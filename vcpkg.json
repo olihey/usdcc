@@ -1,0 +1,9 @@
+{
+  "name": "usdcc",
+  "version-string": "0.1.0",
+  "builtin-baseline": "aeb844bc19b32a7f347182f7e1db80c77915dcd2",
+  "dependencies": [
+    "qtbase",
+    "pybind11"
+  ]
+}

@@ -239,7 +239,7 @@ These run throughout, not as discrete milestones:
 
 | Milestone | Status |
 |-----------|--------|
-| M0 Repository & Build Bootstrap | Not started |
+| M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
 | M1 Core Application Shell | Not started |
 | M2 OpenUSD Integration & Stage Management | Not started |
 | M3 Hydra Viewport | Not started |

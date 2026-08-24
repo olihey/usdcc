@@ -1,0 +1,9 @@
+build/
+out/
+vcpkg_installed/
+*.dir/
+CMakeFiles/
+CMakeCache.txt
+.vs/
+.vscode/
+*.user
