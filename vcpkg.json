@@ -4,6 +4,7 @@
   "builtin-baseline": "aeb844bc19b32a7f347182f7e1db80c77915dcd2",
   "dependencies": [
     "qtbase",
+    "qt-advanced-docking-system",
     "pybind11"
   ]
 }

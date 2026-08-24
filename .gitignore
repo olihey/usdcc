@@ -7,3 +7,11 @@ CMakeCache.txt
 .vs/
 .vscode/
 *.user
+
+# Fetched build-time tooling for building PySide6/Shiboken6 from source
+# against vcpkg's Qt (see tools/build-pyside.ps1) — large, not vendored.
+external/libclang/
+external/pyside-setup/
+external/pyside-setup-src/
+external/pyside-build/
+external/pyside-install/

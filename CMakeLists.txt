@@ -27,6 +27,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)

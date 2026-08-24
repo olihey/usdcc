@@ -46,6 +46,30 @@ OpenUSD tree. Pass `-DUSD_INSTALL=<path-to-usd-install>` (the directory containi
 `pxrConfig.cmake`) to enable USD-dependent targets once they exist (milestone M2).
 Until then the app shell builds without it.
 
+### Python bindings (`usdcc.ui`)
+
+`SidePanel`/`ViewPanel` are exposed to Python via Shiboken6. This requires PySide6
+and Shiboken6 built **from source against usdcc's own vcpkg Qt** — a pip-installed
+PySide6 ships a different, independently-compiled Qt, and loading both in one
+process causes intermittent DLL-load crashes (see
+[docs/PLAN.md](docs/PLAN.md) §6 item 11). Build once with:
+
+```
+tools/build-pyside.ps1
+```
+
+then point the main configure at it:
+
+```
+cmake -S . -B build -DUSDCC_PYSIDE_INSTALL_PREFIX="external/pyside-setup/build/<...>/install"
+```
+
+(the exact path is printed at the end of `build-pyside.ps1`). Without
+`USDCC_PYSIDE_INSTALL_PREFIX` set, the build falls back to whatever
+PySide6/shiboken6-generator a Python interpreter on `PATH` can import — fine for
+experimenting with the CMake/Shiboken6 wiring itself, but expect the DLL-load
+issue above until you build the matching PySide6.
+
 ### Convenience scripts
 
 [tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the

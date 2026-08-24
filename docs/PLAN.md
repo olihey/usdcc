@@ -76,6 +76,7 @@ so a deliberate choice gets made instead of an accidental one.
 | 7 | Scope of "full undo support" — does it cover script-driven edits from the Scripting panel and plugin actions, or only UI-driven edits? | Assume it must cover all mutation paths (UI, scripting, plugins) |
 | 8 | Multi-stage model: are stages fully independent documents, or can they reference/compose each other in one session? | Assume independent documents, each with its own `pxr.Usd.Stage` and undo stack |
 | 9 | Import/export of non-USD formats (FBX, Alembic, glTF, etc.) — in scope at all? | Out of scope until explicitly requested |
+| 10 | Where does the app's PySide6/Shiboken6 come from — a from-source build against vcpkg's own Qt (required today, see §6 item 11) or something else once M11 packaging needs a repeatable, CI-friendly answer? | Assume the from-source build (`tools/build-pyside.ps1`) stays the approach; revisit if it proves too slow/fragile for CI |
 
 ## 6. Suggested Improvements
 
@@ -114,6 +115,15 @@ things that will bite later if not addressed early:
 10. **Docs beyond the plan** — the layout lists `docs/changelog.md` but nothing for
     architecture notes or a plugin-author guide. Recommend adding
     `docs/ARCHITECTURE.md` and `docs/PLUGIN_SDK.md` once M1/M9 stabilize their shapes.
+11. **PySide6/Shiboken6 must be built from source against vcpkg's Qt** — discovered while
+    wiring up M1's Python bindings: a pip-installed PySide6 ships its own, independently
+    compiled Qt binaries, and loading those alongside vcpkg's Qt in one process causes
+    intermittent `DLL load failed` crashes (Windows resolves a same-named DLL to whichever
+    copy loaded first, not necessarily the one usdcc's C++ was compiled against). There's
+    no reliable way to bind vcpkg-Qt-derived classes for pip-PySide6 as a result.
+    `tools/build-pyside.ps1` builds PySide6/Shiboken6 from source against the same vcpkg
+    Qt; this needs to become a real dependency step (M0/CI, and M11 packaging) rather than
+    a one-off local workaround. See §5 item 10.
 
 ## 7. Milestones
 
@@ -210,7 +220,8 @@ several of them rather than as a discrete phase.
 - **Goal:** a one-command deployable build.
 - Deliverables: `deploy` CMake target producing a launchable package folder,
   including required OpenUSD build-tree files; per-OS packaging (installer or
-  archive); CI artifact publishing.
+  archive); CI artifact publishing; the from-source PySide6/Shiboken6 build
+  (§6 item 11) folded into this rather than a manual local step.
 - Exit criteria: the deploy output runs standalone on a clean machine (no dev
   environment) on each target OS.
 
@@ -240,7 +251,7 @@ These run throughout, not as discrete milestones:
 | Milestone | Status |
 |-----------|--------|
 | M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
-| M1 Core Application Shell | Not started |
+| M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel`/`ViewPanel` are also exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel`'s ADS base isn't itself bound to Python (out of scope — see typesystem.xml); layout-persistence and panel-registration are not yet exposed to Python. Panel registration/layout persistence beyond the stand-ins is otherwise done |
 | M2 OpenUSD Integration & Stage Management | Not started |
 | M3 Hydra Viewport | Not started |
 | M4 Scene Introspection Panels | Not started |
