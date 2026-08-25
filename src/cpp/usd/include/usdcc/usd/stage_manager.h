@@ -38,6 +38,32 @@ public:
     PXR_NS::UsdStageRefPtr currentStage() const;
     void setCurrentStage(const PXR_NS::UsdStageRefPtr& stage);
 
+    // Every stage opened through this manager is also registered in
+    // UsdUtilsStageCache::Get() (USD's own shared, process-wide stage
+    // cache). These accessors expose the plain integer form of its cache Id
+    // so Python code can be given one (via a pybind11 binding of
+    // StageManager) and independently retrieve a fully-functional
+    // pxr.Usd.Stage for it with
+    // UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(id)) —
+    // using USD's own, already-correct pxr_boost::python bindings for that
+    // lookup. This is deliberate: passing a UsdStageRefPtr/Usd.Stage
+    // directly across the pybind11<->pxr_boost::python boundary (e.g. via a
+    // custom pybind11 type_caster reaching into pxr_boost::python's
+    // extract<>/object()) was tried and confirmed to corrupt unrelated
+    // boost::python state elsewhere in the process (argument-matching for
+    // unrelated types started failing) — USD's boost::python fork lives
+    // under the namespace pxrInternal_v..._pxrReserved__::pxr_boost, i.e.
+    // it's explicitly internal/reserved and not designed for cross-DLL use
+    // by third-party extensions. Returns -1 if the stage isn't known to
+    // this manager. See docs/PLAN.md open question 11.
+    long stageCacheId(const PXR_NS::UsdStageRefPtr& stage) const;
+    std::vector<long> stageCacheIds() const;
+
+    // Reverse lookup for the above: given a cache Id (e.g. one a Python
+    // caller sends back into a C++-facing method), returns the stage if
+    // this manager still has it open, or a null pointer otherwise.
+    PXR_NS::UsdStageRefPtr findByCacheId(long cacheId) const;
+
 signals:
     void stageOpened(PXR_NS::UsdStageRefPtr stage);
     void stageClosed(PXR_NS::UsdStageRefPtr stage);

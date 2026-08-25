@@ -167,9 +167,10 @@ foreach(_config ${CMAKE_CONFIGURATION_TYPES})
                    RUNTIME_OUTPUT_DIRECTORY_${_config_upper} "${_python_package_dir}")
 endforeach()
 
+# Shared across every usdcc.* submodule — see that file for why.
 add_custom_command(
     TARGET usdcc_ui_python
     POST_BUILD
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/usdcc_package_init.py"
-        "${_python_package_dir}/__init__.py")
+        ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/python/usdcc/__init__.py" "${_python_package_dir}/__init__.py")

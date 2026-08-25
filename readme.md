@@ -71,6 +71,25 @@ PySide6/shiboken6-generator a Python interpreter on `PATH` can import — fine f
 experimenting with the CMake/Shiboken6 wiring itself, but expect the DLL-load
 issue above until you build the matching PySide6.
 
+### Python bindings (`usdcc.usd`)
+
+`StageManager` is exposed to Python via pybind11 as `usdcc.usd.StageManager`, once
+`USD_INSTALL` is set. Its Python-facing methods (`open_stage`, `stage_cache_ids`,
+`current_stage_cache_id`, `set_current_stage`, `close_stage`) exchange USD stages
+as plain integer ids from `UsdUtilsStageCache::Get()`, not real `Usd.Stage` objects
+— passing those directly across the pybind11⇄`pxr_boost::python` boundary corrupts
+unrelated USD Python state (see [docs/PLAN.md](docs/PLAN.md) §5 item 11). Retrieve
+the actual stage with USD's own bindings:
+
+```python
+from pxr import Usd, UsdUtils
+import usdcc.usd
+
+manager = usdcc.usd.StageManager()
+cache_id = manager.open_stage("scene.usda")
+stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(cache_id))
+```
+
 ### Convenience scripts
 
 [tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the
