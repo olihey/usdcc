@@ -41,10 +41,11 @@ cmake --build build --config RelWithDebInfo
 The first configure builds Qt6 and pybind11 from source via vcpkg, which can
 take significant time without a populated binary cache.
 
-OpenUSD is not fetched by vcpkg — it's expected to be a separately built/installed
-OpenUSD tree. Pass `-DUSD_INSTALL=<path-to-usd-install>` (the directory containing
-`pxrConfig.cmake`) to enable USD-dependent targets once they exist (milestone M2).
-Until then the app shell builds without it.
+OpenUSD is not fetched by vcpkg — vcpkg's own `usd` port hardcodes Python bindings
+off, which the spec requires (see [docs/PLAN.md](docs/PLAN.md) §6 item 11). Build
+OpenUSD separately with Python support (e.g. Pixar's `build_usd.py`) and pass
+`-DUSD_INSTALL=<path-to-usd-install>` (the directory containing `pxrConfig.cmake`)
+to enable USD-dependent targets. Until then the app shell builds without it.
 
 ### Python bindings (`usdcc.ui`)
 

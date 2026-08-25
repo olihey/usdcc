@@ -68,7 +68,7 @@ so a deliberate choice gets made instead of an accidental one.
 | # | Question | Assumption used for planning below |
 |---|----------|-------------------------------------|
 | 1 | Target OS/platforms (Windows only? + Linux? + macOS?) | Windows + Linux, macOS best-effort |
-| 2 | Minimum/pinned versions: OpenUSD, Qt6, Python, C++ compiler | Pin exact versions at M0 once vcpkg baseline is chosen |
+| 2 | Minimum/pinned versions: OpenUSD, Qt6, Python, C++ compiler | Qt 6.11.1 (vcpkg baseline), Python 3.12, MSVC 2022 pinned via M0; OpenUSD 26.8 now in use (a from-source build, not vcpkg's Python-less `usd` port — see §6 item 11) |
 | 3 | Project license, and how third-party license compliance is tracked for the Info dialog | TBD — needed before first public distribution |
 | 4 | Plugin manifest/discovery format, versioning & compatibility policy, sandboxing for Python plugins | Design during M9 |
 | 5 | Threading model: does stage loading / Hydra render run off the UI thread? | Assume async loading + render thread; confirm during M2/M3 |
@@ -77,6 +77,7 @@ so a deliberate choice gets made instead of an accidental one.
 | 8 | Multi-stage model: are stages fully independent documents, or can they reference/compose each other in one session? | Assume independent documents, each with its own `pxr.Usd.Stage` and undo stack |
 | 9 | Import/export of non-USD formats (FBX, Alembic, glTF, etc.) — in scope at all? | Out of scope until explicitly requested |
 | 10 | Where does the app's PySide6/Shiboken6 come from — a from-source build against vcpkg's own Qt (required today, see §6 item 11) or something else once M11 packaging needs a repeatable, CI-friendly answer? | Assume the from-source build (`tools/build-pyside.ps1`) stays the approach; revisit if it proves too slow/fragile for CI |
+| 11 | `StageManager` (ours, would be bound via pybind11 per the spec's "other C++ classes" rule) needs to hand out/accept the same `UsdStage` objects OpenUSD's own `pxr_boost::python` bindings produce, but pybind11 and pxr_boost::python are two independent binding frameworks with no built-in interop. Worth a small bridging shim (round-tripping through the raw `PyObject*`) or is there a cleaner answer? | Assume a targeted pybind11 type-caster bridging via each framework's `PyObject*`/`.ptr()` escape hatch; design when Python stage enumeration is tackled |
 
 ## 6. Suggested Improvements
 
@@ -252,7 +253,7 @@ These run throughout, not as discrete milestones:
 |-----------|--------|
 | M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
 | M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel`/`ViewPanel` are also exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel`'s ADS base isn't itself bound to Python (out of scope — see typesystem.xml); layout-persistence and panel-registration are not yet exposed to Python. Panel registration/layout persistence beyond the stand-ins is otherwise done |
-| M2 OpenUSD Integration & Stage Management | Not started |
+| M2 OpenUSD Integration & Stage Management | In progress — `USD_INSTALL` wired up against a real OpenUSD 26.8 build (with Python support) and `usdcc::usd::StageManager` (open/close/enumerate/current-stage tracking, Qt signals) verified in C++ via a standalone smoke test: multiple stages open simultaneously, enumerate correctly, current-stage switches, signals fire as expected. Python enumeration not yet started — needs a pybind11 ⇄ pxr_boost::python interop bridge (see §5 item 11); ViewPanel's actual stage-dropdown UI deferred to M3/M4 when a real ViewPanel subclass exists to hang it on |
 | M3 Hydra Viewport | Not started |
 | M4 Scene Introspection Panels | Not started |
 | M5 Editing Tools & Gizmos | Not started |

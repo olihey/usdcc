@@ -24,6 +24,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         CACHE STRING "Build type" FORCE)
 endif()
 
+if(WIN32)
+    # windows.h's min/max macros (pulled in transitively by Qt) corrupt any
+    # std::min/std::max usage in headers compiled afterward — including
+    # OpenUSD's — with cryptic syntax errors. NOMINMAX suppresses them.
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
@@ -36,6 +43,10 @@ find_package(pybind11 REQUIRED)
 # pass -DUSD_INSTALL=<path-to-usd-install> to point at a custom OpenUSD build.
 # Not REQUIRED yet — USD integration lands in milestone M2 — so the app shell
 # can build standalone before then.
+#
+# USD's imaging targets (e.g. garch) reference OpenGL::GL, so it must already
+# be findable before pxrConfig.cmake sets up USD's own imported targets.
+find_package(OpenGL)
 find_package(USD)
 if(USD_FOUND)
     message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
