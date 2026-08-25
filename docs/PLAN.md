@@ -1,6 +1,6 @@
 # usdcc — Project Plan
 
-*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-08-24.*
+*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-08-25.*
 
 ## 1. Overview
 
@@ -37,6 +37,7 @@ src/
   python/
     (mirrors src/cpp structure: usdcc.core, usdcc.ui, usdcc.usd, usdcc.tools)
   plugins/
+test_data/
 readme.md
 ```
 
@@ -125,6 +126,68 @@ things that will bite later if not addressed early:
     `tools/build-pyside.ps1` builds PySide6/Shiboken6 from source against the same vcpkg
     Qt; this needs to become a real dependency step (M0/CI, and M11 packaging) rather than
     a one-off local workaround. See §5 item 10.
+12. **Resolved: Hydra-in-Qt viewport embedding had two separate bugs — geometric pixel
+    corruption (fixed by switching embedding approach) and all-black shading (fixed by an
+    explicit `glClear()`).** Discovered while building M3's `HydraViewportWidget` (a
+    `QOpenGLWidget`): camera/projection math, render-viewport sizing, and render-delegate
+    enumeration/switching were all confirmed correct (pixel-perfect, camera-tracking
+    silhouettes; both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin` enumerate and
+    switch cleanly) — but the shaded pixels inside those silhouettes were corrupted: a fine
+    colored-static pattern, identical between Storm and Embree, unaffected by
+    `SetRenderBufferSize`, `GL_POLYGON_STIPPLE`/`GL_STENCIL_TEST` state, or waiting for
+    convergence.
+    **Fix #1, per the user's direction to try an alternative embedding**: `QOpenGLWidget`
+    renders into an offscreen FBO that Qt then composites into the widget backing store —
+    that indirection was corrupting Hydra's output. Rebuilding the viewport as
+    `HydraViewportWindow : public QWindow` (its own `QOpenGLContext`, calling
+    `swapBuffers()` directly, embedded into the widget tree via
+    `QWidget::createWindowContainer()`) made the corruption disappear completely. One
+    necessary fix found along the way: `QSurfaceFormat` must request `CompatibilityProfile`,
+    not `CoreProfile` — Storm's `HgiGL_ScopedStateHolder` queries/pushes legacy GL state
+    that doesn't exist in Core and raises `GL error: invalid enum` there.
+    **Fix #2**: after the `QWindow` switch, shaded geometry rendered solid black — even with
+    lighting disabled and even with a hard `overrideColor`, ruling out lighting/material
+    specifically. Root cause found by reading `HgiInteropOpenGL::CompositeToInterop`'s
+    actual source (`pxr/imaging/hgiInterop/opengl.cpp`): it composites Hydra's rendered
+    color+depth "over the application's framebuffer contents" using premultiplied-alpha
+    blending plus a `GL_LEQUAL` depth test against *our* depth buffer — i.e. it assumes the
+    caller already cleared color and depth before calling `Render()`. `HydraViewportWindow`
+    never did (a raw `QWindow`+`QOpenGLContext`, unlike `QOpenGLWidget`, has no framework
+    doing this automatically). An explicit `glClear(GL_COLOR_BUFFER_BIT |
+    GL_DEPTH_BUFFER_BIT)` before `Render()` on every frame fixed it completely — confirmed
+    both by the user directly (live screenshots of both Storm and Embree showing the correct
+    red cube/blue sphere with proper shading) and independently on this end.
+    **What this also explains**: earlier in this investigation, automated screenshots of
+    the same code/scene sometimes showed correct colors and sometimes solid black, which
+    was chalked up to "unreliable capture tooling" at the time. In hindsight this was very
+    likely the real, uncleared-depth-buffer bug manifesting inconsistently (its outcome
+    depends on whatever undefined memory the depth buffer happened to contain from a
+    previous frame/process) rather than a capture artifact — worth remembering: intermittent
+    results are more often a real race/uninitialized-state bug than a broken test harness.
+    **Loose end**: `HgiInteropOpenGL`/`HgiGLTexture` GL errors ("invalid operation",
+    `glGetError()` verification failures) still appear in the log at every frame/teardown
+    even though rendering is now visibly correct — cosmetic-only so far (no visible
+    artifacts, no crashes across extended runs), but worth investigating if it ever proves
+    otherwise. See §9 status.
+13. **`MainWindow`'s saved dock layout must only be restored after every panel for the
+    session exists.** Surfaced when M3 added `ViewportViewPanel` in `main.cpp` *after*
+    `MainWindow`'s constructor had already run — and that constructor called
+    `restoreLayout()` on itself, before Viewport existed. Applying a saved ADS state
+    (captured in a *previous* run, once Viewport existed) against a dock manager that
+    currently only knows about the M1 stand-ins left ADS's internal layout state
+    inconsistent, and the Viewport panel added moments later simply didn't appear at all
+    (not corrupted-looking — entirely absent from the UI) until the registry key
+    (`HKCU\Software\usdcc\usdcc`) was cleared by hand. Fixed by moving `restoreLayout()` out
+    of the constructor into a public method the composition root calls once, after every
+    panel (stand-ins and USD-dependent ones alike) has been added — confirmed fixed across
+    repeated runs with no manual reset needed. Relevant again for M4 (`OutlinerViewPanel`,
+    `AttributesViewPanel`): any future panel added after `MainWindow` is constructed needs
+    to exist before `restoreLayout()` is called, same as `ViewportViewPanel`.
+    Also switched saved-layout storage from `QSettings`' native format (the Windows
+    registry) to a plain INI file at `%LOCALAPPDATA%\usdcc\usdcc.ini`
+    (`QStandardPaths::AppConfigLocation`), so a stale/incompatible saved layout — a routine
+    occurrence during active development, as above — can be found and deleted by hand
+    without hunting through regedit.
 
 ## 7. Milestones
 
@@ -254,7 +317,7 @@ These run throughout, not as discrete milestones:
 | M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
 | M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel`/`ViewPanel` are also exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel`'s ADS base isn't itself bound to Python (out of scope — see typesystem.xml); layout-persistence and panel-registration are not yet exposed to Python. Panel registration/layout persistence beyond the stand-ins is otherwise done |
 | M2 OpenUSD Integration & Stage Management | Exit criteria met and verified — `usdcc::usd::StageManager` (open/close/enumerate/current-stage tracking) works from both C++ (Qt signals; standalone smoke test) and Python (`usdcc.usd` pybind11 module; standalone smoke test). Python side deliberately never passes a `UsdStageRefPtr`/`Usd.Stage` across the pybind11⇄pxr_boost::python boundary — that was tried via a custom pybind11 type_caster and confirmed to corrupt unrelated boost::python state — instead every opened stage is registered in `UsdUtilsStageCache::Get()` and only its plain-integer cache id crosses into Python, which retrieves the real stage via USD's own bindings (see §5 item 11). Remaining for a later pass: `ViewPanel`'s actual stage-dropdown UI (needs a real `ViewPanel` subclass to hang it on, M3/M4) and exposing `StageManager`'s Qt signals to Python |
-| M3 Hydra Viewport | Not started |
+| M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_viewport` target) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
 | M4 Scene Introspection Panels | Not started |
 | M5 Editing Tools & Gizmos | Not started |
 | M6 Undo/Redo Framework | Not started |

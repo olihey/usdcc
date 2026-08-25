@@ -98,11 +98,14 @@ steps above (including the one-time vcpkg bootstrap):
 ```
 tools/build.ps1              # configure + build
 tools/run.ps1                # configure + build + launch
+tools/run.ps1 -Scene test_data\cube_and_sphere.usda   # ...and open a stage on launch
 ```
 
-Both accept `-Configuration`, `-Generator`, `-Arch`, `-UsdInstall`, and `-Clean`;
-`build.ps1` additionally takes `-Run` (which is what `run.ps1` wraps). See each
-script's help (`Get-Help tools/build.ps1 -Full`) for details.
+Both accept `-Configuration`, `-Generator`, `-Arch`, `-UsdInstall`, `-Scene`, and
+`-Clean`; `build.ps1` additionally takes `-Run` (which is what `run.ps1` wraps).
+`-UsdInstall` only needs to be passed once — it's cached by CMake and reused by
+later `-Run`/`run.ps1` invocations automatically. See each script's help
+(`Get-Help tools/build.ps1 -Full`) for details.
 
 ## Repository Layout
 
@@ -121,5 +124,6 @@ src/
   python/
     (mirrors src/cpp: usdcc.core, usdcc.ui, usdcc.usd, usdcc.tools)
   plugins/
+test_data/
 readme.md
 ```

@@ -1,6 +1,10 @@
 # usdcc — the application executable.
 add_executable(usdcc main.cpp)
 target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools)
+# usdcc_usd_viewport only exists when USD_FOUND (see src/cpp/usd/CMakeLists.txt).
+if(TARGET usdcc_usd_viewport)
+    target_link_libraries(usdcc PRIVATE usdcc_usd_viewport)
+endif()
 
 set_target_properties(usdcc PROPERTIES WIN32_EXECUTABLE ON)
 

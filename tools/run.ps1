@@ -11,6 +11,9 @@
 
 .EXAMPLE
     tools/run.ps1 -Configuration Debug -Clean
+
+.EXAMPLE
+    tools/run.ps1 -Scene test_data\cube_and_sphere.usda
 #>
 [CmdletBinding()]
 param(
@@ -22,6 +25,8 @@ param(
     [string]$Arch = 'x64',
 
     [string]$UsdInstall,
+
+    [string]$Scene,
 
     [switch]$Clean
 )
@@ -37,6 +42,7 @@ $buildParams = @{
     Run           = $true
 }
 if ($UsdInstall) { $buildParams.UsdInstall = $UsdInstall }
+if ($Scene) { $buildParams.Scene = $Scene }
 if ($Clean) { $buildParams.Clean = $true }
 
 & $buildScript @buildParams

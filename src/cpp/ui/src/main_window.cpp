@@ -2,7 +2,9 @@
 
 #include <DockManager.h>
 #include <QCloseEvent>
+#include <QDir>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTextEdit>
 
 #include "usdcc/ui/side_panel.h"
@@ -11,10 +13,20 @@
 namespace usdcc::ui {
 
 namespace {
-constexpr auto kOrganization = "usdcc";
-constexpr auto kApplication = "usdcc";
 constexpr auto kGeometryKey = "MainWindow/geometry";
 constexpr auto kDockLayoutKey = "MainWindow/dockLayout";
+
+// A plain INI file (rather than QSettings' native format, which is the
+// Windows registry under HKCU\Software\usdcc\usdcc) so it's a real file a
+// developer can find, inspect, or delete by hand instead of hunting through
+// regedit — useful during active development, when the on-disk panel set
+// changes often enough that a stale saved layout is a routine annoyance
+// rather than a rare edge case.
+QSettings layoutSettings() {
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QDir().mkpath(configDir);
+    return QSettings(configDir + "/usdcc.ini", QSettings::IniFormat);
+}
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -31,14 +43,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // ...) in later milestones.
     auto* viewPanelStandIn = new ViewPanel("Outliner", this);
     viewPanelStandIn->setContentWidget(new QTextEdit(viewPanelStandIn));
-    m_dockManager->addDockWidget(ads::CenterDockWidgetArea, viewPanelStandIn);
+    m_centerDockArea = m_dockManager->addDockWidget(ads::CenterDockWidgetArea, viewPanelStandIn);
 
     auto* sidePanelStandIn = new SidePanel("Log", this);
     sidePanelStandIn->setWidget(new QTextEdit(sidePanelStandIn));
     addDockWidget(Qt::BottomDockWidgetArea, sidePanelStandIn);
 
-    restoreLayout();
+    // Deliberately not calling restoreLayout() here — see its declaration in
+    // main_window.h for why. The composition root calls it once every panel
+    // exists.
 }
+
+ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
+
+ads::CDockAreaWidget* MainWindow::centerDockArea() const { return m_centerDockArea; }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     saveLayout();
@@ -46,7 +64,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::restoreLayout() {
-    QSettings settings(kOrganization, kApplication);
+    QSettings settings = layoutSettings();
     if (settings.contains(kGeometryKey)) {
         restoreGeometry(settings.value(kGeometryKey).toByteArray());
     }
@@ -56,7 +74,7 @@ void MainWindow::restoreLayout() {
 }
 
 void MainWindow::saveLayout() const {
-    QSettings settings(kOrganization, kApplication);
+    QSettings settings = layoutSettings();
     settings.setValue(kGeometryKey, saveGeometry());
     settings.setValue(kDockLayoutKey, m_dockManager->saveState());
 }
