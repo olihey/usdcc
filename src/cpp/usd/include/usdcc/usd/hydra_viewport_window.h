@@ -50,6 +50,19 @@ public:
     PXR_NS::TfToken currentRendererPlugin() const;
     void setRendererPlugin(const PXR_NS::TfToken& pluginId);
 
+    // The orbit/pan/zoom camera's state. Exposed so a caller duplicating a
+    // ViewportViewPanel (see ViewPanel::duplicate()) can make the copy start
+    // out looking at the same thing as the original, rather than resetting
+    // to the default view.
+    struct CameraState {
+        PXR_NS::GfVec3d target{0.0, 0.0, 0.0};
+        double distance = 10.0;
+        double yaw = 45.0;
+        double pitch = -20.0;
+    };
+    CameraState cameraState() const;
+    void setCameraState(const CameraState& state);
+
 signals:
     void rendererPluginsChanged();
 

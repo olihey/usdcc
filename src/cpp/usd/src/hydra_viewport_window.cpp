@@ -82,6 +82,18 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
     renderNow();
 }
 
+HydraViewportWindow::CameraState HydraViewportWindow::cameraState() const {
+    return {m_target, m_distance, m_yaw, m_pitch};
+}
+
+void HydraViewportWindow::setCameraState(const CameraState& state) {
+    m_target = state.target;
+    m_distance = state.distance;
+    m_yaw = state.yaw;
+    m_pitch = state.pitch;
+    renderNow();
+}
+
 PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
     const double yawRad = PXR_NS::GfDegreesToRadians(m_yaw);
     const double pitchRad = PXR_NS::GfDegreesToRadians(m_pitch);

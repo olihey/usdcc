@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -103,6 +104,41 @@ void ViewportViewPanel::onRendererComboChanged(int index) {
     }
     const QString pluginId = m_rendererCombo->itemData(index).toString();
     m_viewport->setRendererPlugin(PXR_NS::TfToken(pluginId.toStdString()));
+}
+
+usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
+    auto* copy = new ViewportViewPanel(m_stageManager, windowTitle(), parent);
+
+    // Stage selection: refreshStageCombo() already ran synchronously inside
+    // the constructor above, so the combo is already populated.
+    const int stageIndex = m_stageCombo->currentIndex();
+    if (stageIndex >= 0) {
+        copy->m_stageCombo->setCurrentIndex(stageIndex);
+    }
+
+    // Renderer selection and camera state: the duplicate's HydraViewportWindow
+    // has no GL context yet (it's created lazily on first expose), so its
+    // renderer combo isn't populated until rendererPluginsChanged() fires.
+    // Apply both once that happens rather than immediately.
+    const PXR_NS::TfToken rendererPluginId = m_viewport->currentRendererPlugin();
+    const HydraViewportWindow::CameraState cameraState = m_viewport->cameraState();
+    connect(copy->m_viewport, &HydraViewportWindow::rendererPluginsChanged, copy,
+            [copy, rendererPluginId, cameraState]() {
+                if (!rendererPluginId.IsEmpty()) {
+                    const int index = copy->m_rendererCombo->findData(QString::fromUtf8(rendererPluginId.GetText()));
+                    if (index >= 0) {
+                        copy->m_rendererCombo->setCurrentIndex(index);
+                    }
+                }
+                copy->m_viewport->setCameraState(cameraState);
+            });
+
+    return copy;
+}
+
+void ViewportViewPanel::populateContextMenu(QMenu* menu) {
+    usdcc::ui::ViewPanel::populateContextMenu(menu);
+    menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
 }
 
 }  // namespace usdcc::usd

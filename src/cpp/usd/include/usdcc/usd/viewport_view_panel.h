@@ -29,6 +29,15 @@ public:
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
 
+    // Copies the currently-viewed stage, the current render delegate, and
+    // the camera position onto the duplicate — see ViewPanel::duplicate().
+    ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+
+protected:
+    // Adds a "Reset Camera" entry on top of ViewPanel's base "Duplicate" —
+    // see ViewPanel::populateContextMenu() for the extension mechanism.
+    void populateContextMenu(QMenu* menu) override;
+
 private slots:
     void refreshStageCombo();
     void refreshRendererCombo();
