@@ -214,6 +214,91 @@ things that will bite later if not addressed early:
     matrix, and asset-path attributes aren't covered by the dispatcher yet and display
     read-only. All three new panels live in the `usdcc_usd_ui` CMake target (renamed from
     `usdcc_usd_viewport` now that it hosts more than just the viewport panel).
+15. **M5 design decisions.** `usdcc::tools::Tool` (base for `SelectTool`/`MoveTool`/
+    `RotateTool`/`ScaleTool`) lives in a new `usdcc_tools` static library kept deliberately
+    free of Qt/GL: a `GizmoGeometry` struct (world-space line/triangle lists) is the only
+    output a Tool produces for drawing, and a `ToolContext` (stage, selection, camera
+    matrices, a `pickPrim` callback) is the only input it needs — `HydraViewportWindow`
+    owns one instance of each tool, is the only place that touches GL or USD's picking API,
+    and turns `GizmoGeometry` into actual draw calls. Click-to-select uses Hydra's own GPU
+    picking (`UsdImagingGLEngine::TestIntersection` with a `GfFrustum::ComputeNarrowedFrustum`
+    around the click point, resolve mode `HdxPickResolveModeTokens->resolveNearestToCamera`)
+    rather than a manual ray-cast — the same mechanism `usdview` itself uses. Gizmo geometry
+    is drawn as legacy (fixed-function) immediate-mode GL (`QOpenGLFunctions_1_1`, obtained
+    via Qt6's `QOpenGLVersionFunctionsFactory::get<T>()` — Qt5's `QOpenGLContext::
+    versionFunctions<T>()` template method no longer exists in Qt6) directly into the same
+    already-Storm-composited framebuffer, with depth testing disabled so handles stay
+    grabbable from behind geometry; this piggybacks on the `CompatibilityProfile` context M3
+    already required for Storm, so it adds no new platform constraint. Handle hit-testing is
+    screen-space (project each handle's world-space geometry to NDC via the same
+    `viewMatrix * projMatrix` used for rendering, then measure 2D distance to the click point)
+    rather than full 3D ray-vs-primitive math — simpler and robust, at the cost of the
+    picked handle being whichever screen-space geometry is nearest even if another handle is
+    genuinely closer in 3D (not visually distinguishable to the user in practice). Axis- and
+    plane-constrained dragging use `GfFindClosestPoints(ray, GfLine)` and `GfRay::Intersect
+    (GfPlane)` respectively — both are ready-made USD `Gf` utilities, no custom geometry math
+    needed. `TransformGizmoTool::getOrCreateOp()` re-sorts a prim's xformOps into canonical
+    translate/rotate/scale order whenever it has to add a new one, but only when every
+    existing op is one of those three known types — a stack already containing a matrix or
+    orient op is left alone rather than risking corrupting an ordering this code doesn't
+    understand. Known gap: `RotateTool` drives the prim's own `rotateXYZ` Euler components
+    directly from its object-space rings (see §6 item 17), which is exact for a single-axis
+    rotation (the common case) and only an approximation once more than one Euler component
+    is non-zero, since doing this exactly would mean composing/decomposing a `GfRotation`
+    through the op's existing value on every drag step. Multi-prim gizmo editing is also out
+    of scope —
+    with more than one prim selected, the gizmo tools draw nothing and don't handle mouse
+    events. Gizmo-driven edits mutate the stage directly rather than going through an undo
+    command, same as the rename/reorder/attribute-edit paths M4 already shipped without one —
+    M6 (Undo/Redo) is the milestone that has to retrofit all of these uniformly.
+16. **Fixed: the viewport's "Stage:" combo didn't actually switch stages once more than one
+    was open.** `UsdImagingGLEngine` only populates its scene index/delegate from a stage
+    once per engine instance (an internal `_isPopulated` flag in
+    `usdImaging/usdImagingGL/engine.cpp`, set on the first `Render()`/`PrepareBatch()` call
+    and never cleared again except by `SetRendererPlugin()` switching to a genuinely
+    different plugin, which tears down and rebuilds the whole engine as a side effect) — so
+    every later `Render()` call kept showing the first stage's content regardless of which
+    stage's root prim `HydraViewportWindow` actually passed in. There's no public API to
+    force a re-population directly. Fixed by having `HydraViewportWindow::setStage()`
+    recreate the engine (mirroring what `SetRendererPlugin()` does internally) whenever the
+    stage actually changes, restoring whichever renderer plugin was already selected
+    afterward so switching stages doesn't reset that choice back to the default. Verified by
+    opening two visually distinct stages and confirming the combo switch changes the
+    rendered content (screenshots before/after).
+17. **Fixed: the Move/Rotate/Scale gizmos were always drawn/dragged along pure world axes,
+    ignoring the selected prim's own rotation.** `TransformGizmoTool` previously used the
+    literal world unit vectors `(1,0,0)`/`(0,1,0)`/`(0,0,1)` for every axis, plane normal, and
+    ring — correct for an unrotated prim, but visibly wrong once the prim (or an ancestor)
+    carried a rotation, since the handles no longer lined up with the object's actual edges.
+    Fixed by adding `TransformGizmoTool::GizmoFrame` (origin + X/Y/Z axes, all in world space):
+    the axes come from `ComputeLocalToWorldTransform()` via `TransformDir()` on each unit
+    basis vector — that picks out the corresponding row of the matrix, i.e. the world-space
+    direction of the prim's own local axis, with scale normalized back out so a scaled prim
+    doesn't skew the gizmo or its drag math. `MoveTool`/`RotateTool`/`ScaleTool` all switched
+    from the old `gizmoOrigin()` + hardcoded axes to `gizmoFrame()` throughout (drawing, hit
+    testing, and the axis/plane drag math alike); `gizmoOrigin()` itself was deleted as dead
+    code once nothing called it anymore. The `RotateTool` header comment was reworded to
+    match: rings are now drawn along the prim's own current axes rather than literal world
+    axes, so the existing single-axis-only limitation (documented there) applies to whichever
+    axis is currently non-zero, not specifically "world-aligned" rotation. Verified with a
+    prim under a 45°-rotated parent: the gizmo's arrows now visibly track the rotated cube's
+    edges instead of staying screen-axis-aligned (screenshot).
+18. **Fixed: Alt+drag camera orbit didn't work while the Select tool was active (but worked
+    fine with Move/Rotate/Scale).** `HydraViewportWindow::mousePressEvent()` had no explicit
+    Alt-modifier check at all — it always gave the active tool first refusal on a left-button
+    press and only fell back to orbiting when the tool reported `handled = false`. That
+    fallback happened to coincide with Alt-drag for Move/Rotate/Scale, since their
+    `mousePress()` only reports `handled` when a gizmo handle is actually under the cursor
+    (which an arbitrary Alt-drag rarely is). `SelectTool::mousePress()`, however, always
+    reports `handled = true` — a click always resolves to "select this" or "select nothing" —
+    so it permanently latched `m_dragging` and orbiting could never engage, Alt or not. Fixed
+    by checking `Qt::AltModifier` explicitly in `mousePressEvent()`: Alt+left-drag now always
+    orbits and skips tool dispatch entirely, regardless of which tool is active — which also
+    hardens Move/Rotate/Scale against the latent case of Alt-dragging directly over a gizmo
+    handle (previously would have wrongly grabbed the handle instead of orbiting). Verified via
+    synthetic mouse events sent to the real `HydraViewportWindow` with the Select tool active:
+    an Alt-drag changed the camera's yaw/pitch as expected, while a plain (non-Alt) drag left
+    the camera untouched (still consumed as a selection action, confirming no regression).
 
 ## 7. Milestones
 
@@ -345,7 +430,7 @@ These run throughout, not as discrete milestones:
 | M2 OpenUSD Integration & Stage Management | Exit criteria met and verified — `usdcc::usd::StageManager` (open/close/enumerate/current-stage tracking) works from both C++ (Qt signals; standalone smoke test) and Python (`usdcc.usd` pybind11 module; standalone smoke test). Python side deliberately never passes a `UsdStageRefPtr`/`Usd.Stage` across the pybind11⇄pxr_boost::python boundary — that was tried via a custom pybind11 type_caster and confirmed to corrupt unrelated boost::python state — instead every opened stage is registered in `UsdUtilsStageCache::Get()` and only its plain-integer cache id crosses into Python, which retrieves the real stage via USD's own bindings (see §5 item 11). Remaining for a later pass: `ViewPanel`'s actual stage-dropdown UI (needs a real `ViewPanel` subclass to hang it on, M3/M4) and exposing `StageManager`'s Qt signals to Python |
 | M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_ui` target, renamed from `usdcc_usd_viewport` in M4 — see §6 item 14) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
 | M4 Scene Introspection Panels | Exit criteria met and verified — `OutlinerViewPanel` (rename/disable/select/reorder via a custom `UsdPrimTreeModel`) and `AttributesViewPanel` (view/edit via `TfType`-based dispatch) are docked alongside the viewport; selection is shared per-stage through `StageManager` (see §6 item 14 for the full design). Verified end to end through the real, wired-up UI code paths (tree/table widgets, model roles, the outliner's context menu): select, rename, selection-follows-rename, disable, attribute edit, and reorder all confirmed correct against direct stage introspection; the disable case was additionally confirmed *visually* — a screenshot taken after deactivating a prim via the outliner's checkbox showed it correctly absent from the live Hydra render, satisfying the "reflected live in the viewport" exit criterion. Known gap: array/matrix/asset-path attributes remain read-only in the Attributes panel (see §6 item 14) |
-| M5 Editing Tools & Gizmos | Not started |
+| M5 Editing Tools & Gizmos | Exit criteria met and verified — `SelectTool` (GPU-picking click-to-select via `UsdImagingGLEngine::TestIntersection`), `MoveTool` (axis/plane/free-constrained translate), `RotateTool` (axis-ring rotate), and `ScaleTool` (axis/uniform scale) all live in the new `usdcc_tools` target and are wired into `HydraViewportWindow`/`ViewportViewPanel`'s new "Tool:" combo (see §6 item 15 for the design). Verified through the real, wired-up code paths — synthetic mouse-drag events sent to the actual `HydraViewportWindow` for Move/Rotate, a hand-built `ToolContext` calling `ScaleTool` directly for Scale — confirming the resulting `xformOp:translate`/`rotateXYZ`/`scale` values, plus a screenshot showing the gizmo rendering correctly (no black-viewport or corruption regression) on the moved/rotated/scaled prim. One real bug was found and fixed along the way: the verification harness itself crashed inside ADS (`qtadvanceddocking-qt6.dll`, access violation) from calling `setCurrentDockWidget()` on a `CDockAreaWidget*` captured *before* `MainWindow::restoreLayout()`, which can rebuild dock areas from a saved layout and leave that earlier pointer dangling — fixed by fetching the dock area live via `CDockWidget::dockAreaWidget()` at the point of use instead of caching it. Known gaps: multi-selection gizmo editing is unsupported (no gizmo drawn), and `RotateTool`'s object-space rings (see §6 item 17) are only exact for a single-axis rotation |
 | M6 Undo/Redo Framework | Not started |
 | M7 Scripting & Python Extensibility | Not started |
 | M8 Layer Editing & Logging | Not started |

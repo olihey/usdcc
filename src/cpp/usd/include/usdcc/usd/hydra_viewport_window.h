@@ -1,16 +1,22 @@
 #pragma once
 
+#include "usdcc/tools/tool.h"
+
+#include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/tf/token.h>
+#include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
 #include <QPoint>
 #include <QWindow>
 
+#include <array>
 #include <memory>
 #include <vector>
 
 class QOpenGLContext;
+class QOpenGLFunctions_1_1;
 
 // A plain `namespace PXR_NS { class UsdImagingGLEngine; }` here would declare
 // a phantom, unrelated class: PXR_NS (aliased to `pxr`) merely re-exposes the
@@ -34,6 +40,12 @@ namespace usdcc::usd {
 // wrapped into the widget tree with QWidget::createWindowContainer(), avoids
 // that Qt-widget-compositor layer entirely, matching how usdview and other
 // Hydra-in-Qt integrations typically embed the viewport.
+//
+// Also owns the M5 editing tools (Select/Move/Rotate/Scale — see
+// docs/PLAN.md milestone M5): the active tool gets first refusal on left
+// mouse events (to pick a prim or grab a gizmo handle), and only when it
+// declines does the existing orbit-camera handling kick in, so gizmo
+// interaction never fights with camera navigation.
 class HydraViewportWindow : public QWindow {
     Q_OBJECT
 
@@ -63,8 +75,23 @@ public:
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
 
+    enum class ToolKind { Select, Move, Rotate, Scale };
+    ToolKind activeTool() const { return m_activeToolKind; }
+    void setActiveTool(ToolKind kind);
+
+    // Called by ViewportViewPanel when StageManager's selection changes for
+    // the stage this viewport is currently showing, so the gizmo tools and
+    // the engine's highlight both stay in sync with the outliner/attributes
+    // panels (see docs/PLAN.md milestone M4).
+    void setSelectedPaths(std::vector<PXR_NS::SdfPath> paths);
+
 signals:
     void rendererPluginsChanged();
+
+    // Emitted when a tool (currently just SelectTool) changes the selection
+    // itself, so ViewportViewPanel can push it into StageManager and keep
+    // every other panel showing this stage in sync.
+    void selectionRequested(std::vector<PXR_NS::SdfPath> paths);
 
 protected:
     void exposeEvent(QExposeEvent* event) override;
@@ -78,10 +105,22 @@ protected:
 
 private:
     void ensureEngine();
+    void configureEngine();
     void renderNow();
     PXR_NS::GfVec3d cameraPosition() const;
+    PXR_NS::GfFrustum currentFrustum() const;
+
+    usdcc::tools::ToolContext buildToolContext();
+    PXR_NS::GfVec2d ndcFromPixel(const QPointF& pixelPos) const;
+    PXR_NS::SdfPath pickPrim(const PXR_NS::GfVec2d& ndcPos);
+    void applyToolResult(const usdcc::tools::ToolResult& result);
+    void updateEngineSelection();
+    void drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
+                   const PXR_NS::GfMatrix4d& projMatrix);
+    usdcc::tools::Tool* activeToolInstance() const;
 
     QOpenGLContext* m_context = nullptr;
+    QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
     PXR_NS::UsdStageRefPtr m_stage;
 
@@ -93,6 +132,11 @@ private:
     QPoint m_lastMousePos;
     bool m_orbiting = false;
     bool m_panning = false;
+    bool m_dragging = false;
+
+    ToolKind m_activeToolKind = ToolKind::Select;
+    std::array<std::unique_ptr<usdcc::tools::Tool>, 4> m_tools;
+    std::vector<PXR_NS::SdfPath> m_selectedPaths;
 };
 
 }  // namespace usdcc::usd

@@ -33,7 +33,11 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+# OpenGL component: only needed for QOpenGLFunctions_1_1 (legacy
+# immediate-mode drawing), used by HydraViewportWindow to render M5's gizmo
+# overlays directly into the same Compatibility-profile GL context Storm
+# already requires (see docs/PLAN.md milestone M5/M3).
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 set(PYBIND11_FINDPYTHON ON)
@@ -56,7 +60,7 @@ else()
 endif()
 
 add_subdirectory(src/cpp/core)
-add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/tools)
+add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
 add_subdirectory(src/cpp/app)

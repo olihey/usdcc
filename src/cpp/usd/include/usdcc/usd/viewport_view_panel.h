@@ -2,6 +2,11 @@
 
 #include "usdcc/ui/view_panel.h"
 
+#include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/common.h>
+
+#include <vector>
+
 class QComboBox;
 
 namespace usdcc::usd {
@@ -11,9 +16,10 @@ class HydraViewportWindow;
 
 // ViewPanel subclass that renders a USD stage via Hydra and lets the user
 // switch between loaded stages and available render delegates (see
-// docs/PLAN.md milestone M3). Actual navigation (orbit/pan/zoom) and
-// rendering live in HydraViewportWidget; this class is the ViewPanel/toolbar
-// wrapper around it.
+// docs/PLAN.md milestone M3), and switch between the Select/Move/Rotate/
+// Scale editing tools (milestone M5). Actual navigation (orbit/pan/zoom),
+// rendering, and tool/gizmo handling live in HydraViewportWindow; this class
+// is the ViewPanel/toolbar wrapper around it.
 //
 // Deliberately built as part of the usdcc_usd_ui target (see
 // src/cpp/usd/CMakeLists.txt) rather than usdcc_ui: it only exists when USD
@@ -43,12 +49,17 @@ private slots:
     void refreshRendererCombo();
     void onStageComboChanged(int index);
     void onRendererComboChanged(int index);
+    void onToolComboChanged(int index);
+    void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
+    void onStageSelectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
 private:
     StageManager* m_stageManager;
     HydraViewportWindow* m_viewport;
     QComboBox* m_stageCombo;
     QComboBox* m_rendererCombo;
+    QComboBox* m_toolCombo;
+    PXR_NS::UsdStageRefPtr m_stage;
 };
 
 }  // namespace usdcc::usd

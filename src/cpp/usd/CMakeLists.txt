@@ -34,7 +34,7 @@ if(USD_FOUND)
         src/usd_prim_tree_model.cpp
         src/viewport_view_panel.cpp
     )
-    target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui Qt6::Widgets)
+    target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL)
 else()
     # Placeholder so the rest of the app builds without USD_INSTALL set (see
     # docs/PLAN.md milestone M0/M2): an empty header-only target.
