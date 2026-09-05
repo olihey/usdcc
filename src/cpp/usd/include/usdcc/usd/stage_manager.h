@@ -1,10 +1,12 @@
 #pragma once
 
+#include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
 #include <QObject>
 #include <QString>
 
+#include <map>
 #include <vector>
 
 namespace usdcc::usd {
@@ -64,14 +66,26 @@ public:
     // this manager still has it open, or a null pointer otherwise.
     PXR_NS::UsdStageRefPtr findByCacheId(long cacheId) const;
 
+    // The set of selected prim paths for a given stage — shared across every
+    // panel currently showing that stage (see docs/PLAN.md milestone M4:
+    // OutlinerViewPanel writes this on tree selection changes; other panels,
+    // e.g. AttributesViewPanel, read it to know which prim to show). Kept
+    // per-stage (rather than one flat "current selection") since a stage can
+    // be shown in more than one panel/viewport at once, each independently
+    // selectable — see ViewPanel's per-panel stage dropdown.
+    std::vector<PXR_NS::SdfPath> selectedPaths(const PXR_NS::UsdStageRefPtr& stage) const;
+    void setSelectedPaths(const PXR_NS::UsdStageRefPtr& stage, std::vector<PXR_NS::SdfPath> paths);
+
 signals:
     void stageOpened(PXR_NS::UsdStageRefPtr stage);
     void stageClosed(PXR_NS::UsdStageRefPtr stage);
     void currentStageChanged(PXR_NS::UsdStageRefPtr stage);
+    void selectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
 private:
     std::vector<PXR_NS::UsdStageRefPtr> m_stages;
     PXR_NS::UsdStageRefPtr m_currentStage;
+    std::map<long, std::vector<PXR_NS::SdfPath>> m_selections;
 };
 
 }  // namespace usdcc::usd

@@ -11,6 +11,8 @@
 #include <QMenuBar>
 #include <QSurfaceFormat>
 
+#include "usdcc/usd/attributes_view_panel.h"
+#include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 #endif
@@ -47,8 +49,17 @@ int main(int argc, char** argv) {
     usdcc::ui::MainWindow window;
 
 #ifdef USDCC_USD_AVAILABLE
+    // The center dock area is established here (rather than by MainWindow)
+    // since it's the first USD-dependent panel — see MainWindow's comment on
+    // why it no longer seeds a stand-in there itself.
     auto* viewport = new usdcc::usd::ViewportViewPanel(&stageManager, "Viewport", &window);
-    window.dockManager()->addDockWidgetTabToArea(viewport, window.centerDockArea());
+    auto* centerArea = window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, viewport);
+
+    auto* outliner = new usdcc::usd::OutlinerViewPanel(&stageManager, "Outliner", &window);
+    window.dockManager()->addDockWidgetTabToArea(outliner, centerArea);
+
+    auto* attributes = new usdcc::usd::AttributesViewPanel(&stageManager, "Attributes", &window);
+    window.dockManager()->addDockWidgetTabToArea(attributes, centerArea);
 
     QMenu* fileMenu = window.menuBar()->addMenu(QObject::tr("&File"));
     QAction* openStageAction = fileMenu->addAction(QObject::tr("&Open Stage..."));

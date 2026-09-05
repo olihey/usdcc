@@ -1,6 +1,6 @@
 # usdcc — Project Plan
 
-*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-08-25.*
+*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-09-05.*
 
 ## 1. Overview
 
@@ -188,6 +188,32 @@ things that will bite later if not addressed early:
     (`QStandardPaths::AppConfigLocation`), so a stale/incompatible saved layout — a routine
     occurrence during active development, as above — can be found and deleted by hand
     without hunting through regedit.
+14. **M4 design decisions.** Selection is shared per-*stage* rather than globally, since a
+    stage can be open in several panels/viewports at once (the established M3 pattern):
+    `StageManager` keys a `std::map<long /*stage cache id*/, std::vector<SdfPath>>` and
+    emits `selectionChanged(stage, paths)`; each panel's tree/table selection syncs
+    bidirectionally against it, guarded by a `bool m_updatingSelection` flag to prevent
+    signal feedback loops. `OutlinerViewPanel` is a custom `UsdPrimTreeModel`
+    (`QAbstractItemModel`) built with `UsdPrim::GetFilteredChildren(UsdPrimAllPrimsPredicate)`
+    so inactive prims are shown (grayed out, italic) and toggleable rather than hidden;
+    renaming goes through `pxr::UsdNamespaceEditor` (`RenamePrim` + `ApplyEdits`), which
+    handles relationship/connection path fixups automatically; reordering authors a
+    "reorder nameChildren" opinion via `SdfPrimSpec::SetNameChildrenOrder` on the parent's
+    edit-target spec (creating one via `UsdStage::OverridePrim` first if the parent has none
+    there yet) — this is the composition-aware way to reorder siblings, as opposed to moving
+    specs between layers. Both the rename and the checkbox-driven active/inactive toggle
+    call the model's full `beginResetModel()/endResetModel()` rather than incremental
+    updates (simpler given USD's own composition machinery does the real work) — the
+    trade-off is that this invalidates every previously-held `QModelIndex`, which must be
+    re-fetched afterward. `AttributesViewPanel` dispatches attribute get/set by the
+    attribute's underlying C++ type via `pxr::TfType::Find<T>()` compared against
+    `attr.GetTypeName().GetType()` (so role variants like `Color3f`/`Vector3f`/`Point3f`,
+    which all share the `GfVec3f` C++ representation, are handled uniformly); `Gf` vector
+    types support `operator<<` but not `operator>>`, so parsing typed-in text uses a small
+    manual `parseNumberList()` helper instead of stream extraction. Known gap: array,
+    matrix, and asset-path attributes aren't covered by the dispatcher yet and display
+    read-only. All three new panels live in the `usdcc_usd_ui` CMake target (renamed from
+    `usdcc_usd_viewport` now that it hosts more than just the viewport panel).
 
 ## 7. Milestones
 
@@ -317,8 +343,8 @@ These run throughout, not as discrete milestones:
 | M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
 | M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel`/`ViewPanel` are also exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel`'s ADS base isn't itself bound to Python (out of scope — see typesystem.xml); layout-persistence and panel-registration are not yet exposed to Python. Panel registration/layout persistence beyond the stand-ins is otherwise done |
 | M2 OpenUSD Integration & Stage Management | Exit criteria met and verified — `usdcc::usd::StageManager` (open/close/enumerate/current-stage tracking) works from both C++ (Qt signals; standalone smoke test) and Python (`usdcc.usd` pybind11 module; standalone smoke test). Python side deliberately never passes a `UsdStageRefPtr`/`Usd.Stage` across the pybind11⇄pxr_boost::python boundary — that was tried via a custom pybind11 type_caster and confirmed to corrupt unrelated boost::python state — instead every opened stage is registered in `UsdUtilsStageCache::Get()` and only its plain-integer cache id crosses into Python, which retrieves the real stage via USD's own bindings (see §5 item 11). Remaining for a later pass: `ViewPanel`'s actual stage-dropdown UI (needs a real `ViewPanel` subclass to hang it on, M3/M4) and exposing `StageManager`'s Qt signals to Python |
-| M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_viewport` target) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
-| M4 Scene Introspection Panels | Not started |
+| M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_ui` target, renamed from `usdcc_usd_viewport` in M4 — see §6 item 14) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
+| M4 Scene Introspection Panels | Exit criteria met and verified — `OutlinerViewPanel` (rename/disable/select/reorder via a custom `UsdPrimTreeModel`) and `AttributesViewPanel` (view/edit via `TfType`-based dispatch) are docked alongside the viewport; selection is shared per-stage through `StageManager` (see §6 item 14 for the full design). Verified end to end through the real, wired-up UI code paths (tree/table widgets, model roles, the outliner's context menu): select, rename, selection-follows-rename, disable, attribute edit, and reorder all confirmed correct against direct stage introspection; the disable case was additionally confirmed *visually* — a screenshot taken after deactivating a prim via the outliner's checkbox showed it correctly absent from the live Hydra render, satisfying the "reflected live in the viewport" exit criterion. Known gap: array/matrix/asset-path attributes remain read-only in the Attributes panel (see §6 item 14) |
 | M5 Editing Tools & Gizmos | Not started |
 | M6 Undo/Redo Framework | Not started |
 | M7 Scripting & Python Extensibility | Not started |

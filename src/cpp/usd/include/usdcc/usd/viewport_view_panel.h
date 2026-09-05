@@ -15,7 +15,7 @@ class HydraViewportWindow;
 // rendering live in HydraViewportWidget; this class is the ViewPanel/toolbar
 // wrapper around it.
 //
-// Deliberately built as part of the usdcc_usd_viewport target (see
+// Deliberately built as part of the usdcc_usd_ui target (see
 // src/cpp/usd/CMakeLists.txt) rather than usdcc_ui: it only exists when USD
 // is available, and keeping it out of usdcc_usd itself means usdcc.usd's
 // pybind11 module doesn't pull in Qt Widgets/ADS as a runtime dependency it

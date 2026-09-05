@@ -35,8 +35,12 @@ void StageManager::closeStage(const PXR_NS::UsdStageRefPtr& stage) {
         return;
     }
 
+    // Captured before Erase(): stageCacheId() looks the id up in the stage
+    // cache, which is no longer possible once the stage is removed from it.
+    const long cacheId = stageCacheId(stage);
     PXR_NS::UsdUtilsStageCache::Get().Erase(stage);
     m_stages.erase(it);
+    m_selections.erase(cacheId);
     emit stageClosed(stage);
 
     if (m_currentStage == stage) {
@@ -75,6 +79,22 @@ PXR_NS::UsdStageRefPtr StageManager::findByCacheId(long cacheId) const {
         return nullptr;
     }
     return stage;
+}
+
+std::vector<PXR_NS::SdfPath> StageManager::selectedPaths(const PXR_NS::UsdStageRefPtr& stage) const {
+    if (!stage) {
+        return {};
+    }
+    auto it = m_selections.find(stageCacheId(stage));
+    return it != m_selections.end() ? it->second : std::vector<PXR_NS::SdfPath>{};
+}
+
+void StageManager::setSelectedPaths(const PXR_NS::UsdStageRefPtr& stage, std::vector<PXR_NS::SdfPath> paths) {
+    if (!stage) {
+        return;
+    }
+    m_selections[stageCacheId(stage)] = paths;
+    emit selectionChanged(stage, paths);
 }
 
 }  // namespace usdcc::usd

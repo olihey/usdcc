@@ -8,7 +8,6 @@
 #include <QTextEdit>
 
 #include "usdcc/ui/side_panel.h"
-#include "usdcc/ui/view_panel.h"
 
 namespace usdcc::ui {
 
@@ -38,13 +37,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_dockManager = new ads::CDockManager(this);
     setCentralWidget(m_dockManager);
 
-    // Stand-ins proving SidePanel/ViewPanel + layout persistence work end to
-    // end; replaced by real subclasses (OutlinerViewPanel, LogSidePanel,
-    // ...) in later milestones.
-    auto* viewPanelStandIn = new ViewPanel("Outliner", this);
-    viewPanelStandIn->setContentWidget(new QTextEdit(viewPanelStandIn));
-    m_centerDockArea = m_dockManager->addDockWidget(ads::CenterDockWidgetArea, viewPanelStandIn);
-
+    // Stand-in proving SidePanel + layout persistence work end to end;
+    // replaced by a real LogSidePanel in a later milestone (M8). The
+    // equivalent ViewPanel stand-in was retired once M3/M4 gave the app real
+    // ViewPanel subclasses (Viewport/Outliner/Attributes) that prove the
+    // same thing — the composition root (main.cpp) establishes the center
+    // dock area itself once USD is available, since a placeholder here would
+    // just be a second, unused "empty center area" when it isn't.
     auto* sidePanelStandIn = new SidePanel("Log", this);
     sidePanelStandIn->setWidget(new QTextEdit(sidePanelStandIn));
     addDockWidget(Qt::BottomDockWidgetArea, sidePanelStandIn);
@@ -55,8 +54,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
-
-ads::CDockAreaWidget* MainWindow::centerDockArea() const { return m_centerDockArea; }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     saveLayout();
