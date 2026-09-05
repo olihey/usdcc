@@ -218,7 +218,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
 
     if (m_orbiting) {
         m_yaw -= delta.x() * 0.5;
-        m_pitch = std::clamp(m_pitch - delta.y() * 0.5, -89.0, 89.0);
+        m_pitch = std::clamp(m_pitch + delta.y() * 0.5, -89.0, 89.0);
         renderNow();
     } else if (m_panning) {
         const PXR_NS::GfVec3d eye = cameraPosition();
