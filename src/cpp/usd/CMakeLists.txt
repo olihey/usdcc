@@ -5,7 +5,11 @@ if(USD_FOUND)
         src/stage_manager.cpp
     )
     target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
-    target_link_libraries(usdcc_usd PUBLIC usdcc_core Qt6::Core ${PXR_LIBRARIES})
+    # Deliberately no Qt here: StageManager (this target's only class) is
+    # non-UI logic and stays Qt-free — see docs/PLAN.md's "Qt only in UI
+    # classes" rule and stage_manager.h's own comment. usdcc_usd_ui below is
+    # where Qt enters this directory's build.
+    target_link_libraries(usdcc_usd PUBLIC usdcc_core ${PXR_LIBRARIES})
     # Downstream code (the app's composition root, main.cpp) uses this to
     # conditionally compile the USD-dependent UI wiring, since usdcc_usd
     # falls back to an empty placeholder without USD_INSTALL (see the else()

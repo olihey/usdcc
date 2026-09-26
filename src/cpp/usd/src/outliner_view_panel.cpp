@@ -56,9 +56,14 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, const QString& 
     connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
 
     if (m_stageManager) {
-        connect(m_stageManager, &StageManager::stageOpened, this, &OutlinerViewPanel::refreshStageCombo);
-        connect(m_stageManager, &StageManager::stageClosed, this, &OutlinerViewPanel::refreshStageCombo);
-        connect(m_stageManager, &StageManager::selectionChanged, this, &OutlinerViewPanel::onStageSelectionChanged);
+        m_stageOpenedConnection = m_stageManager->stageOpened.connect(
+            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_stageClosedConnection = m_stageManager->stageClosed.connect(
+            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
+            [this](PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+                onStageSelectionChanged(stage, std::move(paths));
+            });
     }
 
     refreshStageCombo();

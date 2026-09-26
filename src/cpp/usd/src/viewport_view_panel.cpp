@@ -62,9 +62,14 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& 
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
 
     if (m_stageManager) {
-        connect(m_stageManager, &StageManager::stageOpened, this, &ViewportViewPanel::refreshStageCombo);
-        connect(m_stageManager, &StageManager::stageClosed, this, &ViewportViewPanel::refreshStageCombo);
-        connect(m_stageManager, &StageManager::selectionChanged, this, &ViewportViewPanel::onStageSelectionChanged);
+        m_stageOpenedConnection = m_stageManager->stageOpened.connect(
+            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_stageClosedConnection = m_stageManager->stageClosed.connect(
+            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
+            [this](PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+                onStageSelectionChanged(stage, std::move(paths));
+            });
     }
 
     refreshStageCombo();

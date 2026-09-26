@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -49,6 +50,12 @@ private:
     QComboBox* m_stageCombo;
     QTableWidget* m_table;
     bool m_updatingTable = false;
+
+    // Kept alive for as long as this panel wants to keep receiving
+    // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr>::Connection m_stageOpenedConnection;
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr>::Connection m_stageClosedConnection;
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
 };
 
 }  // namespace usdcc::usd

@@ -336,6 +336,63 @@ things that will bite later if not addressed early:
       working in `usdcc_usd_python`. Verified with clean Debug and RelWithDebInfo rebuilds from
       a reconfigure, plus launching the resulting Debug `usdcc.exe` and confirming it stays
       running rather than exiting immediately.
+20. **Fixed: `StageManager` (in the non-UI `usdcc_usd` target) violated the "Qt only in UI
+    classes" architecture rule.** An audit across `usdcc_core`, `usdcc_tools`, and the non-UI
+    part of `usdcc_usd` found those clean except for `StageManager` itself: it inherited
+    `QObject`, used `Q_OBJECT`/Qt signals/`emit`, and took `QString` parameters — forcing
+    `usdcc_usd` to publicly link `Qt6::Core` (and, transitively, its Python bindings module,
+    `usdcc_usd_python`, to depend on Qt at all despite never using it — the very thing that
+    target's own CMakeLists.txt comment already flagged as worth avoiding for
+    `usdcc_usd_ui`/Qt Widgets, just not carried through to Qt6::Core/QObject itself). Fixed by:
+    - Adding `usdcc::core::Signal<Args...>` (`src/cpp/core/include/usdcc/core/signal.h`): a
+      small, header-only, Qt-free multicast delegate. `connect()` returns a move-only
+      `Connection` that disconnects on destruction (or explicitly) — the same safety
+      `QObject`'s automatic disconnect-on-destroy provides, without requiring either side to
+      derive from `QObject`. Internally, callback storage lives behind a `shared_ptr`/`weak_ptr`
+      pair specifically so destruction order between the `Signal` and an outstanding
+      `Connection` can't dangle either way. (Its internal callback-list field is deliberately
+      *not* named `slots`: Qt's `<QObject>` `#define`s that as a bare macro project-wide, and a
+      Qt-including translation unit reaching this header afterward silently mangled the
+      member — hit and fixed during this change.)
+    - Rewriting `StageManager` to drop `QObject`/`Q_OBJECT` entirely, changing
+      `openStage(const QString&)` to `openStage(const std::string&)`, and replacing its four
+      Qt signals with `usdcc::core::Signal` members of the same name (`stageOpened`,
+      `stageClosed`, `currentStageChanged`, `selectionChanged`) fired via `operator()` instead
+      of `emit`.
+    - Updating every consumer (`ViewportViewPanel`, `OutlinerViewPanel`,
+      `AttributesViewPanel`, `main.cpp`, `bindings.cpp`) from `connect(&stageManager,
+      &StageManager::stageOpened, this, &Panel::slot)` to `stageManager->stageOpened.connect(...)`,
+      storing the returned `Connection` as a panel member so it disconnects automatically
+      when the panel is destroyed. `main.cpp`'s two `QString`-passing call sites now do
+      `.toStdString()` first.
+    - Dropping the now-unnecessary "pybind11 must come first" comment/ordering constraint in
+      `bindings.cpp`: that workaround existed solely because `stage_manager.h` used to pull in
+      `<QObject>`/`<QString>`, colliding with CPython's own "slots" struct member — moot now
+      that `StageManager` doesn't touch Qt at all.
+    - Removing `Qt6::Core` from `usdcc_usd`'s `target_link_libraries` in
+      `src/cpp/usd/CMakeLists.txt`; `usdcc_usd_ui` (the actual UI target) already links
+      `Qt6::Widgets`/`Qt6::OpenGL`, which pull in `Qt6::Core` transitively on their own.
+
+    Verified: clean Debug and RelWithDebInfo rebuilds; `dumpbin /dependents` on the rebuilt
+    `usd.pyd` confirms it no longer links any Qt DLL at all (previously transitive via
+    `usdcc_usd`); a Python smoke test (`import usdcc.usd`, `open_stage`/`close_stage`/
+    `stage_cache_ids`) still works correctly. Signal/Connection correctness was verified with a
+    temporary test harness in `main.cpp` (since removed): direct connect/fire/disconnect
+    semantics, all three real panels' combo boxes updating correctly when a second stage opens
+    (proving the new mechanism actually reaches real UI code), and — the specific safety
+    property being replaced — that destroying a panel while `StageManager` stays alive doesn't
+    crash on the next signal it fires.
+
+    That same harness also surfaced an unrelated, pre-existing bug: rapidly closing a stage
+    while a `HydraViewportWindow` is showing it (i.e. calling `StageManager::closeStage()`
+    synchronously, back-to-back with other work, rather than paced by real UI clicks) can
+    crash with `STATUS_HEAP_CORRUPTION` inside `HydraViewportWindow`'s stage-change/engine-
+    recreation path (see item 16). Bisection confirmed this reproduces independent of every
+    piece of today's Qt-removal change (isolated `Signal`/`Connection` use, `StageManager`
+    open/close, and panel construction/destruction each individually check out clean); it's
+    specifically triggered by the compound sequence exercising the viewport's engine
+    recreation without the pacing normal UI interaction provides. Not investigated further
+    here — flagged for a separate pass.
 
 ## 7. Milestones
 

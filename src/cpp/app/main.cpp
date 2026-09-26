@@ -39,10 +39,10 @@ int main(int argc, char** argv) {
 #ifdef USDCC_USD_AVAILABLE
     // Declared before `window` (and so destroyed after it, per C++'s
     // reverse-construction-order rule) since the viewport panel created
-    // below is parented into `window` and holds Qt signal connections to
-    // this. Owned here rather than by MainWindow so usdcc_ui itself stays
-    // USD-agnostic and buildable without USD_INSTALL (see docs/PLAN.md
-    // milestone M0).
+    // below is parented into `window` and holds usdcc::core::Signal
+    // connections to this (see stage_manager.h). Owned here rather than by
+    // MainWindow so usdcc_ui itself stays USD-agnostic and buildable without
+    // USD_INSTALL (see docs/PLAN.md milestone M0).
     usdcc::usd::StageManager stageManager;
 #endif
 
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
         if (!path.isEmpty()) {
-            stageManager.openStage(path);
+            stageManager.openStage(path.toStdString());
         }
     });
 
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     // viewed without going through File > Open Stage first.
     const QStringList args = app.arguments();
     if (args.size() > 1) {
-        stageManager.openStage(args.at(1));
+        stageManager.openStage(args.at(1).toStdString());
     }
 #endif
 

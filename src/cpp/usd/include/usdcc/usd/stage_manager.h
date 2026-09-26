@@ -1,12 +1,12 @@
 #pragma once
 
+#include "usdcc/core/signal.h"
+
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
-#include <QObject>
-#include <QString>
-
 #include <map>
+#include <string>
 #include <vector>
 
 namespace usdcc::usd {
@@ -16,19 +16,26 @@ namespace usdcc::usd {
 // between loaded stages" dropdown (see docs/PLAN.md section 4) and to know
 // which stage is currently selected.
 //
+// Deliberately Qt-free: this is core, non-UI stage-management logic, usable
+// without a GUI (its own Python bindings in src/cpp/usd/python/bindings.cpp
+// don't need a display, for instance) — see docs/PLAN.md's "Qt only in UI
+// classes" rule. The Qt-facing ViewPanels that use it (ViewportViewPanel,
+// OutlinerViewPanel, AttributesViewPanel) connect to its
+// usdcc::core::Signal members below instead of Qt signals/slots.
+//
 // Single-threaded for now: stage loading is synchronous (see docs/PLAN.md
 // open question #5 — async loading is a later milestone's concern).
-class StageManager : public QObject {
-    Q_OBJECT
-
+class StageManager {
 public:
-    explicit StageManager(QObject* parent = nullptr);
+    StageManager() = default;
+    StageManager(const StageManager&) = delete;
+    StageManager& operator=(const StageManager&) = delete;
 
     // Opens the stage at the given identifier (file path or resolvable USD
     // asset path) and registers it. Opening the same identifier again
     // returns the already-open stage rather than creating a second one.
     // Returns a null pointer if the stage failed to open.
-    PXR_NS::UsdStageRefPtr openStage(const QString& identifier);
+    PXR_NS::UsdStageRefPtr openStage(const std::string& identifier);
 
     // Unregisters the stage. The underlying UsdStage is only destroyed once
     // every other UsdStageRefPtr referencing it (e.g. one held by a
@@ -76,11 +83,15 @@ public:
     std::vector<PXR_NS::SdfPath> selectedPaths(const PXR_NS::UsdStageRefPtr& stage) const;
     void setSelectedPaths(const PXR_NS::UsdStageRefPtr& stage, std::vector<PXR_NS::SdfPath> paths);
 
-signals:
-    void stageOpened(PXR_NS::UsdStageRefPtr stage);
-    void stageClosed(PXR_NS::UsdStageRefPtr stage);
-    void currentStageChanged(PXR_NS::UsdStageRefPtr stage);
-    void selectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
+    // Qt-free equivalents of Qt signals (see usdcc::core::Signal). UI code
+    // connects with e.g. `stageOpened.connect(...)` and keeps the returned
+    // Connection alive (typically as a member) for as long as it should
+    // keep receiving notifications. Only StageManager itself fires these —
+    // treat them as read-only from the outside, same as a Qt signal.
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> stageOpened;
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> stageClosed;
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> currentStageChanged;
+    usdcc::core::Signal<PXR_NS::UsdStageRefPtr, std::vector<PXR_NS::SdfPath>> selectionChanged;
 
 private:
     std::vector<PXR_NS::UsdStageRefPtr> m_stages;

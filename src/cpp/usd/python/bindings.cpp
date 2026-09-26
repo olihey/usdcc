@@ -1,8 +1,3 @@
-// pybind11 (and thus Python.h) must come first: stage_manager.h pulls in
-// <QString>/<QObject>, and Qt's signals/slots/emit macros (active unless
-// QT_NO_KEYWORDS is defined, which we don't do project-wide since our own
-// headers use them) corrupt CPython's own "slots" struct member if Python.h
-// gets processed afterward instead.
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -31,7 +26,7 @@ PYBIND11_MODULE(usd, m) {
         .def(
             "open_stage",
             [](usdcc::usd::StageManager& self, const std::string& identifier) -> long {
-                auto stage = self.openStage(QString::fromStdString(identifier));
+                auto stage = self.openStage(identifier);
                 return stage ? self.stageCacheId(stage) : -1;
             },
             py::arg("identifier"),

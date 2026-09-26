@@ -8,10 +8,8 @@
 
 namespace usdcc::usd {
 
-StageManager::StageManager(QObject* parent) : QObject(parent) {}
-
-PXR_NS::UsdStageRefPtr StageManager::openStage(const QString& identifier) {
-    auto stage = PXR_NS::UsdStage::Open(identifier.toStdString());
+PXR_NS::UsdStageRefPtr StageManager::openStage(const std::string& identifier) {
+    auto stage = PXR_NS::UsdStage::Open(identifier);
     if (!stage) {
         return nullptr;
     }
@@ -19,7 +17,7 @@ PXR_NS::UsdStageRefPtr StageManager::openStage(const QString& identifier) {
     if (std::find(m_stages.begin(), m_stages.end(), stage) == m_stages.end()) {
         PXR_NS::UsdUtilsStageCache::Get().Insert(stage);
         m_stages.push_back(stage);
-        emit stageOpened(stage);
+        stageOpened(stage);
     }
 
     if (!m_currentStage) {
@@ -41,7 +39,7 @@ void StageManager::closeStage(const PXR_NS::UsdStageRefPtr& stage) {
     PXR_NS::UsdUtilsStageCache::Get().Erase(stage);
     m_stages.erase(it);
     m_selections.erase(cacheId);
-    emit stageClosed(stage);
+    stageClosed(stage);
 
     if (m_currentStage == stage) {
         setCurrentStage(m_stages.empty() ? PXR_NS::UsdStageRefPtr() : m_stages.front());
@@ -57,7 +55,7 @@ void StageManager::setCurrentStage(const PXR_NS::UsdStageRefPtr& stage) {
         return;
     }
     m_currentStage = stage;
-    emit currentStageChanged(stage);
+    currentStageChanged(stage);
 }
 
 long StageManager::stageCacheId(const PXR_NS::UsdStageRefPtr& stage) const {
@@ -94,7 +92,7 @@ void StageManager::setSelectedPaths(const PXR_NS::UsdStageRefPtr& stage, std::ve
         return;
     }
     m_selections[stageCacheId(stage)] = paths;
-    emit selectionChanged(stage, paths);
+    selectionChanged(stage, paths);
 }
 
 }  // namespace usdcc::usd
