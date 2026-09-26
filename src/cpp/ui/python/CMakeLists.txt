@@ -17,6 +17,25 @@
 # pip-installed PySide6/shiboken6-generator on PATH if that variable isn't
 # set, for anyone who wants to experiment before running the from-source
 # build — but expect the ABI mismatch above until they do.
+# Used below to work around a Debug-only link failure — see the
+# target_link_options() call after add_library() for why — regardless of
+# which of the two branches below resolves the actual PySide6/Shiboken6 CMake
+# packages, since both ultimately sit on top of whatever plain "python3"/
+# "python" tools/build-pyside.ps1 and pip itself already run against.
+find_program(USDCC_UI_PYTHON_VERSION_PROBE NAMES python3 python PATHS ENV PATH NO_DEFAULT_PATH)
+if(USDCC_UI_PYTHON_VERSION_PROBE)
+    execute_process(
+        COMMAND ${USDCC_UI_PYTHON_VERSION_PROBE} -c
+                "import sysconfig; print(sysconfig.get_config_var('VERSION') or '')"
+        OUTPUT_VARIABLE _usdcc_ui_python_version
+        RESULT_VARIABLE _usdcc_ui_python_version_result
+        ERROR_QUIET)
+    if(_usdcc_ui_python_version_result EQUAL 0)
+        string(STRIP "${_usdcc_ui_python_version}" _usdcc_ui_python_version)
+        string(REPLACE "." "" _usdcc_ui_python_version_nodot "${_usdcc_ui_python_version}")
+    endif()
+endif()
+
 if(USDCC_PYSIDE_INSTALL_PREFIX)
     list(APPEND CMAKE_PREFIX_PATH "${USDCC_PYSIDE_INSTALL_PREFIX}/lib/cmake/Shiboken6Tools")
     list(APPEND CMAKE_PREFIX_PATH "${USDCC_PYSIDE_INSTALL_PREFIX}/lib/cmake/Shiboken6")
@@ -151,6 +170,26 @@ target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${
 # redefining access-specifier keywords as a hard error unless this is set.
 target_compile_definitions(usdcc_ui_python PRIVATE _ALLOW_KEYWORD_MACROS)
 target_link_libraries(usdcc_ui_python PRIVATE usdcc_ui Shiboken6::libshiboken PySide6::pyside6)
+# Debug-config-only fixup: the generated wrapper .cpp files include
+# shiboken6's sbkpython.h, which #includes <Python.h> with no protection
+# against MSVC's pyconfig.h auto-embedding
+# `#pragma comment(lib,"python312_d.lib")` whenever `_DEBUG` is defined (i.e.
+# every Debug-config translation unit) — unlike pybind11's own Python.h
+# wrapper (see usdcc_usd_python), which explicitly undefs _DEBUG around its
+# include specifically to avoid this. A pip-installed PySide6/shiboken6 only
+# ships release-mode Python ABI stub libraries (pyside6.abi3.lib/
+# shiboken6.abi3.lib, already linked above, which resolve dynamically against
+# whatever python3*.dll is loaded at runtime and don't themselves need a
+# debug-suffixed import lib), so linking still fails looking for a
+# python3xy_d.lib file that plain `pip install`/python.org installs don't
+# provide (building CPython itself in debug mode is a separate, rarely-taken
+# step). /NODEFAULTLIB suppresses that specific embedded request; it doesn't
+# remove any of the explicitly-linked libraries above, which is all this
+# target's Stable-ABI-only code actually needs.
+if(MSVC AND _usdcc_ui_python_version_nodot)
+    target_link_options(usdcc_ui_python PRIVATE
+        $<$<CONFIG:Debug>:/NODEFAULTLIB:python${_usdcc_ui_python_version_nodot}_d.lib>)
+endif()
 set_target_properties(
     usdcc_ui_python
     PROPERTIES

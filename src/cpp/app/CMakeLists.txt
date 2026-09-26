@@ -6,6 +6,25 @@ if(TARGET usdcc_usd_ui)
     target_link_libraries(usdcc PRIVATE usdcc_usd_ui)
 endif()
 
+# USD's own headers wrap their Python.h include the same way pybind11 does
+# (see src/cpp/usd/python/CMakeLists.txt's comment on usdcc_usd_python) to
+# avoid ever requiring a debug-suffixed Python import library — but they do
+# it unconditionally, regardless of the *consumer's* own build config, so
+# every USD-header-including object file (confirmed via `dumpbin /directives`
+# across usdcc_tools/usdcc_usd/usdcc_usd_ui's Debug objects) embeds a plain
+# `#pragma comment(lib,"python312.lib")`, requesting the system Python's
+# release import library even when usdcc itself is built Debug. USD's own
+# lib dirs (the only ones on this target's search path) don't contain that
+# file, so a Debug build failed with "LNK1104: cannot open file
+# 'python312.lib'". Explicitly linking the same Python3_LIBRARY that
+# find_package(USD) already resolved (via pxrConfig.cmake, to whatever
+# system interpreter USD itself was built against) satisfies that request
+# directly, for every config — exactly what usdcc_usd_python already does
+# for its own, separately-discovered system Python.
+if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+    target_link_libraries(usdcc PRIVATE "${Python3_LIBRARY}")
+endif()
+
 set_target_properties(usdcc PROPERTIES WIN32_EXECUTABLE ON)
 
 # Qt is a shared (non-static) vcpkg build: vcpkg's applocal-deps step copies
