@@ -104,9 +104,10 @@ else()
     return()
 endif()
 
-# Bindings only cover SidePanel/ViewPanel today (see typesystem.xml), so the
-# include list only needs to satisfy those two headers. Extend this if
-# bindings.h grows to include headers from other usdcc_* libraries.
+# Bindings only cover SidePanel today (see typesystem.xml) — ViewPanel is
+# deliberately excluded (see bindings.h) — so the include list only needs to
+# satisfy that one header. Extend this if bindings.h grows to include headers
+# from other usdcc_* libraries.
 get_target_property(_qt_core_includes Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(_qt_gui_includes Qt6::Gui INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(_qt_widgets_includes Qt6::Widgets INTERFACE_INCLUDE_DIRECTORIES)
@@ -134,15 +135,14 @@ set(_typesystem_file "${CMAKE_CURRENT_SOURCE_DIR}/typesystem.xml")
 set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # Filenames are shiboken6's own naming convention for a `package="usdcc.ui"`
-# typesystem with `usdcc::ui::{SidePanel,ViewPanel}` object-types: verified
-# empirically by running shiboken6 once and inspecting its output, not
-# documented anywhere authoritative. Re-run by hand if typesystem.xml grows
-# new classes and the build starts complaining about missing generated files.
+# typesystem with a `usdcc::ui::SidePanel` object-type: verified empirically
+# by running shiboken6 once and inspecting its output, not documented
+# anywhere authoritative. Re-run by hand if typesystem.xml grows new classes
+# and the build starts complaining about missing generated files.
 set(_generated_sources
     "${_gen_dir}/usdcc/ui/usdcc_wrapper.cpp"
     "${_gen_dir}/usdcc/ui/usdcc_ui_wrapper.cpp"
     "${_gen_dir}/usdcc/ui/usdcc_ui_sidepanel_wrapper.cpp"
-    "${_gen_dir}/usdcc/ui/usdcc_ui_viewpanel_wrapper.cpp"
     "${_gen_dir}/usdcc/ui/ui_module_wrapper.cpp")
 
 add_custom_command(
@@ -155,7 +155,6 @@ add_custom_command(
     DEPENDS
         ${_bindings_header} ${_typesystem_file}
         "${CMAKE_SOURCE_DIR}/src/cpp/ui/include/usdcc/ui/side_panel.h"
-        "${CMAKE_SOURCE_DIR}/src/cpp/ui/include/usdcc/ui/view_panel.h"
     COMMENT "Generating usdcc.ui Python bindings (Shiboken6)"
     VERBATIM)
 
@@ -189,6 +188,14 @@ target_link_libraries(usdcc_ui_python PRIVATE usdcc_ui Shiboken6::libshiboken Py
 if(MSVC AND _usdcc_ui_python_version_nodot)
     target_link_options(usdcc_ui_python PRIVATE
         $<$<CONFIG:Debug>:/NODEFAULTLIB:python${_usdcc_ui_python_version_nodot}_d.lib>)
+endif()
+# usdcc_ui now transitively links usdcc_usd (see src/cpp/ui/CMakeLists.txt's
+# comment on ViewPanel's mandatory Stage association), which pulls in USD's
+# own headers — those embed a plain `#pragma comment(lib,"python312.lib")`
+# regardless of build config (see src/cpp/app/CMakeLists.txt's comment on the
+# exact same issue for the usdcc executable). Same fix here.
+if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+    target_link_libraries(usdcc_ui_python PRIVATE "${Python3_LIBRARY}")
 endif()
 set_target_properties(
     usdcc_ui_python

@@ -38,6 +38,11 @@ public:
     // Returns a null pointer if the stage failed to open.
     StageRefPtr openStage(const std::string& identifier);
 
+    // Creates and registers a fresh, anonymous, non-file-backed stage (e.g.
+    // for a ViewPanel that needs some stage to show and none was given —
+    // ViewPanel's own invariant forbids it from ever holding a null one).
+    StageRefPtr createStage();
+
     // Unregisters the stage. The underlying Stage (and its UsdStage) is
     // only destroyed once every other StageRefPtr referencing it (e.g. one
     // held by a ViewPanel) has also let go.
@@ -92,6 +97,11 @@ public:
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>> selectionChanged;
 
 private:
+    // Shared by openStage()/createStage(): inserts into UsdUtilsStageCache,
+    // wraps in a Stage, registers it, fires stageOpened, and becomes the
+    // current stage if none was set yet.
+    StageRefPtr registerStage(const PXR_NS::UsdStageRefPtr& usdStage);
+
     std::vector<StageRefPtr> m_stages;
     StageRefPtr m_currentStage;
 };

@@ -1,10 +1,6 @@
 # usdcc — the application executable.
 add_executable(usdcc main.cpp)
-target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools)
-# usdcc_usd_ui only exists when USD_FOUND (see src/cpp/usd/CMakeLists.txt).
-if(TARGET usdcc_usd_ui)
-    target_link_libraries(usdcc PRIVATE usdcc_usd_ui)
-endif()
+target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui)
 
 # USD's own headers wrap their Python.h include the same way pybind11 does
 # (see src/cpp/usd/python/CMakeLists.txt's comment on usdcc_usd_python) to
@@ -27,7 +23,7 @@ endif()
 
 set_target_properties(usdcc PROPERTIES WIN32_EXECUTABLE ON)
 
-if(WIN32 AND USD_INSTALL)
+if(WIN32)
     # Visual Studio's own debugger (Start Debugging / F5) launches usdcc.exe
     # directly, without USD's bin/lib on PATH — unlike tools/run.ps1, which
     # sets this by hand before launching — so Storm/Hydra fails to load with

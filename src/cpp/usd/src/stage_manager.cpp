@@ -23,11 +23,21 @@ StageRefPtr StageManager::openStage(const std::string& identifier) {
     }
 
     if (!stage) {
-        PXR_NS::UsdUtilsStageCache::Get().Insert(usdStage);
-        stage = std::make_shared<Stage>(usdStage);
-        m_stages.push_back(stage);
-        stageOpened(stage);
+        stage = registerStage(usdStage);
+    } else if (!m_currentStage) {
+        setCurrentStage(stage);
     }
+
+    return stage;
+}
+
+StageRefPtr StageManager::createStage() { return registerStage(PXR_NS::UsdStage::CreateInMemory()); }
+
+StageRefPtr StageManager::registerStage(const PXR_NS::UsdStageRefPtr& usdStage) {
+    PXR_NS::UsdUtilsStageCache::Get().Insert(usdStage);
+    auto stage = std::make_shared<Stage>(usdStage);
+    m_stages.push_back(stage);
+    stageOpened(stage);
 
     if (!m_currentStage) {
         setCurrentStage(stage);

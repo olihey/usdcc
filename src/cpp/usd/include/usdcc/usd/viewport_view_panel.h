@@ -32,8 +32,8 @@ class ViewportViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    explicit ViewportViewPanel(StageManager* stageManager, const QString& title = QStringLiteral("Viewport"),
-                                QWidget* parent = nullptr);
+    explicit ViewportViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                const QString& title = QStringLiteral("Viewport"), QWidget* parent = nullptr);
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
 
@@ -46,27 +46,23 @@ protected:
     // see ViewPanel::populateContextMenu() for the extension mechanism.
     void populateContextMenu(QMenu* menu) override;
 
+    // Points the viewport at the new stage and restores its selection.
+    void onStageChanged(const StageRefPtr& stage) override;
+
 private slots:
-    void refreshStageCombo();
     void refreshRendererCombo();
-    void onStageComboChanged(int index);
     void onRendererComboChanged(int index);
     void onToolComboChanged(int index);
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
 private:
-    StageManager* m_stageManager;
     HydraViewportWindow* m_viewport;
-    QComboBox* m_stageCombo;
     QComboBox* m_rendererCombo;
     QComboBox* m_toolCombo;
-    StageRefPtr m_stage;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageOpenedConnection;
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageClosedConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
 };
 

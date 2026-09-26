@@ -436,6 +436,81 @@ things that will bite later if not addressed early:
     included) alive and readable even though `findByCacheId()` no longer finds it. That test
     deliberately never touched the stage the viewport was actively displaying, to avoid
     retriggering the unrelated crash noted in item 20.
+22. **`ViewPanel`: mandatory Stage association.** `docs/PLAN.md`'s own Architecture Guidelines
+    (§4) always described the intended design — "Every ViewPanel can switch between currently
+    loaded USD stages via a dropdown" — but `usdcc::ui::ViewPanel` itself never implemented it;
+    instead, "stage awareness" (a `StageManager*`, a `StageRefPtr`, a "Stage:" combo box, and the
+    open/close/selection signal wiring) was independently duplicated across all three concrete
+    panels. Per explicit direction, this became a real, enforced property of `ViewPanel` itself:
+    every `ViewPanel` always has an associated `Stage` (never null — no "no stage selected"
+    state), with `setStage()`/`currentStage()` to change/query it, and — since a panel can no
+    longer fall back to "no stage" — any panel showing a stage that gets closed now closes
+    itself too.
+
+    `ViewPanel` gained: a `StageManager* stageManager()` / `StageRefPtr currentStage()` pair
+    (both set at construction, non-null by documented precondition — no runtime assert,
+    matching `Stage`'s own constructor precedent); `void setStage(StageRefPtr)` (no-ops if null
+    or unchanged, resyncs the combo, calls the new `protected virtual onStageChanged()` hook
+    subclasses override); a `protected QComboBox* stageCombo()` (created parent-less at
+    construction — `QLayout::addWidget()` reparents it automatically into whichever toolbar
+    layout a subclass builds); and `protected void refreshStageCombo()`, which subclasses still
+    call as the last line of their own constructor (unchanged from before) rather than the base
+    constructor calling it — a virtual call from `ViewPanel`'s own constructor would dispatch to
+    `ViewPanel`'s own `onStageChanged()`, not a subclass override, since the derived part of the
+    object doesn't exist yet. `stageOpened`/`stageClosed` are now wired once, in the base
+    constructor: the former just calls `refreshStageCombo()`; the latter calls `deleteDockWidget()`
+    directly when the closed stage matches this panel's own (confirmed safe to call synchronously
+    from within the signal handler — ADS's own implementation already routes it through
+    `deleteLater()`). `ViewportViewPanel`/`OutlinerViewPanel`/`AttributesViewPanel` each dropped
+    their own now-duplicate members/slots entirely and instead override `onStageChanged()` with
+    what their old stage-combo handler used to do.
+
+    `StageManager` gained `createStage()` (wraps `UsdStage::CreateInMemory()` for an anonymous,
+    non-file-backed stage — the shared "insert into the cache, wrap in `Stage`, fire
+    `stageOpened`" logic moved into a private `registerStage()` both `openStage()` and
+    `createStage()` call), used by `main.cpp`'s new startup order: since a `ViewPanel` can never
+    be constructed without a stage, `main.cpp` now resolves one (the CLI-arg stage if given and
+    it opens successfully, else a fresh empty one via `createStage()` — matching common DCC
+    "Untitled" startup UX) *before* constructing `ViewportViewPanel`/`OutlinerViewPanel`/
+    `AttributesViewPanel`, reversing the previous order.
+
+    Three acknowledged consequences, confirmed before starting:
+    - **USD is now a hard, unconditional requirement — if it's missing, nothing compiles.**
+      `ViewPanel` unconditionally needs `usdcc::usd::Stage`/`StageManager`, so top-level
+      `CMakeLists.txt`'s `find_package(USD)` became `find_package(USD REQUIRED)` — retiring
+      milestone M0's "app shell builds standalone before M2" property (see that milestone's
+      status row below). Every other conditional this made moot was removed too, rather than
+      left as dead-but-harmless scaffolding: `src/cpp/usd/CMakeLists.txt` and
+      `src/cpp/tools/CMakeLists.txt`'s `if(USD_FOUND)/else()` placeholder-target branches (and
+      the now-orphaned placeholder headers they built, `usdcc/usd/usd.h` and
+      `usdcc/tools/tools.h`, deleted); the `USDCC_USD_AVAILABLE` compile definition and every
+      `#ifdef USDCC_USD_AVAILABLE` guard in `main.cpp`; and `src/cpp/app/CMakeLists.txt`'s
+      `if(TARGET usdcc_usd_ui)`/`if(WIN32 AND USD_INSTALL)` guards (both now unconditionally
+      true). There is no longer any code path, in CMake or C++, that treats USD as optional.
+    - **`ViewPanel` is no longer exposed to Python.** Its only C++ constructor now requires
+      `usdcc::usd::StageManager*`/`StageRefPtr` — pybind11 types (`src/cpp/usd/python/
+      bindings.cpp`) with no bridge to the Shiboken6 pipeline `usdcc_ui`'s Python bindings use;
+      there's no existing mechanism in this repo connecting the two, and building one is a
+      separate, much larger feature. `ViewPanel` was removed from `bindings.h`/`typesystem.xml`/
+      the Shiboken `CMakeLists.txt`'s generated-sources and DEPENDS lists/`src/python/usdcc/
+      __init__.py`'s re-export — only `SidePanel` remains Python-exposed, a regression from the
+      previously-verified "ViewPanel is Python-subclassable" state (see milestone M1's status
+      row below).
+    - **If the last open `Stage` closes, all panels showing it self-close** — potentially all
+      three fixed ones at once, leaving zero dock widgets with no in-app way to spawn new ones
+      (File > Open only calls `stageManager.openStage()`; nothing today reconstructs panels for
+      a freshly-opened stage). Not fixed here — flagged as a follow-up ("File > New Viewport"-
+      style action, or auto-recreating a default panel set on the next `stageOpened` when none
+      exist).
+
+    Verified: clean Debug and RelWithDebInfo rebuilds; launching with no arguments (empty
+    "Untitled" stage) and with a real scene path, both unchanged from before; `usdcc.ui` still
+    imports successfully in Python with only `SidePanel` present (confirmed `hasattr(ui,
+    "ViewPanel")` is `False`); a temporary test harness in `main.cpp` (since removed) that opened
+    a second stage, switched just the Attributes panel to it via `setStage()` while Viewport/
+    Outliner stayed on the original stage, then closed that second stage and confirmed (via
+    `QPointer`, after letting the event loop process the deferred `deleteLater()`) that the
+    Attributes panel was actually destroyed while Viewport/Outliner were untouched.
 
 ## 7. Milestones
 
@@ -562,8 +637,8 @@ These run throughout, not as discrete milestones:
 
 | Milestone | Status |
 |-----------|--------|
-| M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending |
-| M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel`/`ViewPanel` are also exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel`'s ADS base isn't itself bound to Python (out of scope — see typesystem.xml); layout-persistence and panel-registration are not yet exposed to Python. Panel registration/layout persistence beyond the stand-ins is otherwise done |
+| M0 Repository & Build Bootstrap | In progress — vcpkg submodule, root CMakeLists.txt, `FindUSD.cmake`, and an empty-`QMainWindow` app skeleton build and run cleanly on Windows (verified); Linux/macOS untested, CI skeleton still pending. USD is now a hard `find_package(USD REQUIRED)` dependency of the whole app (§6 item 22 — `usdcc::ui::ViewPanel` unconditionally needs `usdcc::usd::Stage`/`StageManager`), retiring the "app shell builds standalone before M2" property this milestone originally established |
+| M1 Core Application Shell | In progress — Qt Advanced Docking System integrated into `MainWindow`, `SidePanel`/`ViewPanel` C++ base classes exist with stand-in subclasses, dock layout persists across restart (verified). `SidePanel` is exposed to Python via Shiboken6 and subclassable from Python (verified: import, instantiate, subclass, and content-widget ownership all confirmed working) — required building PySide6/Shiboken6 from source against usdcc's own vcpkg Qt (`tools/build-pyside.ps1`), since a pip-installed PySide6's independently-built Qt binaries clash with vcpkg's at runtime; see §5 item 10 and §6 item 11. `ViewPanel` is **no longer** exposed to Python as of §6 item 22 ("ViewPanel: mandatory Stage association") — its constructor now requires pybind11 types (`usdcc::usd::StageManager*`/`StageRefPtr`) with no bridge to the Shiboken6 pipeline; layout-persistence and panel-registration are not yet exposed to Python either. Panel registration/layout persistence beyond the stand-ins is otherwise done |
 | M2 OpenUSD Integration & Stage Management | Exit criteria met and verified — `usdcc::usd::StageManager` (open/close/enumerate/current-stage tracking) works from both C++ (Qt signals; standalone smoke test) and Python (`usdcc.usd` pybind11 module; standalone smoke test). Python side deliberately never passes a `UsdStageRefPtr`/`Usd.Stage` across the pybind11⇄pxr_boost::python boundary — that was tried via a custom pybind11 type_caster and confirmed to corrupt unrelated boost::python state — instead every opened stage is registered in `UsdUtilsStageCache::Get()` and only its plain-integer cache id crosses into Python, which retrieves the real stage via USD's own bindings (see §5 item 11). Remaining for a later pass: `ViewPanel`'s actual stage-dropdown UI (needs a real `ViewPanel` subclass to hang it on, M3/M4) and exposing `StageManager`'s Qt signals to Python |
 | M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_ui` target, renamed from `usdcc_usd_viewport` in M4 — see §6 item 14) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
 | M4 Scene Introspection Panels | Exit criteria met and verified — `OutlinerViewPanel` (rename/disable/select/reorder via a custom `UsdPrimTreeModel`) and `AttributesViewPanel` (view/edit via `TfType`-based dispatch) are docked alongside the viewport; selection is shared per-stage through `StageManager` (see §6 item 14 for the full design). Verified end to end through the real, wired-up UI code paths (tree/table widgets, model roles, the outliner's context menu): select, rename, selection-follows-rename, disable, attribute edit, and reorder all confirmed correct against direct stage introspection; the disable case was additionally confirmed *visually* — a screenshot taken after deactivating a prim via the outliner's checkbox showed it correctly absent from the live Hydra render, satisfying the "reflected live in the viewport" exit criterion. Known gap: array/matrix/asset-path attributes remain read-only in the Attributes panel (see §6 item 14) |

@@ -9,7 +9,6 @@
 
 #include <vector>
 
-class QComboBox;
 class QTableWidget;
 
 namespace usdcc::usd {
@@ -31,31 +30,28 @@ class AttributesViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    explicit AttributesViewPanel(StageManager* stageManager, const QString& title = QStringLiteral("Attributes"),
-                                  QWidget* parent = nullptr);
+    explicit AttributesViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                  const QString& title = QStringLiteral("Attributes"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
+protected:
+    // Resets the selected-prim path and refreshes the table for the new stage.
+    void onStageChanged(const StageRefPtr& stage) override;
+
 private slots:
-    void refreshStageCombo();
-    void onStageComboChanged(int index);
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
     void onCellChanged(int row, int column);
 
 private:
     void refreshAttributes();
 
-    StageManager* m_stageManager;
-    StageRefPtr m_stage;
     PXR_NS::SdfPath m_primPath;
-    QComboBox* m_stageCombo;
     QTableWidget* m_table;
     bool m_updatingTable = false;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageOpenedConnection;
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageClosedConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
 };
 

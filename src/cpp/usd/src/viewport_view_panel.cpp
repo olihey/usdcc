@@ -18,8 +18,9 @@
 
 namespace usdcc::usd {
 
-ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& title, QWidget* parent)
-    : usdcc::ui::ViewPanel(title, parent), m_stageManager(stageManager) {
+ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+                                      QWidget* parent)
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -29,7 +30,6 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& 
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(4, 4, 4, 4);
 
-    m_stageCombo = new QComboBox(toolbar);
     m_rendererCombo = new QComboBox(toolbar);
     m_toolCombo = new QComboBox(toolbar);
     m_toolCombo->addItem(tr("Select"));
@@ -37,7 +37,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& 
     m_toolCombo->addItem(tr("Rotate"));
     m_toolCombo->addItem(tr("Scale"));
     toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
-    toolbarLayout->addWidget(m_stageCombo, 1);
+    toolbarLayout->addWidget(stageCombo(), 1);
     toolbarLayout->addWidget(new QLabel(tr("Renderer:"), toolbar));
     toolbarLayout->addWidget(m_rendererCombo, 1);
     toolbarLayout->addWidget(new QLabel(tr("Tool:"), toolbar));
@@ -53,52 +53,25 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& 
 
     setContentWidget(container);
 
-    connect(m_stageCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            &ViewportViewPanel::onStageComboChanged);
     connect(m_rendererCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
             &ViewportViewPanel::onRendererComboChanged);
     connect(m_toolCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ViewportViewPanel::onToolComboChanged);
     connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::refreshRendererCombo);
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
 
-    if (m_stageManager) {
-        m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](StageRefPtr) { refreshStageCombo(); });
-        m_stageClosedConnection = m_stageManager->stageClosed.connect([this](StageRefPtr) { refreshStageCombo(); });
-        m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
-            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
-                onStageSelectionChanged(stage, std::move(paths));
-            });
-    }
+    // NB: uses the `stageManager` constructor parameter directly, not the
+    // stageManager() accessor — the parameter shadows it in this scope.
+    m_selectionChangedConnection = stageManager->selectionChanged.connect(
+        [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+            onStageSelectionChanged(stage, std::move(paths));
+        });
 
     refreshStageCombo();
 }
 
-void ViewportViewPanel::refreshStageCombo() {
-    m_stageCombo->blockSignals(true);
-    m_stageCombo->clear();
-
-    if (m_stageManager) {
-        for (const auto& stage : m_stageManager->stages()) {
-            const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
-            m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
-        }
-    }
-
-    m_stageCombo->blockSignals(false);
-    onStageComboChanged(m_stageCombo->currentIndex());
-}
-
-void ViewportViewPanel::onStageComboChanged(int index) {
-    if (!m_stageManager || index < 0) {
-        m_stage = nullptr;
-        m_viewport->setStage(nullptr);
-        m_viewport->setSelectedPaths({});
-        return;
-    }
-    const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
-    m_stage = m_stageManager->findByCacheId(cacheId);
-    m_viewport->setStage(m_stage ? m_stage->usdStage() : PXR_NS::UsdStageRefPtr());
-    m_viewport->setSelectedPaths(m_stageManager->selectedPaths(m_stage));
+void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_viewport->setStage(stage->usdStage());
+    m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
 }
 
 void ViewportViewPanel::refreshRendererCombo() {
@@ -131,26 +104,17 @@ void ViewportViewPanel::onToolComboChanged(int index) {
 }
 
 void ViewportViewPanel::onSelectionRequested(std::vector<PXR_NS::SdfPath> paths) {
-    if (m_stageManager && m_stage) {
-        m_stageManager->setSelectedPaths(m_stage, std::move(paths));
-    }
+    stageManager()->setSelectedPaths(currentStage(), std::move(paths));
 }
 
 void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
-    if (stage == m_stage) {
+    if (stage == currentStage()) {
         m_viewport->setSelectedPaths(std::move(paths));
     }
 }
 
 usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new ViewportViewPanel(m_stageManager, windowTitle(), parent);
-
-    // Stage selection: refreshStageCombo() already ran synchronously inside
-    // the constructor above, so the combo is already populated.
-    const int stageIndex = m_stageCombo->currentIndex();
-    if (stageIndex >= 0) {
-        copy->m_stageCombo->setCurrentIndex(stageIndex);
-    }
+    auto* copy = new ViewportViewPanel(stageManager(), currentStage(), windowTitle(), parent);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so its

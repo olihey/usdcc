@@ -45,19 +45,17 @@ find_package(pybind11 REQUIRED)
 
 # OpenUSD is provided externally (see docs/PLAN.md, "Technical Requirements"):
 # pass -DUSD_INSTALL=<path-to-usd-install> to point at a custom OpenUSD build.
-# Not REQUIRED yet — USD integration lands in milestone M2 — so the app shell
-# can build standalone before then.
+# REQUIRED: usdcc::ui::ViewPanel (usdcc_ui, needed by every panel and thus by
+# the whole app) unconditionally requires usdcc::usd::Stage/StageManager as of
+# docs/PLAN.md §6's "ViewPanel: mandatory Stage association" — there is no
+# longer a meaningful "app shell builds without USD_INSTALL" mode (retiring
+# that milestone-M0 property).
 #
 # USD's imaging targets (e.g. garch) reference OpenGL::GL, so it must already
 # be findable before pxrConfig.cmake sets up USD's own imported targets.
 find_package(OpenGL)
-find_package(USD)
-if(USD_FOUND)
-    message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
-else()
-    message(STATUS "OpenUSD not found; pass -DUSD_INSTALL=<path> to enable USD-dependent "
-                    "targets once they exist (see docs/PLAN.md, milestone M2).")
-endif()
+find_package(USD REQUIRED)
+message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)

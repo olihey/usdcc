@@ -9,7 +9,6 @@
 
 #include <vector>
 
-class QComboBox;
 class QTreeView;
 
 namespace usdcc::usd {
@@ -27,17 +26,18 @@ class OutlinerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    explicit OutlinerViewPanel(StageManager* stageManager, const QString& title = QStringLiteral("Outliner"),
-                                QWidget* parent = nullptr);
+    explicit OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                const QString& title = QStringLiteral("Outliner"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
 protected:
     void populateContextMenu(QMenu* menu) override;
 
+    // Points the tree model at the new stage and restores its selection.
+    void onStageChanged(const StageRefPtr& stage) override;
+
 private slots:
-    void refreshStageCombo();
-    void onStageComboChanged(int index);
     void onTreeSelectionChanged();
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
     void onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath);
@@ -45,17 +45,12 @@ private slots:
 private:
     void moveSelectedPrim(int direction);  // -1 = up, +1 = down
 
-    StageManager* m_stageManager;
-    StageRefPtr m_stage;
-    QComboBox* m_stageCombo;
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
     bool m_updatingSelection = false;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageOpenedConnection;
-    usdcc::core::Signal<StageRefPtr>::Connection m_stageClosedConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
 };
 

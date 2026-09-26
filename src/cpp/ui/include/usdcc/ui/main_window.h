@@ -21,8 +21,9 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
-    // Lets the app's composition root (main.cpp) add USD-dependent panels
-    // without usdcc_ui itself depending on USD — see main.cpp.
+    // Lets the app's composition root (main.cpp) add panels directly, rather
+    // than MainWindow needing to know about a specific StageManager instance
+    // (or any particular set of panels) itself — see main.cpp.
     ads::CDockManager* dockManager() const;
 
     // Restores the saved window geometry/dock layout. Must be called by the

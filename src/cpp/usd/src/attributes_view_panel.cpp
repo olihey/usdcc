@@ -28,6 +28,7 @@
 #include <QWidget>
 
 #include <sstream>
+#include <utility>
 
 namespace usdcc::usd {
 
@@ -128,8 +129,9 @@ bool setAttributeFromText(const PXR_NS::UsdAttribute& attr, const QString& text)
 
 }  // namespace
 
-AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, const QString& title, QWidget* parent)
-    : usdcc::ui::ViewPanel(title, parent), m_stageManager(stageManager) {
+AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+                                          QWidget* parent)
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -139,9 +141,8 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, const QStri
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(4, 4, 4, 4);
 
-    m_stageCombo = new QComboBox(toolbar);
     toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
-    toolbarLayout->addWidget(m_stageCombo, 1);
+    toolbarLayout->addWidget(stageCombo(), 1);
 
     m_table = new QTableWidget(container);
     m_table->setColumnCount(3);
@@ -154,60 +155,26 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, const QStri
 
     setContentWidget(container);
 
-    connect(m_stageCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            &AttributesViewPanel::onStageComboChanged);
     connect(m_table, &QTableWidget::cellChanged, this, &AttributesViewPanel::onCellChanged);
 
-    if (m_stageManager) {
-        m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](StageRefPtr) { refreshStageCombo(); });
-        m_stageClosedConnection = m_stageManager->stageClosed.connect([this](StageRefPtr) { refreshStageCombo(); });
-        m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
-            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
-                onStageSelectionChanged(stage, std::move(paths));
-            });
-    }
+    m_selectionChangedConnection = stageManager->selectionChanged.connect(
+        [this](StageRefPtr changedStage, std::vector<PXR_NS::SdfPath> paths) {
+            onStageSelectionChanged(changedStage, std::move(paths));
+        });
 
     refreshStageCombo();
 }
 
 usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new AttributesViewPanel(m_stageManager, windowTitle(), parent);
-    const int stageIndex = m_stageCombo->currentIndex();
-    if (stageIndex >= 0) {
-        copy->m_stageCombo->setCurrentIndex(stageIndex);
-    }
-    return copy;
+    return new AttributesViewPanel(stageManager(), currentStage(), windowTitle(), parent);
 }
 
-void AttributesViewPanel::refreshStageCombo() {
-    m_stageCombo->blockSignals(true);
-    m_stageCombo->clear();
-
-    if (m_stageManager) {
-        for (const auto& stage : m_stageManager->stages()) {
-            const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
-            m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
-        }
-    }
-
-    m_stageCombo->blockSignals(false);
-    onStageComboChanged(m_stageCombo->currentIndex());
-}
-
-void AttributesViewPanel::onStageComboChanged(int index) {
-    if (!m_stageManager || index < 0) {
-        m_stage = nullptr;
-        m_primPath = PXR_NS::SdfPath();
-        refreshAttributes();
-        return;
-    }
-    const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
-    m_stage = m_stageManager->findByCacheId(cacheId);
-    onStageSelectionChanged(m_stage, m_stageManager->selectedPaths(m_stage));
+void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
+    onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
 }
 
 void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
-    if (stage != m_stage) {
+    if (stage != currentStage()) {
         return;
     }
     m_primPath = paths.empty() ? PXR_NS::SdfPath() : paths.front();
@@ -218,8 +185,8 @@ void AttributesViewPanel::refreshAttributes() {
     m_updatingTable = true;
     m_table->setRowCount(0);
 
-    const PXR_NS::UsdPrim prim = (m_stage && !m_primPath.IsEmpty()) ? m_stage->usdStage()->GetPrimAtPath(m_primPath)
-                                                                     : PXR_NS::UsdPrim();
+    const PXR_NS::UsdPrim prim =
+        !m_primPath.IsEmpty() ? currentStage()->usdStage()->GetPrimAtPath(m_primPath) : PXR_NS::UsdPrim();
     if (prim) {
         const std::vector<PXR_NS::UsdAttribute> attrs = prim.GetAttributes();
         m_table->setRowCount(static_cast<int>(attrs.size()));
@@ -251,7 +218,7 @@ void AttributesViewPanel::refreshAttributes() {
 }
 
 void AttributesViewPanel::onCellChanged(int row, int column) {
-    if (m_updatingTable || column != 2 || !m_stage) {
+    if (m_updatingTable || column != 2) {
         return;
     }
     QTableWidgetItem* nameItem = m_table->item(row, 0);
@@ -260,7 +227,7 @@ void AttributesViewPanel::onCellChanged(int row, int column) {
         return;
     }
 
-    const PXR_NS::UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(m_primPath);
+    const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(m_primPath);
     const PXR_NS::UsdAttribute attr = prim ? prim.GetAttribute(PXR_NS::TfToken(nameItem->text().toStdString()))
                                             : PXR_NS::UsdAttribute();
 

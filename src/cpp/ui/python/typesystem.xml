@@ -2,13 +2,12 @@
 <!--
   Shiboken6 typesystem for the usdcc.ui Python module.
 
-  usdcc::ui classes derive from Qt (QDockWidget) or from Qt Advanced Docking
-  System (ads::CDockWidget). QDockWidget is already known via PySide6's own
-  QtWidgets typesystem, loaded below. ads::CDockWidget is NOT bound here —
-  binding all of ADS is out of scope for now — so ViewPanel is declared
-  without an inheritable base; its own setContentWidget()/contentWidget()
-  give Python a working content API without needing ADS bindings (see the
-  comment on ViewPanel in view_panel.h).
+  usdcc::ui::SidePanel derives from Qt (QDockWidget), already known via
+  PySide6's own QtWidgets typesystem, loaded below.
+
+  ViewPanel is NOT bound here (see bindings.h's comment): its constructor now
+  requires usdcc::usd::StageManager*/StageRefPtr, pybind11 types this
+  Shiboken6 pipeline has no way to know about or convert.
 -->
 <typesystem package="usdcc.ui">
     <load-typesystem name="typesystem_widgets.xml" generate="no"/>
@@ -20,14 +19,14 @@
          meant to be Python-overridden anyway, so drop it like PySide does. -->
     <rejection class="*" function-name="qt_metacall"/>
 
-    <!-- These namespaces only exist so shiboken can resolve
-         usdcc::ui::SidePanel/ViewPanel's qualified C++ names (a bare,
-         unqualified <object-type name="SidePanel"/> fails to match — shiboken
-         needs the enclosing namespaces spelled out). That makes the classes
-         land at usdcc.ui.usdcc.ui.SidePanel; visible="no" to flatten that
-         hits a shiboken codegen bug (undeclared SBK_...IDX in the namespace
-         wrapper), so instead __init__.py re-exports SidePanel/ViewPanel at
-         the top level after import — see that file. -->
+    <!-- This namespace only exists so shiboken can resolve
+         usdcc::ui::SidePanel's qualified C++ name (a bare, unqualified
+         <object-type name="SidePanel"/> fails to match — shiboken needs the
+         enclosing namespaces spelled out). That makes the class land at
+         usdcc.ui.usdcc.ui.SidePanel; visible="no" to flatten that hits a
+         shiboken codegen bug (undeclared SBK_...IDX in the namespace
+         wrapper), so instead __init__.py re-exports SidePanel at the top
+         level after import — see that file. -->
     <namespace-type name="usdcc">
         <namespace-type name="ui">
             <!-- Every QObject-derived binding gets generated code reaching
@@ -42,28 +41,6 @@
                 <extra-includes>
                     <include file-name="pysideproperty.h" location="global"/>
                 </extra-includes>
-            </object-type>
-            <object-type name="ViewPanel">
-                <extra-includes>
-                    <include file-name="pysideproperty.h" location="global"/>
-                </extra-includes>
-                <!-- setContentWidget() reparents the widget onto the C++
-                     ViewPanel (via CDockWidget::setWidget()), but since
-                     Shiboken doesn't know that ADS base class exists, it
-                     can't infer the reparenting itself and defaults to
-                     leaving Python holding sole ownership. A caller that
-                     doesn't keep their own reference — e.g.
-                     panel.setContentWidget(QLabel(...)) — then has the
-                     widget garbage-collected (and the underlying C++ object
-                     destroyed) right after the call, so contentWidget()
-                     next returns a dangling pointer. Confirmed by crash.
-                     This tells Shiboken the C++ side (this) takes ownership,
-                     matching every other Qt "give me a child widget" API. -->
-                <modify-function signature="setContentWidget(QWidget*)">
-                    <modify-argument index="1">
-                        <parent index="this" action="add"/>
-                    </modify-argument>
-                </modify-function>
             </object-type>
         </namespace-type>
     </namespace-type>
