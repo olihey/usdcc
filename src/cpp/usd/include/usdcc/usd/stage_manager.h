@@ -1,20 +1,21 @@
 #pragma once
 
 #include "usdcc/core/signal.h"
+#include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
-#include <map>
 #include <string>
 #include <vector>
 
 namespace usdcc::usd {
 
-// Owns every USD stage currently open in the application. ViewPanels query
-// this — rather than tracking stages themselves — to populate their "switch
-// between loaded stages" dropdown (see docs/PLAN.md section 4) and to know
-// which stage is currently selected.
+// Owns every USD stage currently open in the application, each wrapped in a
+// Stage (see stage.h) alongside usdcc-specific per-stage state. ViewPanels
+// query this — rather than tracking stages themselves — to populate their
+// "switch between loaded stages" dropdown (see docs/PLAN.md section 4) and
+// to know which stage is currently selected.
 //
 // Deliberately Qt-free: this is core, non-UI stage-management logic, usable
 // without a GUI (its own Python bindings in src/cpp/usd/python/bindings.cpp
@@ -35,24 +36,23 @@ public:
     // asset path) and registers it. Opening the same identifier again
     // returns the already-open stage rather than creating a second one.
     // Returns a null pointer if the stage failed to open.
-    PXR_NS::UsdStageRefPtr openStage(const std::string& identifier);
+    StageRefPtr openStage(const std::string& identifier);
 
-    // Unregisters the stage. The underlying UsdStage is only destroyed once
-    // every other UsdStageRefPtr referencing it (e.g. one held by a
-    // ViewPanel) has also let go.
-    void closeStage(const PXR_NS::UsdStageRefPtr& stage);
+    // Unregisters the stage. The underlying Stage (and its UsdStage) is
+    // only destroyed once every other StageRefPtr referencing it (e.g. one
+    // held by a ViewPanel) has also let go.
+    void closeStage(const StageRefPtr& stage);
 
-    const std::vector<PXR_NS::UsdStageRefPtr>& stages() const;
+    const std::vector<StageRefPtr>& stages() const;
 
-    PXR_NS::UsdStageRefPtr currentStage() const;
-    void setCurrentStage(const PXR_NS::UsdStageRefPtr& stage);
+    StageRefPtr currentStage() const;
+    void setCurrentStage(const StageRefPtr& stage);
 
-    // Every stage opened through this manager is also registered in
-    // UsdUtilsStageCache::Get() (USD's own shared, process-wide stage
-    // cache). These accessors expose the plain integer form of its cache Id
-    // so Python code can be given one (via a pybind11 binding of
-    // StageManager) and independently retrieve a fully-functional
-    // pxr.Usd.Stage for it with
+    // Cache ids of every stage currently open, in open order — the plain-
+    // integer form of Stage::cacheId() (see its own comment for why),
+    // aggregated across every currently-open stage. Used to give Python
+    // code (via a pybind11 binding of StageManager) a stable handle it can
+    // independently retrieve a fully-functional pxr.Usd.Stage for with
     // UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(id)) —
     // using USD's own, already-correct pxr_boost::python bindings for that
     // lookup. This is deliberate: passing a UsdStageRefPtr/Usd.Stage
@@ -63,15 +63,13 @@ public:
     // unrelated types started failing) — USD's boost::python fork lives
     // under the namespace pxrInternal_v..._pxrReserved__::pxr_boost, i.e.
     // it's explicitly internal/reserved and not designed for cross-DLL use
-    // by third-party extensions. Returns -1 if the stage isn't known to
-    // this manager. See docs/PLAN.md open question 11.
-    long stageCacheId(const PXR_NS::UsdStageRefPtr& stage) const;
+    // by third-party extensions. See docs/PLAN.md open question 11.
     std::vector<long> stageCacheIds() const;
 
     // Reverse lookup for the above: given a cache Id (e.g. one a Python
     // caller sends back into a C++-facing method), returns the stage if
     // this manager still has it open, or a null pointer otherwise.
-    PXR_NS::UsdStageRefPtr findByCacheId(long cacheId) const;
+    StageRefPtr findByCacheId(long cacheId) const;
 
     // The set of selected prim paths for a given stage — shared across every
     // panel currently showing that stage (see docs/PLAN.md milestone M4:
@@ -80,23 +78,22 @@ public:
     // per-stage (rather than one flat "current selection") since a stage can
     // be shown in more than one panel/viewport at once, each independently
     // selectable — see ViewPanel's per-panel stage dropdown.
-    std::vector<PXR_NS::SdfPath> selectedPaths(const PXR_NS::UsdStageRefPtr& stage) const;
-    void setSelectedPaths(const PXR_NS::UsdStageRefPtr& stage, std::vector<PXR_NS::SdfPath> paths);
+    std::vector<PXR_NS::SdfPath> selectedPaths(const StageRefPtr& stage) const;
+    void setSelectedPaths(const StageRefPtr& stage, std::vector<PXR_NS::SdfPath> paths);
 
     // Qt-free equivalents of Qt signals (see usdcc::core::Signal). UI code
     // connects with e.g. `stageOpened.connect(...)` and keeps the returned
     // Connection alive (typically as a member) for as long as it should
     // keep receiving notifications. Only StageManager itself fires these —
     // treat them as read-only from the outside, same as a Qt signal.
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> stageOpened;
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> stageClosed;
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr> currentStageChanged;
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr, std::vector<PXR_NS::SdfPath>> selectionChanged;
+    usdcc::core::Signal<StageRefPtr> stageOpened;
+    usdcc::core::Signal<StageRefPtr> stageClosed;
+    usdcc::core::Signal<StageRefPtr> currentStageChanged;
+    usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>> selectionChanged;
 
 private:
-    std::vector<PXR_NS::UsdStageRefPtr> m_stages;
-    PXR_NS::UsdStageRefPtr m_currentStage;
-    std::map<long, std::vector<PXR_NS::SdfPath>> m_selections;
+    std::vector<StageRefPtr> m_stages;
+    StageRefPtr m_currentStage;
 };
 
 }  // namespace usdcc::usd

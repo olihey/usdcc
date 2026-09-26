@@ -62,12 +62,10 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, const QString& 
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
 
     if (m_stageManager) {
-        m_stageOpenedConnection = m_stageManager->stageOpened.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
-        m_stageClosedConnection = m_stageManager->stageClosed.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](StageRefPtr) { refreshStageCombo(); });
+        m_stageClosedConnection = m_stageManager->stageClosed.connect([this](StageRefPtr) { refreshStageCombo(); });
         m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
-            [this](PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
                 onStageSelectionChanged(stage, std::move(paths));
             });
     }
@@ -81,8 +79,8 @@ void ViewportViewPanel::refreshStageCombo() {
 
     if (m_stageManager) {
         for (const auto& stage : m_stageManager->stages()) {
-            const QString identifier = QString::fromStdString(stage->GetRootLayer()->GetIdentifier());
-            m_stageCombo->addItem(identifier, static_cast<qlonglong>(m_stageManager->stageCacheId(stage)));
+            const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
+            m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
         }
     }
 
@@ -99,7 +97,7 @@ void ViewportViewPanel::onStageComboChanged(int index) {
     }
     const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
     m_stage = m_stageManager->findByCacheId(cacheId);
-    m_viewport->setStage(m_stage);
+    m_viewport->setStage(m_stage ? m_stage->usdStage() : PXR_NS::UsdStageRefPtr());
     m_viewport->setSelectedPaths(m_stageManager->selectedPaths(m_stage));
 }
 
@@ -138,7 +136,7 @@ void ViewportViewPanel::onSelectionRequested(std::vector<PXR_NS::SdfPath> paths)
     }
 }
 
-void ViewportViewPanel::onStageSelectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
     if (stage == m_stage) {
         m_viewport->setSelectedPaths(std::move(paths));
     }

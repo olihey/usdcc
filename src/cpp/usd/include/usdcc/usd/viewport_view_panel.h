@@ -2,6 +2,7 @@
 
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
+#include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
@@ -52,7 +53,7 @@ private slots:
     void onRendererComboChanged(int index);
     void onToolComboChanged(int index);
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
-    void onStageSelectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
+    void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
 private:
     StageManager* m_stageManager;
@@ -60,13 +61,13 @@ private:
     QComboBox* m_stageCombo;
     QComboBox* m_rendererCombo;
     QComboBox* m_toolCombo;
-    PXR_NS::UsdStageRefPtr m_stage;
+    StageRefPtr m_stage;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr>::Connection m_stageOpenedConnection;
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr>::Connection m_stageClosedConnection;
-    usdcc::core::Signal<PXR_NS::UsdStageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
+    usdcc::core::Signal<StageRefPtr>::Connection m_stageOpenedConnection;
+    usdcc::core::Signal<StageRefPtr>::Connection m_stageClosedConnection;
+    usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
 };
 
 }  // namespace usdcc::usd

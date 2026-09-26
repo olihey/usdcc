@@ -393,6 +393,49 @@ things that will bite later if not addressed early:
     specifically triggered by the compound sequence exercising the viewport's engine
     recreation without the pacing normal UI interaction provides. Not investigated further
     here — flagged for a separate pass.
+21. **Added `usdcc::usd::Stage`, wrapping each `UsdStageRefPtr` StageManager tracks.** Until
+    now, `StageManager` stored stages as a plain `std::vector<UsdStageRefPtr>` with a *second*,
+    parallel `std::map<long, std::vector<SdfPath>>` (keyed by cache id) tracking each one's
+    selection — the only piece of usdcc-specific per-stage state that existed. Adding a second
+    piece of per-stage state (e.g. a future per-stage render setting) would have meant another
+    parallel cache-id-keyed map. `Stage` (`src/cpp/usd/include/usdcc/usd/stage.h`) fixes that by
+    giving each stage's usdcc-specific state (currently just `selectedPaths()`, but the point of
+    the class is to have one place to grow that) a home directly alongside the `UsdStageRefPtr`
+    it belongs to, computing and caching `cacheId()` once at construction (previously
+    recomputed via a `UsdUtilsStageCache::Get()` round-trip on every call).
+
+    Chose the full-migration option over keeping `Stage` an internal-only detail: `StageManager`'s
+    entire public API (`stages()`, `currentStage()`, `openStage()`/`closeStage()`,
+    `findByCacheId()`, `selectedPaths()`/`setSelectedPaths()`, and all four signals) now returns/
+    accepts `StageRefPtr` (a `std::shared_ptr<Stage>`, aliased in stage.h) instead of a bare
+    `UsdStageRefPtr`. `shared_ptr` rather than a raw `Stage*` deliberately: it preserves the
+    exact survival-past-close semantics `UsdStageRefPtr` itself already had (documented on
+    `StageManager::closeStage()`) — a ViewPanel holding a `StageRefPtr` keeps the `Stage` (and
+    its selection data) alive even after `StageManager::closeStage()` removes it from the
+    manager's own list, rather than being left with a dangling pointer.
+
+    `ViewportViewPanel`/`OutlinerViewPanel`/`AttributesViewPanel` (the only other consumers of
+    this API) were updated accordingly — their `m_stage` members are now `StageRefPtr`, and
+    every direct USD API call on them (`GetRootLayer()`, `GetPrimAtPath()`, `GetEditTarget()`,
+    etc.) goes through the new `.usdStage()` accessor. Deliberately *not* touched:
+    `HydraViewportWindow::setStage()` and `UsdPrimTreeModel::setStage()` — both are lower-level,
+    StageManager-agnostic classes that only ever needed a raw `UsdStageRefPtr` in the first
+    place, so the panels translate at the boundary (`m_viewport->setStage(m_stage ?
+    m_stage->usdStage() : nullptr)`) rather than teaching those classes about `Stage` too.
+
+    `StageManager::stageCacheId(stage)` (the single-stage overload) was removed entirely — now
+    that `cacheId()` lives on `Stage` itself, `stage->cacheId()` replaces it directly at every
+    call site (bindings.cpp included); `stageCacheIds()` (the all-open-stages plural) stays, now
+    implemented as a one-line loop over `stage->cacheId()`.
+
+    Verified: clean Debug and RelWithDebInfo rebuilds, and a temporary test harness in
+    `main.cpp` (since removed) confirming two independently-opened stages get distinct `Stage`
+    objects and cache ids, `setSelectedPaths`/`selectedPaths` round-trip correctly through
+    `Stage`, and — the specific behavior this design was chosen to preserve — that a
+    `StageRefPtr` held past `StageManager::closeStage()` keeps its `Stage` (selection data
+    included) alive and readable even though `findByCacheId()` no longer finds it. That test
+    deliberately never touched the stage the viewport was actively displaying, to avoid
+    retriggering the unrelated crash noted in item 20.
 
 ## 7. Milestones
 

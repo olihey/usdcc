@@ -56,12 +56,10 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, const QString& 
     connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
 
     if (m_stageManager) {
-        m_stageOpenedConnection = m_stageManager->stageOpened.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
-        m_stageClosedConnection = m_stageManager->stageClosed.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](StageRefPtr) { refreshStageCombo(); });
+        m_stageClosedConnection = m_stageManager->stageClosed.connect([this](StageRefPtr) { refreshStageCombo(); });
         m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
-            [this](PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
                 onStageSelectionChanged(stage, std::move(paths));
             });
     }
@@ -90,8 +88,8 @@ void OutlinerViewPanel::refreshStageCombo() {
 
     if (m_stageManager) {
         for (const auto& stage : m_stageManager->stages()) {
-            const QString identifier = QString::fromStdString(stage->GetRootLayer()->GetIdentifier());
-            m_stageCombo->addItem(identifier, static_cast<qlonglong>(m_stageManager->stageCacheId(stage)));
+            const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
+            m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
         }
     }
 
@@ -107,7 +105,7 @@ void OutlinerViewPanel::onStageComboChanged(int index) {
     }
     const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
     m_stage = m_stageManager->findByCacheId(cacheId);
-    m_model->setStage(m_stage);
+    m_model->setStage(m_stage ? m_stage->usdStage() : PXR_NS::UsdStageRefPtr());
     onStageSelectionChanged(m_stage, m_stageManager->selectedPaths(m_stage));
 }
 
@@ -122,7 +120,7 @@ void OutlinerViewPanel::onTreeSelectionChanged() {
     m_stageManager->setSelectedPaths(m_stage, paths);
 }
 
-void OutlinerViewPanel::onStageSelectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
     if (stage != m_stage) {
         return;
     }
@@ -165,7 +163,7 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     }
 
     const PXR_NS::SdfPath path = m_model->pathForIndex(selected.first());
-    const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(path);
+    const PXR_NS::UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(path);
     const PXR_NS::UsdPrim parent = prim ? prim.GetParent() : PXR_NS::UsdPrim();
     if (!prim || !parent) {
         return;
@@ -189,12 +187,13 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     }
     std::iter_swap(it, swapWith);
 
-    if (!m_stage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
+    if (!m_stage->usdStage()->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
         // Reordering requires a prim spec for the parent on the edit target
         // layer to author the "reorder nameChildren" opinion onto.
-        m_stage->OverridePrim(parent.GetPath());
+        m_stage->usdStage()->OverridePrim(parent.GetPath());
     }
-    if (PXR_NS::SdfPrimSpecHandle parentSpec = m_stage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
+    if (PXR_NS::SdfPrimSpecHandle parentSpec =
+            m_stage->usdStage()->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
         parentSpec->SetNameChildrenOrder(order);
     }
 

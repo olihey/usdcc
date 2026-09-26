@@ -1,7 +1,9 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
 if(USD_FOUND)
     add_library(usdcc_usd STATIC
+        include/usdcc/usd/stage.h
         include/usdcc/usd/stage_manager.h
+        src/stage.cpp
         src/stage_manager.cpp
     )
     target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})

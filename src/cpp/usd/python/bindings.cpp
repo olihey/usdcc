@@ -16,8 +16,7 @@ namespace py = pybind11;
 // code retrieves the actual stage via USD's own, already-correct bindings:
 //   from pxr import Usd, UsdUtils
 //   stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(id))
-// See usdcc::usd::StageManager::stageCacheId() and docs/PLAN.md open
-// question 11.
+// See usdcc::usd::Stage::cacheId() and docs/PLAN.md open question 11.
 PYBIND11_MODULE(usd, m) {
     m.doc() = "usdcc.usd -- StageManager and OpenUSD integration (milestone M2).";
 
@@ -27,7 +26,7 @@ PYBIND11_MODULE(usd, m) {
             "open_stage",
             [](usdcc::usd::StageManager& self, const std::string& identifier) -> long {
                 auto stage = self.openStage(identifier);
-                return stage ? self.stageCacheId(stage) : -1;
+                return stage ? stage->cacheId() : -1;
             },
             py::arg("identifier"),
             "Opens a stage; returns its UsdUtilsStageCache cache id, or -1 on failure.")
@@ -45,7 +44,7 @@ PYBIND11_MODULE(usd, m) {
             "current_stage_cache_id",
             [](const usdcc::usd::StageManager& self) -> long {
                 auto stage = self.currentStage();
-                return stage ? self.stageCacheId(stage) : -1;
+                return stage ? stage->cacheId() : -1;
             },
             "-1 if no stage is current.")
         .def(

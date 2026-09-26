@@ -159,12 +159,10 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, const QStri
     connect(m_table, &QTableWidget::cellChanged, this, &AttributesViewPanel::onCellChanged);
 
     if (m_stageManager) {
-        m_stageOpenedConnection = m_stageManager->stageOpened.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
-        m_stageClosedConnection = m_stageManager->stageClosed.connect(
-            [this](PXR_NS::UsdStageRefPtr) { refreshStageCombo(); });
+        m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](StageRefPtr) { refreshStageCombo(); });
+        m_stageClosedConnection = m_stageManager->stageClosed.connect([this](StageRefPtr) { refreshStageCombo(); });
         m_selectionChangedConnection = m_stageManager->selectionChanged.connect(
-            [this](PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
                 onStageSelectionChanged(stage, std::move(paths));
             });
     }
@@ -187,8 +185,8 @@ void AttributesViewPanel::refreshStageCombo() {
 
     if (m_stageManager) {
         for (const auto& stage : m_stageManager->stages()) {
-            const QString identifier = QString::fromStdString(stage->GetRootLayer()->GetIdentifier());
-            m_stageCombo->addItem(identifier, static_cast<qlonglong>(m_stageManager->stageCacheId(stage)));
+            const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
+            m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
         }
     }
 
@@ -208,7 +206,7 @@ void AttributesViewPanel::onStageComboChanged(int index) {
     onStageSelectionChanged(m_stage, m_stageManager->selectedPaths(m_stage));
 }
 
-void AttributesViewPanel::onStageSelectionChanged(PXR_NS::UsdStageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
+void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
     if (stage != m_stage) {
         return;
     }
@@ -220,7 +218,7 @@ void AttributesViewPanel::refreshAttributes() {
     m_updatingTable = true;
     m_table->setRowCount(0);
 
-    const PXR_NS::UsdPrim prim = (m_stage && !m_primPath.IsEmpty()) ? m_stage->GetPrimAtPath(m_primPath)
+    const PXR_NS::UsdPrim prim = (m_stage && !m_primPath.IsEmpty()) ? m_stage->usdStage()->GetPrimAtPath(m_primPath)
                                                                      : PXR_NS::UsdPrim();
     if (prim) {
         const std::vector<PXR_NS::UsdAttribute> attrs = prim.GetAttributes();
@@ -262,7 +260,7 @@ void AttributesViewPanel::onCellChanged(int row, int column) {
         return;
     }
 
-    const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(m_primPath);
+    const PXR_NS::UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(m_primPath);
     const PXR_NS::UsdAttribute attr = prim ? prim.GetAttribute(PXR_NS::TfToken(nameItem->text().toStdString()))
                                             : PXR_NS::UsdAttribute();
 
