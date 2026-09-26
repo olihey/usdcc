@@ -27,6 +27,23 @@ endif()
 
 set_target_properties(usdcc PROPERTIES WIN32_EXECUTABLE ON)
 
+if(WIN32 AND USD_INSTALL)
+    # Visual Studio's own debugger (Start Debugging / F5) launches usdcc.exe
+    # directly, without USD's bin/lib on PATH — unlike tools/run.ps1, which
+    # sets this by hand before launching — so Storm/Hydra fails to load with
+    # "usd_usdImagingGL.dll was not found" the moment a stage is opened.
+    # VS_DEBUGGER_ENVIRONMENT becomes <LocalDebuggerEnvironment> in the
+    # generated .vcxproj, which Visual Studio's debugger reads directly, so
+    # this only needs setting once here rather than by every developer by
+    # hand in the IDE. Entries are newline-separated (not semicolon —
+    # semicolons only separate multiple paths within PATH itself).
+    set_target_properties(
+        usdcc
+        PROPERTIES
+            VS_DEBUGGER_ENVIRONMENT
+            "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")
+endif()
+
 # Qt is a shared (non-static) vcpkg build: vcpkg's applocal-deps step copies
 # the DLLs usdcc links against directly, but not the platform plugin, which
 # Qt loads dynamically at startup and which vcpkg doesn't ship a windeployqt
