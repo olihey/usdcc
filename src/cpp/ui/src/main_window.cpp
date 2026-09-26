@@ -3,6 +3,8 @@
 #include <DockManager.h>
 #include <QCloseEvent>
 #include <QDir>
+#include <QMenu>
+#include <QMenuBar>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextEdit>
@@ -47,6 +49,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* sidePanelStandIn = new SidePanel("Log", this);
     sidePanelStandIn->setWidget(new QTextEdit(sidePanelStandIn));
     addDockWidget(Qt::BottomDockWidgetArea, sidePanelStandIn);
+    m_sidePanels.append(sidePanelStandIn);
 
     // Deliberately not calling restoreLayout() here — see its declaration in
     // main_window.h for why. The composition root calls it once every panel
@@ -74,6 +77,16 @@ void MainWindow::saveLayout() const {
     QSettings settings = layoutSettings();
     settings.setValue(kGeometryKey, saveGeometry());
     settings.setValue(kDockLayoutKey, m_dockManager->saveState());
+}
+
+void MainWindow::buildViewMenu() {
+    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    // QDockWidget already provides a checkable show/hide QAction, kept in
+    // sync with the dock widget's actual visibility — no custom toggle slot
+    // needed.
+    for (SidePanel* panel : m_sidePanels) {
+        viewMenu->addAction(panel->toggleViewAction());
+    }
 }
 
 }  // namespace usdcc::ui

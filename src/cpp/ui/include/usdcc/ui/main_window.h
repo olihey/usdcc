@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QMainWindow>
 
 namespace ads {
@@ -7,6 +8,8 @@ class CDockManager;
 }
 
 namespace usdcc::ui {
+
+class SidePanel;
 
 // QMainWindow shell hosting the Qt Advanced Docking System. Panel
 // registration currently instantiates a stand-in SidePanel to prove the
@@ -37,6 +40,14 @@ public:
     // milestone M3 for how this was diagnosed.
     void restoreLayout();
 
+    // Builds the "View" menu from m_sidePanels, one entry per instance —
+    // a future LogSidePanel/ScriptingSidePanel/USDASidePanel just needs to
+    // be appended to m_sidePanels before this runs. Public (rather than
+    // called from the constructor) so the composition root (main.cpp)
+    // controls menu-bar ordering — it calls this after adding its own
+    // "File" menu, so "File" stays first.
+    void buildViewMenu();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -44,6 +55,7 @@ private:
     void saveLayout() const;
 
     ads::CDockManager* m_dockManager = nullptr;
+    QList<SidePanel*> m_sidePanels;
 };
 
 }  // namespace usdcc::ui

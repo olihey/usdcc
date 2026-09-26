@@ -79,6 +79,10 @@ int main(int argc, char** argv) {
         }
     });
 
+    // Built after the File menu above so "File" stays the first menu-bar
+    // entry (QMenuBar orders entries by insertion order).
+    window.buildViewMenu();
+
     // Every panel for this session must exist before restoring — see
     // MainWindow::restoreLayout()'s declaration for why.
     window.restoreLayout();
