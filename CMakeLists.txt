@@ -64,3 +64,7 @@ add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
 add_subdirectory(src/cpp/app)
+
+# Set here (rather than left to whoever opens the generated .sln) so it
+# survives every CMake reconfigure instead of reverting to CMakePredefinedTargets.
+set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT usdcc)
