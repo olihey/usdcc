@@ -512,6 +512,32 @@ things that will bite later if not addressed early:
     `QPointer`, after letting the event loop process the deferred `deleteLater()`) that the
     Attributes panel was actually destroyed while Viewport/Outliner were untouched.
 
+23. **Fixed: viewport stayed black and Outliner stayed empty after item 22 — and File > Open Stage
+    now creates a `ViewportViewPanel` for the opened stage.** Regression from item 22: the base
+    `ViewPanel` stores the initial stage in its constructor, so the subclass's
+    `refreshStageCombo()` ends in `setStage(sameStage)`, which no-ops on an unchanged stage —
+    `onStageChanged()` therefore never ran for the *initial* stage, `HydraViewportWindow` never
+    received a stage (its `Render()` call is skipped without one), and `OutlinerViewPanel`'s model
+    never got one either. `view_panel.h` already documented the intended contract ("subclasses
+    perform their initial setup from `currentStage()` at the end of their own constructor") but
+    none of the three did. Fixed by each subclass's constructor ending with an explicit
+    `onStageChanged(currentStage())`. Item 22's "launching … unchanged from before" verification
+    was only a process-alive check and missed this; **this fix was verified by screenshotting the
+    window** (Storm renders the cube/sphere, Outliner shows the prim tree).
+    `main.cpp` now connects `stageManager.stageOpened` (after the startup panels exist) to create
+    one more `ViewportViewPanel`, tabbed next to the startup viewport. Two ADS constraints shaped
+    this: (a) the target dock area is re-queried from the startup viewport at call time, not
+    captured, because `restoreLayout()`'s `restoreState()` can replace `CDockAreaWidget`s and a
+    captured pointer dangled (reproducible `0xc0000005` crash in `Qt6Core.dll`); (b) an ADS
+    dock widget's objectName (defaults to its title) must be unique and is its identity in saved
+    layouts, so the startup viewport keeps the stable name `"Viewport"` and later ones get a
+    pretty title (`Viewport - <stage>`) plus a separate unique objectName (`Viewport-<cacheId>`).
+    Two things a future verifier should know: Qt's `AppConfigLocation` on Windows resolves via the
+    Known Folder API, so overriding `%LOCALAPPDATA%` does **not** isolate `usdcc.ini` — move the
+    file aside to test a clean layout; and `Stop-Process` kills skip `closeEvent`, so test runs
+    don't overwrite the saved layout. A one-off run with a clean layout once showed every dock
+    widget closed; not reproduced in seven further launches, cause unknown.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

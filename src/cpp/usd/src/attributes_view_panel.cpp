@@ -163,6 +163,8 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
         });
 
     refreshStageCombo();
+    // See ViewportViewPanel's constructor for why this is explicit.
+    onStageChanged(currentStage());
 }
 
 usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {

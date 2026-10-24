@@ -60,6 +60,8 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
         });
 
     refreshStageCombo();
+    // See ViewportViewPanel's constructor for why this is explicit.
+    onStageChanged(currentStage());
 }
 
 usdcc::ui::ViewPanel* OutlinerViewPanel::duplicate(QWidget* parent) const {

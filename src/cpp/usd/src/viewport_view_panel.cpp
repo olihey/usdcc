@@ -67,6 +67,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
         });
 
     refreshStageCombo();
+    // The combo's initial selection can't trigger this itself: ViewPanel
+    // already holds the initial stage, so setStage() sees it as unchanged.
+    onStageChanged(currentStage());
 }
 
 void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
