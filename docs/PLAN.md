@@ -538,6 +538,34 @@ things that will bite later if not addressed early:
     don't overwrite the saved layout. A one-off run with a clean layout once showed every dock
     widget closed; not reproduced in seven further launches, cause unknown.
 
+24. **Added: dark theme from the "3D DCC with Modern Dark Design" Claude Design project
+    (option 1a, "Classic — Blender-style dense workspace").** Style only — the design's layout
+    (left tool rail, segmented tool controls, status bar, right-hand property panel) is *not*
+    implemented; the existing panels keep their structure and just take on the look. Lives in
+    `usdcc_ui` as `usdcc::ui::theme` (`theme.h`/`.cpp`): `apply(QApplication&)` (Fusion style +
+    dark `QPalette` + `resources/theme/dark.qss`), called from `main.cpp` right after the
+    `QApplication`; `applyToDockManager()` (appends `resources/theme/dock.qss`), called from
+    `MainWindow`'s constructor right after it creates the `CDockManager`. Design tokens
+    (surfaces `#161618/#1a1a1c/#1c1c1e/#141416`, accent `#3d8bfd`, 6/8/10% white hairlines,
+    11px type, 20px controls, 3–4px radii) are documented at the top of `dark.qss`.
+    Three things that aren't obvious: (a) **ADS needs its own pass.** `CDockManager` installs a
+    widget-level stylesheet (`focus_highlighting.css`, since `FocusHighlighting` is on) which beats
+    the app-wide one, so `dock.qss` is *appended* to the manager's existing sheet using the same
+    selectors/specificity (`ads--CDockWidgetTab[focused="true"]` etc.) so it wins while ADS's own
+    functional rules stay — this also fixed inactive tab labels being invisible (they used
+    `palette(dark)`). (b) **Icons are generated PNGs, not SVG**: the deployed Qt has no SVG
+    plugins (`imageformats/qsvg`, `iconengines`), so `image: url(x.svg)` would draw nothing —
+    this also means ADS's own stock SVG icons never rendered. `tools/gen_theme_icons.py`
+    (stdlib only) regenerates them at 1x/`@2x`. (c) The resources live in a static library, so
+    `theme.cpp` calls `Q_INIT_RESOURCE(usdcc_ui)` (outside any namespace) or the linker can drop
+    them and the sheets load empty. The viewport background (`kViewportBackground` in
+    `hydra_viewport_window.cpp`) is `#1c1c1e`, matching the panels, and the three panels'
+    Stage/Renderer/Tool rows are tagged `objectName = "panelToolbar"` for the design's options-bar
+    look. Not done: the Inter font (not installed or bundled; the sheet falls back to Segoe UI),
+    and letter-spaced uppercase section labels (QSS has no `letter-spacing`/`text-transform`).
+    Verified by window screenshots of all three panels, the View menu and the Log dock, in
+    RelWithDebInfo; Debug builds and launches.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

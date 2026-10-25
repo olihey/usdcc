@@ -10,6 +10,7 @@
 #include <QTextEdit>
 
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/theme.h"
 
 namespace usdcc::ui {
 
@@ -37,6 +38,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
     ads::CDockManager::setConfigFlag(ads::CDockManager::FocusHighlighting, true);
     m_dockManager = new ads::CDockManager(this);
+    theme::applyToDockManager(m_dockManager);
     setCentralWidget(m_dockManager);
 
     // Stand-in proving SidePanel + layout persistence work end to end;

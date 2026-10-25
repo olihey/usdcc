@@ -1,6 +1,7 @@
 #include <QApplication>
 
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/theme.h"
 
 #include <DockManager.h>
 
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
     QSurfaceFormat::setDefaultFormat(format);
 
     QApplication app(argc, argv);
+    usdcc::ui::theme::apply(app);
 
     // Declared before `window` (and so destroyed after it, per C++'s
     // reverse-construction-order rule) since the viewport panel created

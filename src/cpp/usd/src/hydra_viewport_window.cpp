@@ -36,6 +36,10 @@ constexpr double kFovY = 45.0;
 constexpr double kNearClip = 0.1;
 constexpr double kFarClip = 10000.0;
 constexpr double kMinDistance = 0.01;
+
+// The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss) —
+// the design's viewports sit on the same colour as the panels around them.
+constexpr float kViewportBackground[3] = {28.0f / 255.0f, 28.0f / 255.0f, 30.0f / 255.0f};
 }  // namespace
 
 HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
@@ -352,7 +356,7 @@ void HydraViewportWindow::renderNow() {
     // still show through.
     if (auto* gl = m_context->functions()) {
         gl->glViewport(0, 0, w, h);
-        gl->glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        gl->glClearColor(kViewportBackground[0], kViewportBackground[1], kViewportBackground[2], 1.0f);
         gl->glClearDepthf(1.0f);
         gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
@@ -373,7 +377,8 @@ void HydraViewportWindow::renderNow() {
     m_engine->SetLightingState(lights, material, sceneAmbient);
 
     PXR_NS::UsdImagingGLRenderParams params;
-    params.clearColor = PXR_NS::GfVec4f(0.24f, 0.24f, 0.26f, 1.0f);
+    params.clearColor =
+        PXR_NS::GfVec4f(kViewportBackground[0], kViewportBackground[1], kViewportBackground[2], 1.0f);
     params.frame = PXR_NS::UsdTimeCode::Default();
     params.enableLighting = true;
 

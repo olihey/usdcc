@@ -1,0 +1,123 @@
+/*
+ * usdcc dark theme — overrides for the Qt Advanced Docking System (ADS).
+ *
+ * ADS sets its own stylesheet on its CDockManager when it is constructed
+ * (focus_highlighting.css, since MainWindow enables FocusHighlighting). A
+ * widget-level stylesheet beats the app-wide one for any property both
+ * set, so the app-wide dark.qss alone leaves the tabs, title bars and
+ * splitter handles in ADS's palette-derived look. theme.cpp therefore
+ * appends this file to the manager's existing sheet: same selectors (and
+ * specificity) as ADS's rules, placed later, so these win while ADS's
+ * own functional rules (e.g. the close/detach button icon hooks) stay.
+ *
+ * Icons are the generated PNGs in this directory — the Qt SVG plugins
+ * ADS's own icons need are not deployed with the app.
+ * Colours: see dark.qss.
+ */
+
+ads--CDockContainerWidget {
+    background: #1c1c1e;
+}
+
+ads--CDockSplitter::handle {
+    background-color: #0e0e10;
+}
+
+ads--CDockAreaWidget {
+    background: #1c1c1e;
+}
+
+ads--CDockWidget {
+    background: #1c1c1e;
+    border: none;
+}
+
+/* Tab strip = the design's 26px viewport header. */
+ads--CDockAreaTitleBar {
+    background: #1a1a1c;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    padding-bottom: 0px;
+}
+
+ads--CDockAreaWidget[focused="true"] ads--CDockAreaTitleBar {
+    border-bottom: 1px solid rgba(61, 139, 253, 60%);
+}
+
+ads--CDockWidgetTab {
+    background: transparent;
+    border-style: solid;
+    border-width: 0 1px 2px 0;
+    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+    padding: 0 4px;
+}
+
+ads--CDockWidgetTab:hover {
+    background: rgba(255, 255, 255, 5%);
+}
+
+ads--CDockWidgetTab[activeTab="true"] {
+    background: #1c1c1e;
+    border-color: transparent rgba(255, 255, 255, 6%) rgba(61, 139, 253, 40%) transparent;
+}
+
+ads--CDockWidgetTab[focused="true"] {
+    background: #1c1c1e;
+    border-color: transparent rgba(255, 255, 255, 6%) #3d8bfd transparent;
+}
+
+ads--CDockWidgetTab QLabel {
+    color: rgba(255, 255, 255, 50%);
+}
+
+ads--CDockWidgetTab:hover QLabel {
+    color: rgba(255, 255, 255, 75%);
+}
+
+ads--CDockWidgetTab[activeTab="true"] QLabel {
+    color: #e8e8ea;
+}
+
+ads--CDockWidgetTab[focused="true"] QLabel {
+    color: #ffffff;
+}
+
+/* Title-bar / tab buttons. */
+#tabsMenuButton,
+#dockAreaCloseButton,
+#detachGroupButton,
+#tabCloseButton {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+}
+
+#tabsMenuButton:hover,
+#dockAreaCloseButton:hover,
+#detachGroupButton:hover,
+#tabCloseButton:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+#tabsMenuButton:pressed,
+#dockAreaCloseButton:pressed,
+#detachGroupButton:pressed,
+#tabCloseButton:pressed {
+    background: rgba(255, 255, 255, 16%);
+}
+
+#tabsMenuButton {
+    qproperty-icon: url(:/usdcc/theme/chevron-down.png);
+    qproperty-iconSize: 16px;
+}
+
+#dockAreaCloseButton,
+#tabCloseButton,
+ads--CDockWidgetTab[focused="true"] > #tabCloseButton {
+    qproperty-icon: url(:/usdcc/theme/close.png), url(:/usdcc/theme/close-disabled.png) disabled;
+    qproperty-iconSize: 16px;
+}
+
+#detachGroupButton {
+    qproperty-icon: url(:/usdcc/theme/detach.png), url(:/usdcc/theme/detach-disabled.png) disabled;
+    qproperty-iconSize: 16px;
+}

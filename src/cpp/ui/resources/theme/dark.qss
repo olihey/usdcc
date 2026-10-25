@@ -1,0 +1,378 @@
+/*
+ * usdcc dark theme — app-wide Qt stylesheet.
+ *
+ * Derived from the "3D DCC with Modern Dark Design" Claude Design project
+ * (option 1a, "Classic — Blender-style dense workspace"). Tokens used:
+ *
+ *   surfaces   #161618 menu/status/header   #1a1a1c bars   #1c1c1e panels
+ *              #141416 inset (inputs, tracks)   #0e0e10 gaps
+ *   hairlines  rgba(255,255,255, 6%) dividers   8% input borders   10% popups
+ *   text       #e8e8ea primary   75% / 50% / 40% secondary, muted, section labels
+ *   accent     #3d8bfd   (selection fill: 18% of accent)
+ *   axes       X #ff5f56   Y #4fd671   Z #3d8bfd
+ *   radii      3px controls, 4px groups     density: 11px type, 20px controls
+ *
+ * Kept in sync by hand with the palette in theme.cpp and the viewport
+ * background in hydra_viewport_window.cpp. Dock-system (ADS) widgets need
+ * their own overrides — see dock.qss for why.
+ *
+ * Qt stylesheets have no letter-spacing or text-transform, so the design's
+ * letter-spaced uppercase section labels aren't reproduced.
+ */
+
+QWidget {
+    font-family: "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 11px;
+}
+
+QMainWindow,
+QDialog {
+    background: #1c1c1e;
+}
+
+QToolTip {
+    background: #232326;
+    color: #e8e8ea;
+    border: 1px solid rgba(255, 255, 255, 10%);
+    padding: 3px 6px;
+}
+
+QLabel {
+    color: rgba(255, 255, 255, 55%);
+}
+
+/* ---- Menus ---------------------------------------------------------- */
+
+QMenuBar {
+    background: #161618;
+    color: rgba(255, 255, 255, 65%);
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    min-height: 26px;
+    padding: 0 6px;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 3px;
+}
+
+QMenuBar::item:selected {
+    background: rgba(255, 255, 255, 10%);
+    color: #e8e8ea;
+}
+
+QMenu {
+    background: #1c1c1e;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 10%);
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 4px 24px 4px 22px;
+    border-radius: 3px;
+}
+
+QMenu::item:selected {
+    background: #3d8bfd;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: rgba(255, 255, 255, 30%);
+}
+
+QMenu::separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 8%);
+    margin: 4px 6px;
+}
+
+QMenu::indicator {
+    width: 11px;
+    height: 11px;
+    left: 6px;
+}
+
+QMenu::indicator:non-exclusive:checked {
+    image: url(:/usdcc/theme/check.png);
+    background: #3d8bfd;
+    border-radius: 2px;
+}
+
+/* ---- Inputs --------------------------------------------------------- */
+
+QComboBox,
+QLineEdit,
+QAbstractSpinBox {
+    min-height: 18px;
+    padding: 0 8px;
+    background: #141416;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 8%);
+    border-radius: 3px;
+    selection-background-color: #3d8bfd;
+    selection-color: #ffffff;
+}
+
+QComboBox:hover,
+QLineEdit:hover,
+QAbstractSpinBox:hover {
+    border-color: rgba(255, 255, 255, 18%);
+}
+
+QComboBox:focus,
+QComboBox:on,
+QLineEdit:focus,
+QAbstractSpinBox:focus {
+    border-color: #3d8bfd;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 16px;
+}
+
+QComboBox::down-arrow {
+    image: url(:/usdcc/theme/chevron-down.png);
+    width: 16px;
+    height: 16px;
+}
+
+QComboBox QAbstractItemView {
+    background: #1c1c1e;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 10%);
+    selection-background-color: #3d8bfd;
+    selection-color: #ffffff;
+    outline: 0;
+}
+
+QPushButton,
+QToolButton {
+    min-height: 18px;
+    padding: 0 10px;
+    background: #232326;
+    color: #e8e8ea;
+    border: 1px solid rgba(255, 255, 255, 8%);
+    border-radius: 3px;
+}
+
+QPushButton:hover,
+QToolButton:hover {
+    background: #2c2c30;
+}
+
+QPushButton:pressed,
+QToolButton:pressed,
+QPushButton:default,
+QToolButton:checked {
+    background: #3d8bfd;
+    border-color: #3d8bfd;
+    color: #ffffff;
+}
+
+QPushButton:disabled,
+QToolButton:disabled {
+    color: rgba(255, 255, 255, 30%);
+}
+
+QCheckBox,
+QRadioButton {
+    color: rgba(255, 255, 255, 75%);
+    spacing: 6px;
+}
+
+QCheckBox::indicator,
+QTreeView::indicator,
+QTableView::indicator,
+QListView::indicator {
+    width: 11px;
+    height: 11px;
+    background: #141416;
+    border: 1px solid rgba(255, 255, 255, 18%);
+    border-radius: 2px;
+}
+
+QCheckBox::indicator:checked,
+QTreeView::indicator:checked,
+QTableView::indicator:checked,
+QListView::indicator:checked {
+    background: #3d8bfd;
+    border-color: #3d8bfd;
+    image: url(:/usdcc/theme/check.png);
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #141416;
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background: #3d8bfd;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    width: 10px;
+    margin: -3px 0;
+    border-radius: 5px;
+    background: #e8e8ea;
+}
+
+QProgressBar {
+    height: 4px;
+    background: #141416;
+    border: none;
+    border-radius: 2px;
+    text-align: center;
+    color: transparent;
+}
+
+QProgressBar::chunk {
+    background: #3d8bfd;
+    border-radius: 2px;
+}
+
+/* ---- Item views ----------------------------------------------------- */
+
+QTreeView,
+QTableView,
+QListView {
+    background: #1c1c1e;
+    alternate-background-color: #1c1c1e;
+    color: rgba(255, 255, 255, 75%);
+    border: none;
+    outline: 0;
+    gridline-color: rgba(255, 255, 255, 6%);
+    selection-background-color: rgba(61, 139, 253, 18%);
+    selection-color: #ffffff;
+}
+
+QTreeView::item,
+QListView::item {
+    padding: 3px 6px;
+    border-radius: 3px;
+}
+
+QTableView::item {
+    padding: 3px 6px;
+}
+
+QTreeView::item:hover,
+QListView::item:hover {
+    background: rgba(255, 255, 255, 5%);
+}
+
+QTreeView::item:selected,
+QListView::item:selected,
+QTableView::item:selected {
+    background: rgba(61, 139, 253, 18%);
+    color: #ffffff;
+}
+
+QHeaderView::section {
+    background: #161618;
+    color: rgba(255, 255, 255, 40%);
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    border-right: 1px solid rgba(255, 255, 255, 6%);
+    padding: 4px 8px;
+}
+
+QTableCornerButton::section {
+    background: #161618;
+    border: none;
+}
+
+QTextEdit,
+QPlainTextEdit {
+    background: #141416;
+    color: rgba(255, 255, 255, 75%);
+    border: none;
+    selection-background-color: rgba(61, 139, 253, 45%);
+    selection-color: #ffffff;
+}
+
+/* ---- Scroll bars ---------------------------------------------------- */
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 15%);
+    border-radius: 3px;
+    min-height: 24px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(255, 255, 255, 15%);
+    border-radius: 3px;
+    min-width: 24px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    background: rgba(255, 255, 255, 28%);
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {
+    width: 0;
+    height: 0;
+    border: none;
+    background: none;
+}
+
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+}
+
+/* ---- Window furniture ----------------------------------------------- */
+
+QStatusBar {
+    background: #161618;
+    color: rgba(255, 255, 255, 50%);
+    border-top: 1px solid rgba(255, 255, 255, 6%);
+}
+
+QMainWindow::separator,
+QSplitter::handle {
+    background: #141416;
+    width: 1px;
+    height: 1px;
+}
+
+/* SidePanel (a plain QDockWidget, outside the ADS container). */
+QDockWidget {
+    color: rgba(255, 255, 255, 50%);
+}
+
+QDockWidget::title {
+    background: #161618;
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+}
+
+/* The Stage/Renderer/Tool row at the top of each ViewPanel (the design's
+   "tool options bar"). */
+QWidget#panelToolbar {
+    background: #1a1a1c;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+}

@@ -1,0 +1,18 @@
+<RCC>
+    <qresource prefix="/usdcc/theme">
+        <file alias="dark.qss">theme/dark.qss</file>
+        <file alias="dock.qss">theme/dock.qss</file>
+        <file alias="check.png">theme/check.png</file>
+        <file alias="check@2x.png">theme/check@2x.png</file>
+        <file alias="chevron-down.png">theme/chevron-down.png</file>
+        <file alias="chevron-down@2x.png">theme/chevron-down@2x.png</file>
+        <file alias="close.png">theme/close.png</file>
+        <file alias="close@2x.png">theme/close@2x.png</file>
+        <file alias="close-disabled.png">theme/close-disabled.png</file>
+        <file alias="close-disabled@2x.png">theme/close-disabled@2x.png</file>
+        <file alias="detach.png">theme/detach.png</file>
+        <file alias="detach@2x.png">theme/detach@2x.png</file>
+        <file alias="detach-disabled.png">theme/detach-disabled.png</file>
+        <file alias="detach-disabled@2x.png">theme/detach-disabled@2x.png</file>
+    </qresource>
+</RCC>
