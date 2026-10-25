@@ -370,6 +370,73 @@ QDockWidget::title {
     border-bottom: 1px solid rgba(255, 255, 255, 6%);
 }
 
+/* ---- Custom title bar (title_bar.cpp) -------------------------------- */
+
+QFrame#titleBar {
+    background: #161618;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+}
+
+/* The bar supplies the background and divider; the menu bar inside it must
+   not draw its own. */
+QFrame#titleBar QMenuBar {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+}
+
+/* The items must fit inside the bar's fixed height, or the menu bar treats
+   them as overflowing and hides them behind its ">>" button. */
+QFrame#titleBar QMenuBar::item {
+    padding: 3px 8px;
+    margin: 0;
+}
+
+QLabel#titleBarLogo {
+    background: #3d8bfd;
+    border-radius: 3px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+    margin: 0 10px;
+}
+
+QLabel#titleBarTitle {
+    color: rgba(255, 255, 255, 50%);
+}
+
+QLabel#titleBarTitle[active="false"] {
+    color: rgba(255, 255, 255, 28%);
+}
+
+QToolButton#titleBarButton,
+QToolButton#titleBarCloseButton {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-width: 46px;
+    max-width: 46px;
+}
+
+QToolButton#titleBarButton:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+QToolButton#titleBarButton:pressed {
+    background: rgba(255, 255, 255, 16%);
+}
+
+QToolButton#titleBarCloseButton:hover {
+    background: #e81123;
+}
+
+QToolButton#titleBarCloseButton:pressed {
+    background: #f1707a;
+}
+
 /* The Stage/Renderer/Tool row at the top of each ViewPanel (the design's
    "tool options bar"). */
 QWidget#panelToolbar {

@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
             }
         });
 
-    QMenu* fileMenu = window.menuBar()->addMenu(QObject::tr("&File"));
+    QMenu* fileMenu = window.mainMenuBar()->addMenu(QObject::tr("&File"));
     QAction* openStageAction = fileMenu->addAction(QObject::tr("&Open Stage..."));
     QObject::connect(openStageAction, &QAction::triggered, &window, [&stageManager, &window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),

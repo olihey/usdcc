@@ -566,6 +566,32 @@ things that will bite later if not addressed early:
     Verified by window screenshots of all three panels, the View menu and the Log dock, in
     RelWithDebInfo; Debug builds and launches.
 
+25. **Prototype: custom title bar (QWindowKit) replacing the OS window frame.** `MainWindow` is
+    now frameless; its `menuWidget` is a `TitleBar` (`title_bar.h`/`.cpp`: logo, the window's
+    `QMenuBar`, centered title, minimize/maximize/close buttons — plain Qt, no QWindowKit types),
+    and a `QWK::WidgetWindowAgent` supplies the native behaviour. QWindowKit is vendored as a git
+    submodule at `external/qwindowkit` (vcpkg has no port; pinned by the gitlink to
+    `5626b3a`, 45 commits past the 1.5.0 tag — chosen for Qt 6.11 compatibility, not yet checked
+    against 1.5.0) and built static, Widgets-only, without its system-theme "style agent" via
+    `add_subdirectory` in the top-level `CMakeLists.txt`; its configure step also builds a small
+    host tool (qmsetup) into the build tree. `MainWindow` registers the title bar as the agent's
+    drag area, the menu bar as hit-test-visible, and the logo/buttons as system buttons (which is
+    what lets Windows 11 show snap layouts on the maximize button). **API change:** use
+    `MainWindow::mainMenuBar()`, never `QMainWindow::menuBar()` — the latter sees the title bar
+    isn't a `QMenuBar` and replaces it with an empty one (`main.cpp` and `buildViewMenu()` updated).
+    Gotchas found: the menu bar must be re-measured when menus are added after construction
+    (`TitleBar` watches `ActionAdded`), and the menu bar's global `min-height: 26px` +
+    item padding made items taller than the 26px bar so they were hidden behind its overflow
+    button — `dark.qss` overrides both for the title bar. Caption-button glyphs are more generated
+    PNGs (`tools/gen_theme_icons.py`). **Verified on Windows 11** by driving the real window with
+    synthetic mouse input: drag-by-title moves the window exactly, double-click maximizes, the
+    maximize button toggles maximize/restore, minimize works, File/View menus open, edges and
+    corner resize, and the Hydra viewport (an embedded native `QWindow`) still renders inside the
+    frameless window. **Not verified:** the Win11 snap-layout flyout (needs a real hover), macOS
+    (traffic-light buttons are hidden-by-`#ifdef` but untested; the bar doesn't reserve space for
+    them) and Linux, multi-monitor/mixed-DPI, and ADS *floating* windows — those still get the
+    OS frame.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

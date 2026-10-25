@@ -1,3 +1,6 @@
 [submodule "external/vcpkg"]
 	path = external/vcpkg
 	url = https://github.com/microsoft/vcpkg
+[submodule "external/qwindowkit"]
+	path = external/qwindowkit
+	url = https://github.com/stdware/qwindowkit

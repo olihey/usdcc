@@ -10,6 +10,16 @@
         <file alias="close@2x.png">theme/close@2x.png</file>
         <file alias="close-disabled.png">theme/close-disabled.png</file>
         <file alias="close-disabled@2x.png">theme/close-disabled@2x.png</file>
+        <file alias="win-minimize.png">theme/win-minimize.png</file>
+        <file alias="win-minimize@2x.png">theme/win-minimize@2x.png</file>
+        <file alias="win-maximize.png">theme/win-maximize.png</file>
+        <file alias="win-maximize@2x.png">theme/win-maximize@2x.png</file>
+        <file alias="win-restore.png">theme/win-restore.png</file>
+        <file alias="win-restore@2x.png">theme/win-restore@2x.png</file>
+        <file alias="win-close.png">theme/win-close.png</file>
+        <file alias="win-close@2x.png">theme/win-close@2x.png</file>
+        <file alias="win-close-hover.png">theme/win-close-hover.png</file>
+        <file alias="win-close-hover@2x.png">theme/win-close-hover@2x.png</file>
         <file alias="detach.png">theme/detach.png</file>
         <file alias="detach@2x.png">theme/detach@2x.png</file>
         <file alias="detach-disabled.png">theme/detach-disabled.png</file>

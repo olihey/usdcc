@@ -13,6 +13,7 @@ full requirements, architecture guidelines, open questions, and milestone plan.
 
 - C++20
 - Qt6 (UI), Qt Advanced Docking System
+- QWindowKit (custom frameless title bar; git submodule at `external/qwindowkit`)
 - OpenUSD / Hydra
 - Python scripting and plugin support
   - Shiboken6 for Qt/UI bindings
@@ -23,7 +24,7 @@ full requirements, architecture guidelines, open questions, and milestone plan.
 
 ## Building
 
-The vcpkg submodule needs to be cloned and bootstrapped once:
+The submodules (vcpkg, QWindowKit) need to be cloned, and vcpkg bootstrapped, once:
 
 ```
 git submodule update --init --recursive
@@ -115,6 +116,7 @@ docs/
   changelog.md
 CMakeLists.txt
 external/vcpkg/
+external/qwindowkit/
 src/
   cpp/
     core/

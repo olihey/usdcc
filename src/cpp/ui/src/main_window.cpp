@@ -1,6 +1,7 @@
 #include "usdcc/ui/main_window.h"
 
 #include <DockManager.h>
+#include <QAbstractButton>
 #include <QCloseEvent>
 #include <QDir>
 #include <QMenu>
@@ -11,6 +12,9 @@
 
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/ui/title_bar.h"
+
+#include <QWKWidgets/widgetwindowagent.h>
 
 namespace usdcc::ui {
 
@@ -34,6 +38,32 @@ QSettings layoutSettings() {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("usdcc");
     resize(1280, 800);
+
+    // Replace the OS title bar with our own (see TitleBar). QWindowKit makes
+    // the window frameless and adds back native behaviour; its agent must be
+    // set up before the window is first shown, and it requires this attribute
+    // so the window's native handle isn't forced onto its ancestors.
+    setAttribute(Qt::WA_DontCreateNativeAncestors);
+    m_windowAgent = new QWK::WidgetWindowAgent(this);
+    m_windowAgent->setup(this);
+
+    m_titleBar = new TitleBar(this);
+    m_windowAgent->setTitleBar(m_titleBar);  // the bar's empty space drags / double-click-maximizes
+    // Interactive widgets inside the bar must opt out of that dragging. The
+    // caption buttons are registered as the window's system buttons instead,
+    // which also gives the maximize button Windows 11's snap-layout flyout.
+    m_windowAgent->setHitTestVisible(m_titleBar->menuBar(), true);
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::WindowIcon, m_titleBar->logoWidget());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Minimize, m_titleBar->minimizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Maximize, m_titleBar->maximizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Close, m_titleBar->closeButton());
+#ifdef Q_OS_MAC
+    // macOS keeps its native traffic-light buttons (untested here).
+    m_titleBar->minimizeButton()->hide();
+    m_titleBar->maximizeButton()->hide();
+    m_titleBar->closeButton()->hide();
+#endif
+    setMenuWidget(m_titleBar);
 
     ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
     ads::CDockManager::setConfigFlag(ads::CDockManager::FocusHighlighting, true);
@@ -60,6 +90,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
 
+QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
+
 void MainWindow::closeEvent(QCloseEvent* event) {
     saveLayout();
     QMainWindow::closeEvent(event);
@@ -82,7 +114,7 @@ void MainWindow::saveLayout() const {
 }
 
 void MainWindow::buildViewMenu() {
-    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    QMenu* viewMenu = mainMenuBar()->addMenu(tr("&View"));
     // QDockWidget already provides a checkable show/hide QAction, kept in
     // sync with the dock widget's actual visibility — no custom toggle slot
     // needed.

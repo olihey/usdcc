@@ -3,13 +3,20 @@
 #include <QList>
 #include <QMainWindow>
 
+class QMenuBar;
+
 namespace ads {
 class CDockManager;
+}
+
+namespace QWK {
+class WidgetWindowAgent;
 }
 
 namespace usdcc::ui {
 
 class SidePanel;
+class TitleBar;
 
 // QMainWindow shell hosting the Qt Advanced Docking System. Panel
 // registration currently instantiates a stand-in SidePanel to prove the
@@ -18,11 +25,20 @@ class SidePanel;
 // ViewPanel subclasses (Viewport/Outliner/Attributes — see docs/PLAN.md
 // section 4 and section 7) directly via dockManager(), including
 // establishing the central dock area itself.
+//
+// Frameless: instead of the operating system's title bar, the window shows a
+// TitleBar (logo, menu bar, title, caption buttons) driven by QWindowKit,
+// which supplies the native-feeling drag, resize, snap and shadow behaviour.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+
+    // The window's menu bar, which lives inside the title bar. Use this, not
+    // QMainWindow::menuBar(): that would see the title bar isn't a QMenuBar
+    // and replace it with a fresh, empty one.
+    QMenuBar* mainMenuBar() const;
 
     // Lets the app's composition root (main.cpp) add panels directly, rather
     // than MainWindow needing to know about a specific StageManager instance
@@ -55,6 +71,8 @@ private:
     void saveLayout() const;
 
     ads::CDockManager* m_dockManager = nullptr;
+    QWK::WidgetWindowAgent* m_windowAgent = nullptr;
+    TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
 };
 

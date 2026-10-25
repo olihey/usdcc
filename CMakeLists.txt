@@ -40,6 +40,20 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
+# QWindowKit: frameless window + custom title bar (usdcc::ui::MainWindow's
+# title bar). Vendored as a git submodule because vcpkg has no port for it.
+# Static and Widgets-only (no Quick, examples, tests or install), and without
+# its system-theme "style agent" — usdcc has one fixed dark theme. Its own
+# configure step also builds a small host tool (qmsetup); that is expected.
+set(QWINDOWKIT_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(QWINDOWKIT_BUILD_WIDGETS ON CACHE BOOL "" FORCE)
+set(QWINDOWKIT_BUILD_QUICK OFF CACHE BOOL "" FORCE)
+set(QWINDOWKIT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QWINDOWKIT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(QWINDOWKIT_INSTALL OFF CACHE BOOL "" FORCE)
+set(QWINDOWKIT_ENABLE_STYLE_AGENT OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/qwindowkit EXCLUDE_FROM_ALL)
+
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)
 
