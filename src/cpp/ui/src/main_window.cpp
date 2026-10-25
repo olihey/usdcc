@@ -8,6 +8,7 @@
 #include <QMenuBar>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QToolBar>
 #include <QTextEdit>
 
 #include "usdcc/ui/side_panel.h"
@@ -21,6 +22,11 @@ namespace usdcc::ui {
 namespace {
 constexpr auto kGeometryKey = "MainWindow/geometry";
 constexpr auto kDockLayoutKey = "MainWindow/dockLayout";
+// QMainWindow::saveState(): where its toolbars and side-panel dock widgets are
+// docked, floating or hidden. Bump the version if their set changes in a way an
+// old saved state would mishandle (restoreState() then ignores it).
+constexpr auto kWindowStateKey = "MainWindow/windowState";
+constexpr int kWindowStateVersion = 1;
 
 // A plain INI file (rather than QSettings' native format, which is the
 // Windows registry under HKCU\Software\usdcc\usdcc) so it's a real file a
@@ -102,6 +108,11 @@ void MainWindow::restoreLayout() {
     if (settings.contains(kGeometryKey)) {
         restoreGeometry(settings.value(kGeometryKey).toByteArray());
     }
+    // Toolbars and side panels, which are all created by now (see this
+    // method's declaration), keyed by their objectNames.
+    if (settings.contains(kWindowStateKey)) {
+        restoreState(settings.value(kWindowStateKey).toByteArray(), kWindowStateVersion);
+    }
     if (settings.contains(kDockLayoutKey)) {
         m_dockManager->restoreState(settings.value(kDockLayoutKey).toByteArray());
     }
@@ -110,6 +121,7 @@ void MainWindow::restoreLayout() {
 void MainWindow::saveLayout() const {
     QSettings settings = layoutSettings();
     settings.setValue(kGeometryKey, saveGeometry());
+    settings.setValue(kWindowStateKey, saveState(kWindowStateVersion));
     settings.setValue(kDockLayoutKey, m_dockManager->saveState());
 }
 
@@ -120,6 +132,17 @@ void MainWindow::buildViewMenu() {
     // needed.
     for (SidePanel* panel : m_sidePanels) {
         viewMenu->addAction(panel->toggleViewAction());
+    }
+
+    // Toolbars can be hidden (and dragged anywhere), so list them too: this is
+    // the way back to one that was hidden. Whoever added them (main.cpp) must
+    // have done so before this runs.
+    const QList<QToolBar*> toolBars = findChildren<QToolBar*>(QString(), Qt::FindDirectChildrenOnly);
+    if (!toolBars.isEmpty()) {
+        viewMenu->addSeparator();
+        for (QToolBar* toolBar : toolBars) {
+            viewMenu->addAction(toolBar->toggleViewAction());
+        }
     }
 }
 

@@ -24,6 +24,28 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         CACHE STRING "Build type" FORCE)
 endif()
 
+if(MSVC)
+    # OpenUSD is built once, in Release (/MD, _ITERATOR_DEBUG_LEVEL=0), and used
+    # by every configuration of usdcc. Its API passes std::vector/std::string
+    # across the DLL boundary (e.g. UsdImagingGLEngine::SetSelected(const
+    # SdfPathVector&)), so the app must share its STL layout and heap. A stock
+    # Debug build (/MDd, _ITERATOR_DEBUG_LEVEL=2) does not: std::vector gains a
+    # debug-proxy pointer, so USD reads our vectors with the wrong layout and
+    # hits an access violation on *every* launch (usually swallowed, sometimes
+    # fatal) — see docs/PLAN.md §6 item 28. So all configurations use the release
+    # CRT with iterator debugging off. "Debug" still means no optimisation and
+    # full symbols; it just doesn't get MSVC's debug-STL/heap checks.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+    add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0)
+    # The same goes for Qt and Qt Advanced Docking System: Qt hands ownership
+    # of objects across its DLL boundary (e.g. setLayout(new QHBoxLayout) is
+    # deleted from inside Qt), so they must be on the same CRT heap as the app.
+    # vcpkg's *Debug* Qt/ADS DLLs use the debug CRT, so link their Release
+    # builds in every configuration (done below, right after find_package()
+    # has created those imported targets).
+    set(USDCC_LINK_RELEASE_QT ON)
+endif()
+
 if(WIN32)
     # windows.h's min/max macros (pulled in transitively by Qt) corrupt any
     # std::min/std::max usage in headers compiled afterward — including
@@ -39,6 +61,17 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # already requires (see docs/PLAN.md milestone M5/M3).
 find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
+
+if(USDCC_LINK_RELEASE_QT)
+    # Only Qt and ADS: other imported targets (e.g. USD's TBB) don't have a
+    # Release/Debug pair to choose between.
+    get_directory_property(_usdcc_imported IMPORTED_TARGETS)
+    foreach(_target IN LISTS _usdcc_imported)
+        if(_target MATCHES "^(Qt6::|ads::)")
+            set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
+        endif()
+    endforeach()
+endif()
 
 # QWindowKit: frameless window + custom title bar (usdcc::ui::MainWindow's
 # title bar). Vendored as a git submodule because vcpkg has no port for it.

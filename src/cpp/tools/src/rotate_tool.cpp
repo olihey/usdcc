@@ -29,6 +29,32 @@ std::optional<PXR_NS::GfVec3d> ringVector(const PXR_NS::GfVec3d& point, const PX
     }
     return v.GetNormalized();
 }
+
+// The prim's existing rotateXYZ op, or an invalid op if it has none (unlike
+// getOrCreateOp(), this never authors anything).
+PXR_NS::UsdGeomXformOp findRotateOp(const PXR_NS::UsdGeomXformable& xformable) {
+    bool resetsXformStack = false;
+    for (const auto& op : xformable.GetOrderedXformOps(&resetsXformStack)) {
+        if (op.GetOpType() == PXR_NS::UsdGeomXformOp::TypeRotateXYZ) {
+            return op;
+        }
+    }
+    return {};
+}
+
+PXR_NS::GfVec3d readEuler(const PXR_NS::UsdGeomXformOp& op) {
+    if (!op) {
+        return PXR_NS::GfVec3d(0.0);
+    }
+    if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
+        PXR_NS::GfVec3d v(0.0);
+        op.Get(&v);
+        return v;
+    }
+    PXR_NS::GfVec3f v(0.0f);
+    op.Get(&v);
+    return PXR_NS::GfVec3d(v);
+}
 }  // namespace
 
 PXR_NS::GfVec3d RotateTool::axisForHandle(Handle handle, const GizmoFrame& frame) {
@@ -117,6 +143,8 @@ ToolResult RotateTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d&
         return {};
     }
     m_lastVector = *vector;
+    m_dragStartEuler = readEuler(findRotateOp(xformable));
+    m_dragTotalDegrees = 0.0;
 
     ToolResult result;
     result.handled = true;
@@ -156,23 +184,34 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
         return result;
     }
 
-    PXR_NS::UsdGeomXformOp rotateOp = getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeRotateXYZ);
+    // The angle swept since the mouse went down; snapping rounds this total,
+    // not each small step, and the result is applied on top of the value the
+    // op had at press.
+    m_dragTotalDegrees += deltaDegrees;
+    const double appliedDegrees = snapped(m_dragTotalDegrees);
+
+    // Don't author a rotate op until the rotation actually amounts to something
+    // (e.g. a snapped drag that hasn't yet reached its first increment).
+    PXR_NS::UsdGeomXformOp rotateOp = findRotateOp(xformable);
     if (!rotateOp) {
-        return {};
+        if (std::abs(appliedDegrees) < 1e-9) {
+            ToolResult result;
+            result.handled = true;
+            return result;
+        }
+        rotateOp = getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeRotateXYZ);
+        if (!rotateOp) {
+            return {};
+        }
     }
 
-    const bool isDouble = rotateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble;
     const int axisIndex = m_activeHandle == Handle::AxisX ? 0 : (m_activeHandle == Handle::AxisY ? 1 : 2);
-    if (isDouble) {
-        PXR_NS::GfVec3d v(0.0);
-        rotateOp.Get(&v);
-        v[axisIndex] += deltaDegrees;
-        rotateOp.Set(v);
+    PXR_NS::GfVec3d euler = m_dragStartEuler;
+    euler[axisIndex] += appliedDegrees;
+    if (rotateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
+        rotateOp.Set(euler);
     } else {
-        PXR_NS::GfVec3f v(0.0f);
-        rotateOp.Get(&v);
-        v[axisIndex] += static_cast<float>(deltaDegrees);
-        rotateOp.Set(v);
+        rotateOp.Set(PXR_NS::GfVec3f(euler));
     }
 
     ToolResult result;

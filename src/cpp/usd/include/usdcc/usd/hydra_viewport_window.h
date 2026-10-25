@@ -1,6 +1,7 @@
 #pragma once
 
-#include "usdcc/tools/tool.h"
+#include "usdcc/core/signal.h"
+#include "usdcc/tools/tool_set.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/vec3d.h>
@@ -11,7 +12,6 @@
 #include <QPoint>
 #include <QWindow>
 
-#include <array>
 #include <memory>
 #include <vector>
 
@@ -75,9 +75,12 @@ public:
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
 
-    enum class ToolKind { Select, Move, Rotate, Scale };
-    ToolKind activeTool() const { return m_activeToolKind; }
-    void setActiveTool(ToolKind kind);
+    // The editing tools this viewport draws gizmos for and sends mouse events
+    // to. Normally one ToolSet is shared by every viewport and driven by the
+    // main window's tool rail and options bar (see ViewportToolBars); the
+    // viewport redraws whenever the set's active tool or options change. A
+    // viewport that is never given one uses a private set.
+    void setToolSet(std::shared_ptr<usdcc::tools::ToolSet> toolSet);
 
     // Called by ViewportViewPanel when StageManager's selection changes for
     // the stage this viewport is currently showing, so the gizmo tools and
@@ -134,8 +137,10 @@ private:
     bool m_panning = false;
     bool m_dragging = false;
 
-    ToolKind m_activeToolKind = ToolKind::Select;
-    std::array<std::unique_ptr<usdcc::tools::Tool>, 4> m_tools;
+    std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
+    // Redraw triggers; dropped automatically when this window goes away.
+    usdcc::core::Signal<>::Connection m_activeToolConnection;
+    usdcc::core::Signal<>::Connection m_optionsConnection;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
 };
 

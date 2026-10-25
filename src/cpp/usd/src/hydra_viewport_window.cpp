@@ -1,10 +1,5 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
-#include "usdcc/tools/move_tool.h"
-#include "usdcc/tools/rotate_tool.h"
-#include "usdcc/tools/scale_tool.h"
-#include "usdcc/tools/select_tool.h"
-
 #include <pxr/base/gf/math.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec2i.h>
@@ -44,10 +39,9 @@ constexpr float kViewportBackground[3] = {28.0f / 255.0f, 28.0f / 255.0f, 30.0f 
 
 HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
     setSurfaceType(QWindow::OpenGLSurface);
-    m_tools[static_cast<size_t>(ToolKind::Select)] = std::make_unique<usdcc::tools::SelectTool>();
-    m_tools[static_cast<size_t>(ToolKind::Move)] = std::make_unique<usdcc::tools::MoveTool>();
-    m_tools[static_cast<size_t>(ToolKind::Rotate)] = std::make_unique<usdcc::tools::RotateTool>();
-    m_tools[static_cast<size_t>(ToolKind::Scale)] = std::make_unique<usdcc::tools::ScaleTool>();
+    // Until a shared set is installed (see setToolSet()), use a private one so
+    // the viewport always has working tools.
+    setToolSet(std::make_shared<usdcc::tools::ToolSet>());
 }
 
 HydraViewportWindow::~HydraViewportWindow() {
@@ -153,12 +147,17 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
     renderNow();
 }
 
-void HydraViewportWindow::setActiveTool(ToolKind kind) {
-    if (usdcc::tools::Tool* tool = activeToolInstance()) {
-        tool->mouseRelease();
-    }
-    m_activeToolKind = kind;
+void HydraViewportWindow::setToolSet(std::shared_ptr<usdcc::tools::ToolSet> toolSet) {
+    m_toolSet = std::move(toolSet);
     m_dragging = false;
+    // The active tool's gizmo (and how it looks, e.g. Move's Space) is drawn by
+    // this viewport, so redraw whenever the shared tools change. The
+    // Connections drop out automatically when this window is destroyed.
+    m_activeToolConnection = m_toolSet->activeToolChanged.connect([this]() {
+        m_dragging = false;
+        renderNow();
+    });
+    m_optionsConnection = m_toolSet->optionsChanged.connect([this]() { renderNow(); });
     renderNow();
 }
 
@@ -174,9 +173,7 @@ void HydraViewportWindow::updateEngineSelection() {
     }
 }
 
-usdcc::tools::Tool* HydraViewportWindow::activeToolInstance() const {
-    return m_tools[static_cast<size_t>(m_activeToolKind)].get();
-}
+usdcc::tools::Tool* HydraViewportWindow::activeToolInstance() const { return &m_toolSet->activeTool(); }
 
 PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
     const double yawRad = PXR_NS::GfDegreesToRadians(m_yaw);

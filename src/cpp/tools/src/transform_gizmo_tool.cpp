@@ -7,8 +7,39 @@
 #include <pxr/usd/usd/timeCode.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace usdcc::tools {
+
+namespace {
+constexpr const char* kSnapId = "snap";
+constexpr const char* kSnapIncrementId = "snapIncrement";
+}  // namespace
+
+std::vector<ToolOption> TransformGizmoTool::options() const {
+    return {ToolOption::toggle(kSnapId, "Snap", m_snapEnabled),
+            ToolOption::number(kSnapIncrementId, "Increment", m_snapIncrement, m_snapSpec.min, m_snapSpec.max,
+                               m_snapSpec.step, m_snapSpec.decimals, m_snapSpec.suffix, kSnapId)};
+}
+
+void TransformGizmoTool::setOption(const std::string& id, const OptionValue& value) {
+    if (id == kSnapId) {
+        if (const auto* on = std::get_if<bool>(&value)) {
+            m_snapEnabled = *on;
+        }
+    } else if (id == kSnapIncrementId) {
+        if (const auto* increment = std::get_if<double>(&value)) {
+            m_snapIncrement = std::clamp(*increment, m_snapSpec.min, m_snapSpec.max);
+        }
+    }
+}
+
+double TransformGizmoTool::snapped(double value) const {
+    if (!m_snapEnabled || m_snapIncrement <= 0.0) {
+        return value;
+    }
+    return std::round(value / m_snapIncrement) * m_snapIncrement;
+}
 
 PXR_NS::UsdGeomXformable TransformGizmoTool::resolveXformable(const ToolContext& ctx) const {
     if (!ctx.stage || ctx.selection.size() != 1) {
@@ -34,6 +65,11 @@ TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdG
     frame.axisX = worldXform.TransformDir(PXR_NS::GfVec3d(1.0, 0.0, 0.0)).GetNormalized();
     frame.axisY = worldXform.TransformDir(PXR_NS::GfVec3d(0.0, 1.0, 0.0)).GetNormalized();
     frame.axisZ = worldXform.TransformDir(PXR_NS::GfVec3d(0.0, 0.0, 1.0)).GetNormalized();
+    if (m_space == Space::World) {
+        frame.axisX = PXR_NS::GfVec3d(1.0, 0.0, 0.0);
+        frame.axisY = PXR_NS::GfVec3d(0.0, 1.0, 0.0);
+        frame.axisZ = PXR_NS::GfVec3d(0.0, 0.0, 1.0);
+    }
     return frame;
 }
 

@@ -9,12 +9,14 @@ add_library(usdcc_tools STATIC
     include/usdcc/tools/scale_tool.h
     include/usdcc/tools/select_tool.h
     include/usdcc/tools/tool.h
+    include/usdcc/tools/tool_set.h
     include/usdcc/tools/transform_gizmo_tool.h
     src/gizmo_shapes.cpp
     src/move_tool.cpp
     src/rotate_tool.cpp
     src/scale_tool.cpp
     src/select_tool.cpp
+    src/tool_set.cpp
     src/transform_gizmo_tool.cpp
 )
 target_include_directories(usdcc_tools PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})

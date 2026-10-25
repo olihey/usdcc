@@ -59,6 +59,67 @@ ICONS = {
     ),
 }
 
+def _arc(cx, cy, r, start_deg, end_deg, steps=24):
+    return [
+        (cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+        for a in (start_deg + (end_deg - start_deg) * i / steps for i in range(steps + 1))
+    ]
+
+
+def _arrowhead(tip, direction_deg, length=2.6, spread=2.2):
+    """Two wing strokes of an arrowhead whose tip is at `tip`, pointing along
+    `direction_deg` (screen coordinates: +x right, +y down)."""
+    d = math.radians(direction_deg)
+    back = (-math.cos(d), -math.sin(d))
+    side = (-math.sin(d), math.cos(d))
+    base = (tip[0] + back[0] * length, tip[1] + back[1] * length)
+    return [
+        [(base[0] + side[0] * spread, base[1] + side[1] * spread), tip, (base[0] - side[0] * spread, base[1] - side[1] * spread)]
+    ]
+
+
+# Viewport tool glyphs (the tool rail). Each is drawn twice: light for the
+# idle state, white for the checked state on the accent background.
+_ROTATE_ARC = _arc(8, 8, 5.0, -40, 220)
+_ROTATE_TIP = _ROTATE_ARC[-1]
+_ROTATE_DIR = 220 + 90  # tangent of a clockwise-on-screen sweep at its end
+TOOL_GLYPHS = {
+    "tool-select": (
+        1.2,
+        [[(4.5, 3.0), (4.5, 12.5), (7.0, 10.2), (8.8, 13.6), (10.4, 12.8), (8.6, 9.5), (12.0, 9.3), (4.5, 3.0)]],
+    ),
+    "tool-move": (
+        1.2,
+        [
+            [(2.5, 8), (13.5, 8)],
+            [(8, 2.5), (8, 13.5)],
+            [(6, 4.5), (8, 2.5), (10, 4.5)],
+            [(6, 11.5), (8, 13.5), (10, 11.5)],
+            [(4.5, 6), (2.5, 8), (4.5, 10)],
+            [(11.5, 6), (13.5, 8), (11.5, 10)],
+        ],
+    ),
+    "tool-rotate": (1.2, [_ROTATE_ARC] + _arrowhead(_ROTATE_TIP, _ROTATE_DIR)),
+    "tool-scale": (
+        1.2,
+        [
+            [(3.5, 8.5), (7.5, 8.5), (7.5, 12.5), (3.5, 12.5), (3.5, 8.5)],
+            [(8.5, 7.5), (12.5, 3.5)],
+            [(8.5, 3.5), (12.5, 3.5), (12.5, 7.5)],
+        ],
+    ),
+}
+# Drag-handle grips for movable toolbars: two columns of dots (for the handle
+# on a horizontal toolbar) and two rows (for a vertical one). A zero-length
+# stroke with round caps is a dot.
+GRIP = (104, 104, 110)
+ICONS["grip-horizontal"] = (2.0, GRIP, [[(x, y), (x, y)] for x in (6.5, 9.5) for y in (4.5, 8, 11.5)])
+ICONS["grip-vertical"] = (2.0, GRIP, [[(x, y), (x, y)] for y in (6.5, 9.5) for x in (4.5, 8, 11.5)])
+
+for _name, (_width, _lines) in TOOL_GLYPHS.items():
+    ICONS[_name] = (_width, LIGHT, _lines)
+    ICONS[_name + "-active"] = (_width, WHITE, _lines)
+
 SUPERSAMPLE = 4
 
 

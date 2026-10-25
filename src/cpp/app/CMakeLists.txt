@@ -67,6 +67,23 @@ if(WIN32)
             "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")
 endif()
 
+# The Debug configuration links the *Release* Qt/ADS builds (see the top-level
+# CMakeLists.txt: everything must share USD's release CRT), but vcpkg's
+# applocal step deploys from debug/bin for Debug and so finds nothing to copy.
+# Run the same step against the release bin for Debug. (Other configurations
+# get a no-op; vcpkg's own step already does their job.)
+if(WIN32 AND USDCC_LINK_RELEASE_QT AND Z_VCPKG_EXECUTABLE)
+    set(_usdcc_release_bin "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+    add_custom_command(
+        TARGET usdcc
+        POST_BUILD
+        COMMAND
+            $<IF:$<CONFIG:Debug>,${Z_VCPKG_EXECUTABLE},${CMAKE_COMMAND}>
+            $<IF:$<CONFIG:Debug>,z-applocal$<SEMICOLON>--target-binary=$<TARGET_FILE:usdcc>$<SEMICOLON>--installed-bin-dir=${_usdcc_release_bin},-E$<SEMICOLON>true>
+        COMMAND_EXPAND_LISTS
+        VERBATIM)
+endif()
+
 # Qt is a shared (non-static) vcpkg build: vcpkg's applocal-deps step copies
 # the DLLs usdcc links against directly, but not the platform plugin, which
 # Qt loads dynamically at startup and which vcpkg doesn't ship a windeployqt
@@ -79,7 +96,7 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/platforms"
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/platforms/$<IF:$<CONFIG:Debug>,qwindowsd.dll,qwindows.dll>"
+            "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/platforms/qwindows.dll"
             "$<TARGET_FILE_DIR:usdcc>/platforms/"
         COMMENT "Deploying Qt platform plugin")
 endif()

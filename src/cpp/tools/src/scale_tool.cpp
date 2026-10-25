@@ -194,6 +194,10 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
         ratio = param / m_dragStartParam;
     }
 
+    // Round the change in factor (not the factor itself) so snapping steps
+    // outward from the scale the drag started with.
+    ratio = 1.0 + snapped(ratio - 1.0);
+
     if (!std::isfinite(ratio) || std::abs(ratio) < kMinScaleRatio) {
         ToolResult result;
         result.handled = true;

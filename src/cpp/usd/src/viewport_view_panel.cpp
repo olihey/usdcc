@@ -18,9 +18,10 @@
 
 namespace usdcc::usd {
 
-ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                      std::shared_ptr<usdcc::tools::ToolSet> toolSet, const QString& title,
                                       QWidget* parent)
-    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent), m_toolSet(std::move(toolSet)) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -33,21 +34,15 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbarLayout->setContentsMargins(10, 4, 10, 4);
 
     m_rendererCombo = new QComboBox(toolbar);
-    m_toolCombo = new QComboBox(toolbar);
-    m_toolCombo->addItem(tr("Select"));
-    m_toolCombo->addItem(tr("Move"));
-    m_toolCombo->addItem(tr("Rotate"));
-    m_toolCombo->addItem(tr("Scale"));
     toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
     toolbarLayout->addWidget(stageCombo(), 1);
     toolbarLayout->addWidget(new QLabel(tr("Renderer:"), toolbar));
     toolbarLayout->addWidget(m_rendererCombo, 1);
-    toolbarLayout->addWidget(new QLabel(tr("Tool:"), toolbar));
-    toolbarLayout->addWidget(m_toolCombo, 1);
 
     // Embedded via createWindowContainer() (QWindow, not QOpenGLWidget) —
     // see hydra_viewport_window.h for why.
     m_viewport = new HydraViewportWindow();
+    m_viewport->setToolSet(m_toolSet);
     QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
 
     layout->addWidget(toolbar);
@@ -57,7 +52,6 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 
     connect(m_rendererCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
             &ViewportViewPanel::onRendererComboChanged);
-    connect(m_toolCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ViewportViewPanel::onToolComboChanged);
     connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::refreshRendererCombo);
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
 
@@ -104,10 +98,6 @@ void ViewportViewPanel::onRendererComboChanged(int index) {
     m_viewport->setRendererPlugin(PXR_NS::TfToken(pluginId.toStdString()));
 }
 
-void ViewportViewPanel::onToolComboChanged(int index) {
-    m_viewport->setActiveTool(static_cast<HydraViewportWindow::ToolKind>(std::max(0, index)));
-}
-
 void ViewportViewPanel::onSelectionRequested(std::vector<PXR_NS::SdfPath> paths) {
     stageManager()->setSelectedPaths(currentStage(), std::move(paths));
 }
@@ -119,7 +109,7 @@ void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
 }
 
 usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new ViewportViewPanel(stageManager(), currentStage(), windowTitle(), parent);
+    auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, windowTitle(), parent);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so its

@@ -1,5 +1,7 @@
 #include <QApplication>
 
+#include <memory>
+
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/theme.h"
 
@@ -17,7 +19,9 @@
 
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 namespace {
@@ -61,6 +65,12 @@ int main(int argc, char** argv) {
 
     usdcc::ui::MainWindow window;
 
+    // The editing tools and which is active, shared by every viewport and
+    // driven by the tool rail / options bar in the main window's layout (the
+    // toolbars are owned by `window`).
+    auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
+    new usdcc::usd::ViewportToolBars(&window, toolSet);
+
     // A ViewPanel always has an associated Stage (see docs/PLAN.md §6
     // "ViewPanel: mandatory Stage association") — resolve one *before*
     // constructing any panel below. Prefer the stage passed on the command
@@ -79,8 +89,7 @@ int main(int argc, char** argv) {
     // The center dock area is established here (rather than by MainWindow)
     // since it's the first USD-dependent panel — see MainWindow's comment on
     // why it no longer seeds a stand-in there itself.
-    auto* viewport =
-        new usdcc::usd::ViewportViewPanel(&stageManager, initialStage, "Viewport", &window);
+    auto* viewport = new usdcc::usd::ViewportViewPanel(&stageManager, initialStage, toolSet, "Viewport", &window);
     auto* centerArea = window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, viewport);
 
     auto* outliner = new usdcc::usd::OutlinerViewPanel(&stageManager, initialStage, "Outliner", &window);
@@ -105,9 +114,9 @@ int main(int argc, char** argv) {
     // when that's happened, just re-establish a fresh center area.
     QPointer<usdcc::usd::ViewportViewPanel> initialViewport = viewport;
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&stageManager, &window, initialViewport](const usdcc::usd::StageRefPtr& stage) {
-            auto* newViewport =
-                new usdcc::usd::ViewportViewPanel(&stageManager, stage, viewportTitleForStage(stage), &window);
+        [&stageManager, &window, initialViewport, toolSet](const usdcc::usd::StageRefPtr& stage) {
+            auto* newViewport = new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet,
+                                                                  viewportTitleForStage(stage), &window);
             // Must be unique and set before the dock manager registers this
             // widget; the stage's cache id is unique per open stage.
             newViewport->setObjectName(QStringLiteral("Viewport-%1").arg(stage->cacheId()));

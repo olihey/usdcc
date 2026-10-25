@@ -14,8 +14,42 @@ namespace usdcc::tools {
 // getting-or-creating the xformOp each tool writes to. Multi-prim gizmo
 // editing is out of scope for M5 (see docs/PLAN.md) — with more than one
 // prim selected, these tools draw no gizmo and don't handle mouse events.
+//
+// Also owns the options all three share: "Snap" (on/off) and its "Increment".
+// Snapping is relative — the drag's total change since the mouse went down is
+// rounded to a multiple of the increment — and its unit (scene units, degrees,
+// scale factor) is each tool's own, described by SnapSpec.
 class TransformGizmoTool : public Tool {
+public:
+    std::vector<ToolOption> options() const override;
+    void setOption(const std::string& id, const OptionValue& value) override;
+
+    bool snapEnabled() const { return m_snapEnabled; }
+    double snapIncrement() const { return m_snapIncrement; }
+
 protected:
+    // How a tool presents and defaults its snap increment.
+    struct SnapSpec {
+        double increment;  // default increment
+        double min;
+        double max;
+        double step;       // spin-box arrow step
+        int decimals;
+        const char* suffix;
+    };
+    explicit TransformGizmoTool(const SnapSpec& snapSpec)
+        : m_snapSpec(snapSpec), m_snapIncrement(snapSpec.increment) {}
+
+    // `value` rounded to the nearest multiple of the snap increment, or
+    // unchanged when snapping is off.
+    double snapped(double value) const;
+
+    // Which axes the gizmo (and its drag math) uses: the prim's own, or the
+    // world's. Only MoveTool exposes this; Rotate/Scale write to the prim's
+    // local rotate/scale ops, so they must stay on its own axes.
+    enum class Space { Local, World };
+    Space m_space = Space::Local;
+
     enum class Handle { None, AxisX, AxisY, AxisZ, PlaneXY, PlaneYZ, PlaneXZ, Center };
 
     static constexpr double kGizmoScreenSize = 0.15;
@@ -67,6 +101,11 @@ protected:
                                                  PXR_NS::UsdGeomXformOp::Type opType);
 
     Handle m_activeHandle = Handle::None;
+
+private:
+    SnapSpec m_snapSpec;
+    bool m_snapEnabled = false;
+    double m_snapIncrement;
 };
 
 }  // namespace usdcc::tools

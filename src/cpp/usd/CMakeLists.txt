@@ -24,12 +24,18 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/outliner_view_panel.h
+    include/usdcc/usd/tool_options_bar.h
+    include/usdcc/usd/tool_rail.h
     include/usdcc/usd/usd_prim_tree_model.h
+    include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
     src/outliner_view_panel.cpp
+    src/tool_options_bar.cpp
+    src/tool_rail.cpp
     src/usd_prim_tree_model.cpp
+    src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
 )
 target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL)

@@ -28,7 +28,55 @@ PXR_NS::GfMatrix4d parentToWorld(const PXR_NS::UsdPrim& prim) {
     }
     return PXR_NS::GfMatrix4d(1.0);
 }
+
+// The prim's existing translate op, or an invalid op if it has none (unlike
+// getOrCreateOp(), this never authors anything).
+PXR_NS::UsdGeomXformOp findTranslateOp(const PXR_NS::UsdGeomXformable& xformable) {
+    bool resetsXformStack = false;
+    for (const auto& op : xformable.GetOrderedXformOps(&resetsXformStack)) {
+        if (op.GetOpType() == PXR_NS::UsdGeomXformOp::TypeTranslate) {
+            return op;
+        }
+    }
+    return {};
+}
+
+PXR_NS::GfVec3d readTranslate(const PXR_NS::UsdGeomXformable& xformable) {
+    const PXR_NS::UsdGeomXformOp op = findTranslateOp(xformable);
+    if (!op) {
+        return PXR_NS::GfVec3d(0.0);
+    }
+    if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
+        PXR_NS::GfVec3f v(0.0f);
+        op.Get(&v);
+        return PXR_NS::GfVec3d(v);
+    }
+    PXR_NS::GfVec3d v(0.0);
+    op.Get(&v);
+    return v;
+}
 }  // namespace
+
+std::vector<ToolOption> MoveTool::options() const {
+    std::vector<ToolOption> opts = TransformGizmoTool::options();
+    opts.insert(opts.begin(), ToolOption::choice("space", "Space", m_space == Space::World ? "world" : "local",
+                                                 {{"local", "Local"}, {"world", "World"}}));
+    return opts;
+}
+
+void MoveTool::setOption(const std::string& id, const OptionValue& value) {
+    if (id != "space") {
+        TransformGizmoTool::setOption(id, value);
+        return;
+    }
+    if (const auto* space = std::get_if<std::string>(&value)) {
+        if (*space == "world") {
+            m_space = Space::World;
+        } else if (*space == "local") {
+            m_space = Space::Local;
+        }
+    }
+}
 
 GizmoGeometry MoveTool::buildGizmo(const ToolContext& ctx) const {
     GizmoGeometry geo;
@@ -162,6 +210,7 @@ ToolResult MoveTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& n
         return {};
     }
     m_dragAnchor = *anchor;
+    m_dragStartLocal = readTranslate(xformable);
 
     ToolResult result;
     result.handled = true;
@@ -209,38 +258,41 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
         return result;
     }
 
-    const PXR_NS::GfVec3d worldDelta = *newPoint - m_dragAnchor;
-    if (worldDelta.GetLength() < 1e-9) {
-        ToolResult result;
-        result.handled = true;
-        return result;
+    // Total movement since the mouse went down, always measured from the fixed
+    // press anchor (not accumulated frame to frame) so snapping can round the
+    // whole drag rather than each tiny step.
+    PXR_NS::GfVec3d worldDelta = *newPoint - m_dragAnchor;
+    if (snapEnabled()) {
+        // Round the movement along each of the gizmo's axes. A constrained
+        // drag only has a component along its own axis/plane, so the others
+        // round to zero.
+        worldDelta = m_dragFrame.axisX * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisX)) +
+                     m_dragFrame.axisY * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisY)) +
+                     m_dragFrame.axisZ * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisZ));
     }
 
-    PXR_NS::UsdGeomXformOp translateOp = getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeTranslate);
+    // Don't author a translate op just because the mouse jittered, or because
+    // a snapped drag is still sitting on its starting value.
+    PXR_NS::UsdGeomXformOp translateOp = findTranslateOp(xformable);
     if (!translateOp) {
-        return {};
+        if (worldDelta.GetLength() < 1e-9) {
+            ToolResult result;
+            result.handled = true;
+            return result;
+        }
+        translateOp = getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeTranslate);
+        if (!translateOp) {
+            return {};
+        }
     }
 
     const PXR_NS::GfMatrix4d worldToParent = parentToWorld(xformable.GetPrim()).GetInverse();
-    const PXR_NS::GfVec3d localDelta = worldToParent.TransformDir(worldDelta);
-
-    PXR_NS::GfVec3d currentValue(0.0);
-    const bool isFloat = translateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat;
-    if (isFloat) {
-        PXR_NS::GfVec3f v(0.0f);
-        translateOp.Get(&v);
-        currentValue = PXR_NS::GfVec3d(v);
-    } else {
-        translateOp.Get(&currentValue);
-    }
-    const PXR_NS::GfVec3d newValue = currentValue + localDelta;
-    if (isFloat) {
+    const PXR_NS::GfVec3d newValue = m_dragStartLocal + worldToParent.TransformDir(worldDelta);
+    if (translateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
         translateOp.Set(PXR_NS::GfVec3f(newValue));
     } else {
         translateOp.Set(newValue);
     }
-
-    m_dragAnchor = *newPoint;
 
     ToolResult result;
     result.handled = true;
