@@ -592,6 +592,34 @@ things that will bite later if not addressed early:
     them) and Linux, multi-monitor/mixed-DPI, and ADS *floating* windows — those still get the
     OS frame.
 
+26. **Added: app icon** — three stacked blue layers (front one framed) on a dark rounded tile,
+    from a supplied 1024×1024 SVG. The SVG had unfilled template placeholders
+    (`{{ground}}`/`{{back}}`/`{{mid}}`/`{{front}}`); colours were chosen from the dark theme
+    (`#1c1c1e` / `#1d4f96` / `#2d6fd1` / `#3d8bfd`) and are constants at the top of
+    `tools/gen_app_icon.py`. The deployed Qt has no SVG plugin, so that script rasterises the
+    geometry itself (including the SVG's stroke-painted-under-fill halo) at 16–256px, natively per
+    size, into (a) `ui/resources/app-icon/usdcc-<size>.png`, compiled into `usdcc_ui` and exposed
+    as `usdcc::ui::theme::appIcon()` — `theme::apply()` installs it as the window icon, so the
+    title bar's logo (`TitleBar::updateLogo()`, now the icon rather than a plain accent square) and
+    the running window's taskbar entry use it — and (b) `app/resources/usdcc.ico`
+    (DIB frames below 256px, PNG at 256), embedded in the `.exe` through `usdcc.rc` for Explorer
+    and pinned shortcuts. Verified by extracting the built `.exe`'s icon and by a window
+    screenshot. The same script also emits the other platforms' formats: **macOS**
+    `app/resources/usdcc.icns` (all eleven standard PNG-payload entries, 16px–1024px incl. the
+    `@2x` types; `app/CMakeLists.txt` builds usdcc as a `MACOSX_BUNDLE` with it in
+    `Contents/Resources` and `MACOSX_BUNDLE_ICON_FILE`) and **Linux** `app/resources/linux/`: a
+    freedesktop `icons/hicolor` tree (8 PNG sizes 16–512px plus a scalable `usdcc.svg` with the
+    colour placeholders filled in), and `usdcc.desktop` (`Icon=usdcc`), installed to
+    `share/icons` / `share/applications` by `install()` rules (the project has no other
+    install rules yet, so those cover only these files). `theme::apply()` also calls
+    `QGuiApplication::setDesktopFileName("usdcc")` so Wayland shells can match the window to
+    that launcher entry. Verified only what a Windows machine can: the `.icns` parses back
+    structurally (header, lengths, every payload a PNG of the right size), the SVG renders
+    identically to the raster in a browser, and a throwaway project running the exact CMake
+    commands installs the expected Linux tree. **Not done / unverified:** actually building or
+    running on macOS (the bundle conversion in particular — Qt plugin/library deployment for a
+    bundle isn't set up) or Linux, and a runtime check of the Windows taskbar button.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

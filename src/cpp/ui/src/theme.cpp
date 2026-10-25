@@ -65,8 +65,22 @@ QPalette darkPalette() {
 
 }  // namespace
 
+QIcon appIcon() {
+    initThemeResources();
+    QIcon icon;
+    for (const int size : {16, 24, 32, 48, 64, 128, 256}) {
+        icon.addFile(QStringLiteral(":/usdcc/app/icon-%1.png").arg(size), QSize(size, size));
+    }
+    return icon;
+}
+
 void apply(QApplication& app) {
     initThemeResources();
+    app.setWindowIcon(appIcon());
+    // Linux shells (Wayland always, some X11 ones) match a running window to
+    // its launcher entry by this name — which is how they find usdcc.desktop's
+    // Icon= and the installed hicolor icons. Harmless elsewhere.
+    QGuiApplication::setDesktopFileName(QStringLiteral("usdcc"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     app.setPalette(darkPalette());
     app.setStyleSheet(readResource(QStringLiteral(":/usdcc/theme/dark.qss")));

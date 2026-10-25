@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=usdcc
+Comment=Cross-platform DCC tool: manage multiple scenes via OpenUSD stages and view them through Hydra
+Exec=usdcc %f
+Icon=usdcc
+Terminal=false
+Categories=Graphics;3DGraphics;
+StartupNotify=true

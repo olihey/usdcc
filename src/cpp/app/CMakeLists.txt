@@ -1,5 +1,32 @@
 # usdcc — the application executable.
 add_executable(usdcc main.cpp)
+if(WIN32)
+    # The .exe's own icon (Explorer, taskbar pins); see resources/usdcc.rc.
+    target_sources(usdcc PRIVATE resources/usdcc.rc)
+endif()
+
+# All three icon formats are generated from one source by tools/gen_app_icon.py.
+if(APPLE)
+    # macOS shows an app's icon from its bundle, so usdcc is built as one with
+    # usdcc.icns in Contents/Resources. NOTE: not yet built or run on macOS.
+    set(USDCC_MAC_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/usdcc.icns")
+    target_sources(usdcc PRIVATE "${USDCC_MAC_ICON}")
+    set_source_files_properties("${USDCC_MAC_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(
+        usdcc
+        PROPERTIES MACOSX_BUNDLE ON
+                   MACOSX_BUNDLE_ICON_FILE usdcc.icns
+                   MACOSX_BUNDLE_BUNDLE_NAME usdcc)
+endif()
+
+if(UNIX AND NOT APPLE)
+    # Linux desktop integration: the freedesktop icon theme tree and the
+    # launcher entry that refers to it. The project has no other install rules
+    # yet (none for the executable itself), so this only covers these files.
+    # NOTE: not yet built or run on Linux.
+    install(DIRECTORY resources/linux/icons/ DESTINATION share/icons)
+    install(FILES resources/linux/usdcc.desktop DESTINATION share/applications)
+endif()
 target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui)
 
 # USD's own headers wrap their Python.h include the same way pybind11 does

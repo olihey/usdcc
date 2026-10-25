@@ -16,6 +16,7 @@ namespace {
 
 constexpr int kBarHeight = 26;  // the design's menu-bar height
 constexpr int kIconSize = 16;
+constexpr int kLogoSize = 16;
 
 QToolButton* makeCaptionButton(const char* objectName, const QString& iconPath, QWidget* parent) {
     auto* button = new QToolButton(parent);
@@ -83,6 +84,7 @@ TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow)
     m_closeButton->installEventFilter(this);
     m_menuBar->installEventFilter(this);
     updateWindowState();
+    updateLogo();
 }
 
 QWidget* TitleBar::logoWidget() const { return m_logo; }
@@ -95,6 +97,9 @@ bool TitleBar::eventFilter(QObject* watched, QEvent* event) {
                 break;
             case QEvent::WindowStateChange:
                 updateWindowState();
+                break;
+            case QEvent::WindowIconChange:
+                updateLogo();
                 break;
             case QEvent::WindowActivate:
             case QEvent::WindowDeactivate:
@@ -123,6 +128,13 @@ bool TitleBar::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     return QFrame::eventFilter(watched, event);
+}
+
+// The logo is the window's own icon (the app icon, unless something sets
+// another), drawn at the label's device pixel ratio so it stays sharp on
+// high-DPI screens.
+void TitleBar::updateLogo() {
+    m_logo->setPixmap(m_host->windowIcon().pixmap(QSize(kLogoSize, kLogoSize), m_logo->devicePixelRatioF()));
 }
 
 void TitleBar::updateWindowState() {

@@ -37,6 +37,7 @@ protected:
 
 private:
     void updateWindowState();
+    void updateLogo();
 
     QWidget* m_host;
     QLabel* m_logo = nullptr;

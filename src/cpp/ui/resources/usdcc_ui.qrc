@@ -25,4 +25,13 @@
         <file alias="detach-disabled.png">theme/detach-disabled.png</file>
         <file alias="detach-disabled@2x.png">theme/detach-disabled@2x.png</file>
     </qresource>
+    <qresource prefix="/usdcc/app">
+        <file alias="icon-16.png">app-icon/usdcc-16.png</file>
+        <file alias="icon-24.png">app-icon/usdcc-24.png</file>
+        <file alias="icon-32.png">app-icon/usdcc-32.png</file>
+        <file alias="icon-48.png">app-icon/usdcc-48.png</file>
+        <file alias="icon-64.png">app-icon/usdcc-64.png</file>
+        <file alias="icon-128.png">app-icon/usdcc-128.png</file>
+        <file alias="icon-256.png">app-icon/usdcc-256.png</file>
+    </qresource>
 </RCC>

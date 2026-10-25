@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>usdcc</title>
+  <rect width="1024" height="1024" rx="228" fill="#1c1c1e"/>
+  <g transform="translate(512 512) scale(1.25) translate(-512 -512)">
+    <polygon points="232,632 512,492 792,632 512,772" fill="#1c1c1e" stroke="#1c1c1e" stroke-width="56" stroke-linejoin="miter"/>
+    <polygon points="232,632 512,492 792,632 512,772" fill="#1d4f96"/>
+    <polygon points="232,512 512,372 792,512 512,652" fill="#1c1c1e" stroke="#1c1c1e" stroke-width="56" stroke-linejoin="miter"/>
+    <polygon points="232,512 512,372 792,512 512,652" fill="#2d6fd1"/>
+    <polygon points="232,392 512,252 792,392 512,532" fill="#1c1c1e" stroke="#1c1c1e" stroke-width="56" stroke-linejoin="miter"/>
+    <polygon points="232,392 512,252 792,392 512,532" fill="#3d8bfd"/>
+    <polygon points="333,392 512,302 691,392 512,482" fill="#1c1c1e"/>
+    <polygon points="389,392 512,330 635,392 512,454" fill="#1d4f96"/>
+  </g>
+</svg>

@@ -393,13 +393,9 @@ QFrame#titleBar QMenuBar::item {
     margin: 0;
 }
 
+/* The app icon (set from code), with the design's 10px side gutters. */
 QLabel#titleBarLogo {
-    background: #3d8bfd;
-    border-radius: 3px;
-    min-width: 14px;
-    max-width: 14px;
-    min-height: 14px;
-    max-height: 14px;
+    background: transparent;
     margin: 0 10px;
 }
 
