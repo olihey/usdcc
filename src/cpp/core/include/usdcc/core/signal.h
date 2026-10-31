@@ -27,10 +27,9 @@ namespace usdcc::core {
 // operator().
 //
 // Deliberately doesn't call its internal storage "slots": Qt's <QObject>
-// #defines `slots` (and `signals`/`emit`) as bare macros project-wide
-// (QT_NO_KEYWORDS is never set here, since UI code relies on that syntax),
-// so any Qt-including translation unit that reaches this header afterward
-// would silently mangle a member actually named that.
+// #defines `slots` (and `signals`/`emit`) as bare macros unless
+// QT_NO_KEYWORDS is set, so a Qt-including translation unit that reaches this
+// header afterward would silently mangle a member actually named that.
 template <typename... Args>
 class Signal {
 public:

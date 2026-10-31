@@ -129,7 +129,7 @@ QWidget* ToolOptionsBar::makeChoice(const ToolOption& option) {
         group->addButton(button);
         layout->addWidget(button);
         connect(button, &QToolButton::clicked, this,
-                [this, id = option.id, choiceId = choice.id]() { emit optionChanged(id, OptionValue(choiceId)); });
+                [this, id = option.id, choiceId = choice.id]() { Q_EMIT optionChanged(id, OptionValue(choiceId)); });
     }
     return labelled(QString::fromStdString(option.label), segmented, this);
 }
@@ -140,7 +140,7 @@ QWidget* ToolOptionsBar::makeToggle(const ToolOption& option) {
     box->setChecked(std::get<bool>(option.value));
     box->setFocusPolicy(Qt::NoFocus);
     connect(box, &QCheckBox::toggled, this,
-            [this, id = option.id](bool on) { emit optionChanged(id, OptionValue(on)); });
+            [this, id = option.id](bool on) { Q_EMIT optionChanged(id, OptionValue(on)); });
     return box;
 }
 
@@ -157,7 +157,7 @@ QWidget* ToolOptionsBar::makeNumber(const ToolOption& option) {
     // keystroke — typing "0.25" must not pass through 0, 0.2 along the way.
     spin->setKeyboardTracking(false);
     connect(spin, &QDoubleSpinBox::valueChanged, this,
-            [this, id = option.id](double value) { emit optionChanged(id, OptionValue(value)); });
+            [this, id = option.id](double value) { Q_EMIT optionChanged(id, OptionValue(value)); });
     return labelled(QString::fromStdString(option.label), spin, this);
 }
 

@@ -88,7 +88,7 @@ public:
     // panels (see docs/PLAN.md milestone M4).
     void setSelectedPaths(std::vector<PXR_NS::SdfPath> paths);
 
-signals:
+Q_SIGNALS:
     void rendererPluginsChanged();
 
     // Emitted when a tool (currently just SelectTool) changes the selection

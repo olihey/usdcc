@@ -31,7 +31,7 @@ void ToolRail::addTool(int id, const QString& toolTip, const QString& iconName) 
     action->setData(id);
     m_group->addAction(action);
     // triggered() (not toggled()) so only a user pick reports, not setCurrentTool().
-    connect(action, &QAction::triggered, this, [this, id]() { emit toolSelected(id); });
+    connect(action, &QAction::triggered, this, [this, id]() { Q_EMIT toolSelected(id); });
 }
 
 void ToolRail::setCurrentTool(int id) {

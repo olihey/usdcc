@@ -54,6 +54,10 @@ protected:
 
     static constexpr double kGizmoScreenSize = 0.15;
     static constexpr double kPickThresholdNdc = 0.035;
+    // Within this distance of the gizmo's origin the center handle wins outright.
+    // The axes all start at the origin, so without this a press a pixel or two
+    // off the center box would be nearer to an axis line and grab that instead.
+    static constexpr double kCenterPickNdc = 0.02;
 
     // The gizmo's origin and its own X/Y/Z axes, expressed in world space —
     // i.e. the selected prim's object/local space, not the world's. Scale is

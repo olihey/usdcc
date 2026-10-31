@@ -69,7 +69,7 @@ so a deliberate choice gets made instead of an accidental one.
 | # | Question | Assumption used for planning below |
 |---|----------|-------------------------------------|
 | 1 | Target OS/platforms (Windows only? + Linux? + macOS?) | Windows + Linux, macOS best-effort |
-| 2 | Minimum/pinned versions: OpenUSD, Qt6, Python, C++ compiler | Qt 6.11.1 (vcpkg baseline), Python 3.12, MSVC 2022 pinned via M0; OpenUSD 26.8 now in use (a from-source build, not vcpkg's Python-less `usd` port — see §6 item 11) |
+| 2 | Minimum/pinned versions: OpenUSD, Qt6, Python, C++ compiler | Qt 6.11.1 (vcpkg baseline), Python 3.12, MSVC 2022 pinned via M0; OpenUSD 26.11 now in use (a from-source build, not vcpkg's Python-less `usd` port — see §6 item 11). Moving 26.8 → 26.11 needed `QT_NO_KEYWORDS` (oneTBB's `event::emit()` collides with Qt's `emit` macro) and an explicit `<pxr/usd/usd/stage.h>` include where `UsdStage` was only reached transitively |
 | 3 | Project license, and how third-party license compliance is tracked for the Info dialog | TBD — needed before first public distribution |
 | 4 | Plugin manifest/discovery format, versioning & compatibility policy, sandboxing for Python plugins | Design during M9 |
 | 5 | Threading model: does stage loading / Hydra render run off the UI thread? | Assume async loading + render thread; confirm during M2/M3 |
@@ -241,12 +241,9 @@ things that will bite later if not addressed early:
     translate/rotate/scale order whenever it has to add a new one, but only when every
     existing op is one of those three known types — a stack already containing a matrix or
     orient op is left alone rather than risking corrupting an ordering this code doesn't
-    understand. Known gap: `RotateTool` drives the prim's own `rotateXYZ` Euler components
-    directly from its object-space rings (see §6 item 17), which is exact for a single-axis
-    rotation (the common case) and only an approximation once more than one Euler component
-    is non-zero, since doing this exactly would mean composing/decomposing a `GfRotation`
-    through the op's existing value on every drag step. Multi-prim gizmo editing is also out
-    of scope —
+    understand. (`RotateTool` first drove one `rotateXYZ` Euler component per ring, which was
+    only right for a single-axis rotation; item 29 made it exact.) Multi-prim gizmo editing
+    is also out of scope —
     with more than one prim selected, the gizmo tools draw nothing and don't handle mouse
     events. Gizmo-driven edits mutate the stage directly rather than going through an undo
     command, same as the rename/reorder/attribute-edit paths M4 already shipped without one —
@@ -705,6 +702,35 @@ things that will bite later if not addressed early:
     runtime everywhere at the cost of a full second USD build. Switch back to that if debug-STL
     checking or Qt debug builds are needed.
 
+29. **Fixed: the Rotate tool went wrong as soon as a prim had been rotated about a second
+    axis.** Reported as "fails at the third axis rotation". Each ring added the swept angle to
+    one component of the prim's `rotateXYZ` value, but the rings are drawn on the prim's *own*
+    axes, and Euler components only line up with those while the other two are zero. A
+    headless drive of `RotateTool` (X, then Y, then Z drags, compared against the exact
+    composition) was already off after the second drag: |R - expected| up to 0.67, and up to
+    1.5 after two rounds in any order. **Fix (`rotate_tool.cpp`):** at press the prim's
+    orientation is taken from the op's Euler value; each move rotates that start orientation
+    about the grabbed object-space axis by the swept angle (snapped as a total, as before) and
+    converts the result back to `rotateXYZ` degrees. The conversion is closed form for
+    USD's `Rx * Ry * Rz` row-vector composition, handles gimbal lock (Y at +-90, Z kept where
+    it was), and of the two equivalent triples plus whole turns picks the one nearest the
+    previous value so the numbers don't jump mid-drag. **Verified** with a temporary headless
+    harness (36 checks): single axes, X/Y/Z in all six orders twice around, no Euler jump above
+    a few degrees per move, snapping, a rotated parent, a pre-existing compound Euler value,
+    Y at 90 degrees, and sweeps past 180 and 300 degrees; 11 of the first 18 checks failed before
+    the fix and all pass after. In the live app a ring drag spins the prim inside a ring that
+    stays fixed on screen; the full three-ring sequence was not driven with the real mouse,
+    because the window layout (and so the ring positions) differs between launches.
+
+30. **Fixed: the Move tool's center handle was hard to grab.** The center box and the three
+    axes all start at the same point, and the center was only chosen if strictly nearer than
+    every axis, so a press a few pixels off the box picked an axis (a diagonal drag then
+    moved the prim along one axis only). `MoveTool::pickHandle()` now returns the center
+    whenever the press is within `kCenterPickNdc` (0.02, a bit more than the box's drawn
+    radius) of the origin. Reproduced headlessly (presses 0.004 NDC off the origin grabbed X,
+    Y or Z) and confirmed with a real mouse drag: the prim now follows the cursor in both
+    axes. `ScaleTool::pickHandle()` has the same pattern and was not changed.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
@@ -836,7 +862,7 @@ These run throughout, not as discrete milestones:
 | M3 Hydra Viewport | Exit criteria met and verified — `ViewportViewPanel`/`HydraViewportWindow` (`usdcc_usd_ui` target, renamed from `usdcc_usd_viewport` in M4 — see §6 item 14) render a stage correctly (confirmed by the user directly: red cube and blue sphere, correctly shaded/lit) in both `HdStormRendererPlugin` and `HdEmbreeRendererPlugin`, with working orbit/pan/zoom camera navigation, per-panel stage selection, render-delegate switching, `MainWindow` File > Open Stage, and a `usdcc.exe <stage-path>` / `tools/run.ps1 -Scene <path>` CLI path. Two real bugs were found and fixed along the way (see §6 item 12): geometric pixel corruption (fixed by moving from `QOpenGLWidget` to a `QWindow`-based `HydraViewportWindow`) and all-black shading (fixed by explicitly clearing color+depth before each `Render()` call, since `HgiInteropOpenGL`'s compositing step assumes the caller already did). A cosmetic `HgiInteropOpenGL`/`HgiGLTexture` GL-error log spam remains unexplained but doesn't affect the visible output. Remaining for a later pass: `OutlinerViewPanel`/`AttributesViewPanel` (M4) |
 | M4 Scene Introspection Panels | Exit criteria met and verified — `OutlinerViewPanel` (rename/disable/select/reorder via a custom `UsdPrimTreeModel`) and `AttributesViewPanel` (view/edit via `TfType`-based dispatch) are docked alongside the viewport; selection is shared per-stage through `StageManager` (see §6 item 14 for the full design). Verified end to end through the real, wired-up UI code paths (tree/table widgets, model roles, the outliner's context menu): select, rename, selection-follows-rename, disable, attribute edit, and reorder all confirmed correct against direct stage introspection; the disable case was additionally confirmed *visually* — a screenshot taken after deactivating a prim via the outliner's checkbox showed it correctly absent from the live Hydra render, satisfying the "reflected live in the viewport" exit criterion. Known gap: array/matrix/asset-path attributes remain read-only in the Attributes panel (see §6 item 14) |
 | M5 Editing Tools & Gizmos | Exit criteria met and verified — `SelectTool` (GPU-picking click-to-select via `UsdImagingGLEngine::TestIntersection`), `MoveTool` (axis/plane/free-constrained translate), `RotateTool` (axis-ring rotate), and `ScaleTool` (axis/uniform scale) all live in the new `usdcc_tools` target and are wired into `HydraViewportWindow`/`ViewportViewPanel`'s new "Tool:" combo (see §6 item 15 for the design). Verified through the real, wired-up code paths — synthetic mouse-drag events sent to the actual `HydraViewportWindow` for Move/Rotate, a hand-built `ToolContext` calling `ScaleTool` directly for Scale — confirming the resulting `xformOp:translate`/`rotateXYZ`/`scale` values, plus a screenshot showing the gizmo rendering correctly (no black-viewport or corruption regression) on the moved/rotated/scaled prim. One real bug was found and fixed along the way: the verification harness itself crashed inside ADS (`qtadvanceddocking-qt6.dll`, access violation) from calling `setCurrentDockWidget()` on a `CDockAreaWidget*` captured *before* `MainWindow::restoreLayout()`, which can rebuild dock areas from a saved layout and leave that earlier pointer dangling — fixed by fetching the dock area live via `CDockWidget::dockAreaWidget()` at the point of use instead of caching it. Known gaps: multi-selection gizmo editing is unsupported (no gizmo drawn), and `RotateTool`'s object-space rings (see §6 item 17) are only exact for a single-axis rotation |
-| M6 Undo/Redo Framework | Not started |
+| M6 Undo/Redo Framework | In progress — a per-stage Qt undo manager snapshots the current edit-target layer for attribute edits and outliner sibling reordering; Edit > Undo/Redo is wired. Rename/activate edits and gizmo/script command integration remain |
 | M7 Scripting & Python Extensibility | Not started |
 | M8 Layer Editing & Logging | Not started |
 | M9 Plugin System | Not started |

@@ -104,6 +104,13 @@ find_package(OpenGL)
 find_package(USD REQUIRED)
 message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
 
+# Qt's `emit`/`signals`/`slots` keyword macros collide with OpenUSD's own TBB
+# headers (oneapi/tbb/profiling.h declares `event::emit()`), which every Qt
+# translation unit that touches a pxr header ends up including. So our code
+# spells them Q_EMIT/Q_SIGNALS/Q_SLOTS. Set here, after the vendored QWindowKit,
+# so only usdcc's own targets get it.
+add_compile_definitions(QT_NO_KEYWORDS)
+
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)

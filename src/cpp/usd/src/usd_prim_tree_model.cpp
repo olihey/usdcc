@@ -175,14 +175,14 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
             return false;
         }
         const PXR_NS::SdfPath newPath = oldPath.GetParentPath().AppendChild(PXR_NS::TfToken(newName));
-        emit primRenamed(oldPath, newPath);
+        Q_EMIT primRenamed(oldPath, newPath);
         refresh();
         return true;
     }
 
     if (role == Qt::CheckStateRole) {
         prim.SetActive(value.toInt() == Qt::Checked);
-        emit dataChanged(index, index, {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole});
+        Q_EMIT dataChanged(index, index, {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole});
         return true;
     }
 

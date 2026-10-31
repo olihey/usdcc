@@ -46,7 +46,7 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
-signals:
+Q_SIGNALS:
     // Emitted when the user renames a prim via this model (Qt::EditRole) —
     // the panel listens to fix up the shared selection if the renamed prim
     // was selected (its path changed).

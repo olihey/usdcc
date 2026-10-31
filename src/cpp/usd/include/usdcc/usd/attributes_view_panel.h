@@ -14,6 +14,7 @@ class QTableWidget;
 namespace usdcc::usd {
 
 class StageManager;
+class UndoManager;
 
 // ViewPanel subclass showing/editing the attributes of whichever prim is
 // currently selected (via StageManager::selectedPaths()) on this panel's
@@ -30,7 +31,7 @@ class AttributesViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    explicit AttributesViewPanel(StageManager* stageManager, StageRefPtr stage,
+    explicit AttributesViewPanel(StageManager* stageManager, StageRefPtr stage, std::shared_ptr<UndoManager> undoManager,
                                   const QString& title = QStringLiteral("Attributes"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
@@ -39,7 +40,7 @@ protected:
     // Resets the selected-prim path and refreshes the table for the new stage.
     void onStageChanged(const StageRefPtr& stage) override;
 
-private slots:
+private Q_SLOTS:
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
     void onCellChanged(int row, int column);
 
@@ -49,6 +50,7 @@ private:
     PXR_NS::SdfPath m_primPath;
     QTableWidget* m_table;
     bool m_updatingTable = false;
+    std::shared_ptr<UndoManager> m_undoManager;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

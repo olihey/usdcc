@@ -3,12 +3,15 @@
 #include "usdcc/tools/gizmo_shapes.h"
 
 #include <pxr/base/gf/math.h>
+#include <pxr/base/gf/matrix3d.h>
+#include <pxr/base/gf/rotation.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/timeCode.h>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace usdcc::tools {
 
@@ -54,6 +57,58 @@ PXR_NS::GfVec3d readEuler(const PXR_NS::UsdGeomXformOp& op) {
     PXR_NS::GfVec3f v(0.0f);
     op.Get(&v);
     return PXR_NS::GfVec3d(v);
+}
+
+// What a rotateXYZ op with these Euler degrees rotates by. USD composes it as
+// Rx * Ry * Rz in its row-vector convention (X is applied first).
+PXR_NS::GfMatrix3d eulerToRotation(const PXR_NS::GfVec3d& degrees) {
+    return PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::XAxis(), degrees[0])) *
+           PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::YAxis(), degrees[1])) *
+           PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::ZAxis(), degrees[2]));
+}
+
+// `angle` shifted by whole turns to lie within half a turn of `reference`.
+double nearestTurn(double angle, double reference) {
+    return angle - 360.0 * std::round((angle - reference) / 360.0);
+}
+
+// The rotateXYZ Euler degrees that produce `rotation` (the inverse of
+// eulerToRotation()). Every orientation has two such triples, plus whole turns
+// of each component, so this returns the one closest to `hint` (the previous
+// value): without that, a drag could make the numbers jump between equivalent
+// triples from one mouse move to the next.
+PXR_NS::GfVec3d rotationToEuler(const PXR_NS::GfMatrix3d& m, const PXR_NS::GfVec3d& hint) {
+    // With M = Rx(a) * Ry(b) * Rz(c): M[0][2] = -sin(b), M[1][2] = sin(a)cos(b),
+    // M[2][2] = cos(a)cos(b), M[0][1] = cos(b)sin(c), M[0][0] = cos(b)cos(c).
+    const double sinB = std::clamp(-m[0][2], -1.0, 1.0);
+    const double cosB = std::sqrt(std::max(0.0, 1.0 - sinB * sinB));
+    double a = 0.0, b = std::asin(sinB), c = 0.0;
+    if (cosB > 1e-6) {
+        a = std::atan2(m[1][2], m[2][2]);
+        c = std::atan2(m[0][1], m[0][0]);
+    } else {
+        // Gimbal lock (Y at +-90 degrees): only a -/+ c is determined. Keep Z
+        // where it was and solve for X.
+        c = PXR_NS::GfDegreesToRadians(hint[2]);
+        a = sinB > 0.0 ? std::atan2(m[1][0], m[1][1]) + c : std::atan2(-m[1][0], m[1][1]) - c;
+    }
+    const PXR_NS::GfVec3d first(PXR_NS::GfRadiansToDegrees(a), PXR_NS::GfRadiansToDegrees(b),
+                                PXR_NS::GfRadiansToDegrees(c));
+    const PXR_NS::GfVec3d second(first[0] + 180.0, 180.0 - first[1], first[2] + 180.0);
+
+    PXR_NS::GfVec3d best = first;
+    double bestDistance = std::numeric_limits<double>::max();
+    for (PXR_NS::GfVec3d candidate : {first, second}) {
+        for (int i = 0; i < 3; ++i) {
+            candidate[i] = nearestTurn(candidate[i], hint[i]);
+        }
+        const double distance = (candidate - hint).GetLengthSq();
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = candidate;
+        }
+    }
+    return best;
 }
 }  // namespace
 
@@ -143,7 +198,8 @@ ToolResult RotateTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d&
         return {};
     }
     m_lastVector = *vector;
-    m_dragStartEuler = readEuler(findRotateOp(xformable));
+    m_lastEuler = readEuler(findRotateOp(xformable));
+    m_dragStartRotation = eulerToRotation(m_lastEuler);
     m_dragTotalDegrees = 0.0;
 
     ToolResult result;
@@ -205,9 +261,17 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
         }
     }
 
+    // Spin the orientation the prim had at press about its own axis (the one
+    // the ring is drawn on), then express the result as rotateXYZ Euler
+    // degrees. Adding the angle to one Euler component instead would only turn
+    // the prim about that ring while the other two components are zero.
     const int axisIndex = m_activeHandle == Handle::AxisX ? 0 : (m_activeHandle == Handle::AxisY ? 1 : 2);
-    PXR_NS::GfVec3d euler = m_dragStartEuler;
-    euler[axisIndex] += appliedDegrees;
+    PXR_NS::GfVec3d axisInObjectSpace(0.0);
+    axisInObjectSpace[axisIndex] = 1.0;
+    const PXR_NS::GfMatrix3d rotated =
+        PXR_NS::GfMatrix3d(PXR_NS::GfRotation(axisInObjectSpace, appliedDegrees)) * m_dragStartRotation;
+    const PXR_NS::GfVec3d euler = rotationToEuler(rotated, m_lastEuler);
+    m_lastEuler = euler;
     if (rotateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
         rotateOp.Set(euler);
     } else {

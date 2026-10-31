@@ -2,6 +2,8 @@
 
 #include "usdcc/tools/transform_gizmo_tool.h"
 
+#include <pxr/base/gf/matrix3d.h>
+
 namespace usdcc::tools {
 
 // Rotate gizmo: three axis rings (X/Y/Z), drawn along the selected prim's
@@ -9,15 +11,12 @@ namespace usdcc::tools {
 // dragged tangentially to spin the prim about that axis — see
 // docs/PLAN.md milestone M5.
 //
-// Known limitation: each ring drives the corresponding component of the
-// prim's own rotateXYZ Euler op directly (ring X adds to the op's X degree
-// value, etc.), which is exact for a single-axis rotation (the common case,
-// and what M5's own verification exercises) but only an approximation once
-// the prim already has a compound rotation across more than one axis, since
-// Euler components aren't independent once more than one is non-zero. Doing
-// this exactly would mean composing/decomposing a GfRotation through the
-// op's existing value on every drag step — left as a follow-up rather than
-// blocking M5 on it.
+// A drag spins the prim about the grabbed ring's axis exactly, whatever
+// rotation it already has: the orientation at press is rotated about that
+// object-space axis by the angle swept so far, then converted back to the
+// rotateXYZ op's Euler degrees (choosing, of the equivalent triples, the one
+// nearest the previous value so the numbers don't jump). Adding the angle to
+// one Euler component instead is only right while the other two are zero.
 //
 // Options: the shared Snap/Increment, in degrees.
 class RotateTool : public TransformGizmoTool {
@@ -41,9 +40,10 @@ private:
     PXR_NS::GfVec3d m_lastVector{1.0, 0.0, 0.0};  // last frame's origin-to-hit vector, projected onto the ring plane
 
     // The drag is measured from where it started rather than applied step by
-    // step, so snapping can round the whole rotation: the op's Euler value at
-    // press, plus the total angle swept since.
-    PXR_NS::GfVec3d m_dragStartEuler{0.0};
+    // step, so snapping can round the whole rotation: the prim's rotation at
+    // press, turned by the total angle swept since.
+    PXR_NS::GfMatrix3d m_dragStartRotation{1.0};
+    PXR_NS::GfVec3d m_lastEuler{0.0};  // the Euler degrees last written (or at press); keeps them continuous
     double m_dragTotalDegrees = 0.0;
 };
 

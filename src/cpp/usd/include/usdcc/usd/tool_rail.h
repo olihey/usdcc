@@ -25,7 +25,7 @@ public:
     // Checks the action for `id` without emitting toolSelected().
     void setCurrentTool(int id);
 
-signals:
+Q_SIGNALS:
     // Only for the user picking a tool, never for setCurrentTool().
     void toolSelected(int id);
 

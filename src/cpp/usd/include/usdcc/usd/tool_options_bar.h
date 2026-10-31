@@ -29,7 +29,7 @@ public:
     // option. Never emits optionChanged() itself.
     void setTool(const QString& toolName, const std::vector<usdcc::tools::ToolOption>& options);
 
-signals:
+Q_SIGNALS:
     void optionChanged(const std::string& id, const usdcc::tools::OptionValue& value);
 
 private:

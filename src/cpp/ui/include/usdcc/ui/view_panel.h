@@ -105,7 +105,7 @@ protected:
     // this itself).
     void refreshStageCombo();
 
-private slots:
+private Q_SLOTS:
     void onStageComboChanged(int index);
 
 private:

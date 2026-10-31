@@ -57,7 +57,7 @@ protected:
     // Points the viewport at the new stage and restores its selection.
     void onStageChanged(const StageRefPtr& stage) override;
 
-private slots:
+private Q_SLOTS:
     void refreshRendererCombo();
     void onRendererComboChanged(int index);
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);

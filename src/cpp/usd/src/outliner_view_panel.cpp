@@ -2,6 +2,7 @@
 
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usd_prim_tree_model.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/primSpec.h>
@@ -24,9 +25,10 @@
 
 namespace usdcc::usd {
 
-OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                      std::shared_ptr<UndoManager> undoManager, const QString& title,
                                       QWidget* parent)
-    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent), m_undoManager(std::move(undoManager)) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -62,12 +64,14 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
         });
 
     refreshStageCombo();
+    connect(m_undoManager->stack(currentStage()), &QUndoStack::indexChanged, this,
+            [this](int) { m_model->refresh(); });
     // See ViewportViewPanel's constructor for why this is explicit.
     onStageChanged(currentStage());
 }
 
 usdcc::ui::ViewPanel* OutlinerViewPanel::duplicate(QWidget* parent) const {
-    return new OutlinerViewPanel(stageManager(), currentStage(), windowTitle(), parent);
+    return new OutlinerViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
 }
 
 void OutlinerViewPanel::populateContextMenu(QMenu* menu) {
@@ -154,13 +158,20 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     std::iter_swap(it, swapWith);
 
     const PXR_NS::UsdStageRefPtr& usdStage = currentStage()->usdStage();
-    if (!usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
-        // Reordering requires a prim spec for the parent on the edit target
-        // layer to author the "reorder nameChildren" opinion onto.
-        usdStage->OverridePrim(parent.GetPath());
-    }
-    if (PXR_NS::SdfPrimSpecHandle parentSpec = usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
-        parentSpec->SetNameChildrenOrder(order);
+    const bool applied = m_undoManager->apply(currentStage(), tr("Reorder %1").arg(QString::fromStdString(prim.GetName().GetString())),
+                                               [&]() {
+                                                   if (!usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
+                                                       usdStage->OverridePrim(parent.GetPath());
+                                                   }
+                                                   if (PXR_NS::SdfPrimSpecHandle parentSpec =
+                                                           usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
+                                                       parentSpec->SetNameChildrenOrder(order);
+                                                       return true;
+                                                   }
+                                                   return false;
+                                               });
+    if (!applied) {
+        return;
     }
 
     m_model->refresh();

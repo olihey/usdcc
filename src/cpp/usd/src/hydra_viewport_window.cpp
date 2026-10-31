@@ -105,7 +105,7 @@ void HydraViewportWindow::ensureEngine() {
             m_legacyGl->initializeOpenGLFunctions();
         }
 
-        emit rendererPluginsChanged();
+        Q_EMIT rendererPluginsChanged();
     }
 }
 
@@ -264,7 +264,7 @@ void HydraViewportWindow::applyToolResult(const usdcc::tools::ToolResult& result
     if (result.newSelection) {
         m_selectedPaths = *result.newSelection;
         updateEngineSelection();
-        emit selectionRequested(m_selectedPaths);
+        Q_EMIT selectionRequested(m_selectedPaths);
     }
 }
 

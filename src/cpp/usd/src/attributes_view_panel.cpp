@@ -1,6 +1,7 @@
 #include "usdcc/usd/attributes_view_panel.h"
 
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include <pxr/base/gf/vec2d.h>
 #include <pxr/base/gf/vec2f.h>
@@ -129,9 +130,10 @@ bool setAttributeFromText(const PXR_NS::UsdAttribute& attr, const QString& text)
 
 }  // namespace
 
-AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                          std::shared_ptr<UndoManager> undoManager, const QString& title,
                                           QWidget* parent)
-    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent), m_undoManager(std::move(undoManager)) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -165,12 +167,14 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
         });
 
     refreshStageCombo();
+    connect(m_undoManager->stack(currentStage()), &QUndoStack::indexChanged, this,
+            [this](int) { refreshAttributes(); });
     // See ViewportViewPanel's constructor for why this is explicit.
     onStageChanged(currentStage());
 }
 
 usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {
-    return new AttributesViewPanel(stageManager(), currentStage(), windowTitle(), parent);
+    return new AttributesViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
 }
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
@@ -235,7 +239,10 @@ void AttributesViewPanel::onCellChanged(int row, int column) {
     const PXR_NS::UsdAttribute attr = prim ? prim.GetAttribute(PXR_NS::TfToken(nameItem->text().toStdString()))
                                             : PXR_NS::UsdAttribute();
 
-    if (!attr || !setAttributeFromText(attr, valueItem->text())) {
+    const QString newText = valueItem->text();
+    const bool applied = attr && m_undoManager->apply(currentStage(), tr("Edit %1").arg(nameItem->text()),
+                                                       [&]() { return setAttributeFromText(attr, newText); });
+    if (!applied) {
         // Unsupported type or unparsable text: revert the displayed value
         // rather than leaving an edit that didn't actually apply.
         refreshAttributes();

@@ -15,6 +15,7 @@ namespace usdcc::usd {
 
 class StageManager;
 class UsdPrimTreeModel;
+class UndoManager;
 
 // ViewPanel subclass showing a USD stage's prim hierarchy as a tree: rename
 // (double-click/F2), toggle active/inactive ("disable" — the row's
@@ -26,7 +27,7 @@ class OutlinerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    explicit OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
+    explicit OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage, std::shared_ptr<UndoManager> undoManager,
                                 const QString& title = QStringLiteral("Outliner"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
@@ -37,7 +38,7 @@ protected:
     // Points the tree model at the new stage and restores its selection.
     void onStageChanged(const StageRefPtr& stage) override;
 
-private slots:
+private Q_SLOTS:
     void onTreeSelectionChanged();
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
     void onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath);
@@ -48,6 +49,7 @@ private:
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
     bool m_updatingSelection = false;
+    std::shared_ptr<UndoManager> m_undoManager;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

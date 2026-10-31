@@ -21,6 +21,7 @@
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
@@ -62,6 +63,7 @@ int main(int argc, char** argv) {
     // composition root) rather than by MainWindow, which stays decoupled
     // from any one specific StageManager instance.
     usdcc::usd::StageManager stageManager;
+    auto undoManager = std::make_shared<usdcc::usd::UndoManager>();
 
     usdcc::ui::MainWindow window;
 
@@ -92,10 +94,10 @@ int main(int argc, char** argv) {
     auto* viewport = new usdcc::usd::ViewportViewPanel(&stageManager, initialStage, toolSet, "Viewport", &window);
     auto* centerArea = window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, viewport);
 
-    auto* outliner = new usdcc::usd::OutlinerViewPanel(&stageManager, initialStage, "Outliner", &window);
+    auto* outliner = new usdcc::usd::OutlinerViewPanel(&stageManager, initialStage, undoManager, "Outliner", &window);
     window.dockManager()->addDockWidgetTabToArea(outliner, centerArea);
 
-    auto* attributes = new usdcc::usd::AttributesViewPanel(&stageManager, initialStage, "Attributes", &window);
+    auto* attributes = new usdcc::usd::AttributesViewPanel(&stageManager, initialStage, undoManager, "Attributes", &window);
     window.dockManager()->addDockWidgetTabToArea(attributes, centerArea);
 
     // Every stage opened from here on (e.g. via File > Open Stage below) gets
@@ -136,6 +138,20 @@ int main(int argc, char** argv) {
             stageManager.openStage(path.toStdString());
         }
     });
+
+    QMenu* editMenu = window.mainMenuBar()->addMenu(QObject::tr("&Edit"));
+    QAction* undoAction = editMenu->addAction(QObject::tr("&Undo"));
+    undoAction->setShortcut(QKeySequence::Undo);
+    QObject::connect(undoAction, &QAction::triggered, &window,
+                     [&stageManager, undoManager]() {
+                         if (auto stack = undoManager->stack(stageManager.currentStage())) stack->undo();
+                     });
+    QAction* redoAction = editMenu->addAction(QObject::tr("&Redo"));
+    redoAction->setShortcut(QKeySequence::Redo);
+    QObject::connect(redoAction, &QAction::triggered, &window,
+                     [&stageManager, undoManager]() {
+                         if (auto stack = undoManager->stack(stageManager.currentStage())) stack->redo();
+                     });
 
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).

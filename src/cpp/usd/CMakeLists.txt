@@ -29,6 +29,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/usd_prim_tree_model.h
     include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
+    include/usdcc/usd/undo_manager.h
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
     src/outliner_view_panel.cpp
@@ -37,5 +38,6 @@ add_library(usdcc_usd_ui STATIC
     src/usd_prim_tree_model.cpp
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
+    src/undo_manager.cpp
 )
 target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL)

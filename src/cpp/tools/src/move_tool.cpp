@@ -134,6 +134,9 @@ MoveTool::Handle MoveTool::pickHandle(const ToolContext& ctx, const PXR_NS::GfVe
 
     const double centerDistance =
         (ndcPos - projectToNdc(frame.origin, ctx.viewMatrix, ctx.projMatrix)).GetLength();
+    if (centerDistance < kCenterPickNdc) {
+        return Handle::Center;
+    }
     if (centerDistance < bestDistance) {
         bestDistance = centerDistance;
         best = Handle::Center;
