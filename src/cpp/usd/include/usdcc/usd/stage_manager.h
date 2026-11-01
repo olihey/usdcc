@@ -24,8 +24,10 @@ namespace usdcc::usd {
 // OutlinerViewPanel, AttributesViewPanel) connect to its
 // usdcc::core::Signal members below instead of Qt signals/slots.
 //
-// Single-threaded for now: stage loading is synchronous (see docs/PLAN.md
-// open question #5 — async loading is a later milestone's concern).
+// Not thread-safe: every member except loadUsdStage() must be called from one
+// thread. openStage() loads synchronously; to load without blocking, call
+// loadUsdStage() on a worker thread and hand the result to adoptStage() on the
+// manager's thread (see StageOpener, which does this behind a progress dialog).
 class StageManager {
 public:
     StageManager() = default;
@@ -37,6 +39,17 @@ public:
     // returns the already-open stage rather than creating a second one.
     // Returns a null pointer if the stage failed to open.
     StageRefPtr openStage(const std::string& identifier);
+
+    // The slow half of openStage(): just UsdStage::Open(), touching no
+    // StageManager state, so it is safe to run on any thread. Returns a null
+    // pointer if the stage failed to open. The result is not yet registered;
+    // pass it to adoptStage() on the manager's own thread.
+    static PXR_NS::UsdStageRefPtr loadUsdStage(const std::string& identifier);
+
+    // The other half of openStage(): registers a stage that loadUsdStage()
+    // opened (or returns the existing Stage already wrapping it), fires
+    // stageOpened, and becomes the current stage if none was set yet.
+    StageRefPtr adoptStage(const PXR_NS::UsdStageRefPtr& usdStage);
 
     // Creates and registers a fresh, anonymous, non-file-backed stage (e.g.
     // for a ViewPanel that needs some stage to show and none was given —

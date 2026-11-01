@@ -21,6 +21,7 @@
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/stage_opener.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -131,11 +132,17 @@ int main(int argc, char** argv) {
 
     QMenu* fileMenu = window.mainMenuBar()->addMenu(QObject::tr("&File"));
     QAction* openStageAction = fileMenu->addAction(QObject::tr("&Open Stage..."));
-    QObject::connect(openStageAction, &QAction::triggered, &window, [&stageManager, &window]() {
+    // Opens off the UI thread behind a progress dialog (the stage named on the
+    // command line, above, deliberately just blocks instead: there is no window
+    // yet). Owned by `window`.
+    auto* stageOpener = new usdcc::usd::StageOpener(&stageManager, &window);
+    QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openStageAction,
+                     [openStageAction](bool busy) { openStageAction->setEnabled(!busy); });
+    QObject::connect(openStageAction, &QAction::triggered, &window, [stageOpener, &window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
         if (!path.isEmpty()) {
-            stageManager.openStage(path.toStdString());
+            stageOpener->open(path);
         }
     });
 

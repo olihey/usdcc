@@ -91,6 +91,11 @@ public:
 Q_SIGNALS:
     void rendererPluginsChanged();
 
+    // Emitted once, after the first frame of a stage has been rendered. That
+    // first Render() is when Hydra populates its scene from the stage, so it is
+    // where a big stage's viewport actually stalls the UI.
+    void firstFrameRendered();
+
     // Emitted when a tool (currently just SelectTool) changes the selection
     // itself, so ViewportViewPanel can push it into StageManager and keep
     // every other panel showing this stage in sync.
@@ -136,6 +141,7 @@ private:
     bool m_orbiting = false;
     bool m_panning = false;
     bool m_dragging = false;
+    bool m_firstFrameRendered = false;
 
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     // Redraw triggers; dropped automatically when this window goes away.

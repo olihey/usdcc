@@ -24,6 +24,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/outliner_view_panel.h
+    include/usdcc/usd/stage_opener.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
     include/usdcc/usd/usd_prim_tree_model.h
@@ -33,6 +34,7 @@ add_library(usdcc_usd_ui STATIC
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
     src/outliner_view_panel.cpp
+    src/stage_opener.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp
     src/usd_prim_tree_model.cpp

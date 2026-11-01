@@ -9,7 +9,14 @@
 namespace usdcc::usd {
 
 StageRefPtr StageManager::openStage(const std::string& identifier) {
-    auto usdStage = PXR_NS::UsdStage::Open(identifier);
+    return adoptStage(loadUsdStage(identifier));
+}
+
+PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier) {
+    return PXR_NS::UsdStage::Open(identifier);
+}
+
+StageRefPtr StageManager::adoptStage(const PXR_NS::UsdStageRefPtr& usdStage) {
     if (!usdStage) {
         return nullptr;
     }

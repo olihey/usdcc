@@ -744,6 +744,24 @@ things that will bite later if not addressed early:
     checks unchanged) and live (Move active, click cube then sphere: only the sphere is
     selected and carries the gizmo).
 
+32. **File > Open Stage no longer blocks the UI.** `StageManager::openStage()` is now
+    `adoptStage(loadUsdStage(id))`: `loadUsdStage()` (static, just `UsdStage::Open()`) is safe
+    on a worker thread, `adoptStage()` registers the result on the UI thread. A new
+    `StageOpener` (`usdcc_usd_ui`, Qt) runs the load on a `QThread::create` thread behind a
+    window-modal `QProgressDialog` ("Opening x..."; busy bar, no Cancel or close button since
+    `Open()` can't be interrupted). The dialog appears only after 300 ms so small stages
+    don't flash it. After `adoptStage()` the label becomes "Preparing viewport..." and the
+    dialog stays until the new viewport emits `HydraViewportWindow::firstFrameRendered()` (the
+    first `Render()` is where Hydra builds its scene, and it needs the UI thread's GL
+    context, so it can't be moved off it), with a 10 s safety timeout. If loading alone took
+    over 100 ms that label is shown straight away; otherwise it is only visible if the dialog
+    already was, because a blocked UI thread can't run the timer that would reveal it. A
+    failed open shows a message box. The stage named on the command line still uses the
+    blocking `openStage()` (no window yet, no dialog), and so does the Python binding. File >
+    Open Stage is disabled while an open is in progress. Verified live with a 150k-prim, 26 MB
+    stage (both phases visible, animated bar while loading), a small stage (no dialog), a
+    garbage file (error box) and a command-line open.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
