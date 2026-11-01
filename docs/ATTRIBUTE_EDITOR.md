@@ -1,0 +1,455 @@
+# Attribute Editor Revamp — Plan
+
+*Status: planned, nothing implemented yet. Tracked as milestone M13 in
+[PLAN.md](PLAN.md). Last updated: 2026-11-01.*
+
+## 1. Goal
+
+Replace today's `AttributesViewPanel` (a three-column `QTableWidget` with text-parsed
+values) with a property editor in the style of the reference mockup:
+
+- **One row per property:** label on the left, a type-specific editor on the right.
+- **Collapsible categories:** Transform, Material, Level of Detail, Visibility, Physics, …
+- **Typed editors:** colored X/Y/Z prefixes on vector fields, a swatch plus R/G/B for
+  colors, a filled slider bar for ranged floats, an asset field with browse/link, and an
+  array summary with an Edit button.
+
+The work also adds:
+
+1. An editor for **every USD value type**, plus array variants, with a read-only
+   fallback for anything not covered.
+2. **Meaningful categories**, derived from USD's own schema information where it exists.
+3. A **transform stack** section for `UsdGeomXformable` prims: show, edit, add, remove
+   and reorder xformOps.
+4. **Per-op targeting** for the Move, Rotate and Scale tools. For example, with two scale
+   ops, the Scale tool edits only the one the user picked.
+5. A **Debug menu** with a "USD Data Types…" dialog showing every type's editor side by
+   side.
+
+### Where we start from
+
+These facts constrain the plan:
+
+- `AttributesViewPanel` lists `prim.GetAttributes()` in a table and parses text back via
+  `TfType` dispatch. Arrays, matrices, quaternions and asset paths are read-only.
+- `UndoManager::apply()` snapshots the *whole* edit-target layer to a string before and
+  after each edit. That is fine for one discrete edit. It is far too slow for a value
+  scrubbed 60 times a second, and it would flood the undo stack.
+- **Gizmo drags are not undoable today.** The tools call `UsdAttribute::Set()` directly.
+- The panel refreshes only when the selection or the undo stack index changes. **It does
+  not update during a gizmo drag.** There is no `UsdNotice` listener anywhere.
+- Each tool finds its target op with "first op of type X, create if none" (in
+  `TransformGizmoTool::getOrCreateOp()` and the Rotate tool's `findRotateOp()`). The
+  gizmo frame is always the prim's full local-to-world transform.
+
+## 2. Architecture
+
+New code lives under `src/cpp/usd/`. The split follows the project's "Qt only in UI
+classes" rule:
+
+| Qt-free (target `usdcc_usd`, testable headlessly, bindable to Python) | Qt (target `usdcc_usd_ui`) |
+|---|---|
+| `ValueTypeInfo`: classifies an `SdfValueTypeName` (scalar kind, component count, role, axis labels, array-ness) | Widget kit: `DragNumberField`, `SliderField`, `ColorSwatch`, `AssetPathField`, `TokenComboField`, `MatrixField`, `ArraySummaryField` |
+| `PropertyCategorizer`: prim → ordered categories → property names | `PropertyEditor` base class and `PropertyEditorFactory` (type → editor) |
+| `XformStack`: read, add, remove, reorder and rename xformOps on a `UsdGeomXformable` | `PropertyRow` (label, editor, status badges, context menu) and `CategorySection` (collapsible header) |
+| `StageChangeListener`: wraps `TfNotice` / `UsdNotice::ObjectsChanged` in a `usdcc::core::Signal` | `TransformStackSection`, `ArrayEditorDialog`, `DataTypeGalleryDialog` |
+| Undo edit sessions (see §3) | The rewritten `AttributesViewPanel` |
+
+### 2.1 Editor contract
+
+```cpp
+class PropertyEditor : public QWidget {
+public:
+    virtual void setValue(const VtValue& value) = 0;  // never emits valueEdited
+    virtual void setReadOnly(bool readOnly);
+    virtual void setMixed(bool mixed);                // reserved for multi-selection (§9)
+Q_SIGNALS:
+    void editStarted();                               // press on a field / start typing
+    void valueEdited(const VtValue& value);           // live, possibly many times
+    void editFinished();                              // release / Enter / focus out
+    void editCanceled();                              // Esc: restore the value from editStarted
+};
+```
+
+An `AttributeBinding` connects one editor to one `UsdAttribute`:
+
+- `editStarted` begins an undo edit session.
+- `valueEdited` calls `attr.Set(value, UsdTimeCode::Default())` live, so Hydra updates
+  the viewport while scrubbing.
+- `editFinished` commits the session; `editCanceled` rolls it back.
+
+External changes arrive through `StageChangeListener`. They call `setValue()` on every
+editor except the one currently being edited, so keyboard focus and in-progress typing
+survive a gizmo drag or an undo.
+
+**The panel never rebuilds its widgets on a value change.** It rebuilds only when the
+selected prim changes, or when that prim's *set* of properties changes (a resync notice,
+an op added, a schema applied).
+
+### 2.2 Editor registry
+
+`PropertyEditorFactory` resolves an editor in this order:
+
+1. **Custom editors** registered for `(schema, property name)`. These are for special
+   cases such as `xformOpOrder` (owned by the transform stack) or, later, plugin-provided
+   editors (M9).
+2. Editors for an exact `SdfValueTypeName`, including its role (`color3f`, `normal3f`,
+   …).
+3. Editors for the underlying C++ `TfType` with any role (`GfVec3f`).
+4. The read-only fallback: the `VtValue` printed as text, marked "unsupported type". The
+   panel therefore never silently drops a property.
+
+The registry can be extended from C++ now and from Python in M7/M9.
+
+## 3. Prerequisites: undo sessions and live refresh
+
+These land first because every later phase depends on them.
+
+### 3.1 Undo edit sessions
+
+Extend `UndoManager` with two sets of calls:
+
+- **Explicit sessions:** `beginEdit(stage, description)` snapshots the edit-target
+  layer, and `endEdit()` pushes one `LayerSnapshotCommand` if anything changed.
+  `cancelEdit()` restores the snapshot.
+- **One-shot calls:** the existing `apply()` stays for discrete edits, built on the same
+  begin/end pair.
+
+Both the property editors and the **gizmo tools** use sessions: press = begin,
+release = end. That makes gizmo drags undoable, which closes part of M6.
+
+The tools are Qt-free, so the viewport opens and closes the session around the tool's
+press and release. `ToolResult` gets a flag such as `startedEdit`, so that a press that
+only *selects* does not leave an empty session behind.
+
+Whole-layer snapshots stay acceptable for now. A follow-up (§9) replaces them with
+spec-level inverse edits before large scenes become a real target.
+
+### 3.2 Live refresh
+
+`StageChangeListener` registers once per stage for `UsdNotice::ObjectsChanged` and
+re-emits `ChangedInfoOnlyPaths()` and `GetResyncedPaths()` as a Qt-free signal. The
+attribute panel filters for its prim:
+
+- A changed property path → update that row's value.
+- A resync of the prim → rebuild the panel.
+
+This fixes the stale panel during gizmo drags and after edits from other panels or
+scripts.
+
+## 4. Per-type editors
+
+The type list comes from `SdfSchema::GetInstance().GetAllTypes()` at runtime, not a
+hard-coded list. A type that a future USD version adds shows up in the gallery as
+"unsupported" instead of disappearing.
+
+| USD types | Editor | Notes |
+|---|---|---|
+| `bool` | Checkbox | |
+| `uchar`, `int`, `uint`, `int64`, `uint64` | `DragNumberField` (integer) | Clamped to the C++ type's range |
+| `half`, `float`, `double`, `timecode` | `DragNumberField`, or `SliderField` when limits are known | Range from `UsdAttribute::GetSoftLimits()`/`GetHardLimits()` (USD 26.11) and, for shader inputs, Sdr metadata |
+| `int2/3/4`, `half2/3/4`, `float2/3/4`, `double2/3/4` | N fields prefixed X Y Z W | Axis prefixes red/green/blue, as in the mockup |
+| `point3*`, `vector3*`, `normal3*` | Same as `float3` | Role shown in the tooltip |
+| `texCoord2*`, `texCoord3*` | N fields prefixed U V W | |
+| `color3*`, `color4*` | `ColorSwatch` plus R G B (A) fields | Values are linear. The swatch shows an sRGB-encoded preview, and `QColorDialog` round-trips through that conversion |
+| `quath/f/d` | 4 fields prefixed W X Y Z | Optional read-only Euler hint in the tooltip |
+| `matrix2d/3d/4d`, `frame4d` | `MatrixField`: one-line summary that expands to an N×N grid | For a 4×4 transform, optionally show decomposed T/R/S read-only |
+| `string` | Line edit | Multi-line popup for long text |
+| `token` | `TokenComboField` when `allowedTokens` metadata exists, otherwise a line edit | Covers `visibility`, `purpose`, `orientation`, `subdivisionScheme`, … |
+| `asset` | `AssetPathField`: path field, "…" browse, link button; a second line shows the resolved path | Resolved via `ArResolver`; red text when unresolved |
+| `pathExpression` | Line edit with syntax validation | |
+| `opaque`, `group` | Read-only label | These have no value to edit |
+| any `T[]` | `ArraySummaryField`: `[N] v0, v1, v2…` plus **Edit** | Opens `ArrayEditorDialog` (below) |
+
+**`ArrayEditorDialog`:** a virtualized `QTableView` with one row per element, edited with
+that element type's editor. It supports add, insert, remove and resize, plus paste from
+the clipboard (one element per line). It edits a copy and applies it as one undoable
+edit on OK. It is virtualized because mesh `points` arrays can hold millions of
+elements.
+
+### 4.1 Row features shared by all types
+
+- **Label:** the `displayName` metadata if authored. Otherwise a prettified base name:
+  `primvars:displayColor` becomes "Display Color" and `xformOp:translate` becomes
+  "Translate".
+- **Tooltip:** full property name, value type, role, the schema's documentation string,
+  and which layer holds the strongest opinion.
+- **State badges:**
+  - authored vs. schema fallback (fallback values in dimmed text)
+  - **time-sampled**: no timeline exists yet, so editing is disabled and the badge
+    explains why (see §10)
+  - **connected** (a UsdShade input or attribute connection): shows the source path and
+    is read-only, like the mockup's "Linked · …" sub-line
+  - locked by a stronger layer: an edit would be overridden
+- **Context menu:** Copy value, Paste value, Reset to default (`attr.Clear()` in the
+  edit target), Copy property path, Show in USDA panel (once M8 exists).
+
+### 4.2 The widget kit (matching the mockup)
+
+- **`DragNumberField`:** a dark rounded field with an optional colored axis prefix.
+  - A horizontal drag scrubs the value: Shift makes the step smaller, Ctrl larger.
+  - A click without dragging enters text-edit mode. Esc cancels.
+  - Number formatting follows the mockup (`0.00`, plus a unit suffix such as `°`).
+- **`SliderField`:** a filled bar showing the value (e.g. "0.420"). Click-drag sets the
+  value; double-click types it.
+- **Other widgets:** `ColorSwatch`, the array summary, the token combo and the asset
+  field reuse the existing theme tokens in `dark.qss`. New selectors are scoped by
+  object name, the same way the existing `panelToolbar` and `titleBar` selectors are.
+- **Section headers:** a chevron plus a bold title with a full-width separator, as in
+  the mockup. Collapsed state is remembered per category name in `QSettings`.
+
+## 5. Categories
+
+`PropertyCategorizer` (Qt-free) assigns each property to a category. The first rule that
+matches wins:
+
+1. **Authored `displayGroup` metadata** (`UsdProperty::GetDisplayGroup()`, nested groups
+   via `GetNestedDisplayGroups()`). This is USD's own mechanism, so an asset author's
+   choice is always respected.
+2. **Transform:** `xformOpOrder` and every `xformOp:*`. These are owned by the transform
+   stack section (§6), not shown as plain rows.
+3. **Applied API schemas:** for each schema in `prim.GetAppliedSchemas()`, look up
+   `UsdSchemaRegistry::FindAppliedAPIPrimDefinition(name)->GetPropertyNames()`. Each API
+   gets a section named after it ("Physics Rigid Body", "Material Binding", …). Several
+   instances of a multiple-apply schema get one section per instance.
+4. **Typed schema hierarchy:** walk the prim type's `TfType` ancestry from the base up,
+   for example Imageable → Xformable → Boundable → Gprim → PointBased → Mesh. Look up each
+   level's definition with `FindAbstractPrimDefinition` or `FindConcretePrimDefinition`.
+   Each property goes to the *most basic* schema that declares it. Then map schemas to
+   user-facing names:
+   - Imageable → **Visibility** (visibility, purpose, proxyPrim)
+   - Boundable → **Bounds** (extent)
+   - Gprim → **Display** (displayColor, displayOpacity, doubleSided, orientation)
+   - PointBased / Mesh / Sphere / Camera / Light / … → a section named after the schema
+     (**Mesh**, **Camera**, **Light**, …)
+5. **UsdShade:** `inputs:*` → **Inputs**, `outputs:*` → **Outputs**, on Shader, Material
+   and NodeGraph prims.
+6. **Primvars** that no schema declared → **Primvars**, each showing its interpolation.
+7. Everything else (custom, unschematized) → **Custom**, sub-grouped by namespace
+   (`userProperties:` → "User Properties").
+
+The order puts Transform first, then the typed-schema sections from most derived to
+most basic, then applied APIs, Primvars, Inputs/Outputs, and Custom last.
+
+A **"Prim" header section** sits above all of these: path, type, kind, specifier,
+active, instanceable and applied schemas. Most of it is read-only; active, kind and
+instanceable are editable.
+
+**Panel toolbar additions:**
+- A search field that filters rows by label or property name across categories.
+- A **Show** menu: Authored only / All / include `hidden` properties.
+
+Phase 1 starts with a spike that confirms rule 4's ancestry walk on real prims (Mesh,
+Sphere, Camera, a light, a UsdShade shader). The registry calls exist in 26.11; what the
+spike checks is that the ancestry and definitions line up as expected. If they don't,
+rule 4 falls back to a curated name table for the core UsdGeom schemas.
+
+The **Material** section in the mockup (the bound material's shader inputs shown inline
+on the geometry prim) is a separate, later feature; see §9. Until then, a Material
+section shows the material binding relationship with a "select material" button.
+
+## 6. Transform stack section
+
+The section appears for any `UsdGeomXformable` prim. It replaces the plain rows for
+`xformOp:*` and `xformOpOrder`.
+
+```
+Transform                                   [Reset XForm Stack ☐]  [+ Add ▾]
+  ≡  Translate              X 0.00   Y 1.24   Z 0.00            [×]
+  ≡  Translate (pivot)      X 0.00   Y 0.50   Z 0.00            [×]
+  ≡  Rotate XYZ             X 0°     Y 35°    Z 0°              [×]
+  ≡  Scale                  X 1.00   Y 1.00   Z 1.00            [×]
+  ≡  Scale (second)  ◆      X 2.00   Y 2.00   Z 2.00            [×]   ← tool target
+  ≡  Translate (pivot) ⁻¹   (inverse of "pivot", no value)      [×]
+```
+
+**Rows** follow `GetOrderedXformOps()` order:
+- **Label:** a friendly op name, the suffix in parentheses, and "⁻¹" for `!invert!` ops.
+- **Editor by op type:**
+  - translate, scale, rotateXYZ (and the other five Euler orders) → 3 fields
+  - rotateX/Y/Z → 1 field
+  - orient → quaternion
+  - transform → matrix
+- **Precision:** float, double or half, shown in the tooltip.
+- **Inverse ops** have no editor. They share their attribute with the forward op.
+
+**Actions** (all undoable; the logic lives in Qt-free `XformStack` so it is unit-tested):
+- **Reorder:** drag a row by its "≡" handle, or use Move Up/Down in its context menu.
+  This calls `SetXformOpOrder(newOrder, resetsXformStack)`.
+- **Remove** ("×"): takes the op out of `xformOpOrder`. The attribute itself is also
+  removed (`prim.RemoveProperty`) but only when *all* of these hold:
+  - it is authored in the current edit target,
+  - no remaining op references it (a pivot's inverse op shares the attribute),
+  - no weaker layer defines it.
+
+  Otherwise it is left in place, unused. This matches USD's rule that ops missing from
+  `xformOpOrder` are ignored.
+- **Add** ("+"): Translate, Rotate (XYZ, XZY, YXZ, YZX, ZXY, ZYX, X, Y, Z), Scale, Orient,
+  Transform, and a **Pivot** preset that inserts a `translate:pivot` /
+  `!invert!translate:pivot` pair around the selected op.
+  - New ops go *after the selected row* (or at the end) via `AddXformOp()` followed by a
+    reorder.
+  - A unique suffix is generated when the plain name is taken (`scale` → `scale:scale2`),
+    and the user can rename it from the context menu.
+  - Precision defaults to USD's own default (double).
+- **Reset XForm Stack** checkbox toggles `resetXformStack`.
+- **Context-menu extras:**
+  - Reset op to identity.
+  - "Bake stack to single matrix" (one `transform` op holding the composed local
+    matrix).
+  - "Convert to common TRS" (`UsdGeomXformCommonAPI`), enabled only when the stack is
+    compatible.
+
+**Selecting a row** sets the **tool target op** (§7), shown with the ◆ marker.
+
+## 7. Tools acting on a specific xformOp
+
+### 7.1 Target state
+
+A per-stage "target op" lives next to the selection in `Stage`/`StageManager`:
+`setTargetXformOp(primPath, opName)`, plus a `targetXformOpChanged` signal. An empty
+name means **Auto**, which is today's behaviour: first op of the matching type, created
+if missing.
+
+The target is cleared when the selection changes to a different prim, or when the op
+disappears from the stack.
+
+`ToolContext` gets a `targetOpName` field (`TfToken`), filled by the viewport, so the
+Qt-free tools receive it like the selection.
+
+There are **two ways to set it**, kept in sync:
+1. Select a row in the Attribute editor's transform stack.
+2. A **Target** combo in the viewport's tool options bar. It lists Auto plus every op on
+   the selected prim that the active tool can drive.
+
+### 7.2 Which tool can drive which op
+
+| Tool | Drivable op types |
+|---|---|
+| Move | `translate` (any suffix, including pivots) |
+| Rotate | `rotateXYZ`, the five other Euler orders, `rotateX/Y/Z` (only that axis's ring is drawn and pickable), `orient` (composed as a quaternion and written back exactly) |
+| Scale | `scale` |
+| *(later)* Move/Rotate/Scale | a `transform` matrix op: decompose, apply, recompose |
+
+**When the target and the active tool don't match** (e.g. a scale op is targeted while
+Move is active), selecting a row **switches to the tool that can drive it**:
+translate → Move, rotate/orient → Rotate, scale → Scale. If the user then picks an
+incompatible tool by hand, the gizmo is drawn dimmed and does nothing. The options bar
+explains: "Target is a Scale op; choose Auto or a Translate op." Silently editing a
+different op would defeat the purpose of targeting.
+
+### 7.3 The maths: the op's own frame
+
+Today the gizmo frame is the prim's whole local-to-world matrix. That is correct only
+when the edited op is the first in a plain TRS stack.
+
+For a target op at index k, split the composed transform. USD uses row vectors, and
+ops listed earlier in `xformOpOrder` are applied *last*:
+
+```
+world = Inner · Op_k · Outer · ParentToWorld
+Inner = product of the ops after k   (applied to the point before Op_k)
+Outer = product of the ops before k  (applied after Op_k)
+```
+
+Each op's matrix comes from `UsdGeomXformOp::GetOpTransform()`.
+
+- **Gizmo frame for op k** = `Outer · ParentToWorld`, the space Op_k's result lives in.
+  Its translation is the gizmo origin and its rows are the axes, stripped of scale as
+  `GizmoFrame` already does. A pivot falls out of this: when the preceding
+  `translate:pivot` is part of `Outer`, the gizmo sits at the pivot.
+- **Move** on a translate op: convert the world-space delta into that frame (inverse of
+  `Outer · ParentToWorld`, direction only) and add it to the op's value.
+- **Rotate** on a rotate op: the composition the Rotate fix introduced
+  (R' = Rot_axis(θ) · R_start), with axes taken from the op frame instead of the prim
+  frame. The decomposition generalizes from XYZ to all six Euler orders, with the same
+  nearest-continuous and gimbal handling. Single-axis ops add θ directly. `orient` ops
+  compose quaternions.
+- **Scale** on a scale op: per-axis or uniform ratio applied to that op only, with axes
+  from the op frame.
+- **Other ops** are only read, never written. The two-scale-ops case is exactly this:
+  target `scale:second`, and `scale` keeps its value.
+
+`TransformGizmoTool` gets an `opFrame(xformable, opIndex)` helper and a
+`resolveTargetOp(ctx, allowedTypes)` that replaces `getOrCreateOp` and `findRotateOp`.
+Auto mode keeps today's behaviour exactly.
+
+### 7.4 Tests
+
+The headless tool harness becomes a real test target (§8). It covers:
+- two scale ops, each edited independently
+- a pivot sandwich (rotate about a pivot)
+- a target op in the middle of a 5-op stack, under a rotated and scaled parent
+- all six Euler orders
+- `rotateY` single-axis
+- `orient`
+- target cleared when the op is removed
+- a mismatched tool/op leaves everything unchanged
+
+## 8. Debug menu and the "USD Data Types" gallery
+
+- A new top-level **Debug** menu goes after View. It is always present for now; a
+  setting can hide it once M10's Settings dialog exists.
+- **Debug > USD Data Types…** opens a non-modal `DataTypeGalleryDialog`:
+  - **Contents:**
+    - Every type from `SdfSchema::GetAllTypes()`, grouped as Scalars, Vectors,
+      Points/Normals/Vectors, Texture Coordinates, Colors, Quaternions, Matrices,
+      Strings & Paths, Other, and Arrays (one tab per group).
+    - Each row is a real `PropertyRow`. It shows the type name, the C++ type and the
+      role, and is bound to a real attribute on a prim in a scratch in-memory stage, so
+      the editors are fully functional.
+    - Each attribute is preset with a sample value; arrays get a few elements.
+    - Types without an editor show the fallback and are counted in an "N unsupported"
+      footer.
+  - **Toggles that preview every row state:** read-only, fallback (unauthored),
+    time-sampled, connected, and limits (soft limits set on the scalar rows to exercise
+    the slider).
+  - **Edits are recorded** in an in-dialog log line ("float3 → (1, 2, 3)"), so the
+    `valueEdited` / `editFinished` sequence can be checked by eye.
+- The dialog is also the widget kit's visual test bench. It lands *before* the panel
+  rewrite (phase 2), so every editor is reviewed in isolation first.
+
+## 9. Out of scope for this plan
+
+- **Inline material editing:** the mockup's Material section shows the bound material's
+  surface-shader inputs, resolved via `UsdShadeMaterialBindingAPI::ComputeBoundMaterial`
+  and edited on the geometry prim. It is planned as a follow-up once the base editor is
+  done.
+- **Multi-selection editing:** the editor shows the first selected prim, as today. The
+  editor contract already has `setMixed()` for later.
+- **Relationship editing** beyond showing targets read-only (material binding, proxyPrim,
+  collection targets).
+- **Animation:** editing time samples and keyframing. This needs a timeline first.
+- **Faster undo:** spec-level inverse edits instead of whole-layer snapshots. This is
+  needed before large-scene performance work in M12.
+- **Python and plugin-registered custom editors:** the registry is designed for them,
+  but the bindings come with M7/M9.
+
+## 10. Decisions taken as defaults
+
+Each of these can be changed before the phase that needs it starts:
+
+| # | Question | Default used by this plan |
+|---|---|---|
+| 1 | Time-sampled attributes, with no timeline yet | Show the value at `Default` (or the first sample if there is no default), editing disabled, with an "animated" badge |
+| 2 | Units like "5.0 m" in the mockup | No distance units at first. Degrees get `°`. Unit display based on `metersPerUnit` is a later option |
+| 3 | The link button on the asset field | Toggles between a layer-relative path and an absolute path. The resolved path is always shown below |
+| 4 | Debug menu visibility | Always shown until a setting exists (M10) |
+| 5 | A row selected for a tool the user hasn't picked | Auto-switch to the matching tool (§7.2) |
+| 6 | Removing an op | Remove from `xformOpOrder`, and delete the attribute when that is safe (§6) |
+
+## 11. Phases
+
+Each phase ends with something usable and verified.
+
+| Phase | Content | Verification |
+|---|---|---|
+| **1. Foundations** | Undo edit sessions (§3.1), including **undoable gizmo drags**. `StageChangeListener` and live panel refresh (§3.2). `ValueTypeInfo`. A real test target replacing the scratch harnesses. Categorizer spike (§5) | Unit tests for sessions (one undo step per drag, cancel restores). The current table panel updates live during a gizmo drag. Undo of a Move drag works |
+| **2. Widget kit + gallery** | `DragNumberField`, `SliderField`, `ColorSwatch`, `TokenComboField`, `AssetPathField`, `MatrixField`, `ArraySummaryField` + `ArrayEditorDialog`; `PropertyEditor`, the factory and `PropertyRow`; theme additions. **Debug menu + USD Data Types dialog** (§8) | Every type from `GetAllTypes()` shows an editor or a counted fallback. The goal is zero unsupported types except `opaque`/`group`. Edits round-trip on the scratch stage. Screenshots reviewed against the mockup |
+| **3. New panel** | Rewritten `AttributesViewPanel`: scroll area, "Prim" header, `PropertyCategorizer` sections, search, Show filter, badges, context menu, collapsed state persisted | Categorizer unit tests on Mesh/Sphere/Camera/Light/Shader/custom prims. Live edit of each category reflected in the viewport. Undo of panel edits works |
+| **4. Transform stack** | `XformStack` (Qt-free) and `TransformStackSection`: values, add, remove, reorder, pivot preset, resetXformStack, bake/convert actions | Unit tests for every stack operation, including the inverse-op attribute-sharing case and weaker-layer opinions. All actions undoable |
+| **5. Tool targeting** | Target-op state, options-bar Target combo, row selection ↔ target sync, `opFrame`/`resolveTargetOp`, Euler orders, single-axis rotate, orient | §7.4 test list. Live check with a pivot-sandwich asset and a two-scale-op asset |
+
+Phases 1 and 2 are independent and can run in parallel. Phase 3 needs both. Phases 4 and
+5 need 3, but 5's maths (`opFrame`, Euler orders) can start against the tool tests
+right after phase 1.

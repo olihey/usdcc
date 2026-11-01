@@ -872,6 +872,18 @@ several of them rather than as a discrete phase.
 - Exit criteria: defined performance targets met; no known crash-on-plugin-error paths;
   documentation set complete.
 
+### M13 — Attribute Editor Revamp
+- **Goal:** a categorized property editor with a typed editor for every USD value type,
+  a transform-stack editor, and Move/Rotate/Scale that can target one specific xformOp.
+- Deliverables: see [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md). Undo edit sessions
+  (which also make gizmo drags undoable) and live panel refresh; widget kit plus
+  Debug > USD Data Types gallery; rewritten `AttributesViewPanel` with schema-derived
+  categories; transform stack add/remove/reorder; per-op tool targeting.
+- Exit criteria: every `SdfSchema::GetAllTypes()` type has an editor or a counted
+  fallback; the panel updates live during gizmo drags; every panel, stack and gizmo
+  edit is a single undo step; with two scale ops, the Scale tool edits only the
+  targeted one.
+
 ## 8. Cross-Cutting Workstreams
 
 These run throughout, not as discrete milestones:
@@ -902,3 +914,4 @@ These run throughout, not as discrete milestones:
 | M10 Dialogs & Settings | Not started |
 | M11 Packaging & Deployment | Not started |
 | M12 Hardening & Release Readiness | Not started |
+| M13 Attribute Editor Revamp | Planned — [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md) |
