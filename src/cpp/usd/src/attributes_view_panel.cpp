@@ -5,6 +5,7 @@
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
+#include "usdcc/usd/properties/transform_stack_editor.h"
 #include "usdcc/usd/property_categorizer.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -17,6 +18,7 @@
 #include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/primvar.h>
+#include <pxr/usd/usdGeom/xformable.h>
 
 #include <QAction>
 #include <QComboBox>
@@ -32,6 +34,7 @@
 #include <QWidget>
 
 #include <functional>
+#include <set>
 #include <utility>
 
 namespace usdcc::usd {
@@ -181,6 +184,14 @@ std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
     if (!prim) return {};
     std::string signature = prim.GetTypeName().GetString();
     signature += prim.IsActive() ? "|a" : "|i";
+    // The op order too: moving an inverse op changes no property, only the order.
+    if (const UsdGeomXformable xformable{prim}) {
+        bool resets = false;
+        signature += "|ops:";
+        for (const UsdGeomXformOp& op : xformable.GetOrderedXformOps(&resets)) {
+            signature += op.GetOpName().GetString() + ",";
+        }
+    }
     const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
     for (const PropertyCategory& category : categorizeProperties(prim, options)) {
         signature += "|" + category.key + ":";
@@ -212,6 +223,7 @@ void AttributesViewPanel::rebuild() {
     m_rows.clear();
     m_sections.clear();
     m_primSection = nullptr;
+    m_xformEditor = nullptr;
     m_header = {};
     m_rebuildPending = false;
     m_refreshPending = false;
@@ -240,11 +252,28 @@ void AttributesViewPanel::rebuild() {
     buildPrimSection(prim, layout);
 
     const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
-    for (const PropertyCategory& category : categorizeProperties(prim, options)) {
+    std::vector<PropertyCategory> categories = categorizeProperties(prim, options);
+    // Every xformable prim gets the Transform section, even with nothing to
+    // list (Authored Only, no ops yet): it is where ops are added.
+    const bool xformable = static_cast<bool>(UsdGeomXformable(prim));
+    if (xformable && (categories.empty() || categories.front().key != "transform")) {
+        categories.insert(categories.begin(), PropertyCategory{"transform", "Transform", {}});
+    }
+    for (const PropertyCategory& category : categories) {
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
+        std::set<TfToken> inStack;
+        if (category.key == "transform" && xformable) {
+            buildTransformStack(prim, section, inStack);
+        }
         for (const UsdProperty& property : category.properties) {
+            if (inStack.count(property.GetName()) || property.GetName() == UsdGeomTokens->xformOpOrder) {
+                continue;  // shown (and edited) by the transform stack
+            }
             Row row = buildRow(property, category);
             row.section = section;
+            if (category.key == "transform") {
+                row.row->setNote(tr("not in stack"));  // an xformOp:* attribute xformOpOrder doesn't use
+            }
             section->addRow(row.row);
             m_rows.push_back(row);
         }
@@ -257,6 +286,25 @@ void AttributesViewPanel::rebuild() {
     applyFilter();
     // The scroll range is only known once the new content has been laid out.
     QTimer::singleShot(0, this, [this, scrollPosition]() { m_scroll->verticalScrollBar()->setValue(scrollPosition); });
+}
+
+void AttributesViewPanel::buildTransformStack(const UsdPrim& prim, CategorySection* section, std::set<TfToken>& inStack) {
+    m_xformEditor = new properties::TransformStackEditor(section, prim, currentStage(), m_undoManager.get(), section);
+    for (const auto& opRow : m_xformEditor->rows()) {
+        Row row;
+        row.row = opRow.row;
+        row.binding = opRow.binding;
+        row.editor = opRow.row->editor();
+        row.section = section;
+        row.property = prim.GetAttribute(opRow.attrName);
+        row.searchText = (opRow.row->labelText() + QLatin1Char(' ') + qs(opRow.opName.GetString())).toLower();
+        row.managedByStack = true;
+        if (row.binding) {
+            connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
+        }
+        m_rows.push_back(row);
+        inStack.insert(opRow.attrName);
+    }
 }
 
 void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* layout) {
@@ -396,6 +444,7 @@ void AttributesViewPanel::refreshValues() {
         return;
     }
     refreshPrimHeader(prim);
+    if (m_xformEditor) m_xformEditor->refresh();
     for (Row& row : m_rows) {
         if (row.binding) row.binding->refresh();
         updateRowState(row);
@@ -464,14 +513,15 @@ void AttributesViewPanel::processPendingChanges() {
     // Never rebuild under a gesture (it would delete the widget being dragged);
     // the gesture's end calls back here.
     if (anyEditing()) return;
-    if (m_rebuildPending) {
-        m_rebuildPending = false;
-        // A resync doesn't always change what's shown (e.g. the first edit of a
-        // schema attribute creates its spec): then just refresh the values.
-        if (layoutSignature(currentPrim()) != m_signature) {
-            rebuild();
-            return;
-        }
+    m_rebuildPending = false;
+    // Rebuild only if what's shown changed — and check that for value changes
+    // too: reordering transform ops only changes xformOpOrder's value, which
+    // USD reports as a plain value change, not a resync. Conversely a resync
+    // doesn't always change anything shown (e.g. the first edit of a schema
+    // attribute creates its spec): then just refresh the values.
+    if (layoutSignature(currentPrim()) != m_signature) {
+        rebuild();
+        return;
     }
     refreshValues();
 }

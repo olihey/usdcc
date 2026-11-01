@@ -93,6 +93,14 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // came from (undo/redo, another panel, a script) — requestUpdate() folds a
     // burst of notices into one frame.
     m_stageChangedConnection = stage->changed.connect([this](const StageChanges&) { m_viewport->requestUpdate(); });
+    m_targetConnection = stage->targetXformOpChanged.connect([this]() { syncTarget(); });
+    syncTarget();
+}
+
+void ViewportViewPanel::syncTarget() {
+    const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(currentStage());
+    m_viewport->setTargetXformOp(selection.empty() ? PXR_NS::TfToken()
+                                                   : currentStage()->targetXformOpFor(selection.front()));
 }
 
 void ViewportViewPanel::refreshRendererCombo() {
@@ -127,6 +135,7 @@ void ViewportViewPanel::onSelectionRequested(std::vector<PXR_NS::SdfPath> paths)
 void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
     if (stage == currentStage()) {
         m_viewport->setSelectedPaths(std::move(paths));
+        syncTarget();
     }
 }
 

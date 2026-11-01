@@ -12,6 +12,7 @@
 #include <QString>
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,7 @@ class AttributeBinding;
 class CategorySection;
 class PropertyEditor;
 class PropertyRow;
+class TransformStackEditor;
 }  // namespace properties
 
 // ViewPanel subclass showing and editing the properties of the selected prim
@@ -74,6 +76,7 @@ private:
         properties::CategorySection* section = nullptr;
         PXR_NS::UsdProperty property;
         QString searchText;  // label and name, lower case
+        bool managedByStack = false;  // a transform-stack row (TransformStackEditor owns its actions)
     };
     struct PrimHeader {
         properties::PropertyEditor* path = nullptr;
@@ -92,6 +95,8 @@ private:
     void updateRowState(Row& row);
     void applyFilter();
     void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
+    void buildTransformStack(const PXR_NS::UsdPrim& prim, properties::CategorySection* section,
+                             std::set<PXR_NS::TfToken>& inStack);
     Row buildRow(const PXR_NS::UsdProperty& property, const PropertyCategory& category);
     properties::CategorySection* makeSection(const QString& key, const QString& title);
     void onStageObjectsChanged(const StageChanges& changes);
@@ -113,6 +118,7 @@ private:
     std::vector<Row> m_rows;
     std::vector<properties::CategorySection*> m_sections;
     properties::CategorySection* m_primSection = nullptr;
+    properties::TransformStackEditor* m_xformEditor = nullptr;
     PrimHeader m_header;
     std::string m_signature;  // what the current rows were built from
 

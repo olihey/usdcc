@@ -5,6 +5,7 @@
 #include <pxr/base/gf/vec2d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/gf/vec4f.h>
+#include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -124,6 +125,11 @@ struct ToolContext {
     // path if nothing was hit. Backed by
     // UsdImagingGLEngine::TestIntersection in HydraViewportWindow.
     std::function<PXR_NS::SdfPath(const PXR_NS::GfVec2d& ndcPos)> pickPrim;
+
+    // The transform op the user chose for the selected prim (e.g.
+    // "xformOp:scale:second"), or empty for Auto: each transform tool then acts
+    // on the first op of its own type. See docs/ATTRIBUTE_EDITOR.md §7.
+    PXR_NS::TfToken targetOpName;
 };
 
 // Outcome of a mouse event handled by a Tool.

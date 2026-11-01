@@ -3,6 +3,7 @@
 #include "usdcc/tools/transform_gizmo_tool.h"
 
 #include <pxr/base/gf/matrix3d.h>
+#include <pxr/base/gf/vec4d.h>
 
 namespace usdcc::tools {
 
@@ -34,10 +35,19 @@ public:
 protected:
     ToolResult beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
                               const PXR_NS::GfRay& ray) override;
+    // Any rotate op (the six Euler orders, rotateX/Y/Z) and orient.
+    bool canDrive(PXR_NS::UsdGeomXformOp::Type type) const override;
 
 private:
-    Handle pickRing(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
+    // `onlyAxis` (0-2) restricts picking to one ring, for a targeted rotateX/Y/Z op.
+    Handle pickRing(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame,
+                    int onlyAxis = -1) const;
     static PXR_NS::GfVec3d axisForHandle(Handle handle, const GizmoFrame& frame);
+
+    // Set while dragging a targeted op (Auto mode leaves it invalid).
+    PXR_NS::UsdGeomXformOp m_targetOp;
+    double m_startAngle = 0.0;  // a single-axis op's value at press
+    PXR_NS::GfVec4d m_lastQuat{1.0, 0.0, 0.0, 0.0};  // an orient op's last value (real, i, j, k)
 
     GizmoFrame m_dragFrame;                        // gizmo origin/axes (the prim's object space) at drag start
     PXR_NS::GfVec3d m_lastVector{1.0, 0.0, 0.0};  // last frame's origin-to-hit vector, projected onto the ring plane

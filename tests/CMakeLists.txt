@@ -13,6 +13,9 @@ add_executable(usdcc_tests
     stage_changes_test.cpp
     undo_manager_test.cpp
     value_type_info_test.cpp
+    xform_math_test.cpp
+    xform_stack_test.cpp
+    xform_target_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
 

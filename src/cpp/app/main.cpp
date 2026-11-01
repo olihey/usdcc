@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
     // driven by the tool rail / options bar in the main window's layout (the
     // toolbars are owned by `window`).
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
-    new usdcc::usd::ViewportToolBars(&window, toolSet);
+    new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
 
     // A ViewPanel always has an associated Stage (see docs/PLAN.md §6
     // "ViewPanel: mandatory Stage association") — resolve one *before*

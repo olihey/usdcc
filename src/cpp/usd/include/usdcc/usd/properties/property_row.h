@@ -3,7 +3,10 @@
 #include <QString>
 #include <QWidget>
 
+#include <functional>
+
 class QLabel;
+class QMenu;
 
 namespace usdcc::usd::properties {
 
@@ -36,7 +39,14 @@ public:
     void setPropertyPath(const QString& path) { m_propertyPath = path; }
     // An extra control after the editor (e.g. a relationship's "Select" button).
     void addTrailingWidget(QWidget* widget);
+    // An extra control before the label (e.g. a transform op's drag handle).
+    void addLeadingWidget(QWidget* widget);
     QString labelText() const;
+
+    // Marks the row as the tool target (the transform stack's selected op).
+    void setTargeted(bool targeted);
+    // Adds entries to the row's context menu (after the standard ones).
+    void setExtraMenu(std::function<void(QMenu*)> populate) { m_extraMenu = std::move(populate); }
 
     void setUnauthored(bool unauthored);
     void setAnimated(bool animated);
@@ -47,9 +57,12 @@ public:
 Q_SIGNALS:
     // "Reset to Default" from the context menu: clear the authored value.
     void resetRequested();
+    // The label was clicked.
+    void labelClicked();
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void updateReadOnly();
@@ -60,11 +73,14 @@ private:
     QLabel* m_note;
     QLabel* m_badge;
     QLabel* m_subLine;
+    QWidget* m_valueColumn;
     QString m_propertyPath;
     QString m_connectedSource;
     bool m_animated = false;
     bool m_readOnly = false;
     bool m_resettable = false;
+    QString m_labelText;
+    std::function<void(QMenu*)> m_extraMenu;
 };
 
 }  // namespace usdcc::usd::properties

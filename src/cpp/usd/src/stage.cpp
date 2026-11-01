@@ -5,7 +5,10 @@
 #include <pxr/usd/usd/notice.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageCache.h>
+#include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdUtils/stageCache.h>
+
+#include <algorithm>
 
 namespace usdcc::usd {
 
@@ -51,6 +54,11 @@ private:
         for (const auto& path : notice.GetChangedInfoOnlyPaths()) {
             changes.changedInfoOnlyPaths.push_back(path);
         }
+        // Drop a tool target whose op is no longer in the stack, before
+        // anyone reacts to the change.
+        if (!m_owner.m_targetOp.IsEmpty() && changes.affectsPrim(m_owner.m_targetPrim)) {
+            m_owner.validateTarget();
+        }
         m_owner.changed(changes);
     }
 
@@ -64,5 +72,27 @@ Stage::Stage(PXR_NS::UsdStageRefPtr usdStage)
       m_changeListener(std::make_unique<ChangeListener>(*this)) {}
 
 Stage::~Stage() = default;
+
+PXR_NS::TfToken Stage::targetXformOpFor(const PXR_NS::SdfPath& primPath) const {
+    return primPath == m_targetPrim ? m_targetOp : PXR_NS::TfToken();
+}
+
+void Stage::setTargetXformOp(const PXR_NS::SdfPath& primPath, const PXR_NS::TfToken& opName) {
+    const PXR_NS::SdfPath prim = opName.IsEmpty() ? PXR_NS::SdfPath() : primPath;
+    if (prim == m_targetPrim && opName == m_targetOp) return;
+    m_targetPrim = prim;
+    m_targetOp = opName;
+    targetXformOpChanged();
+}
+
+void Stage::validateTarget() {
+    const PXR_NS::UsdPrim prim = m_usdStage->GetPrimAtPath(m_targetPrim);
+    PXR_NS::VtTokenArray order;
+    const PXR_NS::UsdGeomXformable xformable(prim);
+    if (xformable) xformable.GetXformOpOrderAttr().Get(&order);
+    if (std::find(order.begin(), order.end(), m_targetOp) == order.end()) {
+        clearTargetXformOp();
+    }
+}
 
 }  // namespace usdcc::usd

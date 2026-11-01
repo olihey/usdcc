@@ -1,6 +1,6 @@
 # Attribute Editor Revamp — Plan
 
-*Status: phases 1–3 done (see §12); phases 4–5 not started. Tracked as milestone M13
+*Status: all five phases done (see §12); §9 lists what remains out of scope. Tracked as milestone M13
 in [PLAN.md](PLAN.md). Last updated: 2026-11-01.*
 
 ## 1. Goal
@@ -329,7 +329,7 @@ There are **two ways to set it**, kept in sync:
 | Move | `translate` (any suffix, including pivots) |
 | Rotate | `rotateXYZ`, the five other Euler orders, `rotateX/Y/Z` (only that axis's ring is drawn and pickable), `orient` (composed as a quaternion and written back exactly) |
 | Scale | `scale` |
-| *(later)* Move/Rotate/Scale | a `transform` matrix op: decompose, apply, recompose |
+| Move, Rotate and Scale | a `transform` matrix op, each tool editing only its part of it (see §12, "Matrix ops") |
 
 **When the target and the active tool don't match** (e.g. a scale op is targeted while
 Move is active), selecting a row **switches to the tool that can drive it**:
@@ -447,14 +447,14 @@ Each phase ends with something usable and verified.
 | **1. Foundations** *(done)* | Undo edit sessions (§3.1), including **undoable gizmo drags**. `StageChangeListener` and live panel refresh (§3.2). `ValueTypeInfo`. A real test target replacing the scratch harnesses. Categorizer spike (§5) | Unit tests for sessions (one undo step per drag, cancel restores). The current table panel updates live during a gizmo drag. Undo of a Move drag works |
 | **2. Widget kit + gallery** *(done)* | `DragNumberField`, `SliderField`, `ColorSwatch`, `TokenComboField`, `AssetPathField`, `MatrixField`, `ArraySummaryField` + `ArrayEditorDialog`; `PropertyEditor`, the factory and `PropertyRow`; theme additions. **Debug menu + USD Data Types dialog** (§8) | Every type from `GetAllTypes()` shows an editor or a counted fallback. The goal is zero unsupported types except `opaque`/`group`. Edits round-trip on the scratch stage. Screenshots reviewed against the mockup |
 | **3. New panel** *(done)* | Rewritten `AttributesViewPanel`: scroll area, "Prim" header, `PropertyCategorizer` sections, search, Show filter, badges, context menu, collapsed state persisted | Categorizer unit tests on Mesh/Sphere/Camera/Light/Shader/custom prims. Live edit of each category reflected in the viewport. Undo of panel edits works |
-| **4. Transform stack** | `XformStack` (Qt-free) and `TransformStackSection`: values, add, remove, reorder, pivot preset, resetXformStack, bake/convert actions | Unit tests for every stack operation, including the inverse-op attribute-sharing case and weaker-layer opinions. All actions undoable |
-| **5. Tool targeting** | Target-op state, options-bar Target combo, row selection ↔ target sync, `opFrame`/`resolveTargetOp`, Euler orders, single-axis rotate, orient | §7.4 test list. Live check with a pivot-sandwich asset and a two-scale-op asset |
+| **4. Transform stack** *(done)* | `XformStack` (Qt-free) and `TransformStackSection`: values, add, remove, reorder, pivot preset, resetXformStack, bake/convert actions | Unit tests for every stack operation, including the inverse-op attribute-sharing case and weaker-layer opinions. All actions undoable |
+| **5. Tool targeting** *(done)* | Target-op state, options-bar Target combo, row selection ↔ target sync, `opFrame`/`resolveTargetOp`, Euler orders, single-axis rotate, orient | §7.4 test list. Live check with a pivot-sandwich asset and a two-scale-op asset |
 
 Phases 1 and 2 are independent and can run in parallel. Phase 3 needs both. Phases 4 and
 5 need 3, but 5's maths (`opFrame`, Euler orders) can start against the tool tests
 right after phase 1.
 
-## 12. What phases 1–3 built
+## 12. What was built
 
 Where the result differs from the plan above, this section is the current truth.
 
@@ -597,3 +597,114 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
   - search, Authored Only, and a collapsed section staying collapsed across prims
   - the binding's Select jumps to the material
   - deactivating a prim from the header, and undoing it
+
+### Phase 4: transform stack
+
+- **`XformStack`** (`usdcc_usd`, Qt-free) implements every §6 operation:
+  - move, add (unique suffixes, identity starting values, inserted at an index)
+  - remove, with the attribute deleted only when no remaining op uses it and the edit
+    target holds its only opinion
+  - addPivot (a `translate:pivot` / `!invert!` pair around an op)
+  - rename (value, time samples and inverse references follow)
+  - resetToIdentity, resetXformStack
+  - bakeToMatrix, and convertToTRS (refused for sheared matrices)
+
+  Bake and convert keep the `!resetXformStack!` marker, which `ClearXformOpOrder()`
+  would otherwise drop.
+- **Shared maths:** `xform_math` (`usdcc_usd`) has `eulerToMatrix`/`matrixToEuler` for all
+  six Euler orders and `composeOps`. `matrixToEuler` checks every candidate by
+  recomposing it, rather than trusting a hand-derived sign table. It keeps the result
+  nearest-continuous with the previous value, and at gimbal lock holds the last-applied
+  angle. The Rotate tool's Auto mode now uses it too. `usdcc_tools` links `usdcc_usd`
+  for this; both are Qt-free.
+- **`TransformStackEditor`** (`usdcc_usd_ui`) builds the Transform section:
+  - **Header:** a Reset Stack checkbox and a "+ Add" menu with every op type plus Bake
+    and Convert.
+  - **Rows:** one per op, with a "≡" grip, the label (suffix in parentheses, "⁻¹" for
+    inverses), the value's editor (`°` on rotations) and a "×" remove button.
+  - **Context menu:** Move Up/Down, Use as Tool Target, Rename Suffix…, Reset to
+    Identity, Add Pivot Around, Remove, Bake, Convert.
+  - **Undo:** every action is one undo step.
+  - Every xformable prim gets the section, even under Authored Only, since it is where
+    ops are added. `xformOp:*` attributes missing from the order still show, marked
+    "not in stack".
+- **Reordering is an in-widget drag** (grip, drop line, move on release) rather than
+  `QDrag`, since rows only move within their own list.
+- **Fixed along the way:** reordering changes only `xformOpOrder`'s *value*, which USD
+  reports as a value change, not a resync. So the panel now compares its layout signature
+  (which includes the op order) on every update, not just on resyncs.
+
+### Phase 5: per-op tool targeting
+
+- **Target state:** the target lives on `Stage` (`targetPrim()`, `targetXformOp()`,
+  `targetXformOpFor()`, `setTargetXformOp()`, `targetXformOpChanged`) rather than on
+  `StageManager`, next to the selection it belongs to.
+  - It clears itself when its op leaves `xformOpOrder` (checked on the stage's change
+    notice).
+  - `StageManager::setSelectedPaths()` clears it when the selection moves to another
+    prim.
+- **Tools:**
+  - `ToolContext::targetOpName` carries the target, filled in by `HydraViewportWindow`
+    from `ViewportViewPanel`.
+  - `TransformGizmoTool` has `resolveTarget()`, `canDrive()`, `opFrame()` (Op_k · Outer ·
+    ParentToWorld), `opValueSpace()` and precision-agnostic `readOpNumbers()` /
+    `writeOpNumbers()`.
+  - **Auto mode** (no target, or one naming an op not in the stack) runs exactly the old
+    code paths, and the existing tool tests still pass.
+  - **Move** adds the world delta converted into the op's value space. Space: World still
+    gives world axes.
+  - **Rotate** rotates the op's own matrix about the ring axis and converts back for all
+    six Euler orders. Single-axis ops draw and pick only their ring and add the angle.
+    Orient composes quaternions with sign continuity.
+  - **Scale** writes the ratio to the targeted op only.
+  - **A target the active tool can't drive** gives a grey gizmo; a press on it is
+    swallowed with no edit.
+- **UI:**
+  - Clicking an op label in the stack toggles the target; the row turns blue with "◆".
+  - The tool options bar has a **Target** dropdown (Auto plus the ops the active tool can
+    drive) that follows the *current* stage. Picking a stack row whose op the active tool
+    can't drive switches to the tool that can.
+  - With an incompatible tool picked by hand, an orange hint explains the grey gizmo.
+- **Tests:** 1,228 checks in total.
+  - `xform_math_test` covers USD agreement, 200 random round trips per order, gimbal
+    lock and continuity.
+  - `xform_stack_test` covers every operation, including a weaker-layer opinion.
+  - `xform_target_test` covers the §7.4 list: two scale ops, the pivot sandwich, a
+    mid-stack target under a rotated and scaled parent, all six orders, rotateY, orient,
+    target clearing, and a mismatched tool.
+- **Verified live** (`twoscale.usda`: translate, rotateXYZ, scale, scale:second):
+  - the stack rows
+  - clicking "Scale (second)" marks it, switches to Scale and fills the Target dropdown
+  - the gizmo follows the op's rotated frame, and a drag changed only `scale:second`
+    (1.5 → 5.49)
+  - drag-reorder
+  - the context menu
+  - "+ Add" → Rotate Y
+  - picking Move by hand greys the gizmo and shows the hint
+
+### Matrix ops
+
+A targeted `transform` (matrix4d) op can be edited with all three tools; there is no
+decompose/recompose step, so nothing the user didn't touch can drift.
+
+- **Each tool edits only its part of the matrix:**
+  - **Move** adds the drag (converted into the op's value space, as for translate ops) to
+    the translation row. The 3×3 part is untouched.
+  - **Rotate** turns the 3×3 part about the drawn ring axis (that axis's matrix row, in
+    value space), applied after the matrix's own scale: A' = A · Rot. The object turns
+    rigidly about the axis you see. Rows stay orthogonal and keep their lengths, so no
+    shear appears even with non-uniform scale. The translation row is untouched.
+  - **Scale** scales the grabbed axis's row (all three for uniform scale): the matrix's
+    own scale, applied before its rotation. The translation row is untouched.
+- **Tool choice:** `toolCanDrive()` accepts a matrix op for Move, Rotate and Scale.
+  Picking a matrix row while Select is active switches to Move; with one of the three
+  already active, the tool stays.
+- **Tests:** `xform_target_test` [9] uses a matrix with rotation, non-uniform scale and
+  translation, after a translate op and under a rotated parent. Move shifts the op origin
+  by exactly the drag and leaves the 3×3 alone. Rotate matches A · Rot(drawn axis), keeps
+  the translation, adds no shear and keeps the scale. Scale changes only the grabbed row.
+  1,249 checks in total.
+- **Verified live** with a box whose only op is a rotated, non-uniformly scaled matrix:
+  - picking the row switches to Move with Target "Transform"
+  - the Rotate rings follow the matrix
+  - a ring drag turns the box about its own Y axis and it stays rectangular

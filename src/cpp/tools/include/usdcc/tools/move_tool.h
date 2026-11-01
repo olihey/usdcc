@@ -27,13 +27,19 @@ public:
 protected:
     ToolResult beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
                               const PXR_NS::GfRay& ray) override;
+    bool canDrive(PXR_NS::UsdGeomXformOp::Type type) const override;
 
 private:
     Handle pickHandle(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
+    // The gizmo frame: the prim's (Auto) or the targeted op's, with Space applied.
+    GizmoFrame frameFor(const Target& target, const PXR_NS::UsdGeomXformable& xformable) const;
 
     PXR_NS::GfVec3d m_dragAnchor{0.0};      // world-space point the drag started at, on the constrained axis/plane
-    PXR_NS::GfVec3d m_dragStartLocal{0.0};  // the prim's translate-op value when the drag started
+    PXR_NS::GfVec3d m_dragStartLocal{0.0};  // the translate op's value when the drag started
     GizmoFrame m_dragFrame;                 // gizmo origin/axes at drag start
+    // Set while dragging a targeted op: that op, and world -> its value space.
+    PXR_NS::UsdGeomXformOp m_targetOp;
+    PXR_NS::GfMatrix4d m_worldToValue{1.0};
 };
 
 }  // namespace usdcc::tools

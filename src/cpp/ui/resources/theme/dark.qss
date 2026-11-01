@@ -666,3 +666,31 @@ QToolButton#sectionHeader:pressed {
 QLabel#sectionCount {
     color: rgba(255, 255, 255, 30%);
 }
+
+/* Transform stack (TransformStackEditor) and the tool target. */
+QLabel#dragHandle {
+    color: rgba(255, 255, 255, 35%);
+    font-size: 13px;
+}
+
+QLabel#dragHandle:hover {
+    color: #e8e8ea;
+}
+
+QFrame#dropIndicator {
+    background: #3d8bfd;
+}
+
+/* The op the Move/Rotate/Scale tools act on. */
+QLabel#propertyLabel[target="true"] {
+    color: #3d8bfd;
+    font-weight: 600;
+}
+
+QCheckBox#sectionHeaderCheck {
+    color: rgba(255, 255, 255, 55%);
+}
+
+QLabel#targetHint {
+    color: #ffb340;
+}

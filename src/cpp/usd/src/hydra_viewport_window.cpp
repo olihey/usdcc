@@ -168,6 +168,14 @@ void HydraViewportWindow::setSelectedPaths(std::vector<PXR_NS::SdfPath> paths) {
     renderNow();
 }
 
+void HydraViewportWindow::setTargetXformOp(const PXR_NS::TfToken& opName) {
+    if (opName == m_targetOp) {
+        return;
+    }
+    m_targetOp = opName;
+    renderNow();  // the gizmo moves to (or greys out for) the new target
+}
+
 void HydraViewportWindow::updateEngineSelection() {
     if (m_engine) {
         m_engine->SetSelected(m_selectedPaths);
@@ -258,6 +266,7 @@ usdcc::tools::ToolContext HydraViewportWindow::buildToolContext() {
     ctx.projMatrix = frustum.ComputeProjectionMatrix();
     ctx.cameraPos = frustum.GetPosition();
     ctx.pickPrim = [this](const PXR_NS::GfVec2d& ndcPos) { return pickPrim(ndcPos); };
+    ctx.targetOpName = m_targetOp;
     return ctx;
 }
 

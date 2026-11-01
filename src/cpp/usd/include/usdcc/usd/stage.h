@@ -2,6 +2,7 @@
 
 #include "usdcc/core/signal.h"
 
+#include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -65,12 +66,29 @@ public:
     const std::vector<PXR_NS::SdfPath>& selectedPaths() const { return m_selectedPaths; }
     void setSelectedPaths(std::vector<PXR_NS::SdfPath> paths) { m_selectedPaths = std::move(paths); }
 
+    // The transform op the Move/Rotate/Scale tools act on (docs/ATTRIBUTE_EDITOR.md
+    // §7.1): an op name on a prim, e.g. xformOp:scale:second on /World/Box.
+    // Empty means Auto — each tool picks the first op of its own type. It is
+    // cleared automatically when the op leaves the prim's xformOpOrder (or the
+    // prim goes away), and by StageManager when the selection moves to
+    // another prim.
+    const PXR_NS::SdfPath& targetPrim() const { return m_targetPrim; }
+    const PXR_NS::TfToken& targetXformOp() const { return m_targetOp; }
+    // The target op if `primPath` is the target prim, else empty (Auto).
+    PXR_NS::TfToken targetXformOpFor(const PXR_NS::SdfPath& primPath) const;
+    void setTargetXformOp(const PXR_NS::SdfPath& primPath, const PXR_NS::TfToken& opName);
+    void clearTargetXformOp() { setTargetXformOp(PXR_NS::SdfPath(), PXR_NS::TfToken()); }
+    usdcc::core::Signal<> targetXformOpChanged;
+
 private:
     class ChangeListener;
+    void validateTarget();
 
     PXR_NS::UsdStageRefPtr m_usdStage;
     long m_cacheId;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
+    PXR_NS::SdfPath m_targetPrim;
+    PXR_NS::TfToken m_targetOp;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
 };
 

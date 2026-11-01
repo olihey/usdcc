@@ -3,6 +3,7 @@
 #include <QString>
 #include <QWidget>
 
+class QHBoxLayout;
 class QLabel;
 class QToolButton;
 class QVBoxLayout;
@@ -22,6 +23,8 @@ public:
     const QString& key() const { return m_key; }
 
     void addRow(QWidget* row);
+    // A control in the header, before the row count (e.g. the transform stack's "+ Add").
+    void addHeaderWidget(QWidget* widget);
 
     bool isCollapsed() const { return m_collapsed; }
     void setCollapsed(bool collapsed);
@@ -38,6 +41,7 @@ private:
 
     QString m_key;
     QToolButton* m_header;
+    QHBoxLayout* m_headerLayout;
     QLabel* m_count;
     QWidget* m_body;
     QVBoxLayout* m_bodyLayout;

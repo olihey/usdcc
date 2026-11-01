@@ -1,5 +1,8 @@
 #include "usdcc/tools/transform_gizmo_tool.h"
 
+#include "usdcc/usd/value_type_info.h"
+#include "usdcc/usd/xform_math.h"
+
 #include <pxr/base/gf/line.h>
 #include <pxr/base/gf/plane.h>
 #include <pxr/usd/usd/prim.h>
@@ -45,7 +48,9 @@ ToolResult TransformGizmoTool::mousePress(const ToolContext& ctx, const PXR_NS::
                                           const PXR_NS::GfRay& ray) {
     ToolResult result = beginGizmoDrag(ctx, ndcPos, ray);
     if (result.handled) {
-        result.startsEdit = true;
+        // A press on a dimmed gizmo (a target this tool can't drive) is
+        // swallowed without grabbing a handle: no drag, so no edit.
+        result.startsEdit = m_activeHandle != Handle::None;
         return result;
     }
     m_activeHandle = Handle::None;
@@ -89,6 +94,87 @@ TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdG
         frame.axisZ = PXR_NS::GfVec3d(0.0, 0.0, 1.0);
     }
     return frame;
+}
+
+TransformGizmoTool::Target TransformGizmoTool::resolveTarget(const ToolContext& ctx,
+                                                             const PXR_NS::UsdGeomXformable& xformable) const {
+    Target target;
+    if (ctx.targetOpName.IsEmpty() || !xformable) {
+        return target;
+    }
+    bool resets = false;
+    const std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
+    for (size_t i = 0; i < ops.size(); ++i) {
+        if (ops[i].IsInverseOp() || ops[i].GetOpName() != ctx.targetOpName) {
+            continue;
+        }
+        if (canDrive(ops[i].GetOpType())) {
+            target.op = ops[i];
+            target.index = static_cast<int>(i);
+            target.targeted = true;
+        } else {
+            target.mismatch = true;
+        }
+        break;
+    }
+    return target;
+}
+
+PXR_NS::GfMatrix4d TransformGizmoTool::opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex) {
+    bool resets = false;
+    const std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
+    const PXR_NS::GfMatrix4d parent =
+        resets ? PXR_NS::GfMatrix4d(1.0) : xformable.ComputeParentToWorldTransform(PXR_NS::UsdTimeCode::Default());
+    return usdcc::usd::composeOps(ops, 0, static_cast<size_t>(std::max(opIndex, 0))) * parent;
+}
+
+TransformGizmoTool::GizmoFrame TransformGizmoTool::opFrame(const PXR_NS::UsdGeomXformable& xformable,
+                                                            int opIndex) const {
+    bool resets = false;
+    const std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
+    if (opIndex < 0 || opIndex >= static_cast<int>(ops.size())) {
+        return gizmoFrame(xformable);
+    }
+    const PXR_NS::GfMatrix4d m =
+        ops[static_cast<size_t>(opIndex)].GetOpTransform(PXR_NS::UsdTimeCode::Default()) * opValueSpace(xformable, opIndex);
+    GizmoFrame frame;
+    frame.origin = m.ExtractTranslation();
+    frame.axisX = m.TransformDir(PXR_NS::GfVec3d(1.0, 0.0, 0.0)).GetNormalized();
+    frame.axisY = m.TransformDir(PXR_NS::GfVec3d(0.0, 1.0, 0.0)).GetNormalized();
+    frame.axisZ = m.TransformDir(PXR_NS::GfVec3d(0.0, 0.0, 1.0)).GetNormalized();
+    return frame;
+}
+
+std::vector<double> TransformGizmoTool::readOpNumbers(const PXR_NS::UsdGeomXformOp& op) {
+    PXR_NS::VtValue value;
+    if (!op || !op.GetAttr().Get(&value, PXR_NS::UsdTimeCode::Default())) {
+        return {};
+    }
+    return usdcc::usd::numericComponents(value);
+}
+
+bool TransformGizmoTool::writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers) {
+    const PXR_NS::VtValue value = usdcc::usd::makeNumericValue(op.GetAttr().GetTypeName(), numbers);
+    return !value.IsEmpty() && op.GetAttr().Set(value, PXR_NS::UsdTimeCode::Default());
+}
+
+bool TransformGizmoTool::isMatrixOp(const PXR_NS::UsdGeomXformOp& op) {
+    return op && op.GetOpType() == PXR_NS::UsdGeomXformOp::TypeTransform;
+}
+
+PXR_NS::GfMatrix4d TransformGizmoTool::readOpMatrix(const PXR_NS::UsdGeomXformOp& op) {
+    PXR_NS::GfMatrix4d m(1.0);
+    if (op) op.Get(&m, PXR_NS::UsdTimeCode::Default());  // transform ops are always double precision
+    return m;
+}
+
+bool TransformGizmoTool::writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix) {
+    return op && op.Set(matrix, PXR_NS::UsdTimeCode::Default());
+}
+
+PXR_NS::GfVec4f TransformGizmoTool::dimmed(const PXR_NS::GfVec4f& color) {
+    const float grey = (color[0] + color[1] + color[2]) / 3.0f * 0.5f + 0.15f;
+    return PXR_NS::GfVec4f(grey, grey, grey, color[3]);
 }
 
 double TransformGizmoTool::gizmoScale(const PXR_NS::GfVec3d& origin, const PXR_NS::GfVec3d& cameraPos) const {

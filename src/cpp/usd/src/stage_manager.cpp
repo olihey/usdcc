@@ -107,6 +107,10 @@ void StageManager::setSelectedPaths(const StageRefPtr& stage, std::vector<PXR_NS
         return;
     }
     stage->setSelectedPaths(paths);
+    // A tool target belongs to one prim: selecting another prim drops it.
+    if (paths.empty() || paths.front() != stage->targetPrim()) {
+        stage->clearTargetXformOp();
+    }
     selectionChanged(stage, std::move(paths));
 }
 

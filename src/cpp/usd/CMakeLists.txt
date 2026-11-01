@@ -4,10 +4,14 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/value_type_info.h
+    include/usdcc/usd/xform_math.h
+    include/usdcc/usd/xform_stack.h
     src/property_categorizer.cpp
     src/stage.cpp
     src/stage_manager.cpp
     src/value_type_info.cpp
+    src/xform_math.cpp
+    src/xform_stack.cpp
 )
 target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
 # Deliberately no Qt here: StageManager (this target's only class) is
@@ -37,6 +41,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/property_editor.h
     include/usdcc/usd/properties/property_row.h
     include/usdcc/usd/properties/property_style.h
+    include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
@@ -55,6 +60,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/number_field.cpp
     src/properties/property_editors.cpp
     src/properties/property_row.cpp
+    src/properties/transform_stack_editor.cpp
     src/stage_opener.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp

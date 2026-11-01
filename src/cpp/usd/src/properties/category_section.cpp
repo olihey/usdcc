@@ -21,6 +21,7 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 
     auto* headerRow = new QWidget(this);
     auto* headerLayout = new QHBoxLayout(headerRow);
+    m_headerLayout = headerLayout;
     headerLayout->setContentsMargins(4, 4, 8, 4);
     headerLayout->setSpacing(4);
     m_header = new QToolButton(headerRow);
@@ -49,6 +50,10 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 }
 
 void CategorySection::addRow(QWidget* row) { m_bodyLayout->addWidget(row); }
+
+void CategorySection::addHeaderWidget(QWidget* widget) {
+    m_headerLayout->insertWidget(m_headerLayout->count() - 1, widget);  // before the count
+}
 
 void CategorySection::setCollapsed(bool collapsed) {
     m_collapsed = collapsed;

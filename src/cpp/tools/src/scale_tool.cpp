@@ -23,14 +23,20 @@ constexpr PXR_NS::GfVec4f kColorCenter(0.9f, 0.9f, 0.9f, 1.0f);
 constexpr double kMinScaleRatio = 0.05;
 }  // namespace
 
+bool ScaleTool::canDrive(PXR_NS::UsdGeomXformOp::Type type) const {
+    return type == PXR_NS::UsdGeomXformOp::TypeScale || type == PXR_NS::UsdGeomXformOp::TypeTransform;
+}
+
 GizmoGeometry ScaleTool::buildGizmo(const ToolContext& ctx) const {
     GizmoGeometry geo;
     const PXR_NS::UsdGeomXformable xformable = resolveXformable(ctx);
     if (!xformable) {
         return geo;
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
+    auto paint = [&](const PXR_NS::GfVec4f& color) { return target.mismatch ? dimmed(color) : color; };
 
     struct AxisEntry {
         PXR_NS::GfVec3d axis;
@@ -41,12 +47,13 @@ GizmoGeometry ScaleTool::buildGizmo(const ToolContext& ctx) const {
                               {frame.axisY, kColorY, Handle::AxisY},
                               {frame.axisZ, kColorZ, Handle::AxisZ}};
     for (const auto& entry : axes) {
-        const PXR_NS::GfVec4f color = (m_activeHandle == entry.handle) ? kColorActive : entry.color;
+        const PXR_NS::GfVec4f color = paint((m_activeHandle == entry.handle) ? kColorActive : entry.color);
         shapes::appendAxisLine(geo, frame.origin, entry.axis, scale * 0.8, color);
         shapes::appendBox(geo, frame.origin + entry.axis * scale * 0.85, scale * 0.05, color);
     }
 
-    shapes::appendBox(geo, frame.origin, scale * 0.06, m_activeHandle == Handle::Center ? kColorActive : kColorCenter);
+    shapes::appendBox(geo, frame.origin, scale * 0.06,
+                      paint(m_activeHandle == Handle::Center ? kColorActive : kColorCenter));
     return geo;
 }
 
@@ -129,13 +136,32 @@ ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec
         m_activeHandle = Handle::None;
         return {};
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
     m_activeHandle = pickHandle(ctx, ndcPos, frame);
     if (m_activeHandle == Handle::None) {
         return {};
     }
+    if (target.mismatch) {
+        // The target is an op Scale can't edit: the dimmed gizmo swallows the
+        // press and does nothing (see mousePress()).
+        m_activeHandle = Handle::None;
+        ToolResult result;
+        result.handled = true;
+        return result;
+    }
     m_dragFrame = frame;
+    m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
     m_dragStartScale = readScale(findScaleOp(xformable));
+    if (isMatrixOp(m_targetOp)) {
+        m_dragStartMatrix = readOpMatrix(m_targetOp);
+        m_dragStartScale = PXR_NS::GfVec3f(1.0f);
+    } else if (m_targetOp) {
+        const std::vector<double> start = readOpNumbers(m_targetOp);  // any precision
+        m_dragStartScale = start.size() == 3 ? PXR_NS::GfVec3f(static_cast<float>(start[0]), static_cast<float>(start[1]),
+                                                                static_cast<float>(start[2]))
+                                             : PXR_NS::GfVec3f(1.0f);
+    }
 
     PXR_NS::GfVec3d axis(0.0);
     switch (m_activeHandle) {
@@ -221,7 +247,8 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
         return result;
     }
 
-    PXR_NS::UsdGeomXformOp scaleOp = getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeScale);
+    PXR_NS::UsdGeomXformOp scaleOp =
+        m_targetOp ? m_targetOp : getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeScale);
     if (!scaleOp) {
         return {};
     }
@@ -233,13 +260,32 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
         const int axisIndex = m_activeHandle == Handle::AxisX ? 0 : (m_activeHandle == Handle::AxisY ? 1 : 2);
         newScale[axisIndex] = m_dragStartScale[axisIndex] * static_cast<float>(ratio);
     }
-    writeScale(scaleOp, newScale);
+    if (isMatrixOp(m_targetOp)) {
+        // A matrix op: scale the rows of its 3x3 part — each row is where one
+        // local axis ends up, i.e. the axis drawn on the gizmo — which is the
+        // matrix's own scale applied before its rotation. The translation row
+        // stays.
+        PXR_NS::GfMatrix4d m = m_dragStartMatrix;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                m[r][c] *= newScale[r];
+            }
+        }
+        writeOpMatrix(scaleOp, m);
+    } else if (m_targetOp) {
+        writeOpNumbers(scaleOp, {newScale[0], newScale[1], newScale[2]});  // any precision
+    } else {
+        writeScale(scaleOp, newScale);
+    }
 
     ToolResult result;
     result.handled = true;
     return result;
 }
 
-void ScaleTool::mouseRelease() { m_activeHandle = Handle::None; }
+void ScaleTool::mouseRelease() {
+    m_activeHandle = Handle::None;
+    m_targetOp = PXR_NS::UsdGeomXformOp();
+}
 
 }  // namespace usdcc::tools

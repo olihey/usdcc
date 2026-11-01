@@ -67,6 +67,9 @@ private Q_SLOTS:
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
 private:
+    // Passes the stage's tool target (for the selected prim) to the viewport.
+    void syncTarget();
+
     HydraViewportWindow* m_viewport;
     QComboBox* m_rendererCombo;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
@@ -78,6 +81,7 @@ private:
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
     // The viewed stage's change notices, which trigger a redraw.
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
+    usdcc::core::Signal<>::Connection m_targetConnection;
 };
 
 }  // namespace usdcc::usd

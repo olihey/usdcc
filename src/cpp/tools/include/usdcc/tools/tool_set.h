@@ -3,6 +3,8 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool.h"
 
+#include <pxr/usd/usdGeom/xformOp.h>
+
 #include <array>
 #include <memory>
 #include <string>
@@ -10,6 +12,14 @@
 namespace usdcc::tools {
 
 enum class ToolKind { Select, Move, Rotate, Scale };
+
+// Which transform tool can act on an op type (docs/ATTRIBUTE_EDITOR.md §7.2):
+// Move drives translate ops, Rotate any rotate op or orient, Scale scale ops,
+// and all three drive a transform (matrix) op — each its own part of it.
+// toolKindForOpType() is the tool to switch to (Move for a matrix), Select
+// for an op none of them drives.
+ToolKind toolKindForOpType(PXR_NS::UsdGeomXformOp::Type type);
+bool toolCanDrive(ToolKind kind, PXR_NS::UsdGeomXformOp::Type type);
 
 // The editing tools (Select/Move/Rotate/Scale) and which one is active — the
 // state the main window's tool rail and options bar control. One ToolSet is

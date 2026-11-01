@@ -87,6 +87,47 @@ protected:
 
     PXR_NS::UsdGeomXformable resolveXformable(const ToolContext& ctx) const;
     GizmoFrame gizmoFrame(const PXR_NS::UsdGeomXformable& xformable) const;
+
+    // Targeting one specific op (ToolContext::targetOpName, see
+    // docs/ATTRIBUTE_EDITOR.md §7). With no target — or one naming an op that
+    // isn't in the stack — a tool runs in Auto mode, exactly as before: the
+    // first op of its type, the prim's own frame.
+    struct Target {
+        PXR_NS::UsdGeomXformOp op;  // the targeted op (valid only when `targeted`)
+        int index = -1;             // its position in xformOpOrder
+        bool targeted = false;      // a target this tool can drive
+        bool mismatch = false;      // a target this tool can't drive: dim the gizmo, edit nothing
+    };
+    // Whether this tool can edit ops of `type` (Move: translate, …).
+    virtual bool canDrive(PXR_NS::UsdGeomXformOp::Type type) const = 0;
+    Target resolveTarget(const ToolContext& ctx, const PXR_NS::UsdGeomXformable& xformable) const;
+
+    // The frame a targeted op is edited in: with the stack split around op k as
+    // Inner · Op_k · Outer · ParentToWorld (row vectors), the gizmo sits in
+    // Op_k · Outer · ParentToWorld — its origin is where the op acts (a pivot
+    // in Outer moves it to the pivot) and its axes follow the op's own
+    // rotation. Scale is stripped from the axes, as in gizmoFrame().
+    GizmoFrame opFrame(const PXR_NS::UsdGeomXformable& xformable, int opIndex) const;
+    // Outer · ParentToWorld: the space an op's own value is expressed in
+    // (a translate op's value moves the prim along these axes).
+    static PXR_NS::GfMatrix4d opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex);
+
+    // An op's value as plain numbers / written back from them, whatever its
+    // precision (half, float or double).
+    static std::vector<double> readOpNumbers(const PXR_NS::UsdGeomXformOp& op);
+    static bool writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers);
+
+    // A gizmo color greyed out (a target this tool can't drive).
+    static PXR_NS::GfVec4f dimmed(const PXR_NS::GfVec4f& color);
+
+    // Targeted transform (matrix) ops: each tool edits its own part of the
+    // matrix — Move the translation row, Rotate and Scale the 3x3 part — and
+    // leaves the rest alone. The matrix is read at press and every move
+    // writes a variation of it.
+    static bool isMatrixOp(const PXR_NS::UsdGeomXformOp& op);
+    static PXR_NS::GfMatrix4d readOpMatrix(const PXR_NS::UsdGeomXformOp& op);
+    static bool writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix);
+    PXR_NS::GfMatrix4d m_dragStartMatrix{1.0};
     double gizmoScale(const PXR_NS::GfVec3d& origin, const PXR_NS::GfVec3d& cameraPos) const;
 
     static PXR_NS::GfVec2d projectToNdc(const PXR_NS::GfVec3d& worldPoint, const PXR_NS::GfMatrix4d& viewMatrix,

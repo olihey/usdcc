@@ -78,14 +78,33 @@ void MoveTool::setOption(const std::string& id, const OptionValue& value) {
     }
 }
 
+bool MoveTool::canDrive(PXR_NS::UsdGeomXformOp::Type type) const {
+    return type == PXR_NS::UsdGeomXformOp::TypeTranslate || type == PXR_NS::UsdGeomXformOp::TypeTransform;
+}
+
+MoveTool::GizmoFrame MoveTool::frameFor(const Target& target, const PXR_NS::UsdGeomXformable& xformable) const {
+    if (!target.targeted) {
+        return gizmoFrame(xformable);
+    }
+    GizmoFrame frame = opFrame(xformable, target.index);
+    if (m_space == Space::World) {
+        frame.axisX = PXR_NS::GfVec3d(1.0, 0.0, 0.0);
+        frame.axisY = PXR_NS::GfVec3d(0.0, 1.0, 0.0);
+        frame.axisZ = PXR_NS::GfVec3d(0.0, 0.0, 1.0);
+    }
+    return frame;
+}
+
 GizmoGeometry MoveTool::buildGizmo(const ToolContext& ctx) const {
     GizmoGeometry geo;
     const PXR_NS::UsdGeomXformable xformable = resolveXformable(ctx);
     if (!xformable) {
         return geo;
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = frameFor(target, xformable);
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
+    auto paint = [&](const PXR_NS::GfVec4f& color) { return target.mismatch ? dimmed(color) : color; };
 
     struct AxisEntry {
         PXR_NS::GfVec3d axis;
@@ -96,7 +115,7 @@ GizmoGeometry MoveTool::buildGizmo(const ToolContext& ctx) const {
                               {frame.axisY, kColorY, Handle::AxisY},
                               {frame.axisZ, kColorZ, Handle::AxisZ}};
     for (const auto& entry : axes) {
-        const PXR_NS::GfVec4f color = (m_activeHandle == entry.handle) ? kColorActive : entry.color;
+        const PXR_NS::GfVec4f color = paint((m_activeHandle == entry.handle) ? kColorActive : entry.color);
         shapes::appendAxisLine(geo, frame.origin, entry.axis, scale * 0.8, color);
         shapes::appendCone(geo, frame.origin + entry.axis * scale, entry.axis, scale * 0.2, scale * 0.06, color);
     }
@@ -110,11 +129,12 @@ GizmoGeometry MoveTool::buildGizmo(const ToolContext& ctx) const {
                                  {frame.axisY, frame.axisZ, kColorX, Handle::PlaneYZ},
                                  {frame.axisZ, frame.axisX, kColorY, Handle::PlaneXZ}};
     for (const auto& entry : planes) {
-        const PXR_NS::GfVec4f color = (m_activeHandle == entry.handle) ? kColorActive : entry.color;
+        const PXR_NS::GfVec4f color = paint((m_activeHandle == entry.handle) ? kColorActive : entry.color);
         shapes::appendPlaneQuad(geo, frame.origin, entry.u, entry.v, scale * 0.2, scale * 0.2, color);
     }
 
-    shapes::appendBox(geo, frame.origin, scale * 0.05, m_activeHandle == Handle::Center ? kColorActive : kColorCenter);
+    shapes::appendBox(geo, frame.origin, scale * 0.05,
+                      paint(m_activeHandle == Handle::Center ? kColorActive : kColorCenter));
     return geo;
 }
 
@@ -175,10 +195,19 @@ ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2
         m_activeHandle = Handle::None;
         return {};
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = frameFor(target, xformable);
     m_activeHandle = pickHandle(ctx, ndcPos, frame);
     if (m_activeHandle == Handle::None) {
         return {};
+    }
+    if (target.mismatch) {
+        // The target is an op Move can't edit: the dimmed gizmo swallows the
+        // press and does nothing (see mousePress()).
+        m_activeHandle = Handle::None;
+        ToolResult result;
+        result.handled = true;
+        return result;
     }
     m_dragFrame = frame;
 
@@ -213,7 +242,19 @@ ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2
         return {};
     }
     m_dragAnchor = *anchor;
-    m_dragStartLocal = readTranslate(xformable);
+    m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
+    if (isMatrixOp(m_targetOp)) {
+        // A matrix op: Move edits its translation row.
+        m_dragStartMatrix = readOpMatrix(m_targetOp);
+        m_dragStartLocal = m_dragStartMatrix.ExtractTranslation();
+        m_worldToValue = opValueSpace(xformable, target.index).GetInverse();
+    } else if (m_targetOp) {
+        const std::vector<double> start = readOpNumbers(m_targetOp);
+        m_dragStartLocal = start.size() == 3 ? PXR_NS::GfVec3d(start[0], start[1], start[2]) : PXR_NS::GfVec3d(0.0);
+        m_worldToValue = opValueSpace(xformable, target.index).GetInverse();
+    } else {
+        m_dragStartLocal = readTranslate(xformable);
+    }
 
     ToolResult result;
     result.handled = true;
@@ -274,6 +315,21 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
                      m_dragFrame.axisZ * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisZ));
     }
 
+    // A targeted op: its value lives in the space before it in the stack.
+    if (m_targetOp) {
+        const PXR_NS::GfVec3d value = m_dragStartLocal + m_worldToValue.TransformDir(worldDelta);
+        if (isMatrixOp(m_targetOp)) {
+            PXR_NS::GfMatrix4d m = m_dragStartMatrix;
+            m.SetTranslateOnly(value);  // the 3x3 part (rotation, scale) stays as it was
+            writeOpMatrix(m_targetOp, m);
+        } else {
+            writeOpNumbers(m_targetOp, {value[0], value[1], value[2]});
+        }
+        ToolResult result;
+        result.handled = true;
+        return result;
+    }
+
     // Don't author a translate op just because the mouse jittered, or because
     // a snapped drag is still sitting on its starting value.
     PXR_NS::UsdGeomXformOp translateOp = findTranslateOp(xformable);
@@ -302,6 +358,9 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
     return result;
 }
 
-void MoveTool::mouseRelease() { m_activeHandle = Handle::None; }
+void MoveTool::mouseRelease() {
+    m_activeHandle = Handle::None;
+    m_targetOp = PXR_NS::UsdGeomXformOp();
+}
 
 }  // namespace usdcc::tools

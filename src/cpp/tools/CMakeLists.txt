@@ -20,4 +20,5 @@ add_library(usdcc_tools STATIC
     src/transform_gizmo_tool.cpp
 )
 target_include_directories(usdcc_tools PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
-target_link_libraries(usdcc_tools PUBLIC usdcc_core ${PXR_LIBRARIES})
+# usdcc_usd (Qt-free too) for the shared transform-op maths and value access.
+target_link_libraries(usdcc_tools PUBLIC usdcc_core usdcc_usd ${PXR_LIBRARIES})

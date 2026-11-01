@@ -88,6 +88,10 @@ public:
     // panels (see docs/PLAN.md milestone M4).
     void setSelectedPaths(std::vector<PXR_NS::SdfPath> paths);
 
+    // The transform op the tools should act on for the selected prim (empty =
+    // Auto); passed to them as ToolContext::targetOpName. See Stage::targetXformOp().
+    void setTargetXformOp(const PXR_NS::TfToken& opName);
+
 Q_SIGNALS:
     void rendererPluginsChanged();
 
@@ -157,6 +161,7 @@ private:
     usdcc::core::Signal<>::Connection m_activeToolConnection;
     usdcc::core::Signal<>::Connection m_optionsConnection;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
+    PXR_NS::TfToken m_targetOp;
 };
 
 }  // namespace usdcc::usd

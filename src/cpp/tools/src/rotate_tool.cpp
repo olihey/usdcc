@@ -1,9 +1,12 @@
 #include "usdcc/tools/rotate_tool.h"
 
 #include "usdcc/tools/gizmo_shapes.h"
+#include "usdcc/usd/xform_math.h"
 
 #include <pxr/base/gf/math.h>
 #include <pxr/base/gf/matrix3d.h>
+#include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/quatd.h>
 #include <pxr/base/gf/rotation.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -34,7 +37,7 @@ std::optional<PXR_NS::GfVec3d> ringVector(const PXR_NS::GfVec3d& point, const PX
 }
 
 // The prim's existing rotateXYZ op, or an invalid op if it has none (unlike
-// getOrCreateOp(), this never authors anything).
+// getOrCreateOp(), this never authors anything). Auto mode's op.
 PXR_NS::UsdGeomXformOp findRotateOp(const PXR_NS::UsdGeomXformable& xformable) {
     bool resetsXformStack = false;
     for (const auto& op : xformable.GetOrderedXformOps(&resetsXformStack)) {
@@ -58,59 +61,11 @@ PXR_NS::GfVec3d readEuler(const PXR_NS::UsdGeomXformOp& op) {
     op.Get(&v);
     return PXR_NS::GfVec3d(v);
 }
-
-// What a rotateXYZ op with these Euler degrees rotates by. USD composes it as
-// Rx * Ry * Rz in its row-vector convention (X is applied first).
-PXR_NS::GfMatrix3d eulerToRotation(const PXR_NS::GfVec3d& degrees) {
-    return PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::XAxis(), degrees[0])) *
-           PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::YAxis(), degrees[1])) *
-           PXR_NS::GfMatrix3d(PXR_NS::GfRotation(PXR_NS::GfVec3d::ZAxis(), degrees[2]));
-}
-
-// `angle` shifted by whole turns to lie within half a turn of `reference`.
-double nearestTurn(double angle, double reference) {
-    return angle - 360.0 * std::round((angle - reference) / 360.0);
-}
-
-// The rotateXYZ Euler degrees that produce `rotation` (the inverse of
-// eulerToRotation()). Every orientation has two such triples, plus whole turns
-// of each component, so this returns the one closest to `hint` (the previous
-// value): without that, a drag could make the numbers jump between equivalent
-// triples from one mouse move to the next.
-PXR_NS::GfVec3d rotationToEuler(const PXR_NS::GfMatrix3d& m, const PXR_NS::GfVec3d& hint) {
-    // With M = Rx(a) * Ry(b) * Rz(c): M[0][2] = -sin(b), M[1][2] = sin(a)cos(b),
-    // M[2][2] = cos(a)cos(b), M[0][1] = cos(b)sin(c), M[0][0] = cos(b)cos(c).
-    const double sinB = std::clamp(-m[0][2], -1.0, 1.0);
-    const double cosB = std::sqrt(std::max(0.0, 1.0 - sinB * sinB));
-    double a = 0.0, b = std::asin(sinB), c = 0.0;
-    if (cosB > 1e-6) {
-        a = std::atan2(m[1][2], m[2][2]);
-        c = std::atan2(m[0][1], m[0][0]);
-    } else {
-        // Gimbal lock (Y at +-90 degrees): only a -/+ c is determined. Keep Z
-        // where it was and solve for X.
-        c = PXR_NS::GfDegreesToRadians(hint[2]);
-        a = sinB > 0.0 ? std::atan2(m[1][0], m[1][1]) + c : std::atan2(-m[1][0], m[1][1]) - c;
-    }
-    const PXR_NS::GfVec3d first(PXR_NS::GfRadiansToDegrees(a), PXR_NS::GfRadiansToDegrees(b),
-                                PXR_NS::GfRadiansToDegrees(c));
-    const PXR_NS::GfVec3d second(first[0] + 180.0, 180.0 - first[1], first[2] + 180.0);
-
-    PXR_NS::GfVec3d best = first;
-    double bestDistance = std::numeric_limits<double>::max();
-    for (PXR_NS::GfVec3d candidate : {first, second}) {
-        for (int i = 0; i < 3; ++i) {
-            candidate[i] = nearestTurn(candidate[i], hint[i]);
-        }
-        const double distance = (candidate - hint).GetLengthSq();
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            best = candidate;
-        }
-    }
-    return best;
-}
 }  // namespace
+
+bool RotateTool::canDrive(PXR_NS::UsdGeomXformOp::Type type) const {
+    return usdcc::usd::isRotation(type) || type == PXR_NS::UsdGeomXformOp::TypeTransform;
+}
 
 PXR_NS::GfVec3d RotateTool::axisForHandle(Handle handle, const GizmoFrame& frame) {
     switch (handle) {
@@ -131,7 +86,9 @@ GizmoGeometry RotateTool::buildGizmo(const ToolContext& ctx) const {
     if (!xformable) {
         return geo;
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const int onlyAxis = target.targeted ? usdcc::usd::singleRotationAxis(target.op.GetOpType()) : -1;
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
 
     struct RingEntry {
@@ -142,15 +99,22 @@ GizmoGeometry RotateTool::buildGizmo(const ToolContext& ctx) const {
     const RingEntry rings[] = {{frame.axisX, kColorX, Handle::AxisX},
                                {frame.axisY, kColorY, Handle::AxisY},
                                {frame.axisZ, kColorZ, Handle::AxisZ}};
-    for (const auto& entry : rings) {
-        const PXR_NS::GfVec4f color = (m_activeHandle == entry.handle) ? kColorActive : entry.color;
+    for (int i = 0; i < 3; ++i) {
+        if (onlyAxis >= 0 && i != onlyAxis) {
+            continue;  // a rotateX/Y/Z op turns about one axis only
+        }
+        const RingEntry& entry = rings[i];
+        PXR_NS::GfVec4f color = (m_activeHandle == entry.handle) ? kColorActive : entry.color;
+        if (target.mismatch) {
+            color = dimmed(color);
+        }
         shapes::appendRing(geo, frame.origin, entry.axis, scale, color);
     }
     return geo;
 }
 
 RotateTool::Handle RotateTool::pickRing(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
-                                         const GizmoFrame& frame) const {
+                                         const GizmoFrame& frame, int onlyAxis) const {
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
 
     struct RingEntry {
@@ -163,14 +127,17 @@ RotateTool::Handle RotateTool::pickRing(const ToolContext& ctx, const PXR_NS::Gf
     Handle best = Handle::None;
     double bestDistance = kPickThresholdNdc;
 
-    for (const auto& entry : rings) {
+    for (int i = 0; i < 3; ++i) {
+        if (onlyAxis >= 0 && i != onlyAxis) {
+            continue;
+        }
         GizmoGeometry ringGeo;
-        shapes::appendRing(ringGeo, frame.origin, entry.axis, scale, PXR_NS::GfVec4f(0.0f));
+        shapes::appendRing(ringGeo, frame.origin, rings[i].axis, scale, PXR_NS::GfVec4f(0.0f));
         for (const auto& line : ringGeo.lines) {
             const double d = distanceToSegmentNdc(ndcPos, line.a, line.b, ctx.viewMatrix, ctx.projMatrix);
             if (d < bestDistance) {
                 bestDistance = d;
-                best = entry.handle;
+                best = rings[i].handle;
             }
         }
     }
@@ -184,10 +151,20 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
         m_activeHandle = Handle::None;
         return {};
     }
-    const GizmoFrame frame = gizmoFrame(xformable);
-    m_activeHandle = pickRing(ctx, ndcPos, frame);
+    const Target target = resolveTarget(ctx, xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const int onlyAxis = target.targeted ? usdcc::usd::singleRotationAxis(target.op.GetOpType()) : -1;
+    m_activeHandle = pickRing(ctx, ndcPos, frame, onlyAxis);
     if (m_activeHandle == Handle::None) {
         return {};
+    }
+    if (target.mismatch) {
+        // The target is an op Rotate can't edit: the dimmed gizmo swallows the
+        // press and does nothing (see mousePress()).
+        m_activeHandle = Handle::None;
+        ToolResult result;
+        result.handled = true;
+        return result;
     }
     m_dragFrame = frame;
 
@@ -199,9 +176,26 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
         return {};
     }
     m_lastVector = *vector;
-    m_lastEuler = readEuler(findRotateOp(xformable));
-    m_dragStartRotation = eulerToRotation(m_lastEuler);
     m_dragTotalDegrees = 0.0;
+
+    m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
+    if (m_targetOp) {
+        // Whatever kind of rotation it is, its matrix is the starting point.
+        m_dragStartRotation =
+            m_targetOp.GetOpTransform(PXR_NS::UsdTimeCode::Default()).ExtractRotationMatrix();
+        m_dragStartMatrix = readOpMatrix(m_targetOp);  // used if it's a matrix op
+        const std::vector<double> value = readOpNumbers(m_targetOp);
+        if (value.size() == 3) {
+            m_lastEuler = PXR_NS::GfVec3d(value[0], value[1], value[2]);
+        } else if (value.size() == 1) {
+            m_startAngle = value[0];
+        } else if (value.size() == 4) {
+            m_lastQuat = PXR_NS::GfVec4d(value[0], value[1], value[2], value[3]);
+        }
+    } else {
+        m_lastEuler = readEuler(findRotateOp(xformable));
+        m_dragStartRotation = usdcc::usd::eulerToMatrix(m_lastEuler, PXR_NS::UsdGeomXformOp::TypeRotateXYZ);
+    }
 
     ToolResult result;
     result.handled = true;
@@ -247,8 +241,61 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
     m_dragTotalDegrees += deltaDegrees;
     const double appliedDegrees = snapped(m_dragTotalDegrees);
 
-    // Don't author a rotate op until the rotation actually amounts to something
-    // (e.g. a snapped drag that hasn't yet reached its first increment).
+    // Spin the orientation the op had at press about the ring's axis (the
+    // op's own axis — the frame follows its rotation), then express the
+    // result in the op's own terms. Adding the angle to one Euler component
+    // instead would only turn about that ring while the other two are zero.
+    const int axisIndex = m_activeHandle == Handle::AxisX ? 0 : (m_activeHandle == Handle::AxisY ? 1 : 2);
+    PXR_NS::GfVec3d axisInObjectSpace(0.0);
+    axisInObjectSpace[axisIndex] = 1.0;
+    const PXR_NS::GfMatrix3d rotated =
+        PXR_NS::GfMatrix3d(PXR_NS::GfRotation(axisInObjectSpace, appliedDegrees)) * m_dragStartRotation;
+
+    if (m_targetOp) {
+        const PXR_NS::UsdGeomXformOp::Type type = m_targetOp.GetOpType();
+        if (type == PXR_NS::UsdGeomXformOp::TypeTransform) {
+            // A matrix op: turn its 3x3 part about the ring's axis as drawn
+            // (row `axisIndex` of the matrix, in the op's value space), applied
+            // after the matrix's own scale — A' = A * Rot. That turns the
+            // object rigidly about the axis the user sees and never adds shear,
+            // even with non-uniform scale. The translation row stays.
+            const PXR_NS::GfMatrix3d a = m_dragStartMatrix.ExtractRotationMatrix();
+            PXR_NS::GfVec3d axisInValueSpace(a[axisIndex][0], a[axisIndex][1], a[axisIndex][2]);
+            if (axisInValueSpace.GetLength() > 1e-12) {
+                axisInValueSpace.Normalize();
+                const PXR_NS::GfMatrix3d turned =
+                    a * PXR_NS::GfMatrix3d(PXR_NS::GfRotation(axisInValueSpace, appliedDegrees));
+                PXR_NS::GfMatrix4d m = m_dragStartMatrix;
+                for (int r = 0; r < 3; ++r) {
+                    for (int c = 0; c < 3; ++c) {
+                        m[r][c] = turned[r][c];
+                    }
+                }
+                writeOpMatrix(m_targetOp, m);
+            }
+        } else if (usdcc::usd::singleRotationAxis(type) >= 0) {
+            writeOpNumbers(m_targetOp, {m_startAngle + appliedDegrees});
+        } else if (type == PXR_NS::UsdGeomXformOp::TypeOrient) {
+            const PXR_NS::GfQuatd q = PXR_NS::GfMatrix4d(rotated, PXR_NS::GfVec3d(0.0)).ExtractRotation().GetQuat();
+            PXR_NS::GfVec4d value(q.GetReal(), q.GetImaginary()[0], q.GetImaginary()[1], q.GetImaginary()[2]);
+            // q and -q are the same rotation: keep the sign continuous.
+            if (PXR_NS::GfDot(value, m_lastQuat) < 0.0) {
+                value = -value;
+            }
+            m_lastQuat = value;
+            writeOpNumbers(m_targetOp, {value[0], value[1], value[2], value[3]});
+        } else {
+            m_lastEuler = usdcc::usd::matrixToEuler(rotated, type, m_lastEuler);
+            writeOpNumbers(m_targetOp, {m_lastEuler[0], m_lastEuler[1], m_lastEuler[2]});
+        }
+        ToolResult result;
+        result.handled = true;
+        return result;
+    }
+
+    // Auto mode. Don't author a rotate op until the rotation actually amounts
+    // to something (e.g. a snapped drag that hasn't yet reached its first
+    // increment).
     PXR_NS::UsdGeomXformOp rotateOp = findRotateOp(xformable);
     if (!rotateOp) {
         if (std::abs(appliedDegrees) < 1e-9) {
@@ -261,17 +308,8 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
             return {};
         }
     }
-
-    // Spin the orientation the prim had at press about its own axis (the one
-    // the ring is drawn on), then express the result as rotateXYZ Euler
-    // degrees. Adding the angle to one Euler component instead would only turn
-    // the prim about that ring while the other two components are zero.
-    const int axisIndex = m_activeHandle == Handle::AxisX ? 0 : (m_activeHandle == Handle::AxisY ? 1 : 2);
-    PXR_NS::GfVec3d axisInObjectSpace(0.0);
-    axisInObjectSpace[axisIndex] = 1.0;
-    const PXR_NS::GfMatrix3d rotated =
-        PXR_NS::GfMatrix3d(PXR_NS::GfRotation(axisInObjectSpace, appliedDegrees)) * m_dragStartRotation;
-    const PXR_NS::GfVec3d euler = rotationToEuler(rotated, m_lastEuler);
+    const PXR_NS::GfVec3d euler =
+        usdcc::usd::matrixToEuler(rotated, PXR_NS::UsdGeomXformOp::TypeRotateXYZ, m_lastEuler);
     m_lastEuler = euler;
     if (rotateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
         rotateOp.Set(euler);
@@ -284,6 +322,9 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
     return result;
 }
 
-void RotateTool::mouseRelease() { m_activeHandle = Handle::None; }
+void RotateTool::mouseRelease() {
+    m_activeHandle = Handle::None;
+    m_targetOp = PXR_NS::UsdGeomXformOp();
+}
 
 }  // namespace usdcc::tools

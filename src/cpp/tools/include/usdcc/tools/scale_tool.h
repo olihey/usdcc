@@ -24,6 +24,7 @@ public:
 protected:
     ToolResult beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
                               const PXR_NS::GfRay& ray) override;
+    bool canDrive(PXR_NS::UsdGeomXformOp::Type type) const override;
 
 private:
     Handle pickHandle(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
@@ -31,6 +32,7 @@ private:
     GizmoFrame m_dragFrame;          // gizmo origin/axes (the prim's object space) at drag start
     double m_dragStartParam = 1.0;  // signed distance along the axis, or from the origin (uniform), at drag start
     PXR_NS::GfVec3f m_dragStartScale{1.0f, 1.0f, 1.0f};
+    PXR_NS::UsdGeomXformOp m_targetOp;  // set while dragging a targeted op
 };
 
 }  // namespace usdcc::tools

@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -27,13 +28,16 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
+    m_labelText = label;
     m_label = new QLabel(label, this);
     m_label->setObjectName(QStringLiteral("propertyLabel"));
     m_label->setFixedHeight(style::kFieldHeight);
     m_label->setToolTip(label);
+    m_label->installEventFilter(this);
     layout->addWidget(m_label, 0, Qt::AlignTop);
 
     auto* valueColumn = new QWidget(this);
+    m_valueColumn = valueColumn;
     auto* valueLayout = new QVBoxLayout(valueColumn);
     valueLayout->setContentsMargins(0, 0, 0, 0);
     valueLayout->setSpacing(2);
@@ -64,11 +68,30 @@ void PropertyRow::setLabelWidth(int width) { m_label->setFixedWidth(width); }
 
 void PropertyRow::addTrailingWidget(QWidget* widget) {
     auto* rowLayout = static_cast<QHBoxLayout*>(layout());
-    // Before the note and badge, right after the value column.
-    rowLayout->insertWidget(2, widget, 0, Qt::AlignTop);
+    // Right after the value column, before the note and badge.
+    rowLayout->insertWidget(rowLayout->indexOf(m_valueColumn) + 1, widget, 0, Qt::AlignTop);
 }
 
-QString PropertyRow::labelText() const { return m_label->text(); }
+void PropertyRow::addLeadingWidget(QWidget* widget) {
+    static_cast<QHBoxLayout*>(layout())->insertWidget(0, widget, 0, Qt::AlignTop);
+}
+
+QString PropertyRow::labelText() const { return m_labelText; }
+
+void PropertyRow::setTargeted(bool targeted) {
+    // "◆" marks the op the transform tools act on.
+    m_label->setText(targeted ? m_labelText + QStringLiteral("  \xE2\x97\x86") : m_labelText);
+    m_label->setProperty("target", targeted);
+    repolish(m_label);
+}
+
+bool PropertyRow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_label && event->type() == QEvent::MouseButtonRelease &&
+        static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) {
+        Q_EMIT labelClicked();
+    }
+    return QWidget::eventFilter(watched, event);
+}
 
 void PropertyRow::setLabelToolTip(const QString& toolTip) { m_label->setToolTip(toolTip); }
 
@@ -135,6 +158,10 @@ void PropertyRow::contextMenuEvent(QContextMenuEvent* event) {
     menu.addSeparator();
     QAction* reset = menu.addAction(tr("Reset to Default"), this, [this]() { Q_EMIT resetRequested(); });
     reset->setEnabled(m_resettable && !m_editor->isReadOnly());
+    if (m_extraMenu) {
+        menu.addSeparator();
+        m_extraMenu(&menu);
+    }
     menu.exec(event->globalPos());
 }
 
