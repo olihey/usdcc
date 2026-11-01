@@ -378,6 +378,9 @@ void HydraViewportWindow::renderNow() {
         PXR_NS::GfVec4f(kViewportBackground[0], kViewportBackground[1], kViewportBackground[2], 1.0f);
     params.frame = PXR_NS::UsdTimeCode::Default();
     params.enableLighting = true;
+    // SetSelected() only feeds the engine the selection; it is drawn solely
+    // when the render params ask for it (the flag defaults to off).
+    params.highlight = true;
 
     if (m_stage) {
         m_engine->Render(m_stage->GetPseudoRoot(), params);
