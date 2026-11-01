@@ -1,5 +1,7 @@
 #include "usdcc/usd/tool_rail.h"
 
+#include "usdcc/ui/scaled_metrics.h"
+
 #include <QAction>
 #include <QActionGroup>
 #include <QIcon>
@@ -15,7 +17,7 @@ ToolRail::ToolRail(QWidget* parent) : QToolBar(parent), m_group(new QActionGroup
     setWindowTitle(tr("Tools"));  // names it in the main window's toolbar context menu
     setOrientation(Qt::Vertical);  // initially; the main window flips it if the user docks it top/bottom
     setToolButtonStyle(Qt::ToolButtonIconOnly);
-    setIconSize(QSize(kIconSize, kIconSize));
+    usdcc::ui::scaled::iconSize(this, kIconSize, kIconSize);
     m_group->setExclusive(true);
 }
 

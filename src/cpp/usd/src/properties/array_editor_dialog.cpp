@@ -1,5 +1,7 @@
 #include "usdcc/usd/properties/array_editor_dialog.h"
 
+#include "usdcc/ui/scaled_metrics.h"
+
 #include <QAbstractTableModel>
 #include <QApplication>
 #include <QClipboard>
@@ -152,7 +154,9 @@ ArrayEditorDialog::ArrayEditorDialog(const VtValue& array, const SdfValueTypeNam
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ElementDelegate(std::move(hints), m_view));
     m_view->horizontalHeader()->setStretchLastSection(true);
-    m_view->verticalHeader()->setDefaultSectionSize(24);
+    usdcc::ui::UiScaleController::instance().bind(m_view->verticalHeader(), "rowHeight", [this]() {
+        m_view->verticalHeader()->setDefaultSectionSize(usdcc::ui::scaled::pixels(24));
+    });
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed |
                             QAbstractItemView::SelectedClicked);

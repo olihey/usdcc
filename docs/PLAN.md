@@ -1,6 +1,6 @@
 # usdcc — Project Plan
 
-*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-09-05.*
+*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-11-01.*
 
 ## 1. Overview
 
@@ -781,6 +781,41 @@ things that will bite later if not addressed early:
     stage (both phases visible, animated bar while loading), a small stage (no dialog), a
     garbage file (error box) and a command-line open.
 
+33. **UI scaling.** `usdcc_ui` owns one `UiScaleController` (`scale_controller.h`), restored
+    before widget creation by `theme::apply()`. Ctrl+Numpad+ and Ctrl+Numpad- change UI
+    density in 10 percentage-point steps, clamped to 80–200%; View > UI Scale shows the current
+    percentage and provides increase/decrease/reset actions. The application event filter
+    reserves exactly Ctrl+Keypad plus/minus, so focused editors and floating panels work without
+    consuming other shortcuts. `Appearance/uiScale` persists in the existing INI settings. Screen
+    DPI remains Qt's responsibility. Stylesheets are regenerated from their original dimensions;
+    resource URLs, colours and one-pixel hairlines are retained (the C++ section separator stays
+    1px too). Explicit C++ widget/layout metrics use `scaled_metrics.h` bindings so existing and
+    newly created controls follow the same scale without cumulative rounding; zero margins and
+    spacings stay plain Qt calls, as they never change. Native viewport dimensions, camera state
+    and scene/tool coordinates are unaffected.
+    Tested by `scale_controller_test` in the `usdcc_ui_tests` executable (the shared test harness,
+    run on Qt's offscreen platform): shortcuts — including a key press delivered through the
+    window, which must count once — bounds, reset, persistence, late-created controls, custom size
+    hints, title-bar sizing and drift-free theme reapplication (31 checks). Verified on Windows:
+    RelWithDebInfo app/test builds and a live Ctrl+Numpad+ increase. Mixed-DPI monitor
+    transitions and Linux/macOS have not been exercised.
+
+34. **Stages menu.** File, Edit, View, **Stages**, Debug: one submenu per open stage (its short
+    name, see `shortStageNames()`; the full identifier as tooltip), each offering a new panel of
+    every registered `ViewPanel` type showing that stage, then "Close Stage..." (the same
+    `closeStageInteractively()` as File > Close Stage, which stays). "No stages open" while there
+    are none. Panel types live in `usdcc::ui::ViewPanelRegistry` (`view_panel_registry.h`):
+    `main.cpp` registers Viewport, Outliner and Attributes with factories that capture what their
+    constructors need, and `ViewPanelRegistry::open()` creates, names ("<type> - <stage file>",
+    unique objectName) and docks a panel — tabbed next to an on-screen panel of the same class,
+    else in the centre — then brings it to the front. The viewport created for a newly opened
+    stage goes through it too. A new panel of a type always opens, even if one already shows that
+    stage. Like the per-stage viewports before, these panels are not restored from a saved layout
+    (their objectNames carry the session's stage cache id). `StagesMenu`
+    (`usd/stages_menu.h`) rebuilds itself each time it opens. Tested: registry order, lookup,
+    replacement and unique names (`view_panel_registry_test`); the menu, Outliner and the submenus
+    for two stages checked in the app.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
@@ -928,7 +963,7 @@ These run throughout, not as discrete milestones:
 | M7 Scripting & Python Extensibility | Not started |
 | M8 Layer Editing & Logging | Not started |
 | M9 Plugin System | Not started |
-| M10 Dialogs & Settings | Not started |
+| M10 Dialogs & Settings | In progress — persistent UI scaling and View-menu controls implemented; settings and Info dialogs remain |
 | M11 Packaging & Deployment | Not started |
 | M12 Hardening & Release Readiness | Not started |
 | M13 Attribute Editor Revamp | Done (all five phases) — undo edit sessions and undoable gizmo drags, `Stage::changed` live refresh, `ValueTypeInfo`, the `usdcc_tests` CTest target, the property widget kit and Debug > USD Data Types (112 types, all with an editor), the categorized `AttributesViewPanel`, the transform-stack editor (add/remove/reorder/rename/pivot/bake/convert), and Move/Rotate/Scale targeting one specific xformOp (all six Euler orders, single-axis rotates, orient, and `transform` matrix ops). See [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md) §12; §9 there lists what's still out of scope |

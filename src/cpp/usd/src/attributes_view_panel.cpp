@@ -1,5 +1,6 @@
 #include "usdcc/usd/attributes_view_panel.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
@@ -99,7 +100,7 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(10, 4, 10, 4);
+    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
     m_search = new QLineEdit(toolbar);
     m_search->setPlaceholderText(tr("Search attributes"));
@@ -250,7 +251,7 @@ void AttributesViewPanel::rebuild() {
         auto* empty = new QLabel(note, m_content);
         empty->setObjectName(QStringLiteral("propertyNote"));
         empty->setAlignment(Qt::AlignCenter);
-        empty->setContentsMargins(0, 24, 0, 0);
+        usdcc::ui::scaled::margins(empty, 0, 24, 0, 0);
         layout->addWidget(empty);
         layout->addStretch(1);
         m_scroll->setWidget(m_content);

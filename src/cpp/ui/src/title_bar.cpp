@@ -1,5 +1,7 @@
 #include "usdcc/ui/title_bar.h"
 
+#include "usdcc/ui/scaled_metrics.h"
+
 #include <QCoreApplication>
 #include <QEvent>
 #include <QHBoxLayout>
@@ -22,7 +24,7 @@ QToolButton* makeCaptionButton(const char* objectName, const QString& iconPath, 
     auto* button = new QToolButton(parent);
     button->setObjectName(QLatin1String(objectName));
     button->setIcon(QIcon(iconPath));
-    button->setIconSize(QSize(kIconSize, kIconSize));
+    usdcc::ui::scaled::iconSize(button, kIconSize, kIconSize);
     button->setFocusPolicy(Qt::NoFocus);
     button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     return button;
@@ -43,7 +45,7 @@ void clearStuckHover(QWidget* widget) {
 TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow) {
     setObjectName(QStringLiteral("titleBar"));
     setAttribute(Qt::WA_StyledBackground);
-    setFixedHeight(kBarHeight);
+    usdcc::ui::scaled::fixedHeight(this, kBarHeight);
 
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -84,7 +86,7 @@ TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow)
     m_closeButton->installEventFilter(this);
     m_menuBar->installEventFilter(this);
     updateWindowState();
-    updateLogo();
+    UiScaleController::instance().bind(this, "logo", [this]() { updateLogo(); });
 }
 
 QWidget* TitleBar::logoWidget() const { return m_logo; }
@@ -134,7 +136,7 @@ bool TitleBar::eventFilter(QObject* watched, QEvent* event) {
 // another), drawn at the label's device pixel ratio so it stays sharp on
 // high-DPI screens.
 void TitleBar::updateLogo() {
-    m_logo->setPixmap(m_host->windowIcon().pixmap(QSize(kLogoSize, kLogoSize), m_logo->devicePixelRatioF()));
+    m_logo->setPixmap(m_host->windowIcon().pixmap(scaled::size(kLogoSize, kLogoSize), m_logo->devicePixelRatioF()));
 }
 
 void TitleBar::updateWindowState() {

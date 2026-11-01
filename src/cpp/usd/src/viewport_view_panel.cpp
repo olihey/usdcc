@@ -1,5 +1,6 @@
 #include "usdcc/usd/viewport_view_panel.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -35,7 +36,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(10, 4, 10, 4);
+    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
     m_rendererCombo = new QComboBox(toolbar);
     toolbarLayout->addWidget(stageCombo(), 1);

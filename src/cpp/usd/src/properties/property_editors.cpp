@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/property_editor.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/array_editor_dialog.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/number_field.h"
@@ -91,7 +92,7 @@ namespace {
 QHBoxLayout* rowLayout(QWidget* parent, int spacing = 4) {
     auto* layout = new QHBoxLayout(parent);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(spacing);
+    usdcc::ui::scaled::spacing(layout, spacing);
     return layout;
 }
 
@@ -265,7 +266,7 @@ public:
         : PropertyEditor(info, parent), m_numbers(static_cast<size_t>(info.numberCount()), 0.0) {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(3);
+        usdcc::ui::scaled::spacing(layout, 3);
 
         auto* header = new QWidget(this);
         auto* headerLayout = rowLayout(header);
@@ -284,7 +285,7 @@ public:
         m_grid = new QWidget(this);
         auto* grid = new QGridLayout(m_grid);
         grid->setContentsMargins(0, 0, 0, 0);
-        grid->setSpacing(3);
+        usdcc::ui::scaled::spacing(grid, 3);
         const int n = info.components;
         for (int r = 0; r < n; ++r) {
             for (int c = 0; c < n; ++c) {
@@ -456,7 +457,7 @@ public:
         : PropertyEditor(info, parent), m_anchor(hints.anchorLayer) {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(2);
+        usdcc::ui::scaled::spacing(layout, 2);
 
         auto* row = new QWidget(this);
         auto* rowLay = rowLayout(row);

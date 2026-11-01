@@ -1,5 +1,6 @@
 #include "usdcc/usd/close_stage_dialog.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
@@ -84,7 +85,7 @@ CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr
                                    const QStringList& panelTitles, QWidget* parent)
     : QDialog(parent), m_stageManager(stageManager) {
     setWindowTitle(tr("Close Stage"));
-    setMinimumWidth(420);  // room for the panel list before it wraps
+    usdcc::ui::scaled::minimumWidth(this, 420);  // room for the panel list before it wraps
 
     auto* layout = new QVBoxLayout(this);
     auto* message = new QLabel(

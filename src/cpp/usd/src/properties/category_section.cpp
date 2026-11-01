@@ -1,5 +1,7 @@
 #include "usdcc/usd/properties/category_section.h"
 
+#include "usdcc/ui/scaled_metrics.h"
+
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -16,14 +18,14 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 
     auto* separator = new QFrame(this);
     separator->setObjectName(QStringLiteral("sectionSeparator"));
-    separator->setFixedHeight(1);
+    separator->setFixedHeight(1);  // a hairline at every UI scale, as in the stylesheets
     layout->addWidget(separator);
 
     auto* headerRow = new QWidget(this);
     auto* headerLayout = new QHBoxLayout(headerRow);
     m_headerLayout = headerLayout;
-    headerLayout->setContentsMargins(4, 4, 8, 4);
-    headerLayout->setSpacing(4);
+    usdcc::ui::scaled::margins(headerLayout, 4, 4, 8, 4);
+    usdcc::ui::scaled::spacing(headerLayout, 4);
     m_header = new QToolButton(headerRow);
     m_header->setObjectName(QStringLiteral("sectionHeader"));
     m_header->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -39,8 +41,8 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 
     m_body = new QWidget(this);
     m_bodyLayout = new QVBoxLayout(m_body);
-    m_bodyLayout->setContentsMargins(14, 2, 10, 10);
-    m_bodyLayout->setSpacing(6);
+    usdcc::ui::scaled::margins(m_bodyLayout, 14, 2, 10, 10);
+    usdcc::ui::scaled::spacing(m_bodyLayout, 6);
     layout->addWidget(m_body);
 
     connect(m_header, &QToolButton::clicked, this, [this]() {

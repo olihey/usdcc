@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/color_swatch.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_style.h"
 
 #include <QColorDialog>
@@ -29,7 +30,7 @@ void ColorSwatch::setReadOnly(bool readOnly) {
     update();
 }
 
-QSize ColorSwatch::sizeHint() const { return QSize(style::kFieldHeight + 8, style::kFieldHeight); }
+QSize ColorSwatch::sizeHint() const { return usdcc::ui::scaled::size(style::kFieldHeight + 8, style::kFieldHeight); }
 
 double ColorSwatch::linearToDisplay(double linear) {
     const double c = std::clamp(linear, 0.0, 1.0);
@@ -46,7 +47,7 @@ void ColorSwatch::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath shape;
-    shape.addRoundedRect(r, style::kRadius, style::kRadius);
+    shape.addRoundedRect(r, usdcc::ui::scaled::pixels(style::kRadius), usdcc::ui::scaled::pixels(style::kRadius));
     QColor fill = m_color;
     fill.setAlpha(255);  // alpha is edited as a number; the chip shows the color itself
     p.fillPath(shape, m_readOnly ? fill.darker(160) : fill);

@@ -1,11 +1,14 @@
 #include "usdcc/ui/theme.h"
 
+#include "usdcc/ui/scale_controller.h"
+
 #include <DockManager.h>
 
 #include <QApplication>
 #include <QFile>
 #include <QPalette>
 #include <QStyleFactory>
+#include <QVariant>
 
 // Q_INIT_RESOURCE must be used outside any namespace, and is required here
 // because the resources live in a static library — without it the linker can
@@ -83,13 +86,28 @@ void apply(QApplication& app) {
     QGuiApplication::setDesktopFileName(QStringLiteral("usdcc"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     app.setPalette(darkPalette());
-    app.setStyleSheet(readResource(QStringLiteral(":/usdcc/theme/dark.qss")));
+    auto& scale = UiScaleController::instance();
+    const auto refresh = [&app]() {
+        app.setStyleSheet(UiScaleController::instance().styleSheet(
+            readResource(QStringLiteral(":/usdcc/theme/dark.qss"))));
+    };
+    QObject::connect(&scale, &UiScaleController::scaleChanged, &app, [refresh](int) { refresh(); });
+    refresh();
 }
 
 void applyToDockManager(ads::CDockManager* dockManager) {
     initThemeResources();
-    dockManager->setStyleSheet(dockManager->styleSheet() + QLatin1Char('\n') +
-                               readResource(QStringLiteral(":/usdcc/theme/dock.qss")));
+    // Capture the original ADS sheet once; reapplying the theme must not grow
+    // the stylesheet or multiply already-scaled dimensions.
+    constexpr auto key = "_usdccBaseDockStyleSheet";
+    if (!dockManager->property(key).isValid()) {
+        dockManager->setProperty(key, dockManager->styleSheet());
+    }
+    const QString original = dockManager->property(key).toString() + QLatin1Char('\n') +
+                             readResource(QStringLiteral(":/usdcc/theme/dock.qss"));
+    UiScaleController::instance().bind(dockManager, "dockStyle", [dockManager, original]() {
+        dockManager->setStyleSheet(UiScaleController::instance().styleSheet(original));
+    });
 }
 
 }  // namespace usdcc::ui::theme

@@ -1,5 +1,7 @@
 #include "usdcc/usd/tool_options_bar.h"
 
+#include "usdcc/ui/scaled_metrics.h"
+
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -23,7 +25,7 @@ QWidget* labelled(const QString& label, QWidget* control, QWidget* parent) {
     auto* group = new QWidget(parent);
     auto* layout = new QHBoxLayout(group);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
+    usdcc::ui::scaled::spacing(layout, 6);
     if (!label.isEmpty()) {
         layout->addWidget(new QLabel(label, group));
     }
@@ -36,11 +38,11 @@ QWidget* labelled(const QString& label, QWidget* control, QWidget* parent) {
 ToolOptionsBar::ToolOptionsBar(QWidget* parent) : QFrame(parent), m_layout(new QHBoxLayout(this)) {
     setObjectName(QStringLiteral("toolOptionsBar"));
     setAttribute(Qt::WA_StyledBackground);
-    setFixedHeight(kBarHeight);
+    usdcc::ui::scaled::fixedHeight(this, kBarHeight);
     // Fill the whole width of the QToolBar that hosts it.
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_layout->setContentsMargins(10, 0, 10, 0);
-    m_layout->setSpacing(12);
+    usdcc::ui::scaled::margins(m_layout, 10, 0, 10, 0);
+    usdcc::ui::scaled::spacing(m_layout, 12);
 }
 
 void ToolOptionsBar::clear() {
@@ -113,8 +115,8 @@ QWidget* ToolOptionsBar::makeChoice(const ToolOption& option) {
     auto* segmented = new QFrame();
     segmented->setObjectName(QStringLiteral("segmented"));
     auto* layout = new QHBoxLayout(segmented);
-    layout->setContentsMargins(2, 2, 2, 2);
-    layout->setSpacing(2);
+    usdcc::ui::scaled::margins(layout, 2, 2, 2, 2);
+    usdcc::ui::scaled::spacing(layout, 2);
 
     auto* group = new QButtonGroup(segmented);
     group->setExclusive(true);
@@ -151,7 +153,7 @@ QWidget* ToolOptionsBar::makeNumber(const ToolOption& option) {
     spin->setSingleStep(option.step);
     spin->setSuffix(QString::fromUtf8(option.suffix.data(), static_cast<qsizetype>(option.suffix.size())));
     spin->setValue(std::get<double>(option.value));
-    spin->setFixedWidth(kNumberWidth);
+    usdcc::ui::scaled::fixedWidth(spin, kNumberWidth);
     spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     // Report the value once it's committed (Enter / focus out), not on every
     // keystroke — typing "0.25" must not pass through 0, 0.2 along the way.

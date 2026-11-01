@@ -1,5 +1,6 @@
 #include "usdcc/usd/outliner_view_panel.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usd_prim_tree_model.h"
 #include "usdcc/usd/undo_manager.h"
@@ -38,7 +39,7 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(10, 4, 10, 4);
+    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
     toolbarLayout->addWidget(stageCombo(), 1);
 

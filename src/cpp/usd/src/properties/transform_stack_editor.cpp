@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/transform_stack_editor.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -39,10 +40,10 @@ public:
     StackRows(TransformStackEditor* editor, QWidget* parent) : QWidget(parent), m_editor(editor) {
         m_layout = new QVBoxLayout(this);
         m_layout->setContentsMargins(0, 0, 0, 0);
-        m_layout->setSpacing(6);
+        usdcc::ui::scaled::spacing(m_layout, 6);
         m_indicator = new QFrame(this);
         m_indicator->setObjectName(QStringLiteral("dropIndicator"));
-        m_indicator->setFixedHeight(2);
+        usdcc::ui::scaled::fixedHeight(m_indicator, 2);
         m_indicator->hide();
     }
     void addRow(QWidget* row) { m_layout->addWidget(row); }
@@ -51,11 +52,11 @@ public:
         const int slot = slotAt(y);
         int lineY = 0;
         if (slot < m_layout->count()) {
-            lineY = m_layout->itemAt(slot)->geometry().top() - 4;
+            lineY = m_layout->itemAt(slot)->geometry().top() - usdcc::ui::scaled::pixels(4);
         } else if (m_layout->count() > 0) {
-            lineY = m_layout->itemAt(m_layout->count() - 1)->geometry().bottom() + 2;
+            lineY = m_layout->itemAt(m_layout->count() - 1)->geometry().bottom() + usdcc::ui::scaled::pixels(2);
         }
-        m_indicator->setGeometry(0, std::max(0, lineY), width(), 2);
+        m_indicator->setGeometry(0, std::max(0, lineY), width(), usdcc::ui::scaled::pixels(2));
         m_indicator->show();
         m_indicator->raise();
     }
@@ -89,7 +90,7 @@ public:
         setObjectName(QStringLiteral("dragHandle"));
         setCursor(Qt::OpenHandCursor);
         setToolTip(tr("Drag to reorder"));
-        setFixedSize(14, 20);
+        usdcc::ui::scaled::fixedSize(this, 14, 20);
         setAlignment(Qt::AlignCenter);
     }
 

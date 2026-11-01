@@ -46,6 +46,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/stage_opener.h
+    include/usdcc/usd/stages_menu.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
     include/usdcc/usd/usd_prim_tree_model.h
@@ -66,6 +67,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/transform_stack_editor.cpp
     src/close_stage_dialog.cpp
     src/stage_opener.cpp
+    src/stages_menu.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp
     src/usd_prim_tree_model.cpp

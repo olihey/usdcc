@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/number_field.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_style.h"
 
 #include <QKeyEvent>
@@ -98,16 +99,16 @@ QString NumberField::text() const {
     return number + m_suffix;
 }
 
-QSize NumberField::sizeHint() const { return QSize(72, style::kFieldHeight); }
+QSize NumberField::sizeHint() const { return usdcc::ui::scaled::size(72, style::kFieldHeight); }
 
-QSize NumberField::minimumSizeHint() const { return QSize(36, style::kFieldHeight); }
+QSize NumberField::minimumSizeHint() const { return usdcc::ui::scaled::size(36, style::kFieldHeight); }
 
 QRect NumberField::valueRect() const {
-    int left = kPadding;
+    int left = usdcc::ui::scaled::pixels(kPadding);
     if (!m_prefix.isEmpty()) {
-        left += fontMetrics().horizontalAdvance(m_prefix) + 5;
+        left += fontMetrics().horizontalAdvance(m_prefix) + usdcc::ui::scaled::pixels(5);
     }
-    return rect().adjusted(left, 0, -kPadding, 0);
+    return rect().adjusted(left, 0, -usdcc::ui::scaled::pixels(kPadding), 0);
 }
 
 double NumberField::valueAtX(int x) const {
@@ -121,7 +122,7 @@ void NumberField::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath shape;
-    shape.addRoundedRect(r, style::kRadius, style::kRadius);
+    shape.addRoundedRect(r, usdcc::ui::scaled::pixels(style::kRadius), usdcc::ui::scaled::pixels(style::kRadius));
     p.fillPath(shape, style::inset());
 
     if (m_slider) {
@@ -140,7 +141,7 @@ void NumberField::paintEvent(QPaintEvent*) {
 
     if (!m_prefix.isEmpty()) {
         p.setPen(m_readOnly ? style::textMuted() : m_prefixColor);
-        p.drawText(rect().adjusted(kPadding, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, m_prefix);
+        p.drawText(rect().adjusted(usdcc::ui::scaled::pixels(kPadding), 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, m_prefix);
     }
     if (!m_textEditing) {
         p.setPen(m_readOnly ? style::textMuted() : style::text());

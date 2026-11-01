@@ -1,5 +1,6 @@
 #include "usdcc/usd/viewport_tool_bars.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/tool_options_bar.h"
 #include "usdcc/usd/tool_rail.h"
@@ -42,14 +43,14 @@ ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::t
     m_targetBox = new QWidget();
     m_targetBox->setObjectName(QStringLiteral("toolOptionsBar"));
     m_targetBox->setAttribute(Qt::WA_StyledBackground);
-    m_targetBox->setFixedHeight(30);
+    usdcc::ui::scaled::fixedHeight(m_targetBox, 30);
     auto* targetLayout = new QHBoxLayout(m_targetBox);
-    targetLayout->setContentsMargins(10, 0, 10, 0);
-    targetLayout->setSpacing(6);
+    usdcc::ui::scaled::margins(targetLayout, 10, 0, 10, 0);
+    usdcc::ui::scaled::spacing(targetLayout, 6);
     m_targetHint = new QLabel(m_targetBox);
     m_targetHint->setObjectName(QStringLiteral("targetHint"));
     m_targetCombo = new QComboBox(m_targetBox);
-    m_targetCombo->setMinimumWidth(160);
+    usdcc::ui::scaled::minimumWidth(m_targetCombo, 160);
     m_targetCombo->setToolTip(tr("The transform op the tool acts on. Auto: the first op of the tool's own type."));
     targetLayout->addWidget(m_targetHint);
     targetLayout->addWidget(new QLabel(tr("Target"), m_targetBox));

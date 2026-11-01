@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/property_row.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_style.h"
 
@@ -26,12 +27,12 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     : QWidget(parent), m_editor(editor) {
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
+    usdcc::ui::scaled::spacing(layout, 8);
 
     m_labelText = label;
     m_label = new QLabel(label, this);
     m_label->setObjectName(QStringLiteral("propertyLabel"));
-    m_label->setFixedHeight(style::kFieldHeight);
+    usdcc::ui::scaled::fixedHeight(m_label, style::kFieldHeight);
     m_label->setToolTip(label);
     m_label->installEventFilter(this);
     layout->addWidget(m_label, 0, Qt::AlignTop);
@@ -40,7 +41,7 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     m_valueColumn = valueColumn;
     auto* valueLayout = new QVBoxLayout(valueColumn);
     valueLayout->setContentsMargins(0, 0, 0, 0);
-    valueLayout->setSpacing(2);
+    usdcc::ui::scaled::spacing(valueLayout, 2);
     editor->setParent(valueColumn);
     valueLayout->addWidget(editor);
     m_subLine = new QLabel(valueColumn);
@@ -51,20 +52,20 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
 
     m_note = new QLabel(this);
     m_note->setObjectName(QStringLiteral("propertyNote"));
-    m_note->setFixedHeight(style::kFieldHeight);
+    usdcc::ui::scaled::fixedHeight(m_note, style::kFieldHeight);
     m_note->setVisible(false);
     layout->addWidget(m_note, 0, Qt::AlignTop);
 
     m_badge = new QLabel(this);
     m_badge->setObjectName(QStringLiteral("propertyBadge"));
-    m_badge->setFixedHeight(style::kFieldHeight);
+    usdcc::ui::scaled::fixedHeight(m_badge, style::kFieldHeight);
     m_badge->setVisible(false);
     layout->addWidget(m_badge, 0, Qt::AlignTop);
 
     setLabelWidth(110);
 }
 
-void PropertyRow::setLabelWidth(int width) { m_label->setFixedWidth(width); }
+void PropertyRow::setLabelWidth(int width) { usdcc::ui::scaled::fixedWidth(m_label, width); }
 
 void PropertyRow::addTrailingWidget(QWidget* widget) {
     auto* rowLayout = static_cast<QHBoxLayout*>(layout());
@@ -100,7 +101,7 @@ void PropertyRow::setNote(const QString& note, int fixedWidth) {
     m_note->setToolTip(note);
     m_note->setVisible(!note.isEmpty());
     if (fixedWidth > 0) {
-        m_note->setFixedWidth(fixedWidth);
+        usdcc::ui::scaled::fixedWidth(m_note, fixedWidth);
     }
 }
 

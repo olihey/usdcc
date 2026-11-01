@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
@@ -67,11 +68,11 @@ DataTypeGalleryDialog::DataTypeGalleryDialog(QWidget* parent) : QDialog(parent) 
     // Groups in a sidebar rather than tabs: ten of them don't fit a tab bar.
     m_groups = new QListWidget(this);
     m_groups->setObjectName(QStringLiteral("galleryGroups"));
-    m_groups->setFixedWidth(190);
+    usdcc::ui::scaled::fixedWidth(m_groups, 190);
     m_pages = new QStackedWidget(this);
     connect(m_groups, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     auto* body = new QHBoxLayout;
-    body->setSpacing(10);
+    usdcc::ui::scaled::spacing(body, 10);
     body->addWidget(m_groups);
     body->addWidget(m_pages, 1);
     m_log = new QLabel(tr("Edit any value; the edit signals show up here."), this);
@@ -156,8 +157,8 @@ void DataTypeGalleryDialog::rebuild() {
         if (auto it = pages.find(key); it != pages.end()) return it->second;
         auto* content = new QWidget;
         auto* layout = new QVBoxLayout(content);
-        layout->setContentsMargins(12, 10, 12, 10);
-        layout->setSpacing(6);
+        usdcc::ui::scaled::margins(layout, 12, 10, 12, 10);
+        usdcc::ui::scaled::spacing(layout, 6);
         auto* scroll = new QScrollArea;
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);

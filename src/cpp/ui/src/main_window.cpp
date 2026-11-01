@@ -11,6 +11,7 @@
 #include <QToolBar>
 #include <QTextEdit>
 
+#include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/theme.h"
@@ -136,6 +137,7 @@ void MainWindow::buildViewMenu() {
             viewMenu->addAction(toolBar->toggleViewAction());
         }
     }
+    UiScaleController::instance().addMenu(viewMenu);
 }
 
 }  // namespace usdcc::ui
