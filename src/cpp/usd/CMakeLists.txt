@@ -1,8 +1,10 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
 add_library(usdcc_usd STATIC
     include/usdcc/usd/stage.h
+    include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/value_type_info.h
+    src/property_categorizer.cpp
     src/stage.cpp
     src/stage_manager.cpp
     src/value_type_info.cpp
@@ -28,6 +30,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/outliner_view_panel.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
+    include/usdcc/usd/properties/category_section.h
     include/usdcc/usd/properties/color_swatch.h
     include/usdcc/usd/properties/data_type_gallery_dialog.h
     include/usdcc/usd/properties/number_field.h
@@ -46,6 +49,7 @@ add_library(usdcc_usd_ui STATIC
     src/outliner_view_panel.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
+    src/properties/category_section.cpp
     src/properties/color_swatch.cpp
     src/properties/data_type_gallery_dialog.cpp
     src/properties/number_field.cpp

@@ -1,6 +1,6 @@
 # Attribute Editor Revamp — Plan
 
-*Status: phases 1 and 2 done (see §12); phases 3–5 not started. Tracked as milestone M13
+*Status: phases 1–3 done (see §12); phases 4–5 not started. Tracked as milestone M13
 in [PLAN.md](PLAN.md). Last updated: 2026-11-01.*
 
 ## 1. Goal
@@ -446,7 +446,7 @@ Each phase ends with something usable and verified.
 |---|---|---|
 | **1. Foundations** *(done)* | Undo edit sessions (§3.1), including **undoable gizmo drags**. `StageChangeListener` and live panel refresh (§3.2). `ValueTypeInfo`. A real test target replacing the scratch harnesses. Categorizer spike (§5) | Unit tests for sessions (one undo step per drag, cancel restores). The current table panel updates live during a gizmo drag. Undo of a Move drag works |
 | **2. Widget kit + gallery** *(done)* | `DragNumberField`, `SliderField`, `ColorSwatch`, `TokenComboField`, `AssetPathField`, `MatrixField`, `ArraySummaryField` + `ArrayEditorDialog`; `PropertyEditor`, the factory and `PropertyRow`; theme additions. **Debug menu + USD Data Types dialog** (§8) | Every type from `GetAllTypes()` shows an editor or a counted fallback. The goal is zero unsupported types except `opaque`/`group`. Edits round-trip on the scratch stage. Screenshots reviewed against the mockup |
-| **3. New panel** | Rewritten `AttributesViewPanel`: scroll area, "Prim" header, `PropertyCategorizer` sections, search, Show filter, badges, context menu, collapsed state persisted | Categorizer unit tests on Mesh/Sphere/Camera/Light/Shader/custom prims. Live edit of each category reflected in the viewport. Undo of panel edits works |
+| **3. New panel** *(done)* | Rewritten `AttributesViewPanel`: scroll area, "Prim" header, `PropertyCategorizer` sections, search, Show filter, badges, context menu, collapsed state persisted | Categorizer unit tests on Mesh/Sphere/Camera/Light/Shader/custom prims. Live edit of each category reflected in the viewport. Undo of panel edits works |
 | **4. Transform stack** | `XformStack` (Qt-free) and `TransformStackSection`: values, add, remove, reorder, pivot preset, resetXformStack, bake/convert actions | Unit tests for every stack operation, including the inverse-op attribute-sharing case and weaker-layer opinions. All actions undoable |
 | **5. Tool targeting** | Target-op state, options-bar Target combo, row selection ↔ target sync, `opFrame`/`resolveTargetOp`, Euler orders, single-axis rotate, orient | §7.4 test list. Live check with a pivot-sandwich asset and a two-scale-op asset |
 
@@ -454,7 +454,7 @@ Phases 1 and 2 are independent and can run in parallel. Phase 3 needs both. Phas
 5 need 3, but 5's maths (`opFrame`, Euler orders) can start against the tool tests
 right after phase 1.
 
-## 12. What phases 1 and 2 built
+## 12. What phases 1–3 built
 
 Where the result differs from the plan above, this section is the current truth.
 
@@ -542,3 +542,58 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
   - array summaries, the array dialog and the in-cell vector editor
   - a Move drag undone in one step via both Edit > Undo and Ctrl+Z
   - the table panel showing the dragged value without a reselect
+
+### Phase 3
+
+- **`PropertyCategorizer`** (`usdcc_usd`, Qt-free; `categorizeProperties()`,
+  `propertyLabel()`, `propertyLabelInCategory()`, `schemaLabel()`) implements §5 with
+  these refinements:
+  - **Display groups:** `displayGroup` is honoured only when *authored* in a layer.
+    Schema-declared groups (UsdLux's "Basic"/"Advanced", …) would otherwise override
+    the schema sections.
+  - **Nested schemas:** multiple-apply API instances (a light's
+    `CollectionAPI:lightLink`/`shadowLink`) claim their properties before the API that
+    builds them in. Otherwise LightAPI swallows 14 collection rows.
+  - **Geometry:** PointBased is shown as "Geometry".
+  - **Labels** drop what the section title already says (`userProperties:weight` →
+    "Weight" in "User Properties", `collection:lightLink:includeRoot` → "Include Root").
+    Schema-declared display names win ("Enable Shadows", "Linear Velocity", a light's
+    "Diffuse Multiplier").
+  - **Material binding:** `material:binding` isn't declared by MaterialBindingAPI, so it
+    lands in a namespace section, "Material", labelled "Binding" — which is the interim
+    the plan asked for.
+  - Unit-tested in `tests/property_categorizer_test.cpp` on Mesh (with transform ops,
+    applied APIs, a primvar, custom and display-grouped properties), Sphere, Camera,
+    DistantLight, Shader and a typeless prim. It covers the options and the label rules.
+- **`AttributesViewPanel`** rewritten:
+  - **Layout:** a scroll area with a "Prim" header (path, type, specifier and applied
+    schemas read-only; kind, active and instanceable editable and undoable), then one
+    `CategorySection` per category.
+  - **Rows:** `PropertyRow` and `AttributeBinding` with the phase 2 editors.
+    - Rotation ops get a `°` suffix.
+    - Primvars show their interpolation as a note.
+    - Rows show the unauthored/animated/connected states, and Reset to Default is
+      undoable.
+    - Relationships are read-only rows with a **Select** button that selects their
+      targets. The material binding's Select is the planned "select material" button.
+  - **Search:** filters by label or name. While searching, sections are force-expanded
+    and the Prim header hides.
+  - **Show menu:** Authored Only and Hidden Properties, both persisted.
+  - **Collapsed sections** are remembered per category key. A new
+    `usdcc::ui::appSettings()` gives panels the app's INI settings file (it was private
+    to `MainWindow`).
+  - **Live updates:** value changes refresh rows in place. A resync rebuilds only if a
+    "layout signature" (type, active, categories and property names) changed, and never
+    during an edit gesture.
+  - **Transform:** the xformOps are plain rows until phase 4 replaces them with the
+    stack editor.
+- **Verified live** with `test_data/cube_and_sphere.usda` and a richer scene (a mesh with
+  applied APIs, a material binding, a primvar, a namespace and display groups; a distant
+  light; a material and a shader with soft limits):
+  - the categories, labels and editors (sliders, color swatch, asset field with resolved
+    line, connected badge)
+  - scrubbing Translate X moves the cube in the viewport, and Edit > Undo restores the
+    panel and the viewport
+  - search, Authored Only, and a collapsed section staying collapsed across prims
+  - the binding's Select jumps to the material
+  - deactivating a prim from the header, and undoing it

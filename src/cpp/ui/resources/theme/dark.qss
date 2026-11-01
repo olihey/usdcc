@@ -646,3 +646,23 @@ QToolButton#propertyDisclosure:pressed {
     min-width: 16px;
     max-width: 16px;
 }
+
+/* Attribute editor sections (CategorySection). */
+QFrame#sectionSeparator {
+    background: rgba(255, 255, 255, 6%);
+}
+
+QToolButton#sectionHeader,
+QToolButton#sectionHeader:hover,
+QToolButton#sectionHeader:pressed {
+    background: transparent;
+    border: none;
+    padding: 0 2px;
+    min-height: 18px;
+    color: #e8e8ea;
+    font-weight: 600;
+}
+
+QLabel#sectionCount {
+    color: rgba(255, 255, 255, 30%);
+}

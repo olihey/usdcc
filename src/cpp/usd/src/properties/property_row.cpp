@@ -62,6 +62,14 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
 
 void PropertyRow::setLabelWidth(int width) { m_label->setFixedWidth(width); }
 
+void PropertyRow::addTrailingWidget(QWidget* widget) {
+    auto* rowLayout = static_cast<QHBoxLayout*>(layout());
+    // Before the note and badge, right after the value column.
+    rowLayout->insertWidget(2, widget, 0, Qt::AlignTop);
+}
+
+QString PropertyRow::labelText() const { return m_label->text(); }
+
 void PropertyRow::setLabelToolTip(const QString& toolTip) { m_label->setToolTip(toolTip); }
 
 void PropertyRow::setNote(const QString& note, int fixedWidth) {

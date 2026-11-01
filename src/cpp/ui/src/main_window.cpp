@@ -11,6 +11,7 @@
 #include <QToolBar>
 #include <QTextEdit>
 
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/title_bar.h"
@@ -28,17 +29,8 @@ constexpr auto kDockLayoutKey = "MainWindow/dockLayout";
 constexpr auto kWindowStateKey = "MainWindow/windowState";
 constexpr int kWindowStateVersion = 1;
 
-// A plain INI file (rather than QSettings' native format, which is the
-// Windows registry under HKCU\Software\usdcc\usdcc) so it's a real file a
-// developer can find, inspect, or delete by hand instead of hunting through
-// regedit — useful during active development, when the on-disk panel set
-// changes often enough that a stale saved layout is a routine annoyance
-// rather than a rare edge case.
-QSettings layoutSettings() {
-    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(configDir);
-    return QSettings(configDir + "/usdcc.ini", QSettings::IniFormat);
-}
+// See appSettings() for why this is a plain INI file.
+QSettings layoutSettings() { return appSettings(); }
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {

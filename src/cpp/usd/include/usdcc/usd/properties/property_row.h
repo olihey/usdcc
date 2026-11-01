@@ -34,6 +34,9 @@ public:
     void setNote(const QString& note, int fixedWidth = 0);
     // Full property path, for the context menu's "Copy Property Path".
     void setPropertyPath(const QString& path) { m_propertyPath = path; }
+    // An extra control after the editor (e.g. a relationship's "Select" button).
+    void addTrailingWidget(QWidget* widget);
+    QString labelText() const;
 
     void setUnauthored(bool unauthored);
     void setAnimated(bool animated);

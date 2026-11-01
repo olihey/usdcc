@@ -8,6 +8,7 @@ add_executable(usdcc_tests
     test_main.cpp
     categorizer_spike_test.cpp
     move_tool_test.cpp
+    property_categorizer_test.cpp
     rotate_tool_test.cpp
     stage_changes_test.cpp
     undo_manager_test.cpp

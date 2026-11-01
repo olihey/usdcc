@@ -1,132 +1,84 @@
 #include "usdcc/usd/attributes_view_panel.h"
 
+#include "usdcc/ui/settings.h"
+#include "usdcc/usd/properties/attribute_binding.h"
+#include "usdcc/usd/properties/category_section.h"
+#include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/properties/property_row.h"
+#include "usdcc/usd/property_categorizer.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
-#include <pxr/base/gf/vec2d.h>
-#include <pxr/base/gf/vec2f.h>
-#include <pxr/base/gf/vec2i.h>
-#include <pxr/base/gf/vec3d.h>
-#include <pxr/base/gf/vec3f.h>
-#include <pxr/base/gf/vec3i.h>
-#include <pxr/base/gf/vec4d.h>
-#include <pxr/base/gf/vec4f.h>
-#include <pxr/base/gf/vec4i.h>
-#include <pxr/base/tf/token.h>
-#include <pxr/base/tf/type.h>
-#include <pxr/base/vt/value.h>
+#include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/kind/registry.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/attribute.h>
-#include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/modelAPI.h>
+#include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/primvar.h>
 
-#include <QApplication>
+#include <QAction>
 #include <QComboBox>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QLabel>
-#include <QTableWidget>
+#include <QLineEdit>
+#include <QMenu>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include <sstream>
+#include <functional>
 #include <utility>
 
 namespace usdcc::usd {
 
+using namespace PXR_NS;
+using properties::AttributeBinding;
+using properties::CategorySection;
+using properties::EditorHints;
+using properties::PropertyEditor;
+using properties::PropertyRow;
+
 namespace {
 
-std::vector<double> parseNumberList(const QString& text) {
-    QString trimmed = text.trimmed();
-    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
-        trimmed = trimmed.mid(1, trimmed.length() - 2);
-    }
-    std::vector<double> values;
-    for (const QString& part : trimmed.split(',', Qt::SkipEmptyParts)) {
-        bool ok = false;
-        const double value = part.trimmed().toDouble(&ok);
-        if (!ok) {
-            return {};
-        }
-        values.push_back(value);
-    }
-    return values;
+constexpr int kLabelWidth = 130;
+constexpr auto kCollapsedKeyPrefix = "AttributeEditor/collapsed/";
+constexpr auto kAuthoredOnlyKey = "AttributeEditor/authoredOnly";
+constexpr auto kShowHiddenKey = "AttributeEditor/showHidden";
+
+QString qs(const std::string& s) { return QString::fromStdString(s); }
+
+PropertyEditor* readOnlyText(const QString& text) {
+    PropertyEditor* editor = properties::createPropertyEditor(SdfValueTypeNames->String);
+    editor->setReadOnly(true);
+    editor->setValue(VtValue(text.toStdString()));
+    return editor;
 }
 
-// Parses `text` according to `attr`'s actual value type and sets it.
-// Dispatches on the attribute's underlying C++ type (pxr::TfType) rather
-// than its exact SdfValueTypeName, since role variants like Color3f/
-// Vector3f/Point3f/Normal3f all share the same GfVec3f C++ representation
-// and Set() only cares about that. Returns false (leaving the attribute
-// unchanged) for types not handled here.
-bool setAttributeFromText(const PXR_NS::UsdAttribute& attr, const QString& text) {
-    using namespace PXR_NS;
-    const TfType type = attr.GetTypeName().GetType();
-    bool ok = false;
+QString targetsText(const UsdRelationship& rel) {
+    SdfPathVector targets;
+    rel.GetTargets(&targets);
+    if (targets.empty()) return QObject::tr("(no targets)");
+    QStringList parts;
+    for (const SdfPath& t : targets) parts << qs(t.GetString());
+    return parts.join(QStringLiteral(", "));
+}
 
-    if (type == TfType::Find<bool>()) {
-        const QString lower = text.trimmed().toLower();
-        return attr.Set(lower == "true" || lower == "1");
+const char* specifierName(SdfSpecifier specifier) {
+    switch (specifier) {
+        case SdfSpecifierDef:
+            return "def";
+        case SdfSpecifierOver:
+            return "over";
+        case SdfSpecifierClass:
+            return "class";
+        default:
+            return "";
     }
-    if (type == TfType::Find<int>()) {
-        const int value = text.toInt(&ok);
-        return ok && attr.Set(value);
-    }
-    if (type == TfType::Find<unsigned int>()) {
-        const uint value = text.toUInt(&ok);
-        return ok && attr.Set(value);
-    }
-    if (type == TfType::Find<int64_t>()) {
-        const qlonglong value = text.toLongLong(&ok);
-        return ok && attr.Set(static_cast<int64_t>(value));
-    }
-    if (type == TfType::Find<float>()) {
-        const float value = text.toFloat(&ok);
-        return ok && attr.Set(value);
-    }
-    if (type == TfType::Find<double>()) {
-        const double value = text.toDouble(&ok);
-        return ok && attr.Set(value);
-    }
-    if (type == TfType::Find<std::string>()) {
-        return attr.Set(text.toStdString());
-    }
-    if (type == TfType::Find<TfToken>()) {
-        return attr.Set(TfToken(text.toStdString()));
-    }
-
-    const std::vector<double> values = parseNumberList(text);
-    if (type == TfType::Find<GfVec2f>() && values.size() == 2) {
-        return attr.Set(GfVec2f(values[0], values[1]));
-    }
-    if (type == TfType::Find<GfVec3f>() && values.size() == 3) {
-        return attr.Set(GfVec3f(values[0], values[1], values[2]));
-    }
-    if (type == TfType::Find<GfVec4f>() && values.size() == 4) {
-        return attr.Set(GfVec4f(values[0], values[1], values[2], values[3]));
-    }
-    if (type == TfType::Find<GfVec2d>() && values.size() == 2) {
-        return attr.Set(GfVec2d(values[0], values[1]));
-    }
-    if (type == TfType::Find<GfVec3d>() && values.size() == 3) {
-        return attr.Set(GfVec3d(values[0], values[1], values[2]));
-    }
-    if (type == TfType::Find<GfVec4d>() && values.size() == 4) {
-        return attr.Set(GfVec4d(values[0], values[1], values[2], values[3]));
-    }
-    if (type == TfType::Find<GfVec2i>() && values.size() == 2) {
-        return attr.Set(GfVec2i(static_cast<int>(values[0]), static_cast<int>(values[1])));
-    }
-    if (type == TfType::Find<GfVec3i>() && values.size() == 3) {
-        return attr.Set(
-            GfVec3i(static_cast<int>(values[0]), static_cast<int>(values[1]), static_cast<int>(values[2])));
-    }
-    if (type == TfType::Find<GfVec4i>() && values.size() == 4) {
-        return attr.Set(GfVec4i(static_cast<int>(values[0]), static_cast<int>(values[1]),
-                                 static_cast<int>(values[2]), static_cast<int>(values[3])));
-    }
-
-    return false;
 }
 
 }  // namespace
@@ -146,21 +98,48 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(10, 4, 10, 4);
 
+    m_search = new QLineEdit(toolbar);
+    m_search->setPlaceholderText(tr("Search attributes"));
+    m_search->setClearButtonEnabled(true);
+
+    m_showButton = new QToolButton(toolbar);
+    m_showButton->setText(tr("Show"));
+    m_showButton->setPopupMode(QToolButton::InstantPopup);
+    auto* showMenu = new QMenu(m_showButton);
+    m_authoredOnly = showMenu->addAction(tr("Authored Only"));
+    m_authoredOnly->setCheckable(true);
+    m_showHidden = showMenu->addAction(tr("Hidden Properties"));
+    m_showHidden->setCheckable(true);
+    m_showButton->setMenu(showMenu);
+    {
+        QSettings settings = usdcc::ui::appSettings();
+        m_authoredOnly->setChecked(settings.value(kAuthoredOnlyKey, false).toBool());
+        m_showHidden->setChecked(settings.value(kShowHiddenKey, false).toBool());
+    }
+
     toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
     toolbarLayout->addWidget(stageCombo(), 1);
+    toolbarLayout->addWidget(m_search, 1);
+    toolbarLayout->addWidget(m_showButton);
 
-    m_table = new QTableWidget(container);
-    m_table->setColumnCount(3);
-    m_table->setHorizontalHeaderLabels({tr("Name"), tr("Type"), tr("Value")});
-    m_table->horizontalHeader()->setStretchLastSection(true);
-    m_table->verticalHeader()->setVisible(false);
+    m_scroll = new QScrollArea(container);
+    m_scroll->setObjectName(QStringLiteral("attributeScroll"));
+    m_scroll->setWidgetResizable(true);
+    m_scroll->setFrameShape(QFrame::NoFrame);
 
     layout->addWidget(toolbar);
-    layout->addWidget(m_table, 1);
-
+    layout->addWidget(m_scroll, 1);
     setContentWidget(container);
 
-    connect(m_table, &QTableWidget::cellChanged, this, &AttributesViewPanel::onCellChanged);
+    connect(m_search, &QLineEdit::textChanged, this, [this]() { applyFilter(); });
+    for (QAction* action : {m_authoredOnly, m_showHidden}) {
+        connect(action, &QAction::toggled, this, [this]() {
+            QSettings settings = usdcc::ui::appSettings();
+            settings.setValue(kAuthoredOnlyKey, m_authoredOnly->isChecked());
+            settings.setValue(kShowHiddenKey, m_showHidden->isChecked());
+            rebuild();
+        });
+    }
 
     m_selectionChangedConnection = stageManager->selectionChanged.connect(
         [this](StageRefPtr changedStage, std::vector<PXR_NS::SdfPath> paths) {
@@ -182,96 +161,319 @@ void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
 }
 
-void AttributesViewPanel::onStageObjectsChanged(const StageChanges& changes) {
-    if (m_primPath.IsEmpty() || !changes.affectsPrim(m_primPath) || m_refreshQueued) {
-        return;
-    }
-    // A drag sends a notice per mouse move, and several can arrive before the
-    // next paint: coalesce them into one refresh, run after the edit that sent
-    // the notice has finished.
-    m_refreshQueued = true;
-    QMetaObject::invokeMethod(
-        this,
-        [this]() {
-            m_refreshQueued = false;
-            // Don't yank a cell out from under the user mid-typing (an open
-            // cell editor is a focused child of the table); the edit's own
-            // commit refreshes afterwards anyway.
-            QWidget* focus = QApplication::focusWidget();
-            const bool editingCell = focus && focus != m_table && m_table->isAncestorOf(focus);
-            if (!editingCell) {
-                refreshAttributes();
-            }
-        },
-        Qt::QueuedConnection);
-}
-
 void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
     if (stage != currentStage()) {
         return;
     }
-    m_primPath = paths.empty() ? PXR_NS::SdfPath() : paths.front();
-    refreshAttributes();
+    const SdfPath path = paths.empty() ? SdfPath() : paths.front();
+    if (path == m_primPath && m_content) {
+        return;
+    }
+    m_primPath = path;
+    rebuild();
 }
 
-void AttributesViewPanel::refreshAttributes() {
-    m_updatingTable = true;
-    m_table->setRowCount(0);
+UsdPrim AttributesViewPanel::currentPrim() const {
+    return m_primPath.IsEmpty() ? UsdPrim() : currentStage()->usdStage()->GetPrimAtPath(m_primPath);
+}
 
-    const PXR_NS::UsdPrim prim =
-        !m_primPath.IsEmpty() ? currentStage()->usdStage()->GetPrimAtPath(m_primPath) : PXR_NS::UsdPrim();
-    if (prim) {
-        const std::vector<PXR_NS::UsdAttribute> attrs = prim.GetAttributes();
-        m_table->setRowCount(static_cast<int>(attrs.size()));
-
-        int row = 0;
-        for (const auto& attr : attrs) {
-            auto* nameItem = new QTableWidgetItem(QString::fromStdString(attr.GetName().GetString()));
-            nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
-            m_table->setItem(row, 0, nameItem);
-
-            auto* typeItem = new QTableWidgetItem(QString::fromStdString(attr.GetTypeName().GetAsToken().GetString()));
-            typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
-            m_table->setItem(row, 1, typeItem);
-
-            QString valueText;
-            PXR_NS::VtValue value;
-            if (attr.Get(&value)) {
-                std::ostringstream oss;
-                oss << value;
-                valueText = QString::fromStdString(oss.str());
-            }
-            m_table->setItem(row, 2, new QTableWidgetItem(valueText));
-
-            ++row;
+std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
+    if (!prim) return {};
+    std::string signature = prim.GetTypeName().GetString();
+    signature += prim.IsActive() ? "|a" : "|i";
+    const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
+    for (const PropertyCategory& category : categorizeProperties(prim, options)) {
+        signature += "|" + category.key + ":";
+        for (const UsdProperty& property : category.properties) {
+            signature += property.GetName().GetString() + ",";
         }
     }
-
-    m_updatingTable = false;
+    return signature;
 }
 
-void AttributesViewPanel::onCellChanged(int row, int column) {
-    if (m_updatingTable || column != 2) {
-        return;
+CategorySection* AttributesViewPanel::makeSection(const QString& key, const QString& title) {
+    auto* section = new CategorySection(key, title);
+    QSettings settings = usdcc::ui::appSettings();
+    section->setCollapsed(settings.value(kCollapsedKeyPrefix + key, false).toBool());
+    connect(section, &CategorySection::collapsedChanged, this, [key](bool collapsed) {
+        QSettings s = usdcc::ui::appSettings();
+        s.setValue(kCollapsedKeyPrefix + key, collapsed);
+    });
+    return section;
+}
+
+void AttributesViewPanel::rebuild() {
+    const int scrollPosition = m_scroll->verticalScrollBar()->value();
+    if (QWidget* old = m_scroll->takeWidget()) {
+        // Deferred: a rebuild can be triggered from inside one of the old
+        // widgets' own signal handlers.
+        old->deleteLater();
     }
-    QTableWidgetItem* nameItem = m_table->item(row, 0);
-    QTableWidgetItem* valueItem = m_table->item(row, column);
-    if (!nameItem || !valueItem) {
+    m_rows.clear();
+    m_sections.clear();
+    m_primSection = nullptr;
+    m_header = {};
+    m_rebuildPending = false;
+    m_refreshPending = false;
+
+    m_content = new QWidget;
+    m_content->setObjectName(QStringLiteral("attributeContent"));
+    auto* layout = new QVBoxLayout(m_content);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    const UsdPrim prim = currentPrim();
+    m_signature = layoutSignature(prim);
+    if (!prim) {
+        auto* empty = new QLabel(m_primPath.IsEmpty() ? tr("Select a prim to see its attributes.")
+                                                      : tr("%1 no longer exists.").arg(qs(m_primPath.GetString())),
+                                 m_content);
+        empty->setObjectName(QStringLiteral("propertyNote"));
+        empty->setAlignment(Qt::AlignCenter);
+        empty->setContentsMargins(0, 24, 0, 0);
+        layout->addWidget(empty);
+        layout->addStretch(1);
+        m_scroll->setWidget(m_content);
         return;
     }
 
-    const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(m_primPath);
-    const PXR_NS::UsdAttribute attr = prim ? prim.GetAttribute(PXR_NS::TfToken(nameItem->text().toStdString()))
-                                            : PXR_NS::UsdAttribute();
+    buildPrimSection(prim, layout);
 
-    const QString newText = valueItem->text();
-    const bool applied = attr && m_undoManager->apply(currentStage(), tr("Edit %1").arg(nameItem->text()),
-                                                       [&]() { return setAttributeFromText(attr, newText); });
-    if (!applied) {
-        // Unsupported type or unparsable text: revert the displayed value
-        // rather than leaving an edit that didn't actually apply.
-        refreshAttributes();
+    const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
+    for (const PropertyCategory& category : categorizeProperties(prim, options)) {
+        CategorySection* section = makeSection(qs(category.key), qs(category.label));
+        for (const UsdProperty& property : category.properties) {
+            Row row = buildRow(property, category);
+            row.section = section;
+            section->addRow(row.row);
+            m_rows.push_back(row);
+        }
+        layout->addWidget(section);
+        m_sections.push_back(section);
     }
+    layout->addStretch(1);
+    m_scroll->setWidget(m_content);
+
+    applyFilter();
+    // The scroll range is only known once the new content has been laid out.
+    QTimer::singleShot(0, this, [this, scrollPosition]() { m_scroll->verticalScrollBar()->setValue(scrollPosition); });
+}
+
+void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* layout) {
+    m_primSection = makeSection(QStringLiteral("prim"), tr("Prim"));
+    auto addRow = [this](const QString& label, PropertyEditor* editor) {
+        auto* row = new PropertyRow(label, editor);
+        row->setLabelWidth(kLabelWidth);
+        m_primSection->addRow(row);
+        return editor;
+    };
+
+    m_header.path = addRow(tr("Path"), readOnlyText(QString()));
+    m_header.type = addRow(tr("Type"), readOnlyText(QString()));
+
+    EditorHints kindHints;
+    kindHints.allowedTokens = {TfToken(), KindTokens->model, KindTokens->component, KindTokens->group,
+                               KindTokens->assembly, KindTokens->subcomponent};
+    m_header.kind = addRow(tr("Kind"), properties::createPropertyEditor(SdfValueTypeNames->Token, kindHints));
+    m_header.specifier = addRow(tr("Specifier"), readOnlyText(QString()));
+    m_header.active = addRow(tr("Active"), properties::createPropertyEditor(SdfValueTypeNames->Bool));
+    m_header.instanceable = addRow(tr("Instanceable"), properties::createPropertyEditor(SdfValueTypeNames->Bool));
+    m_header.schemas = addRow(tr("Applied Schemas"), readOnlyText(QString()));
+
+    // Prim metadata edits: each one undo step.
+    auto edit = [this](const QString& description, std::function<bool(UsdPrim&)> change) {
+        UsdPrim p = currentPrim();
+        if (p) m_undoManager->apply(currentStage(), description, [&]() { return change(p); });
+    };
+    connect(m_header.kind, &PropertyEditor::valueEdited, this, [edit](const VtValue& v) {
+        const TfToken kind = v.IsHolding<TfToken>() ? v.UncheckedGet<TfToken>() : TfToken();
+        edit(tr("Set Kind"), [kind](UsdPrim& p) { UsdModelAPI(p).SetKind(kind); return true; });
+    });
+    connect(m_header.active, &PropertyEditor::valueEdited, this, [edit](const VtValue& v) {
+        const bool on = v.IsHolding<bool>() && v.UncheckedGet<bool>();
+        edit(on ? tr("Activate") : tr("Deactivate"), [on](UsdPrim& p) { return p.SetActive(on); });
+    });
+    connect(m_header.instanceable, &PropertyEditor::valueEdited, this, [edit](const VtValue& v) {
+        const bool on = v.IsHolding<bool>() && v.UncheckedGet<bool>();
+        edit(tr("Set Instanceable"), [on](UsdPrim& p) { return p.SetInstanceable(on); });
+    });
+
+    refreshPrimHeader(prim);
+    layout->addWidget(m_primSection);
+}
+
+void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {
+    if (!m_primSection || !prim) return;
+    m_header.path->setValue(VtValue(prim.GetPath().GetString()));
+    m_header.type->setValue(VtValue(prim.GetTypeName().IsEmpty() ? std::string("(typeless)")
+                                                                 : prim.GetTypeName().GetString()));
+    TfToken kind;
+    UsdModelAPI(prim).GetKind(&kind);
+    m_header.kind->setValue(VtValue(kind));
+    m_header.specifier->setValue(VtValue(std::string(specifierName(prim.GetSpecifier()))));
+    m_header.active->setValue(VtValue(prim.IsActive()));
+    m_header.instanceable->setValue(VtValue(prim.IsInstanceable()));
+    std::vector<std::string> schemas;
+    for (const TfToken& s : prim.GetAppliedSchemas()) schemas.push_back(s.GetString());
+    m_header.schemas->setValue(VtValue(schemas.empty() ? std::string("(none)") : TfStringJoin(schemas, ", ")));
+}
+
+AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& property, const PropertyCategory& category) {
+    Row row;
+    row.property = property;
+    const QString label = qs(propertyLabelInCategory(property, category));
+    const QString name = qs(property.GetName().GetString());
+    row.searchText = (label + QLatin1Char(' ') + name).toLower();
+
+    QString tooltip = QStringLiteral("<b>%1</b>").arg(name.toHtmlEscaped());
+    if (const UsdAttribute attr = property.As<UsdAttribute>()) {
+        tooltip += QStringLiteral("<br>%1").arg(qs(attr.GetTypeName().GetAsToken().GetString()));
+        EditorHints hints = EditorHints::forAttribute(attr);
+        if (TfStringStartsWith(property.GetName().GetString(), "xformOp:rotate")) {
+            hints.suffix = QStringLiteral("\xC2\xB0");
+        }
+        row.editor = properties::createPropertyEditor(attr.GetTypeName(), hints);
+        row.row = new PropertyRow(label, row.editor);
+        row.binding = new AttributeBinding(attr, row.editor, currentStage(), m_undoManager.get(), row.row);
+        connect(row.row, &PropertyRow::resetRequested, row.binding, &AttributeBinding::resetToDefault);
+        // Rebuilds wait for a gesture to finish; pick up any that were held back.
+        connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
+        if (const UsdGeomPrimvar primvar{attr}) {
+            row.row->setNote(qs(primvar.GetInterpolation().GetString()));
+        }
+    } else if (const UsdRelationship rel = property.As<UsdRelationship>()) {
+        tooltip += QStringLiteral("<br>relationship");
+        row.editor = readOnlyText(targetsText(rel));
+        row.row = new PropertyRow(label, row.editor);
+        auto* select = new QToolButton(row.row);
+        select->setObjectName(QStringLiteral("propertyButton"));
+        select->setText(tr("Select"));
+        select->setToolTip(tr("Select the target prims"));
+        connect(select, &QToolButton::clicked, this, [this, rel]() {
+            SdfPathVector targets;
+            rel.GetTargets(&targets);
+            std::vector<SdfPath> prims;
+            for (const SdfPath& t : targets) prims.push_back(t.GetPrimPath());
+            if (!prims.empty()) stageManager()->setSelectedPaths(currentStage(), prims);
+        });
+        row.row->addTrailingWidget(select);
+    }
+    const std::string doc = property.GetDocumentation();
+    if (!doc.empty()) {
+        tooltip += QStringLiteral("<br><br>%1").arg(qs(doc).left(600).toHtmlEscaped());
+    }
+    const auto stack = property.GetPropertyStack();
+    if (!stack.empty() && stack.front()) {
+        tooltip += QStringLiteral("<br><br>Strongest opinion: %1").arg(qs(stack.front()->GetLayer()->GetDisplayName()));
+    }
+    row.row->setLabelWidth(kLabelWidth);
+    row.row->setLabelToolTip(tooltip);
+    row.row->setPropertyPath(qs(property.GetPath().GetString()));
+    updateRowState(row);
+    return row;
+}
+
+void AttributesViewPanel::updateRowState(Row& row) {
+    if (const UsdAttribute attr = row.property.As<UsdAttribute>()) {
+        const bool authored = attr.HasAuthoredValue();
+        row.row->setUnauthored(!authored);
+        row.row->setResettable(authored);
+        row.row->setAnimated(attr.GetNumTimeSamples() > 0);
+        SdfPathVector sources;
+        attr.GetConnections(&sources);
+        row.row->setConnectedSource(sources.empty() ? QString() : qs(sources.front().GetString()));
+    } else if (const UsdRelationship rel = row.property.As<UsdRelationship>()) {
+        row.row->setUnauthored(!rel.IsAuthored());
+        row.editor->setValue(VtValue(targetsText(rel).toStdString()));
+    }
+}
+
+void AttributesViewPanel::refreshValues() {
+    m_refreshPending = false;
+    const UsdPrim prim = currentPrim();
+    if (!prim) {
+        rebuild();
+        return;
+    }
+    refreshPrimHeader(prim);
+    for (Row& row : m_rows) {
+        if (row.binding) row.binding->refresh();
+        updateRowState(row);
+    }
+}
+
+void AttributesViewPanel::applyFilter() {
+    const QString text = m_search->text().trimmed().toLower();
+    std::vector<int> visibleCounts(m_sections.size(), 0);
+    for (Row& row : m_rows) {
+        const bool visible = text.isEmpty() || row.searchText.contains(text);
+        row.row->setVisible(visible);
+        if (visible) {
+            for (size_t i = 0; i < m_sections.size(); ++i) {
+                if (m_sections[i] == row.section) ++visibleCounts[i];
+            }
+        }
+    }
+    for (size_t i = 0; i < m_sections.size(); ++i) {
+        m_sections[i]->setVisible(visibleCounts[i] > 0);
+        m_sections[i]->setCount(visibleCounts[i]);
+        m_sections[i]->setForceExpanded(!text.isEmpty());
+    }
+    if (m_primSection) {
+        m_primSection->setVisible(text.isEmpty());
+    }
+}
+
+void AttributesViewPanel::onStageObjectsChanged(const StageChanges& changes) {
+    if (m_primPath.IsEmpty()) {
+        return;
+    }
+    if (changes.resyncsPrim(m_primPath)) {
+        m_rebuildPending = true;
+    } else if (changes.affectsPrim(m_primPath)) {
+        m_refreshPending = true;
+    } else {
+        return;
+    }
+    queueProcessPendingChanges();
+}
+
+void AttributesViewPanel::queueProcessPendingChanges() {
+    // A drag sends a notice per mouse move: coalesce them into one update, run
+    // after the edit that sent the notice has finished.
+    if (m_processQueued) return;
+    m_processQueued = true;
+    QMetaObject::invokeMethod(
+        this,
+        [this]() {
+            m_processQueued = false;
+            processPendingChanges();
+        },
+        Qt::QueuedConnection);
+}
+
+bool AttributesViewPanel::anyEditing() const {
+    for (const Row& row : m_rows) {
+        if (row.binding && row.binding->isEditing()) return true;
+    }
+    return false;
+}
+
+void AttributesViewPanel::processPendingChanges() {
+    if (!m_rebuildPending && !m_refreshPending) return;
+    // Never rebuild under a gesture (it would delete the widget being dragged);
+    // the gesture's end calls back here.
+    if (anyEditing()) return;
+    if (m_rebuildPending) {
+        m_rebuildPending = false;
+        // A resync doesn't always change what's shown (e.g. the first edit of a
+        // schema attribute creates its spec): then just refresh the values.
+        if (layoutSignature(currentPrim()) != m_signature) {
+            rebuild();
+            return;
+        }
+    }
+    refreshValues();
 }
 
 }  // namespace usdcc::usd

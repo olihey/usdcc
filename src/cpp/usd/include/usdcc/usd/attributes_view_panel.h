@@ -6,27 +6,51 @@
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/property.h>
 
+#include <QString>
+
+#include <memory>
+#include <string>
 #include <vector>
 
-class QTableWidget;
+class QAction;
+class QLabel;
+class QLineEdit;
+class QScrollArea;
+class QToolButton;
+class QVBoxLayout;
 
 namespace usdcc::usd {
 
 class StageManager;
 class UndoManager;
+struct PropertyCategory;
 
-// ViewPanel subclass showing/editing the attributes of whichever prim is
-// currently selected (via StageManager::selectedPaths()) on this panel's
-// chosen stage — see docs/PLAN.md milestone M4. Shows the first prim when
-// multiple are selected.
+namespace properties {
+class AttributeBinding;
+class CategorySection;
+class PropertyEditor;
+class PropertyRow;
+}  // namespace properties
+
+// ViewPanel subclass showing and editing the properties of the selected prim
+// (the first one, when several are selected) on this panel's stage — see
+// docs/ATTRIBUTE_EDITOR.md (milestone M13, phase 3).
 //
-// Value editing covers common scalar types (bool/int/float/double/
-// string/token) and Gf vector types (Float2/3/4, Double2/3/4, Int2/3/4,
-// and role variants sharing those C++ types, e.g. Color3f/Vector3f/Point3f)
-// via a "(x, y, z)"-style text format matching how USD itself displays
-// them. Other types (arrays, matrices, asset paths, etc.) are shown
-// read-only for now — see docs/PLAN.md §6 for the known gap.
+// Layout: a "Prim" header (path, type, kind, specifier, active, instanceable,
+// applied schemas), then one collapsible section per PropertyCategorizer
+// category, each row a label plus the value type's own PropertyEditor.
+// Attribute edits go through AttributeBinding (one undo step per gesture);
+// relationships are shown read-only with a button to select their targets.
+// The toolbar has a search field and a Show menu (authored only, hidden
+// properties); section collapse states and the Show choices persist.
+//
+// The panel follows the stage live (Stage::changed): value changes update the
+// rows in place, and only a change to the set of properties shown rebuilds them
+// — never in the middle of an edit gesture, which would delete the widget
+// being dragged.
 class AttributesViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
@@ -37,28 +61,69 @@ public:
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
 protected:
-    // Resets the selected-prim path and refreshes the table for the new stage.
     void onStageChanged(const StageRefPtr& stage) override;
 
 private Q_SLOTS:
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
-    void onCellChanged(int row, int column);
 
 private:
-    void refreshAttributes();
+    struct Row {
+        properties::PropertyRow* row = nullptr;
+        properties::AttributeBinding* binding = nullptr;  // null for relationships
+        properties::PropertyEditor* editor = nullptr;
+        properties::CategorySection* section = nullptr;
+        PXR_NS::UsdProperty property;
+        QString searchText;  // label and name, lower case
+    };
+    struct PrimHeader {
+        properties::PropertyEditor* path = nullptr;
+        properties::PropertyEditor* type = nullptr;
+        properties::PropertyEditor* kind = nullptr;
+        properties::PropertyEditor* specifier = nullptr;
+        properties::PropertyEditor* active = nullptr;
+        properties::PropertyEditor* instanceable = nullptr;
+        properties::PropertyEditor* schemas = nullptr;
+    };
+
+    PXR_NS::UsdPrim currentPrim() const;
+    void rebuild();
+    void refreshValues();
+    void refreshPrimHeader(const PXR_NS::UsdPrim& prim);
+    void updateRowState(Row& row);
+    void applyFilter();
+    void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
+    Row buildRow(const PXR_NS::UsdProperty& property, const PropertyCategory& category);
+    properties::CategorySection* makeSection(const QString& key, const QString& title);
     void onStageObjectsChanged(const StageChanges& changes);
+    void processPendingChanges();
+    void queueProcessPendingChanges();
+    bool anyEditing() const;
+    std::string layoutSignature(const PXR_NS::UsdPrim& prim) const;
 
     PXR_NS::SdfPath m_primPath;
-    QTableWidget* m_table;
-    bool m_updatingTable = false;
-    bool m_refreshQueued = false;
     std::shared_ptr<UndoManager> m_undoManager;
+
+    QLineEdit* m_search;
+    QToolButton* m_showButton;
+    QAction* m_authoredOnly;
+    QAction* m_showHidden;
+    QScrollArea* m_scroll;
+    QWidget* m_content = nullptr;
+
+    std::vector<Row> m_rows;
+    std::vector<properties::CategorySection*> m_sections;
+    properties::CategorySection* m_primSection = nullptr;
+    PrimHeader m_header;
+    std::string m_signature;  // what the current rows were built from
+
+    bool m_rebuildPending = false;
+    bool m_refreshPending = false;
+    bool m_processQueued = false;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
-    // The shown stage's change notices (re-made whenever the stage changes), so
-    // values follow gizmo drags, undo/redo and edits made elsewhere.
+    // The shown stage's change notices (re-made whenever the stage changes).
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 
