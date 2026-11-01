@@ -55,6 +55,13 @@ int main(int argc, char** argv) {
     format.setStencilBufferSize(8);
     QSurfaceFormat::setDefaultFormat(format);
 
+    // The viewport is a native child window (QWidget::createWindowContainer),
+    // and by default Qt then makes its siblings native too — including the
+    // custom title bar, which then receives the mouse itself instead of the
+    // main window's hit test, so dragging it no longer moves the window.
+    // QWindowKit requires this attribute, set before QApplication exists.
+    QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
+
     QApplication app(argc, argv);
     usdcc::ui::theme::apply(app);
 
