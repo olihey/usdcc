@@ -65,6 +65,9 @@ ScaleTool::Handle ScaleTool::pickHandle(const ToolContext& ctx, const PXR_NS::Gf
     double bestDistance = kPickThresholdNdc;
 
     const double centerDistance = (ndcPos - projectToNdc(frame.origin, ctx.viewMatrix, ctx.projMatrix)).GetLength();
+    if (centerDistance < kCenterPickNdc) {
+        return Handle::Center;  // see kCenterPickNdc: the axes would otherwise win next to the box
+    }
     if (centerDistance < bestDistance) {
         bestDistance = centerDistance;
         best = Handle::Center;

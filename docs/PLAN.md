@@ -729,7 +729,9 @@ things that will bite later if not addressed early:
     whenever the press is within `kCenterPickNdc` (0.02, a bit more than the box's drawn
     radius) of the origin. Reproduced headlessly (presses 0.004 NDC off the origin grabbed X,
     Y or Z) and confirmed with a real mouse drag: the prim now follows the cursor in both
-    axes. `ScaleTool::pickHandle()` has the same pattern and was not changed.
+    axes. `ScaleTool::pickHandle()` had the same pattern and got the same fix afterwards
+    (headless: presses 0.004-0.012 NDC off the origin grabbed a single axis, e.g. scale
+    `(1, 25.9, 1)`, instead of scaling uniformly; now all five scale uniformly).
 
 31. **Move/Rotate/Scale are `SelectTool`s.** `TransformGizmoTool` now derives from
     `SelectTool`, so prims can be picked while a transform tool is active. Its
