@@ -106,7 +106,7 @@ void writeScale(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfVec3f& value) 
 }
 }  // namespace
 
-ToolResult ScaleTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) {
+ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) {
     const PXR_NS::UsdGeomXformable xformable = resolveXformable(ctx);
     if (!xformable) {
         m_activeHandle = Handle::None;

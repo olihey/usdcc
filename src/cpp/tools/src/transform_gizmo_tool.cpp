@@ -17,9 +17,14 @@ constexpr const char* kSnapIncrementId = "snapIncrement";
 }  // namespace
 
 std::vector<ToolOption> TransformGizmoTool::options() const {
-    return {ToolOption::toggle(kSnapId, "Snap", m_snapEnabled),
-            ToolOption::number(kSnapIncrementId, "Increment", m_snapIncrement, m_snapSpec.min, m_snapSpec.max,
-                               m_snapSpec.step, m_snapSpec.decimals, m_snapSpec.suffix, kSnapId)};
+    std::vector<ToolOption> opts = {
+        ToolOption::toggle(kSnapId, "Snap", m_snapEnabled),
+        ToolOption::number(kSnapIncrementId, "Increment", m_snapIncrement, m_snapSpec.min, m_snapSpec.max,
+                           m_snapSpec.step, m_snapSpec.decimals, m_snapSpec.suffix, kSnapId)};
+    for (ToolOption& selectOption : SelectTool::options()) {
+        opts.push_back(std::move(selectOption));
+    }
+    return opts;
 }
 
 void TransformGizmoTool::setOption(const std::string& id, const OptionValue& value) {
@@ -31,7 +36,19 @@ void TransformGizmoTool::setOption(const std::string& id, const OptionValue& val
         if (const auto* increment = std::get_if<double>(&value)) {
             m_snapIncrement = std::clamp(*increment, m_snapSpec.min, m_snapSpec.max);
         }
+    } else {
+        SelectTool::setOption(id, value);
     }
+}
+
+ToolResult TransformGizmoTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
+                                          const PXR_NS::GfRay& ray) {
+    ToolResult result = beginGizmoDrag(ctx, ndcPos, ray);
+    if (result.handled) {
+        return result;
+    }
+    m_activeHandle = Handle::None;
+    return SelectTool::mousePress(ctx, ndcPos, ray);
 }
 
 double TransformGizmoTool::snapped(double value) const {

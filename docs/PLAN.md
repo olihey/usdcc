@@ -731,6 +731,19 @@ things that will bite later if not addressed early:
     Y or Z) and confirmed with a real mouse drag: the prim now follows the cursor in both
     axes. `ScaleTool::pickHandle()` has the same pattern and was not changed.
 
+31. **Move/Rotate/Scale are `SelectTool`s.** `TransformGizmoTool` now derives from
+    `SelectTool`, so prims can be picked while a transform tool is active. Its
+    `mousePress()` (final) first calls the tool's `beginGizmoDrag()` (the old `mousePress()`
+    body of each tool): a press on a gizmo handle starts the drag as before; any other press
+    falls through to `SelectTool::mousePress()`, so the same Mode (New/Add/Subtract/Invert)
+    applies. The options bar shows the gizmo's options first (Space, Snap, Increment), then
+    Mode. Consequences: a press that misses the gizmo is now always handled, so left-drag on
+    empty space no longer orbits with these tools (Alt+drag orbits, as for Select); with 0 or
+    2+ prims selected every press is a selection click. Verified headlessly (Move/Scale
+    handle-vs-select, Rotate ring-vs-select, Mode honoured; 75 checks, plus the 36 Rotate
+    checks unchanged) and live (Move active, click cube then sphere: only the sphere is
+    selected and carries the gizmo).
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

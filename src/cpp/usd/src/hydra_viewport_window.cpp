@@ -402,12 +402,12 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
 
     if (event->button() == Qt::LeftButton) {
         // Alt+drag is the camera-navigation override: it must always orbit,
-        // never reach the active tool. Without this, SelectTool::mousePress()
-        // (which always reports handled=true, even on empty space, since a
-        // click always resolves to "select this" or "select nothing") would
-        // permanently latch m_dragging and never fall through to orbiting —
-        // unlike Move/Rotate/Scale, whose mousePress() only reports handled
-        // when a gizmo handle is actually under the cursor.
+        // never reach the active tool. Without this, a tool's mousePress()
+        // would always claim the click (SelectTool reports handled=true even
+        // on empty space, since a click always resolves to "select this" or
+        // "select nothing", and Move/Rotate/Scale are SelectTools that fall
+        // back to that when no gizmo handle is under the cursor), so
+        // m_dragging would latch and the view could never be orbited.
         if (!(event->modifiers() & Qt::AltModifier)) {
             if (usdcc::tools::Tool* tool = activeToolInstance()) {
                 const usdcc::tools::ToolContext ctx = buildToolContext();

@@ -177,7 +177,8 @@ RotateTool::Handle RotateTool::pickRing(const ToolContext& ctx, const PXR_NS::Gf
     return best;
 }
 
-ToolResult RotateTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) {
+ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
+                                      const PXR_NS::GfRay& ray) {
     const PXR_NS::UsdGeomXformable xformable = resolveXformable(ctx);
     if (!xformable) {
         m_activeHandle = Handle::None;

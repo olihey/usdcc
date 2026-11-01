@@ -169,7 +169,7 @@ MoveTool::Handle MoveTool::pickHandle(const ToolContext& ctx, const PXR_NS::GfVe
     return best;
 }
 
-ToolResult MoveTool::mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) {
+ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) {
     const PXR_NS::UsdGeomXformable xformable = resolveXformable(ctx);
     if (!xformable) {
         m_activeHandle = Handle::None;

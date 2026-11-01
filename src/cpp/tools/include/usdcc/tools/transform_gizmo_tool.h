@@ -1,6 +1,6 @@
 #pragma once
 
-#include "usdcc/tools/tool.h"
+#include "usdcc/tools/select_tool.h"
 
 #include <pxr/usd/usdGeom/xformOp.h>
 #include <pxr/usd/usdGeom/xformable.h>
@@ -13,16 +13,23 @@ namespace usdcc::tools {
 // points to normalized device coordinates for screen-space hit testing, and
 // getting-or-creating the xformOp each tool writes to. Multi-prim gizmo
 // editing is out of scope for M5 (see docs/PLAN.md) — with more than one
-// prim selected, these tools draw no gizmo and don't handle mouse events.
+// prim selected, these tools draw no gizmo and every press is a selection click.
 //
 // Also owns the options all three share: "Snap" (on/off) and its "Increment".
 // Snapping is relative — the drag's total change since the mouse went down is
 // rounded to a multiple of the increment — and its unit (scene units, degrees,
 // scale factor) is each tool's own, described by SnapSpec.
-class TransformGizmoTool : public Tool {
+//
+// These tools are SelectTools too, so objects can be picked while one is
+// active: a press on a gizmo handle starts that tool's drag (beginGizmoDrag());
+// a press anywhere else selects like SelectTool does, including its "Mode"
+// option, which comes after the gizmo's own options.
+class TransformGizmoTool : public SelectTool {
 public:
     std::vector<ToolOption> options() const override;
     void setOption(const std::string& id, const OptionValue& value) override;
+
+    ToolResult mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) final;
 
     bool snapEnabled() const { return m_snapEnabled; }
     double snapIncrement() const { return m_snapIncrement; }
@@ -43,6 +50,13 @@ protected:
     // `value` rounded to the nearest multiple of the snap increment, or
     // unchanged when snapping is off.
     double snapped(double value) const;
+
+    // Starts a drag if the press landed on one of this tool's gizmo handles
+    // (sets m_activeHandle and returns handled=true). Otherwise leaves
+    // m_activeHandle at None and returns an unhandled result, which makes
+    // mousePress() fall back to selecting.
+    virtual ToolResult beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
+                                      const PXR_NS::GfRay& ray) = 0;
 
     // Which axes the gizmo (and its drag math) uses: the prim's own, or the
     // world's. Only MoveTool exposes this; Rotate/Scale write to the prim's

@@ -131,7 +131,7 @@ struct ToolResult {
     // If true, the viewport suppresses its own camera-orbit/pan handling for
     // this event (see HydraViewportWindow::mousePressEvent).
     bool handled = false;
-    // Set to replace the current selection (SelectTool only).
+    // Set to replace the current selection (SelectTool and its subclasses).
     std::optional<std::vector<PXR_NS::SdfPath>> newSelection;
 };
 

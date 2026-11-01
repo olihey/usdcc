@@ -18,9 +18,12 @@ public:
     std::string name() const override { return "Scale"; }
 
     GizmoGeometry buildGizmo(const ToolContext& ctx) const override;
-    ToolResult mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) override;
     ToolResult mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) override;
     void mouseRelease() override;
+
+protected:
+    ToolResult beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos,
+                              const PXR_NS::GfRay& ray) override;
 
 private:
     Handle pickHandle(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
