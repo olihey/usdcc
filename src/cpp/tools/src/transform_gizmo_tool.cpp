@@ -45,6 +45,7 @@ ToolResult TransformGizmoTool::mousePress(const ToolContext& ctx, const PXR_NS::
                                           const PXR_NS::GfRay& ray) {
     ToolResult result = beginGizmoDrag(ctx, ndcPos, ray);
     if (result.handled) {
+        result.startsEdit = true;
         return result;
     }
     m_activeHandle = Handle::None;

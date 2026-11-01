@@ -46,15 +46,20 @@ private Q_SLOTS:
 
 private:
     void refreshAttributes();
+    void onStageObjectsChanged(const StageChanges& changes);
 
     PXR_NS::SdfPath m_primPath;
     QTableWidget* m_table;
     bool m_updatingTable = false;
+    bool m_refreshQueued = false;
     std::shared_ptr<UndoManager> m_undoManager;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
+    // The shown stage's change notices (re-made whenever the stage changes), so
+    // values follow gizmo drags, undo/redo and edits made elsewhere.
+    usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 
 }  // namespace usdcc::usd

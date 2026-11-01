@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/signal.h"
+
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -7,6 +9,21 @@
 #include <vector>
 
 namespace usdcc::usd {
+
+// What one UsdNotice::ObjectsChanged reported, in plain data (see Stage::changed).
+struct StageChanges {
+    // Prims/properties whose composition or existence may have changed —
+    // anything under these paths must be re-read from scratch.
+    std::vector<PXR_NS::SdfPath> resyncedPaths;
+    // Properties (or prims) where only a value or metadata changed.
+    std::vector<PXR_NS::SdfPath> changedInfoOnlyPaths;
+
+    // True if the prim at `primPath`, or any of its properties, changed in any way.
+    bool affectsPrim(const PXR_NS::SdfPath& primPath) const;
+    // True if the prim itself, one of its ancestors, or one of its properties
+    // was resynced — i.e. the set of properties to show may be different now.
+    bool resyncsPrim(const PXR_NS::SdfPath& primPath) const;
+};
 
 // Wraps a UsdStageRefPtr together with usdcc-specific, per-stage state that
 // doesn't belong on USD's own Stage object — currently just the prim
@@ -28,8 +45,16 @@ public:
     // cacheId() is looked up once here, at construction, rather than on
     // every call.
     explicit Stage(PXR_NS::UsdStageRefPtr usdStage);
+    ~Stage();
+    Stage(const Stage&) = delete;
+    Stage& operator=(const Stage&) = delete;
 
     const PXR_NS::UsdStageRefPtr& usdStage() const { return m_usdStage; }
+
+    // Fired for every UsdNotice::ObjectsChanged the stage sends, whoever made
+    // the edit (a panel, a gizmo, undo/redo, a script), synchronously on the
+    // editing thread. Lets panels update live instead of polling.
+    usdcc::core::Signal<const StageChanges&> changed;
 
     // The UsdUtilsStageCache::Get() id this stage was registered under when
     // opened (computed once, at construction) — see
@@ -41,9 +66,12 @@ public:
     void setSelectedPaths(std::vector<PXR_NS::SdfPath> paths) { m_selectedPaths = std::move(paths); }
 
 private:
+    class ChangeListener;
+
     PXR_NS::UsdStageRefPtr m_usdStage;
     long m_cacheId;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
+    std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
 };
 
 using StageRefPtr = std::shared_ptr<Stage>;

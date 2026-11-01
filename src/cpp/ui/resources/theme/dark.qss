@@ -564,3 +564,85 @@ QWidget#panelToolbar {
     background: #1a1a1c;
     border-bottom: 1px solid rgba(255, 255, 255, 6%);
 }
+
+/* ---- Attribute editor / property widgets ------------------------------
+   (docs/ATTRIBUTE_EDITOR.md §4.2). The number fields and color chips are
+   custom-painted with the same tokens (see properties/property_style.h). */
+
+QLabel#propertyLabel {
+    color: rgba(255, 255, 255, 55%);
+}
+
+/* Showing a schema fallback, nothing authored. */
+QLabel#propertyLabel[unauthored="true"] {
+    color: rgba(255, 255, 255, 35%);
+    font-style: italic;
+}
+
+QLabel#propertyNote {
+    color: rgba(255, 255, 255, 35%);
+}
+
+QLabel#propertyBadge {
+    color: #3d8bfd;
+    font-size: 10px;
+}
+
+/* Second line under a value: resolved asset path, connection source. */
+QLabel#propertySubLine {
+    color: #3d8bfd;
+    font-size: 10px;
+}
+
+QLabel#propertySubLine[unresolved="true"] {
+    color: #ff5f56;
+}
+
+QLabel#propertyValueText,
+QLabel#propertyArraySummary {
+    min-height: 18px;
+    padding: 0 8px;
+    background: #141416;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 8%);
+    border-radius: 3px;
+}
+
+QPushButton#propertyButton,
+QToolButton#propertyButton {
+    padding: 0 8px;
+}
+
+QTabWidget::pane {
+    border: 1px solid rgba(255, 255, 255, 6%);
+    border-radius: 4px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: transparent;
+    color: rgba(255, 255, 255, 55%);
+    padding: 5px 10px;
+    border: none;
+    border-bottom: 2px solid transparent;
+}
+
+QTabBar::tab:hover {
+    color: #e8e8ea;
+}
+
+QTabBar::tab:selected {
+    color: #e8e8ea;
+    border-bottom-color: #3d8bfd;
+}
+
+/* Expand/collapse arrow (a matrix's full grid). */
+QToolButton#propertyDisclosure,
+QToolButton#propertyDisclosure:checked,
+QToolButton#propertyDisclosure:pressed {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-width: 16px;
+    max-width: 16px;
+}

@@ -86,6 +86,20 @@ ScaleTool::Handle ScaleTool::pickHandle(const ToolContext& ctx, const PXR_NS::Gf
 }
 
 namespace {
+// The prim's existing scale op, or an invalid op if it has none (unlike
+// getOrCreateOp(), this never authors anything — a press must not edit the
+// stage, since the undo step for a drag only starts once the press is known to
+// have grabbed a handle).
+PXR_NS::UsdGeomXformOp findScaleOp(const PXR_NS::UsdGeomXformable& xformable) {
+    bool resetsXformStack = false;
+    for (const auto& op : xformable.GetOrderedXformOps(&resetsXformStack)) {
+        if (op.GetOpType() == PXR_NS::UsdGeomXformOp::TypeScale) {
+            return op;
+        }
+    }
+    return {};
+}
+
 PXR_NS::GfVec3f readScale(const PXR_NS::UsdGeomXformOp& op) {
     if (!op) {
         return PXR_NS::GfVec3f(1.0f, 1.0f, 1.0f);
@@ -121,7 +135,7 @@ ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec
         return {};
     }
     m_dragFrame = frame;
-    m_dragStartScale = readScale(getOrCreateOp(xformable, PXR_NS::UsdGeomXformOp::TypeScale));
+    m_dragStartScale = readScale(findScaleOp(xformable));
 
     PXR_NS::GfVec3d axis(0.0);
     switch (m_activeHandle) {

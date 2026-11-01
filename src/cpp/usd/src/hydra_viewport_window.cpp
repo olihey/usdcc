@@ -155,6 +155,7 @@ void HydraViewportWindow::setToolSet(std::shared_ptr<usdcc::tools::ToolSet> tool
     // Connections drop out automatically when this window is destroyed.
     m_activeToolConnection = m_toolSet->activeToolChanged.connect([this]() {
         m_dragging = false;
+        finishToolEdit();
         renderNow();
     });
     m_optionsConnection = m_toolSet->optionsChanged.connect([this]() { renderNow(); });
@@ -265,6 +266,13 @@ void HydraViewportWindow::applyToolResult(const usdcc::tools::ToolResult& result
         m_selectedPaths = *result.newSelection;
         updateEngineSelection();
         Q_EMIT selectionRequested(m_selectedPaths);
+    }
+}
+
+void HydraViewportWindow::finishToolEdit() {
+    if (m_toolEditActive) {
+        m_toolEditActive = false;
+        Q_EMIT toolEditFinished();
     }
 }
 
@@ -420,6 +428,10 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 const PXR_NS::GfRay ray = currentFrustum().ComputePickRay(ndc);
                 const usdcc::tools::ToolResult result = tool->mousePress(ctx, ndc, ray);
                 applyToolResult(result);
+                if (result.startsEdit && !m_toolEditActive) {
+                    m_toolEditActive = true;
+                    Q_EMIT toolEditStarted(QString::fromStdString(tool->name()));
+                }
                 if (result.handled) {
                     m_dragging = true;
                     renderNow();
@@ -469,6 +481,7 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
                 tool->mouseRelease();
             }
             m_dragging = false;
+            finishToolEdit();
             renderNow();
         }
     }

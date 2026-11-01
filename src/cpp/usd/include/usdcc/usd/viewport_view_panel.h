@@ -17,6 +17,7 @@ namespace usdcc::usd {
 
 class StageManager;
 class HydraViewportWindow;
+class UndoManager;
 
 // ViewPanel subclass that renders a USD stage via Hydra and lets the user
 // switch between loaded stages and available render delegates (see
@@ -37,9 +38,11 @@ class ViewportViewPanel : public usdcc::ui::ViewPanel {
 
 public:
     // `toolSet` is shared with every other viewport (and the toolbars that
-    // drive it); it must not be null.
+    // drive it); it must not be null. Gizmo drags are recorded as undo steps in
+    // `undoManager`'s stack for the viewed stage.
     explicit ViewportViewPanel(StageManager* stageManager, StageRefPtr stage,
                                 std::shared_ptr<usdcc::tools::ToolSet> toolSet,
+                                std::shared_ptr<UndoManager> undoManager,
                                 const QString& title = QStringLiteral("Viewport"), QWidget* parent = nullptr);
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
@@ -67,10 +70,14 @@ private:
     HydraViewportWindow* m_viewport;
     QComboBox* m_rendererCombo;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
+    std::shared_ptr<UndoManager> m_undoManager;
+    StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
+    // The viewed stage's change notices, which trigger a redraw.
+    usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 
 }  // namespace usdcc::usd

@@ -1,7 +1,7 @@
 # Attribute Editor Revamp — Plan
 
-*Status: planned, nothing implemented yet. Tracked as milestone M13 in
-[PLAN.md](PLAN.md). Last updated: 2026-11-01.*
+*Status: phases 1 and 2 done (see §12); phases 3–5 not started. Tracked as milestone M13
+in [PLAN.md](PLAN.md). Last updated: 2026-11-01.*
 
 ## 1. Goal
 
@@ -444,8 +444,8 @@ Each phase ends with something usable and verified.
 
 | Phase | Content | Verification |
 |---|---|---|
-| **1. Foundations** | Undo edit sessions (§3.1), including **undoable gizmo drags**. `StageChangeListener` and live panel refresh (§3.2). `ValueTypeInfo`. A real test target replacing the scratch harnesses. Categorizer spike (§5) | Unit tests for sessions (one undo step per drag, cancel restores). The current table panel updates live during a gizmo drag. Undo of a Move drag works |
-| **2. Widget kit + gallery** | `DragNumberField`, `SliderField`, `ColorSwatch`, `TokenComboField`, `AssetPathField`, `MatrixField`, `ArraySummaryField` + `ArrayEditorDialog`; `PropertyEditor`, the factory and `PropertyRow`; theme additions. **Debug menu + USD Data Types dialog** (§8) | Every type from `GetAllTypes()` shows an editor or a counted fallback. The goal is zero unsupported types except `opaque`/`group`. Edits round-trip on the scratch stage. Screenshots reviewed against the mockup |
+| **1. Foundations** *(done)* | Undo edit sessions (§3.1), including **undoable gizmo drags**. `StageChangeListener` and live panel refresh (§3.2). `ValueTypeInfo`. A real test target replacing the scratch harnesses. Categorizer spike (§5) | Unit tests for sessions (one undo step per drag, cancel restores). The current table panel updates live during a gizmo drag. Undo of a Move drag works |
+| **2. Widget kit + gallery** *(done)* | `DragNumberField`, `SliderField`, `ColorSwatch`, `TokenComboField`, `AssetPathField`, `MatrixField`, `ArraySummaryField` + `ArrayEditorDialog`; `PropertyEditor`, the factory and `PropertyRow`; theme additions. **Debug menu + USD Data Types dialog** (§8) | Every type from `GetAllTypes()` shows an editor or a counted fallback. The goal is zero unsupported types except `opaque`/`group`. Edits round-trip on the scratch stage. Screenshots reviewed against the mockup |
 | **3. New panel** | Rewritten `AttributesViewPanel`: scroll area, "Prim" header, `PropertyCategorizer` sections, search, Show filter, badges, context menu, collapsed state persisted | Categorizer unit tests on Mesh/Sphere/Camera/Light/Shader/custom prims. Live edit of each category reflected in the viewport. Undo of panel edits works |
 | **4. Transform stack** | `XformStack` (Qt-free) and `TransformStackSection`: values, add, remove, reorder, pivot preset, resetXformStack, bake/convert actions | Unit tests for every stack operation, including the inverse-op attribute-sharing case and weaker-layer opinions. All actions undoable |
 | **5. Tool targeting** | Target-op state, options-bar Target combo, row selection ↔ target sync, `opFrame`/`resolveTargetOp`, Euler orders, single-axis rotate, orient | §7.4 test list. Live check with a pivot-sandwich asset and a two-scale-op asset |
@@ -453,3 +453,92 @@ Each phase ends with something usable and verified.
 Phases 1 and 2 are independent and can run in parallel. Phase 3 needs both. Phases 4 and
 5 need 3, but 5's maths (`opFrame`, Euler orders) can start against the tool tests
 right after phase 1.
+
+## 12. What phases 1 and 2 built
+
+Where the result differs from the plan above, this section is the current truth.
+
+### Phase 1
+
+- **Undo edit sessions:** `UndoManager::beginEdit()`, `endEdit()` and `cancelEdit()`.
+  Sessions nest, and `apply()` is built on them. A failed `apply()` now rolls the layer
+  back instead of leaving a half-done edit in place.
+- **Gizmo drags are undoable:** `ToolResult::startsEdit` is set by
+  `TransformGizmoTool::mousePress()` when a handle was grabbed.
+  - `HydraViewportWindow` emits `toolEditStarted`/`toolEditFinished` around the drag,
+    including when switching tools cuts it short.
+  - `ViewportViewPanel` turns that pair into one undo step. It now takes the
+    `UndoManager` as a constructor argument.
+  - `ScaleTool` used to create its scale op on press; it now creates it on the first
+    move, so a press never edits outside the session.
+- **Change notices:** `Stage::changed` re-emits `UsdNotice::ObjectsChanged` as plain
+  `StageChanges` data, with `affectsPrim()` and `resyncsPrim()` helpers. It is a member
+  of `Stage` rather than a separate class.
+  - The current table panel uses it for coalesced live refresh. That replaces its old
+    undo-stack connection, which was never re-pointed when the panel switched stages.
+  - The viewport uses it to redraw. **This fixed a real bug:** the viewport only redrew
+    on its own events, so undo/redo and edits from other panels didn't show until the
+    next mouse move.
+- **`ValueTypeInfo`** (`usdcc_usd`, Qt-free): type classification, the canonical type list,
+  numeric and array access, sample values and value formatting.
+  - `SdfSchema::GetAllTypes()` also returns legacy capitalized aliases (`Vec3f`,
+    `PointFloat`, `Color`, …), which `canonicalValueTypes()` drops.
+  - USD 26.11 has **112 canonical types** (57 scalar, 55 array), including `duration`
+    (`GfDuration`) and `timecode` (`GfTimeCode`).
+- **Test target:** `tests/usdcc_tests`, registered with CTest (`ctest -C RelWithDebInfo`).
+  - It uses a small in-repo harness (`test_harness.h`) rather than GoogleTest, to avoid
+    a new vcpkg dependency for now.
+  - It contains the two former scratch tool harnesses plus new undo, stage-change,
+    value-type and categorizer tests.
+- **Categorizer spike** (`tests/categorizer_spike_test.cpp`): §5 rules 3 and 4 work as
+  planned, using only `UsdSchemaRegistry`.
+  - Mesh: Imageable → visibility/purpose/proxyPrim, Xformable → xformOpOrder, Boundable
+    → extent, Gprim → doubleSided/orientation/displayColor/displayOpacity, PointBased →
+    points/normals/…, Mesh → its own attributes. Applied ShadowAPI and
+    PhysicsRigidBodyAPI take their own properties.
+  - **Built-in API schemas own many properties of typed prims.** LightAPI owns a light's
+    `inputs:intensity`, `inputs:color` and the light-link collections; NodeDefAPI owns a
+    Shader's `info:id`. Those therefore land in API sections under rule 3. Phase 3 must
+    name them well ("Light" rather than "LightAPI").
+  - Shader `inputs:*` declared by the shader itself belong to no schema, so rule 5
+    (Inputs/Outputs) is needed as planned.
+
+### Phase 2
+
+All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
+
+- **Widgets:**
+  - `NumberField` is the planned `DragNumberField` and `SliderField` in one widget,
+    since they share typed entry and the edit signals. It scrubs with Shift/Ctrl for
+    fine/coarse steps, types on click, and cancels with Esc. In slider mode a press sets
+    the value and a double-click types.
+  - A **soft** range drives the slider but never clamps the shown or typed value; a
+    **hard** range clamps.
+  - `ColorSwatch` previews linear colors sRGB-encoded.
+- **Editors** (`createPropertyEditor()`, in `property_editors.cpp`):
+  - bool
+  - numeric scalar, vector and quaternion, including colors (swatch plus R/G/B/A)
+  - matrix (summary, expandable grid)
+  - string, token and path expression (path expressions validated with `TfErrorMark`)
+  - token combo, used when `allowedTokens` is authored
+  - asset (Rel/Abs toggle, browse, resolved/unresolved sub-line)
+  - array (summary plus `ArrayEditorDialog`)
+  - read-only "(no value)" for `opaque`/`group`, and a read-only fallback for unknown
+    types.
+- **`ArrayEditorDialog`:** a virtual table that edits each element with that element
+  type's editor, with Add, Insert, Remove, Resize and Paste Lines.
+- **`PropertyRow` and `AttributeBinding`:** as specified in §2.1/§4.1. The binding works
+  without an `UndoManager` for scratch stages.
+- **Debug > USD Data Types** (`DataTypeGalleryDialog`):
+  - The groups are a **sidebar list instead of tabs**, since ten groups overflowed a tab
+    bar.
+  - Result: **112 types, 0 without a dedicated editor.**
+- **Theme:** `dark.qss` has a property-widget section.
+- **Verified live:**
+  - every group page and the preview toggles
+  - scrubbing with the edit-signal log
+  - soft-limit sliders
+  - matrix expand
+  - array summaries, the array dialog and the in-cell vector editor
+  - a Move drag undone in one step via both Edit > Undo and Ctrl+Z
+  - the table panel showing the dragged value without a reselect

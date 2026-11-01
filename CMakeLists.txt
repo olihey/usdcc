@@ -117,6 +117,12 @@ add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
 add_subdirectory(src/cpp/app)
 
+option(USDCC_BUILD_TESTS "Build the usdcc_tests executable and register it with CTest" ON)
+if(USDCC_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 # Set here (rather than left to whoever opens the generated .sln) so it
 # survives every CMake reconfigure instead of reverting to CMakePredefinedTargets.
 set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT usdcc)

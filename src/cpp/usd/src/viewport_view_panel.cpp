@@ -2,6 +2,7 @@
 
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -19,9 +20,12 @@
 namespace usdcc::usd {
 
 ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr stage,
-                                      std::shared_ptr<usdcc::tools::ToolSet> toolSet, const QString& title,
+                                      std::shared_ptr<usdcc::tools::ToolSet> toolSet,
+                                      std::shared_ptr<UndoManager> undoManager, const QString& title,
                                       QWidget* parent)
-    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent), m_toolSet(std::move(toolSet)) {
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent),
+      m_toolSet(std::move(toolSet)),
+      m_undoManager(std::move(undoManager)) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -54,6 +58,20 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
             &ViewportViewPanel::onRendererComboChanged);
     connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::refreshRendererCombo);
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
+    // One undo step per gizmo drag. The stage is remembered at the start so the
+    // session is closed on the same stage it was opened on.
+    connect(m_viewport, &HydraViewportWindow::toolEditStarted, this, [this](const QString& description) {
+        if (m_undoManager) {
+            m_toolEditStage = currentStage();
+            m_undoManager->beginEdit(m_toolEditStage, description);
+        }
+    });
+    connect(m_viewport, &HydraViewportWindow::toolEditFinished, this, [this]() {
+        if (m_undoManager && m_toolEditStage) {
+            m_undoManager->endEdit(m_toolEditStage);
+            m_toolEditStage.reset();
+        }
+    });
 
     // NB: uses the `stageManager` constructor parameter directly, not the
     // stageManager() accessor — the parameter shadows it in this scope.
@@ -71,6 +89,10 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_viewport->setStage(stage->usdStage());
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
+    // The viewport only draws when asked: redraw after every edit, wherever it
+    // came from (undo/redo, another panel, a script) — requestUpdate() folds a
+    // burst of notices into one frame.
+    m_stageChangedConnection = stage->changed.connect([this](const StageChanges&) { m_viewport->requestUpdate(); });
 }
 
 void ViewportViewPanel::refreshRendererCombo() {
@@ -109,7 +131,7 @@ void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
 }
 
 usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, windowTitle(), parent);
+    auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, m_undoManager, windowTitle(), parent);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so its

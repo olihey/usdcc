@@ -101,6 +101,13 @@ Q_SIGNALS:
     // every other panel showing this stage in sync.
     void selectionRequested(std::vector<PXR_NS::SdfPath> paths);
 
+    // Bracket a tool drag that edits the stage (see ToolResult::startsEdit):
+    // started on the press that grabbed a gizmo handle, finished on release (or
+    // when the drag is cut short, e.g. by switching tools). ViewportViewPanel
+    // turns the pair into one undo step. `description` is the tool's name.
+    void toolEditStarted(const QString& description);
+    void toolEditFinished();
+
 protected:
     void exposeEvent(QExposeEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -122,6 +129,7 @@ private:
     PXR_NS::GfVec2d ndcFromPixel(const QPointF& pixelPos) const;
     PXR_NS::SdfPath pickPrim(const PXR_NS::GfVec2d& ndcPos);
     void applyToolResult(const usdcc::tools::ToolResult& result);
+    void finishToolEdit();
     void updateEngineSelection();
     void drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
                    const PXR_NS::GfMatrix4d& projMatrix);
@@ -141,6 +149,7 @@ private:
     bool m_orbiting = false;
     bool m_panning = false;
     bool m_dragging = false;
+    bool m_toolEditActive = false;  // between toolEditStarted() and toolEditFinished()
     bool m_firstFrameRendered = false;
 
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;

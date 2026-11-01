@@ -2,8 +2,10 @@
 add_library(usdcc_usd STATIC
     include/usdcc/usd/stage.h
     include/usdcc/usd/stage_manager.h
+    include/usdcc/usd/value_type_info.h
     src/stage.cpp
     src/stage_manager.cpp
+    src/value_type_info.cpp
 )
 target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
 # Deliberately no Qt here: StageManager (this target's only class) is
@@ -24,6 +26,14 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/outliner_view_panel.h
+    include/usdcc/usd/properties/array_editor_dialog.h
+    include/usdcc/usd/properties/attribute_binding.h
+    include/usdcc/usd/properties/color_swatch.h
+    include/usdcc/usd/properties/data_type_gallery_dialog.h
+    include/usdcc/usd/properties/number_field.h
+    include/usdcc/usd/properties/property_editor.h
+    include/usdcc/usd/properties/property_row.h
+    include/usdcc/usd/properties/property_style.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
@@ -34,6 +44,13 @@ add_library(usdcc_usd_ui STATIC
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
     src/outliner_view_panel.cpp
+    src/properties/array_editor_dialog.cpp
+    src/properties/attribute_binding.cpp
+    src/properties/color_swatch.cpp
+    src/properties/data_type_gallery_dialog.cpp
+    src/properties/number_field.cpp
+    src/properties/property_editors.cpp
+    src/properties/property_row.cpp
     src/stage_opener.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp

@@ -133,6 +133,11 @@ struct ToolResult {
     bool handled = false;
     // Set to replace the current selection (SelectTool and its subclasses).
     std::optional<std::vector<PXR_NS::SdfPath>> newSelection;
+    // Set by a mousePress() that started a drag which will edit the stage (a
+    // gizmo handle was grabbed). The viewport then opens an undo session that
+    // lasts until mouseRelease(), so the whole drag becomes one undo step. A
+    // press that sets this must not have edited anything itself yet.
+    bool startsEdit = false;
 };
 
 // Base class for viewport-driven editing tools (see docs/PLAN.md section 4

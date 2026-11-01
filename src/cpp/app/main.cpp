@@ -19,6 +19,7 @@
 
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/usd/properties/data_type_gallery_dialog.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_opener.h"
@@ -92,7 +93,8 @@ int main(int argc, char** argv) {
     // The center dock area is established here (rather than by MainWindow)
     // since it's the first USD-dependent panel — see MainWindow's comment on
     // why it no longer seeds a stand-in there itself.
-    auto* viewport = new usdcc::usd::ViewportViewPanel(&stageManager, initialStage, toolSet, "Viewport", &window);
+    auto* viewport =
+        new usdcc::usd::ViewportViewPanel(&stageManager, initialStage, toolSet, undoManager, "Viewport", &window);
     auto* centerArea = window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, viewport);
 
     auto* outliner = new usdcc::usd::OutlinerViewPanel(&stageManager, initialStage, undoManager, "Outliner", &window);
@@ -117,8 +119,8 @@ int main(int argc, char** argv) {
     // when that's happened, just re-establish a fresh center area.
     QPointer<usdcc::usd::ViewportViewPanel> initialViewport = viewport;
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&stageManager, &window, initialViewport, toolSet](const usdcc::usd::StageRefPtr& stage) {
-            auto* newViewport = new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet,
+        [&stageManager, &window, initialViewport, toolSet, undoManager](const usdcc::usd::StageRefPtr& stage) {
+            auto* newViewport = new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet, undoManager,
                                                                   viewportTitleForStage(stage), &window);
             // Must be unique and set before the dock manager registers this
             // widget; the stage's cache id is unique per open stage.
@@ -163,6 +165,21 @@ int main(int argc, char** argv) {
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).
     window.buildViewMenu();
+
+    // Developer tools; always shown until a setting can hide it (M10).
+    QMenu* debugMenu = window.mainMenuBar()->addMenu(QObject::tr("&Debug"));
+    QAction* dataTypesAction = debugMenu->addAction(QObject::tr("USD &Data Types..."));
+    QObject::connect(dataTypesAction, &QAction::triggered, &window, [&window]() {
+        // One non-modal instance; reopening the action brings it back to front.
+        static QPointer<usdcc::usd::properties::DataTypeGalleryDialog> dialog;
+        if (!dialog) {
+            dialog = new usdcc::usd::properties::DataTypeGalleryDialog(&window);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+        }
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    });
 
     // Every panel for this session must exist before restoring — see
     // MainWindow::restoreLayout()'s declaration for why.

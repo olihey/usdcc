@@ -20,6 +20,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <QApplication>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -167,8 +168,6 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
         });
 
     refreshStageCombo();
-    connect(m_undoManager->stack(currentStage()), &QUndoStack::indexChanged, this,
-            [this](int) { refreshAttributes(); });
     // See ViewportViewPanel's constructor for why this is explicit.
     onStageChanged(currentStage());
 }
@@ -178,7 +177,33 @@ usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {
 }
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_stageChangedConnection =
+        stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
+}
+
+void AttributesViewPanel::onStageObjectsChanged(const StageChanges& changes) {
+    if (m_primPath.IsEmpty() || !changes.affectsPrim(m_primPath) || m_refreshQueued) {
+        return;
+    }
+    // A drag sends a notice per mouse move, and several can arrive before the
+    // next paint: coalesce them into one refresh, run after the edit that sent
+    // the notice has finished.
+    m_refreshQueued = true;
+    QMetaObject::invokeMethod(
+        this,
+        [this]() {
+            m_refreshQueued = false;
+            // Don't yank a cell out from under the user mid-typing (an open
+            // cell editor is a focused child of the table); the edit's own
+            // commit refreshes afterwards anyway.
+            QWidget* focus = QApplication::focusWidget();
+            const bool editingCell = focus && focus != m_table && m_table->isAncestorOf(focus);
+            if (!editingCell) {
+                refreshAttributes();
+            }
+        },
+        Qt::QueuedConnection);
 }
 
 void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
