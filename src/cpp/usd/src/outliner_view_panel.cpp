@@ -64,8 +64,6 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
         });
 
     refreshStageCombo();
-    connect(m_undoManager->stack(currentStage()), &QUndoStack::indexChanged, this,
-            [this](int) { m_model->refresh(); });
     // See ViewportViewPanel's constructor for why this is explicit.
     onStageChanged(currentStage());
 }
@@ -81,12 +79,18 @@ void OutlinerViewPanel::populateContextMenu(QMenu* menu) {
 }
 
 void OutlinerViewPanel::onStageChanged(const StageRefPtr& stage) {
-    m_model->setStage(stage->usdStage());
+    m_model->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
+    // Undo/redo can add, remove or reorder prims: follow this stage's stack.
+    disconnect(m_undoConnection);
+    m_undoConnection = {};
+    if (QUndoStack* undoStack = stage ? m_undoManager->stack(stage) : nullptr) {
+        m_undoConnection = connect(undoStack, &QUndoStack::indexChanged, this, [this](int) { m_model->refresh(); });
+    }
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
 }
 
 void OutlinerViewPanel::onTreeSelectionChanged() {
-    if (m_updatingSelection) {
+    if (m_updatingSelection || !currentStage()) {
         return;
     }
     std::vector<PXR_NS::SdfPath> paths;
@@ -128,7 +132,7 @@ void OutlinerViewPanel::onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_
 
 void OutlinerViewPanel::moveSelectedPrim(int direction) {
     const QModelIndexList selected = m_treeView->selectionModel()->selectedIndexes();
-    if (selected.size() != 1) {
+    if (selected.size() != 1 || !currentStage()) {
         return;
     }
 

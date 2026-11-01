@@ -6,6 +6,8 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <algorithm>
+
 namespace usdcc::usd {
 
 namespace {
@@ -46,6 +48,14 @@ const UndoManager::Entry* UndoManager::findEntry(const StageRefPtr& stage) const
     if (!stage) return nullptr;
     auto it = m_entries.constFind(static_cast<qulonglong>(stage->cacheId()));
     return it != m_entries.constEnd() ? it.value() : nullptr;
+}
+
+void UndoManager::removeStage(const StageRefPtr& stage) {
+    const Entry* e = findEntry(stage);
+    if (!e) return;
+    m_entries.remove(static_cast<qulonglong>(stage->cacheId()));
+    m_storage.erase(std::find_if(m_storage.begin(), m_storage.end(),
+                                 [e](const std::unique_ptr<Entry>& owned) { return owned.get() == e; }));
 }
 
 QUndoStack* UndoManager::stack(const StageRefPtr& stage) {

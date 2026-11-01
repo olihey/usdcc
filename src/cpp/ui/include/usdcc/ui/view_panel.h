@@ -16,13 +16,17 @@ namespace usdcc::ui {
 
 // Base class for panels living inside the Qt Advanced Docking System
 // container (ViewportViewPanel, OutlinerViewPanel, AttributesViewPanel —
-// see docs/PLAN.md section 4). Every ViewPanel always has an associated
-// usdcc::usd::Stage (never null — see the constructor) and a "Stage:"
-// dropdown to switch which one it shows, both owned here rather than
-// duplicated per-subclass — see docs/PLAN.md §6 "ViewPanel: mandatory Stage
-// association" for the full design and its acknowledged consequences
-// (usdcc_ui no longer builds without USD_INSTALL; ViewPanel is no longer
-// exposed to Python).
+// see docs/PLAN.md section 4). Every ViewPanel has an associated
+// usdcc::usd::Stage and a "Stage:" dropdown to switch which one it shows,
+// both owned here rather than duplicated per-subclass — see docs/PLAN.md §6
+// "ViewPanel: Stage association" for the full design and its acknowledged
+// consequences (usdcc_ui no longer builds without USD_INSTALL; ViewPanel is
+// no longer exposed to Python).
+//
+// The stage may be null: the app starts with no stage open, and a panel can
+// be left without one when its stage is closed. A panel with no stage shows
+// empty content, adopts the next stage that is opened, and keeps its dropdown
+// disabled while no stage is open at all.
 //
 // Uses ADS's deprecated (title, parent) CDockWidget constructor rather than
 // the (manager, title, parent) one: the manager association still happens
@@ -40,19 +44,19 @@ class ViewPanel : public ads::CDockWidget {
     Q_OBJECT
 
 public:
-    // `stageManager` and `stage` must both be non-null — a ViewPanel always
-    // shows some real stage. If `stage` is later closed via
-    // StageManager::closeStage(), this panel closes itself (see the .cpp).
+    // `stageManager` must be non-null; `stage` may be null (no stage yet). If
+    // the panel's stage is later closed via StageManager::closeStage(), the
+    // panel is left with no stage (see the .cpp) — File > Close Stage first
+    // asks whether to close such panels or switch them to another stage.
     explicit ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRefPtr stage, const QString& title,
                        QWidget* parent = nullptr);
 
     usdcc::usd::StageManager* stageManager() const { return m_stageManager; }
     const usdcc::usd::StageRefPtr& currentStage() const { return m_stage; }
 
-    // Switches which stage this panel shows. No-op if `stage` is null (the
-    // invariant forbids ever actually holding a null stage) or already the
-    // current one. Calls onStageChanged() so subclasses can refresh their
-    // displayed content.
+    // Switches which stage this panel shows; null leaves it with none. No-op
+    // if `stage` is already the current one. Calls onStageChanged() so
+    // subclasses can refresh their displayed content.
     void setStage(usdcc::usd::StageRefPtr stage);
 
     void setContentWidget(QWidget* widget);
@@ -83,9 +87,9 @@ protected:
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
-    // Called whenever the stage this panel shows changes (via setStage(),
-    // including the user picking a different entry in stageCombo()) — never
-    // at construction time (a virtual call from ViewPanel's own constructor
+    // Called whenever the stage this panel shows changes, including to null
+    // (via setStage(), or the user picking a different entry in
+    // stageCombo()) — never at construction time (a virtual call from ViewPanel's own constructor
     // would dispatch to this no-op base version, not a subclass override,
     // since the derived part of the object doesn't exist yet). Subclasses
     // instead perform their initial setup directly from currentStage() at
@@ -93,13 +97,19 @@ protected:
     // rely on this override for every later change.
     virtual void onStageChanged(const usdcc::usd::StageRefPtr& stage) {}
 
+    // Whether this panel, while it has no stage, switches to the next stage
+    // opened. True by default; a panel type whose owner picks which panel gets
+    // a new stage (viewports, see main.cpp) returns false.
+    virtual bool adoptsOpenedStage() const { return true; }
+
     // The "Stage:" combo — subclasses insert this into their own toolbar
     // layout (QLayout::addWidget() reparents it automatically, so being
     // parent-less here at construction is fine).
     QComboBox* stageCombo() const { return m_stageCombo; }
 
-    // Repopulates stageCombo() from stageManager()->stages() and restores
-    // its selection to match currentStage(). Subclasses call this once, as
+    // Repopulates stageCombo() from stageManager()->stages(), restores its
+    // selection to match currentStage() (none when that is null) and
+    // disables it while no stage is open. Subclasses call this once, as
     // the last line of their own constructor, to apply their initial stage
     // (see onStageChanged()'s comment for why the base constructor can't do
     // this itself).

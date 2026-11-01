@@ -55,6 +55,10 @@ public:
 
     void setStage(const PXR_NS::UsdStageRefPtr& stage);
 
+    // Whether firstFrameRendered() has already fired for the current stage —
+    // a viewport that was already on screen draws it inside setStage().
+    bool hasRenderedFirstFrame() const { return m_firstFrameRendered; }
+
     // Valid once the GL context has initialized; rendererPluginsChanged()
     // fires at that point.
     std::vector<PXR_NS::TfToken> rendererPlugins() const;
@@ -95,7 +99,7 @@ public:
 Q_SIGNALS:
     void rendererPluginsChanged();
 
-    // Emitted once, after the first frame of a stage has been rendered. That
+    // Emitted once per stage, after its first frame has been rendered. That
     // first Render() is when Hydra populates its scene from the stage, so it is
     // where a big stage's viewport actually stalls the UI.
     void firstFrameRendered();

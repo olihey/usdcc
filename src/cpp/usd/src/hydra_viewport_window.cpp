@@ -57,6 +57,7 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
         return;
     }
     m_stage = stage;
+    m_firstFrameRendered = false;  // firstFrameRendered() is per stage
 
     // UsdImagingGLEngine::Render()/PrepareBatch() only populates its scene
     // index/delegate from a stage once (see the _isPopulated flag in

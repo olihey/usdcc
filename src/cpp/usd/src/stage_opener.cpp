@@ -116,9 +116,10 @@ void StageOpener::onLoaded(const PXR_NS::UsdStageRefPtr& usdStage) {
 }
 
 void StageOpener::waitForFirstFrame(const StageRefPtr& stage) {
-    // adoptStage() fired stageOpened, which has created the stage's viewport
-    // panel by now (see main.cpp) — but not drawn it: that happens once its
-    // window is exposed, later in the event loop.
+    // adoptStage() fired stageOpened, which has given the stage a viewport by
+    // now (see main.cpp). A new panel hasn't drawn yet: that happens once its
+    // window is exposed, later in the event loop. An empty viewport that was
+    // already on screen and picked the stage up has drawn it already.
     HydraViewportWindow* viewport = nullptr;
     for (QWidget* widget : QApplication::allWidgets()) {
         auto* panel = qobject_cast<ViewportViewPanel*>(widget);
@@ -127,7 +128,7 @@ void StageOpener::waitForFirstFrame(const StageRefPtr& stage) {
             break;
         }
     }
-    if (!viewport) {
+    if (!viewport || viewport->hasRenderedFirstFrame()) {
         finish();
         return;
     }

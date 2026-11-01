@@ -61,7 +61,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.
     connect(m_viewport, &HydraViewportWindow::toolEditStarted, this, [this](const QString& description) {
-        if (m_undoManager) {
+        if (m_undoManager && currentStage()) {
             m_toolEditStage = currentStage();
             m_undoManager->beginEdit(m_toolEditStage, description);
         }
@@ -87,8 +87,15 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 }
 
 void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
-    m_viewport->setStage(stage->usdStage());
+    m_viewport->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
+    if (!stage) {
+        m_stageChangedConnection = {};
+        m_targetConnection = {};
+        m_viewport->setTargetXformOp(PXR_NS::TfToken());
+        m_viewport->requestUpdate();
+        return;
+    }
     // The viewport only draws when asked: redraw after every edit, wherever it
     // came from (undo/redo, another panel, a script) — requestUpdate() folds a
     // burst of notices into one frame.
@@ -99,7 +106,7 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
 
 void ViewportViewPanel::syncTarget() {
     const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(currentStage());
-    m_viewport->setTargetXformOp(selection.empty() ? PXR_NS::TfToken()
+    m_viewport->setTargetXformOp(selection.empty() || !currentStage() ? PXR_NS::TfToken()
                                                    : currentStage()->targetXformOpFor(selection.front()));
 }
 

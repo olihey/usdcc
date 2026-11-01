@@ -35,31 +35,34 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
     tabWidget()->installEventFilter(this);
 
     m_stageCombo = new QComboBox();
+    m_stageCombo->setPlaceholderText(tr("No stage"));  // shown while the panel has none
     connect(m_stageCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ViewPanel::onStageComboChanged);
 
-    m_stageOpenedConnection =
-        m_stageManager->stageOpened.connect([this](usdcc::usd::StageRefPtr) { refreshStageCombo(); });
-    m_stageClosedConnection = m_stageManager->stageClosed.connect([this](usdcc::usd::StageRefPtr closed) {
-        if (closed == m_stage) {
-            // The stage this panel was showing is gone, and a ViewPanel can
-            // never fall back to "no stage" — so the panel goes too.
-            // deleteDockWidget() itself removes this from the dock manager
-            // and calls deleteLater(), so this is safe to call synchronously
-            // from within this signal handler.
-            deleteDockWidget();
-            return;
-        }
+    m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](usdcc::usd::StageRefPtr opened) {
         refreshStageCombo();
+        // A panel with nothing to show picks up the stage that was just opened.
+        if (!m_stage && adoptsOpenedStage()) {
+            setStage(std::move(opened));
+        }
+    });
+    m_stageClosedConnection = m_stageManager->stageClosed.connect([this](usdcc::usd::StageRefPtr closed) {
+        refreshStageCombo();
+        // Normally File > Close Stage has already closed or switched every
+        // panel showing it; a stage closed some other way (e.g. from Python)
+        // leaves its panels empty.
+        if (closed == m_stage) {
+            setStage(nullptr);
+        }
     });
 }
 
 void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
-    if (!stage || stage == m_stage) {
+    if (stage == m_stage) {
         return;
     }
     m_stage = std::move(stage);
 
-    const int index = m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId()));
+    const int index = m_stage ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())) : -1;
     if (index != m_stageCombo->currentIndex()) {
         const QSignalBlocker blocker(m_stageCombo);
         m_stageCombo->setCurrentIndex(index);
@@ -75,7 +78,8 @@ void ViewPanel::refreshStageCombo() {
         const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
         m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
     }
-    m_stageCombo->setCurrentIndex(m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())));
+    m_stageCombo->setCurrentIndex(m_stage ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())) : -1);
+    m_stageCombo->setEnabled(m_stageCombo->count() > 0);
 }
 
 void ViewPanel::onStageComboChanged(int index) {

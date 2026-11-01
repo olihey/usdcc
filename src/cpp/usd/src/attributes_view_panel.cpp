@@ -159,9 +159,16 @@ usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {
 }
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
-    m_stageChangedConnection =
-        stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
-    onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
+    m_stageChangedConnection = {};
+    if (stage) {
+        m_stageChangedConnection =
+            stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
+    }
+    // Always rebuild: the new stage may have the same prim path selected, and
+    // the old rows are bound to the old stage.
+    const std::vector<SdfPath> paths = stageManager()->selectedPaths(stage);
+    m_primPath = paths.empty() ? SdfPath() : paths.front();
+    rebuild();
 }
 
 void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths) {
@@ -177,7 +184,8 @@ void AttributesViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector
 }
 
 UsdPrim AttributesViewPanel::currentPrim() const {
-    return m_primPath.IsEmpty() ? UsdPrim() : currentStage()->usdStage()->GetPrimAtPath(m_primPath);
+    return m_primPath.IsEmpty() || !currentStage() ? UsdPrim()
+                                                   : currentStage()->usdStage()->GetPrimAtPath(m_primPath);
 }
 
 std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
@@ -237,9 +245,10 @@ void AttributesViewPanel::rebuild() {
     const UsdPrim prim = currentPrim();
     m_signature = layoutSignature(prim);
     if (!prim) {
-        auto* empty = new QLabel(m_primPath.IsEmpty() ? tr("Select a prim to see its attributes.")
-                                                      : tr("%1 no longer exists.").arg(qs(m_primPath.GetString())),
-                                 m_content);
+        const QString note = !currentStage()       ? tr("No stage open.")
+                             : m_primPath.IsEmpty() ? tr("Select a prim to see its attributes.")
+                                                    : tr("%1 no longer exists.").arg(qs(m_primPath.GetString()));
+        auto* empty = new QLabel(note, m_content);
         empty->setObjectName(QStringLiteral("propertyNote"));
         empty->setAlignment(Qt::AlignCenter);
         empty->setContentsMargins(0, 24, 0, 0);

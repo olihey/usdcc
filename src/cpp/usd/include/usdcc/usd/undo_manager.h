@@ -45,6 +45,10 @@ public:
     void cancelEdit(const StageRefPtr& stage);
     bool isEditing(const StageRefPtr& stage) const;
 
+    // Drops the stage's undo stack (and the reference it holds to the stage);
+    // called when the stage is closed.
+    void removeStage(const StageRefPtr& stage);
+
 private:
     struct Session {
         PXR_NS::SdfLayerHandle layer;

@@ -18,6 +18,7 @@
 #include <pxr/usd/usd/stage.h>
 
 #include "usdcc/usd/attributes_view_panel.h"
+#include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
 #include "usdcc/tools/tool_set.h"
@@ -82,19 +83,13 @@ int main(int argc, char** argv) {
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
 
-    // A ViewPanel always has an associated Stage (see docs/PLAN.md §6
-    // "ViewPanel: mandatory Stage association") — resolve one *before*
-    // constructing any panel below. Prefer the stage passed on the command
-    // line; fall back to a fresh, empty "Untitled" in-memory stage (matching
-    // common DCC startup UX) if none was given, or if that identifier failed
-    // to open.
+    // The stage passed on the command line, if any. Without one (or if it
+    // failed to open) the app starts with no stage: the panels below are
+    // empty, with their Stage dropdowns disabled, until one is opened.
     const QStringList args = app.arguments();
     usdcc::usd::StageRefPtr initialStage;
     if (args.size() > 1) {
         initialStage = stageManager.openStage(args.at(1).toStdString());
-    }
-    if (!initialStage) {
-        initialStage = stageManager.createStage();
     }
 
     // The center dock area is established here (rather than by MainWindow)
@@ -110,33 +105,58 @@ int main(int argc, char** argv) {
     auto* attributes = new usdcc::usd::AttributesViewPanel(&stageManager, initialStage, undoManager, "Attributes", &window);
     window.dockManager()->addDockWidgetTabToArea(attributes, centerArea);
 
-    // Every stage opened from here on (e.g. via File > Open Stage below) gets
-    // its own ViewportViewPanel, tabbed alongside the initial one above. Safe
-    // from double-creating one for initialStage itself: its stageOpened
-    // already fired synchronously above, before this connection existed.
-    // Kept alive for the whole app lifetime by living in main()'s own scope.
+    // Every stage opened from here on (e.g. via File > Open Stage below) is
+    // shown in one viewport, which is brought to the front: a viewport with no
+    // stage if there is one (one on screen first, else a closed one, which is
+    // reopened), otherwise a new ViewportViewPanel tabbed next to a viewport
+    // on screen. Viewports leave this choice to this handler (see
+    // ViewportViewPanel::adoptsOpenedStage()); other empty panels switch to the
+    // stage themselves. Safe from double-handling initialStage: its
+    // stageOpened already fired synchronously above, before this connection
+    // existed. Kept alive for the whole app lifetime by living in main()'s
+    // own scope.
     //
-    // Deliberately re-queries `viewport`'s current dock area at call time
-    // (rather than capturing `centerArea` itself) since restoreLayout()
-    // below calls ADS's restoreState(), which can rebuild the dock area/
-    // container tree from the saved layout and replace CDockAreaWidget
-    // instances — a CDockAreaWidget* captured before that point can be
-    // dangling by the time this connection fires. `viewport` is a QPointer
-    // since ViewPanel self-closes if initialStage itself is later closed;
-    // when that's happened, just re-establish a fresh center area.
-    QPointer<usdcc::usd::ViewportViewPanel> initialViewport = viewport;
+    // The panels are looked up at call time through the dock manager — which
+    // also knows floating panels and no longer lists one File > Close Stage is
+    // deleting — rather than captured here: restoreLayout() below can rebuild
+    // the dock area tree, and panels come and go.
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&stageManager, &window, initialViewport, toolSet, undoManager](const usdcc::usd::StageRefPtr& stage) {
+        [&stageManager, &window, toolSet, undoManager](const usdcc::usd::StageRefPtr& stage) {
+            usdcc::usd::ViewportViewPanel* empty = nullptr;
+            usdcc::usd::ViewportViewPanel* onScreen = nullptr;  // to tab a new viewport next to
+            for (ads::CDockWidget* dockWidget : window.dockManager()->dockWidgetsMap()) {
+                auto* existing = qobject_cast<usdcc::usd::ViewportViewPanel*>(dockWidget);
+                if (!existing) {
+                    continue;
+                }
+                if (!existing->isClosed() && !onScreen) {
+                    onScreen = existing;
+                }
+                if (!existing->currentStage() && (!empty || (empty->isClosed() && !existing->isClosed()))) {
+                    empty = existing;
+                }
+            }
+
+            if (empty) {
+                if (empty->isClosed()) {
+                    empty->toggleView(true);
+                }
+                empty->setStage(stage);
+                empty->setAsCurrentTab();
+                return;
+            }
+
             auto* newViewport = new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet, undoManager,
                                                                   viewportTitleForStage(stage), &window);
             // Must be unique and set before the dock manager registers this
             // widget; the stage's cache id is unique per open stage.
             newViewport->setObjectName(QStringLiteral("Viewport-%1").arg(stage->cacheId()));
-            if (initialViewport) {
-                window.dockManager()->addDockWidgetTabToArea(newViewport, initialViewport->dockAreaWidget());
+            if (onScreen && onScreen->dockAreaWidget()) {
+                window.dockManager()->addDockWidgetTabToArea(newViewport, onScreen->dockAreaWidget());
             } else {
                 window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, newViewport);
             }
+            newViewport->setAsCurrentTab();
         });
 
     QMenu* fileMenu = window.mainMenuBar()->addMenu(QObject::tr("&File"));
@@ -154,6 +174,34 @@ int main(int argc, char** argv) {
             stageOpener->open(path);
         }
     });
+
+    // File > Close Stage > one entry per open stage, built when it opens.
+    QMenu* closeStageMenu = fileMenu->addMenu(QObject::tr("&Close Stage"));
+    closeStageMenu->setToolTipsVisible(true);
+    QObject::connect(fileMenu, &QMenu::aboutToShow, closeStageMenu,
+                     [&stageManager, closeStageMenu]() {
+                         closeStageMenu->menuAction()->setEnabled(!stageManager.stages().empty());
+                     });
+    QObject::connect(closeStageMenu, &QMenu::aboutToShow, &window, [&stageManager, &window, closeStageMenu]() {
+        closeStageMenu->clear();
+        for (const usdcc::usd::StageRefPtr& stage : stageManager.stages()) {
+            const PXR_NS::SdfLayerHandle rootLayer = stage->usdStage()->GetRootLayer();
+            QAction* action = closeStageMenu->addAction(QString::fromStdString(rootLayer->GetDisplayName()));
+            action->setToolTip(QString::fromStdString(rootLayer->GetIdentifier()));
+            // Queued: the dialog must not run from inside the menu's own event
+            // handling, and the stage is held by value until it does.
+            QObject::connect(action, &QAction::triggered, &window, [&stageManager, &window, stage]() {
+                QMetaObject::invokeMethod(
+                    &window, [&stageManager, &window, stage]() {
+                        usdcc::usd::closeStageInteractively(&stageManager, stage, &window);
+                    },
+                    Qt::QueuedConnection);
+            });
+        }
+    });
+    // A closed stage's undo history goes with it (it also holds the stage).
+    auto undoOnStageClosed = stageManager.stageClosed.connect(
+        [undoManager](const usdcc::usd::StageRefPtr& stage) { undoManager->removeStage(stage); });
 
     QMenu* editMenu = window.mainMenuBar()->addMenu(QObject::tr("&Edit"));
     QAction* undoAction = editMenu->addAction(QObject::tr("&Undo"));

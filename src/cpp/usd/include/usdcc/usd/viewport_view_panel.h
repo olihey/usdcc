@@ -59,6 +59,8 @@ protected:
 
     // Points the viewport at the new stage and restores its selection.
     void onStageChanged(const StageRefPtr& stage) override;
+    // An opened stage goes to one viewport only, which main.cpp picks.
+    bool adoptsOpenedStage() const override { return false; }
 
 private Q_SLOTS:
     void refreshRendererCombo();

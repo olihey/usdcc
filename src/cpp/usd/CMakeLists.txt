@@ -42,6 +42,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/property_row.h
     include/usdcc/usd/properties/property_style.h
     include/usdcc/usd/properties/transform_stack_editor.h
+    include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
@@ -61,6 +62,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/property_editors.cpp
     src/properties/property_row.cpp
     src/properties/transform_stack_editor.cpp
+    src/close_stage_dialog.cpp
     src/stage_opener.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp

@@ -509,6 +509,23 @@ things that will bite later if not addressed early:
     `QPointer`, after letting the event loop process the deferred `deleteLater()`) that the
     Attributes panel was actually destroyed while Viewport/Outliner were untouched.
 
+    **Follow-up: the stage became optional, and File > Close Stage was added.** The app no longer
+    starts with an anonymous "Untitled" stage. Without a command-line stage, the panels start
+    with none: empty content, and a "No stage" Stage dropdown that stays disabled while no stage
+    is open. `ViewPanel::setStage(nullptr)` is now allowed, and `onStageChanged()` overrides
+    handle a null stage. Every opened stage is shown in exactly one viewport, which `main.cpp`
+    picks and brings to the front. It reuses a viewport with no stage: one on screen first,
+    otherwise a closed one, which is reopened. If there is none, it creates a new viewport,
+    tabbed next to one on screen or in the centre area if no viewport is on screen. This
+    resolves the "no way to spawn panels" consequence above. Other empty panels (Outliner,
+    Attributes) switch to the opened stage themselves; viewports opt out of that through
+    `ViewPanel::adoptsOpenedStage()`. File > Close Stage lists every open stage. Closing one that visible panels still show
+    opens a `CloseStageDialog` (`close_stage_dialog.h`). It offers "Close the panels" or "Switch
+    them to:", with a dropdown of the other open stages plus "No stage". Hidden panels follow the
+    choice. A stage closed some other way (e.g. from Python) leaves its panels empty instead of
+    closing them. `UndoManager::removeStage()` drops the closed stage's undo stack, which used
+    to keep the stage alive.
+
 23. **Fixed: viewport stayed black and Outliner stayed empty after item 22 — and File > Open Stage
     now creates a `ViewportViewPanel` for the opened stage.** Regression from item 22: the base
     `ViewPanel` stores the initial stage in its constructor, so the subclass's

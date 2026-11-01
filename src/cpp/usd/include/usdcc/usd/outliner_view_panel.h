@@ -50,6 +50,7 @@ private:
     UsdPrimTreeModel* m_model;
     bool m_updatingSelection = false;
     std::shared_ptr<UndoManager> m_undoManager;
+    QMetaObject::Connection m_undoConnection;  // the shown stage's undo stack
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
