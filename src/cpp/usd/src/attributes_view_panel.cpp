@@ -120,7 +120,6 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
         m_showHidden->setChecked(settings.value(kShowHiddenKey, false).toBool());
     }
 
-    toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
     toolbarLayout->addWidget(stageCombo(), 1);
     toolbarLayout->addWidget(m_search, 1);
     toolbarLayout->addWidget(m_showButton);

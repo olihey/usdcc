@@ -23,6 +23,7 @@
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/stage_names.h"
 #include "usdcc/usd/stage_opener.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
@@ -184,10 +185,12 @@ int main(int argc, char** argv) {
                      });
     QObject::connect(closeStageMenu, &QMenu::aboutToShow, &window, [&stageManager, &window, closeStageMenu]() {
         closeStageMenu->clear();
-        for (const usdcc::usd::StageRefPtr& stage : stageManager.stages()) {
-            const PXR_NS::SdfLayerHandle rootLayer = stage->usdStage()->GetRootLayer();
-            QAction* action = closeStageMenu->addAction(QString::fromStdString(rootLayer->GetDisplayName()));
-            action->setToolTip(QString::fromStdString(rootLayer->GetIdentifier()));
+        const auto& stages = stageManager.stages();
+        const std::vector<std::string> names = usdcc::usd::shortStageNames(stages);
+        for (std::size_t i = 0; i < stages.size(); ++i) {
+            const usdcc::usd::StageRefPtr stage = stages[i];
+            QAction* action = closeStageMenu->addAction(QString::fromStdString(names[i]));
+            action->setToolTip(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier()));
             // Queued: the dialog must not run from inside the menu's own event
             // handling, and the stage is held by value until it does.
             QObject::connect(action, &QAction::triggered, &window, [&stageManager, &window, stage]() {

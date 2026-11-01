@@ -38,7 +38,6 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbarLayout->setContentsMargins(10, 4, 10, 4);
 
     m_rendererCombo = new QComboBox(toolbar);
-    toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
     toolbarLayout->addWidget(stageCombo(), 1);
     toolbarLayout->addWidget(new QLabel(tr("Renderer:"), toolbar));
     toolbarLayout->addWidget(m_rendererCombo, 1);

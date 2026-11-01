@@ -3,12 +3,14 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/stage.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
+    include/usdcc/usd/stage_names.h
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
     src/property_categorizer.cpp
     src/stage.cpp
     src/stage_manager.cpp
+    src/stage_names.cpp
     src/value_type_info.cpp
     src/xform_math.cpp
     src/xform_stack.cpp

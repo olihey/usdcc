@@ -11,6 +11,7 @@ add_executable(usdcc_tests
     property_categorizer_test.cpp
     rotate_tool_test.cpp
     stage_changes_test.cpp
+    stage_names_test.cpp
     undo_manager_test.cpp
     value_type_info_test.cpp
     xform_math_test.cpp

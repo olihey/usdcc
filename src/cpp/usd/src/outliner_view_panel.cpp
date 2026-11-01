@@ -40,7 +40,6 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(10, 4, 10, 4);
 
-    toolbarLayout->addWidget(new QLabel(tr("Stage:"), toolbar));
     toolbarLayout->addWidget(stageCombo(), 1);
 
     m_model = new UsdPrimTreeModel(this);

@@ -1,6 +1,7 @@
 #include "usdcc/ui/view_panel.h"
 
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/stage_names.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -74,9 +75,15 @@ void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
 void ViewPanel::refreshStageCombo() {
     const QSignalBlocker blocker(m_stageCombo);
     m_stageCombo->clear();
-    for (const auto& stage : m_stageManager->stages()) {
-        const QString identifier = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier());
-        m_stageCombo->addItem(identifier, static_cast<qlonglong>(stage->cacheId()));
+    // File names, with just enough folders to tell same-named files apart;
+    // the full identifier is the tooltip.
+    const auto& stages = m_stageManager->stages();
+    const std::vector<std::string> names = usdcc::usd::shortStageNames(stages);
+    for (std::size_t i = 0; i < stages.size(); ++i) {
+        m_stageCombo->addItem(QString::fromStdString(names[i]), static_cast<qlonglong>(stages[i]->cacheId()));
+        m_stageCombo->setItemData(m_stageCombo->count() - 1,
+                                  QString::fromStdString(stages[i]->usdStage()->GetRootLayer()->GetIdentifier()),
+                                  Qt::ToolTipRole);
     }
     m_stageCombo->setCurrentIndex(m_stage ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())) : -1);
     m_stageCombo->setEnabled(m_stageCombo->count() > 0);

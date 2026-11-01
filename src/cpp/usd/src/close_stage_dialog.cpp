@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/stage_names.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -20,7 +21,13 @@
 namespace usdcc::usd {
 
 namespace {
-QString displayName(const StageRefPtr& stage) {
+// The stage's short name among all open stages (see shortStageNames()).
+QString displayName(StageManager* stageManager, const StageRefPtr& stage) {
+    const auto& stages = stageManager->stages();
+    const std::vector<std::string> names = shortStageNames(stages);
+    for (std::size_t i = 0; i < stages.size(); ++i) {
+        if (stages[i] == stage) return QString::fromStdString(names[i]);
+    }
     return QString::fromStdString(stage->usdStage()->GetRootLayer()->GetDisplayName());
 }
 
@@ -82,7 +89,7 @@ CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr
     auto* layout = new QVBoxLayout(this);
     auto* message = new QLabel(
         tr("<b>%1</b> is still shown in: %2.<br>What should happen to these panels?")
-            .arg(displayName(stage).toHtmlEscaped(), panelTitles.join(QStringLiteral(", ")).toHtmlEscaped()),
+            .arg(displayName(stageManager, stage).toHtmlEscaped(), panelTitles.join(QStringLiteral(", ")).toHtmlEscaped()),
         this);
     message->setWordWrap(true);
     layout->addWidget(message);
@@ -93,7 +100,7 @@ CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr
     m_replacementCombo = new QComboBox(this);
     for (const StageRefPtr& other : stageManager->stages()) {
         if (other != stage) {
-            m_replacementCombo->addItem(displayName(other), static_cast<qlonglong>(other->cacheId()));
+            m_replacementCombo->addItem(displayName(stageManager, other), static_cast<qlonglong>(other->cacheId()));
             m_replacementCombo->setItemData(m_replacementCombo->count() - 1,
                                             QString::fromStdString(other->usdStage()->GetRootLayer()->GetIdentifier()),
                                             Qt::ToolTipRole);
