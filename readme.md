@@ -51,7 +51,8 @@ to enable USD-dependent targets. Until then the app shell builds without it.
 ### Python bindings (`usdcc.ui`)
 
 `SidePanel` is exposed to Python via Shiboken6, so scripts can add their own side
-panels (`usdcc.app.add_side_panel()`, [docs/SCRIPTING.md](docs/SCRIPTING.md) §8).
+panels (`usdcc.app.add_side_panel()`) and view panel types
+(`usdcc.app.register_view_panel()`, [docs/SCRIPTING.md](docs/SCRIPTING.md) §8).
 This requires PySide6 and Shiboken6 built **from source against usdcc's own vcpkg
 Qt**, for OpenUSD's Python. A pip-installed PySide6 ships a different,
 independently-compiled Qt, and loading both in one process causes intermittent

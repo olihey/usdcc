@@ -11,7 +11,8 @@ class ToolSet;
 
 namespace usdcc::ui {
 class MainWindow;
-}
+class ViewPanelRegistry;
+}  // namespace usdcc::ui
 
 namespace usdcc::scripting {
 
@@ -23,6 +24,9 @@ struct AppContext {
     // For usdcc.app.main_window() and add_side_panel(); null without a
     // window, and then those raise.
     usdcc::ui::MainWindow* mainWindow = nullptr;
+    // The view panel types (the Stages menu's), for register_view_panel();
+    // open_view_panel() needs it and the window.
+    usdcc::ui::ViewPanelRegistry* viewPanels = nullptr;
 };
 
 // Makes `context` what the embedded module _usdcc_app — and through it

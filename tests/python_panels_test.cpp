@@ -1,25 +1,39 @@
-// Side panels made in Python (docs/SCRIPTING.md §8, phase 5): a
+// Panels made in Python (docs/SCRIPTING.md §8). Side panels (phase 5): a
 // usdcc.ui.SidePanel subclass docked with usdcc.app.add_side_panel() is in the
 // window and its View menu, belongs to the window, and goes back where the
-// saved layout had it when a later session adds it again. Needs PySide6
-// (tools/build-pyside.ps1); without it this file isn't built.
+// saved layout had it when a later session adds it again. View panels (M1): a
+// usdcc.ui.ViewPanel subclass registered with register_view_panel() opens as
+// a ScriptedViewPanel that follows its stage, fills its options menu, floats,
+// and duplicates. Needs PySide6 (tools/build-pyside.ps1); without it this
+// file isn't built.
 #include "python_test_app.h"
 #include "test_harness.h"
 
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/stage_manager.h"
+
+#include <DockManager.h>
 
 #include <QAction>
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QStandardPaths>
 
+#include <filesystem>
+#include <fstream>
+#include <memory>
+
 using usdcc::scripting::AppContextScope;
+using usdcc::scripting::ScriptedViewPanel;
 using usdcc::test::pythonTestApp;
 using usdcc::ui::MainWindow;
 
@@ -132,4 +146,107 @@ USDCC_TEST(python_side_panel) {
     }
     const auto noWindow = app.python.evaluate("__import__('usdcc.app').app.is_embedded()");
     CHECK(noWindow && *noWindow == "True", "the test app's own context is back");
+}
+
+namespace {
+QString labelText(QWidget* panel) {
+    const auto labels = panel->findChildren<QLabel*>();
+    return labels.isEmpty() ? QString() : labels.back()->text();
+}
+
+std::vector<ScriptedViewPanel*> scriptedPanels(MainWindow& window) {
+    std::vector<ScriptedViewPanel*> panels;
+    for (ads::CDockWidget* dock : window.dockManager()->dockWidgetsMap()) {
+        if (auto* panel = qobject_cast<ScriptedViewPanel*>(dock)) panels.push_back(panel);
+    }
+    return panels;
+}
+}  // namespace
+
+USDCC_TEST(python_view_panel) {
+    TestSettings settings;
+    auto& app = pythonTestApp();
+    const auto file = std::filesystem::temp_directory_path() /
+                      ("usdcc_view_panel_" + std::to_string(QCoreApplication::applicationPid()) + ".usda");
+    std::ofstream(file) << "#usda 1.0\ndef Xform \"World\"\n{\n    def Cube \"Box\"\n    {\n    }\n}\n";
+    const usdcc::usd::StageRefPtr stage = app.stages.openStage(file.string());
+    {
+        MainWindow window;
+        usdcc::ui::ViewPanelRegistry registry;
+        registry.add(QStringLiteral("builtin"), QStringLiteral("Built-in"),
+                     [](const usdcc::usd::StageRefPtr&, const QString&, QWidget*) { return nullptr; });
+        const AppContextScope scope({&app.stages, &app.undo, &app.tools, &window, &registry});
+
+        CHECK(app.python.runString("stage_id = " + std::to_string(stage->cacheId()) + R"(
+import usdcc.app, usdcc.ui, usdcc.usd
+from PySide6 import QtWidgets
+
+class PrimCount(usdcc.ui.ViewPanel):
+    def create_widget(self):
+        self.label = QtWidgets.QLabel("not yet")
+        return self.label
+    def stage_changed(self, stage):
+        self.label.setText("no stage" if stage is None else "%d prims" % len(list(stage.Traverse())))
+    def populate_options_menu(self, menu):
+        menu.addAction("Count Inactive Prims")
+
+usdcc.app.register_view_panel("prim_count", "Prim Count", PrimCount)
+stage = [s for s in usdcc.usd.stages() if usdcc.usd.stage_id(s) == stage_id][0]
+panel = usdcc.app.open_view_panel("prim_count", stage)
+assert isinstance(panel, PrimCount) and panel.stage == stage, panel
+assert ("prim_count", "Prim Count") in usdcc.app.view_panel_types()
+)", "register_view_panel.py"),
+              "a Python view panel type is registered and opened");
+        const auto* entry = registry.find(QStringLiteral("prim_count"));
+        CHECK(entry && entry->displayName == "Prim Count", "it's a type like the built-in ones (the Stages menu's)");
+
+        const auto panels = scriptedPanels(window);
+        CHECK(panels.size() == 1, "one panel docked: %d", int(panels.size()));
+        if (panels.size() != 1) return;
+        ScriptedViewPanel* panel = panels.front();
+        CHECK(panel->currentStage() == stage && labelText(panel) == "2 prims",
+              "it shows the stage, and its Python widget saw it: [%s]", qPrintable(labelText(panel)));
+
+        QMenu menu;
+        panel->populateOptionsMenu(&menu);
+        CHECK(!menu.actions().isEmpty() && menu.actions().back()->text() == "Count Inactive Prims",
+              "Python fills the options menu");
+
+        panel->setStage(nullptr);
+        CHECK(labelText(panel) == "no stage", "a stage change reaches Python: [%s]", qPrintable(labelText(panel)));
+        panel->setStage(stage);
+
+        panel->setFloating();
+        CHECK(panel->isFloating(), "it undocks into a floating window, like any view panel");
+
+        std::unique_ptr<usdcc::ui::ViewPanel> copy(panel->duplicate());
+        CHECK(copy && copy->currentStage() == stage && labelText(copy.get()) == "2 prims",
+              "Duplicate makes another instance on the same stage: [%s]",
+              copy ? qPrintable(labelText(copy.get())) : "?");
+        copy.reset();
+
+        CHECK(!app.python.runString("import usdcc.app, usdcc.ui\n"
+                                    "class X(usdcc.ui.ViewPanel): pass\n"
+                                    "usdcc.app.register_view_panel('builtin', 'Mine', X)\n"),
+              "a built-in type can't be replaced");
+        CHECK(!app.python.runString("import usdcc.app\nusdcc.app.register_view_panel('plain', 'Plain', object)\n"),
+              "only usdcc.ui.ViewPanel subclasses are accepted");
+
+        CHECK(app.python.runString("stage_id = " + std::to_string(stage->cacheId()) + R"(
+import usdcc.app, usdcc.ui, usdcc.usd
+class Broken(usdcc.ui.ViewPanel):
+    def create_widget(self):
+        raise RuntimeError("broken panel")
+usdcc.app.register_view_panel("broken", "Broken", Broken)
+usdcc.app.open_view_panel("broken", [s for s in usdcc.usd.stages() if usdcc.usd.stage_id(s) == stage_id][0])
+)", "broken_panel.py"),
+              "a panel whose Python code raises still opens");
+        bool saysWhy = false;
+        for (ScriptedViewPanel* scripted : scriptedPanels(window)) {
+            if (!scripted->pythonPanel()) saysWhy = labelText(scripted).contains("failed");
+        }
+        CHECK(saysWhy, "and says its code failed instead of showing content");
+    }
+    app.stages.closeStage(stage);
+    std::filesystem::remove(file);
 }

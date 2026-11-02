@@ -4,6 +4,8 @@
 #include <pybind11/embed.h>
 #include <pybind11/stl.h>
 
+#include "python_object.h"
+#include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/usd/python/bind_usd.h"
 #endif
 
@@ -12,13 +14,18 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <QUndoStack>
 
+#include <DockManager.h>
+
 #include <array>
 #include <cstdint>
+#include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -58,6 +65,15 @@ usdcc::ui::MainWindow& mainWindow() {
     if (!context().mainWindow) throw std::runtime_error("the usdcc app has no main window here");
     return *context().mainWindow;
 }
+
+usdcc::ui::ViewPanelRegistry& viewPanels() {
+    if (!context().viewPanels) throw std::runtime_error("the usdcc app has no view panel types here");
+    return *context().viewPanels;
+}
+
+// Types registered from Python, which may be registered again (replaced);
+// the built-in ones may not.
+std::set<std::string> s_pythonPanelTypes;
 
 constexpr std::array<std::pair<Qt::DockWidgetArea, const char*>, 4> kAreaNames = {{
     {Qt::LeftDockWidgetArea, "left"},
@@ -156,6 +172,47 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             throw py::value_error("no dock area named '" + areaName + "' (left, right, top or bottom)");
         },
         py::arg("address"), py::arg("area"));
+
+    m.def(
+        "register_view_panel",
+        [](const std::string& id, const std::string& displayName, py::object cls) {
+            usdcc::ui::ViewPanelRegistry& registry = viewPanels();
+            const QString qid = QString::fromStdString(id);
+            if (registry.find(qid) && !s_pythonPanelTypes.count(id)) {
+                throw py::value_error("'" + id + "' is a built-in view panel type");
+            }
+            auto pythonClass = std::make_shared<usdcc::scripting::PythonObject>(std::move(cls));
+            usdcc::usd::StageManager* stages = context().stageManager;
+            registry.add(qid, QString::fromStdString(displayName),
+                         [stages, pythonClass](const StageRefPtr& stage, const QString& title,
+                                               QWidget* parent) -> usdcc::ui::ViewPanel* {
+                             return new usdcc::scripting::ScriptedViewPanel(stages, stage, title, pythonClass, parent);
+                         });
+            s_pythonPanelTypes.insert(id);
+        },
+        py::arg("id"), py::arg("display_name"), py::arg("cls"));
+    m.def(
+        "open_view_panel",
+        [](const std::string& id, long cacheId) -> py::object {
+            usdcc::ui::ViewPanelRegistry& registry = viewPanels();
+            if (!registry.find(QString::fromStdString(id))) throw py::value_error("no view panel type '" + id + "'");
+            usdcc::ui::MainWindow& window = mainWindow();
+            usdcc::ui::ViewPanel* panel =
+                registry.open(QString::fromStdString(id), stageFor(cacheId), window.dockManager(), &window);
+            if (!panel) throw std::runtime_error("the '" + id + "' panel couldn't be created");
+            // The Python instance for a Python type, None for a built-in one.
+            auto* scripted = qobject_cast<usdcc::scripting::ScriptedViewPanel*>(panel);
+            if (scripted && scripted->pythonPanel()) return scripted->pythonPanel()->object;
+            return py::none();
+        },
+        py::arg("id"), py::arg("cache_id"), "Opens a panel of the type for the stage, like the Stages menu.");
+    m.def("view_panel_types", []() {
+        std::vector<std::pair<std::string, std::string>> types;
+        for (const auto& entry : viewPanels().entries()) {
+            types.emplace_back(entry.id.toStdString(), entry.displayName.toStdString());
+        }
+        return types;
+    });
 
     m.def("tool_names", []() {
         std::vector<std::string> names;

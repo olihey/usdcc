@@ -174,12 +174,14 @@ int main(int argc, char** argv) {
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
 
-    // Scripts reach the app's stages, undo history, tools and window through
-    // these (usdcc.usd / usdcc.app / usdcc.tools, docs/SCRIPTING.md §4, §8)
-    // until this goes out of scope, before the tool set does. ScriptRunner
-    // makes each run one undo step per stage it changes.
+    // Scripts reach the app's stages, undo history, tools, window and view
+    // panel types through these (usdcc.usd / usdcc.app / usdcc.tools,
+    // docs/SCRIPTING.md §4, §8) until this goes out of scope, before the tool
+    // set does. ScriptRunner makes each run one undo step per stage it
+    // changes. Python view panel types registered in panelTypes outlive the
+    // interpreter; they let go of their Python class without it.
     const usdcc::scripting::AppContextScope scriptingContext(
-        {&stageManager, undoManager.get(), toolSet.get(), &window});
+        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     window.addSidePanel(new usdcc::scripting::ScriptingSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);

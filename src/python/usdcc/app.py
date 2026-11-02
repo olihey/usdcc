@@ -3,8 +3,9 @@
 ``is_embedded()`` tells whether this python runs inside usdcc. Inside it,
 ``stage_manager()`` and ``undo_manager()`` are the app's own objects; most
 scripts use the friendlier usdcc.usd functions instead. With PySide6,
-``main_window()`` is the window and ``add_side_panel()`` docks a panel made in
-Python (docs/SCRIPTING.md section 8).
+``main_window()`` is the window, ``add_side_panel()`` docks a side panel made
+in Python, and ``register_view_panel()`` adds a view panel type
+(docs/SCRIPTING.md section 8).
 """
 
 try:
@@ -64,3 +65,40 @@ def add_side_panel(panel, area="right"):
     # leaves deleting it to the window.
     panel.setParent(main_window())
     _app().add_side_panel(shiboken6.getCppPointer(panel)[0], area)
+
+
+def register_view_panel(id, name, cls):
+    """Makes ``cls``, a ``usdcc.ui.ViewPanel`` subclass, a view panel type
+    named ``name`` (as the Stages menu shows it) with the stable ``id``.
+
+    Registering an id again replaces that type, so re-running the script that
+    registers it picks up changes; panels already open keep their old class.
+    The built-in types (``view_panel_types()``) can't be replaced. Needs PySide6.
+    """
+    from usdcc import ui
+
+    if not (isinstance(cls, type) and issubclass(cls, ui.ViewPanel)):
+        raise TypeError("register_view_panel() needs a usdcc.ui.ViewPanel subclass, not %r" % (cls,))
+    _app().register_view_panel(id, name, cls)
+
+
+def open_view_panel(id, stage=None):
+    """Opens a new view panel of type ``id`` showing ``stage`` (a ``Usd.Stage``
+    open in the app; by default the current one), tabbed like one opened from
+    the Stages menu. Raises RuntimeError if no stage is open.
+
+    Returns the panel's Python object for a type registered from Python, None
+    for a built-in one.
+    """
+    from usdcc import usd
+
+    if stage is None:
+        stage = usd.current_stage()
+        if stage is None:
+            raise RuntimeError("no stage is open to show in a view panel")
+    return _app().open_view_panel(id, usd.stage_id(stage))
+
+
+def view_panel_types():
+    """The view panel types as (id, name) pairs, built-in ones first."""
+    return _app().view_panel_types()

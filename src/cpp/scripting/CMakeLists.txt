@@ -60,6 +60,11 @@ if(USDCC_PYTHON_FOUND)
     add_dependencies(usdcc_scripting usdcc_python_package)
 
     target_link_libraries(usdcc_scripting_app PRIVATE usdcc_usd_bindings)
+    # Python view panels; they need pybind11, so only with Python.
+    target_sources(usdcc_scripting_app PRIVATE
+        include/usdcc/scripting/scripted_view_panel.h
+        src/python_object.h
+        src/scripted_view_panel.cpp)
     target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_HAS_PYTHON=1)
 else()
     target_compile_definitions(usdcc_scripting PRIVATE USDCC_HAS_PYTHON=0)

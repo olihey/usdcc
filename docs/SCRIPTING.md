@@ -129,11 +129,11 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 | Module | Contents |
 |---|---|
 | `usdcc.usd` | `StageManager` (and `UndoManager` in the app); `stages()`, `current_stage()`, `set_current_stage()`, `open_stage(path)`, `close_stage()`, all as `pxr.Usd.Stage`; `stage_id(stage)`; `selected_paths()`, `select(prims/paths)`; `edit(description)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`, `undo_text()`; `EMBEDDED` |
-| `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()`; with PySide6, `main_window()` and `add_side_panel(panel, area)` (§8) |
+| `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()`; with PySide6, `main_window()`, `add_side_panel(panel, area)`, `register_view_panel(id, name, cls)`, `open_view_panel(id, stage=None)`, `view_panel_types()` (§8) |
 | `usdcc.core` | `log(level, category, message)`, the level constants, `set_levels(spec)` (USDCC_LOG's format) |
 | `usdcc.tools` | `tool_names()`, `active_tool()`, `set_active_tool(name)` |
 | `usdcc.log` | The logging bridge (§5) |
-| `usdcc.ui` | `SidePanel`, the base class for panels made in Python (§8; needs PySide6) |
+| `usdcc.ui` | `SidePanel` and `ViewPanel`, the base classes for panels made in Python (§8; needs PySide6) |
 
 - **Stage functions** default to the current stage and raise `RuntimeError` outside the app.
 - **Prims, `Sdf.Path`s or strings** are all accepted where paths are.
@@ -286,6 +286,46 @@ class NotesPanel(usdcc.ui.SidePanel):
         self.setWidget(QtWidgets.QPlainTextEdit())
 
 usdcc.app.add_side_panel(NotesPanel(), "left")
+```
+
+**View panels** (milestone M1), the tabs in the centre that each show one stage:
+
+- A `usdcc.ui.ViewPanel` subclass is registered with `usdcc.app.register_view_panel(id, name,
+  cls)`. It's then a view panel type like the built-in ones: the Stages menu offers it for
+  every stage, and `usdcc.app.open_view_panel(id, stage=None)` opens one (on the current stage
+  by default) and returns its Python object. Registering an id again replaces the type; the
+  built-in ids can't be replaced.
+- Each panel is a C++ `ScriptedViewPanel` with the usual options button and Stage dropdown,
+  docking, floating and Duplicate. It makes one instance of the class:
+  - `create_widget()` returns the content, which the panel takes ownership of;
+  - `stage_changed(stage)` gets the shown `Usd.Stage` (or `None`) at the start and on every
+    change;
+  - `populate_options_menu(menu)` fills the options menu.
+
+  `self.stage` and `self.widget` hold the current stage and the content. An exception in
+  this code is logged; if `create_widget()` fails, the panel says so instead.
+- **Why hosted, not bound**: `ViewPanel` isn't bound through Shiboken. Its constructor takes
+  the pybind11 `StageManager`/`Stage` (PLAN.md §6 item 22). Also, `_ui.pyd` carries its own
+  copy of the static `usdcc_ui` code, so a bound `ViewPanel` would use a second, unconfigured
+  `UiScaleController::instance()`. The host is compiled into the app, and Python only fills
+  it, through three bridge functions in `ui.py` that turn addresses and cache ids into
+  PySide objects and `Usd.Stage`s.
+- Like the built-in panels opened from the Stages menu, Python view panels aren't reopened
+  by the saved layout on the next start; a startup script can open them.
+
+```python
+from PySide6 import QtWidgets
+import usdcc.app, usdcc.ui
+
+class PrimCount(usdcc.ui.ViewPanel):
+    def create_widget(self):
+        self.label = QtWidgets.QLabel()
+        return self.label
+
+    def stage_changed(self, stage):
+        self.label.setText("No stage" if stage is None else "%d prims" % len(list(stage.Traverse())))
+
+usdcc.app.register_view_panel("prim_count", "Prim Count", PrimCount)
 ```
 
 Without PySide, `main_window()` and `add_side_panel()` raise an `ImportError` saying what to
@@ -522,3 +562,24 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
 - **Checked in the app**: a startup script adds a panel; a `--script` moves it to the right;
   the next session puts it back on the right, shown and in the View menu (screenshot taken).
   This was also the first look at the Scripting panel in the running app.
+
+### After M7: Python view panels (milestone M1)
+
+- **[ScriptedViewPanel](../src/cpp/scripting/include/usdcc/scripting/scripted_view_panel.h)**
+  in `usdcc_scripting_app` (built with Python only), with `PythonObject`
+  (`src/python_object.h`), which releases a Python reference with the GIL held, or abandons
+  it once Python is finalized (the panel registry outlives the interpreter).
+- **`_usdcc_app`**: `register_view_panel`, `open_view_panel`, `view_panel_types`.
+  `AppContext` gains `viewPanels` (the app's `ViewPanelRegistry`). `usdcc.app` wraps them
+  (§8). **`usdcc.ui.ViewPanel`** and the bridge functions are in `ui.py`.
+- **Tests** (`python_view_panel` in [python_panels_test.cpp](../tests/python_panels_test.cpp)):
+  - a type is registered (listed like the built-in ones) and opened on a stage;
+  - its Python widget sees the stage, and a stage change;
+  - Python fills the options menu;
+  - the panel floats, and Duplicate makes another instance on the same stage;
+  - built-in ids and non-`ViewPanel` classes are refused;
+  - a panel whose `create_widget()` raises still opens and says so.
+- **Checked in the app**: a startup script registers "Prim Count", and a `--script` opens it
+  on `cube_and_sphere.usda`. It's docked in the centre with the options button and Stage
+  dropdown, and its label reads "4 prims in cube_and_sphere.usda". The screen was locked, so
+  the window was captured with `QWidget::grab()` from the script.
