@@ -7,6 +7,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
+#include <set>
 #include <vector>
 
 class QTreeView;
@@ -45,16 +46,33 @@ private Q_SLOTS:
 
 private:
     void moveSelectedPrim(int direction);  // -1 = up, +1 = down
+    // Rebuilds the tree when the stage's prim hierarchy may have changed (a
+    // prim path resynced: added, removed, renamed, reordered, (de)activated,
+    // or one of those undone). Value-only edits — attribute changes, gizmo
+    // drags — leave the tree alone. Coalesced into one rebuild per event loop
+    // turn, since a single edit can send several notices.
+    void onStageObjectsChanged(const StageChanges& changes);
+    // Around every model reset: remember which prims are expanded (and the
+    // scroll position), then expand them again and reselect, so a rebuild
+    // doesn't collapse the tree.
+    void saveViewState();
+    void restoreViewState();
 
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
     bool m_updatingSelection = false;
     std::shared_ptr<UndoManager> m_undoManager;
-    QMetaObject::Connection m_undoConnection;  // the shown stage's undo stack
+    bool m_refreshQueued = false;
+    // View state carried across a model reset; not across a stage switch,
+    // whose paths belong to another stage.
+    bool m_keepViewState = true;
+    std::set<PXR_NS::SdfPath> m_expandedPaths;
+    int m_scrollPosition = 0;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
+    usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 
 }  // namespace usdcc::usd

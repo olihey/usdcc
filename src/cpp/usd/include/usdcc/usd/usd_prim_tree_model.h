@@ -18,10 +18,11 @@ namespace usdcc::usd {
 // Structural edits (rename/reorder) call refresh(), which rebuilds the
 // whole tree via beginResetModel()/endResetModel() rather than incremental
 // inserts/removes/moves: simpler and safer than tracking exact index shifts
-// through USD's own composition/namespace-edit machinery, at the cost of
-// losing transient QModelIndex-based view state (e.g. expansion) across an
-// edit. Activating/deactivating a prim (no structural change) only emits
-// dataChanged() and does not need a full refresh.
+// through USD's own composition/namespace-edit machinery. A reset drops the
+// view's QModelIndex-based state (expansion, selection); OutlinerViewPanel
+// saves it by prim path around every reset and restores it, and only
+// refreshes when the hierarchy actually changed. Activating/deactivating a
+// prim from the checkbox only emits dataChanged().
 class UsdPrimTreeModel : public QAbstractItemModel {
     Q_OBJECT
 

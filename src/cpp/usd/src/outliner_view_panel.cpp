@@ -17,6 +17,8 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenu>
+#include <QScrollBar>
+#include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -57,6 +59,8 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             &OutlinerViewPanel::onTreeSelectionChanged);
     connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
+    connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
+    connect(m_model, &QAbstractItemModel::modelReset, this, &OutlinerViewPanel::restoreViewState);
 
     m_selectionChangedConnection = stageManager->selectionChanged.connect(
         [this](StageRefPtr changedStage, std::vector<PXR_NS::SdfPath> paths) {
@@ -79,14 +83,68 @@ void OutlinerViewPanel::populateContextMenu(QMenu* menu) {
 }
 
 void OutlinerViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_keepViewState = false;  // the expanded paths belong to the previous stage
     m_model->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
-    // Undo/redo can add, remove or reorder prims: follow this stage's stack.
-    disconnect(m_undoConnection);
-    m_undoConnection = {};
-    if (QUndoStack* undoStack = stage ? m_undoManager->stack(stage) : nullptr) {
-        m_undoConnection = connect(undoStack, &QUndoStack::indexChanged, this, [this](int) { m_model->refresh(); });
+    m_keepViewState = true;
+    // Edits, and undo/redo of them, arrive as change notices; only the ones
+    // that touch the hierarchy rebuild the tree.
+    m_stageChangedConnection = {};
+    if (stage) {
+        m_stageChangedConnection =
+            stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
     }
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
+}
+
+void OutlinerViewPanel::onStageObjectsChanged(const StageChanges& changes) {
+    const bool hierarchyChanged =
+        std::any_of(changes.resyncedPaths.begin(), changes.resyncedPaths.end(), [](const PXR_NS::SdfPath& path) {
+            return path.IsPrimPath() || path.IsAbsoluteRootPath();  // not a property's resync
+        });
+    if (!hierarchyChanged || m_refreshQueued) {
+        return;
+    }
+    m_refreshQueued = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_refreshQueued = false;
+        m_model->refresh();
+    });
+}
+
+void OutlinerViewPanel::saveViewState() {
+    m_expandedPaths.clear();
+    m_scrollPosition = m_treeView->verticalScrollBar()->value();
+    if (!m_keepViewState) {
+        return;
+    }
+    std::vector<QModelIndex> pending{QModelIndex()};
+    while (!pending.empty()) {
+        const QModelIndex parent = pending.back();
+        pending.pop_back();
+        for (int row = 0; row < m_model->rowCount(parent); ++row) {
+            const QModelIndex index = m_model->index(row, 0, parent);
+            if (m_treeView->isExpanded(index)) {
+                m_expandedPaths.insert(m_model->pathForIndex(index));
+                pending.push_back(index);  // collapsed subtrees keep their children's state hidden anyway
+            }
+        }
+    }
+}
+
+void OutlinerViewPanel::restoreViewState() {
+    if (!m_keepViewState) {
+        return;
+    }
+    for (const PXR_NS::SdfPath& path : m_expandedPaths) {
+        const QModelIndex index = m_model->indexForPath(path);
+        if (index.isValid()) {
+            m_treeView->setExpanded(index, true);
+        }
+    }
+    onStageSelectionChanged(currentStage(), stageManager()->selectedPaths(currentStage()));
+    // After the view has laid out the restored rows.
+    const int scrollPosition = m_scrollPosition;
+    QTimer::singleShot(0, this, [this, scrollPosition]() { m_treeView->verticalScrollBar()->setValue(scrollPosition); });
 }
 
 void OutlinerViewPanel::onTreeSelectionChanged() {
@@ -162,7 +220,9 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     std::iter_swap(it, swapWith);
 
     const PXR_NS::UsdStageRefPtr& usdStage = currentStage()->usdStage();
-    const bool applied = m_undoManager->apply(currentStage(), tr("Reorder %1").arg(QString::fromStdString(prim.GetName().GetString())),
+    // No refresh here: the edit's change notice rebuilds the tree, keeping
+    // its expansion and the selection (see onStageObjectsChanged()).
+    m_undoManager->apply(currentStage(), tr("Reorder %1").arg(QString::fromStdString(prim.GetName().GetString())),
                                                [&]() {
                                                    if (!usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
                                                        usdStage->OverridePrim(parent.GetPath());
@@ -174,18 +234,6 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
                                                    }
                                                    return false;
                                                });
-    if (!applied) {
-        return;
-    }
-
-    m_model->refresh();
-
-    // refresh() reset the model, losing the view's selection; restore it so
-    // repeated Move Up/Down on the same prim doesn't require re-selecting.
-    const QModelIndex newIndex = m_model->indexForPath(path);
-    if (newIndex.isValid()) {
-        m_treeView->setCurrentIndex(newIndex);
-    }
 }
 
 }  // namespace usdcc::usd
