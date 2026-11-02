@@ -26,7 +26,9 @@
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/native_stream_capture.h"
+#include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/script_runner.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
@@ -150,6 +152,13 @@ int main(int argc, char** argv) {
     // toolbars are owned by `window`).
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
+
+    // Scripts reach the app's stages, undo history and tools through these
+    // (usdcc.usd / usdcc.app / usdcc.tools, docs/SCRIPTING.md §4) until this
+    // goes out of scope, before the tool set does. ScriptRunner makes each run
+    // one undo step per stage it changes.
+    const usdcc::scripting::AppContextScope scriptingContext({&stageManager, undoManager.get(), toolSet.get()});
+    usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
 
     // Panels created on demand get a "<type> - <stage>" title and a unique
     // objectName (see ViewPanelRegistry::open()); the three startup panels
@@ -333,11 +342,11 @@ int main(int argc, char** argv) {
                                       ? QObject::tr("Run a Python script in the app (Python %1)")
                                             .arg(QString::fromStdString(python.version()))
                                       : QString::fromStdString(python.unavailableReason()));
-    QObject::connect(runPythonAction, &QAction::triggered, &window, [&python, &window]() {
+    QObject::connect(runPythonAction, &QAction::triggered, &window, [&scriptRunner, &window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Run Python File"), QString(),
                                                             QObject::tr("Python Files (*.py)"));
         if (!path.isEmpty()) {
-            python.runFile(std::filesystem::path(path.toStdU16String()));
+            scriptRunner.runFile(std::filesystem::path(path.toStdU16String()));
         }
     });
 

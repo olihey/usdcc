@@ -1,0 +1,286 @@
+// Scripts working on the app (docs/SCRIPTING.md phase 2): usdcc.usd / usdcc.app
+// / usdcc.tools on the live StageManager, UndoManager and ToolSet, and
+// ScriptRunner's one undo step per stage a run changes — M7's exit criterion
+// (a script opens a stage, edits a prim, and drives the undo stack like a UI
+// edit) included.
+#include "python_test_app.h"
+#include "test_harness.h"
+
+#include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/script_runner.h"
+#include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
+
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/usd/attribute.h>
+#include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/stage.h>
+
+#include <QCoreApplication>
+#include <QUndoStack>
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+using usdcc::test::pythonTestApp;
+using usdcc::usd::StageRefPtr;
+
+namespace {
+// A small .usda in the temp folder, deleted again when this goes out of scope.
+struct TempStageFile {
+    std::filesystem::path path;
+    explicit TempStageFile(const std::string& name) {
+        path = std::filesystem::temp_directory_path() /
+               (name + "_" + std::to_string(QCoreApplication::applicationPid()) + ".usda");
+        std::ofstream(path) << "#usda 1.0\ndef Xform \"World\" {}\n";
+    }
+    ~TempStageFile() {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+    // With forward slashes, ready to paste into Python source.
+    std::string python() const { return path.generic_string(); }
+};
+
+StageRefPtr findStage(const std::filesystem::path& file) {
+    for (const StageRefPtr& stage : pythonTestApp().stages.stages()) {
+        if (std::filesystem::equivalent(stage->usdStage()->GetRootLayer()->GetRealPath(), file)) return stage;
+    }
+    return nullptr;
+}
+
+int undoCount(const StageRefPtr& stage) { return pythonTestApp().undo.stack(stage)->count(); }
+
+std::string undoText(const StageRefPtr& stage) { return pythonTestApp().undo.stack(stage)->undoText().toStdString(); }
+
+bool hasPrim(const StageRefPtr& stage, const char* path) {
+    return stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath(path)).IsValid();
+}
+
+// Python source for the app's already-open stage on `file` (open_stage()
+// would open the file again, as a second stage).
+std::string openStageIn(const TempStageFile& file) {
+    return "next(s for s in usdcc.usd.stages() if s.GetRootLayer().realPath.replace('\\\\', '/').lower() == r'" +
+           file.python() + "'.lower())";
+}
+
+std::string evaluate(const std::string& expression) {
+    return pythonTestApp().python.evaluate(expression).value_or("<raised>");
+}
+}  // namespace
+
+USDCC_TEST(python_exit_criterion) {
+    auto& app = pythonTestApp();
+    TempStageFile file("usdcc_exit_criterion");
+
+    // A script opens a stage and edits a prim.
+    const bool ok = app.runner.run(
+        "import usdcc.usd\n"
+        "stage = usdcc.usd.open_stage(r'" + file.python() + "')\n"
+        "cube = stage.DefinePrim('/World/Cube', 'Cube')\n"
+        "cube.GetAttribute('size').Set(2.0)\n"
+        "usdcc.usd.select([cube], stage)\n",
+        "exit_criterion.py");
+    CHECK(ok, "the script ran");
+
+    const StageRefPtr stage = findStage(file.path);
+    CHECK(stage != nullptr, "the stage is open in the app");
+    if (!stage) return;
+    CHECK(hasPrim(stage, "/World/Cube"), "the prim exists");
+    CHECK(app.stages.selectedPaths(stage) == std::vector<PXR_NS::SdfPath>({PXR_NS::SdfPath("/World/Cube")}),
+          "and is selected");
+    CHECK(app.runner.lastUndoSteps() == 1 && undoCount(stage) == 1, "one undo step: %d", undoCount(stage));
+    CHECK(undoText(stage) == "Run exit_criterion.py", "named after the run: %s", undoText(stage).c_str());
+
+    // A UI-style edit on top, through the same UndoManager the panels use.
+    auto size = [&] {
+        double value = 0;
+        stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath("/World/Cube")).GetAttribute(PXR_NS::TfToken("size")).Get(&value);
+        return value;
+    };
+    app.undo.apply(stage, QStringLiteral("Set Size"), [&] {
+        return stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath("/World/Cube"))
+            .GetAttribute(PXR_NS::TfToken("size"))
+            .Set(3.0);
+    });
+    CHECK(undoCount(stage) == 2 && size() == 3.0, "the UI edit is the next step");
+
+    // Driving the stack from Python, step by step, like Edit > Undo/Redo.
+    const std::string id = std::to_string(stage->cacheId());
+    const std::string stageExpr = "__import__('usdcc.usd').usd._stage(" + id + ")";
+    app.python.runString("import usdcc.usd\nusdcc.usd.undo(" + stageExpr + ")\n");
+    CHECK(size() == 2.0 && hasPrim(stage, "/World/Cube"), "undo reverts the UI edit only");
+    app.python.runString("import usdcc.usd\nusdcc.usd.undo(" + stageExpr + ")\n");
+    CHECK(!hasPrim(stage, "/World/Cube"), "the next undo reverts the whole script run");
+    CHECK(evaluate("__import__('usdcc.usd').usd.can_undo(" + stageExpr + ")") == "False", "nothing left to undo");
+    app.python.runString("import usdcc.usd\nusdcc.usd.redo(" + stageExpr + ")\n");
+    CHECK(hasPrim(stage, "/World/Cube") && size() == 2.0, "redo brings the script's edits back");
+    app.python.runString("import usdcc.usd\nusdcc.usd.redo(" + stageExpr + ")\n");
+    CHECK(size() == 3.0, "and then the UI edit");
+
+    app.stages.closeStage(stage);
+}
+
+USDCC_TEST(python_run_spans_stages) {
+    auto& app = pythonTestApp();
+    TempStageFile fileA("usdcc_spans_a");
+    TempStageFile fileB("usdcc_spans_b");
+    TempStageFile fileC("usdcc_spans_c");
+    const StageRefPtr a = app.stages.openStage(fileA.path.string());
+    const StageRefPtr untouched = app.stages.openStage(fileC.path.string());
+
+    const bool ok = app.runner.run(
+        "import usdcc.usd\n"
+        "a = " + openStageIn(fileA) + "\n"                        // already open
+        "b = usdcc.usd.open_stage(r'" + fileB.python() + "')\n"   // opened during the run
+        "a.DefinePrim('/World/A')\n"
+        "b.DefinePrim('/World/B')\n",
+        "two_stages.py");
+    const StageRefPtr b = findStage(fileB.path);
+    CHECK(ok && b, "the script ran and opened B");
+    if (!b) return;
+    CHECK(app.runner.lastUndoSteps() == 2, "a step on each changed stage: %d", app.runner.lastUndoSteps());
+    CHECK(undoCount(a) == 1 && undoCount(b) == 1 && undoText(b) == "Run two_stages.py", "A and B each got one");
+    CHECK(undoCount(untouched) == 0, "an untouched stage got none");
+    CHECK(app.stages.stages().size() == 3, "no stage opened twice: %zu", app.stages.stages().size());
+
+    app.undo.stack(b)->undo();
+    CHECK(!hasPrim(b, "/World/B") && hasPrim(b, "/World"), "B's step reverts to B as it was opened");
+
+    app.stages.closeStage(a);
+    app.stages.closeStage(b);
+    app.stages.closeStage(untouched);
+}
+
+USDCC_TEST(python_failed_run_is_one_step) {
+    auto& app = pythonTestApp();
+    TempStageFile file("usdcc_failed_run");
+    const StageRefPtr stage = app.stages.openStage(file.path.string());
+
+    const bool ok = app.runner.run(
+        "import usdcc.usd\n"
+        "stage = " + openStageIn(file) + "\n"
+        "stage.DefinePrim('/World/Partial')\n"
+        "raise ValueError('stop here')\n",
+        "failing.py");
+    CHECK(!ok, "the run reports the exception");
+    CHECK(hasPrim(stage, "/World/Partial"), "the changes before it stay");
+    CHECK(undoCount(stage) == 1 && undoText(stage) == "Run failing.py (failed)", "as one step: %s",
+          undoText(stage).c_str());
+    app.undo.stack(stage)->undo();
+    CHECK(!hasPrim(stage, "/World/Partial"), "which one Undo reverts");
+
+    app.stages.closeStage(stage);
+}
+
+USDCC_TEST(python_edit_blocks) {
+    auto& app = pythonTestApp();
+    TempStageFile file("usdcc_edit_blocks");
+    const StageRefPtr stage = app.stages.openStage(file.path.string());
+    const std::string open = "import usdcc.usd\nstage = " + openStageIn(file) + "\n";
+
+    // Outside a run (a startup script, a plugin): edit() makes the step.
+    app.python.runString(open +
+                         "with usdcc.usd.edit('Make sphere', stage) as s:\n"
+                         "    s.DefinePrim('/World/Sphere', 'Sphere')\n"
+                         "    s.DefinePrim('/World/Sphere/Child')\n");
+    CHECK(undoCount(stage) == 1 && undoText(stage) == "Make sphere", "edit() is one named step: %s",
+          undoText(stage).c_str());
+
+    // Inside a run, edit() blocks nest into the run's step.
+    app.runner.run(open +
+                       "with usdcc.usd.edit('First', stage):\n"
+                       "    stage.DefinePrim('/World/One')\n"
+                       "with usdcc.usd.edit('Second', stage):\n"
+                       "    stage.DefinePrim('/World/Two')\n",
+                   "nested.py");
+    CHECK(undoCount(stage) == 2 && undoText(stage) == "Run nested.py", "nested edits join the run: %s",
+          undoText(stage).c_str());
+
+    app.stages.closeStage(stage);
+}
+
+USDCC_TEST(python_app_api) {
+    auto& app = pythonTestApp();
+    TempStageFile file("usdcc_app_api");
+    const StageRefPtr stage = app.stages.openStage(file.path.string());
+    app.stages.setCurrentStage(stage);
+
+    CHECK(evaluate("__import__('usdcc.app').app.is_embedded()") == "True", "usdcc.app knows it's embedded");
+    CHECK(evaluate("__import__('usdcc.usd').usd.EMBEDDED") == "True", "usdcc.usd uses the app's module");
+    CHECK(evaluate("__import__('usdcc.usd').usd.current_stage().GetRootLayer().realPath.replace('\\\\', '/')") ==
+              file.python(),
+          "current_stage() is the app's current stage as a Usd.Stage");
+    CHECK(evaluate("len(__import__('usdcc.usd').usd.stages())") == std::to_string(app.stages.stages().size()),
+          "stages() lists the app's stages");
+    CHECK(evaluate("__import__('usdcc.usd').usd.stage_id(__import__('usdcc.usd').usd.current_stage())") ==
+              std::to_string(stage->cacheId()),
+          "stage_id() is the app's id");
+
+    app.python.runString("import usdcc.usd\nusdcc.usd.select(['/World'])\n");
+    CHECK(app.stages.selectedPaths(stage) == std::vector<PXR_NS::SdfPath>({PXR_NS::SdfPath("/World")}),
+          "select() with a path string");
+    CHECK(evaluate("[str(p) for p in __import__('usdcc.usd').usd.selected_paths()]") == "['/World']",
+          "selected_paths() as Sdf.Paths");
+    CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.select(['not a path'])\n"),
+          "a bad path raises ValueError");
+
+    CHECK(evaluate("__import__('usdcc.tools').tools.tool_names()") == "['select', 'move', 'rotate', 'scale']",
+          "tool names");
+    app.python.runString("import usdcc.tools\nusdcc.tools.set_active_tool('move')\n");
+    CHECK(app.tools.activeKind() == usdcc::tools::ToolKind::Move, "set_active_tool() drives the ToolSet");
+    CHECK(evaluate("__import__('usdcc.tools').tools.active_tool()") == "move", "active_tool()");
+    CHECK(!app.python.runString("import usdcc.tools\nusdcc.tools.set_active_tool('lasso')\n"),
+          "an unknown tool raises");
+    app.tools.setActiveKind(usdcc::tools::ToolKind::Select);
+
+    CHECK(evaluate("__import__('usdcc.core').core.set_levels('info')") == "True", "usdcc.core.set_levels()");
+
+    app.stages.closeStage(stage);
+    CHECK(evaluate("__import__('usdcc.usd').usd.current_stage()") == "None" || !app.stages.stages().empty(),
+          "current_stage() is None with no stage open");
+}
+
+// usdcc.usd outside the app: a plain python of the same version, with
+// usdcc/_usd.pyd and its own StageManager.
+USDCC_TEST(python_standalone_module) {
+    auto& app = pythonTestApp();
+    const auto& settings = app.python.settings();
+    if (settings.paths.size() < 2) return;
+    const std::filesystem::path usdRoot = settings.paths[1].parent_path().parent_path();  // <USD>/lib/site-packages
+    TempStageFile stageFile("usdcc_standalone");
+
+    const auto dir = std::filesystem::temp_directory_path();
+    const auto script = dir / "usdcc_standalone_check.py";
+    const auto output = dir / "usdcc_standalone_check.txt";
+    {
+        std::ofstream out(script);
+        out << "import os, sys\n"
+            << "root = r'" << usdRoot.generic_string() << "'\n"
+            << "os.environ['PATH'] = os.pathsep.join([root, root + '/lib', root + '/bin', os.environ.get('PATH', '')])\n"
+            << "sys.path[:0] = [r'" << settings.paths[0].generic_string() << "', r'"
+            << settings.paths[1].generic_string() << "']\n"
+            << "import usdcc.usd, usdcc.app\n"
+            << "manager = usdcc.usd.StageManager()\n"
+            << "cache_id = manager.open_stage(r'" << stageFile.python() << "')\n"
+            << "try:\n    usdcc.usd.current_stage()\n    needs_app = False\n"
+            << "except RuntimeError:\n    needs_app = True\n"
+            << "print('OK' if (not usdcc.usd.EMBEDDED and not usdcc.app.is_embedded() and cache_id >= 0 "
+            << "and manager.stage_cache_ids() == [cache_id] and needs_app) else 'WRONG')\n";
+    }
+    const std::string command = "\"\"" + (settings.home / "python.exe").string() + "\" \"" + script.string() +
+                                "\" > \"" + output.string() + "\" 2>&1\"";
+    const int exitCode = std::system(command.c_str());
+    std::ifstream in(output);
+    std::stringstream text;
+    text << in.rdbuf();
+    std::filesystem::remove(script);
+    in.close();
+    std::filesystem::remove(output);
+    CHECK(exitCode == 0 && text.str().find("OK") != std::string::npos,
+          "_usd.pyd works in a plain python (exit %d): %s", exitCode, text.str().c_str());
+}

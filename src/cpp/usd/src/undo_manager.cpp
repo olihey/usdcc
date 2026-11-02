@@ -1,5 +1,7 @@
 #include "usdcc/usd/undo_manager.h"
 
+#include "usdcc/usd/stage_manager.h"
+
 #include "usdcc/core/log.h"
 
 #include <QUndoCommand>
@@ -137,6 +139,40 @@ void UndoManager::cancelEdit(const StageRefPtr& stage) {
 bool UndoManager::isEditing(const StageRefPtr& stage) const {
     const Entry* e = findEntry(stage);
     return e && e->session;
+}
+
+void UndoManager::beginGlobalEdit(StageManager& stageManager, const QString& description) {
+    if (m_globalEdit) return;
+    m_globalEdit = std::make_unique<GlobalEdit>();
+    m_globalEdit->description = description;
+    for (const StageRefPtr& stage : stageManager.stages()) {
+        beginEdit(stage, description);
+        m_globalEdit->stages.push_back(stage);
+    }
+    // A stage opened during the edit is snapshotted as opened, so everything
+    // done to it afterwards is in the step too.
+    m_globalEdit->stageOpened = stageManager.stageOpened.connect([this](const StageRefPtr& stage) {
+        beginEdit(stage, m_globalEdit->description);
+        m_globalEdit->stages.push_back(stage);
+    });
+}
+
+int UndoManager::endGlobalEdit(const QString& description) {
+    if (!m_globalEdit) return 0;
+    std::unique_ptr<GlobalEdit> global = std::move(m_globalEdit);
+    global->stageOpened.disconnect();
+    int recorded = 0;
+    for (const StageRefPtr& stage : global->stages) {
+        // A stage closed during the edit took its stack and session with it
+        // (removeStage()); entry() would make a new, empty one.
+        auto it = m_entries.constFind(static_cast<qulonglong>(stage->cacheId()));
+        if (it == m_entries.constEnd() || !it.value()->session) continue;
+        if (!description.isEmpty()) it.value()->session->description = description;
+        if (endEdit(stage)) ++recorded;
+    }
+    USDCC_LOG_DEBUG("usdcc.undo", "Global edit \"{}\": {} undo step(s)",
+                    (description.isEmpty() ? global->description : description).toStdString(), recorded);
+    return recorded;
 }
 
 }  // namespace usdcc::usd

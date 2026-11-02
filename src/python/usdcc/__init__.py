@@ -1,11 +1,11 @@
-# usdcc namespace package.
+# usdcc package (docs/SCRIPTING.md section 4).
 #
-# Each usdcc.* submodule (ui, usd, ...) is an independently-optional compiled
-# extension (see each one's CMakeLists.txt for why: usdcc.ui needs
-# PySide6/Shiboken6, usdcc.usd needs USD_INSTALL). This file is shared by all
-# of them — every submodule's build step copies this same file to
-# build/python/usdcc/__init__.py — so it must tolerate any subset being
-# absent rather than hard-failing `import usdcc.*` for an unrelated module.
+# Pure-Python modules (usd, app, core, tools, log) sit next to the compiled
+# ones they use: inside the app, the embedded modules _usdcc_app and
+# _usdcc_log; in a plain python, _usd.pyd. usdcc.ui is an optional compiled
+# extension (it needs a PySide6/Shiboken6 build), so this file must tolerate
+# it being absent rather than hard-failing `import usdcc.*` for an unrelated
+# module.
 try:
     from . import ui as _ui
 except ImportError:

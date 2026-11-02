@@ -44,9 +44,11 @@ add_executable(usdcc_python_tests
     test_harness.h
     test_harness.cpp
     python_test_main.cpp
+    python_app_test.cpp
     python_runtime_test.cpp
+    python_test_app.h
 )
-target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting)
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app)
 
 foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     # Same reason as the app (see src/cpp/app/CMakeLists.txt): USD's headers ask

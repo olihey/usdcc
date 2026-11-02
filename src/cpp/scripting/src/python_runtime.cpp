@@ -119,6 +119,9 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_log, m) {
                 static_cast<LogLevel>(std::clamp(level, 0, static_cast<int>(LogLevel::Fatal))), source, category);
         },
         py::arg("level"), py::arg("source"), py::arg("category"));
+    m.def(
+        "configure_levels", [](const std::string& spec) { return usdcc::core::LogHub::instance().configureLevels(spec); },
+        py::arg("spec"), "Same format as USDCC_LOG; False if a part couldn't be parsed.");
 }
 
 void PythonRuntime::Impl::start() {

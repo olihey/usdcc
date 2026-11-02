@@ -27,7 +27,7 @@ if(UNIX AND NOT APPLE)
     install(DIRECTORY resources/linux/icons/ DESTINATION share/icons)
     install(FILES resources/linux/usdcc.desktop DESTINATION share/applications)
 endif()
-target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui usdcc_scripting)
+target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui usdcc_scripting usdcc_scripting_app)
 usdcc_deploy_core_library(usdcc)
 
 # USD's own headers wrap their Python.h include the same way pybind11 does

@@ -1,13 +1,26 @@
 # usdcc.scripting — the embedded Python interpreter (milestone M7,
-# docs/SCRIPTING.md). Qt-free. Uses OpenUSD's own Python (USDCC_PYTHON_*,
-# cmake/modules/UsdccPython.cmake); without it the library still builds and
-# PythonRuntime reports scripting as unavailable.
+# docs/SCRIPTING.md). Uses OpenUSD's own Python (USDCC_PYTHON_*,
+# cmake/modules/UsdccPython.cmake); without it both libraries still build and
+# scripting reports itself unavailable.
+#
+#   usdcc_scripting      PythonRuntime and the log bridge; Qt-free
+#   usdcc_scripting_app  the running app for scripts: the embedded _usdcc_app
+#                        module (usdcc.app/.usd/.tools) and ScriptRunner (undo)
 add_library(usdcc_scripting STATIC
     include/usdcc/scripting/python_runtime.h
     src/python_runtime.cpp
 )
 target_include_directories(usdcc_scripting PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(usdcc_scripting PUBLIC usdcc_core)
+
+add_library(usdcc_scripting_app STATIC
+    include/usdcc/scripting/app_module.h
+    include/usdcc/scripting/script_runner.h
+    src/app_module.cpp
+    src/script_runner.cpp
+)
+target_include_directories(usdcc_scripting_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core)
 
 if(USDCC_PYTHON_FOUND)
     find_package(pybind11 REQUIRED)
@@ -26,6 +39,10 @@ if(USDCC_PYTHON_FOUND)
     # The usdcc package (usdcc/log.py, ...) must be in build/python before
     # anything embeds the interpreter.
     add_dependencies(usdcc_scripting usdcc_python_package)
+
+    target_link_libraries(usdcc_scripting_app PRIVATE usdcc_usd_bindings)
+    target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_HAS_PYTHON=1)
 else()
     target_compile_definitions(usdcc_scripting PRIVATE USDCC_HAS_PYTHON=0)
+    target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_HAS_PYTHON=0)
 endif()

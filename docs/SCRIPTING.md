@@ -1,6 +1,6 @@
 # Scripting — Plan
 
-*Status: phase 1 done (see §12); phases 2–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
+*Status: phases 1–2 done (see §12); phases 3–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
 ([LOGGING.md](LOGGING.md) §3.4). Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -57,8 +57,9 @@ These facts constrain the plan (checked in this checkout, 2026-11-02):
 
 | Target | Contents |
 |---|---|
-| `usdcc_scripting` (new, static, Qt-free) | `PythonRuntime` (interpreter start/stop, paths, GIL), `ScriptRunner` (run a file or a string, output, exceptions, undo chunk), the embedded modules (§4) |
-| `usdcc_usd_bindings` (new, static) | The `usdcc.usd` binding code as `bindUsd(py::module_&)`, shared by `usd.pyd` and the embedded module |
+| `usdcc_scripting` (new, static, Qt-free) | `PythonRuntime` (interpreter start/stop, paths, GIL), the embedded `_usdcc_log` (§5) |
+| `usdcc_scripting_app` (new, static, Qt) | The embedded `_usdcc_app` module (§4.1), `AppContextScope`, `ScriptRunner` (one undo step per run, §4.2) |
+| `usdcc_usd_bindings` (new, static) | The `StageManager` binding code, `bindStageManager(py::module_&)`, shared by `_usd.pyd` and `_usdcc_app` |
 | `usdcc_scripting_ui` (new, static, Qt) | `ScriptingSidePanel`, `PythonHighlighter`, `CodeEditor` (line numbers, indentation) |
 | `src/python/usdcc/` | Pure-Python parts: `log.py` (logging bridge), `app.py` helpers, `usd.py` conveniences (`current_stage()`, `edit()`) |
 
@@ -115,21 +116,31 @@ short. The panel shows a busy cursor and "Running…". There's no Stop in M7 (§
 
 ### 4.1 Modules inside the app
 
-The exe registers embedded modules (`PYBIND11_EMBEDDED_MODULE`) and puts them in `sys.modules`
-under their package names **before any user code runs**. `import usdcc.usd` then finds the
-app's own module rather than `usd.pyd` on `sys.path`.
+The modules users import are **pure Python** (`src/python/usdcc`); each picks its native part
+when imported:
+
+- **Inside the app**: the embedded module `_usdcc_app`, compiled into the exe, working on the
+  app's own objects (`AppContextScope`).
+- **In a plain python**: `usdcc/_usd.pyd`, with a `StageManager` of its own. It was `usd.pyd`
+  before; renamed so it can't shadow `usd.py`.
+
+No `sys.modules` patching is needed, and `import usdcc.usd` works the same in both places.
 
 | Module | Contents |
 |---|---|
-| `usdcc.usd` | `StageManager`, `UndoManager` (new binding), the existing cache-id calls; plus `current_stage()` → `pxr.Usd.Stage`, `stages()`, `open_stage(path)` → `Usd.Stage`, `stage_id(stage)`, selection (`selected_paths()`, `select(paths)`) |
-| `usdcc.app` | The running app's objects: `stage_manager`, `undo_manager`, `tool_set`, `version`; `is_embedded()` |
-| `usdcc.core` | `log(level, category, message)`, `LogLevel`; the hub's levels (`set_level`) |
-| `usdcc.tools` | `ToolKind`, `active_tool()`, `set_active_tool(kind)`, tool options by id |
+| `usdcc.usd` | `StageManager` (and `UndoManager` in the app); `stages()`, `current_stage()`, `set_current_stage()`, `open_stage(path)`, `close_stage()`, all as `pxr.Usd.Stage`; `stage_id(stage)`; `selected_paths()`, `select(prims/paths)`; `edit(description)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`, `undo_text()`; `EMBEDDED` |
+| `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()` |
+| `usdcc.core` | `log(level, category, message)`, the level constants, `set_levels(spec)` (USDCC_LOG's format) |
+| `usdcc.tools` | `tool_names()`, `active_tool()`, `set_active_tool(name)` |
 | `usdcc.log` | The logging bridge (§5) |
 
-Outside the app (a plain `python` with `build/python` on its path), `usdcc.usd` is still
-`usd.pyd` with its own `StageManager`, and `usdcc.app` reports `is_embedded() == False`. Both
-build from the same `bindUsd()` code, so the API matches.
+- **Stage functions** default to the current stage and raise `RuntimeError` outside the app.
+- **Prims, `Sdf.Path`s or strings** are all accepted where paths are.
+- **`open_stage()` behaves like File > Open Stage**: a file that's already open is opened again
+  as a second stage (`UsdStage::Open` never reuses one). To work on an open stage, use
+  `stages()`/`current_stage()`.
+- **In a plain python**, `usdcc.usd` imports `_usd.pyd` inside OpenUSD's own
+  `Tf.WindowsImportWrapper`, which adds the folders on PATH as DLL folders.
 
 Stages stay cache ids at the binding level; the `Usd.Stage` helpers live in `src/python/usdcc`
 and use `UsdUtils.StageCache`. A script works with `pxr` directly:
@@ -141,7 +152,7 @@ import usdcc.usd
 stage = usdcc.usd.open_stage("C:/shots/a.usda")        # opens it in the app, like File > Open
 cube = stage.DefinePrim("/World/Cube", "Cube")
 cube.GetAttribute("size").Set(2.0)
-usdcc.usd.select([cube.GetPath()])                      # the Outliner and Viewport follow
+usdcc.usd.select([cube])                                # the Outliner and Viewport follow
 ```
 
 ### 4.2 Undo
@@ -251,7 +262,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 | Phase | Content | Verification |
 |---|---|---|
 | **1. One Python, embedded** *(done)* | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
-| **2. App API and undo** | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
+| **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
 | **3. Scripting panel** | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
 | **5. PySide integration** *(needs PySide)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
@@ -335,3 +346,41 @@ Found for later:
   python" check will make `usdcc/__init__.py` add them.
 - **`usdcc.ui` still uses the stale Python 3.11.** Its CMake keeps the PATH lookup (cached at
   3.11) for PySide; phase 5 moves it to `USDCC_PYTHON_*`, together with `build-pyside.ps1`.
+
+### Phase 2
+
+- **Shared binding code** ([bind_usd.h](../src/cpp/usd/python/include/usdcc/usd/python/bind_usd.h),
+  `usdcc_usd_bindings`): `StageManager`, now with selection (paths as strings).
+  `open_stage` releases the GIL while it loads, so OpenUSD's own threads can take it. The
+  standalone module is `usdcc/_usd.pyd`, and a stale `usd.pyd` is deleted at configure.
+- **`UndoManager::beginGlobalEdit/endGlobalEdit`**: a session on every open stage and on each
+  stage opened during the edit. Stages closed meanwhile are skipped, and the end can rename
+  the step (for "(failed)").
+- **`_usdcc_app`** ([app_module.h](../src/cpp/scripting/include/usdcc/scripting/app_module.h)):
+  the app's `StageManager`, `UndoManager` (begin/end/cancel edits, undo/redo, texts, count)
+  and tools, through `AppContextScope`. After that scope ends, calls raise `RuntimeError`
+  instead of touching freed objects.
+- **[ScriptRunner](../src/cpp/scripting/include/usdcc/scripting/script_runner.h)**: one global
+  edit per run, named "Run <name>" or "Run <name> (failed)". Debug > Run Python File uses it.
+- **Python front modules**: `usd.py`, `app.py`, `core.py`, `tools.py` (§4.1).
+- **Tests** ([python_app_test.cpp](../tests/python_app_test.cpp); `usdcc_python_tests` now sets
+  up an app context like `main()`'s):
+  - **The exit criterion**: a script opens a stage, defines and sizes a cube and selects it.
+    That is one step "Run exit_criterion.py"; a UI-style `apply()` goes on top; two undos from
+    Python revert the UI edit and then the whole run; two redos bring both back.
+  - **Several stages**: a run touching an open stage and one it opens gives one step on each,
+    none on an untouched stage, and no stage opened twice.
+  - **A failing run** leaves one "(failed)" step, and one Undo reverts it.
+  - **`edit()`** makes one named step outside a run and nests into the run's step inside one.
+  - **The API**: `is_embedded`, `current_stage`/`stages`/`stage_id`, `select`/`selected_paths`
+    (bad paths raise), tools, `set_levels`.
+  - **Standalone**: `_usd.pyd` works in a plain Python 3.12 with its own `StageManager`, and
+    the app-only functions raise there.
+
+Not checked in the app this time: the Windows session was locked (screen capture failed), so
+Debug > Run Python File plus Edit > Undo on a script's change wasn't tried by hand. The tests
+drive the same `ScriptRunner`, `_usdcc_app` and `UndoManager` the app uses.
+
+Found along the way: opening a file that's already open makes a second stage on the same
+layers, from File > Open Stage as from `open_stage()`. Both stages then record undo steps for
+one change. Whether opening should return the open stage instead is a decision for later.
