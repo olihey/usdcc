@@ -21,9 +21,14 @@ endif()
 set(_shiboken6_generator_dir "${USDCC_PYSIDE_DIR}/shiboken6_generator")
 set(_shiboken6_dir "${USDCC_PYSIDE_DIR}/shiboken6")
 set(_pyside6_dir "${USDCC_PYSIDE_DIR}/PySide6")
-list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_generator_dir}/lib/cmake/Shiboken6Tools")
-list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_dir}/lib/cmake/Shiboken6")
-list(APPEND CMAKE_PREFIX_PATH "${_pyside6_dir}/lib/cmake/PySide6")
+# Set the package dirs outright rather than adding search hints: find_package()
+# prefers a <Package>_DIR already in the cache, and a build directory
+# configured before tools/build-pyside.ps1 existed has pip's packages there —
+# a PySide6 built against another Qt, and a shiboken6 whose bundled libclang
+# 20 can't parse external/libclang's version 19 headers.
+set(Shiboken6Tools_DIR "${_shiboken6_generator_dir}/lib/cmake/Shiboken6Tools" CACHE PATH "" FORCE)
+set(Shiboken6_DIR "${_shiboken6_dir}/lib/cmake/Shiboken6" CACHE PATH "" FORCE)
+set(PySide6_DIR "${_pyside6_dir}/lib/cmake/PySide6" CACHE PATH "" FORCE)
 string(REPLACE "." "" _usdcc_ui_python_version_nodot "${USDCC_PYTHON_VERSION}")
 
 find_package(Shiboken6Tools REQUIRED)
