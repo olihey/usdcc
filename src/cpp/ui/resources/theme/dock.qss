@@ -55,14 +55,25 @@ ads--CDockWidgetTab:hover {
     background: rgba(255, 255, 255, 5%);
 }
 
+/* The current tab is filled with the accent blue: solid in the dock area
+   that has focus, muted in the others, so the focused panel stands out
+   while every area still shows which tab is current. */
 ads--CDockWidgetTab[activeTab="true"] {
-    background: #1c1c1e;
-    border-color: transparent rgba(255, 255, 255, 6%) rgba(61, 139, 253, 40%) transparent;
+    background: rgba(61, 139, 253, 25%);
+    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+}
+
+ads--CDockWidgetTab[activeTab="true"]:hover {
+    background: rgba(61, 139, 253, 35%);
 }
 
 ads--CDockWidgetTab[focused="true"] {
-    background: #1c1c1e;
-    border-color: transparent rgba(255, 255, 255, 6%) #3d8bfd transparent;
+    background: #3d8bfd;
+    border-color: transparent #3d8bfd #3d8bfd transparent;
+}
+
+ads--CDockWidgetTab[focused="true"]:hover {
+    background: #5a9cfd;
 }
 
 ads--CDockWidgetTab QLabel {
@@ -111,9 +122,14 @@ ads--CDockWidgetTab[focused="true"] QLabel {
 }
 
 #dockAreaCloseButton,
-#tabCloseButton,
-ads--CDockWidgetTab[focused="true"] > #tabCloseButton {
+#tabCloseButton {
     qproperty-icon: url(:/usdcc/theme/close.png), url(:/usdcc/theme/close-disabled.png) disabled;
+    qproperty-iconSize: 16px;
+}
+
+/* White on the focused tab's solid blue, where the grey icon washes out. */
+ads--CDockWidgetTab[focused="true"] > #tabCloseButton {
+    qproperty-icon: url(:/usdcc/theme/close-white.png), url(:/usdcc/theme/close-disabled.png) disabled;
     qproperty-iconSize: 16px;
 }
 
