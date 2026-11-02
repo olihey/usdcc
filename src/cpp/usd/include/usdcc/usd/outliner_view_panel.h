@@ -10,6 +10,7 @@
 #include <set>
 #include <vector>
 
+class QToolButton;
 class QTreeView;
 
 namespace usdcc::usd {
@@ -23,7 +24,10 @@ class UndoManager;
 // checkbox), select, and reorder siblings (tab's context menu: Move
 // Up/Down) — see docs/PLAN.md milestone M4. Selection is written to
 // StageManager::setSelectedPaths() so other panels showing the same stage
-// (e.g. AttributesViewPanel) stay in sync.
+// (e.g. AttributesViewPanel) stay in sync. The selected prims' ancestors are
+// tinted, and with "Expand to Selection" (on by default, saved in the
+// settings) a selection made anywhere, e.g. by picking in the viewport,
+// expands the tree down to it and scrolls it into view.
 class OutlinerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
@@ -57,9 +61,13 @@ private:
     // doesn't collapse the tree.
     void saveViewState();
     void restoreViewState();
+    // Expands every ancestor of the selected prims and scrolls the first one
+    // into view.
+    void expandToSelection(const std::vector<PXR_NS::SdfPath>& paths);
 
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
+    QToolButton* m_expandToSelection;
     bool m_updatingSelection = false;
     std::shared_ptr<UndoManager> m_undoManager;
     bool m_refreshQueued = false;

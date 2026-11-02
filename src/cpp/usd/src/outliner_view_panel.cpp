@@ -1,6 +1,7 @@
 #include "usdcc/usd/outliner_view_panel.h"
 
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usd_prim_tree_model.h"
 #include "usdcc/usd/undo_manager.h"
@@ -17,8 +18,12 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenu>
+#include <QPainter>
 #include <QScrollBar>
+#include <QSettings>
+#include <QStyledItemDelegate>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -27,6 +32,33 @@
 #include <utility>
 
 namespace usdcc::usd {
+
+namespace {
+constexpr auto kExpandToSelectionKey = "Outliner/expandToSelection";
+constexpr int kItemRadius = 3;  // dark.qss, QTreeView::item border-radius
+
+// Paints the model's BackgroundRole (the selection-ancestor tint) itself: with
+// the stylesheet's QTreeView::item rule (padding, rounded corners) in effect,
+// the style draws the item panel from that rule and ignores the model's brush.
+class ItemTintDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        const QVariant tint = index.data(Qt::BackgroundRole);
+        if (tint.canConvert<QColor>() && !(option.state & QStyle::State_Selected)) {
+            const qreal radius = usdcc::ui::scaled::pixels(kItemRadius);
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(tint.value<QColor>());
+            painter->drawRoundedRect(QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
+            painter->restore();
+        }
+        QStyledItemDelegate::paint(painter, option, index);
+    }
+};
+}  // namespace
 
 OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
                                       std::shared_ptr<UndoManager> undoManager, const QString& title,
@@ -45,9 +77,18 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
 
     toolbarLayout->addWidget(stageCombo(), 1);
 
+    m_expandToSelection = new QToolButton(toolbar);
+    m_expandToSelection->setText(tr("Expand to Selection"));
+    m_expandToSelection->setToolTip(
+        tr("Expand the tree down to the selected prims whenever the selection changes, wherever it was made"));
+    m_expandToSelection->setCheckable(true);
+    m_expandToSelection->setChecked(usdcc::ui::appSettings().value(kExpandToSelectionKey, true).toBool());
+    toolbarLayout->addWidget(m_expandToSelection);
+
     m_model = new UsdPrimTreeModel(this);
     m_treeView = new QTreeView(container);
     m_treeView->setModel(m_model);
+    m_treeView->setItemDelegate(new ItemTintDelegate(m_treeView));
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
 
@@ -61,6 +102,14 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
     connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
     connect(m_model, &QAbstractItemModel::modelReset, this, &OutlinerViewPanel::restoreViewState);
+    connect(m_expandToSelection, &QToolButton::toggled, this, [this](bool on) {
+        QSettings settings = usdcc::ui::appSettings();
+        settings.setValue(kExpandToSelectionKey, on);
+        if (on) {
+            // this->: the constructor parameter `stageManager` shadows the accessor here.
+            expandToSelection(this->stageManager()->selectedPaths(currentStage()));
+        }
+    });
 
     m_selectionChangedConnection = stageManager->selectionChanged.connect(
         [this](StageRefPtr changedStage, std::vector<PXR_NS::SdfPath> paths) {
@@ -172,6 +221,29 @@ void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
     }
     m_treeView->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
     m_updatingSelection = false;
+    m_model->setSelectedPaths(paths);
+    if (m_expandToSelection->isChecked()) {
+        expandToSelection(paths);
+    }
+}
+
+void OutlinerViewPanel::expandToSelection(const std::vector<PXR_NS::SdfPath>& paths) {
+    QModelIndex first;
+    for (const PXR_NS::SdfPath& path : paths) {
+        const QModelIndex index = m_model->indexForPath(path);
+        if (!index.isValid()) {
+            continue;
+        }
+        for (QModelIndex parent = index.parent(); parent.isValid(); parent = parent.parent()) {
+            m_treeView->expand(parent);
+        }
+        if (!first.isValid()) {
+            first = index;
+        }
+    }
+    if (first.isValid()) {
+        m_treeView->scrollTo(first);  // EnsureVisible: no jump if it already shows
+    }
 }
 
 void OutlinerViewPanel::onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath) {

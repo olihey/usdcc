@@ -6,6 +6,7 @@
 #include <QAbstractItemModel>
 
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace usdcc::usd {
@@ -34,6 +35,12 @@ public:
     // structural edit (rename, reorder, add/remove prim) made outside this
     // model's own setData() (which already refreshes after renaming).
     void refresh();
+
+    // Tints the ancestors of these (selected) prims, so a selection deep in a
+    // collapsed or long tree can be traced from the top. Kept by path, so it
+    // survives refresh().
+    void setSelectedPaths(const std::vector<PXR_NS::SdfPath>& paths);
+    bool isSelectionAncestor(const PXR_NS::SdfPath& path) const { return m_selectionAncestors.count(path) > 0; }
 
     PXR_NS::SdfPath pathForIndex(const QModelIndex& index) const;
     QModelIndex indexForPath(const PXR_NS::SdfPath& path) const;
@@ -65,6 +72,7 @@ private:
 
     PXR_NS::UsdStageRefPtr m_stage;
     std::unique_ptr<Node> m_root;
+    std::set<PXR_NS::SdfPath> m_selectionAncestors;
 };
 
 }  // namespace usdcc::usd

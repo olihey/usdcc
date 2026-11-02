@@ -12,6 +12,12 @@
 
 namespace usdcc::usd {
 
+namespace {
+// Ancestors of the selection: the selection's own colour (dark.qss, QTreeView
+// selection-background-color: accent blue at 18%) at half the opacity.
+const QColor kAncestorBackground(61, 139, 253, 23);  // 9% of 255
+}  // namespace
+
 UsdPrimTreeModel::UsdPrimTreeModel(QObject* parent) : QAbstractItemModel(parent) {
     m_root = std::make_unique<Node>();
     m_root->path = PXR_NS::SdfPath::AbsoluteRootPath();
@@ -20,6 +26,29 @@ UsdPrimTreeModel::UsdPrimTreeModel(QObject* parent) : QAbstractItemModel(parent)
 void UsdPrimTreeModel::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     m_stage = stage;
     refresh();
+}
+
+void UsdPrimTreeModel::setSelectedPaths(const std::vector<PXR_NS::SdfPath>& paths) {
+    std::set<PXR_NS::SdfPath> ancestors;
+    for (const PXR_NS::SdfPath& path : paths) {
+        for (PXR_NS::SdfPath parent = path.GetParentPath();
+             !parent.IsEmpty() && parent != PXR_NS::SdfPath::AbsoluteRootPath(); parent = parent.GetParentPath()) {
+            ancestors.insert(parent);
+        }
+    }
+    if (ancestors == m_selectionAncestors) {
+        return;
+    }
+    // Repaint the rows that gain or lose the tint.
+    std::set<PXR_NS::SdfPath> changed = ancestors;
+    changed.insert(m_selectionAncestors.begin(), m_selectionAncestors.end());
+    m_selectionAncestors = std::move(ancestors);
+    for (const PXR_NS::SdfPath& path : changed) {
+        const QModelIndex index = indexForPath(path);
+        if (index.isValid()) {
+            Q_EMIT dataChanged(index, index, {Qt::BackgroundRole});
+        }
+    }
 }
 
 void UsdPrimTreeModel::refresh() {
@@ -134,6 +163,11 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         case Qt::ForegroundRole:
             if (!prim.IsActive()) {
                 return QColor(Qt::gray);
+            }
+            break;
+        case Qt::BackgroundRole:
+            if (isSelectionAncestor(node->path)) {
+                return kAncestorBackground;
             }
             break;
         case Qt::FontRole:
