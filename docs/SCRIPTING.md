@@ -1,6 +1,6 @@
 # Scripting — Plan
 
-*Status: phases 1–3 done (see §12); phases 4–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
+*Status: phases 1–4 done (see §12); phase 5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
 ([LOGGING.md](LOGGING.md) §3.4). Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -203,10 +203,15 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 ## 6. Startup scripts and the command line
 
 - Every `*.py` in `%LOCALAPPDATA%/usdcc/scripts/startup/` (`AppLocalDataLocation`) runs once
-  the window is up, in name order, each in its own namespace. A failing one is logged and the
-  rest still run. That folder's parent, `scripts/`, is on `sys.path` for shared modules.
-- `usdcc.exe --script file.py [stage]` runs a script after start-up (logged, not shown in the
-  panel). `--no-startup-scripts` skips the startup folder.
+  the window is up, in name order (ignoring case), each in its own namespace. A failing one is
+  logged and the rest still run. They get no undo step of their own (§4.2). That folder's
+  parent, `scripts/`, is at the end of `sys.path` for shared modules, so they can't shadow
+  `usdcc` or `pxr`. The app creates `startup/` if it's missing; ☰ > *Open Startup Scripts
+  Folder* in the Scripting panel opens it.
+- `usdcc.exe [--script file.py]... [--no-startup-scripts] [stage]`: each `--script` runs after
+  the startup scripts, in order, as one undo step like Debug > Run Python File. Its output is
+  in the log, not in the panel. `--no-startup-scripts` skips the startup folder (it's still
+  on `sys.path`). `--help` lists the options.
 - **M9** builds plugins on this: a Python plugin is a package with a manifest, loaded by the
   same runner.
 
@@ -270,7 +275,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 | **1. One Python, embedded** *(done)* | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
 | **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
 | **3. Scripting panel** *(done)* | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
-| **4. Startup scripts and CLI** | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
+| **4. Startup scripts and CLI** *(done)* | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
 | **5. PySide integration** *(needs PySide)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
 
 Phases 1 → 2 → 3 in order; 4 needs 2; 5 only needs 1, plus a PySide build.
@@ -418,3 +423,24 @@ one change. Whether opening should return the open stage instead is a decision f
 
 Not checked by hand: the Windows session was locked, so the panel hasn't been looked at in the
 running app. The app does start cleanly with it (no warnings or errors in the log).
+
+### Phase 4
+
+- **[runStartupScripts()](../src/cpp/scripting/include/usdcc/scripting/startup_scripts.h)** and
+  `userScriptsFolder()` in `usdcc_scripting_app`, as described in §6. A run logs how many
+  scripts it found, each script's result (from `PythonRuntime::runFile()`), and a warning
+  counting the ones that failed.
+- **`PythonRuntime::addToPath()`** appends a folder to `sys.path`.
+- **The command line** in `main()` now goes through `QCommandLineParser`: `--script <file>`
+  (repeatable), `--no-startup-scripts`, `--help`, and the stage as before. An unknown option
+  shows Qt's error box and exits. Extra positional arguments are logged and ignored. The
+  startup scripts and `--script`s run from a zero-length timer after `window.show()`, so the
+  window and the command-line stage exist.
+- **Tests** ([startup_scripts_test.cpp](../tests/startup_scripts_test.cpp)): three scripts run
+  in name order past a failing one, its exception and the others' output are in the log, with
+  a summary; a shared module next to `startup/` imports; the folder doesn't shadow `usdcc`;
+  nothing runs when skipped; a missing folder is created.
+- **Checked in the app**: with a working and a failing startup script, plus `--script` and a
+  stage, both startup scripts run (the failure logged with its traceback). The `--script`
+  sees the command-line stage as current, and its output is in the log. With
+  `--no-startup-scripts` the folder is skipped and `--script` still runs.

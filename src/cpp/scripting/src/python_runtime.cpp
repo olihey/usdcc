@@ -305,6 +305,18 @@ void PythonRuntime::resetSession() {
 #endif
 }
 
+void PythonRuntime::addToPath(const std::filesystem::path& folder) {
+#if USDCC_HAS_PYTHON
+    if (!m_impl->available) return;
+    py::gil_scoped_acquire gil;
+    py::list path = py::module_::import("sys").attr("path");
+    const py::str entry(toUtf8(folder));
+    if (!path.contains(entry)) path.append(entry);
+#else
+    (void)folder;
+#endif
+}
+
 bool PythonRuntime::runFile(const std::filesystem::path& file, Namespace scope) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {

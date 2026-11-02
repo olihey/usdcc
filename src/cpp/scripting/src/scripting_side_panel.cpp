@@ -4,6 +4,7 @@
 #include "usdcc/scripting/code_editor.h"
 #include "usdcc/scripting/python_highlighter.h"
 #include "usdcc/scripting/script_runner.h"
+#include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -12,6 +13,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QBoxLayout>
+#include <QDesktopServices>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
@@ -26,6 +29,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QTextCursor>
+#include <QUrl>
 
 #include <memory>
 #include <mutex>
@@ -363,6 +367,12 @@ void ScriptingSidePanel::populateMenu(QMenu* menu) {
     menu->addAction(m_keepVariables);
     menu->addAction(tr("Reset Variables"), this, [this]() { m_runtime.resetSession(); })->setEnabled(keepsVariables());
     menu->addAction(tr("Clear Output"), this, [this]() { clearOutput(); });
+    menu->addSeparator();
+    menu->addAction(tr("Open Startup Scripts Folder"), this, []() {
+        const QString folder = QString::fromStdU16String((userScriptsFolder() / "startup").u16string());
+        QDir().mkpath(folder);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    });
 }
 
 }  // namespace usdcc::scripting

@@ -69,6 +69,10 @@ public:
     bool runFile(const std::filesystem::path& file, Namespace scope = Namespace::Fresh);
     // Forgets the session namespace's names.
     void resetSession();
+    // Appends `folder` to sys.path, if it isn't there yet, so scripts can
+    // import modules from it. Goes after the usdcc and pxr packages, so a
+    // module there can't shadow them.
+    void addToPath(const std::filesystem::path& folder);
     // str() of a Python expression's value, or nothing if it raised (logged).
     std::optional<std::string> evaluate(const std::string& expression);
 

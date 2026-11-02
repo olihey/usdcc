@@ -12,12 +12,14 @@
 #include <DockManager.h>
 
 #include <QAction>
+#include <QCommandLineParser>
 #include <QFileDialog>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
 #include <QStandardPaths>
 #include <QSurfaceFormat>
+#include <QTimer>
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -30,6 +32,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/scripting/scripting_side_panel.h"
+#include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
@@ -111,6 +114,24 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
 
+    // usdcc [--script file.py]... [--no-startup-scripts] [stage]
+    // (docs/SCRIPTING.md §6). Qt's own options (-platform, ...) are already
+    // gone from the arguments here.
+    QCommandLineParser commandLine;
+    commandLine.setApplicationDescription(QObject::tr("usdcc, a USD editor"));
+    commandLine.addHelpOption();
+    const QCommandLineOption scriptOption(
+        QStringLiteral("script"), QObject::tr("Run <file> once the window is up, after the startup scripts. Repeatable."),
+        QObject::tr("file"));
+    const QCommandLineOption noStartupScriptsOption(QStringLiteral("no-startup-scripts"),
+                                                    QObject::tr("Don't run the scripts in the startup folder."));
+    commandLine.addOption(scriptOption);
+    commandLine.addOption(noStartupScriptsOption);
+    commandLine.addPositionalArgument(QStringLiteral("stage"), QObject::tr("A USD file to open."),
+                                      QStringLiteral("[stage]"));
+    // Shows a message box and exits for --help and unknown options.
+    commandLine.process(app);
+
     // Needs the application object for its folder (AppLocalDataLocation).
     const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/logs";
     ScopedLogSink fileLog{usdcc::core::FileLogSink::openInDirectory(logDir.toStdU16String())};
@@ -187,10 +208,14 @@ int main(int argc, char** argv) {
     // The stage passed on the command line, if any. Without one (or if it
     // failed to open) the app starts with no stage: the panels below are
     // empty, with their Stage dropdowns disabled, until one is opened.
-    const QStringList args = app.arguments();
+    const QStringList positional = commandLine.positionalArguments();
     usdcc::usd::StageRefPtr initialStage;
-    if (args.size() > 1) {
-        initialStage = stageManager.openStage(args.at(1).toStdString());
+    if (!positional.isEmpty()) {
+        initialStage = stageManager.openStage(positional.front().toStdString());
+    }
+    if (positional.size() > 1) {
+        USDCC_LOG_WARNING("usdcc.app", "Only one stage can be opened from the command line; ignored {}",
+                          positional.mid(1).join(QStringLiteral(", ")).toStdString());
     }
 
     // The center dock area is established here (rather than by MainWindow)
@@ -358,6 +383,22 @@ int main(int argc, char** argv) {
     window.restoreLayout();
 
     window.show();
+
+    // Once the window is up (and with it the initial stage, if any): the
+    // startup scripts, then each --script, each as one undo step like Debug >
+    // Run Python File. Their output goes to the log.
+    const QStringList scripts = commandLine.values(scriptOption);
+    const bool runStartup = !commandLine.isSet(noStartupScriptsOption);
+    QTimer::singleShot(0, &window, [&python, &scriptRunner, scripts, runStartup]() {
+        usdcc::scripting::runStartupScripts(python, usdcc::scripting::userScriptsFolder(), runStartup);
+        for (const QString& script : scripts) {
+            if (!python.isAvailable()) {
+                USDCC_LOG_ERROR("usdcc.python", "Can't run {}: {}", script.toStdString(), python.unavailableReason());
+                continue;
+            }
+            scriptRunner.runFile(std::filesystem::path(script.toStdU16String()));
+        }
+    });
 
     return app.exec();
 }

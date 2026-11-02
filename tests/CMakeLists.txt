@@ -47,6 +47,7 @@ add_executable(usdcc_python_tests
     python_app_test.cpp
     python_runtime_test.cpp
     scripting_panel_test.cpp
+    startup_scripts_test.cpp
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
