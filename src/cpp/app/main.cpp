@@ -79,12 +79,13 @@ int main(int argc, char** argv) {
 
     // Panels created on demand get a "<type> - <stage>" title and a unique
     // objectName (see ViewPanelRegistry::open()); the three startup panels
-    // below keep their plain names, which saved layouts refer to.
+    // below keep their plain names, which saved layouts refer to. Viewports
+    // drop the stage from their title and are just "Viewport".
     panelTypes.add(QStringLiteral("viewport"), QObject::tr("Viewport"),
-                   [&stageManager, toolSet, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                   [&stageManager, toolSet, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& /*title*/,
                                                           QWidget* parent) -> usdcc::ui::ViewPanel* {
-                       return new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet, undoManager, title,
-                                                                parent);
+                       return new usdcc::usd::ViewportViewPanel(&stageManager, stage, toolSet, undoManager,
+                                                                QObject::tr("Viewport"), parent);
                    });
     panelTypes.add(QStringLiteral("outliner"), QObject::tr("Outliner"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
