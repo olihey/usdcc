@@ -11,8 +11,6 @@
 #include <memory>
 #include <vector>
 
-class QComboBox;
-
 namespace usdcc::usd {
 
 class StageManager;
@@ -20,8 +18,8 @@ class HydraViewportWindow;
 class UndoManager;
 
 // ViewPanel subclass that renders a USD stage via Hydra and lets the user
-// switch between loaded stages and available render delegates (see
-// docs/PLAN.md milestone M3). Actual navigation (orbit/pan/zoom), rendering,
+// switch between loaded stages and, from the options menu's Renderer
+// submenu, the available render delegates (see docs/PLAN.md milestone M3). Actual navigation (orbit/pan/zoom), rendering,
 // and tool/gizmo handling live in HydraViewportWindow; this class is the
 // ViewPanel/toolbar wrapper around it. Which editing tool is active, and its
 // options, are not per panel: they live in a ToolSet shared by every viewport
@@ -56,6 +54,8 @@ protected:
     // Adds a "Reset Camera" entry on top of ViewPanel's base "Duplicate" —
     // see ViewPanel::populateContextMenu() for the extension mechanism.
     void populateContextMenu(QMenu* menu) override;
+    // A Renderer submenu listing the render delegates, the current one checked.
+    void populateOptionsMenu(QMenu* menu) override;
 
     // Points the viewport at the new stage and restores its selection.
     void onStageChanged(const StageRefPtr& stage) override;
@@ -63,8 +63,6 @@ protected:
     bool adoptsOpenedStage() const override { return false; }
 
 private Q_SLOTS:
-    void refreshRendererCombo();
-    void onRendererComboChanged(int index);
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
 
@@ -73,7 +71,6 @@ private:
     void syncTarget();
 
     HydraViewportWindow* m_viewport;
-    QComboBox* m_rendererCombo;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     std::shared_ptr<UndoManager> m_undoManager;
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on

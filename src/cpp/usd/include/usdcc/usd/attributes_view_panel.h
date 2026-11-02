@@ -20,7 +20,6 @@ class QAction;
 class QLabel;
 class QLineEdit;
 class QScrollArea;
-class QToolButton;
 class QVBoxLayout;
 
 namespace usdcc::usd {
@@ -46,8 +45,9 @@ class TransformStackEditor;
 // category, each row a label plus the value type's own PropertyEditor.
 // Attribute edits go through AttributeBinding (one undo step per gesture);
 // relationships are shown read-only with a button to select their targets.
-// The toolbar has a search field and a Show menu (authored only, hidden
-// properties); section collapse states and the Show choices persist.
+// The toolbar has a search field; the options menu filters to authored
+// properties and shows hidden ones. Section collapse states and those two
+// choices persist.
 //
 // The panel follows the stage live (Stage::changed): value changes update the
 // rows in place, and only a change to the set of properties shown rebuilds them
@@ -63,6 +63,8 @@ public:
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
 protected:
+    // Authored Only and Hidden Properties.
+    void populateOptionsMenu(QMenu* menu) override;
     void onStageChanged(const StageRefPtr& stage) override;
 
 private Q_SLOTS:
@@ -112,7 +114,6 @@ private:
     std::shared_ptr<UndoManager> m_undoManager;
 
     QLineEdit* m_search;
-    QToolButton* m_showButton;
     QAction* m_authoredOnly;
     QAction* m_showHidden;
     QScrollArea* m_scroll;

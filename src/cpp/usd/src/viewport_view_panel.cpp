@@ -1,6 +1,5 @@
 #include "usdcc/usd/viewport_view_panel.h"
 
-#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -8,9 +7,8 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
-#include <QComboBox>
+#include <QActionGroup>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QMenu>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -36,12 +34,8 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
-    m_rendererCombo = new QComboBox(toolbar);
-    toolbarLayout->addWidget(stageCombo(), 1);
-    toolbarLayout->addWidget(new QLabel(tr("Renderer:"), toolbar));
-    toolbarLayout->addWidget(m_rendererCombo, 1);
+    addPanelControls(toolbarLayout);
 
     // Embedded via createWindowContainer() (QWindow, not QOpenGLWidget) —
     // see hydra_viewport_window.h for why.
@@ -54,9 +48,6 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 
     setContentWidget(container);
 
-    connect(m_rendererCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            &ViewportViewPanel::onRendererComboChanged);
-    connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::refreshRendererCombo);
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.
@@ -110,31 +101,6 @@ void ViewportViewPanel::syncTarget() {
                                                    : currentStage()->targetXformOpFor(selection.front()));
 }
 
-void ViewportViewPanel::refreshRendererCombo() {
-    m_rendererCombo->blockSignals(true);
-    m_rendererCombo->clear();
-
-    for (const auto& pluginId : m_viewport->rendererPlugins()) {
-        m_rendererCombo->addItem(m_viewport->rendererDisplayName(pluginId), QString::fromUtf8(pluginId.GetText()));
-    }
-
-    const QString current = QString::fromUtf8(m_viewport->currentRendererPlugin().GetText());
-    const int currentIndex = m_rendererCombo->findData(current);
-    if (currentIndex >= 0) {
-        m_rendererCombo->setCurrentIndex(currentIndex);
-    }
-
-    m_rendererCombo->blockSignals(false);
-}
-
-void ViewportViewPanel::onRendererComboChanged(int index) {
-    if (index < 0) {
-        return;
-    }
-    const QString pluginId = m_rendererCombo->itemData(index).toString();
-    m_viewport->setRendererPlugin(PXR_NS::TfToken(pluginId.toStdString()));
-}
-
 void ViewportViewPanel::onSelectionRequested(std::vector<PXR_NS::SdfPath> paths) {
     stageManager()->setSelectedPaths(currentStage(), std::move(paths));
 }
@@ -150,18 +116,16 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, m_undoManager, windowTitle(), parent);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
-    // has no GL context yet (it's created lazily on first expose), so its
-    // renderer combo isn't populated until rendererPluginsChanged() fires.
-    // Apply both once that happens rather than immediately.
+    // has no GL context yet (it's created lazily on first expose), so it has
+    // no renderers to pick from until rendererPluginsChanged() fires. Apply
+    // both once that happens rather than immediately.
     const PXR_NS::TfToken rendererPluginId = m_viewport->currentRendererPlugin();
     const HydraViewportWindow::CameraState cameraState = m_viewport->cameraState();
     connect(copy->m_viewport, &HydraViewportWindow::rendererPluginsChanged, copy,
             [copy, rendererPluginId, cameraState]() {
-                if (!rendererPluginId.IsEmpty()) {
-                    const int index = copy->m_rendererCombo->findData(QString::fromUtf8(rendererPluginId.GetText()));
-                    if (index >= 0) {
-                        copy->m_rendererCombo->setCurrentIndex(index);
-                    }
+                const std::vector<PXR_NS::TfToken> plugins = copy->m_viewport->rendererPlugins();
+                if (std::find(plugins.begin(), plugins.end(), rendererPluginId) != plugins.end()) {
+                    copy->m_viewport->setRendererPlugin(rendererPluginId);
                 }
                 copy->m_viewport->setCameraState(cameraState);
             });
@@ -172,6 +136,24 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
 void ViewportViewPanel::populateContextMenu(QMenu* menu) {
     usdcc::ui::ViewPanel::populateContextMenu(menu);
     menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
+}
+
+void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
+    QMenu* renderers = menu->addMenu(tr("Renderer"));
+    // Empty until the viewport has been shown once: its GL context, and with
+    // it the Hydra engine that lists the plugins, is created on first expose.
+    const std::vector<PXR_NS::TfToken> plugins = m_viewport->rendererPlugins();
+    renderers->setEnabled(!plugins.empty());
+
+    auto* group = new QActionGroup(renderers);  // exclusive: one renderer checked
+    const PXR_NS::TfToken current = m_viewport->currentRendererPlugin();
+    for (const PXR_NS::TfToken& pluginId : plugins) {
+        QAction* action = renderers->addAction(m_viewport->rendererDisplayName(pluginId));
+        action->setCheckable(true);
+        action->setChecked(pluginId == current);
+        group->addAction(action);
+        connect(action, &QAction::triggered, this, [this, pluginId]() { m_viewport->setRendererPlugin(pluginId); });
+    }
 }
 
 }  // namespace usdcc::usd

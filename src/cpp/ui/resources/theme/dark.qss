@@ -571,6 +571,11 @@ QWidget#panelToolbar {
     border-bottom: 1px solid rgba(255, 255, 255, 6%);
 }
 
+/* ViewPanel's options button: an icon-only square, not a text button. */
+QToolButton#panelMenuButton {
+    padding: 0;
+}
+
 /* ---- Attribute editor / property widgets ------------------------------
    (docs/ATTRIBUTE_EDITOR.md §4.2). The number fields and color chips are
    custom-painted with the same tokens (see properties/property_style.h). */

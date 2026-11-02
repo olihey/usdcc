@@ -13,7 +13,7 @@
 #include <pxr/usd/usd/primFlags.h>
 #include <pxr/usd/usd/stage.h>
 
-#include <QComboBox>
+#include <QAction>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QLabel>
@@ -23,7 +23,6 @@
 #include <QSettings>
 #include <QStyledItemDelegate>
 #include <QTimer>
-#include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -73,17 +72,14 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
-    toolbarLayout->addWidget(stageCombo(), 1);
+    addPanelControls(toolbarLayout);
 
-    m_expandToSelection = new QToolButton(toolbar);
-    m_expandToSelection->setText(tr("Expand to Selection"));
+    m_expandToSelection = new QAction(tr("Expand to Selection"), this);
     m_expandToSelection->setToolTip(
         tr("Expand the tree down to the selected prims whenever the selection changes, wherever it was made"));
     m_expandToSelection->setCheckable(true);
     m_expandToSelection->setChecked(usdcc::ui::appSettings().value(kExpandToSelectionKey, true).toBool());
-    toolbarLayout->addWidget(m_expandToSelection);
 
     m_model = new UsdPrimTreeModel(this);
     m_treeView = new QTreeView(container);
@@ -102,7 +98,7 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
     connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
     connect(m_model, &QAbstractItemModel::modelReset, this, &OutlinerViewPanel::restoreViewState);
-    connect(m_expandToSelection, &QToolButton::toggled, this, [this](bool on) {
+    connect(m_expandToSelection, &QAction::toggled, this, [this](bool on) {
         QSettings settings = usdcc::ui::appSettings();
         settings.setValue(kExpandToSelectionKey, on);
         if (on) {
@@ -129,6 +125,11 @@ void OutlinerViewPanel::populateContextMenu(QMenu* menu) {
     usdcc::ui::ViewPanel::populateContextMenu(menu);
     menu->addAction(tr("Move Up"), this, [this]() { moveSelectedPrim(-1); });
     menu->addAction(tr("Move Down"), this, [this]() { moveSelectedPrim(1); });
+}
+
+void OutlinerViewPanel::populateOptionsMenu(QMenu* menu) {
+    menu->setToolTipsVisible(true);
+    menu->addAction(m_expandToSelection);
 }
 
 void OutlinerViewPanel::onStageChanged(const StageRefPtr& stage) {

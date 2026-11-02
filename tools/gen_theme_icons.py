@@ -28,6 +28,8 @@ ICONS = {
     "close-disabled": (1.4, DIM, [[(5, 5), (11, 11)], [(11, 5), (5, 11)]]),
     # On the focused dock tab's accent-blue fill, where LIGHT washes out.
     "close-white": (1.4, WHITE, [[(5, 5), (11, 11)], [(11, 5), (5, 11)]]),
+    # ViewPanel's options menu button, left of the stage dropdown.
+    "menu": (1.4, LIGHT, [[(3.5, 4.5), (12.5, 4.5)], [(3.5, 8), (12.5, 8)], [(3.5, 11.5), (12.5, 11.5)]]),
     # Custom title-bar caption buttons (MainWindow's QWindowKit title bar).
     "win-minimize": (1.0, LIGHT, [[(3.5, 8), (12.5, 8)]]),
     "win-maximize": (1.0, LIGHT, [[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5), (3.5, 3.5)]]),

@@ -117,30 +117,23 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
-    usdcc::ui::scaled::margins(toolbarLayout, 10, 4, 10, 4);
 
     m_search = new QLineEdit(toolbar);
     m_search->setPlaceholderText(tr("Search attributes"));
     m_search->setClearButtonEnabled(true);
 
-    m_showButton = new QToolButton(toolbar);
-    m_showButton->setText(tr("Show"));
-    m_showButton->setPopupMode(QToolButton::InstantPopup);
-    auto* showMenu = new QMenu(m_showButton);
-    m_authoredOnly = showMenu->addAction(tr("Authored Only"));
+    m_authoredOnly = new QAction(tr("Authored Only"), this);
     m_authoredOnly->setCheckable(true);
-    m_showHidden = showMenu->addAction(tr("Hidden Properties"));
+    m_showHidden = new QAction(tr("Hidden Properties"), this);
     m_showHidden->setCheckable(true);
-    m_showButton->setMenu(showMenu);
     {
         QSettings settings = usdcc::ui::appSettings();
         m_authoredOnly->setChecked(settings.value(kAuthoredOnlyKey, false).toBool());
         m_showHidden->setChecked(settings.value(kShowHiddenKey, false).toBool());
     }
 
-    toolbarLayout->addWidget(stageCombo(), 1);
+    addPanelControls(toolbarLayout);
     toolbarLayout->addWidget(m_search, 1);
-    toolbarLayout->addWidget(m_showButton);
 
     m_scroll = new QScrollArea(container);
     m_scroll->setObjectName(QStringLiteral("attributeScroll"));
@@ -173,6 +166,11 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
 
 usdcc::ui::ViewPanel* AttributesViewPanel::duplicate(QWidget* parent) const {
     return new AttributesViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
+}
+
+void AttributesViewPanel::populateOptionsMenu(QMenu* menu) {
+    menu->addAction(m_authoredOnly);
+    menu->addAction(m_showHidden);
 }
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {

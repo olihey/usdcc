@@ -12,6 +12,8 @@
         <file alias="close-disabled@2x.png">theme/close-disabled@2x.png</file>
         <file alias="close-white.png">theme/close-white.png</file>
         <file alias="close-white@2x.png">theme/close-white@2x.png</file>
+        <file alias="menu.png">theme/menu.png</file>
+        <file alias="menu@2x.png">theme/menu@2x.png</file>
         <file alias="win-minimize.png">theme/win-minimize.png</file>
         <file alias="win-minimize@2x.png">theme/win-minimize@2x.png</file>
         <file alias="win-maximize.png">theme/win-maximize.png</file>

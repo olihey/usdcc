@@ -578,7 +578,8 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
       targets. The material binding's Select is the planned "select material" button.
   - **Search:** filters by label or name. While searching, sections are force-expanded
     and the Prim header hides.
-  - **Show menu:** Authored Only and Hidden Properties, both persisted.
+  - **Options menu** (the panel's ☰ button, left of the stage dropdown): Authored Only
+    and Hidden Properties, both persisted.
   - **Collapsed sections** are remembered per category key. A new
     `usdcc::ui::appSettings()` gives panels the app's INI settings file (it was private
     to `MainWindow`).

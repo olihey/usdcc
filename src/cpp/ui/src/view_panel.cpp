@@ -1,5 +1,6 @@
 #include "usdcc/ui/view_panel.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
 
@@ -10,10 +11,13 @@
 #include <DockWidgetTab.h>
 #include <QtCore/qcompilerdetection.h>
 
+#include <QBoxLayout>
 #include <QComboBox>
 #include <QContextMenuEvent>
+#include <QIcon>
 #include <QMenu>
 #include <QSignalBlocker>
+#include <QToolButton>
 
 #include <utility>
 
@@ -21,6 +25,23 @@ QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
 
 namespace usdcc::ui {
+
+namespace {
+// A square button: as tall as the toolbar row (the stage dropdown), and as
+// wide as it is tall, at any UI scale.
+class SquareToolButton : public QToolButton {
+public:
+    SquareToolButton() { setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred); }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QToolButton::resizeEvent(event);
+        if (width() != height()) {
+            setFixedWidth(height());
+        }
+    }
+};
+}  // namespace
 
 ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRefPtr stage, const QString& title,
                       QWidget* parent)
@@ -34,6 +55,13 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
     // tabWidget() is already valid here: CDockWidget's constructor creates
     // it before returning.
     tabWidget()->installEventFilter(this);
+
+    m_optionsButton = new SquareToolButton();
+    m_optionsButton->setObjectName(QStringLiteral("panelMenuButton"));  // styled by theme/dark.qss
+    m_optionsButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/menu.png")));
+    usdcc::ui::scaled::iconSize(m_optionsButton, 16, 16);
+    m_optionsButton->setToolTip(tr("Panel options"));
+    connect(m_optionsButton, &QToolButton::clicked, this, &ViewPanel::showOptionsMenu);
 
     m_stageCombo = new QComboBox();
     m_stageCombo->setPlaceholderText(tr("No stage"));  // shown while the panel has none
@@ -72,6 +100,24 @@ void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
     onStageChanged(m_stage);
 }
 
+void ViewPanel::addPanelControls(QBoxLayout* toolbarLayout) {
+    // The same small margin on every side, so the options button sits in the
+    // toolbar's corner without extra room around it.
+    usdcc::ui::scaled::margins(toolbarLayout, 4, 4, 4, 4);
+    toolbarLayout->addWidget(m_optionsButton);
+    toolbarLayout->addWidget(m_stageCombo, 1);
+}
+
+void ViewPanel::showOptionsMenu() {
+    // Built per opening and destroyed afterwards, so submenus and action
+    // groups a subclass adds don't pile up.
+    QMenu menu(this);
+    populateOptionsMenu(&menu);
+    m_optionsButton->setDown(true);
+    menu.exec(m_optionsButton->mapToGlobal(QPoint(0, m_optionsButton->height())));
+    m_optionsButton->setDown(false);
+}
+
 void ViewPanel::refreshStageCombo() {
     const QSignalBlocker blocker(m_stageCombo);
     m_stageCombo->clear();
@@ -102,10 +148,6 @@ void ViewPanel::onStageComboChanged(int index) {
 void ViewPanel::setContentWidget(QWidget* widget) { setWidget(widget); }
 
 QWidget* ViewPanel::contentWidget() const { return widget(); }
-
-ViewPanel* ViewPanel::duplicate(QWidget* parent) const {
-    return new ViewPanel(m_stageManager, m_stage, windowTitle(), parent);
-}
 
 void ViewPanel::populateContextMenu(QMenu* menu) {
     menu->addSeparator();

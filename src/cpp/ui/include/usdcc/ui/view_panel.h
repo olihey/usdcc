@@ -5,8 +5,10 @@
 
 #include <DockWidget.h>
 
+class QBoxLayout;
 class QComboBox;
 class QMenu;
+class QToolButton;
 
 namespace usdcc::usd {
 class StageManager;
@@ -27,6 +29,10 @@ namespace usdcc::ui {
 // be left without one when its stage is closed. A panel with no stage shows
 // empty content, adopts the next stage that is opened, and keeps its dropdown
 // disabled while no stage is open at all.
+//
+// Left of the dropdown sits an options button (three horizontal lines) whose
+// menu each panel type fills with its own view options — populateOptionsMenu(),
+// which every subclass implements; ViewPanel itself is therefore abstract.
 //
 // Uses ADS's deprecated (title, parent) CDockWidget constructor rather than
 // the (manager, title, parent) one: the manager association still happens
@@ -62,17 +68,13 @@ public:
     void setContentWidget(QWidget* widget);
     QWidget* contentWidget() const;
 
-    // Creates a copy of this panel, showing the same stage. The base
-    // implementation just constructs a plain ViewPanel with the same title
-    // and stage — it has no way to generically duplicate an arbitrary
-    // content widget, and no way to invoke a subclass's constructor (which
-    // typically needs extra arguments). Subclasses that carry their own
-    // state should override this: construct their own type (passing
-    // currentStage(), not stageManager()->currentStage() — a sibling panel
-    // may be showing a different stage than whatever is globally current),
-    // then copy whatever values make the duplicate meaningfully match the
-    // original (e.g. the camera position, selection).
-    virtual ViewPanel* duplicate(QWidget* parent = nullptr) const;
+    // Creates a copy of this panel, showing the same stage. Subclasses
+    // construct their own type (passing currentStage(), not
+    // stageManager()->currentStage() — a sibling panel may be showing a
+    // different stage than whatever is globally current), then copy whatever
+    // values make the duplicate meaningfully match the original (e.g. the
+    // camera position, selection).
+    virtual ViewPanel* duplicate(QWidget* parent = nullptr) const = 0;
 
 protected:
     // Extends the context menu shown when right-clicking this panel's tab —
@@ -84,6 +86,10 @@ protected:
     // then add their own — see ViewportViewPanel::populateContextMenu() for
     // an example.
     virtual void populateContextMenu(QMenu* menu);
+
+    // Fills the options button's menu, built afresh each time it opens so it
+    // reflects the current state (e.g. the available renderers).
+    virtual void populateOptionsMenu(QMenu* menu) = 0;
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -102,9 +108,12 @@ protected:
     // a new stage (viewports, see main.cpp) returns false.
     virtual bool adoptsOpenedStage() const { return true; }
 
-    // The "Stage:" combo — subclasses insert this into their own toolbar
-    // layout (QLayout::addWidget() reparents it automatically, so being
-    // parent-less here at construction is fine).
+    // Adds the options button and the stage dropdown, in that order, to a
+    // subclass's toolbar layout, and sets the layout's margins (the same for
+    // every panel); call it first so they lead the toolbar.
+    // (addWidget() reparents both, so being parent-less until then is fine.)
+    void addPanelControls(QBoxLayout* toolbarLayout);
+
     QComboBox* stageCombo() const { return m_stageCombo; }
 
     // Repopulates stageCombo() from stageManager()->stages(), restores its
@@ -117,10 +126,12 @@ protected:
 
 private Q_SLOTS:
     void onStageComboChanged(int index);
+    void showOptionsMenu();
 
 private:
     usdcc::usd::StageManager* m_stageManager;
     usdcc::usd::StageRefPtr m_stage;
+    QToolButton* m_optionsButton;
     QComboBox* m_stageCombo;
 
     // Kept alive for as long as this panel should keep receiving

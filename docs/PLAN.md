@@ -816,6 +816,14 @@ things that will bite later if not addressed early:
     replacement and unique names (`view_panel_registry_test`); the menu, Outliner and the submenus
     for two stages checked in the app.
 
+35. **Panel options menu.** Every `ViewPanel` toolbar starts with an options button (three
+    horizontal lines, `theme/menu.png`) left of the stage dropdown; `addPanelControls()` adds
+    both. Its menu is built each time it opens by the pure virtual `populateOptionsMenu()`, so
+    `ViewPanel` is abstract (`duplicate()` is pure virtual too). Viewport: a Renderer submenu
+    replaces the "Renderer:" dropdown (disabled until the viewport has been shown and its Hydra
+    engine exists). Outliner: Expand to Selection, formerly a toolbar toggle. Attributes: Authored
+    Only and Hidden Properties, formerly the Show button.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
