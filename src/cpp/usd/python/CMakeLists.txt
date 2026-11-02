@@ -2,57 +2,17 @@
 #
 # Deliberately does NOT use the top-level pybind11_add_module()/pybind11
 # target: those are tied to whichever Python find_package(pybind11) resolved
-# at the top level, which is vcpkg's bundled python3 (see
-# src/cpp/ui/python/CMakeLists.txt for why that happens and why it's wrong
-# here too) — this module must load into the SAME Python that OpenUSD's own
-# pxr_boost::python bindings were built against, i.e. whatever system
-# interpreter USD_INSTALL was built with. Mirrors usdcc.ui's independent,
-# PATH-only interpreter lookup for the same reason.
-find_program(
-    USDCC_USD_BINDINGS_PYTHON
-    NAMES python3 python
-    PATHS ENV PATH
-    NO_DEFAULT_PATH)
-
-if(NOT USDCC_USD_BINDINGS_PYTHON)
-    message(STATUS "usdcc.usd Python bindings: no python interpreter found on PATH; skipping.")
+# at the top level, which is vcpkg's bundled python3 — this module must load
+# into the SAME Python that OpenUSD's own pxr_boost::python bindings were
+# built against: USDCC_PYTHON_* (cmake/modules/UsdccPython.cmake). An earlier
+# version found "the first python on PATH" instead, and so could end up built
+# for a different Python than pxr (docs/SCRIPTING.md §1).
+if(NOT USDCC_PYTHON_FOUND)
+    message(STATUS "usdcc.usd Python bindings: OpenUSD's Python not found; skipping.")
     return()
 endif()
-
-execute_process(
-    COMMAND
-        ${USDCC_USD_BINDINGS_PYTHON} -c
-        "import sysconfig
-print(sysconfig.get_path('include'))
-print(sysconfig.get_config_var('LIBDIR') or '')
-print(sysconfig.get_config_var('LDLIBRARY') or sysconfig.get_config_var('LIBRARY') or '')
-print(sysconfig.get_config_var('VERSION') or '')"
-    OUTPUT_VARIABLE _usdcc_usd_python_probe
-    RESULT_VARIABLE _usdcc_usd_python_probe_result
-    ERROR_QUIET)
-
-if(NOT _usdcc_usd_python_probe_result EQUAL 0)
-    message(STATUS "usdcc.usd Python bindings: could not query ${USDCC_USD_BINDINGS_PYTHON}; skipping.")
-    return()
-endif()
-
-string(STRIP "${_usdcc_usd_python_probe}" _usdcc_usd_python_probe)
-string(REPLACE "\n" ";" _usdcc_usd_python_probe "${_usdcc_usd_python_probe}")
-list(GET _usdcc_usd_python_probe 0 _usdcc_usd_python_include_dir)
-list(GET _usdcc_usd_python_probe 3 _usdcc_usd_python_version)
-
-# sysconfig doesn't report the .lib import library location on Windows
-# (LIBDIR/LDLIBRARY are POSIX-oriented); it lives at <prefix>/libs/pythonXY.lib.
-get_filename_component(_usdcc_usd_python_prefix "${_usdcc_usd_python_include_dir}" DIRECTORY)
-string(REPLACE "." "" _usdcc_usd_python_version_nodot "${_usdcc_usd_python_version}")
-set(_usdcc_usd_python_library
-    "${_usdcc_usd_python_prefix}/libs/python${_usdcc_usd_python_version_nodot}.lib")
-
-if(NOT EXISTS "${_usdcc_usd_python_library}")
-    message(STATUS "usdcc.usd Python bindings: expected import library not found at "
-                    "${_usdcc_usd_python_library}; skipping.")
-    return()
-endif()
+set(_usdcc_usd_python_include_dir "${USDCC_PYTHON_INCLUDE_DIR}")
+set(_usdcc_usd_python_library "${USDCC_PYTHON_LIBRARY}")
 
 find_package(pybind11 REQUIRED)
 
@@ -85,10 +45,6 @@ foreach(_config ${CMAKE_CONFIGURATION_TYPES})
                    RUNTIME_OUTPUT_DIRECTORY_${_config_upper} "${_python_package_dir}")
 endforeach()
 
-# Shared across every usdcc.* submodule — see that file for why.
-add_custom_command(
-    TARGET usdcc_usd_python
-    POST_BUILD
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/src/python/usdcc/__init__.py" "${_python_package_dir}/__init__.py")
+# The package's pure-Python files (__init__.py, ...) — see the top-level
+# CMakeLists.txt.
+add_dependencies(usdcc_usd_python usdcc_python_package)

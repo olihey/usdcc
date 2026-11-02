@@ -1,4 +1,4 @@
-# Two test executables on a tiny in-repo harness (test_harness.h/.cpp) rather
+# Three test executables on a tiny in-repo harness (test_harness.h/.cpp) rather
 # than GoogleTest, so they need no extra dependency. Run them through CTest
 # (`ctest -C RelWithDebInfo`) or directly, optionally with a name filter as the
 # first argument.
@@ -37,13 +37,26 @@ add_executable(usdcc_ui_tests
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
 
-foreach(_usdcc_test usdcc_tests usdcc_ui_tests)
+#   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
+#                    executable because Python can only be started once per
+#                    process; python_test_main.cpp starts it for every test.
+add_executable(usdcc_python_tests
+    test_harness.h
+    test_harness.cpp
+    python_test_main.cpp
+    python_runtime_test.cpp
+)
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting)
+
+foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     # Same reason as the app (see src/cpp/app/CMakeLists.txt): USD's headers ask
     # for the release Python import library in every configuration.
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
         target_link_libraries(${_usdcc_test} PRIVATE "${Python3_LIBRARY}")
     endif()
     usdcc_deploy_core_library(${_usdcc_test})
+    # OpenUSD's Python DLL rather than vcpkg's (see UsdccPython.cmake).
+    usdcc_deploy_python(${_usdcc_test})
     add_test(NAME ${_usdcc_test} COMMAND ${_usdcc_test})
 endforeach()
 
@@ -66,10 +79,10 @@ if(WIN32)
         list(APPEND _usdcc_ui_test_env "PATH=path_list_prepend:${_usdcc_vcpkg_dir}/bin"
              "QT_QPA_PLATFORM_PLUGIN_PATH=set:${_usdcc_vcpkg_dir}/Qt6/plugins/platforms")
     endif()
-    set_tests_properties(usdcc_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
+    set_tests_properties(usdcc_tests usdcc_python_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
     set_tests_properties(usdcc_ui_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_ui_test_env}")
     set_target_properties(
-        usdcc_tests usdcc_ui_tests
+        usdcc_tests usdcc_ui_tests usdcc_python_tests
         PROPERTIES
             VS_DEBUGGER_ENVIRONMENT
             "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")

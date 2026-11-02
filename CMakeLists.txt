@@ -103,6 +103,20 @@ find_package(pybind11 REQUIRED)
 find_package(OpenGL)
 find_package(USD REQUIRED)
 message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
+include(UsdccPython)
+
+# The usdcc Python package lives in build/python/usdcc: the compiled modules
+# (usd.pyd, ...) are built there, and this copies the pure-Python files from
+# src/python/usdcc next to them. The embedded interpreter puts build/python on
+# sys.path (docs/SCRIPTING.md §3.1).
+set(USDCC_PYTHON_PACKAGE_ROOT "${CMAKE_BINARY_DIR}/python")
+file(GLOB _usdcc_python_sources CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/python/usdcc/*.py")
+add_custom_target(
+    usdcc_python_package ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_usdcc_python_sources} "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc"
+    SOURCES ${_usdcc_python_sources}
+    VERBATIM)
 
 # Qt's `emit`/`signals`/`slots` keyword macros collide with OpenUSD's own TBB
 # headers (oneapi/tbb/profiling.h declares `event::emit()`), which every Qt
@@ -115,6 +129,7 @@ add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
+add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
 
 option(USDCC_BUILD_TESTS "Build the usdcc_tests executable and register it with CTest" ON)

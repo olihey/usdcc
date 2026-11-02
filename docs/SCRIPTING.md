@@ -1,6 +1,6 @@
 # Scripting — Plan
 
-*Status: planned, not started. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
+*Status: phase 1 done (see §12); phases 2–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
 ([LOGGING.md](LOGGING.md) §3.4). Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -250,7 +250,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 
 | Phase | Content | Verification |
 |---|---|---|
-| **1. One Python, embedded** | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
+| **1. One Python, embedded** *(done)* | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
 | **2. App API and undo** | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
 | **3. Scripting panel** | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
@@ -282,3 +282,56 @@ Each of these can be changed before the phase that needs it starts:
 | 6 | Undo granularity for a Run | One step per changed stage (§4.2), even if the script used `edit()` inside |
 | 7 | Script output | Both in the panel's output pane and in the log |
 | 8 | Python-made UI | Optional phase 5, only with a PySide build (§8) |
+
+## 12. What was built
+
+### Phase 1
+
+- **One Python in the build** ([UsdccPython.cmake](../cmake/modules/UsdccPython.cmake)):
+  `USDCC_PYTHON_*` comes from OpenUSD's `pxrConfig.cmake`. `usdcc_deploy_python()` copies that
+  Python's `python3XY.dll`/`python3.dll` next to the exe and the three test executables, after
+  vcpkg's deploy step, replacing vcpkg's copy. `usd.pyd` is now built for it as well (it was
+  for a stale 3.11). The pure-Python package files are copied to `build/python/usdcc` by a
+  `usdcc_python_package` target.
+- **[PythonRuntime](../src/cpp/scripting/include/usdcc/scripting/python_runtime.h)** in the new
+  `usdcc_scripting` library:
+  - Starts Python from `PythonSettings` (home = OpenUSD's Python, `USDCC_PYTHONHOME`
+    overrides; `sys.path` gets `build/python` and OpenUSD's `site-packages`). It checks for a
+    standard library first, so a wrong home is a logged reason, not a fatal Python abort.
+  - Installs `usdcc.log` (below), imports `pxr.Usd` as a check, then releases the GIL.
+  - Provides `runString()`, `runFile()` and `evaluate()`, from any thread. Exceptions are
+    logged with their traceback, and `SystemExit` ends only the script.
+  - Finalizes Python at exit: the app shuts down cleanly with `pxr` loaded (exit code 0).
+  - It is created in `main()` after the stage manager and before the window.
+- **Logging phase 5**: the embedded module `_usdcc_log` and
+  [usdcc/log.py](../src/python/usdcc/log.py) cover the `logging` root handler (logger name
+  as category, filtered by the hub's levels), `captureWarnings`, line-buffered
+  `sys.stdout`/`sys.stderr`, `sys.excepthook` and `threading.excepthook`. Python thread
+  names are kept on the records.
+- **Debug > Run Python File…** (until the Scripting panel). It is disabled, with the reason
+  as its status tip, when Python couldn't start.
+- **Tests**: the new `usdcc_python_tests` executable (one interpreter per process):
+  - the interpreter is OpenUSD's Python, and `pxr.Usd` works;
+  - only one runtime can exist;
+  - print, partial lines, logger records with their call site, `exc_info`, warnings and
+    stderr arrive with the right categories and levels;
+  - exceptions are logged with message, traceback and innermost frame, and `SystemExit`
+    is harmless;
+  - another thread runs Python between runs, and Python thread names and thread
+    exceptions are kept;
+  - `runFile()` sets `__file__`.
+
+Checked in the app: the log shows "Python 3.12.10 from C:/Program Files/Python312, with pxr".
+A script run from the Debug menu found the app's open stage through `UsdUtils.StageCache` and
+listed its prims. Its prints, a logger warning and its final exception reached the log with
+their file and line.
+
+Found for later:
+
+- **Standalone `usd.pyd` needs OpenUSD's DLL folders.** In a plain Python, `import usdcc.usd`
+  only works after `os.add_dll_directory()` for OpenUSD's root, `bin` and `lib` folders: Python
+  3.8+ ignores PATH for extension modules, and `pxr` adds those folders only while it imports
+  itself. Inside the app the DLLs are already loaded. Phase 2's "still imports in a plain
+  python" check will make `usdcc/__init__.py` add them.
+- **`usdcc.ui` still uses the stale Python 3.11.** Its CMake keeps the PATH lookup (cached at
+  3.11) for PySide; phase 5 moves it to `USDCC_PYTHON_*`, together with `build-pyside.ps1`.

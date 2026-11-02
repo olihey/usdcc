@@ -27,7 +27,7 @@ if(UNIX AND NOT APPLE)
     install(DIRECTORY resources/linux/icons/ DESTINATION share/icons)
     install(FILES resources/linux/usdcc.desktop DESTINATION share/applications)
 endif()
-target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui)
+target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui usdcc_scripting)
 usdcc_deploy_core_library(usdcc)
 
 # USD's own headers wrap their Python.h include the same way pybind11 does
@@ -101,3 +101,8 @@ if(WIN32)
             "$<TARGET_FILE_DIR:usdcc>/platforms/"
         COMMENT "Deploying Qt platform plugin")
 endif()
+
+# OpenUSD's Python DLL next to the exe, replacing the one vcpkg's deploy step
+# copies there (docs/SCRIPTING.md §3.1). Added last, so it runs after vcpkg's
+# own POST_BUILD step.
+usdcc_deploy_python(usdcc)

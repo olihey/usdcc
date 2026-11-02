@@ -1,5 +1,6 @@
 #include <QApplication>
 
+#include <filesystem>
 #include <memory>
 
 #include "usdcc/ui/log_side_panel.h"
@@ -25,6 +26,7 @@
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/native_stream_capture.h"
+#include "usdcc/scripting/python_runtime.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
@@ -133,6 +135,12 @@ int main(int argc, char** argv) {
     // stage) can create; filled in below, once the tool set exists. Declared
     // before `window` so it outlives the menu that reads it.
     usdcc::ui::ViewPanelRegistry panelTypes;
+
+    // The embedded Python (docs/SCRIPTING.md §3). Declared after the stage
+    // manager and before the window, so it is finalized after the panels are
+    // gone but while the stages Python may still reference exist. If it
+    // can't start, it says why in the log and the app runs without scripting.
+    usdcc::scripting::PythonRuntime python;
 
     usdcc::ui::MainWindow window;
     window.logPanel()->setLogFile(logFilePath);
@@ -317,6 +325,21 @@ int main(int argc, char** argv) {
     QObject::connect(testMessagesAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogTestMessages(); });
     QAction* burstAction = debugMenu->addAction(QObject::tr("Emit 10 000 Log &Messages"));
     QObject::connect(burstAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogBurst(10000); });
+    // Until the Scripting panel exists (docs/SCRIPTING.md phase 3).
+    debugMenu->addSeparator();
+    QAction* runPythonAction = debugMenu->addAction(QObject::tr("Run &Python File..."));
+    runPythonAction->setEnabled(python.isAvailable());
+    runPythonAction->setStatusTip(python.isAvailable()
+                                      ? QObject::tr("Run a Python script in the app (Python %1)")
+                                            .arg(QString::fromStdString(python.version()))
+                                      : QString::fromStdString(python.unavailableReason()));
+    QObject::connect(runPythonAction, &QAction::triggered, &window, [&python, &window]() {
+        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Run Python File"), QString(),
+                                                            QObject::tr("Python Files (*.py)"));
+        if (!path.isEmpty()) {
+            python.runFile(std::filesystem::path(path.toStdU16String()));
+        }
+    });
 
     // Every panel for this session must exist before restoring — see
     // MainWindow::restoreLayout()'s declaration for why.
