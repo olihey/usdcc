@@ -146,6 +146,20 @@ USDCC_TEST(python_exceptions_are_logged) {
     CHECK(python().runString("x = 1"), "and the runtime keeps working");
 }
 
+USDCC_TEST(python_syntax_errors_are_logged) {
+    // A script that doesn't compile: the exception has no traceback.
+    ScopedCollect collect;
+    CHECK(!python().runString("print(sys.9version)\n", "<syntax test>"), "a script that doesn't compile fails");
+    auto errors = collect.sink->where("python.exception");
+    CHECK(errors.size() == 1, "one Error: %zu", errors.size());
+    if (errors.size() == 1) {
+        CHECK(errors[0].message.find("SyntaxError") == 0, "SyntaxError as the message: %s", errors[0].message.c_str());
+        CHECK(errors[0].file == "<syntax test>" && errors[0].line == 1, "located at its line: %s:%d",
+              errors[0].file.c_str(), errors[0].line);
+    }
+    CHECK(python().runString("x = 1"), "and the runtime keeps working");
+}
+
 USDCC_TEST(python_threads) {
     ScopedCollect collect;
     // Between runs the main thread doesn't hold the GIL, so another thread

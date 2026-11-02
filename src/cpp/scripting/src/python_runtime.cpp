@@ -188,7 +188,12 @@ void PythonRuntime::Impl::start() {
 
 void PythonRuntime::Impl::logException(py::error_already_set& error) {
     try {
-        py::module_::import("usdcc.log").attr("log_exception")(error.type(), error.value(), error.trace());
+        // An exception raised before any code ran — a SyntaxError from
+        // compile() — has no traceback, and pybind11 refuses to pass a null
+        // handle (it throws py::cast_error, which would end the app).
+        const auto orNone = [](const py::object& object) -> py::object { return object ? object : py::none(); };
+        py::module_::import("usdcc.log")
+            .attr("log_exception")(orNone(error.type()), orNone(error.value()), orNone(error.trace()));
     } catch (py::error_already_set& nested) {
         // usdcc.log itself is broken: at least say what happened.
         USDCC_LOG_ERROR("python.exception", "{}", error.what());

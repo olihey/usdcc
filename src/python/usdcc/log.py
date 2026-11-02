@@ -67,6 +67,9 @@ def log_exception(exc_type, exc_value, exc_traceback, category="python.exception
     frames = traceback.extract_tb(exc_traceback)
     if frames:
         file, line, function = frames[-1].filename, frames[-1].lineno, frames[-1].name
+    elif isinstance(exc_value, SyntaxError):
+        # Raised while compiling, before any frame ran: it carries its own location.
+        file, line = exc_value.filename or "", exc_value.lineno or 0
     post(ERROR, category, message, details, file, line, function)
 
 
