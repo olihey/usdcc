@@ -1,6 +1,6 @@
 # Logging — Plan
 
-*Status: phases 1–3 done (see §11); phases 4–5 to do. Covers the logging half of milestone M8 in [PLAN.md](PLAN.md);
+*Status: phases 1–4 done (see §11); phase 5 (Python) to do. Covers the logging half of milestone M8 in [PLAN.md](PLAN.md);
 the `USDASidePanel` half gets its own plan. Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -219,8 +219,11 @@ Some output never passes through any of the above: `TF_DEBUG`, `printf` from ren
 or third-party libraries, and Python C extensions writing to the C-level streams.
 `NativeStreamCapture` replaces file descriptors 1 and 2 with pipes (`_dup2` on Windows,
 `dup2` on POSIX) and starts one reader thread per pipe that splits lines and posts them as
-source `"stdout"`/`"stderr"` (Info/Warning). In Debug builds each line is also written to the
-original descriptor, so a terminal or the debugger still shows it.
+source `"stdout"`/`"stderr"` (Info/Warning). The original stderr is kept: `ConsoleLogSink`
+and the hub's own error notes write there through `writeToOriginalStderr()`, since writing to
+the captured stderr would feed every line back in (and could block the reader on its own full
+pipe). The Debug-build "tee" first planned here is therefore not needed: `ConsoleLogSink`
+already prints every record, captured lines included, to the original stderr.
 
 This is the riskiest bridge (CRT stream buffering, crashing with a full pipe, MSVC's separate
 CRT per DLL), so it comes last and can be turned off with `USDCC_NO_STREAM_CAPTURE=1`.
@@ -231,7 +234,7 @@ CRT per DLL), so it comes last and can be turned off with `USDCC_NO_STREAM_CAPTU
 layouts still find it.
 
 ```
-[☰]  [ search…                                  ] [Aa] [.*]   [Clear] [Log Folder]
+[☰]  [ search…                                  ] [Aa] [.*]   [🗑] [📁]
 ──────────────────────────────────────────────────────────────────────────────────────
 12:04:31.204  ✕  usd     TF_RUNTIME_ERROR   Failed to open layer @a.usda@      ×1
 12:04:31.205  ⚠  qt      qt.qpa.window      Window position outside any screen
@@ -332,7 +335,7 @@ Each phase ends with something usable and verified.
 | **1. Hub and C++ API** *(done)* | `usdcc_core` as a shared library; `LogRecord`, `LogHub`, collapsing, re-entrancy guard; `USDCC_LOG_*`; `FileLogSink`; first log calls in `StageManager`/`StageOpener`/`HydraViewportWindow`/`UndoManager`/`MainWindow` | Hub and file-sink unit tests. A run writes a readable log file with the stage open/close lines |
 | **2. Qt and OpenUSD bridges** *(done)* | `QtMessageBridge`, `TfDiagnosticBridge`, start-up order (§6); the `StageOpener` error mark and better failure dialog | Tf and Qt mapping tests, including worker threads. Opening a broken `.usda` names the error. No console needed to see Tf messages |
 | **3. Log panel** *(done)* | `LogModel`, `LogSidePanel` replacing the stand-in, filters, search, details tooltip, follow mode, error badge; Debug > Emit Test Messages (C++/Qt/Tf part) | Every test message shows correctly. A 10 000-message burst does not freeze the UI. Saved layouts still restore the panel |
-| **4. Native stream capture** | `NativeStreamCapture`, off-switch, Debug-build tee | `printf` and `TF_DEBUG` output show in the panel. No hang with a flood of output or at shutdown |
+| **4. Native stream capture** *(done)* | `NativeStreamCapture`, off-switch, Debug-build tee | `printf` and `TF_DEBUG` output show in the panel. No hang with a flood of output or at shutdown |
 | **5. Python** | `PYBIND11_EMBEDDED_MODULE(_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
 
 Phases 1–3 make the panel useful on their own. Phase 4 is independent of 3. Phase 5 needs the
@@ -412,7 +415,7 @@ the viewport never drew during the test runs. Both are on the phase 3 checklist 
   plain or regular-expression search in either case.
 - **[LogSidePanel](../src/cpp/ui/include/usdcc/ui/log_side_panel.h)** replaces the stand-in in
   `MainWindow` (objectName still "Log"). Toolbar: the three-lines filter menu (levels with
-  counts, sources, a checkable category tree split at '.', Show All Categories), search with Aa and .* toggles, Clear, Log Folder. The
+  counts, sources, a checkable category tree split at '.', Show All Categories), search with Aa and .* toggles, and Clear (bin icon) and Log Folder (folder icon) as square icon buttons (`PanelIconButton`). The
   button is [PanelMenuButton](../src/cpp/ui/include/usdcc/ui/panel_menu_button.h), now shared
   with every ViewPanel's options button. Table with fixed row
   heights, follow mode, the row's details as a tooltip (`LogModel::detailsHtml()`: full
@@ -441,3 +444,28 @@ the worker-thread messages, and one "×500" row. The details show for the hovere
 the 10 000 burst shows at once, and a broken file opened through File > Open Stage shows the
 dialog, which stays usable past 4 s. Show Log brings the panel to the bottom and clears the
 error count. The viewport's GL errors (PLAN.md §6 item 12) did not appear in any of these runs.
+
+### Phase 4
+
+- **[NativeStreamCapture](../src/cpp/core/include/usdcc/core/native_stream_capture.h)** in
+  `usdcc_core`, created at the top of `main()` before the bridges and restored last.
+  Descriptors 1 and 2 become pipes (not inherited by child processes); on Windows the
+  `STD_OUTPUT`/`STD_ERROR` handles follow, for DLLs with a CRT of their own. A GUI process
+  started without a console has no stdout/stderr at all, so they (and stdin) are first opened
+  on `NUL` to get descriptors 0-2. stdout and stderr are unbuffered while captured. Readers
+  post one record per line (`\r` stripped, empty lines dropped, a last line without a newline
+  posted when capture ends, 64 KB at most per record), from threads named "stdout capture" and
+  "stderr capture". On shutdown a reader that hasn't seen end-of-file within a second has its
+  read cancelled (`CancelSynchronousIo`; POSIX readers poll a stop flag). One capture at a
+  time; `USDCC_NO_STREAM_CAPTURE` turns it off.
+- **`writeToOriginalStderr()`**, used by `ConsoleLogSink` and the hub's sink-exception note.
+- **Debug > Emit Test Log Messages** also writes with `printf`, `fprintf(stderr)` and
+  `std::cout`, and from a worker thread.
+- **Tests** ([log_capture_test.cpp](../tests/log_capture_test.cpp)): line splitting across
+  calls, `\r\n`, a raw descriptor write, a worker thread, the unterminated last line;
+  20 000 lines from two threads (about 180 ms, none lost); the console sink doesn't loop; one
+  capture at a time; the off switch; output goes to the real stdout again afterwards.
+
+Checked in the app, started without a console: `TF_DEBUG=PLUG_INFO_SEARCH` output (138 lines)
+and the test messages' native lines reach the panel and the log file, and the app exits
+normally in a fraction of a second.

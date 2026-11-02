@@ -10,10 +10,12 @@ add_library(usdcc_core SHARED
     include/usdcc/core/export.h
     include/usdcc/core/file_log_sink.h
     include/usdcc/core/log.h
+    include/usdcc/core/native_stream_capture.h
     include/usdcc/core/signal.h
     src/console_log_sink.cpp
     src/file_log_sink.cpp
     src/log.cpp
+    src/native_stream_capture.cpp
 )
 target_include_directories(usdcc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(usdcc_core PRIVATE USDCC_CORE_BUILD)

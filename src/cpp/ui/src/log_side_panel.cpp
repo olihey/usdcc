@@ -2,6 +2,7 @@
 
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/ui/log_model.h"
+#include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
@@ -115,13 +116,11 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     toolbarLayout->addWidget(m_caseButton);
     toolbarLayout->addWidget(m_regexButton);
 
-    auto* clearButton = new QToolButton(toolbar);
-    clearButton->setText(tr("Clear"));
-    clearButton->setToolTip(tr("Clear the panel (the log file keeps everything)"));
+    auto* clearButton = new PanelIconButton(QStringLiteral(":/usdcc/theme/trash.png"),
+                                            tr("Clear the panel (the log file keeps everything)"), toolbar);
     toolbarLayout->addWidget(clearButton);
 
-    m_folderButton = new QToolButton(toolbar);
-    m_folderButton->setText(tr("Log Folder"));
+    m_folderButton = new PanelIconButton(QStringLiteral(":/usdcc/theme/folder.png"), tr("Open the log folder"), toolbar);
     m_folderButton->setVisible(false);  // until setLogFile()
     toolbarLayout->addWidget(m_folderButton);
 
@@ -233,7 +232,7 @@ LogSidePanel::~LogSidePanel() {
 void LogSidePanel::setLogFile(const QString& path) {
     m_logFile = path;
     m_folderButton->setVisible(!path.isEmpty());
-    m_folderButton->setToolTip(tr("Open the folder holding %1").arg(QFileInfo(path).fileName()));
+    m_folderButton->setToolTip(tr("Open the log folder (this session's log is %1)").arg(QFileInfo(path).fileName()));
 }
 
 void LogSidePanel::showLatest() {
@@ -245,9 +244,10 @@ void LogSidePanel::showLatest() {
 }
 
 QToolButton* LogSidePanel::addToggle(const QString& toolTip) {
-    auto* button = new QToolButton(this);
+    // The same square as the icon buttons beside it, with short text instead
+    // of an icon ("Aa", ".*").
+    auto* button = new PanelIconButton(QString(), toolTip, this);
     button->setCheckable(true);
-    button->setToolTip(toolTip);
     return button;
 }
 

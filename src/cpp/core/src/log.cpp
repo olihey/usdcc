@@ -1,5 +1,7 @@
 #include "usdcc/core/log.h"
 
+#include "usdcc/core/native_stream_capture.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -53,15 +55,16 @@ bool coversCategory(std::string_view key, std::string_view category) {
 
 // Calls `call` for one sink. A sink that throws must not take the hub down
 // with it (or leave this thread marked as posting): the exception is reported
-// on stderr, the only place left that can't be the failing sink.
+// on the original stderr, the only place left that can't be the failing sink
+// (stderr itself may be captured into the hub).
 template <typename Call>
 void callSink(const char* what, Call&& call) {
     try {
         call();
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "usdcc log: a sink's %s threw: %s\n", what, e.what());
+        writeToOriginalStderr(std::string("usdcc log: a sink's ") + what + " threw: " + e.what() + "\n");
     } catch (...) {
-        std::fprintf(stderr, "usdcc log: a sink's %s threw\n", what);
+        writeToOriginalStderr(std::string("usdcc log: a sink's ") + what + " threw\n");
     }
 }
 

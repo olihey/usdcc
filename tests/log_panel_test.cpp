@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLineEdit>
 #include <QMenu>
 #include <QScrollBar>
 #include <QTableView>
@@ -212,6 +213,61 @@ USDCC_TEST(log_model_burst) {
     CHECK(batches < 100, "in a few batches, not one per message: %d", batches);
     CHECK(elapsed < 3000, "within 3 s: %lld ms", elapsed);
     std::printf("  (10 000 messages shown in %lld ms, %d batches)\n", elapsed, batches);
+}
+
+// Reported: searching, then clearing the search with the field's x button,
+// left the table empty.
+USDCC_TEST(log_side_panel_clear_search) {
+    ScratchSettings settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
+    LogHub hub;
+    LogSidePanel panel(nullptr, hub, settings.path);
+    panel.resize(800, 300);
+    panel.show();
+    for (int i = 0; i < 40; ++i) post(hub, LogLevel::Info, "usdcc", "test", "message " + std::to_string(i));
+    waitFor([&] { return panel.model()->rowCount() == 40; });
+    for (int i = 0; i < 5; ++i) QApplication::processEvents();
+
+    QLineEdit* search = panel.findChild<QLineEdit*>();
+    QTableView* view = panel.view();
+    auto visibleRow = [view]() { return view->indexAt(QPoint(5, 5)).isValid(); };
+    auto report = [&](const char* when) {
+        std::printf("  %s: rows %d, scroll %d of %d, row at top %d\n", when, panel.filterModel()->rowCount(),
+                    view->verticalScrollBar()->value(), view->verticalScrollBar()->maximum(),
+                    view->indexAt(QPoint(5, 5)).row());
+    };
+    report("before");
+
+    search->setFocus();
+    search->setText(QStringLiteral("message 3"));  // 3 and 30-39
+    for (int i = 0; i < 5; ++i) QApplication::processEvents();
+    report("searching");
+    CHECK(panel.filterModel()->rowCount() == 11, "searching narrows the rows: %d", panel.filterModel()->rowCount());
+
+    // Click the x button inside the field, as the user does.
+    QToolButton* clearButton = nullptr;
+    for (QToolButton* button : search->findChildren<QToolButton*>()) {
+        if (button->isVisible()) clearButton = button;
+    }
+    CHECK(clearButton != nullptr, "the field shows a clear button");
+    if (clearButton) clearButton->click();
+    for (int i = 0; i < 5; ++i) QApplication::processEvents();
+    report("cleared");
+    CHECK(search->text().isEmpty(), "the field is empty");
+    CHECK(panel.filterModel()->rowCount() == 40, "every row is back: %d", panel.filterModel()->rowCount());
+    CHECK(visibleRow(), "and rows are on screen");
+
+    // A search that matches nothing empties the table first.
+    search->setText(QStringLiteral("no such message"));
+    for (int i = 0; i < 5; ++i) QApplication::processEvents();
+    report("matching nothing");
+    for (QToolButton* button : search->findChildren<QToolButton*>()) {
+        if (button->isVisible()) button->click();
+    }
+    for (int i = 0; i < 5; ++i) QApplication::processEvents();
+    report("cleared again");
+    CHECK(panel.filterModel()->rowCount() == 40, "every row is back: %d", panel.filterModel()->rowCount());
+    CHECK(visibleRow(), "and rows are on screen");
 }
 
 USDCC_TEST(log_side_panel) {

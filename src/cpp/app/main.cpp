@@ -24,6 +24,7 @@
 #include "usdcc/core/console_log_sink.h"
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/log.h"
+#include "usdcc/core/native_stream_capture.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
@@ -62,12 +63,16 @@ int main(int argc, char** argv) {
             USDCC_LOG_WARNING("usdcc.app", "Ignored parts of USDCC_LOG=\"{}\" that aren't valid", spec.toStdString());
         }
     }
-    // Then the bridges, before anything can emit: OpenUSD's diagnostics and
-    // Qt's messages (docs/LOGGING.md §6). Both outlive everything below.
+    // Then everything that would otherwise only reach stdout/stderr: the C
+    // level streams themselves (TF_DEBUG, printf from libraries), OpenUSD's
+    // diagnostics and Qt's messages (docs/LOGGING.md §6). All three outlive
+    // everything below; the capture is restored last.
+    usdcc::core::NativeStreamCapture nativeStreams;
     usdcc::usd::TfDiagnosticBridge usdDiagnostics;
     usdcc::ui::QtMessageBridge qtMessages;
     // With the bridges in, neither OpenUSD nor Qt prints anything itself any
-    // more; this keeps it visible in a terminal and the debugger.
+    // more, and stdout/stderr lead into the log; this keeps it all visible in
+    // a terminal and the debugger (through the original stderr).
 #ifdef NDEBUG
     const bool logToConsole = !qEnvironmentVariableIsEmpty("USDCC_LOG_STDERR");
 #else

@@ -10,10 +10,9 @@ namespace usdcc::core {
 // bridge is installed OpenUSD no longer prints its messages itself, so this is
 // how a developer still sees them in a terminal or in Visual Studio's Output
 // pane. Attached in Debug builds and when USDCC_LOG_STDERR is set (main.cpp).
-// Writes synchronously; collapsed repeats aren't printed again.
-//
-// TODO(LOGGING.md phase 4): once fd 2 is captured into the hub, this must
-// write to the original stderr, or every line would come back as a record.
+// Writes synchronously; collapsed repeats aren't printed again. Goes to the
+// stderr the process started with (writeToOriginalStderr()), so lines don't
+// come back as records while NativeStreamCapture is active.
 class ConsoleLogSink : public LogSink {
 public:
     USDCC_CORE_API ConsoleLogSink();

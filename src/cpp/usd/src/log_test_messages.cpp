@@ -6,6 +6,8 @@
 
 #include <QLoggingCategory>
 
+#include <cstdio>
+#include <iostream>
 #include <thread>
 
 // The TF_* macros name Tf's helpers unqualified.
@@ -49,8 +51,14 @@ void emitLogTestMessages() {
     TF_CODING_ERROR("OpenUSD coding error message");
     TF_RUNTIME_ERROR("OpenUSD runtime error message");
 
+    // Captured by NativeStreamCapture (unless USDCC_NO_STREAM_CAPTURE is set).
+    std::printf("Native stdout line (printf)\n");
+    std::fprintf(stderr, "Native stderr line (fprintf)\n");
+    std::cout << "Native stdout line (std::cout)" << std::endl;
+
     std::thread worker([] {
         usdcc::core::setThreadName("log-test-worker");
+        std::printf("Native stdout line from a worker thread\n");
         USDCC_LOG_WARNING("usdcc.test", "usdcc warning from a worker thread");
         TF_WARN("OpenUSD warning from a worker thread");
         TF_RUNTIME_ERROR("OpenUSD runtime error from a worker thread");

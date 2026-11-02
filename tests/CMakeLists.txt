@@ -12,6 +12,7 @@ add_executable(usdcc_tests
     test_main.cpp
     categorizer_spike_test.cpp
     log_bridges_test.cpp
+    log_capture_test.cpp
     log_test.cpp
     move_tool_test.cpp
     property_categorizer_test.cpp
