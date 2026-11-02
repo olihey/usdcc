@@ -1,6 +1,6 @@
 # Scripting — Plan
 
-*Status: phases 1–2 done (see §12); phases 3–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
+*Status: phases 1–3 done (see §12); phases 4–5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
 ([LOGGING.md](LOGGING.md) §3.4). Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -212,17 +212,19 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 
 ## 7. The Scripting panel
 
-`ScriptingSidePanel` (a `SidePanel`, objectName "Scripting", docked like the Log panel):
+`ScriptingSidePanel` (a `SidePanel`, objectName "Scripting", docked on the right until moved;
+added through `MainWindow::addSidePanel()`):
 
 ```
-[☰] [ shot_setup.py ▾ ]                                    [▶] [▶|] [📂] [💾]
+[☰] shot_setup.py •                                          [▶] [▶|] [📂] [💾]
 ┌──────────────────────────────────────────────────────────────────────┐
 │ 1  from pxr import Sdf                                                │
 │ 2  import usdcc.usd                                                   │
 │ 3  stage = usdcc.usd.current_stage()                                  │
 ├──────────────────────────────────────────────────────────────────────┤
-│ >>> Run shot_setup.py (12 ms)                                         │
+│ >>> Run shot_setup.py                                                 │
 │ Created 3 prims                                                       │
+│     done in 12 ms, 1 undo step                                        │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -231,17 +233,21 @@ Lands with the runtime, since every later step needs it to see what went wrong:
   Ctrl+/ to toggle comments.
 - **Highlighting** (`PythonHighlighter`): keywords, builtins, strings (including triple-quoted
   across lines), comments, numbers, decorators, and `def`/`class` names, in theme colors.
-- **Run** (Ctrl+Enter): the selection if there is one, otherwise the whole text. **Run
-  Selection** runs the current line if nothing is selected. Each run gets a fresh namespace,
-  with `__file__` set when the text came from a file; ☰ > *Keep Variables Between Runs* uses
-  one namespace for the session instead.
-- **Output pane** below the editor: each run's header with its duration, stdout, stderr
-  (amber) and tracebacks (red), with ☰ > Clear Output. Everything also goes to the Log panel.
-- **Files**: Open, Save, Save As, and a recent-files dropdown that also names the open file. A
-  "•" marks unsaved changes. The panel remembers the open file and keeps unsaved text
-  between sessions.
-- **Toolbar**: the shared `PanelMenuButton` and `PanelIconButton`s (new theme icons: play,
-  play-selection, open, save).
+- **Run** (Ctrl+Enter) runs the editor's text (as it is, saved or not). **Run Selection**
+  (Ctrl+Shift+Enter) runs the selected lines, or the cursor's line, without their common
+  indentation.
+- **Namespaces**: each run gets a fresh namespace. Tracebacks name the open file, but
+  `__file__` isn't set, since the text may differ from the file. ☰ > *Keep Variables Between
+  Runs* uses one namespace for the session instead, and ☰ > *Reset Variables* clears it.
+- **Output pane** below the editor: each run's header, its print output, stderr and warnings
+  (amber), tracebacks and errors (red), any OpenUSD messages during the run, and a footer with
+  the time and undo steps. ☰ > Clear Output empties it. Everything also goes to the Log panel.
+- **Files** in the ☰ menu: New, Open…, Open Recent ▸ (ten), Save, Save As…, plus Ctrl+O and
+  Ctrl+S. The open file's name sits next to ☰, with "•" for unsaved changes. Leaving unsaved
+  changes asks first. The open file, recent files, unsaved text (without asking, on exit), the
+  split and the variables option persist.
+- **Toolbar**: the shared `PanelMenuButton` and `PanelIconButton`s, with new theme icons for
+  play, play-selection and save; Open reuses the folder icon.
 - **When scripting is unavailable** (§3.1), the panel shows the reason instead of the editor.
 
 ## 8. Python-made UI (needs PySide)
@@ -263,7 +269,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 |---|---|---|
 | **1. One Python, embedded** *(done)* | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
 | **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
-| **3. Scripting panel** | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
+| **3. Scripting panel** *(done)* | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
 | **5. PySide integration** *(needs PySide)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
 
@@ -384,3 +390,31 @@ drive the same `ScriptRunner`, `_usdcc_app` and `UndoManager` the app uses.
 Found along the way: opening a file that's already open makes a second stage on the same
 layers, from File > Open Stage as from `open_stage()`. Both stages then record undo steps for
 one change. Whether opening should return the open stage instead is a decision for later.
+
+### Phase 3
+
+- **[ScriptingSidePanel](../src/cpp/scripting/include/usdcc/scripting/scripting_side_panel.h)**
+  in the new `usdcc_scripting_ui` library, as described in §7. It's docked by `main()`
+  through the new `MainWindow::addSidePanel()`, which phase 5's Python panels need too. Debug
+  > Run Python File stays, for running a file without opening it.
+- **[CodeEditor](../src/cpp/scripting/include/usdcc/scripting/code_editor.h)**: line numbers,
+  current-line highlight, 4-space Tab/Shift+Tab, Enter keeping and adding indentation, Ctrl+/,
+  and `selectedCode()`.
+  **[PythonHighlighter](../src/cpp/scripting/include/usdcc/scripting/python_highlighter.h)**:
+  a regex pass plus a string/comment scan, which keeps `#` inside strings and carries
+  triple-quoted strings across lines. The editor and output fonts come from `dark.qss`.
+- **The output pane** is fed by a log sink attached for the run, so it shows exactly what the
+  Log panel gets for that run.
+- **`PythonRuntime::Namespace::Session`** and `resetSession()`, for Keep Variables;
+  `ScriptRunner` passes it through.
+- **Tests** ([scripting_panel_test.cpp](../tests/scripting_panel_test.cpp); `usdcc_python_tests`
+  is now a `QApplication` on the offscreen platform):
+  - highlighting spans;
+  - the editor's indent, dedent, comments, and Enter after `:`;
+  - Run, a failing run's traceback, Run Selection, and kept and reset variables;
+  - Save As, the • marker, recent files, unsaved text across a restart, and a clean file
+    reopening from disk;
+  - the unavailable state.
+
+Not checked by hand: the Windows session was locked, so the panel hasn't been looked at in the
+running app. The app does start cleanly with it (no warnings or errors in the log).

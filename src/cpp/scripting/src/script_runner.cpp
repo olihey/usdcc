@@ -20,13 +20,14 @@ bool ScriptRunner::runAsOneStep(const std::string& name, Run&& run) {
     return ok;
 }
 
-bool ScriptRunner::run(const std::string& code, const std::string& name) {
-    return runAsOneStep(name, [&] { return m_runtime.runString(code, name); });
+bool ScriptRunner::run(const std::string& code, const std::string& name, PythonRuntime::Namespace scope) {
+    return runAsOneStep(name, [&] { return m_runtime.runString(code, name, scope); });
 }
 
-bool ScriptRunner::runFile(const std::filesystem::path& file) {
+bool ScriptRunner::runFile(const std::filesystem::path& file, PythonRuntime::Namespace scope) {
     const std::u8string fileName = file.filename().u8string();
-    return runAsOneStep(std::string(fileName.begin(), fileName.end()), [&] { return m_runtime.runFile(file); });
+    return runAsOneStep(std::string(fileName.begin(), fileName.end()),
+                        [&] { return m_runtime.runFile(file, scope); });
 }
 
 }  // namespace usdcc::scripting

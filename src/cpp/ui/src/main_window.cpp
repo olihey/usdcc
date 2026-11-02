@@ -88,6 +88,12 @@ ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
 
 LogSidePanel* MainWindow::logPanel() const { return m_logPanel; }
 
+void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
+    panel->setParent(this);
+    addDockWidget(area, panel);
+    m_sidePanels.append(panel);
+}
+
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

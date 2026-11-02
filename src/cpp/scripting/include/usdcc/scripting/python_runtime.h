@@ -37,6 +37,11 @@ struct PythonSettings {
 // destroying it finalizes the interpreter.
 class PythonRuntime {
 public:
+    // Where a run's top-level names live: a fresh namespace each time, or one
+    // kept for the session, so a later run sees what an earlier one defined
+    // (the Scripting panel's "Keep Variables Between Runs").
+    enum class Namespace { Fresh, Session };
+
     explicit PythonRuntime(const PythonSettings& settings = PythonSettings::defaults());
     ~PythonRuntime();
     PythonRuntime(const PythonRuntime&) = delete;
@@ -58,9 +63,12 @@ public:
     // `fileName` names it in tracebacks). Returns false if it raised: the
     // exception and its traceback are logged (category python.exception).
     // SystemExit just ends the script and counts as success.
-    bool runString(const std::string& code, const std::string& fileName = "<string>");
+    bool runString(const std::string& code, const std::string& fileName = "<string>",
+                   Namespace scope = Namespace::Fresh);
     // runString() with the file's contents; __file__ is set.
-    bool runFile(const std::filesystem::path& file);
+    bool runFile(const std::filesystem::path& file, Namespace scope = Namespace::Fresh);
+    // Forgets the session namespace's names.
+    void resetSession();
     // str() of a Python expression's value, or nothing if it raised (logged).
     std::optional<std::string> evaluate(const std::string& expression);
 

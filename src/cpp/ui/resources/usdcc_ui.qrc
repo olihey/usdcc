@@ -20,6 +20,12 @@
         <file alias="trash@2x.png">theme/trash@2x.png</file>
         <file alias="folder.png">theme/folder.png</file>
         <file alias="folder@2x.png">theme/folder@2x.png</file>
+        <file alias="play.png">theme/play.png</file>
+        <file alias="play@2x.png">theme/play@2x.png</file>
+        <file alias="play-selection.png">theme/play-selection.png</file>
+        <file alias="play-selection@2x.png">theme/play-selection@2x.png</file>
+        <file alias="save.png">theme/save.png</file>
+        <file alias="save@2x.png">theme/save@2x.png</file>
         <file alias="win-minimize.png">theme/win-minimize.png</file>
         <file alias="win-minimize@2x.png">theme/win-minimize@2x.png</file>
         <file alias="win-maximize.png">theme/win-maximize.png</file>

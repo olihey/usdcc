@@ -46,9 +46,10 @@ add_executable(usdcc_python_tests
     python_test_main.cpp
     python_app_test.cpp
     python_runtime_test.cpp
+    scripting_panel_test.cpp
     python_test_app.h
 )
-target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app)
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
 
 foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     # Same reason as the app (see src/cpp/app/CMakeLists.txt): USD's headers ask
@@ -63,7 +64,7 @@ foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
 endforeach()
 
 # No window ever appears; the widgets still lay out and paint.
-set_tests_properties(usdcc_ui_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(usdcc_ui_tests usdcc_python_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(WIN32)
     # USD's DLLs and plugins aren't next to the executables; Qt's are (vcpkg's
@@ -81,8 +82,8 @@ if(WIN32)
         list(APPEND _usdcc_ui_test_env "PATH=path_list_prepend:${_usdcc_vcpkg_dir}/bin"
              "QT_QPA_PLATFORM_PLUGIN_PATH=set:${_usdcc_vcpkg_dir}/Qt6/plugins/platforms")
     endif()
-    set_tests_properties(usdcc_tests usdcc_python_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
-    set_tests_properties(usdcc_ui_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_ui_test_env}")
+    set_tests_properties(usdcc_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
+    set_tests_properties(usdcc_ui_tests usdcc_python_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_ui_test_env}")
     set_target_properties(
         usdcc_tests usdcc_ui_tests usdcc_python_tests
         PROPERTIES

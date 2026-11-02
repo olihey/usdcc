@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/scripting/python_runtime.h"
+
 #include <filesystem>
 #include <string>
 
@@ -9,8 +11,6 @@ class UndoManager;
 }  // namespace usdcc::usd
 
 namespace usdcc::scripting {
-
-class PythonRuntime;
 
 // Runs a script the way the user expects from a DCC (docs/SCRIPTING.md
 // §4.2–4.3): everything it does becomes one undo step on each stage it
@@ -23,8 +23,9 @@ public:
 
     // Returns true if the script ran without an exception. `name` is used in
     // tracebacks and the undo step's description.
-    bool run(const std::string& code, const std::string& name);
-    bool runFile(const std::filesystem::path& file);
+    bool run(const std::string& code, const std::string& name,
+             PythonRuntime::Namespace scope = PythonRuntime::Namespace::Fresh);
+    bool runFile(const std::filesystem::path& file, PythonRuntime::Namespace scope = PythonRuntime::Namespace::Fresh);
 
     // How many undo steps the last run recorded.
     int lastUndoSteps() const { return m_lastUndoSteps; }

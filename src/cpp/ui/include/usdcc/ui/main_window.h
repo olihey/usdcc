@@ -47,6 +47,12 @@ public:
     // The Log side panel; always exists.
     LogSidePanel* logPanel() const;
 
+    // Docks a side panel from outside usdcc_ui (the Scripting panel; later
+    // plugins) in `area` and lists it in the View menu. Call before
+    // buildViewMenu() and restoreLayout(): a saved layout then places it
+    // like the built-in ones, by its objectName.
+    void addSidePanel(SidePanel* panel, Qt::DockWidgetArea area);
+
     // Restores the saved window geometry/dock layout. Must be called by the
     // composition root (main.cpp) only after *every* panel for this session
     // has been added (including USD-dependent ones like ViewportViewPanel) —

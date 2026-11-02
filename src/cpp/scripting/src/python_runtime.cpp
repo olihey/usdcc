@@ -76,12 +76,15 @@ struct PythonRuntime::Impl {
     std::string version;
 #if USDCC_HAS_PYTHON
     PyThreadState* mainThreadState = nullptr;  // while the main thread doesn't hold the GIL
+    std::optional<py::dict> session;            // Namespace::Session; only touched with the GIL
     bool initialized = false;
 
     void start();
     void logException(py::error_already_set& error);
     void flushStreams();
-    bool run(const std::string& code, const std::string& fileName, const std::filesystem::path* file);
+    bool run(const std::string& code, const std::string& fileName, const std::filesystem::path* file,
+             Namespace scope);
+    static py::dict freshNamespace();
 #endif
 };
 
@@ -200,17 +203,32 @@ void PythonRuntime::Impl::flushStreams() {
     }
 }
 
+py::dict PythonRuntime::Impl::freshNamespace() {
+    py::dict globals;
+    globals["__name__"] = "__main__";
+    globals["__builtins__"] = py::module_::import("builtins");
+    return globals;
+}
+
 bool PythonRuntime::Impl::run(const std::string& code, const std::string& fileName,
-                              const std::filesystem::path* file) {
+                              const std::filesystem::path* file, Namespace scope) {
     if (!available) return false;
     py::gil_scoped_acquire gil;
     bool ok = true;
     try {
         py::module_ builtins = py::module_::import("builtins");
         py::dict globals;
-        globals["__name__"] = "__main__";
-        globals["__builtins__"] = builtins;
-        if (file) globals["__file__"] = toUtf8(*file);
+        if (scope == Namespace::Session) {
+            if (!session) session = freshNamespace();
+            globals = *session;
+        } else {
+            globals = freshNamespace();
+        }
+        if (file) {
+            globals["__file__"] = toUtf8(*file);
+        } else if (globals.contains("__file__")) {
+            PyDict_DelItemString(globals.ptr(), "__file__");
+        }
         py::object compiled = builtins.attr("compile")(code, fileName, "exec");
         builtins.attr("exec")(compiled, globals);
     } catch (py::error_already_set& error) {
@@ -246,6 +264,7 @@ PythonRuntime::~PythonRuntime() {
 #if USDCC_HAS_PYTHON
     if (m_impl->initialized) {
         PyEval_RestoreThread(m_impl->mainThreadState);
+        m_impl->session.reset();
         m_impl->flushStreams();
         if (Py_FinalizeEx() != 0) {
             USDCC_LOG_WARNING("usdcc.python", "Python reported errors while shutting down");
@@ -267,17 +286,26 @@ const std::string& PythonRuntime::version() const { return m_impl->version; }
 
 const PythonSettings& PythonRuntime::settings() const { return m_impl->settings; }
 
-bool PythonRuntime::runString(const std::string& code, const std::string& fileName) {
+bool PythonRuntime::runString(const std::string& code, const std::string& fileName, Namespace scope) {
 #if USDCC_HAS_PYTHON
-    return m_impl->run(code, fileName, nullptr);
+    return m_impl->run(code, fileName, nullptr, scope);
 #else
     (void)code;
     (void)fileName;
+    (void)scope;
     return false;
 #endif
 }
 
-bool PythonRuntime::runFile(const std::filesystem::path& file) {
+void PythonRuntime::resetSession() {
+#if USDCC_HAS_PYTHON
+    if (!m_impl->available) return;
+    py::gil_scoped_acquire gil;
+    m_impl->session.reset();
+#endif
+}
+
+bool PythonRuntime::runFile(const std::filesystem::path& file, Namespace scope) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
         USDCC_LOG_ERROR("usdcc.python", "Can't read {}", toUtf8(file));
@@ -287,7 +315,7 @@ bool PythonRuntime::runFile(const std::filesystem::path& file) {
     code << in.rdbuf();
 #if USDCC_HAS_PYTHON
     const auto start = std::chrono::steady_clock::now();
-    const bool ok = m_impl->run(code.str(), toUtf8(file), &file);
+    const bool ok = m_impl->run(code.str(), toUtf8(file), &file, scope);
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     if (ok) {

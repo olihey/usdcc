@@ -6,6 +6,8 @@
 #   usdcc_scripting      PythonRuntime and the log bridge; Qt-free
 #   usdcc_scripting_app  the running app for scripts: the embedded _usdcc_app
 #                        module (usdcc.app/.usd/.tools) and ScriptRunner (undo)
+#   usdcc_scripting_ui   the Scripting side panel: CodeEditor,
+#                        PythonHighlighter, ScriptingSidePanel
 add_library(usdcc_scripting STATIC
     include/usdcc/scripting/python_runtime.h
     src/python_runtime.cpp
@@ -21,6 +23,17 @@ add_library(usdcc_scripting_app STATIC
 )
 target_include_directories(usdcc_scripting_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core)
+
+add_library(usdcc_scripting_ui STATIC
+    include/usdcc/scripting/code_editor.h
+    include/usdcc/scripting/python_highlighter.h
+    include/usdcc/scripting/scripting_side_panel.h
+    src/code_editor.cpp
+    src/python_highlighter.cpp
+    src/scripting_side_panel.cpp
+)
+target_include_directories(usdcc_scripting_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(usdcc_scripting_ui PUBLIC usdcc_scripting_app usdcc_ui Qt6::Widgets)
 
 if(USDCC_PYTHON_FOUND)
     find_package(pybind11 REQUIRED)
