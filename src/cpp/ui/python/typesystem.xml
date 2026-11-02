@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <!--
-  Shiboken6 typesystem for the usdcc.ui Python module.
+  Shiboken6 typesystem for usdcc._ui, the compiled part of the usdcc.ui
+  Python module (src/python/usdcc/ui.py).
 
   usdcc::ui::SidePanel derives from Qt (QDockWidget), already known via
   PySide6's own QtWidgets typesystem, loaded below.
@@ -9,7 +10,7 @@
   requires usdcc::usd::StageManager*/StageRefPtr, pybind11 types this
   Shiboken6 pipeline has no way to know about or convert.
 -->
-<typesystem package="usdcc.ui">
+<typesystem package="usdcc._ui">
     <load-typesystem name="typesystem_widgets.xml" generate="no"/>
 
     <!-- Both classes get a moc-generated qt_metacall() override (Q_OBJECT).
@@ -23,10 +24,9 @@
          usdcc::ui::SidePanel's qualified C++ name (a bare, unqualified
          <object-type name="SidePanel"/> fails to match — shiboken needs the
          enclosing namespaces spelled out). That makes the class land at
-         usdcc.ui.usdcc.ui.SidePanel; visible="no" to flatten that hits a
+         usdcc._ui.usdcc.ui.SidePanel; visible="no" to flatten that hits a
          shiboken codegen bug (undeclared SBK_...IDX in the namespace
-         wrapper), so instead __init__.py re-exports SidePanel at the top
-         level after import — see that file. -->
+         wrapper), so instead ui.py re-exports it as usdcc.ui.SidePanel. -->
     <namespace-type name="usdcc">
         <namespace-type name="ui">
             <!-- Every QObject-derived binding gets generated code reaching

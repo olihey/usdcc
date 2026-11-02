@@ -19,7 +19,6 @@
 #include <QPointer>
 #include <QStandardPaths>
 #include <QSurfaceFormat>
-#include <QTimer>
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -175,11 +174,12 @@ int main(int argc, char** argv) {
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
 
-    // Scripts reach the app's stages, undo history and tools through these
-    // (usdcc.usd / usdcc.app / usdcc.tools, docs/SCRIPTING.md §4) until this
-    // goes out of scope, before the tool set does. ScriptRunner makes each run
-    // one undo step per stage it changes.
-    const usdcc::scripting::AppContextScope scriptingContext({&stageManager, undoManager.get(), toolSet.get()});
+    // Scripts reach the app's stages, undo history, tools and window through
+    // these (usdcc.usd / usdcc.app / usdcc.tools, docs/SCRIPTING.md §4, §8)
+    // until this goes out of scope, before the tool set does. ScriptRunner
+    // makes each run one undo step per stage it changes.
+    const usdcc::scripting::AppContextScope scriptingContext(
+        {&stageManager, undoManager.get(), toolSet.get(), &window});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     window.addSidePanel(new usdcc::scripting::ScriptingSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);
@@ -384,12 +384,13 @@ int main(int argc, char** argv) {
 
     window.show();
 
-    // Once the window is up (and with it the initial stage, if any): the
-    // startup scripts, then each --script, each as one undo step like Debug >
-    // Run Python File. Their output goes to the log.
+    // Once the window is up and its layout settled (so panels the scripts add
+    // stay docked, see MainWindow::layoutSettled()), with the initial stage
+    // open if there is one: the startup scripts, then each --script, each as
+    // one undo step like Debug > Run Python File. Their output goes to the log.
     const QStringList scripts = commandLine.values(scriptOption);
     const bool runStartup = !commandLine.isSet(noStartupScriptsOption);
-    QTimer::singleShot(0, &window, [&python, &scriptRunner, scripts, runStartup]() {
+    QObject::connect(&window, &usdcc::ui::MainWindow::layoutSettled, &window, [&python, &scriptRunner, scripts, runStartup]() {
         usdcc::scripting::runStartupScripts(python, usdcc::scripting::userScriptsFolder(), runStartup);
         for (const QString& script : scripts) {
             if (!python.isAvailable()) {
@@ -398,7 +399,7 @@ int main(int argc, char** argv) {
             }
             scriptRunner.runFile(std::filesystem::path(script.toStdU16String()));
         }
-    });
+    }, Qt::SingleShotConnection);
 
     return app.exec();
 }

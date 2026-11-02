@@ -50,27 +50,22 @@ to enable USD-dependent targets. Until then the app shell builds without it.
 
 ### Python bindings (`usdcc.ui`)
 
-`SidePanel`/`ViewPanel` are exposed to Python via Shiboken6. This requires PySide6
-and Shiboken6 built **from source against usdcc's own vcpkg Qt** — a pip-installed
-PySide6 ships a different, independently-compiled Qt, and loading both in one
-process causes intermittent DLL-load crashes (see
-[docs/PLAN.md](docs/PLAN.md) §6 item 11). Build once with:
+`SidePanel` is exposed to Python via Shiboken6, so scripts can add their own side
+panels (`usdcc.app.add_side_panel()`, [docs/SCRIPTING.md](docs/SCRIPTING.md) §8).
+This requires PySide6 and Shiboken6 built **from source against usdcc's own vcpkg
+Qt**, for OpenUSD's Python. A pip-installed PySide6 ships a different,
+independently-compiled Qt, and loading both in one process causes intermittent
+DLL-load crashes (see [docs/PLAN.md](docs/PLAN.md) §6 item 11). After a first
+`tools/build.ps1`, build it once with:
 
 ```
 tools/build-pyside.ps1
 ```
 
-then point the main configure at it:
-
-```
-cmake -S . -B build -DUSDCC_PYSIDE_INSTALL_PREFIX="external/pyside-setup/build/<...>/install"
-```
-
-(the exact path is printed at the end of `build-pyside.ps1`). Without
-`USDCC_PYSIDE_INSTALL_PREFIX` set, the build falls back to whatever
-PySide6/shiboken6-generator a Python interpreter on `PATH` can import — fine for
-experimenting with the CMake/Shiboken6 wiring itself, but expect the DLL-load
-issue above until you build the matching PySide6.
+It downloads libclang (~700 MB) and pyside-setup and takes 20+ minutes. The result
+lands in `external/pyside-install`, where the next CMake configure finds it
+(`USDCC_PYSIDE_DIR`) and builds `usdcc.ui`. Without it, everything else builds and
+scripts just can't make panels.
 
 ### Python bindings (`usdcc.usd`)
 

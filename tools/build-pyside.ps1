@@ -13,6 +13,10 @@
     one Qt build in the process — hence building PySide6/Shiboken6
     ourselves against the *same* vcpkg Qt.
 
+    It's built for OpenUSD's Python, the one usdcc embeds (docs/SCRIPTING.md
+    section 3.1): the Python3_EXECUTABLE usdcc's build found (build/
+    CMakeCache.txt), unless -Python names another.
+
     This script automates the recipe that was worked out by hand:
       1. Bootstrap the vcpkg build (for Qt + qtpaths6) if not already done.
       2. Fetch a prebuilt libclang (shiboken6's C++ parser) if not present.
@@ -26,11 +30,9 @@
          step doesn't know to copy for a non-official Qt build (ICU, zstd,
          etc. — whatever vcpkg's Qt actually links against).
 
-    Output: external/pyside-install/{PySide6,shiboken6,shiboken6_generator}
-    Point USDCC_PYSIDE_INSTALL_PREFIX (a CMake variable, not used by this
-    script) at external/pyside-setup/build/<...>/install to build usdcc's
-    Shiboken6 bindings against this instead of a pip-installed PySide6 —
-    see src/cpp/ui/python/CMakeLists.txt.
+    Output: external/pyside-install/{PySide6,shiboken6,shiboken6_generator},
+    where usdcc's CMake looks for it (USDCC_PYSIDE_DIR): re-run CMake after
+    this to build the usdcc.ui module (src/cpp/ui/python/CMakeLists.txt).
 
     Known workarounds baked in below, each tied to a specific build failure
     encountered while developing this script:
@@ -46,6 +48,9 @@
         list of third-party DLLs it expects an official Qt build to need;
         vcpkg's Qt has a different (larger) list.
 
+.PARAMETER Python
+    The Python to build for. Default: OpenUSD's, as found by usdcc's build.
+
 .PARAMETER ModuleSubset
     Qt modules to build PySide6 bindings for. Default: Core,Gui,Widgets
     (matches what usdcc actually uses). Rebuilding with a larger subset
@@ -57,6 +62,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$Python,
     [string]$ModuleSubset = "Core,Gui,Widgets"
 )
 
@@ -82,19 +88,38 @@ function Invoke-Checked {
 
 # --- prerequisites ---------------------------------------------------------
 
+if (-not $Python) {
+    $cacheFile = Join-Path $repoRoot 'build/CMakeCache.txt'
+    $cacheMatch = if (Test-Path $cacheFile) { Select-String -Path $cacheFile -Pattern '^Python3_EXECUTABLE:FILEPATH=(.*)$' }
+    if (-not $cacheMatch) { throw "No Python3_EXECUTABLE in $cacheFile. Run tools/build.ps1 first, or pass -Python." }
+    $Python = $cacheMatch.Matches[0].Groups[1].Value
+}
+Write-Host "Building for $Python ($(& $Python -c 'import sys; print(sys.version.split()[0])'))"
+
+# pyside-setup builds with Ninja and cl.exe, so it needs the Visual Studio
+# developer environment when this isn't already running in one.
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+    $vsPath = & $vswhere -products '*' -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $vsPath) { throw 'No Visual Studio with the C++ x64 tools found (vswhere).' }
+    Import-Module (Join-Path $vsPath 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+    Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
+}
+
 if (-not (Test-Path (Join-Path $vcpkgInstalled 'tools/Qt6/bin/qtpaths6.exe'))) {
     throw "vcpkg Qt build not found at $vcpkgInstalled. Run tools/build.ps1 first."
 }
 
 if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
     Write-Host 'Installing ninja (build tool required by pyside-setup)...'
-    Invoke-Checked -FilePath 'python' -ArgumentList @('-m', 'pip', 'install', '--user', 'ninja')
+    Invoke-Checked -FilePath $Python -ArgumentList @('-m', 'pip', 'install', '--user', 'ninja')
+    # Where pip put ninja.exe (with --user, not next to the package).
+    $ninjaBin = & $Python -c "import ninja; print(ninja.BIN_DIR)"
+    $env:PATH = "$ninjaBin;$env:PATH"
 }
-$ninjaScripts = & python -c "import ninja, os; print(os.path.join(os.path.dirname(ninja.__file__), '..', 'Scripts'))"
-$env:PATH = "$ninjaScripts;$env:PATH"
 
 Write-Host 'Installing pyside-setup Python build dependencies...'
-Invoke-Checked -FilePath 'python' -ArgumentList @(
+Invoke-Checked -FilePath $Python -ArgumentList @(
     '-m', 'pip', 'install', '--user', 'packaging', 'ordered-set', 'more-itertools',
     'jaraco.text', 'importlib_metadata', 'importlib_resources', 'tomli', 'platformdirs',
     'wheel', 'setuptools')
@@ -137,7 +162,7 @@ function Invoke-PySideSetupBuild {
     param([Parameter(Mandatory)][string]$InternalBuildType)
     Push-Location $pysideSrcDir
     try {
-        & python setup.py build `
+        & $Python setup.py build `
             --qtpaths="$qtpaths" --cmake="$cmakeExe" --module-subset=$ModuleSubset `
             --limited-api=yes --ignore-git --parallel=$jobs --skip-docs --disable-pyi `
             --reuse-build --internal-build-type=$InternalBuildType
@@ -200,15 +225,18 @@ $extraRuntimeDlls = @(
     'icuin78.dll', 'icuuc78.dll', 'icudt78.dll', 'z.dll', 'double-conversion.dll',
     'pcre2-16.dll', 'zstd.dll', 'libpng16.dll', 'harfbuzz.dll', 'freetype.dll',
     'bz2.dll', 'brotlidec.dll', 'brotlicommon.dll', 'md4c.dll')
+# The generator (shiboken6.exe, which usdcc's build runs) needs them too, for
+# its Qt6Core.dll, and libclang.dll, its C++ parser.
 foreach ($dll in $extraRuntimeDlls) {
     $src = Join-Path $vcpkgInstalled "bin/$dll"
     if (Test-Path $src) {
         Copy-Item -Force $src (Join-Path $pysideInstallDir "PySide6/$dll")
+        Copy-Item -Force $src (Join-Path $pysideInstallDir "shiboken6_generator/$dll")
     }
 }
+Copy-Item -Force (Join-Path $libclangDir 'bin/libclang.dll') (Join-Path $pysideInstallDir 'shiboken6_generator/libclang.dll')
 
 Write-Host "Done. PySide6/shiboken6/shiboken6_generator built against vcpkg's Qt at:"
 Write-Host "  $pysideInstallDir"
 Write-Host ''
-Write-Host 'To build usdcc against this instead of a pip-installed PySide6:'
-Write-Host "  cmake -S . -B build -DUSDCC_PYSIDE_INSTALL_PREFIX=`"$buildDir/install`""
+Write-Host 'Re-run CMake (tools/build.ps1) to build the usdcc.ui module against it.'

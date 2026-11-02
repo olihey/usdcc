@@ -52,6 +52,9 @@ if(USDCC_PYTHON_FOUND)
                 USDCC_PYTHON_HOME="${USDCC_PYTHON_HOME}"
                 USDCC_PYTHON_PACKAGE_ROOT="${USDCC_PYTHON_PACKAGE_ROOT}"
                 USDCC_USD_PYTHON_DIR="${USD_INSTALL}/lib/site-packages")
+    if(USDCC_PYSIDE_FOUND)
+        target_compile_definitions(usdcc_scripting PRIVATE USDCC_PYSIDE_DIR="${USDCC_PYSIDE_DIR}")
+    endif()
     # The usdcc package (usdcc/log.py, ...) must be in build/python before
     # anything embeds the interpreter.
     add_dependencies(usdcc_scripting usdcc_python_package)

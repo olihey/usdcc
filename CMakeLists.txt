@@ -104,6 +104,19 @@ find_package(OpenGL)
 find_package(USD REQUIRED)
 message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
 include(UsdccPython)
+# PySide6 and shiboken6 as tools/build-pyside.ps1 builds them, against vcpkg's
+# Qt for OpenUSD's Python (docs/SCRIPTING.md §8). Without them the usdcc.ui
+# module isn't built and scripts can't make panels; everything else works.
+set(USDCC_PYSIDE_DIR "${CMAKE_SOURCE_DIR}/external/pyside-install"
+    CACHE PATH "PySide6/shiboken6 built against vcpkg's Qt (tools/build-pyside.ps1)")
+if(EXISTS "${USDCC_PYSIDE_DIR}/PySide6/__init__.py" AND EXISTS "${USDCC_PYSIDE_DIR}/shiboken6/__init__.py")
+    set(USDCC_PYSIDE_FOUND TRUE)
+    message(STATUS "PySide6 for usdcc: ${USDCC_PYSIDE_DIR}")
+else()
+    set(USDCC_PYSIDE_FOUND FALSE)
+    message(STATUS "PySide6 for usdcc: none in ${USDCC_PYSIDE_DIR} (run tools/build-pyside.ps1); "
+                   "usdcc.ui and Python-made panels are disabled")
+endif()
 
 # The usdcc Python package lives in build/python/usdcc: the compiled modules
 # (usd.pyd, ...) are built there, and this copies the pure-Python files from

@@ -51,6 +51,11 @@ add_executable(usdcc_python_tests
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+# Python-made panels need the usdcc.ui module, which needs PySide6.
+if(TARGET usdcc_ui_python)
+    target_sources(usdcc_python_tests PRIVATE python_panels_test.cpp)
+    add_dependencies(usdcc_python_tests usdcc_ui_python)
+endif()
 
 foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     # Same reason as the app (see src/cpp/app/CMakeLists.txt): USD's headers ask

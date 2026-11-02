@@ -17,8 +17,9 @@ struct PythonSettings {
     std::vector<std::filesystem::path> paths;
 
     // The build's defaults: OpenUSD's Python, then build/python (the usdcc
-    // package) and OpenUSD's site-packages (pxr). The environment variable
-    // USDCC_PYTHONHOME overrides `home`.
+    // package), OpenUSD's site-packages (pxr) and, if it was built,
+    // USDCC_PYSIDE_DIR (PySide6). The environment variable USDCC_PYTHONHOME
+    // overrides `home`.
     static PythonSettings defaults();
 };
 

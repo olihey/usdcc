@@ -10,12 +10,15 @@
 #include "usdcc/scripting/app_module.h"
 
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/ui/main_window.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <QUndoStack>
 
 #include <array>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -23,15 +26,13 @@ namespace usdcc::scripting {
 
 namespace {
 const AppContext* s_context = nullptr;
-AppContext s_storage;
 }  // namespace
 
-AppContextScope::AppContextScope(const AppContext& context) {
-    s_storage = context;
-    s_context = &s_storage;
+AppContextScope::AppContextScope(const AppContext& context) : m_context(context), m_outer(s_context) {
+    s_context = &m_context;
 }
 
-AppContextScope::~AppContextScope() { s_context = nullptr; }
+AppContextScope::~AppContextScope() { s_context = m_outer; }
 
 const AppContext* currentAppContext() { return s_context; }
 
@@ -52,6 +53,18 @@ StageRefPtr stageFor(long cacheId) {
     if (!stage) throw py::value_error("no open stage with cache id " + std::to_string(cacheId));
     return stage;
 }
+
+usdcc::ui::MainWindow& mainWindow() {
+    if (!context().mainWindow) throw std::runtime_error("the usdcc app has no main window here");
+    return *context().mainWindow;
+}
+
+constexpr std::array<std::pair<Qt::DockWidgetArea, const char*>, 4> kAreaNames = {{
+    {Qt::LeftDockWidgetArea, "left"},
+    {Qt::RightDockWidgetArea, "right"},
+    {Qt::TopDockWidgetArea, "top"},
+    {Qt::BottomDockWidgetArea, "bottom"},
+}};
 
 constexpr std::array<std::pair<ToolKind, const char*>, 4> kToolNames = {{
     {ToolKind::Select, "select"},
@@ -122,6 +135,27 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "undo_manager", []() { return context().undoManager; }, py::return_value_policy::reference,
         "The app's UndoManager.");
+
+    // Qt objects cross as their C++ addresses, which usdcc/app.py turns into
+    // PySide objects and back with shiboken6: this module is pybind11 and
+    // knows nothing of PySide.
+    m.def("main_window_address", []() {
+        return reinterpret_cast<std::uintptr_t>(static_cast<QMainWindow*>(&mainWindow()));
+    });
+    m.def(
+        "add_side_panel",
+        [](std::uintptr_t address, const std::string& areaName) {
+            usdcc::ui::MainWindow& window = mainWindow();
+            for (const auto& [area, name] : kAreaNames) {
+                if (areaName == name) {
+                    // usdcc/app.py checked that it is a usdcc.ui.SidePanel.
+                    window.addSidePanel(reinterpret_cast<usdcc::ui::SidePanel*>(address), area);
+                    return;
+                }
+            }
+            throw py::value_error("no dock area named '" + areaName + "' (left, right, top or bottom)");
+        },
+        py::arg("address"), py::arg("area"));
 
     m.def("tool_names", []() {
         std::vector<std::string> names;

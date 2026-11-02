@@ -1,6 +1,6 @@
 # Scripting — Plan
 
-*Status: phases 1–4 done (see §12); phase 5 to do. Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
+*Status: all five phases done (see §12). Milestone M7 in [PLAN.md](PLAN.md); also covers logging phase 5
 ([LOGGING.md](LOGGING.md) §3.4). Last updated: 2026-11-02.*
 
 ## 1. Goal
@@ -129,10 +129,11 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 | Module | Contents |
 |---|---|
 | `usdcc.usd` | `StageManager` (and `UndoManager` in the app); `stages()`, `current_stage()`, `set_current_stage()`, `open_stage(path)`, `close_stage()`, all as `pxr.Usd.Stage`; `stage_id(stage)`; `selected_paths()`, `select(prims/paths)`; `edit(description)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`, `undo_text()`; `EMBEDDED` |
-| `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()` |
+| `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()`; with PySide6, `main_window()` and `add_side_panel(panel, area)` (§8) |
 | `usdcc.core` | `log(level, category, message)`, the level constants, `set_levels(spec)` (USDCC_LOG's format) |
 | `usdcc.tools` | `tool_names()`, `active_tool()`, `set_active_tool(name)` |
 | `usdcc.log` | The logging bridge (§5) |
+| `usdcc.ui` | `SidePanel`, the base class for panels made in Python (§8; needs PySide6) |
 
 - **Stage functions** default to the current stage and raise `RuntimeError` outside the app.
 - **Prims, `Sdf.Path`s or strings** are all accepted where paths are.
@@ -203,7 +204,8 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 ## 6. Startup scripts and the command line
 
 - Every `*.py` in `%LOCALAPPDATA%/usdcc/scripts/startup/` (`AppLocalDataLocation`) runs once
-  the window is up, in name order (ignoring case), each in its own namespace. A failing one is
+  the window is up and its layout has settled (`MainWindow::layoutSettled()`, §12 phase 5),
+  in name order (ignoring case), each in its own namespace. A failing one is
   logged and the rest still run. They get no undo step of their own (§4.2). That folder's
   parent, `scripts/`, is at the end of `sys.path` for shared modules, so they can't shadow
   `usdcc` or `pxr`. The app creates `startup/` if it's missing; ☰ > *Open Startup Scripts
@@ -257,13 +259,34 @@ added through `MainWindow::addSidePanel()`):
 
 ## 8. Python-made UI (needs PySide)
 
-Only once `tools/build-pyside.ps1` has run and `usdcc.ui` builds:
+Only once `tools/build-pyside.ps1` has run, and CMake then finds it in `USDCC_PYSIDE_DIR`
+(default `external/pyside-install`) and builds `usdcc.ui`:
 
-- `usdcc.app.main_window()` returns the main window through `shiboken6.wrapInstance`.
-- A Python `usdcc.ui.SidePanel` subclass can be added with `usdcc.app.add_side_panel(panel)`,
-  which docks it and lists it in the View menu (`MainWindow` gains `addSidePanel()`).
-- The same PySide must be built for the same Python as §3.1; `build-pyside.ps1` is changed to
-  use it.
+- `usdcc.app.main_window()` returns the main window as a PySide6 `QMainWindow`, through
+  `shiboken6.wrapInstance`. Scripts can add menus, actions and dialogs with it.
+- A Python `usdcc.ui.SidePanel` subclass is docked with `usdcc.app.add_side_panel(panel,
+  area="right")`. It appears in the View menu, and the window takes ownership of it.
+  `MainWindow::addSidePanel()` handles panels added after start-up:
+  - the panel goes back where the saved layout last had it (`QMainWindow::restoreDockWidget`,
+    by its object name, which is the title it was made with), or to `area` if the layout
+    doesn't know it;
+  - it's added to the View menu above the toolbars;
+  - it leaves the menu when it's deleted.
+- PySide is built for the same Python as §3.1 (OpenUSD's, which `build-pyside.ps1` reads from
+  usdcc's CMake cache) and against vcpkg's Qt. Its folder is on the embedded `sys.path`.
+
+```python
+# A startup script: %LOCALAPPDATA%/usdcc/scripts/startup/notes_panel.py
+from PySide6 import QtWidgets
+import usdcc.app, usdcc.ui
+
+class NotesPanel(usdcc.ui.SidePanel):
+    def __init__(self):
+        super().__init__("Notes")
+        self.setWidget(QtWidgets.QPlainTextEdit())
+
+usdcc.app.add_side_panel(NotesPanel(), "left")
+```
 
 Without PySide, `main_window()` and `add_side_panel()` raise an `ImportError` saying what to
 build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
@@ -276,7 +299,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 | **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
 | **3. Scripting panel** *(done)* | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** *(done)* | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
-| **5. PySide integration** *(needs PySide)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
+| **5. PySide integration** *(done)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
 
 Phases 1 → 2 → 3 in order; 4 needs 2; 5 only needs 1, plus a PySide build.
 
@@ -444,3 +467,58 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
   stage, both startup scripts run (the failure logged with its traceback). The `--script`
   sees the command-line stage as current, and its output is in the log. With
   `--no-startup-scripts` the folder is skipped and `--script` still runs.
+
+### Phase 5
+
+- **PySide6 for OpenUSD's Python.** `tools/build-pyside.ps1` now:
+  - builds for the `Python3_EXECUTABLE` in usdcc's CMake cache (OpenUSD's 3.12), or `-Python`;
+  - enters the Visual Studio developer environment itself when `cl.exe` isn't on PATH;
+  - finds pip's `ninja.exe` (`ninja.BIN_DIR`; the old path guess was wrong for `--user`
+    installs);
+  - copies `libclang.dll` and vcpkg's Qt dependencies next to `shiboken6.exe`, which otherwise
+    can't start.
+
+  The result is in `external/pyside-install` (PySide 6.11.1, matching vcpkg's Qt).
+- **CMake**: the top level sets `USDCC_PYSIDE_DIR` (default `external/pyside-install`) and
+  `USDCC_PYSIDE_FOUND`. `src/cpp/ui/python` builds only with it and uses `USDCC_PYTHON_*`; the
+  stale PATH lookup (Python 3.11) and the pip-PySide fallback are gone. The generator gets
+  `LLVM_INSTALL_DIR`, so it finds Clang's headers. With PySide found, its folder is on the
+  embedded `sys.path` (`PythonSettings::defaults()`).
+- **`usdcc.ui` is now `ui.py` over `_ui.pyd`** (typesystem package `usdcc._ui`), like
+  `usd.py`/`_usd.pyd`. `ui.py` imports PySide6 first (its DLL folders), imports `_ui` inside
+  `Tf.WindowsImportWrapper` (OpenUSD's DLLs), and re-exports `SidePanel`. `usdcc/__init__.py`
+  no longer imports anything, so `import usdcc.log` at start-up doesn't load PySide.
+- **`usdcc.app.main_window()` and `add_side_panel()`** (§8), through two new `_usdcc_app`
+  functions that take and return addresses (`AppContext` gains `mainWindow`).
+  `add_side_panel()` checks the type and area, then parents the panel to the window from
+  Python, which hands its ownership to the window.
+- **`MainWindow::addSidePanel()` after start-up**:
+  - it uses `restoreDockWidget()` once `restoreLayout()` has run;
+  - it shows the panel when the window is already visible;
+  - it inserts the panel into the View menu above the toolbars and removes it when the panel
+    is destroyed;
+  - it warns about two panels with the same name.
+
+  `saveLayout()` logs the panels it saved at debug level.
+- **`MainWindow::layoutSettled()`**, emitted 300 ms after the window was shown and stopped
+  resizing. Found by trying it in the app: Qt keeps re-applying a restored layout while a
+  window opening maximized gets its final size (`QMainWindowLayout`'s `restoredState`, dropped
+  150 ms after the last resize). A dock widget added before then is taken out of the layout
+  again and shown at (0, 0) when made visible. Startup scripts and `--script` now run on this
+  signal instead of right after `show()`. Panels added from the Scripting panel are never
+  affected.
+- **`AppContextScope`s nest**, so the tests can give a window of their own.
+- **Tests** ([python_panels_test.cpp](../tests/python_panels_test.cpp), built when `usdcc.ui`
+  is):
+  - `main_window()`;
+  - a Python subclass added on the left, after the shown window settled: it stays docked and
+    visible, survives its script's namespace, and is in the View menu;
+  - a plain `QDockWidget` and an unknown area are refused;
+  - after a save and a new window, the panel comes back on the left although it asks for the
+    bottom;
+  - deleting it removes it from the menu.
+
+  The window's layout goes to Qt's test-mode config folder.
+- **Checked in the app**: a startup script adds a panel; a `--script` moves it to the right;
+  the next session puts it back on the right, shown and in the View menu (screenshot taken).
+  This was also the first look at the Scripting panel in the running app.

@@ -64,6 +64,9 @@ PythonSettings PythonSettings::defaults() {
     settings.home = std::filesystem::u8path(USDCC_PYTHON_HOME);
     if (auto home = environmentPath("USDCC_PYTHONHOME")) settings.home = *home;
     settings.paths = {std::filesystem::u8path(USDCC_PYTHON_PACKAGE_ROOT), std::filesystem::u8path(USDCC_USD_PYTHON_DIR)};
+#ifdef USDCC_PYSIDE_DIR
+    settings.paths.push_back(std::filesystem::u8path(USDCC_PYSIDE_DIR));  // PySide6, shiboken6
+#endif
 #endif
     return settings;
 }

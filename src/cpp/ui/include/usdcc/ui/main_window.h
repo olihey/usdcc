@@ -2,7 +2,10 @@
 
 #include <QList>
 #include <QMainWindow>
+#include <QTimer>
 
+class QAction;
+class QMenu;
 class QMenuBar;
 
 namespace ads {
@@ -47,11 +50,29 @@ public:
     // The Log side panel; always exists.
     LogSidePanel* logPanel() const;
 
-    // Docks a side panel from outside usdcc_ui (the Scripting panel; later
-    // plugins) in `area` and lists it in the View menu. Call before
-    // buildViewMenu() and restoreLayout(): a saved layout then places it
-    // like the built-in ones, by its objectName.
+    // Docks a side panel from outside usdcc_ui (the Scripting panel, panels
+    // made in Python) in `area`, lists it in the View menu, and takes
+    // ownership of it. A saved layout places it by its objectName, like the
+    // built-in ones: either through restoreLayout(), for a panel added before
+    // it, or, for one added later (from a script), by putting it back where
+    // the layout last had it instead of in `area`. A panel that is deleted
+    // leaves the menu. Adding the same panel again does nothing.
+    //
+    // Between show() and layoutSettled(), don't add one: see there.
     void addSidePanel(SidePanel* panel, Qt::DockWidgetArea area);
+
+    // Whether layoutSettled() has been emitted.
+    bool isLayoutSettled() const { return m_layoutSettled; }
+
+Q_SIGNALS:
+    // Once, after the window was shown and has stopped resizing for a moment.
+    // Until then Qt may still re-apply the layout restoreLayout() restored
+    // (it does so while a window opening maximized gets its final size), which
+    // drops dock widgets added in between; so code that adds panels after
+    // start-up (startup scripts) waits for this.
+    void layoutSettled();
+
+public:
 
     // Restores the saved window geometry/dock layout. Must be called by the
     // composition root (main.cpp) only after *every* panel for this session
@@ -74,6 +95,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void saveLayout() const;
@@ -83,6 +106,13 @@ private:
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
     LogSidePanel* m_logPanel = nullptr;
+    bool m_layoutRestored = false;
+    bool m_layoutSettled = false;
+    QTimer m_settleTimer;
+    // Set by buildViewMenu(); panels added later go in before
+    // m_viewMenuPanelsEnd (the separator above the toolbars, if any).
+    QMenu* m_viewMenu = nullptr;
+    QAction* m_viewMenuPanelsEnd = nullptr;
 };
 
 }  // namespace usdcc::ui

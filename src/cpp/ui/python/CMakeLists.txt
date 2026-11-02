@@ -1,93 +1,30 @@
-# usdcc.ui Python bindings (Shiboken6) — milestone M1.
+# usdcc.ui Python bindings (Shiboken6) — milestone M1, used by M7's
+# Python-made side panels (docs/SCRIPTING.md §8).
 #
 # PySide6/Shiboken6's own Qt binaries are a *different compiled build* of Qt
 # than vcpkg's (different vendor, different build flags) even at the same
 # version number. Loading both in one process makes Qt/QObject-derived
 # symbols resolve against whichever copy happened to load first, which
 # produces "DLL load failed: the specified procedure could not be found" at
-# random points — hit and confirmed while building this. There is no
-# reliable way to bind vcpkg-Qt-derived classes (SidePanel, ViewPanel) for
-# use from a pip-installed PySide6 as a result.
+# random points — hit and confirmed while building this. A pip-installed
+# PySide6 can't be used for that reason.
 #
-# The fix is to build PySide6/Shiboken6 from source against usdcc's own
-# vcpkg Qt, so there is exactly one Qt build in the process. That custom
-# build's CMake package config lives under USDCC_PYSIDE_INSTALL_PREFIX
-# (see tools/build-pyside.ps1, which produces
-# external/pyside-setup/build/<...>/install). Falls back to discovering a
-# pip-installed PySide6/shiboken6-generator on PATH if that variable isn't
-# set, for anyone who wants to experiment before running the from-source
-# build — but expect the ABI mismatch above until they do.
-# Used below to work around a Debug-only link failure — see the
-# target_link_options() call after add_library() for why — regardless of
-# which of the two branches below resolves the actual PySide6/Shiboken6 CMake
-# packages, since both ultimately sit on top of whatever plain "python3"/
-# "python" tools/build-pyside.ps1 and pip itself already run against.
-find_program(USDCC_UI_PYTHON_VERSION_PROBE NAMES python3 python PATHS ENV PATH NO_DEFAULT_PATH)
-if(USDCC_UI_PYTHON_VERSION_PROBE)
-    execute_process(
-        COMMAND ${USDCC_UI_PYTHON_VERSION_PROBE} -c
-                "import sysconfig; print(sysconfig.get_config_var('VERSION') or '')"
-        OUTPUT_VARIABLE _usdcc_ui_python_version
-        RESULT_VARIABLE _usdcc_ui_python_version_result
-        ERROR_QUIET)
-    if(_usdcc_ui_python_version_result EQUAL 0)
-        string(STRIP "${_usdcc_ui_python_version}" _usdcc_ui_python_version)
-        string(REPLACE "." "" _usdcc_ui_python_version_nodot "${_usdcc_ui_python_version}")
-    endif()
+# So PySide6/Shiboken6 are built from source against usdcc's own vcpkg Qt,
+# for OpenUSD's Python (the one the app embeds): tools/build-pyside.ps1,
+# which leaves them in USDCC_PYSIDE_DIR (see the top-level CMakeLists.txt).
+# Without that build this module is skipped.
+if(NOT USDCC_PYSIDE_FOUND OR NOT USDCC_PYTHON_FOUND)
+    message(STATUS "usdcc.ui Python bindings: skipped (needs OpenUSD's Python and tools/build-pyside.ps1)")
+    return()
 endif()
 
-if(USDCC_PYSIDE_INSTALL_PREFIX)
-    list(APPEND CMAKE_PREFIX_PATH "${USDCC_PYSIDE_INSTALL_PREFIX}/lib/cmake/Shiboken6Tools")
-    list(APPEND CMAKE_PREFIX_PATH "${USDCC_PYSIDE_INSTALL_PREFIX}/lib/cmake/Shiboken6")
-    list(APPEND CMAKE_PREFIX_PATH "${USDCC_PYSIDE_INSTALL_PREFIX}/lib/cmake/PySide6")
-    set(_pyside6_dir "${USDCC_PYSIDE_INSTALL_PREFIX}/PySide6")
-    set(_shiboken6_dir "${USDCC_PYSIDE_INSTALL_PREFIX}/shiboken6")
-else()
-    # Deliberately does NOT reuse the top-level Python_EXECUTABLE: vcpkg's
-    # toolchain redirects find_package(Python) to its own bundled python3
-    # tool (for pybind11's build-time codegen), which won't have
-    # PySide6/shiboken6 installed. Bindings need whatever interpreter the
-    # developer actually installed PySide6 into, hence the independent,
-    # PATH-only lookup below.
-    find_program(
-        USDCC_BINDINGS_PYTHON
-        NAMES python3 python
-        PATHS ENV PATH
-        NO_DEFAULT_PATH)
-
-    if(NOT USDCC_BINDINGS_PYTHON)
-        message(STATUS "usdcc.ui Python bindings: no python interpreter found on PATH; skipping.")
-        return()
-    endif()
-
-    execute_process(
-        COMMAND
-            ${USDCC_BINDINGS_PYTHON} -c
-            "import shiboken6_generator, shiboken6, PySide6, os, sys
-print(os.path.dirname(shiboken6_generator.__file__))
-print(os.path.dirname(shiboken6.__file__))
-print(os.path.dirname(PySide6.__file__))"
-        OUTPUT_VARIABLE _usdcc_bindings_probe
-        RESULT_VARIABLE _usdcc_bindings_probe_result
-        ERROR_QUIET)
-
-    if(NOT _usdcc_bindings_probe_result EQUAL 0)
-        message(STATUS "usdcc.ui Python bindings: PySide6 / shiboken6-generator not importable by "
-                        "${USDCC_BINDINGS_PYTHON}; skipping (pip install pyside6 shiboken6-generator, "
-                        "or set USDCC_PYSIDE_INSTALL_PREFIX to a from-source build, to enable).")
-        return()
-    endif()
-
-    string(STRIP "${_usdcc_bindings_probe}" _usdcc_bindings_probe)
-    string(REPLACE "\n" ";" _usdcc_bindings_probe "${_usdcc_bindings_probe}")
-    list(GET _usdcc_bindings_probe 0 _shiboken6_generator_dir)
-    list(GET _usdcc_bindings_probe 1 _shiboken6_dir)
-    list(GET _usdcc_bindings_probe 2 _pyside6_dir)
-
-    list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_generator_dir}/lib/cmake/Shiboken6Tools")
-    list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_dir}/lib/cmake/Shiboken6")
-    list(APPEND CMAKE_PREFIX_PATH "${_pyside6_dir}/lib/cmake/PySide6")
-endif()
+set(_shiboken6_generator_dir "${USDCC_PYSIDE_DIR}/shiboken6_generator")
+set(_shiboken6_dir "${USDCC_PYSIDE_DIR}/shiboken6")
+set(_pyside6_dir "${USDCC_PYSIDE_DIR}/PySide6")
+list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_generator_dir}/lib/cmake/Shiboken6Tools")
+list(APPEND CMAKE_PREFIX_PATH "${_shiboken6_dir}/lib/cmake/Shiboken6")
+list(APPEND CMAKE_PREFIX_PATH "${_pyside6_dir}/lib/cmake/PySide6")
+string(REPLACE "." "" _usdcc_ui_python_version_nodot "${USDCC_PYTHON_VERSION}")
 
 find_package(Shiboken6Tools REQUIRED)
 find_package(Shiboken6 REQUIRED)
@@ -119,7 +56,7 @@ set(_shiboken_include_dirs
     ${_qt_gui_includes}
     ${_qt_widgets_includes}
     ${_ads_includes}
-    ${Python_INCLUDE_DIRS}
+    "${USDCC_PYTHON_INCLUDE_DIR}"
     "${_pyside6_dir}/include"
     "${_pyside6_dir}/include/QtCore"
     "${_pyside6_dir}/include/QtGui"
@@ -134,21 +71,28 @@ set(_bindings_header "${CMAKE_CURRENT_SOURCE_DIR}/bindings.h")
 set(_typesystem_file "${CMAKE_CURRENT_SOURCE_DIR}/typesystem.xml")
 set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
-# Filenames are shiboken6's own naming convention for a `package="usdcc.ui"`
+# Filenames are shiboken6's own naming convention for a `package="usdcc._ui"`
 # typesystem with a `usdcc::ui::SidePanel` object-type: verified empirically
 # by running shiboken6 once and inspecting its output, not documented
 # anywhere authoritative. Re-run by hand if typesystem.xml grows new classes
 # and the build starts complaining about missing generated files.
 set(_generated_sources
-    "${_gen_dir}/usdcc/ui/usdcc_wrapper.cpp"
-    "${_gen_dir}/usdcc/ui/usdcc_ui_wrapper.cpp"
-    "${_gen_dir}/usdcc/ui/usdcc_ui_sidepanel_wrapper.cpp"
-    "${_gen_dir}/usdcc/ui/ui_module_wrapper.cpp")
+    "${_gen_dir}/usdcc/_ui/usdcc_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/usdcc_ui_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/usdcc_ui_sidepanel_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/_ui_module_wrapper.cpp")
+
+# libclang's own headers, which shiboken6 otherwise can't find (it warns that
+# parse errors may follow); tools/build-pyside.ps1 leaves them here.
+set(_shiboken_env "")
+if(EXISTS "${CMAKE_SOURCE_DIR}/external/libclang/lib/clang")
+    set(_shiboken_env ${CMAKE_COMMAND} -E env "LLVM_INSTALL_DIR=${CMAKE_SOURCE_DIR}/external/libclang")
+endif()
 
 add_custom_command(
     OUTPUT ${_generated_sources}
     COMMAND
-        Shiboken6::shiboken6 --generator-set=shiboken --enable-parent-ctor-heuristic
+        ${_shiboken_env} $<TARGET_FILE:Shiboken6::shiboken6> --generator-set=shiboken --enable-parent-ctor-heuristic
         --enable-return-value-heuristic --avoid-protected-hack -std=c++17
         --compiler=${_shiboken_compiler} ${_shiboken_include_flags} -T${PYSIDE_TYPESYSTEMS}
         --output-directory=${_gen_dir} ${_bindings_header} ${_typesystem_file}
@@ -158,12 +102,13 @@ add_custom_command(
     COMMENT "Generating usdcc.ui Python bindings (Shiboken6)"
     VERBATIM)
 
-# Output layout: build/python/usdcc/ui.pyd (+ a hand-rolled __init__.py) so
-# `import usdcc.ui` works with build/python on PYTHONPATH.
+# Output layout: build/python/usdcc/_ui.pyd, behind src/python/usdcc/ui.py
+# (which sets up the DLL folders it needs first), so `import usdcc.ui` works
+# with build/python on PYTHONPATH.
 set(_python_package_dir "${CMAKE_BINARY_DIR}/python/usdcc")
 
 add_library(usdcc_ui_python MODULE ${_generated_sources})
-target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${_gen_dir}/usdcc/ui")
+target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${_gen_dir}/usdcc/_ui")
 # Shiboken's generated wrappers use the standard "#define protected public"
 # trick to reach protected members of the wrapped classes. MSVC's STL treats
 # redefining access-specifier keywords as a hard error unless this is set.
@@ -195,13 +140,11 @@ endif()
 # own headers — those embed a plain `#pragma comment(lib,"python312.lib")`
 # regardless of build config (see src/cpp/app/CMakeLists.txt's comment on the
 # exact same issue for the usdcc executable). Same fix here.
-if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
-    target_link_libraries(usdcc_ui_python PRIVATE "${Python3_LIBRARY}")
-endif()
+target_link_libraries(usdcc_ui_python PRIVATE "${USDCC_PYTHON_LIBRARY}")
 set_target_properties(
     usdcc_ui_python
     PROPERTIES
-        OUTPUT_NAME "ui"
+        OUTPUT_NAME "_ui"
         PREFIX ""
         SUFFIX ".pyd"
         LIBRARY_OUTPUT_DIRECTORY "${_python_package_dir}"
