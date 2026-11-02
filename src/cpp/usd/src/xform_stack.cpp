@@ -126,6 +126,20 @@ std::optional<size_t> XformStack::add(UsdGeomXformOp::Type type, size_t index, U
     return target;
 }
 
+std::optional<size_t> XformStack::addExisting(const TfToken& attrName, size_t index) const {
+    if (!m_xformable || !UsdGeomXformOp::IsXformOp(attrName)) return std::nullopt;
+    const UsdGeomXformOp op(m_xformable.GetPrim().GetAttribute(attrName));
+    if (!op) return std::nullopt;
+    std::vector<UsdGeomXformOp> stack = ops();
+    for (const UsdGeomXformOp& existing : stack) {
+        if (existing.GetOpName() == op.GetOpName()) return std::nullopt;
+    }
+    const size_t target = std::min(index, stack.size());
+    stack.insert(stack.begin() + static_cast<std::ptrdiff_t>(target), op);
+    if (!setOrder(stack)) return std::nullopt;
+    return target;
+}
+
 bool XformStack::addPivot(size_t index) const {
     std::vector<UsdGeomXformOp> stack = ops();
     if (index >= stack.size()) return false;

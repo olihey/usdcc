@@ -10,6 +10,7 @@
 #include "usdcc/usd/property_categorizer.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/xform_stack.h"
 
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/kind/registry.h>
@@ -34,6 +35,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <algorithm>
 #include <functional>
 #include <set>
 #include <utility>
@@ -55,6 +57,21 @@ constexpr auto kAuthoredOnlyKey = "AttributeEditor/authoredOnly";
 constexpr auto kShowHiddenKey = "AttributeEditor/showHidden";
 
 QString qs(const std::string& s) { return QString::fromStdString(s); }
+
+// The layers other than the edit target that hold an opinion for `attr`,
+// strongest first — what keeps an attribute alive that removing its op could
+// not delete (see XformStack::remove()).
+std::vector<SdfLayerHandle> otherDefiningLayers(const UsdAttribute& attr) {
+    const SdfLayerHandle target = attr.GetStage()->GetEditTarget().GetLayer();
+    std::vector<SdfLayerHandle> layers;
+    for (const SdfPropertySpecHandle& spec : attr.GetPropertyStack()) {
+        const SdfLayerHandle layer = spec ? spec->GetLayer() : SdfLayerHandle();
+        if (layer && layer != target && std::find(layers.begin(), layers.end(), layer) == layers.end()) {
+            layers.push_back(layer);
+        }
+    }
+    return layers;
+}
 
 PropertyEditor* readOnlyText(const QString& text) {
     PropertyEditor* editor = properties::createPropertyEditor(SdfValueTypeNames->String);
@@ -280,8 +297,8 @@ void AttributesViewPanel::rebuild() {
             }
             Row row = buildRow(property, category);
             row.section = section;
-            if (category.key == "transform") {
-                row.row->setNote(tr("not in stack"));  // an xformOp:* attribute xformOpOrder doesn't use
+            if (category.key == "transform" && UsdGeomXformOp::IsXformOp(property.GetName())) {
+                setUpUnusedOp(row);
             }
             section->addRow(row.row);
             m_rows.push_back(row);
@@ -314,6 +331,41 @@ void AttributesViewPanel::buildTransformStack(const UsdPrim& prim, CategorySecti
         m_rows.push_back(row);
         inStack.insert(opRow.attrName);
     }
+}
+
+void AttributesViewPanel::setUpUnusedOp(const Row& row) {
+    const UsdAttribute attr = row.property.As<UsdAttribute>();
+    if (!attr) return;
+    QString note = tr("not in stack");
+    QString toolTip = tr("Not listed in xformOpOrder, so USD ignores it: it has no effect on the transform.");
+    const std::vector<SdfLayerHandle> layers = otherDefiningLayers(attr);
+    if (!layers.empty()) {
+        // U+00B7 middle dot, as UTF-8 bytes (no /utf-8 source charset here).
+        note += QString::fromUtf8(" \xC2\xB7 ") + tr("from %1").arg(qs(layers.front()->GetDisplayName()));
+        if (layers.size() > 1) note += QStringLiteral(" +%1").arg(layers.size() - 1);
+        toolTip += QStringLiteral("\n\n") +
+                   tr("Defined in other layers than the edit target, so it can't be deleted from here:");
+        for (const SdfLayerHandle& layer : layers) {
+            toolTip += QStringLiteral("\n    ") + qs(layer->GetIdentifier());
+        }
+    }
+    toolTip += QStringLiteral("\n\n") + tr("Right-click > Add to Stack to use it again.");
+    row.row->setNote(note, 0, toolTip);
+    row.row->setUnused(true);
+
+    const TfToken name = attr.GetName();
+    row.row->setExtraMenu([this, name](QMenu* menu) {
+        menu->addSeparator();
+        menu->addAction(tr("Add to Stack"), this, [this, name]() {
+            const UsdPrim prim = currentPrim();
+            if (!prim) return;
+            // At the end of xformOpOrder, like "+ Add" with no target op: applied first.
+            m_undoManager->apply(currentStage(), tr("Add %1 to Stack").arg(qs(name.GetString())), [&]() {
+                const XformStack stack(prim);
+                return stack.addExisting(name, stack.ops().size()).has_value();
+            });
+        });
+    });
 }
 
 void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* layout) {

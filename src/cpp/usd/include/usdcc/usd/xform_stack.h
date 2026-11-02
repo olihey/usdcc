@@ -46,6 +46,13 @@ public:
                               PXR_NS::UsdGeomXformOp::Precision precision = PXR_NS::UsdGeomXformOp::PrecisionDouble,
                               const PXR_NS::TfToken& suffix = PXR_NS::TfToken()) const;
 
+    // Puts an existing xformOp:* attribute that xformOpOrder doesn't list (one
+    // left behind by remove(), or authored that way) back into the stack at
+    // `index` (clamped to the end), keeping its value. Returns the op's index;
+    // nullopt if `attrName` isn't a transform op attribute of this prim or is
+    // already in the stack.
+    std::optional<size_t> addExisting(const PXR_NS::TfToken& attrName, size_t index) const;
+
     // Wraps the op at `index` in a pivot: a translate:pivot op before it and
     // its !invert! inverse after it, so it is applied about the pivot point.
     // Starts at zero, so the composed transform doesn't change.

@@ -626,8 +626,12 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
     Identity, Add Pivot Around, Remove, Bake, Convert.
   - **Undo:** every action is one undo step.
   - Every xformable prim gets the section, even under Authored Only, since it is where
-    ops are added. `xformOp:*` attributes missing from the order still show, marked
-    "not in stack".
+    ops are added. `xformOp:*` attributes missing from the order still show, dimmed
+    (they have no effect) and marked "not in stack". When layers other than the edit
+    target define the attribute, which is why removing its op could not delete it, the
+    note names the strongest one ("not in stack · from render_default.usd"), and the
+    tooltip lists them all. Right-click > Add to Stack puts the attribute back at the
+    end of `xformOpOrder`, keeping its value (`XformStack::addExisting()`).
 - **Reordering is an in-widget drag** (grip, drop line, move on release) rather than
   `QDrag`, since rows only move within their own list.
 - **Fixed along the way:** reordering changes only `xformOpOrder`'s *value*, which USD

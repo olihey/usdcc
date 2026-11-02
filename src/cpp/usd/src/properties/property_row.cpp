@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
@@ -96,13 +97,25 @@ bool PropertyRow::eventFilter(QObject* watched, QEvent* event) {
 
 void PropertyRow::setLabelToolTip(const QString& toolTip) { m_label->setToolTip(toolTip); }
 
-void PropertyRow::setNote(const QString& note, int fixedWidth) {
+void PropertyRow::setNote(const QString& note, int fixedWidth, const QString& toolTip) {
     m_note->setText(note);
-    m_note->setToolTip(note);
+    m_note->setToolTip(toolTip.isEmpty() ? note : toolTip);
     m_note->setVisible(!note.isEmpty());
     if (fixedWidth > 0) {
         usdcc::ui::scaled::fixedWidth(m_note, fixedWidth);
     }
+}
+
+void PropertyRow::setUnused(bool unused) {
+    if (!unused) {
+        setGraphicsEffect(nullptr);  // deletes the effect
+        return;
+    }
+    // An opacity effect rather than per-widget styling: it dims the label,
+    // every kind of editor (several paint themselves) and the note alike.
+    auto* effect = new QGraphicsOpacityEffect(this);
+    effect->setOpacity(0.5);
+    setGraphicsEffect(effect);
 }
 
 void PropertyRow::setUnauthored(bool unauthored) {

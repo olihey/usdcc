@@ -34,7 +34,8 @@ public:
     void setLabelToolTip(const QString& toolTip);
     // Muted text after the editor (the data-type gallery shows the C++ type
     // there). A fixed width keeps the editors of neighbouring rows aligned.
-    void setNote(const QString& note, int fixedWidth = 0);
+    // The tooltip defaults to the note itself.
+    void setNote(const QString& note, int fixedWidth = 0, const QString& toolTip = QString());
     // Full property path, for the context menu's "Copy Property Path".
     void setPropertyPath(const QString& path) { m_propertyPath = path; }
     // An extra control after the editor (e.g. a relationship's "Select" button).
@@ -47,6 +48,10 @@ public:
     void setTargeted(bool targeted);
     // Adds entries to the row's context menu (after the standard ones).
     void setExtraMenu(std::function<void(QMenu*)> populate) { m_extraMenu = std::move(populate); }
+
+    // Dims the whole row: the property exists but has no effect (e.g. an
+    // xformOp:* attribute that xformOpOrder doesn't list). It stays editable.
+    void setUnused(bool unused);
 
     void setUnauthored(bool unauthored);
     void setAnimated(bool animated);

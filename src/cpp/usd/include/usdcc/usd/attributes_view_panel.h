@@ -98,6 +98,9 @@ private:
     void buildTransformStack(const PXR_NS::UsdPrim& prim, properties::CategorySection* section,
                              std::set<PXR_NS::TfToken>& inStack);
     Row buildRow(const PXR_NS::UsdProperty& property, const PropertyCategory& category);
+    // An xformOp:* attribute xformOpOrder doesn't list: dimmed, a note naming
+    // the layer that keeps it alive, and a context-menu "Add to Stack".
+    void setUpUnusedOp(const Row& row);
     properties::CategorySection* makeSection(const QString& key, const QString& title);
     void onStageObjectsChanged(const StageChanges& changes);
     void processPendingChanges();

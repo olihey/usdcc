@@ -1,5 +1,5 @@
 // XformStack: add (unique suffixes, positions, identity values), move,
-// remove (with the attribute-deletion rules), pivot, rename, reset,
+// remove (with the attribute-deletion rules), addExisting, pivot, rename, reset,
 // resetXformStack, bake and convert — each keeping or changing the composed
 // transform exactly as it should.
 #include "test_harness.h"
@@ -167,4 +167,29 @@ USDCC_TEST(xform_stack) {
     CHECK(ls.remove(0), "remove an op defined in a weaker layer");
     CHECK(ls.ops().empty(), "out of the order");
     CHECK(lx.GetPrim().HasAttribute(TfToken("xformOp:translate")), "attribute kept: the weaker layer defines it");
+
+    // ... and it can be put back, value and all.
+    CHECK(ls.addExisting(TfToken("xformOp:translate"), 0) == size_t(0), "add the leftover attribute back");
+    CHECK(joined(names(ls)) == "xformOp:translate", "back in the order: %s", joined(names(ls)).c_str());
+    GfVec3d restored;
+    lx.GetPrim().GetAttribute(TfToken("xformOp:translate")).Get(&restored);
+    CHECK(restored == GfVec3d(1, 0, 0), "value kept");
+    CHECK(!ls.addExisting(TfToken("xformOp:translate"), 0), "an op already in the stack isn't added twice");
+    lx.GetPrim().CreateAttribute(TfToken("notAnOp"), SdfValueTypeNames->Double);
+    CHECK(!ls.addExisting(TfToken("notAnOp"), 0), "a non-xformOp attribute is refused");
+    CHECK(!ls.addExisting(TfToken("xformOp:rotateX"), 0), "a missing attribute is refused");
+
+    // Inserted where asked, clamped to the end.
+    UsdGeomXform ax = UsdGeomXform::Define(stage, SdfPath("/AddExisting"));
+    ax.AddTranslateOp();
+    ax.AddScaleOp();
+    ax.GetPrim().CreateAttribute(TfToken("xformOp:rotateY"), SdfValueTypeNames->Double).Set(30.0);
+    XformStack as(ax.GetPrim());
+    CHECK(as.addExisting(TfToken("xformOp:rotateY"), 1) == size_t(1), "insert in the middle");
+    CHECK(joined(names(as)) == "xformOp:translate, xformOp:rotateY, xformOp:scale", "order: %s",
+          joined(names(as)).c_str());
+    UsdGeomXform bx = UsdGeomXform::Define(stage, SdfPath("/AddExistingEnd"));
+    bx.AddTranslateOp();
+    bx.GetPrim().CreateAttribute(TfToken("xformOp:scale"), SdfValueTypeNames->Double3);
+    CHECK(XformStack(bx.GetPrim()).addExisting(TfToken("xformOp:scale"), 99) == size_t(1), "index clamped to the end");
 }
