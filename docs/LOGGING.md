@@ -336,7 +336,7 @@ Each phase ends with something usable and verified.
 | **2. Qt and OpenUSD bridges** *(done)* | `QtMessageBridge`, `TfDiagnosticBridge`, start-up order (§6); the `StageOpener` error mark and better failure dialog | Tf and Qt mapping tests, including worker threads. Opening a broken `.usda` names the error. No console needed to see Tf messages |
 | **3. Log panel** *(done)* | `LogModel`, `LogSidePanel` replacing the stand-in, filters, search, details tooltip, follow mode, error badge; Debug > Emit Test Messages (C++/Qt/Tf part) | Every test message shows correctly. A 10 000-message burst does not freeze the UI. Saved layouts still restore the panel |
 | **4. Native stream capture** *(done)* | `NativeStreamCapture`, off-switch, Debug-build tee | `printf` and `TF_DEBUG` output show in the panel. No hang with a flood of output or at shutdown |
-| **5. Python** | `PYBIND11_EMBEDDED_MODULE(_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
+| **5. Python** *(done as part of SCRIPTING.md phase 1)* | `PYBIND11_EMBEDDED_MODULE(_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
 
 Phases 1–3 make the panel useful on their own. Phase 4 is independent of 3. Phase 5 needs the
 embedded interpreter.
