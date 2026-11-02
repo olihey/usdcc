@@ -9,8 +9,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QToolBar>
-#include <QTextEdit>
 
+#include "usdcc/core/log.h"
+#include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
@@ -70,17 +71,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     theme::applyToDockManager(m_dockManager);
     setCentralWidget(m_dockManager);
 
-    // Stand-in proving SidePanel + layout persistence work end to end;
-    // replaced by a real LogSidePanel in a later milestone (M8). The
-    // equivalent ViewPanel stand-in was retired once M3/M4 gave the app real
-    // ViewPanel subclasses (Viewport/Outliner/Attributes) that prove the
-    // same thing — the composition root (main.cpp) establishes the center
-    // dock area itself once USD is available, since a placeholder here would
-    // just be a second, unused "empty center area" when it isn't.
-    auto* sidePanelStandIn = new SidePanel("Log", this);
-    sidePanelStandIn->setWidget(new QTextEdit(sidePanelStandIn));
-    addDockWidget(Qt::BottomDockWidgetArea, sidePanelStandIn);
-    m_sidePanels.append(sidePanelStandIn);
+    // The application log (docs/LOGGING.md). Its objectName stays "Log", the
+    // name the stand-in it replaced was saved under, so existing layouts
+    // still place it. The composition root (main.cpp) establishes the center
+    // dock area itself once USD is available.
+    m_logPanel = new LogSidePanel(this);
+    addDockWidget(Qt::BottomDockWidgetArea, m_logPanel);
+    m_sidePanels.append(m_logPanel);
 
     // Deliberately not calling restoreLayout() here — see its declaration in
     // main_window.h for why. The composition root calls it once every panel
@@ -88,6 +85,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
+
+LogSidePanel* MainWindow::logPanel() const { return m_logPanel; }
 
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
@@ -103,12 +102,15 @@ void MainWindow::restoreLayout() {
     }
     // Toolbars and side panels, which are all created by now (see this
     // method's declaration), keyed by their objectNames.
-    if (settings.contains(kWindowStateKey)) {
-        restoreState(settings.value(kWindowStateKey).toByteArray(), kWindowStateVersion);
+    if (settings.contains(kWindowStateKey) &&
+        !restoreState(settings.value(kWindowStateKey).toByteArray(), kWindowStateVersion)) {
+        USDCC_LOG_WARNING("usdcc.layout", "Ignored the saved toolbar and side panel layout (older version)");
     }
-    if (settings.contains(kDockLayoutKey)) {
-        m_dockManager->restoreState(settings.value(kDockLayoutKey).toByteArray());
+    if (settings.contains(kDockLayoutKey) &&
+        !m_dockManager->restoreState(settings.value(kDockLayoutKey).toByteArray())) {
+        USDCC_LOG_WARNING("usdcc.layout", "Could not restore the saved panel layout");
     }
+    USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
 }
 
 void MainWindow::saveLayout() const {

@@ -1,5 +1,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
+#include "usdcc/core/log.h"
+
 #include <pxr/base/gf/math.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec2i.h>
@@ -91,6 +93,8 @@ void HydraViewportWindow::ensureEngine() {
         m_context->makeCurrent(this);
         m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
         configureEngine();
+        USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}",
+                       m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()));
 
         // Legacy (fixed-function) GL, used only to draw M5's gizmo overlays
         // via simple immediate-mode glBegin/glVertex calls — Storm itself
@@ -132,7 +136,11 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
         return;
     }
     m_context->makeCurrent(this);
-    m_engine->SetRendererPlugin(pluginId);
+    if (m_engine->SetRendererPlugin(pluginId)) {
+        USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}", m_engine->GetRendererDisplayName(pluginId));
+    } else {
+        USDCC_LOG_WARNING("usdcc.viewport", "Could not switch the viewport to renderer {}", pluginId.GetString());
+    }
     renderNow();
 }
 

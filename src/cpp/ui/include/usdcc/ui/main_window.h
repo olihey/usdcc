@@ -15,13 +15,12 @@ class WidgetWindowAgent;
 
 namespace usdcc::ui {
 
+class LogSidePanel;
 class SidePanel;
 class TitleBar;
 
-// QMainWindow shell hosting the Qt Advanced Docking System. Panel
-// registration currently instantiates a stand-in SidePanel to prove the
-// docking wiring end to end; a real LogSidePanel lands in a later milestone
-// (M8). The composition root (main.cpp) adds the real, USD-dependent
+// QMainWindow shell hosting the Qt Advanced Docking System, with the side
+// panels (so far the LogSidePanel) docked around it. The composition root (main.cpp) adds the real, USD-dependent
 // ViewPanel subclasses (Viewport/Outliner/Attributes — see docs/PLAN.md
 // section 4 and section 7) directly via dockManager(), including
 // establishing the central dock area itself.
@@ -44,6 +43,9 @@ public:
     // than MainWindow needing to know about a specific StageManager instance
     // (or any particular set of panels) itself — see main.cpp.
     ads::CDockManager* dockManager() const;
+
+    // The Log side panel; always exists.
+    LogSidePanel* logPanel() const;
 
     // Restores the saved window geometry/dock layout. Must be called by the
     // composition root (main.cpp) only after *every* panel for this session
@@ -74,6 +76,7 @@ private:
     QWK::WidgetWindowAgent* m_windowAgent = nullptr;
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
+    LogSidePanel* m_logPanel = nullptr;
 };
 
 }  // namespace usdcc::ui

@@ -8,6 +8,9 @@
 #include <QString>
 #include <QTimer>
 
+#include <string>
+#include <vector>
+
 class QProgressDialog;
 class QThread;
 class QWidget;
@@ -49,9 +52,11 @@ public:
 
 Q_SIGNALS:
     void busyChanged(bool busy);
+    // The failure dialog's Show Log button was clicked.
+    void showLogRequested();
 
 private:
-    void onLoaded(const PXR_NS::UsdStageRefPtr& usdStage);
+    void onLoaded(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<std::string>& errors);
     void waitForFirstFrame(const StageRefPtr& stage);
     void showDialog();
     void finish();

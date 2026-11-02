@@ -211,6 +211,16 @@ QListView::indicator:checked {
     image: url(:/usdcc/theme/check.png);
 }
 
+/* Partly checked: a tree node with only some children checked. */
+QCheckBox::indicator:indeterminate,
+QTreeView::indicator:indeterminate,
+QTableView::indicator:indeterminate,
+QListView::indicator:indeterminate {
+    background: #3d8bfd;
+    border-color: #3d8bfd;
+    image: url(:/usdcc/theme/check-partial.png);
+}
+
 QSlider::groove:horizontal {
     height: 4px;
     background: #141416;

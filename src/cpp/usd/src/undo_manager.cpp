@@ -1,5 +1,7 @@
 #include "usdcc/usd/undo_manager.h"
 
+#include "usdcc/core/log.h"
+
 #include <QUndoCommand>
 #include <QUndoStack>
 
@@ -16,12 +18,23 @@ public:
     LayerSnapshotCommand(const PXR_NS::SdfLayerHandle& layer, std::string before, std::string after,
                          const QString& description)
         : QUndoCommand(description), m_layer(layer), m_before(std::move(before)), m_after(std::move(after)) {}
-    void undo() override { if (m_layer) m_layer->ImportFromString(m_before); }
+    void undo() override {
+        USDCC_LOG_INFO("usdcc.undo", "Undo: {}", text().toStdString());
+        restore(m_before);
+    }
     void redo() override {
         if (m_first) { m_first = false; return; }
-        if (m_layer) m_layer->ImportFromString(m_after);
+        USDCC_LOG_INFO("usdcc.undo", "Redo: {}", text().toStdString());
+        restore(m_after);
     }
 private:
+    void restore(const std::string& contents) {
+        if (m_layer && !m_layer->ImportFromString(contents)) {
+            USDCC_LOG_ERROR("usdcc.undo", "Could not restore layer {} for \"{}\"", m_layer->GetIdentifier(),
+                            text().toStdString());
+        }
+    }
+
     PXR_NS::SdfLayerHandle m_layer;
     std::string m_before;
     std::string m_after;
@@ -100,6 +113,7 @@ bool UndoManager::endEdit(const StageRefPtr& stage) {
     std::string after;
     session->layer->ExportToString(&after);
     if (after == session->before) return false;
+    USDCC_LOG_DEBUG("usdcc.undo", "Recorded: {}", session->description.toStdString());
     e->stack->push(new LayerSnapshotCommand(session->layer, std::move(session->before), std::move(after),
                                             session->description));
     return true;

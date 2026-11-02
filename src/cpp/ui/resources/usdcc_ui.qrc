@@ -4,6 +4,8 @@
         <file alias="dock.qss">theme/dock.qss</file>
         <file alias="check.png">theme/check.png</file>
         <file alias="check@2x.png">theme/check@2x.png</file>
+        <file alias="check-partial.png">theme/check-partial.png</file>
+        <file alias="check-partial@2x.png">theme/check-partial@2x.png</file>
         <file alias="chevron-down.png">theme/chevron-down.png</file>
         <file alias="chevron-down@2x.png">theme/chevron-down@2x.png</file>
         <file alias="close.png">theme/close.png</file>

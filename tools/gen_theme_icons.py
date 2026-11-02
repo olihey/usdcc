@@ -24,6 +24,8 @@ WHITE = (255, 255, 255)
 ICONS = {
     "chevron-down": (1.4, LIGHT, [[(4.5, 6.5), (8, 10), (11.5, 6.5)]]),
     "check": (1.8, WHITE, [[(3.5, 8.5), (6.5, 11.5), (12.5, 4.5)]]),
+    # A partly checked box (e.g. a category tree node with some children hidden).
+    "check-partial": (1.8, WHITE, [[(4.5, 8), (11.5, 8)]]),
     "close": (1.4, LIGHT, [[(5, 5), (11, 11)], [(11, 5), (5, 11)]]),
     "close-disabled": (1.4, DIM, [[(5, 5), (11, 11)], [(11, 5), (5, 11)]]),
     # On the focused dock tab's accent-blue fill, where LIGHT washes out.

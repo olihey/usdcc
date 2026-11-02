@@ -8,13 +8,14 @@
 class QBoxLayout;
 class QComboBox;
 class QMenu;
-class QToolButton;
 
 namespace usdcc::usd {
 class StageManager;
 }
 
 namespace usdcc::ui {
+
+class PanelMenuButton;
 
 // Base class for panels living inside the Qt Advanced Docking System
 // container (ViewportViewPanel, OutlinerViewPanel, AttributesViewPanel —
@@ -126,12 +127,11 @@ protected:
 
 private Q_SLOTS:
     void onStageComboChanged(int index);
-    void showOptionsMenu();
 
 private:
     usdcc::usd::StageManager* m_stageManager;
     usdcc::usd::StageRefPtr m_stage;
-    QToolButton* m_optionsButton;
+    PanelMenuButton* m_optionsButton;
     QComboBox* m_stageCombo;
 
     // Kept alive for as long as this panel should keep receiving

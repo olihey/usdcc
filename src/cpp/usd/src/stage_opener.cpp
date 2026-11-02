@@ -4,15 +4,20 @@
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
+#include "usdcc/core/log.h"
+
 #include <pxr/usd/usd/stage.h>
 
 #include <QApplication>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QProgressDialog>
+#include <QPushButton>
+#include <QStringList>
 #include <QThread>
 
 #include <climits>
+#include <exception>
 #include <memory>
 #include <string>
 
@@ -74,31 +79,58 @@ void StageOpener::open(const QString& path) {
 
     // QThread::create() rather than QtConcurrent: no extra Qt module needed.
     // The result travels in a shared_ptr the lambda keeps alive.
-    auto result = std::make_shared<PXR_NS::UsdStageRefPtr>();
+    struct Result {
+        PXR_NS::UsdStageRefPtr stage;
+        std::vector<std::string> errors;
+    };
+    auto result = std::make_shared<Result>();
     const std::string identifier = path.toStdString();
     m_thread = QThread::create([result, identifier]() {
+        usdcc::core::setThreadName("stage-loader");
         try {
-            *result = StageManager::loadUsdStage(identifier);
+            result->stage = StageManager::loadUsdStage(identifier, &result->errors);
+        } catch (const std::exception& e) {
+            USDCC_LOG_ERROR("usdcc.stage", "Opening {} threw an exception: {}", identifier, e.what());
+            result->errors.push_back(e.what());
+            result->stage.Reset();
         } catch (...) {
-            result->Reset();
+            USDCC_LOG_ERROR("usdcc.stage", "Opening {} threw an exception", identifier);
+            result->stage.Reset();
         }
     });
     m_thread->setParent(this);
     connect(m_thread, &QThread::finished, this, [this, result]() {
         m_thread->deleteLater();
         m_thread = nullptr;
-        onLoaded(*result);
+        onLoaded(result->stage, result->errors);
     });
     m_thread->start();
 }
 
-void StageOpener::onLoaded(const PXR_NS::UsdStageRefPtr& usdStage) {
+void StageOpener::onLoaded(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<std::string>& errors) {
     if (!usdStage) {
         const QString path = m_path;
         finish();
-        QMessageBox::warning(m_dialogParent, tr("Open USD Stage"), tr("Could not open %1.").arg(path));
+        // The first error says why; all of them (also in the log) under Show Details.
+        QMessageBox box(QMessageBox::Warning, tr("Open USD Stage"), tr("Could not open %1.").arg(path),
+                        QMessageBox::Ok, m_dialogParent);
+        if (!errors.empty()) {
+            box.setInformativeText(QString::fromStdString(errors.front()));
+        }
+        if (errors.size() > 1) {
+            QStringList all;
+            for (const std::string& error : errors) all << QString::fromStdString(error);
+            box.setDetailedText(all.join(QStringLiteral("\n\n")));
+        }
+        QPushButton* showLog = box.addButton(tr("Show Log"), QMessageBox::ActionRole);
+        box.exec();
+        if (box.clickedButton() == showLog) {
+            Q_EMIT showLogRequested();
+        }
         return;
     }
+
+    USDCC_LOG_DEBUG("usdcc.stage", "Loaded {} in {} ms", m_path.toStdString(), m_elapsed.elapsed());
 
     // From here on the UI thread is going to be busy (registering the stage,
     // building its panels, then the viewport's first frame), so make sure the
@@ -150,10 +182,11 @@ void StageOpener::finish() {
     m_firstFrameTimeout.stop();
     disconnect(m_firstFrameConnection);
     m_firstFrameConnection = {};
-    if (m_dialog) {
-        m_dialog->hide();
-        m_dialog->deleteLater();
-    }
+    // Deleted at once, not deleteLater(): a failed open goes on to show a modal
+    // message box, whose event loop doesn't run deferred deletes, and
+    // QProgressDialog's own force-show timer would bring the hidden dialog back
+    // over the message box after a few seconds, blocking it.
+    delete m_dialog.data();
     setBusy(false);
 }
 

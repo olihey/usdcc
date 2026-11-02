@@ -1,6 +1,6 @@
 # usdcc — Project Plan
 
-*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-11-01.*
+*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-11-02.*
 
 ## 1. Overview
 
@@ -895,7 +895,10 @@ several of them rather than as a discrete phase.
 ### M8 — Layer Editing & Logging
 - **Goal:** low-level layer inspection/editing and centralized diagnostics.
 - Deliverables: `USDASidePanel` (USDA text view/edit with explicit apply);
-  `LogSidePanel` (filter/search) backed by the shared logging framework (§6.7).
+  `LogSidePanel` (filter/search) backed by the shared logging framework (§6 item 7).
+  The logging half is planned in [LOGGING.md](LOGGING.md): one hub fed by usdcc C++,
+  Qt, OpenUSD (`TfDiagnosticMgr` delegate), Python and native stdout/stderr, plus a
+  log file on disk.
 - Exit criteria: a manual USDA edit applied through the panel round-trips correctly
   and is undoable; log messages from C++, Python, and plugins all appear in one place.
 
@@ -969,7 +972,7 @@ These run throughout, not as discrete milestones:
 | M5 Editing Tools & Gizmos | Exit criteria met and verified — `SelectTool` (GPU-picking click-to-select via `UsdImagingGLEngine::TestIntersection`), `MoveTool` (axis/plane/free-constrained translate), `RotateTool` (axis-ring rotate), and `ScaleTool` (axis/uniform scale) all live in the new `usdcc_tools` target and are wired into `HydraViewportWindow`/`ViewportViewPanel`'s new "Tool:" combo (see §6 item 15 for the design). Verified through the real, wired-up code paths — synthetic mouse-drag events sent to the actual `HydraViewportWindow` for Move/Rotate, a hand-built `ToolContext` calling `ScaleTool` directly for Scale — confirming the resulting `xformOp:translate`/`rotateXYZ`/`scale` values, plus a screenshot showing the gizmo rendering correctly (no black-viewport or corruption regression) on the moved/rotated/scaled prim. One real bug was found and fixed along the way: the verification harness itself crashed inside ADS (`qtadvanceddocking-qt6.dll`, access violation) from calling `setCurrentDockWidget()` on a `CDockAreaWidget*` captured *before* `MainWindow::restoreLayout()`, which can rebuild dock areas from a saved layout and leave that earlier pointer dangling — fixed by fetching the dock area live via `CDockWidget::dockAreaWidget()` at the point of use instead of caching it. Known gaps: multi-selection gizmo editing is unsupported (no gizmo drawn), and `RotateTool`'s object-space rings (see §6 item 17) are only exact for a single-axis rotation |
 | M6 Undo/Redo Framework | In progress — a per-stage Qt undo manager snapshots the current edit-target layer for attribute edits, outliner sibling reordering and (as of M13 phase 1) gizmo drags, which use edit sessions so a whole drag is one step; Edit > Undo/Redo is wired, and the viewport now redraws on every stage change so undo/redo shows immediately. Rename/activate edits and script command integration remain |
 | M7 Scripting & Python Extensibility | Not started |
-| M8 Layer Editing & Logging | Not started |
+| M8 Layer Editing & Logging | In progress — logging planned in [LOGGING.md](LOGGING.md) (five phases; phase 5, Python, needs M7's embedded interpreter). Phase 1 done: `usdcc_core` is now a shared library holding the `LogHub`, `USDCC_LOG_*` macros, a rotating log file in `%LOCALAPPDATA%/usdcc/logs`, first log calls in stage/viewport/undo/layout code. Phase 2 done: OpenUSD diagnostics (`TfDiagnosticBridge`) and Qt messages (`QtMessageBridge`) reach the log, a console sink for Debug builds, and the open-stage failure dialog names the error. Phase 3 done: the `LogSidePanel` replaces the stand-in (filters, search, details, follow mode, unseen-error title, Show Log from the failure dialog, Debug > Emit Test Log Messages). `USDASidePanel` not planned yet |
 | M9 Plugin System | Not started |
 | M10 Dialogs & Settings | In progress — persistent UI scaling and View-menu controls implemented; settings and Info dialogs remain |
 | M11 Packaging & Deployment | Not started |

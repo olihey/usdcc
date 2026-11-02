@@ -1,5 +1,9 @@
 #include "usdcc/usd/stage_manager.h"
 
+#include "usdcc/core/log.h"
+
+#include <pxr/base/tf/errorMark.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageCache.h>
 #include <pxr/usd/usdUtils/stageCache.h>
@@ -12,8 +16,28 @@ StageRefPtr StageManager::openStage(const std::string& identifier) {
     return adoptStage(loadUsdStage(identifier));
 }
 
-PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier) {
-    return PXR_NS::UsdStage::Open(identifier);
+PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier,
+                                                  std::vector<std::string>* errors) {
+    PXR_NS::UsdStageRefPtr stage;
+    std::string firstError;
+    {
+        // Only to read the errors: the mark isn't cleared, so they still
+        // reach the log (TfDiagnosticBridge) when it goes out of scope.
+        PXR_NS::TfErrorMark mark;
+        stage = PXR_NS::UsdStage::Open(identifier);
+        for (auto it = mark.GetBegin(); it != PXR_NS::TfDiagnosticMgr::GetInstance().GetErrorEnd(); ++it) {
+            if (firstError.empty()) firstError = it->GetCommentary();
+            if (errors) errors->push_back(it->GetCommentary());
+        }
+    }
+    if (!stage) {
+        if (firstError.empty()) {
+            USDCC_LOG_ERROR("usdcc.stage", "Could not open stage {}", identifier);
+        } else {
+            USDCC_LOG_ERROR("usdcc.stage", "Could not open stage {}: {}", identifier, firstError);
+        }
+    }
+    return stage;
 }
 
 StageRefPtr StageManager::adoptStage(const PXR_NS::UsdStageRefPtr& usdStage) {
@@ -44,6 +68,7 @@ StageRefPtr StageManager::registerStage(const PXR_NS::UsdStageRefPtr& usdStage) 
     PXR_NS::UsdUtilsStageCache::Get().Insert(usdStage);
     auto stage = std::make_shared<Stage>(usdStage);
     m_stages.push_back(stage);
+    USDCC_LOG_INFO("usdcc.stage", "Opened stage {}", usdStage->GetRootLayer()->GetIdentifier());
     stageOpened(stage);
 
     if (!m_currentStage) {
@@ -61,6 +86,7 @@ void StageManager::closeStage(const StageRefPtr& stage) {
 
     PXR_NS::UsdUtilsStageCache::Get().Erase(stage->usdStage());
     m_stages.erase(it);
+    USDCC_LOG_INFO("usdcc.stage", "Closed stage {}", stage->usdStage()->GetRootLayer()->GetIdentifier());
     stageClosed(stage);
 
     if (m_currentStage == stage) {

@@ -2,7 +2,9 @@
 
 #include <memory>
 
+#include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/qt_message_bridge.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/view_panel_registry.h"
 
@@ -13,13 +15,18 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
+#include <QStandardPaths>
 #include <QSurfaceFormat>
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
+#include "usdcc/core/console_log_sink.h"
+#include "usdcc/core/file_log_sink.h"
+#include "usdcc/core/log.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
+#include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
 #include "usdcc/tools/tool_set.h"
@@ -27,11 +34,50 @@
 #include "usdcc/usd/stage_names.h"
 #include "usdcc/usd/stage_opener.h"
 #include "usdcc/usd/stages_menu.h"
+#include "usdcc/usd/tf_diagnostic_bridge.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
+namespace {
+// Detaches a sink from the hub when it goes out of scope. Declared right after
+// QApplication in main(), so it outlives the window and the stage manager and
+// the log file still gets what they log while being destroyed.
+struct ScopedLogSink {
+    std::shared_ptr<usdcc::core::LogSink> sink;
+    ~ScopedLogSink() {
+        if (sink) usdcc::core::LogHub::instance().removeSink(sink.get());
+    }
+};
+}  // namespace
+
 int main(int argc, char** argv) {
+    // Logging comes first, so nothing logged during start-up is lost: records
+    // wait in the hub's ring buffer until the log file (below) attaches and
+    // replays them. USDCC_LOG sets levels, e.g. "debug" or
+    // "info,usdcc.viewport=debug,usd=warning" (docs/LOGGING.md §3.1).
+    usdcc::core::setThreadName("main");
+    if (const QString spec = qEnvironmentVariable("USDCC_LOG"); !spec.isEmpty()) {
+        if (!usdcc::core::LogHub::instance().configureLevels(spec.toStdString())) {
+            USDCC_LOG_WARNING("usdcc.app", "Ignored parts of USDCC_LOG=\"{}\" that aren't valid", spec.toStdString());
+        }
+    }
+    // Then the bridges, before anything can emit: OpenUSD's diagnostics and
+    // Qt's messages (docs/LOGGING.md §6). Both outlive everything below.
+    usdcc::usd::TfDiagnosticBridge usdDiagnostics;
+    usdcc::ui::QtMessageBridge qtMessages;
+    // With the bridges in, neither OpenUSD nor Qt prints anything itself any
+    // more; this keeps it visible in a terminal and the debugger.
+#ifdef NDEBUG
+    const bool logToConsole = !qEnvironmentVariableIsEmpty("USDCC_LOG_STDERR");
+#else
+    const bool logToConsole = true;
+#endif
+    ScopedLogSink console{logToConsole ? std::make_shared<usdcc::core::ConsoleLogSink>() : nullptr};
+    if (console.sink) {
+        usdcc::core::LogHub::instance().addSink(console.sink);
+    }
+
     // Must be set before QApplication is constructed (QSurfaceFormat docs).
     // HgiGL_ScopedStateHolder (Hydra/Storm's save-and-restore-caller's-GL-
     // state wrapper, used so Storm can share a GL context with a foreign
@@ -54,6 +100,20 @@ int main(int argc, char** argv) {
     QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
 
     QApplication app(argc, argv);
+
+    // Needs the application object for its folder (AppLocalDataLocation).
+    const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/logs";
+    ScopedLogSink fileLog{usdcc::core::FileLogSink::openInDirectory(logDir.toStdU16String())};
+    QString logFilePath;
+    if (fileLog.sink) {
+        usdcc::core::LogHub::instance().addSink(fileLog.sink);
+        const auto& path = static_cast<usdcc::core::FileLogSink&>(*fileLog.sink).path();
+        logFilePath = QString::fromStdU16String(path.generic_u16string());
+        USDCC_LOG_INFO("usdcc.app", "Logging to {}", logFilePath.toStdString());
+    } else {
+        USDCC_LOG_WARNING("usdcc.app", "Could not create a log file in {}", logDir.toStdString());
+    }
+
     usdcc::ui::theme::apply(app);
 
     // Declared before `window` (and so destroyed after it, per C++'s
@@ -70,6 +130,7 @@ int main(int argc, char** argv) {
     usdcc::ui::ViewPanelRegistry panelTypes;
 
     usdcc::ui::MainWindow window;
+    window.logPanel()->setLogFile(logFilePath);
 
     // The editing tools and which is active, shared by every viewport and
     // driven by the tool rail / options bar in the main window's layout (the
@@ -168,6 +229,8 @@ int main(int argc, char** argv) {
     auto* stageOpener = new usdcc::usd::StageOpener(&stageManager, &window);
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openStageAction,
                      [openStageAction](bool busy) { openStageAction->setEnabled(!busy); });
+    QObject::connect(stageOpener, &usdcc::usd::StageOpener::showLogRequested, window.logPanel(),
+                     &usdcc::ui::LogSidePanel::showLatest);
     QObject::connect(openStageAction, &QAction::triggered, &window, [stageOpener, &window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
@@ -242,6 +305,13 @@ int main(int argc, char** argv) {
         dialog->raise();
         dialog->activateWindow();
     });
+    // Checks for the Log panel (docs/LOGGING.md §7): one message of every
+    // level from every source, and a large burst.
+    debugMenu->addSeparator();
+    QAction* testMessagesAction = debugMenu->addAction(QObject::tr("Emit &Test Log Messages"));
+    QObject::connect(testMessagesAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogTestMessages(); });
+    QAction* burstAction = debugMenu->addAction(QObject::tr("Emit 10 000 Log &Messages"));
+    QObject::connect(burstAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogBurst(10000); });
 
     // Every panel for this session must exist before restoring — see
     // MainWindow::restoreLayout()'s declaration for why.

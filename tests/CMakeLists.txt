@@ -11,6 +11,8 @@ add_executable(usdcc_tests
     test_harness.cpp
     test_main.cpp
     categorizer_spike_test.cpp
+    log_bridges_test.cpp
+    log_test.cpp
     move_tool_test.cpp
     property_categorizer_test.cpp
     rotate_tool_test.cpp
@@ -29,6 +31,7 @@ add_executable(usdcc_ui_tests
     test_harness.h
     test_harness.cpp
     ui_test_main.cpp
+    log_panel_test.cpp
     scale_controller_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
@@ -39,6 +42,7 @@ foreach(_usdcc_test usdcc_tests usdcc_ui_tests)
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
         target_link_libraries(${_usdcc_test} PRIVATE "${Python3_LIBRARY}")
     endif()
+    usdcc_deploy_core_library(${_usdcc_test})
     add_test(NAME ${_usdcc_test} COMMAND ${_usdcc_test})
 endforeach()
 

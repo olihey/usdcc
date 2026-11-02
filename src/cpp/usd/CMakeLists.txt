@@ -4,6 +4,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
+    include/usdcc/usd/tf_diagnostic_bridge.h
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
@@ -11,6 +12,7 @@ add_library(usdcc_usd STATIC
     src/stage.cpp
     src/stage_manager.cpp
     src/stage_names.cpp
+    src/tf_diagnostic_bridge.cpp
     src/value_type_info.cpp
     src/xform_math.cpp
     src/xform_stack.cpp
@@ -33,6 +35,7 @@ add_subdirectory(python)
 add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
+    include/usdcc/usd/log_test_messages.h
     include/usdcc/usd/outliner_view_panel.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
@@ -55,6 +58,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/undo_manager.h
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
+    src/log_test_messages.cpp
     src/outliner_view_panel.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp

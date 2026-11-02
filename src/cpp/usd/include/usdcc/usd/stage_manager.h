@@ -43,8 +43,11 @@ public:
     // The slow half of openStage(): just UsdStage::Open(), touching no
     // StageManager state, so it is safe to run on any thread. Returns a null
     // pointer if the stage failed to open. The result is not yet registered;
-    // pass it to adoptStage() on the manager's own thread.
-    static PXR_NS::UsdStageRefPtr loadUsdStage(const std::string& identifier);
+    // pass it to adoptStage() on the manager's own thread. The errors OpenUSD
+    // raised while opening go to the log; with `errors`, their messages are
+    // also copied there, so a caller can tell the user why it failed.
+    static PXR_NS::UsdStageRefPtr loadUsdStage(const std::string& identifier,
+                                               std::vector<std::string>* errors = nullptr);
 
     // The other half of openStage(): registers a stage that loadUsdStage()
     // opened (or returns the existing Stage already wrapping it), fires
