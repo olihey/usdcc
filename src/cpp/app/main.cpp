@@ -37,6 +37,7 @@
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/current_stage_ui.h"
+#include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -214,6 +215,11 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::AttributesViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    panelTypes.add(QStringLiteral("dependencies"), QObject::tr("Dependencies"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::DependenciesViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
 
     // The stage passed on the command line, if any. Without one (or if it

@@ -13,6 +13,8 @@ add_executable(usdcc_tests
     test_main.cpp
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
+    dependencies_test.cpp
+    dependency_files.h
     log_bridges_test.cpp
     log_capture_test.cpp
     log_test.cpp
@@ -37,6 +39,8 @@ add_executable(usdcc_ui_tests
     attributes_rename_test.cpp
     composition_edit_test.cpp
     current_stage_test.cpp
+    dependencies_panel_test.cpp
+    dependency_files.h
     log_panel_test.cpp
     outliner_icons_test.cpp
     outliner_context_menu_test.cpp

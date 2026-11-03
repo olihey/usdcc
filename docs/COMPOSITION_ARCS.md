@@ -1,6 +1,6 @@
 # Composition Arcs — Plan
 
-Status: **phases 1 and 2 done** (§8), with the recommended choices in §6. Phase 3 (the Dependencies panel) is still to do.
+Status: **all three phases done** (§8), with the recommended choices in §6.
 
 See and edit a prim's composition arcs (references, payloads, inherits, specializes, variant
 sets): read-only in the Outliner's context menu, editable in a new Attribute Editor section,
@@ -134,7 +134,7 @@ An internal arc ("this file") and a missing asset have it disabled.
 5. **Reordering arcs** (strength order) by dragging, like the transform stack? Recommended:
    **later**. Order matters but is rarely changed by hand.
 
-## 7. A tool for every asset the stage uses: yes
+## 7. A tool for every asset the stage uses: yes (done)
 
 A **Dependencies** view panel (a ViewPanel type in the registry, like the Outliner, on the
 Stages menu). It lists every external file the stage uses, grouped by file:
@@ -155,10 +155,28 @@ Stages menu). It lists every external file the stage uses, grouped by file:
 - **Missing files** in red at the top, so a broken stage shows at a glance.
 - Refreshes on the stage's change notices (resyncs), coalesced like the Outliner.
 
+As built (`dependencies.h` in usdcc_usd, `DependenciesViewPanel` in usdcc_usd_ui, the
+"dependencies" panel type):
+
+- `stageDependencies()` walks the stage with `compositionArcs()` rather than
+  `UsdUtilsExtractExternalReferences()`: it gives the prims too, and reads unloaded payloads and
+  missing files from the specs. Sublayers come from every used layer's sublayer list. The files
+  inside an unloaded payload aren't listed, as that would mean opening it.
+- Files are told apart by where they resolve (or, when missing, where they were looked for), so
+  two spellings of one file are one row. An instance's contents count once per prototype, under
+  its first instance's paths, so a heavily instanced stage isn't walked instance by instance.
+- Columns: File, Type, Used by, State (missing, n unloaded), Path. Each file's prims are its
+  children (a sublayer's are the layers that list it); double-click selects them.
+- Right-click: Select Prims Using It, Open as Stage (not for an asset attribute's file), Reveal
+  in Explorer, Copy Path, Copy Asset Path, and for a payload Load Everywhere / Unload Everywhere
+  (one undo step each).
+- Options: Show Asset Attributes (saved; a UDIM set counts as found), Refresh. Refreshes 100 ms
+  after the last change notice, and on value changes only while asset attributes are shown.
+
 ## 8. Phases
 
 | Phase | Work | Tests |
 |---|---|---|
 | **1. See them** *(done)* | `compositionArcs()` (`composition_arcs.h`, usdcc_usd: from the prim stack's list ops, so unloaded payloads and missing files are there; a layer that's open already, such as an anonymous one, counts as found); the Composition submenu (`prim_context_menu.cpp`); Open as Stage through `setOpenStageHandler()`, which `main.cpp` sets (`StageOpener`, or the open stage's viewport brought forward); Copy Asset Path | `compositionArcs()` on a stage with each arc type, nested references, an unloaded payload, a missing file; the submenu's entries |
 | **2. Edit them** *(done)* | `AttributesViewPanel::buildCompositionSection()`, with `prim_actions::addArc()`/`changeArc()`/`removeArc()` (the entry found in the edit target's list op, replaced in place so it keeps its position and custom data). Each reference or payload is a file row (asset field anchored to the edit target, open ↗ and remove ×), then Prim, Time Offset and Time Scale rows, and Loaded for a payload; inherits and specializes are a path row; variants a picker. Read-only arcs (other layers, nested) come after "From other layers". The section's + adds a reference or payload (file dialog, relative path) or an inherit or specialize (path dialog). The arcs are part of the panel's layout signature, so any arc change rebuilds the section | Each edit and its undo; relative paths; an arc from a sublayer read-only |
-| **3. Dependencies panel** | §7 | Grouping, prims per file, missing and unloaded files, the actions |
+| **3. Dependencies panel** *(done)* | §7: `stageDependencies()` and `DependenciesViewPanel` | Grouping, prims per file, missing and unloaded files, the actions |
