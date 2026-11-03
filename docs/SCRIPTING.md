@@ -44,8 +44,8 @@ These facts constrain the plan (checked in this checkout, 2026-11-02):
 - **Stages cross into Python as cache ids.** Every stage is in `UsdUtilsStageCache`, and
   Python gets the real `Usd.Stage` through OpenUSD's own bindings (PLAN.md §5 item 11). That
   stays: nothing passes a `UsdStageRefPtr` through pybind11.
-- **Undo works per stage, by layer snapshot.** `UndoManager::beginEdit/endEdit` snapshot one
-  stage's edit-target layer and nest by depth. A script may touch several stages, including
+- **Undo works per stage, by recorded layer changes.** `UndoManager::beginEdit/endEdit` record
+  the changes to one stage's edit-target layer (PLAN.md §6 item 36) and nest by depth. A script may touch several stages, including
   one it opens itself.
 - **OpenUSD calls into Python from its own threads** (Python notice listeners and Python
   plugins, guarded by `TfPyLock`). A main thread that keeps the GIL would deadlock them.

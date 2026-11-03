@@ -109,9 +109,9 @@ These land first because every later phase depends on them.
 
 Extend `UndoManager` with two sets of calls:
 
-- **Explicit sessions:** `beginEdit(stage, description)` snapshots the edit-target
-  layer, and `endEdit()` pushes one `LayerSnapshotCommand` if anything changed.
-  `cancelEdit()` restores the snapshot.
+- **Explicit sessions:** `beginEdit(stage, description)` starts recording the
+  edit-target layer's changes, and `endEdit()` pushes one `LayerEditCommand` if anything
+  changed. `cancelEdit()` reverts what was recorded.
 - **One-shot calls:** the existing `apply()` stays for discrete edits, built on the same
   begin/end pair.
 
@@ -122,8 +122,21 @@ The tools are Qt-free, so the viewport opens and closes the session around the t
 press and release. `ToolResult` gets a flag such as `startedEdit`, so that a press that
 only *selects* does not leave an empty session behind.
 
-Whole-layer snapshots stay acceptable for now. A follow-up (§9) replaces them with
-spec-level inverse edits before large scenes become a real target.
+**Recording (replaced whole-layer snapshots).** The first version exported the whole
+layer to text before and after every edit. On a 31 MB crate layer that took about 2 s
+per export (129 MB of text), so every edit froze the UI for seconds and each undo step
+held two copies. Now an `SdfLayerStateDelegateBase` subclass (`EditRecorder` in
+`undo_manager.cpp`) is installed on the edit-target layer the first time it is edited.
+SdfLayer routes every primitive change through it before applying it, and while a
+session is open it stores each change's inverse: the old field, dictionary-key or
+time-sample value; a delete for a created spec; a full copy of a deleted spec's subtree;
+the reverse move; the opposite child push or pop. Consecutive sets of one field keep only
+the first old value, so a drag stays one entry. Undo replays the inverses newest first
+in one `SdfChangeBlock`, and the recorder records *their* inverses as the redo list. It
+also takes over the dirty flag of the `SdfSimpleLayerStateDelegate` it replaces. Cost is
+proportional to the change: an edit, a 60-step drag, an undo or a redo on that scene now
+take under a millisecond. Tests compare the whole layer text after undo and redo of
+creates, deletes, renames, reorders, metadata and time samples.
 
 ### 3.2 Live refresh
 
@@ -420,8 +433,6 @@ The headless tool harness becomes a real test target (§8). It covers:
 - **Relationship editing** beyond showing targets read-only (material binding, proxyPrim,
   collection targets).
 - **Animation:** editing time samples and keyframing. This needs a timeline first.
-- **Faster undo:** spec-level inverse edits instead of whole-layer snapshots. This is
-  needed before large-scene performance work in M12.
 - **Python and plugin-registered custom editors:** the registry is designed for them,
   but the bindings come with M7/M9.
 

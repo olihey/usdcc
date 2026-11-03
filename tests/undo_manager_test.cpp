@@ -1,5 +1,7 @@
 // UndoManager: discrete apply() edits and edit sessions (one undo step per
-// drag, cancel restores), including a real gizmo drag through ScaleTool.
+// drag, cancel restores), including a real gizmo drag through ScaleTool, and
+// structural edits (prims created, deleted, renamed, reordered; metadata,
+// time samples) checked against the whole layer's text.
 #include "test_harness.h"
 
 #include "usdcc/tools/scale_tool.h"
@@ -7,11 +9,16 @@
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/base/gf/frustum.h>
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/namespaceEdit.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/cube.h>
+#include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdGeom/xformable.h>
 
+#include <QTemporaryDir>
 #include <QUndoStack>
 
 using namespace PXR_NS;
@@ -29,6 +36,12 @@ double sizeOf(const StageRefPtr& stage) {
 
 void setSize(const StageRefPtr& stage, double v) {
     UsdGeomCube(stage->usdStage()->GetPrimAtPath(SdfPath("/Cube"))).GetSizeAttr().Set(v);
+}
+
+std::string layerText(const StageRefPtr& stage) {
+    std::string text;
+    stage->usdStage()->GetRootLayer()->ExportToString(&text);
+    return text;
 }
 
 StageRefPtr newStage(StageManager& manager) {
@@ -166,4 +179,93 @@ USDCC_TEST(undo_gizmo_drag) {
     const auto miss = scale.mousePress(ctx, GfVec2d(0.9, -0.9), frustum.ComputePickRay(GfVec2d(0.9, -0.9)));
     CHECK(!miss.startsEdit, "a selection click starts no edit");
     scale.mouseRelease();
+}
+
+USDCC_TEST(undo_structural_edits) {
+    // Each edit is undone and redone twice; the layer's text must match the
+    // state before and after the edit exactly every time.
+    StageManager manager;
+    UndoManager undo;
+    StageRefPtr stage = newStage(manager);
+    const UsdStageRefPtr usd = stage->usdStage();
+    QUndoStack* stack = undo.stack(stage);
+
+    auto roundTrip = [&](const char* name, const std::function<bool()>& edit) {
+        const std::string before = layerText(stage);
+        CHECK(undo.apply(stage, name, edit), "%s: applies", name);
+        const std::string after = layerText(stage);
+        CHECK(after != before, "%s: changed the layer", name);
+        for (int i = 0; i < 2; ++i) {
+            stack->undo();
+            CHECK(layerText(stage) == before, "%s: undo %d restores the layer exactly", name, i + 1);
+            stack->redo();
+            CHECK(layerText(stage) == after, "%s: redo %d reapplies exactly", name, i + 1);
+        }
+    };
+
+    roundTrip("Create prims", [&]() {
+        UsdGeomXform::Define(usd, SdfPath("/Group"));
+        UsdGeomCube::Define(usd, SdfPath("/Group/A")).GetSizeAttr().Set(3.0);
+        UsdGeomCube::Define(usd, SdfPath("/Group/B"));
+        return true;
+    });
+    roundTrip("Metadata", [&]() {
+        UsdPrim prim = usd->GetPrimAtPath(SdfPath("/Group/A"));
+        prim.SetCustomDataByKey(TfToken("note"), VtValue(std::string("hello")));
+        prim.SetDocumentation("documented");
+        return true;
+    });
+    roundTrip("Time samples", [&]() {
+        UsdAttribute size = UsdGeomCube(usd->GetPrimAtPath(SdfPath("/Group/B"))).GetSizeAttr();
+        size.Set(1.0, UsdTimeCode(1.0));
+        size.Set(5.0, UsdTimeCode(10.0));
+        return true;
+    });
+    roundTrip("Deactivate", [&]() { return usd->GetPrimAtPath(SdfPath("/Group/A")).SetActive(false); });
+    roundTrip("Reorder", [&]() {
+        SdfPrimSpecHandle group = usd->GetRootLayer()->GetPrimAtPath(SdfPath("/Group"));
+        group->SetNameChildrenOrder({TfToken("B"), TfToken("A")});
+        return true;
+    });
+    roundTrip("Rename", [&]() {
+        SdfBatchNamespaceEdit edits;
+        edits.Add(SdfPath("/Group/B"), SdfPath("/Group/Renamed"));
+        return usd->GetRootLayer()->Apply(edits);
+    });
+    roundTrip("Delete subtree", [&]() { return usd->RemovePrim(SdfPath("/Group")); });
+    CHECK(!usd->GetPrimAtPath(SdfPath("/Group")), "the delete is in effect after the last redo");
+    stack->undo();
+    CHECK(UsdGeomCube(usd->GetPrimAtPath(SdfPath("/Group/A"))), "undoing the delete brings the subtree back");
+
+    // Undo all the way back, then redo everything.
+    std::string end;
+    stack->redo();
+    end = layerText(stage);
+    stack->setIndex(0);
+    CHECK(!usd->GetPrimAtPath(SdfPath("/Group")), "undo to the start removes everything that was created");
+    CHECK(sizeOf(stage) == 1.0, "the initial cube is untouched (size=%g)", sizeOf(stage));
+    stack->setIndex(stack->count());
+    CHECK(layerText(stage) == end, "redo to the end rebuilds the same layer");
+}
+
+USDCC_TEST(undo_keeps_dirty_state) {
+    // The recorder replaces the layer's state delegate, which also tracks
+    // whether the layer has unsaved changes.
+    StageManager manager;
+    UndoManager undo;
+    StageRefPtr stage = newStage(manager);
+    const SdfLayerHandle layer = stage->usdStage()->GetRootLayer();
+    CHECK(layer->IsDirty(), "a new in-memory stage with a cube starts dirty");
+    undo.apply(stage, "Set size", [&]() { setSize(stage, 2.0); return true; });
+    CHECK(layer->IsDirty(), "still dirty after a recorded edit");
+
+    const QTemporaryDir dir;
+    const std::string file = dir.filePath(QStringLiteral("saved.usda")).toStdString();
+    CHECK(layer->Export(file), "exported to %s", file.c_str());
+    StageRefPtr clean = manager.openStage(file);
+    CHECK(clean && !clean->usdStage()->GetRootLayer()->IsDirty(), "an opened layer starts clean");
+    if (clean) {
+        undo.apply(clean, "Set size", [&]() { setSize(clean, 3.0); return true; });
+        CHECK(clean->usdStage()->GetRootLayer()->IsDirty(), "a recorded edit marks it dirty");
+    }
 }

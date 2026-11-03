@@ -12,7 +12,6 @@
 
 #include <functional>
 #include <memory>
-#include <string>
 #include <vector>
 
 class QUndoStack;
@@ -21,17 +20,23 @@ namespace usdcc::usd {
 
 class StageManager;
 
-// One QUndoStack per stage. An undo step is a before/after snapshot of the
-// stage's edit-target layer (see docs/ATTRIBUTE_EDITOR.md §3.1).
+// One QUndoStack per stage. An undo step is the list of spec-level changes an
+// edit made to the stage's edit-target layer, each stored as its inverse (the
+// old field value, the deleted spec, ...). They are captured by an
+// SdfLayerStateDelegate installed on the layer, which every authoring call
+// goes through; undo replays the inverses newest first, and records their own
+// inverses as the redo list. The cost is proportional to what changed, not to
+// the layer's size (see docs/ATTRIBUTE_EDITOR.md §3.1).
 //
 // Two ways to record a step:
 //   - apply(): one discrete edit, done inside the callback.
 //   - an edit session, for an edit that happens over many calls — a gizmo drag
 //     or a scrubbed value: beginEdit() on press, any number of live
 //     UsdAttribute::Set() calls, then endEdit() on release. The whole session
-//     becomes one undo step (none if nothing changed), and only two snapshots
-//     are taken however many times the value changed in between.
-//     cancelEdit() instead restores the layer to how it was at beginEdit().
+//     becomes one undo step (none if nothing changed), and consecutive sets
+//     of the same field keep only the first old value, so a long drag stays
+//     small. cancelEdit() instead restores the layer to how it was at
+//     beginEdit().
 // Sessions nest: only the outermost begin/end pair records anything, so
 // apply() can be called while a session is open.
 //
@@ -42,6 +47,7 @@ class UndoManager final : public QObject {
     Q_OBJECT
 public:
     explicit UndoManager(QObject* parent = nullptr);
+    ~UndoManager() override;
     QUndoStack* stack(const StageRefPtr& stage);
 
     bool apply(const StageRefPtr& stage, const QString& description, const std::function<bool()>& edit);
@@ -67,12 +73,7 @@ public:
     void removeStage(const StageRefPtr& stage);
 
 private:
-    struct Session {
-        PXR_NS::SdfLayerHandle layer;
-        std::string before;
-        QString description;
-        int depth = 0;
-    };
+    struct Session;  // the open edit and the changes recorded so far; see the .cpp
     struct Entry {
         StageRefPtr stage;
         std::unique_ptr<QUndoStack> stack;
