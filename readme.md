@@ -104,6 +104,22 @@ Both accept `-Configuration`, `-Generator`, `-Arch`, `-UsdInstall`, `-Scene`, an
 later `-Run`/`run.ps1` invocations automatically. See each script's help
 (`Get-Help tools/build.ps1 -Full`) for details.
 
+### Deploying
+
+[tools/deploy.ps1](tools/deploy.ps1) copies a build and everything it needs to run
+(OpenUSD's DLLs and plugins, Qt, the Python OpenUSD was built with, and the usdcc, pxr
+and PySide6 packages) into one folder that runs on a machine without the dev
+environment. Zip it to distribute; start it with `usdcc.cmd` or `bin\usdcc.exe`.
+
+```
+tools/deploy.ps1                       # into .\deploy
+tools/deploy.ps1 D:\dist\usdcc         # into another folder
+tools/deploy.ps1 -Configuration Release
+```
+
+Build first. An earlier deploy in the folder is replaced; any other non-empty folder is
+refused.
+
 ## Repository Layout
 
 ```

@@ -84,7 +84,9 @@ The app embeds **the Python OpenUSD was built with**: `Python3_EXECUTABLE` from
   (`build/python`), OpenUSD's `lib/site-packages`, and the user's own scripts folder (§6).
   `PYTHONPATH` is still honoured, and so is the Python's own `site-packages`, so a user can
   `import numpy`.
-- **M11** replaces the absolute dev-build paths with a Python bundled next to the exe.
+- **Deployed**, the app uses a Python bundled next to it instead: `..\python` from the
+  executable, with usdcc, pxr and PySide6 in its `Lib\site-packages` (tools/deploy.ps1;
+  PLAN.md §6 item 37).
   Nothing else changes.
 
 A failure here (no Python found, `import pxr` fails) is logged as an Error with the reason. The

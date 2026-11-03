@@ -4,6 +4,16 @@
 #include <pybind11/embed.h>
 #endif
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 #include "usdcc/scripting/python_runtime.h"
 
 #include "usdcc/core/log.h"
@@ -55,18 +65,47 @@ bool hasStandardLibrary(const std::filesystem::path& home) {
     }
     return false;
 }
+
+// The folder of the running executable.
+std::filesystem::path executableDir() {
+#if defined(_WIN32)
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) return {};
+        if (length < buffer.size()) {
+            buffer.resize(length);
+            break;
+        }
+        buffer.resize(buffer.size() * 2);  // truncated: try a bigger buffer
+    }
+    return std::filesystem::path(buffer).parent_path();
+#else
+    std::error_code error;
+    return std::filesystem::read_symlink("/proc/self/exe", error).parent_path();
+#endif
+}
 #endif
 }  // namespace
 
 PythonSettings PythonSettings::defaults() {
     PythonSettings settings;
 #if USDCC_HAS_PYTHON
-    settings.home = std::filesystem::u8path(USDCC_PYTHON_HOME);
-    if (auto home = environmentPath("USDCC_PYTHONHOME")) settings.home = *home;
-    settings.paths = {std::filesystem::u8path(USDCC_PYTHON_PACKAGE_ROOT), std::filesystem::u8path(USDCC_USD_PYTHON_DIR)};
+    // A deployed usdcc (tools/deploy.ps1) brings its own Python: bin/usdcc.exe
+    // next to python/, whose Lib/site-packages holds usdcc, pxr and PySide6.
+    const std::filesystem::path bundled = executableDir().parent_path() / "python";
+    if (hasStandardLibrary(bundled)) {
+        settings.home = bundled;
+        settings.paths = {bundled / "Lib" / "site-packages"};
+    } else {
+        settings.home = std::filesystem::u8path(USDCC_PYTHON_HOME);
+        settings.paths = {std::filesystem::u8path(USDCC_PYTHON_PACKAGE_ROOT),
+                          std::filesystem::u8path(USDCC_USD_PYTHON_DIR)};
 #ifdef USDCC_PYSIDE_DIR
-    settings.paths.push_back(std::filesystem::u8path(USDCC_PYSIDE_DIR));  // PySide6, shiboken6
+        settings.paths.push_back(std::filesystem::u8path(USDCC_PYSIDE_DIR));  // PySide6, shiboken6
 #endif
+    }
+    if (auto home = environmentPath("USDCC_PYTHONHOME")) settings.home = *home;
 #endif
     return settings;
 }

@@ -111,6 +111,10 @@ add_custom_command(
 # (which sets up the DLL folders it needs first), so `import usdcc.ui` works
 # with build/python on PYTHONPATH.
 set(_python_package_dir "${CMAKE_BINARY_DIR}/python/usdcc")
+# Before ui.py existed this module was built as ui.pyd. Python imports an
+# extension before a .py of the same name, so a leftover one in an older
+# build directory would hide ui.py (and fail to load in a deploy).
+file(REMOVE "${_python_package_dir}/ui.pyd" "${_python_package_dir}/ui.pdb")
 
 add_library(usdcc_ui_python MODULE ${_generated_sources})
 target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${_gen_dir}/usdcc/_ui")

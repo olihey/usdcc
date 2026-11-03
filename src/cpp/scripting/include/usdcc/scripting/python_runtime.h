@@ -16,10 +16,12 @@ struct PythonSettings {
     // Put at the front of sys.path, in this order.
     std::vector<std::filesystem::path> paths;
 
-    // The build's defaults: OpenUSD's Python, then build/python (the usdcc
-    // package), OpenUSD's site-packages (pxr) and, if it was built,
-    // USDCC_PYSIDE_DIR (PySide6). The environment variable USDCC_PYTHONHOME
-    // overrides `home`.
+    // A deployed usdcc's own Python (../python from the executable, with
+    // usdcc, pxr and PySide6 in its Lib/site-packages; tools/deploy.ps1) if
+    // there is one. Otherwise the build's: OpenUSD's Python, then
+    // build/python (the usdcc package), OpenUSD's site-packages (pxr) and, if
+    // it was built, USDCC_PYSIDE_DIR (PySide6). The environment variable
+    // USDCC_PYTHONHOME overrides `home`.
     static PythonSettings defaults();
 };
 

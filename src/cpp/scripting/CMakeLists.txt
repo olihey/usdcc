@@ -44,8 +44,8 @@ if(USDCC_PYTHON_FOUND)
     # pybind11::headers only: pybind11::embed would link the Python
     # find_package(pybind11) found, which is vcpkg's (see UsdccPython.cmake).
     target_link_libraries(usdcc_scripting PRIVATE pybind11::headers PUBLIC "${USDCC_PYTHON_LIBRARY}")
-    # Build-time defaults for PythonSettings::defaults(); M11 packaging
-    # replaces these absolute dev-build paths with ones next to the exe.
+    # Build-time defaults for PythonSettings::defaults(), used unless the app
+    # finds a Python bundled next to it (tools/deploy.ps1).
     target_compile_definitions(
         usdcc_scripting
         PRIVATE USDCC_HAS_PYTHON=1

@@ -833,6 +833,19 @@ things that will bite later if not addressed early:
     `undo_structural_edits` checks exact round trips of creates, deletes, renames,
     reorders, metadata and time samples, and `undo_keeps_dirty_state` the dirty flag.
 
+37. **Deploy folder (`tools/deploy.ps1`), toward M11.** Copies a build into a folder that
+    runs without the dev environment: `bin\` (usdcc.exe, the app's, vcpkg's and OpenUSD's
+    DLLs, Qt's platform plugin), `bin\usd\` and `plugin\usd\` (OpenUSD's plugins, in the
+    places OpenUSD looks relative to `usd_plug.dll`), and `python\` (OpenUSD's Python's
+    standard library, with usdcc, pxr, PySide6 and shiboken6 in `Lib\site-packages`).
+    `PythonSettings::defaults()` uses `..\python` next to the executable when it has a
+    standard library, instead of the build's absolute paths. Where the app and OpenUSD
+    both ship a DLL (z.dll, libpng16.dll) the app's wins, as on the dev PATH. Checked by
+    running the deploy with PATH cut down to Windows' own folders and no PXR_/PYTHON/QT_
+    variables: Python, pxr, usdcc.ui and PySide6 import from the deploy, Storm renders,
+    and every loaded DLL comes from the deploy or Windows. Still a script, not the
+    planned CMake `deploy` target, and not yet tried on a clean machine.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
