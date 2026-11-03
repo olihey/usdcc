@@ -9,6 +9,7 @@
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 
 #include <pxr/usd/sdf/fileFormat.h>
@@ -442,6 +443,8 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     // By identifier, so an in-memory layer can show too.
     QAction* show = menu->addAction(tr("Show USDA"), this, [this, id]() { showUsdaPreview(id, this); });
     show->setEnabled(bool(entry->layer));
+    QAction* prims = menu->addAction(tr("Show Prims"), this, [this, id]() { showPrimTree(id, this); });
+    prims->setEnabled(bool(entry->layer));
 }
 
 std::string LayerEditorViewPanel::selectedIdentifier() const {

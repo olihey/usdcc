@@ -288,7 +288,7 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
             return font;
         }
         case Qt::CheckStateRole:
-            if (prim.IsInstanceProxy()) break;  // read-only: no checkbox
+            if (m_readOnly || prim.IsInstanceProxy()) break;  // read-only: no checkbox
             return prim.IsActive() ? Qt::Checked : Qt::Unchecked;
         case Qt::ToolTipRole: {
             QString tip = QString::fromStdString(node->path.GetString()) + QLatin1Char('\n') + describe(prim);
@@ -302,7 +302,7 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
 }
 
 bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid() || !m_stage) {
+    if (!index.isValid() || !m_stage || m_readOnly) {
         return false;
     }
     Node* node = static_cast<Node*>(index.internalPointer());
@@ -335,7 +335,7 @@ Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
         return Qt::NoItemFlags;
     }
     const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(pathForIndex(index)) : PXR_NS::UsdPrim();
-    if (prim && prim.IsInstanceProxy()) {
+    if (m_readOnly || (prim && prim.IsInstanceProxy())) {
         return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // read-only
     }
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsUserCheckable;

@@ -93,6 +93,7 @@ USDCC_TEST(dependencies_panel) {
         QMenu menu;
         panel.populateFileMenu(&menu, heavy);
         CHECK(action(menu, "Show USDA") && action(menu, "Show USDA")->isEnabled(), "Show USDA for a layer's file");
+        CHECK(action(menu, "Show Prims") && action(menu, "Show Prims")->isEnabled(), "Show Prims too");
         QAction* unload = action(menu, "Unload Everywhere");
         CHECK(unload && unload->isEnabled() && action(menu, "Load Everywhere") &&
                   !action(menu, "Load Everywhere")->isEnabled(),
@@ -121,6 +122,7 @@ USDCC_TEST(dependencies_panel) {
         QMenu menu;
         panel.populateFileMenu(&menu, indexOf(panel, "wood.png"));
         CHECK(action(menu, "Show USDA") && !action(menu, "Show USDA")->isEnabled(), "but not Show USDA for it");
+        CHECK(action(menu, "Show Prims") && !action(menu, "Show Prims")->isEnabled(), "nor Show Prims");
     }
     panel.setShowAssetAttributes(false);
     QStandardPaths::setTestModeEnabled(false);

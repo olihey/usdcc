@@ -266,8 +266,12 @@ USDCC_TEST(layer_editor_reload) {
         QMenu menu;
         panel.populateLayerMenu(&menu, memory);
         bool show = false;
-        for (QAction* action : menu.actions()) show = show || (action->text() == "Show USDA" && action->isEnabled());
-        CHECK(show, "Show USDA for an in-memory layer too");
+        bool prims = false;
+        for (QAction* action : menu.actions()) {
+            show = show || (action->text() == "Show USDA" && action->isEnabled());
+            prims = prims || (action->text() == "Show Prims" && action->isEnabled());
+        }
+        CHECK(show && prims, "Show USDA and Show Prims for an in-memory layer too");
     }
     QStandardPaths::setTestModeEnabled(false);
 }

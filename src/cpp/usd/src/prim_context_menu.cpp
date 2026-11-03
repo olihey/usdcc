@@ -2,6 +2,7 @@
 
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 
 #include <pxr/usd/usd/stage.h>
@@ -104,6 +105,9 @@ void populateArcMenu(QMenu* menu, const ArcInfo& arc, const PXR_NS::SdfPath& pri
         QAction* show = menu->addAction(tr("Show USDA"), menu,
                                         [file]() { showUsdaPreview(file, QApplication::activeWindow()); });
         show->setEnabled(!arc.assetPath.empty() && !arc.missing);
+        QAction* prims = menu->addAction(tr("Show Prims"), menu,
+                                         [file]() { showPrimTree(file, QApplication::activeWindow()); });
+        prims->setEnabled(show->isEnabled());
         const QString path = arc.assetPath.empty() ? qs(arc.primPath.GetString()) : qs(arc.assetPath);
         menu->addAction(tr("Copy Asset Path"), menu, [path]() { QApplication::clipboard()->setText(path); });
     } else if (arc.type != ArcInfo::Type::Variant) {

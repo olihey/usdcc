@@ -48,6 +48,7 @@ add_executable(usdcc_ui_tests
     outliner_icons_test.cpp
     outliner_context_menu_test.cpp
     outliner_names_test.cpp
+    prim_tree_dialog_test.cpp
     property_row_test.cpp
     scale_controller_test.cpp
     side_panel_test.cpp

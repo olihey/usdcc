@@ -246,6 +246,7 @@ USDCC_TEST(prim_context_menu_composition) {
         QAction* open = findAction(&menu, "Open as Stage");
         CHECK(open && open->isEnabled(), "a payload's file can be opened as a stage");
         CHECK(findAction(&menu, "Show USDA") && findAction(&menu, "Show USDA")->isEnabled(), "or shown as USDA");
+        CHECK(findAction(&menu, "Show Prims") && findAction(&menu, "Show Prims")->isEnabled(), "or as a tree of prims");
         if (open) open->trigger();
         CHECK(opened == QString::fromStdString(test.asset->GetIdentifier()), "Open as Stage passes the file: [%s]",
               qPrintable(opened));

@@ -7,6 +7,7 @@
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
@@ -517,11 +518,14 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
             open->setEnabled(!arc.missing);
             QAction* show = menu->addAction(tr("Show USDA"), this, [this, resolved]() { showUsdaPreview(resolved, this); });
             show->setEnabled(!arc.missing);
+            QAction* prims = menu->addAction(tr("Show Prims"), this, [this, resolved]() { showPrimTree(resolved, this); });
+            prims->setEnabled(!arc.missing);
             QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [resolved]() { revealFile(resolved); });
             reveal->setEnabled(!arc.missing && QFileInfo::exists(resolved));
             if (arc.missing) {
                 open->setToolTip(tr("The file can't be found"));
                 show->setToolTip(tr("The file can't be found"));
+                prims->setToolTip(tr("The file can't be found"));
                 reveal->setToolTip(tr("The file can't be found"));
             }
         }

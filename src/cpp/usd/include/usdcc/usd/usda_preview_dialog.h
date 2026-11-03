@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/usd/preview_stage.h"
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/usda_view.h"
 
@@ -43,10 +44,6 @@ private:
     UsdaView* m_view;
     bool m_loaded = false;
 };
-
-// Whether Show USDA can show `path`: an open layer, or a file USD has a format
-// for (not a texture). A missing file is for its caller to check.
-bool canPreviewUsda(const QString& path);
 
 // Shows `path` in a preview dialog over `parent`'s window, or brings forward
 // the one already showing it. Null if it can't be shown.

@@ -44,6 +44,8 @@ public:
     explicit UsdPrimTreeModel(QObject* parent = nullptr);
 
     void setStage(const PXR_NS::UsdStageRefPtr& stage);
+    // Only to look at (Show Prims): no rename, no active checkbox.
+    void setReadOnly(bool readOnly) { m_readOnly = readOnly; }
     // Rebuilds the tree from the stage's current state. Call after any
     // structural edit (rename, reorder, add/remove prim) made outside this
     // model's own setData() (which already refreshes after renaming).
@@ -96,6 +98,7 @@ private:
     PXR_NS::UsdStageRefPtr m_stage;
     std::unique_ptr<Node> m_root;
     std::set<PXR_NS::SdfPath> m_selectionAncestors;
+    bool m_readOnly = false;
 };
 
 }  // namespace usdcc::usd

@@ -44,6 +44,7 @@
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
@@ -368,6 +369,14 @@ int main(int argc, char** argv) {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show USDA"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
         if (!path.isEmpty()) usdcc::usd::showUsdaPreview(path, &window);
+    });
+    // File > Show Prims...: the same, as a tree of its prims (docs/SHOW_PRIMS.md).
+    QAction* showPrimsAction = new QAction(QObject::tr("Show &Prims..."), fileMenu);
+    fileMenu->insertAction(saveStageAction, showPrimsAction);
+    QObject::connect(showPrimsAction, &QAction::triggered, &window, [&window]() {
+        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show Prims"), QString(),
+                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+        if (!path.isEmpty()) usdcc::usd::showPrimTree(path, &window);
     });
 
     // Outliner > Composition > an arc > Open as Stage: a file already open as

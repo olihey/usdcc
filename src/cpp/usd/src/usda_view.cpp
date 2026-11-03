@@ -5,6 +5,7 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/layer_stack.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_syntax.h"
@@ -797,6 +798,7 @@ void UsdaView::populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& li
     }
     menu->addAction(tr("Open as Stage"), this, [resolved]() { openStageFile(resolved); })->setEnabled(layer);
     menu->addAction(tr("Show USDA"), this, [this, resolved]() { showUsdaPreview(resolved, this); })->setEnabled(layer);
+    menu->addAction(tr("Show Prims"), this, [this, resolved]() { showPrimTree(resolved, this); })->setEnabled(layer);
     menu->addAction(tr("Reveal in Explorer"), this, [resolved]() { revealFile(resolved); })
         ->setEnabled(found && QFileInfo::exists(resolved));
     menu->addSeparator();

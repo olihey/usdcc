@@ -5,6 +5,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -235,6 +236,8 @@ void DependenciesViewPanel::populateFileMenu(QMenu* menu, int index) {
     open->setEnabled(!file.missing && (file.kinds & ~unsigned(Dependency::Asset)));
     QAction* show = menu->addAction(tr("Show USDA"), this, [this, path]() { showUsdaPreview(path, this); });
     show->setEnabled(open->isEnabled());
+    QAction* prims = menu->addAction(tr("Show Prims"), this, [this, path]() { showPrimTree(path, this); });
+    prims->setEnabled(open->isEnabled());
     QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [path]() { revealFile(path); });
     reveal->setEnabled(!file.missing && QFileInfo::exists(path));
 

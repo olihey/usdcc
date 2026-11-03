@@ -1,13 +1,15 @@
 // The USDA view (docs/USDA_VIEW.md): what each Show mode shows, colouring
 // only what's on screen, refreshing after an edit (by itself for a small
 // layer, by hand for the flattened stage), keeping the scroll position, and
-// Find. With USDCC_BENCH=1 it also times a generated ~100 MB layer (Â§5).
+// Find. With USDCC_BENCH=1 it also times a generated ~100 MB layer (Ã‚Â§5).
 // Runs in usdcc_ui_tests (offscreen).
 #include "test_harness.h"
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/line_view.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/usd_prim_tree_model.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_syntax.h"
 #include "usdcc/usd/usda_view_panel.h"
@@ -155,7 +157,7 @@ USDCC_TEST(usda_view_panel) {
     QStandardPaths::setTestModeEnabled(false);
 }
 
-// docs/USDA_VIEW.md Â§5: a ~100 MB layer, timed. Only with USDCC_BENCH=1.
+// docs/USDA_VIEW.md Ã‚Â§5: a ~100 MB layer, timed. Only with USDCC_BENCH=1.
 USDCC_TEST(usda_view_benchmark) {
     if (!std::getenv("USDCC_BENCH")) return;
     QStandardPaths::setTestModeEnabled(true);
@@ -226,6 +228,26 @@ USDCC_TEST(usda_view_benchmark) {
     while (!preview.isStageLoaded() && timer.elapsed() < 300000) QApplication::processEvents();
     std::printf(", the stage (no payloads) after %lld ms\n", timer.elapsed());
     CHECK(preview.isStageLoaded() && preview.view()->stage(), "the stage loaded");
+
+    // Building the tree runs on the UI thread, so it's what can freeze the app.
+    timer.restart();
+    {
+        usdcc::usd::UsdPrimTreeModel treeModel;
+        treeModel.setStage(preview.view()->stage()->usdStage());
+        std::printf("usda_view_benchmark: Show Prims: building the tree: %lld ms\n", timer.elapsed());
+    }
+
+    // Show Prims on it: the stage (open already, so faster), the tree, a filter.
+    timer.restart();
+    usdcc::usd::PrimTreeDialog tree(QString::fromStdString(previewFile));
+    tree.show();
+    while (!tree.isStageLoaded() && timer.elapsed() < 300000) QApplication::processEvents();
+    QApplication::processEvents();
+    std::printf("usda_view_benchmark: Show Prims: the tree after %lld ms", timer.elapsed());
+    timer.restart();
+    tree.setFilter(QStringLiteral("Mesh_1"));
+    QApplication::processEvents();
+    std::printf(", a filter in %lld ms: %s\n", timer.elapsed(), qPrintable(tree.statusLabel()->text()));
     // What copying the layer costs, so the export could run on a copy off the UI thread.
     timer.restart();
     const SdfLayerRefPtr copy = SdfLayer::CreateAnonymous("copy.usda");
@@ -244,7 +266,7 @@ USDCC_TEST(usda_view_benchmark) {
 }
 
 // A saved text layer is shown as it is in its file (comments and all), an
-// edited one as USD writes it (docs/USDA_VIEW.md Â§9.2).
+// edited one as USD writes it (docs/USDA_VIEW.md Ã‚Â§9.2).
 USDCC_TEST(usda_view_reads_saved_files) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir settings;
@@ -303,7 +325,7 @@ USDCC_TEST(line_view) {
     QStandardPaths::setTestModeEnabled(false);
 }
 
-// Links (docs/USDA_VIEW.md Â§6): an asset path resolved against the layer
+// Links (docs/USDA_VIEW.md Ã‚Â§6): an asset path resolved against the layer
 // shown, opened here with Back and Forward, in a new panel, a sublayer shown
 // as the stack's own; a missing file; a prim path selecting; the link menu;
 // Follow Selection.
@@ -399,8 +421,8 @@ USDCC_TEST(usda_view_links) {
     for (QAction* action : menu.actions()) {
         if (!action->isSeparator()) entries << action->text();
     }
-    CHECK(entries == QStringList({"Open Here", "Open in New Panel", "Open as Stage", "Show USDA", "Reveal in Explorer",
-                                  "Copy Path", "Copy Resolved Path"}),
+    CHECK(entries == QStringList({"Open Here", "Open in New Panel", "Open as Stage", "Show USDA", "Show Prims",
+                                  "Reveal in Explorer", "Copy Path", "Copy Resolved Path"}),
           "the link menu: [%s]", qPrintable(entries.join(", ")));
 
     // Follow Selection: to the selected prim's def.
@@ -412,7 +434,7 @@ USDCC_TEST(usda_view_links) {
     QStandardPaths::setTestModeEnabled(false);
 }
 
-// Show USDA (docs/USDA_VIEW.md §10): the text before the stage, a private stage
+// Show USDA (docs/USDA_VIEW.md Â§10): the text before the stage, a private stage
 // the app never hears of, links and prim paths in it, one dialog per file,
 // a broken file, payloads, and a layer shared with an open stage.
 namespace {
