@@ -4,6 +4,7 @@
 #include <QString>
 
 #include <algorithm>
+#include <cstring>
 
 namespace usdcc::usd::usda {
 
@@ -217,6 +218,99 @@ std::vector<std::uint8_t> lineStates(std::string_view text) {
         start = end + 1;
     }
     return states;
+}
+
+std::unordered_map<std::string, int> primLines(std::string_view text) {
+    std::unordered_map<std::string, int> lines;
+    // Open braces: a prim's name, or empty for any other block.
+    std::vector<std::string> blocks;
+    std::string path;          // of the innermost prim
+    std::vector<std::size_t> pathLengths;  // `path` before each prim block opened
+    int line = 0;
+    int parens = 0;            // metadata, between a header and its body
+    bool header = false;       // after def/over/class, before its name
+    std::string pending;       // a prim whose header was read, waiting for its {
+    int pendingLine = 0;
+    const std::size_t size = text.size();
+    auto at = [&](std::size_t i) { return i < size ? text[i] : '\0'; };
+    for (std::size_t i = 0; i < size; ++i) {
+        const char c = text[i];
+        if (c == '\n') {
+            ++line;
+            continue;
+        }
+        if (c == '#') {  // a comment, to the line's end
+            while (i + 1 < size && text[i + 1] != '\n') ++i;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            const bool triple = at(i + 1) == c && at(i + 2) == c;
+            const std::size_t start = i + (triple ? 3 : 1);
+            std::size_t j = start;
+            while (j < size) {
+                if (text[j] == '\\') {
+                    j += 2;
+                    continue;
+                }
+                if (text[j] == '\n') {
+                    if (!triple) break;  // a single-line string ends with its line
+                    ++line;
+                }
+                if (text[j] == c && (!triple || (at(j + 1) == c && at(j + 2) == c))) break;
+                ++j;
+            }
+            if (header) {  // the prim's name
+                pending = std::string(text.substr(start, j - start));
+                pendingLine = line;
+                header = false;
+            }
+            i = j < size && text[j] == '\n' ? j - 1 : j + (triple ? 2 : 0);
+            continue;
+        }
+        if (c == '@') {  // an asset path, which may hold braces
+            const bool triple = at(i + 1) == '@' && at(i + 2) == '@';
+            std::size_t j = i + (triple ? 3 : 1);
+            while (j < size && text[j] != '\n' &&
+                   !(triple ? (text[j] == '@' && at(j + 1) == '@' && at(j + 2) == '@') : text[j] == '@')) {
+                ++j;
+            }
+            i = j + (triple ? 2 : 0);
+            continue;
+        }
+        if (c == '(') ++parens;
+        else if (c == ')') parens = std::max(0, parens - 1);
+        else if (c == '{') {
+            if (!pending.empty() && parens == 0) {
+                pathLengths.push_back(path.size());
+                path += '/';
+                path += pending;
+                lines.emplace(path, pendingLine);  // the first one written wins
+                blocks.push_back(pending);
+                pending.clear();
+            } else {
+                blocks.emplace_back();
+            }
+        } else if (c == '}') {
+            if (!blocks.empty()) {
+                if (!blocks.back().empty()) {
+                    path.resize(pathLengths.back());
+                    pathLengths.pop_back();
+                }
+                blocks.pop_back();
+            }
+        } else if ((c == 'd' || c == 'o' || c == 'c') && (i == 0 || !isIdentifierPart(text[i - 1]))) {
+            for (const char* word : {"def", "over", "class"}) {
+                const std::size_t length = std::strlen(word);
+                if (text.compare(i, length, word) == 0 && !isIdentifierPart(at(i + length))) {
+                    header = true;
+                    pending.clear();
+                    i += length - 1;
+                    break;
+                }
+            }
+        }
+    }
+    return lines;
 }
 
 }  // namespace usdcc::usd::usda

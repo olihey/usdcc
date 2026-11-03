@@ -1,6 +1,6 @@
 # USDA View — Plan
 
-Status: **phase 1 done** (§9), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export.
+Status: **phases 1 and 2 done** (§9), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export.
 
 A view panel that shows a stage as USDA text: any layer of it as authored, or the stage
 flattened. It has syntax highlighting, and asset paths work as links that open the file in this
@@ -249,8 +249,45 @@ offscreen, a generated layer of meshes with arrays and references:
   can't run on another thread while the stage may change, and copying the layer first costs more
   than the export itself.
 
+### 9.3 Phase 2 as built
+
+- **`LineView` links**, kept generic:
+  - The panel's link finder says where a line's links are (asset paths and prim paths, from
+    `usda::tokenize()`). It's asked when a line is laid out, so only for lines on screen, and
+    the links are cached with the layout.
+  - Over a link: a pointing hand and a tooltip. A click opens it; a drag from it still
+    selects. Middle-click and right-click work on links too (`linkActivated`,
+    `linkMenuRequested`).
+- **Asset paths:**
+  - Resolved against the layer shown, the linked file's layer, or (for the flattened views
+    and in-memory layers) the root layer. A layer that's open already counts as found, as in
+    `compositionArcs()`.
+  - A click opens the file here as a new Show entry, "<file> (linked)". A sublayer of the stack
+    opens as that layer instead, so Show names it.
+  - Ctrl+click or middle-click opens it in a new USDA panel, from the registry, docked next to
+    this one (`UsdaViewPanel::setNewPanelHandler()`, set in `main.cpp`).
+  - A file USD has no format for opens in the system's app. A missing one says "Not found" in
+    the status bar.
+  - A linked file's layer is held while it's shown (`SdfLayer::FindOrOpen()`), and read from
+    disk when it's saved text.
+- **Back / Forward** (◀ ▶, Alt+Left/Right) return to each place with its scroll position. A stage
+  switch clears the history.
+- **Prim paths:**
+  - A click selects the prim when it's in the panel's stage. A variant selection or a
+    property in the path is dropped first.
+  - Not in a linked file, whose paths aren't the stage's.
+- **The link menu:**
+  - Asset paths: Open Here, Open in New Panel, Open as Stage, Reveal in Explorer, Copy Path,
+    Copy Resolved Path.
+  - Prim paths: Select Prim and Copy Path.
+- **Follow Selection** (options menu, off by default, saved):
+  - Selecting a prim scrolls to its `def`/`over`/`class` and puts the cursor there.
+  - The prim index (`usda::primLines()`) is built when it's first needed after a refresh:
+    0.3 s for the 82 MB file's 190,000 prims.
+  - Prims inside variants are found by their path without the variant selection.
+
 | Phase | Work | Tests |
 |---|---|---|
 | **1. Show it fast** *(done, §9.2)* | `UsdaViewPanel` (Show menu: the stack's layers, Flattened Layer Stack, Flattened Stage); a read-only text view sharing `CodeEditor`'s gutter and current line (moved to usdcc_ui); the viewport highlighter with the background `"""` scan; Find and Go to Line; refresh (auto under the limit, else the Out of date bar, keeping the position); Flattened Stage off the UI thread with Cancel; the big-file limit | Highlighting of each token kind, including a `"""` string across lines; only visible blocks highlighted; the three Show modes' text; refresh after an edit; a generated 100 MB layer within the budget (times written to this file) |
-| **2. Links** | Link hit-testing and hover; click, Ctrl/middle-click, the link menu; Back/Forward with scroll positions; non-layer files opened by the system; prim-path clicks selecting; Follow Selection with the prim index | Resolving relative links per layer; a missing file's link; history; the prim index (nested prims, variants); a prim-path click selecting |
+| **2. Links** *(done, §9.3)* | Link hit-testing and hover; click, Ctrl/middle-click, the link menu; Back/Forward with scroll positions; non-layer files opened by the system; prim-path clicks selecting; Follow Selection with the prim index | Resolving relative links per layer; a missing file's link; history; the prim index (nested prims, variants); a prim-path click selecting |
 | **3. Editing** (later) | Editable layers with Apply and Revert, parse errors at their line, Apply as one undo step | Apply and undo; a parse error leaves the layer untouched |

@@ -1,6 +1,6 @@
 // The USDA tokenizer (docs/USDA_VIEW.md §3): each token kind, strings that
 // hide other syntax, multi-line strings across lines, and lineStates(), which
-// must agree with tokenize() about where they are.
+// must agree with tokenize() about where they are, and primLines().
 #include "test_harness.h"
 
 #include "usdcc/usd/usda_syntax.h"
@@ -91,4 +91,50 @@ USDCC_TEST(usda_line_states) {
         usda::tokenize(QString::fromStdString(text.substr(start, end - start)), &state);
         start = end + 1;
     }
+}
+
+// primLines() (docs/USDA_VIEW.md §6): nested prims, metadata dictionaries and
+// time samples that aren't prims, braces in strings and comments, and prims
+// in variants listed without the variant selection.
+USDCC_TEST(usda_prim_lines) {
+    const std::string text =
+        "#usda 1.0\n"                                   // 0
+        "(\n"                                           // 1
+        "    customLayerData = { string a = \"{\" }\n"  // 2  a dictionary, a brace in a string
+        ")\n"                                           // 3
+        "def Xform \"World\" (\n"                       // 4
+        "    customData = { int x = 1 }\n"              // 5
+        "    variants = { string look = \"red\" }\n"    // 6
+        "    prepend variantSets = \"look\"\n"          // 7
+        ")\n"                                           // 8
+        "{\n"                                           // 9
+        "    double3 xformOp:translate.timeSamples = {\n"  // 10
+        "        1: (0, 0, 0),\n"                       // 11
+        "    }\n"                                       // 12
+        "    # a comment with a brace {\n"              // 13
+        "    def Mesh \"Chair\"\n"                      // 14
+        "    {\n"                                       // 15
+        "        asset tex = @./odd{name}.png@\n"       // 16
+        "    }\n"                                       // 17
+        "    variantSet \"look\" = {\n"                 // 18
+        "        \"red\" {\n"                           // 19
+        "            over \"Paint\"\n"                  // 20
+        "            {\n"                               // 21
+        "            }\n"                               // 22
+        "        }\n"                                   // 23
+        "    }\n"                                       // 24
+        "}\n"                                           // 25
+        "class \"_class\"\n"                            // 26
+        "{\n"                                           // 27
+        "}\n";                                          // 28
+    const std::unordered_map<std::string, int> lines = usdcc::usd::usda::primLines(text);
+    auto lineOf = [&](const char* path) {
+        const auto it = lines.find(path);
+        return it == lines.end() ? -1 : it->second;
+    };
+    CHECK(lines.size() == 4, "four prims: [%zu]", lines.size());
+    CHECK(lineOf("/World") == 4, "World at its def: [%d]", lineOf("/World"));
+    CHECK(lineOf("/World/Chair") == 14, "Chair, past the time samples and the comment: [%d]", lineOf("/World/Chair"));
+    CHECK(lineOf("/World/Paint") == 20, "a prim in a variant, without the selection: [%d]", lineOf("/World/Paint"));
+    CHECK(lineOf("/_class") == 26, "a class at the root, after World closed: [%d]", lineOf("/_class"));
 }

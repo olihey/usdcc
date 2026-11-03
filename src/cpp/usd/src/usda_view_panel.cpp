@@ -1,21 +1,31 @@
 #include "usdcc/usd/usda_view_panel.h"
 
+#include "usdcc/ui/line_view.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scaled_metrics.h"
-#include "usdcc/ui/line_view.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/usd/layer_stack.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usda_syntax.h"
 
+#include <pxr/usd/ar/resolver.h>
+#include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/layerUtils.h>
+#include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
 
 #include <QApplication>
+#include <QClipboard>
 #include <QComboBox>
+#include <QDesktopServices>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QKeyEvent>
@@ -25,10 +35,12 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSettings>
 #include <QShortcut>
 #include <QTextCharFormat>
 #include <QTimer>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <functional>
@@ -40,7 +52,24 @@ namespace usdcc::usd {
 namespace {
 constexpr int kKindRole = Qt::UserRole;
 constexpr int kIdentifierRole = Qt::UserRole + 1;
-constexpr int kCountChunk = 20000;  // blocks per tick of the find count
+constexpr auto kFollowSelectionKey = "UsdaView/followSelection";
+
+std::function<UsdaViewPanel*(const StageRefPtr&)>& newPanelHandler() {
+    static std::function<UsdaViewPanel*(const StageRefPtr&)> handler;
+    return handler;
+}
+
+// An asset link's path without its @ (or @@@) quotes; a prim link's without < >.
+QString linkTarget(const usdcc::ui::LineView::Link& link) {
+    QString text = link.text;
+    if (link.kind == UsdaViewPanel::AssetLink) {
+        const int quotes = text.startsWith(QLatin1String("@@@")) ? 3 : 1;
+        return text.mid(quotes, std::max(0, int(text.size()) - 2 * quotes));
+    }
+    if (text.startsWith(u'<')) text.remove(0, 1);
+    if (text.endsWith(u'>')) text.chop(1);
+    return text;
+}
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
@@ -135,6 +164,14 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
     m_show->setToolTip(tr("A layer of the stage's layer stack, or the stage flattened"));
     m_show->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     toolbarLayout->addWidget(m_show);
+    m_backButton = new usdcc::ui::PanelIconButton(QString(), tr("Back (Alt+Left)"), toolbar);
+    m_backButton->setText(QString::fromUtf8("\xE2\x97\x80"));  // ◀
+    m_forwardButton = new usdcc::ui::PanelIconButton(QString(), tr("Forward (Alt+Right)"), toolbar);
+    m_forwardButton->setText(QString::fromUtf8("\xE2\x96\xB6"));  // ▶
+    connect(m_backButton, &QToolButton::clicked, this, &UsdaViewPanel::back);
+    connect(m_forwardButton, &QToolButton::clicked, this, &UsdaViewPanel::forward);
+    toolbarLayout->addWidget(m_backButton);
+    toolbarLayout->addWidget(m_forwardButton);
     toolbarLayout->addStretch(1);
     auto* refreshButton = new usdcc::ui::PanelIconButton(QString(), tr("Refresh (F5)"), toolbar);
     refreshButton->setText(QString::fromUtf8("\xE2\x9F\xB3"));  // ⟳
@@ -152,6 +189,24 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
         }
         return ranges;
     });
+    // Asset paths and prim paths are links (§6).
+    m_text->setLinkFinder(
+        [this](int line, const QString& text) {
+            usda::State state = line < int(m_lineStates.size()) ? usda::State(m_lineStates[line]) : usda::Outside;
+            QList<usdcc::ui::LineView::Link> links;
+            for (const usda::Span& span : usda::tokenize(text, &state)) {
+                if (span.kind != usda::Token::AssetPath && span.kind != usda::Token::Path) continue;
+                usdcc::ui::LineView::Link link;
+                link.start = span.start;
+                link.length = span.length;
+                link.kind = span.kind == usda::Token::AssetPath ? AssetLink : PrimLink;
+                links.append(link);
+            }
+            return links;
+        },
+        [this](const usdcc::ui::LineView::Link& link) { return linkToolTip(link); });
+    connect(m_text, &usdcc::ui::LineView::linkActivated, this, &UsdaViewPanel::onLinkActivated);
+    connect(m_text, &usdcc::ui::LineView::linkMenuRequested, this, &UsdaViewPanel::populateLinkMenu);
 
     // Find: under the toolbar, shown by Ctrl+F.
     m_findBar = new QWidget(container);
@@ -231,6 +286,23 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
     shortcut(QKeySequence::Refresh, [this]() { refresh(); });
     shortcut(QKeySequence::FindNext, [this]() { findNext(false); });
     shortcut(QKeySequence::FindPrevious, [this]() { findNext(true); });
+    shortcut(QKeySequence::Back, [this]() { back(); });
+    shortcut(QKeySequence::Forward, [this]() { forward(); });
+
+    m_followSelection = new QAction(tr("Follow Selection"), this);
+    m_followSelection->setToolTip(tr("Scroll to the selected prim's definition when the selection changes"));
+    m_followSelection->setCheckable(true);
+    m_followSelection->setChecked(usdcc::ui::appSettings().value(kFollowSelectionKey, false).toBool());
+    connect(m_followSelection, &QAction::toggled, this, [this](bool on) {
+        QSettings settings = usdcc::ui::appSettings();
+        settings.setValue(kFollowSelectionKey, on);
+        if (on && currentStage()) followSelection(this->stageManager()->selectedPaths(currentStage()));
+    });
+    m_selectionConnection = stageManager->selectionChanged.connect(
+        [this](StageRefPtr changed, std::vector<PXR_NS::SdfPath> paths) {
+            if (changed == currentStage() && m_followSelection->isChecked()) followSelection(paths);
+        });
+    updateHistoryButtons();
 
     connect(m_show, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (m_fillingShow || index < 0) return;
@@ -266,6 +338,9 @@ void UsdaViewPanel::populateOptionsMenu(QMenu* menu) {
     menu->addSeparator();
     menu->addAction(tr("Find..."), QKeySequence::Find, this, &UsdaViewPanel::showFind);
     menu->addAction(tr("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_G), this, &UsdaViewPanel::goToLine);
+    menu->addSeparator();
+    menu->setToolTipsVisible(true);
+    menu->addAction(m_followSelection);
 }
 
 void UsdaViewPanel::onStageChanged(const StageRefPtr& stage) {
@@ -275,6 +350,9 @@ void UsdaViewPanel::onStageChanged(const StageRefPtr& stage) {
     }
     m_source = Source();  // the new stage's root layer
     m_showAll = false;
+    m_back.clear();  // another stage's places
+    m_forward.clear();
+    updateHistoryButtons();
     refreshShowMenu();
     refresh();
 }
@@ -308,6 +386,13 @@ void UsdaViewPanel::refreshShowMenu() {
         m_show->setItemData(m_show->count() - 1, int(Source::Kind::FlattenedLayerStack), kKindRole);
         m_show->addItem(tr("Flattened Stage"));
         m_show->setItemData(m_show->count() - 1, int(Source::Kind::FlattenedStage), kKindRole);
+        if (m_source.kind == Source::Kind::File) {
+            m_show->insertSeparator(m_show->count());
+            m_show->addItem(tr("%1  (linked)").arg(QFileInfo(qs(m_source.identifier)).fileName()));
+            m_show->setItemData(m_show->count() - 1, int(Source::Kind::File), kKindRole);
+            m_show->setItemData(m_show->count() - 1, qs(m_source.identifier), kIdentifierRole);
+            m_show->setItemData(m_show->count() - 1, QDir::toNativeSeparators(qs(m_source.identifier)), Qt::ToolTipRole);
+        }
     }
     // The pick, by kind and layer; a layer that's gone falls back to the root.
     const std::string wanted = m_source.kind == Source::Kind::Layer && m_source.identifier.empty() && stage
@@ -317,7 +402,9 @@ void UsdaViewPanel::refreshShowMenu() {
     for (int i = 0; i < m_show->count(); ++i) {
         if (m_show->itemData(i, kKindRole).isNull()) continue;
         const auto kind = Source::Kind(m_show->itemData(i, kKindRole).toInt());
-        if (kind == m_source.kind && (kind != Source::Kind::Layer || m_show->itemData(i, kIdentifierRole).toString().toStdString() == wanted)) {
+        const bool byIdentifier = kind == Source::Kind::Layer || kind == Source::Kind::File;
+        if (kind == m_source.kind &&
+            (!byIdentifier || m_show->itemData(i, kIdentifierRole).toString().toStdString() == wanted)) {
             pick = i;
         }
     }
@@ -342,8 +429,12 @@ void UsdaViewPanel::refresh() {
     QElapsedTimer timer;
     timer.start();
     m_fromFile = false;
+    m_primLinesValid = false;
+    m_anchor = PXR_NS::SdfLayerHandle();
+    if (m_source.kind != Source::Kind::File) m_fileLayer.Reset();
     if (stage) {
         const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+        m_anchor = usdStage->GetRootLayer();  // for the flattened views
         switch (m_source.kind) {
             case Source::Kind::Layer: {
                 const PXR_NS::SdfLayerHandle layer = m_source.identifier.empty()
@@ -353,6 +444,22 @@ void UsdaViewPanel::refresh() {
                     m_fromFile = readLayerFile(layer, &text);
                     if (!m_fromFile) layer->ExportToString(&text);
                     name = qs(layer->GetDisplayName());
+                    m_anchor = layer;
+                }
+                break;
+            }
+            case Source::Kind::File: {
+                // Held while it's shown, and opened if the stage doesn't use it.
+                if (!m_fileLayer || m_fileLayer->GetIdentifier() != m_source.identifier) {
+                    m_fileLayer = PXR_NS::SdfLayer::FindOrOpen(m_source.identifier);
+                }
+                if (m_fileLayer) {
+                    m_fromFile = readLayerFile(m_fileLayer, &text);
+                    if (!m_fromFile) m_fileLayer->ExportToString(&text);
+                    name = qs(m_fileLayer->GetDisplayName());
+                    m_anchor = m_fileLayer;
+                } else {
+                    name = tr("Can't open %1").arg(QDir::toNativeSeparators(qs(m_source.identifier)));
                 }
                 break;
             }
@@ -463,6 +570,184 @@ void UsdaViewPanel::goToLine() {
     m_text->setCursorPosition({line - 1, 0});
     m_text->scrollToLine(line - 1, /*center=*/true);
     m_text->setFocus();
+}
+
+void UsdaViewPanel::setNewPanelHandler(std::function<UsdaViewPanel*(const StageRefPtr&)> handler) {
+    newPanelHandler() = std::move(handler);
+}
+
+QString UsdaViewPanel::resolveAsset(const QString& assetPath, bool* found) const {
+    // Relative to the layer shown; an in-memory one has no folder, so the root layer's.
+    PXR_NS::SdfLayerHandle anchor = m_anchor;
+    if ((!anchor || anchor->IsAnonymous()) && currentStage()) anchor = currentStage()->usdStage()->GetRootLayer();
+    const std::string path = assetPath.toStdString();
+    const std::string anchored = anchor ? PXR_NS::SdfComputeAssetPathRelativeToLayer(anchor, path) : path;
+    // A layer that's open already counts as found, as in compositionArcs().
+    if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
+        if (found) *found = true;
+        return qs(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
+    }
+    const std::string resolved = PXR_NS::ArGetResolver().Resolve(anchored).GetPathString();
+    if (found) *found = !resolved.empty();
+    return qs(resolved.empty() ? anchored : resolved);
+}
+
+bool UsdaViewPanel::openLink(const QString& assetPath, bool newPanel) {
+    bool found = false;
+    const QString resolved = resolveAsset(assetPath, &found);
+    if (!found) {
+        m_status->setText(tr("Not found: %1").arg(QDir::toNativeSeparators(resolved)));
+        return false;
+    }
+    const std::string path = resolved.toStdString();
+    const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(path);
+    if (!open && !PXR_NS::SdfFileFormat::FindByExtension(path)) {
+        // A texture, a document: the system's app.
+        QDesktopServices::openUrl(QUrl::fromLocalFile(resolved));
+        return true;
+    }
+    // A layer of the stack is shown as one, so Show names it; anything else as a linked file.
+    Source source;
+    if (open && currentStage() && currentStage()->usdStage()->HasLocalLayer(open)) {
+        source.identifier = open->GetIdentifier();
+    } else {
+        source.kind = Source::Kind::File;
+        source.identifier = open ? open->GetIdentifier() : path;
+    }
+    if (newPanel && newPanelHandler()) {
+        if (UsdaViewPanel* panel = newPanelHandler()(currentStage())) {
+            panel->setSource(source);
+            return true;
+        }
+    }
+    navigate(source);
+    return true;
+}
+
+bool UsdaViewPanel::selectPrim(const QString& text) {
+    const StageRefPtr stage = currentStage();
+    if (!stage || m_source.kind == Source::Kind::File) return false;  // a path in another file
+    const std::string string = text.toStdString();
+    if (!PXR_NS::SdfPath::IsValidPathString(string)) return false;
+    const PXR_NS::SdfPath path = PXR_NS::SdfPath(string).StripAllVariantSelections().GetPrimPath();
+    if (!path.IsAbsolutePath() || !stage->usdStage()->GetPrimAtPath(path)) return false;
+    stageManager()->setSelectedPaths(stage, {path});
+    return true;
+}
+
+UsdaViewPanel::HistoryEntry UsdaViewPanel::here() const {
+    return {m_source, m_text->verticalScrollBar()->value(), m_text->horizontalScrollBar()->value()};
+}
+
+void UsdaViewPanel::navigate(const Source& source) {
+    m_back.push_back(here());
+    m_forward.clear();
+    goTo({source, 0, 0});
+}
+
+void UsdaViewPanel::goTo(const HistoryEntry& entry) {
+    m_source = entry.source;
+    m_showAll = false;
+    refreshShowMenu();
+    refresh();
+    m_text->setCursorPosition({entry.line, 0});
+    m_text->verticalScrollBar()->setValue(entry.line);
+    m_text->horizontalScrollBar()->setValue(entry.column);
+    updateHistoryButtons();
+}
+
+void UsdaViewPanel::back() {
+    if (m_back.empty()) return;
+    m_forward.push_back(here());
+    const HistoryEntry entry = m_back.back();
+    m_back.pop_back();
+    goTo(entry);
+}
+
+void UsdaViewPanel::forward() {
+    if (m_forward.empty()) return;
+    m_back.push_back(here());
+    const HistoryEntry entry = m_forward.back();
+    m_forward.pop_back();
+    goTo(entry);
+}
+
+void UsdaViewPanel::updateHistoryButtons() {
+    m_backButton->setEnabled(!m_back.empty());
+    m_forwardButton->setEnabled(!m_forward.empty());
+}
+
+void UsdaViewPanel::onLinkActivated(const usdcc::ui::LineView::Link& link, Qt::MouseButton button,
+                                    Qt::KeyboardModifiers modifiers) {
+    const QString target = linkTarget(link);
+    // Queued: opening replaces the text the click came from.
+    if (link.kind == AssetLink) {
+        const bool newPanel = button == Qt::MiddleButton || (modifiers & Qt::ControlModifier);
+        QMetaObject::invokeMethod(this, [this, target, newPanel]() { openLink(target, newPanel); }, Qt::QueuedConnection);
+    } else if (link.kind == PrimLink) {
+        selectPrim(target);
+    }
+}
+
+QString UsdaViewPanel::linkToolTip(const usdcc::ui::LineView::Link& link) const {
+    const QString target = linkTarget(link);
+    if (link.kind == AssetLink) {
+        bool found = false;
+        const QString resolved = QDir::toNativeSeparators(resolveAsset(target, &found));
+        return found ? tr("%1\nClick to open, Ctrl+click to open in a new panel").arg(resolved)
+                     : tr("Not found: %1").arg(resolved);
+    }
+    if (m_source.kind == Source::Kind::File) return tr("A path in this file");
+    const std::string string = target.toStdString();
+    const PXR_NS::SdfPath path = PXR_NS::SdfPath::IsValidPathString(string)
+                                     ? PXR_NS::SdfPath(string).StripAllVariantSelections().GetPrimPath()
+                                     : PXR_NS::SdfPath();
+    if (currentStage() && path.IsAbsolutePath() && currentStage()->usdStage()->GetPrimAtPath(path)) {
+        return tr("Click to select %1").arg(qs(path.GetString()));
+    }
+    return tr("%1 isn't a prim of this stage").arg(target);
+}
+
+void UsdaViewPanel::populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& link) {
+    const QString target = linkTarget(link);
+    if (link.kind == PrimLink) {
+        QAction* select = menu->addAction(tr("Select Prim"), this, [this, target]() { selectPrim(target); });
+        select->setEnabled(m_source.kind != Source::Kind::File);
+        menu->addAction(tr("Copy Path"), this, [target]() { QApplication::clipboard()->setText(target); });
+        return;
+    }
+    bool found = false;
+    const QString resolved = resolveAsset(target, &found);
+    const bool layer = found && (PXR_NS::SdfLayer::Find(resolved.toStdString()) ||
+                                 PXR_NS::SdfFileFormat::FindByExtension(resolved.toStdString()));
+    auto open = [this, target](bool newPanel) {
+        QMetaObject::invokeMethod(this, [this, target, newPanel]() { openLink(target, newPanel); }, Qt::QueuedConnection);
+    };
+    menu->addAction(tr("Open Here"), this, [open]() { open(false); })->setEnabled(found);
+    menu->addAction(tr("Open in New Panel"), this, [open]() { open(true); })->setEnabled(found && layer);
+    menu->addAction(tr("Open as Stage"), this, [resolved]() { openStageFile(resolved); })->setEnabled(found && layer);
+    menu->addAction(tr("Reveal in Explorer"), this, [resolved]() { revealFile(resolved); })
+        ->setEnabled(found && QFileInfo::exists(resolved));
+    menu->addSeparator();
+    menu->addAction(tr("Copy Path"), this, [target]() { QApplication::clipboard()->setText(target); });
+    menu->addAction(tr("Copy Resolved Path"), this, [resolved]() {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(resolved));
+    })->setEnabled(found);
+}
+
+void UsdaViewPanel::setFollowSelection(bool on) { m_followSelection->setChecked(on); }
+
+void UsdaViewPanel::followSelection(const std::vector<PXR_NS::SdfPath>& paths) {
+    // A linked file's prims aren't the stage's.
+    if (paths.empty() || m_source.kind == Source::Kind::File) return;
+    if (!m_primLinesValid) {
+        m_primLines = usda::primLines(m_text->text());
+        m_primLinesValid = true;
+    }
+    const auto it = m_primLines.find(paths.front().StripAllVariantSelections().GetString());
+    if (it == m_primLines.end()) return;
+    m_text->setCursorPosition({it->second, 0});
+    m_text->scrollToLine(it->second, /*center=*/true);
 }
 
 }  // namespace usdcc::usd

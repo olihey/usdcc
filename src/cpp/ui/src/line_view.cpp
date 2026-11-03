@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QTextLine>
+#include <QToolTip>
 
 #include <algorithm>
 #include <cstring>
@@ -33,6 +34,7 @@ LineView::LineView(QWidget* parent) : QAbstractScrollArea(parent) {
     setFocusPolicy(Qt::StrongFocus);
     viewport()->setCursor(Qt::IBeamCursor);
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
+    viewport()->setMouseTracking(true);  // the pointing hand over links
     setText(std::string());
 }
 
@@ -69,6 +71,23 @@ void LineView::setLineFormatter(LineFormatter formatter) {
     viewport()->update();
 }
 
+void LineView::setLinkFinder(LinkFinder finder, std::function<QString(const Link&)> toolTip) {
+    m_linkFinder = std::move(finder);
+    m_linkToolTip = std::move(toolTip);
+    resetLayouts();
+}
+
+bool LineView::linkAt(const Position& position, Link* link) {
+    if (position.line < 0 || position.line >= lineCount()) return false;
+    for (const Link& candidate : laidOut(position.line)->links) {
+        if (position.column >= candidate.start && position.column < candidate.start + candidate.length) {
+            if (link) *link = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
 QString LineView::lineText(int line) const {
     if (line < 0 || line >= lineCount()) return {};
     const std::size_t start = m_starts[line];
@@ -79,8 +98,10 @@ QString LineView::lineText(int line) const {
 
 void LineView::resetLayouts() { m_layouts.clear(); }
 
-QTextLayout* LineView::layoutFor(int line) {
-    if (auto it = m_layouts.find(line); it != m_layouts.end()) return it->second.get();
+QTextLayout* LineView::layoutFor(int line) { return laidOut(line)->layout.get(); }
+
+LineView::LaidOutLine* LineView::laidOut(int line) {
+    if (auto it = m_layouts.find(line); it != m_layouts.end()) return &it->second;
     if (int(m_layouts.size()) >= kMaxLayouts) m_layouts.clear();  // far from the screen by now
     auto layout = std::make_unique<QTextLayout>(lineText(line), font());
     layout->setCacheEnabled(true);
@@ -91,9 +112,16 @@ QTextLayout* LineView::layoutFor(int line) {
     textLine.setPosition(QPointF(0, 0));
     layout->endLayout();
     ++m_formatted;
-    QTextLayout* result = layout.get();
-    m_layouts.emplace(line, std::move(layout));
-    return result;
+    LaidOutLine entry;
+    if (m_linkFinder) {
+        entry.links = m_linkFinder(line, layout->text());
+        for (Link& link : entry.links) {
+            link.line = line;
+            link.text = layout->text().mid(link.start, link.length);
+        }
+    }
+    entry.layout = std::move(layout);
+    return &m_layouts.emplace(line, std::move(entry)).first->second;
 }
 
 int LineView::lineHeight() const { return std::max(1, fontMetrics().height()); }
@@ -345,14 +373,57 @@ int LineView::countMatches(const QString& needleText) const {
 }
 
 void LineView::mousePressEvent(QMouseEvent* event) {
+    const QPoint point = event->position().toPoint();
+    if (event->button() == Qt::MiddleButton) {
+        Link link;
+        if (linkAt(positionAt(point), &link)) Q_EMIT linkActivated(link, Qt::MiddleButton, event->modifiers());
+        return;
+    }
     if (event->button() != Qt::LeftButton) return QAbstractScrollArea::mousePressEvent(event);
     m_preferredColumn = -1;
-    setCursorPosition(positionAt(event->position().toPoint()), event->modifiers() & Qt::ShiftModifier);
+    const Position at = positionAt(point);
+    const bool shift = event->modifiers() & Qt::ShiftModifier;
+    m_pressedOnLink = !shift && linkAt(at, &m_pressedLink);
+    m_pressPoint = point;
+    setCursorPosition(at, shift);
 }
 
 void LineView::mouseMoveEvent(QMouseEvent* event) {
-    if (!(event->buttons() & Qt::LeftButton)) return;
-    setCursorPosition(positionAt(event->position().toPoint()), true);  // scrolls when dragged past an edge
+    const QPoint point = event->position().toPoint();
+    if (!(event->buttons() & Qt::LeftButton)) {
+        // Hovering: a pointing hand over a link.
+        Link link;
+        viewport()->setCursor(linkAt(positionAt(point), &link) ? Qt::PointingHandCursor : Qt::IBeamCursor);
+        return;
+    }
+    // A drag from a link selects, as from anywhere else.
+    if (m_pressedOnLink && (point - m_pressPoint).manhattanLength() >= QApplication::startDragDistance()) {
+        m_pressedOnLink = false;
+    }
+    setCursorPosition(positionAt(point), true);  // scrolls when dragged past an edge
+}
+
+void LineView::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && m_pressedOnLink) {
+        m_pressedOnLink = false;
+        Q_EMIT linkActivated(m_pressedLink, Qt::LeftButton, event->modifiers());
+        return;
+    }
+    QAbstractScrollArea::mouseReleaseEvent(event);
+}
+
+bool LineView::viewportEvent(QEvent* event) {
+    if (event->type() == QEvent::ToolTip && m_linkToolTip) {
+        auto* help = static_cast<QHelpEvent*>(event);
+        Link link;
+        if (linkAt(positionAt(help->pos()), &link)) {
+            QToolTip::showText(help->globalPos(), m_linkToolTip(link), viewport());
+        } else {
+            QToolTip::hideText();
+        }
+        return true;
+    }
+    return QAbstractScrollArea::viewportEvent(event);
 }
 
 void LineView::mouseDoubleClickEvent(QMouseEvent* event) {
@@ -422,6 +493,11 @@ void LineView::keyPressEvent(QKeyEvent* event) {
 
 void LineView::contextMenuEvent(QContextMenuEvent* event) {
     QMenu menu(this);
+    Link link;
+    if (linkAt(positionAt(viewport()->mapFromGlobal(event->globalPos())), &link)) {
+        Q_EMIT linkMenuRequested(&menu, link);
+        if (!menu.isEmpty()) menu.addSeparator();
+    }
     QAction* copyAction = menu.addAction(tr("Copy"), QKeySequence::Copy, this, &LineView::copy);
     copyAction->setEnabled(hasSelection());
     menu.addAction(tr("Select All"), QKeySequence::SelectAll, this, &LineView::selectAll);

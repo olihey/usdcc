@@ -362,6 +362,13 @@ int main(int argc, char** argv) {
     // Outliner > Composition > an arc > Open as Stage: a file already open as
     // a stage has its viewport brought forward (and becomes current) rather
     // than being opened a second time, as File > Open Stage would.
+    // USDA view > a link > Open in New Panel: a USDA panel from the registry,
+    // docked next to the one the link was in.
+    usdcc::usd::UsdaViewPanel::setNewPanelHandler([&window, &panelTypes](const usdcc::usd::StageRefPtr& stage) {
+        return qobject_cast<usdcc::usd::UsdaViewPanel*>(
+            panelTypes.open(QStringLiteral("usda"), stage, window.dockManager(), &window));
+    });
+
     usdcc::usd::setOpenStageHandler([&stageManager, &window, &panelTypes, stageOpener](const QString& path) {
         const QString wanted = QFileInfo(path).canonicalFilePath();
 #ifdef Q_OS_WIN
@@ -547,6 +554,7 @@ int main(int argc, char** argv) {
 
     const int result = app.exec();
     usdcc::usd::setOpenStageHandler({});  // it holds main()'s objects
+    usdcc::usd::UsdaViewPanel::setNewPanelHandler({});
     // The window is closed (and its layout saved) but its panels still exist.
     panelTypes.savePanels(window.dockManager());
     return result;

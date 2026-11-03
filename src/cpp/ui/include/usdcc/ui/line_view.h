@@ -2,6 +2,7 @@
 
 #include <QAbstractScrollArea>
 #include <QList>
+#include <QMenu>
 #include <QTextLayout>
 
 #include <cstddef>
@@ -40,6 +41,19 @@ public:
     // Colours line `line` (its text decoded): format ranges in UTF-16 columns.
     using LineFormatter = std::function<QList<QTextLayout::FormatRange>(int line, const QString& text)>;
 
+    // A link in the text (docs/USDA_VIEW.md §6): where it is, its text and
+    // its kind (the owner's: e.g. an asset path or a prim path).
+    struct Link {
+        int line = 0;
+        int start = 0;
+        int length = 0;
+        QString text;
+        int kind = 0;
+    };
+    // The links in line `line`: start, length and kind of each. Asked for
+    // when a line is laid out, so only for lines on screen.
+    using LinkFinder = std::function<QList<Link>(int line, const QString& text)>;
+
     explicit LineView(QWidget* parent = nullptr);
 
     // Replaces the text ('\n' line ends; a '\r' before one is dropped); the
@@ -47,6 +61,13 @@ public:
     void setText(std::string utf8);
     const std::string& text() const { return m_text; }
     void setLineFormatter(LineFormatter formatter);
+    // Links: over one the cursor is a pointing hand with `toolTip(link)` as
+    // its tooltip. A click on one (not a drag from it) sends linkActivated;
+    // a middle-click too, with Qt::MiddleButton. Right-clicking one sends
+    // linkMenuRequested with the menu, before Copy and Select All.
+    void setLinkFinder(LinkFinder finder, std::function<QString(const Link&)> toolTip = {});
+    // The link at a position, if there's one (lays out that line).
+    bool linkAt(const Position& position, Link* link);
     int lineCount() const { return int(m_starts.size()); }
     QString lineText(int line) const;
 
@@ -75,8 +96,14 @@ public:
     int formattedLines() const { return m_formatted; }
     bool isLaidOut(int line) const { return m_layouts.count(line) != 0; }
 
+Q_SIGNALS:
+    void linkActivated(const usdcc::ui::LineView::Link& link, Qt::MouseButton button, Qt::KeyboardModifiers modifiers);
+    void linkMenuRequested(QMenu* menu, const usdcc::ui::LineView::Link& link);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    bool viewportEvent(QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void scrollContentsBy(int dx, int dy) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -105,8 +132,20 @@ private:
     std::vector<std::size_t> m_starts;  // byte offset of each line
     std::size_t m_longestLine = 0;      // in bytes, for the horizontal range
     LineFormatter m_formatter;
-    std::unordered_map<int, std::unique_ptr<QTextLayout>> m_layouts;
+    // A laid-out line and the links in it.
+    struct LaidOutLine {
+        std::unique_ptr<QTextLayout> layout;
+        QList<Link> links;
+    };
+    LaidOutLine* laidOut(int line);
+    std::unordered_map<int, LaidOutLine> m_layouts;
     int m_formatted = 0;
+    LinkFinder m_linkFinder;
+    std::function<QString(const Link&)> m_linkToolTip;
+    // A press on a link, activated on release if the mouse didn't drag.
+    bool m_pressedOnLink = false;
+    Link m_pressedLink;
+    QPoint m_pressPoint;
     Position m_anchor;
     Position m_cursor;
     int m_preferredColumn = -1;  // kept across Up/Down through shorter lines

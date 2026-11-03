@@ -1,13 +1,14 @@
 // The USDA view (docs/USDA_VIEW.md): what each Show mode shows, colouring
 // only what's on screen, refreshing after an edit (by itself for a small
 // layer, by hand for the flattened stage), keeping the scroll position, and
-// Find. With USDCC_BENCH=1 it also times a generated ~100 MB layer (§5).
+// Find. With USDCC_BENCH=1 it also times a generated ~100 MB layer (Â§5).
 // Runs in usdcc_ui_tests (offscreen).
 #include "test_harness.h"
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/line_view.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/usda_syntax.h"
 #include "usdcc/usd/usda_view_panel.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -19,7 +20,9 @@
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QFile>
+#include <QFileInfo>
 #include <QLineEdit>
+#include <QMenu>
 #include <QScrollBar>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -27,6 +30,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
 using usdcc::usd::StageManager;
@@ -147,7 +151,7 @@ USDCC_TEST(usda_view_panel) {
     QStandardPaths::setTestModeEnabled(false);
 }
 
-// docs/USDA_VIEW.md §5: a ~100 MB layer, timed. Only with USDCC_BENCH=1.
+// docs/USDA_VIEW.md Â§5: a ~100 MB layer, timed. Only with USDCC_BENCH=1.
 USDCC_TEST(usda_view_benchmark) {
     if (!std::getenv("USDCC_BENCH")) return;
     QStandardPaths::setTestModeEnabled(true);
@@ -199,6 +203,9 @@ USDCC_TEST(usda_view_benchmark) {
     timer.restart();
     const int matches = filePanel.lineView()->countMatches(QStringLiteral("Mesh_1"));
     std::printf("usda_view_benchmark: counting %d matches: %lld ms\n", matches, timer.elapsed());
+    timer.restart();
+    const std::size_t prims = usdcc::usd::usda::primLines(filePanel.lineView()->text()).size();
+    std::printf("usda_view_benchmark: the prim index, %zu prims: %lld ms\n", prims, timer.elapsed());
     // What copying the layer costs, so the export could run on a copy off the UI thread.
     timer.restart();
     const SdfLayerRefPtr copy = SdfLayer::CreateAnonymous("copy.usda");
@@ -217,7 +224,7 @@ USDCC_TEST(usda_view_benchmark) {
 }
 
 // A saved text layer is shown as it is in its file (comments and all), an
-// edited one as USD writes it (docs/USDA_VIEW.md §9.2).
+// edited one as USD writes it (docs/USDA_VIEW.md Â§9.2).
 USDCC_TEST(usda_view_reads_saved_files) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir settings;
@@ -273,5 +280,114 @@ USDCC_TEST(line_view) {
           "counted: [%d]", view.countMatches(QStringLiteral("e")));
     view.selectAll();
     CHECK(view.selectedText().startsWith("first") && view.selectedText().endsWith("apple\n"), "select all");
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Links (docs/USDA_VIEW.md Â§6): an asset path resolved against the layer
+// shown, opened here with Back and Forward, in a new panel, a sublayer shown
+// as the stack's own; a missing file; a prim path selecting; the link menu;
+// Follow Selection.
+USDCC_TEST(usda_view_links) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    auto write = [&dir](const char* name, const char* text) {
+        QFile file(dir.filePath(QString::fromLatin1(name)));
+        if (file.open(QIODevice::WriteOnly)) file.write(text);
+    };
+    write("chair.usda", "#usda 1.0\ndef Xform \"Chair\"\n{\n}\n");
+    write("sub.usda", "#usda 1.0\ndef \"FromSub\"\n{\n}\n");
+    write("shot.usda",
+          "#usda 1.0\n(\n    subLayers = [@./sub.usda@]\n)\n\n"
+          "def Xform \"World\"\n{\n"
+          "    def \"Chair\" (\n        references = @./chair.usda@</Chair>\n    )\n    {\n    }\n"
+          "    rel target = </World/Chair>\n"
+          "    def \"Missing\" (\n        references = @./missing.usda@\n    )\n    {\n    }\n"
+          "}\n");
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    if (!stage) return;
+    UsdaViewPanel panel(&stages, stage);
+    panel.resize(700, 220);  // shorter than the text, so it scrolls
+    panel.show();
+    usdcc::ui::LineView* view = panel.lineView();
+
+    // Where the reference's link is, as the view finds it.
+    int line = 0;
+    while (line < view->lineCount() && !view->lineText(line).contains("@./chair.usda@")) ++line;
+    const int column = int(view->lineText(line).indexOf('@')) + 2;
+    usdcc::ui::LineView::Link link;
+    CHECK(view->linkAt({line, column}, &link) && link.kind == UsdaViewPanel::AssetLink && link.text == "@./chair.usda@",
+          "the asset path is a link: [%s]", qPrintable(link.text));
+    bool found = false;
+    CHECK(QFileInfo(panel.resolveAsset(QStringLiteral("./chair.usda"), &found)).fileName() == "chair.usda" && found,
+          "resolved next to shot.usda");
+    panel.resolveAsset(QStringLiteral("./missing.usda"), &found);
+    CHECK(!found && !panel.openLink(QStringLiteral("./missing.usda")), "a missing file: not found, not opened");
+
+    // Open it here, then Back and Forward.
+    view->verticalScrollBar()->setValue(2);
+    CHECK(view->verticalScrollBar()->value() == 2, "scrolled down two lines first");
+    Q_EMIT view->linkActivated(link, Qt::LeftButton, Qt::NoModifier);
+    wait(50);
+    CHECK(panel.source().kind == UsdaViewPanel::Source::Kind::File && shown(panel).contains("def Xform \"Chair\"") &&
+              panel.canGoBack(),
+          "a click opens the file here");
+    panel.back();
+    CHECK(panel.source().kind == UsdaViewPanel::Source::Kind::Layer && shown(panel).contains("World") &&
+              view->verticalScrollBar()->value() == 2 && panel.canGoForward(),
+          "Back: the stage's layer, where it was: [%d]", view->verticalScrollBar()->value());
+    panel.forward();
+    CHECK(shown(panel).contains("def Xform \"Chair\"") && !panel.canGoForward(), "Forward: the file again");
+    panel.back();
+
+    // A sublayer opens as the stack's own layer.
+    CHECK(panel.openLink(QStringLiteral("./sub.usda")) && panel.source().kind == UsdaViewPanel::Source::Kind::Layer &&
+              shown(panel).contains("FromSub"),
+          "a sublayer link shows that layer of the stack");
+    panel.back();
+
+    // Ctrl+click: a new panel, through the handler main.cpp sets.
+    std::unique_ptr<UsdaViewPanel> made;
+    UsdaViewPanel::setNewPanelHandler([&](const StageRefPtr& s) {
+        made = std::make_unique<UsdaViewPanel>(&stages, s);
+        return made.get();
+    });
+    Q_EMIT view->linkActivated(link, Qt::LeftButton, Qt::ControlModifier);
+    wait(50);
+    CHECK(made && made->source().kind == UsdaViewPanel::Source::Kind::File &&
+              shown(*made).contains("def Xform \"Chair\"") && panel.source().kind == UsdaViewPanel::Source::Kind::Layer,
+          "Ctrl+click opens it in a new panel, this one stays");
+    UsdaViewPanel::setNewPanelHandler({});
+
+    // A prim path selects its prim.
+    line = 0;
+    while (line < view->lineCount() && !view->lineText(line).contains("</World/Chair>")) ++line;
+    usdcc::ui::LineView::Link primLink;
+    CHECK(view->linkAt({line, int(view->lineText(line).indexOf('<')) + 1}, &primLink) &&
+              primLink.kind == UsdaViewPanel::PrimLink,
+          "a prim path is a link");
+    Q_EMIT view->linkActivated(primLink, Qt::LeftButton, Qt::NoModifier);
+    CHECK(stages.selectedPaths(stage) == std::vector<SdfPath>({SdfPath("/World/Chair")}), "and selects the prim");
+
+    // The link menu.
+    QMenu menu;
+    Q_EMIT view->linkMenuRequested(&menu, link);
+    QStringList entries;
+    for (QAction* action : menu.actions()) {
+        if (!action->isSeparator()) entries << action->text();
+    }
+    CHECK(entries == QStringList({"Open Here", "Open in New Panel", "Open as Stage", "Reveal in Explorer", "Copy Path",
+                                  "Copy Resolved Path"}),
+          "the link menu: [%s]", qPrintable(entries.join(", ")));
+
+    // Follow Selection: to the selected prim's def.
+    panel.setFollowSelection(true);
+    stages.setSelectedPaths(stage, {SdfPath("/World/Missing")});
+    CHECK(view->lineText(view->cursorPosition().line).contains("def \"Missing\""), "Follow Selection: at its def: [%s]",
+          qPrintable(view->lineText(view->cursorPosition().line)));
+    panel.setFollowSelection(false);
     QStandardPaths::setTestModeEnabled(false);
 }

@@ -3,7 +3,9 @@
 #include <QStringView>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace usdcc::usd::usda {
@@ -30,5 +32,14 @@ std::vector<Span> tokenize(QStringView line, State* state);
 // any line on its own when it comes into view. Line i of the result is line
 // i of the text.
 std::vector<std::uint8_t> lineStates(std::string_view text);
+
+// Where each prim is defined in a USDA text (docs/USDA_VIEW.md §6): its path
+// ("/World/Chair") to the line of its def, over or class, 0-based. Prims in
+// a variant ("/World{look=red}Chair") are listed by their path without the
+// variant selection, the first one written winning. One pass, following
+// braces outside strings and comments: a prim's body is the { after its
+// header (and its metadata in parentheses); any other { is a dictionary,
+// time samples, a variant set or a variant.
+std::unordered_map<std::string, int> primLines(std::string_view text);
 
 }  // namespace usdcc::usd::usda
