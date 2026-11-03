@@ -3,7 +3,9 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -21,11 +23,16 @@
 #include <pxr/usd/usd/modelAPI.h>
 #include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/variantSets.h>
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/xformable.h>
 
 #include <QAction>
 #include <QComboBox>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QInputDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -217,6 +224,15 @@ std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
             signature += op.GetOpName().GetString() + ",";
         }
     }
+    // The arcs too: a changed reference, payload or variant changes the
+    // Composition section's rows.
+    signature += "|arcs:";
+    for (const ArcInfo& arc : compositionArcs(prim)) {
+        signature += std::to_string(static_cast<int>(arc.type)) + arc.assetPath + "@" + arc.primPath.GetString() + "@" +
+                     std::to_string(arc.layerOffset.GetOffset()) + "x" + std::to_string(arc.layerOffset.GetScale()) +
+                     (arc.loaded ? "L" : "U") + arc.variantSet + "=" + arc.variantSelection + arc.layerIdentifier +
+                     (arc.editable ? "e" : "r") + ",";
+    }
     const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
     for (const PropertyCategory& category : categorizeProperties(prim, options)) {
         signature += "|" + category.key + ":";
@@ -227,10 +243,10 @@ std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
     return signature;
 }
 
-CategorySection* AttributesViewPanel::makeSection(const QString& key, const QString& title) {
+CategorySection* AttributesViewPanel::makeSection(const QString& key, const QString& title, bool collapsedByDefault) {
     auto* section = new CategorySection(key, title);
     QSettings settings = usdcc::ui::appSettings();
-    section->setCollapsed(settings.value(kCollapsedKeyPrefix + key, false).toBool());
+    section->setCollapsed(settings.value(kCollapsedKeyPrefix + key, collapsedByDefault).toBool());
     connect(section, &CategorySection::collapsedChanged, this, [key](bool collapsed) {
         QSettings s = usdcc::ui::appSettings();
         s.setValue(kCollapsedKeyPrefix + key, collapsed);
@@ -248,6 +264,7 @@ void AttributesViewPanel::rebuild() {
     m_rows.clear();
     m_sections.clear();
     m_primSection = nullptr;
+    m_compositionSection = nullptr;
     m_xformEditor = nullptr;
     m_header = {};
     m_rebuildPending = false;
@@ -276,6 +293,7 @@ void AttributesViewPanel::rebuild() {
     }
 
     buildPrimSection(prim, layout);
+    buildCompositionSection(prim, layout);
 
     const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
     std::vector<PropertyCategory> categories = categorizeProperties(prim, options);
@@ -416,6 +434,209 @@ void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* lay
 
     refreshPrimHeader(prim);
     layout->addWidget(m_primSection);
+}
+
+void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* layout) {
+    const std::vector<ArcInfo> arcs = compositionArcs(prim);
+    const bool editablePrim = prim_actions::isEditable(prim);
+    if (arcs.empty() && !editablePrim) return;  // nothing to show, nothing to add
+    // Collapsed by default while there are no arcs (the + is in the header).
+    m_compositionSection = makeSection(QStringLiteral("composition"), tr("Composition"), arcs.empty());
+    CategorySection* section = m_compositionSection;
+    const SdfPath path = prim.GetPath();
+    const SdfLayerHandle editTarget = currentStage()->usdStage()->GetEditTarget().GetLayer();
+
+    if (editablePrim) {
+        QToolButton* add = properties::iconButton(QStringLiteral(":/usdcc/theme/plus.png"), tr("Add a composition arc"));
+        add->setPopupMode(QToolButton::InstantPopup);
+        auto* menu = new QMenu(add);
+        for (ArcInfo::Type type : {ArcInfo::Type::Reference, ArcInfo::Type::Payload, ArcInfo::Type::Inherit,
+                                   ArcInfo::Type::Specialize}) {
+            menu->addAction(tr("%1...").arg(tr(arcTypeName(type))), this,
+                            [this, type]() { addArcInteractively(static_cast<int>(type)); });
+        }
+        add->setMenu(menu);
+        section->addHeaderWidget(add);
+    }
+
+    auto addRow = [section](const QString& label, PropertyEditor* editor) {
+        auto* row = new PropertyRow(label, editor);
+        row->setLabelWidth(kLabelWidth);
+        section->addRow(row);
+        return row;
+    };
+    auto openButton = [this](const ArcInfo& arc, PropertyRow* row) {
+        if (arc.assetPath.empty()) return;  // this file
+        QToolButton* open = properties::iconButton(QStringLiteral(":/usdcc/theme/detach.png"),
+                                                   arc.missing ? tr("The file can't be found") : tr("Open as a stage"), row);
+        open->setEnabled(!arc.missing);
+        const QString file = qs(arc.resolvedPath);
+        connect(open, &QToolButton::clicked, this, [file]() { openStageFile(file); });
+        row->addTrailingWidget(open);
+    };
+    auto removeButton = [this, path](const ArcInfo& arc, PropertyRow* row) {
+        QToolButton* remove = properties::iconButton(QStringLiteral(":/usdcc/theme/close.png"),
+                                                     tr("Remove this %1").arg(tr(arcTypeName(arc.type)).toLower()), row);
+        connect(remove, &QToolButton::clicked, this, [this, path, arc]() {
+            prim_actions::removeArc(*m_undoManager, currentStage(), path, arc);
+        });
+        row->addTrailingWidget(remove);
+    };
+    auto change = [this, path](const ArcInfo& arc, auto modify) {
+        ArcInfo changed = arc;
+        modify(changed);
+        prim_actions::changeArc(*m_undoManager, currentStage(), path, arc, changed);
+    };
+
+    bool otherLayers = false;
+    for (int pass = 0; pass < 2; ++pass) {  // the editable arcs first, then the others
+        for (const ArcInfo& arc : arcs) {
+            const bool editable = arc.editable && editablePrim;
+            if (arc.type == ArcInfo::Type::Variant ? pass != 0 : editable != (pass == 0)) continue;
+            if (pass == 1 && !otherLayers) {
+                otherLayers = true;
+                auto* label = new QLabel(tr("From other layers"));
+                label->setObjectName(QStringLiteral("propertyNote"));
+                section->addRow(label);
+            }
+            const QString type = tr(arcTypeName(arc.type));
+            const bool asset = arc.type == ArcInfo::Type::Reference || arc.type == ArcInfo::Type::Payload;
+
+            if (arc.type == ArcInfo::Type::Variant) {
+                const UsdVariantSet set = prim.GetVariantSet(arc.variantSet);
+                EditorHints hints;
+                for (const std::string& name : set.GetVariantNames()) hints.allowedTokens.push_back(TfToken(name));
+                PropertyEditor* editor = properties::createPropertyEditor(SdfValueTypeNames->Token, hints);
+                editor->setValue(VtValue(TfToken(arc.variantSelection)));
+                editor->setReadOnly(!editablePrim);
+                const std::string setName = arc.variantSet;
+                connect(editor, &PropertyEditor::valueEdited, this, [this, path, setName](const VtValue& v) {
+                    if (!v.IsHolding<TfToken>()) return;
+                    prim_actions::setVariant(*m_undoManager, currentStage(), path, setName, v.UncheckedGet<TfToken>().GetString());
+                });
+                addRow(tr("Variant: %1").arg(qs(arc.variantSet)), editor);
+                continue;
+            }
+
+            if (!editable) {
+                // Read-only: what it points at, and the layer it's in.
+                QString what = asset ? (arc.assetPath.empty() ? tr("(this file)") : qs(arc.assetPath)) : QString();
+                if (!arc.primPath.IsEmpty()) what += (what.isEmpty() ? QString() : QStringLiteral("  ")) +
+                                                     QStringLiteral("<%1>").arg(qs(arc.primPath.GetString()));
+                PropertyRow* row = addRow(type, readOnlyText(what));
+                row->setNote(tr("in %1").arg(qs(arc.layerName)), 0, qs(arc.layerIdentifier));
+                if (asset) openButton(arc, row);
+                continue;
+            }
+
+            if (!asset) {  // an inherit or a specialize: its prim path
+                PropertyEditor* editor = properties::createPropertyEditor(SdfValueTypeNames->String);
+                editor->setValue(VtValue(arc.primPath.GetString()));
+                connect(editor, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {
+                    if (!v.IsHolding<std::string>() || !SdfPath::IsValidPathString(v.UncheckedGet<std::string>())) return;
+                    change(arc, [&](ArcInfo& a) { a.primPath = SdfPath(v.UncheckedGet<std::string>()); });
+                });
+                removeButton(arc, addRow(type, editor));
+                continue;
+            }
+
+            // A reference or payload: the file, then its prim, offset and scale.
+            EditorHints hints;
+            hints.anchorLayer = editTarget;
+            PropertyEditor* file = properties::createPropertyEditor(SdfValueTypeNames->Asset, hints);
+            file->setValue(VtValue(SdfAssetPath(arc.assetPath)));
+            connect(file, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {
+                if (!v.IsHolding<SdfAssetPath>()) return;
+                change(arc, [&](ArcInfo& a) { a.assetPath = v.UncheckedGet<SdfAssetPath>().GetAssetPath(); });
+            });
+            PropertyRow* fileRow = addRow(type, file);
+            openButton(arc, fileRow);
+            removeButton(arc, fileRow);
+
+            PropertyEditor* target = properties::createPropertyEditor(SdfValueTypeNames->String);
+            target->setValue(VtValue(arc.primPath.GetString()));
+            target->setToolTip(tr("The prim to bring in; empty for the file's default prim"));
+            connect(target, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {
+                const std::string text = v.IsHolding<std::string>() ? v.UncheckedGet<std::string>() : std::string();
+                if (!text.empty() && !SdfPath::IsValidPathString(text)) return;
+                change(arc, [&](ArcInfo& a) { a.primPath = text.empty() ? SdfPath() : SdfPath(text); });
+            });
+            addRow(tr("  Prim"), target);
+
+            PropertyEditor* offset = properties::createPropertyEditor(SdfValueTypeNames->Double);
+            offset->setValue(VtValue(arc.layerOffset.GetOffset()));
+            connect(offset, &PropertyEditor::editFinished, this, [change, arc, offset]() {
+                const VtValue v = offset->value();
+                if (!v.IsHolding<double>()) return;
+                change(arc, [&](ArcInfo& a) { a.layerOffset.SetOffset(v.UncheckedGet<double>()); });
+            });
+            addRow(tr("  Time Offset"), offset);
+            PropertyEditor* scale = properties::createPropertyEditor(SdfValueTypeNames->Double);
+            scale->setValue(VtValue(arc.layerOffset.GetScale()));
+            connect(scale, &PropertyEditor::editFinished, this, [change, arc, scale]() {
+                const VtValue v = scale->value();
+                if (!v.IsHolding<double>()) return;
+                change(arc, [&](ArcInfo& a) { a.layerOffset.SetScale(v.UncheckedGet<double>()); });
+            });
+            addRow(tr("  Time Scale"), scale);
+
+            if (arc.type == ArcInfo::Type::Payload) {
+                PropertyEditor* loaded = properties::createPropertyEditor(SdfValueTypeNames->Bool);
+                loaded->setValue(VtValue(arc.loaded));
+                connect(loaded, &PropertyEditor::valueEdited, this, [this, path](const VtValue& v) {
+                    const bool on = v.IsHolding<bool>() && v.UncheckedGet<bool>();
+                    on ? prim_actions::load(*m_undoManager, currentStage(), {path})
+                       : prim_actions::unload(*m_undoManager, currentStage(), {path});
+                });
+                addRow(tr("  Loaded"), loaded);
+            }
+        }
+    }
+    if (arcs.empty()) {
+        auto* label = new QLabel(tr("No composition arcs. Add one with +."));
+        label->setObjectName(QStringLiteral("propertyNote"));
+        section->addRow(label);
+    }
+    layout->addWidget(section);
+}
+
+void AttributesViewPanel::addArcInteractively(int typeValue) {
+    const UsdPrim prim = currentPrim();
+    if (!prim || !m_undoManager) return;
+    const auto type = static_cast<ArcInfo::Type>(typeValue);
+    const QString typeName = tr(arcTypeName(type));
+    if (type == ArcInfo::Type::Reference || type == ArcInfo::Type::Payload) {
+        // Relative to the layer being edited, when it's a file, as an asset
+        // field makes it.
+        const SdfLayerHandle layer = currentStage()->usdStage()->GetEditTarget().GetLayer();
+        const QString layerDir =
+            layer->GetRealPath().empty() ? QString() : QFileInfo(qs(layer->GetRealPath())).absolutePath();
+        const QString file = QFileDialog::getOpenFileName(this, tr("Add %1").arg(typeName), layerDir,
+                                                          tr("USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)"));
+        if (file.isEmpty()) return;
+        QString assetPath = file;
+        if (!layerDir.isEmpty()) {
+            assetPath = QDir(layerDir).relativeFilePath(file);
+            if (!assetPath.startsWith(QStringLiteral("../"))) assetPath.prepend(QStringLiteral("./"));
+        }
+        prim_actions::addArc(*m_undoManager, currentStage(), prim.GetPath(), type, assetPath.toStdString(), SdfPath());
+        return;
+    }
+    // An inherit or specialize: another selected prim, if there is one, to
+    // start from.
+    QString start = QStringLiteral("/");
+    for (const SdfPath& selected : stageManager()->selectedPaths(currentStage())) {
+        if (selected != prim.GetPath()) {
+            start = qs(selected.GetString());
+            break;
+        }
+    }
+    bool ok = false;
+    const QString target = QInputDialog::getText(this, tr("Add %1").arg(typeName), tr("Prim path:"), QLineEdit::Normal,
+                                                 start, &ok)
+                               .trimmed();
+    if (!ok || !SdfPath::IsValidPathString(target.toStdString())) return;
+    prim_actions::addArc(*m_undoManager, currentStage(), prim.GetPath(), type, std::string(), SdfPath(target.toStdString()));
 }
 
 void AttributesViewPanel::renameCurrentPrim(const std::string& name) {
@@ -559,6 +780,9 @@ void AttributesViewPanel::applyFilter() {
     }
     if (m_primSection) {
         m_primSection->setVisible(text.isEmpty());
+    }
+    if (m_compositionSection) {
+        m_compositionSection->setVisible(text.isEmpty());
     }
 }
 

@@ -5,7 +5,12 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/modelAPI.h>
+#include <pxr/usd/usd/editTarget.h>
+#include <pxr/usd/usd/inherits.h>
 #include <pxr/usd/usd/namespaceEditor.h>
+#include <pxr/usd/usd/payloads.h>
+#include <pxr/usd/usd/references.h>
+#include <pxr/usd/usd/specializes.h>
 #include <pxr/usd/usd/primCompositionQuery.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageLoadRules.h>
@@ -74,6 +79,78 @@ private:
     PXR_NS::UsdStageLoadRules m_before;
     PXR_NS::UsdStageLoadRules m_after;
 };
+
+// The entry of a list op that `matches`, in whichever part of it it is;
+// false when there's none.
+template <typename Proxy, typename Item, typename Matches>
+bool findItem(const Proxy& list, Matches matches, Item* found) {
+    auto search = [&](const auto& part) {
+        for (const auto& item : part) {
+            if (matches(item)) {
+                *found = item;
+                return true;
+            }
+        }
+        return false;
+    };
+    return search(list.GetExplicitItems()) || search(list.GetPrependedItems()) || search(list.GetAddedItems()) ||
+           search(list.GetAppendedItems());
+}
+
+// A reference's or payload's fields as `arc` has them.
+template <typename Item>
+bool sameAsset(const Item& item, const ArcInfo& arc) {
+    return item.GetAssetPath() == arc.assetPath && item.GetPrimPath() == arc.primPath &&
+           item.GetLayerOffset() == arc.layerOffset;
+}
+
+template <typename Item>
+Item withFields(Item item, const ArcInfo& changed) {
+    item.SetAssetPath(changed.assetPath);
+    item.SetPrimPath(changed.primPath);
+    item.SetLayerOffset(changed.layerOffset);
+    return item;
+}
+
+// Replaces (`changed`) or removes (null) the entry `arc` describes in the
+// edit target's prim spec.
+bool editArcEntry(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& path, const ArcInfo& arc,
+                  const ArcInfo* changed) {
+    const PXR_NS::SdfPrimSpecHandle spec = usdStage->GetEditTarget().GetPrimSpecForScenePath(path);
+    if (!spec) return false;
+    switch (arc.type) {
+        case ArcInfo::Type::Reference: {
+            PXR_NS::SdfReferencesProxy list = spec->GetReferenceList();
+            PXR_NS::SdfReference item;
+            if (!findItem(list, [&](const PXR_NS::SdfReference& r) { return sameAsset(r, arc); }, &item)) return false;
+            if (!changed) return list.RemoveItemEdits(item), true;
+            list.ReplaceItemEdits(item, withFields(item, *changed));
+            return true;
+        }
+        case ArcInfo::Type::Payload: {
+            PXR_NS::SdfPayloadsProxy list = spec->GetPayloadList();
+            PXR_NS::SdfPayload item;
+            if (!findItem(list, [&](const PXR_NS::SdfPayload& p) { return sameAsset(p, arc); }, &item)) return false;
+            if (!changed) return list.RemoveItemEdits(item), true;
+            list.ReplaceItemEdits(item, withFields(item, *changed));
+            return true;
+        }
+        case ArcInfo::Type::Inherit:
+        case ArcInfo::Type::Specialize: {
+            PXR_NS::SdfPathEditorProxy list =
+                arc.type == ArcInfo::Type::Inherit ? spec->GetInheritPathList() : spec->GetSpecializesList();
+            PXR_NS::SdfPath item;
+            if (!findItem(list, [&](const PXR_NS::SdfPath& p) { return p == arc.primPath; }, &item)) return false;
+            if (!changed) return list.RemoveItemEdits(item), true;
+            if (!changed->primPath.IsAbsolutePath() || !changed->primPath.IsPrimPath()) return false;
+            list.ReplaceItemEdits(item, changed->primPath);
+            return true;
+        }
+        case ArcInfo::Type::Variant:
+            return false;
+    }
+    return false;
+}
 
 bool pushLoadRules(UndoManager& undo, const StageRefPtr& stage, const QString& description,
                    std::function<void(const PXR_NS::UsdStageRefPtr&)> change) {
@@ -243,6 +320,45 @@ bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_N
     return pushLoadRules(undo, stage, describe(tr("Unload"), named), [targets](const PXR_NS::UsdStageRefPtr& usdStage) {
         usdStage->LoadAndUnload({}, targets);
     });
+}
+
+bool addArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, ArcInfo::Type type,
+            const std::string& assetPath, const PXR_NS::SdfPath& target) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || type == ArcInfo::Type::Variant) return false;
+    const bool asset = type == ArcInfo::Type::Reference || type == ArcInfo::Type::Payload;
+    if (asset ? assetPath.empty() && target.IsEmpty() : !target.IsAbsolutePath() || !target.IsPrimPath()) return false;
+    const QString description =
+        tr("Add %1 to %2").arg(tr(arcTypeName(type)), qs(path.GetName()));
+    return undo.apply(stage, description, [&]() {
+        const PXR_NS::UsdPrim p = stage->usdStage()->GetPrimAtPath(path);
+        switch (type) {
+            case ArcInfo::Type::Reference: return p.GetReferences().AddReference(PXR_NS::SdfReference(assetPath, target));
+            case ArcInfo::Type::Payload: return p.GetPayloads().AddPayload(PXR_NS::SdfPayload(assetPath, target));
+            case ArcInfo::Type::Inherit: return p.GetInherits().AddInherit(target);
+            case ArcInfo::Type::Specialize: return p.GetSpecializes().AddSpecialize(target);
+            case ArcInfo::Type::Variant: return false;
+        }
+        return false;
+    });
+}
+
+bool changeArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const ArcInfo& arc,
+               const ArcInfo& changed) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || !arc.editable) return false;
+    const bool same = changed.assetPath == arc.assetPath && changed.primPath == arc.primPath &&
+                      changed.layerOffset == arc.layerOffset;
+    if (same) return false;
+    return undo.apply(stage, tr("Change %1 on %2").arg(tr(arcTypeName(arc.type)), qs(path.GetName())),
+                      [&]() { return editArcEntry(stage->usdStage(), path, arc, &changed); });
+}
+
+bool removeArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const ArcInfo& arc) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || !arc.editable) return false;
+    return undo.apply(stage, tr("Remove %1 from %2").arg(tr(arcTypeName(arc.type)), qs(path.GetName())),
+                      [&]() { return editArcEntry(stage->usdStage(), path, arc, nullptr); });
 }
 
 std::vector<std::pair<QString, QString>> info(const PXR_NS::UsdPrim& prim) {

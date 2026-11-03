@@ -41,7 +41,9 @@ class TransformStackEditor;
 // docs/ATTRIBUTE_EDITOR.md (milestone M13, phase 3).
 //
 // Layout: a "Prim" header (name, which renames the prim, type, kind,
-// specifier, active, instanceable, applied schemas), then one collapsible section per PropertyCategorizer
+// specifier, active, instanceable, applied schemas), a "Composition" section
+// (the prim's arcs: add, change, remove, load, pick variants, open a
+// referenced file as a stage; docs/COMPOSITION_ARCS.md §4), then one collapsible section per PropertyCategorizer
 // category, each row a label plus the value type's own PropertyEditor.
 // Attribute edits go through AttributeBinding (one undo step per gesture);
 // relationships are shown read-only with a button to select their targets.
@@ -106,7 +108,11 @@ private:
     // An xformOp:* attribute xformOpOrder doesn't list: dimmed, a note naming
     // the layer that keeps it alive, and a context-menu "Add to Stack".
     void setUpUnusedOp(const Row& row);
-    properties::CategorySection* makeSection(const QString& key, const QString& title);
+    properties::CategorySection* makeSection(const QString& key, const QString& title, bool collapsedByDefault = false);
+    void buildCompositionSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
+    // From the section's +: a reference or payload (a file dialog) or an
+    // inherit or specialize (a prim path).
+    void addArcInteractively(int type);
     void onStageObjectsChanged(const StageChanges& changes);
     void processPendingChanges();
     void queueProcessPendingChanges();
@@ -125,6 +131,7 @@ private:
     std::vector<Row> m_rows;
     std::vector<properties::CategorySection*> m_sections;
     properties::CategorySection* m_primSection = nullptr;
+    properties::CategorySection* m_compositionSection = nullptr;
     properties::TransformStackEditor* m_xformEditor = nullptr;
     PrimHeader m_header;
     std::string m_signature;  // what the current rows were built from

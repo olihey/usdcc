@@ -1,6 +1,6 @@
 # Composition Arcs — Plan
 
-Status: **phase 1 done** (§8), with the recommended choices in §6. Phases 2 and 3 are still to do.
+Status: **phases 1 and 2 done** (§8), with the recommended choices in §6. Phase 3 (the Dependencies panel) is still to do.
 
 See and edit a prim's composition arcs (references, payloads, inherits, specializes, variant
 sets): read-only in the Outliner's context menu, editable in a new Attribute Editor section,
@@ -160,5 +160,5 @@ Stages menu). It lists every external file the stage uses, grouped by file:
 | Phase | Work | Tests |
 |---|---|---|
 | **1. See them** *(done)* | `compositionArcs()` (`composition_arcs.h`, usdcc_usd: from the prim stack's list ops, so unloaded payloads and missing files are there; a layer that's open already, such as an anonymous one, counts as found); the Composition submenu (`prim_context_menu.cpp`); Open as Stage through `setOpenStageHandler()`, which `main.cpp` sets (`StageOpener`, or the open stage's viewport brought forward); Copy Asset Path | `compositionArcs()` on a stage with each arc type, nested references, an unloaded payload, a missing file; the submenu's entries |
-| **2. Edit them** | The Attribute Editor's Composition section: add, change, remove, Loaded, variants, read-only rows | Each edit and its undo; relative paths; an arc from a sublayer read-only |
+| **2. Edit them** *(done)* | `AttributesViewPanel::buildCompositionSection()`, with `prim_actions::addArc()`/`changeArc()`/`removeArc()` (the entry found in the edit target's list op, replaced in place so it keeps its position and custom data). Each reference or payload is a file row (asset field anchored to the edit target, open ↗ and remove ×), then Prim, Time Offset and Time Scale rows, and Loaded for a payload; inherits and specializes are a path row; variants a picker. Read-only arcs (other layers, nested) come after "From other layers". The section's + adds a reference or payload (file dialog, relative path) or an inherit or specialize (path dialog). The arcs are part of the panel's layout signature, so any arc change rebuilds the section | Each edit and its undo; relative paths; an arc from a sublayer read-only |
 | **3. Dependencies panel** | §7 | Grouping, prims per file, missing and unloaded files, the actions |

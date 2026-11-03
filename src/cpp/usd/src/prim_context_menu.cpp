@@ -270,6 +270,12 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
 
 void setOpenStageHandler(std::function<void(const QString& path)> handler) { openStageHandler() = std::move(handler); }
 
+bool openStageFile(const QString& path) {
+    if (!openStageHandler()) return false;
+    openStageHandler()(path);
+    return true;
+}
+
 QWidget* showPrimInfo(const PXR_NS::UsdPrim& prim, QWidget* parent) {
     auto* dialog = new QDialog(parent);
     dialog->setAttribute(Qt::WA_DeleteOnClose);

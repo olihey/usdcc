@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/stage.h"
 
 #include <pxr/base/tf/token.h>
@@ -53,6 +54,20 @@ bool canUnload(const StageRefPtr& stage, const PXR_NS::SdfPath& path);
 // stage's undo stack puts the stage's load rules back.
 bool load(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
 bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
+
+// Composition arcs (docs/COMPOSITION_ARCS.md §4), in the stage's edit target.
+// Add puts a reference or payload (`assetPath`, `target` empty = the default
+// prim; an empty `assetPath` with a `target` is an internal one), an inherit
+// or a specialize (`target`) at the front of the prepend list, as USD does.
+// Change and remove act on the entry `arc` describes (one of
+// compositionArcs()' editable ones): change keeps its place in the list op
+// and anything else it carries (custom data); remove takes it out of the
+// edit target's lists. Variants have setVariant().
+bool addArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, ArcInfo::Type type,
+            const std::string& assetPath, const PXR_NS::SdfPath& target);
+bool changeArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const ArcInfo& arc,
+               const ArcInfo& changed);
+bool removeArc(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const ArcInfo& arc);
 
 // Prim Info (§4): label and value rows, and the same as text to copy.
 std::vector<std::pair<QString, QString>> info(const PXR_NS::UsdPrim& prim);

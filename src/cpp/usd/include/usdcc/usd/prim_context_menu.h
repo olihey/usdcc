@@ -36,6 +36,8 @@ struct PrimMenuContext {
 // it with StageOpener, or bring it forward if it's open already). Without one
 // the entry is disabled.
 void setOpenStageHandler(std::function<void(const QString& path)> handler);
+// Opens `path` through that handler; false (and nothing done) without one.
+bool openStageFile(const QString& path);
 
 // Fills the menu: the prim's name and type, Active, Visibility, Load/Unload
 // Payload, Variants, Composition (the clicked prim's arcs, read-only, with
