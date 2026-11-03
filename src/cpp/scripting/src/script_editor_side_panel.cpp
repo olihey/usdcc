@@ -150,15 +150,23 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // --- Tabs, then +, like a ViewPanel's tab strip ---------------------------
-    auto* tabStrip = new QWidget(container);
-    tabStrip->setObjectName(QStringLiteral("scriptTabStrip"));  // styled by theme/dark.qss
-    tabStrip->setAttribute(Qt::WA_StyledBackground);
-    auto* tabStripLayout = new QHBoxLayout(tabStrip);
-    tabStripLayout->setContentsMargins(0, 0, 0, 0);
-    tabStripLayout->setSpacing(0);
+    // --- Toolbar: ☰ menu, the tabs, then Run, Run Selection, Open, Save -------
+    // One row: the tabs reach its bottom edge like a ViewPanel's tab strip;
+    // the buttons keep the toolbar's 4px inset.
+    auto* toolbar = new QWidget(container);
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setAttribute(Qt::WA_StyledBackground);
+    auto* toolbarLayout = new QHBoxLayout(toolbar);
+    usdcc::ui::scaled::margins(toolbarLayout, 4, 0, 4, 0);
+    usdcc::ui::scaled::spacing(toolbarLayout, 4);
 
-    m_tabBar = new QTabBar(tabStrip);
+    auto* menuLayout = new QHBoxLayout;
+    usdcc::ui::scaled::margins(menuLayout, 0, 4, 0, 4);
+    menuLayout->addWidget(new usdcc::ui::PanelMenuButton(
+        tr("Script options: new, open, save, recent files"), [this](QMenu* menu) { populateMenu(menu); }, toolbar));
+    toolbarLayout->addLayout(menuLayout);
+
+    m_tabBar = new QTabBar(toolbar);
     m_tabBar->setObjectName(QStringLiteral("scriptTabs"));
     m_tabBar->setProperty("focused", false);
     m_tabBar->setDocumentMode(true);
@@ -168,23 +176,7 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     m_tabBar->setUsesScrollButtons(true);
     m_tabBar->setElideMode(Qt::ElideMiddle);
     m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
-    tabStripLayout->addWidget(m_tabBar, 1);
-
-    auto* newTabButton = new usdcc::ui::PanelIconButton({}, tr("New script (Ctrl+T)"), tabStrip);
-    newTabButton->setText(QStringLiteral("+"));
-    tabStripLayout->addWidget(newTabButton);
-
-    // --- Toolbar: ☰ menu, Run, Run Selection, Open, Save -------------------
-    auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
-    toolbar->setAttribute(Qt::WA_StyledBackground);
-    auto* toolbarLayout = new QHBoxLayout(toolbar);
-    usdcc::ui::scaled::margins(toolbarLayout, 4, 4, 4, 4);
-    usdcc::ui::scaled::spacing(toolbarLayout, 4);
-
-    toolbarLayout->addWidget(new usdcc::ui::PanelMenuButton(
-        tr("Script options: new, open, save, recent files"), [this](QMenu* menu) { populateMenu(menu); }, toolbar));
-    toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_tabBar, 1, Qt::AlignBottom);
 
     auto* runButton = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/play.png"),
                                                       tr("Run the script (Ctrl+Enter)"), toolbar);
@@ -195,10 +187,14 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
         new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/folder.png"), tr("Open a script (Ctrl+O)"), toolbar);
     auto* saveButton =
         new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/save.png"), tr("Save the script (Ctrl+S)"), toolbar);
+    auto* buttonsLayout = new QHBoxLayout;
+    usdcc::ui::scaled::margins(buttonsLayout, 0, 4, 0, 4);
+    usdcc::ui::scaled::spacing(buttonsLayout, 4);
     for (QWidget* button : {static_cast<QWidget*>(runButton), static_cast<QWidget*>(runSelectionButton),
                             static_cast<QWidget*>(openButton), static_cast<QWidget*>(saveButton)}) {
-        toolbarLayout->addWidget(button);
+        buttonsLayout->addWidget(button);
     }
+    toolbarLayout->addLayout(buttonsLayout);
 
     // --- Editors over output -------------------------------------------------
     m_editors = new QStackedWidget(container);
@@ -218,7 +214,6 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     m_splitter->setChildrenCollapsible(false);
     m_splitter->restoreState(m_settings->value(kSplitterKey).toByteArray());
 
-    layout->addWidget(tabStrip);
     layout->addWidget(toolbar);
     layout->addWidget(m_splitter, 1);
     setWidget(container);
@@ -235,7 +230,6 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     connect(runSelectionButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::runSelection);
     connect(openButton, &QToolButton::clicked, this, [this]() { openFile({}); });
     connect(saveButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::save);
-    connect(newTabButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::newScript);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, [this](int index) {
         if (Script* current = script(index)) m_editors->setCurrentWidget(current->editor);
@@ -807,7 +801,7 @@ bool ScriptEditorSidePanel::ruffCheck(int index) {
 
 void ScriptEditorSidePanel::populateMenu(QMenu* menu) {
     if (!m_tabBar) return;
-    menu->addAction(tr("New\tCtrl+T"), this, [this]() { newScript(); });
+    menu->addAction(tr("New Tab\tCtrl+T"), this, [this]() { newScript(); });
     menu->addAction(tr("Open...\tCtrl+O"), this, [this]() { openFile({}); });
     QMenu* recent = menu->addMenu(tr("Open Recent"));
     recent->setEnabled(!m_recentFiles.isEmpty());

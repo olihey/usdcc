@@ -225,8 +225,7 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 added through `MainWindow::addSidePanel()`):
 
 ```
- shot_setup.py • [x] │ Untitled [x] │                                         [+]
-[☰]                                                          [▶] [▶|] [📂] [💾]
+[☰] shot_setup.py • [x] │ Untitled [x] │                       [▶] [▶|] [📂] [💾]
 ┌──────────────────────────────────────────────────────────────────────┐
 │ 1  from pxr import Sdf                                                │
 │ 2  import usdcc.usd                                                   │
@@ -252,10 +251,10 @@ added through `MainWindow::addSidePanel()`):
 - **Output pane** below the editor: each run's header, its print output, stderr and warnings
   (amber), tracebacks and errors (red), any OpenUSD messages during the run, and a footer with
   the time and undo steps. ☰ > Clear Output empties it. Everything also goes to the Log panel.
-- **Tabs**: one script per tab, a file or an untitled script ("Untitled", "Untitled 2", …), above
-  the toolbar like a ViewPanel's tab strip: the current tab is filled with the accent blue,
+- **Tabs**: one script per tab, a file or an untitled script ("Untitled", "Untitled 2", …), in
+  the toolbar row between ☰ and the buttons, styled like a ViewPanel's tab strip: the current tab is filled with the accent blue,
   solid while focus is in the panel. "•" marks unsaved changes; the tooltip is the path. Tabs
-  move by dragging. New tab: Ctrl+T, the + button, or a double-click beside the tabs; Ctrl+W
+  move by dragging. New tab: ☰ > New Tab, Ctrl+T, or a double-click beside the tabs; Ctrl+W
   closes one. Run, Save and the toolbar act on the current tab.
 - **A tab's context menu**: Save, Save As…, Rename… (an untitled tab's name; a file is renamed
   on disk, adding .py without a suffix), Duplicate (an untitled copy beside it), Clear (one undo
@@ -263,7 +262,7 @@ added through `MainWindow::addSidePanel()`):
   (`ruff check`'s findings in the output pane), Close and Close Others. Ruff is looked up on
   PATH, then in the Python's Scripts folder, and gets the file's path as `--stdin-filename` so
   the folder's ruff settings apply; without ruff, both are disabled and say why.
-- **Files** in the ☰ menu: New, Open…, Open Recent ▸ (ten), Save, Save As…, plus Ctrl+O and
+- **Files** in the ☰ menu: New Tab, Open…, Open Recent ▸ (ten), Save, Save As…, plus Ctrl+O and
   Ctrl+S. Open uses a new tab (or the file's tab, if it is open; or an empty untitled current
   tab).
 - **Unsaved changes**: closing a tab with any asks Save/Discard/Cancel. Closing the app asks the

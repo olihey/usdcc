@@ -324,14 +324,9 @@ QPlainTextEdit#scriptEditor {
     background: #1c1c1e;
 }
 
-/* Its tabs, styled like a ViewPanel's tab strip (dock.qss): the current tab
-   filled with the accent blue, solid while focus is in the panel
-   (focused="true", set from code) and muted otherwise. */
-QWidget#scriptTabStrip {
-    background: #1a1a1c;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
-}
-
+/* Its tabs, in its toolbar row, styled like a ViewPanel's tab strip
+   (dock.qss): the current tab filled with the accent blue, solid while focus
+   is in the panel (focused="true", set from code) and muted otherwise. */
 QTabBar#scriptTabs {
     background: transparent;
 }

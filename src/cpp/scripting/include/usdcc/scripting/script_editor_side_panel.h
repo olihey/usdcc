@@ -32,9 +32,9 @@ class ScriptRunner;
 // changes (ScriptRunner).
 //
 // Each tab is a file or an untitled script; its name has a • while it has
-// unsaved changes. New (Ctrl+T, the + button, or a double-click beside the
-// tabs), Open (Ctrl+O, in a new tab), Save (Ctrl+S), Save As and Open Recent
-// are in the ☰ menu; Clear, Rename, Save, Save As, Duplicate, Ruff Format,
+// unsaved changes. New Tab (Ctrl+T, or a double-click beside the tabs), Open
+// (Ctrl+O, in a new tab), Save (Ctrl+S), Save As and Open Recent are in the
+// ☰ menu; Clear, Rename, Save, Save As, Duplicate, Ruff Format,
 // Ruff Check and Close in each tab's context menu.
 //
 // The open tabs, untitled scripts' text, the recent files, the split and the
