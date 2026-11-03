@@ -37,6 +37,11 @@ add_library(usdcc_scripting_ui STATIC
 )
 target_include_directories(usdcc_scripting_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(usdcc_scripting_ui PUBLIC usdcc_scripting_app usdcc_ui Qt6::Widgets)
+# The build's pinned ruff (UsdccRuff.cmake), used unless the app finds one
+# bundled next to it (tools/deploy.ps1).
+if(USDCC_RUFF_EXE)
+    target_compile_definitions(usdcc_scripting_ui PRIVATE USDCC_RUFF_EXE="${USDCC_RUFF_EXE}")
+endif()
 
 if(USDCC_PYTHON_FOUND)
     find_package(pybind11 REQUIRED)

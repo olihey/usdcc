@@ -136,6 +136,7 @@ else()
     message(STATUS "PySide6 for usdcc: none in ${USDCC_PYSIDE_DIR} (run tools/build-pyside.ps1); "
                    "usdcc.ui and Python-made panels are disabled")
 endif()
+include(UsdccRuff)
 
 # The usdcc Python package lives in build/python/usdcc: the compiled modules
 # (usd.pyd, ...) are built there, and this copies the pure-Python files from

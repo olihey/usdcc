@@ -34,8 +34,8 @@ class ScriptRunner;
 // Each tab is a file or an untitled script; its name has a • while it has
 // unsaved changes. New Tab (Ctrl+T, or a double-click beside the tabs), Open
 // (Ctrl+O, in a new tab), Save (Ctrl+S), Save As and Open Recent are in the
-// ☰ menu; Clear, Rename, Save, Save As, Duplicate, Ruff Format,
-// Ruff Check and Close in each tab's context menu.
+// ☰ menu; Clear, Rename, Save, Save As, Duplicate, Ruff Format, Ruff Check,
+// Ruff Fix and Close in each tab's context menu.
 //
 // The open tabs, untitled scripts' text, the recent files, the split and the
 // ☰ menu's Keep Variables Between Runs persist; the tabs are saved a moment
@@ -93,13 +93,16 @@ public:
     bool renameTab(int index, const QString& name = {});  // asks for the name when empty
     bool closeTab(int index);
 
-    // Ruff (https://docs.astral.sh/ruff/), found on PATH or in the Python's
-    // Scripts folder. Format replaces the tab's text with `ruff format`'s
-    // (one undo step); Check prints `ruff check`'s findings to the output.
-    // Both use the ruff settings of the file's folder. Return false when ruff
-    // is missing or fails.
+    // Ruff (https://docs.astral.sh/ruff/): the pinned one bundled with the app
+    // (a deploy's tools/ruff, or the build's, cmake/modules/UsdccRuff.cmake),
+    // else one on PATH or in the Python's Scripts folder. Format replaces the
+    // tab's text with `ruff format`'s, and Fix with `ruff check --fix`'s (each
+    // one undo step; Fix prints what it couldn't fix); Check prints
+    // `ruff check`'s findings to the output. All use the ruff settings of the
+    // file's folder. Return false when ruff is missing or fails.
     QString ruffProgram() const;
     bool ruffFormat(int index);
+    bool ruffFix(int index);
     bool ruffCheck(int index);
 
     void clearOutput();

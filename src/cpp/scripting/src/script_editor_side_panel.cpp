@@ -724,6 +724,14 @@ void ScriptEditorSidePanel::clearOutput() {
 // --- Ruff --------------------------------------------------------------------------
 
 QString ScriptEditorSidePanel::ruffProgram() const {
+    // The pinned ruff first, so formatting doesn't depend on what is installed:
+    // a deploy's tools/ruff next to bin/ (tools/deploy.ps1), then the build's.
+    const QString deployed =
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/ruff/ruff.exe"));
+    if (QFileInfo(deployed).isExecutable()) return QDir::cleanPath(deployed);
+#ifdef USDCC_RUFF_EXE
+    if (QFileInfo(QStringLiteral(USDCC_RUFF_EXE)).isExecutable()) return QStringLiteral(USDCC_RUFF_EXE);
+#endif
     QString program = QStandardPaths::findExecutable(QStringLiteral("ruff"));
     if (program.isEmpty() && m_runtime.isAvailable()) {
         const QString scripts = QString::fromStdU16String((m_runtime.settings().home / "Scripts").u16string());
@@ -782,6 +790,28 @@ bool ScriptEditorSidePanel::ruffFormat(int index) {
         appendOutput(tr("    formatted"), kMutedColor);
     }
     return true;
+}
+
+bool ScriptEditorSidePanel::ruffFix(int index) {
+    Script* target = script(index);
+    if (!target) return false;
+    appendOutput(QStringLiteral(">>> Ruff Fix %1").arg(displayName(*target)), kMutedColor);
+    // With stdin, `--fix` writes the fixed code to stdout and what is left to
+    // fix to stderr.
+    QByteArray out, err;
+    const bool ok = runRuff({QStringLiteral("check"), QStringLiteral("--fix"), QStringLiteral("--output-format"),
+                             QStringLiteral("concise")},
+                            *target, out, err);
+    if (ok) {
+        const QString fixed = QString::fromUtf8(out);
+        if (fixed == target->editor->toPlainText()) {
+            appendOutput(tr("    nothing to fix"), kMutedColor);
+        } else {
+            replaceText(target->editor, fixed);
+        }
+    }
+    if (!err.isEmpty()) appendOutput(QString::fromUtf8(err).trimmed(), ok ? kWarningColor : kErrorColor);
+    return ok;
 }
 
 bool ScriptEditorSidePanel::ruffCheck(int index) {
@@ -844,7 +874,8 @@ void ScriptEditorSidePanel::populateTabMenu(QMenu* menu, int index) {
     const QString missing = tr("ruff wasn't found: install it (pip install ruff) or put it on PATH");
     QAction* format = menu->addAction(tr("Ruff Format"), this, [this, at]() { ruffFormat(at()); });
     QAction* check = menu->addAction(tr("Ruff Check"), this, [this, at]() { ruffCheck(at()); });
-    for (QAction* action : {format, check}) {
+    QAction* fix = menu->addAction(tr("Ruff Fix"), this, [this, at]() { ruffFix(at()); });
+    for (QAction* action : {format, check, fix}) {
         action->setEnabled(hasRuff);
         if (!hasRuff) action->setToolTip(missing);
     }

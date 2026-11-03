@@ -259,9 +259,15 @@ added through `MainWindow::addSidePanel()`):
 - **A tab's context menu**: Save, Save As…, Rename… (an untitled tab's name; a file is renamed
   on disk, adding .py without a suffix), Duplicate (an untitled copy beside it), Clear (one undo
   step), Ruff Format (replaces the text with `ruff format`'s, one undo step), Ruff Check
-  (`ruff check`'s findings in the output pane), Close and Close Others. Ruff is looked up on
-  PATH, then in the Python's Scripts folder, and gets the file's path as `--stdin-filename` so
-  the folder's ruff settings apply; without ruff, both are disabled and say why.
+  (`ruff check`'s findings in the output pane), Ruff Fix (replaces it with `ruff check --fix`'s,
+  one undo step, and lists what it couldn't fix), Close and Close Others. Ruff is bundled at a
+  pinned version (`cmake/modules/UsdccRuff.cmake` downloads PyPI's Windows wheel at configure
+  time, checks its SHA-256 and unpacks `ruff.exe` and its LICENSE into `build/ruff`;
+  `tools/deploy.ps1` copies them into the deploy's `tools/ruff`). The app uses the deploy's,
+  then the build's, then one on PATH or in the Python's Scripts folder; without any, both
+  entries are disabled and say why. Ruff gets the file's path as `--stdin-filename`, so the
+  folder's `pyproject.toml`/`ruff.toml` settings apply. `-DUSDCC_BUNDLE_RUFF=OFF` skips the
+  download.
 - **Files** in the ☰ menu: New Tab, Open…, Open Recent ▸ (ten), Save, Save As…, plus Ctrl+O and
   Ctrl+S. Open uses a new tab (or the file's tab, if it is open; or an empty untitled current
   tab).

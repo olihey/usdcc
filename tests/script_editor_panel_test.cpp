@@ -310,7 +310,7 @@ USDCC_TEST(scripting_panel_tabs) {
         if (!action->isSeparator()) actions << action->text().section('\t', 0, 0);
     }
     CHECK(actions == QStringList({"Save", "Save As...", "Rename...", "Duplicate", "Clear", "Ruff Format", "Ruff Check",
-                                  "Close", "Close Others"}),
+                                  "Ruff Fix", "Close", "Close Others"}),
           "the tab's context menu: [%s]", qPrintable(actions.join(", ")));
 
     CHECK(panel.closeTab(1) && panel.tabCount() == 1, "Close");
@@ -330,6 +330,16 @@ USDCC_TEST(scripting_panel_tabs) {
     panel.clearOutput();
     CHECK(panel.ruffCheck(0) && panel.output()->toPlainText().contains("F401"), "Ruff Check prints findings: [%s]",
           qPrintable(panel.output()->toPlainText()));
+
+    // The unused import goes; the undefined name can't be fixed and is listed.
+    type(*panel.editor(), "import os\nprint(undefined_name)\n");
+    panel.clearOutput();
+    CHECK(panel.ruffFix(0) && panel.editor()->toPlainText() == "print(undefined_name)\n", "Ruff Fix: [%s]",
+          qPrintable(panel.editor()->toPlainText()));
+    CHECK(panel.output()->toPlainText().contains("F821"), "and prints what's left: [%s]",
+          qPrintable(panel.output()->toPlainText()));
+    panel.editor()->undo();
+    CHECK(panel.editor()->toPlainText() == "import os\nprint(undefined_name)\n", "in one undo step");
 }
 
 USDCC_TEST(scripting_panel_unavailable) {

@@ -16,6 +16,8 @@
           plugin\usd\   OpenUSD's other plugins (Storm, Embree, image readers)
           python\       the Python OpenUSD was built with (Lib, DLLs), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
+          tools\ruff\   ruff.exe and its LICENSE, for the Script Editor's Ruff
+                        Format and Ruff Check (the build's pinned version)
 
     OpenUSD finds its plugins relative to usd_plug.dll (bin\usd and
     ..\plugin\usd), and usdcc uses python\ instead of the build's Python when
@@ -106,6 +108,10 @@ if (-not (Test-Path (Join-Path $pythonHome 'Lib/encodings/__init__.py'))) {
 $pysideDir = Get-CacheValue 'USDCC_PYSIDE_DIR'
 $hasPySide = $pysideDir -and (Test-Path (Join-Path $pysideDir 'PySide6/__init__.py'))
 
+# The pinned ruff cmake/modules/UsdccRuff.cmake downloaded into build/ruff.
+$ruffExe = Get-CacheValue 'USDCC_RUFF_EXE_PATH'
+$hasRuff = $ruffExe -and (Test-Path $ruffExe)
+
 $packageDir = Join-Path $buildDir 'python/usdcc'
 if (-not (Test-Path (Join-Path $packageDir '__init__.py'))) {
     throw "The usdcc Python package is missing from $packageDir; build first."
@@ -191,6 +197,19 @@ if ($hasPySide) {
         -ExcludeFiles $buildOnlyFiles -ExcludeDirs $pysideBuildOnly
 } else {
     Write-Warning "No PySide6 in '$pysideDir' (tools/build-pyside.ps1): the deploy works, but scripts can't make panels."
+}
+
+# --- tools ---------------------------------------------------------------
+
+if ($hasRuff) {
+    Write-Host '  ruff'
+    $ruffDir = Join-Path $deployDir 'tools/ruff'
+    New-Item -ItemType Directory -Force $ruffDir | Out-Null
+    Copy-Item $ruffExe $ruffDir
+    $ruffLicense = Join-Path (Split-Path $ruffExe) 'LICENSE'
+    if (Test-Path $ruffLicense) { Copy-Item $ruffLicense $ruffDir }
+} else {
+    Write-Warning "No ruff in the build ('$ruffExe'; reconfigure with USDCC_BUNDLE_RUFF=ON while online): the deploy works, but Ruff Format and Ruff Check need a ruff on PATH."
 }
 
 # --- launcher and checks ---------------------------------------------------
