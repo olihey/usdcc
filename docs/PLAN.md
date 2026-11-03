@@ -846,6 +846,24 @@ things that will bite later if not addressed early:
     and every loaded DLL comes from the deploy or Windows. Still a script, not the
     planned CMake `deploy` target, and not yet tried on a clean machine.
 
+38. **GL errors from the viewport.** Two sources of "GL error" floods in the log:
+    - *On close* (`invalid operation` from HgiGL destructors, thousands): the native surface
+      is destroyed before HydraViewportWindow, so the destructor couldn't make the context
+      current and Hydra freed its GL objects without one. The engine is now released on
+      `QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed`, while the surface still exists,
+      and recreated with the same renderer if the window is shown again. Floating and
+      docking a viewport keep its native window (no release); forcing the window to be
+      destroyed and recreated (QWindow::destroy/create from a script) releases the engine
+      cleanly and brings it back with the renderer that was picked (Embree).
+    - *While rendering scenes with translucent geometry* (`invalid enum`, reported from
+      HgiGLBuffer and HgiGL_ScopedStateHolder): HdxOitResolveTask asks the bound
+      framebuffer about `GL_COLOR_ATTACHMENT0` to size its buffers, which is invalid on the
+      window's default framebuffer. Storm now renders (and picks) into a
+      QOpenGLFramebufferObject that is copied to the window each frame.
+    Found with `USDCC_GL_DEBUG=1` (main.cpp): a debug context whose driver messages the
+    viewport logs synchronously, with the stack of the failing call. The viewport also
+    logs the GL version, profile and renderer it got.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

@@ -325,6 +325,9 @@ That is checked three ways:
 - A UI to edit per-category levels; until M10's settings dialog, `--log-level` and an
   environment variable (`USDCC_LOG=usdcc.viewport=debug,usd=warning`) set them.
 - Investigating the GL-error spam itself (PLAN.md §6 item 12). The panel only makes it visible.
+  (Since done: PLAN.md §6 item 38. `USDCC_GL_DEBUG=1` asks for a debug GL context, and the
+  viewport then logs each GL error under `usdcc.viewport.gl` as the driver reports it, with
+  the stack of the call that caused it.)
 
 ## 9. Phases
 

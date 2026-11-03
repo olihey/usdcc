@@ -16,6 +16,7 @@
 #include <vector>
 
 class QOpenGLContext;
+class QOpenGLFramebufferObject;
 class QOpenGLFunctions_1_1;
 
 // A plain `namespace PXR_NS { class UsdImagingGLEngine; }` here would declare
@@ -132,6 +133,11 @@ private:
     // Destroys the engine with the context current, so its GL objects are
     // freed cleanly, and remembers its renderer for ensureEngine().
     void releaseEngine();
+    // With a debug context (USDCC_GL_DEBUG=1, see main.cpp): logs each GL
+    // error as the driver reports it, with the stack of the call.
+    void startGlDebugLog();
+    // Binds m_framebuffer, (re)made at `width` x `height` device pixels.
+    void bindFramebuffer(int width, int height);
     void renderNow();
     PXR_NS::GfVec3d cameraPosition() const;
     PXR_NS::GfFrustum currentFrustum() const;
@@ -150,6 +156,8 @@ private:
     QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
     PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
+    // What Storm and the gizmo draw into; copied to the window each frame.
+    std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
     PXR_NS::UsdStageRefPtr m_stage;
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};

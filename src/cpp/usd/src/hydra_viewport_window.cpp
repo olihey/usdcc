@@ -5,6 +5,7 @@
 #include <pxr/base/gf/math.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec2i.h>
+#include <pxr/base/tf/stackTrace.h>
 #include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/glf/simpleMaterial.h>
 #include <pxr/imaging/hdx/pickTask.h>
@@ -18,6 +19,8 @@
 #include <QMouseEvent>
 #include <QPlatformSurfaceEvent>
 #include <QOpenGLContext>
+#include <QOpenGLDebugLogger>
+#include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions>
 #include <QOpenGLFunctions_1_1>
 #include <QOpenGLVersionFunctionsFactory>
@@ -66,6 +69,7 @@ void HydraViewportWindow::releaseEngine() {
     }
     m_rendererPluginId = m_engine->GetCurrentRendererId();
     m_engine.reset();
+    m_framebuffer.reset();
     if (current) {
         m_context->doneCurrent();
     }
@@ -105,6 +109,22 @@ void HydraViewportWindow::ensureEngine() {
         m_context = new QOpenGLContext(this);
         m_context->setFormat(requestedFormat());
         m_context->create();
+        m_context->makeCurrent(this);
+        const QSurfaceFormat format = m_context->format();
+        const auto glString = [this](GLenum name) {
+            const GLubyte* text = m_context->functions()->glGetString(name);
+            return text ? reinterpret_cast<const char*>(text) : "?";
+        };
+        USDCC_LOG_INFO("usdcc.viewport", "OpenGL {}.{} {} profile{}, {} ({})", format.majorVersion(),
+                       format.minorVersion(),
+                       format.profile() == QSurfaceFormat::CompatibilityProfile ? "compatibility"
+                       : format.profile() == QSurfaceFormat::CoreProfile        ? "core"
+                                                                                : "no",
+                       format.testOption(QSurfaceFormat::DebugContext) ? ", debug" : "",
+                       glString(GL_RENDERER), glString(GL_VERSION));
+        if (format.testOption(QSurfaceFormat::DebugContext)) {
+            startGlDebugLog();
+        }
     }
     if (!m_engine) {
         m_context->makeCurrent(this);
@@ -132,6 +152,42 @@ void HydraViewportWindow::ensureEngine() {
 
         Q_EMIT rendererPluginsChanged();
     }
+}
+
+void HydraViewportWindow::bindFramebuffer(int width, int height) {
+    if (!m_framebuffer || m_framebuffer->size() != QSize(width, height)) {
+        m_framebuffer.reset();  // before its replacement exists: one at a time in GPU memory
+        QOpenGLFramebufferObjectFormat format;
+        format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);  // Storm composites with a depth test
+        format.setInternalTextureFormat(GL_RGBA8);
+        m_framebuffer = std::make_unique<QOpenGLFramebufferObject>(QSize(width, height), format);
+    }
+    m_framebuffer->bind();
+}
+
+void HydraViewportWindow::startGlDebugLog() {
+    auto* logger = new QOpenGLDebugLogger(this);
+    if (!logger->initialize()) {  // needs the context current, and KHR_debug
+        USDCC_LOG_WARNING("usdcc.viewport", "GL debug output unavailable (no KHR_debug)");
+        delete logger;
+        return;
+    }
+    // Synchronous: the driver reports during the failing call, so the stack
+    // shows who made it (Hydra's own checks only see the error later).
+    connect(logger, &QOpenGLDebugLogger::messageLogged, this, [](const QOpenGLDebugMessage& message) {
+        if (message.type() != QOpenGLDebugMessage::ErrorType) {
+            return;
+        }
+        usdcc::core::LogRecord record;
+        record.level = usdcc::core::LogLevel::Error;
+        record.source = "usdcc";
+        record.category = "usdcc.viewport.gl";
+        record.message = message.message().toStdString();
+        record.details = PXR_NS::TfGetStackTrace();
+        usdcc::core::LogHub::instance().post(std::move(record));
+    });
+    logger->startLogging(QOpenGLDebugLogger::SynchronousLogging);
+    USDCC_LOG_INFO("usdcc.viewport", "GL debug output on (USDCC_GL_DEBUG)");
 }
 
 void HydraViewportWindow::configureEngine() {
@@ -277,9 +333,11 @@ PXR_NS::SdfPath HydraViewportWindow::pickPrim(const PXR_NS::GfVec2d& ndcPos) {
     pickParams.resolveMode = PXR_NS::HdxPickResolveModeTokens->resolveNearestToCamera;
 
     PXR_NS::UsdImagingGLEngine::IntersectionResultVector results;
+    bindFramebuffer(w, h);  // as for rendering, see renderNow()
     const bool hit = m_engine->TestIntersection(pickParams, pickFrustum.ComputeViewMatrix(),
                                                  pickFrustum.ComputeProjectionMatrix(), m_stage->GetPseudoRoot(),
                                                  params, &results);
+    QOpenGLFramebufferObject::bindDefault();
     if (!hit || results.empty()) {
         return {};
     }
@@ -374,6 +432,9 @@ bool HydraViewportWindow::event(QEvent* ev) {
     if (ev->type() == QEvent::PlatformSurface &&
         static_cast<QPlatformSurfaceEvent*>(ev)->surfaceEventType() ==
             QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed) {
+        if (m_engine) {
+            USDCC_LOG_DEBUG("usdcc.viewport", "Native surface going away: releasing the Hydra engine");
+        }
         releaseEngine();
     }
     return QWindow::event(ev);
@@ -390,6 +451,13 @@ void HydraViewportWindow::renderNow() {
     const qreal pixelRatio = devicePixelRatio();
     const int w = std::max(1, static_cast<int>(width() * pixelRatio));
     const int h = std::max(1, static_cast<int>(height() * pixelRatio));
+
+    // Storm draws into our own framebuffer, not the window's default one: some
+    // of its passes ask the bound framebuffer about GL_COLOR_ATTACHMENT0 (the
+    // transparency resolve sizes its buffers that way, HdxOitResolveTask),
+    // which is GL_INVALID_ENUM on the default framebuffer. Hydra then reports
+    // that leftover error from unrelated places. Copied to the window below.
+    bindFramebuffer(w, h);
 
     // QOpenGLWidget sets this automatically from its FBO size before each
     // paintGL(); a raw QWindow + manually-created QOpenGLContext has no such
@@ -445,6 +513,9 @@ void HydraViewportWindow::renderNow() {
         drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
     }
 
+    const QRect frame(0, 0, w, h);
+    QOpenGLFramebufferObject::blitFramebuffer(nullptr, frame, m_framebuffer.get(), frame);
+    QOpenGLFramebufferObject::bindDefault();
     m_context->swapBuffers(this);
 
     if (m_stage && !m_firstFrameRendered) {

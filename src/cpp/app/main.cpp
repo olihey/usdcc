@@ -102,6 +102,11 @@ int main(int argc, char** argv) {
     format.setProfile(QSurfaceFormat::CompatibilityProfile);
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
+    // USDCC_GL_DEBUG=1 asks for a debug context: the viewport then logs each
+    // GL error the driver reports, at the call that caused it, with a stack.
+    if (qEnvironmentVariableIntValue("USDCC_GL_DEBUG") != 0) {
+        format.setOption(QSurfaceFormat::DebugContext);
+    }
     QSurfaceFormat::setDefaultFormat(format);
 
     // The viewport is a native child window (QWidget::createWindowContainer),
