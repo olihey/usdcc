@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPointer>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -41,6 +42,7 @@
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
@@ -329,6 +331,26 @@ int main(int argc, char** argv) {
         if (!path.isEmpty()) {
             stageOpener->open(path);
         }
+    });
+
+    // File > Save Stage: every file layer of the current stage with unsaved
+    // changes (docs/LAYER_EDITOR.md §5). Ctrl+Shift+S, as Ctrl+S is the
+    // Script Editor's and the Layers panel's own Save.
+    QAction* saveStageAction = fileMenu->addAction(QObject::tr("&Save Stage"));
+    saveStageAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    saveStageAction->setStatusTip(QObject::tr("Save every layer of the current stage that has unsaved changes"));
+    QObject::connect(fileMenu, &QMenu::aboutToShow, saveStageAction, [&stageManager, saveStageAction]() {
+        saveStageAction->setEnabled(!usdcc::usd::layer_actions::unsavedLayers(stageManager.currentStage()).empty());
+    });
+    QObject::connect(saveStageAction, &QAction::triggered, &window, [&stageManager, &window]() {
+        QString error;
+        if (!usdcc::usd::layer_actions::saveAll(stageManager.currentStage(), &error)) {
+            QMessageBox::warning(&window, QObject::tr("Save Stage"), error);
+        }
+    });
+    // Closing the window asks about unsaved layers of every open stage.
+    window.addCloseCheck([&stageManager, &window]() {
+        return usdcc::usd::confirmUnsavedLayers(&stageManager, stageManager.stages(), &window);
     });
 
     // Outliner > Composition > an arc > Open as Stage: a file already open as

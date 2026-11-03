@@ -277,6 +277,116 @@ bool reloadLayer(UndoManager& undo, const StageRefPtr& stage, const std::string&
     return ok;
 }
 
+std::vector<PXR_NS::SdfLayerHandle> unsavedLayers(const StageRefPtr& stage) {
+    std::vector<PXR_NS::SdfLayerHandle> layers;
+    if (!stage) return layers;
+    for (const PXR_NS::SdfLayerHandle& layer : stage->usdStage()->GetUsedLayers()) {
+        if (layer && layer->IsDirty() && !layer->IsAnonymous() && !layer->GetRealPath().empty()) layers.push_back(layer);
+    }
+    std::sort(layers.begin(), layers.end(), [](const PXR_NS::SdfLayerHandle& a, const PXR_NS::SdfLayerHandle& b) {
+        return a->GetDisplayName() < b->GetDisplayName();
+    });
+    return layers;
+}
+
+bool saveLayer(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, QString* error) {
+    if (!layer || layer->IsAnonymous()) {
+        if (error) *error = tr("An in-memory layer has no file to save to; use Save As.");
+        return false;
+    }
+    const bool ok = layer->Save();
+    if (!ok && error) {
+        *error = tr("Can't save %1.").arg(QDir::toNativeSeparators(QString::fromStdString(layer->GetRealPath())));
+    }
+    if (stage) stage->layersSaved();
+    return ok;
+}
+
+bool saveAll(const StageRefPtr& stage, QString* error) {
+    for (const PXR_NS::SdfLayerHandle& layer : unsavedLayers(stage)) {
+        if (!saveLayer(stage, layer, error)) return false;
+    }
+    return true;
+}
+
+std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                        const std::string& path, QString* error) {
+    if (!stage) return {};
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = nullptr;
+    const LayerEntry* parent = nullptr;
+    int index = -1;
+    if (!locate(tree, identifier, nullptr, &entry, &parent, &index) || !entry->layer) {
+        if (error) *error = tr("That layer can't be saved.");
+        return {};
+    }
+    const QString file = QString::fromStdString(path);
+    if (PXR_NS::SdfLayer::Find(path) && PXR_NS::SdfLayer::Find(path) != entry->layer) {
+        if (error) *error = tr("%1 is open as another layer.").arg(QFileInfo(file).fileName());
+        return {};
+    }
+    if (!entry->layer->Export(path)) {
+        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        return {};
+    }
+    const PXR_NS::SdfLayerRefPtr saved = PXR_NS::SdfLayer::FindOrOpen(path);
+    if (!saved) {
+        if (error) *error = tr("Can't open %1 after writing it.").arg(QDir::toNativeSeparators(file));
+        return {};
+    }
+    // Opened before (a reload of what was on disk): what was just written.
+    saved->Reload(/*force=*/true);
+    stage->layersSaved();
+    if (!entry->anonymous || !parent) return saved->GetIdentifier();  // a copy
+
+    // The in-memory layer gives its place to the file.
+    const PXR_NS::SdfLayerHandle parentLayer = parent->layer;
+    const bool wasTarget = entry->editTarget;
+    const PXR_NS::SdfLayerRefPtr memory = entry->layer;
+    const PXR_NS::SdfLayerOffset offset = entry->offset;
+    const std::string authored = authoredPath(parentLayer, saved);
+    const QString name = QString::fromStdString(entry->displayName);
+    const bool ok = undo.apply(
+        stage, parentLayer, tr("Save %1 As %2").arg(name, QFileInfo(file).fileName()),
+        [&]() {
+            parentLayer->RemoveSubLayerPath(index);
+            parentLayer->InsertSubLayerPath(authored, index);
+            if (!offset.IsIdentity()) parentLayer->SetSubLayerOffset(offset, index);
+            return true;
+        },
+        {memory, saved});
+    if (!ok) {
+        if (error) *error = tr("%1 was written, but couldn't take the layer's place.").arg(QFileInfo(file).fileName());
+        return {};
+    }
+    if (wasTarget) stage->setEditTargetLayer(saved);
+    return PXR_NS::SdfComputeAssetPathRelativeToLayer(parentLayer, authored);
+}
+
+bool editLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, const QString& description,
+               const std::function<bool(const PXR_NS::SdfLayerHandle&)>& edit) {
+    const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
+    if (!stage || !layer || !edit) return false;
+    return undo.apply(stage, layer, description, [&]() { return edit(layer); });
+}
+
+bool setSublayerOffset(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                       const PXR_NS::SdfLayerOffset& offset) {
+    if (!stage) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = nullptr;
+    const LayerEntry* parent = nullptr;
+    int index = -1;
+    if (!locate(tree, identifier, nullptr, &entry, &parent, &index) || !parent || !parent->layer) return false;
+    if (entry->offset == offset) return true;
+    const PXR_NS::SdfLayerHandle parentLayer = parent->layer;
+    return undo.apply(stage, parentLayer, tr("Set Time Offset of %1").arg(QString::fromStdString(entry->displayName)),
+                      [&]() {
+                          parentLayer->SetSubLayerOffset(offset, index);
+                          return true;
+                      });
+}
+
 bool sublayerPosition(const StageRefPtr& stage, const std::string& identifier, int* index, int* count) {
     if (!stage) return false;
     const std::vector<LayerEntry> tree = layerTree(stage->usdStage());

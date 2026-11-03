@@ -5,6 +5,8 @@
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -24,9 +26,11 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSet>
 #include <QSettings>
 #include <QShortcut>
+#include <QSplitter>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QUndoStack>
@@ -133,6 +137,11 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     });
     add->setMenu(addMenu);
     toolbarLayout->addWidget(add);
+    // Save: the selected layer, else the edit target (§5).
+    auto* save = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/save.png"),
+                                                tr("Save the selected layer (Ctrl+S)"), toolbar);
+    connect(save, &QToolButton::clicked, this, [this]() { saveLayer(layerToSave()); });
+    toolbarLayout->addWidget(save);
 
     auto* tree = new LayerTree(container);
     tree->onMove = [this](QTreeWidgetItem* dragged, int index) {
@@ -173,9 +182,33 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     shortcut(QKeySequence::Delete, [this](const std::string& id) { removeLayer(id); });
     shortcut(QKeySequence(Qt::CTRL | Qt::Key_Up), [this](const std::string& id) { moveBy(id, -1); });
     shortcut(QKeySequence(Qt::CTRL | Qt::Key_Down), [this](const std::string& id) { moveBy(id, 1); });
+    auto* saveShortcut = new QShortcut(QKeySequence::Save, container, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+    connect(saveShortcut, &QShortcut::activated, this, [this]() { saveLayer(layerToSave()); });
+
+    // The selected layer's properties, under the tree (§6).
+    auto* propertiesScroll = new QScrollArea(container);
+    propertiesScroll->setWidgetResizable(true);
+    propertiesScroll->setFrameShape(QFrame::NoFrame);
+    m_properties = new QWidget(propertiesScroll);
+    m_propertiesLayout = new QVBoxLayout(m_properties);
+    usdcc::ui::scaled::margins(m_propertiesLayout, 10, 8, 10, 8);
+    usdcc::ui::scaled::spacing(m_propertiesLayout, 6);
+    propertiesScroll->setWidget(m_properties);
+    // On the selection, not the current item: a click makes a row current
+    // before it selects it, so the current row isn't selected yet then.
+    connect(m_tree, &QTreeWidget::itemSelectionChanged, this, [this]() {
+        if (!m_filling) updateProperties();
+    });
+
+    auto* splitter = new QSplitter(Qt::Vertical, container);
+    splitter->addWidget(m_tree);
+    splitter->addWidget(propertiesScroll);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
+    splitter->setChildrenCollapsible(false);
 
     layout->addWidget(toolbar);
-    layout->addWidget(m_tree, 1);
+    layout->addWidget(splitter, 1);
     setContentWidget(container);
 
     // An edit can send several notices, a drag many.
@@ -194,6 +227,12 @@ usdcc::ui::ViewPanel* LayerEditorViewPanel::duplicate(QWidget* parent) const {
 }
 
 void LayerEditorViewPanel::populateOptionsMenu(QMenu* menu) {
+    QAction* saveAll = menu->addAction(tr("Save All"), this, [this]() {
+        QString error;
+        if (!layer_actions::saveAll(currentStage(), &error)) QMessageBox::warning(this, tr("Save All"), error);
+    });
+    saveAll->setEnabled(!layer_actions::unsavedLayers(currentStage()).empty());
+    menu->addSeparator();
     menu->addAction(tr("Refresh"), this, &LayerEditorViewPanel::refresh);
 }
 
@@ -204,6 +243,9 @@ void LayerEditorViewPanel::onStageChanged(const StageRefPtr& stage) {
         // Any edit can make a layer dirty; muting and sublayer changes resync.
         m_stageChangedConnection = stage->changed.connect([this](const StageChanges&) { m_refreshTimer->start(); });
         m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_refreshTimer->start(); });
+        m_layersSavedConnection = stage->layersSaved.connect([this]() { m_refreshTimer->start(); });
+    } else {
+        m_layersSavedConnection = {};
     }
     refresh();
 }
@@ -255,6 +297,7 @@ void LayerEditorViewPanel::refresh() {
     const LayerEntry* target = findTarget(m_layers);
     m_editing->setText(target ? tr("Editing: %1").arg(qs(target->displayName)) : QString());
     m_editing->setToolTip(target ? qs(target->identifier) : QString());
+    updateProperties();
 }
 
 void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* parent) {
@@ -373,6 +416,12 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
         remove->setShortcut(QKeySequence::Delete);
         remove->setToolTip(tr("Take it out of the layer stack; the file stays"));
     }
+    QAction* saveAction = menu->addAction(tr("Save"), this, [this, identifier]() { saveLayer(identifier); });
+    saveAction->setShortcut(QKeySequence::Save);
+    saveAction->setEnabled(entry->layer && entry->dirty && !entry->anonymous);
+    if (entry->layer) {
+        menu->addAction(tr("Save As..."), this, [this, identifier]() { saveLayerAs(identifier); });
+    }
     if (layer_actions::canReload(*entry)) {
         QAction* reload = menu->addAction(tr("Reload"), this, [this, identifier]() { reloadLayer(identifier); });
         reload->setToolTip(tr("Discard its unsaved changes and load it fresh from its file"));
@@ -392,8 +441,8 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
 }
 
 std::string LayerEditorViewPanel::selectedIdentifier() const {
-    QTreeWidgetItem* item = m_tree->currentItem();
-    return item && item->isSelected() ? item->data(Name, kIdentifierRole).toString().toStdString() : std::string();
+    const QList<QTreeWidgetItem*> selected = m_tree->selectedItems();
+    return selected.isEmpty() ? std::string() : selected.front()->data(Name, kIdentifierRole).toString().toStdString();
 }
 
 std::string LayerEditorViewPanel::parentForAdd() const {
@@ -492,6 +541,217 @@ void LayerEditorViewPanel::reloadLayer(const std::string& identifier) {
     if (!layer_actions::reloadLayer(*m_undoManager, currentStage(), identifier, &error)) {
         QMessageBox::warning(this, tr("Reload Layer"), error);
     }
+}
+
+std::string LayerEditorViewPanel::layerToSave() const {
+    const std::string selected = selectedIdentifier();
+    if (!selected.empty()) return selected;
+    const LayerEntry* target = findTarget(m_layers);
+    return target ? target->identifier : std::string();
+}
+
+// By the layer itself rather than this panel's last refresh, which may not
+// have seen it yet (a layer added a moment ago).
+bool LayerEditorViewPanel::saveLayer(const std::string& identifier) {
+    const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
+    if (!layer || !currentStage()) return false;
+    if (layer->IsAnonymous()) return !saveLayerAs(identifier).empty();  // nowhere to save it yet
+    QString error;
+    if (!layer_actions::saveLayer(currentStage(), layer, &error)) {
+        QMessageBox::warning(this, tr("Save Layer"), error);
+        return false;
+    }
+    return true;
+}
+
+std::string LayerEditorViewPanel::saveLayerAs(const std::string& identifier, const QString& file) {
+    const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
+    if (!layer || !currentStage() || !m_undoManager) return {};
+    const QString name = qs(layer->GetDisplayName());
+    QString path = file;
+    if (path.isEmpty()) {
+        const QString current = qs(layer->GetRealPath());
+        const QString start = current.isEmpty() ? name + QStringLiteral(".usda") : current;
+        path = QFileDialog::getSaveFileName(this, tr("Save %1 As").arg(name), start,
+                                            tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)"));
+        if (path.isEmpty()) return {};
+        if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+    }
+    const bool inMemory = layer->IsAnonymous();
+    QString error;
+    const std::string saved =
+        layer_actions::saveLayerAs(*m_undoManager, currentStage(), identifier, path.toStdString(), &error);
+    if (saved.empty()) {
+        if (file.isEmpty()) QMessageBox::warning(this, tr("Save Layer As"), error);
+        return {};
+    }
+    if (inMemory) m_selectAfterRefresh = saved;  // the file took its place
+    return saved;
+}
+
+void LayerEditorViewPanel::updateProperties() {
+    const std::string identifier = selectedIdentifier();
+    const LayerEntry* entry = identifier.empty() ? nullptr : entryFor(identifier);
+    const bool sublayer = entry && !entry->root && !entry->session;
+    // Rebuilt for another layer; for the same one only its values change, so
+    // a field being typed in keeps its text.
+    const std::string key = entry ? identifier + (sublayer ? "|sublayer" : "") + (entry->layer ? "" : "|missing")
+                                  : std::string();
+    if (key != m_propertiesFor || m_properties->findChildren<QWidget*>().isEmpty()) {
+        m_propertiesFor = key;
+        rebuildProperties(entry, sublayer);
+    }
+    if (!entry) return;
+    for (const PropertyField& field : m_fields) {
+        if (field.editor->isAncestorOf(QApplication::focusWidget())) continue;
+        field.editor->setValue(field.value(*entry));
+        if (field.authored) field.row->setUnauthored(!field.authored(*entry));
+    }
+}
+
+void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool sublayer) {
+    m_fields.clear();
+    while (QLayoutItem* item = m_propertiesLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    auto note = [this](const QString& text) {
+        auto* label = new QLabel(text, m_properties);
+        label->setObjectName(QStringLiteral("propertyNote"));
+        label->setWordWrap(true);
+        m_propertiesLayout->addWidget(label);
+    };
+    if (!entry) {
+        note(tr("Select a layer to see its properties."));
+        m_propertiesLayout->addStretch(1);
+        return;
+    }
+    if (!entry->layer) {
+        note(entry->muted ? tr("Muted, and not open: unmute it to see its properties.")
+                          : tr("Not found: %1").arg(QDir::toNativeSeparators(qs(entry->identifier))));
+        m_propertiesLayout->addStretch(1);
+        return;
+    }
+
+    using namespace usdcc::usd::properties;
+    const std::string identifier = entry->identifier;
+    const QString name = entry->session ? tr("the session layer") : qs(entry->displayName);
+    auto addField = [this](const QString& label, PropertyEditor* editor, std::function<PXR_NS::VtValue(const LayerEntry&)> value,
+                           std::function<bool(const LayerEntry&)> authored = {}) {
+        auto* row = new PropertyRow(label, editor, m_properties);
+        row->setLabelWidth(130);
+        m_propertiesLayout->addWidget(row);
+        m_fields.push_back({row, editor, std::move(value), std::move(authored)});
+        return editor;
+    };
+    auto readOnly = [&](const QString& label, std::function<PXR_NS::VtValue(const LayerEntry&)> value) {
+        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
+        editor->setReadOnly(true);
+        addField(label, editor, std::move(value));
+    };
+    // An edit of the layer itself, one undo step; muted layers send no change
+    // notice, so the tree is refreshed here too.
+    auto edit = [this, identifier](const QString& description, std::function<bool(const PXR_NS::SdfLayerHandle&)> change) {
+        layer_actions::editLayer(*m_undoManager, currentStage(), identifier, description, change);
+        m_refreshTimer->start();
+    };
+    auto text = [](const std::string& s) { return PXR_NS::VtValue(s); };
+    auto stringOf = [](const PXR_NS::VtValue& v) { return v.IsHolding<std::string>() ? v.UncheckedGet<std::string>() : std::string(); };
+
+    readOnly(tr("Identifier"), [text](const LayerEntry& e) { return text(e.identifier); });
+    readOnly(tr("File"), [text](const LayerEntry& e) {
+        const QString path = realPath(e);
+        return text(path.isEmpty() ? tr("(in memory)").toStdString() : QDir::toNativeSeparators(path).toStdString());
+    });
+    readOnly(tr("Format"), [text](const LayerEntry& e) { return text(e.layer->GetFileFormat()->GetFormatId().GetString()); });
+
+    if (sublayer) {
+        // Its offset and scale in the parent's subLayerOffsets.
+        auto offsetField = [&](const QString& label, bool scale) {
+            PropertyEditor* editor = addField(
+                label, createPropertyEditor(PXR_NS::SdfValueTypeNames->Double),
+                [scale](const LayerEntry& e) { return PXR_NS::VtValue(scale ? e.offset.GetScale() : e.offset.GetOffset()); },
+                [](const LayerEntry& e) { return !e.offset.IsIdentity(); });
+            connect(editor, &PropertyEditor::editFinished, this, [this, editor, identifier, scale]() {
+                const PXR_NS::VtValue v = editor->value();
+                const LayerEntry* e = entryFor(identifier);
+                if (!e || !v.IsHolding<double>()) return;
+                PXR_NS::SdfLayerOffset offset = e->offset;
+                scale ? offset.SetScale(v.UncheckedGet<double>()) : offset.SetOffset(v.UncheckedGet<double>());
+                layer_actions::setSublayerOffset(*m_undoManager, currentStage(), identifier, offset);
+            });
+        };
+        offsetField(tr("Time Offset"), false);
+        offsetField(tr("Time Scale"), true);
+    }
+
+    PropertyEditor* defaultPrim = addField(
+        tr("Default Prim"), createPropertyEditor(PXR_NS::SdfValueTypeNames->String),
+        [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
+        [](const LayerEntry& e) { return e.layer->HasDefaultPrim(); });
+    connect(defaultPrim, &PropertyEditor::valueEdited, this, [edit, stringOf, name](const PXR_NS::VtValue& v) {
+        const std::string prim = stringOf(v);
+        edit(tr("Set Default Prim of %1").arg(name), [prim](const PXR_NS::SdfLayerHandle& layer) {
+            prim.empty() ? layer->ClearDefaultPrim() : layer->SetDefaultPrim(PXR_NS::TfToken(prim));
+            return true;
+        });
+    });
+
+    // The layer's time metadata: shown unauthored (with USD's fallback) until set.
+    struct TimeField {
+        QString label;
+        double (PXR_NS::SdfLayer::*get)() const;
+        bool (PXR_NS::SdfLayer::*has)() const;
+        void (PXR_NS::SdfLayer::*set)(double);
+    };
+    for (const TimeField& field : {TimeField{tr("Start Time Code"), &PXR_NS::SdfLayer::GetStartTimeCode,
+                                             &PXR_NS::SdfLayer::HasStartTimeCode, &PXR_NS::SdfLayer::SetStartTimeCode},
+                                   TimeField{tr("End Time Code"), &PXR_NS::SdfLayer::GetEndTimeCode,
+                                             &PXR_NS::SdfLayer::HasEndTimeCode, &PXR_NS::SdfLayer::SetEndTimeCode},
+                                   TimeField{tr("Time Codes per Second"), &PXR_NS::SdfLayer::GetTimeCodesPerSecond,
+                                             &PXR_NS::SdfLayer::HasTimeCodesPerSecond,
+                                             &PXR_NS::SdfLayer::SetTimeCodesPerSecond},
+                                   TimeField{tr("Frames per Second"), &PXR_NS::SdfLayer::GetFramesPerSecond,
+                                             &PXR_NS::SdfLayer::HasFramesPerSecond, &PXR_NS::SdfLayer::SetFramesPerSecond}}) {
+        const TimeField f = field;
+        PropertyEditor* editor = addField(
+            f.label, createPropertyEditor(PXR_NS::SdfValueTypeNames->Double),
+            [f](const LayerEntry& e) { return PXR_NS::VtValue(((*e.layer).*f.get)()); },
+            [f](const LayerEntry& e) { return ((*e.layer).*f.has)(); });
+        connect(editor, &PropertyEditor::editFinished, this, [edit, editor, f, name]() {
+            const PXR_NS::VtValue v = editor->value();
+            if (!v.IsHolding<double>()) return;
+            const double value = v.UncheckedGet<double>();
+            edit(tr("Set %1 of %2").arg(f.label, name), [f, value](const PXR_NS::SdfLayerHandle& layer) {
+                if (((*layer).*f.has)() && ((*layer).*f.get)() == value) return true;  // nothing to change
+                ((*layer).*f.set)(value);
+                return true;
+            });
+        });
+    }
+
+    struct TextField {
+        QString label;
+        std::string (PXR_NS::SdfLayer::*get)() const;
+        void (PXR_NS::SdfLayer::*set)(const std::string&);
+    };
+    for (const TextField& field : {TextField{tr("Comment"), &PXR_NS::SdfLayer::GetComment, &PXR_NS::SdfLayer::SetComment},
+                                   TextField{tr("Documentation"), &PXR_NS::SdfLayer::GetDocumentation,
+                                             &PXR_NS::SdfLayer::SetDocumentation}}) {
+        const TextField f = field;
+        PropertyEditor* editor =
+            addField(f.label, createPropertyEditor(PXR_NS::SdfValueTypeNames->String),
+                     [f, text](const LayerEntry& e) { return text(((*e.layer).*f.get)()); },
+                     [f](const LayerEntry& e) { return !((*e.layer).*f.get)().empty(); });
+        connect(editor, &PropertyEditor::valueEdited, this, [edit, stringOf, f, name](const PXR_NS::VtValue& v) {
+            const std::string value = stringOf(v);
+            edit(tr("Set %1 of %2").arg(f.label, name), [f, value](const PXR_NS::SdfLayerHandle& layer) {
+                ((*layer).*f.set)(value);
+                return true;
+            });
+        });
+    }
+    m_propertiesLayout->addStretch(1);
 }
 
 void LayerEditorViewPanel::moveBy(const std::string& identifier, int delta) {

@@ -5,6 +5,9 @@
 #include "usdcc/usd/layer_stack.h"
 #include "usdcc/usd/stage.h"
 
+#include <pxr/base/vt/value.h>
+
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,11 +17,16 @@ class QLabel;
 class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QVBoxLayout;
 
 namespace usdcc::usd {
 
 class StageManager;
 class UndoManager;
+namespace properties {
+class PropertyEditor;
+class PropertyRow;
+}  // namespace properties
 
 // The stage's layer stack (layerTree(), docs/LAYER_EDITOR.md §2): the session
 // layer, then the root layer, each with its sublayers, strongest first. A
@@ -59,6 +67,12 @@ public:
     enum class AddKind { InMemory, NewFile, Existing };
     std::string addLayer(AddKind kind, const std::string& parent, const QString& file = QString());
 
+    // Saving (§5): Save writes a file layer (an in-memory one goes to Save
+    // As); Save As writes it to `file`, or one asked for, see
+    // layer_actions::saveLayerAs(). Errors go to a message box.
+    bool saveLayer(const std::string& identifier);
+    std::string saveLayerAs(const std::string& identifier, const QString& file = QString());
+
 public Q_SLOTS:
     void refresh();
 
@@ -84,10 +98,28 @@ private:
     // Right-click > Reload: asks first when the layer has unsaved changes
     // (or the reload would clear the undo history), then reloads it.
     void reloadLayer(const std::string& identifier);
+    // What Save and Ctrl+S save: the selected layer, else the edit target.
+    std::string layerToSave() const;
+    // The properties under the tree, for the selected layer (§6): read-only
+    // identifier, file and format; its time offset and scale in its parent;
+    // its default prim, time codes, comment and documentation, each edit one
+    // undo step. Rebuilt for another layer, else only refilled.
+    void updateProperties();
+    void rebuildProperties(const LayerEntry* entry, bool sublayer);
+    struct PropertyField {
+        properties::PropertyRow* row;
+        properties::PropertyEditor* editor;
+        std::function<PXR_NS::VtValue(const LayerEntry&)> value;
+        std::function<bool(const LayerEntry&)> authored;  // unauthored look when false
+    };
 
     QTreeWidget* m_tree;
     QLabel* m_editing;
     QAction* m_editNewLayer;
+    QWidget* m_properties;
+    QVBoxLayout* m_propertiesLayout;
+    std::string m_propertiesFor;
+    std::vector<PropertyField> m_fields;
     std::string m_selectAfterRefresh;  // a layer just added or moved
     QTimer* m_refreshTimer;
     std::shared_ptr<UndoManager> m_undoManager;
@@ -95,6 +127,7 @@ private:
     bool m_filling = false;  // refresh() setting the checkboxes, not the user
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_editTargetConnection;
+    usdcc::core::Signal<>::Connection m_layersSavedConnection;
 };
 
 }  // namespace usdcc::usd

@@ -91,6 +91,9 @@ public:
     // After the edit target changed, however it was changed (this, or
     // UsdStage::SetEditTarget() from a script).
     usdcc::core::Signal<> editTargetChanged;
+    // After usdcc saved one or more of the stage's layers (layer_actions):
+    // their unsaved-changes marks change without a change notice.
+    usdcc::core::Signal<> layersSaved;
 
 private:
     class ChangeListener;

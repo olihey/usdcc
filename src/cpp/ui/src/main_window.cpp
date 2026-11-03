@@ -146,6 +146,12 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             return;
         }
     }
+    for (const std::function<bool()>& check : m_closeChecks) {
+        if (!check()) {
+            event->ignore();
+            return;
+        }
+    }
     saveLayout();
     QMainWindow::closeEvent(event);
 }

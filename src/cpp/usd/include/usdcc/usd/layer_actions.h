@@ -5,7 +5,9 @@
 
 #include <QString>
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -66,6 +68,31 @@ bool reloadIsUndoable(const LayerEntry& entry);
 // stage's undo history is cleared, since its steps on this layer would no
 // longer fit the layer. False, with `error` set, if the file can't be read.
 bool reloadLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, QString* error);
+
+// Saving (§5). None of it is an undo step; each sends Stage::layersSaved.
+// The layers the stage uses (its layer stack and the files it references)
+// that are files with unsaved changes, by name.
+std::vector<PXR_NS::SdfLayerHandle> unsavedLayers(const StageRefPtr& stage);
+// Writes `layer` to its file. False, with `error` set, if it can't.
+bool saveLayer(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, QString* error);
+// Saves every one of unsavedLayers(); stops at the first that fails.
+bool saveAll(const StageRefPtr& stage, QString* error);
+// Writes the layer `identifier` to the file `path`:
+//   - A file layer, or one with no parent here (the root or session layer of
+//     an in-memory stage): a copy. The stage keeps using the original.
+//   - An in-memory sublayer: the file replaces it in its parent's sublayer
+//     list (one undo step), taking over as the edit target if it was.
+// Returns the identifier of the layer now at `path`, or empty with `error` set.
+std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                        const std::string& path, QString* error);
+
+// Layer properties (§6), each one undo step. editLayer() runs `edit` on the
+// layer `identifier` (its default prim, time codes, comment, ...);
+// setSublayerOffset() sets its time offset and scale in its parent.
+bool editLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, const QString& description,
+               const std::function<bool(const PXR_NS::SdfLayerHandle&)>& edit);
+bool setSublayerOffset(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                       const PXR_NS::SdfLayerOffset& offset);
 
 // Its position among its parent's sublayers and how many there are; false
 // for a layer that has no parent here.

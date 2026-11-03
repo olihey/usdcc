@@ -1,6 +1,6 @@
 # Layer Editor — Plan
 
-Status: **phases 1 and 2 done** (§8), with the recommended choices in §7. Phase 3 is still to do.
+Status: **all three phases done** (§8), with the recommended choices in §7.
 
 A view panel that shows a stage's layer stack and manages it: add and remove in-memory
 (anonymous) and file layers, reorder and mute them, pick the layer edits go to (the edit
@@ -197,9 +197,40 @@ Phase 2 as built:
 - Removing an in-memory layer with content doesn't ask first, as §4 planned: undo brings it back
   with its content, which a question would only slow down.
 
+Phase 3 as built:
+
+- `layer_actions::saveLayer()`, `saveAll()` and `saveLayerAs()`, with `unsavedLayers()`: the file
+  layers with unsaved changes among every layer the stage uses, so a referenced file a script
+  edited counts too. Saving sends `Stage::layersSaved`, which the Layers panels follow, since a
+  save sends no change notice.
+- **Layers panel:** the toolbar's 💾 and Ctrl+S save the selected layer, else the edit target.
+  Right-click has Save and Save As...; the options menu has Save All. Save on an in-memory layer
+  opens Save As.
+- **Save As:**
+  - On a file layer, or a layer with no parent here, it writes a copy, as §5 planned.
+  - On an in-memory sublayer, the file takes its place in the parent's list (one undo step)
+    and becomes the edit target if the in-memory layer was.
+- **File > Save Stage** (Ctrl+Shift+S, since Ctrl+S is the Script Editor's and the Layers
+  panel's own Save) saves every unsaved file layer of the current stage.
+- **Unsaved changes on close:**
+  - `confirmUnsavedLayers()` lists the unsaved file layers and asks Save All, Discard or Cancel.
+  - It runs before File > Close Stage (and the Stages menu's Close Stage) and when the window
+    closes, through the new `MainWindow::addCloseCheck()`.
+  - A layer another stage that stays open still uses isn't asked about, since nothing is lost.
+- **Layer properties:** under the tree, in a splitter, for the selected layer:
+  - Read-only: Identifier, File and Format.
+  - For a sublayer: Time Offset and Time Scale in its parent.
+  - Default Prim, Start and End Time Code, Time Codes per Second, Frames per Second, Comment
+    and Documentation.
+  - Each edit is one undo step on that layer (`layer_actions::editLayer()`,
+    `setSublayerOffset()`). A field not authored on the layer has the unauthored look and shows
+    USD's fallback.
+  - The rows are rebuilt only when another layer is selected; otherwise just refilled, so a
+    field being typed in keeps its text.
+
 
 | Phase | Work | Tests |
 |---|---|---|
 | **1. See and target** *(done)* | `LayerEditorViewPanel` (the tree, dirty and missing marks, the Target and Mute columns, the "Editing:" label); setting the edit target; `Stage::editTargetChanged`, followed by the Attribute Editor and a status-bar label; mute and unmute as undo steps; the `usdcc.usd` edit-target calls | The tree of a stage with nested and missing sublayers; setting the target sends the notice and edits land in that layer; mute/unmute and their undo; muting the target moves it |
 | **2. Add, remove, reorder** *(done)* | `layer_actions` (Qt-free where it can be): add in-memory, new-file and existing layers; remove; move up/down and drag within a parent; relative paths; `UndoManager::apply()` on a given layer; references kept to in-memory layers | Each action and its undo; the authored path; an in-memory layer's content surviving remove and undo |
-| **3. Save and properties** | Save, Save As (file and in-memory), Save All; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; the prompt's three answers |
+| **3. Save and properties** *(done)* | Save, Save As (file and in-memory), Save All; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; the prompt's three answers |

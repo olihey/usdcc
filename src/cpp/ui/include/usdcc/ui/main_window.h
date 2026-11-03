@@ -5,6 +5,9 @@
 #include <QTimer>
 #include <QVariantMap>
 
+#include <functional>
+#include <vector>
+
 class QAction;
 class QMenu;
 class QMenuBar;
@@ -95,6 +98,11 @@ public:
     // "File" menu, so "File" stays first.
     void buildViewMenu();
 
+    // Asked, in the order added, before the window closes (after the side
+    // panels' canClose()); one returning false keeps it open. main.cpp adds
+    // the unsaved-layers question (docs/LAYER_EDITOR.md §5).
+    void addCloseCheck(std::function<bool()> check) { m_closeChecks.push_back(std::move(check)); }
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
@@ -118,6 +126,7 @@ private:
     QWK::WidgetWindowAgent* m_windowAgent = nullptr;
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
+    std::vector<std::function<bool()>> m_closeChecks;
     LogSidePanel* m_logPanel = nullptr;
     bool m_layoutRestored = false;
     // objectName -> the size to expand to, of the side panels the saved

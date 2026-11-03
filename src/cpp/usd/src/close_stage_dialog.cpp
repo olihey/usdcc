@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/view_panel.h"
+#include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
 
@@ -10,13 +11,17 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDir>
 #include <QDialogButtonBox>
 #include <QGridLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace usdcc::usd {
@@ -50,6 +55,9 @@ bool closeStageInteractively(StageManager* stageManager, const StageRefPtr& stag
     if (!stage) {
         return false;
     }
+    if (!confirmUnsavedLayers(stageManager, {stage}, dialogParent)) {
+        return false;
+    }
     const std::vector<usdcc::ui::ViewPanel*> panels = panelsShowing(stage);
     // Only panels the user can see are worth asking about; hidden ones just
     // follow the answer (or, with no question asked, are left empty).
@@ -78,6 +86,51 @@ bool closeStageInteractively(StageManager* stageManager, const StageRefPtr& stag
     // Panels not handled above (hidden ones, when nothing was asked) are left
     // with no stage by ViewPanel's own stageClosed handler.
     stageManager->closeStage(stage);
+    return true;
+}
+
+bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRefPtr>& closing, QWidget* dialogParent) {
+    // Which unsaved layers would be lost, and through which closing stage to save each.
+    std::vector<std::pair<StageRefPtr, PXR_NS::SdfLayerHandle>> unsaved;
+    for (const StageRefPtr& stage : closing) {
+        for (const PXR_NS::SdfLayerHandle& layer : layer_actions::unsavedLayers(stage)) {
+            const bool listed = std::any_of(unsaved.begin(), unsaved.end(), [&](const auto& u) { return u.second == layer; });
+            bool kept = false;  // another stage staying open still has it
+            for (const StageRefPtr& other : stageManager->stages()) {
+                if (std::find(closing.begin(), closing.end(), other) != closing.end()) continue;
+                const PXR_NS::SdfLayerHandleVector used = other->usdStage()->GetUsedLayers();
+                if (std::find(used.begin(), used.end(), layer) != used.end()) kept = true;
+            }
+            if (!listed && !kept) unsaved.emplace_back(stage, layer);
+        }
+    }
+    if (unsaved.empty()) return true;
+
+    QStringList names;
+    for (const auto& [stage, layer] : unsaved) names << QStringLiteral("    ") + QString::fromStdString(layer->GetDisplayName());
+    QMessageBox box(QMessageBox::Warning, QObject::tr("Unsaved Layers"),
+                    unsaved.size() == 1 ? QObject::tr("This layer has unsaved changes:")
+                                        : QObject::tr("These layers have unsaved changes:"),
+                    QMessageBox::Cancel, dialogParent);
+    box.setInformativeText(names.join(QLatin1Char('\n')));
+    QStringList paths;
+    for (const auto& [stage, layer] : unsaved) {
+        paths << QDir::toNativeSeparators(QString::fromStdString(layer->GetRealPath()));
+    }
+    box.setDetailedText(paths.join(QLatin1Char('\n')));
+    QPushButton* save = box.addButton(QObject::tr("Save All"), QMessageBox::AcceptRole);
+    QPushButton* discard = box.addButton(QObject::tr("Discard"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(save);
+    box.exec();
+    if (box.clickedButton() == discard) return true;
+    if (box.clickedButton() != save) return false;
+    for (const auto& [stage, layer] : unsaved) {
+        QString error;
+        if (!layer_actions::saveLayer(stage, layer, &error)) {
+            QMessageBox::warning(dialogParent, QObject::tr("Unsaved Layers"), error);
+            return false;
+        }
+    }
     return true;
 }
 

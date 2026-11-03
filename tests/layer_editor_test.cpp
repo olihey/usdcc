@@ -6,7 +6,10 @@
 #include "test_harness.h"
 
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -258,5 +261,136 @@ USDCC_TEST(layer_editor_reload) {
         return false;
     };
     CHECK(hasReload(animId) && !hasReload(memory), "Reload in the menu of a file layer only");
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Saving (docs/LAYER_EDITOR.md §5) and the layer properties (§6).
+USDCC_TEST(layer_editor_save_and_properties) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    {
+        QFile anim(dir.filePath(QStringLiteral("anim.usda")));
+        if (anim.open(QIODevice::WriteOnly)) anim.write("#usda 1.0\n");
+        QFile shot(dir.filePath(QStringLiteral("shot.usda")));
+        if (shot.open(QIODevice::WriteOnly)) shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\n");
+    }
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const UsdStageRefPtr& s = stage->usdStage();
+    namespace actions = usdcc::usd::layer_actions;
+    const SdfLayerHandle root = s->GetRootLayer();
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    if (!anim) return;
+    const std::string animId = anim->GetIdentifier();
+    QUndoStack* stack = undo->stack(stage);
+
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.resize(500, 700);
+    panel.show();
+    int saved = 0;
+    auto savedConnection = stage->layersSaved.connect([&saved]() { ++saved; });
+
+    // Save one layer.
+    stage->setEditTargetLayer(anim);
+    s->DefinePrim(SdfPath("/Walk"));
+    CHECK(actions::unsavedLayers(stage).size() == 1 && actions::unsavedLayers(stage)[0] == anim,
+          "anim.usda is unsaved");
+    CHECK(panel.saveLayer(animId) && !anim->IsDirty() && saved == 1, "Save: clean, with the notice");
+    CHECK(SdfLayer::OpenAsAnonymous(anim->GetRealPath())->GetPrimAtPath(SdfPath("/Walk")), "and in the file");
+    settle();
+    CHECK(!panel.itemFor(animId)->text(0).contains("*"), "the panel drops its *");
+
+    // Save As on a file layer: a copy; the stage keeps the original.
+    const QString copy = dir.filePath(QStringLiteral("copy.usda"));
+    CHECK(!panel.saveLayerAs(animId, copy).empty() && QFile::exists(copy) && s->HasLocalLayer(anim) &&
+              std::vector<std::string>(root->GetSubLayerPaths()) == std::vector<std::string>({"./anim.usda"}),
+          "Save As a file layer writes a copy");
+
+    // Save As on an in-memory layer: the file takes its place, and the target.
+    QString error;
+    const std::string memory = actions::addInMemoryLayer(*undo, stage, root->GetIdentifier(), &error);
+    stage->setEditTargetLayer(SdfLayer::Find(memory));
+    s->DefinePrim(SdfPath("/Tweak"));
+    const std::string file = panel.saveLayerAs(memory, dir.filePath(QStringLiteral("tweaks.usda")));
+    CHECK(!file.empty() && root->GetSubLayerPaths()[0] == std::string("./tweaks.usda"),
+          "the file replaces it in the sublayers: [%s]", std::string(root->GetSubLayerPaths()[0]).c_str());
+    CHECK(stage->editTargetLayer() == SdfLayer::Find(file) && s->GetPrimAtPath(SdfPath("/Tweak")),
+          "and is the edit target, with its prim");
+    stack->undo();
+    CHECK(root->GetSubLayerPaths()[0] == memory, "undo: the in-memory layer back in its place");
+    stack->redo();
+
+    // Save All: every unsaved file layer of the stage.
+    s->DefinePrim(SdfPath("/More"));
+    CHECK(!actions::unsavedLayers(stage).empty() && actions::saveAll(stage, &error) && actions::unsavedLayers(stage).empty(),
+          "Save All leaves nothing unsaved");
+    CHECK(usdcc::usd::confirmUnsavedLayers(&stages, {stage}, nullptr), "nothing unsaved: closing needn't ask");
+
+    // Properties: the selected layer's, each edit one undo step.
+    panel.refresh();
+    panel.itemFor(animId)->setSelected(true);
+    panel.findChild<QTreeWidget*>()->setCurrentItem(panel.itemFor(animId));
+    usdcc::usd::properties::PropertyRow* defaultPrim = nullptr;
+    usdcc::usd::properties::PropertyRow* timeScale = nullptr;
+    for (auto* row : panel.findChildren<usdcc::usd::properties::PropertyRow*>()) {
+        if (row->labelText() == "Default Prim") defaultPrim = row;
+        if (row->labelText() == "Time Scale") timeScale = row;
+    }
+    CHECK(defaultPrim && timeScale, "Default Prim and (for a sublayer) Time Scale rows");
+    if (!defaultPrim || !timeScale) return;
+    Q_EMIT defaultPrim->editor()->valueEdited(VtValue(std::string("Walk")));
+    CHECK(anim->GetDefaultPrim() == TfToken("Walk") && stack->undoText() == "Set Default Prim of anim.usda",
+          "Default Prim: set, as an undo step: [%s]", qPrintable(stack->undoText()));
+    stack->undo();
+    CHECK(!anim->HasDefaultPrim(), "undo clears it");
+    timeScale->editor()->setValue(VtValue(2.0));
+    Q_EMIT timeScale->editor()->editFinished();
+    CHECK(root->GetSubLayerOffset(1).GetScale() == 2.0, "Time Scale sets its offset in the parent: [%g]",
+          root->GetSubLayerOffset(1).GetScale());
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// The properties follow the selected layer when it's clicked: a click makes
+// a row current before it selects it (to the session layer and back).
+USDCC_TEST(layer_editor_properties_follow_clicks) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    const UsdStageRefPtr& s = stage->usdStage();
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.show();
+    auto* tree = panel.findChild<QTreeWidget*>();
+    auto identifierShown = [&]() {
+        for (auto* row : panel.findChildren<usdcc::usd::properties::PropertyRow*>()) {
+            if (row->labelText() != "Identifier") continue;
+            const VtValue value = row->editor()->value();
+            return value.IsHolding<std::string>() ? value.UncheckedGet<std::string>() : std::string();
+        }
+        return std::string();
+    };
+    auto click = [&](const std::string& identifier) {
+        QTreeWidgetItem* item = panel.itemFor(identifier);
+        tree->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);  // as a mouse press does
+        tree->clearSelection();
+        item->setSelected(true);
+    };
+    const std::string root = s->GetRootLayer()->GetIdentifier();
+    const std::string session = s->GetSessionLayer()->GetIdentifier();
+    click(root);
+    CHECK(identifierShown() == root, "the root layer's properties");
+    click(session);
+    CHECK(identifierShown() == session, "then the session layer's: [%s]", identifierShown().c_str());
+    click(root);
+    CHECK(identifierShown() == root, "and back to the root layer's: [%s]", identifierShown().c_str());
     QStandardPaths::setTestModeEnabled(false);
 }
