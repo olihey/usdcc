@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace usdcc::usd {
@@ -35,8 +36,7 @@ namespace usdcc::usd {
 // through USD's own composition/namespace-edit machinery. A reset drops the
 // view's QModelIndex-based state (expansion, selection); OutlinerViewPanel
 // saves it by prim path around every reset and restores it, and only
-// refreshes when the hierarchy actually changed. Activating/deactivating a
-// prim from the checkbox only emits dataChanged().
+// refreshes when the hierarchy actually changed.
 class UsdPrimTreeModel : public QAbstractItemModel {
     Q_OBJECT
 
@@ -74,10 +74,10 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 Q_SIGNALS:
-    // Emitted when the user renames a prim via this model (Qt::EditRole) —
-    // the panel listens to fix up the shared selection if the renamed prim
-    // was selected (its path changed).
-    void primRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath);
+    // The row's checkbox and its name editor ask for these rather than editing
+    // the stage, so the panel can make each an undo step (prim_actions.h).
+    void activeChangeRequested(const PXR_NS::SdfPath& path, bool active);
+    void renameRequested(const PXR_NS::SdfPath& path, const std::string& name);
 
 private:
     struct Node {

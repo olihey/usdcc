@@ -2,7 +2,6 @@
 
 #include "usdcc/usd/prim_icons.h"
 
-#include <pxr/usd/usd/namespaceEditor.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primFlags.h>
 #include <pxr/usd/usd/stage.h>
@@ -312,27 +311,19 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
         return false;  // an instance proxy can't be edited
     }
 
+    // Not edited here: the panel makes each an undo step (prim_actions); the
+    // stage's change notice then rebuilds the tree.
     if (role == Qt::EditRole) {
         const std::string newName = value.toString().toStdString();
         if (newName.empty() || newName == node->path.GetName() || !PXR_NS::SdfPath::IsValidIdentifier(newName)) {
             return false;
         }
-
-        PXR_NS::UsdNamespaceEditor editor(m_stage);
-        const PXR_NS::SdfPath oldPath = node->path;
-        if (!editor.RenamePrim(prim, PXR_NS::TfToken(newName)) || !editor.ApplyEdits()) {
-            return false;
-        }
-        const PXR_NS::SdfPath newPath = oldPath.GetParentPath().AppendChild(PXR_NS::TfToken(newName));
-        Q_EMIT primRenamed(oldPath, newPath);
-        refresh();
+        Q_EMIT renameRequested(node->path, newName);
         return true;
     }
 
     if (role == Qt::CheckStateRole) {
-        prim.SetActive(value.toInt() == Qt::Checked);
-        Q_EMIT dataChanged(index, index,
-                           {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole, Qt::DecorationRole, Qt::ToolTipRole});
+        Q_EMIT activeChangeRequested(node->path, value.toInt() == Qt::Checked);
         return true;
     }
 

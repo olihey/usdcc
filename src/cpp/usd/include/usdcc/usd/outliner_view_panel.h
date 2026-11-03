@@ -21,8 +21,10 @@ class UndoManager;
 
 // ViewPanel subclass showing a USD stage's prim hierarchy as a tree: rename
 // (double-click/F2), toggle active/inactive ("disable" — the row's
-// checkbox), select, and reorder siblings (tab's context menu: Move
-// Up/Down) — see docs/PLAN.md milestone M4. Selection is written to
+// checkbox), select — see docs/PLAN.md milestone M4 — and a right-click menu
+// on the rows (prim_context_menu.h, docs/OUTLINER_CONTEXT_MENU.md): Active,
+// Visibility, Load/Unload Payload, Variants, Move Up/Down, Copy Path, Prim
+// Info. Every edit, the checkbox and rename included, is an undo step. Selection is written to
 // StageManager::setSelectedPaths() so other panels showing the same stage
 // (e.g. AttributesViewPanel) stay in sync. The selected prims' ancestors are
 // tinted, and with "Expand to Selection" (in the options menu; on by default,
@@ -38,7 +40,6 @@ public:
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
 protected:
-    void populateContextMenu(QMenu* menu) override;
     void populateOptionsMenu(QMenu* menu) override;
 
     // Points the tree model at the new stage and restores its selection.
@@ -51,6 +52,11 @@ private Q_SLOTS:
 
 private:
     void moveSelectedPrim(int direction);  // -1 = up, +1 = down
+    // The rows' context menu, for the selection (the row under `pos` is
+    // selected first if it isn't).
+    void showPrimMenu(const QPoint& pos);
+    // After Unload: drops selected prims that are gone with it.
+    void dropMissingSelection();
     // Rebuilds the tree when the stage's prim hierarchy may have changed (a
     // prim path resynced: added, removed, renamed, reordered, (de)activated,
     // or one of those undone). Value-only edits — attribute changes, gizmo

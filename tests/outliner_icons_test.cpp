@@ -163,8 +163,17 @@ USDCC_TEST(outliner_checkbox_on_the_right) {
           "the box is at the row's right edge: row %d..%d, box %d..%d", option.rect.left(), option.rect.right(),
           check.left(), check.right());
 
+    // The model asks rather than edits (the panel makes it an undo step);
+    // here the request is carried out directly.
+    int requests = 0;
+    QObject::connect(&model, &UsdPrimTreeModel::activeChangeRequested, [&](const SdfPath& path, bool active) {
+        ++requests;
+        stage->GetPrimAtPath(path).SetActive(active);
+    });
+
     // A click where Qt draws its box, left of the icon, doesn't toggle it.
     click(view.viewport(), QPoint(option.rect.left() + 8, option.rect.center().y()));
+    CHECK(requests == 0, "no request from a click on the name");
     CHECK(stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "a click on the name leaves it active");
     click(view.viewport(), check.center());
     CHECK(!stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "a click on the box deactivates the prim");

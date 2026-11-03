@@ -3,6 +3,8 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/outliner_item_delegate.h"
+#include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usd_prim_tree_model.h"
 #include "usdcc/usd/undo_manager.h"
@@ -73,7 +75,17 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
 
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             &OutlinerViewPanel::onTreeSelectionChanged);
-    connect(m_model, &UsdPrimTreeModel::primRenamed, this, &OutlinerViewPanel::onPrimRenamed);
+    // The checkbox and the name editor ask; the edits are undo steps here.
+    connect(m_model, &UsdPrimTreeModel::activeChangeRequested, this, [this](const PXR_NS::SdfPath& path, bool active) {
+        if (currentStage()) prim_actions::setActive(*m_undoManager, currentStage(), {path}, active);
+    });
+    connect(m_model, &UsdPrimTreeModel::renameRequested, this, [this](const PXR_NS::SdfPath& path, const std::string& name) {
+        if (currentStage() && prim_actions::rename(*m_undoManager, currentStage(), path, name)) {
+            onPrimRenamed(path, path.GetParentPath().AppendChild(PXR_NS::TfToken(name)));
+        }
+    });
+    m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_treeView, &QTreeView::customContextMenuRequested, this, &OutlinerViewPanel::showPrimMenu);
     connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
     connect(m_model, &QAbstractItemModel::modelReset, this, &OutlinerViewPanel::restoreViewState);
     connect(m_expandToSelection, &QAction::toggled, this, [this](bool on) {
@@ -99,10 +111,37 @@ usdcc::ui::ViewPanel* OutlinerViewPanel::duplicate(QWidget* parent) const {
     return new OutlinerViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
 }
 
-void OutlinerViewPanel::populateContextMenu(QMenu* menu) {
-    usdcc::ui::ViewPanel::populateContextMenu(menu);
-    menu->addAction(tr("Move Up"), this, [this]() { moveSelectedPrim(-1); });
-    menu->addAction(tr("Move Down"), this, [this]() { moveSelectedPrim(1); });
+void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
+    const QModelIndex index = m_treeView->indexAt(pos);
+    if (!index.isValid() || !currentStage()) {
+        return;
+    }
+    if (!m_treeView->selectionModel()->isSelected(index)) {
+        m_treeView->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect);
+    }
+    PrimMenuContext context;
+    context.undo = m_undoManager.get();
+    context.stage = currentStage();
+    context.paths = stageManager()->selectedPaths(currentStage());
+    context.clicked = m_model->pathForIndex(index);
+    context.dialogParent = this;
+    context.move = [this](int direction) { moveSelectedPrim(direction); };
+    context.loadChanged = [this]() { dropMissingSelection(); };
+    QMenu menu(this);
+    populatePrimMenu(&menu, context);
+    menu.exec(m_treeView->viewport()->mapToGlobal(pos));
+}
+
+void OutlinerViewPanel::dropMissingSelection() {
+    std::vector<PXR_NS::SdfPath> paths = stageManager()->selectedPaths(currentStage());
+    const auto gone = std::remove_if(paths.begin(), paths.end(), [this](const PXR_NS::SdfPath& path) {
+        return !currentStage()->usdStage()->GetPrimAtPath(path);
+    });
+    if (gone == paths.end()) {
+        return;
+    }
+    paths.erase(gone, paths.end());
+    stageManager()->setSelectedPaths(currentStage(), paths);
 }
 
 void OutlinerViewPanel::populateOptionsMenu(QMenu* menu) {

@@ -38,6 +38,8 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/log_test_messages.h
     include/usdcc/usd/outliner_item_delegate.h
     include/usdcc/usd/outliner_view_panel.h
+    include/usdcc/usd/prim_actions.h
+    include/usdcc/usd/prim_context_menu.h
     include/usdcc/usd/prim_icons.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
@@ -63,6 +65,8 @@ add_library(usdcc_usd_ui STATIC
     src/log_test_messages.cpp
     src/outliner_item_delegate.cpp
     src/outliner_view_panel.cpp
+    src/prim_actions.cpp
+    src/prim_context_menu.cpp
     src/prim_icons.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp

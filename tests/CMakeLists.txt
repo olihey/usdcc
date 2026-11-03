@@ -35,6 +35,7 @@ add_executable(usdcc_ui_tests
     ui_test_main.cpp
     log_panel_test.cpp
     outliner_icons_test.cpp
+    outliner_context_menu_test.cpp
     outliner_names_test.cpp
     scale_controller_test.cpp
     side_panel_test.cpp
