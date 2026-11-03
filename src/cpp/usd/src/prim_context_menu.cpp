@@ -1,5 +1,6 @@
 #include "usdcc/usd/prim_context_menu.h"
 
+#include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/prim_actions.h"
 
 #include <pxr/usd/usd/stage.h>
@@ -13,6 +14,7 @@
 #include <QClipboard>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
@@ -28,6 +30,79 @@ namespace {
 QString tr(const char* text) { return QCoreApplication::translate("usdcc::usd::PrimMenu", text); }
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
+
+std::function<void(const QString&)>& openStageHandler() {
+    static std::function<void(const QString&)> handler;
+    return handler;
+}
+
+// The entry for an arc: its type, then what it points at, e.g.
+// "Reference   chair.usda  </Chair>   (missing)".
+QString arcEntry(const ArcInfo& arc) {
+    QString what;
+    switch (arc.type) {
+        case ArcInfo::Type::Reference:
+        case ArcInfo::Type::Payload: {
+            what = arc.assetPath.empty() ? tr("(this file)") : QFileInfo(qs(arc.assetPath)).fileName();
+            if (!arc.primPath.IsEmpty()) what += QStringLiteral("  <%1>").arg(qs(arc.primPath.GetString()));
+            break;
+        }
+        case ArcInfo::Type::Inherit:
+        case ArcInfo::Type::Specialize:
+            what = QStringLiteral("<%1>").arg(qs(arc.primPath.GetString()));
+            break;
+        case ArcInfo::Type::Variant:
+            what = QStringLiteral("%1 = %2").arg(qs(arc.variantSet),
+                                                 arc.variantSelection.empty() ? tr("(none)") : qs(arc.variantSelection));
+            break;
+    }
+    QString text = QStringLiteral("%1   %2").arg(tr(arcTypeName(arc.type)), what);
+    if (arc.missing) text += tr("   (missing)");
+    if (arc.type == ArcInfo::Type::Payload && !arc.loaded) text += tr("   (unloaded)");
+    return text;
+}
+
+// The arc's details, as disabled lines, then what can be done with it.
+void populateArcMenu(QMenu* menu, const ArcInfo& arc, const PXR_NS::SdfPath& prim) {
+    auto line = [menu](const QString& label, const QString& value) {
+        menu->addAction(QStringLiteral("%1:  %2").arg(label, value))->setEnabled(false);
+    };
+    line(tr("Type"), tr(arcTypeName(arc.type)));
+    const bool asset = arc.type == ArcInfo::Type::Reference || arc.type == ArcInfo::Type::Payload;
+    if (asset) {
+        line(tr("Asset"), arc.assetPath.empty() ? tr("(this file)") : qs(arc.assetPath));
+        line(tr("Resolved"), arc.missing ? tr("(missing)") : qs(arc.resolvedPath));
+        line(tr("Prim"), arc.primPath.IsEmpty() ? tr("(default prim)") : qs(arc.primPath.GetString()));
+        if (!arc.layerOffset.IsIdentity()) {
+            line(tr("Offset"), tr("%1, scale %2").arg(arc.layerOffset.GetOffset()).arg(arc.layerOffset.GetScale()));
+        }
+        if (arc.type == ArcInfo::Type::Payload) line(tr("State"), arc.loaded ? tr("loaded") : tr("unloaded"));
+    } else if (arc.type == ArcInfo::Type::Variant) {
+        line(tr("Set"), qs(arc.variantSet));
+        line(tr("Selection"), arc.variantSelection.empty() ? tr("(none)") : qs(arc.variantSelection));
+    } else {
+        line(tr("Prim"), qs(arc.primPath.GetString()));
+    }
+    if (arc.type != ArcInfo::Type::Variant) {
+        QString definedIn = QStringLiteral("%1 (%2)").arg(qs(arc.layerName), qs(arc.listPosition));
+        if (arc.specPath != prim) definedIn += QStringLiteral("  <%1>").arg(qs(arc.specPath.GetString()));
+        line(tr("Defined in"), definedIn);
+    }
+
+    menu->addSeparator();
+    if (asset) {
+        const QString file = qs(arc.resolvedPath);
+        QAction* open = menu->addAction(tr("Open as Stage"), menu, [file]() {
+            if (openStageHandler()) openStageHandler()(file);
+        });
+        open->setEnabled(openStageHandler() && !arc.assetPath.empty() && !arc.missing);
+        const QString path = arc.assetPath.empty() ? qs(arc.primPath.GetString()) : qs(arc.assetPath);
+        menu->addAction(tr("Copy Asset Path"), menu, [path]() { QApplication::clipboard()->setText(path); });
+    } else if (arc.type != ArcInfo::Type::Variant) {
+        const QString path = qs(arc.primPath.GetString());
+        menu->addAction(tr("Copy Prim Path"), menu, [path]() { QApplication::clipboard()->setText(path); });
+    }
+}
 
 // Disables `action` on an instance proxy, saying why.
 void readOnlyIf(QAction* action, bool readOnly) {
@@ -144,6 +219,33 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
         }
     }
 
+    // The clicked prim's composition arcs, read-only: its own first, then the
+    // ones from inside them, grouped by the file they come from.
+    const std::vector<ArcInfo> arcs = compositionArcs(clicked);
+    if (!arcs.empty()) {
+        if (setNames.empty()) menu->addSeparator();
+        QMenu* composition = menu->addMenu(tr("Composition"));
+        composition->setToolTipsVisible(true);
+        auto addEntry = [&](const ArcInfo& arc) {
+            QMenu* entry = composition->addMenu(arcEntry(arc));
+            entry->menuAction()->setToolTip(arc.missing ? tr("The file can't be found") : qs(arc.resolvedPath));
+            populateArcMenu(entry, arc, context.clicked);
+        };
+        for (const ArcInfo& arc : arcs) {
+            if (!arc.nested) addEntry(arc);
+        }
+        std::string via;
+        for (const ArcInfo& arc : arcs) {
+            if (!arc.nested) continue;
+            if (arc.layerName != via) {
+                via = arc.layerName;
+                composition->addSeparator();
+                composition->addAction(tr("via %1:").arg(qs(via)))->setEnabled(false);
+            }
+            addEntry(arc);
+        }
+    }
+
     // Order among siblings.
     if (context.move) {
         menu->addSeparator();
@@ -165,6 +267,8 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     QWidget* dialogParent = context.dialogParent;
     menu->addAction(tr("Prim Info..."), menu, [clicked, dialogParent]() { showPrimInfo(clicked, dialogParent); });
 }
+
+void setOpenStageHandler(std::function<void(const QString& path)> handler) { openStageHandler() = std::move(handler); }
 
 QWidget* showPrimInfo(const PXR_NS::UsdPrim& prim, QWidget* parent) {
     auto* dialog = new QDialog(parent);

@@ -15,6 +15,7 @@
 #include <QAction>
 #include <QCommandLineParser>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
@@ -38,6 +39,7 @@
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage_manager.h"
@@ -314,6 +316,40 @@ int main(int argc, char** argv) {
         }
     });
 
+    // Outliner > Composition > an arc > Open as Stage: a file already open as
+    // a stage has its viewport brought forward (and becomes current) rather
+    // than being opened a second time, as File > Open Stage would.
+    usdcc::usd::setOpenStageHandler([&stageManager, &window, &panelTypes, stageOpener](const QString& path) {
+        const QString wanted = QFileInfo(path).canonicalFilePath();
+#ifdef Q_OS_WIN
+        constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
+#else
+        constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;
+#endif
+        for (const usdcc::usd::StageRefPtr& stage : stageManager.stages()) {
+            const QString open =
+                QFileInfo(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetRealPath())).canonicalFilePath();
+            if (open.isEmpty() || open.compare(wanted, kPathCase) != 0) continue;
+            usdcc::ui::ViewPanel* shown = nullptr;
+            for (ads::CDockWidget* dockWidget : window.dockManager()->dockWidgetsMap()) {
+                auto* viewport = qobject_cast<usdcc::usd::ViewportViewPanel*>(dockWidget);
+                if (!viewport || viewport->currentStage() != stage) continue;
+                shown = viewport;
+                if (!viewport->isClosed()) break;  // one on screen first
+            }
+            if (shown) {
+                if (shown->isClosed()) shown->toggleView(true);
+                shown->setAsCurrentTab();
+            } else {
+                shown = panelTypes.open(QStringLiteral("viewport"), stage, window.dockManager(), &window);
+            }
+            if (shown) window.dockManager()->setDockWidgetFocused(shown);
+            stageManager.setCurrentStage(stage);
+            return;
+        }
+        stageOpener->open(path);
+    });
+
     // File > Close Stage > one entry per open stage, built when it opens.
     QMenu* closeStageMenu = fileMenu->addMenu(QObject::tr("&Close Stage"));
     closeStageMenu->setToolTipsVisible(true);
@@ -446,6 +482,7 @@ int main(int argc, char** argv) {
     }, Qt::SingleShotConnection);
 
     const int result = app.exec();
+    usdcc::usd::setOpenStageHandler({});  // it holds main()'s objects
     // The window is closed (and its layout saved) but its panels still exist.
     panelTypes.savePanels(window.dockManager());
     return result;

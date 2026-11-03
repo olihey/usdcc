@@ -12,6 +12,7 @@ add_executable(usdcc_tests
     test_harness.cpp
     test_main.cpp
     categorizer_spike_test.cpp
+    composition_arcs_test.cpp
     log_bridges_test.cpp
     log_capture_test.cpp
     log_test.cpp

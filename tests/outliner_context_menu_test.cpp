@@ -225,6 +225,43 @@ USDCC_TEST(prim_context_menu_entries) {
     }
 }
 
+USDCC_TEST(prim_context_menu_composition) {
+    TestStage test;
+    QString opened;
+    usdcc::usd::setOpenStageHandler([&](const QString& path) { opened = path; });
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/inst"));
+        QAction* reference = findAction(&menu, "Reference   (this file)  </src>");
+        CHECK(findAction(&menu, "Composition") && reference, "Composition lists the internal reference");
+        CHECK(findAction(&menu, "Asset:  (this file)") && !findAction(&menu, "Asset:  (this file)")->isEnabled(),
+              "its details, read-only");
+        CHECK(findAction(&menu, "Open as Stage") && !findAction(&menu, "Open as Stage")->isEnabled(),
+              "nothing to open for this file");
+    }
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/Payloaded"));
+        QAction* open = findAction(&menu, "Open as Stage");
+        CHECK(open && open->isEnabled(), "a payload's file can be opened as a stage");
+        if (open) open->trigger();
+        CHECK(opened == QString::fromStdString(test.asset->GetIdentifier()), "Open as Stage passes the file: [%s]",
+              qPrintable(opened));
+        CHECK(!findAction(&menu, "Show in Attribute Editor"), "no Show in Attribute Editor");
+    }
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/Looks"));
+        CHECK(findAction(&menu, "Variant   look = red"), "the variant set, with its selection");
+    }
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/World/A"));
+        CHECK(!findAction(&menu, "Composition"), "no Composition for a prim without arcs");
+    }
+    usdcc::usd::setOpenStageHandler({});
+}
+
 USDCC_TEST(prim_info_dialog) {
     TestStage test;
     QWidget* dialog = usdcc::usd::showPrimInfo(test.prim("/Looks"), nullptr);

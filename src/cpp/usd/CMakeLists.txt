@@ -1,5 +1,6 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
 add_library(usdcc_usd STATIC
+    include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/stage.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
@@ -8,6 +9,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
+    src/composition_arcs.cpp
     src/property_categorizer.cpp
     src/stage.cpp
     src/stage_manager.cpp
