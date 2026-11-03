@@ -136,6 +136,12 @@ void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    for (SidePanel* panel : std::as_const(m_sidePanels)) {
+        if (!panel->canClose()) {
+            event->ignore();
+            return;
+        }
+    }
     saveLayout();
     QMainWindow::closeEvent(event);
 }

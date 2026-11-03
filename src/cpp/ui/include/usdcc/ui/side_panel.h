@@ -36,6 +36,11 @@ public:
     // The height or width expanding goes back to; while collapsed only.
     int expandedSize() const { return m_expandedSize; }
 
+    // Asked when the main window closes, before anything is saved: a panel
+    // with work to keep (unsaved files) can ask the user, and returns false
+    // when they cancel, which keeps the window open.
+    virtual bool canClose() { return true; }
+
 Q_SIGNALS:
     void collapsedChanged(bool collapsed);
 

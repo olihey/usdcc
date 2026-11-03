@@ -324,9 +324,70 @@ QPlainTextEdit#scriptEditor {
     background: #1c1c1e;
 }
 
-QLabel#scriptFileLabel {
+/* Its tabs, styled like a ViewPanel's tab strip (dock.qss): the current tab
+   filled with the accent blue, solid while focus is in the panel
+   (focused="true", set from code) and muted otherwise. */
+QWidget#scriptTabStrip {
+    background: #1a1a1c;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+}
+
+QTabBar#scriptTabs {
+    background: transparent;
+}
+
+QTabBar#scriptTabs::tab {
+    background: transparent;
+    color: rgba(255, 255, 255, 50%);
+    padding: 4px 4px 4px 8px;
+    border-style: solid;
+    border-width: 0 1px 2px 0;
+    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+}
+
+QTabBar#scriptTabs::tab:hover {
+    background: rgba(255, 255, 255, 5%);
     color: rgba(255, 255, 255, 75%);
-    padding-left: 4px;
+}
+
+QTabBar#scriptTabs::tab:selected {
+    background: rgba(61, 139, 253, 25%);
+    color: #e8e8ea;
+}
+
+QTabBar#scriptTabs::tab:selected:hover {
+    background: rgba(61, 139, 253, 35%);
+}
+
+QTabBar#scriptTabs[focused="true"]::tab:selected {
+    background: #3d8bfd;
+    color: #ffffff;
+    border-color: transparent #3d8bfd #3d8bfd transparent;
+}
+
+QTabBar#scriptTabs[focused="true"]::tab:selected:hover {
+    background: #5a9cfd;
+}
+
+QToolButton#scriptTabClose {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    padding: 0;
+    qproperty-icon: url(:/usdcc/theme/close.png);
+}
+
+QToolButton#scriptTabClose:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+QToolButton#scriptTabClose:pressed {
+    background: rgba(255, 255, 255, 16%);
+}
+
+/* White on the focused tab's solid blue, where the grey icon washes out. */
+QToolButton#scriptTabClose[onAccent="true"] {
+    qproperty-icon: url(:/usdcc/theme/close-white.png);
 }
 
 /* ---- Scroll bars ---------------------------------------------------- */

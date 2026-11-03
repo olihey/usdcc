@@ -225,7 +225,8 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 added through `MainWindow::addSidePanel()`):
 
 ```
-[☰] shot_setup.py •                                          [▶] [▶|] [📂] [💾]
+ shot_setup.py • [x] │ Untitled [x] │                                         [+]
+[☰]                                                          [▶] [▶|] [📂] [💾]
 ┌──────────────────────────────────────────────────────────────────────┐
 │ 1  from pxr import Sdf                                                │
 │ 2  import usdcc.usd                                                   │
@@ -242,7 +243,7 @@ added through `MainWindow::addSidePanel()`):
   Ctrl+/ to toggle comments.
 - **Highlighting** (`PythonHighlighter`): keywords, builtins, strings (including triple-quoted
   across lines), comments, numbers, decorators, and `def`/`class` names, in theme colors.
-- **Run** (Ctrl+Enter) runs the editor's text (as it is, saved or not). **Run Selection**
+- **Run** (Ctrl+Enter) runs the current tab's text (as it is, saved or not). **Run Selection**
   (Ctrl+Shift+Enter) runs the selected lines, or the cursor's line, without their common
   indentation.
 - **Namespaces**: each run gets a fresh namespace. Tracebacks name the open file, but
@@ -251,10 +252,29 @@ added through `MainWindow::addSidePanel()`):
 - **Output pane** below the editor: each run's header, its print output, stderr and warnings
   (amber), tracebacks and errors (red), any OpenUSD messages during the run, and a footer with
   the time and undo steps. ☰ > Clear Output empties it. Everything also goes to the Log panel.
+- **Tabs**: one script per tab, a file or an untitled script ("Untitled", "Untitled 2", …), above
+  the toolbar like a ViewPanel's tab strip: the current tab is filled with the accent blue,
+  solid while focus is in the panel. "•" marks unsaved changes; the tooltip is the path. Tabs
+  move by dragging. New tab: Ctrl+T, the + button, or a double-click beside the tabs; Ctrl+W
+  closes one. Run, Save and the toolbar act on the current tab.
+- **A tab's context menu**: Save, Save As…, Rename… (an untitled tab's name; a file is renamed
+  on disk, adding .py without a suffix), Duplicate (an untitled copy beside it), Clear (one undo
+  step), Ruff Format (replaces the text with `ruff format`'s, one undo step), Ruff Check
+  (`ruff check`'s findings in the output pane), Close and Close Others. Ruff is looked up on
+  PATH, then in the Python's Scripts folder, and gets the file's path as `--stdin-filename` so
+  the folder's ruff settings apply; without ruff, both are disabled and say why.
 - **Files** in the ☰ menu: New, Open…, Open Recent ▸ (ten), Save, Save As…, plus Ctrl+O and
-  Ctrl+S. The open file's name sits next to ☰, with "•" for unsaved changes. Leaving unsaved
-  changes asks first. The open file, recent files, unsaved text (without asking, on exit), the
-  split and the variables option persist.
+  Ctrl+S. Open uses a new tab (or the file's tab, if it is open; or an empty untitled current
+  tab).
+- **Unsaved changes**: closing a tab with any asks Save/Discard/Cancel. Closing the app asks the
+  same for each *file* with unsaved changes (`SidePanel::canClose()`, from
+  `MainWindow::closeEvent()`; Cancel keeps the app open, Discard goes back to the file). Untitled
+  scripts are never asked about: their text is kept and restored on the next start.
+- **Persistence** (`ScriptEditor/…` in the app settings): the tabs in order (files by path, with
+  their text only if they still have unsaved changes; untitled scripts with their name and text),
+  the current tab, recent files, the split and the variables option. The tabs are saved half a
+  second after each change (typing, adding, closing, moving, renaming), not only on exit, so a
+  killed or crashed app still brings them back.
 - **Toolbar**: the shared `PanelMenuButton` and `PanelIconButton`s, with new theme icons for
   play, play-selection and save; Open reuses the folder icon.
 - **When scripting is unavailable** (§3.1), the panel shows the reason instead of the editor.
