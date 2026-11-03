@@ -92,6 +92,7 @@ USDCC_TEST(dependencies_panel) {
     {
         QMenu menu;
         panel.populateFileMenu(&menu, heavy);
+        CHECK(action(menu, "Show USDA") && action(menu, "Show USDA")->isEnabled(), "Show USDA for a layer's file");
         QAction* unload = action(menu, "Unload Everywhere");
         CHECK(unload && unload->isEnabled() && action(menu, "Load Everywhere") &&
                   !action(menu, "Load Everywhere")->isEnabled(),
@@ -116,6 +117,11 @@ USDCC_TEST(dependencies_panel) {
 
     panel.setShowAssetAttributes(true);
     CHECK(indexOf(panel, "wood.png") >= 0, "Show Asset Attributes adds the texture");
+    {
+        QMenu menu;
+        panel.populateFileMenu(&menu, indexOf(panel, "wood.png"));
+        CHECK(action(menu, "Show USDA") && !action(menu, "Show USDA")->isEnabled(), "but not Show USDA for it");
+    }
     panel.setShowAssetAttributes(false);
     QStandardPaths::setTestModeEnabled(false);
 }

@@ -44,6 +44,7 @@
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
@@ -357,6 +358,16 @@ int main(int argc, char** argv) {
     // Closing the window asks about unsaved layers of every open stage.
     window.addCloseCheck([&stageManager, &window]() {
         return usdcc::usd::confirmUnsavedLayers(&stageManager, stageManager.stages(), &window);
+    });
+
+    // File > Show USDA...: a look at a file as text, without opening it as a
+    // stage of the app (docs/USDA_VIEW.md §10).
+    QAction* showUsdaAction = new QAction(QObject::tr("Show &USDA..."), fileMenu);
+    fileMenu->insertAction(saveStageAction, showUsdaAction);
+    QObject::connect(showUsdaAction, &QAction::triggered, &window, [&window]() {
+        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show USDA"), QString(),
+                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+        if (!path.isEmpty()) usdcc::usd::showUsdaPreview(path, &window);
     });
 
     // Outliner > Composition > an arc > Open as Stage: a file already open as

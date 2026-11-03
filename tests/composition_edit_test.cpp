@@ -176,7 +176,7 @@ USDCC_TEST(composition_section_in_attribute_editor) {
     if (actions && actions->menu()) {
         for (QAction* action : actions->menu()->actions()) entries << action->text();
     }
-    CHECK(entries == QStringList({"Remove", "Open as Stage", "Reveal in Explorer"}), "the arc's actions: [%s]",
+    CHECK(entries == QStringList({"Remove", "Open as Stage", "Show USDA", "Reveal in Explorer"}), "the arc's actions: [%s]",
           qPrintable(entries.join(", ")));
 
     // The Prim field: "defaultPrim" while empty, and its own actions.

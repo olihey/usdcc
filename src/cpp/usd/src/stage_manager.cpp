@@ -16,15 +16,15 @@ StageRefPtr StageManager::openStage(const std::string& identifier) {
     return adoptStage(loadUsdStage(identifier));
 }
 
-PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier,
-                                                  std::vector<std::string>* errors) {
+PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier, std::vector<std::string>* errors,
+                                                  PXR_NS::UsdStage::InitialLoadSet load) {
     PXR_NS::UsdStageRefPtr stage;
     std::string firstError;
     {
         // Only to read the errors: the mark isn't cleared, so they still
         // reach the log (TfDiagnosticBridge) when it goes out of scope.
         PXR_NS::TfErrorMark mark;
-        stage = PXR_NS::UsdStage::Open(identifier);
+        stage = PXR_NS::UsdStage::Open(identifier, load);
         for (auto it = mark.GetBegin(); it != PXR_NS::TfDiagnosticMgr::GetInstance().GetErrorEnd(); ++it) {
             if (firstError.empty()) firstError = it->GetCommentary();
             if (errors) errors->push_back(it->GetCommentary());

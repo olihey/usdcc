@@ -42,10 +42,12 @@ struct StageChanges {
 // manager's own list. See StageManager::closeStage()'s comment.
 class Stage {
 public:
-    // `usdStage` must already be registered in UsdUtilsStageCache::Get()
-    // (StageManager::openStage() does this before constructing a Stage) —
-    // cacheId() is looked up once here, at construction, rather than on
-    // every call.
+    // A stage StageManager opens is already registered in
+    // UsdUtilsStageCache::Get() (StageManager::openStage() does this before
+    // constructing a Stage) — cacheId() is looked up once here, at
+    // construction, rather than on every call. One that isn't (a Show USDA
+    // preview's own stage) has an invalid cacheId(), and never reaches what
+    // reads it.
     explicit Stage(PXR_NS::UsdStageRefPtr usdStage);
     ~Stage();
     Stage(const Stage&) = delete;

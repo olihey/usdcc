@@ -68,7 +68,9 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
     include/usdcc/usd/usd_prim_tree_model.h
+    include/usdcc/usd/usda_preview_dialog.h
     include/usdcc/usd/usda_syntax.h
+    include/usdcc/usd/usda_view.h
     include/usdcc/usd/usda_view_panel.h
     include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
@@ -101,7 +103,9 @@ add_library(usdcc_usd_ui STATIC
     src/tool_options_bar.cpp
     src/tool_rail.cpp
     src/usd_prim_tree_model.cpp
+    src/usda_preview_dialog.cpp
     src/usda_syntax.cpp
+    src/usda_view.cpp
     src/usda_view_panel.cpp
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp

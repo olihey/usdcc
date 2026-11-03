@@ -291,3 +291,164 @@ offscreen, a generated layer of meshes with arrays and references:
 | **1. Show it fast** *(done, §9.2)* | `UsdaViewPanel` (Show menu: the stack's layers, Flattened Layer Stack, Flattened Stage); a read-only text view sharing `CodeEditor`'s gutter and current line (moved to usdcc_ui); the viewport highlighter with the background `"""` scan; Find and Go to Line; refresh (auto under the limit, else the Out of date bar, keeping the position); Flattened Stage off the UI thread with Cancel; the big-file limit | Highlighting of each token kind, including a `"""` string across lines; only visible blocks highlighted; the three Show modes' text; refresh after an edit; a generated 100 MB layer within the budget (times written to this file) |
 | **2. Links** *(done, §9.3)* | Link hit-testing and hover; click, Ctrl/middle-click, the link menu; Back/Forward with scroll positions; non-layer files opened by the system; prim-path clicks selecting; Follow Selection with the prim index | Resolving relative links per layer; a missing file's link; history; the prim index (nested prims, variants); a prim-path click selecting |
 | **3. Editing** (later) | Editable layers with Apply and Revert, parse errors at their line, Apply as one undo step | Apply and undo; a parse error leaves the layer untouched |
+
+## 10. Show USDA: a preview dialog
+
+Status: **done** (§10.7), with the recommended choices in §10.6.
+
+Everywhere the app offers **Open as Stage**, a **Show USDA** below it previews the file as USDA
+text in a dialog. It's for a quick look, not for keeping around: no dock panel, nothing added to
+the app's stages, and everything gone when the dialog closes. The dialog loads the file into a
+stage of its own, and has everything the USDA panel has, because both are built from one shared
+widget.
+
+### 10.1 The two pieces
+
+- **`UsdaView`** (new, a `QWidget`): everything in `UsdaViewPanel` today except being a dock
+  panel. That's the Show menu, Back/Forward, Refresh, the `LineView` with highlighting and links,
+  Find, Go to Line, the Out of date and size bars, and the status line. It shows a `StageRefPtr`
+  it's given and knows nothing about docking.
+- **Two thin hosts:**
+  - `UsdaViewPanel`: a `ViewPanel` around a `UsdaView`, on an app stage, as today.
+  - `UsdaPreviewDialog`: a `QDialog` around a `UsdaView`, on its own stage, with **Open as
+    Stage** and **Close** buttons.
+
+What differs by host is small, so `UsdaView` asks its host through a few callbacks:
+
+| | Panel | Dialog |
+|---|---|---|
+| Ctrl+click or middle-click a link | a new USDA panel | a new preview dialog |
+| Click a prim path | selects the prim in the app | jumps to its `def` in the text (nothing else shows this stage) |
+| Follow Selection | in the options menu | not offered (no selection to follow) |
+
+Moving the code makes this mostly a refactor: the panel's existing tests must keep passing
+unchanged, which is the check that nothing was lost.
+
+### 10.2 The dialog's stage
+
+- **Private:** `StageManager` never hears of it. The dialog makes a `Stage` directly around a
+  `UsdStage` of its own, so it isn't in the Stages menu, panels' dropdowns, the current stage, the
+  undo history or the close-with-unsaved-layers question.
+- **`Stage` needs one change:** its constructor assumes a stage in `UsdUtilsStageCache`. Without
+  one, `cacheId()` is simply invalid. `UndoManager` and the Python bindings read it, but a preview
+  never reaches them: it makes no edits, and they only list the stages `StageManager` has.
+- **Separate from an open stage of the same file:** `UsdStage::Open()` outside a cache context
+  makes a new stage every time, with its own session layer and mute state. So `StageManager`'s
+  "same file, same stage" doesn't apply, and nothing the preview does affects the app's stage.
+- **Layers are shared:** USD has one `SdfLayer` per file. So a file with unsaved edits in the app
+  previews with those edits, and if the app edits it while a preview is open, the preview's
+  normal change notices mark it out of date or refresh it. The preview is read-only and
+  never changes a layer.
+- **On close:** the dialog deletes itself and lets go of the stage. USD frees any layer nothing
+  else uses.
+
+### 10.3 Keeping it instant
+
+A stage is slower than reading a file: it parses the layer and everything it references. On the
+82 MB test file (§10.8), the text shows in about 0.3 s and the stage takes about 25 s. A preview
+shouldn't wait for that, so it comes in two steps:
+
+1. **At once, the file's text.** The dialog opens showing the file itself.
+   - A text file that no stage has open has no unsaved edits, so it's read from disk without
+     parsing it.
+   - An open layer with unsaved edits, or a usdc or usdz file, is exported as today, which
+     for a binary file means opening that layer first.
+2. **Behind it, the stage**, on a worker thread with `StageManager::loadUsdStage()`, as
+   `StageOpener` does.
+   - Meanwhile Show lists just the file and says "Loading stage...", and text, Find and links
+     work.
+   - When it's ready, Show fills in the layer stack and the flattened views.
+   - If it fails (a broken file), the text stays if there is any, and the status line gives
+     the error.
+   - Closing the dialog first just drops the result when the thread finishes; USD can't stop an
+     open midway. The thread owns what it needs, so the dialog can go at any time.
+
+**Payloads:** the stage opens with none loaded, so a preview stays cheap (`loadUsdStage()` gets a
+load-set argument). Flattened Stage then leaves payloads out, and the status line says so, with
+**Load Payloads** in the options menu to load them and flatten again (§10.6, question 2).
+
+### 10.4 The dialog
+
+```
+ Show USDA - chair.usda                                                   ✕
+ ───────────────────────────────────────────────────────────────────────────
+  ☰  Show: [chair.usda (root)        ▾]   ◀ ▶   ⟳
+ ───────────────────────────────────────────────────────────────────────────
+    1  #usda 1.0
+    2  def Xform "Chair" (
+    3      references = @./leg.usda@</Leg>      ← a link
+   ...
+ ───────────────────────────────────────────────────────────────────────────
+  chair.usda · 1,204 lines · 48 KB · as saved
+                                              [Open as Stage]  [Close]
+```
+
+- **Not modal** (§10.6, question 1): the app stays usable, so a preview can sit beside the
+  viewport while you read it. It has its own window, stays over the main window, and closes with
+  it.
+- **Esc** closes the Find bar if it's open, else the dialog.
+- **Size:** 800 x 700 the first time; the last size is remembered.
+- **One per file:** Show USDA on a file already previewed brings that dialog forward.
+- **Open as Stage** opens the file through the usual `openStageFile()` and closes the dialog.
+- **Links:**
+  - A click opens the file in this dialog, with Back and Forward, as a "(linked)" entry in
+    Show, as in the panel. It doesn't compose that file.
+  - Ctrl+click, a middle-click or the link menu's **Show USDA** opens a new dialog with that
+    file's own stage.
+
+### 10.5 Where Show USDA goes
+
+One helper next to `openStageFile()`, `showUsdaPreview(path, parent)`, below each Open as Stage:
+
+| Where | Today | Notes |
+|---|---|---|
+| Outliner > Composition > an arc | Open as Stage, Copy Asset Path | |
+| Attribute Editor > an arc's ⋮ menu | Remove, Open as Stage, Reveal in Explorer | |
+| Dependencies panel, right-click | Select Prims Using It, Open as Stage, Reveal, Copy | Not for an asset attribute's file, such as a texture |
+| Layers panel, right-click | Set as Edit Target, ..., Open as Stage | Also for in-memory layers, which Open as Stage can't open |
+| USDA view, an asset link's menu | Open Here, Open in New Panel, Open as Stage | Both hosts; the dialog leaves out Open in New Panel, since its Show USDA is that |
+| File menu | Open Stage... | **Show USDA...**, with a file dialog |
+
+Disabled where Open as Stage is for a missing file, and for files USD has no format for.
+
+### 10.6 Decisions to make
+
+1. **Modal or not?** Recommended: **not modal**. It lets you compare the text with the viewport
+   and open several previews. A modal dialog would be simpler (nothing can edit a shared layer
+   meanwhile) but blocks the whole app for what's meant to be a quick look.
+2. **Payloads?** Recommended: **not loaded**, with Load Payloads in the options menu. Loading them
+   all could take as long as opening the real scene, for a preview that usually only needs the
+   file's own text.
+3. **A prim path click in the dialog?** Recommended: **jump to its `def`** in the text, using the
+   prim index. The alternative, doing nothing, wastes a link, and selecting in the app would mean
+   the wrong stage.
+4. **Show USDA on a file already previewed?** Recommended: **bring that dialog forward**. The
+   alternative, always a new one, piles up windows.
+
+### 10.7 Phases
+
+| Phase | Work | Tests |
+|---|---|---|
+| **1. Share the view** *(done)* | Move everything into `UsdaView`, with the host callbacks; `UsdaViewPanel` becomes a thin host. No change in behaviour | The existing USDA panel tests pass as they are; `UsdaView` runs without a dock manager |
+| **2. The preview dialog** *(done)* | `UsdaPreviewDialog` and `showUsdaPreview()`: a private `Stage`, the text at once, the stage behind it on a worker thread, Load Payloads, one dialog per file, Open as Stage, the remembered size | Previewing opens no app stage (`StageManager` and the current stage unchanged); text shows before the stage is ready, and Show fills in after; a broken file; closing during a load; a prim path jumps to its `def`; a shared layer's edit reaches the preview; an open stage of the same file is untouched |
+| **3. Everywhere** *(done)* | Show USDA in the Outliner's Composition submenu, the Attribute Editor's arc menu, the Dependencies and Layers panels, the USDA link menu, and File > Show USDA... | Each menu has Show USDA below Open as Stage, enabled as it should be |
+
+### 10.8 As built
+
+- **Shared:** `UsdaView` (usdcc_usd_ui) holds what `UsdaViewPanel` used to. The panel is now about
+  90 lines around it, plus Follow Selection. Its tests passed unchanged through the move, apart
+  from the link menu gaining Show USDA.
+- **A file with no layer:** a File source now reads a text file no layer has open without parsing
+  it, and resolves its links with `ArResolver::CreateIdentifier()` against the file. So following
+  a link in the USDA panel got faster too.
+- **Measured** on the generated 82 MB file, not open anywhere: **the text in 0.26 s, the stage,
+  without payloads, after 25.5 s** (its 190,000 references don't exist, so each is a failed
+  lookup, and a real file may differ).
+- **Known limits:**
+  - A usdc or usdz file has to be opened and exported for its text, on the UI thread, before the
+    dialog shows. Text files don't.
+  - The stage loads on a worker thread, as `StageOpener` does, and shares layers with the app's
+    stages. Editing a layer the load is reading at that moment is the same race opening a stage
+    has today, more reachable here since the dialog isn't modal and the app stays usable.
+  - Missing references in a previewed file send USD's warnings to the Log panel, as opening
+    it would.

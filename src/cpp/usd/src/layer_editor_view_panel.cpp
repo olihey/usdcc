@@ -9,6 +9,7 @@
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/usda_preview_dialog.h"
 
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/usd/stage.h>
@@ -438,6 +439,9 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     reveal->setEnabled(!path.isEmpty() && QFileInfo::exists(path));
     QAction* open = menu->addAction(tr("Open as Stage"), this, [path]() { openStageFile(path); });
     open->setEnabled(!path.isEmpty() && !entry->root);
+    // By identifier, so an in-memory layer can show too.
+    QAction* show = menu->addAction(tr("Show USDA"), this, [this, id]() { showUsdaPreview(id, this); });
+    show->setEnabled(bool(entry->layer));
 }
 
 std::string LayerEditorViewPanel::selectedIdentifier() const {

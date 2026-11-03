@@ -8,6 +8,7 @@
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/line_view.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_syntax.h"
 #include "usdcc/usd/usda_view_panel.h"
 
@@ -17,12 +18,14 @@
 #include <pxr/usd/usd/stage.h>
 
 #include <QApplication>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QFile>
 #include <QFileInfo>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPointer>
 #include <QScrollBar>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -35,6 +38,7 @@
 
 using usdcc::usd::StageManager;
 using usdcc::usd::StageRefPtr;
+using usdcc::usd::UsdaView;
 using usdcc::usd::UsdaViewPanel;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -206,6 +210,22 @@ USDCC_TEST(usda_view_benchmark) {
     timer.restart();
     const std::size_t prims = usdcc::usd::usda::primLines(filePanel.lineView()->text()).size();
     std::printf("usda_view_benchmark: the prim index, %zu prims: %lld ms\n", prims, timer.elapsed());
+
+    // Show USDA on a file no stage has open: the text, then the stage behind it.
+    const std::string previewFile = dir.filePath(QStringLiteral("preview.usda")).toStdString();
+    {
+        QFile out(QString::fromStdString(previewFile));
+        if (out.open(QIODevice::WriteOnly)) out.write(filePanel.lineView()->text().data(), qint64(filePanel.textBytes()));
+    }
+    timer.restart();
+    usdcc::usd::UsdaPreviewDialog preview(QString::fromStdString(previewFile));
+    preview.resize(1200, 900);
+    preview.show();
+    QApplication::processEvents();
+    std::printf("usda_view_benchmark: Show USDA: the text in %lld ms", timer.elapsed());
+    while (!preview.isStageLoaded() && timer.elapsed() < 300000) QApplication::processEvents();
+    std::printf(", the stage (no payloads) after %lld ms\n", timer.elapsed());
+    CHECK(preview.isStageLoaded() && preview.view()->stage(), "the stage loaded");
     // What copying the layer costs, so the export could run on a copy off the UI thread.
     timer.restart();
     const SdfLayerRefPtr copy = SdfLayer::CreateAnonymous("copy.usda");
@@ -379,8 +399,8 @@ USDCC_TEST(usda_view_links) {
     for (QAction* action : menu.actions()) {
         if (!action->isSeparator()) entries << action->text();
     }
-    CHECK(entries == QStringList({"Open Here", "Open in New Panel", "Open as Stage", "Reveal in Explorer", "Copy Path",
-                                  "Copy Resolved Path"}),
+    CHECK(entries == QStringList({"Open Here", "Open in New Panel", "Open as Stage", "Show USDA", "Reveal in Explorer",
+                                  "Copy Path", "Copy Resolved Path"}),
           "the link menu: [%s]", qPrintable(entries.join(", ")));
 
     // Follow Selection: to the selected prim's def.
@@ -389,5 +409,133 @@ USDCC_TEST(usda_view_links) {
     CHECK(view->lineText(view->cursorPosition().line).contains("def \"Missing\""), "Follow Selection: at its def: [%s]",
           qPrintable(view->lineText(view->cursorPosition().line)));
     panel.setFollowSelection(false);
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Show USDA (docs/USDA_VIEW.md §10): the text before the stage, a private stage
+// the app never hears of, links and prim paths in it, one dialog per file,
+// a broken file, payloads, and a layer shared with an open stage.
+namespace {
+bool waitForStage(const usdcc::usd::UsdaPreviewDialog& dialog) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!dialog.isStageLoaded() && timer.elapsed() < 20000) QApplication::processEvents();
+    return dialog.isStageLoaded();
+}
+
+QStringList showEntries(usdcc::usd::UsdaView* view) {
+    auto* show = view->findChild<QComboBox*>();
+    QStringList entries;
+    for (int i = 0; show && i < show->count(); ++i) entries << show->itemText(i).trimmed();
+    return entries;
+}
+}  // namespace
+
+USDCC_TEST(usda_preview_dialog) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    auto write = [&dir](const char* name, const char* text) {
+        QFile file(dir.filePath(QString::fromLatin1(name)));
+        if (file.open(QIODevice::WriteOnly)) file.write(text);
+    };
+    write("leg.usda", "#usda 1.0\ndef Cube \"Leg\"\n{\n    def \"LegPart\"\n    {\n    }\n}\n");
+    write("heavy.usda",
+          "#usda 1.0\n(\n    defaultPrim = \"Heavy\"\n)\ndef Xform \"Heavy\"\n{\n    def \"HeavyPart\"\n    {\n    }\n}\n");
+    write("sub.usda", "#usda 1.0\ndef \"FromSub\"\n{\n}\n");
+    write("chair.usda",
+          "#usda 1.0\n# a comment USD would drop\n(\n    subLayers = [@./sub.usda@]\n)\n\n"
+          "def Xform \"Chair\" (\n    references = @./leg.usda@</Leg>\n)\n{\n"
+          "    def \"Seat\" (\n        payload = @./heavy.usda@\n    )\n    {\n    }\n"
+          "    rel target = </Chair/Seat>\n}\n");
+    write("broken.usda", "#usda 1.0\ndef this is not usda {{{\n");
+    write("wood.png", "");
+    const QString chair = dir.filePath(QStringLiteral("chair.usda"));
+
+    StageManager stages;
+    usdcc::usd::UsdaPreviewDialog dialog(chair);
+    usdcc::usd::UsdaView* view = dialog.view();
+    dialog.show();
+
+    // The text at once: before the stage, from the file as it is.
+    CHECK(QString::fromStdString(view->lineView()->text()).contains("a comment USD would drop") && view->isFromFile(),
+          "the file's text right away");
+    CHECK(waitForStage(dialog), "the stage loads behind it");
+    wait(20);
+
+    // Its own stage: Show fills in, and the app knows nothing of it.
+    CHECK(view->stage() && !view->stage()->usdStage()->GetRootLayer()->GetIdentifier().empty(), "it has a stage");
+    CHECK(showEntries(view).contains("Flattened Stage") && showEntries(view).contains("sub.usda"),
+          "Show has the layer stack and the flattened views: [%s]", qPrintable(showEntries(view).join(", ")));
+    CHECK(view->source().kind == UsdaView::Source::Kind::Layer, "the file is now its root layer");
+    CHECK(stages.stages().empty() && !stages.currentStage(), "StageManager never hears of it");
+    CHECK(view->isFromFile() && QString::fromStdString(view->lineView()->text()).contains("a comment USD would drop"),
+          "and the text stayed as it was");
+
+    // Everything the panel has: a sublayer, the flattened stage, without payloads.
+    UsdaView::Source flat;
+    flat.kind = UsdaView::Source::Kind::FlattenedStage;
+    view->setSource(flat);
+    QString text = QString::fromStdString(view->lineView()->text());
+    CHECK(text.contains("FromSub") && text.contains("LegPart") && !text.contains("HeavyPart"),
+          "flattened: composed, the payload not loaded: [%s]", qPrintable(text));
+    CHECK(view->statusLabel()->text().contains("payloads not loaded"), "and it says so: [%s]",
+          qPrintable(view->statusLabel()->text()));
+    view->stage()->usdStage()->Load();
+    view->refresh();
+    CHECK(QString::fromStdString(view->lineView()->text()).contains("HeavyPart") &&
+              !view->statusLabel()->text().contains("payloads not loaded"),
+          "Load Payloads: in the text, and the note gone");
+
+    // A prim path goes to its definition here; there's no selection to change.
+    UsdaView::Source rootLayer;
+    view->setSource(rootLayer);
+    CHECK(view->selectPrim(QStringLiteral("/Chair/Seat")) &&
+              view->lineView()->lineText(view->lineView()->cursorPosition().line).contains("def \"Seat\""),
+          "a prim path jumps to its def");
+    CHECK(!view->selectPrim(QStringLiteral("/Nowhere")), "one the text doesn't define stays put");
+
+    // A link opens here, with Back; Show USDA from one opens a new dialog.
+    CHECK(view->openLink(QStringLiteral("./leg.usda")) &&
+              QString::fromStdString(view->lineView()->text()).contains("def Cube \"Leg\"") && view->canGoBack(),
+          "a link opens here");
+    bool found = false;
+    view->resolveAsset(QStringLiteral("./leg.usda"), &found);
+    CHECK(found, "resolved");
+    view->back();
+    CHECK(view->source().kind == UsdaView::Source::Kind::Layer, "Back returns");
+
+    // One dialog per file; a closed one frees everything.
+    auto* first = usdcc::usd::showUsdaPreview(dir.filePath(QStringLiteral("sub.usda")), nullptr);
+    CHECK(first && first->isVisible(), "Show USDA opens a dialog");
+    CHECK(usdcc::usd::showUsdaPreview(dir.filePath(QStringLiteral("sub.usda")), nullptr) == first,
+          "the same file brings it forward");
+    CHECK(!usdcc::usd::showUsdaPreview(dir.filePath(QStringLiteral("wood.png")), nullptr), "not a texture");
+    // Closed while it may still be loading: the thread just drops its result.
+    QPointer<usdcc::usd::UsdaPreviewDialog> closing(first);
+    if (first) first->close();
+    wait(100);
+    CHECK(!closing, "closing deletes it");
+    CHECK(stages.stages().empty(), "still nothing in StageManager");
+
+    // A file that can't load as a stage: its text stays, the status says why.
+    usdcc::usd::UsdaPreviewDialog broken(dir.filePath(QStringLiteral("broken.usda")));
+    CHECK(QString::fromStdString(broken.view()->lineView()->text()).contains("not usda"), "a broken file's text shows");
+    CHECK(waitForStage(broken) && !broken.view()->stage(), "no stage");
+    CHECK(broken.view()->statusLabel()->text().contains("Couldn't load"), "and it says why: [%s]",
+          qPrintable(broken.view()->statusLabel()->text()));
+
+    // Open as a stage of the app too: separate stages, shared layers.
+    const StageRefPtr appStage = stages.openStage(chair.toStdString());
+    usdcc::usd::UsdaPreviewDialog shared(chair);
+    shared.show();
+    CHECK(waitForStage(shared) && shared.view()->stage()->usdStage() != appStage->usdStage(), "a stage of its own");
+    CHECK(stages.stages().size() == 1 && stages.currentStage() == appStage, "the app's stage stays current");
+    appStage->usdStage()->DefinePrim(SdfPath("/EditedInApp"));
+    wait(700);
+    CHECK(QString::fromStdString(shared.view()->lineView()->text()).contains("EditedInApp"),
+          "an edit to the shared layer reaches the preview");
     QStandardPaths::setTestModeEnabled(false);
 }

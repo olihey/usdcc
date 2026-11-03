@@ -238,12 +238,14 @@ USDCC_TEST(prim_context_menu_composition) {
               "its details, read-only");
         CHECK(findAction(&menu, "Open as Stage") && !findAction(&menu, "Open as Stage")->isEnabled(),
               "nothing to open for this file");
+        CHECK(findAction(&menu, "Show USDA") && !findAction(&menu, "Show USDA")->isEnabled(), "nor to show");
     }
     {
         QMenu menu;
         usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/Payloaded"));
         QAction* open = findAction(&menu, "Open as Stage");
         CHECK(open && open->isEnabled(), "a payload's file can be opened as a stage");
+        CHECK(findAction(&menu, "Show USDA") && findAction(&menu, "Show USDA")->isEnabled(), "or shown as USDA");
         if (open) open->trigger();
         CHECK(opened == QString::fromStdString(test.asset->GetIdentifier()), "Open as Stage passes the file: [%s]",
               qPrintable(opened));

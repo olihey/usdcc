@@ -261,6 +261,14 @@ USDCC_TEST(layer_editor_reload) {
         return false;
     };
     CHECK(hasReload(animId) && !hasReload(memory), "Reload in the menu of a file layer only");
+    {
+        panel.refresh();
+        QMenu menu;
+        panel.populateLayerMenu(&menu, memory);
+        bool show = false;
+        for (QAction* action : menu.actions()) show = show || (action->text() == "Show USDA" && action->isEnabled());
+        CHECK(show, "Show USDA for an in-memory layer too");
+    }
     QStandardPaths::setTestModeEnabled(false);
 }
 

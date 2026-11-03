@@ -5,6 +5,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/usda_preview_dialog.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -232,6 +233,8 @@ void DependenciesViewPanel::populateFileMenu(QMenu* menu, int index) {
     QAction* open = menu->addAction(tr("Open as Stage"), this, [path]() { openStageFile(path); });
     // An asset attribute's file (a texture, ...) is rarely a layer.
     open->setEnabled(!file.missing && (file.kinds & ~unsigned(Dependency::Asset)));
+    QAction* show = menu->addAction(tr("Show USDA"), this, [this, path]() { showUsdaPreview(path, this); });
+    show->setEnabled(open->isEnabled());
     QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [path]() { revealFile(path); });
     reveal->setEnabled(!file.missing && QFileInfo::exists(path));
 

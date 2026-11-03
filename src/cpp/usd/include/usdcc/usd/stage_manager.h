@@ -5,6 +5,7 @@
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/stage.h>
 
 #include <string>
 #include <vector>
@@ -45,9 +46,11 @@ public:
     // pointer if the stage failed to open. The result is not yet registered;
     // pass it to adoptStage() on the manager's own thread. The errors OpenUSD
     // raised while opening go to the log; with `errors`, their messages are
-    // also copied there, so a caller can tell the user why it failed.
+    // also copied there, so a caller can tell the user why it failed. `load`
+    // says whether payloads load (a preview's stage starts without them).
     static PXR_NS::UsdStageRefPtr loadUsdStage(const std::string& identifier,
-                                               std::vector<std::string>* errors = nullptr);
+                                               std::vector<std::string>* errors = nullptr,
+                                               PXR_NS::UsdStage::InitialLoadSet load = PXR_NS::UsdStage::LoadAll);
 
     // The other half of openStage(): registers a stage that loadUsdStage()
     // opened (or returns the existing Stage already wrapping it), fires
