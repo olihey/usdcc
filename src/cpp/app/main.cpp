@@ -238,6 +238,12 @@ int main(int argc, char** argv) {
     auto* attributes = new usdcc::usd::AttributesViewPanel(&stageManager, initialStage, undoManager, "Attributes", &window);
     window.dockManager()->addDockWidgetTabToArea(attributes, centerArea);
 
+    // Their types, so their duplicates are made again after a restart too
+    // (ViewPanelRegistry::savePanels()).
+    viewport->setProperty(usdcc::ui::ViewPanelRegistry::kTypeProperty, QStringLiteral("viewport"));
+    outliner->setProperty(usdcc::ui::ViewPanelRegistry::kTypeProperty, QStringLiteral("outliner"));
+    attributes->setProperty(usdcc::ui::ViewPanelRegistry::kTypeProperty, QStringLiteral("attributes"));
+
     // Every stage opened from here on (e.g. via File > Open Stage below) is
     // shown in one viewport, which is brought to the front: a viewport with no
     // stage if there is one (one on screen first, else a closed one, which is
@@ -386,7 +392,15 @@ int main(int argc, char** argv) {
     });
 
     // Every panel for this session must exist before restoring — see
-    // MainWindow::restoreLayout()'s declaration for why.
+    // MainWindow::restoreLayout()'s declaration for why: so the panels opened
+    // from the Stages menu (or duplicated) last time are made again first,
+    // showing their stage if it's open (the one from the command line).
+    panelTypes.restorePanels(window.dockManager(), &window, [&stageManager](const QString& identifier) {
+        for (const usdcc::usd::StageRefPtr& stage : stageManager.stages()) {
+            if (stage->usdStage()->GetRootLayer()->GetIdentifier() == identifier.toStdString()) return stage;
+        }
+        return usdcc::usd::StageRefPtr();
+    });
     window.restoreLayout();
 
     window.show();
@@ -408,5 +422,8 @@ int main(int argc, char** argv) {
         }
     }, Qt::SingleShotConnection);
 
-    return app.exec();
+    const int result = app.exec();
+    // The window is closed (and its layout saved) but its panels still exist.
+    panelTypes.savePanels(window.dockManager());
+    return result;
 }

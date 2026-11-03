@@ -1,6 +1,8 @@
 #include "usdcc/ui/main_window.h"
 
+#include <DockAreaWidget.h>
 #include <DockManager.h>
+#include <DockWidget.h>
 #include <QAbstractButton>
 #include <QChildEvent>
 #include <QCloseEvent>
@@ -8,10 +10,12 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
+#include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTabBar>
 #include <QToolBar>
+#include <QXmlStreamReader>
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/log_side_panel.h"
@@ -207,12 +211,52 @@ void MainWindow::restoreLayout() {
     }
     m_savedCollapsed = settings.value(kCollapsedPanelsKey).toMap();
     for (SidePanel* panel : std::as_const(m_sidePanels)) restoreCollapsed(panel);
-    if (settings.contains(kDockLayoutKey) &&
-        !m_dockManager->restoreState(settings.value(kDockLayoutKey).toByteArray())) {
-        USDCC_LOG_WARNING("usdcc.layout", "Could not restore the saved panel layout");
+    if (settings.contains(kDockLayoutKey)) {
+        const QByteArray dockLayout = settings.value(kDockLayoutKey).toByteArray();
+        if (m_dockManager->restoreState(dockLayout)) {
+            showPanelsMissingFrom(dockLayout);
+        } else {
+            USDCC_LOG_WARNING("usdcc.layout", "Could not restore the saved panel layout");
+        }
     }
     m_layoutRestored = true;
     USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
+}
+
+void MainWindow::showPanelsMissingFrom(const QByteArray& dockLayout) {
+    // ADS saves its layout as XML, compressed by default: one <Widget Name=..>
+    // per panel, open or closed.
+    const QByteArray xml = dockLayout.startsWith("<?xml") ? dockLayout : qUncompress(dockLayout);
+    QSet<QString> saved;
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd()) {
+        if (reader.readNext() == QXmlStreamReader::StartElement && reader.name() == QLatin1String("Widget")) {
+            saved.insert(reader.attributes().value(QLatin1String("Name")).toString());
+        }
+    }
+    if (reader.hasError() || saved.isEmpty()) return;  // can't tell: leave the layout as restored
+
+    // ADS hides the panels its saved layout doesn't name. One the user closed
+    // is named (as closed); one that isn't was gone when the layout was saved
+    // (deleted by Close Stage, or new), so it opens beside the others.
+    ads::CDockAreaWidget* nextTo = nullptr;
+    for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
+        if (saved.contains(dockWidget->objectName()) && !dockWidget->isClosed() && dockWidget->dockAreaWidget()) {
+            nextTo = dockWidget->dockAreaWidget();
+            break;
+        }
+    }
+    for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
+        if (saved.contains(dockWidget->objectName()) || !dockWidget->isClosed()) continue;
+        if (nextTo) {
+            m_dockManager->addDockWidgetTabToArea(dockWidget, nextTo);
+        } else {
+            nextTo = m_dockManager->addDockWidget(ads::CenterDockWidgetArea, dockWidget);
+        }
+        dockWidget->toggleView(true);
+        USDCC_LOG_DEBUG("usdcc.layout", "Showing {}, which the saved layout doesn't have",
+                        dockWidget->objectName().toStdString());
+    }
 }
 
 void MainWindow::saveLayout() const {

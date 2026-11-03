@@ -39,6 +39,7 @@ add_executable(usdcc_ui_tests
     outliner_names_test.cpp
     scale_controller_test.cpp
     side_panel_test.cpp
+    view_panel_layout_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
 

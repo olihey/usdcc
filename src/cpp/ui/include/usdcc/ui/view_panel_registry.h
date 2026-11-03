@@ -35,6 +35,10 @@ public:
         Factory create;
     };
 
+    // A panel's type id, set by open() (and on the startup panels by the
+    // app); copied by Duplicate.
+    static constexpr const char* kTypeProperty = "usdccPanelType";
+
     // Registers a type; registering an id again replaces it in place.
     void add(const QString& id, const QString& displayName, Factory create);
 
@@ -49,6 +53,18 @@ public:
     // identity for a dock widget). Returns null for an unknown id.
     ViewPanel* open(const QString& id, const usdcc::usd::StageRefPtr& stage, ads::CDockManager* dockManager,
                     QWidget* parent) const;
+
+    // Across a restart. The dock layout (MainWindow::restoreLayout()) can
+    // only place panels that exist, and the app makes only its startup ones,
+    // so savePanels() lists the other open ones with a type (each one's
+    // type, name, title and stage file) in the settings, and restorePanels()
+    // makes them again, before the layout is restored. Their stages aren't reopened: a
+    // panel gets its stage back if `findStage` finds it open (by the root
+    // layer's identifier), and is empty otherwise. Panels whose names exist
+    // already (the startup ones) are left alone.
+    using StageLookup = std::function<usdcc::usd::StageRefPtr(const QString& identifier)>;
+    void savePanels(ads::CDockManager* dockManager) const;
+    void restorePanels(ads::CDockManager* dockManager, QWidget* parent, const StageLookup& findStage) const;
 
 private:
     std::vector<Entry> m_entries;

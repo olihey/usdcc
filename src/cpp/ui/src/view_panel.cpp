@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
 
@@ -133,6 +134,8 @@ void ViewPanel::populateContextMenu(QMenu* menu) {
         }
         copy->setWindowTitle(candidateTitle);
         copy->setObjectName(candidateTitle);
+        // So it is made again after a restart (ViewPanelRegistry::savePanels()).
+        copy->setProperty(ViewPanelRegistry::kTypeProperty, property(ViewPanelRegistry::kTypeProperty));
 
         if (auto* area = dockAreaWidget()) {
             dockManager()->addDockWidgetTabToArea(copy, area);

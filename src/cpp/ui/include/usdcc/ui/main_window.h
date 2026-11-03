@@ -106,6 +106,10 @@ protected:
 
 private:
     void saveLayout() const;
+    // After restoring `dockLayout`: opens the panels it doesn't name, which
+    // ADS would otherwise leave hidden for good (one deleted when the layout
+    // was saved, then made again by the app at startup).
+    void showPanelsMissingFrom(const QByteArray& dockLayout);
     SidePanel* sidePanelOfTab(const QTabBar* tabBar, int index) const;
     // Collapses `panel` if the saved layout had it collapsed.
     void restoreCollapsed(SidePanel* panel);
