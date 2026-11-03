@@ -324,14 +324,17 @@ QPlainTextEdit {
     selection-color: #ffffff;
 }
 
-/* The Script Editor panel's editor and output (docs/SCRIPTING.md section 7):
-   monospace, at the app's (scaled) font size. */
+/* The Script Editor panel's editor and output (docs/SCRIPTING.md section 7),
+   and code views (usdcc::ui::TextView, e.g. the USDA view): monospace, at the
+   app's (scaled) font size. */
 QPlainTextEdit#scriptEditor,
-QPlainTextEdit#scriptOutput {
+QPlainTextEdit#scriptOutput,
+QAbstractScrollArea#codeView {
     font-family: "Cascadia Mono", "Consolas", "DejaVu Sans Mono", monospace;
 }
 
-QPlainTextEdit#scriptEditor {
+QPlainTextEdit#scriptEditor,
+QPlainTextEdit#codeView {
     background: #1c1c1e;
 }
 

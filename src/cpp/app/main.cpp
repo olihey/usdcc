@@ -44,6 +44,7 @@
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -226,6 +227,11 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::LayerEditorViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    panelTypes.add(QStringLiteral("usda"), QObject::tr("USDA"),
+                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                   QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::UsdaViewPanel(&stageManager, stage, title, parent);
                    });
     panelTypes.add(QStringLiteral("dependencies"), QObject::tr("Dependencies"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,

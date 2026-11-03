@@ -25,6 +25,7 @@ add_executable(usdcc_tests
     stage_changes_test.cpp
     stage_names_test.cpp
     undo_manager_test.cpp
+    usda_syntax_test.cpp
     value_type_info_test.cpp
     view_panel_registry_test.cpp
     xform_math_test.cpp
@@ -50,6 +51,7 @@ add_executable(usdcc_ui_tests
     property_row_test.cpp
     scale_controller_test.cpp
     side_panel_test.cpp
+    usda_view_test.cpp
     view_panel_layout_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
