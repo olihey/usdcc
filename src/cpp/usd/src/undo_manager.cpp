@@ -190,8 +190,12 @@ private:
 class LayerEditCommand : public QUndoCommand {
 public:
     LayerEditCommand(const PXR_NS::SdfLayerHandle& layer, PXR_NS::TfRefPtr<EditRecorder> recorder,
-                     InverseEdits edits, const QString& description)
-        : QUndoCommand(description), m_layer(layer), m_recorder(std::move(recorder)), m_edits(std::move(edits)) {}
+                     InverseEdits edits, const QString& description, std::vector<PXR_NS::SdfLayerRefPtr> keep = {})
+        : QUndoCommand(description),
+          m_layer(layer),
+          m_recorder(std::move(recorder)),
+          m_edits(std::move(edits)),
+          m_keep(std::move(keep)) {}
     void undo() override {
         USDCC_LOG_INFO("usdcc.undo", "Undo: {}", text().toStdString());
         play();
@@ -221,6 +225,7 @@ private:
     PXR_NS::SdfLayerHandle m_layer;
     PXR_NS::TfRefPtr<EditRecorder> m_recorder;
     InverseEdits m_edits;
+    std::vector<PXR_NS::SdfLayerRefPtr> m_keep;
     bool m_first = true;
 };
 
@@ -281,6 +286,28 @@ bool UndoManager::apply(const StageRefPtr& stage, const QString& description, co
         return false;
     }
     endEdit(stage);
+    return true;
+}
+
+bool UndoManager::apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, const QString& description,
+                        const std::function<bool()>& edit, std::vector<PXR_NS::SdfLayerRefPtr> keep) {
+    Entry* e = entry(stage);
+    if (!e || !layer || !edit) return false;
+    PXR_NS::TfRefPtr<EditRecorder> recorder = EditRecorder::forLayer(layer);
+    if (recorder->isRecording()) {  // an open session on that layer records it
+        e->keep.insert(e->keep.end(), keep.begin(), keep.end());
+        return edit();
+    }
+    InverseEdits edits;
+    recorder->setRecording(&edits);
+    const bool ok = edit();
+    recorder->setRecording(nullptr);
+    if (!ok) {
+        recorder->play(edits);  // back to how it was
+        return false;
+    }
+    if (edits.empty()) return true;
+    e->stack->push(new LayerEditCommand(layer, std::move(recorder), std::move(edits), description, std::move(keep)));
     return true;
 }
 

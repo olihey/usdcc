@@ -51,6 +51,14 @@ public:
     QUndoStack* stack(const StageRefPtr& stage);
 
     bool apply(const StageRefPtr& stage, const QString& description, const std::function<bool()>& edit);
+    // The same, recording the edits to `layer` rather than the edit target:
+    // e.g. a parent layer's sublayer list (docs/LAYER_EDITOR.md §4). `keep`
+    // stays referenced for as long as the step is on the stack, so an
+    // in-memory layer the edit adds or removes survives undo and redo. If
+    // `layer` is already being recorded (it's the target of an open
+    // session), the edit joins that session instead.
+    bool apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, const QString& description,
+               const std::function<bool()>& edit, std::vector<PXR_NS::SdfLayerRefPtr> keep = {});
 
     void beginEdit(const StageRefPtr& stage, const QString& description);
     // Returns true if the session changed the layer (and so pushed an undo step).
@@ -78,6 +86,9 @@ private:
         StageRefPtr stage;
         std::unique_ptr<QUndoStack> stack;
         std::unique_ptr<Session> session;
+        // Layers apply(stage, layer, ...) was asked to keep while a session
+        // recorded the edit: kept until the stage closes.
+        std::vector<PXR_NS::SdfLayerRefPtr> keep;
     };
     Entry* entry(const StageRefPtr& stage);
     const Entry* findEntry(const StageRefPtr& stage) const;

@@ -1,6 +1,6 @@
 # Layer Editor — Plan
 
-Status: **phase 1 done** (§8), with the recommended choices in §7. Phases 2 and 3 are still to do.
+Status: **phases 1 and 2 done** (§8), with the recommended choices in §7. Phase 3 is still to do.
 
 A view panel that shows a stage's layer stack and manages it: add and remove in-memory
 (anonymous) and file layers, reorder and mute them, pick the layer edits go to (the edit
@@ -121,8 +121,13 @@ The app has no saving yet, and a layer editor that can create layers needs it:
   - For a file layer it writes a copy (`Export()`); the stage keeps using the original.
   - For an in-memory layer it writes the file and points the parent's sublayer path at it,
     making it a file layer.
-- **Revert:** `Reload()`, after a confirmation. It drops the layer's undo steps, since they no
-  longer apply.
+- **Reload** *(done, ahead of this phase)*: right-click > Reload on a file layer loads it fresh
+  from its file, discarding its unsaved changes (`layer_actions::reloadLayer()`). It warns first
+  when the layer has unsaved changes. USD replaces a text layer's content spec by spec, through
+  the undo recorder, so the reload is an undo step that brings the changes back. A layer that
+  streams its data (usdc) is swapped whole, past the recorder: its reload can't be undone and
+  clears the stage's undo history, which the warning says (it's shown whenever there's history
+  to lose). In-memory layers have no file to reload from.
 - **Unsaved changes on close:** closing a stage, or the app, with dirty file layers asks Save
   All, Discard or Cancel, like the Script Editor's tabs.
 - **Not undo steps:** saving and reverting are file operations.
@@ -177,9 +182,24 @@ Phase 1 as built:
   <layer>", the status bar for the current stage. The Attribute Editor rebuilds when the target
   changes.
 
+Phase 2 as built:
+
+- `layer_actions::addInMemoryLayer()`, `addNewLayerFile()` (written at once), `addExistingLayer()`,
+  `removeLayer()` and `moveLayer()`, each one undo step recorded on the parent layer through the
+  new `UndoManager::apply(stage, layer, ...)`. That step keeps a reference to the layer it adds or
+  removes, so undo and redo find it, with its unsaved edits.
+- A layer already in the stack can't be added twice (that includes adding a layer to itself).
+- The panel's + (and right-click > Add Sublayer) adds under the selected layer, else the root.
+  "Edit the New Layer" in that menu (on by default, saved) makes a new in-memory or file layer
+  the edit target; an added existing layer isn't.
+- Remove (Delete), Move Up / Move Down (Ctrl+Up/Down) and dragging a sublayer above or below a
+  sibling. A drop anywhere else is refused.
+- Removing an in-memory layer with content doesn't ask first, as §4 planned: undo brings it back
+  with its content, which a question would only slow down.
+
 
 | Phase | Work | Tests |
 |---|---|---|
 | **1. See and target** *(done)* | `LayerEditorViewPanel` (the tree, dirty and missing marks, the Target and Mute columns, the "Editing:" label); setting the edit target; `Stage::editTargetChanged`, followed by the Attribute Editor and a status-bar label; mute and unmute as undo steps; the `usdcc.usd` edit-target calls | The tree of a stage with nested and missing sublayers; setting the target sends the notice and edits land in that layer; mute/unmute and their undo; muting the target moves it |
-| **2. Add, remove, reorder** | `layer_actions` (Qt-free where it can be): add in-memory, new-file and existing layers; remove; move up/down and drag within a parent; relative paths; `UndoManager::apply()` on a given layer; references kept to in-memory layers | Each action and its undo; the authored path; an in-memory layer's content surviving remove and undo |
-| **3. Save and properties** | Save, Save As (file and in-memory), Save All, Revert; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; Revert; the prompt's three answers |
+| **2. Add, remove, reorder** *(done)* | `layer_actions` (Qt-free where it can be): add in-memory, new-file and existing layers; remove; move up/down and drag within a parent; relative paths; `UndoManager::apply()` on a given layer; references kept to in-memory layers | Each action and its undo; the authored path; an in-memory layer's content surviving remove and undo |
+| **3. Save and properties** | Save, Save As (file and in-memory), Save All; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; the prompt's three answers |

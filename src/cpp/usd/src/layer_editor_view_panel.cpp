@@ -1,6 +1,8 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
 
+#include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
@@ -13,16 +15,24 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
+#include <QDropEvent>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSet>
+#include <QSettings>
+#include <QShortcut>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
+#include <functional>
 #include <utility>
 
 namespace usdcc::usd {
@@ -54,6 +64,35 @@ const LayerEntry* findTarget(const std::vector<LayerEntry>& entries) {
 QString realPath(const LayerEntry& entry) {
     return entry.layer && !entry.layer->GetRealPath().empty() ? qs(entry.layer->GetRealPath()) : QString();
 }
+
+constexpr auto kEditNewLayerKey = "Layers/editNewLayer";
+
+// A drop above or below a sibling reorders the sublayers (through
+// `onMove`); every other drop is refused. The tree itself never moves an
+// item: the edit's change notice rebuilds it.
+class LayerTree : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+    std::function<void(QTreeWidgetItem* dragged, int index)> onMove;
+
+protected:
+    void dropEvent(QDropEvent* event) override {
+        QTreeWidgetItem* dragged = currentItem();
+        QTreeWidgetItem* target = itemAt(event->position().toPoint());
+        const DropIndicatorPosition position = dropIndicatorPosition();
+        event->ignore();
+        setState(NoState);  // ends the drag without QTreeWidget's own move
+        viewport()->update();
+        if (!dragged || !target || target == dragged || !dragged->parent() || target->parent() != dragged->parent() ||
+            (position != AboveItem && position != BelowItem)) {
+            return;
+        }
+        QTreeWidgetItem* parent = dragged->parent();
+        int to = parent->indexOfChild(target) + (position == BelowItem ? 1 : 0);
+        if (to > parent->indexOfChild(dragged)) --to;
+        if (onMove) onMove(dragged, to);
+    }
+};
 }  // namespace
 
 LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefPtr stage,
@@ -75,7 +114,36 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     m_editing->setObjectName(QStringLiteral("propertyNote"));
     toolbarLayout->addWidget(m_editing);
 
-    m_tree = new QTreeWidget(container);
+    // + : a new or existing layer, under the selected one (§4).
+    m_editNewLayer = new QAction(tr("Edit the New Layer"), this);
+    m_editNewLayer->setToolTip(tr("Make a new layer the edit target when it's added"));
+    m_editNewLayer->setCheckable(true);
+    m_editNewLayer->setChecked(usdcc::ui::appSettings().value(kEditNewLayerKey, true).toBool());
+    connect(m_editNewLayer, &QAction::toggled, this, [](bool on) {
+        QSettings settings = usdcc::ui::appSettings();
+        settings.setValue(kEditNewLayerKey, on);
+    });
+    auto* add = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/plus.png"),
+                                               tr("Add a layer under the selected one"), toolbar);
+    add->setPopupMode(QToolButton::InstantPopup);
+    auto* addMenu = new QMenu(add);
+    connect(addMenu, &QMenu::aboutToShow, this, [this, addMenu]() {
+        addMenu->clear();
+        populateAddMenu(addMenu, parentForAdd());
+    });
+    add->setMenu(addMenu);
+    toolbarLayout->addWidget(add);
+
+    auto* tree = new LayerTree(container);
+    tree->onMove = [this](QTreeWidgetItem* dragged, int index) {
+        const std::string identifier = dragged->data(Name, kIdentifierRole).toString().toStdString();
+        QMetaObject::invokeMethod(
+            this, [this, identifier, index]() { layer_actions::moveLayer(*m_undoManager, currentStage(), identifier, index); },
+            Qt::QueuedConnection);
+    };
+    m_tree = tree;
+    m_tree->setDragDropMode(QAbstractItemView::InternalMove);
+    m_tree->setDragEnabled(true);
     m_tree->setColumnCount(ColumnCount);
     m_tree->setHeaderLabels({tr("Layer"), tr("Target"), tr("Mute")});
     m_tree->setUniformRowHeights(true);
@@ -93,6 +161,18 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int column) {
         if (column == Name) setEditTarget(item->data(Name, kIdentifierRole).toString().toStdString());
     });
+
+    // Delete removes the selected layer, Ctrl+Up/Down moves it.
+    auto shortcut = [this](const QKeySequence& keys, std::function<void(const std::string&)> action) {
+        auto* sc = new QShortcut(keys, m_tree, nullptr, nullptr, Qt::WidgetShortcut);
+        connect(sc, &QShortcut::activated, this, [this, action]() {
+            const std::string identifier = selectedIdentifier();
+            if (!identifier.empty()) action(identifier);
+        });
+    };
+    shortcut(QKeySequence::Delete, [this](const std::string& id) { removeLayer(id); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_Up), [this](const std::string& id) { moveBy(id, -1); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_Down), [this](const std::string& id) { moveBy(id, 1); });
 
     layout->addWidget(toolbar);
     layout->addWidget(m_tree, 1);
@@ -161,7 +241,14 @@ void LayerEditorViewPanel::refresh() {
         // The session layer starts collapsed; the rest open.
         const bool closed = first ? (entry && entry->session) : collapsed.contains(id);
         (*it)->setExpanded(!closed);
-        if (id == selected) (*it)->setSelected(true);
+    }
+    // The layer just added, else the one selected before.
+    if (!m_selectAfterRefresh.empty()) {
+        selected = qs(m_selectAfterRefresh);
+        m_selectAfterRefresh.clear();
+    }
+    if (QTreeWidgetItem* item = selected.isEmpty() ? nullptr : itemFor(selected.toStdString())) {
+        m_tree->setCurrentItem(item);
     }
     m_filling = false;
 
@@ -210,6 +297,9 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
         item->setToolTip(Target, tr("Click to edit this layer"));
     }
 
+    // Only a sublayer can be dragged, to reorder it among its siblings.
+    item->setFlags(layer_actions::canRemove(entry) ? item->flags() | Qt::ItemIsDragEnabled
+                                                   : item->flags() & ~Qt::ItemIsDragEnabled);
     if (layer_actions::canMute(entry)) {
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(Mute, entry.muted ? Qt::Checked : Qt::Unchecked);
@@ -265,6 +355,30 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     }
 
     menu->addSeparator();
+    if (layer_actions::canAddTo(*entry)) {
+        QMenu* add = menu->addMenu(tr("Add Sublayer"));
+        populateAddMenu(add, identifier);
+    }
+    if (layer_actions::canRemove(*entry)) {
+        int index = 0;
+        int count = 0;
+        layer_actions::sublayerPosition(currentStage(), identifier, &index, &count);
+        QAction* up = menu->addAction(tr("Move Up"), this, [this, identifier]() { moveBy(identifier, -1); });
+        up->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Up));
+        up->setEnabled(index > 0);
+        QAction* down = menu->addAction(tr("Move Down"), this, [this, identifier]() { moveBy(identifier, 1); });
+        down->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Down));
+        down->setEnabled(index + 1 < count);
+        QAction* remove = menu->addAction(tr("Remove"), this, [this, identifier]() { removeLayer(identifier); });
+        remove->setShortcut(QKeySequence::Delete);
+        remove->setToolTip(tr("Take it out of the layer stack; the file stays"));
+    }
+    if (layer_actions::canReload(*entry)) {
+        QAction* reload = menu->addAction(tr("Reload"), this, [this, identifier]() { reloadLayer(identifier); });
+        reload->setToolTip(tr("Discard its unsaved changes and load it fresh from its file"));
+    }
+
+    menu->addSeparator();
     const QString path = realPath(*entry);
     const QString id = qs(entry->identifier);
     menu->addAction(tr("Copy Identifier"), this, [id]() { QApplication::clipboard()->setText(id); });
@@ -275,6 +389,121 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     reveal->setEnabled(!path.isEmpty() && QFileInfo::exists(path));
     QAction* open = menu->addAction(tr("Open as Stage"), this, [path]() { openStageFile(path); });
     open->setEnabled(!path.isEmpty() && !entry->root);
+}
+
+std::string LayerEditorViewPanel::selectedIdentifier() const {
+    QTreeWidgetItem* item = m_tree->currentItem();
+    return item && item->isSelected() ? item->data(Name, kIdentifierRole).toString().toStdString() : std::string();
+}
+
+std::string LayerEditorViewPanel::parentForAdd() const {
+    const std::string selected = selectedIdentifier();
+    if (!selected.empty()) return selected;
+    return currentStage() ? currentStage()->usdStage()->GetRootLayer()->GetIdentifier() : std::string();
+}
+
+void LayerEditorViewPanel::populateAddMenu(QMenu* menu, const std::string& parent) {
+    menu->setToolTipsVisible(true);
+    const LayerEntry* entry = entryFor(parent);
+    const bool can = entry && layer_actions::canAddTo(*entry);
+    const QString under = entry ? (entry->session ? tr("the session layer") : qs(entry->displayName)) : QString();
+    for (const auto& [kind, text] : {std::pair{AddKind::InMemory, tr("New In-Memory Layer")},
+                                     std::pair{AddKind::NewFile, tr("New Layer File...")},
+                                     std::pair{AddKind::Existing, tr("Add Existing Layer...")}}) {
+        const AddKind which = kind;
+        QAction* action = menu->addAction(text, this, [this, which, parent]() { addLayer(which, parent); });
+        action->setEnabled(can);
+        if (can) action->setToolTip(tr("As the strongest sublayer of %1").arg(under));
+    }
+    menu->addSeparator();
+    menu->addAction(m_editNewLayer);
+}
+
+std::string LayerEditorViewPanel::addLayer(AddKind kind, const std::string& parent, const QString& file) {
+    if (!currentStage() || !m_undoManager) return {};
+    const LayerEntry* entry = entryFor(parent);
+    QString path = file;
+    if (kind != AddKind::InMemory && path.isEmpty()) {
+        // Start in the parent's folder, where a relative path is shortest.
+        const QString dir = entry ? QFileInfo(realPath(*entry)).absolutePath() : QString();
+        const QString filter = tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)");
+        path = kind == AddKind::NewFile ? QFileDialog::getSaveFileName(this, tr("New Layer File"), dir, filter)
+                                        : QFileDialog::getOpenFileName(this, tr("Add Existing Layer"), dir, filter);
+        if (path.isEmpty()) return {};
+        if (kind == AddKind::NewFile && QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+    }
+    QString error;
+    std::string added;
+    switch (kind) {
+        case AddKind::InMemory:
+            added = layer_actions::addInMemoryLayer(*m_undoManager, currentStage(), parent, &error);
+            break;
+        case AddKind::NewFile:
+            added = layer_actions::addNewLayerFile(*m_undoManager, currentStage(), parent, path.toStdString(), &error);
+            break;
+        case AddKind::Existing:
+            added = layer_actions::addExistingLayer(*m_undoManager, currentStage(), parent, path.toStdString(), &error);
+            break;
+    }
+    if (added.empty()) {
+        if (file.isEmpty()) QMessageBox::warning(this, tr("Add Layer"), error);  // not from a test or script
+        return {};
+    }
+    // An existing layer is often added to look at; a new one to edit in.
+    if (kind != AddKind::Existing && m_editNewLayer->isChecked()) {
+        currentStage()->setEditTargetLayer(PXR_NS::SdfLayer::Find(added));
+    }
+    m_selectAfterRefresh = added;
+    return added;
+}
+
+void LayerEditorViewPanel::removeLayer(const std::string& identifier) {
+    if (!currentStage() || !m_undoManager) return;
+    // Queued: the change notice rebuilds this tree, from inside a menu or a shortcut.
+    QMetaObject::invokeMethod(
+        this, [this, identifier]() { layer_actions::removeLayer(*m_undoManager, currentStage(), identifier); },
+        Qt::QueuedConnection);
+}
+
+void LayerEditorViewPanel::reloadLayer(const std::string& identifier) {
+    const LayerEntry* entry = entryFor(identifier);
+    if (!entry || !currentStage() || !m_undoManager) return;
+    const QString name = qs(entry->displayName);
+    const bool undoable = layer_actions::reloadIsUndoable(*entry);
+    QUndoStack* stack = m_undoManager->stack(currentStage());
+    const bool losesHistory = !undoable && stack && stack->count() > 0;
+    // Asked only when something would be lost: unsaved changes, or undo history.
+    if (entry->dirty || losesHistory) {
+        QString text = entry->dirty ? tr("%1 has unsaved changes. Reloading discards them and loads the layer as "
+                                         "it is in its file.")
+                                          .arg(name)
+                                    : tr("Reloading %1 loads it as it is in its file.").arg(name);
+        text += QStringLiteral("\n\n");
+        text += undoable ? tr("You can undo it to get the changes back.")
+                         : tr("This layer can't be reloaded as an undo step, so it can't be undone, and the "
+                              "stage's undo history is cleared.");
+        QMessageBox box(QMessageBox::Warning, tr("Reload Layer"), text, QMessageBox::Cancel, this);
+        QPushButton* reload = box.addButton(tr("Reload"), QMessageBox::DestructiveRole);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != reload) return;
+    }
+    QString error;
+    if (!layer_actions::reloadLayer(*m_undoManager, currentStage(), identifier, &error)) {
+        QMessageBox::warning(this, tr("Reload Layer"), error);
+    }
+}
+
+void LayerEditorViewPanel::moveBy(const std::string& identifier, int delta) {
+    int index = 0;
+    if (!m_undoManager || !layer_actions::sublayerPosition(currentStage(), identifier, &index, nullptr)) return;
+    m_selectAfterRefresh = identifier;
+    QMetaObject::invokeMethod(
+        this,
+        [this, identifier, index, delta]() {
+            layer_actions::moveLayer(*m_undoManager, currentStage(), identifier, index + delta);
+        },
+        Qt::QueuedConnection);
 }
 
 }  // namespace usdcc::usd
