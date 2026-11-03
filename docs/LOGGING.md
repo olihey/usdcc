@@ -350,7 +350,7 @@ Each of these can be changed before the phase that needs it starts:
 
 | # | Question | Default used by this plan |
 |---|---|---|
-| 1 | Python needs an embedded interpreter, which is M7 | Do phases 1–4 now. Start M7 with the bare interpreter (start, `sys.path`, `usdcc.log.install()`, Debug > Run Python File…), then do phase 5, then the Scripting panel. Doing logging first means M7's script errors have somewhere to go |
+| 1 | Python needs an embedded interpreter, which is M7 | Do phases 1–4 now. Start M7 with the bare interpreter (start, `sys.path`, `usdcc.log.install()`, Debug > Run Python File…), then do phase 5, then the Script Editor panel. Doing logging first means M7's script errors have somewhere to go |
 | 2 | How modules reach the one hub | `usdcc_core` becomes a shared library (§2.2) rather than handing a function pointer to each module |
 | 3 | spdlog (suggested in PLAN.md §6 item 7) or our own hub | Our own: the record, ring buffer, collapsing and backlog are the bulk of the work and spdlog provides none of them; `std::format` covers formatting. Revisit if the file sink grows (compression, size-based rotation) |
 | 4 | Ring-buffer size | 10 000 records; the file keeps everything |

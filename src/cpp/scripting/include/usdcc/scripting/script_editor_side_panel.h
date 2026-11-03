@@ -18,7 +18,7 @@ namespace usdcc::scripting {
 class CodeEditor;
 class ScriptRunner;
 
-// The Scripting panel (docs/SCRIPTING.md §7): a Python editor (CodeEditor,
+// The Script Editor panel (docs/SCRIPTING.md §7): a Python editor (CodeEditor,
 // PythonHighlighter), Run (Ctrl+Enter) and Run Selection (Ctrl+Shift+Enter),
 // and an output pane showing each run's header, its print output, warnings
 // and tracebacks. Everything a run prints also goes to the Log panel; each
@@ -29,14 +29,14 @@ class ScriptRunner;
 // file, the recent files, unsaved text, the split and the ☰ menu's Keep
 // Variables Between Runs persist. When Python couldn't start, the panel
 // shows why instead of the editor.
-class ScriptingSidePanel : public usdcc::ui::SidePanel {
+class ScriptEditorSidePanel : public usdcc::ui::SidePanel {
     Q_OBJECT
 
 public:
     // `settingsFile` is for tests; empty means the app's settings.
-    ScriptingSidePanel(PythonRuntime& runtime, ScriptRunner& runner, QWidget* parent = nullptr,
-                       const QString& settingsFile = {});
-    ~ScriptingSidePanel() override;
+    ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunner& runner, QWidget* parent = nullptr,
+                          const QString& settingsFile = {});
+    ~ScriptEditorSidePanel() override;
 
     // Null when Python is unavailable.
     CodeEditor* editor() const { return m_editor; }

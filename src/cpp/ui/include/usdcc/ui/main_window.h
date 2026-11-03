@@ -52,7 +52,7 @@ public:
     // The Log side panel; always exists.
     LogSidePanel* logPanel() const;
 
-    // Docks a side panel from outside usdcc_ui (the Scripting panel, panels
+    // Docks a side panel from outside usdcc_ui (the Script Editor panel, panels
     // made in Python) in `area`, lists it in the View menu, and takes
     // ownership of it. A saved layout places it by its objectName, like the
     // built-in ones: either through restoreLayout(), for a panel added before
@@ -88,7 +88,7 @@ public:
     void restoreLayout();
 
     // Builds the "View" menu from m_sidePanels, one entry per instance —
-    // a future LogSidePanel/ScriptingSidePanel/USDASidePanel just needs to
+    // a future LogSidePanel/ScriptEditorSidePanel/USDASidePanel just needs to
     // be appended to m_sidePanels before this runs. Public (rather than
     // called from the constructor) so the composition root (main.cpp)
     // controls menu-bar ordering — it calls this after adding its own

@@ -7,7 +7,7 @@
 
 Users can script the running application in Python:
 
-- A **Scripting side panel**: an editor with Python syntax highlighting, load/save, Run and
+- A **Script Editor side panel**: an editor with Python syntax highlighting, load/save, Run and
   Run Selection, and the run's output.
 - An **embedded interpreter** in which `pxr` (OpenUSD's own Python API) and `usdcc.*` work
   together on the app's live state: its open stages, selection, undo history and tools.
@@ -60,7 +60,7 @@ These facts constrain the plan (checked in this checkout, 2026-11-02):
 | `usdcc_scripting` (new, static, Qt-free) | `PythonRuntime` (interpreter start/stop, paths, GIL), the embedded `_usdcc_log` (§5) |
 | `usdcc_scripting_app` (new, static, Qt) | The embedded `_usdcc_app` module (§4.1), `AppContextScope`, `ScriptRunner` (one undo step per run, §4.2) |
 | `usdcc_usd_bindings` (new, static) | The `StageManager` binding code, `bindStageManager(py::module_&)`, shared by `_usd.pyd` and `_usdcc_app` |
-| `usdcc_scripting_ui` (new, static, Qt) | `ScriptingSidePanel`, `PythonHighlighter`, `CodeEditor` (line numbers, indentation) |
+| `usdcc_scripting_ui` (new, static, Qt) | `ScriptEditorSidePanel`, `PythonHighlighter`, `CodeEditor` (line numbers, indentation) |
 | `src/python/usdcc/` | Pure-Python parts: `log.py` (logging bridge), `app.py` helpers, `usd.py` conveniences (`current_stage()`, `edit()`) |
 
 C++ lives under `src/cpp/scripting/` (namespace `usdcc::scripting`). The Python package keeps
@@ -90,7 +90,7 @@ The app embeds **the Python OpenUSD was built with**: `Python3_EXECUTABLE` from
   Nothing else changes.
 
 A failure here (no Python found, `import pxr` fails) is logged as an Error with the reason. The
-app keeps running, and the Scripting panel says scripting is unavailable and why.
+app keeps running, and the Script Editor panel says scripting is unavailable and why.
 
 ### 3.2 Life cycle and the GIL
 
@@ -211,7 +211,7 @@ Lands with the runtime, since every later step needs it to see what went wrong:
   logged and the rest still run. They get no undo step of their own (§4.2). That folder's
   parent, `scripts/`, is at the end of `sys.path` for shared modules, so they can't shadow
   `usdcc` or `pxr`. The app creates `startup/` if it's missing; ☰ > *Open Startup Scripts
-  Folder* in the Scripting panel opens it.
+  Folder* in the Script Editor panel opens it.
 - `usdcc.exe [--script file.py]... [--no-startup-scripts] [stage]`: each `--script` runs after
   the startup scripts, in order, as one undo step like Debug > Run Python File. Its output is
   in the log, not in the panel. `--no-startup-scripts` skips the startup folder (it's still
@@ -219,9 +219,9 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 - **M9** builds plugins on this: a Python plugin is a package with a manifest, loaded by the
   same runner.
 
-## 7. The Scripting panel
+## 7. The Script Editor panel
 
-`ScriptingSidePanel` (a `SidePanel`, objectName "Scripting", docked on the right until moved;
+`ScriptEditorSidePanel` (a `SidePanel`, objectName "Script Editor", docked on the right until moved;
 added through `MainWindow::addSidePanel()`):
 
 ```
@@ -339,7 +339,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 |---|---|---|
 | **1. One Python, embedded** *(done)* | Build: USD's Python DLL in the exe and test folders, `usd.pyd` built for it, `USDCC_PYTHON_HOME`. `PythonRuntime` (§3), logging bridge (§5), Debug > Run Python File… | Tests in a new `usdcc_python_tests` executable: start, `import pxr`, `sys.version` equals the Python OpenUSD reports, `print`/`logging`/`warnings`/exceptions reach the hub with the right source and level, an OpenUSD worker thread can take the GIL. In the app: a script file runs from the Debug menu; a broken one logs its traceback and the app keeps going |
 | **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
-| **3. Scripting panel** *(done)* | `ScriptingSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
+| **3. Script Editor panel** *(done)* | `ScriptEditorSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** *(done)* | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
 | **5. PySide integration** *(done)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
 
@@ -395,7 +395,7 @@ Each of these can be changed before the phase that needs it starts:
   as category, filtered by the hub's levels), `captureWarnings`, line-buffered
   `sys.stdout`/`sys.stderr`, `sys.excepthook` and `threading.excepthook`. Python thread
   names are kept on the records.
-- **Debug > Run Python File…** (until the Scripting panel). It is disabled, with the reason
+- **Debug > Run Python File…** (until the Script Editor panel). It is disabled, with the reason
   as its status tip, when Python couldn't start.
 - **Tests**: the new `usdcc_python_tests` executable (one interpreter per process):
   - the interpreter is OpenUSD's Python, and `pxr.Usd` works;
@@ -463,7 +463,7 @@ one change. Whether opening should return the open stage instead is a decision f
 
 ### Phase 3
 
-- **[ScriptingSidePanel](../src/cpp/scripting/include/usdcc/scripting/scripting_side_panel.h)**
+- **[ScriptEditorSidePanel](../src/cpp/scripting/include/usdcc/scripting/script_editor_side_panel.h)**
   in the new `usdcc_scripting_ui` library, as described in §7. It's docked by `main()`
   through the new `MainWindow::addSidePanel()`, which phase 5's Python panels need too. Debug
   > Run Python File stays, for running a file without opening it.
@@ -477,7 +477,7 @@ one change. Whether opening should return the open stage instead is a decision f
   Log panel gets for that run.
 - **`PythonRuntime::Namespace::Session`** and `resetSession()`, for Keep Variables;
   `ScriptRunner` passes it through.
-- **Tests** ([scripting_panel_test.cpp](../tests/scripting_panel_test.cpp); `usdcc_python_tests`
+- **Tests** ([script_editor_panel_test.cpp](../tests/script_editor_panel_test.cpp); `usdcc_python_tests`
   is now a `QApplication` on the offscreen platform):
   - highlighting spans;
   - the editor's indent, dedent, comments, and Enter after `:`;
@@ -547,7 +547,7 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
   window opening maximized gets its final size (`QMainWindowLayout`'s `restoredState`, dropped
   150 ms after the last resize). A dock widget added before then is taken out of the layout
   again and shown at (0, 0) when made visible. Startup scripts and `--script` now run on this
-  signal instead of right after `show()`. Panels added from the Scripting panel are never
+  signal instead of right after `show()`. Panels added from the Script Editor panel are never
   affected.
 - **`AppContextScope`s nest**, so the tests can give a window of their own.
 - **Tests** ([python_panels_test.cpp](../tests/python_panels_test.cpp), built when `usdcc.ui`
@@ -563,7 +563,7 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
   The window's layout goes to Qt's test-mode config folder.
 - **Checked in the app**: a startup script adds a panel; a `--script` moves it to the right;
   the next session puts it back on the right, shown and in the View menu (screenshot taken).
-  This was also the first look at the Scripting panel in the running app.
+  This was also the first look at the Script Editor panel in the running app.
 
 ### After M7: Python view panels (milestone M1)
 

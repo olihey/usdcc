@@ -48,7 +48,7 @@ add_executable(usdcc_python_tests
     python_test_main.cpp
     python_app_test.cpp
     python_runtime_test.cpp
-    scripting_panel_test.cpp
+    script_editor_panel_test.cpp
     startup_scripts_test.cpp
     python_test_app.h
 )

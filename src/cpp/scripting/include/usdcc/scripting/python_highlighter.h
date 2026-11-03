@@ -5,7 +5,7 @@
 
 namespace usdcc::scripting {
 
-// Python syntax highlighting for the Scripting panel's editor
+// Python syntax highlighting for the Script Editor panel's editor
 // (docs/SCRIPTING.md §7), in the dark theme's colors: keywords, builtins
 // (and self/cls), numbers, strings — including triple-quoted ones across
 // lines — comments, decorators, and the names after def/class.

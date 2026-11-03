@@ -30,7 +30,7 @@
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
-#include "usdcc/scripting/scripting_side_panel.h"
+#include "usdcc/scripting/script_editor_side_panel.h"
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
         {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
-    window.addSidePanel(new usdcc::scripting::ScriptingSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);
+    window.addSidePanel(new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);
 
     // Panels created on demand get a "<type> - <stage>" title and a unique
     // objectName (see ViewPanelRegistry::open()); the three startup panels
@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
     QObject::connect(testMessagesAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogTestMessages(); });
     QAction* burstAction = debugMenu->addAction(QObject::tr("Emit 10 000 Log &Messages"));
     QObject::connect(burstAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogBurst(10000); });
-    // Runs a file without opening it in the Scripting panel.
+    // Runs a file without opening it in the Script Editor panel.
     debugMenu->addSeparator();
     QAction* runPythonAction = debugMenu->addAction(QObject::tr("Run &Python File..."));
     runPythonAction->setEnabled(python.isAvailable());

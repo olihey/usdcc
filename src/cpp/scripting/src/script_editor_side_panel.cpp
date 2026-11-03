@@ -1,4 +1,4 @@
-#include "usdcc/scripting/scripting_side_panel.h"
+#include "usdcc/scripting/script_editor_side_panel.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/code_editor.h"
@@ -41,11 +41,11 @@ using usdcc::core::LogLevel;
 using usdcc::core::LogRecord;
 
 namespace {
-constexpr auto kFileKey = "Scripting/file";
-constexpr auto kRecentKey = "Scripting/recentFiles";
-constexpr auto kTextKey = "Scripting/unsavedText";
-constexpr auto kKeepVariablesKey = "Scripting/keepVariables";
-constexpr auto kSplitterKey = "Scripting/splitter";
+constexpr auto kFileKey = "ScriptEditor/file";
+constexpr auto kRecentKey = "ScriptEditor/recentFiles";
+constexpr auto kTextKey = "ScriptEditor/unsavedText";
+constexpr auto kKeepVariablesKey = "ScriptEditor/keepVariables";
+constexpr auto kSplitterKey = "ScriptEditor/splitter";
 constexpr int kMaxRecentFiles = 10;
 constexpr int kMaxOutputLines = 5000;
 
@@ -69,9 +69,9 @@ struct RunCapture : usdcc::core::LogSink {
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 }  // namespace
 
-ScriptingSidePanel::ScriptingSidePanel(PythonRuntime& runtime, ScriptRunner& runner, QWidget* parent,
-                                       const QString& settingsFile)
-    : usdcc::ui::SidePanel(tr("Scripting"), parent), m_runtime(runtime), m_runner(runner) {
+ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunner& runner, QWidget* parent,
+                                             const QString& settingsFile)
+    : usdcc::ui::SidePanel(tr("Script Editor"), parent), m_runtime(runtime), m_runner(runner) {
     // Its own file handle, like UiScaleController: QSettings shares one cache
     // per file within the process.
     m_settings = new QSettings(
@@ -150,11 +150,11 @@ ScriptingSidePanel::ScriptingSidePanel(PythonRuntime& runtime, ScriptRunner& run
         if (!keep) m_runtime.resetSession();
     });
 
-    connect(runButton, &QToolButton::clicked, this, &ScriptingSidePanel::run);
-    connect(runSelectionButton, &QToolButton::clicked, this, &ScriptingSidePanel::runSelection);
+    connect(runButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::run);
+    connect(runSelectionButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::runSelection);
     connect(openButton, &QToolButton::clicked, this, [this]() { openFile({}); });
-    connect(saveButton, &QToolButton::clicked, this, &ScriptingSidePanel::save);
-    connect(m_editor->document(), &QTextDocument::modificationChanged, this, &ScriptingSidePanel::updateFileLabel);
+    connect(saveButton, &QToolButton::clicked, this, &ScriptEditorSidePanel::save);
+    connect(m_editor->document(), &QTextDocument::modificationChanged, this, &ScriptEditorSidePanel::updateFileLabel);
 
     // Panel-wide shortcuts: they work while focus is anywhere in the panel.
     auto shortcut = [this](const QKeySequence& keys, auto slot) {
@@ -186,7 +186,7 @@ ScriptingSidePanel::ScriptingSidePanel(PythonRuntime& runtime, ScriptRunner& run
     updateFileLabel();
 }
 
-ScriptingSidePanel::~ScriptingSidePanel() {
+ScriptEditorSidePanel::~ScriptEditorSidePanel() {
     if (!m_editor) return;
     m_settings->setValue(kFileKey, m_file);
     m_settings->setValue(kRecentKey, m_recentFiles);
@@ -199,27 +199,27 @@ ScriptingSidePanel::~ScriptingSidePanel() {
     }
 }
 
-bool ScriptingSidePanel::isModified() const { return m_editor && m_editor->document()->isModified(); }
+bool ScriptEditorSidePanel::isModified() const { return m_editor && m_editor->document()->isModified(); }
 
-bool ScriptingSidePanel::keepsVariables() const { return m_keepVariables && m_keepVariables->isChecked(); }
+bool ScriptEditorSidePanel::keepsVariables() const { return m_keepVariables && m_keepVariables->isChecked(); }
 
-void ScriptingSidePanel::setKeepVariables(bool keep) {
+void ScriptEditorSidePanel::setKeepVariables(bool keep) {
     if (m_keepVariables) m_keepVariables->setChecked(keep);
 }
 
-bool ScriptingSidePanel::run() {
+bool ScriptEditorSidePanel::run() {
     if (!m_editor) return false;
     const QString name = m_file.isEmpty() ? tr("Untitled") : QFileInfo(m_file).fileName();
     return runCode(m_editor->toPlainText(), name);
 }
 
-bool ScriptingSidePanel::runSelection() {
+bool ScriptEditorSidePanel::runSelection() {
     if (!m_editor) return false;
     const QString name = m_file.isEmpty() ? tr("Untitled") : QFileInfo(m_file).fileName();
     return runCode(m_editor->selectedCode(), tr("%1 (selection)").arg(name));
 }
 
-bool ScriptingSidePanel::runCode(const QString& code, const QString& name) {
+bool ScriptEditorSidePanel::runCode(const QString& code, const QString& name) {
     appendOutput(QStringLiteral(">>> Run %1").arg(name), kMutedColor);
 
     auto capture = std::make_shared<RunCapture>();
@@ -259,7 +259,7 @@ bool ScriptingSidePanel::runCode(const QString& code, const QString& name) {
     return ok;
 }
 
-void ScriptingSidePanel::appendOutput(const QString& text, const QColor& color) {
+void ScriptEditorSidePanel::appendOutput(const QString& text, const QColor& color) {
     QTextCharFormat format;
     format.setForeground(color);
     QTextCursor cursor(m_output->document());
@@ -269,11 +269,11 @@ void ScriptingSidePanel::appendOutput(const QString& text, const QColor& color) 
     m_output->verticalScrollBar()->setValue(m_output->verticalScrollBar()->maximum());
 }
 
-void ScriptingSidePanel::clearOutput() {
+void ScriptEditorSidePanel::clearOutput() {
     if (m_output) m_output->clear();
 }
 
-void ScriptingSidePanel::newScript() {
+void ScriptEditorSidePanel::newScript() {
     if (!m_editor || !maybeSave()) return;
     m_editor->clear();
     m_editor->document()->setModified(false);
@@ -281,7 +281,7 @@ void ScriptingSidePanel::newScript() {
     updateFileLabel();
 }
 
-bool ScriptingSidePanel::openFile(const QString& requestedPath) {
+bool ScriptEditorSidePanel::openFile(const QString& requestedPath) {
     if (!m_editor || !maybeSave()) return false;
     QString path = requestedPath;
     if (path.isEmpty()) {
@@ -302,9 +302,9 @@ bool ScriptingSidePanel::openFile(const QString& requestedPath) {
     return true;
 }
 
-bool ScriptingSidePanel::save() { return m_file.isEmpty() ? saveAs() : saveAs(m_file); }
+bool ScriptEditorSidePanel::save() { return m_file.isEmpty() ? saveAs() : saveAs(m_file); }
 
-bool ScriptingSidePanel::saveAs(const QString& requestedPath) {
+bool ScriptEditorSidePanel::saveAs(const QString& requestedPath) {
     if (!m_editor) return false;
     QString path = requestedPath;
     if (path.isEmpty()) {
@@ -323,31 +323,31 @@ bool ScriptingSidePanel::saveAs(const QString& requestedPath) {
     return true;
 }
 
-bool ScriptingSidePanel::maybeSave() {
+bool ScriptEditorSidePanel::maybeSave() {
     if (!isModified() || m_editor->document()->isEmpty()) return true;
     const auto answer = QMessageBox::question(
-        this, tr("Scripting"),
+        this, tr("Script Editor"),
         tr("Save the changes to %1?").arg(m_file.isEmpty() ? tr("the untitled script") : QFileInfo(m_file).fileName()),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
     if (answer == QMessageBox::Save) return save();
     return answer == QMessageBox::Discard;
 }
 
-void ScriptingSidePanel::addRecentFile(const QString& path) {
+void ScriptEditorSidePanel::addRecentFile(const QString& path) {
     m_recentFiles.removeAll(path);
     m_recentFiles.prepend(path);
     while (m_recentFiles.size() > kMaxRecentFiles) m_recentFiles.removeLast();
     m_settings->setValue(kRecentKey, m_recentFiles);
 }
 
-void ScriptingSidePanel::updateFileLabel() {
+void ScriptEditorSidePanel::updateFileLabel() {
     if (!m_fileLabel) return;
     const QString name = m_file.isEmpty() ? tr("Untitled") : QFileInfo(m_file).fileName();
     m_fileLabel->setText(isModified() ? name + QStringLiteral(" •") : name);
     m_fileLabel->setToolTip(m_file.isEmpty() ? tr("Not saved yet") : m_file);
 }
 
-void ScriptingSidePanel::populateMenu(QMenu* menu) {
+void ScriptEditorSidePanel::populateMenu(QMenu* menu) {
     if (!m_editor) return;
     menu->addAction(tr("New"), this, [this]() { newScript(); });
     menu->addAction(tr("Open..."), this, [this]() { openFile({}); });

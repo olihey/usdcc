@@ -42,7 +42,7 @@ class PythonRuntime {
 public:
     // Where a run's top-level names live: a fresh namespace each time, or one
     // kept for the session, so a later run sees what an earlier one defined
-    // (the Scripting panel's "Keep Variables Between Runs").
+    // (the Script Editor panel's "Keep Variables Between Runs").
     enum class Namespace { Fresh, Session };
 
     explicit PythonRuntime(const PythonSettings& settings = PythonSettings::defaults());

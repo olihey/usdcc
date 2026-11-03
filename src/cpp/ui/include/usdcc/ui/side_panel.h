@@ -8,7 +8,7 @@ class QMainWindow;
 namespace usdcc::ui {
 
 // Base class for panels docked at the edges of the QMainWindow, outside the
-// Qt Advanced Docking System container (LogSidePanel, ScriptingSidePanel,
+// Qt Advanced Docking System container (LogSidePanel, ScriptEditorSidePanel,
 // USDASidePanel — see docs/PLAN.md section 4).
 //
 // Double-clicking a docked panel's title bar, or its tab when panels share a

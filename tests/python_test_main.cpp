@@ -21,7 +21,7 @@ usdcc::test::PythonTestApp* s_app = nullptr;
 usdcc::test::PythonTestApp& usdcc::test::pythonTestApp() { return *s_app; }
 
 int main(int argc, char** argv) {
-    // Widgets for the Scripting panel tests; CTest runs this on Qt's
+    // Widgets for the Script Editor panel tests; CTest runs this on Qt's
     // offscreen platform, so no window appears. The scale controller's
     // settings live in a temporary folder, never in the user's usdcc.ini.
     QApplication qtApp(argc, argv);

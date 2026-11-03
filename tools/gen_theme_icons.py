@@ -49,7 +49,7 @@ ICONS = {
         LIGHT,
         [[(2.5, 3.5), (6.5, 3.5), (8, 5.5), (13.5, 5.5), (13.5, 12.5), (2.5, 12.5), (2.5, 3.5)], [(2.5, 7.5), (13.5, 7.5)]],
     ),
-    # Scripting panel toolbar: Run, Run Selection (a play triangle against a
+    # Script Editor panel toolbar: Run, Run Selection (a play triangle against a
     # bar), Save (a floppy disk).
     "play": (1.3, LIGHT, [[(4.5, 3), (12.5, 8), (4.5, 13), (4.5, 3)]]),
     "play-selection": (1.3, LIGHT, [[(3, 3.5), (10, 8), (3, 12.5), (3, 3.5)], [(13, 3.5), (13, 12.5)]]),

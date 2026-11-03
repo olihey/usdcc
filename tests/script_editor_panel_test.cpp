@@ -1,5 +1,5 @@
-// The Scripting panel (docs/SCRIPTING.md phase 3): PythonHighlighter,
-// CodeEditor's indentation and comments, and ScriptingSidePanel's runs,
+// The Script Editor panel (docs/SCRIPTING.md phase 3): PythonHighlighter,
+// CodeEditor's indentation and comments, and ScriptEditorSidePanel's runs,
 // output, kept variables, files and persistence. Runs offscreen in
 // usdcc_python_tests.
 #include "python_test_app.h"
@@ -8,7 +8,7 @@
 #include "usdcc/scripting/code_editor.h"
 #include "usdcc/scripting/python_highlighter.h"
 #include "usdcc/scripting/python_runtime.h"
-#include "usdcc/scripting/scripting_side_panel.h"
+#include "usdcc/scripting/script_editor_side_panel.h"
 
 #include <QApplication>
 #include <QDir>
@@ -21,7 +21,7 @@
 
 using usdcc::scripting::CodeEditor;
 using usdcc::scripting::PythonHighlighter;
-using usdcc::scripting::ScriptingSidePanel;
+using usdcc::scripting::ScriptEditorSidePanel;
 using usdcc::test::pythonTestApp;
 
 namespace {
@@ -130,7 +130,7 @@ USDCC_TEST(code_editor) {
 USDCC_TEST(scripting_panel_runs) {
     ScratchFiles files;
     auto& app = pythonTestApp();
-    ScriptingSidePanel panel(app.python, app.runner, nullptr, files.path("settings.ini"));
+    ScriptEditorSidePanel panel(app.python, app.runner, nullptr, files.path("settings.ini"));
     CHECK(panel.editor() != nullptr, "an editor while Python runs");
     if (!panel.editor()) return;
 
@@ -171,7 +171,7 @@ USDCC_TEST(scripting_panel_files) {
     const QString settings = files.path("settings.ini");
     const QString script = files.path("shot_setup.py");
     {
-        ScriptingSidePanel panel(app.python, app.runner, nullptr, settings);
+        ScriptEditorSidePanel panel(app.python, app.runner, nullptr, settings);
         auto* label = panel.findChild<QLabel*>(QStringLiteral("scriptFileLabel"));
         type(*panel.editor(), "x = 1\n");
         CHECK(panel.isModified() && label && label->text() == QString::fromUtf8("Untitled •"),
@@ -187,7 +187,7 @@ USDCC_TEST(scripting_panel_files) {
     }
     {
         // Unsaved changes come back after a restart, with the file still open.
-        ScriptingSidePanel panel(app.python, app.runner, nullptr, settings);
+        ScriptEditorSidePanel panel(app.python, app.runner, nullptr, settings);
         CHECK(panel.editor()->toPlainText() == "x = 2  # not saved yet\n" && panel.isModified(),
               "unsaved text restored: [%s]", qPrintable(panel.editor()->toPlainText()));
         CHECK(panel.currentFile() == QFileInfo(script).absoluteFilePath(), "with its file");
@@ -195,7 +195,7 @@ USDCC_TEST(scripting_panel_files) {
         CHECK(panel.openFile(script) && panel.editor()->toPlainText() == "x = 1\n", "Open reads the saved file");
     }
     {
-        ScriptingSidePanel panel(app.python, app.runner, nullptr, settings);
+        ScriptEditorSidePanel panel(app.python, app.runner, nullptr, settings);
         CHECK(!panel.isModified() && panel.editor()->toPlainText() == "x = 1\n", "a clean file reopens from disk");
     }
 }
@@ -204,7 +204,7 @@ USDCC_TEST(scripting_panel_unavailable) {
     ScratchFiles files;
     // A second runtime can't start Python, so it reports itself unavailable.
     usdcc::scripting::PythonRuntime unavailable;
-    ScriptingSidePanel panel(unavailable, pythonTestApp().runner, nullptr, files.path("settings.ini"));
+    ScriptEditorSidePanel panel(unavailable, pythonTestApp().runner, nullptr, files.path("settings.ini"));
     auto* reason = panel.findChild<QLabel*>(QStringLiteral("scriptingUnavailable"));
     CHECK(!panel.editor() && reason && reason->text().contains("unavailable"), "says why instead of an editor: %s",
           reason ? qPrintable(reason->text()) : "?");
