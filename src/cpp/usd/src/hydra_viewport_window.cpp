@@ -16,6 +16,7 @@
 
 #include <QExposeEvent>
 #include <QMouseEvent>
+#include <QPlatformSurfaceEvent>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLFunctions_1_1>
@@ -47,9 +48,25 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
 }
 
 HydraViewportWindow::~HydraViewportWindow() {
-    if (m_context) {
-        m_context->makeCurrent(this);
-        m_engine.reset();
+    // Normally already done when the surface went (see event()); this covers
+    // a window whose surface outlives it.
+    releaseEngine();
+}
+
+void HydraViewportWindow::releaseEngine() {
+    if (!m_engine) {
+        return;
+    }
+    // The engine frees its GL objects (buffers, shaders, textures) as it goes,
+    // which needs the context current on a surface that still exists.
+    // Without one every free fails and Hydra logs a GL error for each.
+    const bool current = m_context && m_context->makeCurrent(this);
+    if (!current) {
+        USDCC_LOG_WARNING("usdcc.viewport", "Releasing the Hydra engine without a current GL context");
+    }
+    m_rendererPluginId = m_engine->GetCurrentRendererId();
+    m_engine.reset();
+    if (current) {
         m_context->doneCurrent();
     }
 }
@@ -92,6 +109,9 @@ void HydraViewportWindow::ensureEngine() {
     if (!m_engine) {
         m_context->makeCurrent(this);
         m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
+        if (!m_rendererPluginId.IsEmpty()) {
+            m_engine->SetRendererPlugin(m_rendererPluginId);  // the one in use before releaseEngine()
+        }
         configureEngine();
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}",
                        m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()));
@@ -346,6 +366,15 @@ bool HydraViewportWindow::event(QEvent* ev) {
     if (ev->type() == QEvent::UpdateRequest) {
         renderNow();
         return true;
+    }
+    // The native surface goes before this object does (the window container
+    // and the main window destroy it on close), and with it the last chance to
+    // make the context current: release the engine now. It is recreated, with
+    // the same renderer, if the window gets a surface and is shown again.
+    if (ev->type() == QEvent::PlatformSurface &&
+        static_cast<QPlatformSurfaceEvent*>(ev)->surfaceEventType() ==
+            QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed) {
+        releaseEngine();
     }
     return QWindow::event(ev);
 }

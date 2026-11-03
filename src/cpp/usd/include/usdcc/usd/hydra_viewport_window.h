@@ -129,6 +129,9 @@ protected:
 private:
     void ensureEngine();
     void configureEngine();
+    // Destroys the engine with the context current, so its GL objects are
+    // freed cleanly, and remembers its renderer for ensureEngine().
+    void releaseEngine();
     void renderNow();
     PXR_NS::GfVec3d cameraPosition() const;
     PXR_NS::GfFrustum currentFrustum() const;
@@ -146,6 +149,7 @@ private:
     QOpenGLContext* m_context = nullptr;
     QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
+    PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
     PXR_NS::UsdStageRefPtr m_stage;
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};
