@@ -2,6 +2,7 @@
 add_library(usdcc_usd STATIC
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
+    include/usdcc/usd/layer_stack.h
     include/usdcc/usd/stage.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/stage_manager.h
@@ -12,6 +13,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/xform_stack.h
     src/composition_arcs.cpp
     src/dependencies.cpp
+    src/layer_stack.cpp
     src/property_categorizer.cpp
     src/stage.cpp
     src/stage_manager.cpp
@@ -40,6 +42,8 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/dependencies_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
+    include/usdcc/usd/layer_actions.h
+    include/usdcc/usd/layer_editor_view_panel.h
     include/usdcc/usd/log_test_messages.h
     include/usdcc/usd/outliner_item_delegate.h
     include/usdcc/usd/outliner_view_panel.h
@@ -70,6 +74,8 @@ add_library(usdcc_usd_ui STATIC
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
     src/hydra_viewport_window.cpp
+    src/layer_actions.cpp
+    src/layer_editor_view_panel.cpp
     src/log_test_messages.cpp
     src/outliner_item_delegate.cpp
     src/outliner_view_panel.cpp

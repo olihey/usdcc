@@ -186,9 +186,13 @@ void AttributesViewPanel::populateOptionsMenu(QMenu* menu) {
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_stageChangedConnection = {};
+    m_editTargetConnection = {};
     if (stage) {
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
+        // Queued: the target can change from inside a menu or another panel's handler.
+        m_editTargetConnection = stage->editTargetChanged.connect(
+            [this]() { QMetaObject::invokeMethod(this, [this]() { rebuild(); }, Qt::QueuedConnection); });
     }
     // Always rebuild: the new stage may have the same prim path selected, and
     // the old rows are bound to the old stage.

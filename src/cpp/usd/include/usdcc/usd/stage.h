@@ -3,6 +3,7 @@
 #include "usdcc/core/signal.h"
 
 #include <pxr/base/tf/token.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -79,6 +80,17 @@ public:
     void setTargetXformOp(const PXR_NS::SdfPath& primPath, const PXR_NS::TfToken& opName);
     void clearTargetXformOp() { setTargetXformOp(PXR_NS::SdfPath(), PXR_NS::TfToken()); }
     usdcc::core::Signal<> targetXformOpChanged;
+
+    // The layer edits go to: UsdStage's edit target (docs/LAYER_EDITOR.md §3),
+    // the root layer until something changes it.
+    PXR_NS::SdfLayerHandle editTargetLayer() const;
+    // Makes `layer` the edit target. False, and nothing changed, for a layer
+    // that isn't in the stage's layer stack (session layers included) or is
+    // muted.
+    bool setEditTargetLayer(const PXR_NS::SdfLayerHandle& layer);
+    // After the edit target changed, however it was changed (this, or
+    // UsdStage::SetEditTarget() from a script).
+    usdcc::core::Signal<> editTargetChanged;
 
 private:
     class ChangeListener;

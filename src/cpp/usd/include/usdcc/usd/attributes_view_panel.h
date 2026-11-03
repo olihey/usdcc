@@ -145,6 +145,8 @@ private:
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
     // The shown stage's change notices (re-made whenever the stage changes).
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
+    // Which arcs and values can be edited follows the edit target.
+    usdcc::core::Signal<>::Connection m_editTargetConnection;
 };
 
 }  // namespace usdcc::usd

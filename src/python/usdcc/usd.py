@@ -137,6 +137,28 @@ def select(items, stage=None):
     stage_manager().set_selected_paths(stage_id(stage), [_path_string(item) for item in items])
 
 
+def edit_target(stage=None):
+    """The layer (Sdf.Layer) edits to `stage` (default: the current stage) go to:
+    its edit target, which the Layers panel shows and sets."""
+    return _resolve(stage).GetEditTarget().GetLayer()
+
+
+def set_edit_target(layer, stage=None):
+    """Makes `layer` (an Sdf.Layer or its identifier) the edit target of `stage`
+    (default: the current stage), as the Layers panel does. It must be in the
+    stage's layer stack, session layers included, and not muted; ValueError
+    otherwise. Not an undo step."""
+    from pxr import Sdf
+
+    stage = _resolve(stage)
+    found = layer if isinstance(layer, Sdf.Layer) else Sdf.Layer.Find(str(layer))
+    if not found or not stage.HasLocalLayer(found):
+        raise ValueError("not a layer of the stage's layer stack: %r" % (layer,))
+    if stage.IsLayerMuted(found.identifier):
+        raise ValueError("the layer is muted: %s" % found.identifier)
+    stage.SetEditTarget(Usd.EditTarget(found))
+
+
 @contextmanager
 def edit(description, stage=None):
     """Makes everything done to `stage` (default: the current stage) inside the

@@ -2,6 +2,7 @@
 
 #include <pxr/base/tf/notice.h>
 #include <pxr/base/tf/weakBase.h>
+#include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/notice.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageCache.h>
@@ -42,10 +43,19 @@ public:
     ChangeListener(Stage& owner) : m_owner(owner) {
         m_key = PXR_NS::TfNotice::Register(PXR_NS::TfCreateWeakPtr(this), &ChangeListener::onObjectsChanged,
                                            PXR_NS::UsdStagePtr(owner.usdStage()));
+        m_editTargetKey = PXR_NS::TfNotice::Register(PXR_NS::TfCreateWeakPtr(this), &ChangeListener::onEditTargetChanged,
+                                                     PXR_NS::UsdStagePtr(owner.usdStage()));
     }
-    ~ChangeListener() { PXR_NS::TfNotice::Revoke(m_key); }
+    ~ChangeListener() {
+        PXR_NS::TfNotice::Revoke(m_key);
+        PXR_NS::TfNotice::Revoke(m_editTargetKey);
+    }
 
 private:
+    void onEditTargetChanged(const PXR_NS::UsdNotice::StageEditTargetChanged&, const PXR_NS::UsdStageWeakPtr&) {
+        m_owner.editTargetChanged();
+    }
+
     void onObjectsChanged(const PXR_NS::UsdNotice::ObjectsChanged& notice, const PXR_NS::UsdStageWeakPtr&) {
         StageChanges changes;
         for (const auto& path : notice.GetResyncedPaths()) {
@@ -64,6 +74,7 @@ private:
 
     Stage& m_owner;
     PXR_NS::TfNotice::Key m_key;
+    PXR_NS::TfNotice::Key m_editTargetKey;
 };
 
 Stage::Stage(PXR_NS::UsdStageRefPtr usdStage)
@@ -83,6 +94,16 @@ void Stage::setTargetXformOp(const PXR_NS::SdfPath& primPath, const PXR_NS::TfTo
     m_targetPrim = prim;
     m_targetOp = opName;
     targetXformOpChanged();
+}
+
+PXR_NS::SdfLayerHandle Stage::editTargetLayer() const { return m_usdStage->GetEditTarget().GetLayer(); }
+
+bool Stage::setEditTargetLayer(const PXR_NS::SdfLayerHandle& layer) {
+    if (!layer || m_usdStage->IsLayerMuted(layer->GetIdentifier())) return false;
+    if (!m_usdStage->HasLocalLayer(layer)) return false;  // not in the layer stack
+    if (layer == editTargetLayer()) return true;
+    m_usdStage->SetEditTarget(PXR_NS::UsdEditTarget(layer));  // sends StageEditTargetChanged
+    return true;
 }
 
 void Stage::validateTarget() {

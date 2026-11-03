@@ -1,6 +1,7 @@
 #include <QApplication>
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 
 #include "usdcc/ui/current_stage_tracker.h"
@@ -16,10 +17,12 @@
 #include <QCommandLineParser>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QSurfaceFormat>
 
 #include <pxr/usd/sdf/layer.h>
@@ -38,6 +41,7 @@
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -215,6 +219,11 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::AttributesViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    panelTypes.add(QStringLiteral("layers"), QObject::tr("Layers"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::LayerEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     panelTypes.add(QStringLiteral("dependencies"), QObject::tr("Dependencies"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -467,6 +476,27 @@ int main(int argc, char** argv) {
     auto titleOnStageOpened = stageManager.stageOpened.connect(updateTitle);
     auto titleOnStageClosed = stageManager.stageClosed.connect(updateTitle);
     updateTitle(nullptr);
+
+    // The status bar says which layer of the current stage edits go to
+    // (docs/LAYER_EDITOR.md §3), following both the current stage and its
+    // edit target.
+    auto* editingLabel = new QLabel(&window);
+    window.statusBar()->addPermanentWidget(editingLabel);
+    usdcc::core::Signal<>::Connection editTargetOfCurrent;
+    std::function<void()> updateEditing = [editingLabel, &stageManager]() {
+        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
+        const PXR_NS::SdfLayerHandle layer = stage ? stage->editTargetLayer() : PXR_NS::SdfLayerHandle();
+        editingLabel->setText(layer ? QObject::tr("Editing: %1").arg(QString::fromStdString(layer->GetDisplayName()))
+                                    : QString());
+        editingLabel->setToolTip(layer ? QString::fromStdString(layer->GetIdentifier()) : QString());
+    };
+    auto editingOnCurrentStage = stageManager.currentStageChanged.connect(
+        [&editTargetOfCurrent, &updateEditing](const usdcc::usd::StageRefPtr& stage) {
+            editTargetOfCurrent = stage ? stage->editTargetChanged.connect([&updateEditing]() { updateEditing(); })
+                                        : usdcc::core::Signal<>::Connection();
+            updateEditing();
+        });
+    updateEditing();
 
     window.show();
 

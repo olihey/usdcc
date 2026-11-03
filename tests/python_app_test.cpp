@@ -229,6 +229,23 @@ USDCC_TEST(python_app_api) {
     CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.select(['not a path'])\n"),
           "a bad path raises ValueError");
 
+    // The edit target (docs/LAYER_EDITOR.md §3): the session layer, and back.
+    int targetNotices = 0;
+    auto targetConnection = stage->editTargetChanged.connect([&targetNotices]() { ++targetNotices; });
+    app.python.runString(
+        "import usdcc.usd\nusdcc.usd.set_edit_target(usdcc.usd.current_stage().GetSessionLayer())\n");
+    CHECK(stage->editTargetLayer() == stage->usdStage()->GetSessionLayer() && targetNotices == 1,
+          "set_edit_target(): the session layer, and the stage's notice");
+    CHECK(evaluate("__import__('usdcc.usd').usd.edit_target() == "
+                   "__import__('usdcc.usd').usd.current_stage().GetSessionLayer()") == "True",
+          "edit_target()");
+    CHECK(!app.python.runString(
+              "import usdcc.usd\nfrom pxr import Sdf\nusdcc.usd.set_edit_target(Sdf.Layer.CreateAnonymous())\n"),
+          "a layer not in the stack raises ValueError");
+    app.python.runString(
+        "import usdcc.usd\nusdcc.usd.set_edit_target(usdcc.usd.current_stage().GetRootLayer().identifier)\n");
+    CHECK(stage->editTargetLayer() == stage->usdStage()->GetRootLayer(), "by identifier, back to the root layer");
+
     CHECK(evaluate("__import__('usdcc.tools').tools.tool_names()") == "['select', 'move', 'rotate', 'scale']",
           "tool names");
     app.python.runString("import usdcc.tools\nusdcc.tools.set_active_tool('move')\n");

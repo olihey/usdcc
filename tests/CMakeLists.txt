@@ -15,6 +15,7 @@ add_executable(usdcc_tests
     composition_arcs_test.cpp
     dependencies_test.cpp
     dependency_files.h
+    layer_stack_test.cpp
     log_bridges_test.cpp
     log_capture_test.cpp
     log_test.cpp
@@ -41,6 +42,7 @@ add_executable(usdcc_ui_tests
     current_stage_test.cpp
     dependencies_panel_test.cpp
     dependency_files.h
+    layer_editor_test.cpp
     log_panel_test.cpp
     outliner_icons_test.cpp
     outliner_context_menu_test.cpp
