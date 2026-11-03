@@ -6,6 +6,7 @@
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -31,6 +32,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFrame>
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QHBoxLayout>
@@ -459,28 +461,64 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
         section->addHeaderWidget(add);
     }
 
-    auto addRow = [section](const QString& label, PropertyEditor* editor) {
+    // An editable reference's or payload's rows go in a small frame of their
+    // own (QFrame#compositionArc in theme/dark.qss), its labels narrower by
+    // the frame's padding so the fields line up with the other sections'.
+    // Every other row goes straight in the section.
+    constexpr int kFramePadding = 8;
+    QVBoxLayout* frameLayout = nullptr;
+    auto beginFrame = [section, &frameLayout]() {
+        auto* frame = new QFrame();
+        frame->setObjectName(QStringLiteral("compositionArc"));
+        frame->setAttribute(Qt::WA_StyledBackground);
+        frameLayout = new QVBoxLayout(frame);
+        usdcc::ui::scaled::margins(frameLayout, kFramePadding, 6, 6, 6);
+        usdcc::ui::scaled::spacing(frameLayout, 6);
+        section->addRow(frame);
+    };
+    auto addRow = [section, &frameLayout](const QString& label, PropertyEditor* editor) {
         auto* row = new PropertyRow(label, editor);
-        row->setLabelWidth(kLabelWidth);
-        section->addRow(row);
+        if (frameLayout) {
+            row->setLabelWidth(kLabelWidth - kFramePadding);
+            frameLayout->addWidget(row);
+        } else {
+            row->setLabelWidth(kLabelWidth);
+            section->addRow(row);
+        }
         return row;
     };
-    auto openButton = [this](const ArcInfo& arc, PropertyRow* row) {
-        if (arc.assetPath.empty()) return;  // this file
-        QToolButton* open = properties::iconButton(QStringLiteral(":/usdcc/theme/detach.png"),
-                                                   arc.missing ? tr("The file can't be found") : tr("Open as a stage"), row);
-        open->setEnabled(!arc.missing);
-        const QString file = qs(arc.resolvedPath);
-        connect(open, &QToolButton::clicked, this, [file]() { openStageFile(file); });
-        row->addTrailingWidget(open);
-    };
-    auto removeButton = [this, path](const ArcInfo& arc, PropertyRow* row) {
-        QToolButton* remove = properties::iconButton(QStringLiteral(":/usdcc/theme/close.png"),
-                                                     tr("Remove this %1").arg(tr(arcTypeName(arc.type)).toLower()), row);
-        connect(remove, &QToolButton::clicked, this, [this, path, arc]() {
-            prim_actions::removeArc(*m_undoManager, currentStage(), path, arc);
-        });
-        row->addTrailingWidget(remove);
+    // One button at the row's right edge, its menu the arc's actions: Remove
+    // (an arc authored here), Open as Stage and Reveal in Explorer (a file).
+    auto actionsButton = [this, path](const ArcInfo& arc, PropertyRow* row, bool removable) {
+        const bool file = !arc.assetPath.empty() &&
+                          (arc.type == ArcInfo::Type::Reference || arc.type == ArcInfo::Type::Payload);
+        if (!removable && !file) return;  // e.g. a read-only reference to this file
+        QToolButton* button = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"),
+                                                     tr("%1 actions").arg(tr(arcTypeName(arc.type))), row);
+        button->setPopupMode(QToolButton::InstantPopup);
+        auto* menu = new QMenu(button);
+        menu->setToolTipsVisible(true);
+        if (removable) {
+            menu->addAction(tr("Remove"), this, [this, path, arc]() {
+                // Queued: removing rebuilds this panel, the menu's button included.
+                QMetaObject::invokeMethod(
+                    this, [this, path, arc]() { prim_actions::removeArc(*m_undoManager, currentStage(), path, arc); },
+                    Qt::QueuedConnection);
+            });
+        }
+        if (file) {
+            const QString resolved = qs(arc.resolvedPath);
+            QAction* open = menu->addAction(tr("Open as Stage"), this, [resolved]() { openStageFile(resolved); });
+            open->setEnabled(!arc.missing);
+            QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [resolved]() { revealFile(resolved); });
+            reveal->setEnabled(!arc.missing && QFileInfo::exists(resolved));
+            if (arc.missing) {
+                open->setToolTip(tr("The file can't be found"));
+                reveal->setToolTip(tr("The file can't be found"));
+            }
+        }
+        button->setMenu(menu);
+        row->addLastWidget(button);  // always the rightmost
     };
     auto change = [this, path](const ArcInfo& arc, auto modify) {
         ArcInfo changed = arc;
@@ -501,6 +539,7 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
             }
             const QString type = tr(arcTypeName(arc.type));
             const bool asset = arc.type == ArcInfo::Type::Reference || arc.type == ArcInfo::Type::Payload;
+            frameLayout = nullptr;
 
             if (arc.type == ArcInfo::Type::Variant) {
                 const UsdVariantSet set = prim.GetVariantSet(arc.variantSet);
@@ -525,7 +564,13 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                                                      QStringLiteral("<%1>").arg(qs(arc.primPath.GetString()));
                 PropertyRow* row = addRow(type, readOnlyText(what));
                 row->setNote(tr("in %1").arg(qs(arc.layerName)), 0, qs(arc.layerIdentifier));
-                if (asset) openButton(arc, row);
+                if (asset && !arc.assetPath.empty()) {
+                    // As the asset field shows it, U+00B7 as UTF-8 bytes.
+                    const QString resolved = qs(arc.resolvedPath);
+                    row->setSubLine(arc.missing ? tr("Unresolved") : tr("Resolved \xC2\xB7 %1").arg(resolved), resolved,
+                                    arc.missing);
+                }
+                actionsButton(arc, row, false);
                 continue;
             }
 
@@ -536,11 +581,12 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                     if (!v.IsHolding<std::string>() || !SdfPath::IsValidPathString(v.UncheckedGet<std::string>())) return;
                     change(arc, [&](ArcInfo& a) { a.primPath = SdfPath(v.UncheckedGet<std::string>()); });
                 });
-                removeButton(arc, addRow(type, editor));
+                actionsButton(arc, addRow(type, editor), true);
                 continue;
             }
 
             // A reference or payload: the file, then its prim, offset and scale.
+            beginFrame();
             EditorHints hints;
             hints.anchorLayer = editTarget;
             PropertyEditor* file = properties::createPropertyEditor(SdfValueTypeNames->Asset, hints);
@@ -550,10 +596,11 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                 change(arc, [&](ArcInfo& a) { a.assetPath = v.UncheckedGet<SdfAssetPath>().GetAssetPath(); });
             });
             PropertyRow* fileRow = addRow(type, file);
-            openButton(arc, fileRow);
-            removeButton(arc, fileRow);
+            actionsButton(arc, fileRow, true);
 
-            PropertyEditor* target = properties::createPropertyEditor(SdfValueTypeNames->String);
+            EditorHints targetHints;
+            targetHints.placeholder = QStringLiteral("defaultPrim");  // empty brings in the file's default prim
+            PropertyEditor* target = properties::createPropertyEditor(SdfValueTypeNames->String, targetHints);
             target->setValue(VtValue(arc.primPath.GetString()));
             target->setToolTip(tr("The prim to bring in; empty for the file's default prim"));
             connect(target, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {
@@ -561,7 +608,34 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                 if (!text.empty() && !SdfPath::IsValidPathString(text)) return;
                 change(arc, [&](ArcInfo& a) { a.primPath = text.empty() ? SdfPath() : SdfPath(text); });
             });
-            addRow(tr("  Prim"), target);
+            PropertyRow* targetRow = addRow(tr("Prim"), target);
+            // Its menu: back to the default prim, or pick one from the file.
+            QToolButton* pick = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"), tr("Prim actions"),
+                                                       targetRow);
+            pick->setPopupMode(QToolButton::InstantPopup);
+            auto* pickMenu = new QMenu(pick);
+            pickMenu->setToolTipsVisible(true);
+            // Queued, as Remove: an edit rebuilds this panel, the menu's button included.
+            if (!arc.primPath.IsEmpty()) {
+                pickMenu->addAction(tr("Use defaultPrim"), this, [this, change, arc]() {
+                    QMetaObject::invokeMethod(
+                        this, [change, arc]() { change(arc, [](ArcInfo& a) { a.primPath = SdfPath(); }); },
+                        Qt::QueuedConnection);
+                });
+            }
+            QAction* select = pickMenu->addAction(tr("Select Prim from Stage..."), this, [this, change, arc]() {
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, change, arc]() {
+                        const std::optional<SdfPath> chosen = pickPrimFromFile(qs(arc.resolvedPath), arc.primPath, this);
+                        if (chosen && *chosen != arc.primPath) change(arc, [&](ArcInfo& a) { a.primPath = *chosen; });
+                    },
+                    Qt::QueuedConnection);
+            });
+            select->setEnabled(!arc.missing);
+            if (arc.missing) select->setToolTip(tr("The file can't be found"));
+            pick->setMenu(pickMenu);
+            targetRow->addLastWidget(pick);
 
             PropertyEditor* offset = properties::createPropertyEditor(SdfValueTypeNames->Double);
             offset->setValue(VtValue(arc.layerOffset.GetOffset()));
@@ -570,7 +644,7 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                 if (!v.IsHolding<double>()) return;
                 change(arc, [&](ArcInfo& a) { a.layerOffset.SetOffset(v.UncheckedGet<double>()); });
             });
-            addRow(tr("  Time Offset"), offset);
+            addRow(tr("Time Offset"), offset);
             PropertyEditor* scale = properties::createPropertyEditor(SdfValueTypeNames->Double);
             scale->setValue(VtValue(arc.layerOffset.GetScale()));
             connect(scale, &PropertyEditor::editFinished, this, [change, arc, scale]() {
@@ -578,7 +652,7 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                 if (!v.IsHolding<double>()) return;
                 change(arc, [&](ArcInfo& a) { a.layerOffset.SetScale(v.UncheckedGet<double>()); });
             });
-            addRow(tr("  Time Scale"), scale);
+            addRow(tr("Time Scale"), scale);
 
             if (arc.type == ArcInfo::Type::Payload) {
                 PropertyEditor* loaded = properties::createPropertyEditor(SdfValueTypeNames->Bool);
@@ -588,7 +662,7 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                     on ? prim_actions::load(*m_undoManager, currentStage(), {path})
                        : prim_actions::unload(*m_undoManager, currentStage(), {path});
                 });
-                addRow(tr("  Loaded"), loaded);
+                addRow(tr("Loaded"), loaded);
             }
         }
     }

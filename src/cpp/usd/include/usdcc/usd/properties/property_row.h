@@ -7,6 +7,7 @@ class QToolButton;
 
 #include <functional>
 
+class QHBoxLayout;
 class QLabel;
 class QMenu;
 
@@ -47,6 +48,9 @@ public:
     void setPropertyPath(const QString& path) { m_propertyPath = path; }
     // An extra control after the editor (e.g. a relationship's "Select" button).
     void addTrailingWidget(QWidget* widget);
+    // A control at the row's right edge, after everything else (e.g. a
+    // composition arc's Open as Stage).
+    void addLastWidget(QWidget* widget);
     // An extra control before the label (e.g. a transform op's drag handle).
     void addLeadingWidget(QWidget* widget);
     QString labelText() const;
@@ -63,6 +67,9 @@ public:
     void setUnauthored(bool unauthored);
     void setAnimated(bool animated);
     void setConnectedSource(const QString& source);  // empty = not connected
+    // A second line under the row (e.g. a read-only arc's resolved path),
+    // red when `warning`; empty hides it.
+    void setSubLine(const QString& text, const QString& toolTip = QString(), bool warning = false);
     void setReadOnly(bool readOnly);                  // forced, independent of the states above
     void setResettable(bool resettable) { m_resettable = resettable; }
 
@@ -86,6 +93,10 @@ private:
     QLabel* m_badge;
     QLabel* m_subLine;
     QWidget* m_valueColumn;
+    // The row's controls, and under them the second lines (connected
+    // source, the editor's subLineWidget()), indented to the value column.
+    QHBoxLayout* m_rowLayout;
+    QHBoxLayout* m_subLayout;
     QString m_propertyPath;
     QString m_connectedSource;
     bool m_animated = false;

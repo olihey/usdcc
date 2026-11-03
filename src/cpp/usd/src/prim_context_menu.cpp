@@ -13,13 +13,17 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDialog>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QProcess>
 #include <QPushButton>
 #include <QStringList>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -274,6 +278,14 @@ bool openStageFile(const QString& path) {
     if (!openStageHandler()) return false;
     openStageHandler()(path);
     return true;
+}
+
+void revealFile(const QString& path) {
+#ifdef _WIN32
+    QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+#endif
 }
 
 QWidget* showPrimInfo(const PXR_NS::UsdPrim& prim, QWidget* parent) {

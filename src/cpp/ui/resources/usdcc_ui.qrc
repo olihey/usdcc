@@ -22,6 +22,8 @@
         <file alias="plus@2x.png">theme/plus@2x.png</file>
         <file alias="menu.png">theme/menu.png</file>
         <file alias="menu@2x.png">theme/menu@2x.png</file>
+        <file alias="more.png">theme/more.png</file>
+        <file alias="more@2x.png">theme/more@2x.png</file>
         <file alias="trash.png">theme/trash.png</file>
         <file alias="trash@2x.png">theme/trash@2x.png</file>
         <file alias="folder.png">theme/folder.png</file>

@@ -108,6 +108,17 @@ Composition                                                         [+]  ← Ref
 - **Edit target:** the app always edits the root layer today, so "editable" means authored in
   the root layer. When an edit-target picker exists, this follows it with no other change.
 
+Later changes to the section:
+
+- An editable reference or payload is in a small frame of its own; every other arc is a plain row.
+- Each arc has one ⋮ button at its row's right edge instead of × and ↗: Remove (an arc authored
+  here), Open as Stage and Reveal in Explorer (a file). Arcs from other layers have it without
+  Remove, and show their resolved path under the row like the asset field.
+- An empty Prim field says "defaultPrim". Its ⋮ menu has Use defaultPrim (when a prim is set)
+  and Select Prim from Stage..., which opens the file (no payloads loaded) in `PrimPickerDialog`:
+  its prims as a tree with the Outliner's icons and types, the default prim in bold, a name
+  filter, Use Prim and Cancel.
+
 ## 5. Open as Stage
 
 Opens the arc's resolved file with `StageOpener` (off the UI thread, with progress, as File > Open

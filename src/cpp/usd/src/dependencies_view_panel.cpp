@@ -12,19 +12,16 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
-#include <QProcess>
 #include <QSet>
 #include <QSettings>
 #include <QTimer>
 #include <QTreeWidget>
-#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -49,14 +46,6 @@ QString count(int n, const QString& one, const QString& many) { return (n == 1 ?
 QString layerName(const std::string& identifier) {
     if (const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier)) return qs(layer->GetDisplayName());
     return QFileInfo(qs(identifier)).fileName();
-}
-
-void revealFile(const QString& path) {
-#ifdef _WIN32
-    QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
-#else
-    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
-#endif
 }
 }  // namespace
 

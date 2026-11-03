@@ -358,11 +358,13 @@ private:
 
 class TextEditor : public PropertyEditor {
 public:
-    TextEditor(const ValueTypeInfo& info, QWidget* parent) : PropertyEditor(info, parent) {
+    TextEditor(const ValueTypeInfo& info, const EditorHints& hints, QWidget* parent) : PropertyEditor(info, parent) {
         auto* layout = rowLayout(this);
         m_edit = new QLineEdit(this);
         layout->addWidget(m_edit, 1);
-        if (info.scalarKind == ScalarKind::PathExpression) {
+        if (!hints.placeholder.isEmpty()) {
+            m_edit->setPlaceholderText(hints.placeholder);
+        } else if (info.scalarKind == ScalarKind::PathExpression) {
             m_edit->setPlaceholderText(tr("e.g. /World/** or //Mesh"));
         }
         connect(m_edit, &QLineEdit::editingFinished, this, [this]() { commit(); });
@@ -462,15 +464,13 @@ public:
         usdcc::ui::scaled::spacing(layout, 2);
 
         auto* row = new QWidget(this);
-        auto* rowLay = rowLayout(row);
+        // Spaced like the row's own buttons (PropertyRow), which follow these.
+        auto* rowLay = rowLayout(row, 8);
         m_edit = new QLineEdit(row);
-        m_relative = new QToolButton(row);
-        m_relative->setObjectName(QStringLiteral("propertyButton"));
-        m_relative->setToolTip(tr("Switch between a path relative to the layer and an absolute path"));
-        m_browse = new QToolButton(row);
-        m_browse->setObjectName(QStringLiteral("propertyButton"));
+        // Square, the size of the row's icon buttons.
+        m_relative = iconButton(QString(), tr("Switch between a path relative to the layer and an absolute path"), row);
+        m_browse = iconButton(QString(), tr("Browse for a file"), row);
         m_browse->setText(QStringLiteral("\xE2\x80\xA6"));
-        m_browse->setToolTip(tr("Browse for a file"));
         rowLay->addWidget(m_edit, 1);
         rowLay->addWidget(m_relative);
         rowLay->addWidget(m_browse);
@@ -493,6 +493,8 @@ public:
         updateDisplay();
     }
     VtValue value() const override { return VtValue(SdfAssetPath(m_path.toStdString())); }
+    // The resolved path: in a PropertyRow, the full width of the row.
+    QWidget* subLineWidget() const override { return m_resolved; }
     void setReadOnly(bool readOnly) override {
         PropertyEditor::setReadOnly(readOnly);
         m_edit->setReadOnly(readOnly);
@@ -665,12 +667,12 @@ PropertyEditor* createPropertyEditor(const SdfValueTypeName& typeName, const Edi
                 editor = new BoolEditor(info, parent);
                 break;
             case ScalarKind::Token:
-                editor = hints.allowedTokens.empty() ? static_cast<PropertyEditor*>(new TextEditor(info, parent))
+                editor = hints.allowedTokens.empty() ? static_cast<PropertyEditor*>(new TextEditor(info, hints, parent))
                                                      : new TokenComboEditor(info, hints.allowedTokens, parent);
                 break;
             case ScalarKind::String:
             case ScalarKind::PathExpression:
-                editor = new TextEditor(info, parent);
+                editor = new TextEditor(info, hints, parent);
                 break;
             case ScalarKind::Asset:
                 editor = new AssetEditor(info, hints, parent);

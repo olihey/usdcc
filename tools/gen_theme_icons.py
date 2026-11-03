@@ -167,6 +167,9 @@ TOOL_GLYPHS = {
 GRIP = (104, 104, 110)
 ICONS["grip-horizontal"] = (2.0, GRIP, [[(x, y), (x, y)] for x in (6.5, 9.5) for y in (4.5, 8, 11.5)])
 ICONS["grip-vertical"] = (2.0, GRIP, [[(x, y), (x, y)] for y in (6.5, 9.5) for x in (4.5, 8, 11.5)])
+# "More": a column of three dots, for a button whose menu holds a row's
+# actions (the Attribute Editor's composition arcs).
+ICONS["more"] = (2.2, LIGHT, [[(8, y), (8, y)] for y in (3.5, 8, 12.5)])
 
 for _name, (_width, _lines) in TOOL_GLYPHS.items():
     ICONS[_name] = (_width, LIGHT, _lines)

@@ -46,6 +46,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/prim_actions.h
     include/usdcc/usd/prim_context_menu.h
     include/usdcc/usd/prim_icons.h
+    include/usdcc/usd/prim_picker_dialog.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
     include/usdcc/usd/properties/category_section.h
@@ -75,6 +76,7 @@ add_library(usdcc_usd_ui STATIC
     src/prim_actions.cpp
     src/prim_context_menu.cpp
     src/prim_icons.cpp
+    src/prim_picker_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
     src/properties/category_section.cpp

@@ -28,6 +28,8 @@ struct EditorHints {
     // Asset paths are shown resolved against, and made relative to, this layer.
     PXR_NS::SdfLayerHandle anchorLayer;
     QString suffix;  // e.g. "°"
+    // Text fields: shown while empty (e.g. "defaultPrim").
+    QString placeholder;
 
     static EditorHints forAttribute(const PXR_NS::UsdAttribute& attribute);
 };
@@ -58,6 +60,10 @@ public:
     // PropertyRow moves it there, after any note, badge or trailing control.
     // Null for none.
     virtual QWidget* rowButton() const { return nullptr; }
+    // A second line under the value (an asset's resolved path): PropertyRow
+    // moves it under the row, from the value's left edge to the row's right
+    // edge, past any buttons. Null for none.
+    virtual QWidget* subLineWidget() const { return nullptr; }
 
 Q_SIGNALS:
     void editStarted();

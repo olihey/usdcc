@@ -29,7 +29,7 @@ void repolish(QWidget* widget) {
 QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent) {
     auto* button = new QToolButton(parent);
     button->setObjectName(QStringLiteral("propertyIconButton"));  // styled by theme/dark.qss
-    button->setIcon(QIcon(iconPath));
+    if (!iconPath.isEmpty()) button->setIcon(QIcon(iconPath));
     button->setToolTip(toolTip);
     usdcc::ui::scaled::fixedSize(button, style::kFieldHeight, style::kFieldHeight);
     usdcc::ui::scaled::iconSize(button, 12, 12);
@@ -38,9 +38,17 @@ QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget
 
 PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* parent)
     : QWidget(parent), m_editor(editor) {
-    auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
+    auto* rows = new QVBoxLayout(this);
+    rows->setContentsMargins(0, 0, 0, 0);
+    usdcc::ui::scaled::spacing(rows, 2);
+    auto* layout = new QHBoxLayout();
+    m_rowLayout = layout;
     usdcc::ui::scaled::spacing(layout, 8);
+    rows->addLayout(layout);
+    // Empty (all hidden) unless there's a second line, so it adds no height.
+    m_subLayout = new QHBoxLayout();
+    m_subLayout->setSpacing(0);
+    rows->addLayout(m_subLayout);
 
     m_labelText = label;
     m_label = new QLabel(label, this);
@@ -54,14 +62,24 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     m_valueColumn = valueColumn;
     auto* valueLayout = new QVBoxLayout(valueColumn);
     valueLayout->setContentsMargins(0, 0, 0, 0);
-    usdcc::ui::scaled::spacing(valueLayout, 2);
     editor->setParent(valueColumn);
     valueLayout->addWidget(editor);
-    m_subLine = new QLabel(valueColumn);
-    m_subLine->setObjectName(QStringLiteral("propertySubLine"));
-    m_subLine->setVisible(false);
-    valueLayout->addWidget(m_subLine);
     layout->addWidget(valueColumn, 1);
+    // Follows the value column's left edge (see eventFilter()).
+    valueColumn->installEventFilter(this);
+
+    m_subLine = new QLabel(this);
+    m_subLine->setObjectName(QStringLiteral("propertySubLine"));
+    m_subLine->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);  // never widens the row
+    m_subLine->setVisible(false);
+    m_subLayout->addWidget(m_subLine, 1);
+    if (QWidget* subLine = editor->subLineWidget()) {
+        if (QLayout* editorLayout = subLine->parentWidget() ? subLine->parentWidget()->layout() : nullptr) {
+            editorLayout->removeWidget(subLine);
+        }
+        subLine->setParent(this);
+        m_subLayout->addWidget(subLine, 1);
+    }
 
     m_note = new QLabel(this);
     m_note->setObjectName(QStringLiteral("propertyNote"));
@@ -90,13 +108,17 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
 void PropertyRow::setLabelWidth(int width) { usdcc::ui::scaled::fixedWidth(m_label, width); }
 
 void PropertyRow::addTrailingWidget(QWidget* widget) {
-    auto* rowLayout = static_cast<QHBoxLayout*>(layout());
+    QHBoxLayout* rowLayout = m_rowLayout;
     // Right after the value column, before the note and badge.
     rowLayout->insertWidget(rowLayout->indexOf(m_valueColumn) + 1, widget, 0, Qt::AlignTop);
 }
 
+void PropertyRow::addLastWidget(QWidget* widget) {
+    m_rowLayout->addWidget(widget, 0, Qt::AlignTop);
+}
+
 void PropertyRow::addLeadingWidget(QWidget* widget) {
-    static_cast<QHBoxLayout*>(layout())->insertWidget(0, widget, 0, Qt::AlignTop);
+    m_rowLayout->insertWidget(0, widget, 0, Qt::AlignTop);
 }
 
 QString PropertyRow::labelText() const { return m_labelText; }
@@ -113,6 +135,11 @@ bool PropertyRow::eventFilter(QObject* watched, QEvent* event) {
         static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) {
         Q_EMIT labelClicked();
     }
+    if (watched == m_valueColumn && (event->type() == QEvent::Move || event->type() == QEvent::Resize)) {
+        // The second lines start where the value does.
+        const int left = m_valueColumn->x();
+        if (m_subLayout->contentsMargins().left() != left) m_subLayout->setContentsMargins(left, 0, 0, 0);
+    }
     return QWidget::eventFilter(watched, event);
 }
 
@@ -125,6 +152,14 @@ void PropertyRow::setNote(const QString& note, int fixedWidth, const QString& to
     if (fixedWidth > 0) {
         usdcc::ui::scaled::fixedWidth(m_note, fixedWidth);
     }
+}
+
+void PropertyRow::setSubLine(const QString& text, const QString& toolTip, bool warning) {
+    m_subLine->setText(text);
+    m_subLine->setToolTip(toolTip.isEmpty() ? text : toolTip);
+    m_subLine->setProperty("unresolved", warning);  // the asset field's red (theme/dark.qss)
+    repolish(m_subLine);
+    m_subLine->setVisible(!text.isEmpty());
 }
 
 void PropertyRow::setUnused(bool unused) {

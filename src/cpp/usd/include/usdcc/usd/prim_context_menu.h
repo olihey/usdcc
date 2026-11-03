@@ -38,6 +38,8 @@ struct PrimMenuContext {
 void setOpenStageHandler(std::function<void(const QString& path)> handler);
 // Opens `path` through that handler; false (and nothing done) without one.
 bool openStageFile(const QString& path);
+// Shows `path` selected in Explorer (elsewhere, its folder in the file browser).
+void revealFile(const QString& path);
 
 // Fills the menu: the prim's name and type, Active, Visibility, Load/Unload
 // Payload, Variants, Composition (the clicked prim's arcs, read-only, with

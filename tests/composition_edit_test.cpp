@@ -2,13 +2,15 @@
 // addArc/changeArc/removeArc on references, payloads and inherits, each one
 // undo step, keeping the entry's place and custom data; arcs from another
 // layer stay read-only; and the Attribute Editor's Composition section edits
-// them. Runs in usdcc_ui_tests (Qt's offscreen platform).
+// them, its Prim field with the defaultPrim placeholder and the prim picker
+// dialog. Runs in usdcc_ui_tests (Qt's offscreen platform).
 #include "test_harness.h"
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -21,8 +23,10 @@
 #include <QApplication>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QUndoStack>
 
 #include <algorithm>
@@ -162,5 +166,62 @@ USDCC_TEST(composition_section_in_attribute_editor) {
     QUndoStack* stack = undo->stack(stage);
     CHECK(stack && stack->undoText() == "Change Reference on Chair", "as one undo step: [%s]",
           stack ? qPrintable(stack->undoText()) : "?");
+
+    // One actions button per arc, its menu Remove, Open as Stage, Reveal.
+    QToolButton* actions = nullptr;
+    for (QToolButton* button : panel.findChildren<QToolButton*>()) {
+        if (button->toolTip() == "Reference actions") actions = button;
+    }
+    QStringList entries;
+    if (actions && actions->menu()) {
+        for (QAction* action : actions->menu()->actions()) entries << action->text();
+    }
+    CHECK(entries == QStringList({"Remove", "Open as Stage", "Reveal in Explorer"}), "the arc's actions: [%s]",
+          qPrintable(entries.join(", ")));
+
+    // The Prim field: "defaultPrim" while empty, and its own actions.
+    bool placeholder = false;
+    for (QLineEdit* edit : panel.findChildren<QLineEdit*>()) {
+        if (edit->placeholderText() == "defaultPrim" && edit->text().isEmpty()) placeholder = true;
+    }
+    CHECK(placeholder, "an empty Prim says defaultPrim");
+    QToolButton* primActions = nullptr;
+    for (QToolButton* button : panel.findChildren<QToolButton*>()) {
+        if (button->toolTip() == "Prim actions") primActions = button;
+    }
+    entries.clear();
+    if (primActions && primActions->menu()) {
+        for (QAction* action : primActions->menu()->actions()) entries << action->text();
+    }
+    CHECK(entries == QStringList({"Select Prim from Stage..."}), "no prim set: only Select: [%s]",
+          qPrintable(entries.join(", ")));
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+USDCC_TEST(prim_picker_dialog) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    stage->DefinePrim(SdfPath("/Creature"), TfToken("Xform"));
+    stage->DefinePrim(SdfPath("/Creature/Body"), TfToken("Mesh"));
+    stage->DefinePrim(SdfPath("/Creature/Groom"), TfToken("Xform"));
+    stage->DefinePrim(SdfPath("/Creature/Groom/Hair"), TfToken("BasisCurves"));
+    stage->DefinePrim(SdfPath("/Lights"), TfToken("Scope"));
+    stage->SetDefaultPrim(stage->GetPrimAtPath(SdfPath("/Creature")));
+
+    usdcc::usd::PrimPickerDialog empty(stage, SdfPath());
+    CHECK(empty.visiblePrimCount() == 5, "every prim: [%d]", empty.visiblePrimCount());
+    CHECK(empty.selectedPath() == SdfPath("/Creature"), "no prim set: the default prim selected");
+
+    usdcc::usd::PrimPickerDialog dialog(stage, SdfPath("/Creature/Groom"));
+    CHECK(dialog.selectedPath() == SdfPath("/Creature/Groom"), "the current prim selected");
+    dialog.setFilter(QStringLiteral("hair"));
+    CHECK(dialog.visiblePrimCount() == 3, "filter: the match and its ancestors: [%d]", dialog.visiblePrimCount());
+    dialog.selectPath(SdfPath("/Creature/Groom/Hair"));
+    CHECK(dialog.selectedPath() == SdfPath("/Creature/Groom/Hair"), "a filtered prim can be picked");
+    dialog.setFilter(QString());
+    CHECK(dialog.visiblePrimCount() == 5, "no filter: all again");
     QStandardPaths::setTestModeEnabled(false);
 }

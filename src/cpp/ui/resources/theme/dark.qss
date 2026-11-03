@@ -730,12 +730,17 @@ QToolButton#propertyButton {
     padding: 0 8px;
 }
 
-/* Square icon buttons in property rows and section headers (Edit, Remove,
-   Add; properties::iconButton()). */
+/* Square buttons in property rows and section headers (Edit, Remove, Add,
+   an asset's Rel and ...; properties::iconButton()): all one size, the
+   height of a field (style::kFieldHeight). Set here, since a stylesheet's
+   min-width overrides a fixed size and the layout would shrink an icon-only
+   one to its icon. 18px inside the 1px border makes 20. */
 QToolButton#propertyIconButton {
     padding: 0;
-    min-width: 0;
-    min-height: 0;
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
 }
 
 QToolButton#propertyIconButton::menu-indicator {
@@ -791,6 +796,14 @@ QToolButton#sectionHeader:pressed {
     min-height: 18px;
     color: #e8e8ea;
     font-weight: 600;
+}
+
+/* An editable reference or payload in the Attribute Editor's Composition
+   section: just a border, on the panel's own background. */
+QFrame#compositionArc {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 8%);
+    border-radius: 4px;
 }
 
 /* Transform stack (TransformStackEditor) and the tool target. */
