@@ -94,13 +94,19 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/external/libclang/lib/clang")
     set(_shiboken_env ${CMAKE_COMMAND} -E env "LLVM_INSTALL_DIR=${CMAKE_SOURCE_DIR}/external/libclang")
 endif()
 
+# shiboken6 leaves a generated file alone when its content hasn't changed, so
+# most of them stay older than the inputs; as the command's outputs, they
+# would make it run on every build. A stamp file is the output instead.
+set(_generated_stamp "${_gen_dir}/generated.stamp")
 add_custom_command(
-    OUTPUT ${_generated_sources}
+    OUTPUT ${_generated_stamp}
+    BYPRODUCTS ${_generated_sources}
     COMMAND
         ${_shiboken_env} $<TARGET_FILE:Shiboken6::shiboken6> --generator-set=shiboken --enable-parent-ctor-heuristic
         --enable-return-value-heuristic --avoid-protected-hack -std=c++17
         --compiler=${_shiboken_compiler} ${_shiboken_include_flags} -T${PYSIDE_TYPESYSTEMS}
         --output-directory=${_gen_dir} ${_bindings_header} ${_typesystem_file}
+    COMMAND ${CMAKE_COMMAND} -E touch ${_generated_stamp}
     DEPENDS
         ${_bindings_header} ${_typesystem_file}
         "${CMAKE_SOURCE_DIR}/src/cpp/ui/include/usdcc/ui/side_panel.h"
@@ -116,7 +122,10 @@ set(_python_package_dir "${CMAKE_BINARY_DIR}/python/usdcc")
 # build directory would hide ui.py (and fail to load in a deploy).
 file(REMOVE "${_python_package_dir}/ui.pyd" "${_python_package_dir}/ui.pdb")
 
-add_library(usdcc_ui_python MODULE ${_generated_sources})
+add_library(usdcc_ui_python MODULE ${_generated_sources} ${_generated_stamp})
+# Nothing in the wrappers needs moc, and AUTOMOC would look at them before
+# the command above has made them (they are only its byproducts).
+set_target_properties(usdcc_ui_python PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${_gen_dir}/usdcc/_ui")
 # Shiboken's generated wrappers use the standard "#define protected public"
 # trick to reach protected members of the wrapped classes. MSVC's STL treats

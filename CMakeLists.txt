@@ -85,7 +85,26 @@ set(QWINDOWKIT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_INSTALL OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_ENABLE_STYLE_AGENT OFF CACHE BOOL "" FORCE)
+# Every configure deletes and recreates QWindowKit's generated include folder
+# (its CMakeLists pass FORCE to qm_sync_include), which gives qwkconfig.h a
+# new timestamp even when its content is the same, and every QWindowKit
+# source, and so everything linking it, would be rebuilt. The file is put
+# back as it was (file(COPY) keeps the timestamp) when nothing in it changed.
+set(_qwk_config "${CMAKE_BINARY_DIR}/external/qwindowkit/out/include/QWKCore/qwkconfig.h")
+set(_qwk_config_saved "${CMAKE_BINARY_DIR}/CMakeFiles/usdcc_qwkconfig")
+file(REMOVE_RECURSE "${_qwk_config_saved}")
+if(EXISTS "${_qwk_config}")
+    file(COPY "${_qwk_config}" DESTINATION "${_qwk_config_saved}")
+endif()
 add_subdirectory(external/qwindowkit EXCLUDE_FROM_ALL)
+if(EXISTS "${_qwk_config_saved}/qwkconfig.h" AND EXISTS "${_qwk_config}")
+    file(SHA256 "${_qwk_config_saved}/qwkconfig.h" _qwk_config_before)
+    file(SHA256 "${_qwk_config}" _qwk_config_after)
+    if(_qwk_config_before STREQUAL _qwk_config_after)
+        get_filename_component(_qwk_config_dir "${_qwk_config}" DIRECTORY)
+        file(COPY "${_qwk_config_saved}/qwkconfig.h" DESTINATION "${_qwk_config_dir}")
+    endif()
+endif()
 
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)
