@@ -1,0 +1,59 @@
+<!-- Prim icons for the Outliner (docs/PRIM_ICONS.md): Tabler Icons 3.49.0 (MIT, prim-icons/LICENSE)
+     and four of ours in the same style. -->
+<RCC>
+    <qresource prefix="/usdcc/prim-icons">
+        <file alias="adjustments.svg">prim-icons/adjustments.svg</file>
+        <file alias="arrows-right.svg">prim-icons/arrows-right.svg</file>
+        <file alias="atom.svg">prim-icons/atom.svg</file>
+        <file alias="bone.svg">prim-icons/bone.svg</file>
+        <file alias="bulb.svg">prim-icons/bulb.svg</file>
+        <file alias="capsule.svg">prim-icons/capsule.svg</file>
+        <file alias="category.svg">prim-icons/category.svg</file>
+        <file alias="circle-dashed.svg">prim-icons/circle-dashed.svg</file>
+        <file alias="circle-square.svg">prim-icons/circle-square.svg</file>
+        <file alias="cloud-fog.svg">prim-icons/cloud-fog.svg</file>
+        <file alias="cloud.svg">prim-icons/cloud.svg</file>
+        <file alias="cone.svg">prim-icons/cone.svg</file>
+        <file alias="crystal-ball.svg">prim-icons/crystal-ball.svg</file>
+        <file alias="cube-3d-sphere.svg">prim-icons/cube-3d-sphere.svg</file>
+        <file alias="cube-spark.svg">prim-icons/cube-spark.svg</file>
+        <file alias="cube.svg">prim-icons/cube.svg</file>
+        <file alias="cylinder.svg">prim-icons/cylinder.svg</file>
+        <file alias="disk-light.svg">prim-icons/disk-light.svg</file>
+        <file alias="filter-cog.svg">prim-icons/filter-cog.svg</file>
+        <file alias="filter.svg">prim-icons/filter.svg</file>
+        <file alias="folder.svg">prim-icons/folder.svg</file>
+        <file alias="grain.svg">prim-icons/grain.svg</file>
+        <file alias="grid-dots.svg">prim-icons/grid-dots.svg</file>
+        <file alias="inner-shadow-top-right.svg">prim-icons/inner-shadow-top-right.svg</file>
+        <file alias="keyframes.svg">prim-icons/keyframes.svg</file>
+        <file alias="layout-board.svg">prim-icons/layout-board.svg</file>
+        <file alias="link.svg">prim-icons/link.svg</file>
+        <file alias="movie.svg">prim-icons/movie.svg</file>
+        <file alias="perspective.svg">prim-icons/perspective.svg</file>
+        <file alias="photo.svg">prim-icons/photo.svg</file>
+        <file alias="plug.svg">prim-icons/plug.svg</file>
+        <file alias="prism-light.svg">prim-icons/prism-light.svg</file>
+        <file alias="pyramid.svg">prim-icons/pyramid.svg</file>
+        <file alias="rect-light.svg">prim-icons/rect-light.svg</file>
+        <file alias="ruler-2.svg">prim-icons/ruler-2.svg</file>
+        <file alias="sparkles.svg">prim-icons/sparkles.svg</file>
+        <file alias="sphere.svg">prim-icons/sphere.svg</file>
+        <file alias="square-dashed.svg">prim-icons/square-dashed.svg</file>
+        <file alias="square-toggle.svg">prim-icons/square-toggle.svg</file>
+        <file alias="stack-2.svg">prim-icons/stack-2.svg</file>
+        <file alias="sun-high.svg">prim-icons/sun-high.svg</file>
+        <file alias="sunset.svg">prim-icons/sunset.svg</file>
+        <file alias="template.svg">prim-icons/template.svg</file>
+        <file alias="topology-full.svg">prim-icons/topology-full.svg</file>
+        <file alias="topology-star-3.svg">prim-icons/topology-star-3.svg</file>
+        <file alias="tube-light.svg">prim-icons/tube-light.svg</file>
+        <file alias="vector-spline.svg">prim-icons/vector-spline.svg</file>
+        <file alias="vector.svg">prim-icons/vector.svg</file>
+        <file alias="video.svg">prim-icons/video.svg</file>
+        <file alias="volume.svg">prim-icons/volume.svg</file>
+        <file alias="walk.svg">prim-icons/walk.svg</file>
+        <file alias="window.svg">prim-icons/window.svg</file>
+        <file alias="xform-axes.svg">prim-icons/xform-axes.svg</file>
+    </qresource>
+</RCC>

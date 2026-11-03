@@ -1,5 +1,7 @@
 #include "usdcc/usd/usd_prim_tree_model.h"
 
+#include "usdcc/usd/prim_icons.h"
+
 #include <pxr/usd/usd/namespaceEditor.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primFlags.h>
@@ -160,6 +162,8 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         case Qt::DisplayRole:
         case Qt::EditRole:
             return QString::fromStdString(node->path.GetName());
+        case Qt::DecorationRole:
+            return prim_icons::icon(prim);  // faded for an inactive prim
         case Qt::ForegroundRole:
             if (!prim.IsActive()) {
                 return QColor(Qt::gray);
@@ -216,7 +220,7 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
 
     if (role == Qt::CheckStateRole) {
         prim.SetActive(value.toInt() == Qt::Checked);
-        Q_EMIT dataChanged(index, index, {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole});
+        Q_EMIT dataChanged(index, index, {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole, Qt::DecorationRole});
         return true;
     }
 

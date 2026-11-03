@@ -58,8 +58,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # OpenGL component: only needed for QOpenGLFunctions_1_1 (legacy
 # immediate-mode drawing), used by HydraViewportWindow to render M5's gizmo
 # overlays directly into the same Compatibility-profile GL context Storm
-# already requires (see docs/PLAN.md milestone M5/M3).
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL)
+# already requires (see docs/PLAN.md milestone M5/M3). Svg: the Outliner's
+# prim icons, rendered with QSvgRenderer (docs/PRIM_ICONS.md); no SVG
+# plugins are needed for that.
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)

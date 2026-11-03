@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/outliner_item_delegate.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usd_prim_tree_model.h"
 #include "usdcc/usd/undo_manager.h"
@@ -18,10 +19,8 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenu>
-#include <QPainter>
 #include <QScrollBar>
 #include <QSettings>
-#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -34,29 +33,6 @@ namespace usdcc::usd {
 
 namespace {
 constexpr auto kExpandToSelectionKey = "Outliner/expandToSelection";
-constexpr int kItemRadius = 3;  // dark.qss, QTreeView::item border-radius
-
-// Paints the model's BackgroundRole (the selection-ancestor tint) itself: with
-// the stylesheet's QTreeView::item rule (padding, rounded corners) in effect,
-// the style draws the item panel from that rule and ignores the model's brush.
-class ItemTintDelegate : public QStyledItemDelegate {
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-
-    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        const QVariant tint = index.data(Qt::BackgroundRole);
-        if (tint.canConvert<QColor>() && !(option.state & QStyle::State_Selected)) {
-            const qreal radius = usdcc::ui::scaled::pixels(kItemRadius);
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(tint.value<QColor>());
-            painter->drawRoundedRect(QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
-            painter->restore();
-        }
-        QStyledItemDelegate::paint(painter, option, index);
-    }
-};
 }  // namespace
 
 OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
@@ -84,7 +60,9 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     m_model = new UsdPrimTreeModel(this);
     m_treeView = new QTreeView(container);
     m_treeView->setModel(m_model);
-    m_treeView->setItemDelegate(new ItemTintDelegate(m_treeView));
+    // Prim icons, and the active checkbox at the row's right edge.
+    m_treeView->setItemDelegate(new OutlinerItemDelegate(m_treeView));
+    usdcc::ui::scaled::iconSize(m_treeView, 16, 16);
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
 

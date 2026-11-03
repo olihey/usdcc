@@ -14,7 +14,8 @@ namespace usdcc::usd {
 // Qt tree model over a UsdStage's prim hierarchy — includes inactive prims
 // (shown visually dimmed, via a checkbox reflecting active state) rather
 // than hiding them, since "disable" (deactivate) needs to stay visible and
-// toggleable in the outliner. See docs/PLAN.md milestone M4.
+// toggleable in the outliner. See docs/PLAN.md milestone M4. Each prim has
+// its type's icon (prim_icons.h, docs/PRIM_ICONS.md) as Qt::DecorationRole.
 //
 // Structural edits (rename/reorder) call refresh(), which rebuilds the
 // whole tree via beginResetModel()/endResetModel() rather than incremental

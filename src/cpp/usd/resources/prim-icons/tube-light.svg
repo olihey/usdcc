@@ -1,0 +1,10 @@
+<!-- usdcc: drawn for the Outliner in the style of Tabler Icons (docs/PRIM_ICONS.md). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M6.5 9.5h11a2.5 2.5 0 0 1 0 5h-11a2.5 2.5 0 0 1 0 -5z" />
+  <path d="M8 6.5v-3" />
+  <path d="M12 6.5v-3.5" />
+  <path d="M16 6.5v-3" />
+  <path d="M8 17.5v3" />
+  <path d="M12 17.5v3.5" />
+  <path d="M16 17.5v3" />
+</svg>

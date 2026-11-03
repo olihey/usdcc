@@ -1,0 +1,8 @@
+<!-- usdcc: drawn for the Outliner in the style of Tabler Icons (docs/PRIM_ICONS.md). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M7 17h13" />
+  <path d="M7 17v-13" />
+  <path d="M7 17l-4 4" />
+  <path d="M17.5 14.5l2.5 2.5l-2.5 2.5" />
+  <path d="M4.5 6.5l2.5 -2.5l2.5 2.5" />
+</svg>

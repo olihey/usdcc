@@ -36,7 +36,9 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/log_test_messages.h
+    include/usdcc/usd/outliner_item_delegate.h
     include/usdcc/usd/outliner_view_panel.h
+    include/usdcc/usd/prim_icons.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
     include/usdcc/usd/properties/category_section.h
@@ -59,7 +61,9 @@ add_library(usdcc_usd_ui STATIC
     src/attributes_view_panel.cpp
     src/hydra_viewport_window.cpp
     src/log_test_messages.cpp
+    src/outliner_item_delegate.cpp
     src/outliner_view_panel.cpp
+    src/prim_icons.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
     src/properties/category_section.cpp
@@ -78,5 +82,7 @@ add_library(usdcc_usd_ui STATIC
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
     src/undo_manager.cpp
+    # The Outliner's prim icons (AUTORCC; see prim_icons.cpp).
+    resources/prim_icons.qrc
 )
-target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL)
+target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg)
