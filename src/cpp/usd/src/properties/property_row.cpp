@@ -9,10 +9,12 @@
 #include <QContextMenuEvent>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QStyle>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace usdcc::usd::properties {
@@ -23,6 +25,16 @@ void repolish(QWidget* widget) {
     widget->style()->polish(widget);
 }
 }  // namespace
+
+QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent) {
+    auto* button = new QToolButton(parent);
+    button->setObjectName(QStringLiteral("propertyIconButton"));  // styled by theme/dark.qss
+    button->setIcon(QIcon(iconPath));
+    button->setToolTip(toolTip);
+    usdcc::ui::scaled::fixedSize(button, style::kFieldHeight, style::kFieldHeight);
+    usdcc::ui::scaled::iconSize(button, 12, 12);
+    return button;
+}
 
 PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* parent)
     : QWidget(parent), m_editor(editor) {
@@ -62,6 +74,15 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     usdcc::ui::scaled::fixedHeight(m_badge, style::kFieldHeight);
     m_badge->setVisible(false);
     layout->addWidget(m_badge, 0, Qt::AlignTop);
+
+    // Last of all: addTrailingWidget() goes before the note, so this stays
+    // the rightmost control.
+    if (QWidget* button = editor->rowButton()) {
+        if (QLayout* editorLayout = button->parentWidget() ? button->parentWidget()->layout() : nullptr) {
+            editorLayout->removeWidget(button);
+        }
+        layout->addWidget(button, 0, Qt::AlignTop);
+    }
 
     setLabelWidth(110);
 }

@@ -62,6 +62,22 @@ ICONS = {
             [(5, 13.5), (5, 9.5), (11, 9.5), (11, 13.5)],
         ],
     ),
+    # Attribute editor icon buttons: an array's Edit (a pencil) and View (an
+    # eye, when it's read-only), and the transform stack's Add (a plus).
+    "pencil": (
+        1.3,
+        LIGHT,
+        [[(3, 13), (3.6, 10.4), (10.6, 3.4), (12.6, 5.4), (5.6, 12.4), (3, 13)], [(9.1, 4.9), (11.1, 6.9)]],
+    ),
+    "eye": (
+        1.3,
+        LIGHT,
+        [
+            [(1.5, 8), (4, 5.2), (8, 4), (12, 5.2), (14.5, 8), (12, 10.8), (8, 12), (4, 10.8), (1.5, 8)],
+            [(8, 6.3), (9.7, 8), (8, 9.7), (6.3, 8), (8, 6.3)],
+        ],
+    ),
+    "plus": (1.4, LIGHT, [[(8, 3.5), (8, 12.5)], [(3.5, 8), (12.5, 8)]]),
     # Custom title-bar caption buttons (MainWindow's QWindowKit title bar).
     "win-minimize": (1.0, LIGHT, [[(3.5, 8), (12.5, 8)]]),
     "win-maximize": (1.0, LIGHT, [[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5), (3.5, 3.5)]]),

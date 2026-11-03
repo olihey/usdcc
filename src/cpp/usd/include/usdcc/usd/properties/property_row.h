@@ -3,6 +3,8 @@
 #include <QString>
 #include <QWidget>
 
+class QToolButton;
+
 #include <functional>
 
 class QLabel;
@@ -22,6 +24,11 @@ class PropertyEditor;
 //   animated   — the attribute has time samples; with no timeline to pick a
 //                time, editing is disabled
 //   connected  — the value comes from a connection; shows the source
+// A square, icon-only button the height of a value field (Edit, Remove, Add),
+// with a theme icon (e.g. ":/usdcc/theme/pencil.png") and a tooltip saying
+// what it does. Styled as #propertyIconButton in theme/dark.qss.
+QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent = nullptr);
+
 class PropertyRow : public QWidget {
     Q_OBJECT
 

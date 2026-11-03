@@ -9,6 +9,10 @@ namespace usdcc::usd::properties {
 // the stylesheet's header comment asks.
 namespace style {
 inline QColor inset() { return QColor(0x14, 0x14, 0x16); }
+// A field that can't be edited: flatter than inset(), nearer the panel, with
+// a fainter border (dark.qss, QLineEdit:read-only).
+inline QColor readOnlyFill() { return QColor(0x22, 0x22, 0x25); }
+inline QColor readOnlyBorder() { return QColor(255, 255, 255, 13); }  // 5%
 inline QColor border() { return QColor(255, 255, 255, 20); }        // 8%
 inline QColor borderHover() { return QColor(255, 255, 255, 46); }   // 18%
 inline QColor accent() { return QColor(0x3d, 0x8b, 0xfd); }

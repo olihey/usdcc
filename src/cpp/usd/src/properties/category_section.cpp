@@ -4,7 +4,6 @@
 
 #include <QFrame>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -32,11 +31,8 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
     m_header->setArrowType(Qt::DownArrow);
     m_header->setText(title);
     m_header->setCursor(Qt::PointingHandCursor);
-    m_count = new QLabel(headerRow);
-    m_count->setObjectName(QStringLiteral("sectionCount"));
     headerLayout->addWidget(m_header);
     headerLayout->addStretch(1);
-    headerLayout->addWidget(m_count);
     layout->addWidget(headerRow);
 
     m_body = new QWidget(this);
@@ -53,9 +49,7 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 
 void CategorySection::addRow(QWidget* row) { m_bodyLayout->addWidget(row); }
 
-void CategorySection::addHeaderWidget(QWidget* widget) {
-    m_headerLayout->insertWidget(m_headerLayout->count() - 1, widget);  // before the count
-}
+void CategorySection::addHeaderWidget(QWidget* widget) { m_headerLayout->addWidget(widget); }
 
 void CategorySection::setCollapsed(bool collapsed) {
     m_collapsed = collapsed;
@@ -66,8 +60,6 @@ void CategorySection::setForceExpanded(bool force) {
     m_forceExpanded = force;
     updateBody();
 }
-
-void CategorySection::setCount(int count) { m_count->setText(QString::number(count)); }
 
 void CategorySection::updateBody() {
     const bool open = !m_collapsed || m_forceExpanded;

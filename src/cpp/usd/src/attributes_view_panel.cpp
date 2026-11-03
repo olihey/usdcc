@@ -1,7 +1,9 @@
 #include "usdcc/usd/attributes_view_panel.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -375,7 +377,8 @@ void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* lay
         return editor;
     };
 
-    m_header.path = addRow(tr("Path"), readOnlyText(QString()));
+    // Editable: a rename, like the Outliner's (prim_actions::rename()).
+    m_header.name = addRow(tr("Name"), properties::createPropertyEditor(SdfValueTypeNames->String));
     m_header.type = addRow(tr("Type"), readOnlyText(QString()));
 
     EditorHints kindHints;
@@ -392,6 +395,12 @@ void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* lay
         UsdPrim p = currentPrim();
         if (p) m_undoManager->apply(currentStage(), description, [&]() { return change(p); });
     };
+    connect(m_header.name, &PropertyEditor::valueEdited, this, [this](const VtValue& v) {
+        const std::string name = v.IsHolding<std::string>() ? v.UncheckedGet<std::string>() : std::string();
+        // Queued: renaming rebuilds this panel, editor included, which must
+        // not happen inside the editor's own signal.
+        QMetaObject::invokeMethod(this, [this, name]() { renameCurrentPrim(name); }, Qt::QueuedConnection);
+    });
     connect(m_header.kind, &PropertyEditor::valueEdited, this, [edit](const VtValue& v) {
         const TfToken kind = v.IsHolding<TfToken>() ? v.UncheckedGet<TfToken>() : TfToken();
         edit(tr("Set Kind"), [kind](UsdPrim& p) { UsdModelAPI(p).SetKind(kind); return true; });
@@ -409,9 +418,31 @@ void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* lay
     layout->addWidget(m_primSection);
 }
 
+void AttributesViewPanel::renameCurrentPrim(const std::string& name) {
+    const UsdPrim prim = currentPrim();
+    if (!prim || !m_undoManager || name == prim.GetName().GetString()) return;
+    const SdfPath oldPath = prim.GetPath();
+    if (!prim_actions::rename(*m_undoManager, currentStage(), oldPath, name)) {
+        USDCC_LOG_WARNING("usdcc.stage", "Can't rename {} to \"{}\": not a valid prim name, or a sibling has it",
+                          oldPath.GetString(), name);
+        if (m_primSection && currentPrim()) m_header.name->setValue(VtValue(oldPath.GetName()));  // back to the old one
+        return;
+    }
+    // Keep showing it: the selection follows the new path, and so does
+    // anything selected under it.
+    const SdfPath newPath = oldPath.ReplaceName(TfToken(name));
+    std::vector<SdfPath> paths = stageManager()->selectedPaths(currentStage());
+    for (SdfPath& path : paths) {
+        if (path.HasPrefix(oldPath)) path = path.ReplacePrefix(oldPath, newPath);
+    }
+    stageManager()->setSelectedPaths(currentStage(), paths);
+}
+
 void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {
     if (!m_primSection || !prim) return;
-    m_header.path->setValue(VtValue(prim.GetPath().GetString()));
+    m_header.name->setValue(VtValue(prim.GetName().GetString()));
+    m_header.name->setToolTip(QString::fromStdString(prim.GetPath().GetString()));  // the path, for a look
+    m_header.name->setReadOnly(!prim_actions::isEditable(prim));  // an instance proxy
     m_header.type->setValue(VtValue(prim.GetTypeName().IsEmpty() ? std::string("(typeless)")
                                                                  : prim.GetTypeName().GetString()));
     TfToken kind;
@@ -524,7 +555,6 @@ void AttributesViewPanel::applyFilter() {
     }
     for (size_t i = 0; i < m_sections.size(); ++i) {
         m_sections[i]->setVisible(visibleCounts[i] > 0);
-        m_sections[i]->setCount(visibleCounts[i]);
         m_sections[i]->setForceExpanded(!text.isEmpty());
     }
     if (m_primSection) {

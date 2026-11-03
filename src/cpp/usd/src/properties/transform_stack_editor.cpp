@@ -145,7 +145,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
     : QObject(parent), m_primPath(prim.GetPath()), m_stage(std::move(stage)), m_undoManager(undoManager) {
     const XformStack stack(prim);
 
-    // Header: Reset Stack and + Add.
+    // Header: Reset Stack and + (Add).
     m_resetStack = new QCheckBox(tr("Reset Stack"));
     m_resetStack->setObjectName(QStringLiteral("sectionHeaderCheck"));
     m_resetStack->setToolTip(tr("Ignore the parent's transform (resetXformStack)"));
@@ -154,9 +154,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
         edit(on ? tr("Reset Xform Stack") : tr("Inherit Parent Transform"),
              [on](XformStack& s) { return s.setResetsXformStack(on); });
     });
-    auto* add = new QToolButton;
-    add->setObjectName(QStringLiteral("propertyButton"));
-    add->setText(tr("+ Add"));
+    QToolButton* add = iconButton(QStringLiteral(":/usdcc/theme/plus.png"), tr("Add an op to the stack"));
     add->setPopupMode(QToolButton::InstantPopup);
     auto* addMenu = new QMenu(add);
     for (const AddEntry& entry : kAddEntries) {
@@ -211,10 +209,8 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
             entry.binding = new AttributeBinding(op.GetAttr(), editor, m_stage, m_undoManager, entry.row);
             connect(entry.row, &PropertyRow::labelClicked, this, [this, i]() { toggleTarget(i); });
         }
-        auto* remove = new QToolButton(entry.row);
-        remove->setObjectName(QStringLiteral("propertyButton"));
-        remove->setText(QStringLiteral("\xC3\x97"));  // ×
-        remove->setToolTip(tr("Remove this op from the stack"));
+        QToolButton* remove =
+            iconButton(QStringLiteral(":/usdcc/theme/close.png"), tr("Remove this op from the stack"), entry.row);
         connect(remove, &QToolButton::clicked, this, [this, i, label]() {
             edit(tr("Remove %1").arg(label), [i](XformStack& s) { return s.remove(i); });
         });

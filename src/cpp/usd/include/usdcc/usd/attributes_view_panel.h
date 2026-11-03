@@ -40,8 +40,8 @@ class TransformStackEditor;
 // (the first one, when several are selected) on this panel's stage — see
 // docs/ATTRIBUTE_EDITOR.md (milestone M13, phase 3).
 //
-// Layout: a "Prim" header (path, type, kind, specifier, active, instanceable,
-// applied schemas), then one collapsible section per PropertyCategorizer
+// Layout: a "Prim" header (name, which renames the prim, type, kind,
+// specifier, active, instanceable, applied schemas), then one collapsible section per PropertyCategorizer
 // category, each row a label plus the value type's own PropertyEditor.
 // Attribute edits go through AttributeBinding (one undo step per gesture);
 // relationships are shown read-only with a button to select their targets.
@@ -81,7 +81,7 @@ private:
         bool managedByStack = false;  // a transform-stack row (TransformStackEditor owns its actions)
     };
     struct PrimHeader {
-        properties::PropertyEditor* path = nullptr;
+        properties::PropertyEditor* name = nullptr;
         properties::PropertyEditor* type = nullptr;
         properties::PropertyEditor* kind = nullptr;
         properties::PropertyEditor* specifier = nullptr;
@@ -94,6 +94,9 @@ private:
     void rebuild();
     void refreshValues();
     void refreshPrimHeader(const PXR_NS::UsdPrim& prim);
+    // From the Name row: one undo step (prim_actions::rename()); the selection
+    // follows the new path. A name that isn't valid or is taken is refused.
+    void renameCurrentPrim(const std::string& name);
     void updateRowState(Row& row);
     void applyFilter();
     void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);

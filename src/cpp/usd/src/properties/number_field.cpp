@@ -123,7 +123,7 @@ void NumberField::paintEvent(QPaintEvent*) {
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath shape;
     shape.addRoundedRect(r, usdcc::ui::scaled::pixels(style::kRadius), usdcc::ui::scaled::pixels(style::kRadius));
-    p.fillPath(shape, style::inset());
+    p.fillPath(shape, m_readOnly ? style::readOnlyFill() : style::inset());
 
     if (m_slider) {
         const double f = (m_value - m_sliderMinimum) / (m_sliderMaximum - m_sliderMinimum);
@@ -136,7 +136,11 @@ void NumberField::paintEvent(QPaintEvent*) {
     }
 
     const bool active = m_dragging || m_textEditing || hasFocus();
-    p.setPen(QPen(active ? style::accent() : (m_hovered && !m_readOnly ? style::borderHover() : style::border()), 1.0));
+    p.setPen(QPen(active                     ? style::accent()
+                  : m_readOnly               ? style::readOnlyBorder()
+                  : m_hovered                ? style::borderHover()
+                                             : style::border(),
+                  1.0));
     p.drawPath(shape);
 
     if (!m_prefix.isEmpty()) {

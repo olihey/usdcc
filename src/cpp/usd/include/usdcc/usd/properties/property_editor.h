@@ -54,6 +54,11 @@ public:
     // True for the read-only text shown for a type no editor handles yet.
     virtual bool isFallback() const { return false; }
 
+    // A button that belongs at the very end of the row (an array's Edit):
+    // PropertyRow moves it there, after any note, badge or trailing control.
+    // Null for none.
+    virtual QWidget* rowButton() const { return nullptr; }
+
 Q_SIGNALS:
     void editStarted();
     void valueEdited(const PXR_NS::VtValue& value);

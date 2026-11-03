@@ -4,6 +4,7 @@
 #include "usdcc/usd/properties/array_editor_dialog.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/number_field.h"
+#include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/properties/property_style.h"
 
 #include <pxr/base/tf/errorMark.h>
@@ -277,7 +278,8 @@ public:
         m_toggle->setArrowType(Qt::RightArrow);
         m_toggle->setToolTip(tr("Show all %1 values").arg(info.numberCount()));
         m_summary = valueLabel(header);
-        m_summary->setObjectName(QStringLiteral("propertyValueText"));
+        // The read-only look (theme/dark.qss): it's edited in the grid below.
+        m_summary->setObjectName(QStringLiteral("propertyMatrixSummary"));
         headerLayout->addWidget(m_toggle);
         headerLayout->addWidget(m_summary, 1);
         layout->addWidget(header);
@@ -571,8 +573,8 @@ public:
         auto* layout = rowLayout(this);
         m_summary = valueLabel(this);
         m_summary->setObjectName(QStringLiteral("propertyArraySummary"));
-        m_edit = new QPushButton(tr("Edit"), this);
-        m_edit->setObjectName(QStringLiteral("propertyButton"));
+        // In a PropertyRow, rowButton() moves it to the row's end.
+        m_edit = iconButton(QStringLiteral(":/usdcc/theme/pencil.png"), tr("Edit the values"), this);
         layout->addWidget(m_summary, 1);
         layout->addWidget(m_edit);
         connect(m_edit, &QPushButton::clicked, this, [this]() { openDialog(); });
@@ -587,8 +589,10 @@ public:
     VtValue value() const override { return m_value; }
     void setReadOnly(bool readOnly) override {
         PropertyEditor::setReadOnly(readOnly);
-        m_edit->setText(readOnly ? tr("View") : tr("Edit"));
+        m_edit->setIcon(QIcon(readOnly ? QStringLiteral(":/usdcc/theme/eye.png") : QStringLiteral(":/usdcc/theme/pencil.png")));
+        m_edit->setToolTip(readOnly ? tr("View the values") : tr("Edit the values"));
     }
+    QWidget* rowButton() const override { return m_edit; }
 
 private:
     void openDialog() {
@@ -607,7 +611,7 @@ private:
     EditorHints m_hints;
     VtValue m_value;
     QLabel* m_summary;
-    QPushButton* m_edit;
+    QToolButton* m_edit;
 };
 
 // ---- Values that can't be edited ---------------------------------------------------
@@ -618,7 +622,7 @@ public:
         : PropertyEditor(info, parent), m_fallback(fallback) {
         auto* layout = rowLayout(this);
         m_label = valueLabel(this);
-        m_label->setObjectName(QStringLiteral("propertyValueText"));
+        m_label->setObjectName(QStringLiteral("propertyReadOnlyText"));  // read-only look, theme/dark.qss
         m_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
         layout->addWidget(m_label, 1);
         if (fallback) {

@@ -14,6 +14,12 @@
         <file alias="close-disabled@2x.png">theme/close-disabled@2x.png</file>
         <file alias="close-white.png">theme/close-white.png</file>
         <file alias="close-white@2x.png">theme/close-white@2x.png</file>
+        <file alias="pencil.png">theme/pencil.png</file>
+        <file alias="pencil@2x.png">theme/pencil@2x.png</file>
+        <file alias="eye.png">theme/eye.png</file>
+        <file alias="eye@2x.png">theme/eye@2x.png</file>
+        <file alias="plus.png">theme/plus.png</file>
+        <file alias="plus@2x.png">theme/plus@2x.png</file>
         <file alias="menu.png">theme/menu.png</file>
         <file alias="menu@2x.png">theme/menu@2x.png</file>
         <file alias="trash.png">theme/trash.png</file>

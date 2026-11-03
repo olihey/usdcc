@@ -12,7 +12,7 @@ values) with a property editor in the style of the reference mockup:
 - **Collapsible categories:** Transform, Material, Level of Detail, Visibility, Physics, …
 - **Typed editors:** colored X/Y/Z prefixes on vector fields, a swatch plus R/G/B for
   colors, a filled slider bar for ranged floats, an asset field with browse/link, and an
-  array summary with an Edit button.
+  array summary with a square Edit (pencil) button, always the row's rightmost control.
 
 The work also adds:
 
@@ -244,7 +244,7 @@ matches wins:
 The order puts Transform first, then the typed-schema sections from most derived to
 most basic, then applied APIs, Primvars, Inputs/Outputs, and Custom last.
 
-A **"Prim" header section** sits above all of these: path, type, kind, specifier,
+A **"Prim" header section** sits above all of these: name (the path in its tooltip), type, kind, specifier,
 active, instanceable and applied schemas. Most of it is read-only; active, kind and
 instanceable are editable.
 
@@ -267,7 +267,7 @@ The section appears for any `UsdGeomXformable` prim. It replaces the plain rows 
 `xformOp:*` and `xformOpOrder`.
 
 ```
-Transform                                   [Reset XForm Stack ☐]  [+ Add ▾]
+Transform                                   [Reset XForm Stack ☐]  [+]
   ≡  Translate              X 0.00   Y 1.24   Z 0.00            [×]
   ≡  Translate (pivot)      X 0.00   Y 0.50   Z 0.00            [×]
   ≡  Rotate XYZ             X 0°     Y 35°    Z 0°              [×]
@@ -577,7 +577,7 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
     applied APIs, a primvar, custom and display-grouped properties), Sphere, Camera,
     DistantLight, Shader and a typeless prim. It covers the options and the label rules.
 - **`AttributesViewPanel`** rewritten:
-  - **Layout:** a scroll area with a "Prim" header (path, type, specifier and applied
+  - **Layout:** a scroll area with a "Prim" header (name, type, specifier and applied
     schemas read-only; kind, active and instanceable editable and undoable), then one
     `CategorySection` per category.
   - **Rows:** `PropertyRow` and `AttributeBinding` with the phase 2 editors.
@@ -630,10 +630,10 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
   angle. The Rotate tool's Auto mode now uses it too. `usdcc_tools` links `usdcc_usd`
   for this; both are Qt-free.
 - **`TransformStackEditor`** (`usdcc_usd_ui`) builds the Transform section:
-  - **Header:** a Reset Stack checkbox and a "+ Add" menu with every op type plus Bake
-    and Convert.
+  - **Header:** a Reset Stack checkbox and a square "+" button whose menu has every op
+    type plus Bake and Convert.
   - **Rows:** one per op, with a "≡" grip, the label (suffix in parentheses, "⁻¹" for
-    inverses), the value's editor (`°` on rotations) and a "×" remove button.
+    inverses), the value's editor (`°` on rotations) and a square "×" remove button.
   - **Context menu:** Move Up/Down, Use as Tool Target, Rename Suffix…, Reset to
     Identity, Add Pivot Around, Remove, Bake, Convert.
   - **Undo:** every action is one undo step.
@@ -724,3 +724,22 @@ decompose/recompose step, so nothing the user didn't touch can drift.
   - picking the row switches to Move with Target "Transform"
   - the Rotate rings follow the matrix
   - a ring drag turns the box about its own Y axis and it stays rectangular
+
+## Later changes
+
+- **Icon buttons.** An array's Edit, a transform op's Remove and the Transform section's Add
+  are square icon buttons the height of a value field (`properties::iconButton()`, styled as
+  `#propertyIconButton`): a pencil (an eye when read-only), the theme's ×, and a plus. A row
+  puts its editor's button (`PropertyEditor::rowButton()`) after everything else, so Edit is
+  always the rightmost control.
+- **No counts in section headers**, and the Prim header shows the prim's **name**, with its
+  path as the tooltip. The name is editable: committing it renames the prim as the Outliner
+  does (`prim_actions::rename()`, one undo step), the selection follows the new path, and a
+  name that isn't valid or is taken by a sibling is refused (logged; the field goes back).
+  An instance proxy's name is read-only.
+- **Read-only fields look different**: `#222225` with a faint 5% border, flatter than an
+  editable field's recessed `#141416` and without its hover highlight. That's
+  `QLineEdit:read-only`, `#propertyReadOnlyText`, `#propertyArraySummary` (an array's
+  values, edited only through its Edit button) and `#propertyMatrixSummary` (a matrix, such as
+  a Transform op's, edited in the grid it opens) in dark.qss, and `style::readOnlyFill()` for
+  the self-painted number fields.

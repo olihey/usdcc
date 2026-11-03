@@ -31,7 +31,6 @@ public:
     // Shows the rows even when collapsed (while a search filters them),
     // without changing the remembered collapsed state.
     void setForceExpanded(bool force);
-    void setCount(int count);
 
 Q_SIGNALS:
     void collapsedChanged(bool collapsed);
@@ -42,7 +41,6 @@ private:
     QString m_key;
     QToolButton* m_header;
     QHBoxLayout* m_headerLayout;
-    QLabel* m_count;
     QWidget* m_body;
     QVBoxLayout* m_bodyLayout;
     bool m_collapsed = false;
