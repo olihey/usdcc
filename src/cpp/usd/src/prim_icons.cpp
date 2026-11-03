@@ -28,8 +28,16 @@ namespace {
 // row's white (dark.qss, QTreeView::item:selected).
 constexpr auto kIconColor = "#a0a0a4";
 constexpr auto kSelectedColor = "#ffffff";
+// The badges' colour, on selected rows too: the theme's accent blue
+// (dark.qss).
+constexpr auto kBadgeColor = "#3d8bfd";
 // An inactive prim's icon, as faded as its name.
 constexpr qreal kInactiveOpacity = 0.35;
+// The badge's circle in the icon's 24-unit grid, at the lower left: cleared
+// before the badge is drawn, so it reads on any row background.
+constexpr qreal kBadgeCenterX = 6.5;
+constexpr qreal kBadgeCenterY = 17.5;
+constexpr qreal kBadgeRadius = 6.75;
 
 // Concrete prim types by their schema type name; each light and each
 // primitive shape has its own (docs/PRIM_ICONS.md §3).
@@ -133,23 +141,26 @@ const std::unordered_map<std::string, const char*>& baseIcons() {
 const char* const kUnknownIcon = "circle-dashed";
 
 // Draws one SVG, recoloured: Tabler's icons stroke with currentColor, which
-// is replaced by the colour for the icon's mode before rendering.
+// is replaced by the colour for the icon's mode before rendering. With a
+// badge (another SVG), a circle at the lower left is cleared and the badge
+// drawn in it.
 class SvgIconEngine final : public QIconEngine {
 public:
-    SvgIconEngine(QByteArray svg, bool inactive) : m_svg(std::move(svg)), m_inactive(inactive) {}
+    SvgIconEngine(QByteArray svg, QByteArray badge, bool inactive)
+        : m_svg(std::move(svg)), m_badge(std::move(badge)), m_inactive(inactive) {}
 
-    void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State) override {
-        painter->save();
-        if (m_inactive || mode == QIcon::Disabled) painter->setOpacity(painter->opacity() * kInactiveOpacity);
-        renderer(mode).render(painter, QRectF(rect));
-        painter->restore();
+    void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State state) override {
+        // Through a pixmap: clearing the badge's circle must not clear what
+        // is under the icon.
+        const qreal scale = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
+        painter->drawPixmap(rect, scaledPixmap(rect.size(), mode, state, scale));
     }
 
     QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override {
         return scaledPixmap(size, mode, state, 1.0);
     }
 
-    QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) override {
+    QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State, qreal scale) override {
         const QString key = QStringLiteral("%1x%2@%3/%4").arg(size.width()).arg(size.height()).arg(scale).arg(mode);
         const auto cached = m_pixmaps.constFind(key);
         if (cached != m_pixmaps.constEnd()) return *cached;
@@ -159,33 +170,59 @@ public:
         {
             QPainter painter(&pixmap);
             painter.setRenderHint(QPainter::Antialiasing);
-            paint(&painter, QRect(QPoint(), size), mode, state);
+            draw(painter, QRectF(QPointF(), size), mode);
         }
         m_pixmaps.insert(key, pixmap);
         return pixmap;
     }
 
     QSize actualSize(const QSize& size, QIcon::Mode, QIcon::State) override { return size; }
-    QIconEngine* clone() const override { return new SvgIconEngine(m_svg, m_inactive); }
+    QIconEngine* clone() const override { return new SvgIconEngine(m_svg, m_badge, m_inactive); }
     QString key() const override { return QStringLiteral("usdcc-prim-icon"); }
 
 private:
-    QSvgRenderer& renderer(QIcon::Mode mode) {
+    void draw(QPainter& painter, const QRectF& rect, QIcon::Mode mode) {
+        if (m_inactive || mode == QIcon::Disabled) painter.setOpacity(kInactiveOpacity);
+        renderer(m_svg, m_renderers, mode, kIconColor, kSelectedColor).render(&painter, rect);
+        if (m_badge.isEmpty()) return;
+        const qreal unit = rect.width() / 24.0;
+        const QPointF center(rect.left() + kBadgeCenterX * unit, rect.top() + kBadgeCenterY * unit);
+        painter.save();
+        painter.setOpacity(1.0);
+        painter.setCompositionMode(QPainter::CompositionMode_Clear);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::black);
+        painter.drawEllipse(center, kBadgeRadius * unit, kBadgeRadius * unit);
+        painter.restore();
+        renderer(m_badge, m_badgeRenderers, mode, kBadgeColor, kBadgeColor).render(&painter, rect);
+    }
+
+    using Renderers = std::array<std::unique_ptr<QSvgRenderer>, 2>;  // normal, selected
+
+    static QSvgRenderer& renderer(const QByteArray& source, Renderers& renderers, QIcon::Mode mode,
+                                  const char* color, const char* selectedColor) {
         const bool selected = mode == QIcon::Selected;
-        std::unique_ptr<QSvgRenderer>& renderer = m_renderers[selected ? 1 : 0];
+        std::unique_ptr<QSvgRenderer>& renderer = renderers[selected ? 1 : 0];
         if (!renderer) {
-            QByteArray svg = m_svg;
-            svg.replace("currentColor", selected ? kSelectedColor : kIconColor);
+            QByteArray svg = source;
+            svg.replace("currentColor", selected ? selectedColor : color);
             renderer = std::make_unique<QSvgRenderer>(svg);
         }
         return *renderer;
     }
 
     QByteArray m_svg;
+    QByteArray m_badge;
     bool m_inactive;
-    std::array<std::unique_ptr<QSvgRenderer>, 2> m_renderers;  // normal, selected
+    Renderers m_renderers;
+    Renderers m_badgeRenderers;
     QHash<QString, QPixmap> m_pixmaps;
 };
+
+QByteArray readIcon(const QString& name) {
+    QFile file(QStringLiteral(":/usdcc/prim-icons/%1.svg").arg(name));
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
 }  // namespace
 
 QString iconNameForType(const PXR_NS::TfToken& typeName) {
@@ -222,21 +259,26 @@ QString iconName(const PXR_NS::UsdPrim& prim) {
     return iconNameForType(prim.GetTypeName());
 }
 
-QIcon icon(const QString& name, bool inactive) {
+QIcon icon(const QString& name, bool inactive, bool referenced) {
     static const bool initialized = (initPrimIconResources(), true);
     Q_UNUSED(initialized);
-    static std::array<QHash<QString, QIcon>, 2> icons;  // active, inactive
-    QHash<QString, QIcon>& cache = icons[inactive ? 1 : 0];
+    static std::array<QHash<QString, QIcon>, 4> icons;  // by inactive, referenced
+    QHash<QString, QIcon>& cache = icons[(inactive ? 1 : 0) + (referenced ? 2 : 0)];
     const auto cached = cache.constFind(name);
     if (cached != cache.constEnd()) return *cached;
 
     QIcon result;
-    QFile file(QStringLiteral(":/usdcc/prim-icons/%1.svg").arg(name));
-    if (file.open(QIODevice::ReadOnly)) result = QIcon(new SvgIconEngine(file.readAll(), inactive));
+    QByteArray svg = readIcon(name);
+    if (!svg.isEmpty()) {
+        result = QIcon(new SvgIconEngine(std::move(svg), referenced ? readIcon(QStringLiteral("badge-reference")) : QByteArray(),
+                                         inactive));
+    }
     cache.insert(name, result);
     return result;
 }
 
-QIcon icon(const PXR_NS::UsdPrim& prim) { return icon(iconName(prim), !prim.IsActive()); }
+QIcon icon(const PXR_NS::UsdPrim& prim) {
+    return icon(iconName(prim), !prim.IsActive(), prim.HasAuthoredReferences());
+}
 
 }  // namespace usdcc::usd::prim_icons

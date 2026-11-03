@@ -147,8 +147,10 @@ LICENSE.
   the shape alone tells the types apart.
 - **Selected rows**: the icon turns white, like the text.
 - **States**, without new icons: an inactive (deactivated) prim draws its icon at 35% opacity,
-  like its text; an instance proxy and a prim with a payload or references get a small dot in
-  the icon's bottom-right corner (a later step, §7 phase 3).
+  like its text. A prim with references has a small arrow badge at the icon's lower left, in
+  the accent blue `#3d8bfd`, on selected rows too (`badge-reference.svg`; a circle under it is
+  cleared so it reads on any row). Badges for payloads and instance proxies are still to do
+  (§7 phase 3).
 
 ## 5. Types without their own icon
 
@@ -194,7 +196,7 @@ pipelines with their own schemas.
 |---|---|---|
 | **1. Icons in the Outliner** *(done)* | `qtsvg` (decision 1), the SVGs and LICENSE in `src/cpp/usd/resources/prim-icons/`, the `prim_icons` lookup in `usdcc_usd_ui` (type name → icon, the `TfType` fallback, a cache per type, state and scale), `Qt::DecorationRole` in `UsdPrimTreeModel`, white when selected, dim when inactive | Every type in §3 shows its icon; a custom schema shows its base type's; the icons stay sharp at 300% |
 | **2. Python** | `usdcc.ui.set_prim_icon()` / `prim_icon()`; the Attributes panel shows the prim's icon beside its path | A pipeline can give its schemas icons from a startup script |
-| **3. State badges** | Dots for instance proxies, payloads and references | — |
+| **3. State badges** | References *(done)*; payloads and instance proxies | — |
 
 Tests: the lookup (each concrete type, the versioned ones, a custom derived type, `def`,
 `class`, `over`), and a rendered icon isn't empty at 16px.

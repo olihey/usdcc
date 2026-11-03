@@ -21,6 +21,7 @@
 #include <QTemporaryDir>
 #include <QTreeView>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -98,6 +99,33 @@ USDCC_TEST(prim_icons_for_prims) {
     const QIcon box = prim_icons::icon(stage->GetPrimAtPath(SdfPath("/World/box")));
     CHECK(draws(box, 16) && draws(box, 16, QIcon::Selected), "draws, and in white when selected");
     CHECK(draws(prim_icons::icon(off), 16), "an inactive prim's icon still draws, faded");
+
+    // A reference: the same icon with the badge at its lower left.
+    const UsdPrim chair = stage->DefinePrim(SdfPath("/World/chair"), TfToken("Cube"));
+    chair.GetReferences().AddInternalReference(SdfPath("/World/box"));
+    const QIcon referenced = prim_icons::icon(chair);
+    const QImage plain = box.pixmap(QSize(16, 16), 2.0).toImage();
+    const QImage badged = referenced.pixmap(QSize(16, 16), 2.0).toImage();
+    CHECK(prim_icons::iconName(chair) == "cube" && referenced.cacheKey() != box.cacheKey() && plain != badged,
+          "a prim with a reference gets the badged icon");
+    // Only the lower-left quarter changes.
+    CHECK(plain.copy(18, 0, 14, 32) == badged.copy(18, 0, 14, 32) &&
+              plain.copy(0, 0, 32, 12) == badged.copy(0, 0, 32, 12) &&
+              plain.copy(0, 18, 16, 14) != badged.copy(0, 18, 16, 14),
+          "the badge is in the lower left");
+    // In the accent blue, the rest of the icon grey.
+    auto bluest = [](const QImage& image) {
+        int best = 0;
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const QRgb pixel = image.pixel(x, y);
+                if (qAlpha(pixel) > 128) best = std::max(best, qBlue(pixel) - qRed(pixel));
+            }
+        }
+        return best;
+    };
+    CHECK(bluest(badged.copy(0, 18, 16, 14)) > 120 && bluest(plain) < 20, "a blue badge: %d, grey icon: %d",
+          bluest(badged.copy(0, 18, 16, 14)), bluest(plain));
 
     UsdPrimTreeModel model;
     model.setStage(stage);

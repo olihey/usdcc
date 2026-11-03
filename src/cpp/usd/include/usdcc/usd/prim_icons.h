@@ -25,8 +25,10 @@ QString iconNameForType(const PXR_NS::TfToken& typeName);
 QString iconName(const PXR_NS::UsdPrim& prim);
 
 // The icon itself; `inactive` fades it, as the Outliner does a deactivated
-// prim's name. Null for a name that isn't in resources/prim-icons.
-QIcon icon(const QString& name, bool inactive = false);
+// prim's name, and `referenced` adds the reference badge (an arrow in the
+// accent blue) at its lower left. Null for a name that isn't in resources/prim-icons.
+QIcon icon(const QString& name, bool inactive = false, bool referenced = false);
+// For a prim: faded when it's inactive, badged when it has references.
 QIcon icon(const PXR_NS::UsdPrim& prim);
 
 }  // namespace prim_icons
