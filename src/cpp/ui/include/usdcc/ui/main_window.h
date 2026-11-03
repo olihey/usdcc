@@ -3,10 +3,12 @@
 #include <QList>
 #include <QMainWindow>
 #include <QTimer>
+#include <QVariantMap>
 
 class QAction;
 class QMenu;
 class QMenuBar;
+class QTabBar;
 
 namespace ads {
 class CDockManager;
@@ -97,9 +99,16 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    // Watches the tab bars of side panels sharing a spot: double-clicking a
+    // tab collapses the panels (SidePanel::setCollapsed()).
+    void childEvent(QChildEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void saveLayout() const;
+    SidePanel* sidePanelOfTab(const QTabBar* tabBar, int index) const;
+    // Collapses `panel` if the saved layout had it collapsed.
+    void restoreCollapsed(SidePanel* panel);
 
     ads::CDockManager* m_dockManager = nullptr;
     QWK::WidgetWindowAgent* m_windowAgent = nullptr;
@@ -107,6 +116,9 @@ private:
     QList<SidePanel*> m_sidePanels;
     LogSidePanel* m_logPanel = nullptr;
     bool m_layoutRestored = false;
+    // objectName -> the size to expand to, of the side panels the saved
+    // layout had collapsed.
+    QVariantMap m_savedCollapsed;
     bool m_layoutSettled = false;
     QTimer m_settleTimer;
     // Set by buildViewMenu(); panels added later go in before

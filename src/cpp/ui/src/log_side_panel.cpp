@@ -215,10 +215,13 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     connect(scrollBar, &QScrollBar::valueChanged, this, [this, scrollBar](int value) {
         if (m_adjusting) return;
         m_follow = value >= scrollBar->maximum() - kFollowSlack;
-        if (m_follow && isVisible()) markSeen();
+        if (m_follow && isVisible() && !isCollapsed()) markSeen();
     });
     connect(this, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (visible && m_follow) markSeen();
+        if (visible && !isCollapsed() && m_follow) markSeen();
+    });
+    connect(this, &SidePanel::collapsedChanged, this, [this](bool collapsed) {
+        if (!collapsed && isVisible() && m_follow) markSeen();
     });
 
     m_model->drainNow();  // the backlog, so the panel isn't empty for a moment
@@ -238,6 +241,7 @@ void LogSidePanel::setLogFile(const QString& path) {
 void LogSidePanel::showLatest() {
     show();
     raise();
+    setCollapsed(false);
     m_follow = true;
     m_view->scrollToBottom();
     markSeen();
@@ -252,7 +256,7 @@ QToolButton* LogSidePanel::addToggle(const QString& toolTip) {
 }
 
 void LogSidePanel::onRecordsAdded(int, int errors) {
-    if (errors > 0 && (!isVisible() || !m_follow)) {
+    if (errors > 0 && (!isVisible() || isCollapsed() || !m_follow)) {
         m_unseenErrors += errors;
         updateTitle();
     }

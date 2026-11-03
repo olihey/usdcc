@@ -29,8 +29,8 @@ class LogModel;
 //   details.
 // - The table follows new messages while scrolled to the bottom and stays
 //   put once the user scrolls up.
-// - An Error the user can't see (panel hidden, or scrolled away from the
-//   bottom) is counted in the panel's title, which the View menu's entry
+// - An Error the user can't see (panel hidden or collapsed, or scrolled away
+//   from the bottom) is counted in the panel's title, which the View menu's entry
 //   shows too, with a red dot, until the panel is shown at the bottom. It
 //   never opens the panel by itself.
 // - Filters and column widths persist; Clear empties the table

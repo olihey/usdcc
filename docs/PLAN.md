@@ -864,6 +864,21 @@ things that will bite later if not addressed early:
     viewport logs synchronously, with the stack of the failing call. The viewport also
     logs the GL version, profile and renderer it got.
 
+39. **Collapsible side panels.** Double-clicking a docked `SidePanel`'s title bar, or its tab
+    where side panels share a spot, collapses that panel and the panels tabbed with it to
+    their title bars; doing it again expands them to the size they had (a floating panel's
+    title bar still docks it on double-click, and floating a collapsed panel expands it).
+    A panel collapses to its title bar's height, except one alone at the left or right
+    edge, which collapses to a vertical title bar's width so the space goes to the
+    viewports. The content is squeezed to zero rather than hidden, which would also shrink
+    the panel's other side to the title's size. Mouse moves until the double-click's button
+    is released are ignored: the title bar has just moved from under the cursor, and Qt took
+    the next move for a drag, unplugging the panel and dropping it elsewhere at another
+    size. `MainWindow` watches the tab bars
+    QMainWindow creates and saves which panels are collapsed, with the size to expand to,
+    under `MainWindow/collapsedSidePanels`. A collapsed Log counts errors as unseen, and
+    its Show Log button expands it. Tested in `side_panel_collapse` (usdcc_ui_tests).
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

@@ -4,7 +4,8 @@
 # first argument.
 #   usdcc_tests    — headless tests for the non-UI logic (tools, undo, stage
 #                    change notices, value-type classification, ...).
-#   usdcc_ui_tests — widget tests (UI scale), which need a full QApplication;
+#   usdcc_ui_tests — widget tests (UI scale, log panel, collapsing side
+#                    panels), which need a full QApplication;
 #                    CTest runs them on Qt's offscreen platform.
 add_executable(usdcc_tests
     test_harness.h
@@ -34,6 +35,7 @@ add_executable(usdcc_ui_tests
     ui_test_main.cpp
     log_panel_test.cpp
     scale_controller_test.cpp
+    side_panel_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
 

@@ -2,12 +2,15 @@
 
 #include <DockManager.h>
 #include <QAbstractButton>
+#include <QChildEvent>
 #include <QCloseEvent>
 #include <QDir>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTabBar>
 #include <QToolBar>
 
 #include "usdcc/core/log.h"
@@ -32,6 +35,9 @@ constexpr auto kDockLayoutKey = "MainWindow/dockLayout";
 // old saved state would mishandle (restoreState() then ignores it).
 constexpr auto kWindowStateKey = "MainWindow/windowState";
 constexpr int kWindowStateVersion = 1;
+// The collapsed side panels (SidePanel::setCollapsed()): objectName -> the
+// size to expand to. The window state above has them at their collapsed size.
+constexpr auto kCollapsedPanelsKey = "MainWindow/collapsedSidePanels";
 
 // See appSettings() for why this is a plain INI file.
 QSettings layoutSettings() { return appSettings(); }
@@ -117,6 +123,8 @@ void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
         // setParent() hid it; a window that is already up doesn't show it
         // again (one added before the window is shown appears with it).
         if (isVisible()) panel->show();
+    } else {
+        restoreCollapsed(panel);
     }
     m_sidePanels.append(panel);
     connect(panel, &QObject::destroyed, this, [this, panel]() { m_sidePanels.removeOne(panel); });
@@ -142,6 +150,44 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     if (!m_layoutSettled && isVisible()) m_settleTimer.start();
 }
 
+void MainWindow::childEvent(QChildEvent* event) {
+    QMainWindow::childEvent(event);
+    // Qt makes a tab bar for each spot where side panels are tabbed together
+    // as it needs one (polished: by then it is a whole QTabBar).
+    if (event->polished()) {
+        if (auto* tabBar = qobject_cast<QTabBar*>(event->child())) tabBar->installEventFilter(this);
+    }
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        if (auto* tabBar = qobject_cast<QTabBar*>(watched)) {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            SidePanel* panel = sidePanelOfTab(tabBar, tabBar->tabAt(mouse->position().toPoint()));
+            if (panel && mouse->button() == Qt::LeftButton) {
+                panel->toggleCollapsed();
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+SidePanel* MainWindow::sidePanelOfTab(const QTabBar* tabBar, int index) const {
+    if (index < 0) return nullptr;
+    // QMainWindow keeps each tab's dock widget's address as the tab's data.
+    const auto id = tabBar->tabData(index).value<quintptr>();
+    for (SidePanel* panel : m_sidePanels) {
+        if (reinterpret_cast<quintptr>(panel) == id) return panel;
+    }
+    return nullptr;
+}
+
+void MainWindow::restoreCollapsed(SidePanel* panel) {
+    const auto saved = m_savedCollapsed.constFind(panel->objectName());
+    if (saved != m_savedCollapsed.cend() && !panel->isCollapsed()) panel->setCollapsed(true, saved->toInt());
+}
+
 void MainWindow::restoreLayout() {
     QSettings settings = layoutSettings();
     if (settings.contains(kGeometryKey)) {
@@ -153,6 +199,8 @@ void MainWindow::restoreLayout() {
         !restoreState(settings.value(kWindowStateKey).toByteArray(), kWindowStateVersion)) {
         USDCC_LOG_WARNING("usdcc.layout", "Ignored the saved toolbar and side panel layout (older version)");
     }
+    m_savedCollapsed = settings.value(kCollapsedPanelsKey).toMap();
+    for (SidePanel* panel : std::as_const(m_sidePanels)) restoreCollapsed(panel);
     if (settings.contains(kDockLayoutKey) &&
         !m_dockManager->restoreState(settings.value(kDockLayoutKey).toByteArray())) {
         USDCC_LOG_WARNING("usdcc.layout", "Could not restore the saved panel layout");
@@ -167,7 +215,12 @@ void MainWindow::saveLayout() const {
     settings.setValue(kWindowStateKey, saveState(kWindowStateVersion));
     settings.setValue(kDockLayoutKey, m_dockManager->saveState());
     QStringList panels;
-    for (const SidePanel* panel : m_sidePanels) panels << panel->objectName();
+    QVariantMap collapsed;
+    for (const SidePanel* panel : m_sidePanels) {
+        panels << panel->objectName();
+        if (panel->isCollapsed()) collapsed.insert(panel->objectName(), panel->expandedSize());
+    }
+    settings.setValue(kCollapsedPanelsKey, collapsed);
     USDCC_LOG_DEBUG("usdcc.layout", "Saved the window layout to {} (side panels: {})", settings.fileName().toStdString(),
                     panels.join(QStringLiteral(", ")).toStdString());
 }
