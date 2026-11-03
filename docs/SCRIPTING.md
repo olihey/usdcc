@@ -138,6 +138,9 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 | `usdcc.ui` | `SidePanel` and `ViewPanel`, the base classes for panels made in Python (§8; needs PySide6) |
 
 - **Stage functions** default to the current stage and raise `RuntimeError` outside the app.
+  The current stage is the stage of the view panel last focused (docs/CURRENT_STAGE.md), so a
+  script run from the Script Editor works on the stage you were just looking at;
+  `set_current_stage()` changes it until another panel is focused.
 - **Prims, `Sdf.Path`s or strings** are all accepted where paths are.
 - **`open_stage()` behaves like File > Open Stage**: a file that's already open is opened again
   as a second stage (`UsdStage::Open` never reuses one). To work on an open stage, use

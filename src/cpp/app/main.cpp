@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <memory>
 
+#include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/qt_message_bridge.h"
@@ -34,6 +35,7 @@
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
+#include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
@@ -259,8 +261,17 @@ int main(int argc, char** argv) {
     // also knows floating panels and no longer lists one File > Close Stage is
     // deleting — rather than captured here: restoreLayout() below can rebuild
     // the dock area tree, and panels come and go.
+    //
+    // That viewport is focused and the stage made current (docs/
+    // CURRENT_STAGE.md), as the stage just opened is the one being looked at:
+    // bringing a tab to the front doesn't move ADS's focus, so the panel
+    // focused before would otherwise keep its stage current.
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&window, &panelTypes](const usdcc::usd::StageRefPtr& stage) {
+        [&window, &panelTypes, &stageManager](const usdcc::usd::StageRefPtr& stage) {
+            auto focus = [&](usdcc::ui::ViewPanel* panel) {
+                if (panel) window.dockManager()->setDockWidgetFocused(panel);
+                stageManager.setCurrentStage(stage);
+            };
             usdcc::usd::ViewportViewPanel* empty = nullptr;
             for (ads::CDockWidget* dockWidget : window.dockManager()->dockWidgetsMap()) {
                 auto* existing = qobject_cast<usdcc::usd::ViewportViewPanel*>(dockWidget);
@@ -278,10 +289,11 @@ int main(int argc, char** argv) {
                 }
                 empty->setStage(stage);
                 empty->setAsCurrentTab();
+                focus(empty);
                 return;
             }
 
-            panelTypes.open(QStringLiteral("viewport"), stage, window.dockManager(), &window);
+            focus(panelTypes.open(QStringLiteral("viewport"), stage, window.dockManager(), &window));
         });
 
     QMenu* fileMenu = window.mainMenuBar()->addMenu(QObject::tr("&File"));
@@ -332,19 +344,17 @@ int main(int argc, char** argv) {
     auto undoOnStageClosed = stageManager.stageClosed.connect(
         [undoManager](const usdcc::usd::StageRefPtr& stage) { undoManager->removeStage(stage); });
 
+    // Undo and Redo act on the current stage: the stage of the view panel
+    // last focused (CurrentStageTracker below, docs/CURRENT_STAGE.md). They
+    // name the step and grey out when there is none.
     QMenu* editMenu = window.mainMenuBar()->addMenu(QObject::tr("&Edit"));
-    QAction* undoAction = editMenu->addAction(QObject::tr("&Undo"));
+    auto* undoGroup = new usdcc::usd::CurrentStageUndoGroup(*undoManager, stageManager, &window);
+    QAction* undoAction = undoGroup->createUndoAction(&window, QObject::tr("&Undo"));
     undoAction->setShortcut(QKeySequence::Undo);
-    QObject::connect(undoAction, &QAction::triggered, &window,
-                     [&stageManager, undoManager]() {
-                         if (auto stack = undoManager->stack(stageManager.currentStage())) stack->undo();
-                     });
-    QAction* redoAction = editMenu->addAction(QObject::tr("&Redo"));
+    editMenu->addAction(undoAction);
+    QAction* redoAction = undoGroup->createRedoAction(&window, QObject::tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
-    QObject::connect(redoAction, &QAction::triggered, &window,
-                     [&stageManager, undoManager]() {
-                         if (auto stack = undoManager->stack(stageManager.currentStage())) stack->redo();
-                     });
+    editMenu->addAction(redoAction);
 
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).
@@ -402,6 +412,19 @@ int main(int argc, char** argv) {
         return usdcc::usd::StageRefPtr();
     });
     window.restoreLayout();
+
+    // The current stage follows the focused view panel, and the title says
+    // which it is.
+    new usdcc::ui::CurrentStageTracker(window.dockManager(), &stageManager, &window);
+    auto updateTitle = [&window, &stageManager](const usdcc::usd::StageRefPtr&) {
+        window.setWindowTitle(usdcc::usd::windowTitle(stageManager));
+    };
+    // Opening or closing another stage can change how the current one is
+    // named (shortStageNames()).
+    auto titleOnCurrentStage = stageManager.currentStageChanged.connect(updateTitle);
+    auto titleOnStageOpened = stageManager.stageOpened.connect(updateTitle);
+    auto titleOnStageClosed = stageManager.stageClosed.connect(updateTitle);
+    updateTitle(nullptr);
 
     window.show();
 

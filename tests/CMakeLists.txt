@@ -33,6 +33,7 @@ add_executable(usdcc_ui_tests
     test_harness.h
     test_harness.cpp
     ui_test_main.cpp
+    current_stage_test.cpp
     log_panel_test.cpp
     outliner_icons_test.cpp
     outliner_context_menu_test.cpp

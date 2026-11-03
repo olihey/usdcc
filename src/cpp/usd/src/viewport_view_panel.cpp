@@ -7,6 +7,8 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <DockManager.h>
+
 #include <QActionGroup>
 #include <QHBoxLayout>
 #include <QMenu>
@@ -49,6 +51,12 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     setContentWidget(container);
 
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
+    // A click in the viewport focuses this panel, which makes its stage the
+    // current one (CurrentStageTracker): ADS doesn't see the native window's
+    // focus. Only the highlight moves; the viewport keeps the keyboard.
+    connect(m_viewport, &HydraViewportWindow::pressed, this, [this]() {
+        if (dockManager()) dockManager()->setDockWidgetFocused(this);
+    });
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.
     connect(m_viewport, &HydraViewportWindow::toolEditStarted, this, [this](const QString& description) {

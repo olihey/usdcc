@@ -530,6 +530,7 @@ void HydraViewportWindow::renderNow() {
 
 void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
     m_lastMousePos = event->pos();
+    Q_EMIT pressed();
 
     if (event->button() == Qt::LeftButton) {
         // Alt+drag is the camera-navigation override: it must always orbit,

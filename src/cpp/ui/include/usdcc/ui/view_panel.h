@@ -77,6 +77,11 @@ public:
     // camera position, selection).
     virtual ViewPanel* duplicate(QWidget* parent = nullptr) const = 0;
 
+Q_SIGNALS:
+    // After the panel switched to another stage (or to none): setStage() or
+    // the stage dropdown. CurrentStageTracker follows it for the focused panel.
+    void stageChanged(const usdcc::usd::StageRefPtr& stage);
+
 protected:
     // Extends the context menu shown when right-clicking this panel's tab —
     // ADS shows panels as tabs in the dock area's title bar rather than a

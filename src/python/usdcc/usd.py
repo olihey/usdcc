@@ -86,7 +86,8 @@ def stages():
 
 
 def current_stage():
-    """The current stage, or None if no stage is open."""
+    """The current stage, or None if no stage is open: the stage of the view
+    panel last focused (or the one set_current_stage() set since)."""
     return _stage(stage_manager().current_stage_cache_id())
 
 

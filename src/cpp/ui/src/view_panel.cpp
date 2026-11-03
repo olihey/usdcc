@@ -76,6 +76,7 @@ void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
     }
 
     onStageChanged(m_stage);
+    Q_EMIT stageChanged(m_stage);
 }
 
 void ViewPanel::addPanelControls(QBoxLayout* toolbarLayout) {

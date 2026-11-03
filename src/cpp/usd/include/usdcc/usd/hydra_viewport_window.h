@@ -100,6 +100,10 @@ public:
 Q_SIGNALS:
     void rendererPluginsChanged();
 
+    // Any mouse button pressed in the viewport. Its panel takes this as
+    // focus: a native window's focus doesn't reach ADS's focus tracking.
+    void pressed();
+
     // Emitted once per stage, after its first frame has been rendered. That
     // first Render() is when Hydra populates its scene from the stage, so it is
     // where a big stage's viewport actually stalls the UI.

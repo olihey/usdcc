@@ -1,5 +1,6 @@
 # usdcc.ui — QMainWindow shell, SidePanel/ViewPanel base classes (milestone M1).
 add_library(usdcc_ui STATIC
+    include/usdcc/ui/current_stage_tracker.h
     include/usdcc/ui/log_model.h
     include/usdcc/ui/log_side_panel.h
     include/usdcc/ui/main_window.h
@@ -14,6 +15,7 @@ add_library(usdcc_ui STATIC
     include/usdcc/ui/title_bar.h
     include/usdcc/ui/view_panel.h
     include/usdcc/ui/view_panel_registry.h
+    src/current_stage_tracker.cpp
     src/log_model.cpp
     src/log_side_panel.cpp
     src/main_window.cpp
