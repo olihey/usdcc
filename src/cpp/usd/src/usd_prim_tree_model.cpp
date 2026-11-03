@@ -18,6 +18,55 @@ namespace {
 // Ancestors of the selection: the selection's own colour (dark.qss, QTreeView
 // selection-background-color: accent blue at 18%) at half the opacity.
 const QColor kAncestorBackground(61, 139, 253, 23);  // 9% of 255
+
+// usdview's prim name colours (usdviewq/common.py UIPrimTypeColors). Other
+// prims keep the theme's text colour (dark.qss, QTreeView color).
+const QColor kInstanceColor(135, 206, 250);  // LIGHT_SKY_BLUE
+const QColor kArcsColor(222, 158, 46);       // DARK_YELLOW
+const QColor kPrototypeColor(118, 136, 217);
+const QColor kTextColor(255, 255, 255, 191);
+// An inactive prim's colour, darker (usdviewq/primViewItem.py HALF_DARKER).
+constexpr int kInactiveDarker = 150;
+
+// The prims an instance's children are: its instance proxies.
+const PXR_NS::Usd_PrimFlagsPredicate kChildren = PXR_NS::UsdTraverseInstanceProxies(PXR_NS::UsdPrimAllPrimsPredicate);
+
+// As usdview's PrimInfo (usdviewq/utils.cpp).
+bool hasCompositionArcs(const PXR_NS::UsdPrim& prim) {
+    return prim.HasAuthoredReferences() || prim.HasAuthoredPayloads() || prim.HasAuthoredInherits() ||
+           prim.HasAuthoredSpecializes() || prim.HasVariantSets();
+}
+
+bool inPrototype(const PXR_NS::UsdPrim& prim) { return prim.IsInPrototype() || prim.IsInstanceProxy(); }
+
+// usdview's colour for the name, the first that applies; invalid for the
+// theme's.
+QColor nameColor(const PXR_NS::UsdPrim& prim) {
+    if (prim.IsInstance()) return kInstanceColor;
+    if (hasCompositionArcs(prim)) return kArcsColor;
+    if (inPrototype(prim)) return kPrototypeColor;
+    return {};
+}
+
+// usdview's tooltip line, e.g. "Inactive Defined Xform Prim".
+QString describe(const PXR_NS::UsdPrim& prim) {
+    QString text = QStringLiteral("Prim");
+    if (!prim.GetTypeName().IsEmpty()) text = QString::fromStdString(prim.GetTypeName().GetString()) + ' ' + text;
+    if (inPrototype(prim)) text = QStringLiteral("Prototype ") + text;
+    if (!prim.IsDefined()) {
+        text = QStringLiteral("Undefined ") + text;
+    } else if (prim.IsAbstract()) {
+        text = QStringLiteral("Abstract ") + text;
+    } else {
+        text = QStringLiteral("Defined ") + text;
+    }
+    if (!prim.IsActive()) {
+        text = QStringLiteral("Inactive ") + text;
+    } else if (prim.IsInstance()) {
+        text = QStringLiteral("Instanced ") + text;
+    }
+    return text;
+}
 }  // namespace
 
 UsdPrimTreeModel::UsdPrimTreeModel(QObject* parent) : QAbstractItemModel(parent) {
@@ -68,13 +117,63 @@ void UsdPrimTreeModel::buildChildren(Node* node) {
     if (!prim) {
         return;
     }
-    for (const auto& child : prim.GetFilteredChildren(PXR_NS::UsdPrimAllPrimsPredicate)) {
+    for (const auto& child : prim.GetFilteredChildren(kChildren)) {
         auto childNode = std::make_unique<Node>();
         childNode->path = child.GetPath();
         childNode->parent = node;
-        buildChildren(childNode.get());
+        if (child.IsInstance()) {
+            childNode->unfetched = true;  // its instance proxies come with fetchMore()
+        } else {
+            buildChildren(childNode.get());
+        }
         node->children.push_back(std::move(childNode));
     }
+}
+
+UsdPrimTreeModel::Node* UsdPrimTreeModel::nodeForIndex(const QModelIndex& index) const {
+    return index.isValid() ? static_cast<Node*>(index.internalPointer()) : m_root.get();
+}
+
+QModelIndex UsdPrimTreeModel::indexForNode(Node* node) const {
+    return node == m_root.get() ? QModelIndex() : indexForPath(node->path);
+}
+
+bool UsdPrimTreeModel::hasChildren(const QModelIndex& parent) const {
+    if (parent.column() > 0) return false;
+    const Node* node = nodeForIndex(parent);
+    if (!node->unfetched) return !node->children.empty();
+    const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(node->path) : PXR_NS::UsdPrim();
+    return prim && !prim.GetFilteredChildren(kChildren).empty();
+}
+
+bool UsdPrimTreeModel::canFetchMore(const QModelIndex& parent) const {
+    return parent.column() <= 0 && nodeForIndex(parent)->unfetched;
+}
+
+void UsdPrimTreeModel::fetchMore(const QModelIndex& parent) {
+    Node* node = nodeForIndex(parent);
+    if (!node->unfetched || !m_stage) return;
+    node->unfetched = false;
+    Node loaded;
+    loaded.path = node->path;
+    buildChildren(&loaded);
+    if (loaded.children.empty()) return;
+    beginInsertRows(parent, 0, static_cast<int>(loaded.children.size()) - 1);
+    for (auto& child : loaded.children) child->parent = node;
+    node->children = std::move(loaded.children);
+    endInsertRows();
+}
+
+QModelIndex UsdPrimTreeModel::fetchPath(const PXR_NS::SdfPath& path) {
+    Node* node = m_root.get();
+    for (const PXR_NS::SdfPath& prefix : path.GetPrefixes()) {
+        if (node->unfetched) fetchMore(indexForNode(node));
+        auto it = std::find_if(node->children.begin(), node->children.end(),
+                               [&](const std::unique_ptr<Node>& child) { return child->path == prefix; });
+        if (it == node->children.end()) return {};
+        node = it->get();
+    }
+    return indexForNode(node);
 }
 
 UsdPrimTreeModel::Node* UsdPrimTreeModel::findNode(Node* node, const PXR_NS::SdfPath& path) const {
@@ -164,27 +263,39 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
             return QString::fromStdString(node->path.GetName());
         case Qt::DecorationRole:
             return prim_icons::icon(prim);  // faded for an inactive prim
-        case Qt::ForegroundRole:
-            if (!prim.IsActive()) {
-                return QColor(Qt::gray);
-            }
-            break;
+        case Qt::ForegroundRole: {
+            const QColor color = nameColor(prim);
+            if (!prim.IsActive()) return (color.isValid() ? color : kTextColor).darker(kInactiveDarker);
+            if (color.isValid()) return color;
+            break;  // the theme's
+        }
         case Qt::BackgroundRole:
             if (isSelectionAncestor(node->path)) {
                 return kAncestorBackground;
             }
             break;
-        case Qt::FontRole:
-            if (!prim.IsActive()) {
-                QFont font;
+        case Qt::FontRole: {
+            // usdview's UIFonts: the specifier, by weight. Only these are set;
+            // the view's font gives the rest (size, family).
+            QFont font;
+            if (prim.IsAbstract()) {
+                font.setWeight(QFont::Normal);
+            } else if (!prim.IsDefined()) {
+                font.setWeight(QFont::Light);
                 font.setItalic(true);
-                return font;
+            } else {
+                font.setWeight(QFont::Bold);
             }
-            break;
+            return font;
+        }
         case Qt::CheckStateRole:
+            if (prim.IsInstanceProxy()) break;  // read-only: no checkbox
             return prim.IsActive() ? Qt::Checked : Qt::Unchecked;
-        case Qt::ToolTipRole:
-            return QString::fromStdString(node->path.GetString());
+        case Qt::ToolTipRole: {
+            QString tip = QString::fromStdString(node->path.GetString()) + QLatin1Char('\n') + describe(prim);
+            if (hasCompositionArcs(prim)) tip += tr("\nHas composition arcs");
+            return tip;
+        }
         default:
             break;
     }
@@ -197,8 +308,8 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
     }
     Node* node = static_cast<Node*>(index.internalPointer());
     PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(node->path);
-    if (!prim) {
-        return false;
+    if (!prim || prim.IsInstanceProxy()) {
+        return false;  // an instance proxy can't be edited
     }
 
     if (role == Qt::EditRole) {
@@ -220,7 +331,8 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
 
     if (role == Qt::CheckStateRole) {
         prim.SetActive(value.toInt() == Qt::Checked);
-        Q_EMIT dataChanged(index, index, {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole, Qt::DecorationRole});
+        Q_EMIT dataChanged(index, index,
+                           {Qt::CheckStateRole, Qt::ForegroundRole, Qt::FontRole, Qt::DecorationRole, Qt::ToolTipRole});
         return true;
     }
 
@@ -230,6 +342,10 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
 Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) {
         return Qt::NoItemFlags;
+    }
+    const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(pathForIndex(index)) : PXR_NS::UsdPrim();
+    if (prim && prim.IsInstanceProxy()) {
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // read-only
     }
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsUserCheckable;
 }

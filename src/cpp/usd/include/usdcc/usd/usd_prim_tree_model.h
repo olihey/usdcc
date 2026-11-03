@@ -17,6 +17,18 @@ namespace usdcc::usd {
 // toggleable in the outliner. See docs/PLAN.md milestone M4. Each prim has
 // its type's icon (prim_icons.h, docs/PRIM_ICONS.md) as Qt::DecorationRole.
 //
+// Names are coloured and weighted as usdview's prim browser does them
+// (docs/OUTLINER_NAMES.md): instances light sky blue, prims with composition
+// arcs dark yellow, instance proxies slate blue, others the theme's text
+// colour, all darker when inactive; bold for a def, light italic for an
+// over, normal for a class. The tooltip says the same in words.
+//
+// An instance's children are its instance proxies, as in usdview. They are
+// read-only (no rename, no checkbox) and loaded only when the instance is
+// first expanded (canFetchMore()/fetchMore()), since a heavily instanced
+// stage would otherwise build the prototype's whole subtree under every
+// instance; fetchPath() loads them down to a given path.
+//
 // Structural edits (rename/reorder) call refresh(), which rebuilds the
 // whole tree via beginResetModel()/endResetModel() rather than incremental
 // inserts/removes/moves: simpler and safer than tracking exact index shifts
@@ -44,12 +56,18 @@ public:
     bool isSelectionAncestor(const PXR_NS::SdfPath& path) const { return m_selectionAncestors.count(path) > 0; }
 
     PXR_NS::SdfPath pathForIndex(const QModelIndex& index) const;
+    // Only finds rows already loaded; fetchPath() loads instance proxies
+    // down to `path` first.
     QModelIndex indexForPath(const PXR_NS::SdfPath& path) const;
+    QModelIndex fetchPath(const PXR_NS::SdfPath& path);
 
     QModelIndex index(int row, int column, const QModelIndex& parent = QModelIndex()) const override;
     QModelIndex parent(const QModelIndex& child) const override;
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
+    bool hasChildren(const QModelIndex& parent = QModelIndex()) const override;
+    bool canFetchMore(const QModelIndex& parent) const override;
+    void fetchMore(const QModelIndex& parent) override;
     QVariant data(const QModelIndex& index, int role) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role) override;
     Qt::ItemFlags flags(const QModelIndex& index) const override;
@@ -66,9 +84,13 @@ private:
         PXR_NS::SdfPath path;
         Node* parent = nullptr;
         std::vector<std::unique_ptr<Node>> children;
+        // An instance whose instance proxies aren't loaded yet.
+        bool unfetched = false;
     };
 
     void buildChildren(Node* node);
+    Node* nodeForIndex(const QModelIndex& index) const;
+    QModelIndex indexForNode(Node* node) const;
     Node* findNode(Node* node, const PXR_NS::SdfPath& path) const;
 
     PXR_NS::UsdStageRefPtr m_stage;

@@ -62,10 +62,27 @@ void OutlinerItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
 
     QStyleOptionViewItem row = rowOption(option, index);
     const QRect check = checkRect(option, index);
+    const QRect text = textRect(row, check);
     // Cut the name short of the checkbox; the style lays it out to the row's end.
-    row.text = row.fontMetrics.elidedText(row.text, row.textElideMode, textRect(row, check).width());
+    const QString name = row.fontMetrics.elidedText(row.text, row.textElideMode, text.width());
+    // A selected row's name is white (dark.qss), but a coloured one (an
+    // instance, a prim with arcs) keeps its colour, so selecting it doesn't
+    // hide what it is: the style draws the row without it, and the name is
+    // drawn here.
+    const QVariant foreground = index.data(Qt::ForegroundRole);
+    const bool ownColor = (row.state & QStyle::State_Selected) && foreground.canConvert<QColor>();
+    row.text = ownColor ? QString() : name;
     QStyle* style = styleOf(row);
     style->drawControl(QStyle::CE_ItemViewItem, &row, painter, row.widget);
+    if (ownColor) {
+        // Inset as the style insets item text.
+        const int margin = style->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, row.widget) + 1;
+        painter->save();
+        painter->setFont(row.font);
+        painter->setPen(foreground.value<QColor>());
+        painter->drawText(text.adjusted(margin, 0, -margin, 0), Qt::AlignLeft | Qt::AlignVCenter, name);
+        painter->restore();
+    }
 
     if (check.isValid()) {
         QStyleOptionViewItem box = row;

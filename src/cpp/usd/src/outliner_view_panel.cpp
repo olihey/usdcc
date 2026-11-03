@@ -164,7 +164,7 @@ void OutlinerViewPanel::restoreViewState() {
         return;
     }
     for (const PXR_NS::SdfPath& path : m_expandedPaths) {
-        const QModelIndex index = m_model->indexForPath(path);
+        const QModelIndex index = m_model->fetchPath(path);  // loads instance proxies as needed
         if (index.isValid()) {
             m_treeView->setExpanded(index, true);
         }
@@ -193,7 +193,9 @@ void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
     m_updatingSelection = true;
     QItemSelection selection;
     for (const auto& path : paths) {
-        const QModelIndex index = m_model->indexForPath(path);
+        // A prim inside an instance (picked in a viewport) is an instance
+        // proxy, which the tree loads on demand.
+        const QModelIndex index = m_model->fetchPath(path);
         if (index.isValid()) {
             selection.select(index, index);
         }
@@ -209,7 +211,7 @@ void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
 void OutlinerViewPanel::expandToSelection(const std::vector<PXR_NS::SdfPath>& paths) {
     QModelIndex first;
     for (const PXR_NS::SdfPath& path : paths) {
-        const QModelIndex index = m_model->indexForPath(path);
+        const QModelIndex index = m_model->fetchPath(path);
         if (!index.isValid()) {
             continue;
         }
@@ -248,8 +250,8 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     const PXR_NS::SdfPath path = m_model->pathForIndex(selected.first());
     const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
     const PXR_NS::UsdPrim parent = prim ? prim.GetParent() : PXR_NS::UsdPrim();
-    if (!prim || !parent) {
-        return;
+    if (!prim || !parent || prim.IsInstanceProxy()) {
+        return;  // an instance proxy can't be reordered
     }
 
     // "reorder nameChildren" on the parent's prim spec controls the composed
