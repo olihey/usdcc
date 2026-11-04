@@ -38,6 +38,13 @@ bool StageChanges::resyncsPrim(const PXR_NS::SdfPath& primPath) const {
     return false;
 }
 
+PXR_NS::SdfPath pathAfterMoves(const PXR_NS::SdfPath& path, const PrimMoves& moves) {
+    for (const auto& [from, to] : moves) {
+        if (path.HasPrefix(from)) return path.ReplacePrefix(from, to);
+    }
+    return path;
+}
+
 bool editTargetReaches(const PXR_NS::UsdPrim& prim) {
     if (!prim) return false;
     const PXR_NS::UsdEditTarget target = prim.GetStage()->GetEditTarget();

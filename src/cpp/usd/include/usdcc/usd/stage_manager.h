@@ -3,6 +3,7 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
+#include <map>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 #include <pxr/usd/usd/stage.h>
@@ -122,6 +123,7 @@ private:
     StageRefPtr registerStage(const PXR_NS::UsdStageRefPtr& usdStage);
 
     std::vector<StageRefPtr> m_stages;
+    std::map<const Stage*, usdcc::core::Signal<const PrimMoves&>::Connection> m_primsMovedConnections;
     StageRefPtr m_currentStage;
 };
 

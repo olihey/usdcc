@@ -87,7 +87,19 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
+    // Dragging rows (docs/OUTLINER_REPARENT.md). A drop doesn't change the tree: it asks,
+    // as a rename does, and the stage's change notice rebuilds it.
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+    Qt::DropActions supportedDropActions() const override;
+    bool canDropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column, const QModelIndex& parent) const override;
+    bool dropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column, const QModelIndex& parent) override;
+
 Q_SIGNALS:
+    // `row` is where among `parent`'s children, or -1 for on it.
+    void dropRequested(const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row);
+    // While hovering: why this drop can't happen, or empty when it can.
+    void dropHint(const QString& why) const;
     // The row's checkbox and its name editor ask for these rather than editing
     // the stage, so the panel can make each an undo step (prim_actions.h).
     void activeChangeRequested(const PXR_NS::SdfPath& path, bool active);

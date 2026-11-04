@@ -9,10 +9,23 @@
 
 #include <QColor>
 #include <QFont>
+#include <QMimeData>
+#include <QStringList>
 
 #include <algorithm>
 
 namespace usdcc::usd {
+
+namespace {
+constexpr auto kPrimPathsMimeType = "application/x-usdcc-prim-paths";
+
+std::vector<PXR_NS::SdfPath> draggedPaths(const QMimeData* data) {
+    std::vector<PXR_NS::SdfPath> paths;
+    const QString text = QString::fromUtf8(data->data(QString::fromLatin1(kPrimPathsMimeType)));
+    for (const QString& path : text.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) paths.emplace_back(path.toStdString());
+    return paths;
+}
+}  // namespace
 
 namespace {
 // Ancestors of the selection: the selection's own colour (dark.qss, QTreeView
@@ -344,7 +357,8 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
 
 Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) {
-        return Qt::NoItemFlags;
+        // The empty space below the rows: the root.
+        return m_stage && !m_readOnly ? Qt::ItemIsDropEnabled : Qt::NoItemFlags;
     }
     const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(pathForIndex(index)) : PXR_NS::UsdPrim();
     // Enabled, so a greyed row can still be expanded to reach what's under it.
@@ -354,9 +368,37 @@ Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
     }
     if (prim && !prim_actions::isEditable(prim)) return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // outside a variant being edited
     // Inside a variant being edited a prim can be activated, but not renamed.
-    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable;
+    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled;
     if (!prim || prim_actions::canRename(prim)) flags |= Qt::ItemIsEditable;
     return flags;
+}
+
+QStringList UsdPrimTreeModel::mimeTypes() const { return {QString::fromLatin1(kPrimPathsMimeType)}; }
+
+QMimeData* UsdPrimTreeModel::mimeData(const QModelIndexList& indexes) const {
+    QStringList paths;
+    for (const QModelIndex& index : indexes) {
+        const QString path = QString::fromStdString(pathForIndex(index).GetString());
+        if (!paths.contains(path)) paths << path;
+    }
+    auto* data = new QMimeData;
+    data->setData(QString::fromLatin1(kPrimPathsMimeType), paths.join(QLatin1Char('\n')).toUtf8());
+    return data;
+}
+
+Qt::DropActions UsdPrimTreeModel::supportedDropActions() const { return Qt::MoveAction; }
+
+bool UsdPrimTreeModel::canDropMimeData(const QMimeData* data, Qt::DropAction action, int, int, const QModelIndex& parent) const {
+    if (!m_stage || m_readOnly || action != Qt::MoveAction || !data || !data->hasFormat(QString::fromLatin1(kPrimPathsMimeType))) return false;
+    const QString why = prim_actions::whyNotDrop(m_stage, draggedPaths(data), parent.isValid() ? pathForIndex(parent) : PXR_NS::SdfPath::AbsoluteRootPath());
+    Q_EMIT dropHint(why);
+    return why.isEmpty();
+}
+
+bool UsdPrimTreeModel::dropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column, const QModelIndex& parent) {
+    if (!canDropMimeData(data, action, row, column, parent)) return false;
+    Q_EMIT dropRequested(draggedPaths(data), parent.isValid() ? pathForIndex(parent) : PXR_NS::SdfPath::AbsoluteRootPath(), row);
+    return true;
 }
 
 QVariant UsdPrimTreeModel::headerData(int section, Qt::Orientation orientation, int role) const {

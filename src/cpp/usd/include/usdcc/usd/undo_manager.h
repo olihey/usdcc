@@ -59,6 +59,14 @@ public:
     // session), the edit joins that session instead.
     bool apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, const QString& description,
                const std::function<bool()>& edit, std::vector<PXR_NS::SdfLayerRefPtr> keep = {});
+    // The same, recording all of `layers`, for an edit that can reach beyond the edit
+    // target: UsdNamespaceEditor rewrites every layer with an opinion on the prim
+    // (docs/OUTLINER_REPARENT.md §3.1). A layer an open session is recording stays with
+    // it. Undoing and redoing play them all as one change, then call `replayed`, with
+    // whether it was an undo.
+    bool applyAcrossLayers(const StageRefPtr& stage, const std::vector<PXR_NS::SdfLayerHandle>& layers,
+                           const QString& description, const std::function<bool()>& edit,
+                           std::function<void(bool undone)> replayed = {});
 
     void beginEdit(const StageRefPtr& stage, const QString& description);
     // Returns true if the session changed the layer (and so pushed an undo step).

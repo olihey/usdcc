@@ -11,6 +11,7 @@
 #include <vector>
 
 class QAction;
+class QLabel;
 class QTreeView;
 
 namespace usdcc::usd {
@@ -24,7 +25,7 @@ class UndoManager;
 // checkbox), select — see docs/PLAN.md milestone M4 — and a right-click menu
 // on the rows (prim_context_menu.h, docs/OUTLINER_CONTEXT_MENU.md): Active,
 // Visibility, Load/Unload Payload, Variants, Move Up/Down, Copy Path, Prim
-// Info. Every edit, the checkbox and rename included, is an undo step. Selection is written to
+// Info. Dragging rows reorders and reparents them (docs/OUTLINER_REPARENT.md). Every edit, the checkbox and rename included, is an undo step. Selection is written to
 // StageManager::setSelectedPaths() so other panels showing the same stage
 // (e.g. AttributesViewPanel) stay in sync. The selected prims' ancestors are
 // tinted, and with "Expand to Selection" (in the options menu; on by default,
@@ -39,7 +40,12 @@ public:
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
+    // What a drop does, once it's allowed: asks first if it changes other layers
+    // (docs/OUTLINER_REPARENT.md §6). `keepWorldPosition` unless Alt was held.
+    void performDrop(const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row, bool keepWorldPosition);
+
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void populateOptionsMenu(QMenu* menu) override;
 
     // Points the tree model at the new stage and restores its selection.
@@ -48,7 +54,6 @@ protected:
 private Q_SLOTS:
     void onTreeSelectionChanged();
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
-    void onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath);
 
 private:
     void moveSelectedPrim(int direction);  // -1 = up, +1 = down
@@ -74,11 +79,13 @@ private:
 
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
+    QLabel* m_dropNote;  // why a drop is refused, while hovering it
     QAction* m_expandToSelection;
     bool m_updatingSelection = false;
     std::shared_ptr<UndoManager> m_undoManager;
     bool m_refreshQueued = false;
-    PXR_NS::SdfPath m_revealAfterRefresh;  // a prim just created
+    PXR_NS::SdfPath m_revealAfterRefresh;  // a prim just created or moved
+    PrimMoves m_movesToRestore;            // for the expanded rows saved by their old paths
     // View state carried across a model reset; not across a stage switch,
     // whose paths belong to another stage.
     bool m_keepViewState = true;
@@ -90,6 +97,7 @@ private:
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<const PXR_NS::SdfPath&>::Connection m_primCreatedConnection;
+    usdcc::core::Signal<const PrimMoves&>::Connection m_primsMovedConnection;
 };
 
 }  // namespace usdcc::usd

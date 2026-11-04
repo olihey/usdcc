@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace usdcc::usd {
@@ -29,6 +30,11 @@ struct StageChanges {
     // was resynced — i.e. the set of properties to show may be different now.
     bool resyncsPrim(const PXR_NS::SdfPath& primPath) const;
 };
+
+// Prims that changed path, old then new (docs/OUTLINER_REPARENT.md §3.8).
+using PrimMoves = std::vector<std::pair<PXR_NS::SdfPath, PXR_NS::SdfPath>>;
+// `path` after those moves: itself, or under a moved prim's new path.
+PXR_NS::SdfPath pathAfterMoves(const PXR_NS::SdfPath& path, const PrimMoves& moves);
 
 // Which variant edits are going into (docs/VARIANT_EDITOR.md §5).
 struct VariantEdit {
@@ -130,6 +136,9 @@ public:
 
     // After the Create menu made a prim: the Outliner shows it, however far down it is.
     usdcc::core::Signal<const PXR_NS::SdfPath&> primCreated;
+    // After prims changed path: a rename or a move, and undoing or redoing one. What
+    // holds a path follows it: the selection (StageManager) and the Outliner's rows.
+    usdcc::core::Signal<const PrimMoves&> primsMoved;
     // After usdcc saved one or more of the stage's layers (layer_actions):
     // their unsaved-changes marks change without a change notice.
     usdcc::core::Signal<> layersSaved;

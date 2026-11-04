@@ -1,5 +1,6 @@
 #include "usdcc/usd/outliner_view_panel.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/outliner_item_delegate.h"
@@ -17,10 +18,14 @@
 #include <pxr/usd/usd/stage.h>
 
 #include <QAction>
+#include <QApplication>
+#include <QCheckBox>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QScrollBar>
 #include <QSettings>
 #include <QTimer>
@@ -35,6 +40,7 @@ namespace usdcc::usd {
 
 namespace {
 constexpr auto kExpandToSelectionKey = "Outliner/expandToSelection";
+constexpr auto kAskBeforeMovingKey = "Outliner/askBeforeMovingAcrossLayers";
 }  // namespace
 
 OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr stage,
@@ -67,9 +73,23 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     usdcc::ui::scaled::iconSize(m_treeView, 16, 16);
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    // InternalMove: from this tree to itself. The drop only asks (dropRequested).
+    m_treeView->setDragEnabled(true);
+    m_treeView->setAcceptDrops(true);
+    m_treeView->setDropIndicatorShown(true);
+    m_treeView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_treeView->setAutoExpandDelay(600);
+    m_treeView->viewport()->installEventFilter(this);
+
+    m_dropNote = new QLabel(container);
+    m_dropNote->setObjectName(QStringLiteral("propertyNote"));
+    m_dropNote->setWordWrap(true);
+    usdcc::ui::scaled::margins(m_dropNote, 8, 4, 8, 4);
+    m_dropNote->hide();
 
     layout->addWidget(toolbar);
     layout->addWidget(m_treeView, 1);
+    layout->addWidget(m_dropNote);
 
     setContentWidget(container);
 
@@ -80,10 +100,19 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
         if (currentStage()) prim_actions::setActive(*m_undoManager, currentStage(), {path}, active);
     });
     connect(m_model, &UsdPrimTreeModel::renameRequested, this, [this](const PXR_NS::SdfPath& path, const std::string& name) {
-        if (currentStage() && prim_actions::rename(*m_undoManager, currentStage(), path, name)) {
-            onPrimRenamed(path, path.GetParentPath().AppendChild(PXR_NS::TfToken(name)));
-        }
+        if (currentStage()) prim_actions::rename(*m_undoManager, currentStage(), path, name, this->stageManager()->stages());
     });
+    connect(m_model, &UsdPrimTreeModel::dropHint, this, [this](const QString& why) {
+        m_dropNote->setText(why);
+        m_dropNote->setVisible(!why.isEmpty());
+    });
+    connect(m_model, &UsdPrimTreeModel::dropRequested, this,
+            [this](const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row) {
+                const bool keepWorld = !(QApplication::keyboardModifiers() & Qt::AltModifier);
+                // Queued: it may ask a question, and it rebuilds the tree, from inside the view's drop.
+                QMetaObject::invokeMethod(
+                    this, [this, paths, parent, row, keepWorld]() { performDrop(paths, parent, row, keepWorld); }, Qt::QueuedConnection);
+            });
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &OutlinerViewPanel::showPrimMenu);
     connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
@@ -109,6 +138,44 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
 
 usdcc::ui::ViewPanel* OutlinerViewPanel::duplicate(QWidget* parent) const {
     return new OutlinerViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
+}
+
+bool OutlinerViewPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_treeView->viewport() && (event->type() == QEvent::DragLeave || event->type() == QEvent::Drop)) m_dropNote->hide();
+    return usdcc::ui::ViewPanel::eventFilter(watched, event);
+}
+
+void OutlinerViewPanel::performDrop(const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row, bool keepWorldPosition) {
+    const StageRefPtr stage = currentStage();
+    if (!stage) return;
+    QSettings settings = usdcc::ui::appSettings();
+    if (settings.value(kAskBeforeMovingKey, true).toBool()) {
+        const prim_actions::MoveNotes notes = prim_actions::moveNotes(stage->usdStage(), paths, parent);
+        if (!notes.isEmpty()) {
+            QStringList lines;
+            if (!notes.otherLayers.empty()) {
+                QStringList names;
+                for (const std::string& name : notes.otherLayers) names << QString::fromStdString(name);
+                lines << tr("This also changes other layers, which will need saving: %1.").arg(names.join(QStringLiteral(", ")));
+            }
+            for (const PXR_NS::SdfPath& path : notes.relocated) {
+                lines << tr("%1 comes from a reference or similar, so its file can't change: this adds a relocates entry to %2 instead.")
+                             .arg(QString::fromStdString(path.GetString()), QString::fromStdString(stage->editTargetLayer()->GetDisplayName()));
+            }
+            QMessageBox box(QMessageBox::Question, tr("Move Prim"), lines.join(QStringLiteral("\n\n")), QMessageBox::Yes | QMessageBox::Cancel, this);
+            box.setDefaultButton(QMessageBox::Yes);
+            auto* dontAsk = new QCheckBox(tr("Don't ask again"), &box);
+            box.setCheckBox(dontAsk);
+            if (box.exec() != QMessageBox::Yes) return;
+            if (dontAsk->isChecked()) settings.setValue(kAskBeforeMovingKey, false);
+        }
+    }
+    prim_actions::MoveOptions options;
+    options.row = row;
+    options.keepWorldPosition = keepWorldPosition;
+    options.openStages = stageManager()->stages();
+    const QString why = prim_actions::movePrims(*m_undoManager, stage, paths, parent, options);
+    if (!why.isEmpty()) USDCC_LOG_WARNING("usdcc.stage", "{}", why.toStdString());
 }
 
 void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
@@ -158,11 +225,18 @@ void OutlinerViewPanel::onStageChanged(const StageRefPtr& stage) {
     // that touch the hierarchy rebuild the tree.
     m_stageChangedConnection = {};
     m_primCreatedConnection = {};
+    m_primsMovedConnection = {};
     m_revealAfterRefresh = PXR_NS::SdfPath();
+    m_movesToRestore.clear();
     if (stage) {
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
         m_primCreatedConnection = stage->primCreated.connect([this](const PXR_NS::SdfPath& path) { m_revealAfterRefresh = path; });
+        // Before the tree rebuilds, which is queued by the edit's change notice.
+        m_primsMovedConnection = stage->primsMoved.connect([this](const PrimMoves& moves) {
+            m_movesToRestore.insert(m_movesToRestore.end(), moves.begin(), moves.end());
+            if (!moves.empty()) m_revealAfterRefresh = moves.front().second;
+        });
     }
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
 }
@@ -210,12 +284,14 @@ void OutlinerViewPanel::restoreViewState() {
     if (!m_keepViewState) {
         return;
     }
-    for (const PXR_NS::SdfPath& path : m_expandedPaths) {
+    for (const PXR_NS::SdfPath& saved : m_expandedPaths) {
+        const PXR_NS::SdfPath path = pathAfterMoves(saved, m_movesToRestore);
         const QModelIndex index = m_model->fetchPath(path);  // loads instance proxies as needed
         if (index.isValid()) {
             m_treeView->setExpanded(index, true);
         }
     }
+    m_movesToRestore.clear();
     onStageSelectionChanged(currentStage(), stageManager()->selectedPaths(currentStage()));
     // After the view has laid out the restored rows.
     const int scrollPosition = m_scrollPosition;
@@ -274,20 +350,6 @@ void OutlinerViewPanel::expandToSelection(const std::vector<PXR_NS::SdfPath>& pa
     }
 }
 
-void OutlinerViewPanel::onPrimRenamed(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath) {
-    auto paths = stageManager()->selectedPaths(currentStage());
-    bool changed = false;
-    for (auto& path : paths) {
-        if (path == oldPath) {
-            path = newPath;
-            changed = true;
-        }
-    }
-    if (changed) {
-        stageManager()->setSelectedPaths(currentStage(), paths);
-    }
-}
-
 void OutlinerViewPanel::moveSelectedPrim(int direction) {
     const QModelIndexList selected = m_treeView->selectionModel()->selectedIndexes();
     if (selected.size() != 1 || !currentStage()) {
@@ -297,43 +359,20 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     const PXR_NS::SdfPath path = m_model->pathForIndex(selected.first());
     const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
     const PXR_NS::UsdPrim parent = prim ? prim.GetParent() : PXR_NS::UsdPrim();
-    if (!prim_actions::isEditable(prim) || !parent || !prim_actions::isEditable(parent)) {
-        return;  // an instance proxy, or a parent outside the variant being edited
-    }
-
-    // "reorder nameChildren" on the parent's prim spec controls the composed
-    // child order regardless of which layer(s) actually define each child —
-    // the correct, composition-aware way to reorder siblings (as opposed to
-    // moving specs between layers, which SetNameChildrenOrder does not do).
-    std::vector<PXR_NS::TfToken> order;
-    for (const auto& sibling : parent.GetFilteredChildren(PXR_NS::UsdPrimAllPrimsPredicate)) {
-        order.push_back(sibling.GetName());
-    }
-    auto it = std::find(order.begin(), order.end(), prim.GetName());
-    if (it == order.end()) {
+    if (!prim || !parent) {
         return;
     }
-    const auto swapWith = direction < 0 ? it - 1 : it + 1;
-    if (swapWith < order.begin() || swapWith >= order.end()) {
+    const int row = selected.first().row();
+    const int siblings = m_model->rowCount(selected.first().parent());
+    if ((direction < 0 && row == 0) || (direction > 0 && row + 1 >= siblings)) {
         return;  // already first/last
     }
-    std::iter_swap(it, swapWith);
-
-    const PXR_NS::UsdStageRefPtr& usdStage = currentStage()->usdStage();
     // No refresh here: the edit's change notice rebuilds the tree, keeping
     // its expansion and the selection (see onStageObjectsChanged()).
-    m_undoManager->apply(currentStage(), tr("Reorder %1").arg(QString::fromStdString(prim.GetName().GetString())),
-                                               [&]() {
-                                                   if (!usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
-                                                       usdStage->OverridePrim(parent.GetPath());
-                                                   }
-                                                   if (PXR_NS::SdfPrimSpecHandle parentSpec =
-                                                           usdStage->GetEditTarget().GetPrimSpecForScenePath(parent.GetPath())) {
-                                                       parentSpec->SetNameChildrenOrder(order);
-                                                       return true;
-                                                   }
-                                                   return false;
-                                               });
+    prim_actions::MoveOptions options;
+    options.row = direction < 0 ? row - 1 : row + 2;  // before that row, as a drop says it
+    const QString why = prim_actions::movePrims(*m_undoManager, currentStage(), {path}, parent.GetPath(), options);
+    if (!why.isEmpty()) USDCC_LOG_WARNING("usdcc.stage", "{}", why.toStdString());
 }
 
 }  // namespace usdcc::usd

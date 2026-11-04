@@ -844,20 +844,13 @@ void AttributesViewPanel::renameCurrentPrim(const std::string& name) {
     const UsdPrim prim = currentPrim();
     if (!prim || !m_undoManager || name == prim.GetName().GetString()) return;
     const SdfPath oldPath = prim.GetPath();
-    if (!prim_actions::rename(*m_undoManager, currentStage(), oldPath, name)) {
+    // The selection follows it (Stage::primsMoved), and so this panel.
+    if (!prim_actions::rename(*m_undoManager, currentStage(), oldPath, name, stageManager()->stages())) {
         USDCC_LOG_WARNING("usdcc.stage", "Can't rename {} to \"{}\": not a valid prim name, or a sibling has it",
                           oldPath.GetString(), name);
         if (m_primSection && currentPrim()) m_header.name->setValue(VtValue(oldPath.GetName()));  // back to the old one
         return;
     }
-    // Keep showing it: the selection follows the new path, and so does
-    // anything selected under it.
-    const SdfPath newPath = oldPath.ReplaceName(TfToken(name));
-    std::vector<SdfPath> paths = stageManager()->selectedPaths(currentStage());
-    for (SdfPath& path : paths) {
-        if (path.HasPrefix(oldPath)) path = path.ReplacePrefix(oldPath, newPath);
-    }
-    stageManager()->setSelectedPaths(currentStage(), paths);
 }
 
 void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {

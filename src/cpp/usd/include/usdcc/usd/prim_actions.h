@@ -50,8 +50,40 @@ bool setVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPa
 bool clearVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
                   const std::string& variantSet);
 
-// With UsdNamespaceEditor. False for an invalid or unchanged name.
-bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name);
+// With UsdNamespaceEditor. False for an invalid or unchanged name. `openStages`: other
+// stages open now, whose overrides on this prim follow it. All the layers it changes are
+// recorded, and the step announces Stage::primsMoved when undone or redone.
+bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name,
+            const std::vector<StageRefPtr>& openStages = {});
+
+// Moving prims (docs/OUTLINER_REPARENT.md). Empty if `path` can be moved under
+// `newParent`, else why not. Quick enough to ask during a drag's hover.
+QString whyNotMove(const PXR_NS::UsdStageRefPtr& stage, const PXR_NS::SdfPath& path, const PXR_NS::SdfPath& newParent);
+// The same for several dragged together: under their own parent it's a reorder, and a
+// prim whose ancestor is among them goes along with it.
+QString whyNotDrop(const PXR_NS::UsdStageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                   const PXR_NS::SdfPath& newParent);
+// What a move would do beyond the edit target, to say so first.
+struct MoveNotes {
+    std::vector<std::string> otherLayers;     // their display names
+    std::vector<PXR_NS::SdfPath> relocated;   // prims from a reference, moved by a relocates entry
+    bool isEmpty() const { return otherLayers.empty() && relocated.empty(); }
+};
+MoveNotes moveNotes(const PXR_NS::UsdStageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                    const PXR_NS::SdfPath& newParent);
+struct MoveOptions {
+    // Before this row of the new parent's children, as they are before the move; -1 is
+    // wherever the move leaves them.
+    int row = -1;
+    // Changes the local transform so a prim stays where it is in the world, unless the
+    // prim or a parent is animated, which is logged.
+    bool keepWorldPosition = false;
+    std::vector<StageRefPtr> openStages;  // as for rename()
+};
+// Moves them under `newParent`, keeping their order in the tree, as one undo step.
+// Empty if done, else why not, with nothing changed.
+QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                  const PXR_NS::SdfPath& newParent, const MoveOptions& options = {});
 
 // Creating a prim (docs/CREATE_MENU.md §3). The target is where a new prim goes for
 // this selection: under the one selected prim, else at the root. During variant edit

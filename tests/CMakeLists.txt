@@ -22,6 +22,7 @@ add_executable(usdcc_tests
     log_capture_test.cpp
     log_test.cpp
     move_tool_test.cpp
+    prim_move_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp
     rotate_tool_test.cpp
@@ -52,6 +53,7 @@ add_executable(usdcc_ui_tests
     log_panel_test.cpp
     outliner_icons_test.cpp
     outliner_context_menu_test.cpp
+    outliner_drag_test.cpp
     outliner_names_test.cpp
     prim_tree_dialog_test.cpp
     property_row_test.cpp

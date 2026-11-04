@@ -68,6 +68,21 @@ StageRefPtr StageManager::registerStage(const PXR_NS::UsdStageRefPtr& usdStage) 
     PXR_NS::UsdUtilsStageCache::Get().Insert(usdStage);
     auto stage = std::make_shared<Stage>(usdStage);
     m_stages.push_back(stage);
+    // The selection follows a prim that changes path. By the stage's raw pointer, as
+    // the stage owns the signal and shouldn't be kept alive by its own callback.
+    m_primsMovedConnections[stage.get()] = stage->primsMoved.connect([this, raw = stage.get()](const PrimMoves& moves) {
+        const auto it = std::find_if(m_stages.begin(), m_stages.end(), [raw](const StageRefPtr& s) { return s.get() == raw; });
+        if (it == m_stages.end()) return;
+        const StageRefPtr moved = *it;
+        std::vector<PXR_NS::SdfPath> paths = selectedPaths(moved);
+        bool changed = false;
+        for (PXR_NS::SdfPath& path : paths) {
+            const PXR_NS::SdfPath after = pathAfterMoves(path, moves);
+            changed = changed || after != path;
+            path = after;
+        }
+        if (changed) setSelectedPaths(moved, std::move(paths));
+    });
     USDCC_LOG_INFO("usdcc.stage", "Opened stage {}", usdStage->GetRootLayer()->GetIdentifier());
     stageOpened(stage);
 
@@ -85,6 +100,7 @@ void StageManager::closeStage(const StageRefPtr& stage) {
     }
 
     PXR_NS::UsdUtilsStageCache::Get().Erase(stage->usdStage());
+    m_primsMovedConnections.erase(stage.get());
     m_stages.erase(it);
     USDCC_LOG_INFO("usdcc.stage", "Closed stage {}", stage->usdStage()->GetRootLayer()->GetIdentifier());
     stageClosed(stage);

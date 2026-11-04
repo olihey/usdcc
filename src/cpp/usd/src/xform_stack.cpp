@@ -278,6 +278,11 @@ bool XformStack::convertToTRS() const {
     return replaceAll(local, true);
 }
 
+bool XformStack::setLocalTransform(const GfMatrix4d& local) const {
+    if (!replaceAll(local, false)) return false;
+    return !canConvertToTRS() || convertToTRS();
+}
+
 std::string XformStack::opLabel(const UsdGeomXformOp& op) {
     std::string label = prettifyIdentifier(UsdGeomXformOp::GetOpTypeToken(op.GetOpType()).GetString());
     const TfToken suffix = opSuffix(op);

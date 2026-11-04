@@ -13,6 +13,7 @@
 #include <pxr/usd/usd/stage.h>
 
 #include <algorithm>
+#include <deque>
 #include <functional>
 #include <utility>
 
@@ -229,6 +230,53 @@ private:
     bool m_first = true;
 };
 
+// One step that changed several layers. Holds them, so that undo still works if
+// the stage that needed them (a dependent one) has since closed.
+class MultiLayerEditCommand : public QUndoCommand {
+public:
+    struct Recording {
+        PXR_NS::SdfLayerRefPtr layer;
+        PXR_NS::TfRefPtr<EditRecorder> recorder;
+        InverseEdits edits;
+    };
+
+    MultiLayerEditCommand(std::vector<Recording> recordings, const QString& description,
+                          std::function<void(bool)> replayed)
+        : QUndoCommand(description), m_recordings(std::move(recordings)), m_replayed(std::move(replayed)) {}
+
+    void undo() override {
+        USDCC_LOG_INFO("usdcc.undo", "Undo: {}", text().toStdString());
+        play();
+        if (m_replayed) m_replayed(true);
+    }
+    void redo() override {
+        if (m_first) {  // pushed after the edit already happened
+            m_first = false;
+            return;
+        }
+        USDCC_LOG_INFO("usdcc.undo", "Redo: {}", text().toStdString());
+        play();
+        if (m_replayed) m_replayed(false);
+    }
+
+private:
+    void play() {
+        PXR_NS::SdfChangeBlock block;  // one recomposition, not one per layer
+        for (Recording& recording : m_recordings) {
+            if (get_pointer(recording.layer->GetStateDelegate()) != get_pointer(recording.recorder)) {
+                USDCC_LOG_ERROR("usdcc.undo", "Could not replay \"{}\" on {}: it no longer records through usdcc's undo",
+                                text().toStdString(), recording.layer->GetIdentifier());
+                continue;
+            }
+            recording.recorder->play(recording.edits);
+        }
+    }
+
+    std::vector<Recording> m_recordings;
+    std::function<void(bool)> m_replayed;
+    bool m_first = true;
+};
+
 }  // namespace
 
 struct UndoManager::Session {
@@ -308,6 +356,35 @@ bool UndoManager::apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& 
     }
     if (edits.empty()) return true;
     e->stack->push(new LayerEditCommand(layer, std::move(recorder), std::move(edits), description, std::move(keep)));
+    return true;
+}
+
+bool UndoManager::applyAcrossLayers(const StageRefPtr& stage, const std::vector<PXR_NS::SdfLayerHandle>& layers,
+                                    const QString& description, const std::function<bool()>& edit,
+                                    std::function<void(bool undone)> replayed) {
+    Entry* e = entry(stage);
+    if (!e || !edit) return false;
+    // A deque's elements stay put, and each recorder holds a pointer to its list.
+    std::deque<MultiLayerEditCommand::Recording> recordings;
+    for (const PXR_NS::SdfLayerHandle& layer : layers) {
+        if (!layer) continue;
+        PXR_NS::TfRefPtr<EditRecorder> recorder = EditRecorder::forLayer(layer);
+        if (recorder->isRecording()) continue;
+        recordings.push_back({PXR_NS::SdfLayerRefPtr(layer), std::move(recorder), {}});
+        recordings.back().recorder->setRecording(&recordings.back().edits);
+    }
+    const bool ok = edit();
+    for (MultiLayerEditCommand::Recording& recording : recordings) recording.recorder->setRecording(nullptr);
+    if (!ok) {
+        PXR_NS::SdfChangeBlock block;
+        for (MultiLayerEditCommand::Recording& recording : recordings) recording.recorder->play(recording.edits);
+        return false;
+    }
+    std::vector<MultiLayerEditCommand::Recording> changed;
+    for (MultiLayerEditCommand::Recording& recording : recordings) {
+        if (!recording.edits.empty()) changed.push_back(std::move(recording));
+    }
+    if (!changed.empty()) e->stack->push(new MultiLayerEditCommand(std::move(changed), description, std::move(replayed)));
     return true;
 }
 

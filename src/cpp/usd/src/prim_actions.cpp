@@ -1,10 +1,16 @@
 #include "usdcc/usd/prim_actions.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/xform_stack.h"
 
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/variantSetSpec.h>
+#include <pxr/usd/sdf/variantSpec.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usd/modelAPI.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/inherits.h>
@@ -19,6 +25,8 @@
 #include <pxr/usd/usd/variantSets.h>
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdGeom/xformCache.h>
+#include <pxr/usd/usdGeom/xformable.h>
 
 #include <QCoreApplication>
 #include <QStringList>
@@ -27,6 +35,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <set>
 
 namespace usdcc::usd::prim_actions {
@@ -170,6 +179,164 @@ bool writeSelection(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPat
     return true;
 }
 
+// Every layer a namespace edit can touch: this stage's and the other open stages'.
+std::vector<PXR_NS::SdfLayerHandle> layersToRecord(const StageRefPtr& stage, const std::vector<StageRefPtr>& openStages) {
+    std::vector<PXR_NS::SdfLayerHandle> layers;
+    std::set<std::string> seen;
+    auto add = [&](const PXR_NS::UsdStageRefPtr& usdStage) {
+        for (const PXR_NS::SdfLayerHandle& layer : usdStage->GetUsedLayers(/*includeClipLayers=*/false)) {
+            if (seen.insert(layer->GetIdentifier()).second) layers.push_back(layer);
+        }
+    };
+    add(stage->usdStage());
+    for (const StageRefPtr& other : openStages) add(other->usdStage());
+    return layers;
+}
+
+// The names in a layer's child order lists that a moved prim leaves stale, which USD
+// doesn't update: a rename keeps its place, and one moved away goes.
+void tidyChildOrder(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& from, const PXR_NS::SdfPath& to) {
+    for (const PXR_NS::SdfLayerHandle& layer : usdStage->GetLayerStack(/*includeSessionLayers=*/true)) {
+        const PXR_NS::SdfPrimSpecHandle parent = layer->GetPrimAtPath(from.GetParentPath());
+        if (!parent || !layer->PermissionToEdit() || !parent->HasNameChildrenOrder()) continue;
+        const auto current = parent->GetNameChildrenOrder();
+        std::vector<PXR_NS::TfToken> order(current.begin(), current.end());
+        const auto it = std::find(order.begin(), order.end(), from.GetNameToken());
+        if (it == order.end()) continue;
+        if (to.GetParentPath() == from.GetParentPath()) {
+            *it = to.GetNameToken();
+        } else {
+            order.erase(it);
+        }
+        if (order.empty()) {
+            layer->EraseField(parent->GetPath(), PXR_NS::SdfFieldKeys->PrimOrder);
+        } else {
+            parent->SetNameChildrenOrder(order);
+        }
+    }
+}
+
+// In the edit target: the whole list, so it's plain what it means. Works over a
+// weaker layer's children or a reference's, with an `over` if need be.
+bool writeChildOrder(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& parent, const std::vector<PXR_NS::TfToken>& order) {
+    const PXR_NS::UsdEditTarget target = usdStage->GetEditTarget();
+    // Not OverridePrim(), which authors nothing where the prim exists, in a weaker layer say.
+    const PXR_NS::SdfPrimSpecHandle spec = parent.IsAbsoluteRootPath() ? target.GetLayer()->GetPseudoRoot()
+                                                                       : PXR_NS::SdfCreatePrimInLayer(target.GetLayer(), target.MapToSpecPath(parent));
+    if (!spec) return false;
+    spec->SetNameChildrenOrder(order);
+    return true;
+}
+
+std::vector<PXR_NS::TfToken> childNames(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& parent) {
+    std::vector<PXR_NS::TfToken> names;
+    const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(parent);
+    if (!prim) return names;
+    for (const PXR_NS::UsdPrim& child : prim.GetFilteredChildren(PXR_NS::UsdPrimAllPrimsPredicate)) names.push_back(child.GetName());
+    return names;
+}
+
+// The namespace edits, in one undo step, with whatever else goes in it, and what
+// follows the prims announced now and on undo and redo. An editor holds one edit: with
+// two moves declared it applies only the last, and says it applied them.
+bool applyMoves(UndoManager& undo, const StageRefPtr& stage, const PrimMoves& moves, const QString& description,
+                const std::vector<StageRefPtr>& openStages, const std::function<bool()>& also, QString* why) {
+    const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    PrimMoves inverse;
+    for (auto it = moves.rbegin(); it != moves.rend(); ++it) inverse.emplace_back(it->second, it->first);
+    // The tool's target op: USD's change notice drops it when its prim goes.
+    const PXR_NS::SdfPath targetPrim = stage->targetPrim();
+    const PXR_NS::TfToken targetOp = stage->targetXformOp();
+    const std::function<void(bool)> announce = [stage = std::weak_ptr<Stage>(stage), moves, inverse, targetPrim, targetOp](bool undone) {
+        const StageRefPtr alive = stage.lock();
+        if (!alive) return;
+        alive->primsMoved(undone ? inverse : moves);
+        if (!targetOp.IsEmpty()) alive->setTargetXformOp(undone ? targetPrim : pathAfterMoves(targetPrim, moves), targetOp);
+    };
+    const bool done = undo.applyAcrossLayers(
+        stage, layersToRecord(stage, openStages), description,
+        [&]() {
+            // C++ gets USD's verification failures as posted errors, not exceptions.
+            PXR_NS::TfErrorMark mark;
+            for (const auto& [from, to] : moves) {
+                PXR_NS::UsdNamespaceEditor editor(usdStage);
+                for (const StageRefPtr& other : openStages) {
+                    if (other != stage) editor.AddDependentStage(other->usdStage());
+                }
+                std::string whyNot = "USD refused it";
+                if (!editor.MovePrimAtPath(from, to) || !editor.CanApplyEdits(&whyNot) || !mark.IsClean() || !editor.ApplyEdits() ||
+                    !mark.IsClean()) {
+                    mark.Clear();
+                    if (why) *why = tr("Can't move %1: %2").arg(qs(from.GetString()), qs(whyNot));
+                    return false;
+                }
+                tidyChildOrder(usdStage, from, to);
+            }
+            return !also || also();
+        },
+        announce);
+    if (done) announce(false);
+    return done;
+}
+
+// Whether a variant of an ancestor has opinions on the prim at `names`, starting from
+// `specPath` at depth `depth`: the namespace editor would leave those behind. The prim's
+// own variants don't count, since they move with it.
+bool heldInVariant(const PXR_NS::SdfLayerHandle& layer, const PXR_NS::SdfPath& specPath,
+                   const std::vector<PXR_NS::TfToken>& names, std::size_t depth, bool inVariant, PXR_NS::SdfPath* where) {
+    if (depth == names.size()) return inVariant;
+    const PXR_NS::SdfPrimSpecHandle spec = layer->GetPrimAtPath(specPath);
+    if (!spec) return false;
+    const PXR_NS::SdfPath child = specPath.AppendChild(names[depth]);
+    if (layer->GetPrimAtPath(child) && heldInVariant(layer, child, names, depth + 1, inVariant, where)) return true;
+    const PXR_NS::SdfVariantSetsProxy sets = spec->GetVariantSets();
+    for (auto set = sets.begin(); set != sets.end(); ++set) {
+        const PXR_NS::SdfVariantSetSpecHandle setSpec = (*set).second;
+        for (const PXR_NS::SdfVariantSpecHandle& variant : setSpec->GetVariantList()) {
+            const PXR_NS::SdfPath variantPath = specPath.AppendVariantSelection(setSpec->GetName(), variant->GetName());
+            if (heldInVariant(layer, variantPath, names, depth, true, where)) {
+                if (where && where->IsEmpty()) *where = variantPath;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A prim's position in the tree, to sort by.
+std::vector<int> treePosition(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& path) {
+    std::vector<int> position;
+    for (const PXR_NS::SdfPath& prefix : path.GetPrefixes()) {
+        const std::vector<PXR_NS::TfToken> siblings = childNames(usdStage, prefix.GetParentPath());
+        const auto it = std::find(siblings.begin(), siblings.end(), prefix.GetNameToken());
+        position.push_back(int(it - siblings.begin()));
+    }
+    return position;
+}
+
+// Those not under another of them, in tree order.
+std::vector<PXR_NS::SdfPath> topMost(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<PXR_NS::SdfPath>& paths) {
+    std::vector<PXR_NS::SdfPath> top;
+    for (const PXR_NS::SdfPath& path : paths) {
+        const bool under = std::any_of(paths.begin(), paths.end(), [&](const PXR_NS::SdfPath& other) {
+            return other != path && path.HasPrefix(other);
+        });
+        if (!under && std::find(top.begin(), top.end(), path) == top.end()) top.push_back(path);
+    }
+    std::map<PXR_NS::SdfPath, std::vector<int>> positions;
+    for (const PXR_NS::SdfPath& path : top) positions[path] = treePosition(usdStage, path);
+    std::sort(top.begin(), top.end(), [&](const PXR_NS::SdfPath& a, const PXR_NS::SdfPath& b) { return positions[a] < positions[b]; });
+    return top;
+}
+
+bool isAnimated(PXR_NS::UsdPrim prim) {
+    for (; prim && !prim.IsPseudoRoot(); prim = prim.GetParent()) {
+        const PXR_NS::UsdGeomXformable xformable(prim);
+        if (xformable && xformable.TransformMightBeTimeVarying()) return true;
+    }
+    return false;
+}
+
 bool pushLoadRules(UndoManager& undo, const StageRefPtr& stage, const QString& description,
                    std::function<void(const PXR_NS::UsdStageRefPtr&)> change) {
     QUndoStack* stack = undo.stack(stage);
@@ -286,15 +453,162 @@ bool clearVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::Sdf
                       [&]() { return writeSelection(stage->usdStage(), path, variantSet, std::string()); });
 }
 
-bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name) {
+bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name,
+            const std::vector<StageRefPtr>& openStages) {
     const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
     if (!canRename(prim) || name.empty() || name == path.GetName() || !PXR_NS::SdfPath::IsValidIdentifier(name)) {
         return false;
     }
-    return undo.apply(stage, tr("Rename %1 to %2").arg(qs(path.GetName()), qs(name)), [&]() {
-        PXR_NS::UsdNamespaceEditor editor(stage->usdStage());
-        return editor.RenamePrim(stage->usdStage()->GetPrimAtPath(path), PXR_NS::TfToken(name)) && editor.ApplyEdits();
-    });
+    const PXR_NS::SdfPath to = path.ReplaceName(PXR_NS::TfToken(name));
+    if (stage->usdStage()->GetPrimAtPath(to)) return false;  // a sibling has it
+    return applyMoves(undo, stage, {{path, to}}, tr("Rename %1 to %2").arg(qs(path.GetName()), qs(name)), openStages, {}, nullptr);
+}
+
+QString whyNotMove(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& path, const PXR_NS::SdfPath& newParent) {
+    const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(path);
+    const QString name = qs(path.GetString());
+    if (!prim || prim.IsPseudoRoot()) return tr("Can't move %1: it doesn't exist").arg(name);
+    if (prim.IsInstanceProxy()) return tr("Can't move %1: it's part of an instance").arg(name);
+    if (!usdStage->GetEditTarget().GetMapFunction().IsIdentity()) return tr("Can't move a prim while editing a variant: exit first");
+    if (newParent.HasPrefix(path)) return tr("Can't move %1 into itself").arg(name);
+    if (const QString why = whyNotCreateUnder(usdStage->GetPrimAtPath(newParent)); !why.isEmpty()) return why;
+    if (path.GetParentPath() != newParent && usdStage->GetPrimAtPath(newParent.AppendChild(path.GetNameToken()))) {
+        return tr("Can't move %1: %2 already has a %3").arg(name, qs(newParent.GetString()), qs(path.GetName()));
+    }
+    // USD leaves a muted layer alone, so its opinion would bring the old path back.
+    for (const std::string& muted : usdStage->GetMutedLayers()) {
+        const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(muted);
+        if (layer && layer->GetPrimAtPath(path)) {
+            return tr("Can't move %1: the muted layer %2 has opinions on it, which would bring it back").arg(name, qs(layer->GetDisplayName()));
+        }
+    }
+    std::vector<PXR_NS::TfToken> names;
+    for (const PXR_NS::SdfPath& prefix : path.GetPrefixes()) names.push_back(prefix.GetNameToken());
+    for (const PXR_NS::SdfLayerHandle& layer : usdStage->GetLayerStack(/*includeSessionLayers=*/true)) {
+        if (layer->GetPrimAtPath(path) && !layer->PermissionToEdit()) {
+            return tr("Can't move %1: the layer %2 can't be edited").arg(name, qs(layer->GetDisplayName()));
+        }
+        PXR_NS::SdfPath where;
+        if (heldInVariant(layer, PXR_NS::SdfPath::AbsoluteRootPath(), names, 0, false, &where)) {
+            return tr("Can't move %1: the variant %2 has opinions on it, which would stay behind").arg(name, qs(where.GetString()));
+        }
+    }
+    return {};
+}
+
+QString whyNotDrop(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& newParent) {
+    if (paths.empty()) return tr("Nothing to move");
+    std::set<PXR_NS::TfToken> arriving;
+    for (const PXR_NS::SdfPath& path : topMost(usdStage, paths)) {
+        if (path.GetParentPath() == newParent) {  // a reorder: an opinion on the parent, nothing moves
+            const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(path);
+            if (!prim || prim.IsInstanceProxy()) return tr("Can't reorder %1: it's part of an instance").arg(qs(path.GetString()));
+            const PXR_NS::UsdPrim parent = usdStage->GetPrimAtPath(newParent);
+            if (!parent || !isEditable(parent)) return tr("Can't reorder the children of %1 from here").arg(qs(newParent.GetString()));
+            continue;
+        }
+        if (const QString why = whyNotMove(usdStage, path, newParent); !why.isEmpty()) return why;
+        if (!arriving.insert(path.GetNameToken()).second) return tr("Can't move two prims called %1 to one parent").arg(qs(path.GetName()));
+    }
+    return {};
+}
+
+MoveNotes moveNotes(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& newParent) {
+    MoveNotes notes;
+    const PXR_NS::SdfLayerHandle target = usdStage->GetEditTarget().GetLayer();
+    for (const PXR_NS::SdfPath& path : topMost(usdStage, paths)) {
+        if (path.GetParentPath() == newParent) continue;
+        for (const PXR_NS::SdfLayerHandle& layer : usdStage->GetLayerStack(/*includeSessionLayers=*/false)) {
+            if (layer == target || !layer->GetPrimAtPath(path)) continue;
+            const std::string name = layer->GetDisplayName();
+            if (std::find(notes.otherLayers.begin(), notes.otherLayers.end(), name) == notes.otherLayers.end()) notes.otherLayers.push_back(name);
+        }
+        for (const PXR_NS::UsdPrimCompositionQueryArc& arc : PXR_NS::UsdPrimCompositionQuery(usdStage->GetPrimAtPath(path)).GetCompositionArcs()) {
+            if (arc.IsAncestral()) {
+                notes.relocated.push_back(path);
+                break;
+            }
+        }
+    }
+    return notes;
+}
+
+QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                  const PXR_NS::SdfPath& newParent, const MoveOptions& options) {
+    const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    if (const QString why = whyNotDrop(usdStage, paths, newParent); !why.isEmpty()) return why;
+    const std::vector<PXR_NS::SdfPath> top = topMost(usdStage, paths);
+
+    PrimMoves moves;
+    std::vector<PXR_NS::TfToken> movedNames;  // all of them, in order, reordered ones too
+    for (const PXR_NS::SdfPath& path : top) {
+        movedNames.push_back(path.GetNameToken());
+        if (path.GetParentPath() != newParent) moves.emplace_back(path, newParent.AppendChild(path.GetNameToken()));
+    }
+
+    // The order to write: the children staying, with these at the row asked for.
+    const std::vector<PXR_NS::TfToken> before = childNames(usdStage, newParent);
+    std::vector<PXR_NS::TfToken> order;
+    if (options.row >= 0) {
+        std::vector<PXR_NS::TfToken> staying;
+        std::size_t insertAt = 0;
+        for (std::size_t i = 0; i < before.size(); ++i) {
+            if (std::find(movedNames.begin(), movedNames.end(), before[i]) != movedNames.end()) continue;
+            staying.push_back(before[i]);
+            if (int(i) < options.row) insertAt = staying.size();
+        }
+        order = staying;
+        order.insert(order.begin() + std::ptrdiff_t(insertAt), movedNames.begin(), movedNames.end());
+    }
+    const QString verb = moves.empty() ? tr("Reorder") : tr("Move");
+    if (moves.empty()) {
+        if (order.empty() || order == before) return {};  // it's where it was dropped
+        if (!undo.apply(stage, describe(verb, top), [&]() { return writeChildOrder(usdStage, newParent, order); })) {
+            return tr("Couldn't reorder the children of %1").arg(qs(newParent.GetString()));
+        }
+        return {};
+    }
+
+    // Before the move, the world transforms to keep.
+    struct Keep {
+        PXR_NS::SdfPath to;
+        PXR_NS::GfMatrix4d world;
+        PXR_NS::GfMatrix4d oldParent;
+    };
+    std::vector<Keep> keep;
+    if (options.keepWorldPosition) {
+        PXR_NS::UsdGeomXformCache cache;
+        const bool parentAnimated = isAnimated(usdStage->GetPrimAtPath(newParent));
+        for (const auto& [from, to] : moves) {
+            const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(from);
+            const PXR_NS::UsdGeomXformable xformable(prim);
+            if (!xformable || xformable.GetResetXformStack()) continue;  // no transform, or the parent's doesn't reach it
+            if (parentAnimated || isAnimated(prim)) {
+                USDCC_LOG_INFO("usdcc.stage", "{} is animated, or a parent is: keeping its local transform, so it may change place",
+                               from.GetString());
+                continue;
+            }
+            keep.push_back({to, cache.GetLocalToWorldTransform(prim), cache.GetParentToWorldTransform(prim)});
+        }
+    }
+
+    QString why;
+    const bool done = applyMoves(
+        undo, stage, moves, moves.size() == 1 ? tr("Move %1 to %2").arg(qs(moves.front().first.GetName()), qs(newParent.GetString())) : describe(verb, top),
+        options.openStages,
+        [&]() {
+            PXR_NS::UsdGeomXformCache cache;
+            for (const Keep& kept : keep) {
+                const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(kept.to);
+                const PXR_NS::GfMatrix4d newParentWorld = cache.GetParentToWorldTransform(prim);
+                if (PXR_NS::GfIsClose(newParentWorld, kept.oldParent, 1e-9)) continue;
+                if (!XformStack(prim).setLocalTransform(kept.world * newParentWorld.GetInverse())) return false;
+            }
+            return order.empty() || writeChildOrder(usdStage, newParent, order);
+        },
+        &why);
+    if (!done && why.isEmpty()) why = tr("Couldn't move it");
+    return done ? QString() : why;
 }
 
 QString whyNotCreateUnder(const PXR_NS::UsdPrim& parent) {

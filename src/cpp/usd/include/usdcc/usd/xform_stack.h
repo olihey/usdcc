@@ -73,6 +73,10 @@ public:
     bool canConvertToTRS() const;
     bool convertToTRS() const;
 
+    // Replaces the stack so the composed local matrix is `local`: translate / rotateXYZ /
+    // scale ops when it has no shear, else one transform op.
+    bool setLocalTransform(const PXR_NS::GfMatrix4d& local) const;
+
     // "Translate (pivot)", "Rotate XYZ", "Scale (second) ⁻¹" (UTF-8).
     static std::string opLabel(const PXR_NS::UsdGeomXformOp& op);
     // The suffix of an op's name: xformOp:translate:pivot -> "pivot".
