@@ -1,5 +1,6 @@
 #include "usdcc/usd/tool_rail.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
 
 #include <QAction>
@@ -21,7 +22,7 @@ ToolRail::ToolRail(QWidget* parent) : QToolBar(parent), m_group(new QActionGroup
     m_group->setExclusive(true);
 }
 
-void ToolRail::addTool(int id, const QString& toolTip, const QString& iconName) {
+void ToolRail::addTool(int id, const QString& toolTip, const QString& iconName, const std::string& shortcutKey) {
     // Off = idle glyph, On = the white glyph drawn on the checked accent fill.
     QIcon icon;
     icon.addFile(QStringLiteral(":/usdcc/theme/%1.png").arg(iconName), QSize(), QIcon::Normal, QIcon::Off);
@@ -34,6 +35,20 @@ void ToolRail::addTool(int id, const QString& toolTip, const QString& iconName) 
     m_group->addAction(action);
     // triggered() (not toggled()) so only a user pick reports, not setCurrentTool().
     connect(action, &QAction::triggered, this, [this, id]() { Q_EMIT toolSelected(id); });
+
+    if (shortcutKey.empty()) return;
+    // Application-wide, so the key also works in floating panels (a floated
+    // viewport is a window of its own). Text fields still get letters typed
+    // into them: they claim those keys first (ShortcutOverride).
+    action->setShortcutContext(Qt::ApplicationShortcut);
+    usdcc::ui::bindShortcut(action, shortcutKey);
+    const auto updateToolTip = [action, toolTip, shortcutKey]() {
+        const QKeySequence key = usdcc::ui::settingShortcut(shortcutKey);
+        action->setToolTip(key.isEmpty() ? toolTip
+                                         : QStringLiteral("%1 (%2)").arg(toolTip, key.toString(QKeySequence::NativeText)));
+    };
+    usdcc::ui::onSettingChanged(action, shortcutKey, updateToolTip);
+    updateToolTip();
 }
 
 void ToolRail::setCurrentTool(int id) {

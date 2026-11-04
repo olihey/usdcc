@@ -6,6 +6,7 @@
 #include "python_test_app.h"
 #include "test_harness.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using usdcc::test::pythonTestApp;
 using usdcc::usd::StageRefPtr;
@@ -350,4 +352,75 @@ USDCC_TEST(python_standalone_module) {
     std::filesystem::remove(output);
     CHECK(exitCode == 0 && text.str().find("OK") != std::string::npos,
           "_usd.pyd works in a plain python (exit %d): %s", exitCode, text.str().c_str());
+}
+
+// usdcc.settings (docs/SETTINGS.md): the same registry C++ uses, read and
+// written from Python, and settings a plugin defines.
+USDCC_TEST(python_settings) {
+    auto& app = pythonTestApp();
+    auto& settings = usdcc::core::Settings::instance();
+    settings.setBackend(nullptr);
+    settings.define({.key = "Appearance/testAccent", .category = "Appearance", .label = "Accent",
+                     .type = usdcc::core::SettingType::Color, .defaultValue = std::string("#3d8bfd")});
+    std::vector<std::string> changes;
+    auto connection = settings.changed.connect([&changes](const std::string& key) { changes.push_back(key); });
+
+    CHECK(evaluate("__import__('usdcc.settings').settings.get('Appearance/testAccent')") == "#3d8bfd",
+          "get() reads a C++ setting");
+    CHECK(app.python.runString("import usdcc.settings\nusdcc.settings.set('Appearance/testAccent', '#E5484D')\n"),
+          "set() takes a valid value");
+    CHECK(settings.get<std::string>("Appearance/testAccent") == "#e5484d" && changes.size() == 1,
+          "C++ sees it, and changed() fired");
+    CHECK(evaluate("__import__('usdcc.settings').settings.is_default('Appearance/testAccent')") == "False",
+          "is_default()");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.set('Appearance/testAccent', 'red')\n"),
+          "an invalid value raises");
+    CHECK(app.python.runString("import usdcc.settings\n"
+                               "try:\n    usdcc.settings.set('Appearance/testAccent', 5)\n"
+                               "except ValueError:\n    pass\nelse:\n    raise AssertionError('no ValueError')\n"),
+          "as a ValueError");
+    CHECK(app.python.runString("import usdcc.settings\n"
+                               "try:\n    usdcc.settings.get('No/such')\n"
+                               "except KeyError:\n    pass\nelse:\n    raise AssertionError('no KeyError')\n"),
+          "an unknown key raises KeyError");
+    app.python.runString("import usdcc.settings\nusdcc.settings.reset('Appearance/testAccent')\n");
+    CHECK(settings.isDefault("Appearance/testAccent"), "reset()");
+
+    CHECK(app.python.runString("import usdcc.settings as s\n"
+                               "s.define('MyPlugin/level', 'int', 3, label='Level', category='My Plugin',\n"
+                               "         group='General', description='How much.', minimum=1, maximum=10)\n"
+                               "s.define('MyPlugin/mode', 'choice', 'fast', category='My Plugin',\n"
+                               "         choices=['fast', 'slow'])\n"
+                               "s.define('MyPlugin/on', 'bool', True, category='My Plugin')\n"
+                               "s.define('MyPlugin/ratio', 'float', 0.5, category='My Plugin')\n"
+                               "s.define('MyPlugin/key', 'shortcut', 'Ctrl+K', category='My Plugin')\n"),
+          "define() adds settings of each type");
+    const usdcc::core::SettingDefinition* level = settings.definition("MyPlugin/level");
+    CHECK(level && level->type == usdcc::core::SettingType::Int && level->category == "My Plugin" &&
+              level->group == "General" && level->label == "Level" && level->minimum == 1 && level->maximum == 10,
+          "with everything it was given");
+    CHECK(evaluate("__import__('usdcc.settings').settings.keys('My Plugin')") ==
+              "['MyPlugin/level', 'MyPlugin/mode', 'MyPlugin/on', 'MyPlugin/ratio', 'MyPlugin/key']",
+          "keys(category)");
+    CHECK(evaluate("'My Plugin' in __import__('usdcc.settings').settings.categories()") == "True", "categories()");
+    CHECK(evaluate("__import__('usdcc.settings').settings.info('MyPlugin/mode')['choices']") == "['fast', 'slow']",
+          "info() has the choices");
+    CHECK(evaluate("__import__('usdcc.settings').settings.info('MyPlugin/level')['maximum']") == "10.0",
+          "and the range");
+    CHECK(evaluate("__import__('usdcc.settings').settings.get('MyPlugin/on')") == "True", "a bool reads as a bool");
+    CHECK(app.python.runString("import usdcc.settings as s\ns.set('MyPlugin/level', 8)\ns.set('MyPlugin/ratio', 2)\n"),
+          "an int, and an int for a float");
+    CHECK(settings.get<int>("MyPlugin/level") == 8 && settings.get<double>("MyPlugin/ratio") == 2.0,
+          "arrive as their types");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.set('MyPlugin/level', 11)\n"),
+          "out of range raises");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.set('MyPlugin/mode', 'medium')\n"),
+          "not one of the choices raises");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.define('X/y', 'colour', '#000000')\n"),
+          "an unknown type raises");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.define('X/y', 'int', 50, minimum=0, maximum=10)\n"),
+          "a default out of range raises");
+    CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.define('X/y', 'int', 5, minimum=0)\n"),
+          "a minimum without a maximum raises");
+    settings.setBackend(nullptr);
 }

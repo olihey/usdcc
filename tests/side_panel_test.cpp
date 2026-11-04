@@ -6,6 +6,7 @@
 // Runs in usdcc_ui_tests (Qt's offscreen platform); the layout is saved in
 // Qt's test-mode config folder, never in the user's usdcc.ini.
 #include "test_harness.h"
+#include "test_settings.h"
 
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
@@ -26,20 +27,6 @@ using usdcc::ui::MainWindow;
 using usdcc::ui::SidePanel;
 
 namespace {
-
-struct TestSettings {
-    TestSettings() {
-        QStandardPaths::setTestModeEnabled(true);
-        remove();
-    }
-    ~TestSettings() {
-        remove();
-        QStandardPaths::setTestModeEnabled(false);
-    }
-    static void remove() {
-        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini");
-    }
-};
 
 void settle(MainWindow& window) {
     QElapsedTimer timer;

@@ -60,8 +60,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # overlays directly into the same Compatibility-profile GL context Storm
 # already requires (see docs/PLAN.md milestone M5/M3). Svg: the Outliner's
 # prim icons, rendered with QSvgRenderer (docs/PRIM_ICONS.md); no SVG
-# plugins are needed for that.
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg)
+# plugins are needed for that. Test: only for the tests (key presses that go
+# through the shortcut map, QTest::keyClick).
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)

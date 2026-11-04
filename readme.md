@@ -87,6 +87,13 @@ cache_id = manager.open_stage("scene.usda")
 stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(cache_id))
 ```
 
+### Settings
+
+Edit > Settings… (`Ctrl+,`) holds the app's preferences, such as the accent color, the UI
+scale and the tool shortcuts (Q select, W move, E rotate, R scale). They are saved in
+`usdcc.ini`, and Python reads and changes them with `usdcc.settings`. See
+[docs/SETTINGS.md](docs/SETTINGS.md).
+
 ### Convenience scripts
 
 [tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the

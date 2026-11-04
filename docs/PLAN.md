@@ -664,8 +664,8 @@ things that will bite later if not addressed early:
     required Move and Rotate to measure the whole drag from its start instead of applying
     per-frame deltas (Scale already did); a snapped drag that hasn't reached its first increment
     authors no xformOp. **Not implemented:** the design's Lasso/Paint select shapes, Select
-    Through, and Pivot (the design shows them; the tools have no such behaviour yet), and keyboard
-    shortcuts for switching tools. **Draggable:** both bars can be dragged by a grip handle to
+    Through, and Pivot (the design shows them; the tools have no such behaviour yet). Keyboard
+    shortcuts for switching tools came later, as settings (item 40). **Draggable:** both bars can be dragged by a grip handle to
     another edge of the main window or floated (the options bar is limited to top/bottom, being a
     horizontal strip). `ViewportToolBars` watches each bar's move/resize and keeps an `area`
     property (left/right/top/bottom/floating) current so `dark.qss` can draw the divider on the edge
@@ -879,6 +879,22 @@ things that will bite later if not addressed early:
     under `MainWindow/collapsedSidePanels`. A collapsed Log counts errors as unseen, and
     its Show Log button expands it. Tested in `side_panel_collapse` (usdcc_ui_tests).
 
+40. **Settings: one registry, a dialog, Python.** Preferences are typed, described
+    settings in `usdcc::core::Settings` (Qt-free, in `usdcc_core` so the exe and the
+    Python modules share one instance). `usdcc.ini` stores them through a QSettings
+    backend. Edit > Settings… (`Ctrl+,`) builds a page per category from the definitions,
+    so every page looks the same, and changes apply immediately. Python reads, writes and
+    defines settings with `usdcc.settings`. The first settings:
+    - the **accent color**, replacing every hard-coded `#3d8bfd`: `@accent` tokens in the
+      stylesheets, `theme::accent()` in C++ painting;
+    - the **UI scale**, moved onto the registry;
+    - **tool shortcuts** Q/W/E/R on the tool rail. These are application-wide, so they
+      work in the viewport's native window and in floating panels; text fields keep their
+      letters.
+
+    UI state (layout, panel filters, dialog sizes) stays as plain `appSettings()` keys. See
+    [SETTINGS.md](SETTINGS.md).
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
@@ -1032,7 +1048,7 @@ These run throughout, not as discrete milestones:
 | M7 Scripting & Python Extensibility | Done — planned in [SCRIPTING.md](SCRIPTING.md) (five phases, all done). Phase 1 done: one Python (OpenUSD's) in the build, `usd.pyd` rebuilt for it, the embedded interpreter (`PythonRuntime`) with Python's output in the log, Debug > Run Python File. Phase 2 done: scripts work on the app's stages, selection, undo history and tools (`usdcc.usd`/`app`/`core`/`tools`); one script run is one undo step per stage it changed; the exit criterion is tested. Phase 3 done: the Script Editor panel (editor with highlighting, Run / Run Selection, output pane, files). Phase 4 done: startup scripts in `%LOCALAPPDATA%/usdcc/scripts/startup`, `--script`, `--no-startup-scripts`. Phase 5 done: PySide6 built for OpenUSD's Python (`tools/build-pyside.ps1` fixed), `usdcc.app.main_window()` and `add_side_panel()` for Python-made side panels that keep their place in the saved layout |
 | M8 Layer Editing & Logging | In progress — the logging half is done: planned in [LOGGING.md](LOGGING.md), all five phases (phase 5, Python's output in the log, was built with M7 phase 1). Phase 1 done: `usdcc_core` is now a shared library holding the `LogHub`, `USDCC_LOG_*` macros, a rotating log file in `%LOCALAPPDATA%/usdcc/logs`, first log calls in stage/viewport/undo/layout code. Phase 2 done: OpenUSD diagnostics (`TfDiagnosticBridge`) and Qt messages (`QtMessageBridge`) reach the log, a console sink for Debug builds, and the open-stage failure dialog names the error. Phase 3 done: the `LogSidePanel` replaces the stand-in (filters, search, details, follow mode, unseen-error title, Show Log from the failure dialog, Debug > Emit Test Log Messages). Phase 4 done: native stdout/stderr (TF_DEBUG, printf from libraries) is captured into the log. `USDASidePanel` not planned yet |
 | M9 Plugin System | Not started |
-| M10 Dialogs & Settings | In progress — persistent UI scaling and View-menu controls implemented; settings and Info dialogs remain |
+| M10 Dialogs & Settings | In progress — the settings registry, the Settings dialog (Appearance: accent color and UI scale; Shortcuts: tools) and `usdcc.settings` for Python are done (§6 item 40, [SETTINGS.md](SETTINGS.md)); more settings (viewport, Python, the Debug menu) and the Info dialog remain |
 | M11 Packaging & Deployment | Not started |
 | M12 Hardening & Release Readiness | Not started |
 | M13 Attribute Editor Revamp | Done (all five phases) — undo edit sessions and undoable gizmo drags, `Stage::changed` live refresh, `ValueTypeInfo`, the `usdcc_tests` CTest target, the property widget kit and Debug > USD Data Types (112 types, all with an editor), the categorized `AttributesViewPanel`, the transform-stack editor (add/remove/reorder/rename/pivot/bake/convert), and Move/Rotate/Scale targeting one specific xformOp (all six Euler orders, single-axis rotates, orient, and `transform` matrix ops). See [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md) §12; §9 there lists what's still out of scope |

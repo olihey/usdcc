@@ -148,7 +148,7 @@ LICENSE.
 - **Selected rows**: the icon turns white, like the text.
 - **States**, without new icons: an inactive (deactivated) prim draws its icon at 35% opacity,
   like its text. A prim with references has a small arrow badge at the icon's lower left, in
-  the accent blue `#3d8bfd`, on selected rows too (`badge-reference.svg`; a circle under it is
+  the accent color (the `Appearance/accentColor` setting, blue `#3d8bfd` by default), on selected rows too (`badge-reference.svg`; a circle under it is
   cleared so it reads on any row). Badges for payloads and instance proxies are still to do
   (§7 phase 3).
 

@@ -1,5 +1,6 @@
 #include "usdcc/usd/viewport_tool_bars.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/tool_options_bar.h"
@@ -20,14 +21,45 @@ namespace usdcc::usd {
 
 using usdcc::tools::ToolKind;
 
+namespace {
+
+// The keys that pick each tool: Shortcut settings, so they can be changed in
+// the Settings dialog (and from Python).
+void defineToolShortcuts() {
+    struct Shortcut {
+        const char* key;
+        const char* label;
+        const char* defaultKey;
+    };
+    for (const Shortcut& shortcut : {Shortcut{toolShortcutKeys::select, "Select tool", "Q"},
+                                     Shortcut{toolShortcutKeys::move, "Move tool", "W"},
+                                     Shortcut{toolShortcutKeys::rotate, "Rotate tool", "E"},
+                                     Shortcut{toolShortcutKeys::scale, "Scale tool", "R"}}) {
+        usdcc::core::Settings::instance().define({
+            .key = shortcut.key,
+            .category = "Shortcuts",
+            .group = "Tools",
+            .label = shortcut.label,
+            .type = usdcc::core::SettingType::Shortcut,
+            .defaultValue = std::string(shortcut.defaultKey),
+        });
+    }
+}
+
+}  // namespace
+
 ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::tools::ToolSet> toolSet,
                                    StageManager* stageManager)
     : QObject(window), m_window(window), m_toolSet(std::move(toolSet)), m_stageManager(stageManager) {
+    defineToolShortcuts();
     m_rail = new ToolRail(window);
-    m_rail->addTool(static_cast<int>(ToolKind::Select), tr("Select"), QStringLiteral("tool-select"));
-    m_rail->addTool(static_cast<int>(ToolKind::Move), tr("Move"), QStringLiteral("tool-move"));
-    m_rail->addTool(static_cast<int>(ToolKind::Rotate), tr("Rotate"), QStringLiteral("tool-rotate"));
-    m_rail->addTool(static_cast<int>(ToolKind::Scale), tr("Scale"), QStringLiteral("tool-scale"));
+    m_rail->addTool(static_cast<int>(ToolKind::Select), tr("Select"), QStringLiteral("tool-select"),
+                    toolShortcutKeys::select);
+    m_rail->addTool(static_cast<int>(ToolKind::Move), tr("Move"), QStringLiteral("tool-move"), toolShortcutKeys::move);
+    m_rail->addTool(static_cast<int>(ToolKind::Rotate), tr("Rotate"), QStringLiteral("tool-rotate"),
+                    toolShortcutKeys::rotate);
+    m_rail->addTool(static_cast<int>(ToolKind::Scale), tr("Scale"), QStringLiteral("tool-scale"),
+                    toolShortcutKeys::scale);
     window->addToolBar(Qt::LeftToolBarArea, m_rail);
 
     // The options bar is a plain widget; a QToolBar is what puts it in the main

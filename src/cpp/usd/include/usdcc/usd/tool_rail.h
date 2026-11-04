@@ -2,6 +2,8 @@
 
 #include <QToolBar>
 
+#include <string>
+
 class QActionGroup;
 
 namespace usdcc::usd {
@@ -19,8 +21,10 @@ public:
 
     // Adds an action below the existing ones. `iconName` names the pair of
     // theme icons `:/usdcc/theme/<iconName>.png` (idle) and `<iconName>-active.png`
-    // (shown while it's checked, on its accent background).
-    void addTool(int id, const QString& toolTip, const QString& iconName);
+    // (shown while it's checked, on its accent background). `shortcutKey`
+    // names a Shortcut setting (usdcc::core::Settings) that picks the tool from
+    // anywhere in the app; the tooltip shows its current key.
+    void addTool(int id, const QString& toolTip, const QString& iconName, const std::string& shortcutKey = {});
 
     // Checks the action for `id` without emitting toolSelected().
     void setCurrentTool(int id);

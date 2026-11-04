@@ -26,6 +26,7 @@ add_executable(usdcc_tests
     property_categorizer_test.cpp
     relationship_targets_test.cpp
     rotate_tool_test.cpp
+    settings_test.cpp
     stage_changes_test.cpp
     stage_names_test.cpp
     undo_manager_test.cpp
@@ -41,6 +42,7 @@ target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6
 
 add_executable(usdcc_ui_tests
     test_harness.h
+    test_settings.h
     test_harness.cpp
     ui_test_main.cpp
     attributes_rename_test.cpp
@@ -60,12 +62,13 @@ add_executable(usdcc_ui_tests
     relationship_editor_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
+    settings_ui_test.cpp
     side_panel_test.cpp
     usda_view_test.cpp
     variant_editor_test.cpp
     view_panel_layout_test.cpp
 )
-target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)
+target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
 #                    executable because Python can only be started once per

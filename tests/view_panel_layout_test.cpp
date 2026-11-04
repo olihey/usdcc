@@ -5,6 +5,7 @@
 // platform); the layout is saved in Qt's test-mode config folder, never in
 // the user's usdcc.ini.
 #include "test_harness.h"
+#include "test_settings.h"
 
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/view_panel_registry.h"
@@ -34,19 +35,6 @@ using usdcc::usd::StageManager;
 using usdcc::usd::UndoManager;
 
 namespace {
-struct TestSettings {
-    TestSettings() {
-        QStandardPaths::setTestModeEnabled(true);
-        remove();
-    }
-    ~TestSettings() {
-        remove();
-        QStandardPaths::setTestModeEnabled(false);
-    }
-    static QString path() { return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini"; }
-    static void remove() { QFile::remove(path()); }
-};
-
 void settle(MainWindow& window) {
     QElapsedTimer timer;
     timer.start();

@@ -4,10 +4,12 @@
 #include <functional>
 #include <memory>
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/qt_message_bridge.h"
+#include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/view_panel_registry.h"
 
@@ -165,6 +167,9 @@ int main(int argc, char** argv) {
         USDCC_LOG_WARNING("usdcc.app", "Could not create a log file in {}", logDir.toStdString());
     }
 
+    // Preferences (docs/SETTINGS.md) load from usdcc.ini from here on; every
+    // setting defined later (the theme's first) starts from its saved value.
+    usdcc::ui::installAppSettings();
     usdcc::ui::theme::apply(app);
 
     // Declared before `window` (and so destroyed after it, per C++'s
@@ -463,6 +468,11 @@ int main(int argc, char** argv) {
     QAction* redoAction = undoGroup->createRedoAction(&window, QObject::tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
     editMenu->addAction(redoAction);
+    editMenu->addSeparator();
+    QAction* settingsAction = editMenu->addAction(QObject::tr("&Settings..."), &window,
+                                                  [&window]() { usdcc::ui::SettingsDialog::showDialog(&window); });
+    settingsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    settingsAction->setMenuRole(QAction::PreferencesRole);
 
     // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
     window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));

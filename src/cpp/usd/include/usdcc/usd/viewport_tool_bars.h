@@ -22,6 +22,15 @@ class StageManager;
 class ToolOptionsBar;
 class ToolRail;
 
+// The Shortcut settings (usdcc::core::Settings) that pick each tool; the
+// constructor below defines them (Q, W, E, R by default).
+namespace toolShortcutKeys {
+inline constexpr auto select = "Shortcuts/tools.select";
+inline constexpr auto move = "Shortcuts/tools.move";
+inline constexpr auto rotate = "Shortcuts/tools.rotate";
+inline constexpr auto scale = "Shortcuts/tools.scale";
+}  // namespace toolShortcutKeys
+
 // The two toolbars that drive the editing tools, installed in the *main
 // window's* layout rather than inside any viewport (see docs/PLAN.md §6): a
 // vertical tool rail down the left edge and a tool-options bar under the menu

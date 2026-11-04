@@ -8,6 +8,7 @@
 // file isn't built.
 #include "python_test_app.h"
 #include "test_harness.h"
+#include "test_settings.h"
 
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -38,22 +39,6 @@ using usdcc::test::pythonTestApp;
 using usdcc::ui::MainWindow;
 
 namespace {
-// The window saves its layout to usdcc.ini in the app's config folder; Qt's
-// test mode moves that folder away from the user's.
-struct TestSettings {
-    TestSettings() {
-        QStandardPaths::setTestModeEnabled(true);
-        remove();
-    }
-    ~TestSettings() {
-        remove();
-        QStandardPaths::setTestModeEnabled(false);
-    }
-    static void remove() {
-        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini");
-    }
-};
-
 QMenu* viewMenu(MainWindow& window) {
     for (QAction* action : window.mainMenuBar()->actions()) {
         if (action->menu() && action->text() == QObject::tr("&View")) return action->menu();
