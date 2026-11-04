@@ -5,14 +5,19 @@
 // edit) included.
 #include "python_test_app.h"
 #include "test_harness.h"
+#include "test_settings.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
+#include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/ui/main_window.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -23,11 +28,13 @@
 #include <QCoreApplication>
 #include <QUndoStack>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using usdcc::test::pythonTestApp;
@@ -423,4 +430,87 @@ USDCC_TEST(python_settings) {
     CHECK(!app.python.runString("import usdcc.settings\nusdcc.settings.define('X/y', 'int', 5, minimum=0)\n"),
           "a minimum without a maximum raises");
     settings.setBackend(nullptr);
+}
+
+namespace {
+struct RecordingSink : usdcc::core::LogSink {
+    std::vector<usdcc::core::LogRecord> records;
+    void onRecord(const usdcc::core::LogRecord& record) override { records.push_back(record); }
+};
+}  // namespace
+
+// usdcc.toast and the toast flag of usdcc.core.log / logging
+// (docs/NOTIFICATIONS.md): toasts in a real MainWindow, and log records marked
+// to show as one.
+USDCC_TEST(python_toasts) {
+    auto& app = pythonTestApp();
+    CHECK(!app.python.runString("import usdcc.toast\nusdcc.toast.show('No window')\n"),
+          "usdcc.toast needs a window");
+
+    TestSettings settings;
+    usdcc::ui::MainWindow window;
+    window.restoreLayout();
+    window.resize(1000, 700);
+    window.show();
+    QCoreApplication::processEvents();
+    const usdcc::scripting::AppContextScope scope({&app.stages, &app.undo, &app.tools, &window});
+    usdcc::ui::ToastManager& toasts = *window.toasts();
+
+    CHECK(app.python.runString("import usdcc.toast\n"
+                               "first = usdcc.toast.show('Exported', 'line 1\\nline 2', kind='success')\n"
+                               "second = usdcc.toast.show('Stays', sticky=True, kind='error')\n"
+                               "third = usdcc.toast.show('Quick', duration=0.5)\n"
+                               "assert usdcc.toast.visible() == [third, second, first], usdcc.toast.visible()\n"),
+          "show() of each sort, and visible() lists them newest first");
+    const QList<usdcc::ui::ToastWidget*> shown = toasts.visibleToasts();
+    CHECK(shown.size() == 3, "three toasts are up (%lld)", static_cast<long long>(shown.size()));
+    if (shown.size() == 3) {
+        CHECK(shown[2]->kind() == usdcc::core::ToastKind::Success && shown[2]->title() == "Exported" &&
+                  shown[2]->body() == "line 1\nline 2",
+              "kind, title and multiline body");
+        CHECK(shown[1]->isSticky() && shown[0]->durationMs() == 500, "sticky, and a duration in seconds");
+    }
+    CHECK(!app.python.runString("import usdcc.toast\nusdcc.toast.show('Bad', kind='fatal')\n"),
+          "an unknown kind raises");
+    CHECK(!app.python.runString("import usdcc.toast\nusdcc.toast.show('Bad', duration=0)\n"),
+          "a zero duration raises (sticky=True is how)");
+    app.python.runString("import usdcc.toast\nusdcc.toast.dismiss_all()\n");
+    CHECK(toasts.visibleToasts().isEmpty(), "dismiss_all()");
+
+    auto sink = std::make_shared<RecordingSink>();
+    usdcc::core::LogHub::instance().addSink(sink, false);
+    CHECK(app.python.runString("import usdcc.core\n"
+                               "usdcc.core.log(usdcc.core.DEBUG, 'my.tool', 'Quiet but shown', toast=True)\n"
+                               "usdcc.core.log(usdcc.core.ERROR, 'my.tool', 'Boom', toast='sticky', title='Export',"
+                               " kind='warning')\n"
+                               "import logging\n"
+                               "logging.getLogger('my.tool').warning('From logging', extra={'usdcc_toast': True,"
+                               " 'usdcc_toast_title': 'Logged'})\n"),
+          "usdcc.core.log(..., toast=...) and logging's extra");
+    CHECK(!app.python.runString("import usdcc.core\nusdcc.core.log(usdcc.core.INFO, 'x', 'y', toast='loud')\n"),
+          "an unknown toast mode raises");
+    usdcc::core::LogHub::instance().removeSink(sink.get());
+    std::vector<usdcc::core::LogRecord> marked;
+    for (const auto& record : sink->records) {
+        if (record.toast) marked.push_back(record);
+    }
+    CHECK(marked.size() == 3, "three records marked as toasts (%zu)", marked.size());
+    if (marked.size() == 3) {
+        CHECK(marked[0].level == usdcc::core::LogLevel::Debug && marked[0].toast->durationMs == -1,
+              "a disabled level still posts a toast record");
+        CHECK(marked[1].toast->durationMs == 0 && marked[1].toast->title == "Export" &&
+                  marked[1].toast->kind == usdcc::core::ToastKind::Warning,
+              "sticky, its title and kind");
+        CHECK(marked[2].message == "From logging" && marked[2].toast->title == "Logged", "logging's extra");
+    }
+    const bool arrived = [&toasts]() {
+        for (int i = 0; i < 200 && toasts.visibleToasts().size() < 3; ++i) {
+            QCoreApplication::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return toasts.visibleToasts().size() == 3;
+    }();
+    CHECK(arrived, "and the window shows them");
+    toasts.dismissAll();
+    window.close();
 }

@@ -18,6 +18,9 @@ add_library(usdcc_ui STATIC
     include/usdcc/ui/text_view.h
     include/usdcc/ui/theme.h
     include/usdcc/ui/title_bar.h
+    include/usdcc/ui/toast.h
+    include/usdcc/ui/toast_log_sink.h
+    include/usdcc/ui/toast_manager.h
     include/usdcc/ui/view_panel.h
     include/usdcc/ui/view_panel_registry.h
     src/app_settings.cpp
@@ -37,6 +40,9 @@ add_library(usdcc_ui STATIC
     src/text_view.cpp
     src/theme.cpp
     src/title_bar.cpp
+    src/toast.cpp
+    src/toast_log_sink.cpp
+    src/toast_manager.cpp
     src/view_panel.cpp
     src/view_panel_registry.cpp
     # Theme stylesheets + icons (AUTORCC compiles this in; see theme.cpp).

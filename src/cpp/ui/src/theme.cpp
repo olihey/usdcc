@@ -90,6 +90,16 @@ QColor accent() {
     return color.isValid() ? color : QColor(QString::fromLatin1(defaultAccentColor));
 }
 
+QColor toastColor(core::ToastKind kind) {
+    switch (kind) {
+        case core::ToastKind::Success: return QColor(0x4f, 0xd6, 0x71);
+        case core::ToastKind::Warning: return QColor(0xff, 0xb3, 0x40);
+        case core::ToastKind::Error: return QColor(0xff, 0x5f, 0x56);
+        case core::ToastKind::Info: break;
+    }
+    return accent();
+}
+
 QString resolveTokens(const QString& sheet, const QColor& accentColor) {
     QString result = sheet;
     result.replace(QStringLiteral("@accent-rgb"), QStringLiteral("%1, %2, %3")

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/toast.h"
+
 #include <QColor>
 #include <QIcon>
 #include <QString>
@@ -29,6 +31,10 @@ void defineSettings();
 
 // The current accent colour (the default one if the setting is undefined).
 QColor accent();
+
+// A toast notification's colour (docs/NOTIFICATIONS.md): Info the accent,
+// Success green, Warning amber, Error red (dark.qss's tokens).
+QColor toastColor(core::ToastKind kind);
 
 // `sheet` with the stylesheet tokens replaced: @accent-rgb by "r, g, b" (for
 // rgba(@accent-rgb, 25%)), @accent-hover by a lighter shade and @accent by

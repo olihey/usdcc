@@ -46,7 +46,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 // follows in the order it was defined.
 const QStringList& knownCategoryOrder() {
     static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"),
-                                      QStringLiteral("Tools"), QStringLiteral("Shortcuts"),
+                                      QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Notifications"),
                                       QStringLiteral("Python")};
     return order;
 }

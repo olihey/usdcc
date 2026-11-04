@@ -91,6 +91,10 @@ take them for a `bool`.
 | `Shortcuts/tools.move` | Shortcut | `W` | `ViewportToolBars` |
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
+| `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
+| `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
+| `Notifications/errorsSticky` | Bool | on | `ToastManager` |
+| `Notifications/maxVisible` | Int 1–10 | 5 | `ToastManager` |
 
 **Accent color.** `dark.qss` and `dock.qss` use three tokens:
 
@@ -122,7 +126,7 @@ at a time.
 
 **Layout.**
 - Categories are listed on the left, those the app knows first (Appearance, Viewport,
-  Tools, Shortcuts, Python), then the others in definition order.
+  Tools, Shortcuts, Notifications, Python), then the others in definition order.
 - Every page is generated from the definitions: a heading per group and a row per
   setting. A row holds the label, an editor for the type, the description, and a Reset
   button that shows while the value isn't the default.

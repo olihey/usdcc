@@ -24,6 +24,8 @@
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/title_bar.h"
+#include "usdcc/ui/toast_log_sink.h"
+#include "usdcc/ui/toast_manager.h"
 
 #include <QWKWidgets/widgetwindowagent.h>
 
@@ -101,6 +103,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     addDockWidget(Qt::BottomDockWidgetArea, m_logPanel);
     m_sidePanels.append(m_logPanel);
 
+    // Toasts, and the log records marked to show as one. Not the records
+    // logged before the window existed (no backlog replay): they'd pop up
+    // long after the fact.
+    m_toasts = new ToastManager(this);
+    m_toastSink = std::make_shared<ToastLogSink>(m_toasts, [this]() { m_logPanel->showLatest(); });
+    usdcc::core::LogHub::instance().addSink(m_toastSink, false);
+
     // Deliberately not calling restoreLayout() here — see its declaration in
     // main_window.h for why. The composition root calls it once every panel
     // exists.
@@ -108,7 +117,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
 
+MainWindow::~MainWindow() {
+    // Before m_toasts goes: the sink posts to it from any thread.
+    usdcc::core::LogHub::instance().removeSink(m_toastSink.get());
+}
+
 LogSidePanel* MainWindow::logPanel() const { return m_logPanel; }
+
+ToastManager* MainWindow::toasts() const { return m_toasts; }
 
 void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
     if (!panel || m_sidePanels.contains(panel)) return;

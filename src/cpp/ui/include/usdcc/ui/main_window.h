@@ -6,6 +6,7 @@
 #include <QVariantMap>
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 class QAction;
@@ -24,6 +25,8 @@ class WidgetWindowAgent;
 namespace usdcc::ui {
 
 class LogSidePanel;
+class ToastLogSink;
+class ToastManager;
 class SidePanel;
 class TitleBar;
 
@@ -41,6 +44,7 @@ class MainWindow : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
     // The window's menu bar, which lives inside the title bar. Use this, not
     // QMainWindow::menuBar(): that would see the title bar isn't a QMenuBar
@@ -54,6 +58,11 @@ public:
 
     // The Log side panel; always exists.
     LogSidePanel* logPanel() const;
+
+    // The window's toast notifications (docs/NOTIFICATIONS.md). Log records
+    // marked as toasts (USDCC_LOG_TOAST) show here too, from the moment the
+    // window exists; warnings and errors with a Show Log button.
+    ToastManager* toasts() const;
 
     // Docks a side panel from outside usdcc_ui (the Script Editor panel, panels
     // made in Python) in `area`, lists it in the View menu, and takes
@@ -128,6 +137,8 @@ private:
     QList<SidePanel*> m_sidePanels;
     std::vector<std::function<bool()>> m_closeChecks;
     LogSidePanel* m_logPanel = nullptr;
+    ToastManager* m_toasts = nullptr;
+    std::shared_ptr<ToastLogSink> m_toastSink;
     bool m_layoutRestored = false;
     // objectName -> the size to expand to, of the side panels the saved
     // layout had collapsed.

@@ -13,6 +13,7 @@ add_library(usdcc_core SHARED
     include/usdcc/core/native_stream_capture.h
     include/usdcc/core/settings.h
     include/usdcc/core/signal.h
+    include/usdcc/core/toast.h
     src/console_log_sink.cpp
     src/file_log_sink.cpp
     src/log.cpp

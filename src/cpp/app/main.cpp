@@ -11,6 +11,7 @@
 #include "usdcc/ui/qt_message_bridge.h"
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
 
 #include <DockManager.h>
@@ -506,6 +507,27 @@ int main(int argc, char** argv) {
     QObject::connect(testMessagesAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogTestMessages(); });
     QAction* burstAction = debugMenu->addAction(QObject::tr("Emit 10 000 Log &Messages"));
     QObject::connect(burstAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogBurst(10000); });
+    // One toast of every kind, a long one, a sticky one and one from the log
+    // (docs/NOTIFICATIONS.md).
+    QAction* testToastsAction = debugMenu->addAction(QObject::tr("Show Test T&oasts"));
+    QObject::connect(testToastsAction, &QAction::triggered, &window, [&window]() {
+        using usdcc::core::ToastKind;
+        using usdcc::core::ToastRequest;
+        usdcc::ui::ToastManager* toasts = window.toasts();
+        toasts->show({.kind = ToastKind::Info, .title = "Stage opened", .body = "cube_and_sphere.usda"});
+        toasts->show({.kind = ToastKind::Success, .title = "Saved", .body = "cube_and_sphere.usda\n3 prims, 2 layers"});
+        toasts->show({.kind = ToastKind::Warning,
+                      .title = "Unresolved asset paths",
+                      .body = "Two references point at files that don't exist:\n"
+                              "  ./props/chair.usda\n"
+                              "  ./props/table_with_a_rather_long_file_name_that_wraps.usda\n"
+                              "The prims that use them stay empty until the files are there."});
+        toasts->show({.kind = ToastKind::Error,
+                      .title = "Export failed (stays until dismissed)",
+                      .body = "Could not write C:/out/scene.usda:\nPermission denied",
+                      .durationMs = ToastRequest::kSticky});
+        USDCC_LOG_TOAST(usdcc::core::LogLevel::Warning, "usdcc.test", "A warning logged as a toast, from {}", "C++");
+    });
     // Runs a file without opening it in the Script Editor panel.
     debugMenu->addSeparator();
     QAction* runPythonAction = debugMenu->addAction(QObject::tr("Run &Python File..."));

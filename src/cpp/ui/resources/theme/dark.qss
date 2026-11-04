@@ -963,3 +963,61 @@ QToolButton#settingReset:hover {
 QToolButton#settingColorButton {
     padding: 0 8px 0 4px;
 }
+
+/* ---- Toast notifications (ToastWidget, docs/NOTIFICATIONS.md) ----------
+   The card, its stripe, icon and countdown bar are painted (toast.cpp, in
+   theme::toastColor()); these are its texts and buttons. */
+
+QLabel#toastTitle {
+    color: #e8e8ea;
+    font-weight: 600;
+}
+
+QLabel#toastBody {
+    color: rgba(255, 255, 255, 75%);
+}
+
+QScrollArea#toastBodyScroll,
+QScrollArea#toastBodyScroll > QWidget,
+QScrollArea#toastBodyScroll > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QLabel#toastCount {
+    color: rgba(255, 255, 255, 75%);
+    background: rgba(255, 255, 255, 10%);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 10px;
+}
+
+QToolButton#toastClose {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+}
+
+QToolButton#toastClose:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+QPushButton#toastAction {
+    min-height: 18px;
+    padding: 0 10px;
+}
+
+QToolButton#toastDismissAll {
+    background: #232326;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 10%);
+    border-radius: 9px;
+    padding: 0 10px;
+    min-height: 18px;
+}
+
+QToolButton#toastDismissAll:hover {
+    color: #e8e8ea;
+    background: #2c2c30;
+}

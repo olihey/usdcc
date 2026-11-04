@@ -70,7 +70,7 @@ void callSink(const char* what, Call&& call) {
 
 bool sameMessage(const LogRecord& a, const LogRecord& b) {
     return a.level == b.level && a.line == b.line && a.message == b.message && a.category == b.category &&
-           a.file == b.file && a.details == b.details;
+           a.file == b.file && a.details == b.details && a.toast.has_value() == b.toast.has_value();
 }
 }  // namespace
 
@@ -170,7 +170,8 @@ LogHub::LogHub() : m_impl(std::make_unique<Impl>()) {}
 LogHub::~LogHub() = default;
 
 void LogHub::post(LogRecord record) {
-    if (!isEnabled(record.level, record.source, record.category)) return;
+    // A toast is meant to be seen: it isn't filtered by level.
+    if (!record.toast && !isEnabled(record.level, record.source, record.category)) return;
 
     if (record.time == std::chrono::system_clock::time_point()) record.time = std::chrono::system_clock::now();
     record.lastTime = record.time;

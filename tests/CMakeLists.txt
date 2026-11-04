@@ -64,6 +64,7 @@ add_executable(usdcc_ui_tests
     schema_pills_test.cpp
     settings_ui_test.cpp
     side_panel_test.cpp
+    toast_test.cpp
     usda_view_test.cpp
     variant_editor_test.cpp
     view_panel_layout_test.cpp

@@ -15,6 +15,7 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -242,6 +243,30 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             throw py::value_error("no tool named '" + toolName + "'");
         },
         py::arg("name"));
+
+    // usdcc.toast (docs/NOTIFICATIONS.md): the main window's toasts.
+    m.def(
+        "toast_show",
+        [](const std::string& title, const std::string& body, const std::string& kind, int durationMs) {
+            usdcc::core::ToastRequest request;
+            usdcc::core::ToastKind parsed{};
+            if (!usdcc::core::parseToastKind(kind, &parsed)) {
+                throw py::value_error("unknown toast kind '" + kind + "' (info, success, warning or error)");
+            }
+            request.kind = parsed;
+            request.title = title;
+            request.body = body;
+            request.durationMs = durationMs;
+            return mainWindow().toasts()->show(request);
+        },
+        py::arg("title"), py::arg("body") = "", py::arg("kind") = "info", py::arg("duration_ms") = -1);
+    m.def("toast_dismiss", [](int id) { mainWindow().toasts()->dismiss(id); }, py::arg("id"));
+    m.def("toast_dismiss_all", []() { mainWindow().toasts()->dismissAll(); });
+    m.def("toast_visible", []() {
+        std::vector<int> ids;
+        for (const usdcc::ui::ToastWidget* toast : mainWindow().toasts()->visibleToasts()) ids.push_back(toast->id());
+        return ids;
+    });
 
     // usdcc.settings (docs/SETTINGS.md): the process-wide registry, so these
     // need no AppContext.

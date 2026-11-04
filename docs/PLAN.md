@@ -895,6 +895,20 @@ things that will bite later if not addressed early:
     UI state (layout, panel filters, dialog sizes) stays as plain `appSettings()` keys. See
     [SETTINGS.md](SETTINGS.md).
 
+41. **Toast notifications.** Stacked cards in a corner of the main window. The corner is a
+    setting; toasts are timed or sticky; Info, Success, Warning and Error each have a color;
+    a title and a multiline body set each toast's size.
+    - Each toast is an owned frameless tool window, not a child widget, so it shows over the
+      native GL viewport and not over other apps.
+    - **Log flag:** `LogRecord::toast` marks a record (`USDCC_LOG_TOAST*`, or
+      `usdcc.core.log(..., toast=)`). Such a record is kept at any level and reaches
+      `ToastLogSink` from any thread. Warnings and errors get a Show Log button.
+    - **Python:** `usdcc.toast`.
+    - **Settings:** under Notifications.
+    - **Library:** qt-toast was checked and not used. It places toasts on the screen, stays
+      on top of every app and keeps global state. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
+    - **Not yet:** no existing message box has been converted.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are
@@ -1048,7 +1062,7 @@ These run throughout, not as discrete milestones:
 | M7 Scripting & Python Extensibility | Done — planned in [SCRIPTING.md](SCRIPTING.md) (five phases, all done). Phase 1 done: one Python (OpenUSD's) in the build, `usd.pyd` rebuilt for it, the embedded interpreter (`PythonRuntime`) with Python's output in the log, Debug > Run Python File. Phase 2 done: scripts work on the app's stages, selection, undo history and tools (`usdcc.usd`/`app`/`core`/`tools`); one script run is one undo step per stage it changed; the exit criterion is tested. Phase 3 done: the Script Editor panel (editor with highlighting, Run / Run Selection, output pane, files). Phase 4 done: startup scripts in `%LOCALAPPDATA%/usdcc/scripts/startup`, `--script`, `--no-startup-scripts`. Phase 5 done: PySide6 built for OpenUSD's Python (`tools/build-pyside.ps1` fixed), `usdcc.app.main_window()` and `add_side_panel()` for Python-made side panels that keep their place in the saved layout |
 | M8 Layer Editing & Logging | In progress — the logging half is done: planned in [LOGGING.md](LOGGING.md), all five phases (phase 5, Python's output in the log, was built with M7 phase 1). Phase 1 done: `usdcc_core` is now a shared library holding the `LogHub`, `USDCC_LOG_*` macros, a rotating log file in `%LOCALAPPDATA%/usdcc/logs`, first log calls in stage/viewport/undo/layout code. Phase 2 done: OpenUSD diagnostics (`TfDiagnosticBridge`) and Qt messages (`QtMessageBridge`) reach the log, a console sink for Debug builds, and the open-stage failure dialog names the error. Phase 3 done: the `LogSidePanel` replaces the stand-in (filters, search, details, follow mode, unseen-error title, Show Log from the failure dialog, Debug > Emit Test Log Messages). Phase 4 done: native stdout/stderr (TF_DEBUG, printf from libraries) is captured into the log. `USDASidePanel` not planned yet |
 | M9 Plugin System | Not started |
-| M10 Dialogs & Settings | In progress — the settings registry, the Settings dialog (Appearance: accent color and UI scale; Shortcuts: tools) and `usdcc.settings` for Python are done (§6 item 40, [SETTINGS.md](SETTINGS.md)); more settings (viewport, Python, the Debug menu) and the Info dialog remain |
+| M10 Dialogs & Settings | In progress — the settings registry, the Settings dialog (Appearance: accent color and UI scale; Shortcuts: tools) and `usdcc.settings` for Python are done (§6 item 40, [SETTINGS.md](SETTINGS.md)), as are toast notifications with their settings (§6 item 41); more settings (viewport, Python, the Debug menu) and the Info dialog remain |
 | M11 Packaging & Deployment | Not started |
 | M12 Hardening & Release Readiness | Not started |
 | M13 Attribute Editor Revamp | Done (all five phases) — undo edit sessions and undoable gizmo drags, `Stage::changed` live refresh, `ValueTypeInfo`, the `usdcc_tests` CTest target, the property widget kit and Debug > USD Data Types (112 types, all with an editor), the categorized `AttributesViewPanel`, the transform-stack editor (add/remove/reorder/rename/pivot/bake/convert), and Move/Rotate/Scale targeting one specific xformOp (all six Euler orders, single-axis rotates, orient, and `transform` matrix ops). See [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md) §12; §9 there lists what's still out of scope |

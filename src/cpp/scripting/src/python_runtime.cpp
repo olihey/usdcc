@@ -142,7 +142,8 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_log, m) {
         "post",
         [](int level, const std::string& source, const std::string& category, const std::string& message,
            const std::string& details, const std::string& file, int line, const std::string& function,
-           const std::string& threadName) {
+           const std::string& threadName, const std::string& toast, const std::string& toastTitle,
+           const std::string& toastKind) {
             usdcc::core::LogRecord record;
             record.level = static_cast<LogLevel>(std::clamp(level, 0, static_cast<int>(LogLevel::Fatal)));
             record.source = source;
@@ -153,10 +154,28 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_log, m) {
             record.line = line;
             record.function = function;
             record.threadName = threadName;
+            // toast: "" (none), "timed" or "sticky" (docs/NOTIFICATIONS.md).
+            if (toast == "timed" || toast == "sticky") {
+                usdcc::core::ToastRequest request;
+                request.title = toastTitle;
+                if (toast == "sticky") request.durationMs = usdcc::core::ToastRequest::kSticky;
+                usdcc::core::ToastKind kind{};
+                if (!toastKind.empty()) {
+                    if (!usdcc::core::parseToastKind(toastKind, &kind)) {
+                        throw py::value_error("unknown toast kind '" + toastKind +
+                                              "' (info, success, warning or error)");
+                    }
+                    request.kind = kind;
+                }
+                record.toast = std::move(request);
+            } else if (!toast.empty()) {
+                throw py::value_error("toast must be '', 'timed' or 'sticky'");
+            }
             usdcc::core::LogHub::instance().post(std::move(record));
         },
         py::arg("level"), py::arg("source"), py::arg("category"), py::arg("message"), py::arg("details") = "",
-        py::arg("file") = "", py::arg("line") = 0, py::arg("function") = "", py::arg("thread_name") = "");
+        py::arg("file") = "", py::arg("line") = 0, py::arg("function") = "", py::arg("thread_name") = "",
+        py::arg("toast") = "", py::arg("toast_title") = "", py::arg("toast_kind") = "");
     m.def(
         "is_enabled",
         [](int level, const std::string& source, const std::string& category) {
