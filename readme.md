@@ -115,6 +115,7 @@ environment. Zip it to distribute; start it with `usdcc.cmd` or `bin\usdcc.exe`.
 tools/deploy.ps1                       # into .\deploy
 tools/deploy.ps1 D:\dist\usdcc         # into another folder
 tools/deploy.ps1 -Configuration Release
+tools/deploy.ps1 -UsdInstall C:\usd\install   # OpenUSD from there instead of the build's
 ```
 
 Build first. An earlier deploy in the folder is replaced; any other non-empty folder is

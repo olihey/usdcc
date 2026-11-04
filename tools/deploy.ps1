@@ -31,11 +31,21 @@
 .PARAMETER Configuration
     Build configuration to deploy. Default: RelWithDebInfo.
 
+.PARAMETER UsdInstall
+    Optional path to the OpenUSD install/build directory to take OpenUSD's
+    files from. Default: the one the build was configured with (USD_INSTALL in
+    build/CMakeCache.txt, as tools/build.ps1 -UsdInstall sets it). usdcc is
+    compiled against that one, so another one gets a warning: it may not run
+    with it.
+
 .EXAMPLE
     tools/deploy.ps1
 
 .EXAMPLE
     tools/deploy.ps1 D:\dist\usdcc -Configuration Release
+
+.EXAMPLE
+    tools/deploy.ps1 -UsdInstall C:\usd\install
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +53,9 @@ param(
     [string]$Destination = 'deploy',
 
     [ValidateSet('Debug', 'RelWithDebInfo', 'Release', 'MinSizeRel')]
-    [string]$Configuration = 'RelWithDebInfo'
+    [string]$Configuration = 'RelWithDebInfo',
+
+    [string]$UsdInstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,7 +63,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $buildDir = Join-Path $repoRoot 'build'
 $appDir = Join-Path $buildDir "src/cpp/app/$Configuration"
-$deployDir = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Destination))
+# Combine, not Join-Path: it keeps an absolute $Destination as it is.
+$deployDir = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine((Get-Location).Path, $Destination))
 
 # Copies `$From` into `$To`, recursively unless `-TopLevelOnly`, taking the
 # files matching `$Files` but not `$ExcludeFiles`, and skipping the folders
@@ -90,9 +103,22 @@ if (-not (Test-Path (Join-Path $appDir 'usdcc.exe'))) {
     throw "No $Configuration build at $appDir; run tools/build.ps1 -Configuration $Configuration first."
 }
 
-$usdInstall = Get-CacheValue 'USD_INSTALL'
-if (-not $usdInstall -or -not (Test-Path (Join-Path $usdInstall 'lib/usd_plug.dll'))) {
-    throw "OpenUSD not found (USD_INSTALL in build/CMakeCache.txt: '$usdInstall')."
+$builtUsdInstall = Get-CacheValue 'USD_INSTALL'
+if ($UsdInstall) {
+    if (-not (Test-Path (Join-Path $UsdInstall 'lib/usd_plug.dll'))) {
+        throw "No OpenUSD in '$UsdInstall' (no lib\usd_plug.dll)."
+    }
+    $usdInstall = [System.IO.Path]::GetFullPath($UsdInstall).TrimEnd('\', '/')
+    $builtFrom = if ($builtUsdInstall) { [System.IO.Path]::GetFullPath($builtUsdInstall).TrimEnd('\', '/') } else { '' }
+    if ($usdInstall -ne $builtFrom) {
+        Write-Warning ("usdcc was built against the OpenUSD in '$builtUsdInstall', not '$usdInstall'; " +
+            "the deploy may not run with it. Build with tools/build.ps1 -UsdInstall '$UsdInstall' first to match.")
+    }
+} else {
+    $usdInstall = $builtUsdInstall
+    if (-not $usdInstall -or -not (Test-Path (Join-Path $usdInstall 'lib/usd_plug.dll'))) {
+        throw "OpenUSD not found (USD_INSTALL in build/CMakeCache.txt: '$usdInstall'); pass -UsdInstall."
+    }
 }
 
 # The Python OpenUSD was built with, as cmake/modules/UsdccPython.cmake finds it.
@@ -140,7 +166,7 @@ Write-Host "Deploying usdcc ($Configuration) to $deployDir"
 # The app's DLLs win where both have one (z.dll, libpng16.dll, ...), as they
 # do when the build runs: its folder comes before OpenUSD's on the DLL path.
 
-Write-Host '  OpenUSD libraries'
+Write-Host "  OpenUSD libraries ($usdInstall)"
 Copy-Tree -From (Join-Path $usdInstall 'lib') -To $binDir -Files '*.dll' -TopLevelOnly
 Copy-Tree -From (Join-Path $usdInstall 'bin') -To $binDir -Files '*.dll' -TopLevelOnly
 
