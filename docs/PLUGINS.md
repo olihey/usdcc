@@ -132,6 +132,10 @@ link to, and a narrow C API, where panels couldn't derive from `ViewPanel`, and 
 - **Copying DLLs after a link isn't enough:** changing a DLL often doesn't relink what uses it, so a stale copy can stay beside it. So `usdcc_deploy_core_library()` copies on every
   build. With the copy after linking, the tests loading a C++ plugin once crashed, and stopped when this changed, with the plugin and test program themselves untouched. That
   fits a stale DLL, but which one wasn't established.
+- **Two Pythons in a Debug build:** USD's targets link `Python3::Python`, which in Debug was vcpkg's `python312_d.lib`. A symbol used only by a library later on the link line, such as
+  pybind11's list conversion in `usdcc_usd_bindings`, resolved to it and ran in a Python that never started, so any binding taking a list stopped at an assert dialog, invisible under the offscreen
+  tests, which looked like a hang. Python is now mapped to the release one in every configuration, like Qt and ADS, and in the SDK too. The link order suggests this predates the DLLs, but
+  no Debug build from before them was run to confirm it.
 - **`build/python/usdcc` is shared by every configuration,** so after a Debug build, `_ui.pyd` there is the Debug one until a Release build relinks it.
 
 **A C++ plugin is tied to the exact build:** `std::` and Qt types cross the boundary, and USD's symbols carry its version (`pxrInternal_v0_26_11`). So `usdcc_add_plugin()`
@@ -287,9 +291,6 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 - **The environment variables** `USDCC_PLUGIN_PATH` and `USDCC_PYTHON_PATH`. What they feed was tested through options and `--plugin-path`.
 - **Render delegates and file formats from a plugin folder:** only a schema was tried (§3.1).
 - **Compiled packages other than numpy,** in particular ones bringing their own Qt or USD libraries (§3.10).
-- **The Python tests in Debug.** Two of the 42 hang, `python_exit_criterion` and `python_app_api`, and the rest pass one at a time; the other two suites pass in Debug. Any binding taking a
-  list, such as `usdcc.usd.select()` or `set_relationship_targets()`, hangs in pybind11's handling before reaching the binding's code, in Debug only. So a Python plugin calling those
-  hangs a Debug build. It looks unrelated to the DLLs, but no Debug build from before them has been run to compare.
 - **Debug and Release share a plugin's output folder,** so the last one built is what's there. They're meant to be compatible, as both use the release CRT, but only the matching pairs were run.
 - **A real mouse drag with a C++ tool,** as for Python's above. The example's Drop Locator tool has been loaded and selected but never driven. The test plugin's tool, much like it, was driven through the `Tool` methods.
 - **A C++ plugin with Python or USD parts too.** The code activates the library, then the Python, but no test has both.

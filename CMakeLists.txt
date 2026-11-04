@@ -124,6 +124,18 @@ find_package(pybind11 REQUIRED)
 find_package(OpenGL)
 find_package(USD REQUIRED)
 message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
+if(USDCC_LINK_RELEASE_QT)
+    # USD's targets link Python3::Python, which in Debug is vcpkg's python312_d.lib.
+    # The interpreter is OpenUSD's release Python, so anything resolved from the
+    # debug one (whatever a library later on the link line alone needs, such as
+    # pybind11's list conversion) would run in a second Python that never started:
+    # an assert, in a dialog, and a hang if nobody sees it. So release, always.
+    foreach(_target Python3::Python Python3::Module)
+        if(TARGET ${_target})
+            set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL;")
+        endif()
+    endforeach()
+endif()
 include(UsdccPython)
 # PySide6 and shiboken6 as tools/build-pyside.ps1 builds them, against vcpkg's
 # Qt for OpenUSD's Python (docs/SCRIPTING.md §8). Without them the usdcc.ui

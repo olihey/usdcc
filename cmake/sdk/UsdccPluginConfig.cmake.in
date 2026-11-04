@@ -23,12 +23,12 @@ find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 find_package(OpenGL)
 find_package(USD REQUIRED)
 
-# The release Qt and ADS in every configuration, which is what the app has: its CRT
-# is shared with them. Otherwise a plugin could ask for vcpkg's debug DLLs (Qt6Widgetsd.dll),
-# which aren't in a deployed app, and fail to load.
+# The release Qt, ADS and Python in every configuration, which is what the app has: its
+# CRT is shared with them. Otherwise a plugin could ask for vcpkg's debug DLLs
+# (Qt6Widgetsd.dll, python312_d.dll), which aren't in a deployed app, and fail to load.
 get_directory_property(_usdcc_imported IMPORTED_TARGETS)
 foreach(_usdcc_target IN LISTS _usdcc_imported)
-    if(_usdcc_target MATCHES "^(Qt6::|ads::)")
+    if(_usdcc_target MATCHES "^(Qt6::|ads::|Python3::)")
         foreach(_usdcc_config DEBUG RELWITHDEBINFO MINSIZEREL)
             set_property(TARGET ${_usdcc_target} PROPERTY MAP_IMPORTED_CONFIG_${_usdcc_config} "RELEASE;RELWITHDEBINFO;MINSIZEREL;")
         endforeach()
