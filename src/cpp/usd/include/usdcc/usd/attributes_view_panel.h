@@ -33,6 +33,7 @@ class AttributeBinding;
 class CategorySection;
 class PropertyEditor;
 class PropertyRow;
+class SchemaPillsEditor;
 class TransformStackEditor;
 }  // namespace properties
 
@@ -64,6 +65,10 @@ public:
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
+    // The Applied Schemas row's + menu (docs/APPLIED_SCHEMAS.md §4): the
+    // registered schemas by category, greyed with the reason when unavailable.
+    void populateSchemaMenu(QMenu* menu);
+
 protected:
     // Authored Only and Hidden Properties.
     void populateOptionsMenu(QMenu* menu) override;
@@ -89,7 +94,7 @@ private:
         properties::PropertyEditor* specifier = nullptr;
         properties::PropertyEditor* active = nullptr;
         properties::PropertyEditor* instanceable = nullptr;
-        properties::PropertyEditor* schemas = nullptr;
+        properties::SchemaPillsEditor* schemas = nullptr;
     };
 
     PXR_NS::UsdPrim currentPrim() const;
@@ -113,6 +118,11 @@ private:
     // From the section's +: a reference or payload (a file dialog) or an
     // inherit or specialize (a prim path).
     void addArcInteractively(int type);
+    // The pills' × and + (docs/APPLIED_SCHEMAS.md §4, §5): removing asks about
+    // the authored properties it would leave behind; applying, a multiple-apply
+    // schema asks for an instance name, then whether to add its attributes.
+    void removeSchemaInteractively(const QString& schema);
+    void applySchemaInteractively(const QString& schema, bool multipleApply);
     void onStageObjectsChanged(const StageChanges& changes);
     void processPendingChanges();
     void queueProcessPendingChanges();

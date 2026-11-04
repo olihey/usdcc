@@ -55,6 +55,18 @@ bool canUnload(const StageRefPtr& stage, const PXR_NS::SdfPath& path);
 bool load(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
 bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
 
+// Applied API schemas (docs/APPLIED_SCHEMAS.md), in the stage's edit target.
+// `schema` is a name like "PhysicsMassAPI" or "CollectionAPI:ferns". Removing
+// refuses a built-in one, where USD would report success and change nothing.
+// With `cleanUp` it also removes, in the same undo step, the properties
+// orphanedProperties() says the edit target has. Applying with `addAttributes`
+// also authors, in the same undo step, what schemaAttributesToAdd() lists, each
+// with its fallback value (declared only, if it has none).
+bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
+                 bool addAttributes = false);
+bool removeSchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
+                  bool cleanUp);
+
 // Composition arcs (docs/COMPOSITION_ARCS.md §4), in the stage's edit target.
 // Add puts a reference or payload (`assetPath`, `target` empty = the default
 // prim; an empty `assetPath` with a `target` is an internal one), an inherit

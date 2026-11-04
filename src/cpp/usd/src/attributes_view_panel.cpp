@@ -4,7 +4,9 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/composition_arcs.h"
+#include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/properties/schema_pills.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/prim_tree_dialog.h"
@@ -41,6 +43,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QTextDocument>
+#include <QPushButton>
+#include <QMessageBox>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QTimer>
@@ -234,6 +239,8 @@ std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
     }
     // The arcs too: a changed reference, payload or variant changes the
     // Composition section's rows.
+    signature += "|schemas:";
+    for (const AppliedSchema& schema : appliedSchemas(prim)) signature += schema.name + ",";
     signature += "|arcs:";
     for (const ArcInfo& arc : compositionArcs(prim)) {
         signature += std::to_string(static_cast<int>(arc.type)) + arc.assetPath + "@" + arc.primPath.GetString() + "@" +
@@ -414,7 +421,19 @@ void AttributesViewPanel::buildPrimSection(const UsdPrim& prim, QVBoxLayout* lay
     m_header.specifier = addRow(tr("Specifier"), readOnlyText(QString()));
     m_header.active = addRow(tr("Active"), properties::createPropertyEditor(SdfValueTypeNames->Bool));
     m_header.instanceable = addRow(tr("Instanceable"), properties::createPropertyEditor(SdfValueTypeNames->Bool));
-    m_header.schemas = addRow(tr("Applied Schemas"), readOnlyText(QString()));
+    m_header.schemas = new properties::SchemaPillsEditor();
+    addRow(tr("Applied Schemas"), m_header.schemas);
+    connect(m_header.schemas, &properties::SchemaPillsEditor::removeRequested, this, [this](const QString& schema) {
+        // Queued: removing rebuilds this panel, the pill included.
+        QMetaObject::invokeMethod(this, [this, schema]() { removeSchemaInteractively(schema); }, Qt::QueuedConnection);
+    });
+    auto* schemaMenu = new QMenu(m_header.schemas->addButton());
+    schemaMenu->setToolTipsVisible(true);
+    connect(schemaMenu, &QMenu::aboutToShow, this, [this, schemaMenu]() {
+        schemaMenu->clear();
+        populateSchemaMenu(schemaMenu);
+    });
+    m_header.schemas->addButton()->setMenu(schemaMenu);
 
     // Prim metadata edits: each one undo step.
     auto edit = [this](const QString& description, std::function<bool(UsdPrim&)> change) {
@@ -758,9 +777,109 @@ void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {
     m_header.specifier->setValue(VtValue(std::string(specifierName(prim.GetSpecifier()))));
     m_header.active->setValue(VtValue(prim.IsActive()));
     m_header.instanceable->setValue(VtValue(prim.IsInstanceable()));
-    std::vector<std::string> schemas;
-    for (const TfToken& s : prim.GetAppliedSchemas()) schemas.push_back(s.GetString());
-    m_header.schemas->setValue(VtValue(schemas.empty() ? std::string("(none)") : TfStringJoin(schemas, ", ")));
+    m_header.schemas->setReadOnly(!prim_actions::isEditable(prim));
+    m_header.schemas->setSchemas(appliedSchemas(prim));
+}
+
+void AttributesViewPanel::populateSchemaMenu(QMenu* menu) {
+    for (const SchemaCategory& category : schemaCatalog(currentPrim())) {
+        QMenu* submenu = menu->addMenu(qs(category.name));
+        submenu->setToolTipsVisible(true);
+        for (const SchemaCatalogEntry& entry : category.schemas) {
+            const QString name = qs(entry.name);
+            const bool multiple = entry.multipleApply;
+            QAction* action = submenu->addAction(multiple ? name + QStringLiteral("...") : name, this, [this, name, multiple]() {
+                // Queued: applying rebuilds this panel, the menu's button included.
+                QMetaObject::invokeMethod(
+                    this, [this, name, multiple]() { applySchemaInteractively(name, multiple); }, Qt::QueuedConnection);
+            });
+            action->setEnabled(entry.available);
+            // Wrapped: a schema's documentation is long, USD's reasons too.
+            const std::string tip = entry.available ? entry.documentation : entry.whyNot;
+            action->setToolTip(Qt::convertFromPlainText(qs(tip).trimmed().section(QStringLiteral("\n\n"), 0, 0)));
+        }
+    }
+}
+
+void AttributesViewPanel::applySchemaInteractively(const QString& schema, bool multipleApply) {
+    const UsdPrim prim = currentPrim();
+    if (!prim) return;
+    QString applied = schema;
+    if (multipleApply) {
+        QString instance;
+        for (;;) {
+            bool ok = false;
+            instance = QInputDialog::getText(this, tr("Apply %1").arg(schema), tr("Instance name:"), QLineEdit::Normal,
+                                             instance, &ok)
+                           .trimmed();
+            if (!ok) return;
+            std::string why;
+            if (canApplyInstance(prim, schema.toStdString(), instance.toStdString(), &why)) break;
+            QMessageBox::warning(this, tr("Apply %1").arg(schema), qs(why));
+        }
+        applied = schema + QLatin1Char(':') + instance;
+    }
+    // Nothing to add, nothing to choose between.
+    bool addAttributes = false;
+    const std::vector<TfToken> attributes = schemaAttributesToAdd(prim, applied.toStdString());
+    if (!attributes.empty()) {
+        constexpr std::size_t kMaxListed = 12;
+        QStringList lines;
+        for (std::size_t i = 0; i < attributes.size() && i < kMaxListed; ++i) {
+            lines << QStringLiteral("    ") + qs(attributes[i].GetString());
+        }
+        if (attributes.size() > kMaxListed) {
+            lines << QStringLiteral("    ") + tr("and %1 more").arg(attributes.size() - kMaxListed);
+        }
+        QMessageBox box(QMessageBox::Question, tr("Apply %1").arg(applied),
+                        tr("Apply %1 to %2?").arg(applied, qs(prim.GetPath().GetString())), QMessageBox::Cancel, this);
+        box.setInformativeText((attributes.size() == 1
+                                    ? tr("Add its attribute to the prim, with its default value?")
+                                    : tr("Add its %1 attributes to the prim, with their default values?").arg(attributes.size())) +
+                               QLatin1Char('\n') + lines.join(QLatin1Char('\n')));
+        QPushButton* only = box.addButton(tr("Apply Schema Only"), QMessageBox::AcceptRole);
+        QPushButton* add = box.addButton(tr("Apply and Add Attributes"), QMessageBox::AcceptRole);
+        box.setDefaultButton(only);
+        box.exec();
+        if (box.clickedButton() != only && box.clickedButton() != add) return;
+        addAttributes = box.clickedButton() == add;
+    }
+    prim_actions::applySchema(*m_undoManager, currentStage(), prim.GetPath(), applied.toStdString(), addAttributes);
+}
+
+void AttributesViewPanel::removeSchemaInteractively(const QString& schema) {
+    const UsdPrim prim = currentPrim();
+    if (!prim) return;
+    const OrphanedProperties orphans = orphanedProperties(prim, schema.toStdString());
+    bool cleanUp = false;
+    // Nothing here to clean up: nothing to choose between.
+    if (!orphans.inEditTarget.empty()) {
+        constexpr std::size_t kMaxListed = 12;
+        const std::size_t count = orphans.inEditTarget.size();
+        QStringList lines;
+        for (std::size_t i = 0; i < count && i < kMaxListed; ++i) {
+            lines << QStringLiteral("    ") + qs(orphans.inEditTarget[i].GetString());
+        }
+        if (count > kMaxListed) lines << QStringLiteral("    ") + tr("and %1 more").arg(count - kMaxListed);
+        if (!orphans.inOtherLayers.empty()) {
+            lines << QString()
+                  << (orphans.inOtherLayers.size() == 1
+                          ? tr("1 more is in another layer, so it can't be removed from here.")
+                          : tr("%1 more are in other layers, so they can't be removed from here.").arg(orphans.inOtherLayers.size()));
+        }
+        QMessageBox box(QMessageBox::Question, tr("Remove %1").arg(schema),
+                        tr("Remove %1 from %2?").arg(schema, qs(prim.GetPath().GetString())), QMessageBox::Cancel, this);
+        box.setInformativeText((count == 1 ? tr("It leaves 1 authored property behind:")
+                                           : tr("It leaves %1 authored properties behind:").arg(count)) +
+                               QLatin1Char('\n') + lines.join(QLatin1Char('\n')));
+        QPushButton* only = box.addButton(tr("Remove Schema Only"), QMessageBox::AcceptRole);
+        QPushButton* clean = box.addButton(tr("Remove and Clean Up"), QMessageBox::DestructiveRole);
+        box.setDefaultButton(only);
+        box.exec();
+        if (box.clickedButton() != only && box.clickedButton() != clean) return;
+        cleanUp = box.clickedButton() == clean;
+    }
+    prim_actions::removeSchema(*m_undoManager, currentStage(), prim.GetPath(), schema.toStdString(), cleanUp);
 }
 
 AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& property, const PropertyCategory& category) {

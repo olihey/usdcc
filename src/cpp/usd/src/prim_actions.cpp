@@ -1,5 +1,6 @@
 #include "usdcc/usd/prim_actions.h"
 
+#include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -319,6 +320,51 @@ bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_N
     if (targets.empty()) return false;
     return pushLoadRules(undo, stage, describe(tr("Unload"), named), [targets](const PXR_NS::UsdStageRefPtr& usdStage) {
         usdStage->LoadAndUnload({}, targets);
+    });
+}
+
+bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
+                 bool addAttributes) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || schema.empty()) return false;
+    const std::vector<PXR_NS::TfToken> attributes =
+        addAttributes ? schemaAttributesToAdd(prim, schema) : std::vector<PXR_NS::TfToken>();
+    return undo.apply(stage, tr("Apply %1 to %2").arg(qs(schema), qs(path.GetName())), [&]() {
+        if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
+        // Looked up afresh: applying the schema recomposed the prim.
+        const PXR_NS::UsdPrim applied = stage->usdStage()->GetPrimAtPath(path);
+        const PXR_NS::UsdPrimDefinition& definition = applied.GetPrimDefinition();
+        for (const PXR_NS::TfToken& name : attributes) {
+            const PXR_NS::UsdPrimDefinition::Attribute attributeDefinition = definition.GetAttributeDefinition(name);
+            if (!attributeDefinition) continue;
+            const PXR_NS::UsdAttribute attribute = applied.CreateAttribute(
+                name, attributeDefinition.GetTypeName(), /*custom=*/false, attributeDefinition.GetVariability());
+            if (!attribute) return false;
+            // Still reads as the schema's fallback, until this makes it authored.
+            PXR_NS::VtValue value;
+            if (attribute.Get(&value) && !value.IsEmpty() && !attribute.Set(value)) return false;
+        }
+        return true;
+    });
+}
+
+bool removeSchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
+                  bool cleanUp) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim)) return false;
+    const std::vector<AppliedSchema> schemas = appliedSchemas(prim);
+    const auto it = std::find_if(schemas.begin(), schemas.end(), [&](const AppliedSchema& s) { return s.name == schema; });
+    if (it == schemas.end() || it->state == AppliedSchema::State::BuiltIn) return false;
+    // Before it goes: afterwards the prim no longer says what it defined.
+    const PXR_NS::TfTokenVector orphans = cleanUp ? orphanedProperties(prim, schema).inEditTarget : PXR_NS::TfTokenVector();
+    return undo.apply(stage, tr("Remove %1 from %2").arg(qs(schema), qs(path.GetName())), [&]() {
+        const PXR_NS::UsdPrim p = stage->usdStage()->GetPrimAtPath(path);
+        if (!p.RemoveAppliedSchema(PXR_NS::TfToken(schema))) return false;
+        for (const PXR_NS::TfToken& name : orphans) {
+            // Looked up afresh: removing the schema recomposed the prim.
+            if (!stage->usdStage()->GetPrimAtPath(path).RemoveProperty(name)) return false;
+        }
+        return true;
     });
 }
 

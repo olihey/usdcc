@@ -1,5 +1,6 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
 add_library(usdcc_usd STATIC
+    include/usdcc/usd/applied_schemas.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
     include/usdcc/usd/layer_stack.h
@@ -11,6 +12,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
+    src/applied_schemas.cpp
     src/composition_arcs.cpp
     src/dependencies.cpp
     src/layer_stack.cpp
@@ -62,6 +64,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/property_editor.h
     include/usdcc/usd/properties/property_row.h
     include/usdcc/usd/properties/property_style.h
+    include/usdcc/usd/properties/schema_pills.h
     include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/current_stage_ui.h
@@ -99,6 +102,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/number_field.cpp
     src/properties/property_editors.cpp
     src/properties/property_row.cpp
+    src/properties/schema_pills.cpp
     src/properties/transform_stack_editor.cpp
     src/close_stage_dialog.cpp
     src/current_stage_ui.cpp

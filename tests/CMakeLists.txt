@@ -11,6 +11,7 @@ add_executable(usdcc_tests
     test_harness.h
     test_harness.cpp
     test_main.cpp
+    applied_schemas_test.cpp
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
     dependencies_test.cpp
@@ -51,6 +52,7 @@ add_executable(usdcc_ui_tests
     prim_tree_dialog_test.cpp
     property_row_test.cpp
     scale_controller_test.cpp
+    schema_pills_test.cpp
     side_panel_test.cpp
     usda_view_test.cpp
     view_panel_layout_test.cpp

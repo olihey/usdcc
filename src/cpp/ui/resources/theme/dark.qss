@@ -801,6 +801,45 @@ QToolButton#sectionHeader:pressed {
     font-weight: 600;
 }
 
+/* An applied schema in the Attribute Editor's Prim section: built in (from the
+   prim's type or another schema) is dimmed, not registered is amber. */
+QFrame#schemaPill {
+    background: rgba(255, 255, 255, 8%);
+    border: 1px solid rgba(255, 255, 255, 8%);
+    border-radius: 10px;
+}
+
+QFrame#schemaPill[state="builtIn"] {
+    background: transparent;
+}
+
+QFrame#schemaPill[state="builtIn"] QLabel {
+    color: rgba(255, 255, 255, 50%);
+}
+
+QFrame#schemaPill[state="unregistered"] {
+    border-color: #ffb340;
+}
+
+QFrame#schemaPill[state="unregistered"] QLabel {
+    color: #ffb340;
+}
+
+QToolButton#schemaPillRemove {
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    padding: 0;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QToolButton#schemaPillRemove:hover {
+    background: rgba(255, 255, 255, 15%);
+}
+
 /* An editable reference or payload in the Attribute Editor's Composition
    section: just a border, on the panel's own background. */
 QFrame#compositionArc {
