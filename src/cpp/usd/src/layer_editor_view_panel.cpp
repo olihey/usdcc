@@ -11,6 +11,7 @@
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
+#include "usdcc/usd/variant_editor_dialog.h"
 
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/usd/stage.h>
@@ -297,7 +298,10 @@ void LayerEditorViewPanel::refresh() {
     m_filling = false;
 
     const LayerEntry* target = findTarget(m_layers);
-    m_editing->setText(target ? tr("Editing: %1").arg(qs(target->displayName)) : QString());
+    const QString variant = currentStage() ? variantEditText(*currentStage()) : QString();
+    m_editing->setText(!target             ? QString()
+                       : variant.isEmpty() ? tr("Editing: %1").arg(qs(target->displayName))
+                                           : tr("%1, in %2").arg(variant, qs(target->displayName)));
     m_editing->setToolTip(target ? qs(target->identifier) : QString());
     updateProperties();
 }
@@ -337,7 +341,9 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
 
     if (entry.editTarget) {
         item->setIcon(Target, QIcon(QStringLiteral(":/usdcc/theme/pencil.png")));
-        item->setToolTip(Target, tr("Edits go to this layer"));
+        const QString variant = currentStage() ? variantEditText(*currentStage()) : QString();
+        item->setToolTip(Target, variant.isEmpty() ? tr("Edits go to this layer")
+                                                   : tr("%1, in this layer. Click to edit the layer itself.").arg(variant));
     } else if (layer_actions::canTarget(entry)) {
         item->setToolTip(Target, tr("Click to edit this layer"));
     }
@@ -371,7 +377,8 @@ void LayerEditorViewPanel::onItemClicked(QTreeWidgetItem* item, int column) {
 
 void LayerEditorViewPanel::setEditTarget(const std::string& identifier) {
     const LayerEntry* entry = entryFor(identifier);
-    if (entry && !entry->editTarget) layer_actions::setEditTarget(currentStage(), *entry);
+    // The current layer too during variant edit mode: that leaves the variant.
+    if (entry && (!entry->editTarget || currentStage()->variantEdit())) layer_actions::setEditTarget(currentStage(), *entry);
 }
 
 void LayerEditorViewPanel::showMenu(const QPoint& pos) {
@@ -388,7 +395,7 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     menu->setToolTipsVisible(true);
 
     QAction* target = menu->addAction(tr("Set as Edit Target"), this, [this, identifier]() { setEditTarget(identifier); });
-    target->setEnabled(layer_actions::canTarget(*entry) && !entry->editTarget);
+    target->setEnabled(layer_actions::canTarget(*entry) && (!entry->editTarget || currentStage()->variantEdit()));
     if (layer_actions::canMute(*entry)) {
         const bool muted = entry->muted;
         menu->addAction(muted ? tr("Unmute") : tr("Mute"), this, [this, identifier, muted]() {

@@ -121,6 +121,7 @@ void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
     }
     PrimMenuContext context;
     context.undo = m_undoManager.get();
+    context.stageManager = stageManager();
     context.stage = currentStage();
     context.paths = stageManager()->selectedPaths(currentStage());
     context.clicked = m_model->pathForIndex(index);
@@ -289,8 +290,8 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
     const PXR_NS::SdfPath path = m_model->pathForIndex(selected.first());
     const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
     const PXR_NS::UsdPrim parent = prim ? prim.GetParent() : PXR_NS::UsdPrim();
-    if (!prim || !parent || prim.IsInstanceProxy()) {
-        return;  // an instance proxy can't be reordered
+    if (!prim_actions::isEditable(prim) || !parent || !prim_actions::isEditable(parent)) {
+        return;  // an instance proxy, or a parent outside the variant being edited
     }
 
     // "reorder nameChildren" on the parent's prim spec controls the composed

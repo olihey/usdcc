@@ -15,11 +15,13 @@ class QWidget;
 
 namespace usdcc::usd {
 
+class StageManager;
 class UndoManager;
 
 // What the Outliner's prim menu acts on (docs/OUTLINER_CONTEXT_MENU.md).
 struct PrimMenuContext {
     UndoManager* undo = nullptr;
+    StageManager* stageManager = nullptr;  // for the Variant Editor to select prims; may be null
     StageRefPtr stage;
     // The selection, which Active, Visibility, Load and Copy Path act on.
     std::vector<PXR_NS::SdfPath> paths;

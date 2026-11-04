@@ -26,6 +26,7 @@ namespace usdcc::usd {
 
 class StageManager;
 class UndoManager;
+class VariantEditBanner;
 struct PropertyCategory;
 
 namespace properties {
@@ -120,6 +121,8 @@ private:
     // From the section's +: a reference or payload (a file dialog) or an
     // inherit or specialize (a prim path).
     void addArcInteractively(int type);
+    // A set's row in the Composition section: its pencil and its actions.
+    void addVariantSetRowActions(properties::PropertyRow* row, const std::string& set);
     // The pills' × and + (docs/APPLIED_SCHEMAS.md §4, §5): removing asks about
     // the authored properties it would leave behind; applying, a multiple-apply
     // schema asks for an instance name, then whether to add its attributes.
@@ -142,6 +145,7 @@ private:
     QAction* m_authoredOnly;
     QAction* m_showHidden;
     QScrollArea* m_scroll;
+    VariantEditBanner* m_variantBanner;
     QWidget* m_content = nullptr;
 
     std::vector<Row> m_rows;

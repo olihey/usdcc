@@ -4,6 +4,7 @@
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
+#include "usdcc/usd/variant_editor_dialog.h"
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/variantSets.h>
@@ -120,7 +121,7 @@ void populateArcMenu(QMenu* menu, const ArcInfo& arc, const PXR_NS::SdfPath& pri
 void readOnlyIf(QAction* action, bool readOnly) {
     if (!readOnly) return;
     action->setEnabled(false);
-    action->setToolTip(tr("Part of an instance: edit the prim it was instanced from instead"));
+    action->setToolTip(tr("Can't be edited: it's part of an instance, or outside the variant being edited"));
 }
 }  // namespace
 
@@ -228,6 +229,11 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
                 prim_actions::clearVariant(undo, stage, path, setName);
             });
             readOnlyIf(clear, !prim_actions::isEditable(clicked));
+            QAction* edit = set->addAction(tr("Edit Variants..."), menu, [stageManager = context.stageManager, &undo, stage, path, setName,
+                                                                         parent = context.dialogParent]() {
+                showVariantEditor(stageManager, stage, &undo, path, setName, parent);
+            });
+            readOnlyIf(edit, !prim_actions::isEditable(clicked));
         }
     }
 

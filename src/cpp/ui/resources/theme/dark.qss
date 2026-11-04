@@ -864,6 +864,17 @@ QFrame#compositionArc {
     border-radius: 4px;
 }
 
+/* Edits are going into a variant (docs/VARIANT_EDITOR.md section 5): hard to miss. */
+QFrame#variantEditBanner {
+    background: rgba(255, 179, 64, 14%);
+    border: 1px solid #ffb340;
+    border-radius: 4px;
+}
+
+QFrame#variantEditBanner QLabel {
+    color: #ffb340;
+}
+
 /* Transform stack (TransformStackEditor) and the tool target. */
 QLabel#dragHandle {
     color: rgba(255, 255, 255, 35%);

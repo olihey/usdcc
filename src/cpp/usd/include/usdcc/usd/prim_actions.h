@@ -22,7 +22,12 @@ class UndoManager;
 // skipped: they can't be edited (isEditable()).
 namespace prim_actions {
 
+// False for an instance proxy, and for a prim a variant edit target doesn't reach:
+// USD would write its edits to the plain layer, silently (docs/VARIANT_EDITOR.md §2).
 bool isEditable(const PXR_NS::UsdPrim& prim);
+// UsdNamespaceEditor refuses an edit target that maps paths, so rename doesn't work
+// inside a variant.
+bool canRename(const PXR_NS::UsdPrim& prim);
 
 bool setActive(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
                bool active);
@@ -37,6 +42,9 @@ bool showOnly(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR
 // Clears the visibility authored in the edit target: back to inherited.
 bool resetVisibility(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
 
+// Under a variant edit target a selection goes in the plain layer: inside the variant
+// it couldn't change what composes. For the set being edited, it switches to editing
+// that variant instead, and clearing is refused.
 bool setVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
                 const std::string& variantSet, const std::string& variant);
 bool clearVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,

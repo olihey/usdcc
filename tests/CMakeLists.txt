@@ -29,6 +29,7 @@ add_executable(usdcc_tests
     undo_manager_test.cpp
     usda_syntax_test.cpp
     value_type_info_test.cpp
+    variant_actions_test.cpp
     view_panel_registry_test.cpp
     xform_math_test.cpp
     xform_stack_test.cpp
@@ -57,6 +58,7 @@ add_executable(usdcc_ui_tests
     schema_pills_test.cpp
     side_panel_test.cpp
     usda_view_test.cpp
+    variant_editor_test.cpp
     view_panel_layout_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui)

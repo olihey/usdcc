@@ -153,6 +153,22 @@ bool editArcEntry(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath&
     return false;
 }
 
+// A selection on the prim's plain path, in the edit target's layer, whatever the
+// target maps to: under a variant target USD would write it inside the variant,
+// where it can't change what's selected. Empty clears it.
+bool writeSelection(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& path, const std::string& set,
+                    const std::string& variant) {
+    const PXR_NS::UsdEditTarget target = usdStage->GetEditTarget();
+    if (target.GetMapFunction().IsIdentity()) {
+        PXR_NS::UsdVariantSet variantSet = usdStage->GetPrimAtPath(path).GetVariantSet(set);
+        return variant.empty() ? variantSet.ClearVariantSelection() : variantSet.SetVariantSelection(variant);
+    }
+    const PXR_NS::SdfPrimSpecHandle spec = PXR_NS::SdfCreatePrimInLayer(target.GetLayer(), path);
+    if (!spec) return false;
+    spec->SetVariantSelection(set, variant);
+    return true;
+}
+
 bool pushLoadRules(UndoManager& undo, const StageRefPtr& stage, const QString& description,
                    std::function<void(const PXR_NS::UsdStageRefPtr&)> change) {
     QUndoStack* stack = undo.stack(stage);
@@ -162,7 +178,13 @@ bool pushLoadRules(UndoManager& undo, const StageRefPtr& stage, const QString& d
 }
 }  // namespace
 
-bool isEditable(const PXR_NS::UsdPrim& prim) { return prim && !prim.IsInstanceProxy(); }
+bool isEditable(const PXR_NS::UsdPrim& prim) {
+    return prim && !prim.IsInstanceProxy() && editTargetReaches(prim);
+}
+
+bool canRename(const PXR_NS::UsdPrim& prim) {
+    return isEditable(prim) && prim.GetStage()->GetEditTarget().GetMapFunction().IsIdentity();
+}
 
 bool setActive(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
                bool active) {
@@ -246,11 +268,11 @@ bool setVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPa
                 const std::string& variantSet, const std::string& variant) {
     const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
     if (!isEditable(prim) || !prim.GetVariantSets().HasVariantSet(variantSet)) return false;
+    if (stage->isEditingVariantSet(path, variantSet)) return stage->enterVariantEdit(path, variantSet, variant);
     if (prim.GetVariantSet(variantSet).GetVariantSelection() == variant) return false;
     return undo.apply(stage,
                       tr("Set %1 to %2 on %3").arg(qs(variantSet), qs(variant), qs(path.GetName())), [&]() {
-                          return stage->usdStage()->GetPrimAtPath(path).GetVariantSet(variantSet).SetVariantSelection(
-                              variant);
+                          return writeSelection(stage->usdStage(), path, variantSet, variant);
                       });
 }
 
@@ -258,14 +280,14 @@ bool clearVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::Sdf
                   const std::string& variantSet) {
     const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
     if (!isEditable(prim) || !prim.GetVariantSets().HasVariantSet(variantSet)) return false;
-    return undo.apply(stage, tr("Clear %1 on %2").arg(qs(variantSet), qs(path.GetName())), [&]() {
-        return stage->usdStage()->GetPrimAtPath(path).GetVariantSet(variantSet).ClearVariantSelection();
-    });
+    if (stage->isEditingVariantSet(path, variantSet)) return false;
+    return undo.apply(stage, tr("Clear %1 on %2").arg(qs(variantSet), qs(path.GetName())),
+                      [&]() { return writeSelection(stage->usdStage(), path, variantSet, std::string()); });
 }
 
 bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name) {
     const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
-    if (!isEditable(prim) || name.empty() || name == path.GetName() || !PXR_NS::SdfPath::IsValidIdentifier(name)) {
+    if (!canRename(prim) || name.empty() || name == path.GetName() || !PXR_NS::SdfPath::IsValidIdentifier(name)) {
         return false;
     }
     return undo.apply(stage, tr("Rename %1 to %2").arg(qs(path.GetName()), qs(name)), [&]() {

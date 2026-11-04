@@ -14,6 +14,8 @@
 #include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
+#include "usdcc/usd/variant_actions.h"
+#include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -154,7 +156,10 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
 
+    m_variantBanner = new VariantEditBanner(container);
+
     layout->addWidget(toolbar);
+    layout->addWidget(m_variantBanner);
     layout->addWidget(m_scroll, 1);
     setContentWidget(container);
 
@@ -188,6 +193,7 @@ void AttributesViewPanel::populateOptionsMenu(QMenu* menu) {
 }
 
 void AttributesViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_variantBanner->setStage(stage);
     m_stageChangedConnection = {};
     m_editTargetConnection = {};
     if (stage) {
@@ -243,6 +249,9 @@ std::string AttributesViewPanel::layoutSignature(const UsdPrim& prim) const {
                      std::to_string(arc.layerOffset.GetOffset()) + "x" + std::to_string(arc.layerOffset.GetScale()) +
                      (arc.loaded ? "L" : "U") + arc.variantSet + "=" + arc.variantSelection + arc.layerIdentifier +
                      (arc.editable ? "e" : "r") + ",";
+        if (arc.type == ArcInfo::Type::Variant) {
+            for (const std::string& name : prim.GetVariantSet(arc.variantSet).GetVariantNames()) signature += name + "/";
+        }
     }
     const CategorizeOptions options{m_authoredOnly->isChecked(), m_showHidden->isChecked()};
     for (const PropertyCategory& category : categorizeProperties(prim, options)) {
@@ -289,6 +298,9 @@ void AttributesViewPanel::rebuild() {
 
     const UsdPrim prim = currentPrim();
     m_signature = layoutSignature(prim);
+    m_variantBanner->setDetail(prim && currentStage()->variantEdit() && !prim_actions::isEditable(prim)
+                                   ? tr("%1 is outside it, so it can't be edited here.").arg(qs(prim.GetPath().GetString()))
+                                   : QString());
     if (!prim) {
         const QString note = !currentStage()       ? tr("No stage open.")
                              : m_primPath.IsEmpty() ? tr("Select a prim to see its attributes.")
@@ -420,7 +432,7 @@ void AttributesViewPanel::setUpUnusedOp(const Row& row) {
         menu->addSeparator();
         menu->addAction(tr("Add to Stack"), this, [this, name]() {
             const UsdPrim prim = currentPrim();
-            if (!prim) return;
+            if (!prim_actions::isEditable(prim)) return;
             // At the end of xformOpOrder, like "+ Add" with no target op: applied first.
             m_undoManager->apply(currentStage(), tr("Add %1 to Stack").arg(qs(name.GetString())), [&]() {
                 const XformStack stack(prim);
@@ -511,6 +523,12 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
             menu->addAction(tr("%1...").arg(tr(arcTypeName(type))), this,
                             [this, type]() { addArcInteractively(static_cast<int>(type)); });
         }
+        menu->addSeparator();
+        menu->addAction(tr("Variant Set..."), this, [this, path]() {
+            // Queued: adding rebuilds this panel, the menu's button included.
+            QMetaObject::invokeMethod(
+                this, [this, path]() { addVariantSetInteractively(currentStage(), *m_undoManager, path, this); }, Qt::QueuedConnection);
+        });
         add->setMenu(menu);
         section->addHeaderWidget(add);
     }
@@ -613,7 +631,13 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
                     if (!v.IsHolding<TfToken>()) return;
                     prim_actions::setVariant(*m_undoManager, currentStage(), path, setName, v.UncheckedGet<TfToken>().GetString());
                 });
-                addRow(tr("Variant: %1").arg(qs(arc.variantSet)), editor);
+                PropertyRow* row = addRow(tr("Variant: %1").arg(qs(arc.variantSet)), editor);
+                const std::vector<std::string> names = set.GetVariantNames();
+                if (!arc.variantSelection.empty() &&
+                    std::find(names.begin(), names.end(), arc.variantSelection) == names.end()) {
+                    row->setSubLine(tr("\"%1\" isn't a variant of this set").arg(qs(arc.variantSelection)), QString(), true);
+                }
+                if (editablePrim) addVariantSetRowActions(row, arc.variantSet);
                 continue;
             }
 
@@ -734,6 +758,49 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
     layout->addWidget(section);
 }
 
+void AttributesViewPanel::addVariantSetRowActions(PropertyRow* row, const std::string& set) {
+    const SdfPath path = m_primPath;
+    QToolButton* edit = properties::iconButton(QStringLiteral(":/usdcc/theme/pencil.png"),
+                                               tr("Edit the variants of %1").arg(qs(set)), row);
+    connect(edit, &QToolButton::clicked, this, [this, path, set]() {
+        showVariantEditor(stageManager(), currentStage(), m_undoManager.get(), path, set, this);
+    });
+    row->addTrailingWidget(edit);
+
+    QToolButton* more = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"), tr("Variant set actions"), row);
+    more->setPopupMode(QToolButton::InstantPopup);
+    auto* menu = new QMenu(more);
+    menu->setToolTipsVisible(true);
+    // Queued, as the arcs' actions: each rebuilds this panel, the menu's button included.
+    auto queued = [this](std::function<void()> action) {
+        return [this, action = std::move(action)]() { QMetaObject::invokeMethod(this, action, Qt::QueuedConnection); };
+    };
+    QAction* clear = menu->addAction(tr("Clear Selection"), this, queued([this, path, set]() {
+        prim_actions::clearVariant(*m_undoManager, currentStage(), path, set);
+    }));
+    QAction* rename = menu->addAction(tr("Rename Set..."), this, queued([this, path, set]() {
+        renameVariantSetInteractively(currentStage(), *m_undoManager, path, set, this);
+    }));
+    QAction* remove = menu->addAction(tr("Remove Set"), this, queued([this, path, set]() {
+        removeVariantSetInteractively(currentStage(), *m_undoManager, path, set, this);
+    }));
+    // As the menu opens: what can be done follows the edit target.
+    connect(menu, &QMenu::aboutToShow, this, [this, path, set, clear, rename, remove]() {
+        const UsdPrim prim = currentPrim();
+        QString why;
+        const bool editing = currentStage()->isEditingVariantSet(path, set);
+        clear->setEnabled(!editing);
+        clear->setToolTip(editing ? tr("A variant of it is being edited: exit first") : QString());
+        rename->setEnabled(variant_actions::canRenameSet(currentStage(), prim, set, &why));
+        rename->setToolTip(why);
+        why.clear();
+        remove->setEnabled(variant_actions::canRemoveSet(currentStage(), prim, set, &why));
+        remove->setToolTip(why);
+    });
+    more->setMenu(menu);
+    row->addLastWidget(more);
+}
+
 void AttributesViewPanel::addArcInteractively(int typeValue) {
     const UsdPrim prim = currentPrim();
     if (!prim || !m_undoManager) return;
@@ -797,7 +864,14 @@ void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {
     if (!m_primSection || !prim) return;
     m_header.name->setValue(VtValue(prim.GetName().GetString()));
     m_header.name->setToolTip(QString::fromStdString(prim.GetPath().GetString()));  // the path, for a look
-    m_header.name->setReadOnly(!prim_actions::isEditable(prim));  // an instance proxy
+    const bool editable = prim_actions::isEditable(prim);  // not an instance proxy, nor outside a variant being edited
+    m_header.name->setReadOnly(!prim_actions::canRename(prim));
+    if (editable && !prim_actions::canRename(prim)) {
+        m_header.name->setToolTip(tr("%1\nCan't be renamed while editing a variant: exit first").arg(qs(prim.GetPath().GetString())));
+    }
+    m_header.kind->setReadOnly(!editable);
+    m_header.active->setReadOnly(!editable);
+    m_header.instanceable->setReadOnly(!editable);
     m_header.type->setValue(VtValue(prim.GetTypeName().IsEmpty() ? std::string("(typeless)")
                                                                  : prim.GetTypeName().GetString()));
     TfToken kind;
@@ -806,7 +880,7 @@ void AttributesViewPanel::refreshPrimHeader(const UsdPrim& prim) {
     m_header.specifier->setValue(VtValue(std::string(specifierName(prim.GetSpecifier()))));
     m_header.active->setValue(VtValue(prim.IsActive()));
     m_header.instanceable->setValue(VtValue(prim.IsInstanceable()));
-    m_header.schemas->setReadOnly(!prim_actions::isEditable(prim));
+    m_header.schemas->setReadOnly(!editable);
     m_header.schemas->setSchemas(appliedSchemas(prim));
 }
 
@@ -945,6 +1019,7 @@ AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& proper
         connect(row.row, &PropertyRow::resetRequested, row.binding, &AttributeBinding::resetToDefault);
         // Rebuilds wait for a gesture to finish; pick up any that were held back.
         connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
+        row.row->setReadOnly(!prim_actions::isEditable(attr.GetPrim()));
         if (const UsdGeomPrimvar primvar{attr}) {
             row.row->setNote(qs(primvar.GetInterpolation().GetString()));
         }
@@ -971,7 +1046,7 @@ void AttributesViewPanel::updateRowState(Row& row) {
     if (const UsdAttribute attr = row.property.As<UsdAttribute>()) {
         const bool authored = attr.HasAuthoredValue();
         row.row->setUnauthored(!authored);
-        row.row->setResettable(authored);
+        row.row->setResettable(authored && prim_actions::isEditable(attr.GetPrim()));
         row.row->setAnimated(attr.GetNumTimeSamples() > 0);
         SdfPathVector sources;
         attr.GetConnections(&sources);

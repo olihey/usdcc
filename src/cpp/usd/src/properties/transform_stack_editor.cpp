@@ -1,6 +1,7 @@
 #include "usdcc/usd/properties/transform_stack_editor.h"
 
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -144,6 +145,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
                                            UndoManager* undoManager, QObject* parent)
     : QObject(parent), m_primPath(prim.GetPath()), m_stage(std::move(stage)), m_undoManager(undoManager) {
     const XformStack stack(prim);
+    const bool readOnly = !prim_actions::isEditable(prim);
 
     // Header: Reset Stack and + (Add).
     m_resetStack = new QCheckBox(tr("Reset Stack"));
@@ -168,6 +170,8 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
     addMenu->addSeparator();
     populateStackActions(addMenu);
     add->setMenu(addMenu);
+    m_resetStack->setEnabled(!readOnly);
+    add->setEnabled(!readOnly);
     section->addHeaderWidget(m_resetStack);
     section->addHeaderWidget(add);
 
@@ -194,7 +198,10 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
         }
         entry.row = new PropertyRow(label, editor);
         entry.row->setLabelWidth(kLabelWidth - 18);
-        entry.row->addLeadingWidget(new DragHandle(i, rows, entry.row));
+        entry.row->setReadOnly(readOnly);
+        auto* handle = new DragHandle(i, rows, entry.row);
+        handle->setEnabled(!readOnly);
+        entry.row->addLeadingWidget(handle);
         const char* precision = op.GetPrecision() == UsdGeomXformOp::PrecisionDouble  ? "double"
                                 : op.GetPrecision() == UsdGeomXformOp::PrecisionHalf ? "half"
                                                                                      : "float";
@@ -214,6 +221,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
         connect(remove, &QToolButton::clicked, this, [this, i, label]() {
             edit(tr("Remove %1").arg(label), [i](XformStack& s) { return s.remove(i); });
         });
+        remove->setEnabled(!readOnly);
         entry.row->addTrailingWidget(remove);
         entry.row->setExtraMenu([this, i](QMenu* menu) { populateRowMenu(menu, i); });
         rows->addRow(entry.row);
@@ -234,7 +242,7 @@ UsdPrim TransformStackEditor::prim() const { return m_stage->usdStage()->GetPrim
 
 bool TransformStackEditor::edit(const QString& description, const std::function<bool(XformStack&)>& change) {
     const UsdPrim p = prim();
-    if (!p) return false;
+    if (!prim_actions::isEditable(p)) return false;
     return m_undoManager->apply(m_stage, description, [&]() {
         XformStack stack(p);
         return change(stack);

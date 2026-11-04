@@ -6,8 +6,11 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/prim.h>
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace usdcc::usd {
@@ -26,6 +29,23 @@ struct StageChanges {
     // was resynced — i.e. the set of properties to show may be different now.
     bool resyncsPrim(const PXR_NS::SdfPath& primPath) const;
 };
+
+// Which variant edits are going into (docs/VARIANT_EDITOR.md §5).
+struct VariantEdit {
+    PXR_NS::SdfPath prim;
+    std::string set;
+    std::string variant;
+};
+
+// Whether the stage's edit target can author on `prim`. Always, unless it's a variant
+// edit target and the prim is outside the variant's prim: USD would then write to the
+// plain layer and report success (docs/VARIANT_EDITOR.md §2).
+bool editTargetReaches(const PXR_NS::UsdPrim& prim);
+
+// Removes the prim spec at `specPath` from `layer` if it's a plain `over` that says
+// nothing, then its parents likewise: what's left when its last opinion goes. It stops
+// at a variant, whose emptiness means something, and at anything with content.
+void removeEmptyOvers(const PXR_NS::SdfLayerHandle& layer, PXR_NS::SdfPath specPath);
 
 // Wraps a UsdStageRefPtr together with usdcc-specific, per-stage state that
 // doesn't belong on USD's own Stage object — currently just the prim
@@ -93,6 +113,20 @@ public:
     // After the edit target changed, however it was changed (this, or
     // UsdStage::SetEditTarget() from a script).
     usdcc::core::Signal<> editTargetChanged;
+
+    // Variant edit mode (docs/VARIANT_EDITOR.md §5): edits go into a variant, in the
+    // layer that was the edit target, through the tools that always edit. The variant
+    // is selected in the session layer, so the mode itself leaves the files alone.
+    // Entering another variant of the same set switches to it; another set while in
+    // the mode is refused (false), as is a variant the set doesn't have.
+    bool enterVariantEdit(const PXR_NS::SdfPath& prim, const std::string& set, const std::string& variant);
+    // Back to the plain layer, with the session layer as it was. Anything else that
+    // changes the edit target leaves the mode as well.
+    void exitVariantEdit();
+    const std::optional<VariantEdit>& variantEdit() const { return m_variantEdit; }
+    bool isEditingVariantSet(const PXR_NS::SdfPath& prim, const std::string& set) const;
+    // After the mode was entered or left, or moved to another variant.
+    usdcc::core::Signal<> variantEditChanged;
     // After usdcc saved one or more of the stage's layers (layer_actions):
     // their unsaved-changes marks change without a change notice.
     usdcc::core::Signal<> layersSaved;
@@ -100,12 +134,17 @@ public:
 private:
     class ChangeListener;
     void validateTarget();
+    void leaveVariantEdit(bool resetTarget);
 
     PXR_NS::UsdStageRefPtr m_usdStage;
     long m_cacheId;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
     PXR_NS::SdfPath m_targetPrim;
     PXR_NS::TfToken m_targetOp;
+    std::optional<VariantEdit> m_variantEdit;
+    PXR_NS::SdfLayerHandle m_variantEditLayer;
+    std::optional<std::string> m_sessionSelectionBefore;  // the set's, in the session layer
+    bool m_changingVariantTarget = false;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
 };
 

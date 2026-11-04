@@ -28,17 +28,17 @@ void forEachItem(const Proxy& list, Callback callback) {
 }
 
 ArcInfo where(const PXR_NS::SdfPrimSpecHandle& spec, const PXR_NS::UsdPrim& prim, bool inStageLayers,
-              const PXR_NS::SdfLayerHandle& editTarget, const char* position) {
+              const PXR_NS::UsdEditTarget& editTarget, const char* position) {
     ArcInfo arc;
     const PXR_NS::SdfLayerHandle layer = spec->GetLayer();
     arc.layerIdentifier = layer->GetIdentifier();
     arc.layerName = layer->GetDisplayName();
     arc.specPath = spec->GetPath();
     arc.listPosition = position;
-    // A variant of this prim (/Looks{look=red}) is still this prim's own;
-    // editing inside it needs a variant edit context, so it isn't editable.
+    // A variant of this prim (/Looks{look=red}) is still this prim's own, and can be
+    // edited when it's where edits are going (variant edit mode).
     arc.nested = !inStageLayers || spec->GetPath().StripAllVariantSelections() != prim.GetPath();
-    arc.editable = !arc.nested && layer == editTarget && spec->GetPath() == prim.GetPath();
+    arc.editable = !arc.nested && layer == editTarget.GetLayer() && spec->GetPath() == editTarget.MapToSpecPath(prim.GetPath());
     return arc;
 }
 
@@ -82,7 +82,7 @@ std::vector<ArcInfo> compositionArcs(const PXR_NS::UsdPrim& prim) {
     if (!prim) return arcs;
     const PXR_NS::UsdStageRefPtr stage = prim.GetStage();
     const PXR_NS::SdfLayerHandleVector stageLayers = stage->GetLayerStack(true);
-    const PXR_NS::SdfLayerHandle editTarget = stage->GetEditTarget().GetLayer();
+    const PXR_NS::UsdEditTarget editTarget = stage->GetEditTarget();
     const bool loaded = prim.IsLoaded();
 
     for (const PXR_NS::SdfPrimSpecHandle& spec : prim.GetPrimStack()) {

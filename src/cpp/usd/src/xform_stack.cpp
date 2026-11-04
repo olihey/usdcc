@@ -85,8 +85,8 @@ void XformStack::removeAttributeIfUnused(const TfToken& attrName, const std::vec
     // there removes the attribute; with a weaker layer defining it too,
     // removing ours would just reveal theirs.
     const auto specs = attr.GetPropertyStack();
-    const SdfLayerHandle target = prim.GetStage()->GetEditTarget().GetLayer();
-    if (specs.size() == 1 && specs.front() && specs.front()->GetLayer() == target) {
+    const SdfPropertySpecHandle here = prim.GetStage()->GetEditTarget().GetPropertySpecForScenePath(attr.GetPath());
+    if (specs.size() == 1 && specs.front() && specs.front() == here) {
         prim.RemoveProperty(attrName);
     }
 }

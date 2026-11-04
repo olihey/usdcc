@@ -1,5 +1,6 @@
 #include "usdcc/usd/usd_prim_tree_model.h"
 
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_icons.h"
 
 #include <pxr/usd/usd/prim.h>
@@ -318,8 +319,8 @@ bool UsdPrimTreeModel::setData(const QModelIndex& index, const QVariant& value, 
     }
     Node* node = static_cast<Node*>(index.internalPointer());
     PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(node->path);
-    if (!prim || prim.IsInstanceProxy()) {
-        return false;  // an instance proxy can't be edited
+    if (!prim_actions::isEditable(prim)) {
+        return false;  // an instance proxy, or a prim outside the variant being edited
     }
 
     // Not edited here: the panel makes each an undo step (prim_actions); the
@@ -351,7 +352,11 @@ Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
     if (m_readOnly || (prim && prim.IsInstanceProxy())) {
         return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // read-only
     }
-    return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsUserCheckable;
+    if (prim && !prim_actions::isEditable(prim)) return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // outside a variant being edited
+    // Inside a variant being edited a prim can be activated, but not renamed.
+    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable;
+    if (!prim || prim_actions::canRename(prim)) flags |= Qt::ItemIsEditable;
+    return flags;
 }
 
 QVariant UsdPrimTreeModel::headerData(int section, Qt::Orientation orientation, int role) const {

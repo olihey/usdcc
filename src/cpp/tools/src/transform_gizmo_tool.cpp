@@ -1,3 +1,4 @@
+#include "usdcc/usd/stage.h"
 #include "usdcc/tools/transform_gizmo_tool.h"
 
 #include "usdcc/usd/value_type_info.h"
@@ -68,7 +69,9 @@ PXR_NS::UsdGeomXformable TransformGizmoTool::resolveXformable(const ToolContext&
     if (!ctx.stage || ctx.selection.size() != 1) {
         return PXR_NS::UsdGeomXformable();
     }
-    return PXR_NS::UsdGeomXformable(ctx.stage->GetPrimAtPath(ctx.selection.front()));
+    const PXR_NS::UsdPrim prim = ctx.stage->GetPrimAtPath(ctx.selection.front());
+    // No gizmo for a prim edits can't reach: outside the variant being edited.
+    return usdcc::usd::editTargetReaches(prim) ? PXR_NS::UsdGeomXformable(prim) : PXR_NS::UsdGeomXformable();
 }
 
 TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdGeomXformable& xformable) const {

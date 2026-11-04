@@ -47,6 +47,7 @@
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
+#include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -541,8 +542,11 @@ int main(int argc, char** argv) {
     std::function<void()> updateEditing = [editingLabel, &stageManager]() {
         const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
         const PXR_NS::SdfLayerHandle layer = stage ? stage->editTargetLayer() : PXR_NS::SdfLayerHandle();
-        editingLabel->setText(layer ? QObject::tr("Editing: %1").arg(QString::fromStdString(layer->GetDisplayName()))
-                                    : QString());
+        const QString variant = stage ? usdcc::usd::variantEditText(*stage) : QString();
+        const QString layerName = layer ? QString::fromStdString(layer->GetDisplayName()) : QString();
+        editingLabel->setText(!layer              ? QString()
+                              : variant.isEmpty() ? QObject::tr("Editing: %1").arg(layerName)
+                                                  : QObject::tr("%1, in %2").arg(variant, layerName));
         editingLabel->setToolTip(layer ? QString::fromStdString(layer->GetIdentifier()) : QString());
     };
     auto editingOnCurrentStage = stageManager.currentStageChanged.connect(
