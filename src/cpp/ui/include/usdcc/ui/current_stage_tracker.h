@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -22,7 +24,7 @@ class ViewPanel;
 // current stage. When the current stage is closed, the focused panel's stage
 // (if it has another) takes over before StageManager falls back to the first
 // open one.
-class CurrentStageTracker : public QObject {
+class USDCC_UI_API CurrentStageTracker : public QObject {
     Q_OBJECT
 
 public:

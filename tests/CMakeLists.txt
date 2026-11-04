@@ -75,6 +75,7 @@ add_executable(usdcc_python_tests
     test_harness.cpp
     python_test_main.cpp
     plugin_manager_test.cpp
+    plugin_native_test.cpp
     python_app_test.cpp
     python_runtime_test.cpp
     script_editor_panel_test.cpp
@@ -82,6 +83,24 @@ add_executable(usdcc_python_tests
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+
+# A C++ plugin for plugin_native_test.cpp, with a DLL of its own beside it.
+set(_usdcc_test_plugins "${CMAKE_CURRENT_BINARY_DIR}/plugins")
+usdcc_add_plugin(usdcc_test_plugin
+    ID test.native
+    NAME "Native Test"
+    VERSION 1.0.0
+    SOURCES test_plugin/test_plugin.cpp
+    OUTPUT_DIR "${_usdcc_test_plugins}/test_native")
+add_library(usdcc_test_plugin_helper SHARED test_plugin/helper.cpp)
+set_target_properties(
+    usdcc_test_plugin_helper
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${_usdcc_test_plugins}/test_native/bin/${USDCC_BUILT_FOR_PLATFORM}>"
+               LIBRARY_OUTPUT_DIRECTORY "$<1:${_usdcc_test_plugins}/test_native/bin/${USDCC_BUILT_FOR_PLATFORM}>")
+target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
+add_dependencies(usdcc_python_tests usdcc_test_plugin)
+target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp python_panels_test.cpp)
@@ -95,7 +114,7 @@ foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
         target_link_libraries(${_usdcc_test} PRIVATE "${Python3_LIBRARY}")
     endif()
-    usdcc_deploy_core_library(${_usdcc_test})
+    usdcc_deploy_core_library(${_usdcc_test} usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui)
     # OpenUSD's Python DLL rather than vcpkg's (see UsdccPython.cmake).
     usdcc_deploy_python(${_usdcc_test})
     add_test(NAME ${_usdcc_test} COMMAND ${_usdcc_test})

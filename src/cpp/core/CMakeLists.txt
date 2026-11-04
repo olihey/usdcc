@@ -21,15 +21,41 @@ target_include_directories(usdcc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_compile_definitions(usdcc_core PRIVATE USDCC_CORE_BUILD)
 set_target_properties(usdcc_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
-# Windows has no rpath: copy usdcc_core.dll next to every binary that loads it
-# (the exe, the test executables, the .pyd modules). Elsewhere the build-tree
-# rpath CMake sets by default finds it.
+# Windows has no rpath: copy usdcc_core.dll, and the other usdcc libraries named,
+# next to every binary that loads them (the exe, the test executables, the .pyd
+# modules). Elsewhere the build-tree rpath CMake sets by default finds them. A
+# second copy in another folder is harmless: Windows uses the DLL of that name
+# already loaded, so a process has one instance.
 function(usdcc_deploy_core_library target)
     if(WIN32)
-        add_custom_command(
-            TARGET ${target}
-            POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:usdcc_core>" "$<TARGET_FILE_DIR:${target}>"
-            VERBATIM)
+        # On every build, not after linking `target`: changing a DLL often doesn't
+        # relink what uses it, which would leave a stale copy beside it.
+        set(_commands COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>")
+        foreach(_library usdcc_core ${ARGN})
+            list(APPEND _commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${_library}>"
+                 "$<TARGET_FILE_DIR:${target}>")
+        endforeach()
+        add_custom_target(${target}_copy_libraries ${_commands} VERBATIM)
+        add_dependencies(${target}_copy_libraries usdcc_core ${ARGN})
+        add_dependencies(${target} ${target}_copy_libraries)
+    endif()
+endfunction()
+
+# A static library of Qt resources (.qrc), for a DLL to link. Something in the DLL
+# has to call Q_INIT_RESOURCE, which is also what pulls them in from the library.
+function(usdcc_add_resources target)
+    add_library(${target} STATIC ${ARGN})
+    set_target_properties(${target} PROPERTIES AUTORCC ON POSITION_INDEPENDENT_CODE ON LINKER_LANGUAGE CXX)
+    target_link_libraries(${target} PRIVATE Qt6::Core)
+endfunction()
+
+# A usdcc library that plugins and the Python modules link: a DLL with its
+# functions exported (docs/PLUGINS.md §3.2). Data has to be marked (core/export.h).
+function(usdcc_export_library target)
+    set_target_properties(${target} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # USD's headers ask for the release Python import library in every
+    # configuration, as for the app (src/cpp/app/CMakeLists.txt).
+    if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+        target_link_libraries(${target} PRIVATE "${Python3_LIBRARY}")
     endif()
 endfunction()

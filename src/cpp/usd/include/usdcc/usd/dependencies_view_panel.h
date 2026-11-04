@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/dependencies.h"
@@ -27,7 +29,7 @@ class UndoManager;
 // and loads or unloads a payload everywhere it's used. "Show Asset
 // Attributes" (options menu, saved) adds the files attributes name.
 // Follows the stage's change notices, coalesced.
-class DependenciesViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API DependenciesViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

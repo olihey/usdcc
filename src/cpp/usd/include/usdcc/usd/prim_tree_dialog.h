@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/preview_stage.h"
 #include "usdcc/usd/stage.h"
@@ -20,7 +22,7 @@ class PrimTreeWidget;
 // app's selection stays out of it. A non-modal dialog with a stage of its own, as
 // in Show USDA, loaded behind "Loading stage..." without payloads (Load Payloads
 // loads them).
-class PrimTreeDialog : public QDialog {
+class USDCC_USD_UI_API PrimTreeDialog : public QDialog {
     Q_OBJECT
 
 public:

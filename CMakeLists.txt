@@ -163,12 +163,28 @@ add_custom_target(
 # so only usdcc's own targets get it.
 add_compile_definitions(QT_NO_KEYWORDS)
 
+# What a C++ plugin has to have been built with (docs/PLUGINS.md §3.2).
+if(WIN32)
+    set(USDCC_BUILT_FOR_PLATFORM "windows-x64")
+elseif(APPLE)
+    set(USDCC_BUILT_FOR_PLATFORM "macos-${CMAKE_SYSTEM_PROCESSOR}")
+else()
+    set(USDCC_BUILT_FOR_PLATFORM "linux-${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(USDCC_BUILT_FOR_COMPILER "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+set(USDCC_BUILT_FOR_QT "${Qt6_VERSION}")
+set(USDCC_BUILT_FOR_USD "${PXR_VERSION}")
+set(USDCC_BUILT_FOR_USDCC "${PROJECT_VERSION}")
+include(UsdccPlugin)
+
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
+add_subdirectory(src/cpp/plugin_sdk)
 add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
+add_subdirectory(src/plugins/cpp_example)
 
 option(USDCC_BUILD_TESTS "Build the usdcc_tests executable and register it with CTest" ON)
 if(USDCC_BUILD_TESTS)

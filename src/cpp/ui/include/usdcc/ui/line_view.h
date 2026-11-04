@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QAbstractScrollArea>
 #include <QList>
 #include <QMenu>
@@ -27,7 +29,7 @@ namespace usdcc::ui {
 // keyboard (arrows, Page Up/Down, Home/End, with Ctrl for the whole text,
 // Shift to extend), copies (Ctrl+C) and finds (find(), case-insensitive for
 // ASCII). Positions are a line and a column in UTF-16 units of that line.
-class LineView : public QAbstractScrollArea {
+class USDCC_UI_API LineView : public QAbstractScrollArea {
     Q_OBJECT
 
 public:

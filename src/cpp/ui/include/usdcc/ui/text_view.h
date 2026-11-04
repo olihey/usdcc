@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QPlainTextEdit>
 
 namespace usdcc::ui {
@@ -10,7 +12,7 @@ namespace usdcc::ui {
 //   - the cursor's line highlighted.
 // The Script Editor's CodeEditor is built on it. For very big read-only text
 // see LineView, whose gutter and current line look the same.
-class TextView : public QPlainTextEdit {
+class USDCC_UI_API TextView : public QPlainTextEdit {
     Q_OBJECT
 
 public:

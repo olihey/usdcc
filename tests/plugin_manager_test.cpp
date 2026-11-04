@@ -138,7 +138,7 @@ USDCC_TEST(plugin_manifests) {
     }
     CHECK(contains(reasonOf(manager, "broken"), "JSON"), "invalid JSON says so");
     CHECK(contains(reasonOf(manager, "old"), "99"), "a wrong API names it");
-    CHECK(contains(reasonOf(manager, "cpp"), "C++"), "a C++ part can't load yet");
+    CHECK(contains(reasonOf(manager, "cpp"), "native"), "a C++ part with no library says so");
 
     PluginManager skipped([&] {
         auto options = plugins.options();

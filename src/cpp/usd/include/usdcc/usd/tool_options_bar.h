@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/tools/tool.h"
 
 #include <QFrame>
@@ -19,7 +21,7 @@ namespace usdcc::usd {
 // optionChanged() for the caller to forward to the tool. A Choice becomes a
 // segmented control, a Toggle a checkbox, a Number a spin box; options marked
 // enabledBy follow their toggle's state.
-class ToolOptionsBar : public QFrame {
+class USDCC_USD_UI_API ToolOptionsBar : public QFrame {
     Q_OBJECT
 
 public:

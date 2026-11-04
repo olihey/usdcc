@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -18,7 +20,7 @@ namespace usdcc::usd::properties {
 // one place. Toggles preview the row states (read-only, unauthored, animated,
 // connected) and soft limits (sliders); a log line shows the edit signals as
 // they happen, and the footer counts types without a dedicated editor.
-class DataTypeGalleryDialog : public QDialog {
+class USDCC_USD_UI_API DataTypeGalleryDialog : public QDialog {
     Q_OBJECT
 
 public:

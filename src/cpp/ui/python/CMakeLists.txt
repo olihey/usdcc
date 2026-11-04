@@ -57,6 +57,7 @@ get_target_property(_ads_includes ads::qtadvanceddocking-qt6 INTERFACE_INCLUDE_D
 
 set(_shiboken_include_dirs
     "${CMAKE_SOURCE_DIR}/src/cpp/ui/include"
+    "${CMAKE_SOURCE_DIR}/src/cpp/core/include"
     ${_qt_core_includes}
     ${_qt_gui_includes}
     ${_qt_widgets_includes}
@@ -132,7 +133,7 @@ target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${
 # redefining access-specifier keywords as a hard error unless this is set.
 target_compile_definitions(usdcc_ui_python PRIVATE _ALLOW_KEYWORD_MACROS)
 target_link_libraries(usdcc_ui_python PRIVATE usdcc_ui Shiboken6::libshiboken PySide6::pyside6)
-usdcc_deploy_core_library(usdcc_ui_python)
+usdcc_deploy_core_library(usdcc_ui_python usdcc_usd usdcc_ui)
 # Debug-config-only fixup: the generated wrapper .cpp files include
 # shiboken6's sbkpython.h, which #includes <Python.h> with no protection
 # against MSVC's pyconfig.h auto-embedding

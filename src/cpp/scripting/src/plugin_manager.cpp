@@ -8,6 +8,8 @@
 #include "usdcc/scripting/plugin_manager.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/plugin/plugin.h"
+#include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/settings.h"
 
@@ -22,7 +24,12 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QLibrary>
 #include <QStringList>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -98,7 +105,12 @@ std::string parseManifest(const std::filesystem::path& file, PluginManifest& man
     manifest.pythonRequires = stringList(python.value("requires"));
     manifest.usdFolders = stringList(json.value("usd"));
     manifest.dependsOn = stringList(json.value("requires"));
-    manifest.hasNative = json.contains("native");
+    const QJsonObject native = json.value("native").toObject();
+    manifest.nativeLibrary = native.value("library").toString().toStdString();
+    const QJsonObject builtFor = native.value("built_for").toObject();
+    for (auto it = builtFor.begin(); it != builtFor.end(); ++it) {
+        manifest.builtFor[it.key().toStdString()] = it.value().toString().toStdString();
+    }
 
     if (manifest.name.empty()) return "Its manifest has no \"name\".";
     if (manifest.version.empty()) return "Its manifest has no \"version\".";
@@ -109,10 +121,83 @@ std::string parseManifest(const std::filesystem::path& file, PluginManifest& man
     if (python.contains("requires") && manifest.pythonModule.empty()) {
         return "Its manifest has \"python\" \"requires\" with no \"module\".";
     }
-    if (manifest.hasNative) return "It has a C++ part, which this app can't load yet.";
+    if (json.contains("native")) {
+        if (manifest.nativeLibrary.empty()) return "Its manifest's \"native\" names no \"library\".";
+        const auto app = pluginBuildInfo();
+        if (manifest.builtFor.empty()) return "Its manifest doesn't say what its C++ part was built for.";
+        // First the platform, which says the most.
+        for (const char* key : {"platform", "compiler", "qt", "usd", "usdcc"}) {
+            const auto built = manifest.builtFor.find(key);
+            const std::string plugin = built == manifest.builtFor.end() ? "an unknown one" : built->second;
+            const std::string ours = app.at(key);
+            if (plugin != ours) {
+                return std::string("Its C++ part was built for ") + key + " " + plugin + ", and this app has " + ours + ".";
+            }
+        }
+    }
     return {};
 }
+
+std::filesystem::path nativeLibraryPath(const PluginManifest& manifest) {
+#if defined(_WIN32)
+    const char* extension = ".dll";
+#elif defined(__APPLE__)
+    const char* extension = ".so";
+#else
+    const char* extension = ".so";
+#endif
+    return manifest.folder / "bin" / USDCC_BUILT_FOR_PLATFORM / std::filesystem::u8path(manifest.nativeLibrary + extension);
+}
+
+// A library and what it exports. Its own DLLs are found next to it. Never unloaded.
+struct LoadedLibrary {
+    std::function<void*(const char*)> symbol;
+    std::string error;
+};
+
+LoadedLibrary loadLibrary(const std::filesystem::path& path) {
+    LoadedLibrary loaded;
+#if defined(_WIN32)
+    HMODULE module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (!module) {
+        const DWORD code = GetLastError();
+        wchar_t* text = nullptr;
+        FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0,
+                       reinterpret_cast<wchar_t*>(&text), 0, nullptr);
+        loaded.error = text ? QString::fromWCharArray(text).trimmed().toStdString() : "error " + std::to_string(code);
+        if (text) LocalFree(text);
+        // Windows doesn't say which: it's the library or something it links.
+        if (code == ERROR_MOD_NOT_FOUND) {
+            loaded.error += " A DLL it links is missing, perhaps built against other libraries than this app's (a debug Qt, say).";
+        }
+        return loaded;
+    }
+    loaded.symbol = [module](const char* name) { return reinterpret_cast<void*>(GetProcAddress(module, name)); };
+#else
+    auto library = std::make_shared<QLibrary>(toQString(path));
+    library->setLoadHints(QLibrary::PreventUnloadHint);
+    if (!library->load()) {
+        loaded.error = library->errorString().toStdString();
+        return loaded;
+    }
+    loaded.symbol = [library](const char* name) { return reinterpret_cast<void*>(library->resolve(name)); };
+#endif
+    return loaded;
+}
 }  // namespace
+
+std::map<std::string, std::string> pluginBuildInfo() {
+    return {{"platform", USDCC_BUILT_FOR_PLATFORM},
+            {"compiler", USDCC_BUILT_FOR_COMPILER},
+            {"qt", USDCC_BUILT_FOR_QT},
+            {"usd", USDCC_BUILT_FOR_USD},
+            {"usdcc", USDCC_BUILT_FOR_USDCC}};
+}
+
+struct PluginManager::NativePlugin {
+    usdcc::plugin::Host host;
+    usdcc::plugin::DeactivateFunction deactivate = nullptr;
+};
 
 std::filesystem::path PluginManager::userFolder() {
     return toPath(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/plugins");
@@ -136,6 +221,47 @@ PluginManager::Options PluginManager::defaultOptions(const std::vector<std::file
 }
 
 PluginManager::PluginManager(Options options) : m_options(std::move(options)) {}
+
+PluginManager::~PluginManager() = default;
+
+std::string PluginManager::activateNative(PluginInfo& plugin) {
+    const std::filesystem::path path = nativeLibraryPath(plugin.manifest);
+    std::error_code error;
+    if (!std::filesystem::exists(path, error)) return "Its C++ library " + toUtf8(path) + " doesn't exist.";
+    const LoadedLibrary library = loadLibrary(path);
+    if (!library.symbol) return "Its C++ library can't be loaded: " + library.error;
+    const auto activateFunction = reinterpret_cast<usdcc::plugin::ActivateFunction>(library.symbol("usdcc_plugin_activate"));
+    if (!activateFunction) return "Its C++ library has no usdcc_plugin_activate().";
+
+    // It lives as long as this manager, as the plugin's callbacks may hold it.
+    auto native = std::make_unique<NativePlugin>();
+    usdcc::plugin::Host& host = native->host;
+    host.id = plugin.manifest.id;
+    host.name = plugin.manifest.name;
+    host.version = plugin.manifest.version;
+    host.folder = plugin.manifest.folder;
+    if (const AppContext* context = currentAppContext()) {
+        host.stageManager = context->stageManager;
+        host.undoManager = context->undoManager;
+        host.toolSet = context->toolSet;
+        host.mainWindow = context->mainWindow;
+        host.viewPanels = context->viewPanels;
+    }
+    host.note = [this, id = plugin.manifest.id](const std::string& kind, const std::string& name) {
+        addContribution(id, kind, name);
+    };
+    native->deactivate = reinterpret_cast<usdcc::plugin::DeactivateFunction>(library.symbol("usdcc_plugin_deactivate"));
+    usdcc::plugin::Host* hostPointer = &host;
+    m_native[plugin.manifest.id] = std::move(native);
+    try {
+        activateFunction(*hostPointer);
+    } catch (const std::exception& failure) {
+        return std::string("usdcc_plugin_activate() threw: ") + failure.what();
+    } catch (...) {
+        return "usdcc_plugin_activate() threw.";
+    }
+    return {};
+}
 
 PluginInfo* PluginManager::findMutable(const std::string& id) {
     const auto it = std::find_if(m_plugins.begin(), m_plugins.end(),
@@ -368,19 +494,22 @@ void PluginManager::activate(PythonRuntime& python) {
         }
     }
     refuseDependents();
+#endif
 
     for (PluginInfo& plugin : m_plugins) {
         if (plugin.state != PluginState::Ready) continue;
         refuseDependents();  // one activated just before this may have failed
         if (plugin.state != PluginState::Ready) continue;
-        if (plugin.manifest.pythonModule.empty()) {
+        if (plugin.manifest.pythonModule.empty() && plugin.manifest.nativeLibrary.empty()) {
             plugin.state = PluginState::Active;
             continue;
         }
         const auto start = std::chrono::steady_clock::now();
         writeCrashMarker(plugin.manifest.id);
         std::string failure;
-        {
+        if (!plugin.manifest.nativeLibrary.empty()) failure = activateNative(plugin);
+#if USDCC_HAS_PYTHON
+        if (failure.empty() && !plugin.manifest.pythonModule.empty()) {
             py::gil_scoped_acquire gil;
             try {
                 failure = py::module_::import("usdcc._plugins")
@@ -391,6 +520,7 @@ void PluginManager::activate(PythonRuntime& python) {
                 failure = error.what();
             }
         }
+#endif
         removeCrashMarker();
         const auto ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
@@ -403,29 +533,35 @@ void PluginManager::activate(PythonRuntime& python) {
             USDCC_LOG_ERROR("usdcc.plugins", "{} failed to activate: {}", plugin.manifest.name, failure);
         }
     }
-#else
-    for (PluginInfo& plugin : m_plugins) {
-        if (plugin.state == PluginState::Ready) plugin.state = PluginState::Active;
-    }
-#endif
 }
 
 void PluginManager::deactivate(PythonRuntime& python) {
-#if USDCC_HAS_PYTHON
-    if (!python.isAvailable()) return;
-    namespace py = pybind11;
-    py::gil_scoped_acquire gil;
     for (auto it = m_plugins.rbegin(); it != m_plugins.rend(); ++it) {
-        if (it->state != PluginState::Active || it->manifest.pythonModule.empty()) continue;
-        try {
-            py::module_::import("usdcc._plugins").attr("deactivate")(it->manifest.id);
-        } catch (py::error_already_set& error) {
-            USDCC_LOG_ERROR("usdcc.plugins", "{} failed to deactivate: {}", it->manifest.name, error.what());
+        if (it->state != PluginState::Active) continue;
+#if USDCC_HAS_PYTHON
+        if (!it->manifest.pythonModule.empty() && python.isAvailable()) {
+            namespace py = pybind11;
+            py::gil_scoped_acquire gil;
+            try {
+                py::module_::import("usdcc._plugins").attr("deactivate")(it->manifest.id);
+            } catch (py::error_already_set& error) {
+                USDCC_LOG_ERROR("usdcc.plugins", "{} failed to deactivate: {}", it->manifest.name, error.what());
+            }
+        }
+#else
+        (void)python;
+#endif
+        const auto native = m_native.find(it->manifest.id);
+        if (native != m_native.end() && native->second->deactivate) {
+            try {
+                native->second->deactivate(native->second->host);
+            } catch (const std::exception& error) {
+                USDCC_LOG_ERROR("usdcc.plugins", "{} failed to deactivate: {}", it->manifest.name, error.what());
+            } catch (...) {
+                USDCC_LOG_ERROR("usdcc.plugins", "{} failed to deactivate", it->manifest.name);
+            }
         }
     }
-#else
-    (void)python;
-#endif
 }
 
 bool PluginManager::isEnabled(const std::string& id) const {

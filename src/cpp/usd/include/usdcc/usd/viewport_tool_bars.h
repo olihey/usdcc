@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage.h"
@@ -39,7 +41,7 @@ class ToolRail;
 // Both toolbars can be dragged to any edge the main window allows (the options
 // bar: top or bottom only), or floated. Parented to the window, which also owns
 // the toolbars; just construct it.
-class ViewportToolBars : public QObject {
+class USDCC_USD_UI_API ViewportToolBars : public QObject {
     Q_OBJECT
 
 public:

@@ -18,16 +18,12 @@
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
-#include <QAction>
-#include <QKeySequence>
-#include <QMenu>
-#include <QMenuBar>
 #include <QSettings>
-#include <QStringList>
 #include <QUndoStack>
 
 #include <DockManager.h>
@@ -104,53 +100,20 @@ QString settingsKey(const std::string& id, const std::string& key) {
     return QStringLiteral("PluginSettings/%1/%2").arg(QString::fromStdString(id), QString::fromStdString(key));
 }
 
-// Calls `callback` as one undo step, however many stages it edits, like a script
-// run from the panel (docs/PLUGINS.md §3.7). An exception is logged.
+// One undo step, like a script run from the panel (docs/PLUGINS.md §3.7). An
+// exception is logged.
 void runAsOneStep(const std::string& label, const std::function<void()>& callback) {
-    UndoManager* undo = s_context ? s_context->undoManager : nullptr;
-    usdcc::usd::StageManager* stages = s_context ? s_context->stageManager : nullptr;
-    // A global edit doesn't nest: inside one, this belongs to that one's step.
-    const bool ownsEdit = undo && stages && !undo->isGlobalEditing();
-    if (ownsEdit) undo->beginGlobalEdit(*stages, QString::fromStdString(label));
-    bool ok = true;
-    {
-        py::gil_scoped_acquire gil;
-        try {
-            callback();
-        } catch (py::error_already_set& error) {
-            logPythonError(error);
-            ok = false;
-        }
-    }
-    if (ownsEdit) undo->endGlobalEdit(ok ? QString() : QStringLiteral("%1 (failed)").arg(QString::fromStdString(label)));
-}
-
-QString withoutMnemonic(QString text) { return text.remove(QLatin1Char('&')); }
-
-// The menu at `parts` under the menu bar, made if it's missing. New top-level
-// menus go before Debug, which stays last.
-QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts) {
-    QMenuBar* bar = window.mainMenuBar();
-    QMenu* current = nullptr;
-    for (const QString& part : parts) {
-        const QList<QAction*> actions = current ? current->actions() : bar->actions();
-        QMenu* found = nullptr;
-        QAction* debug = nullptr;
-        for (QAction* action : actions) {
-            if (action->menu() && withoutMnemonic(action->text()) == withoutMnemonic(part)) found = action->menu();
-            if (!current && withoutMnemonic(action->text()) == QLatin1String("Debug")) debug = action;
-        }
-        if (!found) {
-            if (current) {
-                found = current->addMenu(part);
-            } else {
-                found = new QMenu(part, bar);
-                bar->insertMenu(debug, found);
-            }
-        }
-        current = found;
-    }
-    return current;
+    usdcc::usd::runAsOneUndoStep(s_context ? s_context->undoManager : nullptr, s_context ? s_context->stageManager : nullptr,
+                                 label, [&callback]() {
+                                     py::gil_scoped_acquire gil;
+                                     try {
+                                         callback();
+                                         return true;
+                                     } catch (py::error_already_set& error) {
+                                         logPythonError(error);
+                                         return false;
+                                     }
+                                 });
 }
 
 template <typename Signal, typename Callback>
@@ -329,46 +292,19 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "add_menu_action",
         [](const std::string& path, py::object callback, const std::string& shortcut, const std::string& tip) {
-            QStringList parts = QString::fromStdString(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-            if (parts.size() < 2) throw py::value_error("a menu action's path is 'Menu/Action', not '" + path + "'");
-            const QString label = parts.takeLast();
-            usdcc::ui::MainWindow& window = mainWindow();
-            QMenu* menu = menuAt(window, parts);
-            QAction* action = nullptr;
-            for (QAction* existing : menu->actions()) {
-                if (!existing->menu() && withoutMnemonic(existing->text()) == withoutMnemonic(label)) action = existing;
-            }
-            if (action) {
-                QObject::disconnect(action, &QAction::triggered, nullptr, nullptr);  // registered again
-            } else {
-                action = menu->addAction(label);
-            }
-            action->setShortcut(QKeySequence(QString::fromStdString(shortcut)));
-            action->setStatusTip(QString::fromStdString(tip));
-            action->setToolTip(QString::fromStdString(tip));
             auto held = std::make_shared<PythonObject>(std::move(callback));
-            const std::string description = withoutMnemonic(label).toStdString();
-            QObject::connect(action, &QAction::triggered, &window, [held, description]() {
-                runAsOneStep(description, [&held]() { held->object(); });
-            });
+            const QString qpath = QString::fromStdString(path);
+            const std::string description = qpath.section(QLatin1Char('/'), -1).remove(QLatin1Char('&')).toStdString();
+            const auto run = [held, description]() { runAsOneStep(description, [&held]() { held->object(); }); };
+            if (!usdcc::usd::addMainMenuAction(mainWindow(), qpath, run, QString::fromStdString(shortcut),
+                                               QString::fromStdString(tip))) {
+                throw py::value_error("a menu action's path is 'Menu/Action', not '" + path + "'");
+            }
         },
         py::arg("path"), py::arg("callback"), py::arg("shortcut"), py::arg("tip"));
     m.def(
         "remove_menu_action",
-        [](const std::string& path) {
-            QStringList parts = QString::fromStdString(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-            if (parts.size() < 2) return false;
-            const QString label = parts.takeLast();
-            QMenu* menu = menuAt(mainWindow(), parts);
-            for (QAction* action : menu->actions()) {
-                if (!action->menu() && withoutMnemonic(action->text()) == withoutMnemonic(label)) {
-                    menu->removeAction(action);
-                    action->deleteLater();
-                    return true;
-                }
-            }
-            return false;
-        },
+        [](const std::string& path) { return usdcc::usd::removeMainMenuAction(mainWindow(), QString::fromStdString(path)); },
         py::arg("path"));
     m.def(
         "add_prim_menu_action",

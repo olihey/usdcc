@@ -1,10 +1,9 @@
 # Plugin System
 
-Status: **phases 1 to 4 are built: Python plugins and USD plugins work. C++ plugins (phases 5 and 6) are still a plan.** This is milestone M9 in
-[PLAN.md](PLAN.md), and answers its open question 4.
+All six phases are built. This is milestone M9 in [PLAN.md](PLAN.md), and answers its open question 4.
 
-A plugin is a folder the app finds at startup, holding any mix of Python and USD plugins (schemas, render delegates, file formats), and later a C++
-library. It adds to the app without forking it.
+A plugin is a folder the app finds at startup, holding any mix of Python, USD plugins (schemas, render delegates, file formats) and a C++ library. It adds to the
+app without forking it. This covers plugins in general and Python ones; [PLUGIN_SDK.md](PLUGIN_SDK.md) is the guide to C++ ones.
 
 Marked "checked" below means run against this build (USD 26.11). §5 says what was tested and how.
 
@@ -46,11 +45,12 @@ def deactivate(plugin):  # optional: at quit, for saving
     pass
 ```
 
-[src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`.
+[src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`. The C++ example builds to
+`build/plugins`, so `usdcc --plugin-path build/plugins` loads that.
 
 **Found in, the first with an id winning (logged):** `--plugin-path` folders, `USDCC_PLUGIN_PATH` (a studio's), `%LOCALAPPDATA%/usdcc/plugins` (the
 user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in
-`examples/plugins`, where they don't load unless asked for.
+`examples/plugins`, where they don't load unless asked for, and the SDK for C++ plugins in `sdk`.
 
 **What a plugin can add:**
 
@@ -102,34 +102,41 @@ comes later (§3.3). **Checked in the app:** a stage on the command line with a 
 
 A plugin's USD files stay registered even if its Python is then refused or fails, as they can't be taken back (§3.4).
 
-### 3.2 C++ plugins can't link against the app
+### 3.2 C++ plugins share the app's libraries
 
-**This is the largest piece of work, and isn't built.** Every usdcc library but `usdcc_core` is static, and nothing is exported. A plugin linking those
-statically compiles and links, then fails quietly:
+Every usdcc library but `usdcc_core` used to be static. A plugin linking those would compile and link, then fail quietly:
 
-- **It gets its own copy of every singleton.** `PrimCreationCatalog::instance()` in a plugin is a different catalog, so its entries never
-  appear, with no error. `usdcc_core` is a DLL for exactly this reason (its `CMakeLists.txt` says so).
-- **It gets its own `ViewPanel`,** with its own Qt metaobject, so `qobject_cast<ViewPanel*>` in the app, which `savePanels()` relies on,
-  returns null for its panels.
+- **It would get its own copy of every singleton.** `PrimCreationCatalog::instance()` in a plugin would be a different catalog, so its entries would never
+  appear, with no error.
+- **It would get its own `ViewPanel`,** with its own Qt metaobject, so `qobject_cast<ViewPanel*>` in the app, which `savePanels()` relies on, would return null for
+  its panels.
 
-`_ui.pyd` has this problem already: it links its own `usdcc_ui`. `UiScaleController::instance()` looks itself up through `qApp` to get
-round that.
+`_ui.pyd` had this problem already: it linked its own `usdcc_ui`.
 
-| Option | For | Against |
-|---|---|---|
-| **The libraries become DLLs, with exports** (recommended) | Plugins use the same classes the app does, and it fixes `_ui.pyd` | About 90 public classes to mark (a rough count); every test and module needs the DLLs next to it |
-| **The exe exports its symbols** (`ENABLE_EXPORTS`) | Less build work | `_usd.pyd` in a plain Python has no exe to link to, so `usdcc.usd` keeps its own copy |
-| **A narrow C API** | The classic way to a stable ABI | Panels couldn't derive from `ViewPanel`. Qt and USD types cross it anyway, so the ABI still isn't stable |
+**So:** `usdcc_usd`, `usdcc_tools`, `usdcc_ui` and `usdcc_usd_ui` are DLLs. The alternatives were the exe exporting its symbols, which `_usd.pyd` in a plain Python couldn't
+link to, and a narrow C API, where panels couldn't derive from `ViewPanel`, and which wouldn't make the ABI stable as Qt and USD types cross it anyway. `usdcc_usd` and
+`usdcc_tools` stay free of Qt, and `usdcc.usd` still imports in a plain Python. The scripting libraries stay static, in the exe.
 
-The dependencies have no cycles (`core` ← `usd` ← `tools`, `ui` ← `usd_ui` ← `scripting_*`), so DLLs are possible. `usdcc_usd` and
-`usdcc_tools` have to stay free of Qt, so that `usdcc.usd` still imports in a plain Python.
+**How they export, which differs from the plan.** The plan was to mark about 90 classes by hand, which misses the hundreds of free functions, such as `prim_actions::`. Instead:
 
-**A C++ plugin is tied to the exact build,** whichever option is used: `std::` and Qt types cross the boundary, and USD's symbols carry its
-version (`pxrInternal_v0_26_11`). The compiler, CRT, Qt and USD all have to match. Debug builds are a trap here, since the app links the
-release CRT in Debug (PLAN.md §6).
+- **CMake exports the functions** (`WINDOWS_EXPORT_ALL_SYMBOLS`). That's about 9,600 symbols, well within Windows' limit of 65,535 per DLL.
+- **Data still needs marking,** and the only data is each `Q_OBJECT` class's `staticMetaObject`, so those 50 classes have `USDCC_UI_API` or `USDCC_USD_UI_API`.
+- **Everything is exported, not a chosen API.** A plugin can use anything in the headers, so nothing marks what's meant to stay stable. That's the cost of this.
 
-**So, in phase 6:** the SDK's `usdcc_add_plugin()` CMake function writes those versions into the manifest's `built_for`, and the app compares them
-**before loading the DLL**. For now, a manifest with `"native"` is refused, saying that it can't be loaded yet.
+**Two traps found on the way:**
+
+- **`WINDOWS_EXPORT_ALL_SYMBOLS` fails with AUTORCC** in a target under the Visual Studio generator, looking for `qrc_*.obj` in the wrong folder. So Qt resources are in small static
+  libraries of their own (`usdcc_add_resources()`), which `Q_INIT_RESOURCE` pulls in.
+- **A failed export step leaves an empty `exports.def`** that later builds don't replace, and the link then reports a few symbols missing. Delete it and rebuild if that happens
+  after a failed build.
+- **Copying DLLs after a link isn't enough:** changing a DLL often doesn't relink what uses it, so a stale copy can stay beside it. So `usdcc_deploy_core_library()` copies on every
+  build. With the copy after linking, the tests loading a C++ plugin once crashed, and stopped when this changed, with the plugin and test program themselves untouched. That
+  fits a stale DLL, but which one wasn't established.
+- **`build/python/usdcc` is shared by every configuration,** so after a Debug build, `_ui.pyd` there is the Debug one until a Release build relinks it.
+
+**A C++ plugin is tied to the exact build:** `std::` and Qt types cross the boundary, and USD's symbols carry its version (`pxrInternal_v0_26_11`). So `usdcc_add_plugin()`
+writes the platform, compiler, Qt, USD and usdcc versions into the manifest's `built_for`, and the app compares them **before loading the DLL**, refusing with what differs.
+Debug and Release needn't match, as every configuration uses the release CRT (PLAN.md §6 item 28).
 
 ### 3.3 Activating comes before the layout is restored
 
@@ -254,22 +261,24 @@ author, and no helper is planned.
 | **2. Extension points** | `add_menu_action()` with undo, prim menu entries, `plugin.settings`, events, side panel ids | **Done** |
 | **3. Tools** | Tool ids and list, a rail built from it, Python `Tool`, example tool | **Done** |
 | **4. Plugin Manager** | View > Plugins, enable and disable, Open Plugins Folder, crash marker | **Done** |
-| **5. Libraries become DLLs** | `usdcc_usd`, `usdcc_tools`, `usdcc_ui`, `usdcc_usd_ui` shared, with export headers. `_ui.pyd`, `_usd.pyd`, tests and deploy updated. **No plugin feature:** the app must behave the same. Test: all suites, a singleton being one instance across DLLs, `usdcc.usd` in a plain Python, the deploy folder on its own | Not started |
-| **6. C++ plugins** | Loading, the `built_for` check, entry point, `usdcc_add_plugin()`, SDK in the deploy, example with a panel and tool, `docs/PLUGIN_SDK.md`. Test: PLAN.md's exit criterion, a mismatched build is refused, a plugin's own DLLs are found, a registration reaches the app's own catalog | Not started |
-
-**Phase 5 is the riskiest:** it touches every target, and this project has already had trouble with DLLs and CRTs (PLAN.md §6), so it stands alone with no
-features in it. Whether to do 5 and 6 at all is decision 3 below.
+| **5. Libraries become DLLs** | `usdcc_usd`, `usdcc_tools`, `usdcc_ui`, `usdcc_usd_ui` shared, exported as in §3.2; `_ui.pyd`, `_usd.pyd`, tests and deploy updated | **Done** |
+| **6. C++ plugins** | Loading, the `built_for` check, `usdcc::plugin::Host`, `usdcc_add_plugin()`, SDK in the deploy, example with a panel and tool, [PLUGIN_SDK.md](PLUGIN_SDK.md) | **Done** |
 
 **Later:** plugin-provided attribute editors (`createPropertyEditor()` needs a registry first), plugin icons for prim types, Reload, an Install button
 for Python modules (§3.10).
 
 ## 5. Tested, and not
 
-**Unit tests:** [plugin_manager_test.cpp](../tests/plugin_manager_test.cpp) and [plugin_extensions_test.cpp](../tests/plugin_extensions_test.cpp), including the
-example plugin's panel, menu action, prim menu entry and tool.
+**Unit tests:** [plugin_manager_test.cpp](../tests/plugin_manager_test.cpp), [plugin_extensions_test.cpp](../tests/plugin_extensions_test.cpp), including the
+example plugin's panel, menu action, prim menu entry and tool, and [plugin_native_test.cpp](../tests/plugin_native_test.cpp), with a C++ plugin that has a `Q_OBJECT` panel and a DLL of its
+own: it reaches the app's own catalog, the app's `qobject_cast` recognizes its panel, and each kind of mismatch or broken library says why.
 
 **In the real app, with scratch plugins, and looked at in a screenshot:** the items marked checked above, and the Plugins panel, the tool rail's letter icons and the
-options bar. A deployed folder ran the example plugin with its own Python.
+options bar. A deployed folder ran the example plugin with its own Python. **The C++ example in the app:** its panel counts prims and follows an edit and its undo, and comes back
+after restarts, and its menu action is one undo step.
+
+**Outside this repository:** a plugin built from a copy of the example, against a deployed folder's `sdk`, runs in that deployed app with no development folders on `PATH`, next to the
+C++ and Python examples. **This caught a real bug:** at first it failed to load, as CMake picked vcpkg's debug Qt without the app's mapping to the release one. The SDK now maps it.
 
 **Not checked:**
 
@@ -278,21 +287,23 @@ options bar. A deployed folder ran the example plugin with its own Python.
 - **The environment variables** `USDCC_PLUGIN_PATH` and `USDCC_PYTHON_PATH`. What they feed was tested through options and `--plugin-path`.
 - **Render delegates and file formats from a plugin folder:** only a schema was tried (§3.1).
 - **Compiled packages other than numpy,** in particular ones bringing their own Qt or USD libraries (§3.10).
-- **How much phase 5 changes in practice:** no library has been converted. The count of classes is rough, and I haven't looked for function-local
-  statics or `inline` state that would change meaning across DLLs.
+- **The Python tests in Debug.** Two of the 42 hang, `python_exit_criterion` and `python_app_api`, and the rest pass one at a time; the other two suites pass in Debug. Any binding taking a
+  list, such as `usdcc.usd.select()` or `set_relationship_targets()`, hangs in pybind11's handling before reaching the binding's code, in Debug only. So a Python plugin calling those
+  hangs a Debug build. It looks unrelated to the DLLs, but no Debug build from before them has been run to compare.
+- **Debug and Release share a plugin's output folder,** so the last one built is what's there. They're meant to be compatible, as both use the release CRT, but only the matching pairs were run.
+- **A real mouse drag with a C++ tool,** as for Python's above. The example's Drop Locator tool has been loaded and selected but never driven. The test plugin's tool, much like it, was driven through the `Tool` methods.
+- **A C++ plugin with Python or USD parts too.** The code activates the library, then the Python, but no test has both.
+- **`inline` state across DLLs:** a search of the headers found no function-local statics or mutable globals, but it was a text search.
 - **Linux and macOS:** only Windows has been run.
 
 ## 6. Decisions
 
-1. **Python first, C++ after:** taken. Phases 1 to 4 are Python and USD.
-2. **How C++ plugins link:** recommended, for phase 5: **the libraries become DLLs** (§3.2). It's the most work, and the only option that gives a plugin the
-   same classes and fixes `_ui.pyd`.
-3. **Do C++ plugins come at all?** **Still open.** The spec asks for them, but stopping here is reasonable if Python is enough, except for code that needs to be
-   fast. USD schemas and render delegates work without them.
+1. **Python first, C++ after:** done in that order.
+2. **How C++ plugins link:** the libraries are DLLs (§3.2), the most work of the options, and the only one giving a plugin the same classes and fixing `_ui.pyd`.
+3. **C++ plugins at all:** built, as the spec asks. Most plugins should still be Python (PLUGIN_SDK.md).
 4. **Turning a plugin on or off:** at the next start (§3.4).
 5. **A newly found plugin:** it just loads, as startup scripts do. Someone had to put it in that folder.
 6. **Installing:** copying a folder, with Open Plugins Folder in the panel. No zip installer or store for now.
 7. **Manifest format:** JSON. Qt reads it with no new dependency, and USD's `plugInfo.json` is the same kind of file.
-8. **Compatibility:** `api` is a whole number, raised only when something breaks, and a plugin whose `api` doesn't match is refused with the reason. C++ will
-   additionally need the exact build (§3.2).
+8. **Compatibility:** `api` is a whole number, raised only when something breaks, and a plugin whose `api` doesn't match is refused with the reason. C++ also needs the exact build (§3.2).
 9. **Third-party Python modules:** declared in the manifest, shipped in `deps/` or a shared folder, and checked before any plugin code runs (§3.10). No pip at startup.

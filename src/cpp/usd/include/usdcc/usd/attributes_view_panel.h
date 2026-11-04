@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/stage.h"
@@ -57,7 +59,7 @@ class TransformStackEditor;
 // rows in place, and only a change to the set of properties shown rebuilds them
 // — never in the middle of an edit gesture, which would delete the widget
 // being dragged.
-class AttributesViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API AttributesViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,9 +25,16 @@ struct PluginManifest {
     std::vector<std::string> pythonRequires;  // third-party modules
     std::vector<std::string> usdFolders;      // holding plugInfo.json, relative to `folder`
     std::vector<std::string> dependsOn;       // the ids in "requires"
-    bool hasNative = false;
+    // The C++ part: bin/<platform>/<library> in `folder`, and what it was built for.
+    std::string nativeLibrary;
+    std::map<std::string, std::string> builtFor;
     std::filesystem::path folder;
 };
+
+// What a C++ plugin has to have been built with, as usdcc_add_plugin() writes it
+// in the manifest: platform, compiler, qt, usd and usdcc. std:: and Qt types cross
+// the boundary, and USD's symbols carry its version (docs/PLUGINS.md §3.2).
+std::map<std::string, std::string> pluginBuildInfo();
 
 enum class PluginState {
     Ready,     // scanned; activate() hasn't got to it
@@ -74,6 +83,7 @@ public:
     static std::filesystem::path userFolder();
 
     explicit PluginManager(Options options);
+    ~PluginManager();
 
     void scan();
     void activate(PythonRuntime& python);
@@ -103,10 +113,16 @@ private:
     void registerUsdFolders();
     void writeCrashMarker(const std::string& id) const;
     void removeCrashMarker() const;
+    // Loads and activates its library; returns why not, or nothing.
+    std::string activateNative(PluginInfo& plugin);
+
+    struct NativePlugin;
 
     Options m_options;
     std::vector<PluginInfo> m_plugins;
     std::string m_crashedLastStart;
+    // By id. Libraries are never unloaded (§3.4).
+    std::map<std::string, std::unique_ptr<NativePlugin>> m_native;
 };
 
 }  // namespace usdcc::scripting

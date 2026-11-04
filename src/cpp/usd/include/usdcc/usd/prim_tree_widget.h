@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/usd_prim_tree_model.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -21,7 +23,7 @@ namespace usdcc::usd {
 // dialog. The filter keeps the prims whose name contains its text, and their
 // ancestors, then restores what was open when it's cleared. An instance's contents
 // load when it's expanded, so until then they can't match.
-class PrimTreeWidget : public QWidget {
+class USDCC_USD_UI_API PrimTreeWidget : public QWidget {
     Q_OBJECT
 
 public:

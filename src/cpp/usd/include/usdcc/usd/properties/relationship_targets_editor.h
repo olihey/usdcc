@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/properties/property_editor.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -14,7 +16,7 @@ namespace usdcc::usd::properties {
 // each target showing its path, which selects it, with an × to remove it, wrapping
 // to more lines. One with a problem (it doesn't exist, or its rule objects) is
 // amber, with the reason as its tooltip. The row's last control adds a target.
-class RelationshipTargetsEditor : public PropertyEditor {
+class USDCC_USD_UI_API RelationshipTargetsEditor : public PropertyEditor {
     Q_OBJECT
 
 public:

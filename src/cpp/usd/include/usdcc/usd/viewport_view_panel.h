@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/view_panel.h"
@@ -31,7 +33,7 @@ class UndoManager;
 // is available, and keeping it out of usdcc_usd itself means usdcc.usd's
 // pybind11 module doesn't pull in Qt Widgets/ADS as a runtime dependency it
 // doesn't otherwise need.
-class ViewportViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API ViewportViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

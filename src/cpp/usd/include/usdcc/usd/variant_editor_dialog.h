@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/variant_actions.h"
@@ -27,7 +29,7 @@ class UndoManager;
 
 // The amber line that says edits are going into a variant, with a way out
 // (docs/VARIANT_EDITOR.md §5). Hidden the rest of the time. It follows its stage.
-class VariantEditBanner : public QFrame {
+class USDCC_USD_UI_API VariantEditBanner : public QFrame {
     Q_OBJECT
 
 public:
@@ -54,7 +56,7 @@ QString variantEditText(const Stage& stage);
 // The Variant Editor (docs/VARIANT_EDITOR.md §4): one set's variants on one prim, and
 // what the selected one changes. Non-modal, so the rest of the app stays usable while
 // it's in variant edit mode, which closing it leaves.
-class VariantEditorDialog : public QDialog {
+class USDCC_USD_UI_API VariantEditorDialog : public QDialog {
     Q_OBJECT
 
 public:

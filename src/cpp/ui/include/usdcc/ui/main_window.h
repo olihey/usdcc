@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QList>
 #include <QMainWindow>
 #include <QTimer>
@@ -36,7 +38,7 @@ class TitleBar;
 // Frameless: instead of the operating system's title bar, the window shows a
 // TitleBar (logo, menu bar, title, caption buttons) driven by QWindowKit,
 // which supplies the native-feeling drag, resize, snap and shadow behaviour.
-class MainWindow : public QMainWindow {
+class USDCC_UI_API MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:

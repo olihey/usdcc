@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QFrame>
 
 class QAbstractButton;
@@ -16,7 +18,7 @@ namespace usdcc::ui {
 // registers the widgets below with QWindowKit's agent (which is what makes
 // the empty parts of the bar drag the window, and the maximize button show
 // Windows 11's snap layouts).
-class TitleBar : public QFrame {
+class USDCC_UI_API TitleBar : public QFrame {
     Q_OBJECT
 
 public:

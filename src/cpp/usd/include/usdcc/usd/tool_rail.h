@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QToolBar>
 
 class QActionGroup;
@@ -11,7 +13,7 @@ namespace usdcc::usd {
 // exclusive icon action per tool. Knows nothing about what the tools are —
 // callers register them with an id and an icon, and get toolSelected(id) back
 // when the user picks one.
-class ToolRail : public QToolBar {
+class USDCC_USD_UI_API ToolRail : public QToolBar {
     Q_OBJECT
 
 public:

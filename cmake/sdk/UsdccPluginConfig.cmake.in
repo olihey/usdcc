@@ -1,0 +1,60 @@
+# find_package(UsdccPlugin): builds C++ plugins for the usdcc this SDK came with
+# (docs/PLUGIN_SDK.md). A plugin has to match it exactly, so its compiler, Qt and
+# OpenUSD are checked here rather than left to fail when the app loads it.
+#
+# Point CMake at the same vcpkg tree and -DUSD_INSTALL=<path> the app used.
+
+get_filename_component(_usdcc_sdk "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+
+set(USDCC_BUILT_FOR_PLATFORM "@USDCC_BUILT_FOR_PLATFORM@")
+set(USDCC_BUILT_FOR_COMPILER "@USDCC_BUILT_FOR_COMPILER@")
+set(USDCC_BUILT_FOR_QT "@USDCC_BUILT_FOR_QT@")
+set(USDCC_BUILT_FOR_USD "@USDCC_BUILT_FOR_USD@")
+set(USDCC_BUILT_FOR_USDCC "@USDCC_BUILT_FOR_USDCC@")
+
+if(MSVC)
+    # As the app: docs/PLAN.md section 6 item 28.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${_usdcc_sdk}/cmake")
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
+find_package(OpenGL)
+find_package(USD REQUIRED)
+
+# The release Qt and ADS in every configuration, which is what the app has: its CRT
+# is shared with them. Otherwise a plugin could ask for vcpkg's debug DLLs (Qt6Widgetsd.dll),
+# which aren't in a deployed app, and fail to load.
+get_directory_property(_usdcc_imported IMPORTED_TARGETS)
+foreach(_usdcc_target IN LISTS _usdcc_imported)
+    if(_usdcc_target MATCHES "^(Qt6::|ads::)")
+        foreach(_usdcc_config DEBUG RELWITHDEBINFO MINSIZEREL)
+            set_property(TARGET ${_usdcc_target} PROPERTY MAP_IMPORTED_CONFIG_${_usdcc_config} "RELEASE;RELWITHDEBINFO;MINSIZEREL;")
+        endforeach()
+    endif()
+endforeach()
+
+set(_usdcc_compiler "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+if(NOT _usdcc_compiler STREQUAL USDCC_BUILT_FOR_COMPILER)
+    message(FATAL_ERROR "This usdcc was built with ${USDCC_BUILT_FOR_COMPILER}, not ${_usdcc_compiler}")
+endif()
+if(NOT Qt6_VERSION STREQUAL USDCC_BUILT_FOR_QT)
+    message(FATAL_ERROR "This usdcc was built with Qt ${USDCC_BUILT_FOR_QT}, not ${Qt6_VERSION}")
+endif()
+if(NOT PXR_VERSION STREQUAL USDCC_BUILT_FOR_USD)
+    message(FATAL_ERROR "This usdcc was built with OpenUSD ${USDCC_BUILT_FOR_USD}, not ${PXR_VERSION}")
+endif()
+
+if(NOT TARGET usdcc::plugin_sdk)
+    add_library(usdcc::plugin_sdk INTERFACE IMPORTED)
+    target_include_directories(usdcc::plugin_sdk INTERFACE "${_usdcc_sdk}/include" ${PXR_INCLUDE_DIRS})
+    target_compile_definitions(usdcc::plugin_sdk INTERFACE QT_NO_KEYWORDS)
+    if(MSVC)
+        target_compile_definitions(usdcc::plugin_sdk INTERFACE _ITERATOR_DEBUG_LEVEL=0 NOMINMAX WIN32_LEAN_AND_MEAN)
+    endif()
+    file(GLOB _usdcc_libraries "${_usdcc_sdk}/lib/*${CMAKE_IMPORT_LIBRARY_SUFFIX}")
+    target_link_libraries(usdcc::plugin_sdk INTERFACE ${_usdcc_libraries} Qt6::Widgets ads::qtadvanceddocking-qt6 ${PXR_LIBRARIES})
+endif()
+
+include("${_usdcc_sdk}/cmake/UsdccPlugin.cmake")

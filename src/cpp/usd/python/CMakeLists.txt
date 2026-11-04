@@ -30,7 +30,7 @@ file(REMOVE "${_python_package_dir}/usd.pyd" "${_python_package_dir}/usd.pdb")
 
 add_library(usdcc_usd_python MODULE bindings.cpp)
 target_link_libraries(usdcc_usd_python PRIVATE usdcc_usd_bindings "${USDCC_PYTHON_LIBRARY}")
-usdcc_deploy_core_library(usdcc_usd_python)
+usdcc_deploy_core_library(usdcc_usd_python usdcc_usd)
 # vcpkg's applocal-deps step (VCPKG_APPLOCAL_DEPS, on by default in this
 # toolchain-based integration with no documented per-target override) copies
 # its own bundled python312.dll next to _usd.pyd, even though this target

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/stage.h"
 
 #include <pxr/base/vt/value.h>
@@ -26,7 +28,7 @@ class PropertyEditor;
 //
 // refresh() pulls the attribute's current value into the editor; it is skipped
 // while a gesture is in progress so live notices can't fight the user.
-class AttributeBinding : public QObject {
+class USDCC_USD_UI_API AttributeBinding : public QObject {
     Q_OBJECT
 
 public:

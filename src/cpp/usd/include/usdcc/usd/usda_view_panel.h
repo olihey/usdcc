@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/stage.h"
@@ -21,7 +23,7 @@ class StageManager;
 // prim path selects that prim, Ctrl+click on an asset path opens a new USDA
 // panel, and Follow Selection (options menu, saved) scrolls to the selected
 // prim's def. Everything else is the view's.
-class UsdaViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API UsdaViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

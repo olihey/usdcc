@@ -27,7 +27,15 @@ add_library(usdcc_scripting_app STATIC
     src/startup_scripts.cpp
 )
 target_include_directories(usdcc_scripting_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core)
+target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core PRIVATE usdcc_plugin_sdk)
+# What a C++ plugin has to match (cmake/modules/UsdccPlugin.cmake).
+target_compile_definitions(
+    usdcc_scripting_app
+    PRIVATE USDCC_BUILT_FOR_PLATFORM="${USDCC_BUILT_FOR_PLATFORM}"
+            USDCC_BUILT_FOR_COMPILER="${USDCC_BUILT_FOR_COMPILER}"
+            USDCC_BUILT_FOR_QT="${USDCC_BUILT_FOR_QT}"
+            USDCC_BUILT_FOR_USD="${USDCC_BUILT_FOR_USD}"
+            USDCC_BUILT_FOR_USDCC="${USDCC_BUILT_FOR_USDCC}")
 
 add_library(usdcc_scripting_ui STATIC
     include/usdcc/scripting/code_editor.h

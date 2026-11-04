@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QObject>
 #include <QString>
 
@@ -19,7 +21,7 @@ namespace usdcc::ui {
 // recomputed from its original 100% value (stylesheets via styleSheet(), C++
 // metrics via bind() / scaled_metrics.h), so going back and forth between
 // scales never accumulates rounding errors.
-class UiScaleController : public QObject {
+class USDCC_UI_API UiScaleController : public QObject {
     Q_OBJECT
 public:
     static constexpr int minimumPercent = 80;
