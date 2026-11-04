@@ -1,6 +1,13 @@
 #include "usdcc/usd/value_type_info.h"
 
+// GfDuration (the "duration" value type) isn't in every OpenUSD build usdcc
+// is built against; without it, that type is simply not there.
+#if __has_include(<pxr/base/gf/duration.h>)
 #include <pxr/base/gf/duration.h>
+#define USDCC_HAS_GF_DURATION 1
+#else
+#define USDCC_HAS_GF_DURATION 0
+#endif
 #include <pxr/base/gf/half.h>
 #include <pxr/base/gf/matrix2d.h>
 #include <pxr/base/gf/matrix3d.h>
@@ -49,11 +56,23 @@ namespace {
 // on purpose: no value of it can be authored.
 template <class... Ts>
 struct TypeList {};
+#if USDCC_HAS_GF_DURATION
 using ElementTypes =
     TypeList<bool, unsigned char, int, unsigned int, int64_t, uint64_t, GfHalf, float, double, GfTimeCode, GfDuration,
              std::string, TfToken, SdfAssetPath, SdfPathExpression, GfVec2i, GfVec3i, GfVec4i, GfVec2h, GfVec3h,
              GfVec4h, GfVec2f, GfVec3f, GfVec4f, GfVec2d, GfVec3d, GfVec4d, GfQuath, GfQuatf, GfQuatd, GfMatrix2d,
              GfMatrix3d, GfMatrix4d>;
+template <class T>
+constexpr bool kIsDuration = std::is_same_v<T, GfDuration>;
+#else
+using ElementTypes =
+    TypeList<bool, unsigned char, int, unsigned int, int64_t, uint64_t, GfHalf, float, double, GfTimeCode,
+             std::string, TfToken, SdfAssetPath, SdfPathExpression, GfVec2i, GfVec3i, GfVec4i, GfVec2h, GfVec3h,
+             GfVec4h, GfVec2f, GfVec3f, GfVec4f, GfVec2d, GfVec3d, GfVec4d, GfQuath, GfQuatf, GfQuatd, GfMatrix2d,
+             GfMatrix3d, GfMatrix4d>;
+template <class T>
+constexpr bool kIsDuration = false;
+#endif
 
 // Calls f.template operator()<T>() for the T whose TfType is `type`.
 template <class F, class... Ts>
@@ -77,13 +96,13 @@ bool visitArray(const VtValue& value, F&& f) {
 
 template <class T>
 constexpr bool kIsNumber = (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) || std::is_same_v<T, GfHalf> ||
-                           std::is_same_v<T, GfTimeCode> || std::is_same_v<T, GfDuration>;
+                           std::is_same_v<T, GfTimeCode> || kIsDuration<T>;
 
 template <class T>
 double toDouble(const T& v) {
     if constexpr (std::is_same_v<T, GfHalf>) {
         return static_cast<float>(v);
-    } else if constexpr (std::is_same_v<T, GfTimeCode> || std::is_same_v<T, GfDuration>) {
+    } else if constexpr (std::is_same_v<T, GfTimeCode> || kIsDuration<T>) {
         return v.GetValue();
     } else {
         return static_cast<double>(v);
@@ -94,7 +113,7 @@ template <class T>
 T fromDouble(double d) {
     if constexpr (std::is_same_v<T, GfHalf>) {
         return GfHalf(static_cast<float>(d));
-    } else if constexpr (std::is_same_v<T, GfTimeCode> || std::is_same_v<T, GfDuration>) {
+    } else if constexpr (std::is_same_v<T, GfTimeCode> || kIsDuration<T>) {
         return T(d);
     } else if constexpr (std::is_integral_v<T>) {
         const double lo = static_cast<double>(std::numeric_limits<T>::lowest());
@@ -277,7 +296,9 @@ ValueTypeInfo ValueTypeInfo::classify(const SdfValueTypeName& typeName) {
         if (t == TfType::Find<float>()) return ScalarKind::Float;
         if (t == TfType::Find<double>()) return ScalarKind::Double;
         if (t == TfType::Find<GfTimeCode>()) return ScalarKind::TimeCode;
+#if USDCC_HAS_GF_DURATION
         if (t == TfType::Find<GfDuration>()) return ScalarKind::Duration;
+#endif
         if (t == TfType::Find<std::string>()) return ScalarKind::String;
         if (t == TfType::Find<TfToken>()) return ScalarKind::Token;
         if (t == TfType::Find<SdfAssetPath>()) return ScalarKind::Asset;

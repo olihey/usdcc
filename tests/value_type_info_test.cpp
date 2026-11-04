@@ -26,8 +26,10 @@ USDCC_TEST(value_type_info) {
         names.insert(t.GetAsToken().GetString());
     }
     CHECK(!names.count("Vec3f") && !names.count("PointFloat") && !names.count("Color"), "legacy aliases dropped");
-    CHECK(names.count("float3") && names.count("color3f") && names.count("matrix4d[]") && names.count("duration"),
-          "canonical names kept");
+    CHECK(names.count("float3") && names.count("color3f") && names.count("matrix4d[]"), "canonical names kept");
+#if __has_include(<pxr/base/gf/duration.h>)
+    CHECK(names.count("duration"), "and duration, in an OpenUSD build that has it");
+#endif
 
     // Classification and samples, authored on a real attribute.
     UsdStageRefPtr stage = UsdStage::CreateInMemory();
