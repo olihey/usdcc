@@ -299,11 +299,11 @@ USDCC_TEST(python_app_api) {
     CHECK(evaluate("__import__('usdcc.tools').tools.tool_names()") == "['select', 'move', 'rotate', 'scale']",
           "tool names");
     app.python.runString("import usdcc.tools\nusdcc.tools.set_active_tool('move')\n");
-    CHECK(app.tools.activeKind() == usdcc::tools::ToolKind::Move, "set_active_tool() drives the ToolSet");
+    CHECK(app.tools.activeId() == usdcc::tools::kMoveTool, "set_active_tool() drives the ToolSet");
     CHECK(evaluate("__import__('usdcc.tools').tools.active_tool()") == "move", "active_tool()");
     CHECK(!app.python.runString("import usdcc.tools\nusdcc.tools.set_active_tool('lasso')\n"),
           "an unknown tool raises");
-    app.tools.setActiveKind(usdcc::tools::ToolKind::Select);
+    app.tools.setActive(usdcc::tools::kSelectTool);
 
     CHECK(evaluate("__import__('usdcc.core').core.set_levels('info')") == "True", "usdcc.core.set_levels()");
 

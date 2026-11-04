@@ -60,6 +60,8 @@ private:
 
     // Target: follow the current stage, its selection and its target.
     void watchStage(const StageRefPtr& stage);
+    // One button per tool in the ToolSet.
+    void rebuildRail();
     void updateTarget();
     void onTargetChanged();
 
@@ -74,6 +76,7 @@ private:
     QLabel* m_targetHint = nullptr;
     StageRefPtr m_watchedStage;
     usdcc::core::Signal<>::Connection m_activeToolConnection;
+    usdcc::core::Signal<>::Connection m_toolsConnection;
     usdcc::core::Signal<StageRefPtr>::Connection m_currentStageConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
     usdcc::core::Signal<>::Connection m_targetConnection;

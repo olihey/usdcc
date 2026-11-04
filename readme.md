@@ -87,6 +87,13 @@ cache_id = manager.open_stage("scene.usda")
 stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(cache_id))
 ```
 
+### Plugins
+
+A plugin is a folder with a `usdcc-plugin.json`, holding Python and USD files, that the app finds
+in `%LOCALAPPDATA%/usdcc/plugins`. It can add panels, tools, menu entries and USD schemas. See
+[docs/PLUGINS.md](docs/PLUGINS.md); try the example with `usdcc --plugin-path src/plugins`. C++
+plugins aren't supported yet.
+
 ### Convenience scripts
 
 [tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the

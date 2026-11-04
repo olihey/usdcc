@@ -5,25 +5,37 @@
 #include <pybind11/stl.h>
 
 #include "python_object.h"
+#include "usdcc/scripting/scripted_tool.h"
 #include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/usd/python/bind_usd.h"
 #endif
 
 #include "usdcc/scripting/app_module.h"
 
+#include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <QAction>
+#include <QKeySequence>
+#include <QMenu>
+#include <QMenuBar>
+#include <QSettings>
+#include <QStringList>
 #include <QUndoStack>
 
 #include <DockManager.h>
 
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -33,20 +45,26 @@ namespace usdcc::scripting {
 
 namespace {
 const AppContext* s_context = nullptr;
+// What Python connected to the app, which has to end while Python is there.
+std::map<int, std::shared_ptr<void>> s_eventConnections;
+int s_nextEventConnection = 1;
 }  // namespace
 
 AppContextScope::AppContextScope(const AppContext& context) : m_context(context), m_outer(s_context) {
     s_context = &m_context;
 }
 
-AppContextScope::~AppContextScope() { s_context = m_outer; }
+AppContextScope::~AppContextScope() {
+    s_context = m_outer;
+    s_eventConnections.clear();
+    usdcc::usd::PrimMenuEntries::instance().clear();
+}
 
 const AppContext* currentAppContext() { return s_context; }
 
 #if USDCC_HAS_PYTHON
 namespace {
 namespace py = pybind11;
-using usdcc::tools::ToolKind;
 using usdcc::usd::StageRefPtr;
 using usdcc::usd::UndoManager;
 
@@ -82,12 +100,79 @@ constexpr std::array<std::pair<Qt::DockWidgetArea, const char*>, 4> kAreaNames =
     {Qt::BottomDockWidgetArea, "bottom"},
 }};
 
-constexpr std::array<std::pair<ToolKind, const char*>, 4> kToolNames = {{
-    {ToolKind::Select, "select"},
-    {ToolKind::Move, "move"},
-    {ToolKind::Rotate, "rotate"},
-    {ToolKind::Scale, "scale"},
-}};
+QString settingsKey(const std::string& id, const std::string& key) {
+    return QStringLiteral("PluginSettings/%1/%2").arg(QString::fromStdString(id), QString::fromStdString(key));
+}
+
+// Calls `callback` as one undo step, however many stages it edits, like a script
+// run from the panel (docs/PLUGINS.md §3.7). An exception is logged.
+void runAsOneStep(const std::string& label, const std::function<void()>& callback) {
+    UndoManager* undo = s_context ? s_context->undoManager : nullptr;
+    usdcc::usd::StageManager* stages = s_context ? s_context->stageManager : nullptr;
+    // A global edit doesn't nest: inside one, this belongs to that one's step.
+    const bool ownsEdit = undo && stages && !undo->isGlobalEditing();
+    if (ownsEdit) undo->beginGlobalEdit(*stages, QString::fromStdString(label));
+    bool ok = true;
+    {
+        py::gil_scoped_acquire gil;
+        try {
+            callback();
+        } catch (py::error_already_set& error) {
+            logPythonError(error);
+            ok = false;
+        }
+    }
+    if (ownsEdit) undo->endGlobalEdit(ok ? QString() : QStringLiteral("%1 (failed)").arg(QString::fromStdString(label)));
+}
+
+QString withoutMnemonic(QString text) { return text.remove(QLatin1Char('&')); }
+
+// The menu at `parts` under the menu bar, made if it's missing. New top-level
+// menus go before Debug, which stays last.
+QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts) {
+    QMenuBar* bar = window.mainMenuBar();
+    QMenu* current = nullptr;
+    for (const QString& part : parts) {
+        const QList<QAction*> actions = current ? current->actions() : bar->actions();
+        QMenu* found = nullptr;
+        QAction* debug = nullptr;
+        for (QAction* action : actions) {
+            if (action->menu() && withoutMnemonic(action->text()) == withoutMnemonic(part)) found = action->menu();
+            if (!current && withoutMnemonic(action->text()) == QLatin1String("Debug")) debug = action;
+        }
+        if (!found) {
+            if (current) {
+                found = current->addMenu(part);
+            } else {
+                found = new QMenu(part, bar);
+                bar->insertMenu(debug, found);
+            }
+        }
+        current = found;
+    }
+    return current;
+}
+
+template <typename Signal, typename Callback>
+int keepConnection(Signal& signal, Callback callback) {
+    auto connection = std::make_shared<typename Signal::Connection>(signal.connect(std::move(callback)));
+    const int id = s_nextEventConnection++;
+    s_eventConnections[id] = std::move(connection);
+    return id;
+}
+
+long cacheIdOf(const StageRefPtr& stage) { return stage ? stage->cacheId() : -1; }
+
+// For a callback that a Signal holds: logged rather than thrown into C++.
+template <typename... Args>
+void callLogged(const std::shared_ptr<PythonObject>& callback, Args&&... args) {
+    py::gil_scoped_acquire gil;
+    try {
+        callback->object(std::forward<Args>(args)...);
+    } catch (py::error_already_set& error) {
+        logPythonError(error);
+    }
+}
 }  // namespace
 
 // The running app for usdcc.app / usdcc.usd / usdcc.tools (src/python/usdcc).
@@ -216,28 +301,174 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
 
     m.def("tool_names", []() {
         std::vector<std::string> names;
-        for (const auto& [kind, name] : kToolNames) names.push_back(name);
+        for (const auto& entry : context().toolSet->tools()) names.push_back(entry.id);
         return names;
     });
-    m.def("active_tool", []() -> std::string {
-        const ToolKind active = context().toolSet->activeKind();
-        for (const auto& [kind, name] : kToolNames) {
-            if (kind == active) return name;
-        }
-        return {};
-    });
+    m.def("active_tool", []() -> std::string { return context().toolSet->activeId(); });
     m.def(
         "set_active_tool",
         [](const std::string& toolName) {
-            for (const auto& [kind, name] : kToolNames) {
-                if (toolName == name) {
-                    context().toolSet->setActiveKind(kind);
-                    return;
-                }
-            }
-            throw py::value_error("no tool named '" + toolName + "'");
+            if (!context().toolSet->setActive(toolName)) throw py::value_error("no tool named '" + toolName + "'");
         },
         py::arg("name"));
+    m.def(
+        "register_tool",
+        [](const std::string& id, const std::string& label, py::object instance, const std::string& icon) {
+            if (usdcc::tools::ToolSet::isBuiltIn(id)) throw py::value_error("'" + id + "' is a built-in tool");
+            if (id.empty()) throw py::value_error("a tool needs an id");
+            context().toolSet->addTool(id, label, icon,
+                                       std::make_unique<ScriptedTool>(
+                                           label, std::make_shared<PythonObject>(std::move(instance))));
+        },
+        py::arg("id"), py::arg("label"), py::arg("instance"), py::arg("icon"));
+    m.def(
+        "unregister_tool", [](const std::string& id) { return context().toolSet->removeTool(id); }, py::arg("id"));
+
+    // Menus (docs/PLUGINS.md phase 2). Callbacks get plain values, which
+    // usdcc/app.py wraps.
+    m.def(
+        "add_menu_action",
+        [](const std::string& path, py::object callback, const std::string& shortcut, const std::string& tip) {
+            QStringList parts = QString::fromStdString(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+            if (parts.size() < 2) throw py::value_error("a menu action's path is 'Menu/Action', not '" + path + "'");
+            const QString label = parts.takeLast();
+            usdcc::ui::MainWindow& window = mainWindow();
+            QMenu* menu = menuAt(window, parts);
+            QAction* action = nullptr;
+            for (QAction* existing : menu->actions()) {
+                if (!existing->menu() && withoutMnemonic(existing->text()) == withoutMnemonic(label)) action = existing;
+            }
+            if (action) {
+                QObject::disconnect(action, &QAction::triggered, nullptr, nullptr);  // registered again
+            } else {
+                action = menu->addAction(label);
+            }
+            action->setShortcut(QKeySequence(QString::fromStdString(shortcut)));
+            action->setStatusTip(QString::fromStdString(tip));
+            action->setToolTip(QString::fromStdString(tip));
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            const std::string description = withoutMnemonic(label).toStdString();
+            QObject::connect(action, &QAction::triggered, &window, [held, description]() {
+                runAsOneStep(description, [&held]() { held->object(); });
+            });
+        },
+        py::arg("path"), py::arg("callback"), py::arg("shortcut"), py::arg("tip"));
+    m.def(
+        "remove_menu_action",
+        [](const std::string& path) {
+            QStringList parts = QString::fromStdString(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+            if (parts.size() < 2) return false;
+            const QString label = parts.takeLast();
+            QMenu* menu = menuAt(mainWindow(), parts);
+            for (QAction* action : menu->actions()) {
+                if (!action->menu() && withoutMnemonic(action->text()) == withoutMnemonic(label)) {
+                    menu->removeAction(action);
+                    action->deleteLater();
+                    return true;
+                }
+            }
+            return false;
+        },
+        py::arg("path"));
+    m.def(
+        "add_prim_menu_action",
+        [](const std::string& id, const std::string& label, py::object callback, py::object applies) {
+            usdcc::usd::PrimMenuEntry entry;
+            entry.id = id;
+            entry.label = QString::fromStdString(label);
+            const auto paths = [](const usdcc::usd::PrimMenuContext& menu) {
+                std::vector<std::string> list;
+                for (const PXR_NS::SdfPath& path : menu.paths) list.push_back(path.GetString());
+                return list;
+            };
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            const std::string description = label.substr(label.rfind('/') + 1);
+            entry.run = [held, paths, description](const usdcc::usd::PrimMenuContext& menu) {
+                runAsOneStep(description, [&]() { held->object(cacheIdOf(menu.stage), paths(menu), menu.clicked.GetString()); });
+            };
+            if (!applies.is_none()) {
+                auto heldApplies = std::make_shared<PythonObject>(std::move(applies));
+                entry.applies = [heldApplies, paths](const usdcc::usd::PrimMenuContext& menu) {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        return heldApplies->object(cacheIdOf(menu.stage), paths(menu), menu.clicked.GetString()).cast<bool>();
+                    } catch (py::error_already_set& error) {
+                        logPythonError(error);
+                        return false;
+                    }
+                };
+            }
+            usdcc::usd::PrimMenuEntries::instance().add(std::move(entry));
+        },
+        py::arg("id"), py::arg("label"), py::arg("callback"), py::arg("applies"));
+    m.def(
+        "remove_prim_menu_action", [](const std::string& id) { usdcc::usd::PrimMenuEntries::instance().remove(id); },
+        py::arg("id"));
+
+    // App events: returns an id for disconnect_event().
+    m.def(
+        "connect_event",
+        [](const std::string& event, py::object callback) -> int {
+            usdcc::usd::StageManager& stages = *context().stageManager;
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            if (event == "selection_changed") {
+                return keepConnection(stages.selectionChanged,
+                                      [held](const StageRefPtr& stage, std::vector<PXR_NS::SdfPath> selection) {
+                                          std::vector<std::string> paths;
+                                          for (const PXR_NS::SdfPath& path : selection) paths.push_back(path.GetString());
+                                          callLogged(held, cacheIdOf(stage), paths);
+                                      });
+            }
+            if (event == "current_stage_changed") {
+                return keepConnection(stages.currentStageChanged,
+                                      [held](const StageRefPtr& stage) { callLogged(held, cacheIdOf(stage)); });
+            }
+            if (event == "stage_opened") {
+                return keepConnection(stages.stageOpened,
+                                      [held](const StageRefPtr& stage) { callLogged(held, cacheIdOf(stage)); });
+            }
+            if (event == "stage_closed") {
+                // It has left the stage cache by now, so the file says which it was.
+                return keepConnection(stages.stageClosed, [held](const StageRefPtr& stage) {
+                    callLogged(held, stage->usdStage()->GetRootLayer()->GetIdentifier());
+                });
+            }
+            throw py::value_error("no event named '" + event + "'");
+        },
+        py::arg("event"), py::arg("callback"));
+    m.def(
+        "disconnect_event", [](int id) { s_eventConnections.erase(id); }, py::arg("id"));
+
+    // A plugin's own settings and what it adds (src/python/usdcc/_plugins.py).
+    m.def(
+        "plugin_setting",
+        [](const std::string& id, const std::string& key) -> py::object {
+            const QSettings settings = usdcc::ui::appSettings();
+            const QString name = settingsKey(id, key);
+            if (!settings.contains(name)) return py::none();
+            return py::str(settings.value(name).toString().toStdString());
+        },
+        py::arg("id"), py::arg("key"));
+    m.def(
+        "set_plugin_setting",
+        [](const std::string& id, const std::string& key, const std::string& value) {
+            QSettings settings = usdcc::ui::appSettings();
+            settings.setValue(settingsKey(id, key), QString::fromStdString(value));
+        },
+        py::arg("id"), py::arg("key"), py::arg("value"));
+    m.def(
+        "remove_plugin_setting",
+        [](const std::string& id, const std::string& key) {
+            QSettings settings = usdcc::ui::appSettings();
+            settings.remove(settingsKey(id, key));
+        },
+        py::arg("id"), py::arg("key"));
+    m.def(
+        "plugin_note",
+        [](const std::string& id, const std::string& kind, const std::string& name) {
+            if (s_context && s_context->plugins) s_context->plugins->addContribution(id, kind, name);
+        },
+        py::arg("id"), py::arg("kind"), py::arg("name"));
 }
 #endif  // USDCC_HAS_PYTHON
 

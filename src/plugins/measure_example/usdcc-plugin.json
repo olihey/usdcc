@@ -1,0 +1,8 @@
+{
+  "id": "org.usdcc.measure-example",
+  "name": "Measure Example",
+  "version": "1.0.0",
+  "description": "An example plugin: a Measure tool, a Notes panel, a menu action and a prim menu entry.",
+  "api": 1,
+  "python": { "module": "usdcc_measure_example" }
+}

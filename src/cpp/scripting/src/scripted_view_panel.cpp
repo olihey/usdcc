@@ -23,16 +23,6 @@ namespace {
 // PySide objects and cache ids into Usd.Stages.
 py::object bridge(const char* name) { return py::module_::import("usdcc.ui").attr(name); }
 
-// Logs it like any uncaught Python exception (usdcc.log's excepthook:
-// python.exception, with the traceback).
-void logPythonError(py::error_already_set& error) {
-    try {
-        py::module_::import("sys").attr("excepthook")(error.type(), error.value(), error.trace());
-    } catch (py::error_already_set& hookError) {
-        USDCC_LOG_ERROR("python.exception", "{} (and the excepthook failed: {})", error.what(), hookError.what());
-    }
-}
-
 long cacheIdOf(const StageRefPtr& stage) { return stage ? stage->cacheId() : -1; }
 }  // namespace
 

@@ -150,6 +150,9 @@ add_custom_target(
     usdcc_python_package ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_usdcc_python_sources} "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc"
+    # `packaging`, for the plugins' requirements (docs/PLUGINS.md §3.10).
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/python/usdcc/_vendor"
+            "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc/_vendor"
     SOURCES ${_usdcc_python_sources}
     VERBATIM)
 

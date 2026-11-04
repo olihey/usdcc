@@ -16,6 +16,8 @@ class ViewPanelRegistry;
 
 namespace usdcc::scripting {
 
+class PluginManager;
+
 // The running app's objects scripts work on (docs/SCRIPTING.md §4.1).
 struct AppContext {
     usdcc::usd::StageManager* stageManager = nullptr;
@@ -27,6 +29,8 @@ struct AppContext {
     // The view panel types (the Stages menu's), for register_view_panel();
     // open_view_panel() needs it and the window.
     usdcc::ui::ViewPanelRegistry* viewPanels = nullptr;
+    // Told what each plugin adds; may be null.
+    PluginManager* plugins = nullptr;
 };
 
 // Makes `context` what the embedded module _usdcc_app — and through it
@@ -34,7 +38,8 @@ struct AppContext {
 // exists. Create it once the objects exist and destroy it before they go
 // away; afterwards those calls raise RuntimeError instead of touching freed
 // objects. A scope made inside another one (the tests' window) is in effect
-// until it ends, and then the outer one is again.
+// until it ends, and then the outer one is again. Event connections and prim
+// menu entries made from Python end with a scope, while Python is still there.
 class AppContextScope {
 public:
     explicit AppContextScope(const AppContext& context);
