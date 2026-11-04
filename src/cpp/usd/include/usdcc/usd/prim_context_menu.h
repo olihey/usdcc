@@ -21,7 +21,7 @@ class UndoManager;
 // What the Outliner's prim menu acts on (docs/OUTLINER_CONTEXT_MENU.md).
 struct PrimMenuContext {
     UndoManager* undo = nullptr;
-    StageManager* stageManager = nullptr;  // for the Variant Editor to select prims; may be null
+    StageManager* stageManager = nullptr;  // for the Variant Editor and Create to select prims; may be null
     StageRefPtr stage;
     // The selection, which Active, Visibility, Load and Copy Path act on.
     std::vector<PXR_NS::SdfPath> paths;
@@ -43,7 +43,8 @@ bool openStageFile(const QString& path);
 // Shows `path` selected in Explorer (elsewhere, its folder in the file browser).
 void revealFile(const QString& path);
 
-// Fills the menu: the prim's name and type, Active, Visibility, Load/Unload
+// Fills the menu: the prim's name and type, Create (a prim of any type under the clicked
+// prim, whatever else is selected; docs/CREATE_MENU.md), Active, Visibility, Load/Unload
 // Payload, Variants, Composition (the clicked prim's arcs, read-only, with
 // Open as Stage and Copy; compositionArcs()),
 // Move Up/Down, Copy Path and Prim Info. Entries that don't apply to the

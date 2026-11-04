@@ -5,6 +5,7 @@
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/stage_manager.h"
@@ -159,6 +160,91 @@ USDCC_TEST(create_menu_creates_where_it_says) {
     CHECK(firstLine(&menu) == QStringLiteral("In /Xform, in look=red"), "says the variant");
     entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Sphere"))->trigger();
     CHECK(stage->usdStage()->GetRootLayer()->GetPrimAtPath(SdfPath("/Xform{look=red}Sphere")), "and goes in it");
+    stage->exitVariantEdit();
+}
+
+USDCC_TEST(create_in_the_prim_menu) {
+    Scene s;
+    const StageRefPtr stage = s.manager.createStage();
+    const UsdStageRefPtr usd = stage->usdStage();
+    const SdfPath a("/A");
+    const SdfPath b("/B");
+    usd->DefinePrim(a, TfToken("Xform"));
+    usd->DefinePrim(b, TfToken("Xform"));
+    usdcc::usd::PrimMenuContext context;
+    context.undo = s.undo.get();
+    context.stageManager = &s.manager;
+    context.stage = stage;
+    context.dialogParent = &s.window;
+
+    // Several selected: it goes under the one clicked.
+    s.manager.setSelectedPaths(stage, {a, b});
+    context.paths = {a, b};
+    context.clicked = b;
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && create->menu() && create->isEnabled(), "a Create submenu");
+        if (!create) return;
+        QMenu* sub = create->menu();
+        CHECK(firstLine(sub) == QStringLiteral("In /B"), "saying where");
+        CHECK(sameIcon(entry(sub, QStringLiteral("Prim (no type)")), ""), "Prim (no type), with its icon");
+        CHECK(sameIcon(entry(sub, QStringLiteral("Xform")), "Xform"), "Xform");
+        QAction* cube = entry(sub, QStringLiteral("Geometry"), QStringLiteral("Cube"));
+        CHECK(sameIcon(cube, "Cube"), "the same categories as the menu bar's");
+        cube->trigger();
+    }
+    const SdfPath made("/B/Cube");
+    CHECK(usd->GetPrimAtPath(made).GetTypeName() == TfToken("Cube"), "under the clicked prim");
+    CHECK(!usd->GetPrimAtPath(SdfPath("/A/Cube")), "not the other selected one");
+    CHECK(s.manager.selectedPaths(stage) == std::vector<SdfPath>{made}, "and selected");
+    CHECK(s.undo->stack(stage)->count() == 1, "one undo step");
+    s.undo->stack(stage)->undo();
+    CHECK(!usd->GetPrimAtPath(made), "undone");
+
+    // With no type.
+    context.paths = {a};
+    context.clicked = a;
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        entry(entry(&menu, QStringLiteral("Create"))->menu(), QStringLiteral("Prim (no type)"))->trigger();
+    }
+    const UsdPrim typeless = usd->GetPrimAtPath(SdfPath("/A/Prim"));
+    CHECK(typeless && typeless.GetTypeName().IsEmpty(), "a prim with no type");
+
+    // Where it can't go: disabled, saying why.
+    usd->GetPrimAtPath(b).SetActive(false);
+    context.paths = {b};
+    context.clicked = b;
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && !create->isEnabled() && create->toolTip().contains(QStringLiteral("inactive")), "an inactive prim");
+    }
+    usd->GetPrimAtPath(b).SetActive(true);
+
+    // In a variant: under the clicked prim when it reaches it, not otherwise.
+    usdcc::usd::variant_actions::addSet(*s.undo, stage, a, "look", "red");
+    stage->enterVariantEdit(a, "look", "red");
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && !create->isEnabled() && create->toolTip().contains(QStringLiteral("doesn't reach")), "outside the variant");
+    }
+    context.paths = {a};
+    context.clicked = a;
+    {
+        QMenu menu;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        QMenu* sub = entry(&menu, QStringLiteral("Create"))->menu();
+        CHECK(firstLine(sub) == QStringLiteral("In /A, in look=red"), "inside it, saying so");
+        entry(sub, QStringLiteral("Geometry"), QStringLiteral("Sphere"))->trigger();
+    }
+    CHECK(usd->GetRootLayer()->GetPrimAtPath(SdfPath("/A{look=red}Sphere")), "and it goes in the variant");
     stage->exitVariantEdit();
 }
 

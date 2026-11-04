@@ -96,6 +96,15 @@ Create
   section's + adds the reference. The Outliner
   shows it through the stage's change notice, and it needs to scroll to it and expand its parent.
 
+### In the Outliner
+
+The prim menu has a **Create** submenu with the same entries (`addCreateEntries()`).
+
+- **It goes under the clicked prim,** whatever else is selected, so the first line says that prim.
+- **Where it can't go,** the submenu is disabled, with the reason as its tooltip. That includes a prim outside the variant being
+  edited: a click names the parent, so it doesn't fall back to the variant's prim as the menu bar's does.
+- **Nothing to click on, nothing to create:** the Outliner has no menu on its empty space. The menu bar's creates at the root.
+
 ## 4. The categories: `PrimCreationCatalog`
 
 A registry, as with `RelationshipTargetRules`: the app fills it with the same calls a plugin uses, so built-in entries get no
@@ -132,6 +141,3 @@ usdcc.usd.create_entries()   # what the menu lists now
 - **Types that start empty stay empty,** as this is about default values. A Mesh with starter content would be authored
   data, and a feature of its own.
 - **Curated categories,** rather than grouping by plugin, where Camera would share a list with Cube.
-
-**Later:** the same list as a submenu of the Outliner's prim menu, creating under the clicked prim, which can reuse
-`PrimCreateMenu`'s entries.

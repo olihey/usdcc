@@ -1,6 +1,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 
 #include "usdcc/usd/composition_arcs.h"
+#include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
@@ -145,6 +146,15 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     QAction* title = menu->addAction(QStringLiteral("%1  ·  %2").arg(qs(clicked.GetName().GetString()), type));
     title->setEnabled(false);
     if (paths.size() > 1) title->setText(tr("%1 Prims").arg(paths.size()));
+    menu->addSeparator();
+
+    // Create, under the clicked prim, not the rest of the selection.
+    QMenu* create = menu->addMenu(tr("Create"));
+    create->setToolTipsVisible(true);
+    const QString whyNotCreate = prim_actions::whyNotCreateUnder(clicked);
+    addCreateEntries(create, context.stageManager, stage, &undo, {context.clicked, whyNotCreate});
+    create->menuAction()->setEnabled(whyNotCreate.isEmpty());
+    create->menuAction()->setToolTip(whyNotCreate);
     menu->addSeparator();
 
     // Active.

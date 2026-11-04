@@ -9,6 +9,7 @@
 #include <pxr/base/tf/token.h>
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QTextDocument>
 
 #include <optional>
@@ -28,10 +29,60 @@ QString firstParagraph(const std::string& documentation) {
     return Qt::convertFromPlainText(qs(documentation).trimmed().section(QStringLiteral("\n\n"), 0, 0));
 }
 
+QString tr(const char* text) { return QCoreApplication::translate("usdcc::usd::PrimCreateMenu", text); }
+
 }  // namespace
 
+void addCreateEntries(QMenu* menu, StageManager* stageManager, const StageRefPtr& stage, UndoManager* undo,
+                      const prim_actions::CreateTarget& target) {
+    const bool usable = target.problem.isEmpty();
+    QString where = target.problem;
+    if (usable) {
+        where = target.parent.IsAbsoluteRootPath() ? tr("At the root of the stage") : tr("In %1").arg(qs(target.parent.GetString()));
+        if (const std::optional<VariantEdit>& edit = stage->variantEdit()) {
+            where = tr("%1, in %2=%3").arg(where, qs(edit->set), qs(edit->variant));
+        }
+    }
+    menu->addAction(where)->setEnabled(false);
+    menu->addSeparator();
+
+    const PXR_NS::SdfPath parent = target.parent;
+    auto addEntry = [=](QMenu* into, const QString& label, const std::string& type, const QString& toolTip) {
+        QAction* action = into->addAction(typeIcon(type), label, menu, [=]() {
+            const PXR_NS::SdfPath path = prim_actions::createPrim(*undo, stage, parent, type);
+            if (!path.IsEmpty() && stageManager) stageManager->setSelectedPaths(stage, {path});
+        });
+        action->setToolTip(toolTip);
+        action->setEnabled(usable);
+    };
+    addEntry(menu, tr("Prim (no type)"), std::string(),
+             tr("A prim with no type of its own, which takes the type of what it references or has as a payload."));
+
+    bool separated = false;
+    for (const PrimCreationCatalog::Category& category : PrimCreationCatalog::instance().categories()) {
+        const bool topLevel = category.name == PrimCreationCatalog::kTopLevel;
+        if (!topLevel && !separated) {
+            menu->addSeparator();
+            separated = true;
+        }
+        QMenu* into = menu;
+        if (!topLevel) {
+            into = menu->addMenu(typeIcon(category.groups.front().front().type), qs(category.name));
+            into->setToolTipsVisible(true);
+        }
+        for (std::size_t group = 0; group < category.groups.size(); ++group) {
+            if (group > 0) into->addSeparator();
+            for (const PrimCreationCatalog::Item& item : category.groups[group]) {
+                addEntry(into, qs(item.label), item.type, firstParagraph(item.documentation));
+            }
+        }
+    }
+}
+
 PrimCreateMenu::PrimCreateMenu(StageManager* stageManager, std::shared_ptr<UndoManager> undo, QWidget* parent)
-    : QMenu(tr("&Create"), parent), m_stageManager(stageManager), m_undo(std::move(undo)) {
+    : QMenu(QCoreApplication::translate("usdcc::usd::PrimCreateMenu", "&Create"), parent),
+      m_stageManager(stageManager),
+      m_undo(std::move(undo)) {
     setToolTipsVisible(true);
     connect(this, &QMenu::aboutToShow, this, &PrimCreateMenu::rebuild);
     m_currentStageChanged = m_stageManager->currentStageChanged.connect([this](const StageRefPtr&) { updateEnabled(); });
@@ -47,56 +98,7 @@ void PrimCreateMenu::rebuild() {
     clear();
     const StageRefPtr stage = m_stageManager->currentStage();
     if (!stage) return;
-
-    const prim_actions::CreateTarget target = prim_actions::createTarget(stage, m_stageManager->selectedPaths(stage));
-    const bool usable = target.problem.isEmpty();
-    QString where = target.problem;
-    if (usable) {
-        where = target.parent.IsAbsoluteRootPath() ? tr("At the root of the stage") : tr("In %1").arg(qs(target.parent.GetString()));
-        if (const std::optional<VariantEdit>& edit = stage->variantEdit()) {
-            where = tr("%1, in %2=%3").arg(where, qs(edit->set), qs(edit->variant));
-        }
-    }
-    addAction(where)->setEnabled(false);
-    addSeparator();
-
-    auto addEntry = [this, usable](QMenu* menu, const QString& label, const std::string& type, const QString& toolTip) {
-        QAction* action = menu->addAction(typeIcon(type), label, this, [this, type]() { create(type); });
-        action->setToolTip(toolTip);
-        action->setEnabled(usable);
-    };
-    addEntry(this, tr("Prim (no type)"), std::string(),
-             tr("A prim with no type of its own, which takes the type of what it references or has as a payload."));
-
-    bool separated = false;
-    for (const PrimCreationCatalog::Category& category : PrimCreationCatalog::instance().categories()) {
-        const bool topLevel = category.name == PrimCreationCatalog::kTopLevel;
-        if (!topLevel && !separated) {
-            addSeparator();
-            separated = true;
-        }
-        QMenu* menu = this;
-        if (!topLevel) {
-            menu = addMenu(typeIcon(category.groups.front().front().type), qs(category.name));
-            menu->setToolTipsVisible(true);
-        }
-        for (std::size_t group = 0; group < category.groups.size(); ++group) {
-            if (group > 0) menu->addSeparator();
-            for (const PrimCreationCatalog::Item& item : category.groups[group]) {
-                addEntry(menu, qs(item.label), item.type, firstParagraph(item.documentation));
-            }
-        }
-    }
-}
-
-void PrimCreateMenu::create(const std::string& type) {
-    const StageRefPtr stage = m_stageManager->currentStage();
-    if (!stage) return;
-    // Afresh: the selection could have changed since the menu opened, through a script.
-    const prim_actions::CreateTarget target = prim_actions::createTarget(stage, m_stageManager->selectedPaths(stage));
-    if (!target.problem.isEmpty()) return;
-    const PXR_NS::SdfPath path = prim_actions::createPrim(*m_undo, stage, target.parent, type);
-    if (!path.IsEmpty()) m_stageManager->setSelectedPaths(stage, {path});
+    addCreateEntries(this, m_stageManager, stage, m_undo.get(), prim_actions::createTarget(stage, m_stageManager->selectedPaths(stage)));
 }
 
 }  // namespace usdcc::usd
