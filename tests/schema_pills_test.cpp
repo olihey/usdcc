@@ -245,16 +245,6 @@ USDCC_TEST(schema_pills) {
     CHECK(!pillNamed(pills(), "MotionAPI") && !mesh.GetAttribute(TfToken("motion:velocityScale")).IsValid(),
           "undo takes both away");
 
-    // Nothing to add: no question.
-    QMenu plainMenu;
-    const UsdPrim binding = s->DefinePrim(SdfPath("/Bound"), TfToken("Mesh"));
-    stages.setSelectedPaths(stage, {SdfPath("/Bound")});
-    settle();
-    panel.populateSchemaMenu(&plainMenu);
-    findEntry(&plainMenu, "Shading", "MaterialBindingAPI")->trigger();
-    settle();
-    CHECK(pillNamed(pills(), "MaterialBindingAPI"), "a schema with no attributes applies at once");
-    CHECK(binding.IsValid(), "the prim is there");
 
     // Nothing applied: says so.
     s->DefinePrim(SdfPath("/Plain"), TfToken("Xform"));

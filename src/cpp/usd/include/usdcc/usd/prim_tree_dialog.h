@@ -4,31 +4,22 @@
 #include "usdcc/usd/preview_stage.h"
 #include "usdcc/usd/stage.h"
 
-#include <pxr/usd/sdf/path.h>
-
 #include <QDialog>
 #include <QString>
 
-#include <set>
-
 class QLabel;
-class QLineEdit;
 class QPushButton;
-class QSortFilterProxyModel;
-class QTimer;
 class QTreeView;
 
 namespace usdcc::usd {
 
-class UsdPrimTreeModel;
+class PrimTreeWidget;
 
 // Show Prims (docs/SHOW_PRIMS.md): a file's prims as a tree that looks like the
-// Outliner (its model and delegate, read-only), to look at and nothing else: no
-// menus, and the app's selection stays out of it. A non-modal dialog with a
-// stage of its own, as in Show USDA, loaded behind "Loading stage..." without
-// payloads (Load Payloads loads them). The filter keeps the prims whose name
-// contains its text, and their ancestors. An instance's contents load when
-// it's expanded, so until then they can't match.
+// Outliner (a PrimTreeWidget), to look at and nothing else: no menus, and the
+// app's selection stays out of it. A non-modal dialog with a stage of its own, as
+// in Show USDA, loaded behind "Loading stage..." without payloads (Load Payloads
+// loads them).
 class PrimTreeDialog : public QDialog {
     Q_OBJECT
 
@@ -40,7 +31,7 @@ public:
     // False until the stage has loaded, or failed to.
     bool isStageLoaded() const { return m_loaded; }
     const StageRefPtr& stage() const { return m_stage; }
-    QTreeView* treeView() const { return m_tree; }
+    QTreeView* treeView() const;
     QLabel* statusLabel() const { return m_status; }
     // Filters at once (typing waits for a pause).
     void setFilter(const QString& text);
@@ -52,28 +43,15 @@ public Q_SLOTS:
 
 private:
     void onStageLoaded(const StageRefPtr& stage, const QString& error);
-    void applyFilter();
     void updateStatus();
-    std::set<PXR_NS::SdfPath> expandedPaths() const;
-    void expandPaths(const std::set<PXR_NS::SdfPath>& paths);
-    void expandRoots();
-    int countMatches() const;
 
     QString m_path;
     StageRefPtr m_stage;
-    UsdPrimTreeModel* m_model;
-    QSortFilterProxyModel* m_proxy;
-    QLineEdit* m_filter;
-    QTreeView* m_tree;
+    PrimTreeWidget* m_tree;
     QLabel* m_status;
     QPushButton* m_loadPayloads;
-    QTimer* m_filterTimer;
     bool m_loaded = false;
     bool m_refreshQueued = false;
-    bool m_filtering = false;  // the proxy has a filter
-    // What was open: across a rebuild, and while a filter opens everything.
-    std::set<PXR_NS::SdfPath> m_expanded;
-    std::set<PXR_NS::SdfPath> m_expandedBeforeFilter;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 

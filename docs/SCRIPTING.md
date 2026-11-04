@@ -130,7 +130,7 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 
 | Module | Contents |
 |---|---|
-| `usdcc.usd` | `StageManager` (and `UndoManager` in the app); `stages()`, `current_stage()`, `set_current_stage()`, `open_stage(path)`, `close_stage()`, all as `pxr.Usd.Stage`; `stage_id(stage)`; `selected_paths()`, `select(prims/paths)`; `edit_target()`, `set_edit_target(layer)`; `edit(description)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`, `undo_text()`; `EMBEDDED` |
+| `usdcc.usd` | `StageManager` (and `UndoManager` in the app); `stages()`, `current_stage()`, `set_current_stage()`, `open_stage(path)`, `close_stage()`, all as `pxr.Usd.Stage`; `stage_id(stage)`; `selected_paths()`, `select(prims/paths)`; `edit_target()`, `set_edit_target(layer)`; `set_relationship_targets()`, `remove_relationship_targets()`, `relationship_targets()`, `relationship_target_rules()`; `edit(description)`, `undo()`, `redo()`, `can_undo()`, `can_redo()`, `undo_text()`; `EMBEDDED` |
 | `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()`; with PySide6, `main_window()`, `add_side_panel(panel, area)`, `register_view_panel(id, name, cls)`, `open_view_panel(id, stage=None)`, `view_panel_types()` (§8) |
 | `usdcc.core` | `log(level, category, message)`, the level constants, `set_levels(spec)` (USDCC_LOG's format) |
 | `usdcc.tools` | `tool_names()`, `active_tool()`, `set_active_tool(name)` |

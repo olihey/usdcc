@@ -84,6 +84,8 @@ private:
         properties::PropertyEditor* editor = nullptr;
         properties::CategorySection* section = nullptr;
         PXR_NS::UsdProperty property;
+        // A relationship's row; it can exist before the relationship does.
+        PXR_NS::TfToken relationship;
         QString searchText;  // label and name, lower case
         bool managedByStack = false;  // a transform-stack row (TransformStackEditor owns its actions)
     };
@@ -123,6 +125,10 @@ private:
     // schema asks for an instance name, then whether to add its attributes.
     void removeSchemaInteractively(const QString& schema);
     void applySchemaInteractively(const QString& schema, bool multipleApply);
+    // A relationship's row (docs/RELATIONSHIPS.md): its targets as pills that
+    // select them, and a dialog of the stage's prims to add one.
+    void buildRelationshipEditor(Row& row, const PXR_NS::TfToken& name, const QString& label);
+    void addRelationshipTargetInteractively(const PXR_NS::TfToken& name);
     void onStageObjectsChanged(const StageChanges& changes);
     void processPendingChanges();
     void queueProcessPendingChanges();

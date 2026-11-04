@@ -348,6 +348,51 @@ bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfP
     });
 }
 
+namespace {
+bool setTarget(const PXR_NS::UsdPrim& prim, const PXR_NS::TfToken& name, const PXR_NS::SdfPath& target, bool replace) {
+    PXR_NS::UsdRelationship rel = prim.GetRelationship(name);
+    if (!rel) rel = prim.CreateRelationship(name, /*custom=*/false);
+    if (!rel) return false;
+    return replace ? rel.SetTargets({target}) : rel.AddTarget(target);
+}
+}  // namespace
+
+bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                           const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || schema.empty() || target.IsEmpty()) return false;
+    return undo.apply(stage, tr("Apply %1 to %2").arg(qs(schema), qs(path.GetName())), [&]() {
+        if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
+        return setTarget(stage->usdStage()->GetPrimAtPath(path), relationship, target, /*replace=*/true);
+    });
+}
+
+bool addRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                           const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target, bool replace) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim) || target.IsEmpty()) return false;
+    return undo.apply(stage, tr("Set %1 on %2").arg(qs(relationship.GetString()), qs(path.GetName())),
+                      [&]() { return setTarget(prim, relationship, target, replace); });
+}
+
+bool removeRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                              const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target) {
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!isEditable(prim)) return false;
+    const PXR_NS::UsdRelationship rel = prim.GetRelationship(relationship);
+    if (!rel) return false;
+    return undo.apply(stage, tr("Remove a target of %1 on %2").arg(qs(relationship.GetString()), qs(path.GetName())), [&]() {
+        if (!rel.RemoveTarget(target)) return false;
+        PXR_NS::SdfPathVector left;
+        rel.GetTargets(&left);
+        if (left.empty() && rel.GetPropertyStack().size() == 1 &&
+            stage->usdStage()->GetEditTarget().GetPropertySpecForScenePath(rel.GetPath())) {
+            rel.ClearTargets(/*removeSpec=*/true);
+        }
+        return true;
+    });
+}
+
 bool removeSchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
                   bool cleanUp) {
     const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);

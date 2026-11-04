@@ -9,6 +9,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -228,6 +229,26 @@ USDCC_TEST(python_app_api) {
           "selected_paths() as Sdf.Paths");
     CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.select(['not a path'])\n"),
           "a bad path raises ValueError");
+
+    // What relationships target (docs/RELATIONSHIPS.md): a plugin's rule reaches
+    // the same registry the app's dialogs ask.
+    CHECK(app.python.runString("import usdcc.usd\nusdcc.usd.set_relationship_targets('myStudio:look', types=['Material'], "
+                               "severity='warn', single=True, reason='Usually a Material')\n"),
+          "set_relationship_targets()");
+    const auto rule = usdcc::usd::RelationshipTargetRules::instance().find("myStudio:look");
+    CHECK(rule && rule->types == std::vector<std::string>({"Material"}) && rule->single &&
+              rule->severity == usdcc::usd::RelationshipTargetRule::Severity::Warn && rule->reason == "Usually a Material",
+          "it reaches C++");
+    CHECK(evaluate("__import__('usdcc.usd').usd.relationship_targets('myStudio:look')['severity']") == "warn",
+          "relationship_targets()");
+    CHECK(evaluate("any(r['relationship'] == 'material:binding' for r in __import__('usdcc.usd').usd.relationship_target_rules())") == "True",
+          "relationship_target_rules() lists the built-in ones");
+    CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.set_relationship_targets('x', severity='maybe')\n"),
+          "a bad severity raises");
+    CHECK(evaluate("__import__('usdcc.usd').usd.remove_relationship_targets('myStudio:look')") == "True" &&
+              !usdcc::usd::RelationshipTargetRules::instance().find("myStudio:look"),
+          "remove_relationship_targets()");
+    CHECK(evaluate("__import__('usdcc.usd').usd.relationship_targets('myStudio:look')") == "None", "no rule: None");
 
     // The edit target (docs/LAYER_EDITOR.md §3): the session layer, and back.
     int targetNotices = 0;

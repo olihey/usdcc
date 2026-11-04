@@ -4,7 +4,9 @@
 #include <pxr/usd/usd/common.h>
 
 #include <QAbstractItemModel>
+#include <QString>
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -46,6 +48,16 @@ public:
     void setStage(const PXR_NS::UsdStageRefPtr& stage);
     // Only to look at (Show Prims): no rename, no active checkbox.
     void setReadOnly(bool readOnly) { m_readOnly = readOnly; }
+    // Asked for each row when one is needed (a relationship's target dialog): one
+    // not usable is dimmed and can't be selected, a warning amber, each with the
+    // note in its tooltip.
+    struct RowStatus {
+        bool usable = true;
+        bool warning = false;
+        QString note;
+    };
+    using RowStatusFunction = std::function<RowStatus(const PXR_NS::UsdPrim&)>;
+    void setRowStatus(RowStatusFunction status) { m_rowStatus = std::move(status); }
     // Rebuilds the tree from the stage's current state. Call after any
     // structural edit (rename, reorder, add/remove prim) made outside this
     // model's own setData() (which already refreshes after renaming).
@@ -99,6 +111,7 @@ private:
     std::unique_ptr<Node> m_root;
     std::set<PXR_NS::SdfPath> m_selectionAncestors;
     bool m_readOnly = false;
+    RowStatusFunction m_rowStatus;
 };
 
 }  // namespace usdcc::usd

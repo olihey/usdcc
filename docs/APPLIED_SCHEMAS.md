@@ -120,7 +120,7 @@ add: **Apply Schema Only**, **Apply and Add Attributes** or **Cancel**.
 - **Listed:** the attributes the schema defines, its nested schemas' included, that aren't authored on
   the prim yet (`schemaAttributesToAdd()`). So nothing existing is overwritten.
 - **Not relationships:** an empty relationship says nothing.
-- **No question** when there's nothing to add, such as for `MaterialBindingAPI`.
+- **No question** when there's nothing to add. `MaterialBindingAPI` asks for its material instead (docs/RELATIONSHIPS.md §4).
 
 ## 5. Removing: the × and the cleanup question
 

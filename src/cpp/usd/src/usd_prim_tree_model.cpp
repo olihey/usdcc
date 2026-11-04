@@ -24,6 +24,8 @@ const QColor kInstanceColor(135, 206, 250);  // LIGHT_SKY_BLUE
 const QColor kArcsColor(222, 158, 46);       // DARK_YELLOW
 const QColor kPrototypeColor(118, 136, 217);
 const QColor kTextColor(255, 255, 255, 191);
+const QColor kUnusableColor(255, 255, 255, 64);
+const QColor kWarningColor(0xff, 0xb3, 0x40);
 // An inactive prim's colour, darker (usdviewq/primViewItem.py HALF_DARKER).
 constexpr int kInactiveDarker = 150;
 
@@ -263,6 +265,11 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         case Qt::DecorationRole:
             return prim_icons::icon(prim);  // faded for an inactive prim
         case Qt::ForegroundRole: {
+            if (m_rowStatus) {
+                const RowStatus status = m_rowStatus(prim);
+                if (!status.usable) return kUnusableColor;
+                if (status.warning) return kWarningColor;
+            }
             const QColor color = nameColor(prim);
             if (!prim.IsActive()) return (color.isValid() ? color : kTextColor).darker(kInactiveDarker);
             if (color.isValid()) return color;
@@ -293,6 +300,10 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         case Qt::ToolTipRole: {
             QString tip = QString::fromStdString(node->path.GetString()) + QLatin1Char('\n') + describe(prim);
             if (hasCompositionArcs(prim)) tip += tr("\nHas composition arcs");
+            if (m_rowStatus) {
+                const RowStatus status = m_rowStatus(prim);
+                if (!status.note.isEmpty()) tip += QLatin1Char('\n') + status.note;
+            }
             return tip;
         }
         default:
@@ -335,6 +346,8 @@ Qt::ItemFlags UsdPrimTreeModel::flags(const QModelIndex& index) const {
         return Qt::NoItemFlags;
     }
     const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(pathForIndex(index)) : PXR_NS::UsdPrim();
+    // Enabled, so a greyed row can still be expanded to reach what's under it.
+    if (prim && m_rowStatus && !m_rowStatus(prim).usable) return Qt::ItemIsEnabled;
     if (m_readOnly || (prim && prim.IsInstanceProxy())) {
         return Qt::ItemIsEnabled | Qt::ItemIsSelectable;  // read-only
     }

@@ -67,6 +67,20 @@ bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfP
 bool removeSchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
                   bool cleanUp);
 
+// Applies `schema` and sets a relationship's target, in one undo step (adding
+// MaterialBindingAPI with its material).
+bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                           const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target);
+
+// Relationship targets (docs/RELATIONSHIPS.md), in the stage's edit target. Adding
+// creates the relationship if needed; with `replace` the target becomes its only
+// one. Removing the last one removes the relationship's spec too, when the edit
+// target holds its only opinion, rather than leaving an empty delete list behind.
+bool addRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                           const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target, bool replace);
+bool removeRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                              const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target);
+
 // Composition arcs (docs/COMPOSITION_ARCS.md §4), in the stage's edit target.
 // Add puts a reference or payload (`assetPath`, `target` empty = the default
 // prim; an empty `assetPath` with a `target` is an internal one), an inherit

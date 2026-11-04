@@ -825,6 +825,22 @@ QFrame#schemaPill[state="unregistered"] QLabel {
     color: #ffb340;
 }
 
+/* A relationship target's path, in a pill: it selects the prim. */
+QToolButton#pillLink {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+}
+
+QToolButton#pillLink:hover {
+    color: #3d8bfd;
+}
+
+QFrame#schemaPill[state="unregistered"] QToolButton#pillLink {
+    color: #ffb340;
+}
+
 QToolButton#schemaPillRemove {
     background: transparent;
     border: none;

@@ -6,6 +6,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/layer_stack.h
     include/usdcc/usd/stage.h
     include/usdcc/usd/property_categorizer.h
+    include/usdcc/usd/relationship_targets.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
     include/usdcc/usd/tf_diagnostic_bridge.h
@@ -17,6 +18,7 @@ add_library(usdcc_usd STATIC
     src/dependencies.cpp
     src/layer_stack.cpp
     src/property_categorizer.cpp
+    src/relationship_targets.cpp
     src/stage.cpp
     src/stage_manager.cpp
     src/stage_names.cpp
@@ -55,6 +57,8 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/preview_stage.h
     include/usdcc/usd/prim_picker_dialog.h
     include/usdcc/usd/prim_tree_dialog.h
+    include/usdcc/usd/prim_tree_widget.h
+    include/usdcc/usd/relationship_target_dialog.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
     include/usdcc/usd/properties/category_section.h
@@ -64,6 +68,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/property_editor.h
     include/usdcc/usd/properties/property_row.h
     include/usdcc/usd/properties/property_style.h
+    include/usdcc/usd/properties/relationship_targets_editor.h
     include/usdcc/usd/properties/schema_pills.h
     include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/close_stage_dialog.h
@@ -94,6 +99,8 @@ add_library(usdcc_usd_ui STATIC
     src/preview_stage.cpp
     src/prim_picker_dialog.cpp
     src/prim_tree_dialog.cpp
+    src/prim_tree_widget.cpp
+    src/relationship_target_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
     src/properties/category_section.cpp
@@ -102,6 +109,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/number_field.cpp
     src/properties/property_editors.cpp
     src/properties/property_row.cpp
+    src/properties/relationship_targets_editor.cpp
     src/properties/schema_pills.cpp
     src/properties/transform_stack_editor.cpp
     src/close_stage_dialog.cpp

@@ -430,8 +430,7 @@ The headless tool harness becomes a real test target (§8). It covers:
   done.
 - **Multi-selection editing:** the editor shows the first selected prim, as today. The
   editor contract already has `setMixed()` for later.
-- **Relationship editing** beyond showing targets read-only (material binding, proxyPrim,
-  collection targets).
+- **Relationship editing:** since done, in docs/RELATIONSHIPS.md.
 - **Animation:** editing time samples and keyframing. This needs a timeline first.
 - **Python and plugin-registered custom editors:** the registry is designed for them,
   but the bindings come with M7/M9.
@@ -585,8 +584,8 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
     - Primvars show their interpolation as a note.
     - Rows show the unauthored/animated/connected states, and Reset to Default is
       undoable.
-    - Relationships are read-only rows with a **Select** button that selects their
-      targets. The material binding's Select is the planned "select material" button.
+    - Relationships show their targets as pills that select them, and can be edited
+      (docs/RELATIONSHIPS.md).
   - **Search:** filters by label or name. While searching, sections are force-expanded
     and the Prim header hides.
   - **Options menu** (the panel's ☰ button, left of the stage dropdown): Authored Only

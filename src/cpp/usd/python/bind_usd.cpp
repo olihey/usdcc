@@ -2,10 +2,12 @@
 
 #include <pybind11/stl.h>
 
+#include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <pxr/usd/sdf/path.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -80,6 +82,52 @@ void bindStageManager(py::module_& m) {
                 self.setSelectedPaths(stage, std::move(sdfPaths));
             },
             py::arg("cache_id"), py::arg("paths"), "Selects these prims (absolute paths) on the stage.");
+
+    // What relationships expect to target (docs/RELATIONSHIPS.md).
+    m.def(
+        "set_relationship_targets",
+        [](const std::string& relationship, const std::vector<std::string>& types,
+           const std::vector<std::string>& schemas, const std::string& severity, bool single, const std::string& reason) {
+            if (relationship.empty()) throw py::value_error("no relationship name");
+            if (severity != "block" && severity != "warn") throw py::value_error("severity is 'block' or 'warn'");
+            RelationshipTargetRule rule;
+            rule.relationship = relationship;
+            rule.types = types;
+            rule.schemas = schemas;
+            rule.severity = severity == "warn" ? RelationshipTargetRule::Severity::Warn : RelationshipTargetRule::Severity::Block;
+            rule.single = single;
+            rule.reason = reason;
+            RelationshipTargetRules::instance().set(rule);
+        },
+        py::arg("relationship"), py::arg("types") = std::vector<std::string>(),
+        py::arg("schemas") = std::vector<std::string>(), py::arg("severity") = "block", py::arg("single") = false,
+        py::arg("reason") = "");
+    m.def(
+        "remove_relationship_targets",
+        [](const std::string& relationship) { return RelationshipTargetRules::instance().remove(relationship); },
+        py::arg("relationship"));
+    auto ruleDict = [](const RelationshipTargetRule& rule) {
+        py::dict d;
+        d["relationship"] = rule.relationship;
+        d["types"] = rule.types;
+        d["schemas"] = rule.schemas;
+        d["severity"] = rule.severity == RelationshipTargetRule::Severity::Warn ? "warn" : "block";
+        d["single"] = rule.single;
+        d["reason"] = rule.reason;
+        return d;
+    };
+    m.def("relationship_target_rules", [ruleDict]() {
+        py::list rules;
+        for (const RelationshipTargetRule& rule : RelationshipTargetRules::instance().rules()) rules.append(ruleDict(rule));
+        return rules;
+    });
+    m.def(
+        "relationship_targets",
+        [ruleDict](const std::string& relationship) -> py::object {
+            const std::optional<RelationshipTargetRule> rule = RelationshipTargetRules::instance().find(relationship);
+            return rule ? py::object(ruleDict(*rule)) : py::object(py::none());
+        },
+        py::arg("relationship"));
 }
 
 }  // namespace usdcc::usd::python

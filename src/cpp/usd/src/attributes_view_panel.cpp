@@ -6,7 +6,10 @@
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/properties/relationship_targets_editor.h"
 #include "usdcc/usd/properties/schema_pills.h"
+#include "usdcc/usd/relationship_target_dialog.h"
+#include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/prim_tree_dialog.h"
@@ -70,6 +73,8 @@ using properties::PropertyRow;
 namespace {
 
 constexpr int kLabelWidth = 130;
+constexpr auto kMaterialBindingApi = "MaterialBindingAPI";
+const TfToken kMaterialBinding("material:binding");
 constexpr auto kCollapsedKeyPrefix = "AttributeEditor/collapsed/";
 constexpr auto kAuthoredOnlyKey = "AttributeEditor/authoredOnly";
 constexpr auto kShowHiddenKey = "AttributeEditor/showHidden";
@@ -96,15 +101,6 @@ PropertyEditor* readOnlyText(const QString& text) {
     editor->setReadOnly(true);
     editor->setValue(VtValue(text.toStdString()));
     return editor;
-}
-
-QString targetsText(const UsdRelationship& rel) {
-    SdfPathVector targets;
-    rel.GetTargets(&targets);
-    if (targets.empty()) return QObject::tr("(no targets)");
-    QStringList parts;
-    for (const SdfPath& t : targets) parts << qs(t.GetString());
-    return parts.join(QStringLiteral(", "));
 }
 
 const char* specifierName(SdfSpecifier specifier) {
@@ -318,6 +314,26 @@ void AttributesViewPanel::rebuild() {
     if (xformable && (categories.empty() || categories.front().key != "transform")) {
         categories.insert(categories.begin(), PropertyCategory{"transform", "Transform", {}});
     }
+    // The material near the top, after Transform, rather than with the namespaces
+    // at the end. With MaterialBindingAPI it's there even with no binding yet: the
+    // schema defines no properties, so nothing else would say one can be bound.
+    const std::vector<AppliedSchema> schemas = appliedSchemas(prim);
+    const bool hasBindingApi = std::any_of(schemas.begin(), schemas.end(),
+                                           [](const AppliedSchema& s) { return s.name == kMaterialBindingApi; });
+    {
+        auto material = std::find_if(categories.begin(), categories.end(),
+                                     [](const PropertyCategory& c) { return c.key == "ns:material"; });
+        PropertyCategory section{"ns:material", tr("Material").toStdString(), {}};
+        if (material != categories.end()) {
+            section = std::move(*material);
+            categories.erase(material);
+        }
+        if (hasBindingApi || !section.properties.empty()) {
+            const bool afterTransform = !categories.empty() && categories.front().key == "transform";
+            categories.insert(categories.begin() + (afterTransform ? 1 : 0), std::move(section));
+        }
+    }
+    bool materialBindingShown = false;
     for (const PropertyCategory& category : categories) {
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
         std::set<TfToken> inStack;
@@ -330,9 +346,22 @@ void AttributesViewPanel::rebuild() {
             }
             Row row = buildRow(property, category);
             row.section = section;
+            if (property.GetName() == kMaterialBinding) materialBindingShown = true;
             if (category.key == "transform" && UsdGeomXformOp::IsXformOp(property.GetName())) {
                 setUpUnusedOp(row);
             }
+            section->addRow(row.row);
+            m_rows.push_back(row);
+        }
+        // Authored or not, whatever the Authored Only option says: an unset binding
+        // never is, and this row is how one gets set.
+        if (category.key == "ns:material" && hasBindingApi && !materialBindingShown) {
+            Row row;
+            row.searchText = QStringLiteral("binding material:binding");
+            buildRelationshipEditor(row, kMaterialBinding, tr("Binding"));
+            row.row->setLabelWidth(kLabelWidth);
+            row.section = section;
+            updateRowState(row);
             section->addRow(row.row);
             m_rows.push_back(row);
         }
@@ -819,6 +848,20 @@ void AttributesViewPanel::applySchemaInteractively(const QString& schema, bool m
         }
         applied = schema + QLatin1Char(':') + instance;
     }
+    // Its material, rather than a binding to find afterwards.
+    if (applied == QLatin1String(kMaterialBindingApi)) {
+        RelationshipTargetDialog dialog(currentStage()->usdStage(), kMaterialBinding.GetString(), SdfPath(), this);
+        dialog.setWindowTitle(tr("Bind a Material to %1").arg(qs(prim.GetName().GetString())));
+        dialog.allowNoTarget(tr("Apply Without Material"));
+        if (dialog.exec() != QDialog::Accepted) return;
+        if (dialog.selectedPath().IsEmpty()) {
+            prim_actions::applySchema(*m_undoManager, currentStage(), prim.GetPath(), applied.toStdString());
+        } else {
+            prim_actions::applySchemaWithTarget(*m_undoManager, currentStage(), prim.GetPath(), applied.toStdString(),
+                                                kMaterialBinding, dialog.selectedPath());
+        }
+        return;
+    }
     // Nothing to add, nothing to choose between.
     bool addAttributes = false;
     const std::vector<TfToken> attributes = schemaAttributesToAdd(prim, applied.toStdString());
@@ -907,20 +950,7 @@ AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& proper
         }
     } else if (const UsdRelationship rel = property.As<UsdRelationship>()) {
         tooltip += QStringLiteral("<br>relationship");
-        row.editor = readOnlyText(targetsText(rel));
-        row.row = new PropertyRow(label, row.editor);
-        auto* select = new QToolButton(row.row);
-        select->setObjectName(QStringLiteral("propertyButton"));
-        select->setText(tr("Select"));
-        select->setToolTip(tr("Select the target prims"));
-        connect(select, &QToolButton::clicked, this, [this, rel]() {
-            SdfPathVector targets;
-            rel.GetTargets(&targets);
-            std::vector<SdfPath> prims;
-            for (const SdfPath& t : targets) prims.push_back(t.GetPrimPath());
-            if (!prims.empty()) stageManager()->setSelectedPaths(currentStage(), prims);
-        });
-        row.row->addTrailingWidget(select);
+        buildRelationshipEditor(row, property.GetName(), label);
     }
     const std::string doc = property.GetDocumentation();
     if (!doc.empty()) {
@@ -946,10 +976,76 @@ void AttributesViewPanel::updateRowState(Row& row) {
         SdfPathVector sources;
         attr.GetConnections(&sources);
         row.row->setConnectedSource(sources.empty() ? QString() : qs(sources.front().GetString()));
-    } else if (const UsdRelationship rel = row.property.As<UsdRelationship>()) {
-        row.row->setUnauthored(!rel.IsAuthored());
-        row.editor->setValue(VtValue(targetsText(rel).toStdString()));
+    } else if (!row.relationship.IsEmpty()) {
+        const UsdPrim prim = currentPrim();
+        const UsdRelationship rel = prim ? prim.GetRelationship(row.relationship) : UsdRelationship();
+        row.row->setUnauthored(!rel || !rel.IsAuthored());
+        SdfPathVector paths;
+        if (rel) rel.GetTargets(&paths);
+        const RelationshipTargetRules& rules = RelationshipTargetRules::instance();
+        const std::string name = row.relationship.GetString();
+        std::vector<properties::RelationshipTargetsEditor::Target> targets;
+        for (const SdfPath& path : paths) {
+            properties::RelationshipTargetsEditor::Target target{path, QString()};
+            const UsdPrim targetPrim = currentStage()->usdStage()->GetPrimAtPath(path.GetPrimPath());
+            if (!targetPrim) {
+                target.problem = tr("This prim doesn't exist");
+            } else if (const RelationshipTargetVerdict verdict = rules.check(name, targetPrim);
+                       verdict.kind != RelationshipTargetVerdict::Kind::Fine) {
+                target.problem = qs(verdict.reason);
+            }
+            targets.push_back(std::move(target));
+        }
+        const std::optional<RelationshipTargetRule> rule = rules.find(name);
+        auto* editor = static_cast<properties::RelationshipTargetsEditor*>(row.editor);
+        editor->setReadOnly(prim && !prim_actions::isEditable(prim));
+        editor->setTargets(targets, rule && rule->single);
     }
+}
+
+void AttributesViewPanel::buildRelationshipEditor(Row& row, const TfToken& name, const QString& label) {
+    auto* editor = new properties::RelationshipTargetsEditor();
+    row.editor = editor;
+    row.relationship = name;
+    row.row = new PropertyRow(label, editor);
+    // Queued: each of these rebuilds this panel, the pill included.
+    connect(editor, &properties::RelationshipTargetsEditor::selectRequested, this, [this](const SdfPath& path) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, path]() {
+                const SdfPath prim = path.GetPrimPath();
+                if (currentStage() && currentStage()->usdStage()->GetPrimAtPath(prim)) {
+                    stageManager()->setSelectedPaths(currentStage(), {prim});
+                }
+            },
+            Qt::QueuedConnection);
+    });
+    connect(editor, &properties::RelationshipTargetsEditor::removeRequested, this, [this, name](const SdfPath& path) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, name, path]() {
+                if (const UsdPrim prim = currentPrim()) {
+                    prim_actions::removeRelationshipTarget(*m_undoManager, currentStage(), prim.GetPath(), name, path);
+                }
+            },
+            Qt::QueuedConnection);
+    });
+    connect(editor, &properties::RelationshipTargetsEditor::addRequested, this, [this, name]() {
+        QMetaObject::invokeMethod(this, [this, name]() { addRelationshipTargetInteractively(name); }, Qt::QueuedConnection);
+    });
+}
+
+void AttributesViewPanel::addRelationshipTargetInteractively(const TfToken& name) {
+    const UsdPrim prim = currentPrim();
+    if (!prim) return;
+    const std::optional<RelationshipTargetRule> rule = RelationshipTargetRules::instance().find(name.GetString());
+    const bool single = rule && rule->single;
+    SdfPathVector current;
+    if (const UsdRelationship rel = prim.GetRelationship(name); rel && single) rel.GetTargets(&current);
+    RelationshipTargetDialog dialog(currentStage()->usdStage(), name.GetString(),
+                                    current.empty() ? SdfPath() : current.front(), this);
+    if (dialog.exec() != QDialog::Accepted || dialog.selectedPath().IsEmpty()) return;
+    prim_actions::addRelationshipTarget(*m_undoManager, currentStage(), prim.GetPath(), name, dialog.selectedPath(), single);
 }
 
 void AttributesViewPanel::refreshValues() {

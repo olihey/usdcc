@@ -22,6 +22,7 @@ add_executable(usdcc_tests
     log_test.cpp
     move_tool_test.cpp
     property_categorizer_test.cpp
+    relationship_targets_test.cpp
     rotate_tool_test.cpp
     stage_changes_test.cpp
     stage_names_test.cpp
@@ -51,6 +52,7 @@ add_executable(usdcc_ui_tests
     outliner_names_test.cpp
     prim_tree_dialog_test.cpp
     property_row_test.cpp
+    relationship_editor_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
     side_panel_test.cpp

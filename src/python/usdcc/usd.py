@@ -159,6 +159,33 @@ def set_edit_target(layer, stage=None):
     stage.SetEditTarget(Usd.EditTarget(found))
 
 
+def set_relationship_targets(relationship, types=(), schemas=(), severity="block", single=False, reason=""):
+    """Says what a relationship expects to target (docs/RELATIONSHIPS.md), for the
+    Attribute Editor's target dialog. USD doesn't record it, so this is how a plugin
+    adds its own. `relationship` is a name, with at most one * for any text; a rule
+    for the same one is replaced, so a script can run again, and a built-in rule can
+    be overridden. A target is fine if it's one of `types` (or derives from one) or
+    has one of `schemas`. With severity "block" others are greyed out, with "warn"
+    they can be picked but are marked. `single`: it holds one target. `reason` is the
+    tooltip. Takes effect the next time the dialog opens."""
+    _native.set_relationship_targets(relationship, list(types), list(schemas), severity, single, reason)
+
+
+def remove_relationship_targets(relationship):
+    """Removes that rule; False if there was none."""
+    return _native.remove_relationship_targets(relationship)
+
+
+def relationship_targets(relationship):
+    """The rule (a dict) that applies to a relationship's name, or None."""
+    return _native.relationship_targets(relationship)
+
+
+def relationship_target_rules():
+    """Every rule (dicts), the built-in ones included."""
+    return _native.relationship_target_rules()
+
+
 @contextmanager
 def edit(description, stage=None):
     """Makes everything done to `stage` (default: the current stage) inside the
