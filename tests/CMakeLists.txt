@@ -14,6 +14,7 @@ add_executable(usdcc_tests
     applied_schemas_test.cpp
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
+    create_prim_test.cpp
     dependencies_test.cpp
     dependency_files.h
     layer_stack_test.cpp
@@ -43,6 +44,7 @@ add_executable(usdcc_ui_tests
     ui_test_main.cpp
     attributes_rename_test.cpp
     composition_edit_test.cpp
+    create_menu_test.cpp
     current_stage_test.cpp
     dependencies_panel_test.cpp
     dependency_files.h

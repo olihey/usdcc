@@ -40,6 +40,7 @@
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
+#include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
@@ -462,6 +463,9 @@ int main(int argc, char** argv) {
     QAction* redoAction = undoGroup->createRedoAction(&window, QObject::tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
     editMenu->addAction(redoAction);
+
+    // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
+    window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
 
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).

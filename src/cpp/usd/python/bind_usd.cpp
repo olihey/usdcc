@@ -2,6 +2,7 @@
 
 #include <pybind11/stl.h>
 
+#include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -128,6 +129,36 @@ void bindStageManager(py::module_& m) {
             return rule ? py::object(ruleDict(*rule)) : py::object(py::none());
         },
         py::arg("relationship"));
+
+    // What the Create menu offers (docs/CREATE_MENU.md §4).
+    m.def(
+        "set_create_entry",
+        [](const std::string& type, const std::string& category, int group, int order) {
+            if (type.empty()) throw py::value_error("no type name");
+            PrimCreationCatalog::instance().set(type, PrimCreationCatalog::Entry{category, group, order, false});
+        },
+        py::arg("type"), py::arg("category") = std::string(PrimCreationCatalog::kPlugins), py::arg("group") = 0,
+        py::arg("order") = PrimCreationCatalog::kLastInGroup);
+    m.def("hide_create_entry", [](const std::string& type) { PrimCreationCatalog::instance().hide(type); }, py::arg("type"));
+    m.def(
+        "remove_create_entry", [](const std::string& type) { return PrimCreationCatalog::instance().remove(type); },
+        py::arg("type"));
+    m.def("create_entries", []() {
+        py::list entries;
+        for (const PrimCreationCatalog::Category& category : PrimCreationCatalog::instance().categories()) {
+            for (std::size_t group = 0; group < category.groups.size(); ++group) {
+                for (const PrimCreationCatalog::Item& item : category.groups[group]) {
+                    py::dict d;
+                    d["label"] = item.label;
+                    d["type"] = item.type;
+                    d["category"] = category.name;
+                    d["group"] = group;
+                    entries.append(d);
+                }
+            }
+        }
+        return entries;
+    });
 }
 
 }  // namespace usdcc::usd::python

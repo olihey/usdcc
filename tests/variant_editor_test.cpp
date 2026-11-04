@@ -112,6 +112,10 @@ QTreeWidgetItem* treeRow(QTreeWidget* tree, const QString& name) {
 }
 
 struct Scene {
+    // Its own, as UI tests have: one left behind would stand in for a later test's.
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale{*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini"))};
     UsdStageRefPtr usd = UsdStage::CreateInMemory();
     std::unique_ptr<StageManager> manager = std::make_unique<StageManager>();
     std::shared_ptr<UndoManager> undo = std::make_shared<UndoManager>();

@@ -186,6 +186,32 @@ def relationship_target_rules():
     return _native.relationship_target_rules()
 
 
+def set_create_entry(type, category="Plugins", group=0, order=1000):
+    """Says where the Create menu lists a prim type (docs/CREATE_MENU.md), which a type
+    with no entry finds in Plugins. An entry for the same type is replaced, so a script
+    can run again, and a built-in one can be overridden. A new `category` becomes a
+    submenu; `group`s in it are separated by a line, `order` sorts within one, then
+    the name. Either spelling of a versioned type names its family. A type USD doesn't
+    know is left out until its plugin has loaded. Takes effect the next time the menu
+    opens."""
+    _native.set_create_entry(type, category, group, order)
+
+
+def hide_create_entry(type):
+    """Leaves a prim type out of the Create menu."""
+    _native.hide_create_entry(type)
+
+
+def remove_create_entry(type):
+    """Forgets that entry, so the type goes to Plugins; False if there was none."""
+    return _native.remove_create_entry(type)
+
+
+def create_entries():
+    """What the Create menu lists now (dicts), in its order, leaving out Prim (no type)."""
+    return _native.create_entries()
+
+
 @contextmanager
 def edit(description, stage=None):
     """Makes everything done to `stage` (default: the current stage) inside the

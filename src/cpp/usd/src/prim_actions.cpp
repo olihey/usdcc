@@ -13,6 +13,7 @@
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/specializes.h>
 #include <pxr/usd/usd/primCompositionQuery.h>
+#include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageLoadRules.h>
 #include <pxr/usd/usd/variantSets.h>
@@ -294,6 +295,48 @@ bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& 
         PXR_NS::UsdNamespaceEditor editor(stage->usdStage());
         return editor.RenamePrim(stage->usdStage()->GetPrimAtPath(path), PXR_NS::TfToken(name)) && editor.ApplyEdits();
     });
+}
+
+QString whyNotCreateUnder(const PXR_NS::UsdPrim& parent) {
+    if (!parent) return tr("Can't create here: it doesn't exist");
+    const QString path = qs(parent.GetPath().GetString());
+    if (parent.IsInstanceProxy()) return tr("Can't create in %1: it's part of an instance").arg(path);
+    if (!editTargetReaches(parent)) return tr("Can't create in %1: the edit target doesn't reach it").arg(path);
+    if (!parent.IsActive()) return tr("Can't create in %1: it's inactive").arg(path);
+    if (!parent.IsLoaded()) return tr("Can't create in %1: it isn't loaded").arg(path);
+    return {};
+}
+
+CreateTarget createTarget(const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& selection) {
+    const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    PXR_NS::UsdPrim parent = selection.size() == 1 ? usdStage->GetPrimAtPath(selection.front()) : PXR_NS::UsdPrim();
+    if (const std::optional<VariantEdit>& edit = stage->variantEdit()) {
+        if (!parent || !editTargetReaches(parent)) parent = usdStage->GetPrimAtPath(edit->prim);
+    } else if (!parent) {
+        parent = usdStage->GetPseudoRoot();
+    }
+    return {parent ? parent.GetPath() : PXR_NS::SdfPath(), whyNotCreateUnder(parent)};
+}
+
+PXR_NS::SdfPath createPrim(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& parent, const std::string& type) {
+    const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    if (!whyNotCreateUnder(usdStage->GetPrimAtPath(parent)).isEmpty()) return {};
+    const PXR_NS::TfToken typeName(type);
+    if (!type.empty() && !PXR_NS::UsdSchemaRegistry::GetInstance().FindConcretePrimDefinition(typeName)) return {};
+
+    const std::string base =
+        type.empty() ? std::string("Prim")
+                     : PXR_NS::UsdSchemaRegistry::ParseSchemaFamilyAndVersionFromIdentifier(typeName).first.GetString();
+    PXR_NS::SdfPath path = parent.AppendChild(PXR_NS::TfToken(base));
+    // GetPrimAtPath finds an inactive prim too, and its name is just as taken.
+    for (int i = 1; usdStage->GetPrimAtPath(path); ++i) path = parent.AppendChild(PXR_NS::TfToken(base + std::to_string(i)));
+
+    if (!undo.apply(stage, tr("Create %1").arg(qs(base)),
+                    [&]() { return static_cast<bool>(usdStage->DefinePrim(path, typeName)); })) {
+        return {};
+    }
+    stage->primCreated(path);
+    return path;
 }
 
 bool hasPayloads(const StageRefPtr& stage, const PXR_NS::SdfPath& path) {

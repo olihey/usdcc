@@ -9,6 +9,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -229,6 +230,34 @@ USDCC_TEST(python_app_api) {
           "selected_paths() as Sdf.Paths");
     CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.select(['not a path'])\n"),
           "a bad path raises ValueError");
+
+    // What the Create menu offers (docs/CREATE_MENU.md): a plugin's entry reaches the
+    // same catalog the menu asks.
+    auto catalogHas = [](const std::string& category, const std::string& label) {
+        for (const auto& c : usdcc::usd::PrimCreationCatalog::instance().categories()) {
+            if (c.name != category) continue;
+            for (const auto& group : c.groups) {
+                for (const auto& item : group) {
+                    if (item.label == label) return true;
+                }
+            }
+        }
+        return false;
+    };
+    CHECK(app.python.runString("import usdcc.usd\nusdcc.usd.set_create_entry('Cube', category='Studio', group=1, order=5)\n"),
+          "set_create_entry()");
+    CHECK(catalogHas("Studio", "Cube") && !catalogHas("Geometry", "Cube"), "the menu's catalog sees it");
+    CHECK(evaluate("[e['category'] for e in __import__('usdcc.usd').usd.create_entries() if e['label'] == 'Cube']") == "['Studio']",
+          "create_entries()");
+    CHECK(evaluate("[e['type'] for e in __import__('usdcc.usd').usd.create_entries() if e['label'] == 'Capsule']") == "['Capsule_1']",
+          "create_entries() says what's made");
+    CHECK(evaluate("__import__('usdcc.usd').usd.remove_create_entry('Cube')") == "True" && catalogHas("Plugins", "Cube"),
+          "remove_create_entry(): to Plugins");
+    CHECK(evaluate("__import__('usdcc.usd').usd.remove_create_entry('Cube')") == "False", "there's none now");
+    CHECK(app.python.runString("import usdcc.usd\nusdcc.usd.hide_create_entry('Sphere')\n") && !catalogHas("Geometry", "Sphere"),
+          "hide_create_entry()");
+    CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.set_create_entry('')\n"), "no type name raises ValueError");
+    usdcc::usd::PrimCreationCatalog::instance().reset();
 
     // What relationships target (docs/RELATIONSHIPS.md): a plugin's rule reaches
     // the same registry the app's dialogs ask.

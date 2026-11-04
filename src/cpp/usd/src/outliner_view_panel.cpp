@@ -157,9 +157,12 @@ void OutlinerViewPanel::onStageChanged(const StageRefPtr& stage) {
     // Edits, and undo/redo of them, arrive as change notices; only the ones
     // that touch the hierarchy rebuild the tree.
     m_stageChangedConnection = {};
+    m_primCreatedConnection = {};
+    m_revealAfterRefresh = PXR_NS::SdfPath();
     if (stage) {
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
+        m_primCreatedConnection = stage->primCreated.connect([this](const PXR_NS::SdfPath& path) { m_revealAfterRefresh = path; });
     }
     onStageSelectionChanged(stage, stageManager()->selectedPaths(stage));
 }
@@ -176,6 +179,10 @@ void OutlinerViewPanel::onStageObjectsChanged(const StageChanges& changes) {
     QTimer::singleShot(0, this, [this]() {
         m_refreshQueued = false;
         m_model->refresh();
+        if (m_revealAfterRefresh.IsEmpty()) return;
+        // After the scroll position the refresh restores, also on the next pass.
+        QTimer::singleShot(0, this, [this, path = m_revealAfterRefresh]() { expandToSelection({path}); });
+        m_revealAfterRefresh = PXR_NS::SdfPath();
     });
 }
 

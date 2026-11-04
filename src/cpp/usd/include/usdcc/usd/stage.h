@@ -127,6 +127,9 @@ public:
     bool isEditingVariantSet(const PXR_NS::SdfPath& prim, const std::string& set) const;
     // After the mode was entered or left, or moved to another variant.
     usdcc::core::Signal<> variantEditChanged;
+
+    // After the Create menu made a prim: the Outliner shows it, however far down it is.
+    usdcc::core::Signal<const PXR_NS::SdfPath&> primCreated;
     // After usdcc saved one or more of the stage's layers (layer_actions):
     // their unsaved-changes marks change without a change notice.
     usdcc::core::Signal<> layersSaved;

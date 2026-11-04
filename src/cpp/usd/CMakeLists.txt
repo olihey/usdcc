@@ -5,6 +5,7 @@ add_library(usdcc_usd STATIC
     include/usdcc/usd/dependencies.h
     include/usdcc/usd/layer_stack.h
     include/usdcc/usd/stage.h
+    include/usdcc/usd/prim_creation_catalog.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
     include/usdcc/usd/stage_manager.h
@@ -17,6 +18,7 @@ add_library(usdcc_usd STATIC
     src/composition_arcs.cpp
     src/dependencies.cpp
     src/layer_stack.cpp
+    src/prim_creation_catalog.cpp
     src/property_categorizer.cpp
     src/relationship_targets.cpp
     src/stage.cpp
@@ -72,6 +74,7 @@ add_library(usdcc_usd_ui STATIC
     include/usdcc/usd/properties/schema_pills.h
     include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/close_stage_dialog.h
+    include/usdcc/usd/create_menu.h
     include/usdcc/usd/current_stage_ui.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/stages_menu.h
@@ -115,6 +118,7 @@ add_library(usdcc_usd_ui STATIC
     src/properties/schema_pills.cpp
     src/properties/transform_stack_editor.cpp
     src/close_stage_dialog.cpp
+    src/create_menu.cpp
     src/current_stage_ui.cpp
     src/stage_opener.cpp
     src/stages_menu.cpp

@@ -53,6 +53,23 @@ bool clearVariant(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::Sdf
 // With UsdNamespaceEditor. False for an invalid or unchanged name.
 bool rename(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& name);
 
+// Creating a prim (docs/CREATE_MENU.md §3). The target is where a new prim goes for
+// this selection: under the one selected prim, else at the root. During variant edit
+// mode, a selection the variant doesn't reach means the prim whose variant it is.
+// `problem` says why not, when it can't go there; then createPrim() refuses it too.
+struct CreateTarget {
+    PXR_NS::SdfPath parent;
+    QString problem;
+};
+CreateTarget createTarget(const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& selection);
+// Empty if a prim can be created under `parent`, else why not.
+QString whyNotCreateUnder(const PXR_NS::UsdPrim& parent);
+// `type` is a concrete schema type name, or empty for a prim with no type. One undo
+// step. It's named after its type, made unique among the parent's children, as
+// DefinePrim on a name in use would change that prim's type. Returns its path, empty
+// if refused, and announces it on Stage::primCreated.
+PXR_NS::SdfPath createPrim(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& parent, const std::string& type);
+
 // Payloads: whether anything at or under `path` is loadable, and whether some
 // of it is unloaded / loaded.
 bool hasPayloads(const StageRefPtr& stage, const PXR_NS::SdfPath& path);

@@ -78,6 +78,7 @@ private:
     bool m_updatingSelection = false;
     std::shared_ptr<UndoManager> m_undoManager;
     bool m_refreshQueued = false;
+    PXR_NS::SdfPath m_revealAfterRefresh;  // a prim just created
     // View state carried across a model reset; not across a stage switch,
     // whose paths belong to another stage.
     bool m_keepViewState = true;
@@ -88,6 +89,7 @@ private:
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
+    usdcc::core::Signal<const PXR_NS::SdfPath&>::Connection m_primCreatedConnection;
 };
 
 }  // namespace usdcc::usd
