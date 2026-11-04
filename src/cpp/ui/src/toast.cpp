@@ -27,17 +27,18 @@ constexpr int kMoveMs = 150;
 constexpr int kTickMs = 33;
 // The card's chrome, at 100% UI scale: the stripe and icon on the left, the
 // countdown bar's room at the bottom.
-constexpr int kRadius = 6;
-constexpr int kStripe = 3;
+constexpr int kRadius = 10;
+constexpr int kStripe = 8;
 constexpr int kIconSize = 16;
-constexpr int kLeft = 40;  // stripe + gap + icon + gap
+constexpr int kLeft = 45;  // stripe + gap + icon + gap
 constexpr int kTop = 10;
 constexpr int kRight = 8;
 constexpr int kBottom = 12;
 constexpr int kSpacing = 4;
 constexpr int kBar = 2;
 
-const QColor kCard(0x23, 0x23, 0x26);
+// Slightly see-through (88%): what is behind shows faintly.
+const QColor kCard(0x23, 0x23, 0x26, 224);
 const QColor kBorder(255, 255, 255, 26);  // 10%
 
 // The kind's symbol, drawn in white on a disc of its colour.
