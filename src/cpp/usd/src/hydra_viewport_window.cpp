@@ -1,5 +1,11 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
+#include "usdcc/usd/orbit_camera.h"
+
+#include <QCursor>
+#include <QRect>
+#include <QScreen>
+
 #include "usdcc/core/log.h"
 
 #include <pxr/base/gf/math.h>
@@ -270,24 +276,11 @@ void HydraViewportWindow::updateEngineSelection() {
 usdcc::tools::Tool* HydraViewportWindow::activeToolInstance() const { return &m_toolSet->activeTool(); }
 
 PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
-    const double yawRad = PXR_NS::GfDegreesToRadians(m_yaw);
-    const double pitchRad = PXR_NS::GfDegreesToRadians(m_pitch);
-    const double x = m_distance * std::cos(pitchRad) * std::sin(yawRad);
-    const double y = m_distance * std::sin(pitchRad);
-    const double z = m_distance * std::cos(pitchRad) * std::cos(yawRad);
-    return m_target + PXR_NS::GfVec3d(x, y, z);
+    return orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch).eye;
 }
 
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
-    const PXR_NS::GfVec3d eye = cameraPosition();
-    const PXR_NS::GfVec3d forward = (m_target - eye).GetNormalized();
-    PXR_NS::GfVec3d right = PXR_NS::GfCross(forward, PXR_NS::GfVec3d(0.0, 1.0, 0.0));
-    if (right.GetLength() < 1e-6) {
-        right = PXR_NS::GfVec3d(1.0, 0.0, 0.0);
-    } else {
-        right.Normalize();
-    }
-    const PXR_NS::GfVec3d up = PXR_NS::GfCross(right, forward);
+    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
 
     PXR_NS::GfMatrix4d cameraToWorld(1.0);
     cameraToWorld.SetRow(0, PXR_NS::GfVec4d(right[0], right[1], right[2], 0.0));
@@ -559,6 +552,8 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
             }
         }
         m_orbiting = true;
+        // For the whole drag, so that crossing a pole during it doesn't reverse it.
+        m_orbitReversed = orbitIsUpsideDown(m_pitch);
     } else if (event->button() == Qt::MiddleButton) {
         m_panning = true;
     }
@@ -577,15 +572,27 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         }
         renderNow();
     } else if (m_orbiting) {
-        m_yaw -= delta.x() * 0.5;
-        m_pitch = std::clamp(m_pitch + delta.y() * 0.5, -89.0, 89.0);
+        // Moving the cursor can leave an event from before it behind, which isn't the
+        // mouse moving half a screen.
+        const QScreen* onScreen = screen();
+        const QRect bounds = onScreen ? onScreen->geometry() : QRect();
+        const bool stale = onScreen && (std::abs(delta.x()) > bounds.width() / 2 || std::abs(delta.y()) > bounds.height() / 2);
+        if (!stale) {
+            m_yaw = wrapDegrees(m_yaw - (m_orbitReversed ? -1.0 : 1.0) * delta.x() * 0.5);
+            m_pitch = wrapDegrees(m_pitch + delta.y() * 0.5);
+        }
+        // At the screen's edge, on from the other side, so a drag never runs out.
+        if (onScreen) {
+            const QPoint global = event->globalPosition().toPoint();
+            if (const auto wrapped = wrapCursorAtEdges(global.x(), global.y(), bounds.left(), bounds.top(), bounds.right(), bounds.bottom())) {
+                const QPoint to(wrapped->x, wrapped->y);
+                QCursor::setPos(screen(), to);
+                m_lastMousePos = mapFromGlobal(to);
+            }
+        }
         renderNow();
     } else if (m_panning) {
-        const PXR_NS::GfVec3d eye = cameraPosition();
-        const PXR_NS::GfVec3d forward = (m_target - eye).GetNormalized();
-        PXR_NS::GfVec3d right = PXR_NS::GfCross(forward, PXR_NS::GfVec3d(0.0, 1.0, 0.0));
-        right.Normalize();
-        const PXR_NS::GfVec3d up = PXR_NS::GfCross(right, forward);
+        const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
         const double panScale = m_distance * 0.0015;
         m_target += right * (-delta.x() * panScale) + up * (delta.y() * panScale);
         renderNow();

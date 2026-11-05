@@ -22,6 +22,7 @@ add_executable(usdcc_tests
     log_capture_test.cpp
     log_test.cpp
     move_tool_test.cpp
+    orbit_camera_test.cpp
     prim_move_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp

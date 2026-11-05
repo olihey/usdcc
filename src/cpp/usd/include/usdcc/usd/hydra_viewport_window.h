@@ -173,6 +173,7 @@ private:
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;
+    bool m_orbitReversed = false;  // this drag began upside down, so turns the other way
     bool m_panning = false;
     bool m_dragging = false;
     bool m_toolEditActive = false;  // between toolEditStarted() and toolEditFinished()

@@ -1,5 +1,7 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
 add_library(usdcc_usd SHARED
+    include/usdcc/usd/orbit_camera.h
+    src/orbit_camera.cpp
     include/usdcc/usd/applied_schemas.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
