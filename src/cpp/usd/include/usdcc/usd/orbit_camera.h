@@ -14,6 +14,13 @@ struct OrbitCameraAxes {
     PXR_NS::GfVec3d up;
 };
 
+// Where a new viewport's camera starts, and where Reset Camera puts it: looking down
+// at the origin from above the ground, at an angle. A positive pitch puts the eye
+// above its target.
+constexpr double kDefaultOrbitDistance = 10.0;
+constexpr double kDefaultOrbitYaw = 45.0;
+constexpr double kDefaultOrbitPitch = 20.0;
+
 // The camera at `distance` from `target`, by yaw and pitch in degrees. Its axes come
 // from the angles rather than from a world up vector, so they carry on smoothly over
 // the poles and it ends up upside down, rather than flipping or breaking there.

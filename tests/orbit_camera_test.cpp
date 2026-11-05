@@ -63,6 +63,13 @@ USDCC_TEST(orbit_camera_turns_smoothly_over_the_poles) {
     CHECK(closeTo(round.eye, same.eye) && closeTo(round.up, same.up), "and a whole turn comes back");
 }
 
+USDCC_TEST(orbit_camera_starts_above_the_ground) {
+    const OrbitCameraAxes axes = orbitCameraAxes(GfVec3d(0), kDefaultOrbitDistance, kDefaultOrbitYaw, kDefaultOrbitPitch);
+    CHECK(axes.eye[1] > 0.0, "the eye is above the ground: y %f", axes.eye[1]);
+    CHECK(axes.forward[1] < 0.0, "looking down at the target");
+    CHECK(axes.up[1] > 0.0 && !orbitIsUpsideDown(kDefaultOrbitPitch), "the right way up");
+}
+
 USDCC_TEST(orbit_camera_upside_down) {
     CHECK(!orbitIsUpsideDown(0.0) && !orbitIsUpsideDown(89.0) && !orbitIsUpsideDown(-89.0), "the right way up");
     CHECK(orbitIsUpsideDown(91.0) && orbitIsUpsideDown(180.0) && orbitIsUpsideDown(-135.0), "upside down");

@@ -4,6 +4,7 @@
 
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/orbit_camera.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/vec3d.h>
@@ -75,9 +76,9 @@ public:
     // to the default view.
     struct CameraState {
         PXR_NS::GfVec3d target{0.0, 0.0, 0.0};
-        double distance = 10.0;
-        double yaw = 45.0;
-        double pitch = -20.0;
+        double distance = kDefaultOrbitDistance;
+        double yaw = kDefaultOrbitYaw;
+        double pitch = kDefaultOrbitPitch;  // above the ground, looking down
     };
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
@@ -182,9 +183,9 @@ private:
     PXR_NS::UsdStageRefPtr m_stage;
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};
-    double m_distance = 10.0;
-    double m_yaw = 45.0;
-    double m_pitch = -20.0;
+    double m_distance = kDefaultOrbitDistance;
+    double m_yaw = kDefaultOrbitYaw;
+    double m_pitch = kDefaultOrbitPitch;
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;
