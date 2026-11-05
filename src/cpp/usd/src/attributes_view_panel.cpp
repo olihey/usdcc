@@ -1184,7 +1184,9 @@ void AttributesViewPanel::applyFilter() {
         }
     }
     for (size_t i = 0; i < m_sections.size(); ++i) {
-        m_sections[i]->setVisible(visibleCounts[i] > 0);
+        // Only a search hides a section: with none, one with no rows is still there
+        // for what's in its header, such as Transform's + with no ops yet.
+        m_sections[i]->setVisible(text.isEmpty() || visibleCounts[i] > 0);
         m_sections[i]->setForceExpanded(!text.isEmpty());
     }
     if (m_primSection) {

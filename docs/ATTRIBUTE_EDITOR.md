@@ -268,6 +268,9 @@ section shows the material binding relationship with a "select material" button.
 
 ## 6. Transform stack section
 
+Every xformable prim has this section, with no ops too, as its **+** is how they're added. Only a search
+hides a section with no rows.
+
 The section appears for any `UsdGeomXformable` prim. It replaces the plain rows for
 `xformOp:*` and `xformOpOrder`.
 
