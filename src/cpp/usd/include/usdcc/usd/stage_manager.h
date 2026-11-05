@@ -63,6 +63,11 @@ public:
     // ViewPanel's own invariant forbids it from ever holding a null one).
     StageRefPtr createStage();
 
+    // Creates a stage with a new file at `path` and registers it. The file is written
+    // straight away, replacing one that's there, so ask first. Null if it can't be: `error`
+    // then says why (the file is open already, or `path` isn't a kind USD can write).
+    StageRefPtr createStageFile(const std::string& path, std::string* error = nullptr);
+
     // Unregisters the stage. The underlying Stage (and its UsdStage) is
     // only destroyed once every other StageRefPtr referencing it (e.g. one
     // held by a ViewPanel) has also let go.

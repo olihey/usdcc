@@ -15,6 +15,7 @@ add_executable(usdcc_tests
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
     create_prim_test.cpp
+    create_stage_test.cpp
     dependencies_test.cpp
     dependency_files.h
     layer_stack_test.cpp

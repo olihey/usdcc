@@ -64,6 +64,29 @@ StageRefPtr StageManager::adoptStage(const PXR_NS::UsdStageRefPtr& usdStage) {
 
 StageRefPtr StageManager::createStage() { return registerStage(PXR_NS::UsdStage::CreateInMemory()); }
 
+StageRefPtr StageManager::createStageFile(const std::string& path, std::string* error) {
+    const auto fail = [&](const std::string& why) -> StageRefPtr {
+        USDCC_LOG_ERROR("usdcc.stage", "Could not create stage {}: {}", path, why);
+        if (error) *error = why;
+        return nullptr;
+    };
+    // USD refuses this too, but in terms of layer identifiers.
+    if (PXR_NS::SdfLayer::Find(path)) return fail("That file is open already. Close it first.");
+    PXR_NS::UsdStageRefPtr stage;
+    std::string firstError;
+    {
+        // Only to read the errors: the mark isn't cleared, so they still reach the
+        // log (TfDiagnosticBridge) when it goes out of scope.
+        PXR_NS::TfErrorMark mark;
+        stage = PXR_NS::UsdStage::CreateNew(path);
+        for (auto it = mark.GetBegin(); it != PXR_NS::TfDiagnosticMgr::GetInstance().GetErrorEnd(); ++it) {
+            if (firstError.empty()) firstError = it->GetCommentary();
+        }
+    }
+    if (!stage) return fail(firstError.empty() ? "USD couldn't create it." : firstError);
+    return registerStage(stage);
+}
+
 StageRefPtr StageManager::registerStage(const PXR_NS::UsdStageRefPtr& usdStage) {
     PXR_NS::UsdUtilsStageCache::Get().Insert(usdStage);
     auto stage = std::make_shared<Stage>(usdStage);

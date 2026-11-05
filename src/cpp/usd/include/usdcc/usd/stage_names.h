@@ -13,7 +13,8 @@ namespace usdcc::usd {
 // takes to tell them apart — and no more, each name extended on its own.
 // E.g. C:/p/shots/a.usda, C:/p/assets/a.usda and C:/q/b.usda become
 // "shots/a.usda", "assets/a.usda" and "b.usda". Folders are joined with '/'.
-// An anonymous layer's identifier ("anon:<address>:<tag>") counts as its tag.
+// An anonymous layer shows its whole identifier ("anon:<address>:<tag>"), as all of
+// them have the same tag unless told otherwise.
 // Same order and size as `identifiers`.
 std::vector<std::string> shortLayerNames(const std::vector<std::string>& identifiers);
 

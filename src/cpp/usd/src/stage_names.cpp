@@ -10,9 +10,8 @@ namespace usdcc::usd {
 namespace {
 // The identifier's path components, file name last.
 std::vector<std::string> components(const std::string& identifier) {
-    if (PXR_NS::SdfLayer::IsAnonymousLayerIdentifier(identifier)) {
-        return {PXR_NS::SdfLayer::GetDisplayNameFromIdentifier(identifier)};
-    }
+    // The whole of it, as every in-memory stage has the same tag and no folders.
+    if (PXR_NS::SdfLayer::IsAnonymousLayerIdentifier(identifier)) return {identifier};
     std::vector<std::string> parts;
     std::string part;
     for (const char c : identifier) {

@@ -412,6 +412,26 @@ int main(int argc, char** argv) {
     fileMenu->insertMenu(openStageAction, previewMenu);
     fileMenu->insertSeparator(openStageAction);
 
+    // File > Create Stage: a new stage, which like an opened one gets a viewport and
+    // becomes current. One as a file is written at once, and goes in Open Recent.
+    QMenu* createStageMenu = new QMenu(QObject::tr("Create S&tage"), fileMenu);
+    fileMenu->insertMenu(openStageAction, createStageMenu);
+    createStageMenu->addAction(QObject::tr("In &Memory"), &window, [&stageManager]() { stageManager.createStage(); });
+    createStageMenu->addAction(QObject::tr("As &File..."), &window, [&stageManager, &window]() {
+        // Its own question before replacing a file, which USD then would without asking.
+        QString path = QFileDialog::getSaveFileName(
+            &window, QObject::tr("Create Stage"), QString(),
+            QObject::tr("USD Text (*.usda);;USD Binary (*.usdc);;USD (*.usd)"));
+        if (path.isEmpty()) return;
+        // USD needs an extension to know the format.
+        if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+        std::string error;
+        if (!stageManager.createStageFile(path.toStdString(), &error)) {
+            QMessageBox::warning(&window, QObject::tr("Create Stage"),
+                                 QObject::tr("Could not create %1.\n\n%2").arg(QDir::toNativeSeparators(path), QString::fromStdString(error)));
+        }
+    });
+
     // File > Preview > Show USDA...: as text (docs/USDA_VIEW.md §10).
     QAction* showUsdaAction = previewMenu->addAction(QObject::tr("Show &USDA..."));
     QObject::connect(showUsdaAction, &QAction::triggered, &window, [&window]() {

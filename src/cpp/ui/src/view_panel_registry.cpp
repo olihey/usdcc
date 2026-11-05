@@ -41,7 +41,9 @@ ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRef
     if (!entry || !entry->create || !stage) {
         return nullptr;
     }
-    const QString stageName = QString::fromStdString(stage->usdStage()->GetRootLayer()->GetDisplayName());
+    // An in-memory stage by its whole identifier, as they'd all read the same otherwise.
+    const PXR_NS::SdfLayerHandle rootLayer = stage->usdStage()->GetRootLayer();
+    const QString stageName = QString::fromStdString(rootLayer->IsAnonymous() ? rootLayer->GetIdentifier() : rootLayer->GetDisplayName());
     ViewPanel* panel = entry->create(stage, QStringLiteral("%1 - %2").arg(entry->displayName, stageName), parent);
     if (!panel) {
         return nullptr;
