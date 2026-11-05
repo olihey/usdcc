@@ -238,6 +238,11 @@ matches wins:
 5. **UsdShade:** `inputs:*` → **Inputs**, `outputs:*` → **Outputs**, on Shader, Material
    and NodeGraph prims.
 6. **Primvars** that no schema declared → **Primvars**, each showing its interpolation.
+   In any section, two or more primvars with the same first name after `primvars:` go in a frame
+   titled with it, as it's written, and their labels leave it out: `primvars:skel:jointIndices` is "Joint
+   Indices" in a frame titled "skel". That includes a primvar and what's named after it: `primvars:st`,
+   `primvars:st:indices` and `primvars:st:name` are "Value", "Indices" and "Name" in a frame titled "st".
+   One on its own stays a plain row.
 7. Everything else (custom, unschematized) → **Custom**, sub-grouped by namespace
    (`userProperties:` → "User Properties").
 

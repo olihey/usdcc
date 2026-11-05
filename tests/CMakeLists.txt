@@ -46,6 +46,7 @@ add_executable(usdcc_ui_tests
     test_settings.h
     test_harness.cpp
     ui_test_main.cpp
+    attributes_primvar_groups_test.cpp
     attributes_rename_test.cpp
     composition_edit_test.cpp
     create_menu_test.cpp

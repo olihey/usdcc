@@ -147,6 +147,33 @@ std::string propertyLabelInCategory(const UsdProperty& property, const PropertyC
     return propertyLabel(property);
 }
 
+std::string primvarNamespace(const UsdProperty& property) {
+    static const std::string kPrefix = "primvars:";
+    const std::string& name = property.GetName().GetString();
+    if (!startsWith(name, kPrefix.c_str())) return {};
+    return name.substr(kPrefix.size(), name.find(':', kPrefix.size()) - kPrefix.size());
+}
+
+std::set<std::string> primvarGroups(const PropertyCategory& category) {
+    std::map<std::string, int> counts;
+    for (const UsdProperty& property : category.properties) {
+        const std::string group = primvarNamespace(property);
+        if (!group.empty()) ++counts[group];
+    }
+    std::set<std::string> groups;
+    for (const auto& [group, count] : counts) {
+        if (count > 1) groups.insert(group);
+    }
+    return groups;
+}
+
+std::string propertyLabelInPrimvarGroup(const UsdProperty& property, const std::string& group) {
+    if (!property.GetDisplayName().empty()) return property.GetDisplayName();
+    const std::string covered = "primvars:" + group + ":";
+    const std::string& name = property.GetName().GetString();
+    return name.size() > covered.size() ? prettifyIdentifier(name.substr(covered.size())) : "Value";
+}
+
 std::vector<PropertyCategory> categorizeProperties(const UsdPrim& prim, const CategorizeOptions& options) {
     std::vector<PropertyCategory> result;
     if (!prim) return result;

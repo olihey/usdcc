@@ -186,6 +186,31 @@ USDCC_TEST(property_categorizer) {
     }
     CHECK(propertyLabelInCategory(p.GetProperty(TfToken("points")), *find(m, "schema:PointBased")) == "Points",
           "plain name unchanged");
+    // Primvar namespaces (a frame each, for two or more).
+    const UsdPrim pv = stage->DefinePrim(SdfPath("/PrimvarGroups"), TfToken("Mesh"));
+    UsdGeomPrimvarsAPI pvApi(pv);
+    for (const char* name : {"skel:jointIndices", "skel:jointWeights", "skel:deep:er", "lone:one", "st"}) {
+        pvApi.CreatePrimvar(TfToken(name), SdfValueTypeNames->Float);
+    }
+    pvApi.GetPrimvar(TfToken("st")).CreateIndicesAttr();
+    pvApi.GetPrimvar(TfToken("skel:jointWeights")).CreateIndicesAttr();
+    pv.CreateAttribute(TfToken("userProperties:primvars:x"), SdfValueTypeNames->Float);
+    const auto pvProp = [&pv](const char* name) { return pv.GetProperty(TfToken(name)); };
+    CHECK(primvarNamespace(pvProp("primvars:skel:jointIndices")) == "skel", "first namespace");
+    CHECK(primvarNamespace(pvProp("primvars:skel:deep:er")) == "skel", "only the first");
+    CHECK(primvarNamespace(pvProp("primvars:skel:jointWeights:indices")) == "skel", "a namespaced primvar's indices are in it");
+    CHECK(primvarNamespace(pvProp("primvars:st")) == "st", "a primvar groups with what's named after it");
+    CHECK(primvarNamespace(pvProp("primvars:st:indices")) == "st", "such as its indices");
+    CHECK(primvarNamespace(pvProp("userProperties:primvars:x")).empty(), "not a primvar");
+    const auto pvCategories = categorizeProperties(pv);
+    const std::set<std::string> pvGroups = primvarGroups(*find(pvCategories, "primvars"));
+    CHECK((pvGroups == std::set<std::string>{"skel", "st"}), "two or more share a frame, one alone doesn't: %d", int(pvGroups.size()));
+    CHECK(propertyLabelInPrimvarGroup(pvProp("primvars:st"), "st") == "Value", "the primvar itself has nothing left to say");
+    CHECK(propertyLabelInPrimvarGroup(pvProp("primvars:st:indices"), "st") == "Indices", "and its indices");
+    CHECK(propertyLabelInPrimvarGroup(pvProp("primvars:skel:jointIndices"), "skel") == "Joint Indices", "namespace left out");
+    CHECK(propertyLabelInPrimvarGroup(pvProp("primvars:skel:jointWeights:indices"), "skel").find("skel") == std::string::npos &&
+              propertyLabelInPrimvarGroup(pvProp("primvars:skel:jointWeights:indices"), "skel").find("Skel") == std::string::npos,
+          "as for its indices: '%s'", propertyLabelInPrimvarGroup(pvProp("primvars:skel:jointWeights:indices"), "skel").c_str());
     grouped.SetDisplayName("Shine");
     CHECK(propertyLabel(grouped) == "Shine", "displayName wins");
     CHECK(schemaLabel(TfToken("CollectionAPI:lightLink")) == "Collection (lightLink)", "multiple-apply label: '%s'",

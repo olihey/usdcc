@@ -86,6 +86,7 @@ private:
         properties::AttributeBinding* binding = nullptr;  // null for relationships
         properties::PropertyEditor* editor = nullptr;
         properties::CategorySection* section = nullptr;
+        QWidget* frame = nullptr;  // the frame around it, for primvars of one namespace
         PXR_NS::UsdProperty property;
         // A relationship's row; it can exist before the relationship does.
         PXR_NS::TfToken relationship;
@@ -114,7 +115,9 @@ private:
     void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
     void buildTransformStack(const PXR_NS::UsdPrim& prim, properties::CategorySection* section,
                              std::set<PXR_NS::TfToken>& inStack);
-    Row buildRow(const PXR_NS::UsdProperty& property, const PropertyCategory& category);
+    // `primvarGroup`: the namespace of the frame it's going in, which its label leaves out.
+    Row buildRow(const PXR_NS::UsdProperty& property, const PropertyCategory& category,
+                 const std::string& primvarGroup = {});
     // An xformOp:* attribute xformOpOrder doesn't list: dimmed, a note naming
     // the layer that keeps it alive, and a context-menu "Add to Stack".
     void setUpUnusedOp(const Row& row);

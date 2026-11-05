@@ -4,6 +4,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/property.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,21 @@ std::string propertyLabel(const PXR_NS::UsdProperty& property);
 // collection:lightLink:includeRoot in "Collection (lightLink)" -> "Include Root".
 // A displayName still wins.
 std::string propertyLabelInCategory(const PXR_NS::UsdProperty& property, const PropertyCategory& category);
+
+// The first part of a primvar's name, which it's grouped by: "skel" for
+// primvars:skel:jointIndices, "st" for primvars:st and primvars:st:indices. Empty
+// for anything that isn't a primvar.
+std::string primvarNamespace(const PXR_NS::UsdProperty& property);
+
+// The first parts shared by two or more of the category's primvars, which the
+// Attribute Editor frames together. One on its own keeps its plain row.
+std::set<std::string> primvarGroups(const PropertyCategory& category);
+
+// The label inside the frame of `group`, which already says it:
+// primvars:skel:jointIndices -> "Joint Indices", primvars:st:indices -> "Indices",
+// and primvars:st itself, with nothing left to say -> "Value". A displayName
+// still wins.
+std::string propertyLabelInPrimvarGroup(const PXR_NS::UsdProperty& property, const std::string& group);
 
 // "rigidBodyEnabled" -> "Rigid Body Enabled", "fStop" -> "F Stop", "UVSet" -> "UV Set".
 std::string prettifyIdentifier(const std::string& identifier);

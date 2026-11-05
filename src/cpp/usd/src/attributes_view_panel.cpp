@@ -75,6 +75,37 @@ using properties::PropertyRow;
 namespace {
 
 constexpr int kLabelWidth = 130;
+// Inside a frame labels are narrower by its padding, so the fields line up with
+// the other rows'.
+constexpr int kFramePadding = 8;
+
+struct GroupFrame {
+    QFrame* widget = nullptr;
+    QVBoxLayout* layout = nullptr;
+};
+
+// A small frame in the section for rows that belong together (QFrame#compositionArc
+// in theme/dark.qss).
+GroupFrame addRowFrame(properties::CategorySection* section) {
+    auto* frame = new QFrame();
+    frame->setObjectName(QStringLiteral("compositionArc"));
+    frame->setAttribute(Qt::WA_StyledBackground);
+    auto* layout = new QVBoxLayout(frame);
+    usdcc::ui::scaled::margins(layout, kFramePadding, 6, 6, 6);
+    usdcc::ui::scaled::spacing(layout, 6);
+    section->addRow(frame);
+    return {frame, layout};
+}
+
+// A frame for the primvars of one namespace, titled with it as it's written.
+GroupFrame addPrimvarFrame(properties::CategorySection* section, const std::string& group) {
+    const GroupFrame frame = addRowFrame(section);
+    auto* title = new QLabel(QString::fromStdString(group), frame.widget);
+    title->setObjectName(QStringLiteral("propertyFrameTitle"));
+    title->setToolTip(QStringLiteral("primvars:%1").arg(QString::fromStdString(group)));
+    frame.layout->addWidget(title);
+    return frame;
+}
 constexpr auto kMaterialBindingApi = "MaterialBindingAPI";
 const TfToken kMaterialBinding("material:binding");
 constexpr auto kCollapsedKeyPrefix = "AttributeEditor/collapsed/";
@@ -349,6 +380,8 @@ void AttributesViewPanel::rebuild() {
     for (const PropertyCategory& category : categories) {
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
         std::set<TfToken> inStack;
+        const std::set<std::string> groups = primvarGroups(category);
+        std::map<std::string, GroupFrame> frames;
         if (category.key == "transform" && xformable) {
             buildTransformStack(prim, section, inStack);
         }
@@ -356,13 +389,24 @@ void AttributesViewPanel::rebuild() {
             if (inStack.count(property.GetName()) || property.GetName() == UsdGeomTokens->xformOpOrder) {
                 continue;  // shown (and edited) by the transform stack
             }
-            Row row = buildRow(property, category);
+            const std::string namespaceName = primvarNamespace(property);
+            const bool grouped = groups.count(namespaceName) > 0;
+            Row row = buildRow(property, category, grouped ? namespaceName : std::string());
             row.section = section;
             if (property.GetName() == kMaterialBinding) materialBindingShown = true;
             if (category.key == "transform" && UsdGeomXformOp::IsXformOp(property.GetName())) {
                 setUpUnusedOp(row);
             }
-            section->addRow(row.row);
+            if (grouped) {
+                // In the frame of its namespace, which goes where its first primvar would.
+                GroupFrame& frame = frames[namespaceName];
+                if (!frame.widget) frame = addPrimvarFrame(section, namespaceName);
+                row.frame = frame.widget;
+                row.row->setLabelWidth(kLabelWidth - kFramePadding);
+                frame.layout->addWidget(row.row);
+            } else {
+                section->addRow(row.row);
+            }
             m_rows.push_back(row);
         }
         // Authored or not, whatever the Authored Only option says: an unset binding
@@ -534,20 +578,9 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
     }
 
     // An editable reference's or payload's rows go in a small frame of their
-    // own (QFrame#compositionArc in theme/dark.qss), its labels narrower by
-    // the frame's padding so the fields line up with the other sections'.
-    // Every other row goes straight in the section.
-    constexpr int kFramePadding = 8;
+    // own. Every other row goes straight in the section.
     QVBoxLayout* frameLayout = nullptr;
-    auto beginFrame = [section, &frameLayout]() {
-        auto* frame = new QFrame();
-        frame->setObjectName(QStringLiteral("compositionArc"));
-        frame->setAttribute(Qt::WA_StyledBackground);
-        frameLayout = new QVBoxLayout(frame);
-        usdcc::ui::scaled::margins(frameLayout, kFramePadding, 6, 6, 6);
-        usdcc::ui::scaled::spacing(frameLayout, 6);
-        section->addRow(frame);
-    };
+    auto beginFrame = [section, &frameLayout]() { frameLayout = addRowFrame(section).layout; };
     auto addRow = [section, &frameLayout](const QString& label, PropertyEditor* editor) {
         auto* row = new PropertyRow(label, editor);
         if (frameLayout) {
@@ -992,10 +1025,12 @@ void AttributesViewPanel::removeSchemaInteractively(const QString& schema) {
     prim_actions::removeSchema(*m_undoManager, currentStage(), prim.GetPath(), schema.toStdString(), cleanUp);
 }
 
-AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& property, const PropertyCategory& category) {
+AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& property, const PropertyCategory& category,
+                                                       const std::string& primvarGroup) {
     Row row;
     row.property = property;
-    const QString label = qs(propertyLabelInCategory(property, category));
+    const QString label = qs(primvarGroup.empty() ? propertyLabelInCategory(property, category)
+                                                  : propertyLabelInPrimvarGroup(property, primvarGroup));
     const QString name = qs(property.GetName().GetString());
     row.searchText = (label + QLatin1Char(' ') + name).toLower();
 
@@ -1134,9 +1169,14 @@ void AttributesViewPanel::refreshValues() {
 void AttributesViewPanel::applyFilter() {
     const QString text = m_search->text().trimmed().toLower();
     std::vector<int> visibleCounts(m_sections.size(), 0);
+    std::set<QWidget*> framesInUse;
+    for (const Row& row : m_rows) {
+        if (row.frame && (text.isEmpty() || row.searchText.contains(text))) framesInUse.insert(row.frame);
+    }
     for (Row& row : m_rows) {
         const bool visible = text.isEmpty() || row.searchText.contains(text);
         row.row->setVisible(visible);
+        if (row.frame) row.frame->setVisible(framesInUse.count(row.frame) > 0);
         if (visible) {
             for (size_t i = 0; i < m_sections.size(); ++i) {
                 if (m_sections[i] == row.section) ++visibleCounts[i];

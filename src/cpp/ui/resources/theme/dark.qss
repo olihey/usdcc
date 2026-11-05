@@ -869,6 +869,12 @@ QFrame#compositionArc {
     border-radius: 4px;
 }
 
+/* The namespace of the primvars in a frame. */
+QLabel#propertyFrameTitle {
+    color: rgba(255, 255, 255, 75%);
+    font-weight: 600;
+}
+
 /* Edits are going into a variant (docs/VARIANT_EDITOR.md section 5): hard to miss. */
 QFrame#variantEditBanner {
     background: rgba(255, 179, 64, 14%);
