@@ -20,3 +20,5 @@ external/pyside-setup/
 external/pyside-setup-src/
 external/pyside-build/
 external/pyside-install/
+__pycache__/
+*.pyc
