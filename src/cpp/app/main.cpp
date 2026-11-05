@@ -187,7 +187,9 @@ int main(int argc, char** argv) {
     // doesn't take in a plugin's schemas once it exists (docs/PLUGINS.md §3.1).
     std::vector<std::filesystem::path> extraPluginFolders;
     for (const QString& folder : commandLine.values(pluginPathOption)) {
-        extraPluginFolders.emplace_back(folder.toStdU16String());
+        // Absolute, so the plugins' paths (their libraries, USD folders, Python
+        // modules) don't depend on the working directory later on.
+        extraPluginFolders.emplace_back(QFileInfo(folder).absoluteFilePath().toStdU16String());
     }
     usdcc::scripting::PluginManager plugins(
         usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));

@@ -56,6 +56,16 @@ endfunction()
 # functions exported (docs/PLUGINS.md §3.2). Data has to be marked (core/export.h).
 function(usdcc_export_library target)
     set_target_properties(${target} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    if(MSVC)
+        # A class marked for export (a Q_OBJECT class, for its staticMetaObject,
+        # which the generated list leaves out) has its vtables exported twice:
+        # by the class's dllexport and by WINDOWS_EXPORT_ALL_SYMBOLS's list, which
+        # includes them. The linker warns (LNK4197, "export specified multiple
+        # times") and uses the first; both name the same symbol, so nothing is
+        # wrong. Neither can go (the list can't be filtered, and the marking is
+        # what exports the meta-objects), so the warning is turned off here.
+        target_link_options(${target} PRIVATE /IGNORE:4197)
+    endif()
     # USD's headers ask for the release Python import library in every
     # configuration, as for the app (src/cpp/app/CMakeLists.txt).
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")

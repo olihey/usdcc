@@ -155,8 +155,13 @@ struct LoadedLibrary {
     std::string error;
 };
 
-LoadedLibrary loadLibrary(const std::filesystem::path& path) {
+LoadedLibrary loadLibrary(const std::filesystem::path& given) {
     LoadedLibrary loaded;
+    // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR needs a full path: a relative one (from
+    // `--plugin-path build/plugins`) fails with "The parameter is incorrect".
+    std::error_code absoluteError;
+    const std::filesystem::path absolute = std::filesystem::absolute(given, absoluteError);
+    const std::filesystem::path& path = absoluteError ? given : absolute;
 #if defined(_WIN32)
     HMODULE module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!module) {

@@ -292,6 +292,29 @@ USDCC_TEST(native_plugin_that_throws) {
     CHECK(contains(reasonOf(manager, "test.native"), "the plugin chose to fail"), "saying why: %s", reasonOf(manager, "test.native").c_str());
 }
 
+// A plugin folder given relative to the working directory, as
+// `usdcc --plugin-path build/plugins` does: its library still loads (Windows'
+// LoadLibraryEx refuses a relative path with "The parameter is incorrect").
+// The throwing mode shows it ran: a library that didn't load can't throw.
+USDCC_TEST(native_plugin_from_a_relative_folder) {
+    Settings settings;
+    auto& app = pythonTestApp();
+    std::error_code error;
+    const std::filesystem::path relative =
+        std::filesystem::relative(testPluginFolder().parent_path(), std::filesystem::current_path(), error);
+    if (error || relative.empty() || relative.is_absolute()) return;  // another drive: no relative path
+    qputenv("USDCC_TEST_PLUGIN_THROW", "1");
+    PluginManager::Options options;
+    options.folders = {relative};
+    PluginManager manager(options);
+    manager.scan();
+    manager.activate(app.python);
+    qunsetenv("USDCC_TEST_PLUGIN_THROW");
+    CHECK(manager.find("test.native") != nullptr, "found in %s", relative.string().c_str());
+    CHECK(contains(reasonOf(manager, "test.native"), "the plugin chose to fail"),
+          "its library loaded and ran: %s", reasonOf(manager, "test.native").c_str());
+}
+
 USDCC_TEST(native_plugin_build_info) {
     const auto info = usdcc::scripting::pluginBuildInfo();
     CHECK(info.count("platform") && info.count("compiler") && info.count("qt") && info.count("usd") && info.count("usdcc"), "all five");
