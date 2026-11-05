@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 
@@ -47,7 +49,7 @@ namespace usdcc::usd {
 // mouse events (to pick a prim or grab a gizmo handle), and only when it
 // declines does the existing orbit-camera handling kick in, so gizmo
 // interaction never fights with camera navigation.
-class HydraViewportWindow : public QWindow {
+class USDCC_USD_UI_API HydraViewportWindow : public QWindow {
     Q_OBJECT
 
 public:

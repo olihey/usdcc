@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QStyledItemDelegate>
 
 namespace usdcc::usd {
@@ -14,7 +16,7 @@ namespace usdcc::usd {
 // itself: with the stylesheet's QTreeView::item rule (padding, rounded
 // corners) in effect, the style draws the item panel from that rule and
 // ignores the model's brush.
-class OutlinerItemDelegate : public QStyledItemDelegate {
+class USDCC_USD_UI_API OutlinerItemDelegate : public QStyledItemDelegate {
     Q_OBJECT
 
 public:

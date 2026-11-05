@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/stage.h"
 
 #include <QDialog>
@@ -32,7 +34,7 @@ bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRef
 // The question closeStageInteractively() asks: "Close these panels" or
 // "Switch them to: [stage]". The switch list holds every other open stage,
 // then "No stage", which leaves the panels empty.
-class CloseStageDialog : public QDialog {
+class USDCC_USD_UI_API CloseStageDialog : public QDialog {
     Q_OBJECT
 
 public:

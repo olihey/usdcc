@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/log.h"
 
 #include <QAbstractTableModel>
@@ -21,7 +23,7 @@ namespace usdcc::ui {
 // the model only queues them there and takes them in on the UI thread, at
 // most every 50 ms and all at once, so a burst of thousands of messages is a
 // handful of row insertions rather than thousands of signals.
-class LogModel : public QAbstractTableModel {
+class USDCC_UI_API LogModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
@@ -100,7 +102,7 @@ private:
 // Categories form a tree, '.' separating its levels: hiding (or showing only)
 // "usdcc.viewport" covers "usdcc.viewport" itself and "usdcc.viewport.picking",
 // but not "usdcc.viewportx".
-class LogFilterModel : public QSortFilterProxyModel {
+class USDCC_UI_API LogFilterModel : public QSortFilterProxyModel {
     Q_OBJECT
 
 public:

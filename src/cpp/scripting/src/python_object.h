@@ -4,6 +4,8 @@
 // a single Python call (a registered panel class, a panel's Python instance).
 #include <pybind11/pybind11.h>
 
+#include "usdcc/core/log.h"
+
 #include <utility>
 
 namespace usdcc::scripting {
@@ -27,5 +29,15 @@ struct PythonObject {
     PythonObject(const PythonObject&) = delete;
     PythonObject& operator=(const PythonObject&) = delete;
 };
+
+// Logs it like any uncaught Python exception (usdcc.log's excepthook:
+// python.exception, with the traceback). Needs the GIL.
+inline void logPythonError(pybind11::error_already_set& error) {
+    try {
+        pybind11::module_::import("sys").attr("excepthook")(error.type(), error.value(), error.trace());
+    } catch (pybind11::error_already_set& hookError) {
+        USDCC_LOG_ERROR("python.exception", "{} (and the excepthook failed: {})", error.what(), hookError.what());
+    }
+}
 
 }  // namespace usdcc::scripting

@@ -1,5 +1,5 @@
 # usdcc.ui — QMainWindow shell, SidePanel/ViewPanel base classes (milestone M1).
-add_library(usdcc_ui STATIC
+add_library(usdcc_ui SHARED
     include/usdcc/ui/app_settings.h
     include/usdcc/ui/current_stage_tracker.h
     include/usdcc/ui/flow_layout.h
@@ -45,14 +45,18 @@ add_library(usdcc_ui STATIC
     src/toast_manager.cpp
     src/view_panel.cpp
     src/view_panel_registry.cpp
-    # Theme stylesheets + icons (AUTORCC compiles this in; see theme.cpp).
-    resources/usdcc_ui.qrc
 )
+# Theme stylesheets + icons (see theme.cpp). A library of their own, as CMake's
+# export step can't find an AUTORCC object in a target that uses it.
+usdcc_add_resources(usdcc_ui_resources resources/usdcc_ui.qrc)
 target_include_directories(usdcc_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # usdcc_usd: ViewPanel (below) requires usdcc::usd::Stage/StageManager
 # unconditionally — see docs/PLAN.md §6 "ViewPanel: mandatory Stage
 # association" for why usdcc_ui is no longer USD-agnostic.
+# QWindowKit is static, and private so that this DLL holds the only copy.
 target_link_libraries(usdcc_ui PUBLIC usdcc_core usdcc_usd Qt6::Widgets ads::qtadvanceddocking-qt6
-                                      QWindowKit::Widgets)
+                               PRIVATE QWindowKit::Widgets usdcc_ui_resources)
+target_compile_definitions(usdcc_ui PRIVATE USDCC_UI_BUILD)
+usdcc_export_library(usdcc_ui)
 
 add_subdirectory(python)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/stage.h"
@@ -7,6 +9,7 @@
 #include <QObject>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 class QAction;
@@ -22,14 +25,11 @@ class StageManager;
 class ToolOptionsBar;
 class ToolRail;
 
-// The Shortcut settings (usdcc::core::Settings) that pick each tool; the
-// constructor below defines them (Q, W, E, R by default).
-namespace toolShortcutKeys {
-inline constexpr auto select = "Shortcuts/tools.select";
-inline constexpr auto move = "Shortcuts/tools.move";
-inline constexpr auto rotate = "Shortcuts/tools.rotate";
-inline constexpr auto scale = "Shortcuts/tools.scale";
-}  // namespace toolShortcutKeys
+// The Shortcut setting (usdcc::core::Settings) that picks the tool `toolId`:
+// "Shortcuts/tools.<id>". ViewportToolBars defines one for every tool in the
+// rail, a plugin's too: Q, W, E and R for Select, Move, Rotate and Scale, no
+// key for the others until one is set.
+std::string toolShortcutKey(const std::string& toolId);
 
 // The two toolbars that drive the editing tools, installed in the *main
 // window's* layout rather than inside any viewport (see docs/PLAN.md §6): a
@@ -48,7 +48,7 @@ inline constexpr auto scale = "Shortcuts/tools.scale";
 // Both toolbars can be dragged to any edge the main window allows (the options
 // bar: top or bottom only), or floated. Parented to the window, which also owns
 // the toolbars; just construct it.
-class ViewportToolBars : public QObject {
+class USDCC_USD_UI_API ViewportToolBars : public QObject {
     Q_OBJECT
 
 public:
@@ -69,6 +69,8 @@ private:
 
     // Target: follow the current stage, its selection and its target.
     void watchStage(const StageRefPtr& stage);
+    // One button per tool in the ToolSet.
+    void rebuildRail();
     void updateTarget();
     void onTargetChanged();
 
@@ -83,6 +85,7 @@ private:
     QLabel* m_targetHint = nullptr;
     StageRefPtr m_watchedStage;
     usdcc::core::Signal<>::Connection m_activeToolConnection;
+    usdcc::core::Signal<>::Connection m_toolsConnection;
     usdcc::core::Signal<StageRefPtr>::Connection m_currentStageConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
     usdcc::core::Signal<>::Connection m_targetConnection;

@@ -94,6 +94,13 @@ scale and the tool shortcuts (Q select, W move, E rotate, R scale). They are sav
 `usdcc.ini`, and Python reads and changes them with `usdcc.settings`. See
 [docs/SETTINGS.md](docs/SETTINGS.md).
 
+### Plugins
+
+A plugin is a folder with a `usdcc-plugin.json`, holding Python, USD files or a C++ library, that
+the app finds in `%LOCALAPPDATA%/usdcc/plugins`. It can add panels, tools, menu entries and USD
+schemas. See [docs/PLUGINS.md](docs/PLUGINS.md), and [docs/PLUGIN_SDK.md](docs/PLUGIN_SDK.md) for C++.
+Try the examples with `usdcc --plugin-path src/plugins --plugin-path build/plugins`.
+
 ### Convenience scripts
 
 [tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the

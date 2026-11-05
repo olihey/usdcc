@@ -27,6 +27,8 @@ from contextlib import contextmanager
 
 from pxr import Usd, UsdUtils
 
+from usdcc import _plugins
+
 try:
     import _usdcc_app as _native  # compiled into the app
 
@@ -169,6 +171,7 @@ def set_relationship_targets(relationship, types=(), schemas=(), severity="block
     they can be picked but are marked. `single`: it holds one target. `reason` is the
     tooltip. Takes effect the next time the dialog opens."""
     _native.set_relationship_targets(relationship, list(types), list(schemas), severity, single, reason)
+    _plugins.note("Relationship rule", relationship)
 
 
 def remove_relationship_targets(relationship):
@@ -195,6 +198,7 @@ def set_create_entry(type, category="Plugins", group=0, order=1000):
     know is left out until its plugin has loaded. Takes effect the next time the menu
     opens."""
     _native.set_create_entry(type, category, group, order)
+    _plugins.note("Create menu entry", type)
 
 
 def hide_create_entry(type):

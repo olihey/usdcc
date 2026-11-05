@@ -2,7 +2,7 @@
 # Deliberately kept free of Qt Widgets/GL (see tool.h) — the viewport turns a
 # Tool's GizmoGeometry output into actual draw calls, and only usdcc_usd_ui
 # (not this target) needs Qt.
-add_library(usdcc_tools STATIC
+add_library(usdcc_tools SHARED
     include/usdcc/tools/gizmo_shapes.h
     include/usdcc/tools/move_tool.h
     include/usdcc/tools/rotate_tool.h
@@ -22,3 +22,4 @@ add_library(usdcc_tools STATIC
 target_include_directories(usdcc_tools PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
 # usdcc_usd (Qt-free too) for the shared transform-op maths and value access.
 target_link_libraries(usdcc_tools PUBLIC usdcc_core usdcc_usd ${PXR_LIBRARIES})
+usdcc_export_library(usdcc_tools)

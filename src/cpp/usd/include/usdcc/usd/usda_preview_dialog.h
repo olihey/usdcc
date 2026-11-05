@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/preview_stage.h"
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/usda_view.h"
@@ -19,7 +21,7 @@ namespace usdcc::usd {
 // (without payloads; Load Payloads is in the options menu), and adds the layer
 // stack and the flattened views to Show when it's ready. Closing the dialog
 // meanwhile just drops the result.
-class UsdaPreviewDialog : public QDialog {
+class USDCC_USD_UI_API UsdaPreviewDialog : public QDialog {
     Q_OBJECT
 
 public:

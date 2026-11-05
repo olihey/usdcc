@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
@@ -42,7 +44,7 @@ class PropertyRow;
 //
 // The section is rebuilt from scratch after every structural change (the
 // panel sees the resync), so the editor never has to patch its rows.
-class TransformStackEditor : public QObject {
+class USDCC_USD_UI_API TransformStackEditor : public QObject {
     Q_OBJECT
 
 public:

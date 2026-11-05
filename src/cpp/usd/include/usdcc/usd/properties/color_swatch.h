@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QColor>
 #include <QWidget>
 
@@ -11,7 +13,7 @@ namespace usdcc::usd::properties {
 //
 // Works in display (sRGB-encoded) colors: USD colors are linear, so the
 // ColorEditor converts both ways (see linearToDisplay()).
-class ColorSwatch : public QWidget {
+class USDCC_USD_UI_API ColorSwatch : public QWidget {
     Q_OBJECT
 
 public:

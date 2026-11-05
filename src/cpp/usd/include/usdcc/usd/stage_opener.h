@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/stage.h"
 
 #include <QElapsedTimer>
@@ -36,7 +38,7 @@ class StageManager;
 // Startup opens (the stage named on the command line) deliberately don't use
 // this: they happen before there is a window, so StageManager::openStage()
 // just blocks.
-class StageOpener : public QObject {
+class USDCC_USD_UI_API StageOpener : public QObject {
     Q_OBJECT
 
 public:

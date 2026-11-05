@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/log.h"
 #include "usdcc/ui/side_panel.h"
 
@@ -35,7 +37,7 @@ class LogModel;
 //   never opens the panel by itself.
 // - Filters and column widths persist; Clear empties the table
 //   only (the hub and the log file keep everything).
-class LogSidePanel : public SidePanel {
+class USDCC_UI_API LogSidePanel : public SidePanel {
     Q_OBJECT
 
 public:

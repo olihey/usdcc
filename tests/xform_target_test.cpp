@@ -336,14 +336,14 @@ USDCC_TEST(xform_target) {
             grey = grey && std::abs(line.color[0] - line.color[1]) < 1e-6 && std::abs(line.color[1] - line.color[2]) < 1e-6;
         }
         CHECK(grey, "gizmo drawn grey");
-        CHECK(usdcc::tools::toolKindForOpType(UsdGeomXformOp::TypeScale) == usdcc::tools::ToolKind::Scale &&
-                  usdcc::tools::toolKindForOpType(UsdGeomXformOp::TypeOrient) == usdcc::tools::ToolKind::Rotate &&
-                  usdcc::tools::toolKindForOpType(UsdGeomXformOp::TypeTransform) == usdcc::tools::ToolKind::Move &&
-                  usdcc::tools::toolKindForOpType(UsdGeomXformOp::TypeInvalid) == usdcc::tools::ToolKind::Select,
+        CHECK(usdcc::tools::toolIdForOpType(UsdGeomXformOp::TypeScale) == usdcc::tools::kScaleTool &&
+                  usdcc::tools::toolIdForOpType(UsdGeomXformOp::TypeOrient) == usdcc::tools::kRotateTool &&
+                  usdcc::tools::toolIdForOpType(UsdGeomXformOp::TypeTransform) == usdcc::tools::kMoveTool &&
+                  usdcc::tools::toolIdForOpType(UsdGeomXformOp::TypeInvalid) == usdcc::tools::kSelectTool,
               "which tool drives which op");
-        CHECK(usdcc::tools::toolCanDrive(usdcc::tools::ToolKind::Rotate, UsdGeomXformOp::TypeTransform) &&
-                  usdcc::tools::toolCanDrive(usdcc::tools::ToolKind::Scale, UsdGeomXformOp::TypeTransform) &&
-                  !usdcc::tools::toolCanDrive(usdcc::tools::ToolKind::Select, UsdGeomXformOp::TypeTransform),
+        CHECK(usdcc::tools::toolCanDrive(usdcc::tools::kRotateTool, UsdGeomXformOp::TypeTransform) &&
+                  usdcc::tools::toolCanDrive(usdcc::tools::kScaleTool, UsdGeomXformOp::TypeTransform) &&
+                  !usdcc::tools::toolCanDrive(usdcc::tools::kSelectTool, UsdGeomXformOp::TypeTransform),
               "all three transform tools drive a matrix op");
     }
 

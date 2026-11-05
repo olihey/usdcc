@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/ui/panel_icon_button.h"
 
 #include <functional>
@@ -12,7 +14,7 @@ namespace usdcc::ui {
 // #panelMenuButton in theme/dark.qss). A click opens a menu below it, built
 // afresh by `populate` each time so it reflects the current state. Used by
 // every ViewPanel for its options and by the LogSidePanel for its filters.
-class PanelMenuButton : public PanelIconButton {
+class USDCC_UI_API PanelMenuButton : public PanelIconButton {
     Q_OBJECT
 
 public:

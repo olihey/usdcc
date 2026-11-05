@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QString>
 #include <QWidget>
 
@@ -30,7 +32,7 @@ class PropertyEditor;
 // what it does. Styled as #propertyIconButton in theme/dark.qss.
 QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent = nullptr);
 
-class PropertyRow : public QWidget {
+class USDCC_USD_UI_API PropertyRow : public QWidget {
     Q_OBJECT
 
 public:

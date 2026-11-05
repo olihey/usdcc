@@ -71,6 +71,12 @@ ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRef
 
 void ViewPanelRegistry::savePanels(ads::CDockManager* dockManager) const {
     QVariantList panels;
+    // A type this session doesn't have, from a plugin that's turned off or
+    // missing today, stays on the list, so its panels come back with the plugin
+    // (docs/PLUGINS.md §3.3).
+    for (const QVariant& value : appSettings().value(kOpenedPanelsKey).toList()) {
+        if (!find(value.toMap().value(QStringLiteral("type")).toString())) panels << value;
+    }
     for (ads::CDockWidget* dockWidget : dockManager->dockWidgetsMap()) {
         auto* panel = qobject_cast<ViewPanel*>(dockWidget);
         const QString type = panel ? panel->property(kTypeProperty).toString() : QString();

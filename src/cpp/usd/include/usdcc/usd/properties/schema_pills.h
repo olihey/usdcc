@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/properties/property_editor.h"
 
@@ -13,7 +15,7 @@ namespace usdcc::usd::properties {
 // pill for each schema, wrapping to more lines, with an × on those that can be
 // removed. A built-in one is dimmed, an unregistered one amber. Its + (the
 // row's last control, rowButton()) is for its owner to give a menu.
-class SchemaPillsEditor : public PropertyEditor {
+class USDCC_USD_UI_API SchemaPillsEditor : public PropertyEditor {
     Q_OBJECT
 
 public:

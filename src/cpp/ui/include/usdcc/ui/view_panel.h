@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
@@ -47,7 +49,7 @@ class PanelMenuButton;
 // widget() in terms of QWidget alone, which IS known to Shiboken6 (it's part
 // of Qt's own typesystem), so Python code gets a working content API without
 // needing bindings for ads::CDockWidget itself.
-class ViewPanel : public ads::CDockWidget {
+class USDCC_UI_API ViewPanel : public ads::CDockWidget {
     Q_OBJECT
 
 public:

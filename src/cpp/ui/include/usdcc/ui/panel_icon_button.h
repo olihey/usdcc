@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QToolButton>
 
 namespace usdcc::ui {
@@ -9,7 +11,7 @@ namespace usdcc::ui {
 // theme (`iconPath`, e.g. ":/usdcc/theme/trash.png") and a tooltip saying
 // what it does. Styled as #panelIconButton in theme/dark.qss. With an empty
 // `iconPath` it shows its text instead (keep it to a glyph or two, e.g. "Aa").
-class PanelIconButton : public QToolButton {
+class USDCC_UI_API PanelIconButton : public QToolButton {
     Q_OBJECT
 
 public:

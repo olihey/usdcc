@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/layer_stack.h"
@@ -41,7 +43,7 @@ class PropertyRow;
 // its siblings are undo steps too, as is Reload (a file layer fresh from
 // disk, after a warning when it has unsaved changes). Follows the stage's change notices and
 // edit target, coalesced.
-class LayerEditorViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API LayerEditorViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

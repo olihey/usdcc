@@ -8,6 +8,7 @@
 #include <QString>
 
 #include <functional>
+#include <string>
 #include <vector>
 
 class QMenu;
@@ -32,6 +33,26 @@ struct PrimMenuContext {
     std::function<void(int direction)> move;
     // After Load or Unload, which can remove selected prims.
     std::function<void()> loadChanged;
+};
+
+// An entry added to the prim menu, by a plugin say (docs/PLUGINS.md). They come
+// at the end of the menu, in the order added.
+struct PrimMenuEntry {
+    std::string id;     // adding one again replaces it
+    QString label;      // "Tools/Measure" makes a submenu
+    std::function<void(const PrimMenuContext&)> run;
+    std::function<bool(const PrimMenuContext&)> applies;  // left out of the menu when false; may be null
+};
+class PrimMenuEntries {
+public:
+    static PrimMenuEntries& instance();
+    void add(PrimMenuEntry entry);
+    void remove(const std::string& id);
+    void clear() { m_entries.clear(); }
+    const std::vector<PrimMenuEntry>& entries() const { return m_entries; }
+
+private:
+    std::vector<PrimMenuEntry> m_entries;
 };
 
 // How Composition > an arc > Open as Stage opens a file (the app sets it: open

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/stage.h"
@@ -23,7 +25,7 @@ void addCreateEntries(QMenu* menu, StageManager* stageManager, const StageRefPtr
 // the current stage, grouped by PrimCreationCatalog, with the Outliner's icons. Rebuilt
 // each time it opens, for the selection and any plugin loaded since. Its first line
 // says where a new prim will go. Disabled with no stage.
-class PrimCreateMenu : public QMenu {
+class USDCC_USD_UI_API PrimCreateMenu : public QMenu {
     Q_OBJECT
 
 public:

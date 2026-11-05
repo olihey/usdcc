@@ -16,6 +16,9 @@
           plugin\usd\   OpenUSD's other plugins (Storm, Embree, image readers)
           python\       the Python OpenUSD was built with (Lib, DLLs), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
+          plugins\      plugins shipped with the app (none by default)
+          examples\plugins\   the example plugins, loaded with --plugin-path
+          sdk\          headers, import libraries and CMake files for C++ plugins
           tools\ruff\   ruff.exe and its LICENSE, for the Script Editor's Ruff
                         Format and Ruff Check (the build's pinned version)
 
@@ -238,6 +241,31 @@ if ($hasRuff) {
     Write-Warning "No ruff in the build ('$ruffExe'; reconfigure with USDCC_BUNDLE_RUFF=ON while online): the deploy works, but Ruff Format and Ruff Check need a ruff on PATH."
 }
 
+# --- plugins ---------------------------------------------------------------
+
+# plugins\ is where the app looks for plugins shipped with it. The examples sit
+# apart, so they don't load unless asked: usdcc.cmd --plugin-path examples\plugins
+Write-Host '  Example plugins'
+New-Item -ItemType Directory -Force (Join-Path $deployDir 'plugins') | Out-Null
+Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs @('__pycache__', 'cpp_example')
+Copy-Tree -From (Join-Path $buildDir 'plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeFiles $buildOnlyFiles
+
+# --- SDK for C++ plugins (docs/PLUGIN_SDK.md) --------------------------------
+
+Write-Host '  Plugin SDK'
+$sdkDir = Join-Path $deployDir 'sdk'
+foreach ($library in @('core', 'tools', 'ui', 'usd', 'plugin_sdk')) {
+    Copy-Tree -From (Join-Path $repoRoot "src/cpp/$library/include") -To (Join-Path $sdkDir 'include')
+}
+New-Item -ItemType Directory -Force (Join-Path $sdkDir 'lib'), (Join-Path $sdkDir 'cmake') | Out-Null
+foreach ($library in @('core/usdcc_core', 'usd/usdcc_usd', 'tools/usdcc_tools', 'ui/usdcc_ui', 'usd/usdcc_usd_ui')) {
+    $folder, $name = $library -split '/'
+    Copy-Item (Join-Path $buildDir "src/cpp/$folder/$Configuration/$name.lib") (Join-Path $sdkDir 'lib')
+}
+Copy-Item (Join-Path $buildDir 'sdk/UsdccPluginConfig.cmake') $sdkDir
+Copy-Item (Join-Path $repoRoot 'cmake/modules/UsdccPlugin.cmake'), (Join-Path $repoRoot 'cmake/modules/FindUSD.cmake') (Join-Path $sdkDir 'cmake')
+Copy-Tree -From (Join-Path $repoRoot 'src/plugins/cpp_example') -To (Join-Path $sdkDir 'example')
+
 # --- launcher and checks ---------------------------------------------------
 
 Set-Content -Path (Join-Path $deployDir 'usdcc.cmd') -Encoding ascii -Value @(
@@ -248,7 +276,9 @@ Set-Content -Path (Join-Path $deployDir 'usdcc.cmd') -Encoding ascii -Value @(
 $required = @(
     'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
     'plugin/usd/hdStorm.dll', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
-    'python/Lib/site-packages/pxr/__init__.py'
+    'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
+    'examples/plugins/measure_example/usdcc-plugin.json', 'examples/plugins/cpp_example/usdcc-plugin.json',
+    'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h'
 )
 $missing = @($required | Where-Object { -not (Test-Path (Join-Path $deployDir $_)) })
 if ($missing) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -20,7 +22,7 @@ namespace usdcc::usd {
 // the Outliner's icons and each prim's type, the default prim in bold, and a
 // filter that keeps the prims whose name contains the text (and their
 // ancestors). "Use Prim" (or a double-click) accepts the selected prim.
-class PrimPickerDialog : public QDialog {
+class USDCC_USD_UI_API PrimPickerDialog : public QDialog {
     Q_OBJECT
 
 public:

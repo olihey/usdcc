@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
@@ -17,7 +19,7 @@ class UndoManager;
 // createRedoAction() then name the step ("Undo Rename Chair") and are
 // disabled when there is none. A closed stage's stack leaves the group when
 // UndoManager drops it.
-class CurrentStageUndoGroup : public QUndoGroup {
+class USDCC_USD_UI_API CurrentStageUndoGroup : public QUndoGroup {
     Q_OBJECT
 
 public:

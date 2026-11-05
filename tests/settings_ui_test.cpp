@@ -8,6 +8,7 @@
 #include "test_settings.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/tools/select_tool.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
@@ -40,7 +41,6 @@
 using usdcc::core::SettingDefinition;
 using usdcc::core::Settings;
 using usdcc::core::SettingType;
-using usdcc::tools::ToolKind;
 
 namespace {
 
@@ -253,16 +253,16 @@ USDCC_TEST(settings_tool_shortcuts) {
     settle();
 
     auto& settings = Settings::instance();
-    CHECK(settings.get<std::string>(usdcc::usd::toolShortcutKeys::select) == "Q" &&
-              settings.get<std::string>(usdcc::usd::toolShortcutKeys::move) == "W" &&
-              settings.get<std::string>(usdcc::usd::toolShortcutKeys::rotate) == "E" &&
-              settings.get<std::string>(usdcc::usd::toolShortcutKeys::scale) == "R",
+    CHECK(settings.get<std::string>(usdcc::usd::toolShortcutKey("select")) == "Q" &&
+              settings.get<std::string>(usdcc::usd::toolShortcutKey("move")) == "W" &&
+              settings.get<std::string>(usdcc::usd::toolShortcutKey("rotate")) == "E" &&
+              settings.get<std::string>(usdcc::usd::toolShortcutKey("scale")) == "R",
           "the tool shortcuts default to Q, W, E, R");
 
     auto* rail = window.findChild<usdcc::usd::ToolRail*>();
     QAction* move = nullptr;
     for (QAction* action : rail ? rail->actions() : QList<QAction*>()) {
-        if (action->data().toInt() == static_cast<int>(ToolKind::Move)) move = action;
+        if (action->data().toString() == QStringLiteral("move")) move = action;
     }
     CHECK(move && move->shortcut() == QKeySequence(Qt::Key_W), "the rail's Move action has W");
     CHECK(move && move->toolTip() == QStringLiteral("Move (W)"), "and says so in its tooltip");
@@ -270,27 +270,40 @@ USDCC_TEST(settings_tool_shortcuts) {
     window.setFocus();
     field->clearFocus();
     type(&window, Qt::Key_W);
-    CHECK(toolSet->activeKind() == ToolKind::Move, "W picks Move");
+    CHECK(toolSet->activeId() == "move", "W picks Move");
     type(&window, Qt::Key_E);
-    CHECK(toolSet->activeKind() == ToolKind::Rotate, "E picks Rotate");
+    CHECK(toolSet->activeId() == "rotate", "E picks Rotate");
     type(&window, Qt::Key_R);
-    CHECK(toolSet->activeKind() == ToolKind::Scale, "R picks Scale");
+    CHECK(toolSet->activeId() == "scale", "R picks Scale");
     type(&window, Qt::Key_Q);
-    CHECK(toolSet->activeKind() == ToolKind::Select, "Q picks Select");
+    CHECK(toolSet->activeId() == "select", "Q picks Select");
 
     field->setFocus();
     settle();
     type(&window, Qt::Key_W);
-    CHECK(field->text() == QStringLiteral("w") && toolSet->activeKind() == ToolKind::Select,
+    CHECK(field->text() == QStringLiteral("w") && toolSet->activeId() == "select",
           "in a text field W types a letter instead (text \"%s\")", qPrintable(field->text()));
     field->clearFocus();
     window.setFocus();
 
-    settings.setValue(usdcc::usd::toolShortcutKeys::move, std::string("T"));
+    settings.setValue(usdcc::usd::toolShortcutKey("move"), std::string("T"));
     CHECK(move && move->shortcut() == QKeySequence(Qt::Key_T) && move->toolTip() == QStringLiteral("Move (T)"),
           "a new key rebinds the action and its tooltip");
     type(&window, Qt::Key_W);
-    CHECK(toolSet->activeKind() == ToolKind::Select, "W no longer picks Move");
+    CHECK(toolSet->activeId() == "select", "W no longer picks Move");
     type(&window, Qt::Key_T);
-    CHECK(toolSet->activeKind() == ToolKind::Move, "T does");
+    CHECK(toolSet->activeId() == "move", "T does");
+
+    // A plugin's tool gets a Shortcut setting too, with no key until one is set.
+    toolSet->addTool("measure", "Measure", "", std::make_unique<usdcc::tools::SelectTool>());
+    settle();
+    const usdcc::core::SettingDefinition* measure = settings.definition(usdcc::usd::toolShortcutKey("measure"));
+    CHECK(measure && measure->label == "Measure tool" && settings.get<std::string>(measure->key).empty(),
+          "a plugin tool's shortcut setting, empty at first");
+    CHECK(settings.get<std::string>(usdcc::usd::toolShortcutKey("move")) == "T", "the rebuilt rail keeps Move on T");
+    settings.setValue(usdcc::usd::toolShortcutKey("measure"), std::string("M"));
+    type(&window, Qt::Key_M);
+    CHECK(toolSet->activeId() == "measure", "M picks the plugin's tool");
+    type(&window, Qt::Key_T);
+    CHECK(toolSet->activeId() == "move", "and T still picks Move after the rail was rebuilt");
 }

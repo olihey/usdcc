@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -39,7 +41,7 @@ namespace usdcc::usd {
 // view's QModelIndex-based state (expansion, selection); OutlinerViewPanel
 // saves it by prim path around every reset and restores it, and only
 // refreshes when the hierarchy actually changed.
-class UsdPrimTreeModel : public QAbstractItemModel {
+class USDCC_USD_UI_API UsdPrimTreeModel : public QAbstractItemModel {
     Q_OBJECT
 
 public:

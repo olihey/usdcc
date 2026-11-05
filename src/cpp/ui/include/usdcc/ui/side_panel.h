@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QDockWidget>
 #include <QSize>
 
@@ -15,7 +17,7 @@ namespace usdcc::ui {
 // spot (MainWindow routes those), collapses the panel and the panels tabbed
 // with it to their title bars; doing it again expands them to the size they
 // had. A floating panel's title bar keeps Qt's double-click, which docks it.
-class SidePanel : public QDockWidget {
+class USDCC_UI_API SidePanel : public QDockWidget {
     Q_OBJECT
 
 public:

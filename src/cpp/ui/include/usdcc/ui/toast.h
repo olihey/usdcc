@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/export.h"
 #include "usdcc/core/toast.h"
 
 #include <QElapsedTimer>
@@ -36,7 +37,7 @@ struct ToastAction {
 // any plain child overlay. A tool window stays above its owner only (not
 // above other applications) and is hidden with it when it's minimized.
 // ToastManager places it; it never takes the focus.
-class ToastWidget : public QWidget {
+class USDCC_UI_API ToastWidget : public QWidget {
     Q_OBJECT
 public:
     static constexpr int minimumWidth = 260;  // at 100% UI scale

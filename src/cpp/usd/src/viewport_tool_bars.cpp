@@ -19,47 +19,27 @@
 
 namespace usdcc::usd {
 
-using usdcc::tools::ToolKind;
-
 namespace {
 
-// The keys that pick each tool: Shortcut settings, so they can be changed in
-// the Settings dialog (and from Python).
-void defineToolShortcuts() {
-    struct Shortcut {
-        const char* key;
-        const char* label;
-        const char* defaultKey;
-    };
-    for (const Shortcut& shortcut : {Shortcut{toolShortcutKeys::select, "Select tool", "Q"},
-                                     Shortcut{toolShortcutKeys::move, "Move tool", "W"},
-                                     Shortcut{toolShortcutKeys::rotate, "Rotate tool", "E"},
-                                     Shortcut{toolShortcutKeys::scale, "Scale tool", "R"}}) {
-        usdcc::core::Settings::instance().define({
-            .key = shortcut.key,
-            .category = "Shortcuts",
-            .group = "Tools",
-            .label = shortcut.label,
-            .type = usdcc::core::SettingType::Shortcut,
-            .defaultValue = std::string(shortcut.defaultKey),
-        });
-    }
+// The built-in tools' keys; any other tool (a plugin's) gets a Shortcut
+// setting too, with no key until one is set.
+const char* defaultShortcut(const std::string& id) {
+    if (id == usdcc::tools::kSelectTool) return "Q";
+    if (id == usdcc::tools::kMoveTool) return "W";
+    if (id == usdcc::tools::kRotateTool) return "E";
+    if (id == usdcc::tools::kScaleTool) return "R";
+    return "";
 }
 
 }  // namespace
 
+std::string toolShortcutKey(const std::string& toolId) { return "Shortcuts/tools." + toolId; }
+
 ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::tools::ToolSet> toolSet,
                                    StageManager* stageManager)
     : QObject(window), m_window(window), m_toolSet(std::move(toolSet)), m_stageManager(stageManager) {
-    defineToolShortcuts();
     m_rail = new ToolRail(window);
-    m_rail->addTool(static_cast<int>(ToolKind::Select), tr("Select"), QStringLiteral("tool-select"),
-                    toolShortcutKeys::select);
-    m_rail->addTool(static_cast<int>(ToolKind::Move), tr("Move"), QStringLiteral("tool-move"), toolShortcutKeys::move);
-    m_rail->addTool(static_cast<int>(ToolKind::Rotate), tr("Rotate"), QStringLiteral("tool-rotate"),
-                    toolShortcutKeys::rotate);
-    m_rail->addTool(static_cast<int>(ToolKind::Scale), tr("Scale"), QStringLiteral("tool-scale"),
-                    toolShortcutKeys::scale);
+    rebuildRail();
     window->addToolBar(Qt::LeftToolBarArea, m_rail);
 
     // The options bar is a plain widget; a QToolBar is what puts it in the main
@@ -114,7 +94,7 @@ ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::t
     }
 
     connect(m_rail, &ToolRail::toolSelected, this,
-            [this](int id) { m_toolSet->setActiveKind(static_cast<ToolKind>(id)); });
+            [this](const QString& id) { m_toolSet->setActive(id.toStdString()); });
     connect(m_optionsBar, &ToolOptionsBar::optionChanged, this,
             [this](const std::string& id, const usdcc::tools::OptionValue& value) {
                 m_toolSet->setActiveOption(id, value);
@@ -123,6 +103,11 @@ ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::t
     // Not only for our own clicks: if anything else switches the active tool,
     // the rail and options bar follow.
     m_activeToolConnection = m_toolSet->activeToolChanged.connect([this]() { syncToActiveTool(); });
+    // A plugin added one, say.
+    m_toolsConnection = m_toolSet->toolsChanged.connect([this]() {
+        rebuildRail();
+        syncToActiveTool();
+    });
     watchStage(m_stageManager->currentStage());
     syncToActiveTool();
 }
@@ -170,8 +155,28 @@ void ViewportToolBars::updateArea(QToolBar* bar) {
     bar->update();
 }
 
+void ViewportToolBars::rebuildRail() {
+    m_rail->clearTools();
+    for (const usdcc::tools::ToolSet::Entry& entry : m_toolSet->tools()) {
+        // Its key is a setting, so it can be changed in the Settings dialog
+        // (and from Python). Defining it again (the rail rebuilds when a
+        // plugin adds a tool) keeps the key that was set.
+        const std::string key = toolShortcutKey(entry.id);
+        usdcc::core::Settings::instance().define({
+            .key = key,
+            .category = "Shortcuts",
+            .group = "Tools",
+            .label = (entry.label.empty() ? entry.id : entry.label) + " tool",
+            .type = usdcc::core::SettingType::Shortcut,
+            .defaultValue = std::string(defaultShortcut(entry.id)),
+        });
+        m_rail->addTool(QString::fromStdString(entry.id), QString::fromStdString(entry.label),
+                        QString::fromStdString(entry.icon), key);
+    }
+}
+
 void ViewportToolBars::syncToActiveTool() {
-    m_rail->setCurrentTool(static_cast<int>(m_toolSet->activeKind()));
+    m_rail->setCurrentTool(QString::fromStdString(m_toolSet->activeId()));
     const usdcc::tools::Tool& tool = m_toolSet->activeTool();
     m_optionsBar->setTool(QString::fromStdString(tool.name()), tool.options());
     updateTarget();
@@ -199,9 +204,9 @@ void ViewportToolBars::onTargetChanged() {
         const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(stage->targetPrim());
         for (const PXR_NS::UsdGeomXformOp& op : XformStack(prim).ops()) {
             if (op.GetOpName() != stage->targetXformOp()) continue;
-            const ToolKind kind = usdcc::tools::toolKindForOpType(op.GetOpType());
-            if (kind != ToolKind::Select && !usdcc::tools::toolCanDrive(m_toolSet->activeKind(), op.GetOpType())) {
-                m_toolSet->setActiveKind(kind);  // refreshes the target too, via syncToActiveTool()
+            const std::string tool = usdcc::tools::toolIdForOpType(op.GetOpType());
+            if (tool != usdcc::tools::kSelectTool && !usdcc::tools::toolCanDrive(m_toolSet->activeId(), op.GetOpType())) {
+                m_toolSet->setActive(tool);  // refreshes the target too, via syncToActiveTool()
                 return;
             }
             break;
@@ -212,14 +217,14 @@ void ViewportToolBars::onTargetChanged() {
 
 void ViewportToolBars::updateTarget() {
     if (!m_targetAction) return;  // during construction
-    const ToolKind kind = m_toolSet->activeKind();
+    const std::string tool = m_toolSet->activeId();
     const StageRefPtr stage = m_watchedStage;
     const std::vector<PXR_NS::SdfPath> selection =
         stage ? m_stageManager->selectedPaths(stage) : std::vector<PXR_NS::SdfPath>{};
     const PXR_NS::UsdPrim prim =
         stage && selection.size() == 1 ? stage->usdStage()->GetPrimAtPath(selection.front()) : PXR_NS::UsdPrim();
     const XformStack stack(prim);
-    if (kind == ToolKind::Select || !stack.isValid()) {
+    if (!usdcc::tools::isTransformTool(tool) || !stack.isValid()) {
         m_targetAction->setVisible(false);
         return;
     }
@@ -234,16 +239,16 @@ void ViewportToolBars::updateTarget() {
         if (op.IsInverseOp()) continue;
         const QString label = QString::fromStdString(XformStack::opLabel(op));
         const QString name = QString::fromStdString(op.GetOpName().GetString());
-        if (usdcc::tools::toolCanDrive(kind, op.GetOpType())) {
+        if (usdcc::tools::toolCanDrive(tool, op.GetOpType())) {
             m_targetCombo->addItem(label, name);
             if (op.GetOpName() == target) current = m_targetCombo->count() - 1;
         } else if (op.GetOpName() == target) {
             // An incompatible target stays visible, and explains the grey gizmo.
             m_targetCombo->addItem(tr("%1 (not editable with this tool)").arg(label), name);
             current = m_targetCombo->count() - 1;
-            const QString needs = kind == ToolKind::Move     ? tr("a Translate op")
-                                  : kind == ToolKind::Rotate ? tr("a rotate op")
-                                                             : tr("a Scale op");
+            const QString needs = tool == usdcc::tools::kMoveTool     ? tr("a Translate op")
+                                  : tool == usdcc::tools::kRotateTool ? tr("a rotate op")
+                                                                      : tr("a Scale op");
             hint = tr("Target is %1; choose Auto or %2.").arg(label, needs);
         }
     }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/line_view.h"
 #include "usdcc/usd/stage.h"
@@ -52,7 +54,7 @@ namespace usdcc::usd {
 // A file can show with no stage (setSource() with a File source): a text file
 // no stage has open is read without parsing it, so it's instant. A stage can
 // then arrive with adoptStage(), without disturbing the text (§10.3).
-class UsdaView : public QWidget {
+class USDCC_USD_UI_API UsdaView : public QWidget {
     Q_OBJECT
 
 public:

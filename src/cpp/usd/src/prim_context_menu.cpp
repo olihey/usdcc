@@ -294,6 +294,48 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     });
     QWidget* dialogParent = context.dialogParent;
     menu->addAction(tr("Prim Info..."), menu, [clicked, dialogParent]() { showPrimInfo(clicked, dialogParent); });
+
+    // Entries added by plugins.
+    bool separated = false;
+    for (const PrimMenuEntry& entry : PrimMenuEntries::instance().entries()) {
+        if (entry.applies && !entry.applies(context)) continue;
+        if (!separated) menu->addSeparator();
+        separated = true;
+        QStringList parts = entry.label.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        if (parts.isEmpty()) continue;
+        const QString label = parts.takeLast();
+        QMenu* into = menu;
+        for (const QString& part : parts) {
+            QMenu* found = nullptr;
+            for (QAction* action : into->actions()) {
+                if (action->menu() && action->text() == part) found = action->menu();
+            }
+            into = found ? found : into->addMenu(part);
+        }
+        // A copy: the menu can outlive this call and the entry can be replaced.
+        into->addAction(label, menu, [run = entry.run, context]() { run(context); });
+    }
+}
+
+PrimMenuEntries& PrimMenuEntries::instance() {
+    static PrimMenuEntries entries;
+    return entries;
+}
+
+void PrimMenuEntries::add(PrimMenuEntry entry) {
+    for (PrimMenuEntry& existing : m_entries) {
+        if (existing.id == entry.id) {
+            existing = std::move(entry);
+            return;
+        }
+    }
+    m_entries.push_back(std::move(entry));
+}
+
+void PrimMenuEntries::remove(const std::string& id) {
+    m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(),
+                                   [&id](const PrimMenuEntry& entry) { return entry.id == id; }),
+                    m_entries.end());
 }
 
 void setOpenStageHandler(std::function<void(const QString& path)> handler) { openStageHandler() = std::move(handler); }

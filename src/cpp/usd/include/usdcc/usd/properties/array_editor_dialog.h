@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/properties/property_editor.h"
 
 #include <pxr/base/vt/value.h>
@@ -19,7 +21,7 @@ class ArrayModel;
 // The table is virtual (rows are formatted on demand), so arrays with
 // millions of elements open instantly. The caller applies array() as one edit
 // when exec() returns Accepted.
-class ArrayEditorDialog : public QDialog {
+class USDCC_USD_UI_API ArrayEditorDialog : public QDialog {
     Q_OBJECT
 
 public:

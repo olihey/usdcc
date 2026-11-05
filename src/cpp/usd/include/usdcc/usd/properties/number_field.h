@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QColor>
 #include <QPoint>
 #include <QString>
@@ -24,7 +26,7 @@ namespace usdcc::usd::properties {
 // Edits are reported as editStarted / valueEdited (live, possibly many) /
 // editFinished, or editCanceled, so a caller can make one undo step per
 // gesture. setValue() never emits anything.
-class NumberField : public QWidget {
+class USDCC_USD_UI_API NumberField : public QWidget {
     Q_OBJECT
 
 public:

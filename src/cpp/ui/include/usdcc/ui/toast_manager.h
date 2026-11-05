@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/export.h"
 #include "usdcc/core/toast.h"
 #include "usdcc/ui/toast.h"
 
@@ -27,7 +28,7 @@ namespace usdcc::ui {
 // - From two up, a "Dismiss all" button follows the stack.
 //
 // MainWindow owns one (MainWindow::toasts()); usable on any QWidget window.
-class ToastManager : public QObject {
+class USDCC_UI_API ToastManager : public QObject {
     Q_OBJECT
 public:
     enum class Corner { BottomRight, BottomLeft, TopRight, TopLeft };

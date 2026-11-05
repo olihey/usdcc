@@ -221,8 +221,8 @@ Lands with the runtime, since every later step needs it to see what went wrong:
   the startup scripts, in order, as one undo step like Debug > Run Python File. Its output is
   in the log, not in the panel. `--no-startup-scripts` skips the startup folder (it's still
   on `sys.path`). `--help` lists the options.
-- **M9** builds plugins on this: a Python plugin is a package with a manifest, loaded by the
-  same runner.
+- **Plugins** (docs/PLUGINS.md) are the step up from this: a package with a manifest, loaded
+  before the layout is restored.
 
 ## 7. The Script Editor panel
 
@@ -342,8 +342,9 @@ usdcc.app.add_side_panel(NotesPanel(), "left")
   `UiScaleController::instance()`. The host is compiled into the app, and Python only fills
   it, through three bridge functions in `ui.py` that turn addresses and cache ids into
   PySide objects and `Usd.Stage`s.
-- Like the built-in panels opened from the Stages menu, Python view panels aren't reopened
-  by the saved layout on the next start; a startup script can open them.
+- A view panel type registered from a startup script isn't known yet when the saved layout is
+  restored, so its panels aren't reopened on the next start; a startup script can open them. A
+  plugin registers earlier, and its panels do come back (docs/PLUGINS.md §3.3).
 
 ```python
 from PySide6 import QtWidgets
@@ -382,7 +383,6 @@ Phases 1 → 2 → 3 in order; 4 needs 2; 5 only needs 1, plus a PySide build.
   hook, or running on a worker with marshalled calls (which USD's threading makes hard).
 - Debugging (breakpoints), code completion, a REPL prompt (Run Selection covers most of it).
 - Undoing a stage open/close (the UI can't either).
-- Python `ViewPanel`s and Python tools (M9 with the plugin API).
 - Sandboxing scripts (PLAN.md §6 item 9 only asks that errors don't crash the app).
 
 ## 11. Decisions taken as defaults

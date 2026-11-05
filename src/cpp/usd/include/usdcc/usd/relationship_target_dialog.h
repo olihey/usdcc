@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -18,7 +20,7 @@ class PrimTreeWidget;
 // a tree with the Outliner's icons and a name filter. Prims the relationship's
 // rule (RelationshipTargetRules) blocks are greyed out and can't be picked, with
 // the rule's reason as their tooltip; one it warns about is amber.
-class RelationshipTargetDialog : public QDialog {
+class USDCC_USD_UI_API RelationshipTargetDialog : public QDialog {
     Q_OBJECT
 
 public:

@@ -18,20 +18,32 @@ target_link_libraries(usdcc_scripting PUBLIC usdcc_core)
 
 add_library(usdcc_scripting_app STATIC
     include/usdcc/scripting/app_module.h
+    include/usdcc/scripting/plugin_manager.h
     include/usdcc/scripting/script_runner.h
     include/usdcc/scripting/startup_scripts.h
     src/app_module.cpp
+    src/plugin_manager.cpp
     src/script_runner.cpp
     src/startup_scripts.cpp
 )
 target_include_directories(usdcc_scripting_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core)
+target_link_libraries(usdcc_scripting_app PUBLIC usdcc_scripting usdcc_usd_ui usdcc_tools Qt6::Core PRIVATE usdcc_plugin_sdk)
+# What a C++ plugin has to match (cmake/modules/UsdccPlugin.cmake).
+target_compile_definitions(
+    usdcc_scripting_app
+    PRIVATE USDCC_BUILT_FOR_PLATFORM="${USDCC_BUILT_FOR_PLATFORM}"
+            USDCC_BUILT_FOR_COMPILER="${USDCC_BUILT_FOR_COMPILER}"
+            USDCC_BUILT_FOR_QT="${USDCC_BUILT_FOR_QT}"
+            USDCC_BUILT_FOR_USD="${USDCC_BUILT_FOR_USD}"
+            USDCC_BUILT_FOR_USDCC="${USDCC_BUILT_FOR_USDCC}")
 
 add_library(usdcc_scripting_ui STATIC
     include/usdcc/scripting/code_editor.h
+    include/usdcc/scripting/plugin_manager_side_panel.h
     include/usdcc/scripting/python_highlighter.h
     include/usdcc/scripting/script_editor_side_panel.h
     src/code_editor.cpp
+    src/plugin_manager_side_panel.cpp
     src/python_highlighter.cpp
     src/script_editor_side_panel.cpp
 )
@@ -65,10 +77,12 @@ if(USDCC_PYTHON_FOUND)
     add_dependencies(usdcc_scripting usdcc_python_package)
 
     target_link_libraries(usdcc_scripting_app PRIVATE usdcc_usd_bindings)
-    # Python view panels; they need pybind11, so only with Python.
+    # Python view panels and tools; they need pybind11, so only with Python.
     target_sources(usdcc_scripting_app PRIVATE
+        include/usdcc/scripting/scripted_tool.h
         include/usdcc/scripting/scripted_view_panel.h
         src/python_object.h
+        src/scripted_tool.cpp
         src/scripted_view_panel.cpp)
     target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_HAS_PYTHON=1)
 else()

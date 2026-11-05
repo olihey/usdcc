@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QString>
 #include <QWidget>
 
@@ -14,7 +16,7 @@ namespace usdcc::usd::properties {
 // "▼ Transform" headers, docs/ATTRIBUTE_EDITOR.md §4.2): a header with a
 // chevron, the title and a row count, then the rows. The panel persists the
 // collapsed state per key().
-class CategorySection : public QWidget {
+class USDCC_USD_UI_API CategorySection : public QWidget {
     Q_OBJECT
 
 public:

@@ -37,6 +37,8 @@
 #include "usdcc/core/log.h"
 #include "usdcc/core/native_stream_capture.h"
 #include "usdcc/scripting/app_module.h"
+#include "usdcc/scripting/plugin_manager.h"
+#include "usdcc/scripting/plugin_manager_side_panel.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/scripting/script_editor_side_panel.h"
@@ -137,8 +139,8 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
 
-    // usdcc [--script file.py]... [--no-startup-scripts] [stage]
-    // (docs/SCRIPTING.md §6). Qt's own options (-platform, ...) are already
+    // usdcc [--script file.py]... [--no-startup-scripts] [--no-plugins]
+    // [--plugin-path folder]... [stage] (docs/SCRIPTING.md §6, docs/PLUGINS.md §2). Qt's own options (-platform, ...) are already
     // gone from the arguments here.
     QCommandLineParser commandLine;
     commandLine.setApplicationDescription(QObject::tr("usdcc, a USD editor"));
@@ -148,8 +150,15 @@ int main(int argc, char** argv) {
         QObject::tr("file"));
     const QCommandLineOption noStartupScriptsOption(QStringLiteral("no-startup-scripts"),
                                                     QObject::tr("Don't run the scripts in the startup folder."));
+    const QCommandLineOption noPluginsOption(QStringLiteral("no-plugins"),
+                                             QObject::tr("Don't load any plugins, to start clean when one breaks the app."));
+    const QCommandLineOption pluginPathOption(
+        QStringLiteral("plugin-path"), QObject::tr("Also look for plugins in the folders inside <folder>. Repeatable."),
+        QObject::tr("folder"));
     commandLine.addOption(scriptOption);
     commandLine.addOption(noStartupScriptsOption);
+    commandLine.addOption(noPluginsOption);
+    commandLine.addOption(pluginPathOption);
     commandLine.addPositionalArgument(QStringLiteral("stage"), QObject::tr("A USD file to open."),
                                       QStringLiteral("[stage]"));
     // Shows a message box and exits for --help and unknown options.
@@ -172,6 +181,17 @@ int main(int argc, char** argv) {
     // setting defined later (the theme's first) starts from its saved value.
     usdcc::ui::installAppSettings();
     usdcc::ui::theme::apply(app);
+
+    // Reads the plugins' manifests and registers their USD files, running none
+    // of their code. Before anything can make a stage: USD's schema registry
+    // doesn't take in a plugin's schemas once it exists (docs/PLUGINS.md §3.1).
+    std::vector<std::filesystem::path> extraPluginFolders;
+    for (const QString& folder : commandLine.values(pluginPathOption)) {
+        extraPluginFolders.emplace_back(folder.toStdU16String());
+    }
+    usdcc::scripting::PluginManager plugins(
+        usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
+    plugins.scan();
 
     // Declared before `window` (and so destroyed after it, per C++'s
     // reverse-construction-order rule) since the viewport panel created
@@ -208,7 +228,7 @@ int main(int argc, char** argv) {
     // changes. Python view panel types registered in panelTypes outlive the
     // interpreter; they let go of their Python class without it.
     const usdcc::scripting::AppContextScope scriptingContext(
-        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes});
+        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     window.addSidePanel(new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);
@@ -544,6 +564,22 @@ int main(int argc, char** argv) {
         }
     });
 
+    // In the View menu, and off until the user opens it (a saved layout wins).
+    auto* pluginPanel = new usdcc::scripting::PluginManagerSidePanel(plugins);
+    window.addSidePanel(pluginPanel, Qt::RightDockWidgetArea);
+    pluginPanel->hide();
+
+    // The plugins' code, with the menus and registries they add to in place,
+    // and before the layout is restored, so their panels come back like the
+    // built-in ones (docs/PLUGINS.md §3.3).
+    plugins.activate(python);
+    pluginPanel->refresh();
+    if (const auto* crashed = plugins.find(plugins.crashedLastStart())) {
+        window.statusBar()->showMessage(
+            QObject::tr("The plugin %1 crashed the last start, so it's turned off. See View > Plugins.")
+                .arg(QString::fromStdString(crashed->manifest.name)));
+    }
+
     // Every panel for this session must exist before restoring — see
     // MainWindow::restoreLayout()'s declaration for why: so the panels opened
     // from the Stages menu (or duplicated) last time are made again first,
@@ -617,5 +653,6 @@ int main(int argc, char** argv) {
     usdcc::usd::UsdaViewPanel::setNewPanelHandler({});
     // The window is closed (and its layout saved) but its panels still exist.
     panelTypes.savePanels(window.dockManager());
+    plugins.deactivate(python);
     return result;
 }

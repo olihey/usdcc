@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
@@ -43,7 +45,7 @@ class StageManager;
 // A global edit spans every stage: one session on each stage open when it
 // begins and on each stage opened before it ends. A script run is one, so it
 // becomes one undo step on every stage it changed (docs/SCRIPTING.md §4.2).
-class UndoManager final : public QObject {
+class USDCC_USD_UI_API UndoManager final : public QObject {
     Q_OBJECT
 public:
     explicit UndoManager(QObject* parent = nullptr);

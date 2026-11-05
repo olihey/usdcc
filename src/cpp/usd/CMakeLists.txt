@@ -1,5 +1,5 @@
 # usdcc.usd — StageManager and OpenUSD integration (milestone M2).
-add_library(usdcc_usd STATIC
+add_library(usdcc_usd SHARED
     include/usdcc/usd/applied_schemas.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
@@ -35,6 +35,7 @@ target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 # classes" rule and stage_manager.h's own comment. usdcc_usd_ui below is
 # where Qt enters this directory's build.
 target_link_libraries(usdcc_usd PUBLIC usdcc_core ${PXR_LIBRARIES})
+usdcc_export_library(usdcc_usd)
 
 add_subdirectory(python)
 
@@ -44,8 +45,10 @@ add_subdirectory(python)
 # pybind11 module doesn't pull in Qt Widgets/ADS as a transitive runtime
 # dependency it doesn't otherwise need — usdcc.usd's Python bindings only
 # expose StageManager's plain data surface.
-add_library(usdcc_usd_ui STATIC
+add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/attributes_view_panel.h
+    include/usdcc/usd/main_menu_actions.h
+    src/main_menu_actions.cpp
     include/usdcc/usd/dependencies_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/layer_actions.h
@@ -134,7 +137,10 @@ add_library(usdcc_usd_ui STATIC
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
     src/undo_manager.cpp
-    # The Outliner's prim icons (AUTORCC; see prim_icons.cpp).
-    resources/prim_icons.qrc
 )
-target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg)
+# The Outliner's prim icons (see prim_icons.cpp), as a library for the reason in
+# src/cpp/ui/CMakeLists.txt.
+usdcc_add_resources(usdcc_usd_ui_resources resources/prim_icons.qrc)
+target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg usdcc_usd_ui_resources)
+target_compile_definitions(usdcc_usd_ui PRIVATE USDCC_USD_UI_BUILD)
+usdcc_export_library(usdcc_usd_ui)

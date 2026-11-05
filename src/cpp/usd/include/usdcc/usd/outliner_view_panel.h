@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/stage.h"
@@ -31,7 +33,7 @@ class UndoManager;
 // tinted, and with "Expand to Selection" (in the options menu; on by default,
 // saved in the settings) a selection made anywhere, e.g. by picking in the viewport,
 // expands the tree down to it and scrolls it into view.
-class OutlinerViewPanel : public usdcc::ui::ViewPanel {
+class USDCC_USD_UI_API OutlinerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:

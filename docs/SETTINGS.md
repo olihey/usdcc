@@ -91,6 +91,7 @@ take them for a `bool`.
 | `Shortcuts/tools.move` | Shortcut | `W` | `ViewportToolBars` |
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
+| `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
 | `Notifications/errorsSticky` | Bool | on | `ToastManager` |
@@ -118,6 +119,9 @@ take them for a `bool`.
 - Text fields keep their letters: they claim printable keys first.
 - Item views such as the Outliner lose type-to-search for those keys.
 - The rail's tooltips show the current key.
+- Every tool in the rail has one: `Shortcuts/tools.<tool id>` (`usdcc::usd::toolShortcutKey()`).
+  It is defined when the rail is built, so a plugin's tool gets a row on the Shortcuts page,
+  with no key until one is set.
 
 ## 5. The dialog
 

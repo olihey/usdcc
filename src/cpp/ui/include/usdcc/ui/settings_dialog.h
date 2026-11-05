@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/export.h"
 #include "usdcc/core/settings.h"
 
 #include <QDialog>
@@ -25,7 +26,7 @@ namespace usdcc::ui {
 // Changes apply immediately: every edit is a Settings::setValue(), and the
 // editors follow changes made elsewhere (the View menu, Python). So Enter only
 // commits the field it's typed in; it never closes the dialog (Escape does).
-class SettingsDialog : public QDialog {
+class USDCC_UI_API SettingsDialog : public QDialog {
     Q_OBJECT
 public:
     explicit SettingsDialog(QWidget* parent = nullptr, core::Settings& settings = core::Settings::instance());

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include <QMenu>
 
 namespace ads {
@@ -22,7 +24,7 @@ class StageManager;
 //
 // `stageManager`, `panelTypes` and `dockManager` must outlive the menu;
 // `window` parents the new panels and the close dialog.
-class StagesMenu : public QMenu {
+class USDCC_USD_UI_API StagesMenu : public QMenu {
     Q_OBJECT
 
 public:

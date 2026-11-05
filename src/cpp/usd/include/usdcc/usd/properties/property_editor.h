@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/core/export.h"
+
 #include "usdcc/usd/value_type_info.h"
 
 #include <pxr/base/tf/token.h>
@@ -39,7 +41,7 @@ struct EditorHints {
 // §2.1). setValue() never emits; user edits are reported as editStarted, then
 // any number of valueEdited (live), then editFinished — or editCanceled, after
 // which the caller restores the value it had at editStarted.
-class PropertyEditor : public QWidget {
+class USDCC_USD_UI_API PropertyEditor : public QWidget {
     Q_OBJECT
 
 public:
