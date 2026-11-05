@@ -41,6 +41,14 @@ function(usdcc_deploy_core_library target)
         add_custom_target(${target}_copy_libraries ${_commands} VERBATIM)
         add_dependencies(${target}_copy_libraries usdcc_core ${ARGN})
         add_dependencies(${target} ${target}_copy_libraries)
+        # One copy step after another: several targets share an output folder
+        # (the test programs, the Python modules), and in a parallel build two
+        # steps copying the same DLL there at once fail on the locked file.
+        get_property(_previous GLOBAL PROPERTY USDCC_LAST_COPY_LIBRARIES_TARGET)
+        if(_previous)
+            add_dependencies(${target}_copy_libraries ${_previous})
+        endif()
+        set_property(GLOBAL PROPERTY USDCC_LAST_COPY_LIBRARIES_TARGET ${target}_copy_libraries)
     endif()
 endfunction()
 

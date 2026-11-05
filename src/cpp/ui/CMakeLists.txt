@@ -58,5 +58,6 @@ target_link_libraries(usdcc_ui PUBLIC usdcc_core usdcc_usd Qt6::Widgets ads::qta
                                PRIVATE QWindowKit::Widgets usdcc_ui_resources)
 target_compile_definitions(usdcc_ui PRIVATE USDCC_UI_BUILD)
 usdcc_export_library(usdcc_ui)
+usdcc_precompile_headers(usdcc_ui ui_pch.h)
 
 add_subdirectory(python)

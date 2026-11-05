@@ -909,6 +909,29 @@ things that will bite later if not addressed early:
       on top of every app and keeps global state. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
     - **Not yet:** no existing message box has been converted.
 
+42. **Faster builds.** A full RelWithDebInfo rebuild took 15.3 minutes on a 32-core
+    machine, because it compiled one file at a time: no `/MP`, and MSBuild one project at a
+    time.
+    - **Parallel builds:** `/MP`, MSBuild's multi-tool task with one process limit shared
+      across projects (`CMAKE_VS_GLOBALS`, so the Visual Studio IDE gets it too), and
+      `--parallel` in `tools/build.ps1`. Full rebuild: 2.6 minutes.
+    - **Precompiled headers:** MSVC's `/Bt+` then showed 88% (RelWithDebInfo) to 97% (Debug)
+      of compile time in the front end, mostly the same OpenUSD and Qt headers again. So
+      `cmake/pch/usd_pch.h` goes to `usdcc_usd` and `usdcc_tools`, and `ui_pch.h` (it plus
+      Qt Widgets) to `usdcc_ui`, `usdcc_usd_ui` and the C++ test programs, through
+      `usdcc_precompile_headers()`.
+      - Ten typical files compile in 8.6 s instead of 41.1 s; most single files are 5–12×
+        faster.
+      - A full RelWithDebInfo rebuild takes 1.9 minutes.
+      - The headers' own comments say what may go in them: stable third-party headers only,
+        nothing that brings in `<windows.h>`.
+      - The scripting targets (Python.h must come first) and the app have none.
+      - `-DUSDCC_USE_PCH=OFF` builds without them, which checks that every file still
+        includes what it uses.
+    - **Copy race:** the parallel build exposed one. Targets sharing an output folder (the
+      test programs, the Python modules) copied the same DLLs there at once, and one failed
+      on the locked file. The copy steps now run one after another.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

@@ -36,6 +36,7 @@ target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 # where Qt enters this directory's build.
 target_link_libraries(usdcc_usd PUBLIC usdcc_core ${PXR_LIBRARIES})
 usdcc_export_library(usdcc_usd)
+usdcc_precompile_headers(usdcc_usd usd_pch.h)
 
 add_subdirectory(python)
 
@@ -144,3 +145,4 @@ usdcc_add_resources(usdcc_usd_ui_resources resources/prim_icons.qrc)
 target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg usdcc_usd_ui_resources)
 target_compile_definitions(usdcc_usd_ui PRIVATE USDCC_USD_UI_BUILD)
 usdcc_export_library(usdcc_usd_ui)
+usdcc_precompile_headers(usdcc_usd_ui ui_pch.h)

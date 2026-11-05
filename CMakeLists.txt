@@ -194,6 +194,16 @@ set(USDCC_BUILT_FOR_USD "${PXR_VERSION}")
 set(USDCC_BUILT_FOR_USDCC "${PROJECT_VERSION}")
 include(UsdccPlugin)
 
+# Precompiled headers for the libraries whose files almost all include OpenUSD
+# and Qt: parsing those was ~90% of a file's compile time (cmake/pch/*.h say
+# what may go in them). Off checks that every file still includes what it uses.
+option(USDCC_USE_PCH "Precompile the OpenUSD/Qt headers of the main libraries and tests" ON)
+function(usdcc_precompile_headers target header)
+    if(USDCC_USE_PCH)
+        target_precompile_headers(${target} PRIVATE "${CMAKE_SOURCE_DIR}/cmake/pch/${header}")
+    endif()
+endfunction()
+
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)

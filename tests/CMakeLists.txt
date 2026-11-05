@@ -39,6 +39,7 @@ add_executable(usdcc_tests
     xform_target_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
+usdcc_precompile_headers(usdcc_tests ui_pch.h)
 
 add_executable(usdcc_ui_tests
     test_harness.h
@@ -70,6 +71,7 @@ add_executable(usdcc_ui_tests
     view_panel_layout_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
+usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
 #                    executable because Python can only be started once per
