@@ -22,6 +22,7 @@ class QAction;
 class QLabel;
 class QLineEdit;
 class QScrollArea;
+class QToolButton;
 class QVBoxLayout;
 
 namespace usdcc::usd {
@@ -92,6 +93,10 @@ private:
         PXR_NS::TfToken relationship;
         QString searchText;  // label and name, lower case
         bool managedByStack = false;  // a transform-stack row (TransformStackEditor owns its actions)
+        // UsdShade (shade_connections.h): a receiver's connect/disconnect button, and
+        // whether this is a shader output, whose editor lists the inputs it feeds.
+        QToolButton* connectButton = nullptr;
+        bool shaderOutput = false;
     };
     struct PrimHeader {
         properties::PropertyEditor* name = nullptr;
@@ -137,6 +142,15 @@ private:
     // select them, and a dialog of the stage's prims to add one.
     void buildRelationshipEditor(Row& row, const PXR_NS::TfToken& name, const QString& label);
     void addRelationshipTargetInteractively(const PXR_NS::TfToken& name);
+    // UsdShade connections (docs/ATTRIBUTE_EDITOR.md §4.3): a receiver's
+    // connect/disconnect button, and a shader output's pills of the inputs it feeds.
+    void addConnectionButton(Row& row, const PXR_NS::SdfPath& attribute);
+    void buildShaderOutputEditor(Row& row, const PXR_NS::SdfPath& output, const QString& label);
+    // The dialog, from a receiver (pick its source) or a shader output (pick an input).
+    void connectInteractively(const PXR_NS::SdfPath& attribute, bool fromOutput);
+    void disconnectReceiver(const PXR_NS::SdfPath& receiver);
+    // Selects the prim of `path` (a prim or property path), after the current event.
+    void selectPrimLater(const PXR_NS::SdfPath& path);
     void onStageObjectsChanged(const StageChanges& changes);
     void processPendingChanges();
     void queueProcessPendingChanges();
@@ -144,6 +158,9 @@ private:
     std::string layoutSignature(const PXR_NS::UsdPrim& prim) const;
 
     PXR_NS::SdfPath m_primPath;
+    // With shader outputs shown: their material, edits anywhere under which change
+    // their pills (empty otherwise).
+    PXR_NS::SdfPath m_connectionScope;
     std::shared_ptr<UndoManager> m_undoManager;
 
     QLineEdit* m_search;

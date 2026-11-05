@@ -191,8 +191,9 @@ elements.
   - authored vs. schema fallback (fallback values in dimmed text)
   - **time-sampled**: no timeline exists yet, so editing is disabled and the badge
     explains why (see §10)
-  - **connected** (a UsdShade input or attribute connection): shows the source path and
-    is read-only, like the mockup's "Linked · …" sub-line
+  - **connected** (a UsdShade input or attribute connection): read-only, with the source
+    as a link under the value, relative to the material (`Tex.outputs:rgb`), which
+    selects the source prim. There is no badge for it. See §4.3.
   - locked by a stronger layer: an edit would be overridden
 - **Context menu:** Copy value, Paste value, Reset to default (`attr.Clear()` in the
   edit target), Copy property path, Show in USDA panel (once M8 exists).
@@ -210,6 +211,53 @@ elements.
   object name, the same way the existing `panelToolbar` and `titleBar` selectors are.
 - **Section headers:** a chevron plus a bold title with a full-width separator, as in
   the mockup. Collapsed state is remembered per category name in `QSettings`.
+
+### 4.3 Shader connections (UsdShade)
+
+Rows of shader, material and node graph attributes make and break UsdShade connections.
+The rules are Qt-free, in `shade_connections.h` (`usdcc_usd`). The edits are
+`prim_actions::connectSource()` and `disconnectSource()`, one undo step each.
+
+**Two kinds of row,** by what UsdShade stores:
+
+| Kind | Which attributes | The row |
+|---|---|---|
+| **Receiver** — has a source | `inputs:*` on any connectable prim (Shader, Material, NodeGraph, lights); `outputs:*` on a container (a Material's `outputs:surface`) | Its value editor, a **connect** button (two chain links) at the far right. Once connected: the field is read-only, the source shows as a **link** under it, and the button becomes **disconnect** (a broken chain) |
+| **Shader output** — a source only | `outputs:*` on a Shader | Its value field, meaningless for an output, is replaced by a **pill** for each input connected to it, each with an × that disconnects that input ("Not connected" when none), and a **connect** button at the far right |
+
+- **The link and the pills** show a path relative to the **connection scope**, prim then
+  property: `Tex.outputs:rgb`, `Nodes/Inner.inputs:in`. A property of the scope prim itself
+  starts with its name (`Mat.inputs:roughness`); one outside the scope keeps its full path.
+  The tooltip has the full path. Clicking selects that prim.
+- **Connection scope** (`connectionScope()`): the outermost Material the prim is in, or the
+  prim itself if it is one; without one, the outermost NodeGraph; without that, its parent.
+- **The dialog** (`ShaderConnectionDialog`): the scope and everything under it as a tree on
+  the left, the selected node's attributes and their types on the right, Connect and Cancel.
+  The edited prim is listed but can't be picked. Connect is enabled once an attribute that
+  can be connected is selected; double-clicking one connects too.
+  - **From a receiver** (`PickSource`): only what could be its source at all
+    (`whyNotPossibleSource()`): other nodes' **outputs**, and the **inputs of the Materials
+    and NodeGraphs it is inside**. Another shader's input, or a material's own output, isn't
+    listed. Of what is, the wrong type is greyed, with the reason as tooltip.
+  - **From a shader output** (`PickReceiver`): only the node's **unconnected** receivers of
+    the same type that may take this output.
+  - A node with nothing to list is greyed, like the edited prim.
+- **What a receiver may take its value from** (`whyNotSource()`):
+  - an **input** takes an **output** of another node, but not of its own prim or of a
+    container it is inside. Or an **input of any Material or NodeGraph it is inside**, at
+    any depth: UsdShade's own `CanConnect()` only allows the immediate parent container's,
+    usdcc allows every enclosing one. A container's own input doesn't take an output of a
+    node inside it (a loop);
+  - a **container's output** takes an output of a node inside it;
+  - the value types must match, roles ignored (`typesMatch()`): `color3f` takes `float3` or
+    `normal3f`, but not `float`; an array never takes a scalar.
+- **Disconnecting** clears the edit target's connection. If a weaker layer still connects the
+  attribute, it authors an empty connection list there, so the attribute ends up unconnected
+  either way.
+- **Refreshing:** a receiver's row follows its own changes like any row. A shader output's
+  pills list inputs on *other* prims, so while one is shown the panel also refreshes for
+  changes anywhere under its connection scope.
+- **Plain attribute connections** (not UsdShade) show the link too, but have no buttons.
 
 ## 5. Categories
 
@@ -742,7 +790,8 @@ decompose/recompose step, so nothing the user didn't touch can drift.
   are square icon buttons the height of a value field (`properties::iconButton()`, styled as
   `#propertyIconButton`): a pencil (an eye when read-only), the theme's ×, and a plus. A row
   puts its editor's button (`PropertyEditor::rowButton()`) after everything else, so Edit is
-  always the rightmost control.
+  always the rightmost control. A shader input's connect/disconnect button
+  (`link`/`unlink`, §4.3) is added after even that, with `addLastWidget()`.
 - **No counts in section headers**, and the Prim header shows the prim's **name**, with its
   path as the tooltip. The name is editable: committing it renames the prim as the Outliner
   does (`prim_actions::rename()`, one undo step), the selection follows the new path, and a

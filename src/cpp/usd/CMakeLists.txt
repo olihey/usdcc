@@ -10,6 +10,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/prim_creation_catalog.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
+    include/usdcc/usd/shade_connections.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
     include/usdcc/usd/tf_diagnostic_bridge.h
@@ -23,6 +24,7 @@ add_library(usdcc_usd SHARED
     src/prim_creation_catalog.cpp
     src/property_categorizer.cpp
     src/relationship_targets.cpp
+    src/shade_connections.cpp
     src/stage.cpp
     src/stage_manager.cpp
     src/stage_names.cpp
@@ -69,10 +71,12 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/prim_tree_dialog.h
     include/usdcc/usd/prim_tree_widget.h
     include/usdcc/usd/relationship_target_dialog.h
+    include/usdcc/usd/shader_connection_dialog.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
     include/usdcc/usd/properties/category_section.h
     include/usdcc/usd/properties/color_swatch.h
+    include/usdcc/usd/properties/connected_inputs_editor.h
     include/usdcc/usd/properties/data_type_gallery_dialog.h
     include/usdcc/usd/properties/number_field.h
     include/usdcc/usd/properties/property_editor.h
@@ -114,10 +118,12 @@ add_library(usdcc_usd_ui SHARED
     src/prim_tree_dialog.cpp
     src/prim_tree_widget.cpp
     src/relationship_target_dialog.cpp
+    src/shader_connection_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
     src/properties/category_section.cpp
     src/properties/color_swatch.cpp
+    src/properties/connected_inputs_editor.cpp
     src/properties/data_type_gallery_dialog.cpp
     src/properties/number_field.cpp
     src/properties/property_editors.cpp

@@ -68,6 +68,14 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     // Follows the value column's left edge (see eventFilter()).
     valueColumn->installEventFilter(this);
 
+    m_sourceLink = new QToolButton(this);
+    m_sourceLink->setObjectName(QStringLiteral("subLineLink"));  // styled by theme/dark.qss
+    m_sourceLink->setCursor(Qt::PointingHandCursor);
+    m_sourceLink->setMinimumWidth(1);  // a long path is cut short rather than widening the row
+    m_sourceLink->setVisible(false);
+    connect(m_sourceLink, &QToolButton::clicked, this, &PropertyRow::connectedSourceClicked);
+    m_subLayout->addWidget(m_sourceLink, 0, Qt::AlignLeft);
+
     m_subLine = new QLabel(this);
     m_subLine->setObjectName(QStringLiteral("propertySubLine"));
     m_subLine->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);  // never widens the row
@@ -185,11 +193,13 @@ void PropertyRow::setAnimated(bool animated) {
     updateReadOnly();
 }
 
-void PropertyRow::setConnectedSource(const QString& source) {
-    m_connectedSource = source;
-    m_subLine->setText(source.isEmpty() ? QString() : tr("Connected \xC2\xB7 %1").arg(source));
-    m_subLine->setVisible(!source.isEmpty());
-    updateBadge();
+void PropertyRow::setConnectedSource(const QString& text, const QString& fullPath) {
+    m_connectedSource = text;
+    m_sourceLink->setText(text);
+    m_sourceLink->setToolTip(text.isEmpty() ? QString()
+                                            : tr("The value comes from %1. Click to select it.")
+                                                  .arg(fullPath.isEmpty() ? text : fullPath));
+    m_sourceLink->setVisible(!text.isEmpty());
     updateReadOnly();
 }
 
@@ -205,12 +215,10 @@ void PropertyRow::updateReadOnly() {
 void PropertyRow::updateBadge() {
     QString text;
     QString tip;
+    // A connection shows its source as a link under the value instead.
     if (m_animated) {
         text = tr("animated");
         tip = tr("This attribute has time samples. Editing them needs a timeline, which usdcc doesn't have yet.");
-    } else if (!m_connectedSource.isEmpty()) {
-        text = tr("connected");
-        tip = tr("The value comes from %1.").arg(m_connectedSource);
     }
     m_badge->setText(text);
     m_badge->setToolTip(tip);

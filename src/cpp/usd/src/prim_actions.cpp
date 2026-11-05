@@ -27,6 +27,7 @@
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdShade/connectableAPI.h>
 
 #include <QCoreApplication>
 #include <QStringList>
@@ -769,6 +770,28 @@ bool removeRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const
             rel.ClearTargets(/*removeSpec=*/true);
         }
         return true;
+    });
+}
+
+bool connectSource(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& receiver,
+                   const PXR_NS::SdfPath& source) {
+    const PXR_NS::UsdAttribute attribute = stage->usdStage()->GetAttributeAtPath(receiver);
+    if (!attribute || !isEditable(attribute.GetPrim()) || !stage->usdStage()->GetAttributeAtPath(source)) return false;
+    return undo.apply(stage, tr("Connect %1").arg(qs(attribute.GetName().GetString())), [&]() {
+        return PXR_NS::UsdShadeConnectableAPI::ConnectToSource(
+            attribute, PXR_NS::UsdShadeConnectionSourceInfo(stage->usdStage(), source));
+    });
+}
+
+bool disconnectSource(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& receiver) {
+    const PXR_NS::UsdAttribute attribute = stage->usdStage()->GetAttributeAtPath(receiver);
+    if (!attribute || !isEditable(attribute.GetPrim()) || !attribute.HasAuthoredConnections()) return false;
+    return undo.apply(stage, tr("Disconnect %1").arg(qs(attribute.GetName().GetString())), [&]() {
+        PXR_NS::UsdShadeConnectableAPI::ClearSources(attribute);
+        PXR_NS::SdfPathVector left;
+        attribute.GetConnections(&left);
+        // Still connected from a weaker layer: say "none" here instead.
+        return left.empty() || PXR_NS::UsdShadeConnectableAPI::DisconnectSource(attribute);
     });
 }
 

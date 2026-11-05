@@ -6,10 +6,13 @@
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/properties/connected_inputs_editor.h"
 #include "usdcc/usd/properties/relationship_targets_editor.h"
 #include "usdcc/usd/properties/schema_pills.h"
 #include "usdcc/usd/relationship_target_dialog.h"
 #include "usdcc/usd/relationship_targets.h"
+#include "usdcc/usd/shade_connections.h"
+#include "usdcc/usd/shader_connection_dialog.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/prim_tree_dialog.h"
@@ -322,6 +325,7 @@ void AttributesViewPanel::rebuild() {
     m_compositionSection = nullptr;
     m_xformEditor = nullptr;
     m_header = {};
+    m_connectionScope = SdfPath();  // set again by a shader output's row
     m_rebuildPending = false;
     m_refreshPending = false;
 
@@ -1045,7 +1049,10 @@ AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& proper
     row.searchText = (label + QLatin1Char(' ') + name).toLower();
 
     QString tooltip = QStringLiteral("<b>%1</b>").arg(name.toHtmlEscaped());
-    if (const UsdAttribute attr = property.As<UsdAttribute>()) {
+    if (const UsdAttribute attr = property.As<UsdAttribute>(); attr && isShaderOutput(attr)) {
+        tooltip += QStringLiteral("<br>%1").arg(qs(attr.GetTypeName().GetAsToken().GetString()));
+        buildShaderOutputEditor(row, attr.GetPath(), label);
+    } else if (attr) {
         tooltip += QStringLiteral("<br>%1").arg(qs(attr.GetTypeName().GetAsToken().GetString()));
         EditorHints hints = EditorHints::forAttribute(attr);
         if (TfStringStartsWith(property.GetName().GetString(), "xformOp:rotate")) {
@@ -1061,6 +1068,13 @@ AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& proper
         if (const UsdGeomPrimvar primvar{attr}) {
             row.row->setNote(qs(primvar.GetInterpolation().GetString()));
         }
+        if (isReceiver(attr)) addConnectionButton(row, attr.GetPath());
+        connect(row.row, &PropertyRow::connectedSourceClicked, this, [this, path = attr.GetPath()]() {
+            if (const UsdAttribute connected = currentStage()->usdStage()->GetAttributeAtPath(path)) {
+                const SdfPath source = connectedSource(connected);
+                if (!source.IsEmpty()) selectPrimLater(source);
+            }
+        });
     } else if (const UsdRelationship rel = property.As<UsdRelationship>()) {
         tooltip += QStringLiteral("<br>relationship");
         buildRelationshipEditor(row, property.GetName(), label);
@@ -1081,14 +1095,31 @@ AttributesViewPanel::Row AttributesViewPanel::buildRow(const UsdProperty& proper
 }
 
 void AttributesViewPanel::updateRowState(Row& row) {
-    if (const UsdAttribute attr = row.property.As<UsdAttribute>()) {
+    if (const UsdAttribute attr = row.property.As<UsdAttribute>(); attr && row.shaderOutput) {
+        const UsdPrim scope = connectionScope(attr.GetPrim());
+        std::vector<properties::ConnectedInputsEditor::Receiver> receivers;
+        for (const UsdAttribute& receiver : receiversOf(attr)) {
+            receivers.push_back({receiver.GetPath(), qs(relativeLabel(receiver.GetPath(), scope))});
+        }
+        auto* editor = static_cast<properties::ConnectedInputsEditor*>(row.editor);
+        editor->setReadOnly(!prim_actions::isEditable(attr.GetPrim()));
+        editor->setReceivers(receivers);
+    } else if (attr) {
         const bool authored = attr.HasAuthoredValue();
+        const bool editable = prim_actions::isEditable(attr.GetPrim());
         row.row->setUnauthored(!authored);
-        row.row->setResettable(authored && prim_actions::isEditable(attr.GetPrim()));
+        row.row->setResettable(authored && editable);
         row.row->setAnimated(attr.GetNumTimeSamples() > 0);
-        SdfPathVector sources;
-        attr.GetConnections(&sources);
-        row.row->setConnectedSource(sources.empty() ? QString() : qs(sources.front().GetString()));
+        const SdfPath source = connectedSource(attr);
+        const QString label = source.IsEmpty() ? QString() : qs(relativeLabel(source, connectionScope(attr.GetPrim())));
+        row.row->setConnectedSource(label, qs(source.GetString()));
+        if (row.connectButton) {
+            row.connectButton->setIcon(QIcon(source.IsEmpty() ? QStringLiteral(":/usdcc/theme/link.png")
+                                                              : QStringLiteral(":/usdcc/theme/unlink.png")));
+            row.connectButton->setToolTip(source.IsEmpty() ? tr("Connect\xE2\x80\xA6") : tr("Disconnect from %1").arg(label));
+            row.connectButton->setProperty("connected", !source.IsEmpty());
+            row.connectButton->setVisible(editable);
+        }
     } else if (!row.relationship.IsEmpty()) {
         const UsdPrim prim = currentPrim();
         const UsdRelationship rel = prim ? prim.GetRelationship(row.relationship) : UsdRelationship();
@@ -1116,23 +1147,82 @@ void AttributesViewPanel::updateRowState(Row& row) {
     }
 }
 
+void AttributesViewPanel::selectPrimLater(const SdfPath& path) {
+    // Queued: selecting rebuilds this panel, the link or pill that asked included.
+    QMetaObject::invokeMethod(
+        this,
+        [this, path]() {
+            const SdfPath prim = path.GetPrimPath();
+            if (currentStage() && currentStage()->usdStage()->GetPrimAtPath(prim)) {
+                stageManager()->setSelectedPaths(currentStage(), {prim});
+            }
+        },
+        Qt::QueuedConnection);
+}
+
+void AttributesViewPanel::addConnectionButton(Row& row, const SdfPath& attribute) {
+    row.connectButton = properties::iconButton(QStringLiteral(":/usdcc/theme/link.png"), tr("Connect\xE2\x80\xA6"));
+    row.connectButton->setProperty("connectionButton", true);  // keeps the #propertyIconButton look
+    row.row->addLastWidget(row.connectButton);  // the rightmost control
+    QToolButton* button = row.connectButton;
+    connect(button, &QToolButton::clicked, this, [this, button, attribute]() {
+        const bool connected = button->property("connected").toBool();
+        // Queued: an edit can rebuild this panel, the button included.
+        QMetaObject::invokeMethod(
+            this,
+            [this, attribute, connected]() {
+                if (connected) {
+                    disconnectReceiver(attribute);
+                } else {
+                    connectInteractively(attribute, /*fromOutput=*/false);
+                }
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AttributesViewPanel::buildShaderOutputEditor(Row& row, const SdfPath& output, const QString& label) {
+    auto* editor = new properties::ConnectedInputsEditor();
+    row.editor = editor;
+    row.shaderOutput = true;
+    row.row = new PropertyRow(label, editor);
+    if (const UsdPrim prim = currentPrim()) m_connectionScope = connectionScope(prim).GetPath();
+    connect(editor, &properties::ConnectedInputsEditor::selectRequested, this, &AttributesViewPanel::selectPrimLater);
+    connect(editor, &properties::ConnectedInputsEditor::disconnectRequested, this, [this](const SdfPath& input) {
+        QMetaObject::invokeMethod(this, [this, input]() { disconnectReceiver(input); }, Qt::QueuedConnection);
+    });
+    connect(editor, &properties::ConnectedInputsEditor::connectRequested, this, [this, output]() {
+        QMetaObject::invokeMethod(this, [this, output]() { connectInteractively(output, /*fromOutput=*/true); },
+                                  Qt::QueuedConnection);
+    });
+}
+
+void AttributesViewPanel::connectInteractively(const SdfPath& attribute, bool fromOutput) {
+    if (!currentStage()) return;
+    const UsdAttribute attr = currentStage()->usdStage()->GetAttributeAtPath(attribute);
+    if (!attr) return;
+    ShaderConnectionDialog dialog(attr,
+                                  fromOutput ? ShaderConnectionDialog::Mode::PickReceiver : ShaderConnectionDialog::Mode::PickSource,
+                                  this);
+    if (dialog.exec() != QDialog::Accepted || dialog.selected().IsEmpty()) return;
+    if (fromOutput) {
+        prim_actions::connectSource(*m_undoManager, currentStage(), dialog.selected(), attribute);
+    } else {
+        prim_actions::connectSource(*m_undoManager, currentStage(), attribute, dialog.selected());
+    }
+}
+
+void AttributesViewPanel::disconnectReceiver(const SdfPath& receiver) {
+    if (currentStage()) prim_actions::disconnectSource(*m_undoManager, currentStage(), receiver);
+}
+
 void AttributesViewPanel::buildRelationshipEditor(Row& row, const TfToken& name, const QString& label) {
     auto* editor = new properties::RelationshipTargetsEditor();
     row.editor = editor;
     row.relationship = name;
     row.row = new PropertyRow(label, editor);
     // Queued: each of these rebuilds this panel, the pill included.
-    connect(editor, &properties::RelationshipTargetsEditor::selectRequested, this, [this](const SdfPath& path) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, path]() {
-                const SdfPath prim = path.GetPrimPath();
-                if (currentStage() && currentStage()->usdStage()->GetPrimAtPath(prim)) {
-                    stageManager()->setSelectedPaths(currentStage(), {prim});
-                }
-            },
-            Qt::QueuedConnection);
-    });
+    connect(editor, &properties::RelationshipTargetsEditor::selectRequested, this, &AttributesViewPanel::selectPrimLater);
     connect(editor, &properties::RelationshipTargetsEditor::removeRequested, this, [this, name](const SdfPath& path) {
         QMetaObject::invokeMethod(
             this,
@@ -1211,9 +1301,16 @@ void AttributesViewPanel::onStageObjectsChanged(const StageChanges& changes) {
     if (m_primPath.IsEmpty()) {
         return;
     }
+    // A shader output's pills list inputs on other prims of its material.
+    const auto underScope = [this](const SdfPathVector& paths) {
+        return std::any_of(paths.begin(), paths.end(), [this](const SdfPath& path) { return path.HasPrefix(m_connectionScope); });
+    };
     if (changes.resyncsPrim(m_primPath)) {
         m_rebuildPending = true;
     } else if (changes.affectsPrim(m_primPath)) {
+        m_refreshPending = true;
+    } else if (!m_connectionScope.IsEmpty() &&
+               (underScope(changes.changedInfoOnlyPaths) || underScope(changes.resyncedPaths))) {
         m_refreshPending = true;
     } else {
         return;

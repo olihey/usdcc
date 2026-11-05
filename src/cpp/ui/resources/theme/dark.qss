@@ -717,6 +717,21 @@ QLabel#propertySubLine[unresolved="true"] {
     color: #ff5f56;
 }
 
+/* A connected input's source, under its value: selects the source prim. */
+QToolButton#subLineLink {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+    color: @accent;
+    font-size: 10px;
+}
+
+QToolButton#subLineLink:hover {
+    color: @accent-hover;
+    text-decoration: underline;
+}
+
 QLabel#propertyMatrixSummary,
 QLabel#propertyArraySummary,
 QLabel#propertyReadOnlyText {

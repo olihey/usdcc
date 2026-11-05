@@ -171,6 +171,31 @@ ICONS["grip-vertical"] = (2.0, GRIP, [[(x, y), (x, y)] for y in (6.5, 9.5) for x
 # actions (the Attribute Editor's composition arcs).
 ICONS["more"] = (2.2, LIGHT, [[(8, y), (8, y)] for y in (3.5, 8, 12.5)])
 
+def _capsule(cx, cy, angle_deg, half_length, radius):
+    """A chain link: a stadium centred on (cx, cy), its long axis along `angle_deg`."""
+    d = math.radians(angle_deg)
+    ax, ay = cx - math.cos(d) * half_length, cy - math.sin(d) * half_length
+    bx, by = cx + math.cos(d) * half_length, cy + math.sin(d) * half_length
+    return _arc(bx, by, radius, angle_deg - 90, angle_deg + 90, 12) + _arc(ax, ay, radius, angle_deg + 90, angle_deg + 270, 12) + [
+        (bx + math.cos(d - math.pi / 2) * radius, by + math.sin(d - math.pi / 2) * radius)
+    ]
+
+
+# The Attribute Editor's connect / disconnect buttons (shader inputs and outputs):
+# two chain links joined, and pulled apart with the break marked.
+ICONS["link"] = (1.3, LIGHT, [_capsule(5.9, 10.1, -45, 1.9, 2.3), _capsule(10.1, 5.9, -45, 1.9, 2.3)])
+ICONS["unlink"] = (
+    1.3,
+    LIGHT,
+    [
+        # Short links far apart, so the gap still shows at 12px.
+        _capsule(4.1, 11.9, -45, 0.8, 2.0),
+        _capsule(11.9, 4.1, -45, 0.8, 2.0),
+        [(6.4, 6.4), (5.2, 5.2)],
+        [(9.6, 9.6), (10.8, 10.8)],
+    ],
+)
+
 for _name, (_width, _lines) in TOOL_GLYPHS.items():
     ICONS[_name] = (_width, LIGHT, _lines)
     ICONS[_name + "-active"] = (_width, WHITE, _lines)

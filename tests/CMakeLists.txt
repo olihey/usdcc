@@ -29,6 +29,7 @@ add_executable(usdcc_tests
     relationship_targets_test.cpp
     rotate_tool_test.cpp
     settings_test.cpp
+    shade_connections_test.cpp
     stage_changes_test.cpp
     stage_names_test.cpp
     undo_manager_test.cpp
@@ -70,6 +71,7 @@ add_executable(usdcc_ui_tests
     scale_controller_test.cpp
     schema_pills_test.cpp
     settings_ui_test.cpp
+    shader_connections_ui_test.cpp
     side_panel_test.cpp
     toast_test.cpp
     usda_view_test.cpp

@@ -24,6 +24,10 @@
         <file alias="menu@2x.png">theme/menu@2x.png</file>
         <file alias="more.png">theme/more.png</file>
         <file alias="more@2x.png">theme/more@2x.png</file>
+        <file alias="link.png">theme/link.png</file>
+        <file alias="link@2x.png">theme/link@2x.png</file>
+        <file alias="unlink.png">theme/unlink.png</file>
+        <file alias="unlink@2x.png">theme/unlink@2x.png</file>
         <file alias="trash.png">theme/trash.png</file>
         <file alias="trash@2x.png">theme/trash@2x.png</file>
         <file alias="folder.png">theme/folder.png</file>

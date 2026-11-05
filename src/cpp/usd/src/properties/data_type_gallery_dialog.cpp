@@ -189,7 +189,8 @@ void DataTypeGalleryDialog::rebuild() {
         row->setUnauthored(!attr.HasAuthoredValue());
         row->setResettable(attr.HasAuthoredValue());
         row->setAnimated(m_animated->isChecked());
-        row->setConnectedSource(m_connected->isChecked() ? QStringLiteral("/Gallery/Source.outputs:out") : QString());
+        row->setConnectedSource(m_connected->isChecked() ? QStringLiteral("Source.outputs:out") : QString(),
+                                QStringLiteral("/Gallery/Source.outputs:out"));
         row->setReadOnly(m_readOnly->isChecked());
         layout->addWidget(row);
 

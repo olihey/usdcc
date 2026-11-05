@@ -138,6 +138,15 @@ bool addRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PX
 bool removeRelationshipTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
                               const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target);
 
+// UsdShade connections (shade_connections.h), in the stage's edit target, one undo
+// step each. `receiver` and `source` are attribute paths. Connecting replaces the
+// receiver's source. Disconnecting clears the edit target's connection; if a weaker
+// layer still connects it, it authors an empty connection list, so the receiver
+// ends up unconnected either way.
+bool connectSource(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& receiver,
+                   const PXR_NS::SdfPath& source);
+bool disconnectSource(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& receiver);
+
 // Composition arcs (docs/COMPOSITION_ARCS.md §4), in the stage's edit target.
 // Add puts a reference or payload (`assetPath`, `target` empty = the default
 // prim; an empty `assetPath` with a `target` is an internal one), an inherit
