@@ -36,8 +36,13 @@ like Ninja on Linux/macOS):
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config RelWithDebInfo
+cmake --build build --config RelWithDebInfo --parallel
 ```
+
+`--parallel` builds several projects at once; each compiles its files in parallel too.
+The main libraries and tests use precompiled headers for OpenUSD and Qt
+(`cmake/pch/`). `-DUSDCC_USE_PCH=OFF` turns them off, which is worth a build now and then
+to check that every file still includes what it uses.
 
 The first configure builds Qt6 and pybind11 from source via vcpkg, which can
 take significant time without a populated binary cache.
@@ -86,6 +91,13 @@ manager = usdcc.usd.StageManager()
 cache_id = manager.open_stage("scene.usda")
 stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(cache_id))
 ```
+
+### Settings
+
+Edit > Settings… (`Ctrl+,`) holds the app's preferences, such as the accent color, the UI
+scale and the tool shortcuts (Q select, W move, E rotate, R scale). They are saved in
+`usdcc.ini`, and Python reads and changes them with `usdcc.settings`. See
+[docs/SETTINGS.md](docs/SETTINGS.md).
 
 ### Plugins
 

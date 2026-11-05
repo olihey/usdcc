@@ -3,6 +3,8 @@
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_icons.h"
 
+#include "usdcc/ui/theme.h"
+
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primFlags.h>
 #include <pxr/usd/usd/stage.h>
@@ -29,8 +31,12 @@ std::vector<PXR_NS::SdfPath> draggedPaths(const QMimeData* data) {
 
 namespace {
 // Ancestors of the selection: the selection's own colour (dark.qss, QTreeView
-// selection-background-color: accent blue at 18%) at half the opacity.
-const QColor kAncestorBackground(61, 139, 253, 23);  // 9% of 255
+// selection-background-color: the accent at 18%) at half the opacity.
+QColor ancestorBackground() {
+    QColor color = usdcc::ui::theme::accent();
+    color.setAlpha(23);  // 9% of 255
+    return color;
+}
 
 // usdview's prim name colours (usdviewq/common.py UIPrimTypeColors). Other
 // prims keep the theme's text colour (dark.qss, QTreeView color).
@@ -291,7 +297,7 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         }
         case Qt::BackgroundRole:
             if (isSelectionAncestor(node->path)) {
-                return kAncestorBackground;
+                return ancestorBackground();
             }
             break;
         case Qt::FontRole: {

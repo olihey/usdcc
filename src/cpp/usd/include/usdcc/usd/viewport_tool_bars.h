@@ -9,6 +9,7 @@
 #include <QObject>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 class QAction;
@@ -23,6 +24,12 @@ namespace usdcc::usd {
 class StageManager;
 class ToolOptionsBar;
 class ToolRail;
+
+// The Shortcut setting (usdcc::core::Settings) that picks the tool `toolId`:
+// "Shortcuts/tools.<id>". ViewportToolBars defines one for every tool in the
+// rail, a plugin's too: Q, W, E and R for Select, Move, Rotate and Scale, no
+// key for the others until one is set.
+std::string toolShortcutKey(const std::string& toolId);
 
 // The two toolbars that drive the editing tools, installed in the *main
 // window's* layout rather than inside any viewport (see docs/PLAN.md §6): a

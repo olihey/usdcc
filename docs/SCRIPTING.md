@@ -134,6 +134,8 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 | `usdcc.app` | `is_embedded()`, `stage_manager()`, `undo_manager()`; with PySide6, `main_window()`, `add_side_panel(panel, area)`, `register_view_panel(id, name, cls)`, `open_view_panel(id, stage=None)`, `view_panel_types()` (§8) |
 | `usdcc.core` | `log(level, category, message)`, the level constants, `set_levels(spec)` (USDCC_LOG's format) |
 | `usdcc.tools` | `tool_names()`, `active_tool()`, `set_active_tool(name)` |
+| `usdcc.toast` | Toast notifications in the main window ([NOTIFICATIONS.md](NOTIFICATIONS.md)): `show(title, body, kind, duration, sticky)` → id, `dismiss(id)`, `dismiss_all()`, `visible()`. `usdcc.core.log(..., toast=True/"sticky", title, kind)` and `logging`'s `extra={"usdcc_toast": True}` show a log record as one too |
+| `usdcc.settings` | The app's preferences ([SETTINGS.md](SETTINGS.md) §6): `get(key)`, `set(key, value)`, `reset(key)`, `is_default(key)`, `keys(category)`, `categories()`, `info(key)`, `define(key, type, default, ...)` for a plugin's own settings, shown in the Settings dialog. No change callbacks yet |
 | `usdcc.log` | The logging bridge (§5) |
 | `usdcc.ui` | `SidePanel` and `ViewPanel`, the base classes for panels made in Python (§8; needs PySide6) |
 

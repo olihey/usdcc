@@ -12,12 +12,14 @@
 // module in the process posts to the same instance (§2.2).
 
 #include "usdcc/core/export.h"
+#include "usdcc/core/toast.h"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -48,6 +50,9 @@ struct LogRecord {
     std::uint64_t threadId = 0;  // the hub fills these two with the posting thread's if unset
     std::string threadName;
     std::uint32_t repeatCount = 1;  // > 1 once identical records were collapsed into this one
+    // Set: also show the record as a toast notification (docs/NOTIFICATIONS.md;
+    // USDCC_LOG_TOAST). Such a record is kept whatever the enabled levels.
+    std::optional<ToastRequest> toast;
 };
 
 // Receives records from a LogHub. Both calls are made with the hub's lock
@@ -146,6 +151,21 @@ void logFormatted(LogLevel level, std::string_view category, const std::source_l
     record.function = where.function_name();
     LogHub::instance().post(std::move(record));
 }
+
+template <typename... Args>
+void logToastFormatted(LogLevel level, std::string_view category, ToastRequest toast,
+                       const std::source_location& where, std::format_string<Args...> format, Args&&... args) {
+    LogRecord record;
+    record.level = level;
+    record.source = "usdcc";
+    record.category = category;
+    record.message = std::format(format, std::forward<Args>(args)...);
+    record.file = where.file_name();
+    record.line = static_cast<int>(where.line());
+    record.function = where.function_name();
+    record.toast = std::move(toast);
+    LogHub::instance().post(std::move(record));
+}
 }  // namespace detail
 
 }  // namespace usdcc::core
@@ -165,3 +185,18 @@ void logFormatted(LogLevel level, std::string_view category, const std::source_l
 #define USDCC_LOG_WARNING(category, ...) USDCC_LOG(::usdcc::core::LogLevel::Warning, category, __VA_ARGS__)
 #define USDCC_LOG_ERROR(category, ...) USDCC_LOG(::usdcc::core::LogLevel::Error, category, __VA_ARGS__)
 #define USDCC_LOG_FATAL(category, ...) USDCC_LOG(::usdcc::core::LogLevel::Fatal, category, __VA_ARGS__)
+
+// A record that is also shown as a toast notification (docs/NOTIFICATIONS.md),
+// whatever level is enabled: the user is meant to see it.
+//   USDCC_LOG_TOAST(LogLevel::Warning, "usdcc.stage", "{} has unsaved changes", name);
+//   USDCC_LOG_TOAST_STICKY(LogLevel::Error, "usdcc.stage", "Could not save {}", name);
+//   USDCC_LOG_TOAST_AS(LogLevel::Info, "usdcc.stage",
+//                      (ToastRequest{.kind = ToastKind::Success, .title = "Saved"}), "Saved {}", name);
+// The toast's title is the level's name unless the request gives one, its body
+// the message (and details), and it stays for the kind's default duration.
+#define USDCC_LOG_TOAST_AS(level, category, request, ...) \
+    ::usdcc::core::detail::logToastFormatted(level, category, request, std::source_location::current(), __VA_ARGS__)
+#define USDCC_LOG_TOAST(level, category, ...) \
+    USDCC_LOG_TOAST_AS(level, category, ::usdcc::core::ToastRequest{}, __VA_ARGS__)
+#define USDCC_LOG_TOAST_STICKY(level, category, ...) \
+    USDCC_LOG_TOAST_AS(level, category, ::usdcc::core::ToastRequest::sticky(), __VA_ARGS__)

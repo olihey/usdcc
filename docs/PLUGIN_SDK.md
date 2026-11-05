@@ -94,4 +94,6 @@ version means rebuilding your plugin.**
 
 **This check isn't everything.** usdcc's own version has to be raised when its headers change for it to catch that, and it doesn't check your compile flags. Build with
 `usdcc_add_plugin()`, which sets those as the app does: the release CRT and `_ITERATOR_DEBUG_LEVEL=0` in every configuration, and `QT_NO_KEYWORDS`, so `Q_EMIT` rather than
-`emit`.
+`emit`. On MSVC it also makes sure `extern "C"` functions may throw (`/EHc-`, or usdcc's own `/EHs`): the entry points are `extern "C"`, and under the default `/EHsc` an
+exception from `usdcc_plugin_activate()` is undefined behaviour (warning C4297) rather than a failed plugin. Replacing `/EHsc` with `/EHs` in your `CMAKE_CXX_FLAGS` avoids
+cl's "overriding /EHc" note.

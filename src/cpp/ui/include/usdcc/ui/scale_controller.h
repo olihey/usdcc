@@ -1,21 +1,24 @@
 #pragma once
 
 #include "usdcc/core/export.h"
+#include "usdcc/core/settings.h"
 
 #include <QObject>
 #include <QString>
 
 #include <functional>
+#include <memory>
 
 class QApplication;
 class QMenu;
-class QSettings;
 
 namespace usdcc::ui {
 
 // The application's UI density (View > UI Scale, Ctrl+Numpad+/-), on top of
 // whatever device pixel ratio Qt already applies for the screen. One instance
-// per QApplication (see instance()); the percentage persists in usdcc.ini.
+// per QApplication (see instance()); the percentage is the Appearance/uiScale
+// setting (usdcc::core::Settings), so the Settings dialog and Python change it
+// too.
 //
 // Nothing is ever rescaled from its current size: every scaled metric is
 // recomputed from its original 100% value (stylesheets via styleSheet(), C++
@@ -28,9 +31,13 @@ public:
     static constexpr int maximumPercent = 200;
     static constexpr int stepPercent = 10;
 
-    // Restores the saved scale and installs the Ctrl+Numpad+/- event filter on
-    // `app`, which owns the controller. `settingsFile` overrides usdcc.ini, so
-    // tests never touch the user's preferences.
+    static constexpr auto settingKey = "Appearance/uiScale";
+
+    // Defines the Appearance/uiScale setting, restores the scale from it and
+    // installs the Ctrl+Numpad+/- event filter on `app`, which owns the
+    // controller. Uses Settings::instance() — unless `settingsFile` is given:
+    // then a private registry stored in that file, so tests never touch the
+    // user's preferences.
     explicit UiScaleController(QApplication& app, const QString& settingsFile = {});
 
     // The controller owned by qApp, created on first use with the default
@@ -44,8 +51,9 @@ public:
     // `original` with every CSS "<n>px" scaled, except 1px hairlines; url()s
     // and comments are left alone. Pass the unscaled sheet every time.
     QString styleSheet(const QString& original) const;
-    // Clamped to [minimumPercent, maximumPercent]; saves it, then emits
-    // scaleChanged() and relayouts every widget.
+    // Clamped to [minimumPercent, maximumPercent] and stored in the setting,
+    // which emits scaleChanged() and relayouts every widget (as does any other
+    // change of the setting).
     void setPercent(int percent);
     // Appends a separator and the "UI Scale (n%)" submenu to `viewMenu`.
     void addMenu(QMenu* viewMenu);
@@ -66,7 +74,11 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    QSettings* m_settings;
+    void applySetting();
+
+    std::unique_ptr<core::Settings> m_ownSettings;  // with a settingsFile only
+    core::Settings* m_settings = nullptr;
+    core::Signal<const std::string&>::Connection m_settingConnection;
     int m_percent = 100;
 };
 

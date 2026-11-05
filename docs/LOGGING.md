@@ -54,7 +54,7 @@ These facts constrain the plan:
 | `FileLogSink` (rotating log file) | `LogSidePanel` (view, filters, search, details) |
 | `TfDiagnosticBridge` (in `usdcc_usd`: a `TfDiagnosticMgr::Delegate`) | Status-bar / tab badge for new errors |
 | `NativeStreamCapture` (fd 1/2 redirected into the hub) | |
-| `PythonLogBridge` (embedded module `usdcc._log` + handler and stream objects) | |
+| `PythonLogBridge` (embedded module `_usdcc_log` + handler and stream objects) | `ToastLogSink`: records marked as toasts (§3.6) |
 
 Messages flow one way: every bridge turns its message into a `LogRecord` and calls
 `LogHub::post()`. Sinks — the file and the panel's model — subscribe to the hub. No bridge
@@ -80,6 +80,7 @@ struct LogRecord {
     std::uint64_t threadId;
     std::string threadName;        // "main", "stage-loader", "render", or empty
     std::uint32_t repeatCount = 1; // > 1 when identical records were collapsed (§2.3)
+    std::optional<ToastRequest> toast; // set: also shown as a toast notification (§3.6)
 };
 ```
 
@@ -185,9 +186,10 @@ Behavior to handle:
 ### 3.4 Python
 
 Python lands with M7's embedded interpreter. Logging adds one embedded module, built into the
-exe with `PYBIND11_EMBEDDED_MODULE(_log, m)` so it always talks to the exe's hub:
+exe with `PYBIND11_EMBEDDED_MODULE(_usdcc_log, m)` so it always talks to the exe's hub:
 
-- `usdcc._log.post(level, category, message, details, file, line)`.
+- `_usdcc_log.post(level, source, category, message, details, file, line, function, thread_name,
+  toast, toast_title, toast_kind)`. The last three mark a record as a toast (§3.6).
 
 A small `usdcc/log.py` installs, at interpreter start-up:
 
@@ -227,6 +229,38 @@ already prints every record, captured lines included, to the original stderr.
 
 This is the riskiest bridge (CRT stream buffering, crashing with a full pipe, MSVC's separate
 CRT per DLL), so it comes last and can be turned off with `USDCC_NO_STREAM_CAPTURE=1`.
+
+### 3.6 Records shown as toasts
+
+A record can ask to also be shown as a toast notification ([NOTIFICATIONS.md](NOTIFICATIONS.md)):
+`LogRecord::toast`, a `ToastRequest` (kind, title, body, duration; each optional).
+
+```cpp
+USDCC_LOG_TOAST(LogLevel::Warning, "usdcc.stage", "{} has unsaved changes", name);    // timed
+USDCC_LOG_TOAST_STICKY(LogLevel::Error, "usdcc.stage", "Could not save {}", name);    // until dismissed
+USDCC_LOG_TOAST_AS(LogLevel::Info, "usdcc.stage",
+                   (ToastRequest{.kind = ToastKind::Success, .title = "Saved"}), "Saved {}", name);
+```
+
+```python
+usdcc.core.log(usdcc.core.ERROR, "my.tool", "Export failed", toast="sticky", title="Export")
+logging.getLogger("my.tool").warning("Disk almost full", extra={"usdcc_toast": True})
+```
+
+- **Always kept:** a marked record is posted and kept whatever levels are enabled. The user is
+  meant to see it, so a Debug toast still shows. The toast macros therefore always format
+  their arguments.
+- **Repeats:** it only collapses (§2.3) with another marked record. A repeat counts on the
+  toast that is up ("×2").
+- **What it shows:**
+  - its kind follows the level (Error/Fatal: Error, Warning: Warning, else Info) unless the
+    request names one, such as Success;
+  - its title is the level's name ("Warning") unless given;
+  - its body is the message, plus the details.
+- **Who shows it:** `ToastLogSink` (in `usdcc_ui`, added by `MainWindow`, without backlog
+  replay) queues it to the UI thread. Warning and error toasts get a **Show Log** button,
+  which calls `LogSidePanel::showLatest()`.
+- **Before the window:** records logged before the window exists show no toast.
 
 ## 4. The panel
 
@@ -270,8 +304,8 @@ layouts still find it.
 - **Attention**: a new Error, while the panel is hidden or scrolled away, is counted in the
   panel's title ("Log — 3 new errors"), which the View menu entry shows too, with a red dot. It
   clears once the panel is shown at the bottom. It never pops the panel open by itself. (The
-  status-bar message first planned here is left out: the window has no status bar, and adding
-  one only for this would be a permanent strip for a rare event.)
+  status-bar message first planned here was left out. The window has a status bar now, for the
+  edit target, but a message the user must see is a toast: mark the record, §3.6.)
 - **Theme**: level colors and icons come from the existing theme tokens (`theme.h`).
 
 ## 5. The log file
@@ -339,7 +373,7 @@ Each phase ends with something usable and verified.
 | **2. Qt and OpenUSD bridges** *(done)* | `QtMessageBridge`, `TfDiagnosticBridge`, start-up order (§6); the `StageOpener` error mark and better failure dialog | Tf and Qt mapping tests, including worker threads. Opening a broken `.usda` names the error. No console needed to see Tf messages |
 | **3. Log panel** *(done)* | `LogModel`, `LogSidePanel` replacing the stand-in, filters, search, details tooltip, follow mode, error badge; Debug > Emit Test Messages (C++/Qt/Tf part) | Every test message shows correctly. A 10 000-message burst does not freeze the UI. Saved layouts still restore the panel |
 | **4. Native stream capture** *(done)* | `NativeStreamCapture`, off-switch, Debug-build tee | `printf` and `TF_DEBUG` output show in the panel. No hang with a flood of output or at shutdown |
-| **5. Python** *(done, as SCRIPTING.md phase 1)* | `PYBIND11_EMBEDDED_MODULE(_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
+| **5. Python** *(done, as SCRIPTING.md phase 1)* | `PYBIND11_EMBEDDED_MODULE(_usdcc_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
 
 Phases 1–3 make the panel useful on their own. Phase 4 is independent of 3. Phase 5 needs the
 embedded interpreter.

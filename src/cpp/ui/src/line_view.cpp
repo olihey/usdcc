@@ -1,5 +1,7 @@
 #include "usdcc/ui/line_view.h"
 
+#include "usdcc/ui/theme.h"
+
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
@@ -22,7 +24,12 @@ constexpr int kMaxLayouts = 4000;   // cached lines before the cache is cleared
 const QColor kBackground(0x1c, 0x1c, 0x1e);
 const QColor kGutter(0x16, 0x16, 0x18);
 const QColor kCurrentLine(255, 255, 255, 10);
-const QColor kSelection(0x3d, 0x8b, 0xfd, 90);
+// The selection: the theme's accent at 35%.
+QColor selectionColor() {
+    QColor color = theme::accent();
+    color.setAlpha(90);
+    return color;
+}
 
 char asciiLower(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
 
@@ -188,7 +195,8 @@ void LineView::paintEvent(QPaintEvent* event) {
     const Position start = std::min(m_anchor, m_cursor);
     const Position end = std::max(m_anchor, m_cursor);
     QTextCharFormat selectionFormat;
-    selectionFormat.setBackground(kSelection);
+    const QColor selection = selectionColor();
+    selectionFormat.setBackground(selection);
 
     painter.setClipRect(QRect(gutter, 0, viewport()->width() - gutter, viewport()->height()));
     for (int line = first; line <= last; ++line) {
@@ -203,7 +211,7 @@ void LineView::paintEvent(QPaintEvent* event) {
             // The line break of a selected line: a sliver past its end.
             if (line < end.line) {
                 const qreal x = left + layout->lineAt(0).cursorToX(int(layout->text().size()));
-                painter.fillRect(QRectF(x, y, fontMetrics().horizontalAdvance(u' '), height), kSelection);
+                painter.fillRect(QRectF(x, y, fontMetrics().horizontalAdvance(u' '), height), selection);
             }
         }
         layout->draw(&painter, QPointF(left, y), selections);

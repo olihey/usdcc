@@ -4,11 +4,14 @@
 #include <functional>
 #include <memory>
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/qt_message_bridge.h"
+#include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
 
 #include <DockManager.h>
@@ -174,6 +177,9 @@ int main(int argc, char** argv) {
         USDCC_LOG_WARNING("usdcc.app", "Could not create a log file in {}", logDir.toStdString());
     }
 
+    // Preferences (docs/SETTINGS.md) load from usdcc.ini from here on; every
+    // setting defined later (the theme's first) starts from its saved value.
+    usdcc::ui::installAppSettings();
     usdcc::ui::theme::apply(app);
 
     // Reads the plugins' manifests and registers their USD files, running none
@@ -181,7 +187,9 @@ int main(int argc, char** argv) {
     // doesn't take in a plugin's schemas once it exists (docs/PLUGINS.md §3.1).
     std::vector<std::filesystem::path> extraPluginFolders;
     for (const QString& folder : commandLine.values(pluginPathOption)) {
-        extraPluginFolders.emplace_back(folder.toStdU16String());
+        // Absolute, so the plugins' paths (their libraries, USD folders, Python
+        // modules) don't depend on the working directory later on.
+        extraPluginFolders.emplace_back(QFileInfo(folder).absoluteFilePath().toStdU16String());
     }
     usdcc::scripting::PluginManager plugins(
         usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
@@ -483,6 +491,11 @@ int main(int argc, char** argv) {
     QAction* redoAction = undoGroup->createRedoAction(&window, QObject::tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
     editMenu->addAction(redoAction);
+    editMenu->addSeparator();
+    QAction* settingsAction = editMenu->addAction(QObject::tr("&Settings..."), &window,
+                                                  [&window]() { usdcc::ui::SettingsDialog::showDialog(&window); });
+    settingsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    settingsAction->setMenuRole(QAction::PreferencesRole);
 
     // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
     window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
@@ -516,6 +529,27 @@ int main(int argc, char** argv) {
     QObject::connect(testMessagesAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogTestMessages(); });
     QAction* burstAction = debugMenu->addAction(QObject::tr("Emit 10 000 Log &Messages"));
     QObject::connect(burstAction, &QAction::triggered, &window, []() { usdcc::usd::emitLogBurst(10000); });
+    // One toast of every kind, a long one, a sticky one and one from the log
+    // (docs/NOTIFICATIONS.md).
+    QAction* testToastsAction = debugMenu->addAction(QObject::tr("Show Test T&oasts"));
+    QObject::connect(testToastsAction, &QAction::triggered, &window, [&window]() {
+        using usdcc::core::ToastKind;
+        using usdcc::core::ToastRequest;
+        usdcc::ui::ToastManager* toasts = window.toasts();
+        toasts->show({.kind = ToastKind::Info, .title = "Stage opened", .body = "cube_and_sphere.usda"});
+        toasts->show({.kind = ToastKind::Success, .title = "Saved", .body = "cube_and_sphere.usda\n3 prims, 2 layers"});
+        toasts->show({.kind = ToastKind::Warning,
+                      .title = "Unresolved asset paths",
+                      .body = "Two references point at files that don't exist:\n"
+                              "  ./props/chair.usda\n"
+                              "  ./props/table_with_a_rather_long_file_name_that_wraps.usda\n"
+                              "The prims that use them stay empty until the files are there."});
+        toasts->show({.kind = ToastKind::Error,
+                      .title = "Export failed (stays until dismissed)",
+                      .body = "Could not write C:/out/scene.usda:\nPermission denied",
+                      .durationMs = ToastRequest::kSticky});
+        USDCC_LOG_TOAST(usdcc::core::LogLevel::Warning, "usdcc.test", "A warning logged as a toast, from {}", "C++");
+    });
     // Runs a file without opening it in the Script Editor panel.
     debugMenu->addSeparator();
     QAction* runPythonAction = debugMenu->addAction(QObject::tr("Run &Python File..."));

@@ -11,11 +11,14 @@ add_library(usdcc_core SHARED
     include/usdcc/core/file_log_sink.h
     include/usdcc/core/log.h
     include/usdcc/core/native_stream_capture.h
+    include/usdcc/core/settings.h
     include/usdcc/core/signal.h
+    include/usdcc/core/toast.h
     src/console_log_sink.cpp
     src/file_log_sink.cpp
     src/log.cpp
     src/native_stream_capture.cpp
+    src/settings.cpp
 )
 target_include_directories(usdcc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(usdcc_core PRIVATE USDCC_CORE_BUILD)
@@ -38,6 +41,14 @@ function(usdcc_deploy_core_library target)
         add_custom_target(${target}_copy_libraries ${_commands} VERBATIM)
         add_dependencies(${target}_copy_libraries usdcc_core ${ARGN})
         add_dependencies(${target} ${target}_copy_libraries)
+        # One copy step after another: several targets share an output folder
+        # (the test programs, the Python modules), and in a parallel build two
+        # steps copying the same DLL there at once fail on the locked file.
+        get_property(_previous GLOBAL PROPERTY USDCC_LAST_COPY_LIBRARIES_TARGET)
+        if(_previous)
+            add_dependencies(${target}_copy_libraries ${_previous})
+        endif()
+        set_property(GLOBAL PROPERTY USDCC_LAST_COPY_LIBRARIES_TARGET ${target}_copy_libraries)
     endif()
 endfunction()
 
@@ -53,6 +64,16 @@ endfunction()
 # functions exported (docs/PLUGINS.md §3.2). Data has to be marked (core/export.h).
 function(usdcc_export_library target)
     set_target_properties(${target} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    if(MSVC)
+        # A class marked for export (a Q_OBJECT class, for its staticMetaObject,
+        # which the generated list leaves out) has its vtables exported twice:
+        # by the class's dllexport and by WINDOWS_EXPORT_ALL_SYMBOLS's list, which
+        # includes them. The linker warns (LNK4197, "export specified multiple
+        # times") and uses the first; both name the same symbol, so nothing is
+        # wrong. Neither can go (the list can't be filtered, and the marking is
+        # what exports the meta-objects), so the warning is turned off here.
+        target_link_options(${target} PRIVATE /IGNORE:4197)
+    endif()
     # USD's headers ask for the release Python import library in every
     # configuration, as for the app (src/cpp/app/CMakeLists.txt).
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")

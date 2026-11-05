@@ -8,9 +8,14 @@
  *              #141416 inset (inputs, tracks)   #0e0e10 gaps
  *   hairlines  rgba(255,255,255, 6%) dividers   8% input borders   10% popups
  *   text       #e8e8ea primary   75% / 50% / 40% secondary, muted, section labels
- *   accent     #3d8bfd   (selection fill: 18% of accent)
+ *   accent     @accent   (selection fill: 18% of accent)
  *   axes       X #ff5f56   Y #4fd671   Z #3d8bfd
  *   radii      3px controls, 4px groups     density: 11px type, 20px controls
+ *
+ * The accent is the Appearance/accentColor setting (#3d8bfd by default):
+ * theme.cpp replaces @accent with it, @accent-rgb with its "r, g, b" (for
+ * rgba(@accent-rgb, 25%)) and @accent-hover with a lighter shade before
+ * applying this file, and again whenever it changes. The Z axis stays blue.
  *
  * Kept in sync by hand with the palette in theme.cpp and the viewport
  * background in hydra_viewport_window.cpp. Dock-system (ADS) widgets need
@@ -76,7 +81,7 @@ QMenu::item {
 }
 
 QMenu::item:selected {
-    background: #3d8bfd;
+    background: @accent;
     color: #ffffff;
 }
 
@@ -98,7 +103,7 @@ QMenu::indicator {
 
 QMenu::indicator:non-exclusive:checked {
     image: url(:/usdcc/theme/check.png);
-    background: #3d8bfd;
+    background: @accent;
     border-radius: 2px;
 }
 
@@ -113,7 +118,7 @@ QAbstractSpinBox {
     color: rgba(255, 255, 255, 75%);
     border: 1px solid rgba(255, 255, 255, 8%);
     border-radius: 3px;
-    selection-background-color: #3d8bfd;
+    selection-background-color: @accent;
     selection-color: #ffffff;
 }
 
@@ -127,7 +132,7 @@ QComboBox:focus,
 QComboBox:on,
 QLineEdit:focus,
 QAbstractSpinBox:focus {
-    border-color: #3d8bfd;
+    border-color: @accent;
 }
 
 /* A field that can't be edited (the Attribute Editor's Type, Specifier,
@@ -162,7 +167,7 @@ QComboBox QAbstractItemView {
     background: #1c1c1e;
     color: rgba(255, 255, 255, 75%);
     border: 1px solid rgba(255, 255, 255, 10%);
-    selection-background-color: #3d8bfd;
+    selection-background-color: @accent;
     selection-color: #ffffff;
     outline: 0;
 }
@@ -186,8 +191,8 @@ QPushButton:pressed,
 QToolButton:pressed,
 QPushButton:default,
 QToolButton:checked {
-    background: #3d8bfd;
-    border-color: #3d8bfd;
+    background: @accent;
+    border-color: @accent;
     color: #ffffff;
 }
 
@@ -217,8 +222,8 @@ QCheckBox::indicator:checked,
 QTreeView::indicator:checked,
 QTableView::indicator:checked,
 QListView::indicator:checked {
-    background: #3d8bfd;
-    border-color: #3d8bfd;
+    background: @accent;
+    border-color: @accent;
     image: url(:/usdcc/theme/check.png);
 }
 
@@ -227,8 +232,8 @@ QCheckBox::indicator:indeterminate,
 QTreeView::indicator:indeterminate,
 QTableView::indicator:indeterminate,
 QListView::indicator:indeterminate {
-    background: #3d8bfd;
-    border-color: #3d8bfd;
+    background: @accent;
+    border-color: @accent;
     image: url(:/usdcc/theme/check-partial.png);
 }
 
@@ -239,7 +244,7 @@ QSlider::groove:horizontal {
 }
 
 QSlider::sub-page:horizontal {
-    background: #3d8bfd;
+    background: @accent;
     border-radius: 2px;
 }
 
@@ -260,7 +265,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: #3d8bfd;
+    background: @accent;
     border-radius: 2px;
 }
 
@@ -275,7 +280,7 @@ QListView {
     border: none;
     outline: 0;
     gridline-color: rgba(255, 255, 255, 6%);
-    selection-background-color: rgba(61, 139, 253, 18%);
+    selection-background-color: rgba(@accent-rgb, 18%);
     selection-color: #ffffff;
 }
 
@@ -297,7 +302,7 @@ QListView::item:hover {
 QTreeView::item:selected,
 QListView::item:selected,
 QTableView::item:selected {
-    background: rgba(61, 139, 253, 18%);
+    background: rgba(@accent-rgb, 18%);
     color: #ffffff;
 }
 
@@ -320,7 +325,7 @@ QPlainTextEdit {
     background: #141416;
     color: rgba(255, 255, 255, 75%);
     border: none;
-    selection-background-color: rgba(61, 139, 253, 45%);
+    selection-background-color: rgba(@accent-rgb, 45%);
     selection-color: #ffffff;
 }
 
@@ -360,22 +365,22 @@ QTabBar#scriptTabs::tab:hover {
 }
 
 QTabBar#scriptTabs::tab:selected {
-    background: rgba(61, 139, 253, 25%);
+    background: rgba(@accent-rgb, 25%);
     color: #e8e8ea;
 }
 
 QTabBar#scriptTabs::tab:selected:hover {
-    background: rgba(61, 139, 253, 35%);
+    background: rgba(@accent-rgb, 35%);
 }
 
 QTabBar#scriptTabs[focused="true"]::tab:selected {
-    background: #3d8bfd;
+    background: @accent;
     color: #ffffff;
-    border-color: transparent #3d8bfd #3d8bfd transparent;
+    border-color: transparent @accent @accent transparent;
 }
 
 QTabBar#scriptTabs[focused="true"]::tab:selected:hover {
-    background: #5a9cfd;
+    background: @accent-hover;
 }
 
 QToolButton#scriptTabClose {
@@ -608,7 +613,7 @@ QToolBar#toolRail QToolButton:hover {
 }
 
 QToolBar#toolRail QToolButton:checked {
-    background: #3d8bfd;
+    background: @accent;
 }
 
 /* The contents; the toolbar above supplies the background and divider. */
@@ -656,7 +661,7 @@ QToolButton#segmentButton:hover {
 }
 
 QToolButton#segmentButton:checked {
-    background: #3d8bfd;
+    background: @accent;
     color: #ffffff;
 }
 
@@ -693,13 +698,13 @@ QLabel#propertyNote {
 }
 
 QLabel#propertyBadge {
-    color: #3d8bfd;
+    color: @accent;
     font-size: 10px;
 }
 
 /* Second line under a value: resolved asset path, connection source. */
 QLabel#propertySubLine {
-    color: #3d8bfd;
+    color: @accent;
     font-size: 10px;
 }
 
@@ -771,7 +776,7 @@ QTabBar::tab:hover {
 
 QTabBar::tab:selected {
     color: #e8e8ea;
-    border-bottom-color: #3d8bfd;
+    border-bottom-color: @accent;
 }
 
 /* Expand/collapse arrow (a matrix's full grid). */
@@ -834,7 +839,7 @@ QToolButton#pillLink {
 }
 
 QToolButton#pillLink:hover {
-    color: #3d8bfd;
+    color: @accent;
 }
 
 QFrame#schemaPill[state="unregistered"] QToolButton#pillLink {
@@ -886,12 +891,12 @@ QLabel#dragHandle:hover {
 }
 
 QFrame#dropIndicator {
-    background: #3d8bfd;
+    background: @accent;
 }
 
 /* The op the Move/Rotate/Scale tools act on. */
 QLabel#propertyLabel[target="true"] {
-    color: #3d8bfd;
+    color: @accent;
     font-weight: 600;
 }
 
@@ -901,4 +906,118 @@ QCheckBox#sectionHeaderCheck {
 
 QLabel#targetHint {
     color: #ffb340;
+}
+
+/* ---- Settings dialog (SettingsDialog, docs/SETTINGS.md) ---------------- */
+
+QListWidget#settingsCategories {
+    background: #161618;
+    border: 1px solid rgba(255, 255, 255, 6%);
+    border-radius: 4px;
+    padding: 4px;
+}
+
+QListWidget#settingsCategories::item {
+    padding: 5px 8px;
+}
+
+QScrollArea#settingsPage,
+QWidget#settingsPageContent {
+    background: #1c1c1e;
+}
+
+QLabel#settingsPageTitle {
+    color: #e8e8ea;
+    font-size: 15px;
+    font-weight: 600;
+    padding-bottom: 2px;
+}
+
+QLabel#settingsGroupTitle {
+    color: rgba(255, 255, 255, 50%);
+    font-weight: 600;
+    padding-top: 10px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+}
+
+QLabel#settingLabel {
+    color: rgba(255, 255, 255, 75%);
+}
+
+QLabel#settingConflict {
+    color: #ff5f56;
+}
+
+QToolButton#settingReset {
+    background: transparent;
+    border: none;
+    padding: 0 4px;
+    color: rgba(255, 255, 255, 50%);
+}
+
+QToolButton#settingReset:hover {
+    color: @accent;
+}
+
+QToolButton#settingColorButton {
+    padding: 0 8px 0 4px;
+}
+
+/* ---- Toast notifications (ToastWidget, docs/NOTIFICATIONS.md) ----------
+   The card, its stripe, icon and countdown bar are painted (toast.cpp, in
+   theme::toastColor()); these are its texts and buttons. */
+
+QLabel#toastTitle {
+    color: #e8e8ea;
+    font-weight: 600;
+}
+
+QLabel#toastBody {
+    color: rgba(255, 255, 255, 75%);
+}
+
+QScrollArea#toastBodyScroll,
+QScrollArea#toastBodyScroll > QWidget,
+QScrollArea#toastBodyScroll > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QLabel#toastCount {
+    color: rgba(255, 255, 255, 75%);
+    background: rgba(255, 255, 255, 10%);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 10px;
+}
+
+QToolButton#toastClose {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+}
+
+QToolButton#toastClose:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+QPushButton#toastAction {
+    min-height: 18px;
+    padding: 0 10px;
+}
+
+QToolButton#toastDismissAll {
+    background: #232326;
+    color: rgba(255, 255, 255, 75%);
+    border: 1px solid rgba(255, 255, 255, 10%);
+    border-radius: 9px;
+    padding: 0 10px;
+    min-height: 18px;
+}
+
+QToolButton#toastDismissAll:hover {
+    color: #e8e8ea;
+    background: #2c2c30;
 }

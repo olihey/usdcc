@@ -1,8 +1,10 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/ui/theme.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -47,7 +49,6 @@ namespace usdcc::usd {
 namespace {
 const QColor kMissingColor(0xff, 0x5f, 0x56);   // as the log's errors
 const QColor kMutedColor(255, 255, 255, 89);     // 35%, as a note
-const QColor kTargetColor(0x3d, 0x8b, 0xfd);     // the accent
 constexpr int kIdentifierRole = Qt::UserRole;
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
@@ -220,6 +221,9 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     m_refreshTimer->setInterval(100);
     connect(m_refreshTimer, &QTimer::timeout, this, &LayerEditorViewPanel::refresh);
 
+    // The edit target's name is drawn in the accent colour.
+    usdcc::ui::onSettingChanged(this, usdcc::ui::theme::accentColorKey, [this]() { m_refreshTimer->start(); });
+
     refreshStageCombo();
     // See ViewportViewPanel's constructor for why this is explicit.
     onStageChanged(currentStage());
@@ -336,7 +340,7 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     } else if (entry.muted) {
         item->setForeground(Name, kMutedColor);
     } else if (entry.editTarget) {
-        item->setForeground(Name, kTargetColor);
+        item->setForeground(Name, usdcc::ui::theme::accent());
     }
 
     if (entry.editTarget) {

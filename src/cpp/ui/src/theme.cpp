@@ -1,5 +1,6 @@
 #include "usdcc/ui/theme.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
 
 #include <DockManager.h>
@@ -29,11 +30,10 @@ QString readResource(const QString& path) {
 
 // Same surfaces/text/accent as dark.qss — the palette is what widgets the
 // stylesheet doesn't cover (and Fusion's own drawing) fall back to.
-QPalette darkPalette() {
+QPalette darkPalette(const QColor& accent) {
     const QColor panel(0x1c, 0x1c, 0x1e);
     const QColor inset(0x14, 0x14, 0x16);
     const QColor text(0xe8, 0xe8, 0xea);
-    const QColor accent(0x3d, 0x8b, 0xfd);
     const QColor disabledText(255, 255, 255, 80);
 
     QPalette p;
@@ -66,7 +66,50 @@ QPalette darkPalette() {
     return p;
 }
 
+// The final stylesheet: tokens resolved, then dimensions scaled.
+QString themed(const QString& original) {
+    return UiScaleController::instance().styleSheet(resolveTokens(original, accent()));
+}
+
 }  // namespace
+
+void defineSettings() {
+    core::Settings::instance().define({
+        .key = accentColorKey,
+        .category = "Appearance",
+        .group = "Theme",
+        .label = "Accent color",
+        .description = "Selections, checked buttons, focus borders and links.",
+        .type = core::SettingType::Color,
+        .defaultValue = std::string(defaultAccentColor),
+    });
+}
+
+QColor accent() {
+    const QColor color = settingColor(accentColorKey);
+    return color.isValid() ? color : QColor(QString::fromLatin1(defaultAccentColor));
+}
+
+QColor toastColor(core::ToastKind kind) {
+    switch (kind) {
+        case core::ToastKind::Success: return QColor(0x4f, 0xd6, 0x71);
+        case core::ToastKind::Warning: return QColor(0xff, 0xb3, 0x40);
+        case core::ToastKind::Error: return QColor(0xff, 0x5f, 0x56);
+        case core::ToastKind::Info: break;
+    }
+    return accent();
+}
+
+QString resolveTokens(const QString& sheet, const QColor& accentColor) {
+    QString result = sheet;
+    result.replace(QStringLiteral("@accent-rgb"), QStringLiteral("%1, %2, %3")
+                                                      .arg(accentColor.red())
+                                                      .arg(accentColor.green())
+                                                      .arg(accentColor.blue()));
+    result.replace(QStringLiteral("@accent-hover"), accentColor.lighter(115).name());
+    result.replace(QStringLiteral("@accent"), accentColor.name());
+    return result;
+}
 
 QIcon appIcon() {
     initThemeResources();
@@ -85,13 +128,22 @@ void apply(QApplication& app) {
     // Icon= and the installed hicolor icons. Harmless elsewhere.
     QGuiApplication::setDesktopFileName(QStringLiteral("usdcc"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
-    app.setPalette(darkPalette());
+    defineSettings();
     auto& scale = UiScaleController::instance();
     const auto refresh = [&app]() {
-        app.setStyleSheet(UiScaleController::instance().styleSheet(
-            readResource(QStringLiteral(":/usdcc/theme/dark.qss"))));
+        app.setPalette(darkPalette(accent()));
+        app.setStyleSheet(themed(readResource(QStringLiteral(":/usdcc/theme/dark.qss"))));
     };
-    QObject::connect(&scale, &UiScaleController::scaleChanged, &app, [refresh](int) { refresh(); });
+    // Named so a second apply() (tests) replaces the connections instead of
+    // stacking more.
+    constexpr auto scaleName = "_usdccThemeScale";
+    constexpr auto accentName = "_usdccThemeAccent";
+    delete app.findChild<QObject*>(QLatin1String(scaleName), Qt::FindDirectChildrenOnly);
+    delete app.findChild<QObject*>(QLatin1String(accentName), Qt::FindDirectChildrenOnly);
+    auto* scaleConnection = new QObject(&app);
+    scaleConnection->setObjectName(QLatin1String(scaleName));
+    QObject::connect(&scale, &UiScaleController::scaleChanged, scaleConnection, [refresh](int) { refresh(); });
+    onSettingChanged(&app, accentColorKey, refresh)->setObjectName(QLatin1String(accentName));
     refresh();
 }
 
@@ -105,9 +157,11 @@ void applyToDockManager(ads::CDockManager* dockManager) {
     }
     const QString original = dockManager->property(key).toString() + QLatin1Char('\n') +
                              readResource(QStringLiteral(":/usdcc/theme/dock.qss"));
-    UiScaleController::instance().bind(dockManager, "dockStyle", [dockManager, original]() {
-        dockManager->setStyleSheet(UiScaleController::instance().styleSheet(original));
-    });
+    const auto refresh = [dockManager, original]() { dockManager->setStyleSheet(themed(original)); };
+    UiScaleController::instance().bind(dockManager, "dockStyle", refresh);
+    constexpr auto accentName = "_usdccDockAccent";
+    delete dockManager->findChild<QObject*>(QLatin1String(accentName), Qt::FindDirectChildrenOnly);
+    onSettingChanged(dockManager, accentColorKey, refresh)->setObjectName(QLatin1String(accentName));
 }
 
 }  // namespace usdcc::ui::theme

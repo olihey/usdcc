@@ -37,6 +37,22 @@ if(MSVC)
     # full symbols; it just doesn't get MSVC's debug-STL/heap checks.
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
     add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0)
+    # Unoptimised, a file instantiating templates for every USD value type
+    # (value_type_info.cpp) has more sections than an object file allows by
+    # default (C1128).
+    add_compile_options(/bigobj)
+    # C++ exceptions, without /EHsc's "extern C functions never throw": a C++
+    # plugin's entry points are extern "C" and may throw, and the app catches
+    # that and fails the plugin (docs/PLUGIN_SDK.md). Under /EHsc that's
+    # undefined behaviour (warning C4297 in the plugin).
+    string(REPLACE "/EHsc" "/EHs" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    # Build in parallel. /MP compiles a target's files at once; MSBuild's
+    # multi-tool task does the same across projects, sharing one limit (the
+    # core count) between them, so building several projects at a time
+    # (`cmake --build --parallel`, as tools/build.ps1 does, or Visual Studio)
+    # doesn't start cores x cores compilers.
+    add_compile_options(/MP)
+    set(CMAKE_VS_GLOBALS "UseMultiToolTask=true" "EnforceProcessCountAcrossBuilds=true")
     # The same goes for Qt and Qt Advanced Docking System: Qt hands ownership
     # of objects across its DLL boundary (e.g. setLayout(new QHBoxLayout) is
     # deleted from inside Qt), so they must be on the same CRT heap as the app.
@@ -60,8 +76,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # overlays directly into the same Compatibility-profile GL context Storm
 # already requires (see docs/PLAN.md milestone M5/M3). Svg: the Outliner's
 # prim icons, rendered with QSvgRenderer (docs/PRIM_ICONS.md); no SVG
-# plugins are needed for that.
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg)
+# plugins are needed for that. Test: only for the tests (key presses that go
+# through the shortcut map, QTest::keyClick).
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)
@@ -188,6 +205,16 @@ set(USDCC_BUILT_FOR_QT "${Qt6_VERSION}")
 set(USDCC_BUILT_FOR_USD "${PXR_VERSION}")
 set(USDCC_BUILT_FOR_USDCC "${PROJECT_VERSION}")
 include(UsdccPlugin)
+
+# Precompiled headers for the libraries whose files almost all include OpenUSD
+# and Qt: parsing those was ~90% of a file's compile time (cmake/pch/*.h say
+# what may go in them). Off checks that every file still includes what it uses.
+option(USDCC_USE_PCH "Precompile the OpenUSD/Qt headers of the main libraries and tests" ON)
+function(usdcc_precompile_headers target header)
+    if(USDCC_USE_PCH)
+        target_precompile_headers(${target} PRIVATE "${CMAKE_SOURCE_DIR}/cmake/pch/${header}")
+    endif()
+endfunction()
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/tools)

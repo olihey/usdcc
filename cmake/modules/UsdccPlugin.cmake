@@ -38,6 +38,16 @@ function(usdcc_add_plugin target)
     set(VCPKG_APPLOCAL_DEPS OFF)
     add_library(${target} MODULE ${ARG_SOURCES})
     target_link_libraries(${target} PRIVATE usdcc::plugin_sdk)
+    if(MSVC AND CMAKE_CXX_FLAGS MATCHES "/EHsc")
+        # The entry points are extern "C", and may throw: the app catches what
+        # usdcc_plugin_activate() throws and fails the plugin with its message
+        # (docs/PLUGIN_SDK.md). MSVC's default /EHsc assumes an extern "C"
+        # function never throws (warning C4297 where one does, and undefined
+        # behaviour); /EHc- drops that assumption for the plugin's code. usdcc's
+        # own build uses /EHs throughout; a project of its own can do the same
+        # (replacing /EHsc in CMAKE_CXX_FLAGS) to avoid cl's D9025 note here.
+        target_compile_options(${target} PRIVATE /EHc-)
+    endif()
     # USD's headers ask for the release Python import library in every
     # configuration, as for the app (src/cpp/app/CMakeLists.txt).
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")

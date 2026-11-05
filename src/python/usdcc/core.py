@@ -7,6 +7,7 @@ changing which levels are kept, as USDCC_LOG does at start-up::
     import usdcc.core
     usdcc.core.log(usdcc.core.WARNING, "my.tool", "Something looks odd")
     usdcc.core.set_levels("info,my.tool=debug")
+    usdcc.core.log(usdcc.core.ERROR, "my.tool", "Export failed", toast="sticky")
 """
 
 from usdcc.log import DEBUG, ERROR, FATAL, INFO, TRACE, WARNING, post
@@ -19,9 +20,16 @@ except ImportError:  # a plain python, not the app
 __all__ = ["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL", "log", "set_levels"]
 
 
-def log(level, category, message, details=""):
-    """Posts a record (source "python") to the log. No-op outside the app."""
-    post(level, category, message, details)
+def log(level, category, message, details="", toast=False, title="", kind=None):
+    """Posts a record (source "python") to the log. No-op outside the app.
+
+    `toast` True (or "sticky", to stay until dismissed) also shows it as a
+    toast notification (docs/NOTIFICATIONS.md), whatever levels the log keeps:
+    titled `title` (else the level's name), of `kind` ("info", "success",
+    "warning", "error"; else the level's), the message (and details) as its
+    body.
+    """
+    post(level, category, message, details, toast=toast, toast_title=title, toast_kind=kind or "")
 
 
 def set_levels(spec):

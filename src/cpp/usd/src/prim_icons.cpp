@@ -1,5 +1,7 @@
 #include "usdcc/usd/prim_icons.h"
 
+#include "usdcc/ui/theme.h"
+
 #include <pxr/base/tf/type.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 
@@ -28,9 +30,8 @@ namespace {
 // row's white (dark.qss, QTreeView::item:selected).
 constexpr auto kIconColor = "#a0a0a4";
 constexpr auto kSelectedColor = "#ffffff";
-// The badges' colour, on selected rows too: the theme's accent blue
-// (dark.qss).
-constexpr auto kBadgeColor = "#3d8bfd";
+// The badges' colour, on selected rows too, is the theme's accent
+// (usdcc::ui::theme::accent()), looked up whenever one is drawn.
 // An inactive prim's icon, as faded as its name.
 constexpr qreal kInactiveOpacity = 0.35;
 // The badge's circle in the icon's 24-unit grid, at the lower left: cleared
@@ -161,7 +162,14 @@ public:
     }
 
     QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State, qreal scale) override {
-        const QString key = QStringLiteral("%1x%2@%3/%4").arg(size.width()).arg(size.height()).arg(scale).arg(mode);
+        // The accent is part of the key: a new accent colour draws new badges.
+        const QString badgeColor = m_badge.isEmpty() ? QString() : usdcc::ui::theme::accent().name();
+        const QString key = QStringLiteral("%1x%2@%3/%4/%5")
+                                .arg(size.width())
+                                .arg(size.height())
+                                .arg(scale)
+                                .arg(mode)
+                                .arg(badgeColor);
         const auto cached = m_pixmaps.constFind(key);
         if (cached != m_pixmaps.constEnd()) return *cached;
         QPixmap pixmap(size * scale);
@@ -170,7 +178,7 @@ public:
         {
             QPainter painter(&pixmap);
             painter.setRenderHint(QPainter::Antialiasing);
-            draw(painter, QRectF(QPointF(), size), mode);
+            draw(painter, QRectF(QPointF(), size), mode, badgeColor.toLatin1());
         }
         m_pixmaps.insert(key, pixmap);
         return pixmap;
@@ -181,7 +189,7 @@ public:
     QString key() const override { return QStringLiteral("usdcc-prim-icon"); }
 
 private:
-    void draw(QPainter& painter, const QRectF& rect, QIcon::Mode mode) {
+    void draw(QPainter& painter, const QRectF& rect, QIcon::Mode mode, const QByteArray& badgeColor) {
         if (m_inactive || mode == QIcon::Disabled) painter.setOpacity(kInactiveOpacity);
         renderer(m_svg, m_renderers, mode, kIconColor, kSelectedColor).render(&painter, rect);
         if (m_badge.isEmpty()) return;
@@ -194,21 +202,27 @@ private:
         painter.setBrush(Qt::black);
         painter.drawEllipse(center, kBadgeRadius * unit, kBadgeRadius * unit);
         painter.restore();
-        renderer(m_badge, m_badgeRenderers, mode, kBadgeColor, kBadgeColor).render(&painter, rect);
+        renderer(m_badge, m_badgeRenderers, mode, badgeColor, badgeColor).render(&painter, rect);
     }
 
-    using Renderers = std::array<std::unique_ptr<QSvgRenderer>, 2>;  // normal, selected
+    struct Renderer {
+        std::unique_ptr<QSvgRenderer> svg;
+        QByteArray color;  // what currentColor was replaced with
+    };
+    using Renderers = std::array<Renderer, 2>;  // normal, selected
 
     static QSvgRenderer& renderer(const QByteArray& source, Renderers& renderers, QIcon::Mode mode,
-                                  const char* color, const char* selectedColor) {
+                                  const QByteArray& color, const QByteArray& selectedColor) {
         const bool selected = mode == QIcon::Selected;
-        std::unique_ptr<QSvgRenderer>& renderer = renderers[selected ? 1 : 0];
-        if (!renderer) {
+        Renderer& renderer = renderers[selected ? 1 : 0];
+        const QByteArray& wanted = selected ? selectedColor : color;
+        if (!renderer.svg || renderer.color != wanted) {
             QByteArray svg = source;
-            svg.replace("currentColor", selected ? selectedColor : color);
-            renderer = std::make_unique<QSvgRenderer>(svg);
+            svg.replace("currentColor", wanted);
+            renderer.svg = std::make_unique<QSvgRenderer>(svg);
+            renderer.color = wanted;
         }
-        return *renderer;
+        return *renderer.svg;
     }
 
     QByteArray m_svg;

@@ -23,3 +23,4 @@ target_include_directories(usdcc_tools PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inclu
 # usdcc_usd (Qt-free too) for the shared transform-op maths and value access.
 target_link_libraries(usdcc_tools PUBLIC usdcc_core usdcc_usd ${PXR_LIBRARIES})
 usdcc_export_library(usdcc_tools)
+usdcc_precompile_headers(usdcc_tools usd_pch.h)

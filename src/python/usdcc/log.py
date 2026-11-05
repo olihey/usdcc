@@ -12,6 +12,10 @@ Log panel and the log file, with source "python":
 - uncaught exceptions, also in threads: an Error with the traceback in the
   record's details, category "python.exception" / "python.thread".
 
+A logging record with ``extra={"usdcc_toast": True}`` (or ``"sticky"``) is also
+shown as a toast notification (docs/NOTIFICATIONS.md), like
+usdcc.core.log(..., toast=True); ``extra={"usdcc_toast_title": ...}`` titles it.
+
 Outside the app there is no _usdcc_log module: install() does nothing and the
 user's own logging setup applies.
 """
@@ -50,10 +54,25 @@ def _thread_name():
     return "" if name == "MainThread" else name
 
 
-def post(level, category, message, details="", file="", line=0, function="", source=SOURCE):
-    """Posts one record to the log (no-op outside the app)."""
+def _toast_mode(toast):
+    """True/"timed" -> "timed", "sticky" -> "sticky", False/None -> ""."""
+    if toast is None or toast is False or toast == "":
+        return ""
+    if toast is True or toast == "timed":
+        return "timed"
+    if toast == "sticky":
+        return "sticky"
+    raise ValueError("toast must be True, False, 'timed' or 'sticky'")
+
+
+def post(level, category, message, details="", file="", line=0, function="", source=SOURCE, toast=False,
+         toast_title="", toast_kind=""):
+    """Posts one record to the log (no-op outside the app). `toast` True or
+    "sticky" also shows it as a toast notification."""
+    mode = _toast_mode(toast)
     if _hub is not None:
-        _hub.post(level, source, category, message, details, file, line or 0, function, _thread_name())
+        _hub.post(level, source, category, message, details, file, line or 0, function, _thread_name(),
+                  mode, toast_title or "", toast_kind or "")
 
 
 def log_exception(exc_type, exc_value, exc_traceback, category="python.exception", source=SOURCE):
@@ -77,16 +96,18 @@ class _HubHandler(logging.Handler):
     def emit(self, record):
         try:
             level = _level(record.levelno)
+            toast = getattr(record, "usdcc_toast", False)
             # A plugin's logger, plugin.log, is "plugin.<id>" (docs/PLUGINS.md).
             source = "plugin:" + record.name[7:] if record.name.startswith("plugin.") else SOURCE
-            if not _hub.is_enabled(level, source, record.name):
+            if not toast and not _hub.is_enabled(level, source, record.name):
                 return
             details = ""
             if record.exc_info and record.exc_info[0] is not None:
                 details = "".join(traceback.format_exception(*record.exc_info)).rstrip()
             elif record.stack_info:
                 details = record.stack_info
-            post(level, record.name, record.getMessage(), details, record.pathname, record.lineno, record.funcName, source)
+            post(level, record.name, record.getMessage(), details, record.pathname, record.lineno, record.funcName, source,
+                 toast=toast, toast_title=getattr(record, "usdcc_toast_title", ""))
         except Exception:
             self.handleError(record)
 

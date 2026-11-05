@@ -4,6 +4,8 @@
 
 #include <QToolBar>
 
+#include <string>
+
 class QActionGroup;
 
 namespace usdcc::usd {
@@ -23,7 +25,9 @@ public:
     // icons `:/usdcc/theme/<icon>.png` (idle) and `<icon>-active.png` (shown
     // while it's checked, on its accent background), or is the path of an image
     // file, used for both. Empty: the tooltip's first letter is drawn.
-    void addTool(const QString& id, const QString& toolTip, const QString& icon);
+    // `shortcutKey` names a Shortcut setting (usdcc::core::Settings) that picks
+    // the tool from anywhere in the app; the tooltip shows its current key.
+    void addTool(const QString& id, const QString& toolTip, const QString& icon, const std::string& shortcutKey = {});
     // Removes them all.
     void clearTools();
 

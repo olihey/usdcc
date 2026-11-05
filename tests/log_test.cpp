@@ -312,3 +312,62 @@ USDCC_TEST(log_file_rotation) {
     CHECK(std::filesystem::exists(dir / "unrelated.txt"), "other files untouched");
     CHECK(std::filesystem::exists(dir / "usdcc-20200101-000011-1.log"), "the newest old log kept");
 }
+
+// A record marked to show as a toast (docs/NOTIFICATIONS.md): the marking
+// reaches the sinks, passes a disabled level, and only collapses with a
+// record marked the same way.
+USDCC_TEST(log_toast_records) {
+    LogHub hub;
+    hub.setDefaultLevel(LogLevel::Error);
+    auto sink = std::make_shared<CollectingSink>();
+    hub.addSink(sink);
+
+    LogRecord plain = makeRecord("usdcc", "below the level");
+    hub.post(plain);
+    CHECK(sink->records.empty(), "an Info record is dropped at level Error");
+
+    LogRecord marked = makeRecord("usdcc", "below the level, as a toast");
+    marked.toast = usdcc::core::ToastRequest::sticky();
+    marked.toast->title = "Heads up";
+    hub.post(marked);
+    CHECK(sink->records.size() == 1, "a toast record passes a disabled level (%zu)", sink->records.size());
+    if (!sink->records.empty()) {
+        const LogRecord& record = sink->records.back();
+        CHECK(record.toast && record.toast->durationMs == usdcc::core::ToastRequest::kSticky &&
+                  record.toast->title == "Heads up",
+              "and keeps its toast request");
+    }
+
+    hub.setDefaultLevel(LogLevel::Info);
+    LogRecord first = makeRecord("usdcc", "same text");
+    hub.post(first);
+    LogRecord asToast = makeRecord("usdcc", "same text");
+    asToast.toast = usdcc::core::ToastRequest{};
+    hub.post(asToast);
+    CHECK(sink->records.size() == 3 && sink->repeats == 0,
+          "a toast record doesn't collapse into a plain one (%zu records, %d repeats)", sink->records.size(),
+          sink->repeats);
+    hub.post(asToast);
+    CHECK(sink->records.size() == 3 && sink->repeats == 1, "but into the same toast record");
+
+    // The macros.
+    LogHub& app = LogHub::instance();
+    auto appSink = std::make_shared<CollectingSink>();
+    app.addSink(appSink, false);
+    USDCC_LOG_TOAST(LogLevel::Debug, "usdcc.test", "a {} toast", "debug");
+    USDCC_LOG_TOAST_STICKY(LogLevel::Error, "usdcc.test", "a sticky {}", "error");
+    USDCC_LOG_TOAST_AS(LogLevel::Info, "usdcc.test",
+                       (usdcc::core::ToastRequest{.kind = usdcc::core::ToastKind::Success, .title = "Saved"}),
+                       "saved {}", "scene.usda");
+    app.removeSink(appSink.get());
+    CHECK(appSink->records.size() == 3, "the toast macros post whatever the level (%zu)", appSink->records.size());
+    if (appSink->records.size() == 3) {
+        CHECK(appSink->records[0].toast && appSink->records[0].toast->durationMs == -1 &&
+                  appSink->records[0].message == "a debug toast",
+              "USDCC_LOG_TOAST: the default duration");
+        CHECK(appSink->records[1].toast && appSink->records[1].toast->durationMs == 0, "USDCC_LOG_TOAST_STICKY");
+        CHECK(appSink->records[2].toast && appSink->records[2].toast->kind == usdcc::core::ToastKind::Success &&
+                  appSink->records[2].toast->title == "Saved" && appSink->records[2].message == "saved scene.usda",
+              "USDCC_LOG_TOAST_AS");
+    }
+}

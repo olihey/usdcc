@@ -12,11 +12,13 @@
 
 #include "usdcc/scripting/app_module.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -33,9 +35,12 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace usdcc::scripting {
 
@@ -274,6 +279,128 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             if (!context().toolSet->setActive(toolName)) throw py::value_error("no tool named '" + toolName + "'");
         },
         py::arg("name"));
+
+    // usdcc.toast (docs/NOTIFICATIONS.md): the main window's toasts.
+    m.def(
+        "toast_show",
+        [](const std::string& title, const std::string& body, const std::string& kind, int durationMs) {
+            usdcc::core::ToastRequest request;
+            usdcc::core::ToastKind parsed{};
+            if (!usdcc::core::parseToastKind(kind, &parsed)) {
+                throw py::value_error("unknown toast kind '" + kind + "' (info, success, warning or error)");
+            }
+            request.kind = parsed;
+            request.title = title;
+            request.body = body;
+            request.durationMs = durationMs;
+            return mainWindow().toasts()->show(request);
+        },
+        py::arg("title"), py::arg("body") = "", py::arg("kind") = "info", py::arg("duration_ms") = -1);
+    m.def("toast_dismiss", [](int id) { mainWindow().toasts()->dismiss(id); }, py::arg("id"));
+    m.def("toast_dismiss_all", []() { mainWindow().toasts()->dismissAll(); });
+    m.def("toast_visible", []() {
+        std::vector<int> ids;
+        for (const usdcc::ui::ToastWidget* toast : mainWindow().toasts()->visibleToasts()) ids.push_back(toast->id());
+        return ids;
+    });
+
+    // usdcc.settings (docs/SETTINGS.md): the process-wide registry, so these
+    // need no AppContext.
+    using usdcc::core::SettingDefinition;
+    using usdcc::core::Settings;
+    using usdcc::core::SettingValue;
+    const auto definitionOf = [](const std::string& key) -> const SettingDefinition& {
+        const SettingDefinition* definition = Settings::instance().definition(key);
+        if (!definition) throw py::key_error("no setting '" + key + "'");
+        return *definition;
+    };
+    m.def(
+        "settings_get", [definitionOf](const std::string& key) { return Settings::instance().value(definitionOf(key).key); },
+        py::arg("key"));
+    m.def(
+        "settings_set",
+        [definitionOf](const std::string& key, const SettingValue& value) {
+            const SettingDefinition& definition = definitionOf(key);
+            if (!Settings::instance().setValue(key, value)) {
+                throw py::value_error("not a valid value for setting '" + key + "' (a " +
+                                      std::string(usdcc::core::settingTypeName(definition.type)) + ")");
+            }
+        },
+        py::arg("key"), py::arg("value"));
+    m.def(
+        "settings_reset", [definitionOf](const std::string& key) { Settings::instance().reset(definitionOf(key).key); },
+        py::arg("key"));
+    m.def(
+        "settings_is_default",
+        [definitionOf](const std::string& key) { return Settings::instance().isDefault(definitionOf(key).key); },
+        py::arg("key"));
+    m.def(
+        "settings_keys",
+        [](const std::string& category) {
+            std::vector<std::string> keys;
+            for (const SettingDefinition* definition : Settings::instance().definitions(category)) {
+                keys.push_back(definition->key);
+            }
+            return keys;
+        },
+        py::arg("category") = std::string());
+    m.def("settings_categories", []() { return Settings::instance().categories(); });
+    m.def(
+        "settings_info",
+        [definitionOf](const std::string& key) {
+            const SettingDefinition& definition = definitionOf(key);
+            py::dict info;
+            info["key"] = definition.key;
+            info["type"] = std::string(usdcc::core::settingTypeName(definition.type));
+            info["category"] = definition.category;
+            info["group"] = definition.group;
+            info["label"] = definition.label;
+            info["description"] = definition.description;
+            info["default"] = definition.defaultValue;
+            info["value"] = Settings::instance().value(key);
+            if (definition.maximum > definition.minimum) {
+                info["minimum"] = definition.minimum;
+                info["maximum"] = definition.maximum;
+            }
+            if (!definition.choices.empty()) info["choices"] = definition.choices;
+            return info;
+        },
+        py::arg("key"));
+    m.def(
+        "settings_define",
+        [](const std::string& key, const std::string& type, const SettingValue& defaultValue, const std::string& label,
+           const std::string& category, const std::string& group, const std::string& description,
+           std::optional<double> minimum, std::optional<double> maximum, std::vector<std::string> choices) {
+            SettingDefinition definition;
+            definition.key = key;
+            if (!usdcc::core::parseSettingType(type, &definition.type)) {
+                throw py::value_error("unknown setting type '" + type +
+                                      "' (bool, int, float, string, choice, color or shortcut)");
+            }
+            definition.defaultValue = defaultValue;
+            definition.label = label;
+            definition.category = category;
+            definition.group = group;
+            definition.description = description;
+            if (minimum.has_value() != maximum.has_value()) {
+                throw py::value_error("give both minimum and maximum, or neither");
+            }
+            if (minimum) {
+                if (*maximum <= *minimum) throw py::value_error("maximum must be greater than minimum");
+                definition.minimum = *minimum;
+                definition.maximum = *maximum;
+            }
+            definition.choices = std::move(choices);
+            if (!Settings::instance().define(std::move(definition))) {
+                throw py::value_error("invalid setting '" + key +
+                                      "': it needs a key and a category, and a default that fits its type");
+            }
+        },
+        py::arg("key"), py::arg("type"), py::arg("default"), py::arg("label") = std::string(),
+        py::arg("category") = std::string("Python"), py::arg("group") = std::string(),
+        py::arg("description") = std::string(), py::arg("minimum") = py::none(), py::arg("maximum") = py::none(),
+        py::arg("choices") = std::vector<std::string>());
+
     m.def(
         "register_tool",
         [](const std::string& id, const std::string& label, py::object instance, const std::string& icon) {

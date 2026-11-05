@@ -1,13 +1,12 @@
 #include "usdcc/ui/scale_controller.h"
 
-#include "usdcc/ui/settings.h"
+#include "usdcc/ui/app_settings.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QRegularExpression>
-#include <QSettings>
 #include <QWidget>
 
 #include <algorithm>
@@ -15,18 +14,27 @@
 
 namespace usdcc::ui {
 
-namespace {
-constexpr auto kScaleKey = "Appearance/uiScale";
-}  // namespace
-
 UiScaleController::UiScaleController(QApplication& app, const QString& settingsFile) : QObject(&app) {
-    // Held open rather than opened per use like appSettings(): the file may be
-    // a test's, and QSettings shares one cache per file within the process.
-    m_settings = new QSettings(settingsFile.isEmpty() ? appSettings().fileName() : settingsFile,
-                               QSettings::IniFormat, this);
-    bool ok = false;
-    const int saved = m_settings->value(kScaleKey, 100).toInt(&ok);
-    m_percent = ok ? std::clamp(saved, minimumPercent, maximumPercent) : 100;
+    if (settingsFile.isEmpty()) {
+        m_settings = &core::Settings::instance();
+    } else {
+        m_ownSettings = std::make_unique<core::Settings>();
+        m_ownSettings->setBackend(std::make_unique<QSettingsBackend>(settingsFile));
+        m_settings = m_ownSettings.get();
+    }
+    m_settings->define({.key = settingKey,
+                        .category = "Appearance",
+                        .group = "Interface",
+                        .label = "UI scale (%)",
+                        .description = "Size of text, icons and spacing (also View > UI Scale, Ctrl+Numpad+/-).",
+                        .type = core::SettingType::Int,
+                        .defaultValue = 100,
+                        .minimum = minimumPercent,
+                        .maximum = maximumPercent});
+    m_percent = m_settings->get<int>(settingKey, 100);
+    m_settingConnection = m_settings->changed.connect([this](const std::string& key) {
+        if (key == settingKey) applySetting();
+    });
     app.installEventFilter(this);
 }
 
@@ -71,9 +79,13 @@ QString UiScaleController::styleSheet(const QString& original) const {
 void UiScaleController::setPercent(int percent) {
     const int next = std::clamp(percent, minimumPercent, maximumPercent);
     if (next == m_percent) return;
+    m_settings->setValue(settingKey, next);  // -> applySetting()
+}
+
+void UiScaleController::applySetting() {
+    const int next = m_settings->get<int>(settingKey, 100);
+    if (next == m_percent) return;
     m_percent = next;
-    m_settings->setValue(kScaleKey, m_percent);
-    m_settings->sync();
     Q_EMIT scaleChanged(m_percent);
     for (QWidget* widget : QApplication::allWidgets()) {
         widget->updateGeometry();

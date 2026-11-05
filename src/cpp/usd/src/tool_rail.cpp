@@ -1,5 +1,6 @@
 #include "usdcc/usd/tool_rail.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
 
 #include <QAction>
@@ -39,7 +40,8 @@ ToolRail::ToolRail(QWidget* parent) : QToolBar(parent), m_group(new QActionGroup
     m_group->setExclusive(true);
 }
 
-void ToolRail::addTool(const QString& id, const QString& toolTip, const QString& iconName) {
+void ToolRail::addTool(const QString& id, const QString& toolTip, const QString& iconName,
+                       const std::string& shortcutKey) {
     QIcon icon;
     if (iconName.isEmpty()) {
         icon.addPixmap(letterIcon(toolTip, QColor(0xc8, 0xc8, 0xcc)), QIcon::Normal, QIcon::Off);
@@ -59,6 +61,20 @@ void ToolRail::addTool(const QString& id, const QString& toolTip, const QString&
     m_group->addAction(action);
     // triggered() (not toggled()) so only a user pick reports, not setCurrentTool().
     connect(action, &QAction::triggered, this, [this, id]() { Q_EMIT toolSelected(id); });
+
+    if (shortcutKey.empty()) return;
+    // Application-wide, so the key also works in floating panels (a floated
+    // viewport is a window of its own). Text fields still get letters typed
+    // into them: they claim those keys first (ShortcutOverride).
+    action->setShortcutContext(Qt::ApplicationShortcut);
+    usdcc::ui::bindShortcut(action, shortcutKey);
+    const auto updateToolTip = [action, toolTip, shortcutKey]() {
+        const QKeySequence key = usdcc::ui::settingShortcut(shortcutKey);
+        action->setToolTip(key.isEmpty() ? toolTip
+                                         : QStringLiteral("%1 (%2)").arg(toolTip, key.toString(QKeySequence::NativeText)));
+    };
+    usdcc::ui::onSettingChanged(action, shortcutKey, updateToolTip);
+    updateToolTip();
 }
 
 void ToolRail::clearTools() {
@@ -66,6 +82,10 @@ void ToolRail::clearTools() {
     for (QAction* action : actions) {
         m_group->removeAction(action);
         removeAction(action);
+        // Its shortcut goes now: the rebuilt rail's action takes the same key,
+        // and two live actions with one key would make it ambiguous.
+        action->setShortcut(QKeySequence());
+        action->setEnabled(false);
         action->deleteLater();
     }
 }

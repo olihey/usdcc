@@ -40,7 +40,7 @@ ads--CDockAreaTitleBar {
 }
 
 ads--CDockAreaWidget[focused="true"] ads--CDockAreaTitleBar {
-    border-bottom: 1px solid rgba(61, 139, 253, 60%);
+    border-bottom: 1px solid rgba(@accent-rgb, 60%);
 }
 
 ads--CDockWidgetTab {
@@ -59,21 +59,21 @@ ads--CDockWidgetTab:hover {
    that has focus, muted in the others, so the focused panel stands out
    while every area still shows which tab is current. */
 ads--CDockWidgetTab[activeTab="true"] {
-    background: rgba(61, 139, 253, 25%);
+    background: rgba(@accent-rgb, 25%);
     border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
 }
 
 ads--CDockWidgetTab[activeTab="true"]:hover {
-    background: rgba(61, 139, 253, 35%);
+    background: rgba(@accent-rgb, 35%);
 }
 
 ads--CDockWidgetTab[focused="true"] {
-    background: #3d8bfd;
-    border-color: transparent #3d8bfd #3d8bfd transparent;
+    background: @accent;
+    border-color: transparent @accent @accent transparent;
 }
 
 ads--CDockWidgetTab[focused="true"]:hover {
-    background: #5a9cfd;
+    background: @accent-hover;
 }
 
 ads--CDockWidgetTab QLabel {

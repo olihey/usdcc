@@ -1,5 +1,6 @@
 #include "usdcc/usd/viewport_tool_bars.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/tool_options_bar.h"
@@ -17,6 +18,22 @@
 #include <QToolBar>
 
 namespace usdcc::usd {
+
+namespace {
+
+// The built-in tools' keys; any other tool (a plugin's) gets a Shortcut
+// setting too, with no key until one is set.
+const char* defaultShortcut(const std::string& id) {
+    if (id == usdcc::tools::kSelectTool) return "Q";
+    if (id == usdcc::tools::kMoveTool) return "W";
+    if (id == usdcc::tools::kRotateTool) return "E";
+    if (id == usdcc::tools::kScaleTool) return "R";
+    return "";
+}
+
+}  // namespace
+
+std::string toolShortcutKey(const std::string& toolId) { return "Shortcuts/tools." + toolId; }
 
 ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::tools::ToolSet> toolSet,
                                    StageManager* stageManager)
@@ -141,8 +158,20 @@ void ViewportToolBars::updateArea(QToolBar* bar) {
 void ViewportToolBars::rebuildRail() {
     m_rail->clearTools();
     for (const usdcc::tools::ToolSet::Entry& entry : m_toolSet->tools()) {
+        // Its key is a setting, so it can be changed in the Settings dialog
+        // (and from Python). Defining it again (the rail rebuilds when a
+        // plugin adds a tool) keeps the key that was set.
+        const std::string key = toolShortcutKey(entry.id);
+        usdcc::core::Settings::instance().define({
+            .key = key,
+            .category = "Shortcuts",
+            .group = "Tools",
+            .label = (entry.label.empty() ? entry.id : entry.label) + " tool",
+            .type = usdcc::core::SettingType::Shortcut,
+            .defaultValue = std::string(defaultShortcut(entry.id)),
+        });
         m_rail->addTool(QString::fromStdString(entry.id), QString::fromStdString(entry.label),
-                        QString::fromStdString(entry.icon));
+                        QString::fromStdString(entry.icon), key);
     }
 }
 
