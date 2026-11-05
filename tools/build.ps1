@@ -108,7 +108,9 @@ Invoke-Checked -FilePath 'cmake' -ArgumentList $configureArgs
 # --- build ---------------------------------------------------------------
 
 Write-Host "Building ($Configuration)..."
-Invoke-Checked -FilePath 'cmake' -ArgumentList @('--build', $buildDir, '--config', $Configuration)
+# --parallel: several projects at a time (each compiles its files in parallel
+# too, within one shared limit; see the top-level CMakeLists.txt).
+Invoke-Checked -FilePath 'cmake' -ArgumentList @('--build', $buildDir, '--config', $Configuration, '--parallel')
 
 $exePath = Join-Path $buildDir "src/cpp/app/$Configuration/usdcc.exe"
 Write-Host "Build succeeded: $exePath"

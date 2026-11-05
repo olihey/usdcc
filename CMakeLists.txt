@@ -46,6 +46,13 @@ if(MSVC)
     # that and fails the plugin (docs/PLUGIN_SDK.md). Under /EHsc that's
     # undefined behaviour (warning C4297 in the plugin).
     string(REPLACE "/EHsc" "/EHs" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    # Build in parallel. /MP compiles a target's files at once; MSBuild's
+    # multi-tool task does the same across projects, sharing one limit (the
+    # core count) between them, so building several projects at a time
+    # (`cmake --build --parallel`, as tools/build.ps1 does, or Visual Studio)
+    # doesn't start cores x cores compilers.
+    add_compile_options(/MP)
+    set(CMAKE_VS_GLOBALS "UseMultiToolTask=true" "EnforceProcessCountAcrossBuilds=true")
     # The same goes for Qt and Qt Advanced Docking System: Qt hands ownership
     # of objects across its DLL boundary (e.g. setLayout(new QHBoxLayout) is
     # deleted from inside Qt), so they must be on the same CRT heap as the app.

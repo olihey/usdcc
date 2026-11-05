@@ -105,6 +105,9 @@ add_custom_command(
     COMMAND
         ${_shiboken_env} $<TARGET_FILE:Shiboken6::shiboken6> --generator-set=shiboken --enable-parent-ctor-heuristic
         --enable-return-value-heuristic --avoid-protected-hack -std=c++17
+        # shiboken6 hands clang MSVC's /Zc:__cplusplus itself, which clang reports
+        # as unused ("'linker' input unused") on every run.
+        --clang-option=-Qunused-arguments
         --compiler=${_shiboken_compiler} ${_shiboken_include_flags} -T${PYSIDE_TYPESYSTEMS}
         --output-directory=${_gen_dir} ${_bindings_header} ${_typesystem_file}
     COMMAND ${CMAKE_COMMAND} -E touch ${_generated_stamp}
