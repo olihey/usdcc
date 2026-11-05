@@ -2,12 +2,16 @@
 
 #include "usdcc/ui/side_panel.h"
 
+#include <QPointer>
+
 class QLabel;
+class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
 namespace usdcc::scripting {
 
+class PackageInstallDialog;
 class PluginManager;
 
 // Lists the plugins: each one's version and state, why it isn't running, what it
@@ -21,6 +25,8 @@ public:
 
     // Reads the plugins again, after activating them say.
     void refresh();
+    // Opens the install dialog for Python packages, or raises the one that's open.
+    void installPackages(bool upgrade = false);
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -28,11 +34,16 @@ protected:
 private:
     void updateDetails();
     void updatePendingNote();
+    void updatePackages();
 
     PluginManager& m_plugins;
     QTreeWidget* m_tree = nullptr;
     QLabel* m_details = nullptr;
     QLabel* m_pendingNote = nullptr;
+    QLabel* m_packageFolders = nullptr;
+    QPushButton* m_install = nullptr;
+    QPushButton* m_update = nullptr;
+    QPointer<PackageInstallDialog> m_dialog;
     bool m_refreshing = false;
 };
 

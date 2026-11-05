@@ -38,9 +38,10 @@ enum class SettingType {
     Choice,    // std::string, one of `choices`
     Color,     // std::string "#rrggbb" (lower case)
     Shortcut,  // std::string in QKeySequence's portable text ("W", "Ctrl+Shift+S"), "" = none
+    Folder,    // std::string, a folder's path; "" = none
 };
 
-// "bool", "int", "float", "string", "choice", "color", "shortcut".
+// "bool", "int", "float", "string", "choice", "color", "shortcut", "folder".
 USDCC_CORE_API std::string_view settingTypeName(SettingType type);
 // The names above; false if `text` is none of them.
 USDCC_CORE_API bool parseSettingType(std::string_view text, SettingType* type);
@@ -60,6 +61,9 @@ struct SettingDefinition {
     double minimum = 0;  // Int/Float range, used when maximum > minimum
     double maximum = 0;
     std::vector<std::string> choices;  // Choice
+    // A change is saved at once but only used from the next start. The dialog
+    // says so while the value differs from the one this session started with.
+    bool appliesAtNextStart = false;
 };
 
 // Where setting values are stored. read() returns nothing for a value that
@@ -117,6 +121,9 @@ public:
     // The current value; an empty string for an unknown key.
     USDCC_CORE_API SettingValue value(std::string_view key) const;
     USDCC_CORE_API bool isDefault(std::string_view key) const;
+    // An appliesAtNextStart setting whose value isn't the one this session
+    // started with.
+    USDCC_CORE_API bool isPendingNextStart(std::string_view key) const;
 
     // The value as T, or `fallback` for an unknown key or another type.
     template <typename T>
@@ -155,6 +162,7 @@ private:
     struct Entry {
         SettingDefinition definition;
         SettingValue value;
+        SettingValue sessionValue;  // as it was when loaded
     };
     Entry* find(std::string_view key);
     const Entry* find(std::string_view key) const;

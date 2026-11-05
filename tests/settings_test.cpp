@@ -127,6 +127,24 @@ USDCC_TEST(settings_definitions) {
     CHECK(usdcc::core::parseSettingType("shortcut", &type) && type == SettingType::Shortcut, "type names parse");
     CHECK(!usdcc::core::parseSettingType("colour", &type), "unknown type names don't");
     CHECK(usdcc::core::settingTypeName(SettingType::Color) == "color", "and print");
+    CHECK(usdcc::core::parseSettingType("folder", &type) && type == SettingType::Folder, "folder too");
+}
+
+USDCC_TEST(settings_folder_and_next_start) {
+    Settings settings;
+    CHECK(settings.define({.key = "A/folder", .category = "A", .type = SettingType::Folder, .defaultValue = std::string("C:/x")}),
+          "a folder setting");
+    CHECK(settings.setValue("A/folder", std::string("C:/y")) && settings.get<std::string>("A/folder") == "C:/y", "holds a path");
+    CHECK(!settings.setValue("A/folder", 3), "and only text");
+    CHECK(!settings.isPendingNextStart("A/folder"), "without the flag, a change is never pending");
+
+    settings.define({.key = "A/later", .category = "A", .type = SettingType::Bool, .defaultValue = false, .appliesAtNextStart = true});
+    CHECK(!settings.isPendingNextStart("A/later"), "nothing is pending to begin with");
+    settings.setValue("A/later", true);
+    CHECK(settings.isPendingNextStart("A/later"), "a change is");
+    settings.setValue("A/later", false);
+    CHECK(!settings.isPendingNextStart("A/later"), "and isn't once it's back");
+    CHECK(!settings.isPendingNextStart("A/none"), "an unknown key isn't");
 }
 
 USDCC_TEST(settings_backend) {

@@ -236,6 +236,25 @@ USDCC_TEST(settings_dialog) {
     CHECK(on && on->isChecked(), "a bool gets a check box");
     if (on) on->setChecked(false);
     CHECK(!settings.get<bool>("Other/on", true), "which applies immediately");
+
+    // A folder: text to edit plus a Browse button, and the "next start" note.
+    settings.define({.key = "Other/folder", .category = "Other", .label = "Folder", .type = SettingType::Folder,
+                     .defaultValue = std::string("C:/a"), .appliesAtNextStart = true});
+    settle();
+    auto* folder = withKey<QWidget>(&dialog, QStringLiteral("Other/folder"), QStringLiteral("settingEditor"));
+    auto* folderEdit = folder ? folder->findChild<QLineEdit*>() : nullptr;
+    auto* browse = folder ? folder->findChild<QToolButton*>(QStringLiteral("settingBrowse")) : nullptr;
+    auto* nextStart = withKey<QLabel>(&dialog, QStringLiteral("Other/folder"), QStringLiteral("settingNextStart"));
+    CHECK(folderEdit && browse && nextStart, "a folder gets a field, a Browse button and a note");
+    if (!folderEdit || !nextStart) return;
+    CHECK(folderEdit->text() == QStringLiteral("C:/a"), "showing its value");
+    CHECK(nextStart->isHidden(), "no note while it's what this session started with");
+    folderEdit->setText(QStringLiteral("C:/b"));
+    Q_EMIT folderEdit->editingFinished();
+    CHECK(settings.get<std::string>("Other/folder") == "C:/b", "editing stores it");
+    CHECK(!nextStart->isHidden(), "and says when it takes effect");
+    settings.reset("Other/folder");
+    CHECK(nextStart->isHidden() && folderEdit->text() == QStringLiteral("C:/a"), "reset takes both back");
 }
 
 USDCC_TEST(settings_tool_shortcuts) {

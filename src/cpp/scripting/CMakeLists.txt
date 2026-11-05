@@ -18,11 +18,15 @@ target_link_libraries(usdcc_scripting PUBLIC usdcc_core)
 
 add_library(usdcc_scripting_app STATIC
     include/usdcc/scripting/app_module.h
+    include/usdcc/scripting/package_environment.h
     include/usdcc/scripting/plugin_manager.h
+    include/usdcc/scripting/python_settings.h
     include/usdcc/scripting/script_runner.h
     include/usdcc/scripting/startup_scripts.h
     src/app_module.cpp
+    src/package_environment.cpp
     src/plugin_manager.cpp
+    src/python_settings.cpp
     src/script_runner.cpp
     src/startup_scripts.cpp
 )
@@ -36,13 +40,20 @@ target_compile_definitions(
             USDCC_BUILT_FOR_QT="${USDCC_BUILT_FOR_QT}"
             USDCC_BUILT_FOR_USD="${USDCC_BUILT_FOR_USD}"
             USDCC_BUILT_FOR_USDCC="${USDCC_BUILT_FOR_USDCC}")
+# The build's pinned uv (UsdccUv.cmake), used unless the app finds one bundled
+# next to it (tools/deploy.ps1).
+if(USDCC_UV_EXE)
+    target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_UV_EXE="${USDCC_UV_EXE}")
+endif()
 
 add_library(usdcc_scripting_ui STATIC
     include/usdcc/scripting/code_editor.h
+    include/usdcc/scripting/package_install_dialog.h
     include/usdcc/scripting/plugin_manager_side_panel.h
     include/usdcc/scripting/python_highlighter.h
     include/usdcc/scripting/script_editor_side_panel.h
     src/code_editor.cpp
+    src/package_install_dialog.cpp
     src/plugin_manager_side_panel.cpp
     src/python_highlighter.cpp
     src/script_editor_side_panel.cpp

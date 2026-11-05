@@ -11,7 +11,7 @@ namespace usdcc::core {
 
 namespace {
 
-constexpr std::array<std::pair<SettingType, std::string_view>, 7> kTypeNames = {{
+constexpr std::array<std::pair<SettingType, std::string_view>, 8> kTypeNames = {{
     {SettingType::Bool, "bool"},
     {SettingType::Int, "int"},
     {SettingType::Float, "float"},
@@ -19,6 +19,7 @@ constexpr std::array<std::pair<SettingType, std::string_view>, 7> kTypeNames = {
     {SettingType::Choice, "choice"},
     {SettingType::Color, "color"},
     {SettingType::Shortcut, "shortcut"},
+    {SettingType::Folder, "folder"},
 }};
 
 bool hasRange(const SettingDefinition& definition) { return definition.maximum > definition.minimum; }
@@ -128,6 +129,7 @@ std::optional<SettingValue> Settings::normalized(const SettingDefinition& defini
     }
     case SettingType::String:
     case SettingType::Shortcut:
+    case SettingType::Folder:
         if (const std::string* s = std::get_if<std::string>(&value)) {
             return *s;
         }
@@ -177,6 +179,7 @@ void Settings::setBackend(std::unique_ptr<SettingsBackend> backend) {
     std::vector<std::string> changedKeys;
     for (auto& entry : m_entries) {
         SettingValue value = load(entry->definition);
+        entry->sessionValue = value;
         if (value != entry->value) {
             entry->value = std::move(value);
             changedKeys.push_back(entry->definition.key);
@@ -210,6 +213,7 @@ bool Settings::define(SettingDefinition definition) {
     } else {
         auto added = std::make_unique<Entry>();
         added->value = load(definition);
+        added->sessionValue = added->value;
         added->definition = std::move(definition);
         m_entries.push_back(std::move(added));
     }
@@ -252,6 +256,11 @@ SettingValue Settings::value(std::string_view key) const {
 bool Settings::isDefault(std::string_view key) const {
     const Entry* entry = find(key);
     return !entry || entry->value == entry->definition.defaultValue;
+}
+
+bool Settings::isPendingNextStart(std::string_view key) const {
+    const Entry* entry = find(key);
+    return entry && entry->definition.appliesAtNextStart && entry->value != entry->sessionValue;
 }
 
 bool Settings::setValue(std::string_view key, const SettingValue& value) {

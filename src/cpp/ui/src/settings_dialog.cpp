@@ -7,7 +7,9 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QGridLayout>
 #include <QKeyEvent>
 #include <QHBoxLayout>
@@ -146,6 +148,29 @@ Editor makeEditor(Settings& settings, const SettingDefinition& definition, QWidg
         QObject::connect(edit, &QLineEdit::editingFinished, edit,
                          [&settings, key, edit]() { settings.setValue(key, edit->text().toStdString()); });
         return {edit, [&settings, key, edit]() {
+                    const QSignalBlocker block(edit);
+                    edit->setText(qs(settings.get<std::string>(key)));
+                }};
+    }
+    case SettingType::Folder: {
+        auto* box = new QWidget(parent);
+        auto* row = new QHBoxLayout(box);
+        row->setContentsMargins(0, 0, 0, 0);
+        scaled::spacing(row, 4);
+        auto* edit = new QLineEdit(box);
+        scaled::minimumWidth(edit, 200);
+        row->addWidget(edit, 1);
+        auto* browse = new QToolButton(box);
+        browse->setObjectName(QStringLiteral("settingBrowse"));
+        browse->setText(QObject::tr("Browse..."));
+        row->addWidget(browse);
+        QObject::connect(edit, &QLineEdit::editingFinished, edit,
+                         [&settings, key, edit]() { settings.setValue(key, edit->text().toStdString()); });
+        QObject::connect(browse, &QToolButton::clicked, browse, [&settings, key, edit, box]() {
+            const QString folder = QFileDialog::getExistingDirectory(box->window(), QObject::tr("Choose a Folder"), edit->text());
+            if (!folder.isEmpty()) settings.setValue(key, QDir::toNativeSeparators(folder).toStdString());
+        });
+        return {box, [&settings, key, edit]() {
                     const QSignalBlocker block(edit);
                     edit->setText(qs(settings.get<std::string>(key)));
                 }};
@@ -386,8 +411,13 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
             editor.widget->setProperty("settingKey", qs(key));
             auto* editorRow = new QHBoxLayout;
             editorRow->setContentsMargins(0, 0, 0, 0);
-            editorRow->addWidget(editor.widget);
-            editorRow->addStretch(1);
+            // Text and paths get the room there is; the others keep their size.
+            if (definition->type == SettingType::String || definition->type == SettingType::Folder) {
+                editorRow->addWidget(editor.widget, 1);
+            } else {
+                editorRow->addWidget(editor.widget);
+                editorRow->addStretch(1);
+            }
 
             auto* reset = new QToolButton(content);
             reset->setObjectName(QStringLiteral("settingReset"));
@@ -417,10 +447,18 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
                 description->setWordWrap(true);
                 grid->addWidget(description, row++, 1, 1, 2);
             }
+            QLabel* nextStart = nullptr;
+            if (definition->appliesAtNextStart) {
+                nextStart = new QLabel(tr("Takes effect at the next start."), content);
+                nextStart->setObjectName(QStringLiteral("settingNextStart"));
+                nextStart->setProperty("settingKey", qs(key));
+                grid->addWidget(nextStart, row++, 1, 1, 2);
+            }
 
-            const auto refresh = [this, key, editor, reset, conflict]() {
+            const auto refresh = [this, key, editor, reset, conflict, nextStart]() {
                 editor.refresh();
                 reset->setVisible(!m_settings.isDefault(key));
+                if (nextStart) nextStart->setVisible(m_settings.isPendingNextStart(key));
                 if (conflict) {
                     const SettingDefinition* current = m_settings.definition(key);
                     const QStringList others = current ? shortcutConflicts(m_settings, *current) : QStringList();

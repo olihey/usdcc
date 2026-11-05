@@ -40,6 +40,7 @@
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/python_settings.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/scripting/script_editor_side_panel.h"
 #include "usdcc/scripting/startup_scripts.h"
@@ -160,6 +161,10 @@ int main(int argc, char** argv) {
     commandLine.addOption(noStartupScriptsOption);
     commandLine.addOption(noPluginsOption);
     commandLine.addOption(pluginPathOption);
+    const QCommandLineOption installPackagesOption(
+        QStringLiteral("install-plugin-packages"),
+        QObject::tr("Install the Python packages the plugins ask for, and exit. Exit code: 0 done, 2 some left out, 1 failed."));
+    commandLine.addOption(installPackagesOption);
     commandLine.addPositionalArgument(QStringLiteral("stage"), QObject::tr("A USD file to open."),
                                       QStringLiteral("[stage]"));
     // Shows a message box and exits for --help and unknown options.
@@ -182,6 +187,8 @@ int main(int argc, char** argv) {
     // setting defined later (the theme's first) starts from its saved value.
     usdcc::ui::installAppSettings();
     usdcc::ui::theme::apply(app);
+    // Read by the plugin manager and Python, just below.
+    usdcc::scripting::definePythonSettings();
 
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry
@@ -218,6 +225,16 @@ int main(int argc, char** argv) {
     // gone but while the stages Python may still reference exist. If it
     // can't start, it says why in the log and the app runs without scripting.
     usdcc::scripting::PythonRuntime python;
+
+    // For studios and farm machines, with nobody there to click (docs/PYTHON_PACKAGES.md).
+    if (commandLine.isSet(installPackagesOption)) {
+        const auto report = [](const std::string& line) {
+            USDCC_LOG_INFO("usdcc.packages", "{}", line);
+            // Not stdout, which the log captures once it has been set up.
+            usdcc::core::writeToOriginalStderr(line + "\n");
+        };
+        return plugins.installPackages(python, report);
+    }
 
     usdcc::ui::MainWindow window;
     window.logPanel()->setLogFile(logFilePath);
@@ -624,6 +641,17 @@ int main(int argc, char** argv) {
         window.statusBar()->showMessage(
             QObject::tr("The plugin %1 crashed the last start, so it's turned off. See View > Plugins.")
                 .arg(QString::fromStdString(crashed->manifest.name)));
+    }
+    // Waits for the window to be visible. Nothing is installed without being asked.
+    if (plugins.packagesPending()) {
+        usdcc::core::ToastRequest request;
+        request.title = QObject::tr("Python packages are needed").toStdString();
+        request.body = QObject::tr("Some plugins or your own settings ask for packages that aren't installed.").toStdString();
+        request.kind = usdcc::core::ToastKind::Warning;
+        window.toasts()->show(request, {{QObject::tr("Install..."), [pluginPanel]() {
+                                             pluginPanel->show();
+                                             pluginPanel->installPackages();
+                                         }}});
     }
 
     // Every panel for this session must exist before restoring — see

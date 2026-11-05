@@ -8,6 +8,10 @@
 
 namespace usdcc::scripting {
 
+// A setting (docs/PYTHON_PACKAGES.md): whether the user's own Python packages,
+// %APPDATA%\Python\PythonXY\site-packages, are on sys.path.
+inline constexpr auto kPythonUserSiteKey = "Python/userSite";
+
 // Where the embedded interpreter finds Python and the usdcc/pxr packages.
 struct PythonSettings {
     // The Python's prefix (holds Lib/ and python3XY.dll): the one OpenUSD was
@@ -15,13 +19,17 @@ struct PythonSettings {
     std::filesystem::path home;
     // Put at the front of sys.path, in this order.
     std::vector<std::filesystem::path> paths;
+    // Off, a plugin can't run here on a package it never asked for and fail
+    // elsewhere. Can't change once Python has started.
+    bool userSite = false;
 
     // A deployed usdcc's own Python (../python from the executable, with
     // usdcc, pxr and PySide6 in its Lib/site-packages; tools/deploy.ps1) if
     // there is one. Otherwise the build's: OpenUSD's Python, then
     // build/python (the usdcc package), OpenUSD's site-packages (pxr) and, if
     // it was built, USDCC_PYSIDE_DIR (PySide6). The environment variable
-    // USDCC_PYTHONHOME overrides `home`.
+    // USDCC_PYTHONHOME overrides `home`. `userSite` is the setting's value, if
+    // it has been defined by now.
     static PythonSettings defaults();
 };
 

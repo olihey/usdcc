@@ -1,8 +1,12 @@
 #pragma once
 
+#include "usdcc/scripting/package_environment.h"
+
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -45,6 +49,7 @@ enum class PluginState {
     Active,    // running
     Disabled,  // the user turned it off, or it crashed the last start
     Refused,   // won't be loaded, for `reason`; none of its code ran
+    NeedsPackages,  // as Refused, and installing Python packages could fix it
     Failed,    // its code ran and raised, for `reason`
 };
 
@@ -71,8 +76,11 @@ public:
     struct Options {
         // Folders of plugin folders, the first holding an id winning.
         std::vector<std::filesystem::path> folders;
-        // Folders of shared Python packages, for sys.path (§3.10).
+        // Ready-made folders of Python packages, for sys.path (§3.10).
         std::vector<std::filesystem::path> pythonPackageFolders;
+        // Where the app installs Python packages (docs/PYTHON_PACKAGES.md); its
+        // environment goes on sys.path after the folders above. Empty for none.
+        std::filesystem::path packagesRoot;
         // Names the plugin being activated, so that finding it at the next
         // start means that plugin crashed (§3.6).
         std::filesystem::path crashMarker;
@@ -81,7 +89,8 @@ public:
 
     // `extraFolders` (--plugin-path), USDCC_PLUGIN_PATH, the user's folder,
     // then the one shipped with the app. Python packages from USDCC_PYTHON_PATH
-    // and the user's python-packages. Needs the Qt application object.
+    // and the Python settings (python_settings.h, defined by then, or they count
+    // as empty). Needs the Qt application object.
     static Options defaultOptions(const std::vector<std::filesystem::path>& extraFolders, bool enabled);
     // <AppLocalData>/plugins.
     static std::filesystem::path userFolder();
@@ -108,6 +117,23 @@ public:
 
     void addContribution(const std::string& id, const std::string& kind, const std::string& name);
 
+    // What should be in the shared packages folder, in the order to resolve it,
+    // for the enabled plugins and My packages; and what must never be installed.
+    std::vector<PackageRequest> packageRequests(PythonRuntime& python, std::vector<std::string>* blocked) const;
+    // How to run the installer, from the settings.
+    PackageInstaller::Options installerOptions(const PythonRuntime& python, bool upgrade) const;
+    // Whether an install would do something the user is waiting for: a plugin needs
+    // packages, or My packages changed.
+    bool packagesPending() const;
+    // Says an install finished, which takes effect at the next start.
+    void noteInstalled() { m_packagesInstalled = true; }
+    // The folders of packages on sys.path, in order; set by activate().
+    const std::vector<std::filesystem::path>& packageFoldersInUse() const { return m_packageFolders; }
+    // Installs what packageRequests() asks for, for --install-plugin-packages.
+    // Runs an event loop until it's done. 0 when everything went in, 2 when some
+    // was left out, 1 when it failed. What happens goes to `report`.
+    int installPackages(PythonRuntime& python, const std::function<void(const std::string&)>& report);
+
 private:
     PluginInfo* findMutable(const std::string& id);
     void readManifests();
@@ -127,6 +153,11 @@ private:
     std::string m_crashedLastStart;
     // By id. Libraries are never unloaded (§3.4).
     std::map<std::string, std::unique_ptr<NativePlugin>> m_native;
+    // Manifests that can't be used, whose packages shouldn't be installed.
+    std::set<std::string> m_unusable;
+    std::unique_ptr<PackageEnvironment> m_environment;
+    std::vector<std::filesystem::path> m_packageFolders;
+    bool m_packagesInstalled = false;
 };
 
 }  // namespace usdcc::scripting

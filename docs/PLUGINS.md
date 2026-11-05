@@ -13,7 +13,7 @@ Marked "checked" below means run against this build (USD 26.11). §5 says what w
 notes/
   usdcc-plugin.json
   python/notes/__init__.py     imported, then activate(plugin) is called
-  deps/                        third-party Python modules (§3.10)
+  deps/                        optional: third-party Python modules it carries (§3.10)
   usd/plugInfo.json            USD part: schemas, render delegates
 ```
 
@@ -223,20 +223,21 @@ tool's own work on each event is its own cost.
 - **One interpreter:** a virtual environment per plugin can't work in-process, and one process can only load one numpy.
 - **Renaming doesn't work:** nesting a package inside the plugin's own breaks packages that import themselves by absolute name, and it can't
   give compiled packages a second copy.
-- **The deployed app has no pip:** `tools/deploy.ps1` copies no `python.exe`, leaves out `ensurepip`, and skips the source Python's `site-packages`.
 - **Compiled packages must match USD's Python,** currently 3.12 on Windows x64.
 - **Some packages can take the app down:** `PySide6` from pip brings its own Qt (PLAN.md §6 item 11), and `usd-core` competes with `pxr`.
-  Others may carry their own Qt or copies of libraries USD uses. `opencv-python` is one I'd expect to, *not checked.*
+  Others may carry their own Qt or copies of libraries USD uses. `opencv-python`'s Windows wheel doesn't carry Qt (*checked,* and it runs in the app).
 
 **So:**
 
-1. **A plugin declares what it needs** in `python.requires`. Declaring installs nothing.
-2. **A plugin ships it in `deps/`,** made with `pip install --target deps`, which keeps the `dist-info` folders the check reads. `deps/` isn't on `sys.path`:
-   a finder at the end of `sys.meta_path` serves it, after the app's folders, so it can't replace what the app uses.
+1. **A plugin declares what it needs** in `python.requires`, and **the app installs it** into a folder shared by all Python code, when the user asks. [PYTHON_PACKAGES.md](PYTHON_PACKAGES.md)
+   is that whole story. This is what a plugin should normally do.
+2. **A plugin can instead carry it in `deps/`,** made with `pip install --target deps`, which keeps the `dist-info` folders the check reads. `deps/` isn't on `sys.path`:
+   a finder at the end of `sys.meta_path` serves it, after the app's folders, so it can't replace what the app uses. This suits a plugin that must work with nothing installed.
 3. **The app checks before running any plugin code.** Reading the package metadata of every enabled plugin, including what each bundled package itself
    needs, and importing nothing, it refuses:
-   - **a conflict:** when plugins can't agree on a version, the later one, naming the other plugin and the package;
-   - **a missing package,** saying which;
+   - **a conflict:** when plugins can't agree on a version, the later one, naming the other plugin and the package; or, when an installed copy is fixed, the plugins it doesn't suit;
+   - **a missing package,** saying which, as **Needs packages**, since installing can fix it;
+   - **a URL as a requirement:** only names, versions and markers are allowed;
    - **a protected name:** a plugin bundling `PySide6`, `shiboken6`, `pxr`, `usdcc`, `PySide2`, `PyQt5` or `PyQt6`. Requiring what the app provides is fine.
 4. **One copy is used where several would do.** If two plugins bundle numpy and one version satisfies both, the finder serves the newest that does, to both.
    Only one could load anyway, and this makes the choice explicit rather than down to load order.
@@ -244,18 +245,16 @@ tool's own work on each event is its own cost.
 **The version check needs a parser** for requirement strings, which the standard library doesn't have. `packaging` 24.2 is vendored at
 `usdcc._vendor.packaging`, rather than in `site-packages`, so that a plugin's own copy can't clash with it.
 
-**A shared folder for large packages.** Shipping numpy or scipy in every plugin is wasteful. So `USDCC_PYTHON_PATH` and
-`%LOCALAPPDATA%/usdcc/python-packages` go on `sys.path`, and a studio or user can fill them with `pip install --target`, using a Python of the same version.
-**A copy found there is fixed:** a bundled one can't override it, and a plugin it doesn't suit is told which version is installed. An **Install** button in the
-Plugin Manager can come later. It needs `python.exe` and pip in the deploy.
+**Folders of packages on `sys.path`.** The shared folder the app installs into, the **Additional package folders** setting, and `USDCC_PYTHON_PATH`, which a studio can fill
+with `pip install --target` or `uv pip install --target`, using a Python of the same version. **A copy found there is fixed:** a bundled one can't override it, and a plugin it doesn't
+suit is told which version is installed.
 
-**No pip at startup.** It would need the network at launch, can run package setup code, and could change what other plugins depend on. An install
-is something the user asks for.
+**No installing at startup.** It would need the network at launch, and could change what other plugins depend on. An install is something the user asks for.
 
 **Versions that truly can't coexist** have one real fix: the plugin runs that code in its own separate process and talks to it. That's left to its
 author, and no helper is planned.
 
-**Checked in the app:** numpy 2.5.4 in a plugin's `deps/`, next to USD and PySide, imports and computes. Only that one compiled package has been tried.
+**Checked in the app:** numpy 2.5.4 in a plugin's `deps/`, next to USD and PySide, imports and computes. So do numpy, scipy 1.18 and opencv-python 5.0 from a folder uv filled.
 
 ## 4. Phases
 
@@ -288,9 +287,8 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 
 - **A real mouse drag with a Python tool in the viewport,** and its gizmo actually drawn. The tests call the `Tool` methods as the viewport does.
 - **Clicking through the panel by hand,** such as unticking a plugin with the mouse and restarting. The tests set the checkbox directly.
-- **The environment variables** `USDCC_PLUGIN_PATH` and `USDCC_PYTHON_PATH`. What they feed was tested through options and `--plugin-path`.
 - **Render delegates and file formats from a plugin folder:** only a schema was tried (§3.1).
-- **Compiled packages other than numpy,** in particular ones bringing their own Qt or USD libraries (§3.10).
+- **Compiled packages bringing their own USD libraries or Qt,** which the block list only stops by name (§3.10).
 - **The Python tests in Debug: the hang seen here no longer reproduces.** When this was written, two of the 42 Python tests hung in Debug (`python_exit_criterion`, `python_app_api`):
   a binding taking a list, such as `usdcc.usd.select()`, hung in pybind11 before reaching the binding's code. Retried on 2026-11-05 against the `usd_typhoon` OpenUSD build,
   after the merge with the settings and toast work: all three suites pass in Debug (the Python one 45 tests), also with Debug tests loading Release-built `_ui.pyd`/`_usd.pyd`
@@ -313,4 +311,4 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 6. **Installing:** copying a folder, with Open Plugins Folder in the panel. No zip installer or store for now.
 7. **Manifest format:** JSON. Qt reads it with no new dependency, and USD's `plugInfo.json` is the same kind of file.
 8. **Compatibility:** `api` is a whole number, raised only when something breaks, and a plugin whose `api` doesn't match is refused with the reason. C++ also needs the exact build (§3.2).
-9. **Third-party Python modules:** declared in the manifest, shipped in `deps/` or a shared folder, and checked before any plugin code runs (§3.10). No pip at startup.
+9. **Third-party Python modules:** declared in the manifest, installed by the app when asked into a shared folder ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md)) or carried in `deps/`, and checked before any plugin code runs (§3.10). Nothing is installed at startup.

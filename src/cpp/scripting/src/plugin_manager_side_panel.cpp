@@ -1,6 +1,10 @@
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 
+#include "usdcc/scripting/package_install_dialog.h"
 #include "usdcc/scripting/plugin_manager.h"
+#include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/python_settings.h"
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
 
@@ -37,6 +41,8 @@ QString stateText(const PluginInfo& plugin) {
             return PluginManagerSidePanel::tr("Off");
         case PluginState::Refused:
             return PluginManagerSidePanel::tr("Not loaded");
+        case PluginState::NeedsPackages:
+            return PluginManagerSidePanel::tr("Needs packages");
         case PluginState::Failed:
             return PluginManagerSidePanel::tr("Failed");
         case PluginState::Ready:
@@ -149,12 +155,33 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_pendingNote->setObjectName(QStringLiteral("propertyNote"));
     layout->addWidget(m_pendingNote);
 
+    m_packageFolders = new QLabel(content);
+    m_packageFolders->setObjectName(QStringLiteral("propertyNote"));
+    m_packageFolders->setWordWrap(true);
+    m_packageFolders->setTextFormat(Qt::PlainText);
+    m_packageFolders->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_packageFolders->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_packageFolders->setMinimumWidth(1);
+    layout->addWidget(m_packageFolders);
+
     auto* buttons = new QHBoxLayout;
     buttons->addStretch(1);
+    m_install = new QPushButton(tr("Install Packages..."), content);
+    m_install->setObjectName(QStringLiteral("pluginInstallPackages"));
+    m_install->setToolTip(tr("Install the Python packages the plugins and My packages (Edit > Settings > Python) ask for"));
+    buttons->addWidget(m_install);
+    m_update = new QPushButton(tr("Update Packages..."), content);
+    m_update->setObjectName(QStringLiteral("pluginUpdatePackages"));
+    m_update->setToolTip(tr("Resolve everything again, moving Python packages to their newest versions"));
+    buttons->addWidget(m_update);
     auto* openFolder = new QPushButton(tr("Open Plugins Folder"), content);
     buttons->addWidget(openFolder);
     layout->addLayout(buttons);
     setWidget(content);
+
+    connect(m_install, &QPushButton::clicked, this, [this]() { installPackages(false); });
+    connect(m_update, &QPushButton::clicked, this, [this]() { installPackages(true); });
+    usdcc::ui::onSettingChanged(this, kUserPackagesKey, [this]() { updatePackages(); });
 
     connect(openFolder, &QPushButton::clicked, this, []() {
         const QString folder = QString::fromStdU16String(PluginManager::userFolder().u16string());
@@ -195,9 +222,40 @@ void PluginManagerSidePanel::refresh() {
     m_refreshing = false;
     updateDetails();
     updatePendingNote();
+    updatePackages();
 }
 
 void PluginManagerSidePanel::updatePendingNote() { m_pendingNote->setVisible(m_plugins.hasPendingChanges()); }
+
+void PluginManagerSidePanel::updatePackages() {
+    m_install->setVisible(m_plugins.packagesPending());
+    m_update->setEnabled(PythonRuntime::instance() && PythonRuntime::instance()->isAvailable());
+    QStringList folders;
+    for (const auto& folder : m_plugins.packageFoldersInUse()) {
+        folders << QDir::toNativeSeparators(QString::fromStdU16String(folder.u16string()));
+    }
+    m_packageFolders->setVisible(!folders.isEmpty());
+    m_packageFolders->setText(tr("Python packages from: %1").arg(folders.join(QStringLiteral("; "))));
+}
+
+void PluginManagerSidePanel::installPackages(bool upgrade) {
+    if (m_dialog) {
+        m_dialog->show();
+        m_dialog->raise();
+        m_dialog->activateWindow();
+        return;
+    }
+    PythonRuntime* python = PythonRuntime::instance();
+    if (!python || !python->isAvailable()) return;
+    m_dialog = new PackageInstallDialog(m_plugins, *python, upgrade, window());
+    connect(m_dialog, &PackageInstallDialog::packagesInstalled, this, [this]() {
+        updatePendingNote();
+        // What's waiting has been dealt with, as far as this session can tell.
+        m_install->setVisible(false);
+    });
+    m_dialog->show();
+    m_dialog->start();
+}
 
 void PluginManagerSidePanel::updateDetails() {
     const QTreeWidgetItem* item = m_tree->currentItem();

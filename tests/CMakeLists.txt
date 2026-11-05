@@ -86,6 +86,7 @@ add_executable(usdcc_python_tests
     test_harness.h
     test_harness.cpp
     python_test_main.cpp
+    package_environment_test.cpp
     plugin_manager_test.cpp
     plugin_native_test.cpp
     python_app_test.cpp

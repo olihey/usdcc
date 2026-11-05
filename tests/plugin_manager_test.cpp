@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -317,10 +318,13 @@ USDCC_TEST(plugin_shared_package_folder) {
     plugins.plugin("inst.old", "usdcc_test_inst_old", "raise RuntimeError('should not run')\n", {},
                    R"(, "requires": ["usdcc-test-pkg-inst<2"])");
     plugins.dependency("inst.old", "usdcc_test_pkg_inst", "1.0");
+    // Needing it after the one it doesn't suit, which is the one to blame.
+    plugins.plugin("inst.zlast", "usdcc_test_inst_zlast", "ran = True\n", {}, R"(, "requires": ["usdcc-test-pkg-inst>=3"])");
 
     std::filesystem::create_directories(plugins.root / "folders");
     std::filesystem::rename(plugins.root / "inst.fine", plugins.root / "folders" / "inst.fine");
     std::filesystem::rename(plugins.root / "inst.old", plugins.root / "folders" / "inst.old");
+    std::filesystem::rename(plugins.root / "inst.zlast", plugins.root / "folders" / "inst.zlast");
     auto options = plugins.options();
     options.folders = {plugins.root / "folders"};
     options.pythonPackageFolders = {plugins.root / "packages"};
@@ -332,6 +336,43 @@ USDCC_TEST(plugin_shared_package_folder) {
     CHECK(evaluated("__import__('usdcc_test_inst_fine').version") == "3.0", "that copy");
     CHECK(contains(reasonOf(manager, "inst.old"), "3.0"), "and a plugin it doesn't suit is told which version is installed: %s",
           reasonOf(manager, "inst.old").c_str());
+    CHECK(stateOf(manager, "inst.old") == PluginState::Refused, "installing can't change a ready-made folder");
+    CHECK(stateOf(manager, "inst.zlast") == PluginState::Active, "a plugin it suits isn't blamed for coming last: %s",
+          reasonOf(manager, "inst.zlast").c_str());
+}
+
+USDCC_TEST(plugin_requirements_in_the_manifest) {
+    Plugins plugins("reqs");
+    plugins.plugin("two.missing", "usdcc_test_two_missing", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-nowhere-a", "usdcc-test-nowhere-b>=2"])");
+    plugins.plugin("elsewhere.only", "usdcc_test_elsewhere", "ran = True\n", {},
+                   R"(, "requires": ["usdcc-test-nowhere-c; sys_platform == 'no-such-platform'"])");
+    plugins.plugin("names.url", "usdcc_test_names_url", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-url @ https://example.com/a.whl"])");
+    plugins.plugin("dep.waits", "usdcc_test_dep_waits", "raise RuntimeError('should not run')\n", R"(, "requires": ["two.missing"])");
+
+    PluginManager manager(plugins.options());
+    manager.scan();
+    manager.activate(python());
+
+    CHECK(stateOf(manager, "two.missing") == PluginState::NeedsPackages, "a missing package could be installed");
+    CHECK(contains(reasonOf(manager, "two.missing"), "usdcc-test-nowhere-a") && contains(reasonOf(manager, "two.missing"), "usdcc-test-nowhere-b"),
+          "everything missing is named at once: %s", reasonOf(manager, "two.missing").c_str());
+    CHECK(stateOf(manager, "elsewhere.only") == PluginState::Active, "a marker that doesn't apply needs nothing: %s",
+          reasonOf(manager, "elsewhere.only").c_str());
+    CHECK(stateOf(manager, "names.url") == PluginState::Refused && contains(reasonOf(manager, "names.url"), "URL"),
+          "a URL is refused: %s", reasonOf(manager, "names.url").c_str());
+    CHECK(stateOf(manager, "dep.waits") == PluginState::Refused, "a plugin requiring one that needs packages doesn't load");
+    CHECK(manager.packagesPending(), "an install is waiting");
+
+    std::vector<std::string> blocked;
+    const auto requests = manager.packageRequests(python(), &blocked);
+    CHECK(requests.size() == 2, "the two with something to ask for: %d", int(requests.size()));
+    CHECK(std::find(blocked.begin(), blocked.end(), "pyside6") != blocked.end(), "PySide6 is never installed");
+    for (const auto& request : requests) {
+        if (request.id == "names.url") CHECK(contains(request.problem, "URL"), "not even tried");
+        if (request.id == "two.missing") CHECK(request.requirements.size() == 2, "both go to the installer");
+    }
 }
 
 USDCC_TEST(plugin_usd_folder) {

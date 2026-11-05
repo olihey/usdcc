@@ -32,10 +32,11 @@ and lives in its shared library, so the exe and the Python modules see one insta
 | `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Python`, or a plugin's own |
 | `group` | A heading on that page (`Theme`, `Interface`, `Tools`) |
 | `label`, `description` | What the dialog shows |
-| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none) |
+| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none) |
 | `defaultValue` | A `SettingValue`: `std::variant<bool, int, double, std::string>` |
 | `minimum`, `maximum` | An Int or Float range, used when `maximum > minimum` |
 | `choices` | A Choice setting's values |
+| `appliesAtNextStart` | A change is saved at once but used from the next start. The dialog says so while the value differs from the one the session started with |
 
 **Values.**
 - `define()` loads the saved value. If none is saved, or the saved value no longer fits
@@ -97,6 +98,13 @@ take them for a `bool`.
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
 | `Notifications/errorsSticky` | Bool | on | `ToastManager` |
 | `Notifications/maxVisible` | Int 1–10 | 5 | `ToastManager` |
+| `Python/userSite` | Bool, next start | off | `PythonRuntime` ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md) §1) |
+| `Python/packagesFolder` | Folder, next start | `%LOCALAPPDATA%\usdcc\python-env` | `PluginManager` |
+| `Python/extraPackageFolders` | String, next start | none | `PluginManager` |
+| `Python/userPackages` | String | none | `PluginManager` |
+| `Python/packageIndex` | String | none (PyPI) | `PluginManager` |
+| `Python/wheelsFolder` | Folder | none | `PluginManager` |
+| `Python/offline` | Bool | off | `PluginManager` |
 
 **Accent color.** `dark.qss` and `dock.qss` use three tokens:
 
@@ -145,6 +153,7 @@ at a time.
 | Int / Float | spin box |
 | Choice | combo box |
 | String | line edit |
+| Folder | line edit with a Browse button |
 | Color | swatch button that opens Qt's color dialog |
 | Shortcut | one-chord key sequence editor with a clear button |
 
@@ -178,7 +187,8 @@ settings.define("MyPlugin/autoSave", "bool", True, label="Save automatically",
 - `set()` raises `ValueError` for a value that doesn't fit, and `KeyError` for an unknown
   key.
 - `define()` takes the type as a string: `bool`, `int`, `float`, `string`, `choice`,
-  `color` or `shortcut`. It also takes `minimum`/`maximum` (give both) and `choices`.
+  `color`, `shortcut` or `folder`. It also takes `minimum`/`maximum` (give both), `choices`
+  and `applies_at_next_start`.
 - A defined setting gets a row in the dialog, on a page of its own category.
 - Not yet: change callbacks into Python. Poll with `get()` where it matters.
 

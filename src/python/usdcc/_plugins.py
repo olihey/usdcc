@@ -32,6 +32,9 @@ _PROTECTED_MODULES = {"PySide6", "shiboken6", "pxr", "usdcc", "PySide2", "PyQt5"
 # A requirement on these is met by the app, whatever its metadata says: pxr and
 # PySide6 come from builds without dist-info.
 _PROVIDED_BY_APP = {"pyside6", "pyside6-essentials", "pyside6-addons", "shiboken6", "usd-core", "pxr", "usdcc"}
+# The app won't install these, even for a package that pulls one in: a second Qt
+# or USD in the process takes it down (docs/PYTHON_PACKAGES.md).
+_NEVER_INSTALLED = _PROVIDED_BY_APP | {"pyside2", "pyqt5", "pyqt5-qt5", "pyqt6", "pyqt6-qt6"}
 
 _active = {}
 _current = None
@@ -206,15 +209,41 @@ def _specifier_text(requirement):
     return str(requirement.specifier) or "any version"
 
 
-def check_modules(plugins):
+def _manifest_requirements(texts):
+    """The requirements in a manifest that apply on this machine. Only names,
+    versions and markers: a URL would let a manifest pick where code comes from.
+    Raises InvalidRequirement."""
+    from usdcc._vendor.packaging.requirements import InvalidRequirement, Requirement
+
+    requirements = []
+    for text in texts:
+        requirement = Requirement(text)
+        if requirement.url:
+            raise InvalidRequirement("%s names a URL, and only names and versions are allowed" % text)
+        if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
+            requirements.append(requirement)
+    return requirements
+
+
+def _is_in_folder(dist, folder):
+    if not folder:
+        return False
+    location = os.path.abspath(str(dist.locate_file("")))
+    return os.path.normcase(location) == os.path.normcase(os.path.abspath(folder))
+
+
+def check_modules(plugins, shared_folder=""):
     """Checks what `plugins` (dicts of id, name, module, folder and requires, in
     activation order) need from Python, running none of their code. Returns
-    {id: why it's refused}, and makes the deps/ folders of the rest importable.
+    {id: (why it's refused, whether installing packages could fix it)}, and makes
+    the deps/ folders of the rest importable.
 
     A package needed by several plugins gets one copy: an installed one if there
     is one, as it can't be replaced, otherwise the newest bundled copy that
-    satisfies them all. When none does, the last plugin needing it is refused
-    and the rest are looked at again.
+    satisfies them all. An installed copy refuses the plugins it doesn't suit.
+    When no bundled copy suits them all, the last plugin needing it is refused
+    and the rest are looked at again. `shared_folder` is the environment the app
+    installs into, whose versions can change (docs/PYTHON_PACKAGES.md).
     """
     from usdcc._vendor.packaging.requirements import InvalidRequirement, Requirement
     from usdcc._vendor.packaging.version import InvalidVersion, Version
@@ -226,10 +255,10 @@ def check_modules(plugins):
         id = plugin["id"]
         module = plugin["module"]
         if module in owners:
-            refused[id] = "Its module %s is also the module of %s." % (module, owners[module])
+            refused[id] = ("Its module %s is also the module of %s." % (module, owners[module]), False)
             continue
         if _module_taken(module):
-            refused[id] = "Python already has a module called %s." % module
+            refused[id] = ("Python already has a module called %s." % module, False)
             continue
 
         info = {"name": plugin["name"], "requirements": [], "dists": {}, "folder": None}
@@ -237,7 +266,7 @@ def check_modules(plugins):
         if os.path.isdir(deps):
             protected = _protected_in(deps)
             if protected:
-                refused[id] = "It bundles %s, which the app provides itself." % protected
+                refused[id] = ("It bundles %s, which the app provides itself." % protected, False)
                 continue
             info["folder"] = deps
             for dist in importlib.metadata.distributions(path=[deps]):
@@ -250,9 +279,9 @@ def check_modules(plugins):
                     if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
                         info["requirements"].append(requirement)
         try:
-            info["requirements"].extend(Requirement(text) for text in plugin.get("requires", []))
+            info["requirements"].extend(_manifest_requirements(plugin.get("requires", [])))
         except InvalidRequirement as error:
-            refused[id] = "Its manifest has an invalid requirement: %s" % error
+            refused[id] = ("Its manifest has an invalid requirement: %s" % error, False)
             continue
         owners[module] = plugin["name"]
         infos[id] = info
@@ -280,6 +309,21 @@ def check_modules(plugins):
                 needs.setdefault(package, []).append((id, None))
                 copies.setdefault(package, []).append((dist, info["folder"]))
 
+        # All of what's missing at once, so a plugin can be told everything it
+        # needs, not one package per start.
+        missing = {}
+        for package, requirers in needs.items():
+            if package not in installed and package not in copies:
+                for id, requirement in requirers:
+                    if requirement is not None:
+                        missing.setdefault(id, []).append(str(requirement))
+        if missing:
+            for id, texts in missing.items():
+                verb = "isn't" if len(texts) == 1 else "aren't"
+                refused[id] = ("It needs %s, which %s installed or bundled." % (", ".join(texts), verb), True)
+                del infos[id]
+            continue
+
         chosen = {}
         problem = None
         for package, requirers in needs.items():
@@ -289,29 +333,30 @@ def check_modules(plugins):
                 candidates = [(system, None)]
             else:
                 candidates = sorted(copies.get(package, []), key=lambda copy: version_of(copy[0]), reverse=True)
-            if not candidates:
-                id, requirement = requirements[-1]
-                problem = (id, "It needs %s, which isn't installed or bundled." % requirement)
-                break
             for copy in candidates:
                 version = version_of(copy[0])
                 if all(r.specifier.contains(version, prereleases=True) for _, r in requirements):
                     chosen[package] = copy
                     break
             else:
+                if system is not None:
+                    # The copy is fixed, so the fault is with those it doesn't suit.
+                    version = version_of(system)
+                    id, requirement = [(i, r) for i, r in requirements if not r.specifier.contains(version, prereleases=True)][-1]
+                    why = "the installed %s is %s" % (system.name, system.version)
+                    problem = (id, "It needs %s, but %s." % (requirement, why), _is_in_folder(system, shared_folder))
+                    break
                 id, requirement = requirements[-1]
                 others = [(i, r) for i, r in requirements if i != id]
-                if system is not None:
-                    why = "the installed %s is %s" % (system.name, system.version)
-                elif others:
+                if others:
                     why = "%s needs %s" % (infos[others[-1][0]]["name"], others[-1][1])
                 else:
                     why = "the bundled copy is %s" % candidates[0][0].version
-                problem = (id, "It needs %s, but %s." % (requirement, why))
+                problem = (id, "It needs %s, but %s." % (requirement, why), False)
                 break
         if problem is None:
             break
-        refused[problem[0]] = problem[1]
+        refused[problem[0]] = problem[1:]
         del infos[problem[0]]
 
     for dist, folder in chosen.values():
@@ -324,3 +369,52 @@ def check_modules(plugins):
     if _finder.folders and _finder not in sys.meta_path:
         sys.meta_path.append(_finder)
     return refused
+
+
+# --- Installing packages (docs/PYTHON_PACKAGES.md) ----------------------------
+
+
+def package_requests(plugins, user_packages, extra_folders):
+    """What should be installed: (requests, blocked names).
+
+    Each request is a dict of id, name, requirements and problem, in the order
+    they're resolved: what the user asked for (id "") first, then `plugins`
+    (dicts as for check_modules()). Requirements are normalized, so nothing but a
+    requirement reaches the installer. Left out is what the app provides, what a
+    plugin's own deps/ meets, and what `extra_folders` already meet.
+    """
+    from usdcc._vendor.packaging.requirements import InvalidRequirement
+    from usdcc._vendor.packaging.version import InvalidVersion, Version
+
+    def meets(dist, requirement):
+        try:
+            return requirement.specifier.contains(Version(dist.version), prereleases=True)
+        except InvalidVersion:
+            return False
+
+    provided = {}
+    for dist in importlib.metadata.distributions(path=list(extra_folders)):
+        provided.setdefault(_canonical(dist.name), dist)
+
+    def request(id, name, texts, deps=None):
+        bundled = {}
+        if deps and os.path.isdir(deps):
+            for dist in importlib.metadata.distributions(path=[deps]):
+                bundled[_canonical(dist.name)] = dist
+        entry = {"id": id, "name": name, "requirements": [], "problem": ""}
+        try:
+            for requirement in _manifest_requirements(texts):
+                package = _canonical(requirement.name)
+                if package in _PROVIDED_BY_APP:
+                    continue
+                copy = provided.get(package) or bundled.get(package)
+                if copy is None or not meets(copy, requirement):
+                    entry["requirements"].append(str(requirement))
+        except InvalidRequirement as error:
+            entry["problem"] = "An invalid requirement: %s" % error
+        return entry
+
+    requests = [request("", "My packages", user_packages.split())]
+    for plugin in plugins:
+        requests.append(request(plugin["id"], plugin["name"], plugin.get("requires", []), os.path.join(plugin["folder"], "deps")))
+    return [r for r in requests if r["requirements"] or r["problem"]], sorted(_NEVER_INSTALLED)

@@ -168,6 +168,7 @@ else()
                    "usdcc.ui and Python-made panels are disabled")
 endif()
 include(UsdccRuff)
+include(UsdccUv)
 
 # The usdcc Python package lives in build/python/usdcc: the compiled modules
 # (usd.pyd, ...) are built there, and this copies the pure-Python files from

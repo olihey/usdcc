@@ -17,6 +17,7 @@
 #include "usdcc/scripting/python_runtime.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/settings.h"
 
 #include <algorithm>
 #include <chrono>
@@ -90,6 +91,7 @@ std::filesystem::path executableDir() {
 
 PythonSettings PythonSettings::defaults() {
     PythonSettings settings;
+    settings.userSite = usdcc::core::Settings::instance().get<bool>(kPythonUserSiteKey, false);
 #if USDCC_HAS_PYTHON
     // A deployed usdcc (tools/deploy.ps1) brings its own Python: bin/usdcc.exe
     // next to python/, whose Lib/site-packages holds usdcc, pxr and PySide6.
@@ -203,6 +205,7 @@ void PythonRuntime::Impl::start() {
     PyConfig_InitPythonConfig(&config);
     config.install_signal_handlers = 0;  // Ctrl+C and friends stay the app's
     config.parse_argv = 0;
+    config.user_site_directory = settings.userSite ? 1 : 0;
     PyConfig_SetString(&config, &config.program_name, L"usdcc");
     PyConfig_SetString(&config, &config.home, settings.home.wstring().c_str());
     const PyStatus status = Py_InitializeFromConfig(&config);

@@ -14,13 +14,16 @@
           bin\usd\      OpenUSD's built-in plugins (schemas, Hydra, MaterialX
                         standard library, ...)
           plugin\usd\   OpenUSD's other plugins (Storm, Embree, image readers)
-          python\       the Python OpenUSD was built with (Lib, DLLs), and in
+          python\       the Python OpenUSD was built with (Lib, DLLs, and python.exe,
+                        which uv needs to install packages), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
           plugins\      plugins shipped with the app (none by default)
           examples\plugins\   the example plugins, loaded with --plugin-path
           sdk\          headers, import libraries and CMake files for C++ plugins
           tools\ruff\   ruff.exe and its LICENSE, for the Script Editor's Ruff
                         Format and Ruff Check (the build's pinned version)
+          tools\uv\     uv.exe and its licenses, which install the Python packages
+                        plugins ask for (the build's pinned version)
 
     OpenUSD finds its plugins relative to usd_plug.dll (bin\usd and
     ..\plugin\usd), and usdcc uses python\ instead of the build's Python when
@@ -141,6 +144,10 @@ $hasPySide = $pysideDir -and (Test-Path (Join-Path $pysideDir 'PySide6/__init__.
 $ruffExe = Get-CacheValue 'USDCC_RUFF_EXE_PATH'
 $hasRuff = $ruffExe -and (Test-Path $ruffExe)
 
+# The pinned uv cmake/modules/UsdccUv.cmake downloaded into build/uv.
+$uvExe = Get-CacheValue 'USDCC_UV_EXE_PATH'
+$hasUv = $uvExe -and (Test-Path $uvExe)
+
 $packageDir = Join-Path $buildDir 'python/usdcc'
 if (-not (Test-Path (Join-Path $packageDir '__init__.py'))) {
     throw "The usdcc Python package is missing from $packageDir; build first."
@@ -192,6 +199,9 @@ Write-Host "  Python ($pythonHome)"
 Copy-Tree -From (Join-Path $pythonHome 'Lib') -To (Join-Path $pythonDir 'Lib') `
     -ExcludeDirs @('site-packages', '__pycache__', 'test', 'idlelib', 'tkinter', 'turtledemo', 'ensurepip')
 Copy-Tree -From (Join-Path $pythonHome 'DLLs') -To (Join-Path $pythonDir 'DLLs') -ExcludeFiles $buildOnlyFiles
+# uv can't work without an interpreter, not even to resolve. Its DLLs are in bin,
+# which the app puts on PATH when it runs uv (docs/PYTHON_PACKAGES.md).
+Copy-Item (Join-Path $pythonHome 'python.exe') $pythonDir
 if (Test-Path (Join-Path $pythonHome 'LICENSE.txt')) {
     Copy-Item (Join-Path $pythonHome 'LICENSE.txt') $pythonDir
 }
@@ -241,6 +251,16 @@ if ($hasRuff) {
     Write-Warning "No ruff in the build ('$ruffExe'; reconfigure with USDCC_BUNDLE_RUFF=ON while online): the deploy works, but Ruff Format and Ruff Check need a ruff on PATH."
 }
 
+if ($hasUv) {
+    Write-Host '  uv'
+    $uvDir = Join-Path $deployDir 'tools/uv'
+    New-Item -ItemType Directory -Force $uvDir | Out-Null
+    Copy-Item $uvExe $uvDir
+    Get-ChildItem -Path (Split-Path $uvExe) -Filter 'LICENSE*' | Copy-Item -Destination $uvDir
+} else {
+    Write-Warning "No uv in the build ('$uvExe'; reconfigure with USDCC_BUNDLE_UV=ON while online): the deploy works, but installing Python packages needs a uv on PATH."
+}
+
 # --- plugins ---------------------------------------------------------------
 
 # plugins\ is where the app looks for plugins shipped with it. The examples sit
@@ -275,7 +295,7 @@ Set-Content -Path (Join-Path $deployDir 'usdcc.cmd') -Encoding ascii -Value @(
 
 $required = @(
     'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
-    'plugin/usd/hdStorm.dll', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
+    'plugin/usd/hdStorm.dll', 'python/python.exe', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
     'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
     'examples/plugins/measure_example/usdcc-plugin.json', 'examples/plugins/cpp_example/usdcc-plugin.json',
     'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h'
@@ -283,6 +303,21 @@ $required = @(
 $missing = @($required | Where-Object { -not (Test-Path (Join-Path $deployDir $_)) })
 if ($missing) {
     throw "The deploy is incomplete; missing: $($missing -join ', ')"
+}
+
+# python.exe and uv together, as the app runs them: with bin on PATH for the DLLs.
+if ($hasUv) {
+    $savedPath = $env:PATH
+    $env:PATH = "$binDir;$env:SystemRoot\System32"
+    try {
+        $version = & (Join-Path $deployDir 'tools/uv/uv.exe') python find --no-config --no-python-downloads (Join-Path $pythonDir 'python.exe') 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv can't use the deploy's python.exe: $version"
+        }
+    } finally {
+        $env:PATH = $savedPath
+        $global:LASTEXITCODE = 0
+    }
 }
 
 $bytes = (Get-ChildItem -Path $deployDir -Recurse -File | Measure-Object -Property Length -Sum).Sum

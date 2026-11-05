@@ -9,14 +9,17 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/plugin/plugin.h"
+#include "usdcc/core/settings.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/python_settings.h"
 #include "usdcc/ui/settings.h"
 
 #include <pxr/base/plug/registry.h>
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -227,8 +230,9 @@ PluginManager::Options PluginManager::defaultOptions(const std::vector<std::file
     options.folders.push_back(toPath(QCoreApplication::applicationDirPath()).parent_path() / "plugins");
 
     options.pythonPackageFolders = environmentFolders("USDCC_PYTHON_PATH");
+    for (const auto& folder : extraPackageFoldersSetting()) options.pythonPackageFolders.push_back(folder);
+    if (usdcc::core::Settings::instance().contains(kPackagesFolderKey)) options.packagesRoot = packagesFolderSetting();
     const QString local = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    options.pythonPackageFolders.push_back(toPath(local + "/python-packages"));
     options.crashMarker = toPath(local + "/plugin-activating.txt");
     return options;
 }
@@ -304,6 +308,7 @@ void PluginManager::readManifests() {
                 plugin.reason = problem;
                 if (plugin.manifest.id.empty()) plugin.manifest.id = toUtf8(folder.filename());
                 if (plugin.manifest.name.empty()) plugin.manifest.name = plugin.manifest.id;
+                m_unusable.insert(plugin.manifest.id);
                 USDCC_LOG_WARNING("usdcc.plugins", "{} ({}): {}", plugin.manifest.name, toUtf8(folder), problem);
             }
             if (const PluginInfo* first = find(plugin.manifest.id)) {
@@ -396,7 +401,8 @@ void PluginManager::refuseDependents() {
                 why = "It requires " + dependency + ", which isn't installed.";
             } else if (other->state == PluginState::Disabled) {
                 why = "It requires " + other->manifest.name + ", which is turned off.";
-            } else if (other->state == PluginState::Refused || other->state == PluginState::Failed) {
+            } else if (other->state == PluginState::Refused || other->state == PluginState::NeedsPackages ||
+                       other->state == PluginState::Failed) {
                 why = "It requires " + other->manifest.name + ", which didn't load.";
             }
             if (!why.empty() && plugin.state == PluginState::Ready) {
@@ -469,11 +475,30 @@ void PluginManager::activate(PythonRuntime& python) {
 
 #if USDCC_HAS_PYTHON
     namespace py = pybind11;
-    if (anyPython && python.isAvailable()) {
+    // Whether or not a plugin needs them: scripts use these folders too.
+    std::string sharedFolder;
+    if (python.isAvailable()) {
         std::error_code error;
+        m_packageFolders.clear();
         for (const auto& folder : m_options.pythonPackageFolders) {
-            if (std::filesystem::is_directory(folder, error)) python.addToPath(folder);
+            if (std::filesystem::is_directory(folder, error)) {
+                python.addToPath(folder);
+                m_packageFolders.push_back(folder);
+            }
         }
+        if (!m_options.packagesRoot.empty()) {
+            m_environment = std::make_unique<PackageEnvironment>(m_options.packagesRoot, PackageEnvironment::pythonTag(python.version()));
+            if (const auto active = m_environment->activeFolder()) {
+                python.addToPath(*active);
+                m_packageFolders.push_back(*active);
+                m_environment->markInUse();
+                sharedFolder = toUtf8(*active);
+            }
+            m_environment->removeUnused();
+        }
+    }
+    if (anyPython && python.isAvailable()) {
+        const EnvironmentRecord record = m_environment ? m_environment->record() : EnvironmentRecord();
         py::gil_scoped_acquire gil;
         try {
             py::list specs;
@@ -487,13 +512,22 @@ void PluginManager::activate(PythonRuntime& python) {
                 spec["requires"] = plugin.manifest.pythonRequires;
                 specs.append(spec);
             }
-            const auto refused =
-                py::module_::import("usdcc._plugins").attr("check_modules")(specs).cast<std::map<std::string, std::string>>();
-            for (const auto& [id, why] : refused) {
+            const auto refused = py::module_::import("usdcc._plugins")
+                                     .attr("check_modules")(specs, sharedFolder)
+                                     .cast<std::map<std::string, std::pair<std::string, bool>>>();
+            for (const auto& [id, verdict] : refused) {
                 if (PluginInfo* plugin = findMutable(id)) {
-                    plugin->state = PluginState::Refused;
-                    plugin->reason = why;
-                    USDCC_LOG_WARNING("usdcc.plugins", "{}: {}", plugin->manifest.name, why);
+                    plugin->state = verdict.second ? PluginState::NeedsPackages : PluginState::Refused;
+                    plugin->reason = verdict.first;
+                    // An install tried this already, and it can't be done. Don't keep
+                    // offering it, unless the plugin now asks for something else.
+                    for (const LeftOutPackages& left : record.leftOut) {
+                        if (verdict.second && left.id == id && left.declared == plugin->manifest.pythonRequires) {
+                            plugin->state = PluginState::Refused;
+                            plugin->reason = "Its packages couldn't be installed. " + left.why;
+                        }
+                    }
+                    USDCC_LOG_WARNING("usdcc.plugins", "{}: {}", plugin->manifest.name, plugin->reason);
                 }
             }
         } catch (py::error_already_set& failure) {
@@ -595,13 +629,127 @@ void PluginManager::setEnabled(const std::string& id, bool enabled) {
 }
 
 bool PluginManager::hasPendingChanges() const {
-    return std::any_of(m_plugins.begin(), m_plugins.end(), [this](const PluginInfo& plugin) {
+    return m_packagesInstalled || std::any_of(m_plugins.begin(), m_plugins.end(), [this](const PluginInfo& plugin) {
         return isEnabled(plugin.manifest.id) == (plugin.state == PluginState::Disabled);
     });
 }
 
 void PluginManager::addContribution(const std::string& id, const std::string& kind, const std::string& name) {
     if (PluginInfo* plugin = findMutable(id)) plugin->contributions.push_back({kind, name});
+}
+
+std::vector<PackageRequest> PluginManager::packageRequests(PythonRuntime& python, std::vector<std::string>* blocked) const {
+    std::vector<PackageRequest> requests;
+#if USDCC_HAS_PYTHON
+    namespace py = pybind11;
+    if (!python.isAvailable()) return requests;
+    py::gil_scoped_acquire gil;
+    try {
+        py::list specs;
+        for (const PluginInfo& plugin : m_plugins) {
+            // By the setting, not the state: one turned on just now counts.
+            if (plugin.manifest.pythonRequires.empty() || m_unusable.count(plugin.manifest.id) || !isEnabled(plugin.manifest.id)) continue;
+            py::dict spec;
+            spec["id"] = plugin.manifest.id;
+            spec["name"] = plugin.manifest.name;
+            spec["folder"] = toUtf8(plugin.manifest.folder);
+            spec["requires"] = plugin.manifest.pythonRequires;
+            specs.append(spec);
+        }
+        std::vector<std::string> extraFolders;
+        for (const auto& folder : m_options.pythonPackageFolders) extraFolders.push_back(toUtf8(folder));
+        const py::tuple result = py::module_::import("usdcc._plugins")
+                                     .attr("package_requests")(specs, usdcc::core::Settings::instance().get<std::string>(kUserPackagesKey), extraFolders);
+        for (const py::handle item : result[0]) {
+            const py::dict entry = py::reinterpret_borrow<py::dict>(item);
+            PackageRequest request;
+            request.id = entry["id"].cast<std::string>();
+            request.name = entry["name"].cast<std::string>();
+            request.requirements = entry["requirements"].cast<std::vector<std::string>>();
+            request.problem = entry["problem"].cast<std::string>();
+            if (const PluginInfo* plugin = find(request.id)) request.declared = plugin->manifest.pythonRequires;
+            requests.push_back(std::move(request));
+        }
+        if (blocked) *blocked = result[1].cast<std::vector<std::string>>();
+    } catch (py::error_already_set& failure) {
+        USDCC_LOG_ERROR("usdcc.plugins", "Working out which Python packages are needed failed: {}", failure.what());
+    }
+#else
+    (void)python;
+    (void)blocked;
+#endif
+    return requests;
+}
+
+PackageInstaller::Options PluginManager::installerOptions(const PythonRuntime& python, bool upgrade) const {
+    const usdcc::core::Settings& settings = usdcc::core::Settings::instance();
+    PackageInstaller::Options options;
+    options.root = m_options.packagesRoot;
+    options.pythonTag = PackageEnvironment::pythonTag(python.version());
+    options.python = python.settings().home / "python.exe";
+    options.uv = PackageInstaller::findUv();
+    options.sources.index = settings.get<std::string>(kPackageIndexKey);
+    options.sources.wheels = toPath(QString::fromStdString(settings.get<std::string>(kWheelsFolderKey)));
+    options.sources.offline = settings.get<bool>(kPackagesOfflineKey);
+    options.userPackages = settings.get<std::string>(kUserPackagesKey);
+    options.upgrade = upgrade;
+    return options;
+}
+
+bool PluginManager::packagesPending() const {
+    if (std::any_of(m_plugins.begin(), m_plugins.end(), [](const PluginInfo& plugin) { return plugin.state == PluginState::NeedsPackages; })) {
+        return true;
+    }
+    if (m_options.packagesRoot.empty()) return false;
+    const QString wanted = QString::fromStdString(usdcc::core::Settings::instance().get<std::string>(kUserPackagesKey)).trimmed();
+    if (wanted.isEmpty()) return false;
+    return !m_environment || wanted != QString::fromStdString(m_environment->record().userPackages).trimmed();
+}
+
+int PluginManager::installPackages(PythonRuntime& python, const std::function<void(const std::string&)>& report) {
+    if (!python.isAvailable()) {
+        report("Python isn't available: " + python.unavailableReason());
+        return 1;
+    }
+    if (m_options.packagesRoot.empty()) {
+        report("There is no shared packages folder.");
+        return 1;
+    }
+    std::vector<std::string> blocked;
+    std::vector<PackageRequest> requests = packageRequests(python, &blocked);
+    PackageInstaller::Options options = installerOptions(python, false);
+    options.blocked = std::move(blocked);
+    PackageInstaller installer(std::move(options));
+
+    QEventLoop loop;
+    int result = 0;
+    QObject::connect(&installer, &PackageInstaller::output, &loop, [&report](const QString& line) { report(line.toStdString()); });
+    QObject::connect(&installer, &PackageInstaller::failed, &loop, [&](const QString& reason) {
+        report("Failed: " + reason.toStdString());
+        result = 1;
+        loop.quit();
+    });
+    QObject::connect(&installer, &PackageInstaller::resolved, &loop, [&](const PackagePlan& plan) {
+        for (const LeftOutPackages& left : plan.leftOut) {
+            report("Left out " + left.name + ": " + left.why);
+            result = 2;
+        }
+        if (plan.unchanged) {
+            report("Everything is up to date.");
+            loop.quit();
+            return;
+        }
+        installer.install();
+    });
+    QObject::connect(&installer, &PackageInstaller::installed, &loop, [&](const QString& folder) {
+        report("Installed in " + folder.toStdString());
+        loop.quit();
+    });
+    // resolved() can come before the loop runs only when it fails at once, and then
+    // nothing is left to wait for.
+    installer.resolve(std::move(requests));
+    if (installer.isBusy()) loop.exec();
+    return result;
 }
 
 }  // namespace usdcc::scripting

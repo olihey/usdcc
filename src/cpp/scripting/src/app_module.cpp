@@ -363,6 +363,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                 info["maximum"] = definition.maximum;
             }
             if (!definition.choices.empty()) info["choices"] = definition.choices;
+            info["applies_at_next_start"] = definition.appliesAtNextStart;
             return info;
         },
         py::arg("key"));
@@ -370,12 +371,13 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "settings_define",
         [](const std::string& key, const std::string& type, const SettingValue& defaultValue, const std::string& label,
            const std::string& category, const std::string& group, const std::string& description,
-           std::optional<double> minimum, std::optional<double> maximum, std::vector<std::string> choices) {
+           std::optional<double> minimum, std::optional<double> maximum, std::vector<std::string> choices,
+           bool appliesAtNextStart) {
             SettingDefinition definition;
             definition.key = key;
             if (!usdcc::core::parseSettingType(type, &definition.type)) {
                 throw py::value_error("unknown setting type '" + type +
-                                      "' (bool, int, float, string, choice, color or shortcut)");
+                                      "' (bool, int, float, string, choice, color, shortcut or folder)");
             }
             definition.defaultValue = defaultValue;
             definition.label = label;
@@ -391,6 +393,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                 definition.maximum = *maximum;
             }
             definition.choices = std::move(choices);
+            definition.appliesAtNextStart = appliesAtNextStart;
             if (!Settings::instance().define(std::move(definition))) {
                 throw py::value_error("invalid setting '" + key +
                                       "': it needs a key and a category, and a default that fits its type");
@@ -399,7 +402,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         py::arg("key"), py::arg("type"), py::arg("default"), py::arg("label") = std::string(),
         py::arg("category") = std::string("Python"), py::arg("group") = std::string(),
         py::arg("description") = std::string(), py::arg("minimum") = py::none(), py::arg("maximum") = py::none(),
-        py::arg("choices") = std::vector<std::string>());
+        py::arg("choices") = std::vector<std::string>(), py::arg("applies_at_next_start") = false);
 
     m.def(
         "register_tool",
