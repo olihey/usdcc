@@ -41,6 +41,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -521,6 +522,74 @@ def activate(plugin):
     CHECK(manager.find("panel.good")->state == PluginState::Active, "this session it still runs");
     good->setCheckState(0, Qt::Checked);
     CHECK(manager.isEnabled("panel.good") && pending->isHidden(), "ticking it again cancels that");
+
+    std::filesystem::remove_all(root, error);
+}
+
+USDCC_TEST(plugin_manager_panel_shows_types) {
+    TestSettings settings;
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+                                       ("usdcc_plugin_types_" + std::to_string(QCoreApplication::applicationPid()));
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    const auto manifest = [&root](const std::string& id, const std::string& parts) {
+        std::filesystem::create_directories(root / id);
+        std::ofstream(root / id / "usdcc-plugin.json", std::ios::binary)
+            << R"({"id": ")" << id << R"(", "name": ")" << id << R"(", "version": "1", "api": 1)" << parts << "}";
+    };
+    const std::string python = R"(, "python": {"module": "usdcc_test_types_mod"})";
+    const std::string native = R"(, "native": {"library": "x"})";
+    const std::string usd = R"(, "usd": ["usd"])";
+    manifest("t.python", python);
+    manifest("t.cpp", native);
+    manifest("t.usd", usd);
+    manifest("t.all", native + python + usd);
+    manifest("t.mixed", python + usd);
+    manifest("t.nothing", "");
+
+    PluginManager::Options options;
+    options.folders = {root};
+    PluginManager manager(options);
+    manager.scan();
+
+    using usdcc::scripting::pluginTypes;
+    const auto typesOf = [&manager](const std::string& id) { return pluginTypes(manager.find(id)->manifest); };
+    using Types = std::vector<std::string>;
+    CHECK(typesOf("t.python") == Types{"Python"}, "Python");
+    CHECK(typesOf("t.cpp") == Types{"C++"}, "C++, whether or not it could load");
+    CHECK(typesOf("t.usd") == Types{"USD"}, "USD with no code");
+    CHECK((typesOf("t.all") == Types{"C++", "Python", "USD"}), "all, in a fixed order");
+    CHECK(typesOf("t.nothing").empty(), "nothing");
+
+    PluginManagerSidePanel panel(manager);
+    auto* tree = panel.findChild<QTreeWidget*>();
+    CHECK(tree && tree->topLevelItemCount() == 6, "a row each");
+    if (!tree) return;
+    std::map<QString, QTreeWidgetItem*> rows;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) rows[tree->topLevelItem(i)->text(0)] = tree->topLevelItem(i);
+
+    const auto image = [&tree](QTreeWidgetItem* item) { return item->icon(0).pixmap(tree->iconSize()).toImage(); };
+    CHECK(!rows["t.python"]->icon(0).isNull() && !rows["t.cpp"]->icon(0).isNull() && !rows["t.all"]->icon(0).isNull(), "each has an icon");
+    CHECK(image(rows["t.python"]) != image(rows["t.cpp"]) && image(rows["t.python"]) != image(rows["t.usd"]) &&
+              image(rows["t.cpp"]) != image(rows["t.usd"]),
+          "telling them apart");
+    CHECK(image(rows["t.all"]) != image(rows["t.cpp"]) && image(rows["t.mixed"]) != image(rows["t.python"]), "and a mix from either part");
+    CHECK(image(rows["t.python"]).size() == image(rows["t.all"]).size(), "the same width, so the names line up");
+    CHECK(image(rows["t.nothing"]).size() == image(rows["t.all"]).size(), "even with nothing to show");
+    CHECK(tree->iconSize().width() > tree->iconSize().height(), "wide enough for several");
+
+    const auto details = [&panel]() {
+        for (QLabel* label : panel.findChildren<QLabel*>()) {
+            if (label->objectName() != "propertyNote") return label->text();
+        }
+        return QString();
+    };
+    tree->setCurrentItem(rows["t.mixed"]);
+    CHECK(details().contains("Type: Python + USD"), "the details spell it out: %s", qPrintable(details()));
+    CHECK(rows["t.mixed"]->toolTip(0).contains("Python + USD") && rows["t.mixed"]->toolTip(0).contains("t.mixed"), "and the tooltip");
+    tree->setCurrentItem(rows["t.nothing"]);
+    CHECK(!details().contains("Type:"), "no line with nothing to say");
+    CHECK(rows["t.nothing"]->toolTip(0) == "t.nothing", "nor in the tooltip");
 
     std::filesystem::remove_all(root, error);
 }

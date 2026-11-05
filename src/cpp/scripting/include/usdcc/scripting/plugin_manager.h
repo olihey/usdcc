@@ -31,6 +31,10 @@ struct PluginManifest {
     std::filesystem::path folder;
 };
 
+// What a plugin is made of, from its manifest: "C++", "Python" and "USD", in that order,
+// those it has. Empty for a plugin with none of them.
+std::vector<std::string> pluginTypes(const PluginManifest& manifest);
+
 // What a C++ plugin has to have been built with, as usdcc_add_plugin() writes it
 // in the manifest: platform, compiler, qt, usd and usdcc. std:: and Qt types cross
 // the boundary, and USD's symbols carry its version (docs/PLUGINS.md §3.2).

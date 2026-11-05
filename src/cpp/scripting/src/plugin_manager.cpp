@@ -191,6 +191,14 @@ LoadedLibrary loadLibrary(const std::filesystem::path& given) {
 }
 }  // namespace
 
+std::vector<std::string> pluginTypes(const PluginManifest& manifest) {
+    std::vector<std::string> types;
+    if (!manifest.nativeLibrary.empty()) types.emplace_back("C++");
+    if (!manifest.pythonModule.empty()) types.emplace_back("Python");
+    if (!manifest.usdFolders.empty()) types.emplace_back("USD");
+    return types;
+}
+
 std::map<std::string, std::string> pluginBuildInfo() {
     return {{"platform", USDCC_BUILT_FOR_PLATFORM},
             {"compiler", USDCC_BUILT_FOR_COMPILER},

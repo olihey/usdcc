@@ -68,7 +68,7 @@ user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts
 | Settings | `plugin.settings.value(key, default)`, `set_value(key, value)`, JSON values, one group per plugin in `usdcc.ini` |
 | Logging | `plugin.log`, a logger with the source `plugin:<id>` in the Log panel |
 
-Attribute editors can't be added yet (§4, Later). **View > Plugins** lists the plugins, what each added, and why any isn't running, and turns them on or
+Attribute editors can't be added yet (§4, Later). **View > Plugins** lists the plugins, a chip for each of their parts (`C++`, `Py`, `USD`), what each added, and why any isn't running, and turns them on or
 off for the next start.
 
 Startup scripts are unchanged. A plugin differs in having an identity, a manifest readable without running it, and files other than Python.
