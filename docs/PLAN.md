@@ -932,6 +932,26 @@ things that will bite later if not addressed early:
       test programs, the Python modules) copied the same DLLs there at once, and one failed
       on the locked file. The copy steps now run one after another.
 
+43. **V-Ray Render panel.** A Python plugin (`src/plugins/vray_render`) whose view panel
+    renders its stage progressively with the V-Ray App SDK. See
+    [VRAY_RENDER.md](VRAY_RENDER.md).
+    - **Helper process:** V-Ray runs in a `python.exe` of its own. V-Ray's own OpenUSD has
+      the same DLL names as usdcc's, and a crash there leaves usdcc running. Commands go in
+      as JSON lines; events and RGBA images come back on stdout.
+    - **Camera:** it follows the viewport camera live, or renders through a camera prim.
+    - **Edits:** after one, the flattened stage is exported and loaded again.
+    - **For it, and for any plugin:** `usdcc.app.active_viewport_camera()`, the events
+      `viewport_camera_changed` and `stage_edited`, and `usdcc.settings.show()`.
+      `HydraViewportWindow` has a public `frustum()` and a `cameraChanged()` signal;
+      `ViewportViewPanel::activeViewport()` is the viewport last clicked in.
+    - **Found along the way:**
+      - V-Ray reads a USD file's prims only through its render settings.
+      - Changes to the RenderViews V-Ray makes from the file are ignored while interactive
+        rendering runs, so the helper drives a RenderView of its own.
+      - The App SDK opens a frame buffer window of its own unless told not to.
+    - **Not yet:** in-place updates instead of reloading after each edit, time, and the
+      stage's own render settings.
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

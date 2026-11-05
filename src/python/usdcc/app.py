@@ -7,7 +7,10 @@ scripts use the friendlier usdcc.usd functions instead. With PySide6,
 in Python, and ``register_view_panel()`` adds a view panel type
 (docs/SCRIPTING.md section 8). ``add_menu_action()``, ``add_prim_menu_action()``
 and ``connect()`` are how plugins add to the app (docs/PLUGINS.md).
+``active_viewport_camera()`` is what the viewport looks through.
 """
+
+import math
 
 from usdcc import _plugins
 
@@ -184,6 +187,49 @@ def remove_prim_menu_action(id):
     _app().remove_prim_menu_action(id)
 
 
+class ViewportCamera:
+    """What ``active_viewport_camera()`` returns: a viewport's camera as plain values.
+
+    - ``stage``: the Usd.Stage the viewport shows, or None
+    - ``transform``: camera-to-world, a Gf.Matrix4d. The camera looks down its -Z
+      axis with +Y up, as a UsdGeom.Camera does.
+    - ``fov_y``: the vertical field of view in degrees
+    - ``aspect``: width / height of the viewport
+    - ``near``, ``far``: the clipping range
+    """
+
+    __slots__ = ("stage", "transform", "fov_y", "aspect", "near", "far")
+
+    def fov_x(self):
+        """The horizontal field of view in degrees."""
+        return math.degrees(2.0 * math.atan(math.tan(math.radians(self.fov_y) / 2.0) * self.aspect))
+
+    def __repr__(self):
+        position = self.transform.ExtractTranslation()
+        return f"ViewportCamera(position={tuple(position)}, fov_y={self.fov_y:.1f}, aspect={self.aspect:.3f})"
+
+
+def active_viewport_camera():
+    """The camera of the viewport the user last worked in (the last one clicked, or
+    else the oldest one open), as a ``ViewportCamera``. None with no viewport open.
+    "viewport_camera_changed" (see ``connect()``) says when it changes."""
+    from pxr import Gf
+    from usdcc import usd
+
+    plain = _app().active_viewport_camera()
+    if plain is None:
+        return None
+    cache_id, matrix, fov_y, aspect, near, far = plain
+    camera = ViewportCamera()
+    camera.stage = usd._stage(cache_id)
+    camera.transform = Gf.Matrix4d(*matrix)
+    camera.fov_y = fov_y
+    camera.aspect = aspect
+    camera.near = near
+    camera.far = far
+    return camera
+
+
 class Connection:
     """What ``connect()`` returns. Connections end by themselves when the app quits."""
 
@@ -204,6 +250,14 @@ def connect(event, callback):
     - "current_stage_changed": ``callback(stage)``, with None when no stage is open
     - "stage_opened": ``callback(stage)``
     - "stage_closed": ``callback(identifier)``, its root layer's, as it's gone by then
+    - "stage_edited": ``callback(stage, resynced_paths, changed_info_paths)`` after
+      every change to any open stage, whoever made it (a panel, a tool, undo, a
+      script), with the Sdf.Paths USD's change notice reports. It is called inside
+      that notice: note what changed and act later (e.g. from a QTimer), don't edit
+      or save the stage from it
+    - "viewport_camera_changed": ``callback(camera)``, a ``ViewportCamera`` or None,
+      when the active viewport's camera moves, it shows another stage, or another
+      viewport becomes the active one (see ``active_viewport_camera()``)
     """
     from pxr import Sdf
     from usdcc import usd
@@ -212,6 +266,12 @@ def connect(event, callback):
         plain = lambda cache_id, paths: callback(usd._stage(cache_id), [Sdf.Path(path) for path in paths])
     elif event in ("current_stage_changed", "stage_opened"):
         plain = lambda cache_id: callback(usd._stage(cache_id))
+    elif event == "stage_edited":
+        plain = lambda cache_id, resynced, changed: callback(
+            usd._stage(cache_id), [Sdf.Path(path) for path in resynced], [Sdf.Path(path) for path in changed]
+        )
+    elif event == "viewport_camera_changed":
+        plain = lambda: callback(active_viewport_camera())
     else:
         plain = callback  # stage_closed; an unknown name raises below
     connection = Connection(_app().connect_event(event, plain))

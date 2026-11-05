@@ -1,0 +1,10 @@
+{
+    "id": "org.usdcc.vray-render",
+    "name": "V-Ray Render",
+    "version": "0.1.0",
+    "description": "A view panel that renders the stage progressively with the V-Ray App SDK, following the viewport camera and edits. Needs the V-Ray App SDK and a license.",
+    "api": 1,
+    "python": {
+        "module": "usdcc_vray_render"
+    }
+}

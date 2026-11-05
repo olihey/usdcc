@@ -20,6 +20,41 @@
 
 namespace usdcc::usd {
 
+namespace {
+// Every open viewport, oldest first, and the one clicked last (see activeViewport()).
+std::vector<ViewportViewPanel*>& openViewports() {
+    static std::vector<ViewportViewPanel*> viewports;
+    return viewports;
+}
+ViewportViewPanel* s_clickedViewport = nullptr;
+}  // namespace
+
+ViewportViewPanel* ViewportViewPanel::activeViewport() {
+    if (s_clickedViewport) return s_clickedViewport;
+    return openViewports().empty() ? nullptr : openViewports().front();
+}
+
+usdcc::core::Signal<>& ViewportViewPanel::activeViewportChanged() {
+    static usdcc::core::Signal<> signal;
+    return signal;
+}
+
+ViewportViewPanel::~ViewportViewPanel() {
+    const bool wasActive = activeViewport() == this;
+    std::erase(openViewports(), this);
+    if (s_clickedViewport == this) s_clickedViewport = nullptr;
+    if (wasActive) activeViewportChanged()();
+}
+
+void ViewportViewPanel::makeActive() {
+    if (activeViewport() == this) {
+        s_clickedViewport = this;
+        return;
+    }
+    s_clickedViewport = this;
+    activeViewportChanged()();
+}
+
 ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr stage,
                                       std::shared_ptr<usdcc::tools::ToolSet> toolSet,
                                       std::shared_ptr<UndoManager> undoManager, const QString& title,
@@ -55,8 +90,13 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // current one (CurrentStageTracker): ADS doesn't see the native window's
     // focus. Only the highlight moves; the viewport keeps the keyboard.
     connect(m_viewport, &HydraViewportWindow::pressed, this, [this]() {
+        makeActive();
         if (dockManager()) dockManager()->setDockWidgetFocused(this);
     });
+    connect(m_viewport, &HydraViewportWindow::cameraChanged, this, [this]() {
+        if (activeViewport() == this) activeViewportChanged()();
+    });
+    openViewports().push_back(this);
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.
     connect(m_viewport, &HydraViewportWindow::toolEditStarted, this, [this](const QString& description) {
@@ -88,6 +128,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_viewport->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
+    if (activeViewport() == this) activeViewportChanged()();  // the active camera's stage
     if (!stage) {
         m_stageChangedConnection = {};
         m_targetConnection = {};

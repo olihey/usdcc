@@ -235,7 +235,14 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
     m_distance = state.distance;
     m_yaw = state.yaw;
     m_pitch = state.pitch;
+    cameraMoved();
+}
+
+double HydraViewportWindow::verticalFieldOfView() { return kFovY; }
+
+void HydraViewportWindow::cameraMoved() {
     renderNow();
+    Q_EMIT cameraChanged();
 }
 
 void HydraViewportWindow::setToolSet(std::shared_ptr<usdcc::tools::ToolSet> toolSet) {
@@ -411,7 +418,7 @@ void HydraViewportWindow::exposeEvent(QExposeEvent*) {
     }
 }
 
-void HydraViewportWindow::resizeEvent(QResizeEvent*) { renderNow(); }
+void HydraViewportWindow::resizeEvent(QResizeEvent*) { cameraMoved(); }  // the aspect ratio
 
 bool HydraViewportWindow::event(QEvent* ev) {
     if (ev->type() == QEvent::UpdateRequest) {
@@ -590,12 +597,12 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
                 m_lastMousePos = mapFromGlobal(to);
             }
         }
-        renderNow();
+        cameraMoved();
     } else if (m_panning) {
         const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
         const double panScale = m_distance * 0.0015;
         m_target += right * (-delta.x() * panScale) + up * (delta.y() * panScale);
-        renderNow();
+        cameraMoved();
     }
 }
 
@@ -619,7 +626,7 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
     const double factor = std::pow(0.9, event->angleDelta().y() / 120.0);
     m_distance = std::max(kMinDistance, m_distance * factor);
-    renderNow();
+    cameraMoved();
 }
 
 }  // namespace usdcc::usd

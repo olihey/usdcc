@@ -190,6 +190,8 @@ settings.define("MyPlugin/autoSave", "bool", True, label="Save automatically",
   `color`, `shortcut` or `folder`. It also takes `minimum`/`maximum` (give both), `choices`
   and `applies_at_next_start`.
 - A defined setting gets a row in the dialog, on a page of its own category.
+- `show(category="")` opens the dialog, on that category's page if given (the V-Ray
+  Render panel's Settings… button, [VRAY_RENDER.md](VRAY_RENDER.md) §5).
 - Not yet: change callbacks into Python. Poll with `get()` where it matters.
 
 ## 7. Tests

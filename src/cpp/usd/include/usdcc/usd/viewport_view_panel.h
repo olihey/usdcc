@@ -44,8 +44,17 @@ public:
                                 std::shared_ptr<usdcc::tools::ToolSet> toolSet,
                                 std::shared_ptr<UndoManager> undoManager,
                                 const QString& title = QStringLiteral("Viewport"), QWidget* parent = nullptr);
+    ~ViewportViewPanel() override;
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
+
+    // The viewport the user last worked in: the last one clicked, or until then
+    // the oldest one open. Null when no viewport is open. What follows "the
+    // viewport camera" uses it (usdcc.app.active_viewport_camera()).
+    static ViewportViewPanel* activeViewport();
+    // Fired when activeViewport() changes, its camera moves, or it switches
+    // stages. Main thread only.
+    static usdcc::core::Signal<>& activeViewportChanged();
 
     // Copies the currently-viewed stage, the current render delegate, and
     // the camera position onto the duplicate — see ViewPanel::duplicate().
@@ -71,6 +80,8 @@ private Q_SLOTS:
 private:
     // Passes the stage's tool target (for the selected prim) to the viewport.
     void syncTarget();
+    // Makes this the active viewport; tells activeViewportChanged() if it wasn't.
+    void makeActive();
 
     HydraViewportWindow* m_viewport;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;

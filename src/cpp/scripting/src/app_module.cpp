@@ -18,13 +18,19 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_view_panel.h"
+
+#include <pxr/base/gf/frustum.h>
+#include <pxr/base/gf/matrix4d.h>
 
 #include <QCoreApplication>
 #include <QSettings>
@@ -134,6 +140,39 @@ int keepConnection(Signal& signal, Callback callback) {
 }
 
 long cacheIdOf(const StageRefPtr& stage) { return stage ? stage->cacheId() : -1; }
+
+std::vector<std::string> pathStrings(const std::vector<PXR_NS::SdfPath>& paths) {
+    std::vector<std::string> strings;
+    strings.reserve(paths.size());
+    for (const PXR_NS::SdfPath& path : paths) strings.push_back(path.GetString());
+    return strings;
+}
+
+// "stage_edited": every open stage's change notices as one connection. Stages
+// opened later join; a closed stage's connection goes with it.
+struct AllStagesEdited {
+    using Callback = std::function<void(const StageRefPtr&, const usdcc::usd::StageChanges&)>;
+
+    AllStagesEdited(usdcc::usd::StageManager& stages, Callback callback) : m_callback(std::move(callback)) {
+        for (const StageRefPtr& stage : stages.stages()) add(stage);
+        m_opened = stages.stageOpened.connect([this](const StageRefPtr& stage) { add(stage); });
+        m_closed = stages.stageClosed.connect([this](const StageRefPtr& stage) { m_stages.erase(stage.get()); });
+    }
+
+private:
+    void add(const StageRefPtr& stage) {
+        // Weak: the connection must not keep a closed stage alive.
+        std::weak_ptr<usdcc::usd::Stage> weak = stage;
+        m_stages[stage.get()] = stage->changed.connect([this, weak](const usdcc::usd::StageChanges& changes) {
+            if (const StageRefPtr locked = weak.lock()) m_callback(locked, changes);
+        });
+    }
+
+    Callback m_callback;
+    std::map<const usdcc::usd::Stage*, usdcc::core::Signal<const usdcc::usd::StageChanges&>::Connection> m_stages;
+    usdcc::core::Signal<StageRefPtr>::Connection m_opened;
+    usdcc::core::Signal<StageRefPtr>::Connection m_closed;
+};
 
 // For a callback that a Signal holds: logged rather than thrown into C++.
 template <typename... Args>
@@ -372,6 +411,13 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         py::arg("category") = std::string());
     m.def("settings_categories", []() { return Settings::instance().categories(); });
     m.def(
+        "settings_show",
+        [](const std::string& category) {
+            usdcc::ui::SettingsDialog* dialog = usdcc::ui::SettingsDialog::showDialog(&mainWindow());
+            if (!category.empty()) dialog->showCategory(QString::fromStdString(category));
+        },
+        py::arg("category"));
+    m.def(
         "settings_info",
         [definitionOf](const std::string& key) {
             const SettingDefinition& definition = definitionOf(key);
@@ -497,6 +543,23 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "remove_prim_menu_action", [](const std::string& id) { usdcc::usd::PrimMenuEntries::instance().remove(id); },
         py::arg("id"));
 
+    // The camera of the viewport the user last worked in, as plain values that
+    // usdcc/app.py turns into a ViewportCamera: (stage cache id or -1,
+    // camera-to-world matrix as 16 doubles, row by row, vertical field of view
+    // in degrees, aspect ratio, near, far). None with no viewport open.
+    m.def("active_viewport_camera", []() -> py::object {
+        usdcc::usd::ViewportViewPanel* viewport = usdcc::usd::ViewportViewPanel::activeViewport();
+        if (!viewport) return py::none();
+        const PXR_NS::GfFrustum frustum = viewport->hydraWindow()->frustum();
+        const PXR_NS::GfMatrix4d cameraToWorld = frustum.ComputeViewInverse();
+        std::vector<double> matrix(cameraToWorld.data(), cameraToWorld.data() + 16);
+        const PXR_NS::GfRange2d window = frustum.GetWindow();
+        const double aspect = window.GetSize()[1] > 0.0 ? window.GetSize()[0] / window.GetSize()[1] : 1.0;
+        return py::make_tuple(cacheIdOf(viewport->currentStage()), matrix,
+                              usdcc::usd::HydraViewportWindow::verticalFieldOfView(), aspect,
+                              frustum.GetNearFar().GetMin(), frustum.GetNearFar().GetMax());
+    });
+
     // App events: returns an id for disconnect_event().
     m.def(
         "connect_event",
@@ -524,6 +587,22 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                 return keepConnection(stages.stageClosed, [held](const StageRefPtr& stage) {
                     callLogged(held, stage->usdStage()->GetRootLayer()->GetIdentifier());
                 });
+            }
+            if (event == "stage_edited") {
+                // Synchronously, inside USD's change notice: the callback should
+                // only note what changed, not edit or export the stage.
+                const int id = s_nextEventConnection++;
+                s_eventConnections[id] = std::make_shared<AllStagesEdited>(
+                    stages, [held](const StageRefPtr& stage, const usdcc::usd::StageChanges& changes) {
+                        callLogged(held, cacheIdOf(stage), pathStrings(changes.resyncedPaths),
+                                   pathStrings(changes.changedInfoOnlyPaths));
+                    });
+                return id;
+            }
+            if (event == "viewport_camera_changed") {
+                // usdcc/app.py reads the camera with active_viewport_camera().
+                return keepConnection(usdcc::usd::ViewportViewPanel::activeViewportChanged(),
+                                      [held]() { callLogged(held); });
             }
             throw py::value_error("no event named '" + event + "'");
         },

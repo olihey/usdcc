@@ -48,7 +48,8 @@ def deactivate(plugin):  # optional: at quit and before a reload, to stop what y
 **To write one inside the app,** see [PLUGIN_DEV.md](PLUGIN_DEV.md): **New Plugin...** in View > Plugins, a plugin's tab in the Script Editor, and one-click Reload.
 
 [src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`. The C++ example builds to
-`build/plugins`, so `usdcc --plugin-path build/plugins` loads that.
+`build/plugins`, so `usdcc --plugin-path build/plugins` loads that. [src/plugins/vray_render](../src/plugins/vray_render) is a bigger one: a view panel that renders
+with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)).
 
 **Found in, the first with an id winning (logged):** `--plugin-path` folders, `USDCC_PLUGIN_PATH` (a studio's), `%LOCALAPPDATA%/usdcc/plugins` (the
 user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in
@@ -63,7 +64,8 @@ user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts
 | Main menu | `usdcc.app.add_menu_action("Menu/Action", callback, shortcut, tip)`, one undo step per run |
 | Outliner's prim menu | `usdcc.app.add_prim_menu_action(label, callback, applies=None, id=None)`, one undo step per run |
 | Viewport tools | `usdcc.tools.register_tool(id, label, cls, icon="")` |
-| App events | `usdcc.app.connect(event, callback)`: `selection_changed`, `current_stage_changed`, `stage_opened`, `stage_closed` |
+| App events | `usdcc.app.connect(event, callback)`: `selection_changed`, `current_stage_changed`, `stage_opened`, `stage_closed`, `stage_edited`, `viewport_camera_changed` |
+| The viewport's camera | `usdcc.app.active_viewport_camera()`: camera-to-world, field of view, aspect ratio, clipping |
 | Create menu entries | `usdcc.usd.set_create_entry(...)` |
 | Relationship target rules | `usdcc.usd.set_relationship_targets(...)` |
 | Schemas, render delegates | A folder named in the manifest's `"usd"` |

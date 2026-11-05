@@ -82,6 +82,15 @@ public:
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
 
+    // The camera this viewport renders with, as a frustum: position and
+    // orientation (ComputeViewInverse() is the camera-to-world matrix), the
+    // vertical field of view, the window's aspect ratio and the clipping range.
+    // What an external renderer needs to frame the same view (usdcc.app's
+    // active_viewport_camera(), docs/VRAY_RENDER.md).
+    PXR_NS::GfFrustum frustum() const { return currentFrustum(); }
+    // The vertical field of view frustum() uses, in degrees.
+    static double verticalFieldOfView();
+
     // The editing tools this viewport draws gizmos for and sends mouse events
     // to. Normally one ToolSet is shared by every viewport and driven by the
     // main window's tool rail and options bar (see ViewportToolBars); the
@@ -123,6 +132,10 @@ Q_SIGNALS:
     void toolEditStarted(const QString& description);
     void toolEditFinished();
 
+    // The camera moved (orbit, pan, zoom, setCameraState()) or the window's
+    // aspect ratio changed: frustum() is different now.
+    void cameraChanged();
+
 protected:
     void exposeEvent(QExposeEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -145,6 +158,8 @@ private:
     // Binds m_framebuffer, (re)made at `width` x `height` device pixels.
     void bindFramebuffer(int width, int height);
     void renderNow();
+    // After the camera changed: redraw and tell cameraChanged()'s listeners.
+    void cameraMoved();
     PXR_NS::GfVec3d cameraPosition() const;
     PXR_NS::GfFrustum currentFrustum() const;
 

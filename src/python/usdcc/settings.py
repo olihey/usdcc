@@ -68,6 +68,12 @@ def categories():
     return _app().settings_categories()
 
 
+def show(category=""):
+    """Opens the Settings dialog (or brings it to the front), on `category`'s page
+    if given. Needs the main window."""
+    _app().settings_show(category)
+
+
 def info(key):
     """A dict describing setting `key`: key, type, category, group, label,
     description, default, value and applies_at_next_start, plus minimum/maximum
