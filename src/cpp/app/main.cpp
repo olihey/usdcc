@@ -51,6 +51,7 @@
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/prim_tree_dialog.h"
+#include "usdcc/usd/recent_files.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/variant_editor_dialog.h"
@@ -202,6 +203,10 @@ int main(int argc, char** argv) {
     // composition root) rather than by MainWindow, which stays decoupled
     // from any one specific StageManager instance.
     usdcc::usd::StageManager stageManager;
+    // File > Open Recent lists what's opened from here on, however it's opened,
+    // the stage on the command line included.
+    usdcc::usd::defineRecentFilesSetting(&app);
+    const auto recentFilesConnection = usdcc::usd::rememberOpenedStages(stageManager);
     auto undoManager = std::make_shared<usdcc::usd::UndoManager>();
     // The ViewPanel types the Stages menu (and the viewport for a newly opened
     // stage) can create; filled in below, once the tool set exists. Declared
@@ -371,6 +376,16 @@ int main(int argc, char** argv) {
         }
     });
 
+    // File > Open Recent: built as it opens, so it's current and says what's gone.
+    // Through the handler Open as Stage uses, so a file that's open comes forward.
+    QMenu* recentMenu = fileMenu->addMenu(QObject::tr("Open &Recent"));
+    QObject::connect(fileMenu, &QMenu::aboutToShow, recentMenu, [recentMenu]() {
+        recentMenu->menuAction()->setEnabled(!usdcc::usd::recentFiles().isEmpty());
+    });
+    QObject::connect(recentMenu, &QMenu::aboutToShow, recentMenu, [recentMenu]() {
+        usdcc::usd::populateRecentFilesMenu(recentMenu, [](const QString& path) { usdcc::usd::openStageFile(path); });
+    });
+
     // File > Save Stage: every file layer of the current stage with unsaved
     // changes (docs/LAYER_EDITOR.md §5). Ctrl+Shift+S, as Ctrl+S is the
     // Script Editor's and the Layers panel's own Save.
@@ -479,6 +494,12 @@ int main(int argc, char** argv) {
             });
         }
     });
+    // File > Exit, last: closing the window, which asks about unsaved layers.
+    fileMenu->addSeparator();
+    QAction* exitAction = fileMenu->addAction(QObject::tr("E&xit"), &window, &QWidget::close);
+    exitAction->setStatusTip(QObject::tr("Close usdcc"));
+    exitAction->setMenuRole(QAction::QuitRole);
+
     // A closed stage's undo history goes with it (it also holds the stage).
     auto undoOnStageClosed = stageManager.stageClosed.connect(
         [undoManager](const usdcc::usd::StageRefPtr& stage) { undoManager->removeStage(stage); });

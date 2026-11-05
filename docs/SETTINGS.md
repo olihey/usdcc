@@ -92,6 +92,7 @@ take them for a `bool`.
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
 | `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
+| `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
 | `Notifications/errorsSticky` | Bool | on | `ToastManager` |

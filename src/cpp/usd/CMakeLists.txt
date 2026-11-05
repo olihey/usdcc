@@ -52,6 +52,8 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/main_menu_actions.h
     src/main_menu_actions.cpp
+    include/usdcc/usd/recent_files.h
+    src/recent_files.cpp
     include/usdcc/usd/dependencies_view_panel.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/layer_actions.h

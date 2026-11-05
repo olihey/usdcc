@@ -64,6 +64,7 @@ add_executable(usdcc_ui_tests
     outliner_names_test.cpp
     prim_tree_dialog_test.cpp
     property_row_test.cpp
+    recent_files_test.cpp
     relationship_editor_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
