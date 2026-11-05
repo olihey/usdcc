@@ -118,6 +118,9 @@ Later changes to the section:
   and Select Prim from Stage..., which opens the file (no payloads loaded) in `PrimPickerDialog`:
   its prims as a tree with the Outliner's icons and types, the default prim in bold, a name
   filter, Use Prim and Cancel.
+- Changing the file sets the prim back to the new file's default prim, as a prim in the old file
+  means nothing in the new one, in the same undo step. Clearing the file keeps the prim: with no file
+  the arc refers to this stage, and needs one.
 
 ## 5. Open as Stage
 

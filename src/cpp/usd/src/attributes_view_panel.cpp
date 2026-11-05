@@ -714,7 +714,13 @@ void AttributesViewPanel::buildCompositionSection(const UsdPrim& prim, QVBoxLayo
             file->setValue(VtValue(SdfAssetPath(arc.assetPath)));
             connect(file, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {
                 if (!v.IsHolding<SdfAssetPath>()) return;
-                change(arc, [&](ArcInfo& a) { a.assetPath = v.UncheckedGet<SdfAssetPath>().GetAssetPath(); });
+                change(arc, [&](ArcInfo& a) {
+                    const std::string asset = v.UncheckedGet<SdfAssetPath>().GetAssetPath();
+                    // A prim in the old file means nothing in the new one, so back to its
+                    // defaultPrim. Not with no file: that refers to this stage and needs a prim.
+                    if (asset != a.assetPath && !asset.empty()) a.primPath = SdfPath();
+                    a.assetPath = asset;
+                });
             });
             PropertyRow* fileRow = addRow(type, file);
             actionsButton(arc, fileRow, true);

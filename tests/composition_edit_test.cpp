@@ -17,6 +17,7 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/editTarget.h>
+#include <pxr/usd/usd/payloads.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -195,6 +196,80 @@ USDCC_TEST(composition_section_in_attribute_editor) {
     }
     CHECK(entries == QStringList({"Select Prim from Stage..."}), "no prim set: only Select: [%s]",
           qPrintable(entries.join(", ")));
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+USDCC_TEST(composition_changing_the_file_resets_the_prim) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    const UsdPrim chair = stage->usdStage()->DefinePrim(SdfPath("/Chair"), TfToken("Xform"));
+    chair.GetReferences().AddReference(SdfReference("./chair.usda", SdfPath("/Seat")));
+    const UsdPrim table = stage->usdStage()->DefinePrim(SdfPath("/Table"), TfToken("Xform"));
+    table.GetPayloads().AddPayload(SdfPayload("./table.usda", SdfPath("/Top")));
+
+    usdcc::usd::AttributesViewPanel panel(&stages, stage, undo, QStringLiteral("Attributes"));
+    panel.resize(500, 800);
+    panel.show();
+    const auto field = [&panel](const QString& text) -> QLineEdit* {
+        for (QLineEdit* edit : panel.findChildren<QLineEdit*>()) {
+            if (edit->text() == text) return edit;
+        }
+        return nullptr;
+    };
+    const auto setField = [&field](const QString& from, const QString& to) {
+        QLineEdit* edit = field(from);
+        if (!edit) return false;
+        edit->setText(to);
+        Q_EMIT edit->editingFinished();
+        settle();
+        return true;
+    };
+    stages.setSelectedPaths(stage, {SdfPath("/Chair")});
+    settle();
+    CHECK(field(QStringLiteral("/Seat")), "the prim is showing");
+
+    // The prim alone: the file stays, and the prim changes.
+    CHECK(setField(QStringLiteral("/Seat"), QStringLiteral("/Back")), "editing the prim");
+    std::vector<ArcInfo> refs = arcsOf(stage, "/Chair", ArcInfo::Type::Reference);
+    CHECK(refs.size() == 1 && refs[0].primPath == SdfPath("/Back"), "keeps the file and sets the prim");
+
+    // Another file: back to its default prim, in one undo step, with the field following.
+    QUndoStack* stack = undo->stack(stage);
+    const int before = stack->index();
+    CHECK(setField(QStringLiteral("./chair.usda"), QStringLiteral("./other.usda")), "editing the file");
+    refs = arcsOf(stage, "/Chair", ArcInfo::Type::Reference);
+    CHECK(refs.size() == 1 && refs[0].assetPath == "./other.usda" && refs[0].primPath.IsEmpty(),
+          "another file goes back to its default prim: [%s]", refs.empty() ? "none" : refs[0].primPath.GetText());
+    CHECK(!field(QStringLiteral("/Back")), "the field no longer shows the old prim");
+    CHECK(stack->index() == before + 1, "in one undo step");
+    stack->undo();
+    settle();
+    refs = arcsOf(stage, "/Chair", ArcInfo::Type::Reference);
+    CHECK(refs.size() == 1 && refs[0].assetPath == "./chair.usda" && refs[0].primPath == SdfPath("/Back"), "undo brings both back");
+
+    // The same text again changes nothing.
+    CHECK(setField(QStringLiteral("./chair.usda"), QStringLiteral("./chair.usda")), "the same file");
+    refs = arcsOf(stage, "/Chair", ArcInfo::Type::Reference);
+    CHECK(refs.size() == 1 && refs[0].primPath == SdfPath("/Back"), "keeps the prim");
+
+    // No file: this stage, which needs the prim.
+    CHECK(setField(QStringLiteral("./chair.usda"), QString()), "clearing the file");
+    refs = arcsOf(stage, "/Chair", ArcInfo::Type::Reference);
+    CHECK(refs.size() == 1 && refs[0].assetPath.empty() && refs[0].primPath == SdfPath("/Back"), "keeps the prim");
+    stack->undo();
+    settle();
+
+    // A payload's the same.
+    stages.setSelectedPaths(stage, {SdfPath("/Table")});
+    settle();
+    CHECK(setField(QStringLiteral("./table.usda"), QStringLiteral("./desk.usda")), "a payload's file");
+    const std::vector<ArcInfo> payloads = arcsOf(stage, "/Table", ArcInfo::Type::Payload);
+    CHECK(payloads.size() == 1 && payloads[0].assetPath == "./desk.usda" && payloads[0].primPath.IsEmpty(), "resets its prim too");
     QStandardPaths::setTestModeEnabled(false);
 }
 
