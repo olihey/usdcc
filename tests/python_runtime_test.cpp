@@ -202,3 +202,15 @@ USDCC_TEST(python_run_file) {
           errors.empty() ? 0 : errors[0].line);
     CHECK(!collect.sink->where("usdcc.python").empty(), "the run itself is logged");
 }
+
+USDCC_TEST(python_run_file_with_byte_order_mark) {
+    ScopedCollect collect;
+    const auto file = std::filesystem::temp_directory_path() / "usdcc_python_bom_test.py";
+    std::ofstream(file, std::ios::binary) << "\xEF\xBB\xBF" << "print('after the mark')\n";
+    const bool ok = python().runFile(file);
+    std::filesystem::remove(file);
+
+    CHECK(ok, "a file starting with a UTF-8 byte order mark runs, as in python");
+    auto out = collect.sink->where("python.stdout");
+    CHECK(out.size() == 1 && out[0].message == "after the mark", "and prints: %s", out.empty() ? "?" : out[0].message.c_str());
+}

@@ -100,10 +100,15 @@ void repolish(QWidget* widget) {
     widget->update();
 }
 
+// Without a UTF-8 byte order mark: the editor's text is run as is, and Python only
+// skips one at the start of a file. Saving writes the file without it.
 QString readFile(const QString& path, bool* ok) {
     QFile file(path);
     *ok = file.open(QIODevice::ReadOnly);
-    return *ok ? QString::fromUtf8(file.readAll()) : QString();
+    if (!*ok) return {};
+    QString text = QString::fromUtf8(file.readAll());
+    if (text.startsWith(QChar(0xFEFF))) text.remove(0, 1);
+    return text;
 }
 
 QString withoutCarriageReturns(QString text) { return text.remove(QLatin1Char('\r')); }

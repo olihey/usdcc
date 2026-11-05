@@ -394,9 +394,13 @@ bool PythonRuntime::runFile(const std::filesystem::path& file, Namespace scope) 
     }
     std::ostringstream code;
     code << in.rdbuf();
+    // A UTF-8 byte order mark, which Windows editors like to write: python skips it in
+    // a file, but compiling the text with it in is a SyntaxError (U+FEFF).
+    std::string text = code.str();
+    if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
 #if USDCC_HAS_PYTHON
     const auto start = std::chrono::steady_clock::now();
-    const bool ok = m_impl->run(code.str(), toUtf8(file), &file, scope);
+    const bool ok = m_impl->run(text, toUtf8(file), &file, scope);
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     if (ok) {
