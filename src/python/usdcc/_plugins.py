@@ -9,6 +9,8 @@ end of sys.meta_path, after the app's folders, so they can't replace anything
 the app uses.
 """
 
+import functools
+import importlib
 import importlib.abc
 import importlib.machinery
 import importlib.metadata
@@ -17,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 
 from usdcc import log as _log
@@ -38,6 +41,11 @@ _NEVER_INSTALLED = _PROVIDED_BY_APP | {"pyside2", "pyqt5", "pyqt5-qt5", "pyqt6",
 
 _active = {}
 _current = None
+# What reloading needs (docs/PLUGIN_DEV.md).
+_undo = {}  # plugin id: what to call to take back what it registered, oldest first
+_owners = {}  # top-level module name: plugin id
+_panel_types = {}  # plugin id: the view panel type ids it has ever registered
+_panel_classes = {}  # view panel type id: its class
 
 
 class Settings:
@@ -91,6 +99,45 @@ def note(kind, name):
         _native.plugin_note(_current.id, kind, name)
 
 
+def track(undo, callback=None):
+    """Records how to take back something just registered, for when the plugin
+    reloads: for the plugin being activated or, as a panel can connect to an event
+    long after that, the one `callback` belongs to. Outside any plugin, nothing."""
+    owner = _owner_of(callback) if callback is not None else None
+    if owner is None and _current is not None:
+        owner = _current.id
+    if owner is not None:
+        _undo.setdefault(owner, []).append(undo)
+
+
+def _owner_of(callback):
+    if isinstance(callback, functools.partial):
+        callback = callback.func
+    module = getattr(getattr(callback, "__func__", callback), "__module__", None)
+    return _owners.get(module.split(".")[0]) if module else None
+
+
+def register_panel_class(id, cls):
+    """Remembers a view panel type made in Python, for panels to rebuild from."""
+    _panel_classes[id] = cls
+    if _current is not None:
+        _panel_types.setdefault(_current.id, set()).add(id)
+
+
+def forget_panel_class(id):
+    _panel_classes.pop(id, None)
+
+
+def panel_class(id):
+    """The class of a view panel type, or None if nothing registers it now."""
+    return _panel_classes.get(id)
+
+
+def panel_types(id):
+    """The view panel types a plugin has registered, now or at any earlier reload."""
+    return sorted(_panel_types.get(id, ()))
+
+
 # --- Loading a plugin --------------------------------------------------------
 
 
@@ -119,6 +166,7 @@ def activate(id, name, version, module, folder):
     global _current
     plugin = Plugin(id, name, version, folder)
     _current = plugin
+    _owners[module] = id
     try:
         plugin.module = _load_module(module, folder)
         function = getattr(plugin.module, "activate", None)
@@ -143,6 +191,54 @@ def deactivate(id):
         function(plugin)
     except Exception as error:
         _log.log_exception(type(error), error, error.__traceback__, "plugin", "plugin:" + id)
+
+
+# --- Reloading (docs/PLUGIN_DEV.md) -------------------------------------------
+
+
+def has_deactivate(id):
+    """Whether a running plugin has a deactivate(), which is the only place to clean
+    up what it set up directly, such as a QTimer."""
+    plugin = _active.get(id)
+    return plugin is not None and getattr(plugin.module, "deactivate", None) is not None
+
+
+def _is_inside(path, folder):
+    try:
+        path = os.path.normcase(os.path.abspath(path))
+    except (TypeError, ValueError):
+        return False
+    return path.startswith(os.path.normcase(os.path.abspath(folder)) + os.sep)
+
+
+def _forget_modules(module, folder):
+    """Makes the next import read the plugin's files again. Only its own: a compiled
+    package from deps/ or the shared folder can't be loaded twice."""
+    python = os.path.join(folder, "python")
+    for name, loaded in list(sys.modules.items()):
+        if name == module or name.startswith(module + ".") or _is_inside(getattr(loaded, "__file__", None), python):
+            del sys.modules[name]
+    # A .pyc is matched to its source by size and a time in whole seconds, so a quick
+    # edit of the same length would go on running the old code.
+    for parent, folders, _files in os.walk(python):
+        if "__pycache__" in folders:
+            shutil.rmtree(os.path.join(parent, "__pycache__"), ignore_errors=True)
+            folders.remove("__pycache__")
+    importlib.invalidate_caches()
+
+
+def unload(id, module, folder):
+    """Takes a plugin out as far as can be done: its deactivate(), everything it
+    registered, and its modules. What it did directly, such as connecting a Qt signal,
+    only its deactivate() can end."""
+    deactivate(id)
+    for undo in reversed(_undo.pop(id, [])):
+        try:
+            undo()
+        except Exception as error:
+            _log.log_exception(type(error), error, error.__traceback__, "plugin", "plugin:" + id)
+    _owners.pop(module, None)
+    _forget_modules(module, folder)
 
 
 # --- Third-party modules (docs/PLUGINS.md section 3.10) ----------------------
@@ -257,7 +353,8 @@ def check_modules(plugins, shared_folder=""):
         if module in owners:
             refused[id] = ("Its module %s is also the module of %s." % (module, owners[module]), False)
             continue
-        if _module_taken(module):
+        # A plugin that's running, here for what it needs when another reloads.
+        if not plugin.get("loaded") and _module_taken(module):
             refused[id] = ("Python already has a module called %s." % module, False)
             continue
 

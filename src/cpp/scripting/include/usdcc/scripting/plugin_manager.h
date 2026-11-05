@@ -117,6 +117,26 @@ public:
 
     void addContribution(const std::string& id, const std::string& kind, const std::string& name);
 
+    // Why reload() wouldn't do anything for it; empty if it would.
+    std::string whyNotReloadable(const std::string& id) const;
+    struct ReloadResult {
+        bool ok = false;                 // the plugin is running again
+        std::vector<std::string> names;  // what was reloaded, it and those requiring it
+        std::vector<std::string> notes;  // what the user should know, whichever way it went
+        std::string failure;             // why it isn't running, when it isn't
+    };
+    // Puts a Python plugin's changes into effect with no restart (docs/PLUGIN_DEV.md):
+    // its deactivate(), taking back what it registered, forgetting its modules, reading
+    // its manifest and checking its packages again, and activating. Plugins requiring it
+    // go with it. Open panels of its view panel types are rebuilt where they are. Why it
+    // failed is in its PluginInfo's `reason`. Main thread; not from inside the plugin
+    // (usdcc.app.reload_plugin() waits for it to finish).
+    ReloadResult reload(const std::string& id, PythonRuntime& python);
+
+    // Writes a new Python plugin called `name` into a folder of its own in `parent`, and
+    // starts it with no restart. Its id, or empty with `error` saying why.
+    std::string createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error);
+
     // What should be in the shared packages folder, in the order to resolve it,
     // for the enabled plugins and My packages; and what must never be installed.
     std::vector<PackageRequest> packageRequests(PythonRuntime& python, std::vector<std::string>* blocked) const;
@@ -145,6 +165,9 @@ private:
     void removeCrashMarker() const;
     // Loads and activates its library; returns why not, or nothing.
     std::string activateNative(PluginInfo& plugin);
+    // Refuses those of `plugins` whose Python packages won't do.
+    void checkPythonModules(const std::vector<PluginInfo*>& plugins, PythonRuntime& python);
+    void activateOne(PluginInfo& plugin);
 
     struct NativePlugin;
 
@@ -157,7 +180,9 @@ private:
     std::set<std::string> m_unusable;
     std::unique_ptr<PackageEnvironment> m_environment;
     std::vector<std::filesystem::path> m_packageFolders;
+    std::string m_sharedFolder;
     bool m_packagesInstalled = false;
+    bool m_reloading = false;
 };
 
 }  // namespace usdcc::scripting

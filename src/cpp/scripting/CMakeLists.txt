@@ -50,11 +50,13 @@ add_library(usdcc_scripting_ui STATIC
     include/usdcc/scripting/code_editor.h
     include/usdcc/scripting/package_install_dialog.h
     include/usdcc/scripting/plugin_manager_side_panel.h
+    include/usdcc/scripting/plugin_type_icon.h
     include/usdcc/scripting/python_highlighter.h
     include/usdcc/scripting/script_editor_side_panel.h
     src/code_editor.cpp
     src/package_install_dialog.cpp
     src/plugin_manager_side_panel.cpp
+    src/plugin_type_icon.cpp
     src/python_highlighter.cpp
     src/script_editor_side_panel.cpp
 )

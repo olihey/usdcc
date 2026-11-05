@@ -28,6 +28,10 @@
         <file alias="trash@2x.png">theme/trash@2x.png</file>
         <file alias="folder.png">theme/folder.png</file>
         <file alias="folder@2x.png">theme/folder@2x.png</file>
+        <file alias="python-file.png">theme/python-file.png</file>
+        <file alias="python-file@2x.png">theme/python-file@2x.png</file>
+        <file alias="reload.png">theme/reload.png</file>
+        <file alias="reload@2x.png">theme/reload@2x.png</file>
         <file alias="play.png">theme/play.png</file>
         <file alias="play@2x.png">theme/play@2x.png</file>
         <file alias="play-selection.png">theme/play-selection.png</file>

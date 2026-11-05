@@ -41,9 +41,11 @@ def activate(plugin):
     usdcc.app.add_menu_action("Tools/Add Note", add_note)
     usdcc.tools.register_tool(plugin.id + ".measure", "Measure", MeasureTool)
 
-def deactivate(plugin):  # optional: at quit, for saving
+def deactivate(plugin):  # optional: at quit and before a reload, to stop what you started
     pass
 ```
+
+**To write one inside the app,** see [PLUGIN_DEV.md](PLUGIN_DEV.md): **New Plugin...** in View > Plugins, a plugin's tab in the Script Editor, and one-click Reload.
 
 [src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`. The C++ example builds to
 `build/plugins`, so `usdcc --plugin-path build/plugins` loads that.
@@ -168,8 +170,9 @@ files, and 122 to 126 ms after that. It's only paid with a Python plugin enabled
 - **Python can't fully:** other code keeps references to its classes and modules, and `sys.modules` keeps what it imported.
 - **C++ couldn't safely:** types, metaobjects and callbacks would point into a freed DLL.
 
-**So:** enabling and disabling take effect **at the next start**, and the panel says so. A plugin that fails in `activate()` keeps whatever it had
-registered until then, for the same reason. For developing one, re-running a registration replaces the type. A proper Reload could come later.
+**So:** enabling and disabling take effect **at the next start**, and the panel says so.
+
+**A plugin's Python can be reloaded,** though, as nearly everything it registers can be taken back, and that's what developing one needs ([PLUGIN_DEV.md](PLUGIN_DEV.md)). It's for working on a plugin rather than for turning one off: what it did directly, such as connecting a Qt signal, only its `deactivate()` can end.
 
 ### 3.5 One Python for everyone
 

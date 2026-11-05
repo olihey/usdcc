@@ -43,31 +43,16 @@ ScriptedViewPanel::ScriptedViewPanel(usdcc::usd::StageManager* stageManager, Sta
 
     // The Python widget goes in here; ui.py parents it from Python, which
     // hands its ownership to this panel.
-    auto* host = new QWidget(container);
-    host->setObjectName(QStringLiteral("scriptedPanelContent"));
-    auto* hostLayout = new QVBoxLayout(host);
+    m_host = new QWidget(container);
+    m_host->setObjectName(QStringLiteral("scriptedPanelContent"));
+    auto* hostLayout = new QVBoxLayout(m_host);
     hostLayout->setContentsMargins(0, 0, 0, 0);
 
     layout->addWidget(toolbar);
-    layout->addWidget(host, 1);
+    layout->addWidget(m_host, 1);
     setContentWidget(container);
 
-    {
-        py::gil_scoped_acquire gil;
-        try {
-            m_instance = std::make_shared<PythonObject>(
-                bridge("_create_view_panel")(m_class->object, reinterpret_cast<std::uintptr_t>(host)));
-        } catch (py::error_already_set& error) {
-            logPythonError(error);
-        }
-    }
-    if (!m_instance) {
-        auto* failed = new QLabel(tr("This panel's Python code failed; the Log panel has the details."), host);
-        failed->setAlignment(Qt::AlignCenter);
-        failed->setWordWrap(true);
-        hostLayout->addWidget(failed);
-    }
-
+    createContent();
     refreshStageCombo();
     // As in the other panels: the initial stage, explicitly (see
     // ViewPanel::onStageChanged()).
@@ -75,6 +60,37 @@ ScriptedViewPanel::ScriptedViewPanel(usdcc::usd::StageManager* stageManager, Sta
 }
 
 ScriptedViewPanel::~ScriptedViewPanel() = default;
+
+void ScriptedViewPanel::createContent() {
+    if (m_class) {
+        py::gil_scoped_acquire gil;
+        try {
+            m_instance = std::make_shared<PythonObject>(
+                bridge("_create_view_panel")(m_class->object, reinterpret_cast<std::uintptr_t>(m_host)));
+        } catch (py::error_already_set& error) {
+            logPythonError(error);
+        }
+    }
+    if (!m_instance) {
+        auto* failed = new QLabel(m_class ? tr("This panel's Python code failed; the Log panel has the details.")
+                                          : tr("Nothing provides this panel now. If its plugin is failing, fixing it and reloading brings it back."),
+                                  m_host);
+        failed->setAlignment(Qt::AlignCenter);
+        failed->setWordWrap(true);
+        m_host->layout()->addWidget(failed);
+    }
+}
+
+void ScriptedViewPanel::rebuild(std::shared_ptr<PythonObject> pythonClass) {
+    {
+        py::gil_scoped_acquire gil;
+        m_instance.reset();
+        qDeleteAll(m_host->findChildren<QWidget*>(Qt::FindDirectChildrenOnly));
+        m_class = std::move(pythonClass);
+    }
+    createContent();
+    onStageChanged(currentStage());
+}
 
 usdcc::ui::ViewPanel* ScriptedViewPanel::duplicate(QWidget* parent) const {
     return new ScriptedViewPanel(stageManager(), currentStage(), windowTitle(), m_class, parent);

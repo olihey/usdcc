@@ -41,6 +41,8 @@ public:
 
     // Registers a type; registering an id again replaces it in place.
     void add(const QString& id, const QString& displayName, Factory create);
+    // False if it isn't registered. Panels of it that are open aren't touched.
+    bool remove(const QString& id);
 
     // In registration order.
     const std::vector<Entry>& entries() const { return m_entries; }

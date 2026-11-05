@@ -1032,3 +1032,8 @@ QToolButton#toastDismissAll:hover {
     color: #e8e8ea;
     background: #2c2c30;
 }
+
+/* A selected row in a plugin's file tree is one colour, arrow area included. */
+QTreeView#pluginTree {
+    show-decoration-selected: 0;
+}

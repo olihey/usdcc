@@ -35,6 +35,11 @@ public:
     // The Python instance, or null if creating it failed.
     PythonObject* pythonPanel() const { return m_instance.get(); }
 
+    // Replaces the content with a new instance of `pythonClass`, staying where it is
+    // in the layout, for when its plugin reloads. Null, as nothing provides the type
+    // now, leaves a note saying so. What the old instance held in memory is gone.
+    void rebuild(std::shared_ptr<PythonObject> pythonClass);
+
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
     // Public (protected in ViewPanel) so it can be checked without opening
     // the menu.
@@ -44,6 +49,9 @@ protected:
     void onStageChanged(const usdcc::usd::StageRefPtr& stage) override;
 
 private:
+    void createContent();
+
+    QWidget* m_host = nullptr;
     std::shared_ptr<PythonObject> m_class;
     std::shared_ptr<PythonObject> m_instance;
 };

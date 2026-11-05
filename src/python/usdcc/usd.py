@@ -172,6 +172,7 @@ def set_relationship_targets(relationship, types=(), schemas=(), severity="block
     tooltip. Takes effect the next time the dialog opens."""
     _native.set_relationship_targets(relationship, list(types), list(schemas), severity, single, reason)
     _plugins.note("Relationship rule", relationship)
+    _plugins.track(lambda: remove_relationship_targets(relationship))
 
 
 def remove_relationship_targets(relationship):
@@ -199,11 +200,13 @@ def set_create_entry(type, category="Plugins", group=0, order=1000):
     opens."""
     _native.set_create_entry(type, category, group, order)
     _plugins.note("Create menu entry", type)
+    _plugins.track(lambda: remove_create_entry(type))
 
 
 def hide_create_entry(type):
     """Leaves a prim type out of the Create menu."""
     _native.hide_create_entry(type)
+    _plugins.track(lambda: remove_create_entry(type))
 
 
 def remove_create_entry(type):

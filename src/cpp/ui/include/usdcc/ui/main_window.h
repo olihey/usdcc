@@ -76,6 +76,9 @@ public:
     //
     // Between show() and layoutSettled(), don't add one: see there.
     void addSidePanel(SidePanel* panel, Qt::DockWidgetArea area);
+    // Takes it out, View menu entry included, and deletes it later. Adding another
+    // with the same object name puts that one where this one was.
+    void removeSidePanel(SidePanel* panel);
 
     // Whether layoutSettled() has been emitted.
     bool isLayoutSettled() const { return m_layoutSettled; }

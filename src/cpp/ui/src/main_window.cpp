@@ -153,6 +153,13 @@ void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
     }
 }
 
+void MainWindow::removeSidePanel(SidePanel* panel) {
+    if (!panel || !m_sidePanels.removeOne(panel)) return;
+    if (m_viewMenu) m_viewMenu->removeAction(panel->toggleViewAction());
+    removeDockWidget(panel);
+    panel->deleteLater();
+}
+
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

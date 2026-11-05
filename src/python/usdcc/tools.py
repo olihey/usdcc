@@ -154,6 +154,7 @@ def register_tool(id, label, cls, icon=""):
         raise TypeError("register_tool() needs a usdcc.tools.Tool subclass, not %r" % (cls,))
     _app().register_tool(id, label, cls(), str(icon))
     _plugins.note("Tool", label)
+    _plugins.track(lambda: unregister_tool(id))
 
 
 def unregister_tool(id):

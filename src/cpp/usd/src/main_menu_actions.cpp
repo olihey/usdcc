@@ -15,7 +15,10 @@ namespace usdcc::usd {
 namespace {
 QString withoutMnemonic(QString text) { return text.remove(QLatin1Char('&')); }
 
-QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts) {
+// Marks a menu made for an entry, which goes when its last entry does.
+constexpr auto kMadeForEntries = "usdccMadeForEntries";
+
+QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts, bool create = true) {
     QMenuBar* bar = window.mainMenuBar();
     QMenu* current = nullptr;
     for (const QString& part : parts) {
@@ -27,12 +30,14 @@ QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts) {
             if (!current && withoutMnemonic(action->text()) == QLatin1String("Debug")) debug = action;
         }
         if (!found) {
+            if (!create) return nullptr;
             if (current) {
                 found = current->addMenu(part);
             } else {
                 found = new QMenu(part, bar);
                 bar->insertMenu(debug, found);
             }
+            found->setProperty(kMadeForEntries, true);
         }
         current = found;
     }
@@ -79,11 +84,18 @@ bool removeMainMenuAction(usdcc::ui::MainWindow& window, const QString& path) {
     QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     if (parts.size() < 2) return false;
     const QString label = parts.takeLast();
-    QMenu* menu = menuAt(window, parts);
-    QAction* action = entryIn(menu, label);
+    QMenu* menu = menuAt(window, parts, false);
+    QAction* action = menu ? entryIn(menu, label) : nullptr;
     if (!action) return false;
     menu->removeAction(action);
     action->deleteLater();
+    // Up through the menus made for it that have nothing left. The app's own stay.
+    while (menu && menu->actions().isEmpty() && menu->property(kMadeForEntries).toBool()) {
+        QMenu* parent = qobject_cast<QMenu*>(menu->parentWidget());
+        if (QWidget* owner = menu->parentWidget()) owner->removeAction(menu->menuAction());
+        menu->deleteLater();
+        menu = parent;
+    }
     return true;
 }
 

@@ -89,6 +89,7 @@ add_executable(usdcc_python_tests
     package_environment_test.cpp
     plugin_manager_test.cpp
     plugin_native_test.cpp
+    plugin_tab_test.cpp
     python_app_test.cpp
     python_runtime_test.cpp
     script_editor_panel_test.cpp
@@ -116,7 +117,7 @@ target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usd
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
-    target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp python_panels_test.cpp)
+    target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp)
     target_compile_definitions(usdcc_python_tests PRIVATE USDCC_EXAMPLE_PLUGINS="${CMAKE_SOURCE_DIR}/src/plugins")
     add_dependencies(usdcc_python_tests usdcc_ui_python)
 endif()

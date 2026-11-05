@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 namespace usdcc::usd {
 class StageManager;
 class UndoManager;
@@ -54,5 +57,9 @@ private:
 
 // The context in effect, or null.
 const AppContext* currentAppContext();
+
+// Rebuilds the open panels of these Python view panel types from what's registered
+// now, after their plugin reloaded (docs/PLUGIN_DEV.md).
+void rebuildScriptedPanels(const std::vector<std::string>& types);
 
 }  // namespace usdcc::scripting

@@ -73,6 +73,14 @@ def add_side_panel(panel, area="right", id=None):
     panel.setParent(main_window())
     _app().add_side_panel(shiboken6.getCppPointer(panel)[0], area)
     _plugins.note("Side panel", panel.windowTitle())
+    _plugins.track(lambda: _remove_side_panel(panel))
+
+
+def _remove_side_panel(panel):
+    import shiboken6
+
+    if shiboken6.isValid(panel):
+        _app().remove_side_panel(shiboken6.getCppPointer(panel)[0])
 
 
 def register_view_panel(id, name, cls):
@@ -88,7 +96,16 @@ def register_view_panel(id, name, cls):
     if not (isinstance(cls, type) and issubclass(cls, ui.ViewPanel)):
         raise TypeError("register_view_panel() needs a usdcc.ui.ViewPanel subclass, not %r" % (cls,))
     _app().register_view_panel(id, name, cls)
+    _plugins.register_panel_class(id, cls)
     _plugins.note("View panel", name)
+    _plugins.track(lambda: unregister_view_panel(id))
+
+
+def unregister_view_panel(id):
+    """Removes a view panel type made in Python. Panels of it that are open stay, and
+    say the type is gone. True if there was one."""
+    _plugins.forget_panel_class(id)
+    return _app().unregister_view_panel(id)
 
 
 def open_view_panel(id, stage=None):
@@ -129,6 +146,7 @@ def add_menu_action(path, callback, shortcut="", tip=""):
     """
     _app().add_menu_action(path, callback, shortcut, tip)
     _plugins.note("Menu action", path)
+    _plugins.track(lambda: remove_menu_action(path))
 
 
 def remove_menu_action(path):
@@ -158,6 +176,7 @@ def add_prim_menu_action(label, callback, applies=None, id=None):
         None if applies is None else lambda *plain: bool(applies(*arguments(*plain))),
     )
     _plugins.note("Prim menu action", label)
+    _plugins.track(lambda: remove_prim_menu_action(id or label))
 
 
 def remove_prim_menu_action(id):
@@ -195,4 +214,12 @@ def connect(event, callback):
         plain = lambda cache_id: callback(usd._stage(cache_id))
     else:
         plain = callback  # stage_closed; an unknown name raises below
-    return Connection(_app().connect_event(event, plain))
+    connection = Connection(_app().connect_event(event, plain))
+    _plugins.track(connection.disconnect, callback)
+    return connection
+
+
+def reload_plugin(id):
+    """Reloads a plugin, once what's running now has finished, so a plugin's own menu
+    action can ask for it (docs/PLUGIN_DEV.md). The Plugins panel shows how it went."""
+    _app().reload_plugin(id)

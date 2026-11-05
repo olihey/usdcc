@@ -13,6 +13,7 @@
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/python_settings.h"
+#include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/settings.h"
 
 #include <pxr/base/plug/registry.h>
@@ -474,9 +475,7 @@ void PluginManager::activate(PythonRuntime& python) {
     }
 
 #if USDCC_HAS_PYTHON
-    namespace py = pybind11;
     // Whether or not a plugin needs them: scripts use these folders too.
-    std::string sharedFolder;
     if (python.isAvailable()) {
         std::error_code error;
         m_packageFolders.clear();
@@ -492,53 +491,17 @@ void PluginManager::activate(PythonRuntime& python) {
                 python.addToPath(*active);
                 m_packageFolders.push_back(*active);
                 m_environment->markInUse();
-                sharedFolder = toUtf8(*active);
+                m_sharedFolder = toUtf8(*active);
             }
             m_environment->removeUnused();
         }
     }
     if (anyPython && python.isAvailable()) {
-        const EnvironmentRecord record = m_environment ? m_environment->record() : EnvironmentRecord();
-        py::gil_scoped_acquire gil;
-        try {
-            py::list specs;
-            for (const PluginInfo& plugin : m_plugins) {
-                if (!needsPython(plugin)) continue;
-                py::dict spec;
-                spec["id"] = plugin.manifest.id;
-                spec["name"] = plugin.manifest.name;
-                spec["module"] = plugin.manifest.pythonModule;
-                spec["folder"] = toUtf8(plugin.manifest.folder);
-                spec["requires"] = plugin.manifest.pythonRequires;
-                specs.append(spec);
-            }
-            const auto refused = py::module_::import("usdcc._plugins")
-                                     .attr("check_modules")(specs, sharedFolder)
-                                     .cast<std::map<std::string, std::pair<std::string, bool>>>();
-            for (const auto& [id, verdict] : refused) {
-                if (PluginInfo* plugin = findMutable(id)) {
-                    plugin->state = verdict.second ? PluginState::NeedsPackages : PluginState::Refused;
-                    plugin->reason = verdict.first;
-                    // An install tried this already, and it can't be done. Don't keep
-                    // offering it, unless the plugin now asks for something else.
-                    for (const LeftOutPackages& left : record.leftOut) {
-                        if (verdict.second && left.id == id && left.declared == plugin->manifest.pythonRequires) {
-                            plugin->state = PluginState::Refused;
-                            plugin->reason = "Its packages couldn't be installed. " + left.why;
-                        }
-                    }
-                    USDCC_LOG_WARNING("usdcc.plugins", "{}: {}", plugin->manifest.name, plugin->reason);
-                }
-            }
-        } catch (py::error_already_set& failure) {
-            // The app's own Python is at fault, not any one plugin's.
-            USDCC_LOG_ERROR("usdcc.plugins", "Checking the plugins' Python modules failed: {}", failure.what());
-            for (PluginInfo& plugin : m_plugins) {
-                if (!needsPython(plugin)) continue;
-                plugin.state = PluginState::Refused;
-                plugin.reason = "Its Python modules couldn't be checked; the Log panel has the details.";
-            }
+        std::vector<PluginInfo*> ready;
+        for (PluginInfo& plugin : m_plugins) {
+            if (needsPython(plugin)) ready.push_back(&plugin);
         }
+        checkPythonModules(ready, python);
     }
     refuseDependents();
 #endif
@@ -547,39 +510,303 @@ void PluginManager::activate(PythonRuntime& python) {
         if (plugin.state != PluginState::Ready) continue;
         refuseDependents();  // one activated just before this may have failed
         if (plugin.state != PluginState::Ready) continue;
-        if (plugin.manifest.pythonModule.empty() && plugin.manifest.nativeLibrary.empty()) {
-            plugin.state = PluginState::Active;
-            continue;
-        }
-        const auto start = std::chrono::steady_clock::now();
-        writeCrashMarker(plugin.manifest.id);
-        std::string failure;
-        if (!plugin.manifest.nativeLibrary.empty()) failure = activateNative(plugin);
+        activateOne(plugin);
+    }
+}
+
+void PluginManager::checkPythonModules(const std::vector<PluginInfo*>& plugins, PythonRuntime& python) {
 #if USDCC_HAS_PYTHON
-        if (failure.empty() && !plugin.manifest.pythonModule.empty()) {
-            py::gil_scoped_acquire gil;
-            try {
-                failure = py::module_::import("usdcc._plugins")
-                              .attr("activate")(plugin.manifest.id, plugin.manifest.name, plugin.manifest.version,
-                                                plugin.manifest.pythonModule, toUtf8(plugin.manifest.folder))
-                              .cast<std::string>();
-            } catch (py::error_already_set& error) {
-                failure = error.what();
-            }
+    namespace py = pybind11;
+    const EnvironmentRecord record = m_environment ? m_environment->record() : EnvironmentRecord();
+    py::gil_scoped_acquire gil;
+    try {
+        py::list specs;
+        const auto addSpec = [&specs](const PluginInfo& plugin, bool loaded) {
+            py::dict spec;
+            spec["id"] = plugin.manifest.id;
+            spec["name"] = plugin.manifest.name;
+            spec["module"] = plugin.manifest.pythonModule;
+            spec["folder"] = toUtf8(plugin.manifest.folder);
+            spec["requires"] = plugin.manifest.pythonRequires;
+            spec["loaded"] = loaded;
+            specs.append(spec);
+        };
+        // Those running stay in the picture, for the packages they bring.
+        for (const PluginInfo& plugin : m_plugins) {
+            if (plugin.state == PluginState::Active && !plugin.manifest.pythonModule.empty()) addSpec(plugin, true);
         }
-#endif
-        removeCrashMarker();
-        const auto ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-        if (failure.empty()) {
-            plugin.state = PluginState::Active;
-            USDCC_LOG_INFO("usdcc.plugins", "Activated {} {} in {} ms", plugin.manifest.name, plugin.manifest.version, ms);
-        } else {
-            plugin.state = PluginState::Failed;
-            plugin.reason = failure;
-            USDCC_LOG_ERROR("usdcc.plugins", "{} failed to activate: {}", plugin.manifest.name, failure);
+        for (const PluginInfo* plugin : plugins) addSpec(*plugin, false);
+        const auto refused = py::module_::import("usdcc._plugins")
+                                 .attr("check_modules")(specs, m_sharedFolder)
+                                 .cast<std::map<std::string, std::pair<std::string, bool>>>();
+        for (const auto& [id, verdict] : refused) {
+            PluginInfo* plugin = findMutable(id);
+            if (!plugin || plugin->state != PluginState::Ready) continue;
+            plugin->state = verdict.second ? PluginState::NeedsPackages : PluginState::Refused;
+            plugin->reason = verdict.first;
+            // An install tried this already, and it can't be done. Don't keep
+            // offering it, unless the plugin now asks for something else.
+            for (const LeftOutPackages& left : record.leftOut) {
+                if (verdict.second && left.id == id && left.declared == plugin->manifest.pythonRequires) {
+                    plugin->state = PluginState::Refused;
+                    plugin->reason = "Its packages couldn't be installed. " + left.why;
+                }
+            }
+            USDCC_LOG_WARNING("usdcc.plugins", "{}: {}", plugin->manifest.name, plugin->reason);
+        }
+    } catch (py::error_already_set& failure) {
+        // The app's own Python is at fault, not any one plugin's.
+        USDCC_LOG_ERROR("usdcc.plugins", "Checking the plugins' Python modules failed: {}", failure.what());
+        for (PluginInfo* plugin : plugins) {
+            plugin->state = PluginState::Refused;
+            plugin->reason = "Its Python modules couldn't be checked; the Log panel has the details.";
         }
     }
+#else
+    (void)plugins;
+    (void)python;
+#endif
+}
+
+void PluginManager::activateOne(PluginInfo& plugin) {
+    if (plugin.manifest.pythonModule.empty() && plugin.manifest.nativeLibrary.empty()) {
+        plugin.state = PluginState::Active;
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    writeCrashMarker(plugin.manifest.id);
+    std::string failure;
+    if (!plugin.manifest.nativeLibrary.empty()) failure = activateNative(plugin);
+#if USDCC_HAS_PYTHON
+    if (failure.empty() && !plugin.manifest.pythonModule.empty()) {
+        namespace py = pybind11;
+        py::gil_scoped_acquire gil;
+        try {
+            failure = py::module_::import("usdcc._plugins")
+                          .attr("activate")(plugin.manifest.id, plugin.manifest.name, plugin.manifest.version,
+                                            plugin.manifest.pythonModule, toUtf8(plugin.manifest.folder))
+                          .cast<std::string>();
+        } catch (py::error_already_set& error) {
+            failure = error.what();
+        }
+    }
+#endif
+    removeCrashMarker();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    if (failure.empty()) {
+        plugin.state = PluginState::Active;
+        USDCC_LOG_INFO("usdcc.plugins", "Activated {} {} in {} ms", plugin.manifest.name, plugin.manifest.version, ms);
+    } else {
+        plugin.state = PluginState::Failed;
+        plugin.reason = failure;
+        USDCC_LOG_ERROR("usdcc.plugins", "{} failed to activate: {}", plugin.manifest.name, failure);
+    }
+}
+
+std::string PluginManager::whyNotReloadable(const std::string& id) const {
+    const PluginInfo* plugin = find(id);
+    if (!plugin) return "There is no such plugin.";
+    if (plugin->state == PluginState::Disabled) return "It's turned off.";
+    if (!plugin->manifest.nativeLibrary.empty()) return "It has a C++ part, whose library can't be unloaded. It needs a restart.";
+    // A manifest that was broken may be fixed by now, which only reading it will tell.
+    if (plugin->manifest.pythonModule.empty() && !m_unusable.count(id)) return "It has no Python to reload.";
+    const PythonRuntime* python = PythonRuntime::instance();
+    if (!python || !python->isAvailable()) return "Python isn't available.";
+    return {};
+}
+
+PluginManager::ReloadResult PluginManager::reload(const std::string& id, PythonRuntime& python) {
+    ReloadResult result;
+#if USDCC_HAS_PYTHON
+    namespace py = pybind11;
+    PluginInfo* target = findMutable(id);
+    if (!target) return result;
+    if (const std::string why = whyNotReloadable(id); !why.empty()) {
+        result.notes.push_back(why);
+        return result;
+    }
+    if (m_reloading) {
+        result.notes.push_back("A reload is running.");
+        return result;
+    }
+    m_reloading = true;
+
+    // It and what requires it, however far, in activation order: those may hold its classes.
+    std::vector<PluginInfo*> chain{target};
+    for (PluginInfo& plugin : m_plugins) {
+        if (&plugin == target || plugin.state == PluginState::Disabled) continue;
+        for (const std::string& dependency : plugin.manifest.dependsOn) {
+            const bool inChain = std::any_of(chain.begin(), chain.end(), [&](const PluginInfo* each) { return each->manifest.id == dependency; });
+            if (inChain) {
+                if (plugin.manifest.nativeLibrary.empty()) {
+                    chain.push_back(&plugin);
+                } else {
+                    result.notes.push_back(plugin.manifest.name + " requires it, but has a C++ part, so it goes on using what it had until a restart.");
+                }
+                break;
+            }
+        }
+    }
+    std::stable_sort(chain.begin(), chain.end());  // m_plugins is in activation order
+
+    usdcc::tools::ToolSet* tools = currentAppContext() ? currentAppContext()->toolSet : nullptr;
+    const std::string activeTool = tools ? tools->activeId() : std::string();
+
+    std::vector<std::string> panelTypes;
+    {
+        py::gil_scoped_acquire gil;
+        py::module_ module = py::module_::import("usdcc._plugins");
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            PluginInfo& plugin = **it;
+            if (plugin.manifest.pythonModule.empty()) continue;
+            try {
+                module.attr("unload")(plugin.manifest.id, plugin.manifest.pythonModule, toUtf8(plugin.manifest.folder));
+            } catch (py::error_already_set& error) {
+                USDCC_LOG_ERROR("usdcc.plugins", "Unloading {} failed: {}", plugin.manifest.name, error.what());
+            }
+        }
+    }
+
+    for (PluginInfo* plugin : chain) {
+        result.names.push_back(plugin->manifest.name);
+        // What it says now. USD files and C++ libraries are only taken in at a start.
+        PluginManifest fresh;
+        fresh.folder = plugin->manifest.folder;
+        const std::string problem = parseManifest(fresh.folder / kManifestName, fresh);
+        plugin->contributions.clear();
+        if (!problem.empty()) {
+            plugin->state = PluginState::Refused;
+            plugin->reason = problem;
+            m_unusable.insert(plugin->manifest.id);
+            USDCC_LOG_WARNING("usdcc.plugins", "{}: {}", plugin->manifest.name, problem);
+            continue;
+        }
+        if (fresh.id != plugin->manifest.id) {
+            plugin->state = PluginState::Refused;
+            plugin->reason = "Its manifest's id changed, from " + plugin->manifest.id + " to " + fresh.id + ". That takes effect at the next start.";
+            continue;
+        }
+        m_unusable.erase(plugin->manifest.id);
+        if (fresh.usdFolders != plugin->manifest.usdFolders || fresh.nativeLibrary != plugin->manifest.nativeLibrary) {
+            result.notes.push_back(fresh.name + ": a change to its USD or C++ parts takes effect at the next start.");
+        }
+        plugin->manifest = std::move(fresh);
+        plugin->state = PluginState::Ready;
+        plugin->reason.clear();
+    }
+
+    std::vector<PluginInfo*> ready;
+    for (PluginInfo* plugin : chain) {
+        if (plugin->state == PluginState::Ready && !plugin->manifest.pythonModule.empty()) ready.push_back(plugin);
+    }
+    checkPythonModules(ready, python);
+    refuseDependents();
+
+    for (PluginInfo* plugin : chain) {
+        refuseDependents();  // one just before this may have failed
+        if (plugin->state == PluginState::Ready) activateOne(*plugin);
+    }
+
+    {
+        py::gil_scoped_acquire gil;
+        py::module_ module = py::module_::import("usdcc._plugins");
+        for (PluginInfo* plugin : chain) {
+            for (const std::string& type : module.attr("panel_types")(plugin->manifest.id).cast<std::vector<std::string>>()) {
+                panelTypes.push_back(type);
+            }
+            if (plugin->state == PluginState::Active && !plugin->manifest.pythonModule.empty() &&
+                !module.attr("has_deactivate")(plugin->manifest.id).cast<bool>()) {
+                result.notes.push_back(plugin->manifest.name +
+                                       " has no deactivate(): anything it set up directly, such as a QTimer, is still running the old code.");
+            }
+        }
+    }
+    rebuildScriptedPanels(panelTypes);
+    if (tools && !activeTool.empty() && tools->tool(activeTool)) tools->setActive(activeTool);
+
+    result.ok = target->state == PluginState::Active;
+    if (!result.ok) result.failure = target->reason;
+    for (const PluginInfo* plugin : chain) {
+        if (plugin != target && plugin->state != PluginState::Active) result.notes.push_back(plugin->manifest.name + " isn't running: " + plugin->reason);
+    }
+    m_reloading = false;
+#else
+    (void)id;
+    (void)python;
+#endif
+    return result;
+}
+
+std::string PluginManager::createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error) {
+    const QString shown = QString::fromStdString(name).trimmed();
+    // What's safe in code and a menu path, as the name goes in both.
+    QString title = shown;
+    title.remove(QRegularExpression(QStringLiteral("[\"\\\\\\r\\n]"))).replace(QLatin1Char('/'), QLatin1Char(' '));
+    title = title.trimmed();
+    QString slug = title.toLower();
+    slug.replace(QRegularExpression(QStringLiteral("[^a-z0-9]+")), QStringLiteral("_"));
+    slug.remove(QRegularExpression(QStringLiteral("^_+|_+$")));
+    if (slug.isEmpty()) {
+        if (error) *error = "A plugin's name needs some letters or digits.";
+        return {};
+    }
+
+    std::error_code fileError;
+    QString folderName = slug;
+    QString id = QStringLiteral("user.%1").arg(slug);
+    for (int n = 2; std::filesystem::exists(parent / folderName.toStdU16String(), fileError) || find(id.toStdString()); ++n) {
+        folderName = QStringLiteral("%1_%2").arg(slug).arg(n);
+        id = QStringLiteral("user.%1").arg(folderName);
+    }
+    // "_plugin" keeps it clear of what else Python can import, and a digit from the front.
+    const QString module = QStringLiteral("%1_plugin").arg(folderName.at(0).isDigit() ? QStringLiteral("p") + folderName : folderName);
+    const std::filesystem::path folder = parent / folderName.toStdU16String();
+    const std::filesystem::path package = folder / "python" / module.toStdU16String();
+    std::filesystem::create_directories(package, fileError);
+    if (fileError) {
+        if (error) *error = "Can't create " + toUtf8(package) + ": " + fileError.message();
+        return {};
+    }
+
+    const QJsonObject manifest{{"id", id},
+                               {"name", shown},
+                               {"version", "0.1.0"},
+                               {"description", ""},
+                               {"api", kPluginApiVersion},
+                               {"python", QJsonObject{{"module", module}, {"requires", QJsonArray()}}}};
+    QFile manifestFile(toQString(folder / kManifestName));
+    QFile codeFile(toQString(package / "__init__.py"));
+    const QString code = QStringLiteral(
+                             "\"\"\"%1: a plugin for usdcc (docs/PLUGINS.md).\"\"\"\n\n"
+                             "import usdcc.app\n\n\n"
+                             "def say_hello():\n"
+                             "    print(\"Hello from %1\")\n\n\n"
+                             "def activate(plugin):\n"
+                             "    \"\"\"Runs at startup and at each reload. What you register with usdcc is taken\n"
+                             "    back by itself at a reload: menu actions, tools, panels, events.\"\"\"\n"
+                             "    usdcc.app.add_menu_action(\"Tools/%1/Say Hello\", say_hello)\n\n\n"
+                             "def deactivate(plugin):\n"
+                             "    \"\"\"Runs at quit and before each reload. Stop here what you started yourself:\n"
+                             "    a QTimer, a thread, a Qt signal you connected.\"\"\"\n")
+                             .arg(title);
+    if (!manifestFile.open(QIODevice::WriteOnly) || manifestFile.write(QJsonDocument(manifest).toJson()) < 0 ||
+        !codeFile.open(QIODevice::WriteOnly) || codeFile.write(code.toUtf8()) < 0) {
+        if (error) *error = "Can't write the plugin's files in " + toUtf8(folder) + ".";
+        return {};
+    }
+    manifestFile.close();
+    codeFile.close();
+
+    PluginInfo plugin;
+    plugin.manifest.folder = folder;
+    if (const std::string problem = parseManifest(folder / kManifestName, plugin.manifest); !problem.empty()) {
+        if (error) *error = problem;
+        return {};
+    }
+    const std::string newId = plugin.manifest.id;
+    m_plugins.push_back(std::move(plugin));
+    reload(newId, python);
+    return newId;
 }
 
 void PluginManager::deactivate(PythonRuntime& python) {

@@ -30,6 +30,13 @@ void ViewPanelRegistry::add(const QString& id, const QString& displayName, Facto
     }
 }
 
+bool ViewPanelRegistry::remove(const QString& id) {
+    auto it = std::find_if(m_entries.begin(), m_entries.end(), [&id](const Entry& e) { return e.id == id; });
+    if (it == m_entries.end()) return false;
+    m_entries.erase(it);
+    return true;
+}
+
 const ViewPanelRegistry::Entry* ViewPanelRegistry::find(const QString& id) const {
     auto it = std::find_if(m_entries.begin(), m_entries.end(), [&id](const Entry& e) { return e.id == id; });
     return it != m_entries.end() ? &*it : nullptr;

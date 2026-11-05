@@ -14,6 +14,7 @@
 
 #include "usdcc/core/settings.h"
 #include "usdcc/scripting/plugin_manager.h"
+#include "usdcc/scripting/python_runtime.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/settings.h"
@@ -25,11 +26,14 @@
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <QCoreApplication>
 #include <QSettings>
+#include <QTimer>
 #include <QUndoStack>
 
 #include <DockManager.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -225,6 +229,28 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             throw py::value_error("no dock area named '" + areaName + "' (left, right, top or bottom)");
         },
         py::arg("address"), py::arg("area"));
+    m.def(
+        "remove_side_panel",
+        [](std::uintptr_t address) { mainWindow().removeSidePanel(reinterpret_cast<usdcc::ui::SidePanel*>(address)); },
+        py::arg("address"));
+    m.def(
+        "unregister_view_panel",
+        [](const std::string& id) {
+            if (!s_pythonPanelTypes.erase(id)) return false;
+            return viewPanels().remove(QString::fromStdString(id));
+        },
+        py::arg("id"));
+    m.def(
+        "reload_plugin",
+        [](const std::string& id) {
+            if (!context().plugins) throw std::runtime_error("there are no plugins here");
+            PluginManager* plugins = context().plugins;
+            // Not now: the caller may be the plugin's own menu action.
+            QTimer::singleShot(0, QCoreApplication::instance(), [plugins, id]() {
+                if (PythonRuntime* python = PythonRuntime::instance()) plugins->reload(id, *python);
+            });
+        },
+        py::arg("id"));
 
     m.def(
         "register_view_panel",
@@ -536,6 +562,29 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         },
         py::arg("id"), py::arg("kind"), py::arg("name"));
 }
+
+void rebuildScriptedPanels(const std::vector<std::string>& types) {
+    if (types.empty() || !s_context || !s_context->mainWindow) return;
+    for (ads::CDockWidget* dock : s_context->mainWindow->dockManager()->dockWidgetsMap()) {
+        auto* panel = qobject_cast<ScriptedViewPanel*>(dock);
+        if (!panel) continue;
+        const std::string type = panel->property(usdcc::ui::ViewPanelRegistry::kTypeProperty).toString().toStdString();
+        if (std::find(types.begin(), types.end(), type) == types.end()) continue;
+        std::shared_ptr<PythonObject> cls;
+        {
+            py::gil_scoped_acquire gil;
+            try {
+                py::object found = py::module_::import("usdcc._plugins").attr("panel_class")(type);
+                if (!found.is_none()) cls = std::make_shared<PythonObject>(std::move(found));
+            } catch (py::error_already_set& error) {
+                logPythonError(error);
+            }
+        }
+        panel->rebuild(std::move(cls));
+    }
+}
+#else
+void rebuildScriptedPanels(const std::vector<std::string>&) {}
 #endif  // USDCC_HAS_PYTHON
 
 }  // namespace usdcc::scripting

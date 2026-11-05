@@ -227,7 +227,9 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 ## 7. The Script Editor panel
 
 `ScriptEditorSidePanel` (a `SidePanel`, objectName "Script Editor", docked on the right until moved;
-added through `MainWindow::addSidePanel()`):
+added through `MainWindow::addSidePanel()`). A tab can also be a plugin, with its folder as a tree and its
+files in tabs of their own ([PLUGIN_DEV.md](PLUGIN_DEV.md)). A file changing on disk updates its tab, asking
+first if the tab has unsaved changes.
 
 ```
 [☰] shot_setup.py • [x] │ Untitled [x] │                       [▶] [▶|] [📂] [💾]

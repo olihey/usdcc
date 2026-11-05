@@ -5,6 +5,7 @@
 #include <QPointer>
 
 class QLabel;
+class QMenu;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -27,6 +28,15 @@ public:
     void refresh();
     // Opens the install dialog for Python packages, or raises the one that's open.
     void installPackages(bool upgrade = false);
+    // Fills the right-click menu for a plugin (public for tests).
+    void populatePluginMenu(QMenu* menu, const QString& id);
+    // Makes a new plugin in the user's folder and opens it. False, logged, if it can't.
+    bool createPlugin(const QString& name);
+
+Q_SIGNALS:
+    // The app connects these to the Script Editor (docs/PLUGIN_DEV.md).
+    void editPluginRequested(const QString& id, const QString& name, const QString& folder, const QString& mainFile);
+    void reloadPluginRequested(const QString& id);
 
 protected:
     void showEvent(QShowEvent* event) override;

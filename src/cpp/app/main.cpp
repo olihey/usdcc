@@ -255,7 +255,8 @@ int main(int argc, char** argv) {
         {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
-    window.addSidePanel(new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner), Qt::RightDockWidgetArea);
+    auto* scriptEditor = new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner);
+    window.addSidePanel(scriptEditor, Qt::RightDockWidgetArea);
 
     // Panels created on demand get a "<type> - <stage>" title and a unique
     // objectName (see ViewPanelRegistry::open()); the three startup panels
@@ -631,6 +632,21 @@ int main(int argc, char** argv) {
     auto* pluginPanel = new usdcc::scripting::PluginManagerSidePanel(plugins);
     window.addSidePanel(pluginPanel, Qt::RightDockWidgetArea);
     pluginPanel->hide();
+
+    // Developing a plugin from inside the app (docs/PLUGIN_DEV.md).
+    scriptEditor->setPluginHooks({[&plugins](const std::string& id) { return plugins.whyNotReloadable(id); },
+                                  [&plugins, &python](const std::string& id) { return plugins.reload(id, python); }});
+    QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::editPluginRequested, scriptEditor,
+                     [scriptEditor](const QString& id, const QString& name, const QString& folder, const QString& mainFile) {
+                         scriptEditor->show();
+                         scriptEditor->setCollapsed(false);
+                         scriptEditor->raise();
+                         scriptEditor->openPlugin(id, name, folder, mainFile);
+                     });
+    QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::reloadPluginRequested, scriptEditor,
+                     &usdcc::scripting::ScriptEditorSidePanel::reloadPlugin);
+    QObject::connect(scriptEditor, &usdcc::scripting::ScriptEditorSidePanel::pluginReloaded, pluginPanel,
+                     &usdcc::scripting::PluginManagerSidePanel::refresh);
 
     // The plugins' code, with the menus and registries they add to in place,
     // and before the layout is restored, so their panels come back like the

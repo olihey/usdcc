@@ -1,7 +1,9 @@
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/scripting/package_install_dialog.h"
 #include "usdcc/scripting/plugin_manager.h"
+#include "usdcc/scripting/plugin_type_icon.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/python_settings.h"
 #include "usdcc/ui/app_settings.h"
@@ -14,8 +16,11 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QFont>
+#include <QFileInfo>
 #include <QIcon>
+#include <QInputDialog>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
@@ -51,69 +56,6 @@ QString stateText(const PluginInfo& plugin) {
     return PluginManagerSidePanel::tr("Waiting");
 }
 
-// A plugin's type as a small labelled chip.
-struct TypeChip {
-    const char* type;
-    const char* label;
-    int width;  // before UI scaling
-    QColor color;
-};
-constexpr int kChipHeight = 14;
-constexpr int kChipGap = 3;
-const TypeChip kChips[] = {{"C++", "C++", 24, QColor(0x4f, 0x8f, 0xe8)},
-                           {"Python", "Py", 18, QColor(0xd9, 0xa4, 0x3a)},
-                           {"USD", "USD", 26, QColor(0x4b, 0xb5, 0x8a)}};
-
-const TypeChip* chipFor(const std::string& type) {
-    const auto it = std::find_if(std::begin(kChips), std::end(kChips), [&type](const TypeChip& chip) { return type == chip.type; });
-    return it == std::end(kChips) ? nullptr : &*it;
-}
-
-// The width `types` take, before UI scaling.
-int chipsWidth(const std::vector<std::string>& types) {
-    int width = 0;
-    for (const std::string& type : types) {
-        if (const TypeChip* chip = chipFor(type)) width += (width > 0 ? kChipGap : 0) + chip->width;
-    }
-    return width;
-}
-
-// The chips, left-aligned in `width`, which is the same for every row so that the names
-// line up. Drawn at twice the size for high-DPI screens.
-QIcon typesIcon(const std::vector<std::string>& types, int width, const QFont& base) {
-    namespace scaled = usdcc::ui::scaled;
-    constexpr qreal kRatio = 2.0;
-    QPixmap pixmap(QSize(scaled::pixels(width), scaled::pixels(kChipHeight)) * kRatio);
-    pixmap.setDevicePixelRatio(kRatio);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    QFont font = base;
-    font.setBold(true);
-    font.setPixelSize(scaled::pixels(9));
-    painter.setFont(font);
-    qreal x = 0;
-    for (const std::string& type : types) {
-        const TypeChip* chip = chipFor(type);
-        if (!chip) continue;
-        const QRectF rect(x, 0, scaled::pixels(chip->width), scaled::pixels(kChipHeight));
-        QColor fill = chip->color;
-        fill.setAlpha(55);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(fill);
-        const qreal radius = scaled::pixels(3);
-        painter.drawRoundedRect(rect, radius, radius);
-        painter.setPen(chip->color.lighter(135));
-        painter.drawText(rect, Qt::AlignCenter, QString::fromLatin1(chip->label));
-        x += rect.width() + scaled::pixels(kChipGap);
-    }
-    painter.end();
-    QIcon icon(pixmap);
-    // The same when selected: Qt's own selected state tints it, losing the colours.
-    icon.addPixmap(pixmap, QIcon::Selected);
-    return icon;
-}
-
 // "Python + USD".
 QString typesText(const std::vector<std::string>& types) {
     QStringList names;
@@ -139,6 +81,14 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& position) {
+        const QTreeWidgetItem* item = m_tree->itemAt(position);
+        if (!item) return;
+        QMenu menu(this);
+        populatePluginMenu(&menu, item->data(0, Qt::UserRole).toString());
+        menu.exec(m_tree->viewport()->mapToGlobal(position));
+    });
     layout->addWidget(m_tree, 1);
 
     m_details = new QLabel(content);
@@ -165,6 +115,14 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     layout->addWidget(m_packageFolders);
 
     auto* buttons = new QHBoxLayout;
+    auto* newPlugin = new QPushButton(tr("New Plugin..."), content);
+    newPlugin->setObjectName(QStringLiteral("pluginNew"));
+    newPlugin->setToolTip(tr("Make a Python plugin to start from, and open it in the Script Editor"));
+    buttons->addWidget(newPlugin);
+    connect(newPlugin, &QPushButton::clicked, this, [this]() {
+        const QString name = QInputDialog::getText(this, tr("New Plugin"), tr("Name:")).trimmed();
+        if (!name.isEmpty()) createPlugin(name);
+    });
     buttons->addStretch(1);
     m_install = new QPushButton(tr("Install Packages..."), content);
     m_install->setObjectName(QStringLiteral("pluginInstallPackages"));
@@ -205,8 +163,8 @@ void PluginManagerSidePanel::refresh() {
     const QString current = m_tree->currentItem() ? m_tree->currentItem()->data(0, Qt::UserRole).toString() : QString();
     m_tree->clear();
     int iconWidth = 0;
-    for (const PluginInfo& plugin : m_plugins.plugins()) iconWidth = std::max(iconWidth, chipsWidth(pluginTypes(plugin.manifest)));
-    m_tree->setIconSize(usdcc::ui::scaled::size(iconWidth, kChipHeight));
+    for (const PluginInfo& plugin : m_plugins.plugins()) iconWidth = std::max(iconWidth, pluginChipsWidth(pluginTypes(plugin.manifest)));
+    m_tree->setIconSize(usdcc::ui::scaled::size(iconWidth, kPluginChipHeight));
     for (const PluginInfo& plugin : m_plugins.plugins()) {
         auto* item = new QTreeWidgetItem(m_tree, {qs(plugin.manifest.name), qs(plugin.manifest.version), stateText(plugin)});
         const QString id = qs(plugin.manifest.id);
@@ -214,7 +172,7 @@ void PluginManagerSidePanel::refresh() {
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, m_plugins.isEnabled(plugin.manifest.id) ? Qt::Checked : Qt::Unchecked);
         const std::vector<std::string> types = pluginTypes(plugin.manifest);
-        if (iconWidth > 0) item->setIcon(0, typesIcon(types, iconWidth, m_tree->font()));
+        if (iconWidth > 0) item->setIcon(0, pluginTypesIcon(types, iconWidth, m_tree->font()));
         item->setToolTip(0, types.empty() ? id : QStringLiteral("%1\n%2").arg(id, typesText(types)));
         if (id == current) m_tree->setCurrentItem(item);
     }
@@ -236,6 +194,47 @@ void PluginManagerSidePanel::updatePackages() {
     }
     m_packageFolders->setVisible(!folders.isEmpty());
     m_packageFolders->setText(tr("Python packages from: %1").arg(folders.join(QStringLiteral("; "))));
+}
+
+void PluginManagerSidePanel::populatePluginMenu(QMenu* menu, const QString& id) {
+    const PluginInfo* plugin = m_plugins.find(id.toStdString());
+    if (!plugin) return;
+    const QString name = qs(plugin->manifest.name);
+    const QString folder = QString::fromStdU16String(plugin->manifest.folder.u16string());
+    // The file to start in: its package's __init__.py, or its module.
+    QString mainFile;
+    if (const QString module = qs(plugin->manifest.pythonModule); !module.isEmpty()) {
+        const QDir python(folder + QStringLiteral("/python"));
+        mainFile = python.filePath(module + QStringLiteral("/__init__.py"));
+        if (!QFileInfo::exists(mainFile)) mainFile = python.filePath(module + QStringLiteral(".py"));
+    }
+    menu->addAction(tr("Edit in Script Editor"), this, [this, id, name, folder, mainFile]() {
+        Q_EMIT editPluginRequested(id, name, folder, mainFile);
+    });
+    QAction* reload = menu->addAction(tr("Reload"), this, [this, id]() { Q_EMIT reloadPluginRequested(id); });
+    const std::string why = m_plugins.whyNotReloadable(id.toStdString());
+    reload->setEnabled(why.empty());
+    reload->setToolTip(qs(why));
+    menu->addSeparator();
+    menu->addAction(tr("Open Folder"), this, [folder]() { QDesktopServices::openUrl(QUrl::fromLocalFile(folder)); });
+    menu->setToolTipsVisible(true);
+}
+
+bool PluginManagerSidePanel::createPlugin(const QString& name) {
+    PythonRuntime* python = PythonRuntime::instance();
+    if (!python) return false;
+    std::string error;
+    const std::string id = m_plugins.createPlugin(name.toStdString(), PluginManager::userFolder(), *python, &error);
+    if (id.empty()) {
+        USDCC_LOG_ERROR("usdcc.plugins", "Can't make the plugin {}: {}", name.toStdString(), error);
+        return false;
+    }
+    refresh();
+    QMenu menu;
+    populatePluginMenu(&menu, QString::fromStdString(id));
+    // The same as asking for it from the menu.
+    menu.actions().constFirst()->trigger();
+    return true;
 }
 
 void PluginManagerSidePanel::installPackages(bool upgrade) {
