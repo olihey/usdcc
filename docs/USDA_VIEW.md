@@ -101,6 +101,11 @@ line file: under a second to first paint, smooth scrolling, and no stall while t
 | Line numbers | A gutter repainting every line | Painting only the visible block range, as `CodeEditor` already does |
 | Memory | Keeping the exported `std::string`, the `QString` and the document | Only the document. A 100 MB file is about 200 MB as UTF-16, plus about 50 bytes a line of block overhead |
 
+- **Very long lines:** USD writes a whole array on one line, so a layer with big meshes has lines of millions of
+  characters. Shaping and drawing a line takes time for all of it, on screen or not, so a line over 4 KB is laid out
+  only near what's visible, which is found by multiplying as the view is monospace. A 23 MB layer in 68 lines took 5.7 s
+  to show, and now takes under a second (§9). Colours start from the line's start state at the laid-out part, so
+  a string crossing its edge can be coloured wrongly, off screen in practice.
 - **Very big files:** past a hard limit (§8, question 2) the panel shows the first part with a
   bar saying so, and "Show All" to load the rest anyway.
 - **Measured, not assumed:** a test generates a big layer (many prims, with time samples and

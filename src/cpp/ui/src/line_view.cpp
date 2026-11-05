@@ -21,6 +21,8 @@ namespace usdcc::ui {
 namespace {
 constexpr int kTextMargin = 6;      // between the gutter and column 0
 constexpr int kMaxLayouts = 4000;   // cached lines before the cache is cleared
+constexpr std::size_t kLongLineBytes = 4096;  // past this, a line is laid out in parts
+constexpr int kWindowMargin = 512;  // columns laid out either side of what's visible
 const QColor kBackground(0x1c, 0x1c, 0x1e);
 const QColor kGutter(0x16, 0x16, 0x18);
 const QColor kCurrentLine(255, 255, 255, 10);
@@ -86,7 +88,7 @@ void LineView::setLinkFinder(LinkFinder finder, std::function<QString(const Link
 
 bool LineView::linkAt(const Position& position, Link* link) {
     if (position.line < 0 || position.line >= lineCount()) return false;
-    for (const Link& candidate : laidOut(position.line)->links) {
+    for (const Link& candidate : laidOut(position.line, position.column)->links) {
         if (position.column >= candidate.start && position.column < candidate.start + candidate.length) {
             if (link) *link = candidate;
             return true;
@@ -105,12 +107,51 @@ QString LineView::lineText(int line) const {
 
 void LineView::resetLayouts() { m_layouts.clear(); }
 
-QTextLayout* LineView::layoutFor(int line) { return laidOut(line)->layout.get(); }
+bool LineView::isLongLine(int line) const {
+    if (line < 0 || line >= lineCount()) return false;
+    const std::size_t end = line + 1 < lineCount() ? m_starts[line + 1] : m_text.size();
+    return end - m_starts[line] > kLongLineBytes;
+}
 
-LineView::LaidOutLine* LineView::laidOut(int line) {
-    if (auto it = m_layouts.find(line); it != m_layouts.end()) return &it->second;
+int LineView::characterWidth() const { return std::max(1, fontMetrics().horizontalAdvance(u'9')); }
+
+int LineView::firstVisibleColumn() const { return horizontalScrollBar()->value() / characterWidth(); }
+
+int LineView::visibleColumns() const { return viewport()->width() / characterWidth() + 2; }
+
+int LineView::laidOutCharacters(int line) const {
+    const auto it = m_layouts.find(line);
+    return it == m_layouts.end() ? 0 : int(it->second.layout->text().size());
+}
+
+qreal LineView::columnX(const LaidOutLine& line, int column) const {
+    if (line.windowed) return qreal(column) * characterWidth();
+    return line.layout->lineAt(0).cursorToX(column);
+}
+
+LineView::LaidOutLine* LineView::laidOut(int line, int column, int span) {
+    const bool windowed = isLongLine(line);
+    if (column < 0) {
+        column = firstVisibleColumn();
+        span = visibleColumns();
+    }
+    if (auto it = m_layouts.find(line); it != m_layouts.end()) {
+        const LaidOutLine& known = it->second;
+        const int to = known.windowStart + int(known.layout->text().size());
+        const bool covers = column >= known.windowStart && (column + span <= to || to == known.columns);
+        if (!windowed || covers) return &it->second;
+        m_layouts.erase(it);
+    }
     if (int(m_layouts.size()) >= kMaxLayouts) m_layouts.clear();  // far from the screen by now
-    auto layout = std::make_unique<QTextLayout>(lineText(line), font());
+    QString text = lineText(line);
+    const int columns = int(text.size());
+    int windowStart = 0;
+    if (windowed) {
+        const int margin = std::max(kWindowMargin, visibleColumns());
+        windowStart = std::clamp(column - margin, 0, columns);
+        text = text.mid(windowStart, span + visibleColumns() + 2 * margin);
+    }
+    auto layout = std::make_unique<QTextLayout>(text, font());
     layout->setCacheEnabled(true);
     if (m_formatter) layout->setFormats(m_formatter(line, layout->text()));
     layout->beginLayout();
@@ -120,11 +161,15 @@ LineView::LaidOutLine* LineView::laidOut(int line) {
     layout->endLayout();
     ++m_formatted;
     LaidOutLine entry;
+    entry.windowed = windowed;
+    entry.windowStart = windowStart;
+    entry.columns = columns;
     if (m_linkFinder) {
         entry.links = m_linkFinder(line, layout->text());
         for (Link& link : entry.links) {
             link.line = line;
             link.text = layout->text().mid(link.start, link.length);
+            link.start += windowStart;
         }
     }
     entry.layout = std::move(layout);
@@ -202,21 +247,23 @@ void LineView::paintEvent(QPaintEvent* event) {
     for (int line = first; line <= last; ++line) {
         const int y = (line - first) * height;
         if (line == m_cursor.line) painter.fillRect(QRect(gutter, y, viewport()->width(), height), kCurrentLine);
-        QTextLayout* layout = layoutFor(line);
+        const LaidOutLine& entry = *laidOut(line, firstVisibleColumn(), visibleColumns());
+        const int laidOutSize = int(entry.layout->text().size());
         QList<QTextLayout::FormatRange> selections;
         if (hasSelection() && line >= start.line && line <= end.line) {
-            const int from = line == start.line ? start.column : 0;
-            const int to = line == end.line ? end.column : int(layout->text().size());
+            // Selection columns are the whole line's; the layout may hold a part of it.
+            const int from = std::clamp((line == start.line ? start.column : 0) - entry.windowStart, 0, laidOutSize);
+            const int to = std::clamp((line == end.line ? end.column : entry.columns) - entry.windowStart, 0, laidOutSize);
             if (to > from) selections.append({from, to - from, selectionFormat});
             // The line break of a selected line: a sliver past its end.
             if (line < end.line) {
-                const qreal x = left + layout->lineAt(0).cursorToX(int(layout->text().size()));
+                const qreal x = left + columnX(entry, entry.columns);
                 painter.fillRect(QRectF(x, y, fontMetrics().horizontalAdvance(u' '), height), selection);
             }
         }
-        layout->draw(&painter, QPointF(left, y), selections);
+        entry.layout->draw(&painter, QPointF(left + qreal(entry.windowStart) * characterWidth(), y), selections);
         if (line == m_cursor.line && hasFocus()) {
-            const qreal x = left + layout->lineAt(0).cursorToX(std::min(m_cursor.column, int(layout->text().size())));
+            const qreal x = left + columnX(entry, std::min(m_cursor.column, entry.columns));
             painter.fillRect(QRectF(x, y, 1, height), QColor(255, 255, 255, 191));
         }
     }
@@ -236,8 +283,13 @@ LineView::Position LineView::positionAt(const QPoint& point) {
     Position position;
     position.line = std::clamp(firstVisibleLine() + point.y() / lineHeight(), 0, std::max(0, lineCount() - 1));
     if (point.y() < 0) position.line = std::max(0, firstVisibleLine() - 1);
-    QTextLayout* layout = layoutFor(position.line);
-    position.column = layout->lineAt(0).xToCursor(point.x() - textLeft());
+    const int x = point.x() - textLeft();
+    if (isLongLine(position.line)) {
+        const int column = std::max(0, qRound(qreal(x) / characterWidth()));
+        position.column = std::min(column, laidOut(position.line, column)->columns);
+    } else {
+        position.column = laidOut(position.line)->layout->lineAt(0).xToCursor(x);
+    }
     return position;
 }
 
@@ -305,8 +357,7 @@ void LineView::scrollToLine(int line, bool center) {
 
 void LineView::ensureCursorVisible() {
     scrollToLine(m_cursor.line);
-    QTextLayout* layout = layoutFor(m_cursor.line);
-    const int x = int(layout->lineAt(0).cursorToX(m_cursor.column));
+    const int x = int(columnX(*laidOut(m_cursor.line, m_cursor.column), m_cursor.column));
     const int width = viewport()->width() - gutterWidth() - kTextMargin * 2;
     const int scroll = horizontalScrollBar()->value();
     if (x < scroll) {

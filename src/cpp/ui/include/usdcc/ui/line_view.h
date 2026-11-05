@@ -97,6 +97,8 @@ public:
     // laid out now: for tests of drawing only what's on screen.
     int formattedLines() const { return m_formatted; }
     bool isLaidOut(int line) const { return m_layouts.count(line) != 0; }
+    // How much of `line` is laid out: less than all of a very long one.
+    int laidOutCharacters(int line) const;
 
 Q_SIGNALS:
     void linkActivated(const usdcc::ui::LineView::Link& link, Qt::MouseButton button, Qt::KeyboardModifiers modifiers);
@@ -118,7 +120,6 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
 
 private:
-    QTextLayout* layoutFor(int line);
     int lineHeight() const;
     int gutterWidth() const;
     int textLeft() const;  // x of column 0, scrolled
@@ -129,6 +130,13 @@ private:
     void ensureCursorVisible();
     void updateScrollBars();
     void resetLayouts();
+    // A line too long to lay out whole: shaping and drawing a line takes time for all
+    // of it, on or off screen. Only the part near what's visible is laid out, and as
+    // this view is monospace its columns are found by multiplying.
+    bool isLongLine(int line) const;
+    int characterWidth() const;
+    int firstVisibleColumn() const;
+    int visibleColumns() const;
 
     std::string m_text;
     std::vector<std::size_t> m_starts;  // byte offset of each line
@@ -137,9 +145,16 @@ private:
     // A laid-out line and the links in it.
     struct LaidOutLine {
         std::unique_ptr<QTextLayout> layout;
-        QList<Link> links;
+        QList<Link> links;  // with columns of the whole line
+        bool windowed = false;  // a long line: `layout` holds only part of it
+        int windowStart = 0;    // the column `layout` starts at
+        int columns = 0;        // of the whole line
     };
-    LaidOutLine* laidOut(int line);
+    // Laid out so that it covers `span` columns from `column` (of a long line; -1 for
+    // what's on screen). A pointer that the next call can invalidate.
+    LaidOutLine* laidOut(int line, int column = -1, int span = 1);
+    // Where a column is, from the line's start.
+    qreal columnX(const LaidOutLine& line, int column) const;
     std::unordered_map<int, LaidOutLine> m_layouts;
     int m_formatted = 0;
     LinkFinder m_linkFinder;

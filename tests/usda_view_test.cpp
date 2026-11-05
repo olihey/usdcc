@@ -561,3 +561,132 @@ USDCC_TEST(usda_preview_dialog) {
           "an edit to the shared layer reaches the preview");
     QStandardPaths::setTestModeEnabled(false);
 }
+
+// A real file, timed: USDCC_USDA_FILE=<path>. For looking into a slow one.
+USDCC_TEST(usda_view_file_timing) {
+    const char* path = std::getenv("USDCC_USDA_FILE");
+    if (!path) return;
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(path);
+    UsdaViewPanel panel(&stages, stage);
+    panel.resize(1200, 900);
+    QElapsedTimer timer;
+    timer.start();
+    panel.show();
+    QApplication::processEvents();
+    std::printf("usda_view_file_timing: shown in %lld ms, %.1f MB, %d lines: export %lld ms, scan %lld ms, document %lld ms\n",
+                timer.elapsed(), panel.textBytes() / 1048576.0, panel.lineView()->lineCount(), panel.lastTimings().exportMs,
+                panel.lastTimings().scanMs, panel.lastTimings().documentMs);
+    std::fflush(stdout);
+    timer.restart();
+    for (int i = 0; i < panel.lineView()->lineCount(); i += 4) {
+        panel.lineView()->verticalScrollBar()->setValue(i);
+        QApplication::processEvents();
+    }
+    std::printf("usda_view_file_timing: scrolling through it: %lld ms\n", timer.elapsed());
+    std::fflush(stdout);
+    timer.restart();
+    for (int i = 0; i < 10; ++i) {
+        panel.lineView()->horizontalScrollBar()->setValue(i * panel.lineView()->horizontalScrollBar()->maximum() / 10);
+        QApplication::processEvents();
+    }
+    std::printf("usda_view_file_timing: 10 jumps along the lines: %lld ms\n", timer.elapsed());
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// A line of millions of characters, as USD writes a big array: only the part near
+// what's on screen is laid out, and everything still works on the whole line.
+USDCC_TEST(line_view_very_long_lines) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    constexpr int kFar = 2000000;
+    std::string longLine(kFar, 'x');
+    longLine += "NEEDLE";
+    longLine += std::string(1000000, 'y');
+    std::string text = "first\n" + longLine + "\nlast line\n";
+    usdcc::ui::LineView view;
+    view.resize(800, 400);
+    view.setLinkFinder(
+        [](int, const QString& line) {
+            QList<usdcc::ui::LineView::Link> links;
+            const int at = int(line.indexOf(QStringLiteral("NEEDLE")));
+            if (at >= 0) {
+                usdcc::ui::LineView::Link link;
+                link.start = at;
+                link.length = 6;
+                links.append(link);
+            }
+            return links;
+        },
+        {});
+    view.show();
+    view.setText(std::move(text));
+    QApplication::processEvents();
+
+    const int total = kFar + 6 + 1000000;
+    CHECK(view.lineCount() >= 3 && int(view.lineText(1).size()) == total, "the whole line is there");
+    CHECK(view.isLaidOut(1), "it's on screen");
+    CHECK(view.laidOutCharacters(1) < 10000, "but only part of it is laid out: %d", view.laidOutCharacters(1));
+    CHECK(view.laidOutCharacters(0) == 5 && view.laidOutCharacters(2) == 9, "and short lines are whole");
+
+    // Going far along it.
+    QScrollBar* bar = view.horizontalScrollBar();
+    CHECK(bar->maximum() > kFar, "the scroll bar spans the whole line: %d", bar->maximum());
+    view.setCursorPosition({1, kFar + 3});
+    QApplication::processEvents();
+    CHECK(view.cursorPosition().column == kFar + 3, "the cursor goes far along it");
+    const int character = view.fontMetrics().horizontalAdvance(u'9');
+    CHECK(bar->value() > (kFar - 500) * character && bar->value() <= (kFar + 3) * character, "and it scrolls there: %d", bar->value());
+    CHECK(view.laidOutCharacters(1) < 10000, "with still only part laid out: %d", view.laidOutCharacters(1));
+
+    // Selecting across parts that aren't laid out, and copying.
+    view.setSelection({1, kFar - 1}, {1, kFar + 7});
+    QApplication::processEvents();
+    CHECK(view.selectedText() == QStringLiteral("xNEEDLEy"), "selection is by the whole line: [%s]", qPrintable(view.selectedText()));
+    view.setSelection({1, 10}, {1, total});
+    QApplication::processEvents();
+    CHECK(view.selectedText().size() == total - 10, "even from far outside the part laid out");
+    view.setCursorPosition({0, 0});
+
+    // Finding, which looks in the text.
+    CHECK(view.find(QStringLiteral("needle")), "find reaches it");
+    CHECK(view.cursorPosition().line == 1 && view.cursorPosition().column == kFar + 6, "selecting it: %d", view.cursorPosition().column);
+    QApplication::processEvents();
+    CHECK(view.selectedText() == QStringLiteral("NEEDLE"), "selected");
+    CHECK(bar->value() > (kFar - 500) * character, "and scrolled to");
+    CHECK(view.countMatches(QStringLiteral("needle")) == 1, "counted once");
+
+    // A link in the part far along, with its column in the whole line.
+    usdcc::ui::LineView::Link link;
+    CHECK(view.linkAt({1, kFar + 2}, &link) && link.start == kFar && link.text == QStringLiteral("NEEDLE"),
+          "a link far along: %d [%s]", link.start, qPrintable(link.text));
+    CHECK(!view.linkAt({1, 5}, &link), "and none at the start");
+    CHECK(view.linkAt({1, kFar + 2}, &link), "and back, the part moving each time");
+
+    // Back to the start: the layout follows.
+    bar->setValue(0);
+    QApplication::processEvents();
+    CHECK(view.laidOutCharacters(1) < 10000, "at the start, part of it again");
+
+    // A line just past the limit, with what's not ASCII in it, and clicks by column.
+    std::string wide = "\xC3\xA4\xC3\xB6\xC3\xBC";
+    wide += std::string(5000, 'z');
+    view.setText(wide);
+    QApplication::processEvents();
+    CHECK(view.lineText(0).size() == 5003, "not ASCII: by character");
+    view.setSelection({0, 0}, {0, 3});
+    QApplication::processEvents();
+    CHECK(view.selectedText() == QString::fromUtf8("\xC3\xA4\xC3\xB6\xC3\xBC"), "and selected as such");
+
+    // End of a long line, where the part can't reach as far as asked.
+    view.setCursorPosition({0, 5003});
+    QApplication::processEvents();
+    CHECK(view.cursorPosition().column == 5003, "the very end");
+    QStandardPaths::setTestModeEnabled(false);
+}
