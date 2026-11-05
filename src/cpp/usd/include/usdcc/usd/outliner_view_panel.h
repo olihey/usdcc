@@ -60,7 +60,7 @@ private Q_SLOTS:
 private:
     void moveSelectedPrim(int direction);  // -1 = up, +1 = down
     // The rows' context menu, for the selection (the row under `pos` is
-    // selected first if it isn't).
+    // selected first if it isn't). On empty space, a menu to create at the root.
     void showPrimMenu(const QPoint& pos);
     // After Unload: drops selected prims that are gone with it.
     void dropMissingSelection();

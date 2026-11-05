@@ -103,7 +103,8 @@ The prim menu has a **Create** submenu with the same entries (`addCreateEntries(
 - **It goes under the clicked prim,** whatever else is selected, so the first line says that prim.
 - **Where it can't go,** the submenu is disabled, with the reason as its tooltip. That includes a prim outside the variant being
   edited: a click names the parent, so it doesn't fall back to the variant's prim as the menu bar's does.
-- **Nothing to click on, nothing to create:** the Outliner has no menu on its empty space. The menu bar's creates at the root.
+- **On the Outliner's empty space,** the menu has only Create, and the prim goes at the root of the stage, whatever is selected. While
+  editing a variant the root is out of reach, so it's disabled with the reason as its tooltip, rather than going in the variant.
 
 ## 4. The categories: `PrimCreationCatalog`
 

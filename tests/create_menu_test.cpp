@@ -21,7 +21,9 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QMenu>
+#include <QStringList>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QTemporaryDir>
 #include <QTreeView>
 #include <QUndoStack>
@@ -266,6 +268,97 @@ USDCC_TEST(create_in_the_prim_menu) {
     }
     CHECK(usd->GetRootLayer()->GetPrimAtPath(SdfPath("/A{look=red}Sphere")), "and it goes in the variant");
     stage->exitVariantEdit();
+}
+
+USDCC_TEST(create_on_the_outliners_empty_space) {
+    Scene s;
+    const StageRefPtr stage = s.manager.createStage();
+    const UsdStageRefPtr usd = stage->usdStage();
+    const SdfPath world("/World");
+    usd->DefinePrim(world, TfToken("Xform"));
+    usd->DefinePrim(SdfPath("/World/Child"), TfToken("Xform"));
+    s.manager.setCurrentStage(stage);
+    s.manager.setSelectedPaths(stage, {world});
+
+    {   // At the root, though something is selected, which the menu bar's would go under.
+        QMenu menu;
+        usdcc::usd::populateEmptySpaceMenu(&menu, &s.manager, stage, s.undo.get());
+        CHECK(menu.actions().size() == 1, "only Create: %d", int(menu.actions().size()));
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && create->menu() && create->isEnabled(), "a Create submenu");
+        if (!create) return;
+        QMenu* sub = create->menu();
+        CHECK(firstLine(sub) == QStringLiteral("At the root of the stage"), "saying where: [%s]", qPrintable(firstLine(sub)));
+        CHECK(sameIcon(entry(sub, QStringLiteral("Geometry"), QStringLiteral("Cube")), "Cube"), "with the usual entries");
+        entry(sub, QStringLiteral("Geometry"), QStringLiteral("Cube"))->trigger();
+    }
+    const SdfPath cube("/Cube");
+    CHECK(usd->GetPrimAtPath(cube).GetTypeName() == TfToken("Cube"), "made at the root");
+    CHECK(!usd->GetPrimAtPath(SdfPath("/World/Cube")), "not under the selection");
+    CHECK(s.manager.selectedPaths(stage) == std::vector<SdfPath>{cube}, "and selected");
+    CHECK(s.undo->stack(stage)->count() == 1 && s.undo->stack(stage)->canUndo(), "one undo step");
+    s.undo->stack(stage)->undo();
+    CHECK(!usd->GetPrimAtPath(cube), "undone");
+
+    {   // With no type.
+        QMenu menu;
+        usdcc::usd::populateEmptySpaceMenu(&menu, &s.manager, stage, s.undo.get());
+        entry(entry(&menu, QStringLiteral("Create"))->menu(), QStringLiteral("Prim (no type)"))->trigger();
+    }
+    const UsdPrim typeless = usd->GetPrimAtPath(SdfPath("/Prim"));
+    CHECK(typeless && typeless.GetTypeName().IsEmpty(), "a prim with no type at the root");
+
+    // While editing a variant the root is out of reach: not into the variant instead.
+    usdcc::usd::variant_actions::addSet(*s.undo, stage, world, "look", "red");
+    stage->enterVariantEdit(world, "look", "red");
+    {
+        QMenu menu;
+        usdcc::usd::populateEmptySpaceMenu(&menu, &s.manager, stage, s.undo.get());
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && !create->isEnabled(), "disabled in a variant");
+        CHECK(create && create->toolTip().contains(QStringLiteral("doesn't reach")), "saying why: [%s]", create ? qPrintable(create->toolTip()) : "");
+    }
+    stage->exitVariantEdit();
+
+    {   // No stage.
+        QMenu menu;
+        usdcc::usd::populateEmptySpaceMenu(&menu, &s.manager, nullptr, s.undo.get());
+        QAction* create = entry(&menu, QStringLiteral("Create"));
+        CHECK(create && !create->isEnabled() && create->toolTip().contains(QStringLiteral("No stage")), "disabled with no stage");
+    }
+
+    // Through the real right-click, on the tree's empty space and on a row.
+    OutlinerViewPanel outliner(&s.manager, stage, s.undo, QStringLiteral("Outliner"));
+    outliner.resize(300, 400);
+    outliner.show();
+    settle();
+    auto* tree = outliner.findChild<QTreeView*>();
+    CHECK(tree != nullptr, "the tree");
+    if (!tree) return;
+    QStringList entries;
+    const auto rightClickAt = [&](const QPoint& point) {
+        entries.clear();
+        QTimer closer;
+        closer.setInterval(20);
+        QObject::connect(&closer, &QTimer::timeout, [&]() {
+            if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                for (QAction* action : popup->actions()) entries << action->text();
+                popup->close();
+            }
+        });
+        closer.start();
+        Q_EMIT tree->customContextMenuRequested(point);
+    };
+    const QPoint emptySpace(tree->viewport()->width() / 2, tree->viewport()->height() - 5);
+    CHECK(!tree->indexAt(emptySpace).isValid(), "a point on empty space");
+    s.manager.setSelectedPaths(stage, {world});
+    settle();
+    rightClickAt(emptySpace);
+    CHECK(entries == QStringList{QStringLiteral("Create")}, "empty space: only Create: [%s]", qPrintable(entries.join(u',')));
+    CHECK(s.manager.selectedPaths(stage) == std::vector<SdfPath>{world}, "and the selection stays");
+    const QPoint onRow = tree->visualRect(tree->model()->index(0, 0)).center();
+    rightClickAt(onRow);
+    CHECK(entries.size() > 3 && entries.contains(QStringLiteral("Create")), "a row keeps its full menu: %d entries", int(entries.size()));
 }
 
 USDCC_TEST(create_menu_outliner_shows_the_new_prim) {

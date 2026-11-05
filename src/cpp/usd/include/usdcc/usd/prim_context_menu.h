@@ -55,6 +55,11 @@ private:
     std::vector<PrimMenuEntry> m_entries;
 };
 
+// The menu on the Outliner's empty space: a Create submenu (docs/CREATE_MENU.md) for prims at
+// the root of the stage, whatever is selected. Where they can't go, with no stage or
+// while editing a variant, it's disabled with the reason as its tooltip.
+void populateEmptySpaceMenu(QMenu* menu, StageManager* stageManager, const StageRefPtr& stage, UndoManager* undo);
+
 // How Composition > an arc > Open as Stage opens a file (the app sets it: open
 // it with StageOpener, or bring it forward if it's open already). Without one
 // the entry is disabled.

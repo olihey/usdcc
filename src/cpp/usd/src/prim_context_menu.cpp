@@ -317,6 +317,16 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     }
 }
 
+void populateEmptySpaceMenu(QMenu* menu, StageManager* stageManager, const StageRefPtr& stage, UndoManager* undo) {
+    menu->setToolTipsVisible(true);
+    const QString why = stage ? prim_actions::whyNotCreateUnder(stage->usdStage()->GetPseudoRoot()) : tr("No stage is open");
+    QMenu* create = menu->addMenu(tr("Create"));
+    create->setToolTipsVisible(true);
+    addCreateEntries(create, stageManager, stage, undo, {PXR_NS::SdfPath::AbsoluteRootPath(), why});
+    create->menuAction()->setEnabled(why.isEmpty());
+    create->menuAction()->setToolTip(why);
+}
+
 PrimMenuEntries& PrimMenuEntries::instance() {
     static PrimMenuEntries entries;
     return entries;

@@ -180,7 +180,14 @@ void OutlinerViewPanel::performDrop(const std::vector<PXR_NS::SdfPath>& paths, c
 
 void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
     const QModelIndex index = m_treeView->indexAt(pos);
-    if (!index.isValid() || !currentStage()) {
+    if (!index.isValid()) {
+        // Empty space: creating at the root. The selection stays as it is.
+        QMenu menu(this);
+        populateEmptySpaceMenu(&menu, stageManager(), currentStage(), m_undoManager.get());
+        menu.exec(m_treeView->viewport()->mapToGlobal(pos));
+        return;
+    }
+    if (!currentStage()) {
         return;
     }
     if (!m_treeView->selectionModel()->isSelected(index)) {
