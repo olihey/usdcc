@@ -67,7 +67,7 @@ Below Show USDA, enabled exactly where it is:
 - The Layers panel: also for in-memory layers. It shows that layer as a stage's root, so its own
   sublayers and references compose, but not the rest of the stack.
 - The USDA view's asset-link menu, in the panel and in the Show USDA dialog
-- The File menu: **Show Prims...**, with a file dialog
+- File > Preview: **Show Prims...**, with a file dialog
 
 ## 5. Decisions to make
 

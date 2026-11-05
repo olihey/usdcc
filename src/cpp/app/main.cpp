@@ -391,18 +391,21 @@ int main(int argc, char** argv) {
         return usdcc::usd::confirmUnsavedLayers(&stageManager, stageManager.stages(), &window);
     });
 
-    // File > Show USDA...: a look at a file as text, without opening it as a
-    // stage of the app (docs/USDA_VIEW.md §10).
-    QAction* showUsdaAction = new QAction(QObject::tr("Show &USDA..."), fileMenu);
-    fileMenu->insertAction(saveStageAction, showUsdaAction);
+    // File > Preview, first in the menu: looks at a file without opening it as a
+    // stage of the app.
+    QMenu* previewMenu = new QMenu(QObject::tr("&Preview"), fileMenu);
+    fileMenu->insertMenu(openStageAction, previewMenu);
+    fileMenu->insertSeparator(openStageAction);
+
+    // File > Preview > Show USDA...: as text (docs/USDA_VIEW.md §10).
+    QAction* showUsdaAction = previewMenu->addAction(QObject::tr("Show &USDA..."));
     QObject::connect(showUsdaAction, &QAction::triggered, &window, [&window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show USDA"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
         if (!path.isEmpty()) usdcc::usd::showUsdaPreview(path, &window);
     });
-    // File > Show Prims...: the same, as a tree of its prims (docs/SHOW_PRIMS.md).
-    QAction* showPrimsAction = new QAction(QObject::tr("Show &Prims..."), fileMenu);
-    fileMenu->insertAction(saveStageAction, showPrimsAction);
+    // File > Preview > Show Prims...: as a tree of its prims (docs/SHOW_PRIMS.md).
+    QAction* showPrimsAction = previewMenu->addAction(QObject::tr("Show &Prims..."));
     QObject::connect(showPrimsAction, &QAction::triggered, &window, [&window]() {
         const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show Prims"), QString(),
                                                             QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));

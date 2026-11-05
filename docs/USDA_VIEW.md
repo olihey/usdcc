@@ -412,7 +412,7 @@ One helper next to `openStageFile()`, `showUsdaPreview(path, parent)`, below eac
 | Dependencies panel, right-click | Select Prims Using It, Open as Stage, Reveal, Copy | Not for an asset attribute's file, such as a texture |
 | Layers panel, right-click | Set as Edit Target, ..., Open as Stage | Also for in-memory layers, which Open as Stage can't open |
 | USDA view, an asset link's menu | Open Here, Open in New Panel, Open as Stage | Both hosts; the dialog leaves out Open in New Panel, since its Show USDA is that |
-| File menu | Open Stage... | **Show USDA...**, with a file dialog |
+| File > Preview | Open Stage... | **Show USDA...**, with a file dialog |
 
 Disabled where Open as Stage is for a missing file, and for files USD has no format for.
 
@@ -436,7 +436,7 @@ Disabled where Open as Stage is for a missing file, and for files USD has no for
 |---|---|---|
 | **1. Share the view** *(done)* | Move everything into `UsdaView`, with the host callbacks; `UsdaViewPanel` becomes a thin host. No change in behaviour | The existing USDA panel tests pass as they are; `UsdaView` runs without a dock manager |
 | **2. The preview dialog** *(done)* | `UsdaPreviewDialog` and `showUsdaPreview()`: a private `Stage`, the text at once, the stage behind it on a worker thread, Load Payloads, one dialog per file, Open as Stage, the remembered size | Previewing opens no app stage (`StageManager` and the current stage unchanged); text shows before the stage is ready, and Show fills in after; a broken file; closing during a load; a prim path jumps to its `def`; a shared layer's edit reaches the preview; an open stage of the same file is untouched |
-| **3. Everywhere** *(done)* | Show USDA in the Outliner's Composition submenu, the Attribute Editor's arc menu, the Dependencies and Layers panels, the USDA link menu, and File > Show USDA... | Each menu has Show USDA below Open as Stage, enabled as it should be |
+| **3. Everywhere** *(done)* | Show USDA in the Outliner's Composition submenu, the Attribute Editor's arc menu, the Dependencies and Layers panels, the USDA link menu, and File > Preview > Show USDA... | Each menu has Show USDA below Open as Stage, enabled as it should be |
 
 ### 10.8 As built
 
