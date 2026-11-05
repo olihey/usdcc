@@ -37,6 +37,15 @@ if(MSVC)
     # full symbols; it just doesn't get MSVC's debug-STL/heap checks.
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
     add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0)
+    # Unoptimised, a file instantiating templates for every USD value type
+    # (value_type_info.cpp) has more sections than an object file allows by
+    # default (C1128).
+    add_compile_options(/bigobj)
+    # C++ exceptions, without /EHsc's "extern C functions never throw": a C++
+    # plugin's entry points are extern "C" and may throw, and the app catches
+    # that and fails the plugin (docs/PLUGIN_SDK.md). Under /EHsc that's
+    # undefined behaviour (warning C4297 in the plugin).
+    string(REPLACE "/EHsc" "/EHs" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     # The same goes for Qt and Qt Advanced Docking System: Qt hands ownership
     # of objects across its DLL boundary (e.g. setLayout(new QHBoxLayout) is
     # deleted from inside Qt), so they must be on the same CRT heap as the app.

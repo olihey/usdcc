@@ -32,10 +32,13 @@ endif()
 
 find_package(pxr CONFIG QUIET)
 
-# OpenUSD's pxrConfig.cmake gives TBB::tbb TBB_USE_DEBUG=1 for Debug *and*
-# RelWithDebInfo. Against a release TBB (/MD) that turns on TBB's debug
-# assertions and makes every TBB include warn "Recommend using /MDd". Keep it for
-# Debug only, and silence TBB 2020's "tbb/task.h is deprecated" message too.
+# OpenUSD's pxrConfig.cmake gives TBB::tbb TBB_USE_DEBUG=1 for Debug and
+# RelWithDebInfo. But OpenUSD and its TBB are release builds, and on MSVC every
+# usdcc configuration uses the release CRT too (top-level CMakeLists.txt,
+# docs/PLAN.md §6 item 28): there it would only turn on TBB's debug assertions
+# against a release TBB and make every TBB include warn "Recommend using /MDd".
+# So it's dropped there (other compilers keep it for Debug), and TBB 2020's
+# "tbb/task.h is deprecated" message is silenced too.
 if(TARGET TBB::tbb)
     get_target_property(_usd_tbb_defs TBB::tbb INTERFACE_COMPILE_DEFINITIONS)
     if(NOT _usd_tbb_defs)
@@ -43,7 +46,7 @@ if(TARGET TBB::tbb)
     endif()
     list(FILTER _usd_tbb_defs EXCLUDE REGEX "TBB_USE_DEBUG")
     list(APPEND _usd_tbb_defs
-        "$<$<CONFIG:Debug>:TBB_USE_DEBUG=1>"
+        "$<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:TBB_USE_DEBUG=1>"
         TBB_SUPPRESS_DEPRECATED_MESSAGES=1)
     set_target_properties(TBB::tbb PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${_usd_tbb_defs}")
     unset(_usd_tbb_defs)

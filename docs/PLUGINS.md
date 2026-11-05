@@ -287,9 +287,12 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 - **The environment variables** `USDCC_PLUGIN_PATH` and `USDCC_PYTHON_PATH`. What they feed was tested through options and `--plugin-path`.
 - **Render delegates and file formats from a plugin folder:** only a schema was tried (§3.1).
 - **Compiled packages other than numpy,** in particular ones bringing their own Qt or USD libraries (§3.10).
-- **The Python tests in Debug.** Two of the 42 hang, `python_exit_criterion` and `python_app_api`, and the rest pass one at a time; the other two suites pass in Debug. Any binding taking a
-  list, such as `usdcc.usd.select()` or `set_relationship_targets()`, hangs in pybind11's handling before reaching the binding's code, in Debug only. So a Python plugin calling those
-  hangs a Debug build. It looks unrelated to the DLLs, but no Debug build from before them has been run to compare.
+- **The Python tests in Debug: the hang seen here no longer reproduces.** When this was written, two of the 42 Python tests hung in Debug (`python_exit_criterion`, `python_app_api`):
+  a binding taking a list, such as `usdcc.usd.select()`, hung in pybind11 before reaching the binding's code. Retried on 2026-11-05 against the `usd_typhoon` OpenUSD build,
+  after the merge with the settings and toast work: all three suites pass in Debug (the Python one 45 tests), also with Debug tests loading Release-built `_ui.pyd`/`_usd.pyd`
+  from the shared `build/python/usdcc`. That clone's OpenUSD wasn't available to compare, so the cause wasn't found. Two Debug build problems were fixed on the way: `/bigobj`
+  for `value_type_info.cpp` (C1128 unoptimised), and TBB's debug mode against the release TBB (FindUSD.cmake). If it comes back, `tools/native_stacks.py <pid>` (dbghelp
+  `StackWalk64` on each suspended thread) gives the native stacks of the hung process without a debugger.
 - **Debug and Release share a plugin's output folder,** so the last one built is what's there. They're meant to be compatible, as both use the release CRT, but only the matching pairs were run.
 - **A real mouse drag with a C++ tool,** as for Python's above. The example's Drop Locator tool has been loaded and selected but never driven. The test plugin's tool, much like it, was driven through the `Tool` methods.
 - **A C++ plugin with Python or USD parts too.** The code activates the library, then the Python, but no test has both.
