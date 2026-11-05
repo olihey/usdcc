@@ -77,7 +77,7 @@ Create
   type's icon. A category's icon is the one of its first entry.
 - **Tooltips:** the first paragraph of the type's documentation from its schema, as in the applied schema menu.
 - **Built as it opens,** so it's current with the stage, the selection and any plugin loaded since.
-- **With no stage open** the whole menu is disabled.
+- **With no stage open** the menu still opens and lists every type, all disabled, without the first line.
 - **Plugins** appears only when it has something in it.
 
 ## 3. Creating

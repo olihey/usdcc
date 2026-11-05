@@ -75,15 +75,35 @@ struct Scene {
 };
 }  // namespace
 
-USDCC_TEST(create_menu_needs_a_stage) {
+USDCC_TEST(create_menu_lists_everything_disabled_with_no_stage) {
     Scene s;
     PrimCreateMenu menu(&s.manager, s.undo, &s.window);
-    CHECK(!menu.menuAction()->isEnabled(), "disabled with no stage");
+    CHECK(menu.menuAction()->isEnabled(), "it opens with no stage");
+    menu.rebuild();
+    CHECK(firstLine(&menu) == QStringLiteral("Prim (no type)"), "starting with the types, with no line above: [%s]", qPrintable(firstLine(&menu)));
+
+    QAction* typeless = entry(&menu, QStringLiteral("Prim (no type)"));
+    QAction* xform = entry(&menu, QStringLiteral("Xform"));
+    QAction* cube = entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Cube"));
+    CHECK(typeless && xform && cube, "and listing what can be made");
+    if (!typeless || !xform || !cube) return;
+    CHECK(!typeless->isEnabled() && !xform->isEnabled() && !cube->isEnabled(), "all disabled");
+    CHECK(sameIcon(cube, "Cube") && !cube->toolTip().isEmpty(), "with their icons and tooltips");
+    QAction* geometry = entry(&menu, QStringLiteral("Geometry"));
+    CHECK(geometry && geometry->isEnabled(), "a submenu can still be opened, to see what's in it");
+    cube->trigger();
+    CHECK(s.manager.stages().empty(), "choosing one does nothing");
+
+    // Opening a stage and closing it, with the menu built each time it opens.
     const StageRefPtr stage = s.manager.createStage();
     s.manager.setCurrentStage(stage);
-    CHECK(menu.menuAction()->isEnabled(), "enabled with one");
+    menu.rebuild();
+    CHECK(firstLine(&menu) == QStringLiteral("At the root of the stage"), "with a stage it says where");
+    CHECK(entry(&menu, QStringLiteral("Xform"))->isEnabled(), "and its entries work");
     s.manager.closeStage(stage);
-    CHECK(!menu.menuAction()->isEnabled(), "and disabled again");
+    menu.rebuild();
+    CHECK(firstLine(&menu) == QStringLiteral("Prim (no type)"), "and back when it closes");
+    CHECK(!entry(&menu, QStringLiteral("Xform"))->isEnabled(), "disabled again");
 }
 
 USDCC_TEST(create_menu_entries_and_icons) {

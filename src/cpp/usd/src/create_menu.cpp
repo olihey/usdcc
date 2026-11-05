@@ -43,8 +43,10 @@ void addCreateEntries(QMenu* menu, StageManager* stageManager, const StageRefPtr
             where = tr("%1, in %2=%3").arg(where, qs(edit->set), qs(edit->variant));
         }
     }
-    menu->addAction(where)->setEnabled(false);
-    menu->addSeparator();
+    if (stage) {  // with no stage there's no "where" to say
+        menu->addAction(where)->setEnabled(false);
+        menu->addSeparator();
+    }
 
     const PXR_NS::SdfPath parent = target.parent;
     auto addEntry = [=](QMenu* into, const QString& label, const std::string& type, const QString& toolTip) {
@@ -85,11 +87,7 @@ PrimCreateMenu::PrimCreateMenu(StageManager* stageManager, std::shared_ptr<UndoM
       m_undo(std::move(undo)) {
     setToolTipsVisible(true);
     connect(this, &QMenu::aboutToShow, this, &PrimCreateMenu::rebuild);
-    m_currentStageChanged = m_stageManager->currentStageChanged.connect([this](const StageRefPtr&) { updateEnabled(); });
-    updateEnabled();
 }
-
-void PrimCreateMenu::updateEnabled() { menuAction()->setEnabled(static_cast<bool>(m_stageManager->currentStage())); }
 
 void PrimCreateMenu::rebuild() {
     // clear() deletes only the actions; the submenus addMenu() made are this
@@ -97,8 +95,13 @@ void PrimCreateMenu::rebuild() {
     for (QMenu* submenu : findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly)) submenu->deleteLater();
     clear();
     const StageRefPtr stage = m_stageManager->currentStage();
-    if (!stage) return;
-    addCreateEntries(this, m_stageManager, stage, m_undo.get(), prim_actions::createTarget(stage, m_stageManager->selectedPaths(stage)));
+    prim_actions::CreateTarget target;
+    if (stage) {
+        target = prim_actions::createTarget(stage, m_stageManager->selectedPaths(stage));
+    } else {
+        target.problem = tr("No stage is open");  // what can be made is still listed, disabled
+    }
+    addCreateEntries(this, m_stageManager, stage, m_undo.get(), target);
 }
 
 }  // namespace usdcc::usd
