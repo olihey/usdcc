@@ -181,11 +181,15 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
 
     addPanelControls(toolbarLayout);
     toolbarLayout->addWidget(m_search, 1);
+    // One right edge for the whole panel: the scroll bar's width (theme/dark.qss),
+    // whose room is always kept, so that nothing moves when it comes and goes.
+    usdcc::ui::scaled::margins(toolbarLayout, 4, 4, 10, 4);
 
     m_scroll = new QScrollArea(container);
     m_scroll->setObjectName(QStringLiteral("attributeScroll"));
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
+    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
 
     m_variantBanner = new VariantEditBanner(container);
 

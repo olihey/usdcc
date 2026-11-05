@@ -432,6 +432,11 @@ QScrollBar::handle:horizontal {
     margin: 2px;
 }
 
+/* Nothing to scroll, where a panel always keeps the bar's room. */
+QScrollBar::handle:vertical:disabled {
+    background: transparent;
+}
+
 QScrollBar::handle:vertical:hover,
 QScrollBar::handle:horizontal:hover {
     background: rgba(255, 255, 255, 28%);

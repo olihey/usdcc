@@ -23,7 +23,8 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
     auto* headerRow = new QWidget(this);
     auto* headerLayout = new QHBoxLayout(headerRow);
     m_headerLayout = headerLayout;
-    usdcc::ui::scaled::margins(headerLayout, 4, 4, 8, 4);
+    // The same on the right as the body's, so its buttons line up with the rows'.
+    usdcc::ui::scaled::margins(headerLayout, 4, 4, 0, 4);
     usdcc::ui::scaled::spacing(headerLayout, 4);
     m_header = new QToolButton(headerRow);
     m_header->setObjectName(QStringLiteral("sectionHeader"));
@@ -37,7 +38,8 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
 
     m_body = new QWidget(this);
     m_bodyLayout = new QVBoxLayout(m_body);
-    usdcc::ui::scaled::margins(m_bodyLayout, 14, 2, 10, 10);
+    // Nothing on the right: the scroll bar's room is the margin (AttributesViewPanel).
+    usdcc::ui::scaled::margins(m_bodyLayout, 14, 2, 0, 10);
     usdcc::ui::scaled::spacing(m_bodyLayout, 6);
     layout->addWidget(m_body);
 

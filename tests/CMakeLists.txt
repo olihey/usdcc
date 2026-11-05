@@ -48,6 +48,7 @@ add_executable(usdcc_ui_tests
     ui_test_main.cpp
     attributes_primvar_groups_test.cpp
     attributes_rename_test.cpp
+    attributes_right_edge_test.cpp
     attributes_transform_section_test.cpp
     composition_edit_test.cpp
     create_menu_test.cpp
