@@ -151,8 +151,13 @@ Runs on pushes to `master` and on pull requests.
 3. Work out the asset name from `deps/usd.json` (the same script as in §3), download it
    with `gh release download`, and unzip it to `C:\deps\usd`. If it's missing, fail with
    a message saying to run `deps-usd.yml`.
-4. **vcpkg binary cache.** `VCPKG_BINARY_SOURCES=clear;files,<dir>,readwrite`, with that
-   directory saved by `actions/cache`. vcpkg's old `x-gha` cache backend is gone, so it's
+4. The same for PySide6 (§4.1), unzipped into `external/`, where the CMake configure
+   looks for it. If it's missing, the build carries on without `usdcc.ui` and the Python
+   panel tests, with a warning: after a Qt update, `deps-pyside.yml` needs a few minutes
+   to catch up, and the build shouldn't fail in the meantime.
+5. **vcpkg binary cache.** `VCPKG_BINARY_SOURCES=clear;files,<dir>,readwrite`, with that
+   directory saved by `actions/cache`. `tools/ci/vcpkg-cache.ps1` sets it up and names the
+   keys, for this workflow and `deps-pyside.yml`. vcpkg's old `x-gha` cache backend is gone, so it's
    the `files` backend plus `actions/cache`. The first run builds Qt (an hour or more), and
    later runs restore it in minutes.
    - The cache holds one zip per package build, named after the package's ABI hash,
@@ -170,10 +175,35 @@ Runs on pushes to `master` and on pull requests.
      old compiler's or a replaced port's packages would be carried from cache to cache.
    - Only from pushes, not pull requests: a pull request's caches would crowd `master`'s
      out of the repository's 10 GB, and pull requests can restore `master`'s.
-5. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
+6. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
    `RelWithDebInfo` like local builds.
-6. Run the tests: `ctest --verbose --timeout 900`, so the log shows every test case and
+7. Run the tests: `ctest --verbose --timeout 900`, so the log shows every test case and
    the check counts, and a crash waiting behind an error dialog ends after 15 minutes.
+
+### 4.1 Workflow `deps-pyside.yml`
+
+PySide6 and shiboken6 can't come from pip: their Qt is a different build from vcpkg's, and
+two Qts in one process fail at random (`src/cpp/ui/python/CMakeLists.txt`). So they're
+built from source against vcpkg's Qt, as `tools/build-pyside.ps1` does locally, and
+published like OpenUSD.
+
+- **Name.** `tools/ci/pyside-asset.ps1`: `pyside-<tag>-qt<version>-<hash>-win64-py312`,
+  tag `deps/pyside-<tag>-qt<version>-<hash>`. The hash covers the PySide tag, qtbase's
+  vcpkg version and port version (an overlay port in `cmake/ports` wins), the Python
+  version from `deps/usd.json`, `build-pyside.ps1` and the naming script itself. Other
+  `vcpkg.json` changes, such as adding QtNodes, don't need a new build.
+- **Runs** by hand, or on a push that changes one of those inputs. It skips the build when
+  the asset exists.
+- **Steps.** Restore `build.yml`'s vcpkg cache, read-only; `vcpkg install` into
+  `build/vcpkg_installed`, where `build-pyside.ps1` looks for Qt; run `build-pyside.ps1`
+  for the Python from `setup-python`; zip `external/pyside-install` with
+  `external/libclang/lib/clang` (clang's headers, which the generator parses usdcc's
+  header with); check the zip from another folder with vcpkg's Qt deleted (PySide6
+  imports, `shiboken6 --version` runs); publish as a prerelease.
+- **Contents.** `pyside-install/` holds PySide6 (Core, Gui and Widgets, with the Qt DLLs
+  it was built with), shiboken6 and the shiboken6 generator with its `libclang.dll`. The
+  generator's CMake files name the build machine's libclang and Qt folders, but only as
+  information; it runs from its own folder.
 
 ## 5. Phases
 
@@ -209,6 +239,12 @@ Runs on pushes to `master` and on pull requests.
    Qt, keyed on the vcpkg baseline, the pyside-setup tag and the Python version, so it
    always matches the Qt usdcc builds against. With it, `usdcc.ui` and the Python panel
    tests build and run in CI.
+   *Done (§4.1). The first run published
+   [`deps/pyside-6.11.1-qt6.11.1-c0e9afd2`](https://github.com/olihey/usdcc/releases/tag/deps/pyside-6.11.1-qt6.11.1-c0e9afd2),
+   75 MB, in 7 minutes: Qt came from the cache and PySide's build of Core, Gui and Widgets
+   is small. With it, `build.yml` builds `usdcc._ui` and the Python tests went from 56 to
+   71 test cases, all green, including the RTX and V-Ray render plugins against their
+   helpers' fake renderers.*
 
 ## 6. Open questions
 

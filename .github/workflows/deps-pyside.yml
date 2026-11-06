@@ -1,8 +1,8 @@
 # Builds PySide6/shiboken6 against vcpkg's Qt with tools/build-pyside.ps1 and
 # publishes them as a prerelease asset, which build.yml downloads to build
-# usdcc.ui and its tests (docs/CI.md, phase 4). Slow (around an hour), so it
-# only runs when what the asset is named after changes, or by hand, and skips
-# the build when that asset already exists.
+# usdcc.ui and its tests (docs/CI.md section 4.1). It only runs when what the
+# asset is named after changes, or by hand, and skips the build when that asset
+# already exists. With Qt in build.yml's cache it takes about 7 minutes.
 name: PySide6
 
 on:

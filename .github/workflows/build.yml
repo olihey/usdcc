@@ -58,7 +58,7 @@ jobs:
       # PySide6 built against this Qt (deps-pyside.yml), into external/, where
       # the CMake configure looks for it. Without it, usdcc.ui and the tests of
       # Python-made panels aren't built, so the run still works, with a warning:
-      # after a Qt update it takes deps-pyside.yml about an hour to catch up.
+      # after a Qt update deps-pyside.yml needs a few minutes to catch up.
       - name: Download PySide6
         run: |
           $asset = tools/ci/pyside-asset.ps1 | ConvertFrom-Json
