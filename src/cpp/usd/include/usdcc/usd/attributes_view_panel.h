@@ -118,6 +118,7 @@ private:
     void updateRowState(Row& row);
     void applyFilter();
     void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
+    void buildAvailableInputs(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
     void buildTransformStack(const PXR_NS::UsdPrim& prim, properties::CategorySection* section,
                              std::set<PXR_NS::TfToken>& inStack);
     // `primvarGroup`: the namespace of the frame it's going in, which its label leaves out.

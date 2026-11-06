@@ -239,13 +239,20 @@ USDCC_TEST(shade_graph_default_layout) {
     UsdStageRefPtr looped = stageFrom(R"(#usda 1.0
 def Material "M"
 {
-    def Shader "A" { float inputs:x.connect = </M/B.outputs:y>
-        float outputs:y }
-    def Shader "B" { float inputs:x.connect = </M/A.outputs:y>
-        float outputs:y }
+    def Shader "A"
+    {
+        float inputs:x.connect = </M/B.outputs:y>
+        float outputs:y
+    }
+    def Shader "B"
+    {
+        float inputs:x.connect = </M/A.outputs:y>
+        float outputs:y
+    }
 }
 )");
     const ShadeGraph loop = readShadeGraph(looped->GetPrimAtPath(SdfPath("/M")));
+    CHECK(loop.nodes.size() == 3, "both, and the Material: %d", int(loop.nodes.size()));
     CHECK(layoutShadeGraph(loop, std::vector<float>(loop.nodes.size(), 50.0f)).size() == loop.nodes.size(), "a loop is laid out");
 }
 

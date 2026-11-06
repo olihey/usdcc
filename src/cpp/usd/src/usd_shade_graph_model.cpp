@@ -1,5 +1,7 @@
 #include "usdcc/usd/usd_shade_graph_model.h"
 
+#include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/shade_connections.h"
 #include "usdcc/usd/shader_node_graphics.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -14,9 +16,12 @@
 #include <pxr/usd/usdUI/nodeGraphNodeAPI.h>
 #include <pxr/usd/usdUI/tokens.h>
 
-#include <QCoreApplication>
+#include <pxr/usd/sdf/schema.h>
+
+#include <QTimer>
 
 #include <algorithm>
+#include <set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -62,9 +67,10 @@ std::string UsdShadeGraphModel::signatureOf(const ShadeGraph& graph) const {
             text += std::to_string(static_cast<int>(row.kind)) + row.page + (row.open ? "+" : "-");
             if (row.kind == ShadeGraphRow::Kind::Page) continue;
             const ShadeGraphPort& port = (row.kind == ShadeGraphRow::Kind::Input ? node.in : node.out)[static_cast<std::size_t>(row.port)];
-            text += port.attribute.GetString() + ":" + port.label + ":" + port.typeName + ":" + (port.connected ? "c" : "") + port.outsideSource + ";";
+            text += port.attribute.GetString() + ":" + port.label + ":" + port.typeName + ":" + (port.connected ? "c" : "") + (port.authored ? "a" : "") + port.outsideSource + ";";
         }
     }
+    for (const ShadeGraphBackdrop& backdrop : graph.backdrops) text += backdrop.path.GetString() + "|" + backdrop.description + "|" + (backdrop.displayColor ? "c" : "") + "\n";
     for (const ShadeGraphConnection& connection : graph.connections) {
         text += std::to_string(connection.fromNode) + "." + std::to_string(connection.fromPort) + ">" + std::to_string(connection.toNode) + "." +
                 std::to_string(connection.toPort) + ";";
@@ -109,6 +115,7 @@ void UsdShadeGraphModel::rebuild() {
     }
     m_nodes = std::move(nodes);
     m_connections = std::move(connections);
+    m_backdrops = std::move(graph.backdrops);
     Q_EMIT modelReset();
 }
 
@@ -147,6 +154,135 @@ void UsdShadeGraphModel::updatePositions() {
         entry.position = stored;
         Q_EMIT nodePositionUpdated(id);
     }
+    if (m_backdrops.empty()) return;
+    for (ShadeGraphBackdrop& backdrop : m_backdrops) {
+        const UsdPrim prim = usd->GetPrimAtPath(backdrop.path);
+        if (!prim) continue;
+        const UsdUINodeGraphNodeAPI api(prim);
+        api.GetPosAttr().Get(&backdrop.position);
+        api.GetSizeAttr().Get(&backdrop.size);
+    }
+    Q_EMIT backdropsChanged();
+}
+
+void UsdShadeGraphModel::scheduleRead() {
+    // Not from inside whatever made the change, which may be a mouse event on an item this
+    // replaces. And a script's many changes are one read.
+    if (m_readScheduled) return;
+    m_readScheduled = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_readScheduled = false;
+        if (m_interacting) {
+            m_readAfterInteraction = true;
+            return;
+        }
+        if (m_level.IsEmpty()) return;
+        const bool lost = !m_stage->usdStage()->GetPrimAtPath(m_level);
+        rebuild();
+        if (lost) Q_EMIT levelLost();
+    });
+}
+
+void UsdShadeGraphModel::beginInteraction() { m_interacting = true; }
+
+void UsdShadeGraphModel::endInteraction() {
+    m_interacting = false;
+    if (m_session) {
+        m_session = false;
+        m_undo->endEdit(m_stage);
+    }
+    if (m_readAfterInteraction) {
+        m_readAfterInteraction = false;
+        scheduleRead();
+    }
+}
+
+void UsdShadeGraphModel::openSession(const QString& description) {
+    if (m_session) return;
+    m_session = true;
+    m_undo->beginEdit(m_stage, description);
+}
+
+const UsdShadeGraphModel::Entry* UsdShadeGraphModel::entryOf(NodeId id) const {
+    const auto found = m_nodes.find(id);
+    return found == m_nodes.end() ? nullptr : &found->second;
+}
+
+std::optional<shade_actions::PortRef> UsdShadeGraphModel::portRef(NodeId id, PortType side, PortIndex index) const {
+    const Entry* entry = entryOf(id);
+    if (!entry) return std::nullopt;
+    const std::vector<ShadeGraphPort>& ports = side == PortType::In ? entry->node.in : entry->node.out;
+    if (index >= ports.size()) return std::nullopt;
+    return shade_actions::PortRef{entry->node.path, ports[index].attribute, ports[index].typeName};
+}
+
+bool UsdShadeGraphModel::isEditable() const {
+    const UsdPrim level = m_stage->usdStage()->GetPrimAtPath(m_level);
+    return level && prim_actions::isEditable(level);
+}
+
+bool UsdShadeGraphModel::wouldLoop(NodeId from, NodeId to) const {
+    // Whether what `from` reads, far enough back, is `to`'s output already.
+    std::vector<NodeId> open{from};
+    std::set<NodeId> seen;
+    while (!open.empty()) {
+        const NodeId at = open.back();
+        open.pop_back();
+        if (at == to) return true;
+        if (!seen.insert(at).second) continue;
+        for (const ConnectionId& id : m_connections) {
+            if (id.inNodeId == at) open.push_back(id.outNodeId);
+        }
+    }
+    return false;
+}
+
+void UsdShadeGraphModel::autoLayout() {
+    ShadeGraph graph;
+    std::vector<NodeId> ids;
+    std::map<NodeId, std::size_t> indexOf;
+    std::vector<float> heights;
+    for (const auto& [id, entry] : m_nodes) {
+        indexOf[id] = ids.size();
+        ids.push_back(id);
+        graph.nodes.push_back(entry.node);
+        heights.push_back(static_cast<float>(entry.size.isValid() && entry.size.height() > 0 ? entry.size.height() : ShaderNodeGeometry::heightFor(entry.node)));
+    }
+    for (const ConnectionId& id : m_connections) {
+        graph.connections.push_back({indexOf[id.outNodeId], static_cast<std::size_t>(id.outPortIndex), indexOf[id.inNodeId], static_cast<std::size_t>(id.inPortIndex)});
+    }
+    const std::vector<GfVec2f> at = layoutShadeGraph(graph, heights);
+    std::vector<std::pair<SdfPath, GfVec2f>> stored;
+    for (std::size_t n = 0; n < ids.size(); ++n) {
+        Entry& entry = m_nodes[ids[n]];
+        const QPointF position(at[n][0], at[n][1]);
+        if (storesPosition(entry)) {
+            stored.emplace_back(entry.node.path, GfVec2f(at[n][0] / kShadeNodePixels, at[n][1] / kShadeNodePixels));
+        } else {
+            m_edgePositions[keyOf(entry.node)] = position;
+            entry.position = position;
+            Q_EMIT nodePositionUpdated(ids[n]);
+        }
+    }
+    shade_actions::setPositions(*m_undo, m_stage, stored);
+}
+
+void UsdShadeGraphModel::setBackdropRect(const SdfPath& path, const QRectF& rect) {
+    const UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(path);
+    if (!prim) return;
+    if (!m_interacting) return;
+    openSession(tr("Move Backdrop"));
+    const GfVec2f position(float(rect.x()) / kShadeNodePixels, float(rect.y()) / kShadeNodePixels);
+    const GfVec2f size(float(rect.width()) / kShadeNodePixels, float(rect.height()) / kShadeNodePixels);
+    UsdUINodeGraphNodeAPI api = UsdUINodeGraphNodeAPI::Apply(prim);
+    api.CreatePosAttr().Set(position);
+    api.CreateSizeAttr().Set(size);
+    for (ShadeGraphBackdrop& backdrop : m_backdrops) {
+        if (backdrop.path == path) {
+            backdrop.position = position;
+            backdrop.size = size;
+        }
+    }
 }
 
 void UsdShadeGraphModel::onStageChanged(const StageChanges& changes) {
@@ -169,23 +305,22 @@ void UsdShadeGraphModel::onStageChanged(const StageChanges& changes) {
     for (const SdfPath& path : changes.changedInfoOnlyPaths) {
         if (!touches(path)) continue;
         any = true;
-        if (!isLayoutProperty(path)) layoutOnly = false;
-        else if (path.GetName() != UsdUITokens->uiNodegraphNodePos.GetString()) layoutOnly = false;
+        if (!isLayoutProperty(path)) {
+            layoutOnly = false;
+        } else if (path.GetName() != UsdUITokens->uiNodegraphNodePos.GetString() && path.GetName() != UsdUITokens->uiNodegraphNodeSize.GetString()) {
+            layoutOnly = false;
+        }
     }
     if (!any) return;
-    if (m_dragging) {
-        m_readAfterDrag = !layoutOnly || m_readAfterDrag;
-        return;  // it's our own, and the view has it already
-    }
-    if (!m_stage->usdStage()->GetPrimAtPath(m_level)) {
-        rebuild();
-        Q_EMIT levelLost();
+    if (m_interacting) {
+        // It's likely our own, and the view has it already. A line being dragged mustn't go.
+        m_readAfterInteraction = m_readAfterInteraction || !layoutOnly;
         return;
     }
     if (layoutOnly) {
         updatePositions();
     } else {
-        rebuild();
+        scheduleRead();
     }
 }
 
@@ -211,16 +346,6 @@ void UsdShadeGraphModel::togglePage(NodeId id, const std::string& page) {
     }
     m_pages[pageKey(node->path, page)] = !open;
     rebuild();
-}
-
-void UsdShadeGraphModel::endDrag() {
-    if (!m_dragging) return;
-    m_dragging = false;
-    m_undo->endEdit(m_stage);
-    if (m_readAfterDrag) {
-        m_readAfterDrag = false;
-        rebuild();
-    }
 }
 
 NodeId UsdShadeGraphModel::newNodeId() { return m_nextId++; }
@@ -252,8 +377,39 @@ bool UsdShadeGraphModel::connectionExists(ConnectionId connectionId) const {
 }
 
 NodeId UsdShadeGraphModel::addNode(QString) { return QtNodes::InvalidNodeId; }
-bool UsdShadeGraphModel::connectionPossible(ConnectionId) const { return false; }
-void UsdShadeGraphModel::addConnection(ConnectionId) {}
+
+bool UsdShadeGraphModel::connectionPossible(ConnectionId id) const {
+    if (id.inNodeId == id.outNodeId || !isEditable()) return false;
+    const Entry* to = entryOf(id.inNodeId);
+    const Entry* from = entryOf(id.outNodeId);
+    if (!to || !from || id.inPortIndex >= to->node.in.size() || id.outPortIndex >= from->node.out.size()) return false;
+    // A level's own outputs take from what's inside, not from its own inputs.
+    if (from->node.kind == ShadeNodeKind::Inputs && to->node.kind == ShadeNodeKind::Outputs) return false;
+    const SdfSchemaBase& schema = SdfSchema::GetInstance();
+    const SdfValueTypeName toType = schema.FindType(to->node.in[id.inPortIndex].typeName);
+    const SdfValueTypeName fromType = schema.FindType(from->node.out[id.outPortIndex].typeName);
+    if (!toType || !fromType || !typesMatch(toType, fromType)) return false;
+    return !wouldLoop(id.outNodeId, id.inNodeId);
+}
+
+void UsdShadeGraphModel::addConnection(ConnectionId id) {
+    const std::optional<shade_actions::PortRef> receiver = portRef(id.inNodeId, PortType::In, id.inPortIndex);
+    const std::optional<shade_actions::PortRef> source = portRef(id.outNodeId, PortType::Out, id.outPortIndex);
+    if (!receiver || !source || !shade_actions::connect(*m_undo, m_stage, *receiver, *source)) return;
+    // It replaces what that input had.
+    const std::vector<ConnectionId> before = m_connections;
+    for (const ConnectionId& old : before) {
+        if (old.inNodeId == id.inNodeId && old.inPortIndex == id.inPortIndex) {
+            m_connections.erase(std::remove(m_connections.begin(), m_connections.end(), old), m_connections.end());
+            Q_EMIT connectionDeleted(old);
+        }
+    }
+    m_connections.push_back(id);
+    Q_EMIT connectionCreated(id);
+    m_readAfterInteraction = true;
+    if (!m_interacting) scheduleRead();
+}
+
 bool UsdShadeGraphModel::nodeExists(NodeId nodeId) const { return m_nodes.count(nodeId) > 0; }
 
 QVariant UsdShadeGraphModel::nodeData(NodeId nodeId, NodeRole role) const {
@@ -314,10 +470,7 @@ bool UsdShadeGraphModel::setNodeData(NodeId nodeId, NodeRole role, QVariant valu
         return true;
     }
     // The first move of a drag opens the session, and the mouse's release closes it.
-    if (!m_dragging) {
-        m_dragging = true;
-        m_undo->beginEdit(m_stage, tr("Move Node"));
-    }
+    if (m_interacting) openSession(tr("Move Node"));
     const UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(entry.node.path);
     const GfVec2f stored(float(position.x()) / kShadeNodePixels, float(position.y()) / kShadeNodePixels);
     UsdUINodeGraphNodeAPI::Apply(prim).CreatePosAttr().Set(stored);
@@ -345,7 +498,19 @@ QVariant UsdShadeGraphModel::portData(NodeId nodeId, PortType portType, PortInde
     }
 }
 
-bool UsdShadeGraphModel::deleteConnection(ConnectionId) { return false; }
+bool UsdShadeGraphModel::deleteConnection(ConnectionId id) {
+    const std::optional<shade_actions::PortRef> receiver = portRef(id.inNodeId, PortType::In, id.inPortIndex);
+    if (!receiver || !connectionExists(id)) return false;
+    // A line pulled off is one step with wherever it lands, on the mouse's release.
+    if (m_interacting) openSession(tr("Change Connection"));
+    if (!prim_actions::disconnectSource(*m_undo, m_stage, receiver->prim.AppendProperty(receiver->attribute))) return false;
+    m_connections.erase(std::remove(m_connections.begin(), m_connections.end(), id), m_connections.end());
+    Q_EMIT connectionDeleted(id);
+    m_readAfterInteraction = true;
+    if (!m_interacting) scheduleRead();
+    return true;
+}
+
 bool UsdShadeGraphModel::deleteNode(NodeId) { return false; }
 
 }  // namespace usdcc::usd

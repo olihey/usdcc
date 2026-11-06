@@ -1,8 +1,11 @@
 #include "usdcc/usd/material_editor_view_panel.h"
 
 #include "usdcc/ui/theme.h"
-#include "usdcc/usd/shade_graph.h"
+#include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/shade_actions.h"
+#include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/shader_node_graphics.h"
+#include "usdcc/usd/shader_node_palette.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usd_shade_graph_model.h"
@@ -12,35 +15,53 @@
 #include <QtNodes/GraphicsView>
 #include <QtNodes/GraphicsViewStyle>
 #include <QtNodes/NodeStyle>
+#include <QtNodes/internal/ConnectionGraphicsObject.hpp>
 #include <QtNodes/internal/NodeGraphicsObject.hpp>
 
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdShade/material.h>
+#include <pxr/usd/usdUI/backdrop.h>
 
 #include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QCursor>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QShortcut>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
+
+using QtNodes::NodeId;
+using QtNodes::PortIndex;
+using QtNodes::PortType;
 
 namespace usdcc::usd {
 
 namespace {
 constexpr double kSmallestToOpenAt = 0.6;  // smaller than this can't be read
 constexpr double kSmallestToFrame = 0.2;
+constexpr auto kClipboardMime = "application/x-usdcc-shade-nodes";
+constexpr float kPasteOffset = 0.25f;  // of a node's size, so a copy doesn't hide what it's of
 
 // The app's dark theme, for what QtNodes draws itself. Its styles are process-wide.
 void applyTheme() {
@@ -67,6 +88,12 @@ QtNodes::NodeGraphicsObject* nodeAt(QtNodes::GraphicsView* view, QPoint viewport
     }
     return nullptr;
 }
+
+ShadeBackdropItem* backdropAt(QtNodes::GraphicsView* view, QPoint viewportPoint) {
+    return dynamic_cast<ShadeBackdropItem*>(view->itemAt(viewportPoint));
+}
+
+GfVec2f stored(QPointF scenePosition) { return GfVec2f(float(scenePosition.x()) / kShadeNodePixels, float(scenePosition.y()) / kShadeNodePixels); }
 }  // namespace
 
 MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, StageRefPtr stage, std::shared_ptr<UndoManager> undo, const QString& title,
@@ -89,24 +116,44 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_pin->setCheckable(true);
     m_pin->setToolTip(tr("Stay on this material when the selection changes"));
     toolbarLayout->addWidget(m_pin);
+    m_paletteButton = new QToolButton(toolbar);
+    m_paletteButton->setObjectName(QStringLiteral("materialEditorPaletteButton"));
+    m_paletteButton->setText(tr("Nodes"));
+    m_paletteButton->setCheckable(true);
+    m_paletteButton->setToolTip(tr("Show the shader nodes to add. Tab searches them from the graph."));
+    toolbarLayout->addWidget(m_paletteButton);
     m_breadcrumb = new QHBoxLayout;
     m_breadcrumb->setContentsMargins(6, 0, 0, 0);
     m_breadcrumb->setSpacing(2);
     toolbarLayout->addLayout(m_breadcrumb);
     toolbarLayout->addStretch(1);
 
-    m_stack = new QStackedWidget(container);
+    m_split = new QSplitter(Qt::Horizontal, container);
+    m_palette = new ShaderNodePalette(m_split);
+    m_palette->hide();
+    m_stack = new QStackedWidget(m_split);
     m_view = new QtNodes::GraphicsView(m_stack);
     m_view->setScaleRange(kSmallestToFrame, 2.0);
     m_view->installEventFilter(this);
     m_view->viewport()->installEventFilter(this);
+    m_view->viewport()->setAcceptDrops(true);
+    m_view->setFocusPolicy(Qt::StrongFocus);
     m_empty = new QLabel(tr("Select a Material, or a prim with one bound."), m_stack);
     m_empty->setAlignment(Qt::AlignCenter);
     m_stack->addWidget(m_view);
     m_stack->addWidget(m_empty);
+    m_split->addWidget(m_palette);
+    m_split->addWidget(m_stack);
+    m_split->setStretchFactor(0, 0);
+    m_split->setStretchFactor(1, 1);
     layout->addWidget(toolbar);
-    layout->addWidget(m_stack, 1);
+    layout->addWidget(m_split, 1);
     setContentWidget(container);
+
+    connect(m_paletteButton, &QToolButton::toggled, this, [this](bool shown) { setPaletteShown(shown); });
+    connect(m_palette, &ShaderNodePalette::nodeChosen, this, [this](const QString& identifier) {
+        addNode(identifier, m_view->mapToScene(m_view->viewport()->rect().center()));
+    });
 
     auto* frame = new QShortcut(QKeySequence(Qt::Key_F), m_view);
     frame->setContext(Qt::WidgetWithChildrenShortcut);
@@ -122,6 +169,7 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
 
 MaterialEditorViewPanel::~MaterialEditorViewPanel() {
     m_view->setScene(nullptr);
+    m_backdropItems.clear();
     m_scene.reset();
     m_model.reset();
 }
@@ -135,12 +183,14 @@ usdcc::ui::ViewPanel* MaterialEditorViewPanel::duplicate(QWidget* parent) const 
 
 void MaterialEditorViewPanel::populateOptionsMenu(QMenu* menu) {
     menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
+    menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); });
 }
 
 void MaterialEditorViewPanel::onStageChanged(const StageRefPtr&) { attachStage(); }
 
 void MaterialEditorViewPanel::attachStage() {
     m_view->setScene(nullptr);
+    m_backdropItems.clear();
     m_scene.reset();
     m_model.reset();
     m_primsMoved = {};
@@ -157,20 +207,37 @@ void MaterialEditorViewPanel::attachStage() {
         // is its undo, so none of them can be left to catch those keys.
         for (QAction* action : m_view->actions()) m_view->removeAction(action);
 
-        // Press and release are the only signal of a drag: its moves come as position changes.
-        connect(m_scene.get(), &QtNodes::BasicGraphicsScene::nodeClicked, m_model.get(), &UsdShadeGraphModel::endDrag);
         connect(m_scene.get(), &QGraphicsScene::selectionChanged, this, [this]() { selectionToStage(); });
         // Not from inside the node's own event: entering replaces it.
-        connect(m_scene.get(), &QtNodes::BasicGraphicsScene::nodeDoubleClicked, this, [this](QtNodes::NodeId id) {
+        connect(m_scene.get(), &QtNodes::BasicGraphicsScene::nodeDoubleClicked, this, [this](NodeId id) {
             const ShadeGraphNode* node = m_model->shadeNode(id);
             if (!node || node->kind != ShadeNodeKind::NodeGraph) return;
             QTimer::singleShot(0, this, [this, path = node->path]() { showLevel(path); });
         });
         // The scene's own slot for this came first, so the items are new here.
-        connect(m_model.get(), &UsdShadeGraphModel::aboutToReset, this, [this]() { m_syncingSelection = true; });
+        connect(m_model.get(), &UsdShadeGraphModel::aboutToReset, this, [this]() {
+            m_syncingSelection = true;
+            m_backdropItems.clear();  // the scene deletes them with the rest
+            m_nodesOnBackdrop.clear();
+        });
         connect(m_model.get(), &UsdShadeGraphModel::modelReset, this, [this]() {
             m_syncingSelection = false;
+            rebuildBackdropItems();
             showSelectionInGraph();
+            std::vector<std::string> systems;
+            for (NodeId id : m_model->allNodeIds()) {
+                const std::string& system = m_model->shadeNode(id)->shadingSystem;
+                if (!system.empty() && std::find(systems.begin(), systems.end(), system) == systems.end()) systems.push_back(system);
+            }
+            std::sort(systems.begin(), systems.end());
+            m_palette->setPreferredSystems(systems);
+        });
+        connect(m_model.get(), &UsdShadeGraphModel::backdropsChanged, this, [this]() {
+            for (ShadeBackdropItem* item : m_backdropItems) {
+                for (const ShadeGraphBackdrop& backdrop : m_model->backdrops()) {
+                    if (backdrop.path == item->path()) item->setShown(backdrop);
+                }
+            }
         });
         connect(m_model.get(), &UsdShadeGraphModel::levelLost, this, [this]() {
             // After the move's own signal, which knows where it went.
@@ -223,6 +290,12 @@ void MaterialEditorViewPanel::showLevel(const SdfPath& level) {
 void MaterialEditorViewPanel::setPinned(bool pinned) { m_pin->setChecked(pinned); }
 bool MaterialEditorViewPanel::isPinned() const { return m_pin->isChecked(); }
 bool MaterialEditorViewPanel::isEmpty() const { return m_stack->currentWidget() == m_empty; }
+
+void MaterialEditorViewPanel::setPaletteShown(bool shown) {
+    if (m_paletteButton->isChecked() != shown) m_paletteButton->setChecked(shown);
+    m_palette->setVisible(shown);
+    if (shown) m_split->setSizes({260, std::max(1, m_split->width() - 260)});
+}
 
 QStringList MaterialEditorViewPanel::breadcrumb() const {
     QStringList names;
@@ -299,13 +372,16 @@ void MaterialEditorViewPanel::showSelectionInGraph() {
     if (!m_scene || !m_model || !currentStage() || m_syncingSelection) return;
     m_syncingSelection = true;
     m_scene->clearSelection();
-    QtNodes::NodeGraphicsObject* last = nullptr;
+    QGraphicsItem* last = nullptr;
     for (const SdfPath& path : stageManager()->selectedPaths(currentStage())) {
-        for (QtNodes::NodeId id : m_model->nodesFor(path)) {
+        for (NodeId id : m_model->nodesFor(path)) {
             if (auto* node = m_scene->nodeGraphicsObject(id)) {
                 node->setSelected(true);
                 last = node;
             }
+        }
+        for (ShadeBackdropItem* item : m_backdropItems) {
+            if (item->path() == path) item->setSelected(true);
         }
     }
     if (last) m_view->ensureVisible(last);
@@ -319,9 +395,308 @@ void MaterialEditorViewPanel::selectionToStage() {
         const ShadeGraphNode* shade = m_model->shadeNode(node->nodeId());
         if (shade && std::find(paths.begin(), paths.end(), shade->path) == paths.end()) paths.push_back(shade->path);
     }
+    for (ShadeBackdropItem* item : m_backdropItems) {
+        if (item->isSelected()) paths.push_back(item->path());
+    }
     m_syncingSelection = true;
     stageManager()->setSelectedPaths(currentStage(), paths);
     m_syncingSelection = false;
+}
+
+std::vector<SdfPath> MaterialEditorViewPanel::selectedPrims() const {
+    std::vector<SdfPath> paths;
+    if (!m_scene || !m_model) return paths;
+    for (QtNodes::NodeGraphicsObject* node : m_scene->selectedNodes()) {
+        const ShadeGraphNode* shade = m_model->shadeNode(node->nodeId());
+        if (shade && (shade->kind == ShadeNodeKind::Shader || shade->kind == ShadeNodeKind::NodeGraph)) paths.push_back(shade->path);
+    }
+    return paths;
+}
+
+void MaterialEditorViewPanel::selectAfterEdit(const std::vector<SdfPath>& paths) {
+    if (!paths.empty()) stageManager()->setSelectedPaths(currentStage(), paths);
+}
+
+QPointF MaterialEditorViewPanel::mouseScenePosition() const {
+    const QPoint inside = m_view->viewport()->mapFromGlobal(QCursor::pos());
+    const QPoint at = m_view->viewport()->rect().contains(inside) ? inside : m_view->viewport()->rect().center();
+    return m_view->mapToScene(at);
+}
+
+SdfPath MaterialEditorViewPanel::addNode(const QString& identifier, QPointF scenePosition) {
+    if (!currentStage() || m_level.IsEmpty()) return SdfPath();
+    const SdfPath path = shade_actions::createShader(*m_undo, currentStage(), m_level, identifier.toStdString(), stored(scenePosition));
+    if (!path.IsEmpty()) selectAfterEdit({path});
+    return path;
+}
+
+SdfPath MaterialEditorViewPanel::addNodeAtMouse(const QString& identifier) { return addNode(identifier, mouseScenePosition()); }
+
+bool MaterialEditorViewPanel::deleteSelected() {
+    if (!m_scene || !m_model) return false;
+    // Selected lines, when there's no node going with them.
+    std::vector<QtNodes::ConnectionId> lines;
+    for (QGraphicsItem* item : m_scene->selectedItems()) {
+        if (auto* line = dynamic_cast<QtNodes::ConnectionGraphicsObject*>(item)) lines.push_back(line->connectionId());
+    }
+    std::vector<SdfPath> paths = selectedPrims();
+    for (ShadeBackdropItem* item : m_backdropItems) {
+        if (item->isSelected()) paths.push_back(item->path());
+    }
+    if (paths.empty()) {
+        bool any = false;
+        for (const QtNodes::ConnectionId& line : lines) any = m_model->deleteConnection(line) || any;
+        return any;
+    }
+    const bool done = shade_actions::deleteNodes(*m_undo, currentStage(), paths);
+    if (done) stageManager()->setSelectedPaths(currentStage(), {});
+    return done;
+}
+
+void MaterialEditorViewPanel::duplicateSelected() {
+    const std::vector<SdfPath> paths = selectedPrims();
+    if (paths.empty()) return;
+    selectAfterEdit(shade_actions::duplicate(*m_undo, currentStage(), paths, GfVec2f(kPasteOffset, kPasteOffset)));
+}
+
+void MaterialEditorViewPanel::copySelected() {
+    const std::vector<SdfPath> paths = selectedPrims();
+    if (paths.empty()) return;
+    const std::string text = shade_actions::copyToText(currentStage(), paths);
+    auto* data = new QMimeData;
+    data->setData(QString::fromLatin1(kClipboardMime), QByteArray::fromStdString(text));
+    data->setText(QString::fromStdString(text));
+    QApplication::clipboard()->setMimeData(data);
+}
+
+void MaterialEditorViewPanel::cutSelected() {
+    copySelected();
+    deleteSelected();
+}
+
+void MaterialEditorViewPanel::paste() {
+    const QMimeData* data = QApplication::clipboard()->mimeData();
+    if (!data || !data->hasFormat(QString::fromLatin1(kClipboardMime)) || m_level.IsEmpty()) return;
+    selectAfterEdit(shade_actions::pasteFromText(*m_undo, currentStage(), m_level, data->data(QString::fromLatin1(kClipboardMime)).toStdString(),
+                                                 GfVec2f(kPasteOffset, kPasteOffset)));
+}
+
+void MaterialEditorViewPanel::groupSelected() {
+    const std::vector<SdfPath> paths = selectedPrims();
+    if (paths.empty()) return;
+    const SdfPath graph = shade_actions::group(*m_undo, currentStage(), paths);
+    if (!graph.IsEmpty()) selectAfterEdit({graph});
+}
+
+void MaterialEditorViewPanel::ungroupSelected() {
+    std::vector<SdfPath> all;
+    for (const SdfPath& path : selectedPrims()) {
+        const UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
+        if (!prim || !prim.IsA<UsdShadeNodeGraph>()) continue;
+        const std::vector<SdfPath> out = shade_actions::ungroup(*m_undo, currentStage(), path);
+        all.insert(all.end(), out.begin(), out.end());
+    }
+    selectAfterEdit(all);
+}
+
+void MaterialEditorViewPanel::autoLayout() {
+    if (!m_model) return;
+    m_model->autoLayout();
+    QTimer::singleShot(0, this, [this]() { fitGraph(kSmallestToOpenAt); });
+}
+
+SdfPath MaterialEditorViewPanel::addBackdrop(QPointF scenePosition) {
+    if (!currentStage() || m_level.IsEmpty()) return SdfPath();
+    // Around what's selected, if anything is.
+    QRectF around;
+    if (m_scene) {
+        for (QtNodes::NodeGraphicsObject* node : m_scene->selectedNodes()) around = around.united(node->sceneBoundingRect());
+    }
+    QPointF at = scenePosition;
+    QSizeF size(400, 300);
+    if (!around.isEmpty()) {
+        around.adjust(-30, -50, 30, 30);
+        at = around.topLeft();
+        size = around.size();
+    }
+    const SdfPath path = shade_actions::createBackdrop(*m_undo, currentStage(), m_level, stored(at), GfVec2f(float(size.width()) / kShadeNodePixels, float(size.height()) / kShadeNodePixels));
+    if (!path.IsEmpty()) selectAfterEdit({path});
+    return path;
+}
+
+void MaterialEditorViewPanel::rebuildBackdropItems() {
+    if (!m_scene || !m_model) return;
+    for (const ShadeGraphBackdrop& backdrop : m_model->backdrops()) {
+        auto* item = new ShadeBackdropItem(backdrop);
+        m_scene->addItem(item);
+        m_backdropItems.push_back(item);
+        connect(item, &ShadeBackdropItem::pressed, this, [this](ShadeBackdropItem* pressed) {
+            // What's on it now goes with it, not what it moves over.
+            m_nodesOnBackdrop.clear();
+            const QRectF area = pressed->sceneRectOf();
+            for (NodeId id : m_model->allNodeIds()) {
+                const auto* node = m_scene->nodeGraphicsObject(id);
+                if (node && area.contains(node->sceneBoundingRect().center())) m_nodesOnBackdrop.push_back(id);
+            }
+        });
+        connect(item, &ShadeBackdropItem::movedBy, this, [this](ShadeBackdropItem* moved, QPointF delta) {
+            m_model->setBackdropRect(moved->path(), moved->sceneRectOf());
+            for (NodeId id : m_nodesOnBackdrop) {
+                m_model->setNodeData(id, QtNodes::NodeRole::Position, m_model->nodeData(id, QtNodes::NodeRole::Position).toPointF() + delta);
+            }
+        });
+        connect(item, &ShadeBackdropItem::resizedTo, this, [this](ShadeBackdropItem* moved, QSizeF) { m_model->setBackdropRect(moved->path(), moved->sceneRectOf()); });
+    }
+}
+
+void MaterialEditorViewPanel::startInlineEdit(const QString& text, const QRectF& sceneRect, const std::function<void(const QString&)>& commit) {
+    delete m_inlineEdit;
+    m_inlineEdit = new QLineEdit(text, m_view->viewport());
+    m_inlineEdit->setObjectName(QStringLiteral("materialEditorInlineEdit"));
+    const QRect rect = m_view->mapFromScene(sceneRect).boundingRect();
+    m_inlineEdit->setGeometry(rect.x(), rect.y(), std::max(rect.width(), 120), m_inlineEdit->sizeHint().height());
+    m_inlineEdit->selectAll();
+    m_inlineEdit->installEventFilter(this);
+    m_inlineEdit->show();
+    m_inlineEdit->setFocus();
+    connect(m_inlineEdit, &QLineEdit::returnPressed, this, [this, commit]() {
+        const QString value = m_inlineEdit->text();
+        m_inlineEdit->hide();
+        m_inlineEdit->deleteLater();
+        m_inlineEdit = nullptr;
+        m_view->setFocus();
+        commit(value);
+    });
+}
+
+void MaterialEditorViewPanel::startRename() {
+    if (!m_scene || !m_model) return;
+    for (ShadeBackdropItem* item : m_backdropItems) {
+        if (!item->isSelected()) continue;
+        std::string current;
+        for (const ShadeGraphBackdrop& backdrop : m_model->backdrops()) {
+            if (backdrop.path == item->path()) current = backdrop.description;
+        }
+        startInlineEdit(QString::fromStdString(current), item->sceneRectOf(), [this, path = item->path()](const QString& value) {
+            shade_actions::setBackdropDescription(*m_undo, currentStage(), path, value.toStdString());
+        });
+        return;
+    }
+    for (QtNodes::NodeGraphicsObject* node : m_scene->selectedNodes()) {
+        const ShadeGraphNode* shade = m_model->shadeNode(node->nodeId());
+        if (!shade || (shade->kind != ShadeNodeKind::Shader && shade->kind != ShadeNodeKind::NodeGraph)) continue;
+        const UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(shade->path);
+        if (!prim || !prim_actions::canRename(prim)) return;
+        startInlineEdit(QString::fromStdString(shade->caption), node->sceneBoundingRect(), [this, path = shade->path](const QString& value) {
+            prim_actions::rename(*m_undo, currentStage(), path, value.toStdString(), stageManager()->stages());
+        });
+        return;
+    }
+}
+
+ShaderNodeSearchPopup* MaterialEditorViewPanel::showNodeSearch() {
+    if (m_level.IsEmpty()) return nullptr;
+    const QPointF at = mouseScenePosition();
+    auto* popup = new ShaderNodeSearchPopup(this);
+    std::vector<std::string> systems;
+    for (NodeId id : m_model->allNodeIds()) {
+        const std::string& system = m_model->shadeNode(id)->shadingSystem;
+        if (!system.empty() && std::find(systems.begin(), systems.end(), system) == systems.end()) systems.push_back(system);
+    }
+    std::sort(systems.begin(), systems.end());
+    popup->palette()->setPreferredSystems(systems);
+    connect(popup, &ShaderNodeSearchPopup::nodeChosen, this, [this, at](const QString& identifier) { addNode(identifier, at); });
+    QPoint global = m_view->viewport()->mapToGlobal(m_view->mapFromScene(at));
+    popup->move(global);
+    popup->show();
+    popup->palette()->search()->setFocus();
+    return popup;
+}
+
+void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePosition) {
+    if (!m_model || !m_scene || m_level.IsEmpty()) return;
+    const QPoint viewportPoint = m_view->mapFromScene(scenePosition);
+    auto* node = nodeAt(m_view, viewportPoint);
+    auto* backdrop = node ? nullptr : backdropAt(m_view, viewportPoint);
+    const bool editable = m_model->isEditable();
+
+    if (backdrop) {
+        if (!backdrop->isSelected()) {
+            m_scene->clearSelection();
+            backdrop->setSelected(true);
+        }
+        menu->addAction(tr("Describe..."), this, [this]() { startRename(); })->setEnabled(editable);
+        menu->addAction(tr("Delete"), this, [this]() { deleteSelected(); })->setEnabled(editable);
+        return;
+    }
+    if (!node) {
+        menu->addAction(tr("Add Node..."), this, [this]() { showNodeSearch(); })->setEnabled(editable);
+        menu->addAction(tr("Add Backdrop"), this, [this, scenePosition]() { addBackdrop(scenePosition); })->setEnabled(editable);
+        QAction* pasteAction = menu->addAction(tr("Paste"), this, [this]() { paste(); });
+        const QMimeData* data = QApplication::clipboard()->mimeData();
+        pasteAction->setEnabled(editable && data && data->hasFormat(QString::fromLatin1(kClipboardMime)));
+        menu->addSeparator();
+        menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); })->setEnabled(editable);
+        menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
+        return;
+    }
+
+    const NodeId id = node->nodeId();
+    const ShadeGraphNode shade = *m_model->shadeNode(id);
+    if (!node->isSelected()) {
+        m_scene->clearSelection();
+        node->setSelected(true);
+    }
+
+    // On a port's row: what's for that port.
+    const auto& geometry = static_cast<const ShaderNodeGeometry&>(m_scene->nodeGeometry());
+    if (const std::optional<PortIndex> input = geometry.inputAt(id, node->mapFromScene(scenePosition)); input && *input < shade.in.size()) {
+        const ShadeGraphPort& port = shade.in[*input];
+        const std::optional<shade_actions::PortRef> ref = m_model->portRef(id, PortType::In, *input);
+        if (port.connected) {
+            menu->addAction(tr("Disconnect %1").arg(QString::fromStdString(port.label)), this, [this, ref]() {
+                prim_actions::disconnectSource(*m_undo, currentStage(), ref->prim.AppendProperty(ref->attribute));
+            })->setEnabled(editable);
+        } else if (shade.kind == ShadeNodeKind::Shader || shade.kind == ShadeNodeKind::NodeGraph) {
+            menu->addAction(tr("Promote %1 to the Interface").arg(QString::fromStdString(port.label)), this, [this, ref]() {
+                shade_actions::promote(*m_undo, currentStage(), *ref, m_level);
+            })->setEnabled(editable);
+        }
+        if (shade.kind == ShadeNodeKind::Outputs && port.authored) {
+            menu->addAction(tr("Remove Terminal %1").arg(QString::fromStdString(port.label)), this, [this, ref]() {
+                shade_actions::removeTerminal(*m_undo, currentStage(), ref->prim, ref->attribute);
+            })->setEnabled(editable);
+        }
+        menu->addSeparator();
+    }
+
+    if (shade.kind == ShadeNodeKind::Outputs && currentStage()->usdStage()->GetPrimAtPath(shade.path).IsA<UsdShadeMaterial>()) {
+        QMenu* terminals = menu->addMenu(tr("Add Terminal"));
+        terminals->setEnabled(editable);
+        for (const RendererProfile& profile : ShaderNodeCatalog::instance().profiles()) {
+            for (const std::string& terminal : profile.terminals) {
+                const std::string name = profile.terminalPrefix.empty() ? terminal : profile.terminalPrefix + ":" + terminal;
+                const bool taken = std::any_of(shade.in.begin(), shade.in.end(), [&name](const ShadeGraphPort& port) { return port.authored && port.attribute.GetString() == "outputs:" + name; });
+                if (taken) continue;
+                terminals->addAction(QString::fromStdString(name), this, [this, path = shade.path, name]() {
+                    shade_actions::addTerminal(*m_undo, currentStage(), path, name);
+                });
+            }
+        }
+        return;
+    }
+    if (shade.kind != ShadeNodeKind::Shader && shade.kind != ShadeNodeKind::NodeGraph) return;
+    if (shade.kind == ShadeNodeKind::NodeGraph) {
+        menu->addAction(tr("Enter"), this, [this, path = shade.path]() { showLevel(path); });
+        menu->addAction(tr("Ungroup"), this, [this]() { ungroupSelected(); })->setEnabled(editable);
+    }
+    menu->addAction(tr("Group into NodeGraph"), this, [this]() { groupSelected(); })->setEnabled(editable);
+    menu->addSeparator();
+    menu->addAction(tr("Rename"), this, [this]() { startRename(); })->setEnabled(editable);
+    menu->addAction(tr("Duplicate"), this, [this]() { duplicateSelected(); })->setEnabled(editable);
+    menu->addAction(tr("Copy"), this, [this]() { copySelected(); });
+    menu->addAction(tr("Cut"), this, [this]() { cutSelected(); })->setEnabled(editable);
+    menu->addAction(tr("Delete"), this, [this]() { deleteSelected(); })->setEnabled(editable);
 }
 
 bool MaterialEditorViewPanel::pressOnPage(QPoint viewportPoint) {
@@ -338,15 +713,118 @@ bool MaterialEditorViewPanel::pressOnPage(QPoint viewportPoint) {
     return true;
 }
 
+bool MaterialEditorViewPanel::handleKey(QKeyEvent* event, bool run) {
+    const auto when = [run](const std::function<void()>& action) {
+        if (run) action();
+        return true;
+    };
+    const Qt::KeyboardModifiers modifiers = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier);
+    const int key = event->key();
+    if (modifiers == Qt::NoModifier) {
+        if (key == Qt::Key_Delete || key == Qt::Key_Backspace) return when([this]() { deleteSelected(); });
+        if (key == Qt::Key_F2) return when([this]() { startRename(); });
+        if (key == Qt::Key_Tab) return when([this]() { showNodeSearch(); });
+        if (key == Qt::Key_L) return when([this]() { autoLayout(); });
+    }
+    if (modifiers == Qt::ControlModifier) {
+        if (key == Qt::Key_D) return when([this]() { duplicateSelected(); });
+        if (key == Qt::Key_C) return when([this]() { copySelected(); });
+        if (key == Qt::Key_X) return when([this]() { cutSelected(); });
+        if (key == Qt::Key_V) return when([this]() { paste(); });
+        if (key == Qt::Key_G) return when([this]() { groupSelected(); });
+    }
+    if (modifiers == (Qt::ControlModifier | Qt::ShiftModifier) && key == Qt::Key_G) return when([this]() { ungroupSelected(); });
+    return false;
+}
+
+bool MaterialEditorViewPanel::handleViewportEvent(QEvent* event) {
+    switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() != Qt::LeftButton) return false;
+            if (pressOnPage(mouse->position().toPoint())) return true;
+            if (m_model) m_model->beginInteraction();
+            m_pressedNode = 0;
+            if (auto* node = nodeAt(m_view, mouse->position().toPoint())) m_pressedNode = node->nodeId();
+            m_shake.reset();
+            m_shakeClock.restart();
+            return false;
+        }
+        case QEvent::MouseMove: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (!m_model || !m_model->isInteracting() || !m_pressedNode || !(mouse->buttons() & Qt::LeftButton)) return false;
+            // Shaking a node off its connections, as one undo step with its move.
+            if (m_shake.addMove(mouse->position().x(), static_cast<double>(m_shakeClock.elapsed()))) {
+                for (const QtNodes::ConnectionId& id : m_model->allConnectionIds(m_pressedNode)) m_model->deleteConnection(id);
+            }
+            return false;
+        }
+        case QEvent::MouseButtonRelease: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() != Qt::LeftButton) return false;
+            // After QtNodes has seen it, which is where a line lands.
+            QTimer::singleShot(0, this, [this]() {
+                if (m_model) m_model->endInteraction();
+            });
+            return false;
+        }
+        case QEvent::MouseButtonDblClick: {
+            const auto* mouse = static_cast<QMouseEvent*>(event);
+            if (auto* backdrop = backdropAt(m_view, mouse->position().toPoint())) {
+                m_scene->clearSelection();
+                backdrop->setSelected(true);
+                startRename();
+                return true;
+            }
+            return false;
+        }
+        case QEvent::ContextMenu: {
+            const auto* context = static_cast<QContextMenuEvent*>(event);
+            QMenu menu(this);
+            populateGraphMenu(&menu, m_view->mapToScene(context->pos()));
+            if (!menu.isEmpty()) menu.exec(context->globalPos());
+            return true;
+        }
+        case QEvent::DragEnter:
+        case QEvent::DragMove: {
+            auto* drag = static_cast<QDragMoveEvent*>(event);
+            if (!drag->mimeData()->hasFormat(QString::fromLatin1(ShaderNodePalette::kMimeType))) return false;
+            drag->acceptProposedAction();
+            return true;
+        }
+        case QEvent::Drop: {
+            auto* drop = static_cast<QDropEvent*>(event);
+            if (!drop->mimeData()->hasFormat(QString::fromLatin1(ShaderNodePalette::kMimeType))) return false;
+            addNode(QString::fromUtf8(drop->mimeData()->data(QString::fromLatin1(ShaderNodePalette::kMimeType))), m_view->mapToScene(drop->position().toPoint()));
+            drop->acceptProposedAction();
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 bool MaterialEditorViewPanel::eventFilter(QObject* watched, QEvent* event) {
     // Each time it's shown QtNodes' view fits the graph itself, however small that makes it.
     // After it, and after the dock has given it its size.
     if (watched == m_view && event->type() == QEvent::Show) {
         QTimer::singleShot(0, this, [this]() { fitGraph(kSmallestToOpenAt); });
     }
-    if (watched == m_view->viewport() && event->type() == QEvent::MouseButtonPress) {
-        const auto* mouse = static_cast<QMouseEvent*>(event);
-        if (mouse->button() == Qt::LeftButton && pressOnPage(mouse->position().toPoint())) return true;
+    if (watched == m_view->viewport() && handleViewportEvent(event)) return true;
+    if (watched == m_view && (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride)) {
+        auto* key = static_cast<QKeyEvent*>(event);
+        // Before anything else that wants them, such as QtNodes' own Delete.
+        if (handleKey(key, event->type() == QEvent::KeyPress)) {
+            event->accept();
+            return true;
+        }
+    }
+    if (m_inlineEdit && watched == m_inlineEdit && event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+        m_inlineEdit->hide();
+        m_inlineEdit->deleteLater();
+        m_inlineEdit = nullptr;
+        m_view->setFocus();
+        return true;
     }
     return ViewPanel::eventFilter(watched, event);
 }

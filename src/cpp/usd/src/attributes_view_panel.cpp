@@ -11,7 +11,9 @@
 #include "usdcc/usd/properties/schema_pills.h"
 #include "usdcc/usd/relationship_target_dialog.h"
 #include "usdcc/usd/relationship_targets.h"
+#include "usdcc/usd/shade_actions.h"
 #include "usdcc/usd/shade_connections.h"
+#include "usdcc/usd/shade_graph.h"
 #include "usdcc/usd/shader_connection_dialog.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
@@ -432,12 +434,49 @@ void AttributesViewPanel::rebuild() {
         layout->addWidget(section);
         m_sections.push_back(section);
     }
+    if (!m_authoredOnly->isChecked()) buildAvailableInputs(prim, layout);
     layout->addStretch(1);
     m_scroll->setWidget(m_content);
 
     applyFilter();
     // The scroll range is only known once the new content has been laid out.
     QTimer::singleShot(0, this, [this, scrollPosition]() { m_scroll->verticalScrollBar()->setValue(scrollPosition); });
+}
+
+// A Shader's definition says what inputs it has, and one with no value isn't an attribute
+// yet, so these rows only offer to create it (docs/MATERIAL_EDITOR.md §4).
+void AttributesViewPanel::buildAvailableInputs(const UsdPrim& prim, QVBoxLayout* layout) {
+    const std::vector<ShadeGraphPort> available = unauthoredInputs(prim);
+    if (available.empty()) return;
+    CategorySection* section = makeSection(QStringLiteral("shader:available"), tr("Available Inputs"), true);
+    for (const ShadeGraphPort& port : available) {
+        auto* row = new QWidget(section);
+        row->setObjectName(QStringLiteral("availableInput"));
+        row->setProperty("attribute", qs(port.attribute.GetString()));
+        auto* rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(8, 1, 8, 1);
+        const QString page = qs(port.page);
+        auto* label = new QLabel(page.isEmpty() ? qs(port.label) : QStringLiteral("%1 / %2").arg(page, qs(port.label)), row);
+        const QString value = qs(defaultValueText(prim, port.attribute));
+        auto* detail = new QLabel(value.isEmpty() ? qs(port.typeName) : QStringLiteral("%1  %2").arg(qs(port.typeName), value.left(32)), row);
+        detail->setEnabled(false);
+        auto* add = new QToolButton(row);
+        add->setText(tr("Add"));
+        add->setToolTip(tr("Create this input with its default"));
+        add->setEnabled(prim_actions::isEditable(prim));
+        rowLayout->addWidget(label, 1);
+        rowLayout->addWidget(detail);
+        rowLayout->addWidget(add);
+        const SdfPath path = prim.GetPath();
+        const TfToken attribute = port.attribute;
+        connect(add, &QToolButton::clicked, this, [this, path, attribute]() {
+            // From a timer: the change rebuilds this panel, and the button with it.
+            QTimer::singleShot(0, this, [this, path, attribute]() { shade_actions::authorInput(*m_undoManager, currentStage(), path, attribute); });
+        });
+        section->addRow(row);
+    }
+    layout->addWidget(section);
+    m_sections.push_back(section);
 }
 
 void AttributesViewPanel::buildTransformStack(const UsdPrim& prim, CategorySection* section, std::set<TfToken>& inStack) {

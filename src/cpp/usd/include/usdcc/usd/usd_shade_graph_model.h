@@ -2,6 +2,7 @@
 
 #include "usdcc/core/export.h"
 #include "usdcc/core/signal.h"
+#include "usdcc/usd/shade_actions.h"
 #include "usdcc/usd/shade_graph.h"
 #include "usdcc/usd/stage.h"
 
@@ -10,10 +11,12 @@
 #include <pxr/usd/sdf/path.h>
 
 #include <QPointF>
+#include <QRectF>
 #include <QSize>
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -24,7 +27,7 @@ class UndoManager;
 
 // One level of a material, a Material's or a NodeGraph's insides, for QtNodes. Nothing is
 // kept but what readShadeGraph() read: the stage is the only data, and any change to it
-// that shows reads it again. So far, the only edit is moving a node (docs/MATERIAL_EDITOR.md §5).
+// that shows reads it again. A line or a move goes straight to the stage (docs/MATERIAL_EDITOR.md §4).
 class USDCC_USD_UI_API UsdShadeGraphModel : public QtNodes::AbstractGraphModel {
     Q_OBJECT
 
@@ -45,8 +48,23 @@ public:
     const ShadePageStates& pageStates() const { return m_pages; }
     void setPageStates(ShadePageStates pages) { m_pages = std::move(pages); }
 
-    // Ends the edit session a drag started, making it one undo step.
-    void endDrag();
+    // A mouse gesture: press to release. Stage changes wait for its end, as a read would
+    // replace the item being dragged, and all it edits is one undo step.
+    void beginInteraction();
+    void endInteraction();
+    bool isInteracting() const { return m_interacting; }
+
+    // A port, as an edit wants it.
+    std::optional<shade_actions::PortRef> portRef(QtNodes::NodeId id, QtNodes::PortType side, QtNodes::PortIndex index) const;
+    // Whether the level can be edited: not an instance proxy, say.
+    bool isEditable() const;
+
+    // Everything, in columns, as one undo step.
+    void autoLayout();
+
+    const std::vector<ShadeGraphBackdrop>& backdrops() const { return m_backdrops; }
+    // In pixels, during a gesture.
+    void setBackdropRect(const PXR_NS::SdfPath& path, const QRectF& rect);
 
     QtNodes::NodeId newNodeId() override;
     std::unordered_set<QtNodes::NodeId> allNodeIds() const override;
@@ -55,7 +73,7 @@ public:
     bool connectionExists(QtNodes::ConnectionId connectionId) const override;
     QtNodes::NodeId addNode(QString nodeType = QString()) override;
     bool connectionPossible(QtNodes::ConnectionId connectionId) const override;
-    bool detachPossible(QtNodes::ConnectionId) const override { return false; }
+    bool detachPossible(QtNodes::ConnectionId) const override { return isEditable(); }
     void addConnection(QtNodes::ConnectionId connectionId) override;
     bool nodeExists(QtNodes::NodeId nodeId) const override;
     QVariant nodeData(QtNodes::NodeId nodeId, QtNodes::NodeRole role) const override;
@@ -70,6 +88,8 @@ Q_SIGNALS:
     void aboutToReset();
     // The prim of the level is gone.
     void levelLost();
+    // Their positions or sizes, which replace no items.
+    void backdropsChanged();
 
 private:
     struct Entry {
@@ -80,6 +100,10 @@ private:
     };
 
     void rebuild();
+    void scheduleRead();
+    void openSession(const QString& description);
+    const Entry* entryOf(QtNodes::NodeId id) const;
+    bool wouldLoop(QtNodes::NodeId from, QtNodes::NodeId to) const;
     void onStageChanged(const StageChanges& changes);
     void updatePositions();
     bool storesPosition(const Entry& entry) const;
@@ -100,8 +124,11 @@ private:
     std::map<std::string, QPointF> m_edgePositions;
     std::map<std::string, QPointF> m_placed;  // where a node with no position first went
     QtNodes::NodeId m_nextId = 1;
-    bool m_dragging = false;
-    bool m_readAfterDrag = false;
+    std::vector<ShadeGraphBackdrop> m_backdrops;
+    bool m_interacting = false;
+    bool m_session = false;
+    bool m_readAfterInteraction = false;
+    bool m_readScheduled = false;
     usdcc::core::Signal<const StageChanges&>::Connection m_changed;
 };
 

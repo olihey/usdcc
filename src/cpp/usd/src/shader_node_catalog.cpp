@@ -83,7 +83,7 @@ ShaderNodeCatalog& ShaderNodeCatalog::instance() {
 }
 
 ShaderNodeCatalog::ShaderNodeCatalog() {
-    setProfile({"glslfx", "USD Preview", "", "", "UsdPreviewSurface", {"surface"}, {}});
+    setProfile({"glslfx", "USD Preview", "", "", "UsdPreviewSurface", {"surface", "displacement"}, {}});
     setProfile({"mtlx", "MaterialX", "", "mtlx", "ND_standard_surface_surfaceshader", {"surface"}, {}});
     setProfile({"mdl", "MDL", "", "mdl", "OmniPBR", {"surface", "displacement", "volume"}, {}});
 }

@@ -5,8 +5,8 @@ NodeGraphs and lay them out. The stage is the only data store. The graph draws w
 and every edit is a USD edit through `UndoManager`, so the Outliner, the Attribute Editor and undo
 keep working without changes.
 
-Status: **phases 0, 1 and 2 done** (§5.1): the panel draws a material's network and follows the selection,
-and moving a node is the only edit so far. The rest is still a plan. §2 and §3 were researched in November 2026 against the
+Status: **phases 0 to 4 done** (§5.1): the panel draws a material's network, follows the selection and edits
+it. MDL (phase 5) and the other renderers (phase 6) are still a plan. §2 and §3 were researched in November 2026 against the
 local USD build (`USD_INSTALL`, `pxr.h` 0.26.8) and the upstream repos named in each section. §3.5 was
 tested on 2026-11-06 against that build, and against the files in the ovrtx 0.6 wheel and the MDL SDK
 2026.0.2 package.
@@ -375,15 +375,39 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   reaching any enclosing Material or NodeGraph. Ports are coloured by type role (color, float, vector,
   token, asset, surface/displacement). Lines are all one grey so far: QtNodes' own per-type line colours
   are a hash of the type's name, not these.
-- **Edits:** each of these is one `prim_actions` call and one undo step: create, delete, rename,
-  duplicate, copy/paste, connect, disconnect, group into a NodeGraph, ungroup, promote an input to the
-  interface, add/remove a Material terminal, create a backdrop, and auto-layout.
+- **Edits:** each of these is one call in `shade_actions.h` (`prim_actions` for rename and disconnect) and
+  one undo step: create, delete, rename, duplicate, copy/paste, connect, disconnect, group into a NodeGraph,
+  ungroup, promote an input to the interface, add/remove a Material terminal, create a backdrop, and
+  auto-layout.
   - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
     `UsdUINodeGraphNodeAPI` position, and nothing else.
-  - Deleting a node also removes connections to it.
+  - Deleting a node also removes connections to it. A prim a weaker layer defines is deactivated instead.
+  - Connecting checks the types with `typesMatch()`, and refuses a loop and a level's input straight to its
+    own output. Pulling a line off and dropping it elsewhere is one step, ending on the mouse's release.
+  - Duplicate, paste, group and ungroup write a copy of the prim as composed into the edit target, rather
+    than moving specs, so they work on a prim from a reference. The old one is removed or deactivated.
+  - Paste drops a connection to anything that isn't in the Material it lands in.
+  - Ungrouping sends an interface input's value to whatever read it, and follows connections through.
+- **Keys, over the graph:** Tab searches nodes, Delete or Backspace deletes, F2 renames, Ctrl+D duplicates,
+  Ctrl+C, X and V copy, cut and paste, Ctrl+G groups, Ctrl+Shift+G ungroups, L lays out, F frames. They're
+  caught before QtNodes' own, whose Delete would edit its own copy. Right-click offers the same, plus
+  what's for the port under the mouse.
+- **Palette:** the Nodes button shows the tree beside the graph. Double-click adds a node, or drag one in.
+  What the graph uses comes first.
+- **Terminals:** a Material's node offers its shaders' profile terminals before they're authored, and
+  `surface` when it's empty, so there's somewhere to drop a line.
+- **Backdrops:** what's on one when it's pressed moves with it, as one step. Its corner resizes it, and
+  double-clicking describes it.
+- **Shaking** a dragged node takes its lines off, as one step with the move: three turns of at least 24
+  pixels within 600 ms.
+- **Attribute Editor:** a Shader's inputs with no attribute yet are listed in an "Available Inputs" section,
+  with their type and default, and Add creates one. They aren't editable until then, its search doesn't
+  find them, and Authored Only hides them. It still has no labels or pages from Sdr for what's authored.
 - **Live refresh:** `Stage::changed`, for anything under the shown Material. A position only moves its
-  node. Otherwise the level is read again, and the scene is replaced only if what's drawn differs, so a
-  new value leaves it alone. Edits from Python, the Attribute Editor or undo show at once.
+  node. Otherwise the level is read again on the next event loop pass, and the scene is replaced only if
+  what's drawn differs, so a new value leaves it alone. During a mouse gesture a read waits for the
+  release, as it would replace the item being dragged. Edits from Python, the Attribute Editor or undo
+  show at once.
 - **Python:**
   - `usdcc.shading.catalog()`, a pybind11 binding of the Qt-free catalog (§5, phase 1).
   - `register_renderer_profile()`, so plugins can add profiles.
@@ -427,6 +451,19 @@ with a NodeGraph and interfaces, and a MaterialX one.
 | NodeGraph enter and exit | Double-click and breadcrumb | Double-click: `usdcc_ui_tests`. Breadcrumb: both |
 
 Not checked: the position scale against files from other DCCs, as none are on this machine (§6, 8).
+
+**Phases 3 and 4.**
+
+| Criterion | Result | Checked by |
+|---|---|---|
+| Every edit is one undo step | Yes, for all of those in §4 | `usdcc_tests` and `usdcc_ui_tests`, the panel's with mouse and key events |
+| A Python edit shows at once | Yes: a script's colour reached the render, and connections, prims and removal reach the graph | Deployed app; `usdcc_ui_tests` |
+| Storm renders a network built only in the editor | Yes. On an empty Material: Tab, typed `UsdPreviewSurface`, Return, L, a line dragged to the terminal. The only thing not from the editor was the colour, set by script | Deployed app, with script-sent keys and mouse. Sphere read (255, 65, 65) |
+| Group and ungroup don't change the render | Yes: no channel differs by anything, on every third pixel of the viewport, after grouping and after ungrouping | Deployed app, from screen captures. Also `usdcc_tests` for a network with connections on both sides |
+| Layout saved and reloaded | A second panel reads the same positions from the stage, and the attributes are stored | `usdcc_ui_tests`. Saving to a file and reopening wasn't run |
+
+Only run in the offscreen tests or not at all: right-click menus (their contents are tested, not opening them),
+dragging from the palette (not run), a real person's hand on any of it.
 
 ## 6. Open questions
 

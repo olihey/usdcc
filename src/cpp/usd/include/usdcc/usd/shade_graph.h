@@ -51,6 +51,7 @@ struct ShadeGraphNode {
     std::string caption;
     std::string subtitle;
     std::string context;  // Shader: "surface", "pattern", ...
+    std::string shadingSystem;  // Shader with a definition: "glslfx", "mtlx", ...
     std::string warning;  // why it can't be drawn as it should, such as having no definition
     std::optional<PXR_NS::GfVec2f> position;  // as stored: a node's size is about 1 (see below)
     std::optional<PXR_NS::GfVec3f> displayColor;
@@ -66,9 +67,19 @@ struct ShadeGraphConnection {
     std::size_t toPort = 0;
 };
 
+// A UsdUIBackdrop: behind the nodes, carrying what's on it when moved.
+struct ShadeGraphBackdrop {
+    PXR_NS::SdfPath path;
+    std::string description;
+    PXR_NS::GfVec2f position = PXR_NS::GfVec2f(0, 0);   // as stored, like a node's
+    PXR_NS::GfVec2f size = PXR_NS::GfVec2f(2, 1.5f);    // the same
+    std::optional<PXR_NS::GfVec3f> displayColor;
+};
+
 struct ShadeGraph {
     std::vector<ShadeGraphNode> nodes;
     std::vector<ShadeGraphConnection> connections;
+    std::vector<ShadeGraphBackdrop> backdrops;
 };
 
 // Whether a page's ports are listed, when someone has opened or closed it. Otherwise it
@@ -94,10 +105,36 @@ std::vector<PXR_NS::UsdPrim> shadeLevelChain(const PXR_NS::UsdPrim& level);
 // - a NodeGraph inside it is one node, its interface as ports.
 ShadeGraph readShadeGraph(const PXR_NS::UsdPrim& level, const ShadePageStates& pages = {});
 
-// Where nodes go that have no position of their own, in pixels: in columns by their distance
-// from where the graph ends, on the right. `heights` is each node's. Phase 4's auto-layout
-// starts here.
+// A definition's inputs that have no attribute yet and can be offered, for the Attribute Editor.
+std::vector<ShadeGraphPort> unauthoredInputs(const PXR_NS::UsdPrim& shader);
+// A definition's default for an input, as text. Empty if it has none.
+std::string defaultValueText(const PXR_NS::UsdPrim& shader, const PXR_NS::TfToken& attribute);
+
+// Where nodes go, in pixels: in columns by their distance from where the graph ends, on the
+// right, and in each column in the order that crosses the fewest lines it can quickly find.
+// `heights` is each node's.
 std::vector<PXR_NS::GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights);
+// How many lines cross, for that order.
+int countCrossings(const ShadeGraph& graph, const std::vector<PXR_NS::GfVec2f>& positions);
+
+// Whether a dragged node is being shaken: its mouse going back and forth, quickly.
+class ShakeDetector {
+public:
+    void reset();
+    // A mouse position along the axis, at a time in milliseconds. True once, when it's a shake.
+    bool addMove(double position, double milliseconds);
+
+private:
+    struct Turn {
+        double milliseconds = 0;
+    };
+    std::vector<Turn> m_turns;
+    double m_lastPosition = 0;
+    double m_extreme = 0;
+    int m_direction = 0;
+    bool m_started = false;
+    bool m_fired = false;
+};
 
 // ui:nodegraph:node:pos isn't in pixels. USD's docs: "assume that the size of a node is
 // approximately 1.0x1.0". This many pixels make one, as a node here is about that wide.

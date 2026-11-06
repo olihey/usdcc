@@ -18,10 +18,13 @@
 #include <pxr/usd/usdShade/output.h>
 #include <pxr/usd/usdShade/shader.h>
 #include <pxr/usd/usdShade/tokens.h>
+#include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/usdUI/backdrop.h>
 #include <pxr/usd/usdUI/nodeGraphNodeAPI.h>
 #include <pxr/usd/usdUI/tokens.h>
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <unordered_map>
 
@@ -134,6 +137,7 @@ Draft readShader(const UsdPrim& prim) {
         node.subtitle = definition->GetLabel().GetString();
         if (node.subtitle.empty()) node.subtitle = definition->GetName();
         node.context = shaderContextOf(*definition);
+        node.shadingSystem = definition->GetShadingSystem().GetString();
         for (const TfToken& name : definition->GetShaderOutputNames()) {
             SdrShaderPropertyConstPtr property = definition->GetShaderOutput(name);
             const TfToken attributeName(UsdShadeTokens->outputs.GetString() + name.GetString());
@@ -226,7 +230,9 @@ std::optional<Draft> readInputsEdge(const UsdPrim& level) {
     return draft;
 }
 
-std::optional<Draft> readOutputsEdge(const UsdPrim& level) {
+// `systems`: the shading systems of what's inside it. A Material offers their terminals
+// before they're authored, connecting to one creating it, so there's somewhere to drop a line.
+std::optional<Draft> readOutputsEdge(const UsdPrim& level, const std::set<std::string>& systems) {
     const bool material = level.IsA<UsdShadeMaterial>();
     const std::vector<UsdShadeOutput> outputs = UsdShadeConnectableAPI(level).GetOutputs();
     if (outputs.empty() && !material) return std::nullopt;
@@ -243,17 +249,53 @@ std::optional<Draft> readOutputsEdge(const UsdPrim& level) {
         port.type = ShadePortType::Terminal;
         addInput(draft, output.GetAttr(), std::move(port), false);
     }
+    if (material) {
+        const auto offer = [&draft](const std::string& name) {
+            const TfToken attribute("outputs:" + name);
+            const auto same = [&attribute](const ShadeGraphPort& port) { return port.attribute == attribute; };
+            if (std::any_of(draft.node.in.begin(), draft.node.in.end(), same)) return;
+            ShadeGraphPort port;
+            port.attribute = attribute;
+            port.label = name;
+            port.typeName = "token";
+            port.type = ShadePortType::Terminal;
+            addInput(draft, UsdAttribute(), std::move(port), false);
+        };
+        if (systems.empty() && outputs.empty()) offer("surface");
+        for (const std::string& system : systems) {
+            const RendererProfile* profile = ShaderNodeCatalog::instance().profile(system);
+            if (!profile) continue;
+            for (const std::string& terminal : profile->terminals) {
+                offer(profile->terminalPrefix.empty() ? terminal : profile->terminalPrefix + ":" + terminal);
+            }
+        }
+    }
     return draft;
 }
 
-void readChildren(const UsdPrim& parent, std::vector<Draft>& drafts) {
+ShadeGraphBackdrop readBackdrop(const UsdPrim& prim) {
+    ShadeGraphBackdrop backdrop;
+    backdrop.path = prim.GetPath();
+    TfToken description;
+    if (UsdUIBackdrop(prim).GetDescriptionAttr().Get(&description)) backdrop.description = description.GetString();
+    const UsdUINodeGraphNodeAPI api(prim);
+    api.GetPosAttr().Get(&backdrop.position);
+    api.GetSizeAttr().Get(&backdrop.size);
+    GfVec3f color;
+    if (api.GetDisplayColorAttr().Get(&color)) backdrop.displayColor = color;
+    return backdrop;
+}
+
+void readChildren(const UsdPrim& parent, std::vector<Draft>& drafts, std::vector<ShadeGraphBackdrop>& backdrops) {
     for (const UsdPrim& child : parent.GetChildren()) {
         if (child.IsA<UsdShadeShader>()) {
             drafts.push_back(readShader(child));
         } else if (isContainer(child)) {
             drafts.push_back(readNodeGraph(child));
+        } else if (child.IsA<UsdUIBackdrop>()) {
+            backdrops.push_back(readBackdrop(child));
         } else {
-            readChildren(child, drafts);  // through a Scope, say
+            readChildren(child, drafts, backdrops);  // through a Scope, say
         }
     }
 }
@@ -355,8 +397,12 @@ ShadeGraph readShadeGraph(const UsdPrim& level, const ShadePageStates& pages) {
 
     std::vector<Draft> drafts;
     if (std::optional<Draft> inputs = readInputsEdge(level)) drafts.push_back(std::move(*inputs));
-    readChildren(level, drafts);
-    if (std::optional<Draft> outputs = readOutputsEdge(level)) drafts.push_back(std::move(*outputs));
+    readChildren(level, drafts, graph.backdrops);
+    std::set<std::string> systems;
+    for (const Draft& draft : drafts) {
+        if (!draft.node.shadingSystem.empty()) systems.insert(draft.node.shadingSystem);
+    }
+    if (std::optional<Draft> outputs = readOutputsEdge(level, systems)) drafts.push_back(std::move(*outputs));
 
     // What's connected to tells a port's source it is, before they choose what to show.
     std::set<SdfPath> used;
@@ -418,17 +464,119 @@ std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector
     }
     for (int value : column) last = std::max(last, value);
 
-    std::map<int, float> columnHeight;
-    for (std::size_t n = 0; n < count; ++n) columnHeight[column[n]] += heights[n] + kRowGap;
-    std::map<int, float> next;
-    for (const auto& [value, height] : columnHeight) next[value] = -height / 2.0f;
+    // The order in each column: by where what it's connected to is, a few times over.
+    std::map<int, std::vector<std::size_t>> columns;
+    for (std::size_t n = 0; n < count; ++n) columns[column[n]].push_back(n);
+    std::vector<double> rank(count, 0.0);
+    const auto rerank = [&rank](const std::vector<std::size_t>& nodes) {
+        for (std::size_t i = 0; i < nodes.size(); ++i) rank[nodes[i]] = static_cast<double>(i);
+    };
+    for (const auto& [value, nodes] : columns) rerank(nodes);
+    const auto sweep = [&](std::vector<std::size_t>& nodes, int thisColumn) {
+        std::map<std::size_t, double> wanted;
+        for (std::size_t node : nodes) {
+            double total = 0.0;
+            int neighbours = 0;
+            for (const ShadeGraphConnection& connection : graph.connections) {
+                const std::size_t other = connection.fromNode == node ? connection.toNode : connection.toNode == node ? connection.fromNode : node;
+                if (other == node || column[other] == thisColumn) continue;
+                total += rank[other];
+                ++neighbours;
+            }
+            wanted[node] = neighbours ? total / neighbours : rank[node];
+        }
+        std::stable_sort(nodes.begin(), nodes.end(), [&wanted](std::size_t a, std::size_t b) { return wanted[a] < wanted[b]; });
+        rerank(nodes);
+    };
+    for (int pass = 0; pass < 4; ++pass) {
+        if (pass % 2 == 0) {
+            for (auto& [value, nodes] : columns) sweep(nodes, value);
+        } else {
+            for (auto at = columns.rbegin(); at != columns.rend(); ++at) sweep(at->second, at->first);
+        }
+    }
 
     std::vector<GfVec2f> positions(count);
-    for (std::size_t n = 0; n < count; ++n) {
-        positions[n] = GfVec2f(static_cast<float>(last - column[n]) * kColumnWidth, next[column[n]]);
-        next[column[n]] += heights[n] + kRowGap;
+    for (const auto& [value, nodes] : columns) {
+        float height = 0.0f;
+        for (std::size_t node : nodes) height += heights[node] + kRowGap;
+        float y = -height / 2.0f;
+        for (std::size_t node : nodes) {
+            positions[node] = GfVec2f(static_cast<float>(last - value) * kColumnWidth, y);
+            y += heights[node] + kRowGap;
+        }
     }
     return positions;
+}
+
+int countCrossings(const ShadeGraph& graph, const std::vector<GfVec2f>& positions) {
+    int crossings = 0;
+    for (std::size_t a = 0; a < graph.connections.size(); ++a) {
+        for (std::size_t b = a + 1; b < graph.connections.size(); ++b) {
+            const ShadeGraphConnection& one = graph.connections[a];
+            const ShadeGraphConnection& two = graph.connections[b];
+            if (positions[one.fromNode][0] != positions[two.fromNode][0] || positions[one.toNode][0] != positions[two.toNode][0]) continue;
+            const float from = positions[one.fromNode][1] - positions[two.fromNode][1];
+            const float to = positions[one.toNode][1] - positions[two.toNode][1];
+            if (from * to < 0) ++crossings;
+        }
+    }
+    return crossings;
+}
+
+std::vector<ShadeGraphPort> unauthoredInputs(const UsdPrim& shader) {
+    std::vector<ShadeGraphPort> ports;
+    if (!shader || !shader.IsA<UsdShadeShader>()) return ports;
+    Draft draft = readShader(shader);
+    for (std::size_t i = 0; i < draft.node.in.size(); ++i) {
+        if (!draft.inOptional[i] && !shader.GetAttribute(draft.node.in[i].attribute)) ports.push_back(draft.node.in[i]);
+    }
+    return ports;
+}
+
+std::string defaultValueText(const UsdPrim& shader, const TfToken& attribute) {
+    SdrShaderNodeConstPtr definition = ShaderNodeCatalog::definitionOf(UsdShadeShader(shader));
+    if (!definition) return std::string();
+    const std::string name = attribute.GetString().substr(attribute.GetString().find(':') + 1);
+    SdrShaderPropertyConstPtr property = definition->GetShaderInput(TfToken(name));
+    if (!property) return std::string();
+    const VtValue value = property->GetDefaultValueAsSdfType();
+    return value.IsEmpty() ? std::string() : TfStringify(value);
+}
+
+void ShakeDetector::reset() { *this = ShakeDetector(); }
+
+bool ShakeDetector::addMove(double position, double milliseconds) {
+    constexpr double kMinimumTravel = 24.0;  // pixels each way: a steady hand doesn't shake
+    constexpr double kWindow = 600.0;
+    constexpr std::size_t kTurns = 3;
+    if (m_fired) return false;
+    if (!m_started) {
+        m_started = true;
+        m_lastPosition = position;
+        m_extreme = position;
+        return false;
+    }
+    const int direction = position > m_lastPosition ? 1 : position < m_lastPosition ? -1 : 0;
+    m_lastPosition = position;
+    if (direction == 0) return false;
+    if (m_direction == 0) m_direction = direction;
+    if (direction != m_direction) {
+        // A turn, if it came far enough since the last.
+        if (std::abs(position - m_extreme) >= kMinimumTravel) {
+            m_turns.push_back({milliseconds});
+            m_extreme = position;
+            m_direction = direction;
+        }
+    } else if ((direction > 0 && position > m_extreme) || (direction < 0 && position < m_extreme)) {
+        m_extreme = position;
+    }
+    while (!m_turns.empty() && milliseconds - m_turns.front().milliseconds > kWindow) m_turns.erase(m_turns.begin());
+    if (m_turns.size() >= kTurns) {
+        m_fired = true;
+        return true;
+    }
+    return false;
 }
 
 }  // namespace usdcc::usd

@@ -9,6 +9,7 @@
 
 #include <QApplication>
 #include <QFontMetricsF>
+#include <QGraphicsSceneMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 
@@ -159,6 +160,105 @@ QPointF ShaderNodeGeometry::portTextPosition(NodeId nodeId, PortType portType, P
 QRectF ShaderNodeGeometry::captionRect(NodeId nodeId) const { return headerRect(nodeId); }
 QPointF ShaderNodeGeometry::captionPosition(NodeId) const { return QPointF(kTextInset, 18); }
 int ShaderNodeGeometry::getPortSpacing() { return kRowHeight; }
+
+PortIndex ShaderNodeGeometry::checkPortHit(NodeId nodeId, PortType portType, QPointF nodePoint) const {
+    const ShadeGraphNode* node = m_model.shadeNode(nodeId);
+    if (!node || portType == PortType::None) return QtNodes::InvalidPortIndex;
+    const std::size_t count = portType == PortType::In ? node->in.size() : node->out.size();
+    for (std::size_t i = 0; i < count; ++i) {
+        const QPointF distance = portPosition(nodeId, portType, static_cast<PortIndex>(i)) - nodePoint;
+        if (QPointF::dotProduct(distance, distance) < kRowHeight * kRowHeight / 4.0) return static_cast<PortIndex>(i);
+    }
+    return QtNodes::InvalidPortIndex;
+}
+
+std::optional<PortIndex> ShaderNodeGeometry::inputAt(NodeId id, QPointF nodePoint) const {
+    const ShadeGraphNode* node = m_model.shadeNode(id);
+    if (!node) return std::nullopt;
+    for (std::size_t r = 0; r < node->rows.size(); ++r) {
+        if (node->rows[r].kind == ShadeGraphRow::Kind::Input && rowRect(id, static_cast<int>(r)).adjusted(-kDotDiameter, 0, 0, 0).contains(nodePoint)) {
+            return static_cast<PortIndex>(node->rows[r].port);
+        }
+    }
+    return std::nullopt;
+}
+
+namespace {
+constexpr double kCornerSize = 16.0;
+constexpr int kBackdropTitleHeight = 24;
+QColor backdropColor(const ShadeGraphBackdrop& backdrop) {
+    if (backdrop.displayColor) return QColor::fromRgbF((*backdrop.displayColor)[0], (*backdrop.displayColor)[1], (*backdrop.displayColor)[2]);
+    return QColor(78, 88, 104);
+}
+}  // namespace
+
+ShadeBackdropItem::ShadeBackdropItem(const ShadeGraphBackdrop& backdrop) : m_path(backdrop.path) {
+    setZValue(-100);
+    setFlag(ItemIsSelectable);
+    setAcceptHoverEvents(false);
+    setShown(backdrop);
+}
+
+void ShadeBackdropItem::setShown(const ShadeGraphBackdrop& backdrop) {
+    prepareGeometryChange();
+    m_description = QString::fromStdString(backdrop.description);
+    m_color = backdropColor(backdrop);
+    m_size = QSizeF(backdrop.size[0] * kShadeNodePixels, backdrop.size[1] * kShadeNodePixels);
+    setPos(backdrop.position[0] * kShadeNodePixels, backdrop.position[1] * kShadeNodePixels);
+    update();
+}
+
+QRectF ShadeBackdropItem::boundingRect() const { return QRectF(QPointF(0, 0), m_size); }
+QRectF ShadeBackdropItem::sceneRectOf() const { return QRectF(pos(), m_size); }
+
+void ShadeBackdropItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
+    painter->setRenderHint(QPainter::Antialiasing);
+    QColor fill = m_color;
+    fill.setAlpha(70);
+    QPen border(isSelected() ? usdcc::ui::theme::accent() : m_color);
+    border.setWidthF(isSelected() ? 2.0 : 1.0);
+    painter->setPen(border);
+    painter->setBrush(fill);
+    painter->drawRoundedRect(boundingRect(), 6, 6);
+    painter->setPen(QColor(225, 225, 228));
+    painter->setFont(captionFont());
+    painter->drawText(QRectF(10, 0, m_size.width() - 20, kBackdropTitleHeight), Qt::AlignLeft | Qt::AlignVCenter, m_description);
+    // The corner to resize it by.
+    painter->setPen(QPen(m_color, 1.5));
+    const QPointF corner(m_size.width() - 4, m_size.height() - 4);
+    painter->drawLine(corner + QPointF(-8, 0), corner + QPointF(0, -8));
+    painter->drawLine(corner + QPointF(-4, 0), corner + QPointF(0, -4));
+}
+
+void ShadeBackdropItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
+    if (event->button() != Qt::LeftButton) {
+        event->ignore();
+        return;
+    }
+    const QPointF at = event->pos();
+    m_resizing = at.x() > m_size.width() - kCornerSize && at.y() > m_size.height() - kCornerSize;
+    QGraphicsObject::mousePressEvent(event);
+    event->accept();
+    Q_EMIT pressed(this);
+}
+
+void ShadeBackdropItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
+    if (m_resizing) {
+        prepareGeometryChange();
+        m_size = QSizeF(std::max(80.0, event->pos().x()), std::max(60.0, event->pos().y()));
+        update();
+        Q_EMIT resizedTo(this, m_size);
+        return;
+    }
+    const QPointF delta = event->scenePos() - event->lastScenePos();
+    setPos(pos() + delta);
+    Q_EMIT movedBy(this, delta);
+}
+
+void ShadeBackdropItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+    m_resizing = false;
+    QGraphicsObject::mouseReleaseEvent(event);
+}
 
 void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ngo) const {
     auto& model = static_cast<UsdShadeGraphModel&>(ngo.graphModel());

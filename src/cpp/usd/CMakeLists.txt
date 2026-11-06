@@ -64,6 +64,10 @@ add_library(usdcc_usd_ui SHARED
     src/usd_shade_graph_model.cpp
     include/usdcc/usd/shader_node_graphics.h
     src/shader_node_graphics.cpp
+    include/usdcc/usd/shade_actions.h
+    src/shade_actions.cpp
+    include/usdcc/usd/shader_node_palette.h
+    src/shader_node_palette.cpp
     include/usdcc/usd/material_editor_view_panel.h
     src/material_editor_view_panel.cpp
     include/usdcc/usd/shader_nodes_dialog.h
