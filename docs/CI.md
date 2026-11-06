@@ -155,16 +155,21 @@ Runs on pushes to `master` and on pull requests.
    directory saved by `actions/cache`. vcpkg's old `x-gha` cache backend is gone, so it's
    the `files` backend plus `actions/cache`. The first run builds Qt (an hour or more), and
    later runs restore it in minutes.
-   - The key is the triplet, the runner image (`ImageOS` and `ImageVersion`), `vcpkg.json`,
-     the overlay ports (`vcpkg-configuration.json` and `cmake/ports`) and the vcpkg
-     submodule commit. The image is in it because its compiler is part of
-     every package's ABI hash: with an unchanged key after an image update, vcpkg would
-     rebuild everything on every run and never save it.
-   - A new key restores the newest older cache (by prefix), so only what changed is
-     rebuilt, and saves the result under the new key.
-   - Saved even when the build fails, so Qt isn't built again after a usdcc compile
-     error. Only from pushes, not pull requests: a pull request's caches would crowd
-     `master`'s out of the repository's 10 GB, and pull requests can restore `master`'s.
+   - The cache holds one zip per package build, named after the package's ABI hash,
+     which covers its port, its dependencies and the compiler.
+   - Restored: the newest cache for the same dependencies (`vcpkg.json`, the overlay
+     ports in `cmake/ports` with `vcpkg-configuration.json`, and the vcpkg submodule
+     commit), or else the newest of any. So after a dependency change or a runner image
+     update only what changed is built.
+   - Saved whenever vcpkg built something, even if usdcc's build or tests failed after it,
+     under a key of the run's own. An earlier version used one key per set of
+     dependencies, and a run that stopped halfway would have left that key behind,
+     with later runs hitting it, rebuilding the rest and never saving it.
+   - Pruned after a successful build: each installed package's `vcpkg_abi_info.txt`
+     hashes to its zip's name, and the zips no package used are dropped. Otherwise an
+     old compiler's or a replaced port's packages would be carried from cache to cache.
+   - Only from pushes, not pull requests: a pull request's caches would crowd `master`'s
+     out of the repository's 10 GB, and pull requests can restore `master`'s.
 5. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
    `RelWithDebInfo` like local builds.
 6. Run the tests (phase 3).

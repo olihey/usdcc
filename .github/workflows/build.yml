@@ -55,11 +55,14 @@ jobs:
           if ($LASTEXITCODE) { throw 'unzipping failed' }
           Remove-Item "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
 
-      # The key changes with the dependencies (vcpkg.json, the overlay ports in
-      # cmake/ports with vcpkg-configuration.json, and the vcpkg commit)
-      # and with the runner image, whose compiler is part of every package's ABI
-      # hash. An older cache is restored when the key is new, so only what
-      # changed gets rebuilt, and the result is saved under the new key.
+      # vcpkg's files cache holds one zip per package build, named after the
+      # package's ABI hash (which covers its port, its dependencies and the
+      # compiler). The newest cache for the same dependencies (vcpkg.json, the
+      # overlay ports in cmake/ports with vcpkg-configuration.json, and the
+      # vcpkg commit) is restored, or else the newest of any, so only what
+      # changed gets built. A run that built something saves under a key of its
+      # own, so a run that stopped halfway can't leave a key behind that later
+      # runs would hit without ever saving what they built.
       - name: Name the vcpkg cache
         id: vcpkg
         run: |
@@ -67,36 +70,70 @@ jobs:
           $dir = "$env:RUNNER_TEMP\vcpkg-cache"
           New-Item -ItemType Directory -Force $dir | Out-Null
           "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> $env:GITHUB_ENV
+          $any = "vcpkg-x64-windows-$env:ImageOS-"
+          $deps = "$any${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}-$commit-"
           "dir=$dir" >> $env:GITHUB_OUTPUT
-          "prefix=vcpkg-x64-windows-$env:ImageOS-" >> $env:GITHUB_OUTPUT
-          "key=vcpkg-x64-windows-$env:ImageOS-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}-$commit-$env:ImageVersion" >> $env:GITHUB_OUTPUT
+          "any=$any" >> $env:GITHUB_OUTPUT
+          "deps=$deps" >> $env:GITHUB_OUTPUT
+          "key=$deps$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
 
       - name: Restore the vcpkg cache
-        id: vcpkg-restore
         uses: actions/cache/restore@v4
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
-          restore-keys: ${{ steps.vcpkg.outputs.prefix }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Note the cached packages
+        run: |
+          $zips = @(Get-ChildItem -Recurse -File -Filter *.zip '${{ steps.vcpkg.outputs.dir }}' | ForEach-Object Name)
+          Set-Content "$env:RUNNER_TEMP\vcpkg-cache-before.txt" $zips
+          Write-Host "$($zips.Count) package(s) in the cache"
 
       - name: Build
+        id: build
         run: tools/build.ps1 -UsdInstall $env:USD_INSTALL
 
       # A crash on a hosted runner can sit behind an error dialog nobody closes,
-      # so every test executable gets a timeout.
+      # so every test executable gets a timeout. Verbose, so the log shows each
+      # test case and the check counts, not just three "Passed".
       - name: Test
         run: |
-          ctest --test-dir build -C RelWithDebInfo --output-on-failure --timeout 900
+          ctest --test-dir build -C RelWithDebInfo --verbose --timeout 900
           if ($LASTEXITCODE) { throw 'tests failed' }
 
-      # Even when the build failed, so the packages vcpkg did build (Qt takes
-      # over an hour) aren't built again next time. Only from master: a pull
+      # After a successful build, drops the packages it didn't use (an older
+      # compiler's, a replaced port's), which would otherwise be carried from
+      # cache to cache for ever: each installed package's vcpkg_abi_info.txt
+      # hashes to its zip's name. After a failed one, vcpkg may not have got to
+      # every package, so nothing is dropped.
+      - name: Prune the vcpkg cache
+        id: vcpkg-prune
+        if: always() && steps.vcpkg.outputs.key != ''
+        run: |
+          $dir = '${{ steps.vcpkg.outputs.dir }}'
+          $zips = @(Get-ChildItem -Recurse -File -Filter *.zip $dir)
+          $installed = 'build\vcpkg_installed\x64-windows\share'
+          if ('${{ steps.build.outcome }}' -eq 'success' -and (Test-Path $installed)) {
+            $used = @(Get-ChildItem $installed -Recurse -Filter vcpkg_abi_info.txt |
+              ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower() + '.zip' })
+            $unused = @($zips | Where-Object { $used -notcontains $_.Name })
+            $unused | Remove-Item
+            Write-Host "$($used.Count) package(s) used, $($unused.Count) unused one(s) dropped"
+          }
+          $before = @(Get-Content "$env:RUNNER_TEMP\vcpkg-cache-before.txt" -ErrorAction SilentlyContinue)
+          $added = @($zips | Where-Object { $before -notcontains $_.Name })
+          Write-Host "$($added.Count) package(s) built and added"
+          "added=$(($added.Count -gt 0).ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      # Whenever vcpkg built something, even if usdcc's build failed afterwards,
+      # so Qt (over an hour) isn't built again. Only from master: a pull
       # request's caches would crowd master's out of the 10 GB the repository
       # gets, and pull requests restore master's.
       - name: Save the vcpkg cache
-        if: >-
-          always() && github.event_name != 'pull_request' && steps.vcpkg.outputs.key != ''
-          && steps.vcpkg-restore.outputs.cache-hit != 'true'
+        if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
