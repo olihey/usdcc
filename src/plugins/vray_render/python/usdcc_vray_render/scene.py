@@ -36,42 +36,20 @@ class Camera:
         self.ortho = ortho
         self.ortho_width = ortho_width
 
+    @classmethod
+    def from_render(cls, camera):
+        """A usdcc.ui.RenderCamera, which the app's render view panel gives at the
+        image's aspect ratio, as V-Ray takes it."""
+        if camera.orthographic:
+            return cls(camera.transform, 1.0, ortho=True, ortho_width=camera.ortho_width)
+        return cls(camera.transform, math.radians(camera.fov_x))
+
     def command_fields(self):
         """The fields of the helper's "camera" command: the matrix's three axes
         and its position as 12 numbers, as V-Ray's Transform takes them."""
         rows = [self.transform.GetRow(i) for i in range(4)]
         values = [float(v) for row in rows for v in (row[0], row[1], row[2])]
         return {"transform": values, "fov": self.fov, "ortho": self.ortho, "ortho_width": self.ortho_width}
-
-
-def horizontal_fov(vertical_degrees, aspect):
-    """The horizontal field of view, in radians, for a vertical one in degrees."""
-    return 2.0 * math.atan(math.tan(math.radians(vertical_degrees) / 2.0) * aspect)
-
-
-def from_viewport(camera, aspect):
-    """A usdcc.app.ViewportCamera as rendered at `aspect` (width / height): the
-    vertical field of view is kept, so a wider image shows more at the sides."""
-    return Camera(camera.transform, horizontal_fov(camera.fov_y, aspect))
-
-
-def from_prim(prim, aspect, time=None):
-    """A UsdGeom.Camera prim as rendered at `aspect` (the default time unless
-    `time` is given). Its horizontal aperture decides the framing, as V-Ray's own
-    USD import does."""
-    gf_camera = UsdGeom.Camera(prim).GetCamera(Usd.TimeCode.Default() if time is None else time)
-    transform = gf_camera.transform
-    if gf_camera.projection == Gf.Camera.Orthographic:
-        # Apertures are in tenths of a scene unit.
-        return Camera(transform, 1.0, ortho=True, ortho_width=gf_camera.horizontalAperture / 10.0)
-    return Camera(transform, math.radians(gf_camera.GetFieldOfView(Gf.Camera.FOVHorizontal)))
-
-
-def camera_prims(stage):
-    """The paths of the stage's cameras, in the order they appear."""
-    if stage is None:
-        return []
-    return [prim.GetPath() for prim in stage.Traverse() if prim.IsA(UsdGeom.Camera) and not prim.GetPath().HasPrefix(ROOT)]
 
 
 class SceneFiles:

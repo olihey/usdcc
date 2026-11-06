@@ -2,8 +2,9 @@
 
 A view panel that renders its stage with V-Ray, progressively. It follows the viewport
 camera, or a camera in the stage, and renders again after edits. It is a Python plugin,
-[src/plugins/vray_render](../src/plugins/vray_render). V-Ray runs in a helper process,
-through the V-Ray App SDK.
+[src/plugins/vray_render](../src/plugins/vray_render).
+- The panel is the app's render view panel ([RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md)).
+- The plugin supplies V-Ray, which runs in a helper process through the V-Ray App SDK.
 
 ## 1. Setup
 
@@ -20,22 +21,23 @@ through the V-Ray App SDK.
 
 ## 2. The panel
 
+The toolbar, the image, the status line and following the camera are the app's render view
+panel (RENDER_VIEW_PANEL.md §1). What V-Ray adds or decides:
+
 | Control | What it does |
 |---|---|
-| Render / Stop | Starts or stops rendering. The helper process starts with the first render and stays until the panel closes, so a second render starts at once |
-| Refresh | Sends the stage to V-Ray again |
-| Camera | **Viewport Camera** follows the viewport the user last clicked in, live; or one of the stage's `UsdGeom.Camera` prims |
-| Resolution | **Fit Panel** at full, half or quarter size, following the panel's size; or 1280 × 720 or 1920 × 1080. The longest side is at most 8192 |
-| Engine | CPU, CUDA or RTX (NVIDIA GPUs) |
-| Update on Edits | Sends the stage again after edits, *Re-render after edits* ms after the last one |
-| Save Image… | PNG, JPEG or TIFF of the image shown |
+| Render / Stop | The helper process starts with the first render and stays until the panel is deleted, so a second render starts at once. Stop only stops sampling |
+| Engine | CPU, CUDA or RTX (NVIDIA GPUs); added with `create_toolbar()` |
+| Update on Edits | Sends the whole stage again, *Re-render after edits* ms after the last edit (`set_edit_delay()`) |
 | Settings… | The V-Ray page of the Settings dialog |
 
-- The status line shows the state, the time since the last change, and the image's size.
-- V-Ray's warnings and errors, and anything the helper prints, go to the Log panel under
-  `plugin:org.usdcc.vray-render`.
-- A license error or a crashed helper also shows a sticky error toast.
-- Without an App SDK folder, the panel says so and starts nothing.
+- **The state** is V-Ray's (Preparing, Rendering, Done, ...) or the helper's ("Starting
+  V-Ray…", "Loading the stage…").
+- **The Log panel:** V-Ray's warnings and errors, and anything the helper prints, go there
+  under `plugin:org.usdcc.vray-render`.
+- **A license error or a crashed helper** is a fatal error (`report_error(..., fatal=True)`):
+  Render goes off, and a sticky error toast says so.
+- **Without an App SDK folder,** `setup_problem()` says so, and Render starts nothing.
 
 ## 3. What V-Ray gets
 
@@ -57,11 +59,14 @@ exported to `%TEMP%\usdcc-vray-*\scene_<n>.usdc`.
 - `fov` is horizontal, in radians.
 
 **The camera.**
-- **Viewport:** `usdcc.app.active_viewport_camera()`. Its vertical field of view (45°) is
-  kept at the image's aspect ratio, so a wider image shows more at the sides.
-- **Camera prim:** `UsdGeom.Camera.GetCamera()`. Its horizontal field of view is used, and
-  an orthographic camera's horizontal aperture becomes `orthographicWidth`.
-- Camera moves are sent at most every 30 ms.
+- **Which camera, and when:** the panel decides that, and gives a `RenderCamera` at the
+  image's aspect ratio (RENDER_VIEW_PANEL.md §2).
+  - For the viewport, its vertical field of view (45°) is kept, so a wider image shows more at
+    the sides.
+  - For a camera prim, its horizontal field of view.
+  - Camera moves come at most every 30 ms.
+- **Into V-Ray's terms:** `scene.Camera.from_render()` takes the horizontal field of view in
+  radians. An orthographic camera's `ortho_width` becomes `orthographicWidth`.
 - The helper renders through a RenderView of its own, `usdccCamera`, made the current
   camera with `renderer.cameraName`. The RenderViews V-Ray makes from the file's render
   camera can't be used: changes to them are ignored while interactive rendering runs
@@ -104,8 +109,12 @@ Python*.
   falls behind. *Image updates* sets how often V-Ray offers one.
 - **stdin closing means usdcc is gone:** the helper stops and exits. Checked by ending
   usdcc with `os._exit()`.
-- **Closing the panel** sends `quit`, waits 3 s, then kills the helper. So does the
-  plugin's `deactivate()` at quit.
+- **Deleting the panel** (File > Close Stage, a plugin reload, quitting) calls the plugin's
+  `close()`, which sends `quit`, waits 3 s, then kills the helper. So does the plugin's
+  `deactivate()` at quit. Closing the tab only hides the panel. That stops rendering, and
+  the helper stays.
+- **The helper's `QProcess` has no parent:** the panel's widgets are the app's, and `close()`
+  ends the process.
 - **`--fake`** renders a gradient instead of loading V-Ray. The tests use it.
 - **The frame buffer:** the helper makes the renderer with `enableFrameBuffer=False`, so the
   App SDK doesn't open its own window.
@@ -141,23 +150,28 @@ Measured with V-Ray App SDK 7.40.01 and a 32-thread CPU, on a small test stage:
 
 `vray_render_plugin` in `usdcc_python_tests`
 ([vray_render_plugin_test.cpp](../tests/vray_render_plugin_test.cpp)) uses the fake
-renderer. It checks that:
+renderer. It drives the app's panel through its controls' object names (`renderButton`,
+`renderCamera`, `renderResolution`, `renderStatus`). It checks that:
 - the panel starts the helper and shows images at the asked size;
 - the export has the render prims and leaves the stage alone;
 - the render follows a viewport's camera and a camera prim;
 - an edit exports again;
-- Stop keeps the helper, and closing the panel ends it and removes the files;
+- Stop keeps the helper, and deleting the panel ends it and removes the files;
 - a missing App SDK is reported.
 
-`active_viewport_camera` and `stage_edited_event`
-([viewport_camera_test.cpp](../tests/viewport_camera_test.cpp)) cover the app calls the
-plugin relies on.
+The panel itself is tested on its own (RENDER_VIEW_PANEL.md §7). `active_viewport_camera` and
+`stage_edited_event` ([viewport_camera_test.cpp](../tests/viewport_camera_test.cpp)) cover
+the app calls underneath.
 
 **Checked by hand, with V-Ray:** with an in-app script driving a real panel:
 - the viewport camera's framing (a projected point lands on the same pixel);
 - a camera prim's framing (the same as `vray.exe` renders it);
 - an edit;
 - the helper ending with usdcc.
+
+These checks were made before the move to the app's render view panel and haven't been
+repeated since. The camera numbers V-Ray gets are the same; the fake-renderer test checks
+them.
 
 ## 8. Limits and next steps
 

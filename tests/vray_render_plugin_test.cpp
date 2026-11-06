@@ -10,7 +10,7 @@
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
-#include "usdcc/scripting/scripted_view_panel.h"
+#include "usdcc/scripting/scripted_render_view_panel.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/view_panel_registry.h"
@@ -34,7 +34,7 @@
 using usdcc::scripting::AppContextScope;
 using usdcc::scripting::PluginManager;
 using usdcc::scripting::PluginState;
-using usdcc::scripting::ScriptedViewPanel;
+using usdcc::scripting::ScriptedRenderViewPanel;
 using usdcc::test::pythonTestApp;
 using usdcc::ui::MainWindow;
 using usdcc::ui::ViewPanelRegistry;
@@ -122,27 +122,38 @@ USDCC_TEST(vray_render_plugin) {
           "its settings");
 
     CHECK(run(R"(
-import builtins, sys, usdcc.app, usdcc.settings, usdcc.usd
+import builtins, math, sys, usdcc.app, usdcc.settings, usdcc.usd
+builtins.math = math
 from pxr import Usd
 vray = sys.modules["usdcc_vray_render"]
 vray.config.FAKE_RENDERER = True
 usdcc.settings.set("VRayRender/editDelay", 50)
 stage = [s for s in usdcc.usd.stages() if s.GetRootLayer().identifier.endswith("usdcc_vray_%d.usda" % __import__("os").getpid())][0]
+from PySide6 import QtWidgets
 panel = usdcc.app.open_view_panel("org.usdcc.vray-render.view", stage)
-panel.resolution_combo.setCurrentIndex(3)  # 1280 x 720, whatever the panel's size
+# The app's panel's own controls, by name.
+builtins.vray_render = panel.widget.findChild(QtWidgets.QToolButton, "renderButton")
+builtins.vray_cameras = panel.widget.findChild(QtWidgets.QComboBox, "renderCamera")
+builtins.vray_status = panel.widget.findChild(QtWidgets.QLabel, "renderStatus")
+panel.widget.findChild(QtWidgets.QComboBox, "renderResolution").setCurrentIndex(3)  # 1280 x 720, whatever the panel's size
+# The cameras the panel sends.
+builtins.vray_sent = []
+def record(camera, send=panel.camera_changed):
+    builtins.vray_sent.append(camera)
+    send(camera)
+panel.camera_changed = record
 builtins.vray_test = panel
 builtins.vray_module = vray
 builtins.vray_stage = stage
 builtins.vray_usdcc = usdcc
 builtins.vray_Usd = Usd
 )"), "opening a panel");
-    CHECK(evaluated("vray_test.camera_combo.itemText(1)") == "Shot", "its camera menu lists the stage's cameras");
+    CHECK(evaluated("vray_cameras.itemText(1)") == "Shot", "its camera menu lists the stage's cameras");
 
-    CHECK(run("vray_test.render_button.setChecked(True)"), "pressing Render");
-    CHECK(waitFor("vray_test.view.image is not None and vray_test.view.image.width() == 1280"),
-          "starts the helper, which sends back an image at the asked size: %s", evaluated("vray_test.status.text()").c_str());
-    CHECK(evaluated("vray_test.view.image.height()") == "720", "1280 x 720");
-    CHECK(evaluated("vray_test.render_button.text()") == "Stop", "the button stops it now");
+    CHECK(run("vray_render.setChecked(True)"), "pressing Render");
+    CHECK(waitFor("vray_test.image_size() == (1280, 720)"),
+          "starts the helper, which sends back an image at the asked size, 1280 x 720: %s", evaluated("vray_status.text()").c_str());
+    CHECK(evaluated("vray_render.text()") == "Stop", "the button stops it now");
 
     // What the helper was given: the stage with render settings and a camera of our own.
     CHECK(run(R"(
@@ -161,17 +172,19 @@ builtins.vray_exported = (exported.GetMetadata("renderSettingsPrimPath"),
     auto viewport = std::make_unique<usdcc::usd::ViewportViewPanel>(&app.stages, open.stage,
                                                                     std::make_shared<usdcc::tools::ToolSet>(), nullptr);
     viewport->hydraWindow()->setCameraState({PXR_NS::GfVec3d(3.0, 0.0, 0.0), 12.0, 30.0, -10.0});
-    CHECK(waitFor("(vray_test.camera.transform.ExtractTranslation() - "
+    CHECK(waitFor("len(vray_sent) > 0 and (vray_sent[-1].transform.ExtractTranslation() - "
                   "vray_usdcc.app.active_viewport_camera().transform.ExtractTranslation()).GetLength() < 1e-6"),
           "moving the viewport camera moves the render's");
-    CHECK(evaluated("abs(vray_test.camera.fov - vray_module.scene.horizontal_fov(45.0, 1280 / 720)) < 1e-9") == "True",
-          "keeping the viewport's vertical field of view at the image's aspect ratio");
+    CHECK(evaluated("abs(vray_module.scene.Camera.from_render(vray_sent[-1]).fov - "
+                    "2 * math.atan(math.tan(math.radians(22.5)) * 1280 / 720)) < 1e-9") == "True",
+          "keeping the viewport's vertical field of view at the image's aspect ratio: %s", evaluated("vray_sent[-1]").c_str());
 
     // A camera prim instead.
-    CHECK(run("vray_test.camera_combo.setCurrentIndex(1)"), "picking the Shot camera");
-    CHECK(evaluated("abs(vray_test.camera.fov - 2 * __import__('math').atan(18 / 50)) < 1e-6") == "True",
-          "renders through it: %s", evaluated("vray_test.camera.fov").c_str());
-    CHECK(evaluated("tuple(vray_test.camera.transform.ExtractTranslation())") == "(0.0, 1.0, 8.0)", "from where it is");
+    CHECK(run("vray_cameras.setCurrentIndex(1)"), "picking the Shot camera");
+    CHECK(evaluated("abs(vray_module.scene.Camera.from_render(vray_sent[-1]).fov - 2 * math.atan(18 / 50)) < 1e-6") == "True",
+          "renders through it: %s", evaluated("vray_sent[-1]").c_str());
+    CHECK(evaluated("tuple(vray_sent[-1].transform.ExtractTranslation())") == "(0.0, 1.0, 8.0)", "from where it is");
+    CHECK(evaluated("str(vray_sent[-1].prim)") == "/Shot", "and says which it is");
 
     // An edit sends the stage again.
     CHECK(run("import builtins\nbuiltins.vray_before = vray_test.files._files[-1]"), "remembering the export");
@@ -183,7 +196,7 @@ builtins.vray_exported = (exported.GetMetadata("renderSettingsPrimPath"),
 
     CHECK(run(R"(
 import builtins
-vray_test.render_button.setChecked(False)
+vray_render.setChecked(False)
 builtins.vray_pid = vray_test.client.process.processId()
 builtins.vray_folder = vray_test.files.folder
 )"), "stopping");
@@ -191,11 +204,10 @@ builtins.vray_folder = vray_test.files.folder
 
     // Closing the panel ends the helper and removes its files.
     viewport.reset();
+    // As File > Close Stage does: out of the dock manager, then deleted. (A plain
+    // delete leaves the dock manager holding it, and the next panel opened reads it.)
     for (ads::CDockWidget* dock : window.dockManager()->dockWidgetsMap()) {
-        if (qobject_cast<ScriptedViewPanel*>(dock)) {
-            dock->closeDockWidget();
-            delete dock;
-        }
+        if (qobject_cast<ScriptedRenderViewPanel*>(dock)) dock->deleteDockWidget();
     }
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     CHECK(run(R"(
@@ -219,14 +231,17 @@ builtins.vray_alive = alive
 import builtins, usdcc.app, usdcc.settings
 vray_module.config.FAKE_RENDERER = False
 usdcc.settings.set("VRayRender/appSdkFolder", "C:/nowhere/AppSDK")
+from PySide6 import QtWidgets
 broken = usdcc.app.open_view_panel("org.usdcc.vray-render.view", vray_stage)
-broken.render_button.setChecked(True)
+builtins.vray_broken_render = broken.widget.findChild(QtWidgets.QToolButton, "renderButton")
+builtins.vray_broken_status = broken.widget.findChild(QtWidgets.QLabel, "renderStatus")
+builtins.vray_broken_render.setChecked(True)
 builtins.vray_broken = broken
 )"), "a panel without the App SDK");
-    CHECK(evaluated("vray_broken.render_button.isChecked()") == "False", "doesn't render");
+    CHECK(evaluated("vray_broken_render.isChecked()") == "False", "doesn't render");
     CHECK(evaluated("vray_broken.client is None") == "True", "starts no helper");
-    CHECK(evaluated("'isn\\'t a V-Ray App SDK folder' in vray_broken.view.message") == "True", "and says why: %s",
-          evaluated("vray_broken.view.message").c_str());
+    CHECK(evaluated("'isn\\'t a V-Ray App SDK folder' in vray_broken_status.text()") == "True", "and says why: %s",
+          evaluated("vray_broken_status.text()").c_str());
 
     CHECK(run("import builtins\nfor name in [n for n in dir(builtins) if n.startswith('vray_')]: delattr(builtins, name)\n"),
           "cleaning up");
