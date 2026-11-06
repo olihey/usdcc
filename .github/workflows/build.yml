@@ -55,27 +55,30 @@ jobs:
           if ($LASTEXITCODE) { throw 'unzipping failed' }
           Remove-Item "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
 
-      # vcpkg's files cache holds one zip per package build, named after the
-      # package's ABI hash (which covers its port, its dependencies and the
-      # compiler). The newest cache for the same dependencies (vcpkg.json, the
-      # overlay ports in cmake/ports with vcpkg-configuration.json, and the
-      # vcpkg commit) is restored, or else the newest of any, so only what
-      # changed gets built. A run that built something saves under a key of its
-      # own, so a run that stopped halfway can't leave a key behind that later
-      # runs would hit without ever saving what they built.
+      # PySide6 built against this Qt (deps-pyside.yml), into external/, where
+      # the CMake configure looks for it. Without it, usdcc.ui and the tests of
+      # Python-made panels aren't built, so the run still works, with a warning:
+      # after a Qt update it takes deps-pyside.yml about an hour to catch up.
+      - name: Download PySide6
+        run: |
+          $asset = tools/ci/pyside-asset.ps1 | ConvertFrom-Json
+          gh release download $asset.tag --pattern $asset.zip --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) {
+            Write-Host "::warning::No $($asset.zip) in release $($asset.tag), so usdcc.ui and the Python panel tests aren't built. Run the PySide6 workflow (deps-pyside.yml)."
+            exit 0
+          }
+          7z x "$env:RUNNER_TEMP\$($asset.zip)" -oexternal | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+          Remove-Item "$env:RUNNER_TEMP\$($asset.zip)"
+
+      # The newest cache for the same dependencies is restored, or else the
+      # newest of any, so only what changed gets built (tools/ci/vcpkg-cache.ps1).
+      # A run that built something saves under a key of its own, so a run that
+      # stopped halfway can't leave a key behind that later runs would hit
+      # without ever saving what they built.
       - name: Name the vcpkg cache
         id: vcpkg
-        run: |
-          $commit = git rev-parse HEAD:external/vcpkg
-          $dir = "$env:RUNNER_TEMP\vcpkg-cache"
-          New-Item -ItemType Directory -Force $dir | Out-Null
-          "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> $env:GITHUB_ENV
-          $any = "vcpkg-x64-windows-$env:ImageOS-"
-          $deps = "$any${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}-$commit-"
-          "dir=$dir" >> $env:GITHUB_OUTPUT
-          "any=$any" >> $env:GITHUB_OUTPUT
-          "deps=$deps" >> $env:GITHUB_OUTPUT
-          "key=$deps$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
+        run: tools/ci/vcpkg-cache.ps1
 
       - name: Restore the vcpkg cache
         uses: actions/cache/restore@v4

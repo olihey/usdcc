@@ -1,0 +1,136 @@
+# Builds PySide6/shiboken6 against vcpkg's Qt with tools/build-pyside.ps1 and
+# publishes them as a prerelease asset, which build.yml downloads to build
+# usdcc.ui and its tests (docs/CI.md, phase 4). Slow (around an hour), so it
+# only runs when what the asset is named after changes, or by hand, and skips
+# the build when that asset already exists.
+name: PySide6
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - external/vcpkg
+      - cmake/ports/qtbase/**
+      - deps/usd.json
+      - tools/build-pyside.ps1
+      - tools/ci/pyside-asset.ps1
+      - .github/workflows/deps-pyside.yml
+
+permissions:
+  contents: write  # publishing the release
+
+concurrency:
+  group: deps-pyside
+  cancel-in-progress: false
+
+jobs:
+  pyside:
+    # Visual Studio 2022, as for usdcc and OpenUSD.
+    runs-on: windows-2022
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Name the asset
+        id: asset
+        run: tools/ci/pyside-asset.ps1 -GitHubOutput
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          $names = gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>$null
+          $found = $LASTEXITCODE -eq 0 -and @($names) -contains '${{ steps.asset.outputs.zip }}'
+          "found=$($found.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($found) { Write-Host "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build." }
+          exit 0
+
+      # OpenUSD's Python, which usdcc embeds. PySide is built for its limited
+      # API, so any 3.12 runs it.
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      # Qt from build.yml's cache, only read: what vcpkg builds here is what
+      # build.yml builds too, and saves.
+      - name: Name the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        id: vcpkg
+        run: tools/ci/vcpkg-cache.ps1 -Access read
+
+      - name: Restore the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      # Into build/vcpkg_installed, as usdcc's CMake configure would, which is
+      # where tools/build-pyside.ps1 looks for Qt.
+      - name: Install Qt
+        if: steps.published.outputs.found != 'true'
+        run: |
+          external/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE) { throw 'bootstrapping vcpkg failed' }
+          external/vcpkg/vcpkg.exe install --triplet x64-windows --x-install-root=build/vcpkg_installed
+          if ($LASTEXITCODE) { throw 'vcpkg install failed' }
+
+      - name: Build PySide6
+        if: steps.published.outputs.found != 'true'
+        run: tools/build-pyside.ps1 -Python (Get-Command python).Source
+
+      # The two folders the usdcc build uses: PySide6/shiboken6/the generator,
+      # and clang's own headers, which the generator parses with.
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        working-directory: external
+        run: |
+          $zip = "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
+          7z a -tzip -mx=5 $zip pyside-install libclang\lib\clang | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw '7z failed' }
+          $size = (Get-Item $zip).Length
+          Write-Host ("{0:N0} MB" -f ($size / 1MB))
+          if ($size -ge 2GB) { throw 'Over GitHub''s 2 GiB per-asset limit' }
+
+      # Unzipped elsewhere, with the vcpkg Qt out of reach, so it has to work
+      # from its own folder, as it will in build.yml.
+      - name: Check it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          $check = "$env:RUNNER_TEMP\pyside-check"
+          7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$check" | Select-Object -Last 2
+          Remove-Item -Recurse -Force build\vcpkg_installed
+          python -I -c "import sys; sys.path.insert(0, sys.argv[1]); import shiboken6, PySide6; from PySide6 import QtCore, QtGui, QtWidgets; print('PySide', PySide6.__version__, 'on Qt', QtCore.qVersion())" "$check\pyside-install"
+          if ($LASTEXITCODE) { throw 'PySide6 doesn''t import' }
+          & "$check\pyside-install\shiboken6_generator\shiboken6.exe" --version
+          if ($LASTEXITCODE) { throw 'shiboken6 doesn''t run' }
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true'
+        run: |
+          $notes = @"
+          PySide6 and shiboken6 built from source against vcpkg's Qt, for usdcc's CI (docs/CI.md, phase 4). Not a usdcc release.
+
+          - PySide ``${{ steps.asset.outputs.pyside }}``, Qt ``${{ steps.asset.outputs.qt }}`` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} x64 (limited API)
+          - Built by ``tools/build-pyside.ps1``, Visual Studio 2022 (runner image ``windows-2022``)
+          - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
+
+          Unzip into usdcc's ``external`` folder: it holds ``pyside-install`` and ``libclang/lib/clang``.
+          "@
+          gh release create '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" `
+            --prerelease --target $env:GITHUB_SHA `
+            --title 'PySide6 ${{ steps.asset.outputs.name }}' --notes $notes
+          if ($LASTEXITCODE) { throw 'publishing failed' }
