@@ -30,7 +30,7 @@ notes/
 }
 ```
 
-Everything but `id`, `name`, `version` and `api` is optional, so a schema-only plugin has no code at all.
+Everything but `id`, `name`, `version` and `api` is optional, so a schema-only plugin has no code at all. `python.requires` are packages the app installs when asked, and `python.indexes` extra https package indexes they come from, shown before installing ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md) §4).
 
 ```python
 # python/notes/__init__.py

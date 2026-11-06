@@ -375,6 +375,44 @@ USDCC_TEST(plugin_requirements_in_the_manifest) {
     }
 }
 
+// python.indexes: extra package indexes a manifest names for its requirements, such as
+// NVIDIA's for ovrtx. Only plain https URLs, and only with requirements.
+USDCC_TEST(plugin_package_indexes) {
+    Plugins plugins("indexes");
+    plugins.plugin("index.good", "usdcc_test_index_good", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-idx-a"], "indexes": ["https://pypi.example.com/simple"])");
+    plugins.plugin("index.http", "usdcc_test_index_http", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-idx-b"], "indexes": ["http://pypi.example.com/simple"])");
+    plugins.plugin("index.file", "usdcc_test_index_file", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-idx-c"], "indexes": ["file:///C:/wheels"])");
+    plugins.plugin("index.user", "usdcc_test_index_user", "raise RuntimeError('should not run')\n", {},
+                   R"(, "requires": ["usdcc-test-idx-d"], "indexes": ["https://me:secret@pypi.example.com/simple"])");
+    plugins.plugin("index.alone", "usdcc_test_index_alone", "raise RuntimeError('should not run')\n", {},
+                   R"(, "indexes": ["https://pypi.example.com/simple"])");
+
+    PluginManager manager(plugins.options());
+    manager.scan();
+    manager.activate(python());
+
+    CHECK(stateOf(manager, "index.good") == PluginState::NeedsPackages, "an https index is fine: %s",
+          reasonOf(manager, "index.good").c_str());
+    CHECK(stateOf(manager, "index.http") == PluginState::Refused && contains(reasonOf(manager, "index.http"), "https"),
+          "plain http is refused: %s", reasonOf(manager, "index.http").c_str());
+    CHECK(stateOf(manager, "index.file") == PluginState::Refused && contains(reasonOf(manager, "index.file"), "https"),
+          "so is a file URL: %s", reasonOf(manager, "index.file").c_str());
+    CHECK(stateOf(manager, "index.user") == PluginState::Refused && contains(reasonOf(manager, "index.user"), "password"),
+          "and one with a password in it: %s", reasonOf(manager, "index.user").c_str());
+    CHECK(stateOf(manager, "index.alone") == PluginState::Refused && contains(reasonOf(manager, "index.alone"), "requires"),
+          "an index with nothing to install from it is refused: %s", reasonOf(manager, "index.alone").c_str());
+
+    std::vector<std::string> blocked;
+    const auto requests = manager.packageRequests(python(), &blocked);
+    CHECK(requests.size() == 1 && requests[0].id == "index.good", "only the good one asks to install: %d", int(requests.size()));
+    if (!requests.empty()) {
+        CHECK(requests[0].indexes == std::vector<std::string>{"https://pypi.example.com/simple"}, "with its index");
+    }
+}
+
 USDCC_TEST(plugin_usd_folder) {
     Plugins plugins("usd");
     plugins.write("schemas/usdcc-plugin.json",

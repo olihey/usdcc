@@ -153,6 +153,32 @@ PackagePlan installAll(const Sandbox& sandbox, std::vector<PackageRequest> reque
 }
 }  // namespace
 
+// A plugin's own package index (python.indexes): a package only it has comes from there,
+// for the plugin that named it and not for others, and the plan says so.
+USDCC_TEST(package_extra_index) {
+    Sandbox sandbox("index");
+    sandbox.wheel("usdcc-index-only", "1.0");
+    // A simple index (PEP 503) in a folder, which uv takes like a URL.
+    const std::filesystem::path index = sandbox.root / "index";
+    const std::filesystem::path project = index / "usdcc-index-only";
+    std::filesystem::create_directories(project);
+    const std::string file = "usdcc_index_only-1.0-py3-none-any.whl";
+    std::filesystem::rename(sandbox.wheels / file, project / file);
+    std::ofstream(project / "index.html") << "<html><body><a href=\"" << file << "\">" << file << "</a></body></html>\n";
+    std::ofstream(index / "index.html") << "<html><body><a href=\"usdcc-index-only/\">usdcc-index-only</a></body></html>\n";
+
+    PackageRequest plain = request("plain", {"usdcc-index-only"});
+    PackageRequest indexed = request("indexed", {"usdcc-index-only"});
+    indexed.indexes = {pythonPath(index)};
+    const PackagePlan plan = installAll(sandbox, {plain, indexed});
+    CHECK(leftOut(plan, "plain"), "a plugin that names no index can't get it");
+    CHECK(!leftOut(plan, "indexed") && versionOf(plan, "usdcc-index-only") == "1.0", "the one that names it does: %s",
+          leftOut(plan, "indexed") ? leftOut(plan, "indexed")->why.c_str() : "");
+    CHECK(plan.indexes.size() == 1 && plan.indexes[0].url == pythonPath(index) &&
+              plan.indexes[0].names == std::vector<std::string>{"Plugin indexed"},
+          "the plan says which index, for whom");
+}
+
 USDCC_TEST(package_tag_from_version) {
     CHECK(PackageEnvironment::pythonTag("3.12.10") == "cp312", "3.12.10");
     CHECK(PackageEnvironment::pythonTag("3.9.1") == "cp39", "3.9.1");

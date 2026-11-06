@@ -138,6 +138,17 @@ void PackageInstallDialog::showPlan(const PackagePlan& plan) {
         }
         text << QString();
     }
+    // Indexes a plugin's manifest names, besides the usual one: a package they have
+    // comes from them.
+    if (!plan.indexes.empty()) {
+        text << tr("From other package indexes:");
+        for (const PackageIndex& index : plan.indexes) {
+            QStringList names;
+            for (const std::string& name : index.names) names << qs(name);
+            text << tr("    %1, named by %2").arg(qs(index.url), names.join(QStringLiteral(", ")));
+        }
+        text << QString();
+    }
     // Against what's in use, so that only real changes read as changes.
     std::map<std::string, std::string> installed;
     for (const ResolvedPackage& package : plan.installed) installed[package.name] = package.version;

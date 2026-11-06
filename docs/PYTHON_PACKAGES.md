@@ -95,8 +95,22 @@ removal means "leave this folder". Two apps installing at once are kept apart wi
 which the app puts on `PATH` when it runs uv. `tools/deploy.ps1` checks that the two work together.
 
 **Only requirements reach uv.** `python.requires` is the one place, with no separate `requirements.txt`. Only names, versions and markers are allowed: **a URL refuses the plugin,** and `_plugins.py` validates
-each line with `packaging` first, so a manifest can't slip in `--index-url` and pick where packages come from. Also taken off the list is what the app provides, what a plugin's own `deps/` meets, and what
+each line with `packaging` first, so a manifest can't slip in `--index-url` through a requirement. Also taken off the list is what the app provides, what a plugin's own `deps/` meets, and what
 ready-made folders meet.
+
+**Extra indexes, named in the open: `python.indexes`.** Some packages have no wheel on PyPI. ovrtx (RTX_RENDER.md) is NVIDIA's "wheel stub" there: a source package whose build fetches the real wheel from NVIDIA's own index. A manifest may name such indexes:
+
+```json
+"python": { "module": "usdcc_rtx_render", "requires": ["ovrtx>=0.6,<0.7"], "indexes": ["https://pypi.nvidia.com"] }
+```
+
+- **Only plain https URLs,** with no user name, password, query or fragment, and only with `requires`. Anything else refuses the plugin (`packageIndexProblem()` in plugin_manager.cpp).
+- **They go to uv as `--index`, ahead of the default index.** uv takes a package from the first index that has it, so the plugin's packages come from its index, and what that index doesn't have (numpy, for NVIDIA's) still comes from PyPI.
+- **Only for the plugin that named them:** they're passed while resolving that plugin and those resolved with it, and while installing the result. Another plugin can't get a package from them on its own (*tested*).
+- **The user sees them before anything is downloaded from them.** The install dialog lists "From other package indexes", each with the plugins that named it, and the log and `--install-plugin-packages` say "<plugin> also uses the package index <url>". Resolving does read the index's listing first, to work out the plan.
+- **Wheels only, still.** An index changes where wheels come from, not that nothing runs during an install.
+
+This relaxes the old rule that a manifest can't pick where packages come from. The trade-off: a plugin already runs with full rights once installed, so the index adds little, and naming it in the manifest, shown before installing, beats sending users to the global **Package index** setting. That setting would move every package to NVIDIA's index, where numpy isn't.
 
 **Installing is always asked for, never at startup.** Startup uses no network and only checks. **Wheels only** (`--only-binary :all:`), so nothing runs during an install, as unpacking a wheel executes nothing. The
 price is that a source-only package can't be installed, and the error says so (*tested*). Importing a package still runs its code, but the plugin asking for it already runs with full rights.
@@ -156,7 +170,9 @@ Fixed along the way: a marker on a manifest's requirement wasn't honoured, so `f
 - **The user site setting, off by default:** nothing from it is on `sys.path`, and a package only found there is reported missing.
 - **scipy 1.18 and opencv-python 5.0 in the app,** from a folder uv filled, computing, with USD and the window fine afterwards. That's 268 MB with numpy. opencv's Windows wheel has no Qt files.
 
-**Tested with the real uv and wheels the tests make:** conflicts, indirect blocked packages, kept versions, updates, new folders, `.in-use` protection, no network, cancelling between resolving and installing, two installs at once, no uv, and `--offline` with `--find-links` together.
+**Tested with the real uv and wheels the tests make:** conflicts, indirect blocked packages, kept versions, updates, new folders, `.in-use` protection, no network, cancelling between resolving and installing, two installs at once, no uv, and `--offline` with `--find-links` together. A plugin's own index (`package_extra_index`), as a local simple index: its package comes from there for the plugin that named it, and the plugin that didn't can't get it. Manifest indexes that are refused: http, file, with a password, and without `requires` (`plugin_package_indexes`).
+
+**Tested with the real NVIDIA index:** `--install-plugin-packages` for RTX Render, into a scratch packages folder: ovrtx and ovstage as wheels from `pypi.nvidia.com`, numpy from PyPI, and the plugin rendering from them afterwards.
 
 **Not tested:**
 

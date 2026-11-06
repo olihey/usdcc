@@ -24,6 +24,15 @@ struct PackageRequest {
     std::vector<std::string> requirements;  // normalized by _plugins.package_requests()
     std::string problem;                    // why it can't even be tried; else empty
     std::vector<std::string> declared;      // as its manifest has them
+    // Package indexes its manifest names besides the usual one (python.indexes), such
+    // as NVIDIA's for ovrtx: https URLs, checked when the manifest is read.
+    std::vector<std::string> indexes;
+};
+
+// An extra package index an install uses, and the plugins that named it.
+struct PackageIndex {
+    std::string url;
+    std::vector<std::string> names;  // the plugins' names
 };
 
 // A request that couldn't be met, and why.
@@ -96,6 +105,9 @@ struct PackagePlan {
     std::vector<ResolvedPackage> packages;
     // What the environment in use has now, to compare with.
     std::vector<ResolvedPackage> installed;
+    // The extra indexes the accepted requests named, for the user to see before
+    // anything is downloaded from them.
+    std::vector<PackageIndex> indexes;
     // Installing would make the environment that's already in use, so there's
     // nothing to do: the installer has finished, and install() does nothing.
     bool unchanged = false;
@@ -144,7 +156,11 @@ Q_SIGNALS:
 private:
     using Done = std::function<void(int code, const QString& errors)>;
     void run(const QStringList& arguments, Done done);
-    QStringList commonArguments() const;
+    // `indexes` go to uv as --index, ahead of the default one: uv takes a package
+    // from the first index that has it.
+    QStringList commonArguments(const std::vector<std::string>& indexes) const;
+    // The extra indexes the requests at `requests` (into m_requests) named, in order.
+    std::vector<std::string> indexesOf(const std::vector<int>& requests) const;
     void compile(const std::vector<int>& requests, const QString& output, Done done);
     void resolveNext();
     void leaveOut(int request, const QString& errors);

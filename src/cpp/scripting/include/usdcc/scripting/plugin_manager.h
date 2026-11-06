@@ -27,6 +27,9 @@ struct PluginManifest {
     int api = 0;
     std::string pythonModule;
     std::vector<std::string> pythonRequires;  // third-party modules
+    // Package indexes besides the usual one, for pythonRequires ("python" "indexes"): https
+    // URLs only, shown to the user before installing from them (docs/PYTHON_PACKAGES.md §4).
+    std::vector<std::string> pythonIndexes;
     std::vector<std::string> usdFolders;      // holding plugInfo.json, relative to `folder`
     std::vector<std::string> dependsOn;       // the ids in "requires"
     // The C++ part: bin/<platform>/<library> in `folder`, and what it was built for.

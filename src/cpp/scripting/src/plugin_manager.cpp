@@ -28,6 +28,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QLibrary>
 #include <QStringList>
 
@@ -85,6 +86,19 @@ std::vector<std::string> stringList(const QJsonValue& value) {
     return list;
 }
 
+// Why a manifest's package index (python.indexes) can't be used, or empty. Only a
+// plain https URL: no other scheme (a file: or http: one could point anywhere, or be
+// read in the clear), and no user name or password in it.
+std::string packageIndexProblem(const std::string& index) {
+    const QUrl url(QString::fromStdString(index), QUrl::StrictMode);
+    if (!url.isValid() || url.scheme() != QLatin1String("https") || url.host().isEmpty()) {
+        return "Its manifest's package index \"" + index + "\" isn't an https URL.";
+    }
+    if (!url.userInfo().isEmpty()) return "Its manifest's package index \"" + index + "\" has a user name or password in it.";
+    if (url.hasQuery() || url.hasFragment()) return "Its manifest's package index \"" + index + "\" has a query or fragment.";
+    return {};
+}
+
 // The reason it can't be used, or empty.
 std::string parseManifest(const std::filesystem::path& file, PluginManifest& manifest) {
     QFile input(toQString(file));
@@ -107,6 +121,7 @@ std::string parseManifest(const std::filesystem::path& file, PluginManifest& man
     const QJsonObject python = json.value("python").toObject();
     manifest.pythonModule = python.value("module").toString().toStdString();
     manifest.pythonRequires = stringList(python.value("requires"));
+    manifest.pythonIndexes = stringList(python.value("indexes"));
     manifest.usdFolders = stringList(json.value("usd"));
     manifest.dependsOn = stringList(json.value("requires"));
     const QJsonObject native = json.value("native").toObject();
@@ -124,6 +139,12 @@ std::string parseManifest(const std::filesystem::path& file, PluginManifest& man
     }
     if (python.contains("requires") && manifest.pythonModule.empty()) {
         return "Its manifest has \"python\" \"requires\" with no \"module\".";
+    }
+    if (python.contains("indexes") && manifest.pythonRequires.empty()) {
+        return "Its manifest has \"python\" \"indexes\" with no \"requires\".";
+    }
+    for (const std::string& index : manifest.pythonIndexes) {
+        if (const std::string problem = packageIndexProblem(index); !problem.empty()) return problem;
     }
     if (json.contains("native")) {
         if (manifest.nativeLibrary.empty()) return "Its manifest's \"native\" names no \"library\".";
@@ -894,7 +915,10 @@ std::vector<PackageRequest> PluginManager::packageRequests(PythonRuntime& python
             request.name = entry["name"].cast<std::string>();
             request.requirements = entry["requirements"].cast<std::vector<std::string>>();
             request.problem = entry["problem"].cast<std::string>();
-            if (const PluginInfo* plugin = find(request.id)) request.declared = plugin->manifest.pythonRequires;
+            if (const PluginInfo* plugin = find(request.id)) {
+                request.declared = plugin->manifest.pythonRequires;
+                request.indexes = plugin->manifest.pythonIndexes;
+            }
             requests.push_back(std::move(request));
         }
         if (blocked) *blocked = result[1].cast<std::vector<std::string>>();

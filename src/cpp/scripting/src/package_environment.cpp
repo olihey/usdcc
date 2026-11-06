@@ -188,7 +188,17 @@ PackageInstaller::~PackageInstaller() {
     cleanUp();
 }
 
-QStringList PackageInstaller::commonArguments() const {
+std::vector<std::string> PackageInstaller::indexesOf(const std::vector<int>& requests) const {
+    std::vector<std::string> indexes;
+    for (int request : requests) {
+        for (const std::string& url : m_requests[request].indexes) {
+            if (std::find(indexes.begin(), indexes.end(), url) == indexes.end()) indexes.push_back(url);
+        }
+    }
+    return indexes;
+}
+
+QStringList PackageInstaller::commonArguments(const std::vector<std::string>& indexes) const {
     QStringList arguments{QStringLiteral("--python"),
                           toQString(m_options.python),
                           // A uv.toml somewhere on the machine doesn't get a say.
@@ -203,6 +213,9 @@ QStringList PackageInstaller::commonArguments() const {
                           QStringLiteral("--system-certs"),
                           QStringLiteral("--cache-dir"),
                           toQString(m_options.root / kCacheFolder)};
+    // A plugin's own indexes (python.indexes), only for the requests that named them
+    // and those resolved with them.
+    for (const std::string& url : indexes) arguments << QStringLiteral("--index") << qs(url);
     const PackageSources& sources = m_options.sources;
     if (!sources.index.empty()) arguments << QStringLiteral("--default-index") << qs(sources.index);
     if (!sources.wheels.empty()) arguments << QStringLiteral("--find-links") << toQString(sources.wheels);
@@ -298,6 +311,14 @@ void PackageInstaller::resolve(std::vector<PackageRequest> requests) {
     std::filesystem::remove_all(m_work, error);
     std::filesystem::create_directories(m_work, error);
 
+    // Said up front, so the log and --install-plugin-packages show where packages may
+    // come from besides the usual index.
+    for (const PackageRequest& request : m_requests) {
+        for (const std::string& url : request.indexes) {
+            Q_EMIT output(tr("%1 also uses the package index %2").arg(qs(request.name), qs(url)));
+        }
+    }
+
     QStringList blocked;
     for (const std::string& name : m_options.blocked) blocked << qs(name) + QStringLiteral("<0");
     writeText(m_work / "blocked.txt", blocked.join(QLatin1Char('\n')) + QLatin1Char('\n'));
@@ -315,7 +336,7 @@ void PackageInstaller::resolve(std::vector<PackageRequest> requests) {
 void PackageInstaller::compile(const std::vector<int>& requests, const QString& output, Done done) {
     QStringList arguments{QStringLiteral("pip"), QStringLiteral("compile"), QStringLiteral("-q"), QStringLiteral("--no-header"),
                           QStringLiteral("--no-annotate")};
-    arguments += commonArguments();
+    arguments += commonArguments(indexesOf(requests));
     arguments << QStringLiteral("-c") << toQString(m_work / "blocked.txt") << QStringLiteral("-o") << output;
     if (m_options.upgrade) arguments << QStringLiteral("--upgrade");
     for (int request : requests) arguments << m_requestFiles[request];
@@ -420,7 +441,15 @@ void PackageInstaller::findClash(int request, int acceptedIndex) {
 }
 
 void PackageInstaller::finishResolving() {
-    for (int request : m_accepted) m_plan.accepted.push_back(m_requests[request]);
+    for (int request : m_accepted) {
+        const PackageRequest& accepted = m_requests[request];
+        m_plan.accepted.push_back(accepted);
+        for (const std::string& url : accepted.indexes) {
+            auto found = std::find_if(m_plan.indexes.begin(), m_plan.indexes.end(), [&url](const PackageIndex& index) { return index.url == url; });
+            if (found == m_plan.indexes.end()) found = m_plan.indexes.insert(m_plan.indexes.end(), PackageIndex{url, {}});
+            found->names.push_back(accepted.name);
+        }
+    }
     m_plan.packages = parseLock(readText(m_work / "accepted.lock"));
 
     const auto active = PackageEnvironment(m_options.root, m_options.pythonTag).activeFolder();
@@ -477,8 +506,10 @@ void PackageInstaller::install() {
         finishInstalling(partial, final);
         return;
     }
+    std::vector<std::string> indexes;
+    for (const PackageIndex& index : m_plan.indexes) indexes.push_back(index.url);
     QStringList arguments{QStringLiteral("pip"), QStringLiteral("sync")};
-    arguments += commonArguments();
+    arguments += commonArguments(indexes);
     arguments << QStringLiteral("--target") << toQString(partial) << toQString(m_work / "accepted.lock");
     run(arguments, [this, partial, final](int code, const QString& errors) {
         if (code != 0) {
