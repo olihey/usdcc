@@ -1,8 +1,21 @@
 # usdcc — the application executable.
 add_executable(usdcc main.cpp)
 if(WIN32)
-    # The .exe's own icon (Explorer, taskbar pins); see resources/usdcc.rc.
+    # The .exe's own icon (Explorer, taskbar pins) and version (Properties >
+    # Details); see resources/usdcc.rc. The version, from the configure-time
+    # release number, in a header the resource script includes.
+    string(REPLACE "." "," _usdcc_rc_version "${USDCC_VERSION_NUMBER},0")
+    if(USDCC_VERSION_RELEASE)
+        set(_usdcc_rc_string "${USDCC_VERSION_RELEASE}")
+        set(_usdcc_rc_flags "0")
+    else()
+        set(_usdcc_rc_string "${USDCC_VERSION_NUMBER} (development build)")
+        set(_usdcc_rc_flags "VS_FF_PRERELEASE")
+    endif()
+    file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/usdcc_version.h" CONTENT
+         "#define USDCC_RC_VERSION ${_usdcc_rc_version}\n#define USDCC_RC_VERSION_STRING \"${_usdcc_rc_string}\"\n#define USDCC_RC_FLAGS ${_usdcc_rc_flags}\n")
     target_sources(usdcc PRIVATE resources/usdcc.rc)
+    set_property(SOURCE resources/usdcc.rc APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 endif()
 
 # All three icon formats are generated from one source by tools/gen_app_icon.py.
@@ -27,6 +40,8 @@ if(UNIX AND NOT APPLE)
     install(DIRECTORY resources/linux/icons/ DESTINATION share/icons)
     install(FILES resources/linux/usdcc.desktop DESTINATION share/applications)
 endif()
+# For Help > About usdcc.
+target_compile_definitions(usdcc PRIVATE USDCC_COMPILER="${USDCC_BUILT_FOR_COMPILER}")
 target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
 usdcc_deploy_core_library(usdcc usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui)
 

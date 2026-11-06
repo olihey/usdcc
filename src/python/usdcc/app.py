@@ -7,7 +7,8 @@ scripts use the friendlier usdcc.usd functions instead. With PySide6,
 in Python, and ``register_view_panel()`` adds a view panel type
 (docs/SCRIPTING.md section 8). ``add_menu_action()``, ``add_prim_menu_action()``
 and ``connect()`` are how plugins add to the app (docs/PLUGINS.md).
-``active_viewport_camera()`` is what the viewport looks through.
+``active_viewport_camera()`` is what the viewport looks through, and
+``version()`` is usdcc's version.
 """
 
 import math
@@ -29,6 +30,18 @@ def _app():
     if _native is None:
         raise RuntimeError("not running inside usdcc")
     return _native
+
+
+def version():
+    """usdcc's version: "0.2.0" for a release, and for a development build the
+    last release, the commits since it and the commit, as in "0.2.0+5.3b70ef2"
+    (docs/RELEASE.md section 2)."""
+    return _app().version()
+
+
+def is_release_build():
+    """True for a build made from a release, False for a development build."""
+    return _app().is_release_build()
 
 
 def stage_manager():

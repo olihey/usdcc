@@ -9,6 +9,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
+#include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
@@ -222,6 +223,11 @@ USDCC_TEST(python_app_api) {
     app.stages.setCurrentStage(stage);
 
     CHECK(evaluate("__import__('usdcc.app').app.is_embedded()") == "True", "usdcc.app knows it's embedded");
+    CHECK(evaluate("__import__('usdcc.app').app.version()") == usdcc::core::version(), "version() is the app's: %s",
+          evaluate("__import__('usdcc.app').app.version()").c_str());
+    CHECK(evaluate("__import__('usdcc.app').app.is_release_build()") ==
+              (usdcc::core::isReleaseBuild() ? "True" : "False"),
+          "and so is is_release_build()");
     CHECK(evaluate("__import__('usdcc.usd').usd.EMBEDDED") == "True", "usdcc.usd uses the app's module");
     CHECK(evaluate("__import__('usdcc.usd').usd.current_stage().GetRootLayer().realPath.replace('\\\\', '/')") ==
               file.python(),

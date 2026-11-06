@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 
+#include "usdcc/ui/about_dialog.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_side_panel.h"
@@ -36,6 +37,7 @@
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/native_stream_capture.h"
+#include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_manager_side_panel.h"
@@ -178,6 +180,9 @@ int main(int argc, char** argv) {
     QString logFilePath;
     if (fileLog.sink) {
         usdcc::core::LogHub::instance().addSink(fileLog.sink);
+        // First, so every log file says which build wrote it.
+        USDCC_LOG_INFO("usdcc.app", "usdcc {}{} starting", usdcc::core::version(),
+                       usdcc::core::isReleaseBuild() ? "" : " (development build)");
         const auto& path = static_cast<usdcc::core::FileLogSink&>(*fileLog.sink).path();
         logFilePath = QString::fromStdU16String(path.generic_u16string());
         USDCC_LOG_INFO("usdcc.app", "Logging to {}", logFilePath.toStdString());
@@ -648,6 +653,31 @@ int main(int argc, char** argv) {
         if (!path.isEmpty()) {
             scriptRunner.runFile(std::filesystem::path(path.toStdU16String()));
         }
+    });
+
+    // Last in the menu bar: menus plugins add go in before Debug.
+    QMenu* helpMenu = window.mainMenuBar()->addMenu(QObject::tr("&Help"));
+    QAction* aboutAction = helpMenu->addAction(QObject::tr("&About usdcc"));
+    aboutAction->setMenuRole(QAction::AboutRole);
+    QObject::connect(aboutAction, &QAction::triggered, &window, [&window, &python]() {
+        usdcc::ui::AboutDialog::Info info = usdcc::ui::AboutDialog::currentBuild();
+        info.components.prepend({QStringLiteral("OpenUSD"), QStringLiteral("%1.%2.%3")
+                                                                 .arg(PXR_MAJOR_VERSION)
+                                                                 .arg(PXR_MINOR_VERSION)
+                                                                 .arg(PXR_PATCH_VERSION)});
+        if (python.isAvailable()) {
+            info.components.append({QStringLiteral("Python"), QString::fromStdString(python.version())});
+            // Without raising (evaluate() logs that) when PySide6 isn't there.
+            const auto pyside = python.evaluate(
+                "getattr(__import__('importlib.util').util.find_spec('PySide6') and __import__('PySide6'), "
+                "'__version__', '')");
+            if (pyside && !pyside->empty()) {
+                info.components.append({QStringLiteral("PySide6"), QString::fromStdString(*pyside)});
+            }
+        }
+        info.components.append({QStringLiteral("Compiler"), QStringLiteral(USDCC_COMPILER)});
+        usdcc::ui::AboutDialog dialog(info, &window);
+        dialog.exec();
     });
 
     // In the View menu, and off until the user opens it (a saved layout wins).

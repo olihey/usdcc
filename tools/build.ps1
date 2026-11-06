@@ -20,6 +20,11 @@
     pxrConfig.cmake). Forwarded as -DUSD_INSTALL=<path>. USD-dependent
     targets don't exist yet (milestone M2), so this is optional.
 
+.PARAMETER UsdccVersion
+    The release's version (0.2.0, 0.2.0-beta.1), for a release build;
+    release.yml passes the release's tag without its v. Without it, it's a
+    development build, named after the last release tag (docs/RELEASE.md).
+
 .PARAMETER Clean
     Remove the build directory before configuring.
 
@@ -52,6 +57,8 @@ param(
     [string]$Arch = 'x64',
 
     [string]$UsdInstall,
+
+    [string]$UsdccVersion,
 
     [string]$Scene,
 
@@ -101,6 +108,9 @@ $configureArgs = @('-S', $repoRoot, '-B', $buildDir, '-G', $Generator, '-A', $Ar
 if ($UsdInstall) {
     $configureArgs += "-DUSD_INSTALL=$UsdInstall"
 }
+# Always, so a release build's version doesn't stay in the CMake cache for the
+# development builds after it.
+$configureArgs += "-DUSDCC_VERSION=$UsdccVersion"
 
 Write-Host "Configuring ($Generator, $Arch)..."
 Invoke-Checked -FilePath 'cmake' -ArgumentList $configureArgs

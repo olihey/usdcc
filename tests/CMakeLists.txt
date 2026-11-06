@@ -40,6 +40,7 @@ add_executable(usdcc_tests
     usda_syntax_test.cpp
     value_type_info_test.cpp
     variant_actions_test.cpp
+    version_test.cpp
     view_panel_registry_test.cpp
     xform_math_test.cpp
     xform_stack_test.cpp
@@ -54,6 +55,7 @@ add_executable(usdcc_ui_tests
     test_settings.h
     test_harness.cpp
     ui_test_main.cpp
+    about_dialog_test.cpp
     attributes_primvar_groups_test.cpp
     attributes_rename_test.cpp
     attributes_right_edge_test.cpp
