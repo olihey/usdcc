@@ -51,6 +51,18 @@ void wait(int ms) {
     while (timer.elapsed() < ms) QApplication::processEvents();
 }
 
+// Until done() or the time is up: a debounce timer can fire late on a busy
+// machine (a CI runner), so a fixed wait would be a race.
+bool waitFor(const std::function<bool()>& done, int timeoutMs = 3000) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!done()) {
+        if (timer.elapsed() > timeoutMs) return false;
+        QApplication::processEvents();
+    }
+    return true;
+}
+
 QString shown(const UsdaViewPanel& panel) { return QString::fromStdString(panel.lineView()->text()); }
 
 // A layer of `prims` prims, each with a few attributes and an array.
@@ -109,7 +121,8 @@ USDCC_TEST(usda_view_panel) {
 
     // The flattened stage refreshes by hand.
     s->DefinePrim(SdfPath("/Late"));
-    wait(700);
+    waitFor([&] { return panel.isOutOfDate(); });
+    wait(700);  // longer than the auto-refresh delay, which mustn't apply here
     CHECK(panel.isOutOfDate() && !shown(panel).contains("Late"), "flattened stage: out of date, not refreshed");
     panel.refresh();
     CHECK(!panel.isOutOfDate() && shown(panel).contains("Late"), "until Refresh");
@@ -120,8 +133,8 @@ USDCC_TEST(usda_view_panel) {
     panel.refresh();
     panel.lineView()->verticalScrollBar()->setValue(200);
     s->DefinePrim(SdfPath("/AfterScroll"));
-    wait(700);
-    CHECK(!panel.isOutOfDate() && shown(panel).contains("AfterScroll"), "auto-refreshed after the edit");
+    CHECK(waitFor([&] { return !panel.isOutOfDate() && shown(panel).contains("AfterScroll"); }),
+          "auto-refreshed after the edit");
     CHECK(panel.lineView()->verticalScrollBar()->value() == 200, "at the same line: [%d]",
           panel.lineView()->verticalScrollBar()->value());
 
@@ -140,12 +153,14 @@ USDCC_TEST(usda_view_panel) {
     auto* find = panel.findChild<QLineEdit*>();
     CHECK(find && find->isVisible(), "Ctrl+F shows the find bar");
     find->setText(QStringLiteral("def \"P1"));
-    wait(400);
-    CHECK(panel.lineView()->selectedText() == "def \"P1", "the first match selected");
     QString count;
-    for (QLabel* label : panel.findChildren<QLabel*>()) {
-        if (label->text().endsWith("matches")) count = label->text();
-    }
+    waitFor([&] {
+        for (QLabel* label : panel.findChildren<QLabel*>()) {
+            if (label->text().endsWith("matches")) count = label->text();
+        }
+        return !count.isEmpty();
+    });
+    CHECK(panel.lineView()->selectedText() == "def \"P1", "the first match selected");
     CHECK(count == "111 matches", "counted: [%s]", qPrintable(count));  // P1, P10-19, P100-199
     QToolButton* close = nullptr;
     for (QToolButton* button : panel.findChildren<QToolButton*>()) {
