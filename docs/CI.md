@@ -134,8 +134,9 @@ itself. It skips the build if the asset for the current hash is already publishe
 7. Publish with `gh release create --prerelease`, with the pin, flags, Python, runner
    image and run link in the release notes.
 
-Expected time: 2–3 hours on a 4-core hosted runner, inside the 6-hour job limit. Not yet
-measured.
+Measured on the first run (`windows-2022`, 4 cores): `build_usd.py` took 2 h 1 min and
+the whole job 2 h 3 min, inside the 6-hour job limit. The runner started with 79 GB free on
+`C:` (and 220 GB on `D:`), which was enough. The zip is 216 MB, far under the 2 GiB limit.
 
 ## 4. Workflow `build.yml`
 
@@ -161,8 +162,8 @@ Runs on pushes to `master` and on pull requests.
    `tools/ci/relocate-usd.ps1`, `tools/ci/usd-sdk-check` and `deps-usd.yml`;
    PLUGIN_SDK.md points plugin authors at the asset. Done when the first asset is
    published, which `deps-usd.yml` only does after the SDK check passed against it in
-   another folder. *Written; the scripts and the SDK check are tested locally against a
-   relocated copy of the local install. The first CI run is pending.*
+   another folder. *Done: the first run published
+   [`deps/usd-70c45e83b-99f25090`](https://github.com/olihey/usdcc/releases/tag/deps/usd-70c45e83b-99f25090).*
 2. **usdcc builds in CI.** `build.yml` up to step 5, with the vcpkg cache, without
    PySide6 (the CMake configure already turns off `usdcc.ui` and Python-made panels
    without it). Done when `master` is green and a second run restores Qt from the cache.
@@ -184,7 +185,6 @@ Runs on pushes to `master` and on pull requests.
 | 1 | Pin NVIDIA's `typhoon/main` or a Pixar release tag? `typhoon/main`'s latest commit is "add on-hold banner", which suggests that branch may be paused | Pin the commit the local build uses, so CI matches it; revisit when bumping USD |
 | 2 | PLAN §5 item 2 says OpenUSD 26.11 is in use, but the local build reports 26.08 | Treat 26.08 (the commit above) as the truth and correct PLAN §5 when the pin is settled |
 | 3 | Is a symbols build of OpenUSD (§2, "Debug symbols") worth its own asset? | Not until someone needs to step into OpenUSD |
-| 4 | Does a hosted Windows runner have enough disk and time for the OpenUSD build? | Yes; measure on the first run |
 
 ## 7. Later
 
