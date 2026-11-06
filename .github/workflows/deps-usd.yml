@@ -6,6 +6,11 @@ name: OpenUSD
 
 on:
   workflow_dispatch:
+    inputs:
+      replace:
+        description: Build again and replace the asset if it's already published
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
@@ -13,6 +18,7 @@ on:
       - deps/patches/**
       - tools/ci/usd-asset.ps1
       - tools/ci/relocate-usd.ps1
+      - tools/ci/usd-licenses.ps1
       - tools/ci/usd-sdk-check/**
       - .github/workflows/deps-usd.yml
 
@@ -48,6 +54,11 @@ jobs:
         run: |
           $names = gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>$null
           $found = $LASTEXITCODE -eq 0 -and @($names) -contains '${{ steps.asset.outputs.zip }}'
+          "exists=$(($LASTEXITCODE -eq 0).ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($found -and '${{ inputs.replace }}' -eq 'true') {
+            Write-Host "::notice::${{ steps.asset.outputs.zip }} is published; building it again to replace it."
+            $found = $false
+          }
           "found=$($found.ToString().ToLower())" >> $env:GITHUB_OUTPUT
           if ($found) { Write-Host "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build." }
           exit 0
@@ -99,6 +110,14 @@ jobs:
             C:\b\build\**\log.txt
           if-no-files-found: ignore
 
+      # The licences of the libraries build_usd.py built, which only their
+      # source and build folders have (docs/RELEASE.md section 6).
+      - name: Collect the licences
+        if: steps.published.outputs.found != 'true'
+        run: |
+          tools/ci/usd-licenses.ps1 -Src "$env:WORK\src" -Build "$env:WORK\build" -Destination "$env:USD_INSTALL\licenses"
+          if (@(Get-ChildItem -Directory "$env:USD_INSTALL\licenses").Count -lt 10) { throw 'Fewer licences than expected' }
+
       - name: Make it relocatable
         if: steps.published.outputs.found != 'true'
         run: |
@@ -147,10 +166,20 @@ jobs:
           - Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
 
+          Includes the licences of OpenUSD's dependencies in ``licenses/``.
+
           Release only: plugins must use the release CRT (``/MD``) and ``_ITERATOR_DEBUG_LEVEL=0`` in every configuration.
           Unzip anywhere and pass ``-DUSD_INSTALL=<folder>`` (docs/PLUGIN_SDK.md).
           "@
-          gh release create '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" `
-            --prerelease --target $env:GITHUB_SHA `
-            --title 'OpenUSD ${{ steps.asset.outputs.name }}' --notes $notes
+          if ('${{ steps.published.outputs.exists }}' -eq 'true') {
+            # Replacing (the replace input): same name, same pin, so build.yml
+            # goes on using it throughout.
+            gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
+            if ($LASTEXITCODE) { throw 'replacing the asset failed' }
+            gh release edit '${{ steps.asset.outputs.tag }}' --notes $notes
+          } else {
+            gh release create '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" `
+              --prerelease --target $env:GITHUB_SHA `
+              --title 'OpenUSD ${{ steps.asset.outputs.name }}' --notes $notes
+          }
           if ($LASTEXITCODE) { throw 'publishing failed' }
