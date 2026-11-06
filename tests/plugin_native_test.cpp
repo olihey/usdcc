@@ -245,7 +245,9 @@ USDCC_TEST(native_plugin_refused_and_failing) {
     scratch.manifest("wrong_usd", "wrong.usd", "nothing_there", "usd", "1999");
     scratch.manifest("wrong_compiler", "wrong.compiler", "nothing_there", "compiler", "Other 1.0");
     scratch.manifest("wrong_platform", "wrong.platform", "nothing_there", "platform", "amiga-68k");
-    scratch.manifest("wrong_usdcc", "wrong.usdcc", "nothing_there", "usdcc", "0.0.1");
+    // A version no usdcc has: the release's tag is the version (docs/RELEASE.md), and the
+    // first release was 0.0.1, which this test used to call wrong.
+    scratch.manifest("wrong_usdcc", "wrong.usdcc", "nothing_there", "usdcc", "999.0.0");
     scratch.write("no_built_for/usdcc-plugin.json", R"({"id": "no.built", "name": "x", "version": "1", "api": 1, "native": {"library": "x"}})");
     scratch.write("no_library/usdcc-plugin.json", R"({"id": "no.library", "name": "x", "version": "1", "api": 1, "native": {"built_for": {}}})");
 
@@ -268,7 +270,7 @@ USDCC_TEST(native_plugin_refused_and_failing) {
     CHECK(contains(reasonOf(manager, "wrong.usd"), "usd 1999"), "a wrong USD is named");
     CHECK(contains(reasonOf(manager, "wrong.compiler"), "Other 1.0"), "a wrong compiler is named");
     CHECK(contains(reasonOf(manager, "wrong.platform"), "amiga-68k"), "a wrong platform is named");
-    CHECK(contains(reasonOf(manager, "wrong.usdcc"), "0.0.1"), "a wrong usdcc is named");
+    CHECK(contains(reasonOf(manager, "wrong.usdcc"), "999.0.0"), "a wrong usdcc is named");
     for (const char* id : {"wrong.qt", "wrong.usd", "wrong.compiler", "wrong.platform", "wrong.usdcc", "no.built", "no.library"}) {
         CHECK(manager.find(id)->state == PluginState::Refused, "refused without running anything: %s", id);
     }
