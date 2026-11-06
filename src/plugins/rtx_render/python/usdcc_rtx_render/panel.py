@@ -34,7 +34,7 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
     def setup_problem(self):
         if config.FAKE_RENDERER:
             return None
-        return clients.python_problem(config.get(config.PYTHON))
+        return clients.setup_problem(config.get(config.PYTHON))
 
     def create_toolbar(self, layout):
         self.mode_combo = QtWidgets.QComboBox(toolTip="Real-time path tracing, path tracing, or minimal rasterizing")
@@ -108,9 +108,9 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
     # The helper.
 
     def _start_helper(self):
-        python = clients.usdcc_python() if config.FAKE_RENDERER else config.get(config.PYTHON)
         # Without a parent: close() ends it, and the panel's widgets are the app's.
-        self.client = clients.RenderClient(python, fake=config.FAKE_RENDERER)
+        self.client = clients.RenderClient("" if config.FAKE_RENDERER else config.get(config.PYTHON),
+                                           fake=config.FAKE_RENDERER)
         self.client.ready.connect(self._helper_ready)
         self.client.image.connect(self._image)
         self.client.event.connect(self._event)

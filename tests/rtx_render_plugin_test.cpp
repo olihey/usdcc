@@ -26,6 +26,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QTemporaryDir>
 
 #include <filesystem>
 #include <fstream>
@@ -119,8 +120,39 @@ USDCC_TEST(rtx_render_plugin) {
     auto& app = pythonTestApp();
     OpenStage open;
     forgetExampleModules();
+
+    // As shipped, the plugin needs ovrtx installed (python.requires), which a test
+    // machine doesn't have: it says so.
+    const std::filesystem::path source = std::filesystem::u8path(USDCC_EXAMPLE_PLUGINS) / "rtx_render";
+    {
+        QTemporaryDir folder;
+        std::filesystem::copy(source, std::filesystem::u8path(folder.path().toStdString()) / "rtx_render",
+                              std::filesystem::copy_options::recursive);
+        PluginManager::Options options;
+        options.folders = {std::filesystem::u8path(folder.path().toStdString())};
+        PluginManager shipped(options);
+        shipped.scan();
+        MainWindow window;
+        ViewPanelRegistry registry;
+        const AppContextScope scope({&app.stages, &app.undo, &app.tools, &window, &registry, &shipped});
+        shipped.activate(app.python);
+        const auto* plugin = shipped.find("org.usdcc.rtx-render");
+        CHECK(plugin && plugin->state == PluginState::NeedsPackages && plugin->reason.find("ovrtx") != std::string::npos,
+              "as shipped, it needs ovrtx installed: %s", plugin ? plugin->reason.c_str() : "not found");
+        CHECK(!registry.find(QStringLiteral("org.usdcc.rtx-render.view")), "and none of its code runs");
+    }
+
+    // A copy without python.requires (and the index it needs them from), so it loads; the
+    // fake renderer needs none of it.
+    QTemporaryDir plugins;
+    const std::filesystem::path copy = std::filesystem::u8path(plugins.path().toStdString()) / "rtx_render";
+    std::filesystem::copy(source, copy, std::filesystem::copy_options::recursive);
+    CHECK(run("import json\npath = r'" + (copy / "usdcc-plugin.json").string() +
+              "'\nmanifest = json.load(open(path))\ndel manifest['python']['requires']\ndel manifest['python']['indexes']\n"
+              "json.dump(manifest, open(path, 'w'))\n"),
+          "a copy of the plugin without its packages");
     PluginManager::Options options;
-    options.folders = {std::filesystem::u8path(USDCC_EXAMPLE_PLUGINS)};
+    options.folders = {copy.parent_path()};
     PluginManager manager(options);
     manager.scan();
 
@@ -250,23 +282,31 @@ builtins.rtx_alive = alive
     CHECK(evaluated("__import__('os').path.exists(rtx_folder)") == "False", "and removes its files");
     CHECK(evaluated("len(rtx_module.client._running)") == "0", "nothing left running");
 
-    // Without a Python for ovrtx, Render says so and starts nothing.
+    // Without ovrtx installed, Render says so and starts nothing; the same for another
+    // Python that isn't there.
     CHECK(run(R"(
-import builtins, usdcc.app, usdcc.settings
+import builtins, usdcc.app
 from PySide6 import QtWidgets
 rtx_module.config.FAKE_RENDERER = False
-usdcc.settings.set("RtxRender/python", "C:/nowhere/python.exe")
-broken = usdcc.app.open_view_panel("org.usdcc.rtx-render.view", rtx_stage)
-builtins.rtx_broken_render = broken.widget.findChild(QtWidgets.QToolButton, "renderButton")
-builtins.rtx_broken_status = broken.widget.findChild(QtWidgets.QLabel, "renderStatus")
-builtins.rtx_broken_render.setChecked(True)
-builtins.rtx_broken = broken
+
+def press_render():
+    panel = usdcc.app.open_view_panel("org.usdcc.rtx-render.view", rtx_stage)
+    button = panel.widget.findChild(QtWidgets.QToolButton, "renderButton")
+    button.setChecked(True)
+    return (button.isChecked(), panel.client is None, panel.widget.findChild(QtWidgets.QLabel, "renderStatus").text())
+
+builtins.rtx_press_render = press_render
 )"),
-          "a panel without a Python for ovrtx");
-    CHECK(evaluated("rtx_broken_render.isChecked()") == "False", "doesn't render");
-    CHECK(evaluated("rtx_broken.client is None") == "True", "starts no helper");
-    CHECK(evaluated("\"doesn't exist\" in rtx_broken_status.text()") == "True", "and says why: %s",
-          evaluated("rtx_broken_status.text()").c_str());
+          "panels that can't render");
+    CHECK(run("import builtins\nbuiltins.rtx_without = rtx_press_render()"), "one without ovrtx installed");
+    CHECK(evaluated("rtx_without[:2]") == "(False, True)", "doesn't render or start a helper");
+    CHECK(evaluated("\"ovrtx isn't installed\" in rtx_without[2] and 'Install Packages' in rtx_without[2]") == "True",
+          "and says how to install it: %s", evaluated("rtx_without[2]").c_str());
+    CHECK(run("import builtins, usdcc.settings\nusdcc.settings.set('RtxRender/python', 'C:/nowhere/python.exe')\n"
+              "builtins.rtx_other = rtx_press_render()"),
+          "one with another Python that isn't there");
+    CHECK(evaluated("rtx_other[:2]") == "(False, True)", "doesn't render either");
+    CHECK(evaluated("\"doesn't exist\" in rtx_other[2]") == "True", "and says why: %s", evaluated("rtx_other[2]").c_str());
 
     for (ads::CDockWidget* dock : window.dockManager()->dockWidgetsMap()) {
         if (qobject_cast<ScriptedRenderViewPanel*>(dock)) dock->deleteDockWidget();

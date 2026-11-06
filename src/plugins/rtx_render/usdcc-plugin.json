@@ -1,10 +1,12 @@
 {
     "id": "org.usdcc.rtx-render",
     "name": "RTX Render",
-    "version": "0.1.0",
-    "description": "A view panel that renders the stage with NVIDIA's ovrtx (Omniverse RTX), following the viewport camera and edits, which it writes in place. Needs an NVIDIA RTX GPU and a Python with ovrtx installed.",
+    "version": "0.2.0",
+    "description": "A view panel that renders the stage with NVIDIA's ovrtx (Omniverse RTX), following the viewport camera and edits, which it writes in place. Needs an NVIDIA RTX GPU; ovrtx (about 2.5 GB) is installed from View > Plugins.",
     "api": 1,
     "python": {
-        "module": "usdcc_rtx_render"
+        "module": "usdcc_rtx_render",
+        "requires": ["ovrtx>=0.6,<0.7", "ovstage>=0.3,<0.4", "numpy>=1.26"],
+        "indexes": ["https://pypi.nvidia.com"]
     }
 }

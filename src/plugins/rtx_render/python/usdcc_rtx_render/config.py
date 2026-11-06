@@ -1,7 +1,5 @@
 """The plugin's settings (Edit > Settings... > RTX, docs/RTX_RENDER.md section 5)."""
 
-import os
-
 import usdcc.settings
 
 from . import scene
@@ -19,25 +17,11 @@ MODES = list(scene.MODES)
 FAKE_RENDERER = False
 
 
-def suggested_python():
-    """Where the setup in docs/RTX_RENDER.md puts ovrtx's Python:
-    %LOCALAPPDATA%\\usdcc\\rtx\\venv."""
-    return os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "usdcc", "rtx", "venv", "Scripts",
-                        "python.exe")
-
-
-def default_python():
-    """USDCC_OVRTX_PYTHON, or suggested_python() if it exists; else empty."""
-    if os.environ.get("USDCC_OVRTX_PYTHON"):
-        return os.environ["USDCC_OVRTX_PYTHON"]
-    suggested = suggested_python()
-    return suggested if os.path.isfile(suggested) else ""
-
-
 def define():
-    usdcc.settings.define(PYTHON, "string", default_python(), label="Python with ovrtx", category=CATEGORY,
-                          group="ovrtx", description="The python.exe RTX renders in, one with ovrtx installed "
-                                                     "(pip install ovrtx ovstage numpy). Python 3.11 to 3.13.")
+    usdcc.settings.define(PYTHON, "string", "", label="Other Python", category=CATEGORY, group="ovrtx",
+                          description="Empty: usdcc's own Python, with the ovrtx the plugin's packages installed. "
+                                      "Or a python.exe of your own with ovrtx, ovstage and numpy installed "
+                                      "(Python 3.11 to 3.13), to try another ovrtx version.")
     usdcc.settings.define(MODE, "choice", MODES[0], label="Mode", category=CATEGORY, group="Rendering",
                           description="What a new RTX Render panel renders with: real-time path tracing, "
                                       "path tracing, or minimal rasterizing.", choices=MODES)

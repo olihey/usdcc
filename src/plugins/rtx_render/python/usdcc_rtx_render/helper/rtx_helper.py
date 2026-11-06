@@ -1,12 +1,13 @@
 """Runs NVIDIA's ovrtx for usdcc's RTX Render panel, in a process of its own
 (docs/RTX_RENDER.md section 4).
 
-    python -I -u rtx_helper.py [--fake]
+    python -I -u rtx_helper.py [--packages folder;folder...] [--fake]
 
-usdcc starts this with the python.exe set in Settings > RTX, one with ovrtx installed.
-ovrtx brings its own OpenUSD, which can't share a process with usdcc's. It reads
-commands from stdin and writes events to stdout (protocol.py); stdin closing means
-usdcc is gone, and it quits.
+usdcc starts this with its own python.exe, and --packages names the folders the app
+installed ovrtx, ovstage and numpy into (its shared packages folder). ovrtx brings its
+own OpenUSD, which can't share a process with usdcc's. It reads commands from stdin
+and writes events to stdout (protocol.py); stdin closing means usdcc is gone, and it
+quits.
 
 ovrtx renders a frame per step(), on this process's main thread. After a change
 (the stage, the camera, the size, an edit) the helper steps until it has rendered
@@ -26,6 +27,17 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script's folder out
 
 import protocol
+
+
+def use_packages(argv):
+    """Puts the --packages folders on sys.path, and takes usdcc's own pxr off it:
+    usdcc's python.exe has usdcc's OpenUSD in its site-packages, and ovrtx's must be
+    the only one here."""
+    if "--packages" not in argv:
+        return
+    folders = [f for f in argv[argv.index("--packages") + 1].split(os.pathsep) if f]
+    sys.path[:] = [p for p in sys.path if not os.path.isdir(os.path.join(p, "pxr"))]
+    sys.path[1:1] = folders  # after the helper's own folder
 
 # The prims the export adds (scene.py): the camera and the render product.
 CAMERA = "/__usdccRtx/Camera"
@@ -154,8 +166,8 @@ class RtxBackend(Backend):
             import ovrtx
             import ovstage
         except ImportError as error:
-            raise RuntimeError("ovrtx can't be imported in %s (%s). Install it there with: "
-                               "pip install ovrtx ovstage numpy" % (sys.executable, error)) from error
+            raise RuntimeError("ovrtx can't be imported in %s (%s). Install the RTX Render plugin's packages "
+                               "from View > Plugins." % (sys.executable, error)) from error
         self.np, self.ovrtx, self.ovstage = numpy, ovrtx, ovstage
         self._set_state("starting")
         self.writer.log("info", "Starting ovrtx %s; the first start compiles shaders, which takes a minute or two."
@@ -310,6 +322,7 @@ def coalesced(commands):
 
 
 def main():
+    use_packages(sys.argv)
     # Events go to a private copy of stdout, and stdout itself to stderr: what native
     # code prints can then never break into the event stream.
     events = os.fdopen(os.dup(1), "wb", buffering=0)

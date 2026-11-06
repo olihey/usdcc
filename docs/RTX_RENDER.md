@@ -6,27 +6,34 @@ follows the viewport camera or a camera in the stage, and renders again after ed
 Moved prims, camera moves and size changes are written into the renderer's stage in place,
 with no reload. It's a Python plugin, [src/plugins/rtx_render](../src/plugins/rtx_render):
 - The panel is the app's render view panel ([RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md)).
-- The plugin supplies ovrtx, which runs in a helper process, in a Python of its own.
+- The plugin supplies ovrtx, which runs in a helper process: usdcc's own Python, with
+  ovrtx installed as the plugin's packages.
 
 ovrtx is pre-release, under NVIDIA's proprietary licence, and needs an NVIDIA RTX GPU with
-a recent driver. usdcc doesn't ship it: each user installs it. The licence also forbids
-publishing benchmark results without NVIDIA's permission, so this page gives no timings.
+a recent driver. usdcc doesn't ship it: it's downloaded from NVIDIA's package index when the
+user installs the plugin's packages. The licence also forbids publishing benchmark results
+without NVIDIA's permission, so this page gives no timings.
 
 ## 1. Setup
 
-1. **Make a Python with ovrtx.** Use Python 3.11 to 3.13. The installed package is about
-   2.5 GB:
-
-   ```bat
-   py -3.12 -m venv %LOCALAPPDATA%\usdcc\rtx\venv
-   %LOCALAPPDATA%\usdcc\rtx\venv\Scripts\python -m pip install ovrtx ovstage numpy
-   ```
-
-   The plugin finds a Python there on its own. Otherwise set *Settings > RTX > Python with
-   ovrtx*, or the `USDCC_OVRTX_PYTHON` environment variable.
-2. **Load the plugin.** Run `usdcc --plugin-path src/plugins`, or copy the folder into
+1. **Load the plugin.** Run `usdcc --plugin-path src/plugins`, or copy the folder into
    `%LOCALAPPDATA%\usdcc\plugins`.
-3. **Open the panel** from Stages > RTX Render, and press Render.
+2. **Install its packages.** The plugin shows **Needs packages** in View > Plugins, and a
+   toast offers **Install**. The dialog lists ovrtx, ovstage and numpy, and says they come
+   from `https://pypi.nvidia.com`, named by RTX Render. The download is about 1.3 GB.
+   Unattended: `usdcc --install-plugin-packages`.
+3. **Restart usdcc,** as for any package install. Then open the panel from Stages > RTX
+   Render, and press Render.
+
+**Why NVIDIA's index:** PyPI has no ovrtx wheel, only NVIDIA's "wheel stub". That is a
+source package whose build downloads the real wheel from `pypi.nvidia.com`. usdcc's installer
+only takes wheels, so that no package code runs during an install. The manifest names
+NVIDIA's index (`python.indexes`, PYTHON_PACKAGES.md §4), which has the wheels. numpy comes
+from PyPI, as NVIDIA's index doesn't have it.
+
+**The versions are pinned to `ovrtx>=0.6,<0.7` and `ovstage>=0.3,<0.4`:** ovrtx changes its
+API between minor versions, and Update Packages would otherwise move to the next one.
+*Settings > RTX > Other Python* can name a `python.exe` with another ovrtx installed instead.
 
 The first render on a machine compiles ovrtx's shaders, which takes a minute or two; the
 panel says so. They're cached in `%LOCALAPPDATA%\ovrtx`, and later starts take seconds.
@@ -90,13 +97,29 @@ ovrtx renders only `/__usdccRtx/Product`.
 ## 4. The helper process
 
 [rtx_helper.py](../src/plugins/rtx_render/python/usdcc_rtx_render/helper/rtx_helper.py) runs
-in the Python set in Settings, never in usdcc. ovrtx brings its own OpenUSD, whose DLLs have
-the same names as usdcc's, and a GPU renderer's crash shouldn't take the app with it.
+in usdcc's own `python.exe`, in a process of its own, never inside usdcc:
+- **A separate process isolates crashes:** a GPU renderer's crash shouldn't take the app with
+  it.
+- **ovrtx can't share a process with another OpenUSD.** ovrtx says so, and usdcc's plugins on
+  `PXR_PLUGINPATH_NAME` would meet ovrtx's OpenUSD.
 
-**Its environment** ([client.py](../src/plugins/rtx_render/python/usdcc_rtx_render/client.py)):
+**Its packages** ([client.py](../src/plugins/rtx_render/python/usdcc_rtx_render/client.py)):
+- **The plugin finds the folders** ovrtx, ovstage and numpy are installed in with
+  `importlib.util.find_spec()`, so they're never imported into usdcc. It passes them to the
+  helper as `--packages`.
+- **The helper puts them on `sys.path`,** and takes off the entry holding usdcc's `pxr`.
+- **The app never loads them either:** its check at start reads their metadata only.
+- **A `python.exe` in *Other Python*** runs with its own packages instead, and gets no
+  `--packages`.
+
+**Its environment:**
 - `PYTHONHOME`, `PYTHONPATH`, `PXR_PLUGINPATH_NAME` and the like are removed.
-- **`PATH`** is that Python's folder and the Windows folders, never usdcc's `bin`, which holds
-  usdcc's OpenUSD.
+- **`PATH`** is the Python's folder, its DLL's folder and the Windows folders.
+  - In a deploy, `python312.dll` is in `bin`, beside usdcc's OpenUSD DLLs (`usd_*.dll`).
+    That's harmless: ovrtx's OpenUSD is one DLL named its own way, `ov_<version>usd_ms.dll`.
+  - Checked: the helper in the deploy's `python.exe`, with `bin` on `PATH`, rendered the same
+    images as in a separate Python.
+  - *Other Python* gets only its own folder.
 - **`OMNICLIENT_HUB_MODE=disabled`.** Without it, ovrtx tries to start an Omniverse Hub
   installed on the machine. It waits for the Hub for seconds on every start, and logs about
   forty warnings when the Hub doesn't come up.
@@ -131,7 +154,7 @@ On the RTX page of the Settings dialog
 
 | Key | Type | Default |
 |---|---|---|
-| `RtxRender/python` | String | `USDCC_OVRTX_PYTHON`, or `%LOCALAPPDATA%\usdcc\rtx\venv\Scripts\python.exe` if it exists |
+| `RtxRender/python` (*Other Python*) | String | empty: usdcc's own Python, with the plugin's packages |
 | `RtxRender/mode` | Choice | Real-Time |
 | `RtxRender/maxFrames` | Int 1–4096 | 128 |
 | `RtxRender/imageInterval` | Int 10–2000 ms | 33 |
@@ -140,7 +163,9 @@ On the RTX page of the Settings dialog
 ## 6. Tests
 
 `rtx_render_plugin` in `usdcc_python_tests`
-([rtx_render_plugin_test.cpp](../tests/rtx_render_plugin_test.cpp)) uses the fake renderer
+([rtx_render_plugin_test.cpp](../tests/rtx_render_plugin_test.cpp)) checks that the plugin as
+shipped shows **Needs packages** naming ovrtx, with none of its code run. Test machines don't
+have ovrtx. Then it loads a copy without `requires` and `indexes`, uses the fake renderer,
 and records what the panel sends. It checks that:
 - the panel starts the helper and shows images at the asked size;
 - the export has the render product, looking through its own camera, and leaves the stage
@@ -150,14 +175,22 @@ and records what the panel sends. It checks that:
 - moving the camera prim the panel looks through moves the render's camera;
 - a new prim, and another mode, load the stage again, in that mode;
 - Stop keeps the helper, and deleting the panel ends it and removes its files;
-- a missing Python is reported.
+- ovrtx not installed, and an *Other Python* that isn't there, are reported.
+
+`package_extra_index` and `plugin_package_indexes` cover `python.indexes`
+(PYTHON_PACKAGES.md §7).
 
 **Checked by hand, with ovrtx 0.6 on an RTX 4090:**
 - **The helper on its own,** driven over its pipes: load, a camera orbit, a prim moved in
-  place, a resize, and quitting.
-- **In the app,** with a script driving a real panel: the first render, a viewport zoom
-  followed, a prim moved in place (only `xforms` and `camera` sent), and Path Tracing. The
-  images were right.
+  place, a resize, and quitting. Both in a separate Python and in the deploy's `python.exe`
+  with `bin` on `PATH`.
+- **The install:** `usdcc --install-plugin-packages`, into a scratch packages folder. ovrtx
+  and ovstage came from NVIDIA's index as wheels, and numpy from PyPI.
+- **In the app,** with ovrtx from that install and a script driving a real panel: the first
+  render, a viewport zoom followed, a prim moved in place (only `xforms` and `camera` sent),
+  and Path Tracing. The images were right.
+- **Not checked by hand:** the install dialog itself, clicked through. Its list of indexes
+  is the same plan that `--install-plugin-packages` logged.
 
 ## 7. Limits and next steps
 
@@ -173,3 +206,9 @@ and records what the panel sends. It checks that:
 - **Hiding the tab** stops rendering but keeps the helper and its GPU memory. Only deleting
   the panel ends it.
 - **Live tests need an RTX GPU and ovrtx:** the real helper is checked by hand, not in CI.
+- **Size:** about 2.5 GB in the shared packages folder once installed.
+- **Everyone who loads `src/plugins` is asked:** the plugin shows **Needs packages**, with
+  the install offer, also on machines without an RTX GPU. Turn it off in View > Plugins there.
+- **ovrtx is importable in usdcc's own Python** once installed, like any shared package.
+  Nothing imports it there, and nothing should: `import ovrtx` in the Script Editor would load
+  a second renderer and OpenUSD into the app.
