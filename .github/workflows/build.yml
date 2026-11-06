@@ -55,7 +55,8 @@ jobs:
           if ($LASTEXITCODE) { throw 'unzipping failed' }
           Remove-Item "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
 
-      # The key changes with the dependencies (vcpkg.json and the vcpkg commit)
+      # The key changes with the dependencies (vcpkg.json, the overlay ports in
+      # cmake/ports with vcpkg-configuration.json, and the vcpkg commit)
       # and with the runner image, whose compiler is part of every package's ABI
       # hash. An older cache is restored when the key is new, so only what
       # changed gets rebuilt, and the result is saved under the new key.
@@ -68,7 +69,7 @@ jobs:
           "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> $env:GITHUB_ENV
           "dir=$dir" >> $env:GITHUB_OUTPUT
           "prefix=vcpkg-x64-windows-$env:ImageOS-" >> $env:GITHUB_OUTPUT
-          "key=vcpkg-x64-windows-$env:ImageOS-${{ hashFiles('vcpkg.json') }}-$commit-$env:ImageVersion" >> $env:GITHUB_OUTPUT
+          "key=vcpkg-x64-windows-$env:ImageOS-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}-$commit-$env:ImageVersion" >> $env:GITHUB_OUTPUT
 
       - name: Restore the vcpkg cache
         id: vcpkg-restore
@@ -80,6 +81,13 @@ jobs:
 
       - name: Build
         run: tools/build.ps1 -UsdInstall $env:USD_INSTALL
+
+      # A crash on a hosted runner can sit behind an error dialog nobody closes,
+      # so every test executable gets a timeout.
+      - name: Test
+        run: |
+          ctest --test-dir build -C RelWithDebInfo --output-on-failure --timeout 900
+          if ($LASTEXITCODE) { throw 'tests failed' }
 
       # Even when the build failed, so the packages vcpkg did build (Qt takes
       # over an hour) aren't built again next time. Only from master: a pull

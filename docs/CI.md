@@ -155,8 +155,9 @@ Runs on pushes to `master` and on pull requests.
    directory saved by `actions/cache`. vcpkg's old `x-gha` cache backend is gone, so it's
    the `files` backend plus `actions/cache`. The first run builds Qt (an hour or more), and
    later runs restore it in minutes.
-   - The key is the triplet, the runner image (`ImageOS` and `ImageVersion`), `vcpkg.json`
-     and the vcpkg submodule commit. The image is in it because its compiler is part of
+   - The key is the triplet, the runner image (`ImageOS` and `ImageVersion`), `vcpkg.json`,
+     the overlay ports (`vcpkg-configuration.json` and `cmake/ports`) and the vcpkg
+     submodule commit. The image is in it because its compiler is part of
      every package's ABI hash: with an unchanged key after an image update, vcpkg would
      rebuild everything on every run and never save it.
    - A new key restores the newest older cache (by prefix), so only what changed is
