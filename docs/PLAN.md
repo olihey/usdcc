@@ -70,7 +70,7 @@ so a deliberate choice gets made instead of an accidental one.
 |---|----------|-------------------------------------|
 | 1 | Target OS/platforms (Windows only? + Linux? + macOS?) | Windows + Linux, macOS best-effort |
 | 2 | Minimum/pinned versions: OpenUSD, Qt6, Python, C++ compiler | Qt 6.11.1 (vcpkg baseline), Python 3.12, MSVC 2022 pinned via M0; OpenUSD 26.11 now in use (a from-source build, not vcpkg's Python-less `usd` port — see §6 item 11). Moving 26.8 → 26.11 needed `QT_NO_KEYWORDS` (oneTBB's `event::emit()` collides with Qt's `emit` macro) and an explicit `<pxr/usd/usd/stage.h>` include where `UsdStage` was only reached transitively |
-| 3 | Project license, and how third-party license compliance is tracked for the Info dialog | TBD — needed before first public distribution |
+| 3 | Project license, and how third-party license compliance is tracked for the Info dialog | Decided: BSD-3-Clause (`LICENSE`). Third-party compliance is planned in docs/RELEASE.md §6: the release zip ships every dependency's licence and NOTICE files in `licenses/`, and the LGPL libraries' sources are linked from the release |
 | 4 | Plugin manifest/discovery format, versioning & compatibility policy, sandboxing for Python plugins | Answered in docs/PLUGINS.md (no sandbox) |
 | 5 | Threading model: does stage loading / Hydra render run off the UI thread? | Assume async loading + render thread; confirm during M2/M3 |
 | 6 | Undo granularity: is a single `QUndoStack` shared across all stages, or one per stage/session? | Assume one stack per open stage/session; confirm during M6 |

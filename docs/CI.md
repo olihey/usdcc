@@ -261,6 +261,8 @@ published like OpenUSD.
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.ps1` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
-- **Deploy artifact.** Upload `tools/deploy.ps1`'s output once M11 lands.
+- **Deploy artifact.** Upload `tools/deploy.ps1`'s output once M11 lands. Releases are
+  planned in [RELEASE.md](RELEASE.md): a GitHub release gets its Windows zip from
+  `release.yml`.
 - **Self-hosted runners** (the Windows PC, the Mac) for faster incremental builds, only
   on `push` and `workflow_dispatch`, never on pull requests from forks.
