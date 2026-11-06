@@ -282,6 +282,29 @@ builtins.rtx_alive = alive
     CHECK(evaluated("__import__('os').path.exists(rtx_folder)") == "False", "and removes its files");
     CHECK(evaluated("len(rtx_module.client._running)") == "0", "nothing left running");
 
+    // A first frame that takes long, as a scene with many complex materials' does: the
+    // panel says it's being worked on, and then shows it.
+    CHECK(run(R"(
+import builtins, os, usdcc.app
+from PySide6 import QtWidgets
+os.environ["USDCC_RTX_FAKE_FIRST_FRAME"] = "4"
+os.environ["USDCC_RTX_FAKE_SLOW_AFTER"] = "1"
+slow = usdcc.app.open_view_panel("org.usdcc.rtx-render.view", rtx_stage)
+builtins.rtx_slow = slow
+builtins.rtx_slow_status = slow.widget.findChild(QtWidgets.QLabel, "renderStatus")
+slow.widget.findChild(QtWidgets.QToolButton, "renderButton").setChecked(True)
+)"),
+          "a panel whose first frame takes 4 s");
+    CHECK(waitFor("rtx_slow_status.text().startswith('Working on the first frame')", 10000),
+          "while it's worked on, the status says so: %s", evaluated("rtx_slow_status.text()").c_str());
+    CHECK(waitFor("rtx_slow.image_size() is not None", 15000), "and the frame is shown when it's done");
+    CHECK(run("import os\ndel os.environ['USDCC_RTX_FAKE_FIRST_FRAME']\ndel os.environ['USDCC_RTX_FAKE_SLOW_AFTER']\n"),
+          "back to quick frames");
+    for (ads::CDockWidget* dock : window.dockManager()->dockWidgetsMap()) {
+        if (qobject_cast<ScriptedRenderViewPanel*>(dock)) dock->deleteDockWidget();
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
     // Without ovrtx installed, Render says so and starts nothing; the same for another
     // Python that isn't there.
     CHECK(run(R"(

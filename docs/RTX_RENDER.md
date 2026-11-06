@@ -130,7 +130,7 @@ in usdcc's own `python.exe`, in a process of its own, never inside usdcc:
 | Direction | Format | Messages |
 |---|---|---|
 | Commands, to the helper's stdin | One JSON line each | `init {max_frames, image_ms}`, `load {path, width, height}`, `camera {transform[16], h_aperture, v_aperture}`, `size {width, height}`, `xforms {items: [{path, matrix[16]}]}`, `start`, `stop`, `quit` |
-| Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, seconds}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, frame}` with RGBA8888 pixels, `log {level, msg}`, `error {msg, fatal}`, `stale` |
+| Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, seconds}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, frame}` with RGBA8888 pixels, `log {level, msg}`, `error {msg, fatal}`, `stale`, `slow {seconds, frame}` |
 
 **How it runs:**
 - **ovrtx renders on the helper's main thread,** one `step()` per frame. Commands are read on
@@ -142,6 +142,13 @@ in usdcc's own `python.exe`, in a process of its own, never inside usdcc:
 - **So is stdout:** before importing ovrtx, the event stream moves to a copy of stdout, and
   stdout points at stderr. Native output can't break into the stream.
 - **Images are coalesced:** only the newest one waiting is sent.
+- **A frame that takes long is reported.** `step()` returns only when ovrtx is done. For a
+  scene with many complex MDL materials, the first frame can take minutes, with the GPU
+  busy throughout. A watchdog thread sends `slow` after 10 s and every 5 s after that. The
+  panel shows how long it's been, in the status line and in place of the image, and logs it
+  every minute. Meanwhile commands wait: Stop takes effect once the frame is done, and
+  deleting the panel kills the helper after 3 s. `--fake` takes
+  `USDCC_RTX_FAKE_FIRST_FRAME` (seconds) and `USDCC_RTX_FAKE_SLOW_AFTER` for the tests.
 - **Quitting:** stdin closing, or `quit`, ends the helper at once, with `os._exit()`. ovrtx's
   own shutdown takes seconds, and the process ending frees its GPU memory anyway. Deleting
   the panel sends `quit`, waits up to 3 s, then kills the helper.
@@ -195,6 +202,13 @@ and records what the panel sends. It checks that:
 
 ## 7. Limits and next steps
 
+- **Heavy first frames:** a product scene (`omniverse_preview.usda`: 10 MDL materials built
+  on OmniSurface, about 1,550 shaders, lit by a dome light) didn't finish its first frame within ten minutes
+  in ovrtx 0.6, in any mode (Real-Time, Path Tracing, Minimal), whatever the texture
+  streaming or sync mode. The GPU stayed busy at 45–80 % and over 200 W, and nothing was
+  logged. Without the dome light, or with only some of the materials, it rendered in
+  seconds. It's ovrtx's own work, not the plugin's: the plugin shows it's still working, but
+  can't make that frame finish.
 - **Light units:** RTX's lights are physical. A stage lit for Storm, with a distant light of
   intensity 3, renders almost black. There's no exposure control in the panel yet.
 - **Implicit shapes** (`Sphere`, `Cube`, ...) are tessellated coarsely by ovrtx: a sphere

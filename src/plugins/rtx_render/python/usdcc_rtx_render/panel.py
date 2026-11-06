@@ -126,6 +126,8 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
         LOG.info("ovrtx %s is ready (%.1f s)", fields.get("version", "?"), fields.get("seconds", 0.0))
         if not self.is_open():
             return
+        if self.image_size() is None:
+            self.show_message("Loading the stage…")
         self.reload()
         if self.is_rendering():
             self.client.send("start")
@@ -142,6 +144,18 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
 
     # What comes back.
 
+    def _slow(self, seconds, frame):
+        """ovrtx has been working on one frame for `seconds`: say so, as nothing else
+        changes meanwhile. A scene's first frame can take minutes when it has many
+        complex (MDL) materials; the helper can't stop it before it's done."""
+        which = "the first frame" if frame == 1 else "frame %d" % frame
+        self.set_state("Working on %s, %d s" % (which, seconds))
+        if self.image_size() is None:
+            self.show_message("ovrtx has been working on %s for %d s.\n\nA scene with many complex materials can take "
+                              "minutes for its first frame. The GPU is busy meanwhile." % (which, seconds))
+        if seconds < 15 or seconds % 60 < 5:  # not every few seconds
+            LOG.info("RTX: working on %s for %d s", which, seconds)
+
     def _image(self, image, frame):
         if self.is_open():
             self.show_image(image)
@@ -150,7 +164,11 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
         if not self.is_open():
             return
         if name == "loaded":
-            LOG.debug("RTX loaded %s in %.2f s", fields.get("path"), fields.get("seconds", 0.0))
+            LOG.info("RTX loaded the stage in %.2f s", fields.get("seconds", 0.0))
+            if self.image_size() is None:
+                self.show_message("Rendering the first frame…")
+        elif name == "slow":
+            self._slow(fields.get("seconds", 0), fields.get("frame", 1))
         elif name == "state":
             state = fields.get("state", "")
             self.set_state(STATES.get(state, state.capitalize()))

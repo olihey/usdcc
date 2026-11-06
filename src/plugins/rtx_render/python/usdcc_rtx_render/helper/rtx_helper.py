@@ -108,6 +108,7 @@ class Backend:
         self.image_seconds = 0.033
         self._sent = 0.0
         self._state = ""
+        self.frame_started = None  # perf_counter() while step() runs
 
     def wants_frames(self):
         return self.rendering and self.loaded and self.frames < self.max_frames
@@ -126,7 +127,11 @@ class Backend:
         self._set_state("stopped")
 
     def render_frame(self):
-        pixels = self.step()
+        self.frame_started = time.perf_counter()
+        try:
+            pixels = self.step()
+        finally:
+            self.frame_started = None
         self.frames += 1
         now = time.perf_counter()
         last = self.frames >= self.max_frames
@@ -294,7 +299,10 @@ class FakeBackend(Backend):
         self.changed()
 
     def step(self):
-        time.sleep(0.01)
+        # USDCC_RTX_FAKE_FIRST_FRAME makes the first frame after a change take that many
+        # seconds, as a heavy scene's does (the tests' "slow" check).
+        first = float(os.environ.get("USDCC_RTX_FAKE_FIRST_FRAME", "0") or 0)
+        time.sleep(first if self.frames == 0 and first > 0 else 0.01)
         width, height = self.size
         red = int(abs(self.camera_x) * 40) % 256
         blue = (self.edits * 40) % 256
@@ -311,6 +319,28 @@ class _Pixels:
 
     def tobytes(self):
         return self._data
+
+
+# A frame taking longer than this is reported, and again every SLOW_REPEAT seconds.
+SLOW_AFTER = 10.0
+SLOW_REPEAT = 5.0
+
+
+def watch(backend, writer, slow_after=SLOW_AFTER, slow_repeat=SLOW_REPEAT):
+    """Says "slow" while a frame takes long. step() doesn't return until ovrtx is done,
+    which for a scene with many complex materials can be minutes, and meanwhile nothing
+    else would tell usdcc the helper is still at work."""
+    reported = 0.0
+    while True:
+        time.sleep(1.0)
+        started = backend.frame_started
+        if started is None:
+            reported = 0.0
+            continue
+        seconds = time.perf_counter() - started
+        if seconds >= slow_after and seconds - reported >= slow_repeat:
+            reported = seconds
+            writer.event("slow", seconds=int(seconds), frame=backend.frames + 1)
 
 
 def coalesced(commands):
@@ -350,6 +380,10 @@ def main():
         commands.put(("quit", {}))
 
     threading.Thread(target=read, name="usdcc-rtx-commands", daemon=True).start()
+    slow = (SLOW_AFTER, SLOW_REPEAT)
+    if isinstance(backend, FakeBackend) and os.environ.get("USDCC_RTX_FAKE_SLOW_AFTER"):
+        slow = (float(os.environ["USDCC_RTX_FAKE_SLOW_AFTER"]), 1.0)  # the tests'
+    threading.Thread(target=watch, args=(backend, writer, *slow), name="usdcc-rtx-watch", daemon=True).start()
 
     try:
         while True:
