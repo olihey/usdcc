@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/NVIDIA-Omniverse/OpenUSD",
+  "commit": "70c45e83b08a7b45588cd6cdbd2ae67f5147befb",
+  "patches": ["patches/build_usd-glm.patch"],
+  "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
+            "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
+            "--generator=Visual Studio 17 2022"],
+  "python": "3.12.10",
+  "platform": "win64"
+}

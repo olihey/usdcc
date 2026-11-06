@@ -70,6 +70,14 @@ cmake --build build --config RelWithDebInfo
 The SDK holds usdcc's headers and import libraries. **Qt, Qt Advanced Docking System and OpenUSD aren't in it,** so you need the ones the app was built with, which
 `find_package(UsdccPlugin)` checks, along with the compiler, stopping with a message if they differ.
 
+**OpenUSD** comes prebuilt from the repository's releases: the `deps/usd-…` prereleases (not usdcc releases), one per OpenUSD build that
+[deps/usd.json](../deps/usd.json) has pinned, made by CI ([CI.md](CI.md)). Take the one whose name `tools/ci/usd-asset.ps1` prints for the usdcc
+version you build against, unzip it anywhere, and pass that folder as `-DUSD_INSTALL`. It has OpenUSD's headers, import libraries, DLLs, plugins and
+CMake files, plus those of its dependencies (TBB, MaterialX, OpenImageIO, OpenColorIO, Embree, ...). It's a Release build, so a plugin uses the release
+CRT (`/MD`) with `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc does; `find_package(UsdccPlugin)` sets that up. It also needs Python 3.12 x64
+installed, which CMake finds by itself. A plain OpenUSD plugin, without usdcc, builds against it the same way: see `tools/ci/usd-sdk-check`, which CI
+builds against every new OpenUSD asset.
+
 The plugin lands in `build/plugins/notes`, with its manifest. Copy that folder to `%LOCALAPPDATA%/usdcc/plugins`, or try it with `usdcc --plugin-path build/plugins`.
 
 `usdcc_add_plugin()` also takes `OUTPUT_DIR`, `PYTHON_MODULE`, `USD_FOLDERS` and `REQUIRES`. A plugin can have Python and USD parts too: the library is activated first,

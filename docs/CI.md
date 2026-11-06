@@ -28,24 +28,35 @@ one difference: `--no-usdview`.
 |---|---|
 | Source | `https://github.com/NVIDIA-Omniverse/OpenUSD`, commit `70c45e83b08a7b45588cd6cdbd2ae67f5147befb` (branch `typhoon/main`; reports itself as 26.08) |
 | Patch | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change |
-| Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release` |
-| Python | 3.12 x64 from `actions/setup-python`, exact patch version pinned |
-| Compiler | MSVC from Visual Studio 2022 (`tools/build.ps1` uses the `Visual Studio 17 2022` generator). The runner image is pinned to a label, never `windows-latest` |
-| Install path | `C:\deps\usd`, the same in both workflows |
+| Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release --generator="Visual Studio 17 2022"` |
+| Python | 3.12.10 x64 from `actions/setup-python` (the same patch version as the local build) |
+| Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.ps1` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
+| Install path | `C:\deps\usd` on CI. The asset itself works from any folder |
 
 **Why `--no-usdview`.** usdview needs a pip-installed PySide6 on the build machine. usdcc
 must never mix pip PySide6 into its process (PLAN §6 item 11), and it doesn't use usdview.
 
-**Making it relocatable.** `pxrConfig.cmake` stores absolute paths from build time
-(`MaterialX_DIR` and the other dependencies' CMake folders, the Python paths). OpenUSD's
-own targets are already found relative to `pxrConfig.cmake`'s folder, but these aren't,
-so the install only works where it was built. `deps-usd.yml` rewrites the dependency
-paths to be relative to that folder (`${CMAKE_CURRENT_LIST_DIR}`) before zipping, and
-fails if any absolute build path is left in a `.cmake` file. CI still unzips to
-`C:\deps\usd` so paths are the same everywhere. The Python paths point at an interpreter
-outside the install and include its patch version, so `build.yml` passes
-`-DPython3_EXECUTABLE` explicitly; `pxrConfig.cmake` only sets these when they aren't
-already defined.
+**Making it relocatable.** `build_usd.py` writes absolute paths into some CMake files, so
+an install only works where it was built. In a local build they are in 12 files:
+`pxrConfig.cmake` (the TBB target, `MaterialX_DIR`, `Imath_DIR`, the Python paths),
+`cmake/pxrTargets.cmake` (an OpenColorIO library, the Python include folder), the boost
+package files and OpenImageIO's. `tools/ci/relocate-usd.ps1` rewrites them before zipping:
+
+- The install folder becomes `${_usdcc_usd_prefix}`, which a line added at the top of each
+  changed file works out from `${CMAKE_CURRENT_LIST_DIR}`.
+- `pxrConfig.cmake` uses its stored Python paths only if they exist on the machine;
+  otherwise CMake finds Python 3.12 itself. So CI, with the same Python as the build,
+  needs no `-DPython3_EXECUTABLE`, and a plugin author's own Python 3.12 install works.
+- The Python include folder in `pxrTargets.cmake` becomes `${Python3_INCLUDE_DIRS}`, which
+  `pxrConfig.cmake` has found by then.
+
+It then fails if any CMake file still names the build folder, or names the Python
+folder outside those guarded lines. Tested on a copy of the local install: 12 files
+rewritten, and the SDK check (§3) built and passed against the copy.
+
+**Consumers put the install on `CMAKE_PREFIX_PATH`**, not just `-Dpxr_DIR`:
+`pxrConfig.cmake` finds OpenSubdiv and TBB with plain `find_dependency()` calls that only
+look there. usdcc's `FindUSD.cmake` already does this.
 
 ### The asset is also the OpenUSD SDK for plugin authors
 
@@ -71,10 +82,11 @@ CRT (`/MD`) and `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc itsel
 `CMakeLists.txt`), or the STL objects it passes to OpenUSD have the wrong layout. Plus the
 same MSVC toolset generation and Python 3.12.
 
-**Debug symbols** go in a separate asset, `<asset name>-pdb.zip`, with the `.pdb` files
-in the same folder layout, to unzip over the main one. Plugin authors who want to step
-into OpenUSD download both; everyone else, CI included, skips it. The matching sources
-are public at the pinned commit.
+**Debug symbols.** `--build-variant=release` produces no `.pdb` files for OpenUSD itself;
+the only ones in the install are TBB's (12 small files), which stay in the zip. Stepping
+into OpenUSD would need a separate symbols build (`--build-variant=relwithdebuginfo`,
+same CRT and ABI) as its own asset. Not planned yet. The sources are public at the
+pinned commit.
 
 ### `deps/usd.json`
 
@@ -86,33 +98,41 @@ One file pins the build:
   "commit": "70c45e83b08a7b45588cd6cdbd2ae67f5147befb",
   "patches": ["patches/build_usd-glm.patch"],
   "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
-            "--openimageio", "--opencolorio", "--embree", "--build-variant=release"],
-  "python": "3.12.x"
+            "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
+            "--generator=Visual Studio 17 2022"],
+  "python": "3.12.10",
+  "platform": "win64"
 }
 ```
 
 The asset's name comes from it: `usd-<short commit>-<hash>-win64-py312.zip`, where
-`<hash>` is the first 8 characters of a SHA-256 over `usd.json` and the patch files. Any
+`<hash>` is the first 8 hex characters of a SHA-256 over `usd.json` and the patch files
+(line endings normalised). `tools/ci/usd-asset.ps1` prints it, with the tag. Any
 change to the pin, the flags or a patch gives a new name, so a stale asset is never used.
 It's published under the tag `deps/usd-<short commit>-<hash>` as a **prerelease**, so it
 stays out of the way of real usdcc releases.
 
 ## 3. Workflow `deps-usd.yml`
 
-Runs on `workflow_dispatch`, and on pushes to `master` that change `deps/usd.json` or
-`deps/patches/**`. It skips the build if the release for the current hash already exists.
+[.github/workflows/deps-usd.yml](../.github/workflows/deps-usd.yml). Runs on
+`workflow_dispatch`, and on pushes to `master` that change `deps/`, its scripts or
+itself. It skips the build if the asset for the current hash is already published.
 
-1. Check out usdcc; set up Python.
-2. Fetch OpenUSD at the pinned commit (shallow fetch of that one commit) and apply the
-   patches with `git apply`.
-3. `python build_scripts/build_usd.py <flags> C:\deps\usd`.
-4. Delete `src/` and `build/` (§2, "The asset is also the OpenUSD SDK").
-5. Make `pxrConfig.cmake` relocatable (§2) and check that no absolute build path is left
-   in any `.cmake` file.
-6. Move the `.pdb` files into a second tree, with the same folder layout, for the
-   `-pdb.zip` asset.
-7. Zip both, check each is under GitHub's 2 GiB per-asset limit, and publish them with
-   `gh release create --prerelease`.
+1. Name the asset (`tools/ci/usd-asset.ps1`) and check whether it's published.
+2. Set up Python; fetch OpenUSD at the pinned commit (a shallow fetch of that one
+   commit, without line-ending conversion) and apply the patches with `git apply`.
+3. `python build_scripts/build_usd.py <flags> --src C:\b\src --build C:\b\build C:\deps\usd`.
+   The downloads and build trees go outside the install. On failure, `build_usd.py`'s
+   logs are uploaded as an artifact.
+4. Make it relocatable (`tools/ci/relocate-usd.ps1`, §2).
+5. Zip it and check it's under GitHub's 2 GiB per-asset limit. The local install is
+   ~830 MB unzipped.
+6. **Check it as an SDK:** delete `C:\deps\usd`, unzip the asset into another folder, and
+   build and run `tools/ci/usd-sdk-check` against it. That's a minimal OpenUSD file format
+   plugin plus a program that loads it through `PlugRegistry` and opens a file with it,
+   so a path the relocation missed fails here instead of on a plugin author's machine.
+7. Publish with `gh release create --prerelease`, with the pin, flags, Python, runner
+   image and run link in the release notes.
 
 Expected time: 2–3 hours on a 4-core hosted runner, inside the 6-hour job limit. Not yet
 measured.
@@ -132,16 +152,17 @@ Runs on pushes to `master` and on pull requests.
    restore it in minutes. vcpkg's old `x-gha` cache backend is gone, so it's the `files`
    backend plus `actions/cache`.
 5. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
-   `RelWithDebInfo` like local builds. `build.ps1` gains a way to pass extra CMake
-   arguments, for `-DPython3_EXECUTABLE`.
+   `RelWithDebInfo` like local builds.
 6. Run the tests (phase 3).
 
 ## 5. Phases
 
-1. **OpenUSD asset.** `deps/usd.json`, the patch, the hash script and `deps-usd.yml`;
-   PLUGIN_SDK.md points plugin authors at the asset. Done when the first asset and its
-   `-pdb.zip` are published, and a small test plugin configures and builds against the
-   asset unzipped to a folder other than `C:\deps\usd` on a fresh runner.
+1. **OpenUSD asset.** `deps/usd.json`, the patch, `tools/ci/usd-asset.ps1`,
+   `tools/ci/relocate-usd.ps1`, `tools/ci/usd-sdk-check` and `deps-usd.yml`;
+   PLUGIN_SDK.md points plugin authors at the asset. Done when the first asset is
+   published, which `deps-usd.yml` only does after the SDK check passed against it in
+   another folder. *Written; the scripts and the SDK check are tested locally against a
+   relocated copy of the local install. The first CI run is pending.*
 2. **usdcc builds in CI.** `build.yml` up to step 5, with the vcpkg cache, without
    PySide6 (the CMake configure already turns off `usdcc.ui` and Python-made panels
    without it). Done when `master` is green and a second run restores Qt from the cache.
@@ -162,7 +183,7 @@ Runs on pushes to `master` and on pull requests.
 |---|---|---|
 | 1 | Pin NVIDIA's `typhoon/main` or a Pixar release tag? `typhoon/main`'s latest commit is "add on-hold banner", which suggests that branch may be paused | Pin the commit the local build uses, so CI matches it; revisit when bumping USD |
 | 2 | PLAN §5 item 2 says OpenUSD 26.11 is in use, but the local build reports 26.08 | Treat 26.08 (the commit above) as the truth and correct PLAN §5 when the pin is settled |
-| 3 | Does the `-pdb.zip` stay under 2 GiB? | Yes; if not, split it, e.g. OpenUSD's symbols and the dependencies' symbols |
+| 3 | Is a symbols build of OpenUSD (§2, "Debug symbols") worth its own asset? | Not until someone needs to step into OpenUSD |
 | 4 | Does a hosted Windows runner have enough disk and time for the OpenUSD build? | Yes; measure on the first run |
 
 ## 7. Later

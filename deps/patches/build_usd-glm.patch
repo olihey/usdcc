@@ -1,0 +1,39 @@
+diff --git a/build_scripts/build_usd.py b/build_scripts/build_usd.py
+index 417110c33..37667c025 100644
+--- a/build_scripts/build_usd.py
++++ b/build_scripts/build_usd.py
+@@ -1807,6 +1807,25 @@ def InstallAdobeOpenPBR(context, force, buildArgs):
+ ADOBEOPENPBR = Dependency("AdobeOpenPBR", InstallAdobeOpenPBR,
+                          "include/openpbr/openpbr.h")
+ 
++############################################################
++# GLM
++
++def InstallGLM(context, force, buildArgs):
++    GLM_URL = "https://github.com/g-truc/glm/archive/refs/tags/1.0.1.zip"
++
++    with CurrentWorkingDirectory(DownloadURL(GLM_URL, context, force)):
++        extraArgs = [
++            "-DGLM_BUILD_TESTS=OFF",
++            "-DGLM_BUILD_LIBRARY=OFF",
++            "-DGLM_BUILD_INSTALL=ON",
++            "-DBUILD_SHARED_LIBS=OFF",
++        ]
++        extraArgs += buildArgs
++
++        RunCMake(context, force, extraArgs)
++
++GLM = Dependency("GLM", InstallGLM, "include/glm/glm.hpp")
++
+ ############################################################
+ # USD
+ 
+@@ -2696,7 +2715,7 @@ if context.buildImaging:
+         requiredDependencies += [ZLIB, BOOST, JPEG, TIFF, PNG, OPENEXR, OPENIMAGEIO]
+ 
+     if context.buildEmbree:
+-        requiredDependencies += [TBB, EMBREE, OPENQMC, ADOBEOPENPBR]
++        requiredDependencies += [TBB, EMBREE, OPENQMC, GLM, ADOBEOPENPBR]
+                              
+ if context.buildUsdview:
+     requiredDependencies += [PYOPENGL, PYSIDE]
