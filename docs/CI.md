@@ -172,7 +172,8 @@ Runs on pushes to `master` and on pull requests.
      out of the repository's 10 GB, and pull requests can restore `master`'s.
 5. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
    `RelWithDebInfo` like local builds.
-6. Run the tests (phase 3).
+6. Run the tests: `ctest --verbose --timeout 900`, so the log shows every test case and
+   the check counts, and a crash waiting behind an error dialog ends after 15 minutes.
 
 ## 5. Phases
 
@@ -195,6 +196,15 @@ Runs on pushes to `master` and on pull requests.
    gizmos) may fail there. Find them, give them a `gpu` CTest label, and run
    `ctest -LE gpu` in CI. Done when the test step is green and every excluded test is
    labelled.
+   *Done, without a `gpu` label: none of the tests uses the GPU. The viewport only
+   creates its GL context and Hydra engine when its window is exposed, which on Qt's
+   offscreen platform never happens, so the viewport tests cover its camera, layout and
+   events but never render, on CI or locally. Rendering would need a test that's run on
+   a real platform. The first runs found one timing race: `usda_view_test` checked
+   Find's 200 ms debounce after a fixed 400 ms and failed when the runner was busy, so
+   it now waits for the result. Since then, two runs in a row were green (134, 112 and
+   56 test cases), with the test step taking under a minute. Without PySide6, the six
+   test files for Python-made panels and the render plugins aren't built (phase 4).*
 4. **PySide6.** A second deps asset built by `tools/build-pyside.ps1` against vcpkg's
    Qt, keyed on the vcpkg baseline, the pyside-setup tag and the Python version, so it
    always matches the Qt usdcc builds against. With it, `usdcc.ui` and the Python panel
