@@ -143,8 +143,14 @@ It uses `build.yml`'s vcpkg cache, read-only.
 2. **Release workflow.** `release.yml` as in §4, with the smoke test. Done when a test
    prerelease (`v0.0.1-test.1`) gets both zips, and its zip runs on a machine without the
    dev environment. The test release and its tag are deleted afterwards.
-   *Written. The smoke test passed on a local deploy, and failed as it should with `pxr`
-   taken out of it.*
+   *Done, with a real release instead of a test one: `0.0.1`. Its first run turned the tag
+   down (only `v0.0.1` was accepted then), and its second failed a test that called a
+   plugin built for usdcc 0.0.1 wrong; the tag was moved to the fix, which had nothing
+   attached yet. The third took 14 minutes: tests green, the deploy started as `0.0.1`
+   with `pxr`, `usdcc` and PySide6 from its own folder, and it attached
+   `usdcc-0.0.1-windows-x64.zip` (166 MB) and the symbols (36 MB, 9 PDBs). That zip,
+   downloaded and unzipped on a development machine, passed the same smoke test, and its
+   `usdcc.exe` reports 0.0.1, not a prerelease.*
 3. **Third-party licences** (§6), before the first real release. *Done: a local deploy has
    29 vcpkg licences, 20 of OpenUSD's dependencies, PySide6's, Python's, QWindowKit's,
    ruff's and uv's, and `SOURCES.txt`.*
