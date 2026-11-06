@@ -49,7 +49,7 @@ def deactivate(plugin):  # optional: at quit and before a reload, to stop what y
 
 [src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`. The C++ example builds to
 `build/plugins`, so `usdcc --plugin-path build/plugins` loads that. [src/plugins/vray_render](../src/plugins/vray_render) is a bigger one: a view panel that renders
-with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)).
+with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)), and [src/plugins/rtx_render](../src/plugins/rtx_render) does the same with NVIDIA's ovrtx ([RTX_RENDER.md](RTX_RENDER.md)).
 
 **Found in, the first with an id winning (logged):** `--plugin-path` folders, `USDCC_PLUGIN_PATH` (a studio's), `%LOCALAPPDATA%/usdcc/plugins` (the
 user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in

@@ -1,0 +1,55 @@
+"""The plugin's settings (Edit > Settings... > RTX, docs/RTX_RENDER.md section 5)."""
+
+import os
+
+import usdcc.settings
+
+from . import scene
+
+CATEGORY = "RTX"
+PYTHON = "RtxRender/python"
+MODE = "RtxRender/mode"
+MAX_FRAMES = "RtxRender/maxFrames"
+IMAGE_MS = "RtxRender/imageInterval"
+EDIT_DELAY_MS = "RtxRender/editDelay"
+
+MODES = list(scene.MODES)
+
+# Tests set this: the helper then renders a gradient instead of importing ovrtx.
+FAKE_RENDERER = False
+
+
+def suggested_python():
+    """Where the setup in docs/RTX_RENDER.md puts ovrtx's Python:
+    %LOCALAPPDATA%\\usdcc\\rtx\\venv."""
+    return os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "usdcc", "rtx", "venv", "Scripts",
+                        "python.exe")
+
+
+def default_python():
+    """USDCC_OVRTX_PYTHON, or suggested_python() if it exists; else empty."""
+    if os.environ.get("USDCC_OVRTX_PYTHON"):
+        return os.environ["USDCC_OVRTX_PYTHON"]
+    suggested = suggested_python()
+    return suggested if os.path.isfile(suggested) else ""
+
+
+def define():
+    usdcc.settings.define(PYTHON, "string", default_python(), label="Python with ovrtx", category=CATEGORY,
+                          group="ovrtx", description="The python.exe RTX renders in, one with ovrtx installed "
+                                                     "(pip install ovrtx ovstage numpy). Python 3.11 to 3.13.")
+    usdcc.settings.define(MODE, "choice", MODES[0], label="Mode", category=CATEGORY, group="Rendering",
+                          description="What a new RTX Render panel renders with: real-time path tracing, "
+                                      "path tracing, or minimal rasterizing.", choices=MODES)
+    usdcc.settings.define(MAX_FRAMES, "int", 128, label="Frames after a change", category=CATEGORY, group="Rendering",
+                          description="How many frames are rendered after a change before the image is done.",
+                          minimum=1, maximum=4096)
+    usdcc.settings.define(IMAGE_MS, "int", 33, label="Image updates (ms)", category=CATEGORY, group="Rendering",
+                          description="How often a new image is sent to the panel at most.", minimum=10, maximum=2000)
+    usdcc.settings.define(EDIT_DELAY_MS, "int", 30, label="Update after edits (ms)", category=CATEGORY,
+                          group="Rendering", description="How long after the last edit it reaches the renderer.",
+                          minimum=0, maximum=10000)
+
+
+def get(key):
+    return usdcc.settings.get(key)

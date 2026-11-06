@@ -12,7 +12,7 @@ The renderer does the rendering, behind a handful of hooks.
   in `usdcc_usd_ui`.
 - **Python:** `usdcc.ui.RenderViewPanel` ([ui.py](../src/python/usdcc/ui.py)), hosted by
   [ScriptedRenderViewPanel](../src/cpp/scripting/include/usdcc/scripting/scripted_render_view_panel.h).
-- **Used by:** the V-Ray Render plugin ([VRAY_RENDER.md](VRAY_RENDER.md)).
+- **Used by:** the V-Ray Render and RTX Render plugins ([VRAY_RENDER.md](VRAY_RENDER.md), [RTX_RENDER.md](RTX_RENDER.md)).
 
 Plugins don't share code with each other. Anything two renderers both need belongs here.
 Each renderer keeps its own helper process, protocol, stage export and settings.
