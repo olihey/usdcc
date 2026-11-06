@@ -92,6 +92,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/current_stage_ui.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/stages_menu.h
+    include/usdcc/usd/render_view_panel.h
     include/usdcc/usd/tool_options_bar.h
     include/usdcc/usd/tool_rail.h
     include/usdcc/usd/usd_prim_tree_model.h
@@ -120,6 +121,7 @@ add_library(usdcc_usd_ui SHARED
     src/prim_tree_dialog.cpp
     src/prim_tree_widget.cpp
     src/relationship_target_dialog.cpp
+    src/render_view_panel.cpp
     src/shader_connection_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp

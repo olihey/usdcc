@@ -137,7 +137,7 @@ No `sys.modules` patching is needed, and `import usdcc.usd` works the same in bo
 | `usdcc.toast` | Toast notifications in the main window ([NOTIFICATIONS.md](NOTIFICATIONS.md)): `show(title, body, kind, duration, sticky)` → id, `dismiss(id)`, `dismiss_all()`, `visible()`. `usdcc.core.log(..., toast=True/"sticky", title, kind)` and `logging`'s `extra={"usdcc_toast": True}` show a log record as one too |
 | `usdcc.settings` | The app's preferences ([SETTINGS.md](SETTINGS.md) §6): `get(key)`, `set(key, value)`, `reset(key)`, `is_default(key)`, `keys(category)`, `categories()`, `info(key)`, `define(key, type, default, ...)` for a plugin's own settings, shown in the Settings dialog. No change callbacks yet |
 | `usdcc.log` | The logging bridge (§5) |
-| `usdcc.ui` | `SidePanel` and `ViewPanel`, the base classes for panels made in Python (§8; needs PySide6) |
+| `usdcc.ui` | `SidePanel` and `ViewPanel`, the base classes for panels made in Python, and `RenderViewPanel` for a renderer behind the app's render view panel, with `RenderCamera` (§8, [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md); needs PySide6) |
 
 - **Stage functions** default to the current stage and raise `RuntimeError` outside the app.
   The current stage is the stage of the view panel last focused (docs/CURRENT_STAGE.md), so a
@@ -344,6 +344,11 @@ usdcc.app.add_side_panel(NotesPanel(), "left")
   `UiScaleController::instance()`. The host is compiled into the app, and Python only fills
   it, through three bridge functions in `ui.py` that turn addresses and cache ids into
   PySide objects and `Usd.Stage`s.
+- **Render view panels:** a `usdcc.ui.RenderViewPanel` subclass, registered the same way,
+  is a renderer behind the app's C++ render view panel, `ScriptedRenderViewPanel`. The panel
+  owns the toolbar, the image and following the camera and edits; the class gets hooks
+  (`start()`, `reload()`, `camera_changed()`, ...) and calls back with `show_image()`.
+  See [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md).
 - A view panel type registered from a startup script isn't known yet when the saved layout is
   restored, so its panels aren't reopened on the next start; a startup script can open them. A
   plugin registers earlier, and its panels do come back (docs/PLUGINS.md §3.3).

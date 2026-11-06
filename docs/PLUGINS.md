@@ -60,6 +60,7 @@ user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts
 | Extension point | Call |
 |---|---|
 | View panel types | `usdcc.app.register_view_panel(id, name, cls)` |
+| Render view panels | `usdcc.app.register_view_panel(id, name, cls)` with a `usdcc.ui.RenderViewPanel` subclass: the app's panel, with the plugin's renderer behind it ([RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md)) |
 | Side panels | `usdcc.app.add_side_panel(panel, area, id=...)`. Give an `id`: otherwise the title is its identity in the saved layout |
 | Main menu | `usdcc.app.add_menu_action("Menu/Action", callback, shortcut, tip)`, one undo step per run |
 | Outliner's prim menu | `usdcc.app.add_prim_menu_action(label, callback, applies=None, id=None)`, one undo step per run |

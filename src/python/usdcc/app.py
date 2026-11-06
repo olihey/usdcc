@@ -87,8 +87,9 @@ def _remove_side_panel(panel):
 
 
 def register_view_panel(id, name, cls):
-    """Makes ``cls``, a ``usdcc.ui.ViewPanel`` subclass, a view panel type
-    named ``name`` (as the Stages menu shows it) with the stable ``id``.
+    """Makes ``cls`` a view panel type named ``name`` (as the Stages menu shows
+    it) with the stable ``id``. ``cls`` is a ``usdcc.ui.ViewPanel`` subclass, or a
+    ``usdcc.ui.RenderViewPanel`` subclass for a renderer (docs/RENDER_VIEW_PANEL.md).
 
     Registering an id again replaces that type, so re-running the script that
     registers it picks up changes; panels already open keep their old class.
@@ -96,9 +97,14 @@ def register_view_panel(id, name, cls):
     """
     from usdcc import ui
 
-    if not (isinstance(cls, type) and issubclass(cls, ui.ViewPanel)):
-        raise TypeError("register_view_panel() needs a usdcc.ui.ViewPanel subclass, not %r" % (cls,))
-    _app().register_view_panel(id, name, cls)
+    if isinstance(cls, type) and issubclass(cls, ui.RenderViewPanel):
+        _app().register_render_view_panel(id, name, cls)
+    elif isinstance(cls, type) and issubclass(cls, ui.ViewPanel):
+        _app().register_view_panel(id, name, cls)
+    else:
+        raise TypeError(
+            "register_view_panel() needs a usdcc.ui.ViewPanel or usdcc.ui.RenderViewPanel subclass, not %r" % (cls,)
+        )
     _plugins.register_panel_class(id, cls)
     _plugins.note("View panel", name)
     _plugins.track(lambda: unregister_view_panel(id))

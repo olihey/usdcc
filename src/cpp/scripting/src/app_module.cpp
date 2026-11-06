@@ -5,6 +5,7 @@
 #include <pybind11/stl.h>
 
 #include "python_object.h"
+#include "usdcc/scripting/scripted_render_view_panel.h"
 #include "usdcc/scripting/scripted_tool.h"
 #include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/usd/python/bind_usd.h"
@@ -25,6 +26,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -53,6 +55,9 @@
 #include <vector>
 
 namespace usdcc::scripting {
+
+// The Python class of a render view panel's handle (scripted_render_view_panel.cpp).
+void bindRenderViewPanelHandle(pybind11::module_& m);
 
 namespace {
 const AppContext* s_context = nullptr;
@@ -309,6 +314,28 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             s_pythonPanelTypes.insert(id);
         },
         py::arg("id"), py::arg("display_name"), py::arg("cls"));
+    // A usdcc.ui.RenderViewPanel subclass (docs/RENDER_VIEW_PANEL.md); usdcc.app's
+    // register_view_panel() picks this or the one above.
+    m.def(
+        "register_render_view_panel",
+        [](const std::string& id, const std::string& displayName, py::object cls) {
+            usdcc::ui::ViewPanelRegistry& registry = viewPanels();
+            const QString qid = QString::fromStdString(id);
+            if (registry.find(qid) && !s_pythonPanelTypes.count(id)) {
+                throw py::value_error("'" + id + "' is a built-in view panel type");
+            }
+            auto pythonClass = std::make_shared<usdcc::scripting::PythonObject>(std::move(cls));
+            usdcc::usd::StageManager* stages = context().stageManager;
+            registry.add(qid, QString::fromStdString(displayName),
+                         [stages, pythonClass](const StageRefPtr& stage, const QString& title,
+                                               QWidget* parent) -> usdcc::ui::ViewPanel* {
+                             return new usdcc::scripting::ScriptedRenderViewPanel(stages, stage, title, pythonClass,
+                                                                                  parent);
+                         });
+            s_pythonPanelTypes.insert(id);
+        },
+        py::arg("id"), py::arg("display_name"), py::arg("cls"));
+    bindRenderViewPanelHandle(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {
@@ -321,6 +348,8 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             // The Python instance for a Python type, None for a built-in one.
             auto* scripted = qobject_cast<usdcc::scripting::ScriptedViewPanel*>(panel);
             if (scripted && scripted->pythonPanel()) return scripted->pythonPanel()->object;
+            auto* rendering = qobject_cast<usdcc::scripting::ScriptedRenderViewPanel*>(panel);
+            if (rendering && rendering->pythonPanel()) return rendering->pythonPanel()->object;
             return py::none();
         },
         py::arg("id"), py::arg("cache_id"), "Opens a panel of the type for the stage, like the Stages menu.");
@@ -550,14 +579,10 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def("active_viewport_camera", []() -> py::object {
         usdcc::usd::ViewportViewPanel* viewport = usdcc::usd::ViewportViewPanel::activeViewport();
         if (!viewport) return py::none();
-        const PXR_NS::GfFrustum frustum = viewport->hydraWindow()->frustum();
-        const PXR_NS::GfMatrix4d cameraToWorld = frustum.ComputeViewInverse();
-        std::vector<double> matrix(cameraToWorld.data(), cameraToWorld.data() + 16);
-        const PXR_NS::GfRange2d window = frustum.GetWindow();
-        const double aspect = window.GetSize()[1] > 0.0 ? window.GetSize()[0] / window.GetSize()[1] : 1.0;
-        return py::make_tuple(cacheIdOf(viewport->currentStage()), matrix,
-                              usdcc::usd::HydraViewportWindow::verticalFieldOfView(), aspect,
-                              frustum.GetNearFar().GetMin(), frustum.GetNearFar().GetMax());
+        const usdcc::usd::RenderCamera camera = usdcc::usd::viewportRenderCamera(*viewport);
+        std::vector<double> matrix(camera.cameraToWorld.data(), camera.cameraToWorld.data() + 16);
+        return py::make_tuple(cacheIdOf(viewport->currentStage()), matrix, camera.fovY, camera.aspect, camera.nearClip,
+                              camera.farClip);
     });
 
     // App events: returns an id for disconnect_event().
@@ -646,8 +671,9 @@ void rebuildScriptedPanels(const std::vector<std::string>& types) {
     if (types.empty() || !s_context || !s_context->mainWindow) return;
     for (ads::CDockWidget* dock : s_context->mainWindow->dockManager()->dockWidgetsMap()) {
         auto* panel = qobject_cast<ScriptedViewPanel*>(dock);
-        if (!panel) continue;
-        const std::string type = panel->property(usdcc::ui::ViewPanelRegistry::kTypeProperty).toString().toStdString();
+        auto* rendering = qobject_cast<ScriptedRenderViewPanel*>(dock);
+        if (!panel && !rendering) continue;
+        const std::string type = dock->property(usdcc::ui::ViewPanelRegistry::kTypeProperty).toString().toStdString();
         if (std::find(types.begin(), types.end(), type) == types.end()) continue;
         std::shared_ptr<PythonObject> cls;
         {
@@ -659,7 +685,11 @@ void rebuildScriptedPanels(const std::vector<std::string>& types) {
                 logPythonError(error);
             }
         }
-        panel->rebuild(std::move(cls));
+        if (panel) {
+            panel->rebuild(std::move(cls));
+        } else {
+            rendering->rebuild(std::move(cls));
+        }
     }
 }
 #else
