@@ -179,9 +179,10 @@ Runs on pushes to `master` and on pull requests.
 2. **usdcc builds in CI.** `build.yml` up to step 5, with the vcpkg cache, without
    PySide6 (the CMake configure already turns off `usdcc.ui` and Python-made panels
    without it). Done when `master` is green and a second run restores Qt from the cache.
-   *Written: `.github/workflows/build.yml`. usdcc configures against the published asset
-   locally (which is how `FindUSD.cmake`'s Python lookup above turned up). The first CI
-   run is pending.*
+   *Done. The first run took 1 h 23 min: vcpkg 74 min (Qt alone 41 min), usdcc 8 min,
+   and a 629 MB cache. The second restored all 37 packages in 11 s and took 11 min. A
+   local configure against the published asset is what turned up `FindUSD.cmake`'s Python
+   lookup above.*
 3. **Tests in CI.** `ctest` for `usdcc_tests`, `usdcc_ui_tests` and
    `usdcc_python_tests`; the UI tests already run with `QT_QPA_PLATFORM=offscreen`.
    Hosted runners have no GPU, so tests that need Hydra/OpenGL (the viewport, picking,
