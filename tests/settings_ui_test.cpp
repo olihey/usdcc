@@ -84,6 +84,7 @@ USDCC_TEST(settings_ini_backend) {
         {.key = "A/name", .category = "A", .type = SettingType::String, .defaultValue = std::string()},
         {.key = "A/color", .category = "A", .type = SettingType::Color, .defaultValue = std::string("#000000")},
         {.key = "A/key", .category = "A", .type = SettingType::Shortcut, .defaultValue = std::string("W")},
+        {.key = "A/folders", .category = "A", .type = SettingType::FolderList, .defaultValue = std::string()},
     };
     {
         Settings settings;
@@ -95,6 +96,7 @@ USDCC_TEST(settings_ini_backend) {
         settings.setValue("A/name", std::string("a, b; c"));
         settings.setValue("A/color", std::string("#E5484D"));
         settings.setValue("A/key", usdcc::ui::shortcutText(QKeySequence(Qt::CTRL | Qt::Key_Comma)));
+        settings.setValue("A/folders", std::string("C:\\a b;D:\\c, d"));
     }
     Settings settings;
     settings.setBackend(std::make_unique<usdcc::ui::QSettingsBackend>(file));
@@ -107,6 +109,8 @@ USDCC_TEST(settings_ini_backend) {
     CHECK(usdcc::ui::settingColor("A/color", settings) == QColor(0xe5, 0x48, 0x4d), "a color survives");
     CHECK(usdcc::ui::settingShortcut("A/key", settings) == QKeySequence(Qt::CTRL | Qt::Key_Comma),
           "a shortcut with a comma survives (got \"%s\")", settings.get<std::string>("A/key").c_str());
+    CHECK(settings.get<std::string>("A/folders") == "C:\\a b;D:\\c, d", "a folder list survives (got \"%s\")",
+          settings.get<std::string>("A/folders").c_str());
     settings.reset("A/count");
     Settings again;
     again.setBackend(std::make_unique<usdcc::ui::QSettingsBackend>(file));
@@ -255,6 +259,62 @@ USDCC_TEST(settings_dialog) {
     CHECK(!nextStart->isHidden(), "and says when it takes effect");
     settings.reset("Other/folder");
     CHECK(nextStart->isHidden() && folderEdit->text() == QStringLiteral("C:/a"), "reset takes both back");
+}
+
+// A list of folders (SettingType::FolderList): the fixed ones greyed before and after
+// the value's, which can be removed and reordered; Reset leaves the fixed ones.
+USDCC_TEST(settings_folder_list_editor) {
+    TestSettings testSettings;
+    QTemporaryDir temp;
+    usdcc::ui::UiScaleController scale(application(), temp.filePath(QStringLiteral("ui.ini")));
+    QDir(temp.path()).mkpath(QStringLiteral("one"));
+    QDir(temp.path()).mkpath(QStringLiteral("two"));
+    const QString one = QDir::toNativeSeparators(temp.filePath(QStringLiteral("one")));
+    const QString two = QDir::toNativeSeparators(temp.filePath(QStringLiteral("two")));
+    Settings settings;
+    settings.define({.key = "Plugins/folders", .category = "Plugins", .label = "Plugin folders", .type = SettingType::FolderList,
+                     .defaultValue = std::string(),
+                     .fixedFolders = {{.label = "Yours", .folder = temp.path().toStdString()},
+                                      {.label = "Shipped", .folder = "C:/usdcc-no-such-folder/plugins", .after = true}},
+                     .appliesAtNextStart = true});
+    usdcc::ui::SettingsDialog dialog(nullptr, settings);
+    auto* editor = withKey<QWidget>(&dialog, QStringLiteral("Plugins/folders"), QStringLiteral("settingEditor"));
+    auto* list = editor ? editor->findChild<QListWidget*>(QStringLiteral("settingFolderList")) : nullptr;
+    auto* remove = editor ? editor->findChild<QToolButton*>(QStringLiteral("settingFolderRemove")) : nullptr;
+    auto* up = editor ? editor->findChild<QToolButton*>(QStringLiteral("settingFolderUp")) : nullptr;
+    auto* down = editor ? editor->findChild<QToolButton*>(QStringLiteral("settingFolderDown")) : nullptr;
+    auto* add = editor ? editor->findChild<QToolButton*>(QStringLiteral("settingFolderAdd")) : nullptr;
+    CHECK(list && remove && up && down && add, "a list with Add, Remove, Move Up and Move Down");
+    if (!list || !remove || !up || !down) return;
+
+    const auto text = [list](int row) { return list->item(row) ? list->item(row)->text() : QString(); };
+    CHECK(list->count() == 2 && text(0).startsWith(QStringLiteral("Yours: ")) && text(1).startsWith(QStringLiteral("Shipped: ")),
+          "only the fixed folders at first, in order: %s | %s", qPrintable(text(0)), qPrintable(text(1)));
+    CHECK(list->item(0)->flags() == Qt::NoItemFlags, "greyed: they can't be picked");
+    CHECK(!text(0).contains(QStringLiteral("(missing)")) && text(1).endsWith(QStringLiteral("(missing)")),
+          "a folder that isn't there says so");
+
+    settings.setValue("Plugins/folders", (one + QLatin1Char(';') + two).toStdString());
+    CHECK(list->count() == 4 && text(1) == one && text(2) == two && text(3).startsWith(QStringLiteral("Shipped")),
+          "the value's folders go between the fixed ones: %s, %s", qPrintable(text(1)), qPrintable(text(2)));
+    CHECK(!remove->isEnabled() && !up->isEnabled() && !down->isEnabled(), "nothing to do with nothing picked");
+    list->setCurrentRow(0);
+    CHECK(!remove->isEnabled(), "nor with a fixed folder");
+
+    list->setCurrentRow(2);
+    CHECK(remove->isEnabled() && up->isEnabled() && !down->isEnabled(), "the last one can move up");
+    up->click();
+    CHECK(settings.get<std::string>("Plugins/folders") == (two + QLatin1Char(';') + one).toStdString(), "Move Up reorders the value");
+    CHECK(list->currentRow() == 1, "and keeps it picked");
+    down->click();
+    CHECK(settings.get<std::string>("Plugins/folders") == (one + QLatin1Char(';') + two).toStdString(), "Move Down too");
+    remove->click();
+    CHECK(settings.get<std::string>("Plugins/folders") == one.toStdString(), "Remove takes it out");
+    CHECK(list->count() == 3, "and off the list");
+
+    auto* reset = withKey<QToolButton>(&dialog, QStringLiteral("Plugins/folders"), QStringLiteral("settingReset"));
+    if (reset) reset->click();
+    CHECK(settings.get<std::string>("Plugins/folders").empty() && list->count() == 2, "Reset leaves only the fixed folders");
 }
 
 USDCC_TEST(settings_tool_shortcuts) {

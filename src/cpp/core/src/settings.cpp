@@ -11,7 +11,7 @@ namespace usdcc::core {
 
 namespace {
 
-constexpr std::array<std::pair<SettingType, std::string_view>, 8> kTypeNames = {{
+constexpr std::array<std::pair<SettingType, std::string_view>, 9> kTypeNames = {{
     {SettingType::Bool, "bool"},
     {SettingType::Int, "int"},
     {SettingType::Float, "float"},
@@ -20,6 +20,7 @@ constexpr std::array<std::pair<SettingType, std::string_view>, 8> kTypeNames = {
     {SettingType::Color, "color"},
     {SettingType::Shortcut, "shortcut"},
     {SettingType::Folder, "folder"},
+    {SettingType::FolderList, "folders"},
 }};
 
 bool hasRange(const SettingDefinition& definition) { return definition.maximum > definition.minimum; }
@@ -130,6 +131,7 @@ std::optional<SettingValue> Settings::normalized(const SettingDefinition& defini
     case SettingType::String:
     case SettingType::Shortcut:
     case SettingType::Folder:
+    case SettingType::FolderList:
         if (const std::string* s = std::get_if<std::string>(&value)) {
             return *s;
         }

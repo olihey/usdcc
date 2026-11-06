@@ -39,9 +39,12 @@ enum class SettingType {
     Color,     // std::string "#rrggbb" (lower case)
     Shortcut,  // std::string in QKeySequence's portable text ("W", "Ctrl+Shift+S"), "" = none
     Folder,    // std::string, a folder's path; "" = none
+    // std::string, folders' paths separated by ';' ("" = none), in order; the
+    // definition's fixedFolders are listed with them but aren't part of the value
+    FolderList,
 };
 
-// "bool", "int", "float", "string", "choice", "color", "shortcut", "folder".
+// "bool", "int", "float", "string", "choice", "color", "shortcut", "folder", "folders".
 USDCC_CORE_API std::string_view settingTypeName(SettingType type);
 // The names above; false if `text` is none of them.
 USDCC_CORE_API bool parseSettingType(std::string_view text, SettingType* type);
@@ -61,6 +64,14 @@ struct SettingDefinition {
     double minimum = 0;  // Int/Float range, used when maximum > minimum
     double maximum = 0;
     std::vector<std::string> choices;  // Choice
+    // FolderList: folders shown with the value, greyed, and not part of it: ones that
+    // are always used, such as the user's and the shipped plugins.
+    struct FixedFolder {
+        std::string label;   // "Your plugins"
+        std::string folder;
+        bool after = false;  // listed after the value's folders, not before
+    };
+    std::vector<FixedFolder> fixedFolders;
     // A change is saved at once but only used from the next start. The dialog
     // says so while the value differs from the one this session started with.
     bool appliesAtNextStart = false;

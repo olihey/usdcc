@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGridLayout>
 #include <QKeyEvent>
 #include <QHBoxLayout>
@@ -32,6 +33,7 @@
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <memory>
 #include <utility>
 
 namespace usdcc::ui {
@@ -173,6 +175,120 @@ Editor makeEditor(Settings& settings, const SettingDefinition& definition, QWidg
         return {box, [&settings, key, edit]() {
                     const QSignalBlocker block(edit);
                     edit->setText(qs(settings.get<std::string>(key)));
+                }};
+    }
+    case SettingType::FolderList: {
+        // The value's folders, between the fixed ones that come before and after
+        // them; buttons to add, remove and reorder the value's.
+        auto* box = new QWidget(parent);
+        auto* row = new QHBoxLayout(box);
+        row->setContentsMargins(0, 0, 0, 0);
+        scaled::spacing(row, 4);
+        auto* list = new QListWidget(box);
+        list->setObjectName(QStringLiteral("settingFolderList"));
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
+        scaled::minimumWidth(list, 200);
+        scaled::fixedHeight(list, 120);
+        row->addWidget(list, 1);
+        auto* buttons = new QVBoxLayout;
+        buttons->setContentsMargins(0, 0, 0, 0);
+        scaled::spacing(buttons, 4);
+        const auto button = [box, buttons](const char* name, const QString& text, const QString& tip) {
+            auto* made = new QToolButton(box);
+            made->setObjectName(QString::fromLatin1(name));
+            made->setText(text);
+            made->setToolTip(tip);
+            made->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            made->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            buttons->addWidget(made);
+            return made;
+        };
+        QToolButton* add = button("settingFolderAdd", QObject::tr("Add..."), QObject::tr("Add a folder at the end"));
+        QToolButton* remove = button("settingFolderRemove", QObject::tr("Remove"), QObject::tr("Remove the selected folder"));
+        QToolButton* up = button("settingFolderUp", QObject::tr("Move Up"), QObject::tr("Look in the selected folder sooner"));
+        QToolButton* down = button("settingFolderDown", QObject::tr("Move Down"), QObject::tr("Look in the selected folder later"));
+        buttons->addStretch(1);
+        row->addLayout(buttons);
+
+        // The value's folders, and the one to select after the next refresh.
+        const auto folders = [&settings, key]() {
+            QStringList result;
+            for (const QString& folder : qs(settings.get<std::string>(key)).split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+                if (!folder.trimmed().isEmpty()) result << folder.trimmed();
+            }
+            return result;
+        };
+        const auto store = [&settings, key](const QStringList& value) {
+            settings.setValue(key, value.join(QLatin1Char(';')).toStdString());
+        };
+        auto select = std::make_shared<int>(-1);
+        const auto selected = [list]() {
+            const QListWidgetItem* item = list->currentItem();
+            return item && item->data(Qt::UserRole).isValid() ? item->data(Qt::UserRole).toInt() : -1;
+        };
+        const auto updateButtons = [folders, selected, remove, up, down]() {
+            const int index = selected();
+            remove->setEnabled(index >= 0);
+            up->setEnabled(index > 0);
+            down->setEnabled(index >= 0 && index + 1 < folders().size());
+        };
+        QObject::connect(list, &QListWidget::currentRowChanged, list, [updateButtons]() { updateButtons(); });
+        QObject::connect(add, &QToolButton::clicked, add, [folders, store, select, box]() {
+            const QString chosen = QFileDialog::getExistingDirectory(box->window(), QObject::tr("Choose a Folder"));
+            if (chosen.isEmpty()) return;
+            QStringList value = folders();
+            const QString folder = QDir::toNativeSeparators(chosen);
+            if (!value.contains(folder, Qt::CaseInsensitive)) value << folder;
+            *select = int(value.indexOf(folder));
+            store(value);
+        });
+        QObject::connect(remove, &QToolButton::clicked, remove, [folders, store, selected, select]() {
+            QStringList value = folders();
+            const int index = selected();
+            if (index < 0 || index >= value.size()) return;
+            value.removeAt(index);
+            *select = std::min(index, int(value.size()) - 1);
+            store(value);
+        });
+        const auto move = [folders, store, selected, select](int by) {
+            QStringList value = folders();
+            const int index = selected();
+            const int to = index + by;
+            if (index < 0 || to < 0 || to >= value.size()) return;
+            value.move(index, to);
+            *select = to;
+            store(value);
+        };
+        QObject::connect(up, &QToolButton::clicked, up, [move]() { move(-1); });
+        QObject::connect(down, &QToolButton::clicked, down, [move]() { move(1); });
+
+        const std::vector<core::SettingDefinition::FixedFolder> fixed = definition.fixedFolders;
+        return {box, [folders, fixed, list, select, updateButtons]() {
+                    const QSignalBlocker block(list);
+                    list->clear();
+                    const auto missing = [](const QString& folder) {
+                        return QFileInfo(folder).isDir() ? QString() : QObject::tr(" (missing)");
+                    };
+                    const auto addFixed = [&](bool after) {
+                        for (const auto& folder : fixed) {
+                            if (folder.after != after) continue;
+                            const QString path = QDir::toNativeSeparators(qs(folder.folder));
+                            auto* item = new QListWidgetItem(QStringLiteral("%1: %2%3").arg(qs(folder.label), path, missing(path)), list);
+                            item->setFlags(Qt::NoItemFlags);  // greyed: always there
+                            item->setToolTip(QObject::tr("Always used; can't be removed"));
+                        }
+                    };
+                    addFixed(false);
+                    const QStringList value = folders();
+                    for (int i = 0; i < value.size(); ++i) {
+                        auto* item = new QListWidgetItem(value[i] + missing(value[i]), list);
+                        item->setData(Qt::UserRole, i);
+                        item->setToolTip(value[i]);
+                        if (i == *select) list->setCurrentItem(item);
+                    }
+                    addFixed(true);
+                    *select = -1;
+                    updateButtons();
                 }};
     }
     case SettingType::Color: {
@@ -412,7 +528,8 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
             auto* editorRow = new QHBoxLayout;
             editorRow->setContentsMargins(0, 0, 0, 0);
             // Text and paths get the room there is; the others keep their size.
-            if (definition->type == SettingType::String || definition->type == SettingType::Folder) {
+            if (definition->type == SettingType::String || definition->type == SettingType::Folder ||
+                definition->type == SettingType::FolderList) {
                 editorRow->addWidget(editor.widget, 1);
             } else {
                 editorRow->addWidget(editor.widget);

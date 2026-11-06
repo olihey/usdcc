@@ -128,6 +128,20 @@ USDCC_TEST(settings_definitions) {
     CHECK(!usdcc::core::parseSettingType("colour", &type), "unknown type names don't");
     CHECK(usdcc::core::settingTypeName(SettingType::Color) == "color", "and print");
     CHECK(usdcc::core::parseSettingType("folder", &type) && type == SettingType::Folder, "folder too");
+    CHECK(usdcc::core::parseSettingType("folders", &type) && type == SettingType::FolderList &&
+              usdcc::core::settingTypeName(SettingType::FolderList) == "folders",
+          "and a list of folders");
+}
+
+USDCC_TEST(settings_folder_list) {
+    Settings settings;
+    CHECK(settings.define({.key = "A/folders", .category = "A", .type = SettingType::FolderList, .defaultValue = std::string(),
+                           .fixedFolders = {{.label = "Always", .folder = "C:/always"}}}),
+          "a folder list setting, with a fixed folder");
+    CHECK(settings.get<std::string>("A/folders").empty(), "the fixed folder isn't part of its value");
+    CHECK(settings.setValue("A/folders", std::string("C:/a;D:/b c")) && settings.get<std::string>("A/folders") == "C:/a;D:/b c",
+          "it holds folders separated by ';'");
+    CHECK(!settings.setValue("A/folders", 1), "and only text");
 }
 
 USDCC_TEST(settings_folder_and_next_start) {
