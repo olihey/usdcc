@@ -90,7 +90,8 @@ things that will bite later if not addressed early:
    in CI. Add this as its own workstream (see §8) rather than bolting it on per-milestone.
 2. **CI/CD** — cross-platform build matrix (at minimum Windows + Linux), vcpkg cache,
    and artifact upload of the `deploy` target output. Needed as soon as M0 lands so
-   later milestones don't regress silently.
+   later milestones don't regress silently. Planned in [CI.md](CI.md): Windows first,
+   on GitHub-hosted runners, with OpenUSD built once and published as a Release asset.
 3. **Coding standards** — a `.clang-format`/`.clang-tidy` config and a short C++/Python
    style guide (naming conventions for the `usdcc.*` mirror, header layout, error handling
    convention — exceptions vs. status codes at the C++/Python boundary).
@@ -994,7 +995,8 @@ several of them rather than as a discrete phase.
 - **Goal:** a clean checkout can configure, build, and produce an empty app window.
 - Deliverables: repo layout per §3, `external/vcpkg` submodule, root `CMakeLists.txt`
   with `USD_INSTALL` parameter, vcpkg manifest with pinned Qt6/pybind11/OpenUSD deps,
-  `readme.md` with build instructions, CI skeleton (configure+build on Windows & Linux).
+  `readme.md` with build instructions, CI skeleton (configure+build on Windows & Linux;
+  Windows first, see [CI.md](CI.md)).
 - Exit criteria: fresh clone builds on both target OSes and launches an empty `QMainWindow`.
 
 ### M1 — Core Application Shell
