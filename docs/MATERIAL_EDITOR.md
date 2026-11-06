@@ -5,8 +5,8 @@ NodeGraphs and lay them out. The stage is the only data store. The graph draws w
 and every edit is a USD edit through `UndoManager`, so the Outliner, the Attribute Editor and undo
 keep working without changes.
 
-Status: **phases 0 and 1 done** (§5.1): QtNodes stays, the catalog and Debug > Shader Nodes are in, and
-the spike panel is a throwaway. The rest is still a plan. §2 and §3 were researched in November 2026 against the
+Status: **phases 0, 1 and 2 done** (§5.1): the panel draws a material's network and follows the selection,
+and moving a node is the only edit so far. The rest is still a plan. §2 and §3 were researched in November 2026 against the
 local USD build (`USD_INSTALL`, `pxr.h` 0.26.8) and the upstream repos named in each section. §3.5 was
 tested on 2026-11-06 against that build, and against the files in the ovrtx 0.6 wheel and the MDL SDK
 2026.0.2 package.
@@ -92,9 +92,9 @@ QtNodes doesn't provide is written here.
   - It fits the whole graph each time it's shown, ignoring the scale range, and `setupScale()` does
     nothing until a range is set. The panel fits again after a show and keeps the scale readable.
 - **Fallback:** if phase 2 shows QtNodes fighting us, especially on custom geometry or on subnet-style
-  navigation, which the spike didn't try, write the view directly on `QGraphicsScene`. The UsdShade model
-  and everything in §3 don't depend on which view draws them, so that replaces only the drawing and
-  interaction code.
+  navigation, write the view directly on `QGraphicsScene`. `shade_graph.h` and everything in §3 don't
+  depend on which view draws them, so that replaces only the drawing and interaction code. Phase 2 needed
+  neither a patch nor a workaround for its own geometry, painter or navigation, so this looks unlikely.
 
 ## 3. Which shading nodes exist: the Sdr registry
 
@@ -341,10 +341,18 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
 
 ## 4. The panel
 
-- **`MaterialEditorViewPanel`** is a view panel type, opened from Stages > Material Editor.
-  - It follows the current stage and the selection: selecting a Material, NodeGraph or Shader (or a
-    prim with a bound material) shows the enclosing Material.
-  - A pin keeps the panel on one Material.
+- **`MaterialEditorViewPanel`** is a view panel type, opened from Stages > (a stage) > Material Editor.
+  - It follows the selection: a Material, a NodeGraph or Shader (the level it's drawn on), or a prim with
+    a bound material. A selection that's already on this level, or the level itself or one around it,
+    doesn't move it, and neither does a prim with no material.
+  - A pin keeps the panel where it is. Double-clicking a NodeGraph and the breadcrumb still work.
+- **What's read and what's drawn are apart:** `shade_graph.h`, Qt-free, reads a level; `UsdShadeGraphModel`
+  gives it to QtNodes; `ShaderNodeGeometry` and `ShaderNodePainter` lay it out and draw it.
+- **Positions:** `ui:nodegraph:node:pos` counts in node sizes, not pixels ("assume that the size of a node
+  is approximately 1.0x1.0", `nodeGraphNodeAPI.h`), so it's stored as pixels / 200. A node with no position
+  goes in a column by its distance from the end of the graph, and stays there for as long as the panel
+  shows that stage. A Material's Outputs node uses the Material's position. A level's other interface
+  nodes have nowhere in USD to keep one, so theirs last as long as the panel does.
 - **Selection is two-way:**
   - Selecting nodes selects their prims, so the Attribute Editor edits them.
   - **The Attribute Editor needs work for this, despite what its doc says.** ATTRIBUTE_EDITOR.md §4 says it
@@ -356,19 +364,26 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   - Unconnectable inputs (`connectability = "interfaceOnly"`, or `IsConnectable()` false) get no
     port.
   - Connecting an unauthored input creates it (`UsdShadeShader::CreateInput` with the Sdr type).
-  - `shownIf` hides ports whose condition is false. When `expansionState` is closed, only connected
-    ports show.
+  - `shownIf` hides ports whose condition is false, unless authored or connected. `GetPagesShownIf()`,
+    for whole pages, isn't read yet. When `expansionState` is closed or minimized, only connected ports
+    show.
+  - A page starts open if it holds something authored or connected. Opening or closing one lasts as long
+    as the panel, and a closed page still lists what's connected, so a line always has somewhere to land.
+  - A connection from outside the level, or from something missing, has no line. Its port names the
+    source instead.
 - **Connection rules:** reuse `shade_connections.h`. It already allows matching value types and
   reaching any enclosing Material or NodeGraph. Ports are coloured by type role (color, float, vector,
-  token, asset, surface/displacement).
+  token, asset, surface/displacement). Lines are all one grey so far: QtNodes' own per-type line colours
+  are a hash of the type's name, not these.
 - **Edits:** each of these is one `prim_actions` call and one undo step: create, delete, rename,
   duplicate, copy/paste, connect, disconnect, group into a NodeGraph, ungroup, promote an input to the
   interface, add/remove a Material terminal, create a backdrop, and auto-layout.
   - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
     `UsdUINodeGraphNodeAPI` position, and nothing else.
   - Deleting a node also removes connections to it.
-- **Live refresh:** a `UsdNotice::ObjectsChanged` listener scoped to the shown Material. It updates the
-  model incrementally, so edits from Python, the Attribute Editor or undo show at once.
+- **Live refresh:** `Stage::changed`, for anything under the shown Material. A position only moves its
+  node. Otherwise the level is read again, and the scene is replaced only if what's drawn differs, so a
+  new value leaves it alone. Edits from Python, the Attribute Editor or undo show at once.
 - **Python:**
   - `usdcc.shading.catalog()`, a pybind11 binding of the Qt-free catalog (§5, phase 1).
   - `register_renderer_profile()`, so plugins can add profiles.
@@ -402,11 +417,16 @@ in phase 2, so the fallback in §2.2 still stands.
 | No black viewport | None in a floating window, or when its tab comes back. Beside the 3D viewport in one tab area it was tested only with a plain widget, offscreen | Floating: deployed app. Tabs: `usdcc_ui_tests` |
 | Catalog grouping and counts | 814 nodes plus 23 hidden; systems `glslfx` and `mtlx` | `usdcc_tests`, deployed app |
 
-Still open for phase 2: **position units.** The spike uses `ui:nodegraph:node:pos` 1:1 as scene
-pixels. Check what other DCCs write before relying on that, or layouts won't round-trip as §1 promises.
+**Phase 2.** The spike is gone, replaced by the panel in §4. `test_data/materials.usda` has a preview material
+with a NodeGraph and interfaces, and a MaterialX one.
 
-The spike's files go when phase 2's panel replaces them: `material_graph_spike_*` and
-`tests/material_graph_spike_test.cpp`, which also holds the Shader Nodes dialog's test, to keep.
+| Criterion | Result | Checked by |
+|---|---|---|
+| Shows the materials, matching `usdcat` | Yes. `usdcat --flatten` lists 10 connections, and all 10 are drawn across the file's levels | `usdcc_tests` counts them in a flattened export; real `usdcat` gave the same number by hand; screenshots from the deployed app |
+| Follows selection both ways | Yes: a shader elsewhere, a bound prim, a shader in a NodeGraph, and a pin. Clicking a node selects its prim | `usdcc_ui_tests` with mouse events, and the deployed app with `usdcc.usd.select()` and script-sent clicks |
+| NodeGraph enter and exit | Double-click and breadcrumb | Double-click: `usdcc_ui_tests`. Breadcrumb: both |
+
+Not checked: the position scale against files from other DCCs, as none are on this machine (§6, 8).
 
 ## 6. Open questions
 
@@ -424,3 +444,6 @@ The spike's files go when phase 2's panel replaces them: `material_graph_spike_*
    don't read Sdr?
 6. **ovrtx and our search paths:** a module from `Materials/mdlSearchPaths` has to reach ovrtx in its helper process too. Not checked how it's told. It may need `MDL_USER_PATH` set for the helper.
 7. **The Omniverse MDL files' licence:** I haven't read it. The plan is only to read them where ovrtx installed them, never to copy them. Without ovrtx, there's no `OmniPBR` to offer, so "New Material" for MDL needs a module from a search path or says why it can't.
+8. **Positions in other DCCs' files:** USD's docs say a node is about 1.0×1.0, and we store pixels / 200. Files
+   that store pixels anyway would open with their nodes spread 200 times too far. Check a real export, and
+   consider guessing the scale per file from how far apart its nodes are.

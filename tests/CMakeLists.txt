@@ -20,6 +20,7 @@ add_executable(usdcc_tests
     dependency_files.h
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
+    shade_graph_test.cpp
     log_bridges_test.cpp
     log_capture_test.cpp
     log_test.cpp
@@ -44,6 +45,7 @@ add_executable(usdcc_tests
     xform_target_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
+target_compile_definitions(usdcc_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 usdcc_precompile_headers(usdcc_tests ui_pch.h)
 
 add_executable(usdcc_ui_tests
@@ -73,7 +75,7 @@ add_executable(usdcc_ui_tests
     render_view_panel_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
-    material_graph_spike_test.cpp
+    material_editor_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
     side_panel_test.cpp
@@ -84,6 +86,7 @@ add_executable(usdcc_ui_tests
     panel_maximizer_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
+target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 

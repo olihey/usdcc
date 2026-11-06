@@ -35,19 +35,6 @@ std::string metadataValue(const SdrShaderNode& node, const char* key) {
 
 bool isTrue(const std::string& value) { return !value.empty() && value != "0" && value != "false" && value != "False"; }
 
-// Nodes defined in .usda, such as USD's preview ones, say "usda" for their context,
-// in their metadata too. Their outputs say what they are.
-std::string contextOf(const SdrShaderNode& node) {
-    const std::string context = node.GetContext().GetString();
-    if (context != "usda" && !context.empty()) return context;
-    // In this order: UsdPreviewSurface has a displacement output too.
-    const SdrTokenVec& outputs = node.GetShaderOutputNames();
-    for (const char* kind : {"surface", "displacement", "volume"}) {
-        if (std::find(outputs.begin(), outputs.end(), TfToken(kind)) != outputs.end()) return kind;
-    }
-    return "pattern";
-}
-
 // What differs between a function's typed versions: ND_add_color3 is add's "color3".
 std::string variantOf(const std::string& identifier, const std::string& function) {
     const std::string marker = "_" + function + "_";
@@ -76,6 +63,19 @@ void sortLevel(ShaderNodeGroup& group) {
     });
 }
 }  // namespace
+
+// Nodes defined in .usda, such as USD's preview ones, say "usda" for their context,
+// in their metadata too. Their outputs say what they are.
+std::string shaderContextOf(const SdrShaderNode& node) {
+    const std::string context = node.GetContext().GetString();
+    if (context != "usda" && !context.empty()) return context;
+    // In this order: UsdPreviewSurface has a displacement output too.
+    const SdrTokenVec& outputs = node.GetShaderOutputNames();
+    for (const char* kind : {"surface", "displacement", "volume"}) {
+        if (std::find(outputs.begin(), outputs.end(), TfToken(kind)) != outputs.end()) return kind;
+    }
+    return "pattern";
+}
 
 ShaderNodeCatalog& ShaderNodeCatalog::instance() {
     static ShaderNodeCatalog catalog;
@@ -113,7 +113,7 @@ ShaderNodeInfo ShaderNodeCatalog::describe(const SdrShaderNode& node) const {
     if (info.label.empty()) info.label = node.GetName();
     if (info.label.empty()) info.label = info.identifier;
     info.shadingSystem = node.GetShadingSystem().GetString();
-    info.context = contextOf(node);
+    info.context = shaderContextOf(node);
     // The metadata, not GetRole(), which falls back to the node's name.
     info.group = metadataValue(node, "role");
     if (info.group.empty()) info.group = kOtherGroup;

@@ -57,7 +57,7 @@
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
-#include "usdcc/usd/material_graph_spike_panel.h"
+#include "usdcc/usd/material_editor_view_panel.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -292,6 +292,11 @@ int main(int argc, char** argv) {
                    [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                    QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::UsdaViewPanel(&stageManager, stage, title, parent);
+                   });
+    panelTypes.add(QStringLiteral("materialEditor"), QObject::tr("Material Editor"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::MaterialEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     panelTypes.add(QStringLiteral("dependencies"), QObject::tr("Dependencies"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -589,7 +594,7 @@ int main(int argc, char** argv) {
         dialog->raise();
         dialog->activateWindow();
     });
-    // The Material Editor's catalog, and its node graph spike (docs/MATERIAL_EDITOR.md §5).
+    // The Material Editor's catalog (docs/MATERIAL_EDITOR.md §3).
     QAction* shaderNodesAction = debugMenu->addAction(QObject::tr("&Shader Nodes..."));
     QObject::connect(shaderNodesAction, &QAction::triggered, &window, [&window]() {
         static QPointer<usdcc::usd::ShaderNodesDialog> dialog;
@@ -600,17 +605,6 @@ int main(int argc, char** argv) {
         dialog->show();
         dialog->raise();
         dialog->activateWindow();
-    });
-    QAction* graphSpikeAction = debugMenu->addAction(QObject::tr("Material &Graph Spike"));
-    QObject::connect(graphSpikeAction, &QAction::triggered, &window, [&window, &stageManager, undoManager]() {
-        // Not a registered type: nothing to come back after a restart, or to outlive it.
-        auto* panel = new usdcc::usd::MaterialGraphSpikePanel(&stageManager, stageManager.currentStage(), undoManager,
-                                                              QObject::tr("Material Graph Spike"), &window);
-        static int count = 0;
-        panel->setObjectName(QStringLiteral("materialGraphSpike-%1").arg(++count));
-        panel->setFeature(ads::CDockWidget::DockWidgetDeleteOnClose, true);
-        window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, panel);
-        panel->setAsCurrentTab();
     });
     // Checks for the Log panel (docs/LOGGING.md §7): one message of every
     // level from every source, and a large burst.

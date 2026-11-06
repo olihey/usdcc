@@ -28,6 +28,7 @@ int runTests(int argc, char** argv) {
         }
         const int failuresBefore = failures();
         std::printf("[%s]\n", test.name);
+        std::fflush(stdout);  // so that a crash says which test it was
         test.run();
         if (failures() != failuresBefore) {
             std::printf("  -> %d failure(s)\n", failures() - failuresBefore);

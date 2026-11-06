@@ -88,6 +88,9 @@ private:
     std::map<std::string, RendererProfile> m_profiles;
 };
 
+// A node's context, "surface", "pattern" and so on, never Sdr's "usda" (§3.2).
+std::string shaderContextOf(const PXR_NS::SdrShaderNode& node);
+
 // Asks a render delegate plugin ("HdStormRendererPlugin"). Empty if it can't be
 // created. V-Ray and RTX don't run as delegates in this process, so their plugins
 // declare the same through their profiles.
