@@ -39,8 +39,8 @@ jobs:
       - name: Check the tag
         id: tag
         run: |
-          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
-            Write-Host "::error::The tag '$env:TAG' isn't v plus a version, such as v0.2.0 or v0.2.0-beta.1."
+          if ($env:TAG -notmatch '^v?(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
+            Write-Host "::error::The tag '$env:TAG' isn't a version, such as 0.2.0, v0.2.0 or 0.2.0-beta.1."
             exit 1
           }
           $version = $Matches[1]

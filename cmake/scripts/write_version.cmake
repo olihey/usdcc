@@ -22,7 +22,7 @@ if(GIT_EXECUTABLE)
         set(commit "")
     endif()
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" describe --tags --long --dirty --abbrev=7 --match "v[0-9]*"
+        COMMAND "${GIT_EXECUTABLE}" describe --tags --long --dirty --abbrev=7 --match "v[0-9]*" --match "[0-9]*"
         WORKING_DIRECTORY "${SOURCE_DIR}"
         OUTPUT_VARIABLE described
         RESULT_VARIABLE result
@@ -51,7 +51,7 @@ else()
             set(dirty ".dirty")
         endif()
     endif()
-    if(described MATCHES "^v(.+)-([0-9]+)-g([0-9a-f]+)(-dirty)?$")
+    if(described MATCHES "^v?(.+)-([0-9]+)-g([0-9a-f]+)(-dirty)?$")
         set(version "${CMAKE_MATCH_1}+${CMAKE_MATCH_2}.${CMAKE_MATCH_3}${dirty}")
     elseif(commit)
         set(version "${NUMBER}+${commit}${dirty}")

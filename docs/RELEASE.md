@@ -7,16 +7,17 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 **Status:** built (§5).
 
-**To make a release:** on GitHub, Releases > Draft a new release, a new tag `v<version>`
-(such as `v0.2.0`, or `v0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes,
+**To make a release:** on GitHub, Releases > Draft a new release, a new tag that is the
+version (`0.2.0` or `v0.2.0`, or `0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes,
 then Publish. About 25 minutes later the release has `usdcc-<version>-windows-x64.zip` and
 its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
 same tag (Actions > Release > Run workflow).
 
 ## 1. Decisions
 
-- **The release's tag is the version.** You create a release with the tag `v0.2.0` (or
-  `v0.2.0-beta.1` for a prerelease), and that build is version `0.2.0`. Nothing to bump by
+- **The release's tag is the version.** You create a release with the tag `0.2.0` (or
+  `0.2.0-beta.1` for a prerelease; a leading `v`, as in `v0.2.0`, works too), and that build
+  is version `0.2.0`. Nothing to bump by
   hand before releasing; the hand-kept `0.1.0` in `CMakeLists.txt` goes.
 - **Every other build is a development build**, named after the last release before it:
   `0.2.0+5.3b70ef2` is 5 commits after `v0.2.0`, at commit `3b70ef2`. The About dialog
@@ -94,7 +95,9 @@ later as a second tab.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand
 (`workflow_dispatch`) with a tag, to rebuild a release whose run failed.
 
-1. **Check the tag.** It has to be `v` plus a version (`v0.2.0`, `v0.2.0-beta.1`).
+1. **Check the tag.** It has to be a version (`0.2.0`, `v0.2.0`, `0.2.0-beta.1`). The
+   first version of this workflow only took `v0.2.0`, and turned down the first release,
+   `0.0.1`.
    Otherwise the run fails before building anything.
 2. **Check out the tag**, with submodules.
 3. **The same steps as `build.yml`:** OpenUSD and PySide6 from their release assets, Qt

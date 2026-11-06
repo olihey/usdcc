@@ -4,7 +4,8 @@
 # The release number, worked out here at configure time:
 #   1. USDCC_VERSION (-DUSDCC_VERSION=0.2.0), which release.yml passes from the
 #      release's tag: a release build.
-#   2. Otherwise the last "v<version>" tag before HEAD (git describe), e.g. 0.2.0
+#   2. Otherwise the last release tag before HEAD ("0.2.0" or "v0.2.0", git
+#      describe), e.g. 0.2.0
 #      for a development build after v0.2.0.
 #   3. Otherwise 0.0.0.
 # It's project(VERSION) and what C++ plugins are checked against
@@ -34,7 +35,7 @@ else()
     set(_usdcc_last_release "0.0.0")
     if(GIT_EXECUTABLE)
         execute_process(
-            COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=0 --match "v[0-9]*"
+            COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=0 --match "v[0-9]*" --match "[0-9]*"
             WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../.."
             OUTPUT_VARIABLE _usdcc_tag
             RESULT_VARIABLE _usdcc_tag_result
