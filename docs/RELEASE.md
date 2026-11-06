@@ -5,7 +5,13 @@ and attaches it. The app shows its version in a new **Help > About usdcc** dialo
 only for now, like the rest of CI ([CI.md](CI.md)). This is part of M11 (packaging), and
 the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
-**Status: plan.** Nothing below is built yet.
+**Status:** built (§5).
+
+**To make a release:** on GitHub, Releases > Draft a new release, a new tag `v<version>`
+(such as `v0.2.0`, or `v0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes,
+then Publish. About 25 minutes later the release has `usdcc-<version>-windows-x64.zip` and
+its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
+same tag (Actions > Release > Run workflow).
 
 ## 1. Decisions
 
@@ -24,7 +30,7 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 ## 2. The version in the build
 
-**Where it comes from.** `cmake/UsdccVersion.cmake` works it out:
+**Where it comes from.** `cmake/modules/UsdccVersion.cmake` works it out:
 
 1. `-DUSDCC_VERSION=0.2.0`, which the release workflow passes from the tag.
 2. Otherwise `git describe --tags --match "v[0-9]*"`: the last release tag, the commits
@@ -39,19 +45,26 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
   development builds after it, but not in 0.3.0, without anyone having to remember to
   raise a version.
 - **The build's identity** (commits since the tag, commit, `dirty`, build date), written at
-  build time into a small generated source in `usdcc_core`. It's rewritten only when it
-  changes, so a new commit recompiles one file, and the About dialog never shows a stale
-  commit.
+  build time into a small generated source in `usdcc_core` (`cmake/scripts/write_version.cmake`).
+  It's rewritten only when it changes, so a new commit recompiles one file, and the About
+  dialog never shows a stale commit.
 
-**What reads it:** `usdcc/core/version.h` (`usdcc::core::version()`, `isRelease()`,
-`commit()`, `buildDate()`), used by:
+`tools/build.ps1` always passes `-DUSDCC_VERSION`, empty without `-UsdccVersion`, so a
+release build's version doesn't stay in the CMake cache for the builds after it. A new tag
+reaches the release number at the next configure. CI's ordinary builds check out without
+tags, so they're `0.0.0+<commit>`.
+
+**What reads it:** `usdcc/core/version.h` (`usdcc::core::version()`, `releaseNumber()`,
+`isReleaseBuild()`, `commit()`, `buildDate()`), used by:
 
 - the About dialog (§3);
-- the log's first line at startup ("usdcc 0.2.0 (3b70ef2) starting"), so every log file
-  says which build wrote it;
-- Python, as `usdcc.app.version()`, for scripts and plugins;
+- the log's first line at startup ("usdcc 0.2.0+5.3b70ef2 (development build) starting"),
+  so every log file says which build wrote it;
+- Python, as `usdcc.app.version()` and `usdcc.app.is_release_build()`, for scripts and
+  plugins;
 - the `.exe`'s version resource (`resources/usdcc.rc`), shown in Explorer's
-  Properties > Details.
+  Properties > Details: the release number, and "(development build)", marked prerelease,
+  for a development build.
 
 ## 3. The About dialog
 
@@ -66,9 +79,11 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 - Links to the repository and its releases.
 - **Copy**, which copies all of it as plain text for a bug report.
 
-`usdcc::ui::AboutDialog` lives in `usdcc_ui` and is given its rows. The app fills them in,
-because `usdcc_ui` doesn't know about OpenUSD or Python. A test in `usdcc_ui_tests` checks
-the rows and the copied text.
+`usdcc::ui::AboutDialog` lives in `usdcc_ui` and is given its rows. The app fills them in
+(`main.cpp`), because `usdcc_ui` doesn't know about Python: OpenUSD's version from
+`pxr/pxr.h`, Python's from the running interpreter, PySide6's from the module when it's
+there. A test in `usdcc_ui_tests` checks the rows and the copied text. The app's stylesheet
+sets font sizes, so the larger title and version are sized with a stylesheet on the label.
 
 M10's Info dialog (third-party licences, registered USD extensions) can grow out of it
 later as a second tab.
@@ -88,16 +103,25 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
 4. **Build** with `tools/build.ps1 -UsdccVersion <version>` (a new parameter that passes
    `-DUSDCC_VERSION`).
 5. **Run the tests.**
-6. **Deploy** with `tools/deploy.ps1` into `usdcc-<version>/`.
-7. **Smoke test the deploy.** Start `bin\usdcc.exe` from the deploy folder, with a `PATH`
-   that has none of the build's folders on it, on Qt's offscreen platform, with
-   `--no-plugins --script check.py`. The script writes `usdcc.app.version()` and OpenUSD's
-   version to a file and quits the app. The workflow checks the version is the tag's. This
-   catches a missing DLL or Python file that the build's own folders were hiding.
+6. **Deploy** with `tools/deploy.ps1` into `usdcc-<version>/`, and check it has the
+   licences of OpenUSD's dependencies, PySide6's and vcpkg's (§6).
+7. **Start the deploy** (`tools/ci/smoke-test.ps1`). `bin\usdcc.exe` from the deploy
+   folder, with a `PATH` of Windows' own folders only, on Qt's offscreen platform, with
+   `--no-startup-scripts --script check.py` (the shipped plugins load as usual). The script
+   records `usdcc.app.version()`, the OpenUSD, Python and PySide6 versions, and where `pxr`,
+   `usdcc` and `PySide6` were imported from, and quits the app. It fails if the app
+   doesn't quit within 3 minutes, if the version isn't the tag's, or if a module came from
+   outside the deploy. That catches a missing DLL or Python file that the build's own
+   folders were hiding; it prints the app's log when it fails. The deploy only has Qt's
+   `windows` platform plugin, so the offscreen one comes from vcpkg's folder.
 8. **Zip:**
-   - `usdcc-<version>-windows-x64.zip`: the deploy folder.
-   - `usdcc-<version>-windows-x64-symbols.zip`: the PDBs of usdcc's own DLLs and exe.
+   - `usdcc-<version>-windows-x64.zip`: the deploy folder, `usdcc-<version>/`.
+   - `usdcc-<version>-windows-x64-symbols.zip`: the PDBs of usdcc's own programs and
+     libraries (the exe, its DLLs, the `usdcc` Python modules, the example C++ plugin),
+     laid out as they are in the deploy.
 9. **Attach** both to the release with `gh release upload`.
+
+It uses `build.yml`'s vcpkg cache, read-only.
 
 **What you see:** the release appears as soon as you publish it, and the zips appear about
 15 minutes later. If the run fails, the release stays without them. Fix the cause, then run
@@ -105,15 +129,22 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
 
 ## 5. Phases
 
-1. **Version and About dialog.** `cmake/UsdccVersion.cmake`, `usdcc/core/version.h`, the
-   startup log line, `usdcc.app.version()`, the `.exe` version resource, the Help menu and
-   `AboutDialog` with its test, and `tools/build.ps1 -UsdccVersion`. All local, testable
+1. **Version and About dialog.** `cmake/modules/UsdccVersion.cmake`, `usdcc/core/version.h`,
+   the startup log line, `usdcc.app.version()`, the `.exe` version resource, the Help menu
+   and `AboutDialog` with its test, and `tools/build.ps1 -UsdccVersion`. All local, testable
    without a release. Done when a local build shows `0.0.0+<commit>` as a development
    build, and `tools/build.ps1 -UsdccVersion 0.2.0` shows `0.2.0` as a release.
+   *Done. A local build is `0.0.0+5cb3857.dirty`; `write_version.cmake` gives
+   `0.2.0-beta.1` for a release and `0.1.0+1.5cb3857.dirty` one commit after a (temporary)
+   `v0.1.0` tag; a version such as `v0.3` is refused at configure time.*
 2. **Release workflow.** `release.yml` as in §4, with the smoke test. Done when a test
    prerelease (`v0.0.1-test.1`) gets both zips, and its zip runs on a machine without the
    dev environment. The test release and its tag are deleted afterwards.
-3. **Third-party licences** (§6), before the first real release.
+   *Written. The smoke test passed on a local deploy, and failed as it should with `pxr`
+   taken out of it.*
+3. **Third-party licences** (§6), before the first real release. *Done: a local deploy has
+   29 vcpkg licences, 20 of OpenUSD's dependencies, PySide6's, Python's, QWindowKit's,
+   ruff's and uv's, and `SOURCES.txt`.*
 
 ## 6. Licences
 
@@ -130,12 +161,23 @@ them requires usdcc to be under the GPL:
 
 What the release has to do, whatever usdcc's own licence:
 
-- **Ship the licence texts.** `tools/deploy.ps1` gathers them into `licenses/`, one file per
-  component: vcpkg's `share/<port>/copyright`, OpenUSD's and its dependencies', Python's,
-  PySide6's, ruff's and uv's, QWindowKit's, plus the NOTICE files the Apache 2.0 licences
-  ask for. usdcc's own `LICENSE` goes at the top of the zip.
-- **Make the LGPL libraries' sources available.** The release notes link to the exact
-  sources: Qt's version with the vcpkg commit whose port patches it, and PySide's tag.
+- **Ship the licence texts.** `tools/deploy.ps1` gathers them into `licenses/`, and usdcc's
+  own `LICENSE` goes at the top as `LICENSE.txt`:
+  - `vcpkg/<port>.txt`: each vcpkg package's `share/<port>/copyright` (not vcpkg's own
+    build helpers).
+  - `OpenUSD/`: OpenUSD's `LICENSE` and `THIRD-PARTY.md`, from its install.
+  - `OpenUSD-dependencies/<library>/`: the licence and NOTICE files of the libraries
+    `build_usd.py` builds, which its install leaves out. `tools/ci/usd-licenses.ps1`
+    collects them from its source and build folders (top-level licence files of each
+    source, and the libraries OpenColorIO and OpenEXR build in themselves).
+    `deps-usd.yml` runs it before deleting those folders, into the asset's `licenses/`;
+    `deploy.ps1` runs it for a local install that still has them.
+  - `PySide6/`: pyside-setup's `LICENSES`, which `tools/build-pyside.ps1` copies into its
+    install.
+  - `Python/`, `QWindowKit/`, `ruff/`, `uv/`.
+- **Make the LGPL libraries' sources available.** `licenses/SOURCES.txt` names, for every
+  vcpkg package, its version, the vcpkg port it was built with and its upstream source
+  (from the SPDX file vcpkg writes), and PySide6's tag.
 - **Keep the LGPL libraries replaceable DLLs.** Never link them statically.
 
 The About dialog's licence tab (M10's Info dialog) can later list the same `licenses/`

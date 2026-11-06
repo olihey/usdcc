@@ -236,6 +236,10 @@ foreach ($dll in $extraRuntimeDlls) {
 }
 Copy-Item -Force (Join-Path $libclangDir 'bin/libclang.dll') (Join-Path $pysideInstallDir 'shiboken6_generator/libclang.dll')
 
+# The licences PySide6 and shiboken6 are under (LGPL v3, among others), which
+# tools/deploy.ps1 ships in the deploy's licenses folder (docs/RELEASE.md section 6).
+Copy-Item -Recurse -Force (Join-Path $pysideSrcDir 'LICENSES') (Join-Path $pysideInstallDir 'LICENSES')
+
 Write-Host "Done. PySide6/shiboken6/shiboken6_generator built against vcpkg's Qt at:"
 Write-Host "  $pysideInstallDir"
 Write-Host ''

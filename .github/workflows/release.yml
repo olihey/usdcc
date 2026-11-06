@@ -1,0 +1,174 @@
+# Builds a GitHub release's Windows zip and attaches it (docs/RELEASE.md §4):
+# publish a release (or prerelease) with a tag such as v0.2.0, and this builds
+# that tag, runs the tests, deploys, starts the deploy as a user would, and
+# attaches usdcc-<version>-windows-x64.zip and its symbols. Run it by hand with
+# the tag to rebuild a release whose run failed.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag, such as v0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: write  # attaching the zips
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    # Visual Studio 2022, as for build.yml and the deps assets.
+    runs-on: windows-2022
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      USD_INSTALL: C:\deps\usd
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the tag
+        id: tag
+        run: |
+          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
+            Write-Host "::error::The tag '$env:TAG' isn't v plus a version, such as v0.2.0 or v0.2.0-beta.1."
+            exit 1
+          }
+          $version = $Matches[1]
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
+          if ($LASTEXITCODE) {
+            Write-Host "::error::There's no release with the tag $env:TAG to attach the zips to."
+            exit 1
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "name=usdcc-$version" >> $env:GITHUB_OUTPUT
+          "zip=usdcc-$version-windows-x64.zip" >> $env:GITHUB_OUTPUT
+          "symbols=usdcc-$version-windows-x64-symbols.zip" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          submodules: recursive
+
+      - name: Name the OpenUSD asset
+        id: asset
+        run: tools/ci/usd-asset.ps1 -GitHubOutput
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      - name: Download OpenUSD
+        run: |
+          gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.zip }}' --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) {
+            Write-Host "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) first."
+            exit 1
+          }
+          7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$env:USD_INSTALL" | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+
+      # Required here, unlike in build.yml: a release without it couldn't make
+      # panels from Python.
+      - name: Download PySide6
+        run: |
+          $asset = tools/ci/pyside-asset.ps1 | ConvertFrom-Json
+          gh release download $asset.tag --pattern $asset.zip --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) {
+            Write-Host "::error::No $($asset.zip) in release $($asset.tag). Run the PySide6 workflow (deps-pyside.yml) first."
+            exit 1
+          }
+          7z x "$env:RUNNER_TEMP\$($asset.zip)" -oexternal | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+
+      # build.yml's cache, only read: build.yml keeps it.
+      - name: Name the vcpkg cache
+        id: vcpkg
+        run: tools/ci/vcpkg-cache.ps1 -Access read
+
+      - name: Restore the vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Build
+        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL -UsdccVersion ${{ steps.tag.outputs.version }}
+
+      - name: Test
+        run: |
+          ctest --test-dir build -C RelWithDebInfo --output-on-failure --timeout 900
+          if ($LASTEXITCODE) { throw 'tests failed' }
+
+      - name: Deploy
+        run: |
+          $deploy = "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}"
+          tools/deploy.ps1 $deploy
+          # A release has to ship every licence (docs/RELEASE.md section 6).
+          foreach ($folder in 'OpenUSD-dependencies', 'PySide6', 'vcpkg') {
+            if (-not (Get-ChildItem "$deploy\licenses\$folder" -ErrorAction SilentlyContinue)) {
+              throw "No licences in licenses\$folder"
+            }
+          }
+
+      - name: Start the deploy
+        run: |
+          tools/ci/smoke-test.ps1 -Deploy "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" `
+            -ExpectVersion ${{ steps.tag.outputs.version }} `
+            -PlatformPlugins build\vcpkg_installed\x64-windows\Qt6\plugins\platforms
+
+      # The deploy, in a folder of its own; and the PDBs of usdcc's own
+      # programs and libraries, laid out as they are in the deploy, for reading
+      # a crash dump from that release.
+      - name: Zip it
+        run: |
+          $deploy = "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}"
+          Push-Location $env:RUNNER_TEMP
+          7z a -tzip -mx=7 '${{ steps.tag.outputs.zip }}' '${{ steps.tag.outputs.name }}' | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw '7z failed' }
+          Pop-Location
+
+          $symbols = "$env:RUNNER_TEMP\symbols\${{ steps.tag.outputs.name }}-symbols"
+          $pdbs = @(Get-ChildItem build -Recurse -Filter *.pdb |
+            Where-Object { $_.FullName -notmatch '\\(vcpkg_installed|CMakeFiles|tests)\\' -and $_.FullName -notmatch '\.dir\\' })
+          $count = 0
+          foreach ($binary in Get-ChildItem $deploy -Recurse -Include *.exe, *.dll, *.pyd) {
+            # OpenUSD's pxr has an _usd.pyd too; of the Python packages, only usdcc's are ours.
+            if ($binary.FullName -match '\\site-packages\\' -and $binary.FullName -notmatch '\\site-packages\\usdcc\\') { continue }
+            $pdb = $pdbs | Where-Object { $_.BaseName -eq $binary.BaseName } | Select-Object -First 1
+            if (-not $pdb) { continue }
+            $to = Join-Path $symbols ([IO.Path]::GetDirectoryName($binary.FullName.Substring($deploy.Length + 1)))
+            New-Item -ItemType Directory -Force $to | Out-Null
+            Copy-Item $pdb.FullName $to
+            $count++
+          }
+          Write-Host "$count PDB(s)"
+          if ($count -lt 5) { throw 'Fewer PDBs than expected' }
+          Push-Location "$env:RUNNER_TEMP\symbols"
+          7z a -tzip -mx=7 "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" * | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw '7z failed' }
+          Pop-Location
+          foreach ($zip in '${{ steps.tag.outputs.zip }}', '${{ steps.tag.outputs.symbols }}') {
+            $size = (Get-Item "$env:RUNNER_TEMP\$zip").Length
+            Write-Host ("{0}: {1:N0} MB" -f $zip, ($size / 1MB))
+            if ($size -ge 2GB) { throw "$zip is over GitHub's 2 GiB per-asset limit" }
+          }
+
+      - name: Attach to the release
+        run: |
+          gh release upload $env:TAG "$env:RUNNER_TEMP\${{ steps.tag.outputs.zip }}" `
+            "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE) { throw 'attaching the zips failed' }

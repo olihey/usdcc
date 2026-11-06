@@ -9,6 +9,10 @@
 
         <Destination>\
           usdcc.cmd     starts bin\usdcc.exe
+          LICENSE.txt   usdcc's licence (BSD-3-Clause)
+          licenses\     the licences of everything else in the folder, and in
+                        SOURCES.txt where each library's source is
+                        (docs/RELEASE.md section 6)
           bin\          usdcc.exe, its DLLs (app, Qt, vcpkg, OpenUSD and the
                         libraries OpenUSD uses), Qt's platform plugin
           bin\usd\      OpenUSD's built-in plugins (schemas, Hydra, MaterialX
@@ -295,6 +299,97 @@ Copy-Item (Join-Path $buildDir 'sdk/UsdccPluginConfig.cmake') $sdkDir
 Copy-Item (Join-Path $repoRoot 'cmake/modules/UsdccPlugin.cmake'), (Join-Path $repoRoot 'cmake/modules/FindUSD.cmake') (Join-Path $sdkDir 'cmake')
 Copy-Tree -From (Join-Path $repoRoot 'src/plugins/cpp_example') -To (Join-Path $sdkDir 'example')
 
+# --- licences (docs/RELEASE.md section 6) ----------------------------------
+
+Write-Host '  Licences'
+$licensesDir = Join-Path $deployDir 'licenses'
+New-Item -ItemType Directory -Force $licensesDir | Out-Null
+Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $deployDir 'LICENSE.txt')
+
+# OpenUSD's own, and its dependencies': deps-usd.yml collects those into the CI
+# asset's licenses folder; a local build_usd.py install still has the source
+# and build folders to collect them from.
+$usdLicenses = Join-Path $licensesDir 'OpenUSD'
+New-Item -ItemType Directory -Force $usdLicenses | Out-Null
+foreach ($file in 'LICENSE', 'THIRD-PARTY.md') {
+    $source = Join-Path $usdInstall $file
+    if (Test-Path $source) { Copy-Item $source $usdLicenses }
+}
+$usdDependencies = Join-Path $licensesDir 'OpenUSD-dependencies'
+$hasUsdDependencyLicenses = $true
+if (Test-Path (Join-Path $usdInstall 'licenses')) {
+    Copy-Tree -From (Join-Path $usdInstall 'licenses') -To $usdDependencies
+} elseif (Test-Path (Join-Path $usdInstall 'src')) {
+    & (Join-Path $repoRoot 'tools/ci/usd-licenses.ps1') -Src (Join-Path $usdInstall 'src') `
+        -Build (Join-Path $usdInstall 'build') -Destination $usdDependencies | Out-Host
+} else {
+    $hasUsdDependencyLicenses = $false
+    Write-Warning "No licences of OpenUSD's dependencies in '$usdInstall' (no licenses or src folder): the deploy works, but can't be distributed as it is."
+}
+
+# vcpkg's packages: a copyright file each, and in SOURCES.txt where its source
+# is, from the SPDX file vcpkg writes (the LGPL ones, Qt and Qt Advanced
+# Docking System, have to say so). vcpkg's own build helpers aren't shipped.
+$vcpkgShare = Join-Path $buildDir 'vcpkg_installed/x64-windows/share'
+$vcpkgLicenses = Join-Path $licensesDir 'vcpkg'
+New-Item -ItemType Directory -Force $vcpkgLicenses | Out-Null
+$sources = @(
+    'Where the source of each library in this folder is. The LGPL ones (Qt, Qt Advanced Docking',
+    'System, PySide6 and shiboken6) are separate DLLs, which you may replace with your own builds',
+    'of the same version.',
+    '')
+foreach ($port in Get-ChildItem $vcpkgShare -Directory | Sort-Object Name) {
+    if ($port.Name -match '^(vcpkg-|pkgconf$)') { continue }
+    $copyright = Join-Path $port.FullName 'copyright'
+    if (-not (Test-Path $copyright)) { continue }
+    Copy-Item $copyright (Join-Path $vcpkgLicenses "$($port.Name).txt")
+    $spdx = Join-Path $port.FullName 'vcpkg.spdx.json'
+    if (Test-Path $spdx) {
+        $packages = (Get-Content -Raw $spdx | ConvertFrom-Json).packages
+        $sources += "$($port.Name) $($packages[0].versionInfo)"
+        $sources += "  vcpkg port: $($packages[0].downloadLocation -replace '^git\+', '')"
+        foreach ($package in $packages | Select-Object -Skip 1) {
+            if ($package.downloadLocation -and $package.downloadLocation -ne 'NONE') {
+                $sources += "  source:     $($package.downloadLocation -replace '^git\+', '')"
+            }
+        }
+    }
+}
+
+if (Test-Path (Join-Path $pythonHome 'LICENSE.txt')) {
+    New-Item -ItemType Directory -Force (Join-Path $licensesDir 'Python') | Out-Null
+    Copy-Item (Join-Path $pythonHome 'LICENSE.txt') (Join-Path $licensesDir 'Python')
+}
+if ($hasPySide) {
+    # tools/build-pyside.ps1 copies them in; an older PySide build has them in
+    # pyside-setup's checkout.
+    $pysideLicenses = @((Join-Path $pysideDir 'LICENSES'), (Join-Path $repoRoot 'external/pyside-setup/LICENSES')) |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($pysideLicenses) {
+        Copy-Tree -From $pysideLicenses -To (Join-Path $licensesDir 'PySide6')
+    } else {
+        Write-Warning "No PySide6 licences in '$pysideDir\LICENSES': run tools/build-pyside.ps1 again."
+    }
+    $pysideVersion = (& $pythonExe -I -c "import sys; sys.path.insert(0, sys.argv[1]); import PySide6; print(PySide6.__version__)" $pysideDir 2>$null)
+    if ($pysideVersion) {
+        $sources += "PySide6 and shiboken6 $pysideVersion, built by tools/build-pyside.ps1 (https://github.com/olihey/usdcc)"
+        $sources += "  source:     https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v$pysideVersion"
+    }
+}
+$qwindowkit = Join-Path $repoRoot 'external/qwindowkit/LICENSE'
+if (Test-Path $qwindowkit) {
+    New-Item -ItemType Directory -Force (Join-Path $licensesDir 'QWindowKit') | Out-Null
+    Copy-Item $qwindowkit (Join-Path $licensesDir 'QWindowKit')
+}
+foreach ($tool in 'ruff', 'uv') {
+    $toolDir = Join-Path $deployDir "tools/$tool"
+    if (Test-Path $toolDir) {
+        New-Item -ItemType Directory -Force (Join-Path $licensesDir $tool) | Out-Null
+        Get-ChildItem $toolDir -Filter 'LICENSE*' | Copy-Item -Destination (Join-Path $licensesDir $tool)
+    }
+}
+Set-Content -Path (Join-Path $licensesDir 'SOURCES.txt') -Encoding utf8 -Value $sources
+
 # --- launcher and checks ---------------------------------------------------
 
 Set-Content -Path (Join-Path $deployDir 'usdcc.cmd') -Encoding ascii -Value @(
@@ -308,7 +403,8 @@ $required = @(
     'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
     'plugins/vray_render/usdcc-plugin.json', 'plugins/rtx_render/usdcc-plugin.json',
     'examples/plugins/measure_example/usdcc-plugin.json', 'examples/plugins/cpp_example/usdcc-plugin.json',
-    'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h'
+    'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h',
+    'LICENSE.txt', 'licenses/OpenUSD/LICENSE', 'licenses/vcpkg/qtbase.txt', 'licenses/SOURCES.txt'
 )
 $missing = @($required | Where-Object { -not (Test-Path (Join-Path $deployDir $_)) })
 if ($missing) {
