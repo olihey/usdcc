@@ -18,6 +18,12 @@ class PythonRuntime;
 // something breaks (docs/PLUGINS.md §5).
 inline constexpr int kPluginApiVersion = 1;
 
+// Settings > Plugins > Plugin folders: folders of plugins besides the user's and the
+// shipped ones, which the setting lists fixed (docs/PLUGINS.md §1).
+inline constexpr const char* kPluginFoldersKey = "Plugins/folders";
+// Defines it; before PluginManager::defaultOptions(). Needs the Qt application object.
+void definePluginSettings();
+
 // usdcc-plugin.json, in the plugin's folder.
 struct PluginManifest {
     std::string id;
@@ -90,13 +96,18 @@ public:
         bool enabled = true;  // false for --no-plugins: nothing is scanned
     };
 
-    // `extraFolders` (--plugin-path), USDCC_PLUGIN_PATH, the user's folder,
-    // then the one shipped with the app. Python packages from USDCC_PYTHON_PATH
+    // `extraFolders` (--plugin-path), USDCC_PLUGIN_PATH, the user's folder, the
+    // folders added in Settings > Plugins (kPluginFoldersKey, defined by
+    // definePluginSettings() by then, or none), then the one shipped with the app. Python packages from USDCC_PYTHON_PATH
     // and the Python settings (python_settings.h, defined by then, or they count
     // as empty). Needs the Qt application object.
     static Options defaultOptions(const std::vector<std::filesystem::path>& extraFolders, bool enabled);
     // <AppLocalData>/plugins.
     static std::filesystem::path userFolder();
+    // plugins/ beside bin/ in a deploy (tools/deploy.ps1): the plugins usdcc ships.
+    static std::filesystem::path shippedFolder();
+    // The folders added in Settings > Plugins, in order.
+    static std::vector<std::filesystem::path> addedFolders();
 
     explicit PluginManager(Options options);
     ~PluginManager();

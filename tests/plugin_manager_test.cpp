@@ -5,6 +5,7 @@
 #include "test_harness.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/settings.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -373,6 +374,57 @@ USDCC_TEST(plugin_requirements_in_the_manifest) {
         if (request.id == "names.url") CHECK(contains(request.problem, "URL"), "not even tried");
         if (request.id == "two.missing") CHECK(request.requirements.size() == 2, "both go to the installer");
     }
+}
+
+// Settings > Plugins > Plugin folders: where defaultOptions() looks. --plugin-path first,
+// then the user's folder, the added folders in their order, and the shipped one last.
+// Of two plugins with one id, the one in the earlier folder runs.
+USDCC_TEST(plugin_folders_setting) {
+    Plugins plugins("folders");
+    usdcc::scripting::definePluginSettings();
+    auto& settings = usdcc::core::Settings::instance();
+    const auto* definition = settings.definition(usdcc::scripting::kPluginFoldersKey);
+    CHECK(definition && definition->type == usdcc::core::SettingType::FolderList && definition->appliesAtNextStart,
+          "a folder list, used from the next start");
+    if (!definition) return;
+    CHECK(definition->fixedFolders.size() == 2 &&
+              std::filesystem::path(std::filesystem::u8path(definition->fixedFolders[0].folder)) == PluginManager::userFolder() &&
+              !definition->fixedFolders[0].after &&
+              std::filesystem::path(std::filesystem::u8path(definition->fixedFolders[1].folder)) == PluginManager::shippedFolder() &&
+              definition->fixedFolders[1].after,
+          "the user's folder before the added ones, the shipped one after, fixed");
+
+    const std::filesystem::path first = plugins.root / "first";
+    const std::filesystem::path second = plugins.root / "second";
+    const auto utf8 = [](const std::filesystem::path& path) {
+        const std::u8string text = path.u8string();
+        return std::string(text.begin(), text.end());
+    };
+    settings.setValue(usdcc::scripting::kPluginFoldersKey, utf8(first) + ";" + utf8(second));
+    const auto options = PluginManager::defaultOptions({plugins.root / "cli"}, true);
+    const auto at = [&options](const std::filesystem::path& folder) {
+        return int(std::find(options.folders.begin(), options.folders.end(), folder) - options.folders.begin());
+    };
+    const int cli = at(plugins.root / "cli"), user = at(PluginManager::userFolder()), a = at(first), b = at(second),
+              shipped = at(PluginManager::shippedFolder());
+    CHECK(cli == 0 && cli < user && user < a && a < b && b < shipped && shipped == int(options.folders.size()) - 1,
+          "--plugin-path, the user's, the added ones in order, then the shipped one: %d %d %d %d %d", cli, user, a, b, shipped);
+
+    // The same id in two added folders: the earlier one's runs.
+    const auto write = [](const std::filesystem::path& folder, const std::string& version) {
+        std::filesystem::create_directories(folder / "twin");
+        std::ofstream(folder / "twin" / "usdcc-plugin.json")
+            << R"({"id": "org.usdcc.twin", "name": "Twin", "version": ")" << version << R"(", "api": 1})";
+    };
+    write(first, "1");
+    write(second, "2");
+    PluginManager::Options scan = plugins.options();
+    scan.folders = {first, second};
+    PluginManager manager(scan);
+    manager.scan();
+    const PluginInfo* twin = manager.find("org.usdcc.twin");
+    CHECK(twin && twin->manifest.version == "1", "the first folder's twin wins: %s", twin ? twin->manifest.version.c_str() : "none");
+    settings.reset(usdcc::scripting::kPluginFoldersKey);
 }
 
 // python.indexes: extra package indexes a manifest names for its requirements, such as

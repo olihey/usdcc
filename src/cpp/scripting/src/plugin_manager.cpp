@@ -241,6 +241,36 @@ std::filesystem::path PluginManager::userFolder() {
     return toPath(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/plugins");
 }
 
+std::filesystem::path PluginManager::shippedFolder() {
+    // A deployed usdcc has bin/usdcc.exe next to plugins/.
+    return toPath(QCoreApplication::applicationDirPath()).parent_path() / "plugins";
+}
+
+std::vector<std::filesystem::path> PluginManager::addedFolders() {
+    std::vector<std::filesystem::path> folders;
+    if (!usdcc::core::Settings::instance().contains(kPluginFoldersKey)) return folders;
+    const QString value = QString::fromStdString(usdcc::core::Settings::instance().get<std::string>(kPluginFoldersKey));
+    for (const QString& folder : value.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+        if (!folder.trimmed().isEmpty()) folders.push_back(toPath(folder.trimmed()));
+    }
+    return folders;
+}
+
+void definePluginSettings() {
+    usdcc::core::Settings::instance().define(
+        {.key = kPluginFoldersKey,
+         .category = "Plugins",
+         .group = "Folders",
+         .label = "Plugin folders",
+         .description = "Folders of plugins, looked in from the top: the first holding a plugin's id wins. "
+                        "Your plugins and the ones shipped with usdcc are always looked in.",
+         .type = usdcc::core::SettingType::FolderList,
+         .defaultValue = std::string(),
+         .fixedFolders = {{.label = "Your plugins", .folder = toUtf8(PluginManager::userFolder())},
+                          {.label = "Shipped with usdcc", .folder = toUtf8(PluginManager::shippedFolder()), .after = true}},
+         .appliesAtNextStart = true});
+}
+
 PluginManager::Options PluginManager::defaultOptions(const std::vector<std::filesystem::path>& extraFolders,
                                                      bool enabled) {
     Options options;
@@ -248,8 +278,8 @@ PluginManager::Options PluginManager::defaultOptions(const std::vector<std::file
     options.folders = extraFolders;
     for (const auto& folder : environmentFolders("USDCC_PLUGIN_PATH")) options.folders.push_back(folder);
     options.folders.push_back(userFolder());
-    // A deployed usdcc has bin/usdcc.exe next to plugins/ (tools/deploy.ps1).
-    options.folders.push_back(toPath(QCoreApplication::applicationDirPath()).parent_path() / "plugins");
+    for (const auto& folder : addedFolders()) options.folders.push_back(folder);
+    options.folders.push_back(shippedFolder());
 
     options.pythonPackageFolders = environmentFolders("USDCC_PYTHON_PATH");
     for (const auto& folder : extraPackageFoldersSetting()) options.pythonPackageFolders.push_back(folder);

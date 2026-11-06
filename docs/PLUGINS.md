@@ -51,9 +51,16 @@ def deactivate(plugin):  # optional: at quit and before a reload, to stop what y
 `build/plugins`, so `usdcc --plugin-path build/plugins` loads that. [src/plugins/vray_render](../src/plugins/vray_render) is a bigger one: a view panel that renders
 with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)), and [src/plugins/rtx_render](../src/plugins/rtx_render) does the same with NVIDIA's ovrtx ([RTX_RENDER.md](RTX_RENDER.md)).
 
-**Found in, the first with an id winning (logged):** `--plugin-path` folders, `USDCC_PLUGIN_PATH` (a studio's), `%LOCALAPPDATA%/usdcc/plugins` (the
-user's), then `plugins/` next to `bin/` in a deployed app. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in
-`examples/plugins`, where they don't load unless asked for, and the SDK for C++ plugins in `sdk`.
+**Found in, the first with an id winning (logged):**
+1. `--plugin-path` folders;
+2. `USDCC_PLUGIN_PATH` (a studio's);
+3. `%LOCALAPPDATA%/usdcc/plugins` (the user's);
+4. the folders added in **Edit > Settings > Plugins > Plugin folders**, in their order;
+5. `plugins/` next to `bin/`, the plugins shipped with usdcc: V-Ray Render and RTX Render.
+
+The setting lists the user's folder and the shipped one as fixed rows, greyed, around the ones you add, remove and reorder. It takes effect at the next start, as plugins are found before the window opens. **Plugin Folders...** in View > Plugins opens it.
+
+A plugin in your own folder wins over a shipped one with the same id; the other is ignored, and the log says so. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in `examples/plugins`, where they don't load unless asked for (`--plugin-path`, or added in the setting), and the SDK for C++ plugins in `sdk`.
 
 **What a plugin can add:**
 

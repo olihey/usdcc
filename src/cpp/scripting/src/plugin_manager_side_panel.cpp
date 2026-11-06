@@ -9,6 +9,7 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings_dialog.h"
 
 #include <QColor>
 #include <QDesktopServices>
@@ -132,7 +133,12 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_update->setObjectName(QStringLiteral("pluginUpdatePackages"));
     m_update->setToolTip(tr("Resolve everything again, moving Python packages to their newest versions"));
     buttons->addWidget(m_update);
+    auto* folders = new QPushButton(tr("Plugin Folders..."), content);
+    folders->setObjectName(QStringLiteral("pluginFolders"));
+    folders->setToolTip(tr("Where plugins are looked for: Edit > Settings > Plugins"));
+    buttons->addWidget(folders);
     auto* openFolder = new QPushButton(tr("Open Plugins Folder"), content);
+    openFolder->setToolTip(tr("Open your plugins folder"));
     buttons->addWidget(openFolder);
     layout->addLayout(buttons);
     setWidget(content);
@@ -141,6 +147,9 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     connect(m_update, &QPushButton::clicked, this, [this]() { installPackages(true); });
     usdcc::ui::onSettingChanged(this, kUserPackagesKey, [this]() { updatePackages(); });
 
+    connect(folders, &QPushButton::clicked, this, [this]() {
+        usdcc::ui::SettingsDialog::showDialog(window())->showCategory(QStringLiteral("Plugins"));
+    });
     connect(openFolder, &QPushButton::clicked, this, []() {
         const QString folder = QString::fromStdU16String(PluginManager::userFolder().u16string());
         QDir().mkpath(folder);
@@ -260,7 +269,7 @@ void PluginManagerSidePanel::updateDetails() {
     const QTreeWidgetItem* item = m_tree->currentItem();
     const PluginInfo* plugin = item ? m_plugins.find(item->data(0, Qt::UserRole).toString().toStdString()) : nullptr;
     if (!plugin) {
-        m_details->setText(m_plugins.plugins().empty() ? tr("No plugins found. Put one in the plugins folder and restart.")
+        m_details->setText(m_plugins.plugins().empty() ? tr("No plugins found. Put one in your plugins folder, or add a folder with Plugin Folders..., and restart.")
                                                        : QString());
         return;
     }
