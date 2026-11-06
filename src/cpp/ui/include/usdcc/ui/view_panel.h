@@ -88,7 +88,9 @@ protected:
     // Extends the context menu shown when right-clicking this panel's tab —
     // ADS shows panels as tabs in the dock area's title bar rather than a
     // traditional per-window titlebar, and that tab is what "the titlebar"
-    // means here. The base implementation adds a "Duplicate" action.
+    // means here. The base implementation adds "Maximize" / "Restore Layout"
+    // (see PanelMaximizer; double-clicking the tab does the same) and a
+    // "Duplicate" action.
     // Subclasses that want their own entries should override this, call
     // ViewPanel::populateContextMenu(menu) first to keep the base entries,
     // then add their own — see ViewportViewPanel::populateContextMenu() for

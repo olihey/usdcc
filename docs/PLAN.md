@@ -985,6 +985,22 @@ things that will bite later if not addressed early:
     - **The key** is the `Shortcuts/viewport.fitToView` setting (F), on one
       application-wide action (`ViewportViewPanel::addFitToViewAction()`), as the tool keys are.
 
+46. **Maximize a view panel.** Double-clicking a `ViewPanel`'s tab, or Maximize in its context
+    menu, gives its dock area all the room; again (Restore Layout) puts the layout back. ADS has
+    no such feature, and its `CDockWidget::showFullScreen()` only works on a floating panel.
+    - **How** (`PanelMaximizer`, owned by `MainWindow`): at each splitter between the area and
+      the dock manager, the children not leading to the area are hidden, and so are the side
+      panels docked in the main window. Nothing is closed or moved, so viewports keep their
+      renderers; restoring sets the splitter sizes and `QMainWindow` state saved beforehand.
+      `saveState()`/`restoreState()` of the dock layout would have closed and reopened panels.
+    - **Undocking by double-click** is replaced for docked panels; the context menu and dragging
+      still undock, and a floating panel is left alone. A double-click on the empty part of the
+      title bar still floats the area: it isn't a tab, and panels can't watch it as they move.
+    - **Layout changes restore first**, so they don't happen out of sight: ADS showing a hidden
+      part, the area closing, an area or panel added, a dock layout or side panel change.
+    - **Never saved:** `MainWindow::closeEvent()` restores before saving the layout.
+    - Tested in `panel_maximizer_test` (usdcc_ui_tests).
+
 ## 7. Milestones
 
 Each milestone lists its goal, key deliverables, and exit criteria. Milestones are

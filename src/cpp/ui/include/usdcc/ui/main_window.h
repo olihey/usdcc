@@ -27,6 +27,7 @@ class WidgetWindowAgent;
 namespace usdcc::ui {
 
 class LogSidePanel;
+class PanelMaximizer;
 class ToastLogSink;
 class ToastManager;
 class SidePanel;
@@ -57,6 +58,10 @@ public:
     // than MainWindow needing to know about a specific StageManager instance
     // (or any particular set of panels) itself — see main.cpp.
     ads::CDockManager* dockManager() const;
+
+    // Gives one dock area all the room for a while; ViewPanels use it for their
+    // tab's double-click and context menu. Always exists.
+    PanelMaximizer* panelMaximizer() const;
 
     // The Log side panel; always exists.
     LogSidePanel* logPanel() const;
@@ -137,6 +142,7 @@ private:
     void restoreCollapsed(SidePanel* panel);
 
     ads::CDockManager* m_dockManager = nullptr;
+    PanelMaximizer* m_panelMaximizer = nullptr;
     QWK::WidgetWindowAgent* m_windowAgent = nullptr;
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;

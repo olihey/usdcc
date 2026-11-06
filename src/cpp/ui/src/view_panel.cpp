@@ -1,5 +1,7 @@
 #include "usdcc/ui/view_panel.h"
 
+#include "usdcc/ui/main_window.h"
+#include "usdcc/ui/panel_maximizer.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/view_panel_registry.h"
@@ -17,6 +19,7 @@
 #include <QComboBox>
 #include <QContextMenuEvent>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QSignalBlocker>
 
 #include <utility>
@@ -25,6 +28,16 @@ QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
 
 namespace usdcc::ui {
+
+namespace {
+// The main window's, when `panel` can be maximized in it right now.
+PanelMaximizer* maximizerFor(const ViewPanel* panel) {
+    const ads::CDockManager* manager = panel->dockManager();
+    auto* window = manager ? qobject_cast<MainWindow*>(manager->window()) : nullptr;
+    PanelMaximizer* maximizer = window ? window->panelMaximizer() : nullptr;
+    return maximizer && maximizer->canMaximize(panel) ? maximizer : nullptr;
+}
+}  // namespace
 
 ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRefPtr stage, const QString& title,
                       QWidget* parent)
@@ -120,6 +133,10 @@ QWidget* ViewPanel::contentWidget() const { return widget(); }
 
 void ViewPanel::populateContextMenu(QMenu* menu) {
     menu->addSeparator();
+    if (PanelMaximizer* maximizer = maximizerFor(this)) {
+        menu->addAction(maximizer->isMaximized(this) ? tr("Restore Layout") : tr("Maximize"), this,
+                        [this, maximizer]() { maximizer->toggle(this); });
+    }
     menu->addAction(tr("Duplicate"), this, [this]() {
         auto* copy = duplicate(window());
 
@@ -152,6 +169,15 @@ bool ViewPanel::eventFilter(QObject* watched, QEvent* event) {
         menu->exec(menuEvent->globalPos());
         menu->deleteLater();
         return true;
+    }
+    // Instead of ADS's undocking, which stays for a floating panel; docked, the
+    // tab's context menu and dragging it still do that.
+    if (watched == tabWidget() && event->type() == QEvent::MouseButtonDblClick &&
+        static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) {
+        if (PanelMaximizer* maximizer = maximizerFor(this)) {
+            maximizer->toggle(this);
+            return true;
+        }
     }
     return ads::CDockWidget::eventFilter(watched, event);
 }

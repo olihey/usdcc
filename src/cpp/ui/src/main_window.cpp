@@ -19,6 +19,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/panel_maximizer.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
@@ -94,6 +95,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_dockManager = new ads::CDockManager(this);
     theme::applyToDockManager(m_dockManager);
     setCentralWidget(m_dockManager);
+    m_panelMaximizer = new PanelMaximizer(this, m_dockManager);
 
     // The application log (docs/LOGGING.md). Its objectName stays "Log", the
     // name the stand-in it replaced was saved under, so existing layouts
@@ -117,6 +119,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 ads::CDockManager* MainWindow::dockManager() const { return m_dockManager; }
 
+PanelMaximizer* MainWindow::panelMaximizer() const { return m_panelMaximizer; }
+
 MainWindow::~MainWindow() {
     // Before m_toasts goes: the sink posts to it from any thread.
     usdcc::core::LogHub::instance().removeSink(m_toastSink.get());
@@ -128,6 +132,8 @@ ToastManager* MainWindow::toasts() const { return m_toasts; }
 
 void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
     if (!panel || m_sidePanels.contains(panel)) return;
+    // Restoring the side panels' state later would drop one it doesn't know.
+    m_panelMaximizer->restore();
     for (const SidePanel* existing : std::as_const(m_sidePanels)) {
         if (existing->objectName() == panel->objectName()) {
             USDCC_LOG_WARNING("usdcc.layout",
@@ -155,6 +161,7 @@ void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
 
 void MainWindow::removeSidePanel(SidePanel* panel) {
     if (!panel || !m_sidePanels.removeOne(panel)) return;
+    m_panelMaximizer->restore();
     if (m_viewMenu) m_viewMenu->removeAction(panel->toggleViewAction());
     removeDockWidget(panel);
     panel->deleteLater();
@@ -175,6 +182,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             return;
         }
     }
+    m_panelMaximizer->restore();  // the user's layout is what gets saved
     saveLayout();
     QMainWindow::closeEvent(event);
 }
