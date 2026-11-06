@@ -93,6 +93,7 @@ take them for a `bool`.
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
 | `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
+| `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
@@ -131,6 +132,8 @@ take them for a `bool`.
 - Every tool in the rail has one: `Shortcuts/tools.<tool id>` (`usdcc::usd::toolShortcutKey()`).
   It is defined when the rail is built, so a plugin's tool gets a row on the Shortcuts page,
   with no key until one is set.
+- Fit to View (`Shortcuts/viewport.fitToView`) works the same way: one application-wide action
+  on the main window, for the active viewport.
 
 ## 5. The dialog
 

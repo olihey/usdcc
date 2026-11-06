@@ -2,6 +2,7 @@
 
 #include <pxr/base/gf/math.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace usdcc::usd {
@@ -19,6 +20,27 @@ OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double y
     axes.right = GfVec3d(std::cos(yaw), 0.0, -std::sin(yaw));
     axes.up = PXR_NS::GfCross(axes.right, axes.forward);
     return axes;
+}
+
+OrbitFraming frameOrbitCamera(const PXR_NS::GfRange3d& box, double verticalFovDegrees, double aspect,
+                              double currentDistance) {
+    OrbitFraming framing;
+    framing.target = box.GetMidpoint();
+    framing.distance = currentDistance;
+    const double radius = box.GetSize().GetLength() / 2.0;
+    if (!(radius > 0.0) || !std::isfinite(radius)) return framing;
+    const double halfVertical = PXR_NS::GfDegreesToRadians(verticalFovDegrees) / 2.0;
+    const double halfHorizontal = std::atan(std::tan(halfVertical) * std::max(aspect, 1e-6));
+    // A sphere is in view when its centre is radius / sin(half angle) away: the planes
+    // of the view then touch it.
+    framing.distance = radius / std::sin(std::min(halfVertical, halfHorizontal));
+    return framing;
+}
+
+OrbitClipping orbitClipping(double distance) {
+    const OrbitClipping atDefault;
+    const double scale = distance / kDefaultOrbitDistance;
+    return {atDefault.nearClip * scale, atDefault.farClip * std::max(1.0, scale)};
 }
 
 double wrapDegrees(double degrees) {

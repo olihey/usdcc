@@ -4,8 +4,12 @@
 
 #include "usdcc/usd/orbit_camera.h"
 
+#include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/math.h>
+#include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/range3d.h>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -113,4 +117,61 @@ USDCC_TEST(orbit_camera_cursor_wraps_at_screen_edges) {
         const auto first = wrapCursorAtEdges(x, y, left, top, right, bottom);
         CHECK(first && !wrapCursorAtEdges(first->x, first->y, left, top, right, bottom), "no ping-pong");
     }
+}
+
+namespace {
+// The frustum the viewport builds for an orbit camera (HydraViewportWindow::currentFrustum()).
+PXR_NS::GfFrustum orbitFrustum(const OrbitFraming& framing, double yaw, double pitch, double fovY, double aspect) {
+    const auto [eye, forward, right, up] = orbitCameraAxes(framing.target, framing.distance, yaw, pitch);
+    PXR_NS::GfMatrix4d cameraToWorld(1.0);
+    cameraToWorld.SetRow(0, PXR_NS::GfVec4d(right[0], right[1], right[2], 0.0));
+    cameraToWorld.SetRow(1, PXR_NS::GfVec4d(up[0], up[1], up[2], 0.0));
+    cameraToWorld.SetRow(2, PXR_NS::GfVec4d(-forward[0], -forward[1], -forward[2], 0.0));
+    cameraToWorld.SetRow(3, PXR_NS::GfVec4d(eye[0], eye[1], eye[2], 1.0));
+    PXR_NS::GfFrustum frustum;
+    frustum.SetPositionAndRotationFromMatrix(cameraToWorld);
+    const OrbitClipping clipping = orbitClipping(framing.distance);
+    frustum.SetPerspective(fovY, true, aspect, clipping.nearClip, clipping.farClip);
+    return frustum;
+}
+}  // namespace
+
+USDCC_TEST(orbit_camera_frames_a_box) {
+    const PXR_NS::GfRange3d box(GfVec3d(-1, 0, 2), GfVec3d(3, 2, 4));
+    for (double aspect : {0.4, 1.0, 1.6, 3.0}) {
+        for (double size : {0.001, 1.0, 1000.0}) {
+            const PXR_NS::GfRange3d scaled(box.GetMin() * size, box.GetMax() * size);
+            const OrbitFraming framing = frameOrbitCamera(scaled, 45.0, aspect, 10.0);
+            CHECK(closeTo(framing.target, scaled.GetMidpoint()), "aimed at the middle");
+            const PXR_NS::GfMatrix4d toNdc =
+                orbitFrustum(framing, 30.0, 20.0, 45.0, aspect).ComputeViewMatrix() *
+                orbitFrustum(framing, 30.0, 20.0, 45.0, aspect).ComputeProjectionMatrix();
+            double widest = 0.0;
+            for (int corner = 0; corner < 8; ++corner) {
+                const GfVec3d ndc = toNdc.Transform(scaled.GetCorner(corner));
+                widest = std::max({widest, std::abs(ndc[0]), std::abs(ndc[1])});
+                CHECK(std::abs(ndc[0]) <= 1.0 && std::abs(ndc[1]) <= 1.0 && ndc[2] > -1.0 && ndc[2] < 1.0,
+                      "every corner in view and between the clipping planes: aspect %f size %f", aspect, size);
+            }
+            CHECK(widest > 0.5, "and it fills the view, rather than being lost in it: %f", widest);
+        }
+    }
+
+    const OrbitFraming square = frameOrbitCamera(box, 45.0, 1.0, 10.0);
+    const double radius = box.GetSize().GetLength() / 2.0;
+    CHECK(closeTo(square.distance, radius / std::sin(PXR_NS::GfDegreesToRadians(22.5))), "the sphere touches the view");
+    CHECK(closeTo(frameOrbitCamera(box, 45.0, 2.0, 10.0).distance, square.distance), "a wide view is fitted by its height");
+    CHECK(frameOrbitCamera(box, 45.0, 0.5, 10.0).distance > square.distance * 1.5, "a tall one by its width");
+
+    const OrbitFraming point = frameOrbitCamera(PXR_NS::GfRange3d(GfVec3d(1, 2, 3), GfVec3d(1, 2, 3)), 45.0, 1.0, 7.0);
+    CHECK(closeTo(point.target, GfVec3d(1, 2, 3)) && closeTo(point.distance, 7.0), "a point: aimed at, from where it was");
+}
+
+USDCC_TEST(orbit_camera_clipping_follows_the_distance) {
+    const OrbitClipping atDefault = orbitClipping(kDefaultOrbitDistance);
+    CHECK(closeTo(atDefault.nearClip, 0.1) && closeTo(atDefault.farClip, 10000.0), "0.1 to 10000 at the default distance");
+    const OrbitClipping further = orbitClipping(kDefaultOrbitDistance * 100.0);
+    CHECK(closeTo(further.nearClip, 10.0) && closeTo(further.farClip, 1e6), "further back, both scale");
+    const OrbitClipping closer = orbitClipping(kDefaultOrbitDistance / 100.0);
+    CHECK(closeTo(closer.nearClip, 0.001) && closeTo(closer.farClip, 10000.0), "closer in, only the near plane");
 }

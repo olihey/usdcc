@@ -28,6 +28,7 @@ add_executable(usdcc_tests
     property_categorizer_test.cpp
     relationship_targets_test.cpp
     rotate_tool_test.cpp
+    scene_bounds_test.cpp
     settings_test.cpp
     shade_connections_test.cpp
     stage_changes_test.cpp

@@ -7,6 +7,7 @@
 #include "usdcc/usd/orbit_camera.h"
 
 #include <pxr/base/gf/frustum.h>
+#include <pxr/base/gf/range3d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
@@ -82,6 +83,10 @@ public:
     };
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
+
+    // Fit to View: moves the camera, keeping the way it looks, so that `box` (world
+    // space) fills the view. See frameOrbitCamera().
+    void frameBox(const PXR_NS::GfRange3d& box);
 
     // The camera this viewport renders with, as a frustum: position and
     // orientation (ComputeViewInverse() is the camera-to-world matrix), the

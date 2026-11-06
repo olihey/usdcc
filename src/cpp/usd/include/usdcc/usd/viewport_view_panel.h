@@ -13,10 +13,15 @@
 #include <memory>
 #include <vector>
 
+class QAction;
+
 namespace usdcc::usd {
 
 class StageManager;
 class HydraViewportWindow;
+
+// The Shortcut setting for Fit to View (F by default).
+inline constexpr const char* kFitToViewShortcutKey = "Shortcuts/viewport.fitToView";
 class UndoManager;
 
 // ViewPanel subclass that renders a USD stage via Hydra and lets the user
@@ -48,6 +53,16 @@ public:
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
 
+    // Fit to View: moves the camera so the selected prims fill the view, or the whole
+    // stage when nothing is selected (sceneBounds()). Selected prims without bounds are
+    // left out; when none of them has any (or the stage is empty), a warning toast says
+    // so and the camera stays. Returns whether it moved the camera.
+    bool fitToView();
+
+    // The application-wide Fit to View action, for the active viewport: added to
+    // `window`, which owns it, with its key from kFitToViewShortcutKey (defined here).
+    static QAction* addFitToViewAction(QWidget* window);
+
     // The viewport the user last worked in: the last one clicked, or until then
     // the oldest one open. Null when no viewport is open. What follows "the
     // viewport camera" uses it (usdcc.app.active_viewport_camera()).
@@ -62,7 +77,7 @@ public:
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
 
 protected:
-    // Adds a "Reset Camera" entry on top of ViewPanel's base "Duplicate" —
+    // Adds "Fit to View" and "Reset Camera" entries on top of ViewPanel's base "Duplicate" —
     // see ViewPanel::populateContextMenu() for the extension mechanism.
     void populateContextMenu(QMenu* menu) override;
     // A Renderer submenu listing the render delegates, the current one checked.

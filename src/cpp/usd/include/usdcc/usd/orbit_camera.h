@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pxr/base/gf/range3d.h>
 #include <pxr/base/gf/vec3d.h>
 
 #include <optional>
@@ -20,6 +21,27 @@ struct OrbitCameraAxes {
 constexpr double kDefaultOrbitDistance = 10.0;
 constexpr double kDefaultOrbitYaw = 45.0;
 constexpr double kDefaultOrbitPitch = 20.0;
+
+// Where the orbit camera goes to fit `box` in the view, keeping the way it looks: at the
+// box's centre, far enough back that the box's bounding sphere fits both the vertical
+// field of view (`verticalFovDegrees`) and the horizontal one (from `aspect`, width over
+// height). A box of no size (a point) keeps `currentDistance`.
+struct OrbitFraming {
+    PXR_NS::GfVec3d target;
+    double distance = kDefaultOrbitDistance;
+};
+OrbitFraming frameOrbitCamera(const PXR_NS::GfRange3d& box, double verticalFovDegrees, double aspect,
+                              double currentDistance);
+
+// The near and far clipping planes for an orbit camera `distance` from its target. At the
+// default distance they are 0.1 and 10000; they scale with the distance, so whatever the
+// camera is fitted to stays in between, however big or small. Closer in, only the near
+// plane moves: the far one stays at 10000.
+struct OrbitClipping {
+    double nearClip = 0.1;
+    double farClip = 10000.0;
+};
+OrbitClipping orbitClipping(double distance);
 
 // The camera at `distance` from `target`, by yaw and pitch in degrees. Its axes come
 // from the angles rather than from a world up vector, so they carry on smoothly over

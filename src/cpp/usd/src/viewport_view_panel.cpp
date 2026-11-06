@@ -1,6 +1,10 @@
 #include "usdcc/usd/viewport_view_panel.h"
 
+#include "usdcc/core/log.h"
+#include "usdcc/core/settings.h"
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -9,6 +13,7 @@
 
 #include <DockManager.h>
 
+#include <QAction>
 #include <QActionGroup>
 #include <QHBoxLayout>
 #include <QMenu>
@@ -182,8 +187,58 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     return copy;
 }
 
+bool ViewportViewPanel::fitToView() {
+    const StageRefPtr stage = currentStage();
+    if (!stage) return false;
+    const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(stage);
+    const std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection);
+    if (!bounds) {
+        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Nothing to fit to view"};
+        if (selection.empty()) {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "The stage has no geometry.");
+        } else if (selection.size() == 1) {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                               "{} has no bounds.", selection.front().GetName());
+        } else {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                               "None of the {} selected prims has bounds.", selection.size());
+        }
+        return false;
+    }
+    m_viewport->frameBox(*bounds);
+    return true;
+}
+
+QAction* ViewportViewPanel::addFitToViewAction(QWidget* window) {
+    usdcc::core::Settings::instance().define({
+        .key = kFitToViewShortcutKey,
+        .category = "Shortcuts",
+        .group = "Viewport",
+        .label = "Fit to view",
+        .description = "Frame the selected prims in the viewport, or the whole stage when nothing is selected.",
+        .type = usdcc::core::SettingType::Shortcut,
+        .defaultValue = std::string("F"),
+    });
+    auto* action = new QAction(tr("Fit to View"), window);
+    action->setObjectName(QStringLiteral("fitToViewAction"));
+    // Application-wide like the tool keys (see ToolRail::addTool()): it also works in a
+    // floating viewport, and text fields still get the letter typed into them.
+    action->setShortcutContext(Qt::ApplicationShortcut);
+    usdcc::ui::bindShortcut(action, kFitToViewShortcutKey);
+    window->addAction(action);
+    connect(action, &QAction::triggered, window, []() {
+        if (ViewportViewPanel* viewport = activeViewport()) viewport->fitToView();
+    });
+    return action;
+}
+
 void ViewportViewPanel::populateContextMenu(QMenu* menu) {
     usdcc::ui::ViewPanel::populateContextMenu(menu);
+    // The key is shown, not set: the main window's action has it (addFitToViewAction()).
+    const QKeySequence key = usdcc::ui::settingShortcut(kFitToViewShortcutKey);
+    const QString fitText = key.isEmpty() ? tr("Fit to View")
+                                          : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
+    menu->addAction(fitText, this, [this]() { fitToView(); });
     menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
 }
 

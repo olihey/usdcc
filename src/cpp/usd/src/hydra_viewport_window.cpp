@@ -40,8 +40,6 @@ namespace usdcc::usd {
 
 namespace {
 constexpr double kFovY = 45.0;
-constexpr double kNearClip = 0.1;
-constexpr double kFarClip = 10000.0;
 constexpr double kMinDistance = 0.01;
 
 // The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss) —
@@ -238,6 +236,14 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
     cameraMoved();
 }
 
+void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
+    const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
+    const OrbitFraming framing = frameOrbitCamera(box, kFovY, aspect, m_distance);
+    m_target = framing.target;
+    m_distance = std::max(kMinDistance, framing.distance);
+    cameraMoved();
+}
+
 double HydraViewportWindow::verticalFieldOfView() { return kFovY; }
 
 void HydraViewportWindow::cameraMoved() {
@@ -301,8 +307,9 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
 
     PXR_NS::GfFrustum frustum;
     frustum.SetPositionAndRotationFromMatrix(cameraToWorld);
-    frustum.SetPerspective(kFovY, /*isFovVertical=*/true, static_cast<double>(w) / static_cast<double>(h), kNearClip,
-                            kFarClip);
+    const OrbitClipping clipping = orbitClipping(m_distance);
+    frustum.SetPerspective(kFovY, /*isFovVertical=*/true, static_cast<double>(w) / static_cast<double>(h),
+                           clipping.nearClip, clipping.farClip);
     return frustum;
 }
 

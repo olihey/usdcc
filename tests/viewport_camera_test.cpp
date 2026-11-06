@@ -1,12 +1,14 @@
 // What a script sees of the viewports and of edits: usdcc.app.active_viewport_camera(),
 // and the "viewport_camera_changed" and "stage_edited" events (docs/SCRIPTING.md,
-// used by the V-Ray render plugin, docs/VRAY_RENDER.md).
+// used by the V-Ray render plugin, docs/VRAY_RENDER.md). And Fit to View (F).
 #include "python_test_app.h"
 #include "test_harness.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -15,13 +17,17 @@
 #include <pxr/base/gf/frustum.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <QAction>
 #include <QCoreApplication>
+#include <QWidget>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 using usdcc::scripting::AppContextScope;
 using usdcc::test::pythonTestApp;
@@ -33,10 +39,10 @@ namespace {
 struct OpenStage {
     std::filesystem::path file;
     StageRefPtr stage;
-    explicit OpenStage(const std::string& name)
+    explicit OpenStage(const std::string& name, const std::string& text = "#usda 1.0\ndef Xform \"A\"\n{\n}\n")
         : file(std::filesystem::temp_directory_path() /
                ("usdcc_viewport_" + name + "_" + std::to_string(QCoreApplication::applicationPid()) + ".usda")) {
-        std::ofstream(file) << "#usda 1.0\ndef Xform \"A\"\n{\n}\n";
+        std::ofstream(file) << text;
         stage = pythonTestApp().stages.openStage(file.string());
     }
     ~OpenStage() {
@@ -153,4 +159,95 @@ builtins.usdcc_test_edit_connection = usdcc.app.connect("stage_edited", edited)
           "disconnecting");
     before.stage->usdStage()->DefinePrim(PXR_NS::SdfPath("/AfterDisconnect"), PXR_NS::TfToken("Xform"));
     CHECK(evaluated("len(usdcc_test_edits)") == "0", "ends the calls");
+}
+
+namespace {
+struct ToastSink : usdcc::core::LogSink {
+    std::vector<usdcc::core::LogRecord> toasts;
+    void onRecord(const usdcc::core::LogRecord& record) override {
+        if (record.toast) toasts.push_back(record);
+    }
+};
+
+bool closeTo(const PXR_NS::GfVec3d& a, const PXR_NS::GfVec3d& b) { return (a - b).GetLength() < 1e-6; }
+
+const char* kFitScene = R"(#usda 1.0
+def Cube "Box"
+{
+    double size = 2
+    double3 xformOp:translate = (10, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+}
+
+def Sphere "Ball"
+{
+    double radius = 1
+    double3 xformOp:translate = (-10, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+}
+
+def Scope "Looks"
+{
+}
+)";
+}  // namespace
+
+USDCC_TEST(fit_to_view) {
+    auto& app = pythonTestApp();
+    OpenStage open("fit", kFitScene);
+    OpenStage empty("fit_empty");
+    auto viewport = makeViewport(open.stage);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    auto sink = std::make_shared<ToastSink>();
+    usdcc::core::LogHub::instance().addSink(sink, false);
+
+    const HydraViewportWindow::CameraState start{PXR_NS::GfVec3d(1, 2, 3), 50.0, 30.0, 15.0};
+    window->setCameraState(start);
+    app.stages.setSelectedPaths(open.stage, {});
+    CHECK(viewport->fitToView(), "nothing selected: fits the whole stage");
+    HydraViewportWindow::CameraState state = window->cameraState();
+    CHECK(closeTo(state.target, PXR_NS::GfVec3d(0, 0, 0)), "aimed at its middle");
+    const double halfFov = 22.5 * 3.14159265358979323846 / 180.0;
+    CHECK(std::abs(state.distance - std::sqrt(22.0 * 22.0 + 2.0 * 2.0 + 2.0 * 2.0) / 2.0 / std::sin(halfFov)) < 1e-6,
+          "from far enough to see both ends: %f", state.distance);
+    CHECK(state.yaw == start.yaw && state.pitch == start.pitch, "still looking the same way");
+
+    app.stages.setSelectedPaths(open.stage, {PXR_NS::SdfPath("/Box"), PXR_NS::SdfPath("/Looks")});
+    CHECK(viewport->fitToView(), "selected prims: fits those with bounds");
+    state = window->cameraState();
+    CHECK(closeTo(state.target, PXR_NS::GfVec3d(10, 0, 0)), "the box");
+    CHECK(std::abs(state.distance - std::sqrt(12.0) / 2.0 / std::sin(halfFov)) < 1e-6, "close up: %f", state.distance);
+    CHECK(sink->toasts.empty(), "no toast while something was framed");
+
+    app.stages.setSelectedPaths(open.stage, {PXR_NS::SdfPath("/Looks")});
+    CHECK(!viewport->fitToView(), "only prims without bounds: nothing to fit");
+    CHECK(closeTo(window->cameraState().target, PXR_NS::GfVec3d(10, 0, 0)) && window->cameraState().distance == state.distance,
+          "the camera stays");
+    CHECK(sink->toasts.size() == 1 && sink->toasts.back().toast->kind == usdcc::core::ToastKind::Warning &&
+              sink->toasts.back().toast->title == "Nothing to fit to view" &&
+              sink->toasts.back().message == "Looks has no bounds.",
+          "a warning toast says why: %s", sink->toasts.empty() ? "none" : sink->toasts.back().message.c_str());
+
+    // The F key: one application-wide action, for the active viewport.
+    app.stages.setSelectedPaths(open.stage, {PXR_NS::SdfPath("/Ball")});
+    {
+        QWidget mainWindow;
+        QAction* action = ViewportViewPanel::addFitToViewAction(&mainWindow);
+        CHECK(action->shortcut() == QKeySequence(Qt::Key_F), "F by default: %s",
+              action->shortcut().toString().toStdString().c_str());
+        CHECK(usdcc::ui::settingShortcut(usdcc::usd::kFitToViewShortcutKey) == QKeySequence(Qt::Key_F), "a Shortcut setting");
+        CHECK(action->shortcutContext() == Qt::ApplicationShortcut && mainWindow.actions().contains(action),
+              "on the main window, wherever the focus is");
+        action->trigger();
+        CHECK(closeTo(window->cameraState().target, PXR_NS::GfVec3d(-10, 0, 0)), "triggering it fits the active viewport");
+    }
+
+    viewport->setStage(empty.stage);
+    app.stages.setSelectedPaths(empty.stage, {});
+    CHECK(!viewport->fitToView(), "a stage with no geometry: nothing to fit");
+    CHECK(sink->toasts.size() == 2 && sink->toasts.back().message == "The stage has no geometry.", "which a toast says: %s",
+          sink->toasts.empty() ? "none" : sink->toasts.back().message.c_str());
+
+    usdcc::core::LogHub::instance().removeSink(sink.get());
+    viewport.reset();
 }

@@ -10,6 +10,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/prim_creation_catalog.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
+    include/usdcc/usd/scene_bounds.h
     include/usdcc/usd/shade_connections.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
@@ -24,6 +25,7 @@ add_library(usdcc_usd SHARED
     src/prim_creation_catalog.cpp
     src/property_categorizer.cpp
     src/relationship_targets.cpp
+    src/scene_bounds.cpp
     src/shade_connections.cpp
     src/stage.cpp
     src/stage_manager.cpp
