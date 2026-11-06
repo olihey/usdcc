@@ -1,0 +1,2 @@
+# Applied byte for byte to LF sources, whatever a checkout does to line endings.
+*.patch -text

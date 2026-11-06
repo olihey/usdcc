@@ -6,6 +6,7 @@
     "qtbase",
     "qtsvg",
     "qt-advanced-docking-system",
+    "qtnodes",
     "pybind11"
   ]
 }

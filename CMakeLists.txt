@@ -80,13 +80,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # through the shortcut map, QTest::keyClick).
 find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
+find_package(QtNodes CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)
-    # Only Qt and ADS: other imported targets (e.g. USD's TBB) don't have a
+    # Only Qt, ADS and QtNodes: other imported targets (e.g. USD's TBB) don't have a
     # Release/Debug pair to choose between.
     get_directory_property(_usdcc_imported IMPORTED_TARGETS)
     foreach(_target IN LISTS _usdcc_imported)
-        if(_target MATCHES "^(Qt6::|ads::)")
+        if(_target MATCHES "^(Qt6::|ads::|QtNodes::)")
             set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
         endif()
     endforeach()

@@ -303,7 +303,7 @@ Set-Content -Path (Join-Path $deployDir 'usdcc.cmd') -Encoding ascii -Value @(
 )
 
 $required = @(
-    'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
+    'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/QtNodes.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
     'plugin/usd/hdStorm.dll', 'python/python.exe', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
     'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
     'plugins/vray_render/usdcc-plugin.json', 'plugins/rtx_render/usdcc-plugin.json',

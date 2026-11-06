@@ -4,6 +4,7 @@
 
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
+#include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -139,6 +140,35 @@ void bindStageManager(py::module_& m) {
         },
         py::arg("type"), py::arg("category") = std::string(PrimCreationCatalog::kPlugins), py::arg("group") = 0,
         py::arg("order") = PrimCreationCatalog::kLastInGroup);
+    // usdcc.shading (docs/MATERIAL_EDITOR.md §4).
+    m.def("shader_nodes", []() {
+        py::list nodes;
+        for (const usdcc::usd::ShaderNodeInfo& node : usdcc::usd::ShaderNodeCatalog::instance().nodes()) {
+            py::dict entry;
+            entry["identifier"] = node.identifier;
+            entry["label"] = node.label;
+            entry["shading_system"] = node.shadingSystem;
+            entry["context"] = node.context;
+            entry["group"] = node.group;
+            entry["function"] = node.function;
+            entry["variant"] = node.variant;
+            entry["help"] = node.help;
+            nodes.append(entry);
+        }
+        return nodes;
+    });
+    m.def(
+        "set_renderer_profile",
+        [](const std::string& system, const std::string& name, const std::string& icon, const std::string& prefix, const std::string& surface,
+           const std::vector<std::string>& terminals, const std::vector<std::string>& hidden) {
+            if (system.empty()) throw py::value_error("no shading system");
+            usdcc::usd::ShaderNodeCatalog::instance().setProfile({system, name, icon, prefix, surface, terminals, hidden});
+        },
+        py::arg("shading_system"), py::arg("display_name"), py::arg("icon"), py::arg("terminal_prefix"), py::arg("default_surface_node"),
+        py::arg("terminals"), py::arg("hidden_contexts"));
+    m.def(
+        "remove_renderer_profile",
+        [](const std::string& system) { return usdcc::usd::ShaderNodeCatalog::instance().removeProfile(system); }, py::arg("shading_system"));
     m.def("hide_create_entry", [](const std::string& type) { PrimCreationCatalog::instance().hide(type); }, py::arg("type"));
     m.def(
         "remove_create_entry", [](const std::string& type) { return PrimCreationCatalog::instance().remove(type); },

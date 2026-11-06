@@ -19,6 +19,7 @@ add_executable(usdcc_tests
     dependencies_test.cpp
     dependency_files.h
     layer_stack_test.cpp
+    shader_node_catalog_test.cpp
     log_bridges_test.cpp
     log_capture_test.cpp
     log_test.cpp
@@ -72,6 +73,7 @@ add_executable(usdcc_ui_tests
     render_view_panel_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
+    material_graph_spike_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
     side_panel_test.cpp
@@ -80,6 +82,7 @@ add_executable(usdcc_ui_tests
     variant_editor_test.cpp
     view_panel_layout_test.cpp
 )
+target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 

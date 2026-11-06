@@ -1,0 +1,15 @@
+diff --git a/src/NodeGraphicsObject.cpp b/src/NodeGraphicsObject.cpp
+index c13b92086..7a52422a9 100644
+--- a/src/NodeGraphicsObject.cpp
++++ b/src/NodeGraphicsObject.cpp
+@@ -188,6 +188,10 @@ void NodeGraphicsObject::paint(QPainter *painter, QStyleOptionGraphicsItem const
+ QVariant NodeGraphicsObject::itemChange(GraphicsItemChange change, const QVariant &value)
+ {
+     if (change == ItemScenePositionHasChanged && scene()) {
++        QPointF const position = pos();
++        if (_graphModel.nodeData<QPointF>(_nodeId, NodeRole::Position) != position) {
++            _graphModel.setNodeData(_nodeId, NodeRole::Position, position);
++        }
+         moveConnections();
+     }
+ 

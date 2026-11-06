@@ -57,6 +57,8 @@
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
+#include "usdcc/usd/material_graph_spike_panel.h"
+#include "usdcc/usd/shader_nodes_dialog.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
@@ -586,6 +588,29 @@ int main(int argc, char** argv) {
         dialog->show();
         dialog->raise();
         dialog->activateWindow();
+    });
+    // The Material Editor's catalog, and its node graph spike (docs/MATERIAL_EDITOR.md §5).
+    QAction* shaderNodesAction = debugMenu->addAction(QObject::tr("&Shader Nodes..."));
+    QObject::connect(shaderNodesAction, &QAction::triggered, &window, [&window]() {
+        static QPointer<usdcc::usd::ShaderNodesDialog> dialog;
+        if (!dialog) {
+            dialog = new usdcc::usd::ShaderNodesDialog(&window);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+        }
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    });
+    QAction* graphSpikeAction = debugMenu->addAction(QObject::tr("Material &Graph Spike"));
+    QObject::connect(graphSpikeAction, &QAction::triggered, &window, [&window, &stageManager, undoManager]() {
+        // Not a registered type: nothing to come back after a restart, or to outlive it.
+        auto* panel = new usdcc::usd::MaterialGraphSpikePanel(&stageManager, stageManager.currentStage(), undoManager,
+                                                              QObject::tr("Material Graph Spike"), &window);
+        static int count = 0;
+        panel->setObjectName(QStringLiteral("materialGraphSpike-%1").arg(++count));
+        panel->setFeature(ads::CDockWidget::DockWidgetDeleteOnClose, true);
+        window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, panel);
+        panel->setAsCurrentTab();
     });
     // Checks for the Log panel (docs/LOGGING.md §7): one message of every
     // level from every source, and a large burst.

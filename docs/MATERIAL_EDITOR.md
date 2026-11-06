@@ -5,9 +5,14 @@ NodeGraphs and lay them out. The stage is the only data store. The graph draws w
 and every edit is a USD edit through `UndoManager`, so the Outliner, the Attribute Editor and undo
 keep working without changes.
 
-Status: **plan**. Nothing here is built yet. §2 and §3 were researched in November 2026 against the
-local USD build (`USD_INSTALL`, `pxr.h` 0.26.8), the local OpenDCC checkout, and the upstream repos
-named in each section.
+Status: **phases 0 and 1 done** (§5.1): QtNodes stays, the catalog and Debug > Shader Nodes are in, and
+the spike panel is a throwaway. The rest is still a plan. §2 and §3 were researched in November 2026 against the
+local USD build (`USD_INSTALL`, `pxr.h` 0.26.8) and the upstream repos named in each section. §3.5 was
+tested on 2026-11-06 against that build, and against the files in the ovrtx 0.6 wheel and the MDL SDK
+2026.0.2 package.
+
+**OpenDCC's node graph isn't used:** not linked, not vendored, and not a source to port from. Everything
+QtNodes doesn't provide is written here.
 
 ## 1. Scope
 
@@ -17,8 +22,8 @@ named in each section.
 - **Layout lives in USD:** `UsdUINodeGraphNodeAPI` (`pos`, `size`, `displayColor`,
   `expansionState`, `stackingOrder`, `icon`, `docURI`) and `UsdUIBackdrop` (`description`). Layout
   therefore survives a save and round-trips to other DCCs.
-- **Shader systems:** USD preview (`glslfx`), MaterialX (`mtlx`), Arnold (`arnold`), V-Ray and Cycles.
-  MDL (RTX) is out of scope, see §3.4.
+- **Shader systems:** USD preview (`glslfx`), MaterialX (`mtlx`), MDL (`mdl`, §3.5), Arnold (`arnold`),
+  V-Ray and Cycles.
 - **Not in scope:** shader preview swatches, editing `.mtlx` documents, and OSL authoring.
 
 ## 2. The node graph framework
@@ -28,7 +33,6 @@ named in each section.
 | Library | License | Activity | Qt6 | Model/view | Fit |
 |---|---|---|---|---|---|
 | [QtNodes](https://github.com/paceholder/nodeeditor) (paceholder/nodeeditor) | BSD-3 | 3.7k★, tag 3.0.16 (Feb 2026), commits through Jul 2026 | yes (default) | **yes**: we subclass `AbstractGraphModel` | **Recommended** |
-| OpenDCC [`opendcc.ui.node_editor`](https://github.com/shapefx/OpenDCC) | Apache-2.0 | 188★, last push Dec 2025, upstream still Qt5 | local fork only | yes: abstract `GraphModel` with string ids | Fallback, and source to port from |
 | [QuickQanava](https://github.com/cneben/QuickQanava) | BSD-3 | 1.4k★, release Sep 2024 | 6.5+, QML | no: owns its graph | Weak: QML, mirrors data |
 | [NodeGraphQt](https://github.com/jchanvfx/NodeGraphQt) | MIT | 1.8k★, Feb 2026 | via Qt.py | no: owns its data | Pure Python. UX reference only |
 | [noodles](https://github.com/facebookexperimental/noodles) | MIT | new (Apr 2026), experimental | GL, host supplies context | yes | Revisit in 2027 |
@@ -36,11 +40,9 @@ named in each section.
 
 - No other credible Qt6 C++ node editor turned up. The other Qt repos found are stale (2016–2023),
   tiny or GPL.
-- vcpkg has none of these. We pick one, pin a commit and add an overlay port.
-- **Other open-source USD-aware editors:**
-  - OpenDCC's `usd_editor.material_editor` and `usd_node_editor` are the closest prior art. They
-    cover UsdShade, NodeGraph grouping, backdrops and Graphviz layout. They depend on OpenDCC's undo
-    router and stage watcher, so they are code to port from, not a library to link.
+- vcpkg has none of these, so QtNodes comes from an overlay port, `cmake/ports/qtnodes`, at a pinned
+  commit. vcpkg finds it through `vcpkg-configuration.json`.
+- **Other open-source editors, for how they feel rather than for code:**
   - [QuiltiX](https://github.com/PrismPipeline/QuiltiX) is a Python MaterialX editor built on
     NodeGraphQt.
   - The MaterialX Graph Editor (ImGui) is a reference for MaterialX node UI.
@@ -59,8 +61,10 @@ named in each section.
     and `SdfPath`, and between port index and input/output name. The map is rebuilt when prims are
     renamed or reparented.
   - **Undo:** QtNodes' own undo is a `QUndoStack` on `BasicGraphicsScene` that saves and reloads JSON.
-    We don't use it. Every model mutation goes through `UndoManager::apply()`. A node drag is an edit
-    session: `beginEdit()` on press, live `pos` sets, `endEdit()` on release.
+    We don't use it, and `GraphicsView` installs Undo, Redo, Delete, Cut, Copy and Paste actions on it,
+    which we remove from each view. Every model mutation goes through `UndoManager::apply()`. A node
+    drag is an edit session: `beginEdit()` on the first position change, because a press sends no
+    signal, then live `pos` sets, and `endEdit()` on release (`nodeClicked`).
   - **NodeGraphs:** QtNodes groups live only in the scene, so we don't use them. We model a NodeGraph
     as a subnet instead:
     - From outside it is one node, whose ports are its interface `inputs:`/`outputs:`.
@@ -70,17 +74,27 @@ named in each section.
     - Houdini and Katana work this way, and it matches UsdShade's encapsulation rules.
   - **Backdrops:** our own `QGraphicsItem` behind the nodes, backed by `UsdUIBackdrop`. Moving one
     moves the nodes on it.
-  - **Tab search, Graphviz auto-layout, shake to disconnect:** ported from OpenDCC (Apache-2.0, with
-    attribution in `THIRD_PARTY_LICENSES`).
-- **Known issues to handle in the spike (§5, phase 0):**
-  - QtNodes issue #529: a `QOpenGLWidget` viewport in ADS tabs turns black. Keep the default raster
-    viewport.
-  - Node moves no longer reach the model (#525/#526). Pin a commit that includes fix PR #533, or patch
-    it in the overlay port.
-- **Fallback:** if the spike shows QtNodes fighting us, especially on custom geometry or on
-  subnet-style navigation, vendor OpenDCC's `ui.node_editor` instead. It is about 3.2k lines and its
-  only dependencies are OpenDCC's namespace macros, a hash helper and Graphviz. It already has string
-  ids and tab search. The cost is that we own an unmaintained fork.
+  - **Tab search and shake to disconnect:** written here, on the scene's own events.
+  - **Auto-layout:** our own layered layout in `usdcc_usd`, Qt-free and unit-tested: nodes in columns by
+    their distance from the Material, ordered to reduce crossings. It's a few hundred lines, against
+    adding Graphviz and its dependencies to the build for one command.
+- **Known issues, as handled in the spike:**
+  - QtNodes issue #529: a `QOpenGLWidget` viewport in ADS tabs turns black. We keep the default raster
+    viewport, a plain `QWidget`.
+  - Node moves no longer reach the model (#525/#526). Fix PR #533 is still open, so the port pins
+    master at `7bbcd3e` and applies the PR's source change as a patch. Drop the patch when it merges.
+- **What a graph model has to do, or nodes come out wrong** (none of it reports an error):
+  - Store `NodeRole::Size` from `setNodeData`, or nodes collapse to 39×39.
+  - Return `NodeRole::Style`, or nodes are invisible and can't be clicked.
+  - Return that style as a `QVariantMap` (`toJson().toVariantMap()`). The painter reads it with
+    `QJsonDocument::fromVariant()`, which drops a `QJsonObject`, and the node draws as a black box.
+- **What the view does on its own:**
+  - It fits the whole graph each time it's shown, ignoring the scale range, and `setupScale()` does
+    nothing until a range is set. The panel fits again after a show and keeps the scale readable.
+- **Fallback:** if phase 2 shows QtNodes fighting us, especially on custom geometry or on subnet-style
+  navigation, which the spike didn't try, write the view directly on `QGraphicsScene`. The UsdShade model
+  and everything in §3 don't depend on which view draws them, so that replaces only the drawing and
+  interaction code.
 
 ## 3. Which shading nodes exist: the Sdr registry
 
@@ -129,8 +143,8 @@ identifier appears in the tooltip.
 | Level | Source | Example |
 |---|---|---|
 | 1. Renderer | `GetShadingSystem()`, mapped to a display name and icon by a renderer profile (§3.3) | MaterialX |
-| 2. Context | `GetContext()`. Read it from `GetMetadataObject()` for usda-defined nodes, whose `GetContext()` returns "usda" | Surface / Pattern / Displacement |
-| 3. Group | `GetRole()`. For MaterialX this is the nodedef's `nodegroup` (pbr, math, procedural2d, adjustment, compositing, ...). For Arnold it is the node's `classification` | pbr |
+| 2. Context | `GetContext()`. Usda-defined nodes say "usda" there and in their metadata, so their outputs decide: `surface`, then `displacement`, then `volume`, else pattern (UsdPreviewSurface has both of the first two) | Surface / Pattern / Displacement |
+| 3. Group | The `role` metadata, because `GetRole()` falls back to the node's name. For MaterialX this is the nodedef's `nodegroup` (pbr, math, procedural2d, adjustment, compositing, ...). For Arnold it is the node's `classification` | pbr |
 
 - **Fallbacks:**
   - A node without a role goes to "Other".
@@ -138,7 +152,8 @@ identifier appears in the tooltip.
   - MaterialX defines one nodedef per signature (`ND_add_float`, `ND_add_color3`, ...). Its leaves group
     by function ("add"), and the type is picked in a submenu or by the first connection.
 - **Hidden:** contexts `light`, `lightFilter`, `displayFilter`, `sampleFilter`, `integrator` and
-  `displaydriver`, plus nodes that the renderer marks hidden (Arnold `hide`, `usd.hide`).
+  `displaydriver`, plus nodes that the renderer marks hidden (Arnold `hide`, `usd.hide`), and usdHydra's
+  old `Hw*` glslfx nodes, some of which have no outputs.
 - **Tab search** matches label, function and identifier across every visible system. The current
   renderer's systems rank first.
 
@@ -151,15 +166,16 @@ identifier appears in the tooltip.
 | Arnold | arnold-usd `nodeRegistryArnold` | `arnold` | `arnold:standard_surface` | `classification` → role; `ui.groups` → pages | only once arnold-usd is built against our USD and the Arnold core DLL loads (its discovery calls `AiBegin`) |
 | Cycles | **none** (Blender's Hydra delegate ships no Sdr plugin) | ours: `cycles` | `cycles:principled_bsdf` (the delegate also accepts `cycles_*`) | ours, from `ccl::NodeType` | needs generated definitions (§3.4) |
 | V-Ray | **none** in the App SDK's USD bundle | ours: `vray` | `vray:BRDFVRayMtl`, to be confirmed against a V-Ray USD export | V-Ray `PluginCategory` (bsdf, material, texture, uvwgen) | needs generated definitions (§3.4) |
-| MDL / RTX | Omniverse `rtx.usdmdl` (Kit only) | `mdl` | `.mdl` asset + subIdentifier | — | no. RTX is served through MaterialX/preview for now |
+| MDL | **none** that USD can use (§3.5) | ours: `mdl` | `mdl:<module>::<name>`, for the catalog only. Prims use `.mdl` asset + subIdentifier | the module's folder; `anno::in_group` → pages | needs our parser and generated definitions (§3.5) |
 
 A **renderer profile** is a small table per shading system. Plugins can add profiles, so the V-Ray
-and RTX plugins bring their own. Each profile holds:
+and RTX plugins bring their own. MDL's is built in, as its parser is. Each profile holds:
 
 - the display name and icon;
-- the Material terminal prefix (`""`, `mtlx`, `arnold`, `cycles`, `vray`);
+- the Material terminal prefix (`""`, `mtlx`, `mdl`, `arnold`, `cycles`, `vray`);
 - the default surface node for "New Material" (`UsdPreviewSurface`, `ND_standard_surface_surfaceshader`,
-  `arnold:standard_surface`, ...);
+  `OmniPBR`, `arnold:standard_surface`, ...);
+- which terminals "New Material" connects (MDL's are `surface`, `displacement` and `volume`);
 - extra hidden contexts.
 
 ### 3.4 Renderers without an Sdr plugin: generated definitions
@@ -176,6 +192,11 @@ OpenUSD has no JSON parser, so the least-work route reuses the built-in
    - identifier `cycles:principled_bsdf`; subIdentifier = the prim name, since prim names can't hold
      ":";
    - discovery type `usda`, shading system `cycles`, uri = the file.
+
+   *Tested* with shading system `mdl`: the node comes back valid, with its inputs, outputs, default, label
+   and page. **The subIdentifier is required:** without it the parser looks for a prim named after the
+   identifier and the node comes back invalid, with only a warning. From Python, that's the full
+   twelve-argument `Sdr.NodeDiscoveryResult`, with a version made by `GetAsDefault()`.
 
    This needs no DLL and no `plugInfo.json`, so a Python plugin can do it. A 40-line
    `SdrDiscoveryPlugin` modelled on usdShaders' is the cleaner alternative if registration ever has to
@@ -195,6 +216,128 @@ Where each generated file comes from:
     regenerated when that version changes, and registered by the V-Ray plugin.
 - **Arnold:** nothing to generate once arnold-usd is built for our USD. It ships as an optional plugin
   whose manifest puts its `plugInfo.json` on the path.
+- **MDL:** parsed from the `.mdl` files themselves, §3.5.
+
+### 3.5 MDL
+
+**How it looks in USD** (from `BuiltInMaterials.usda` in the ovrtx wheel, and
+[NVIDIA's guide](https://developer.nvidia.com/usd/MDLschema)):
+
+```usda
+def Material "OmniPBR"
+{
+    color3f inputs:diffuse_tint = (0.78, 0.65, 0.49) (displayGroup = "Albedo"  displayName = "Color Tint")
+    token outputs:mdl:surface.connect = </World/Looks/OmniPBR/Shader.outputs:out>
+    token outputs:mdl:displacement.connect = </World/Looks/OmniPBR/Shader.outputs:out>
+    token outputs:mdl:volume.connect = </World/Looks/OmniPBR/Shader.outputs:out>
+
+    def Shader "Shader"
+    {
+        uniform token info:implementationSource = "sourceAsset"
+        uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+        uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+        color3f inputs:diffuse_color_constant.connect = </World/Looks/OmniPBR.inputs:diffuse_tint>
+        token outputs:out
+    }
+}
+```
+
+There's no `info:id`. A shader names a file and a definition in it, its output is always `token outputs:out`,
+and one shader can feed all three terminals. In that sample every one of the 16 MDL shaders is like this.
+
+#### The issues
+
+**Sdr doesn't know MDL, so the ports have to come from elsewhere.** *Tested:* on a shader authored as above,
+`GetShaderNodeForSourceType("mdl")` returns nothing, and `GetShaderNodeFromAsset()` too, as no parser handles
+`.mdl`. ovrtx's own USD doesn't register one either: its `plugInfo.json` files list parsers for usdLux, usdMtlx and
+usdShade only. Its `omni.usdMdl.dll` has no `plugInfo.json` of its own, and it isn't a library we could load
+anyway.
+
+**Registered definitions are found by id, and MDL shaders have none.** *Tested:* after registering a definition
+(§3.4), a shader with `info:id` finds it, and one with the `.mdl` asset still doesn't. Authoring an `info:id` to
+make that work isn't an option, as that's what a renderer reads instead. So the catalog needs a lookup of its own (below).
+
+**The definition files might not be on the machine.** `OmniPBR.mdl` and the other 88 files come with the ovrtx wheel
+(`ovrtx/bin/library/mdl`), 1.4 GB, which only the RTX plugin installs. usdcc shouldn't copy them, as they aren't ours to
+ship (their licence not yet read), so a stage can name a module nobody here has.
+
+**Storm can't draw it.** Storm's material contexts are the universal one and `mtlx` (§3.1), so an MDL-only material
+falls back to Storm's default look in the viewport. *Not tested.* Only the RTX panel shows it properly. And each material
+edit reloads the whole stage in that panel (RTX_RENDER.md §3), with heavy scenes taking minutes (§7 there).
+
+#### Where the definitions come from: our own parser
+
+| | Text parser in `usdcc_usd` (**recommended**) | MDL SDK in a helper |
+|---|---|---|
+| Size | Nothing added | 113 MB `libmdl_sdk.dll` on a 388 MB deploy, or 109 MB `libmdl_core.dll` |
+| Build | A few hundred lines of C++ | The BSD package's prebuilt DLL plus a small C++ tool. vcpkg has a `mdl-sdk` port, but it builds LLVM. Its Python binding is for 3.10, and ours is 3.12 |
+| Speed | Reads text, in-process | Starts a process, then compiles the module |
+| Correct on | Signatures, annotations and enums, as far as tested below | Everything, including a module that doesn't compile, and `.mdle` |
+
+**The parser is enough for what the editor needs,** which is ports, labels and groups rather than compiling anything.
+MDL has no preprocessor, and a signature's grammar is small. *Tested:* a rough parser of about 60 lines read all 89 real files:
+**1,276 of 1,318 signatures, and all 42 misses are `(*)`**, presets that inherit a base material's parameters, which
+a real parser follows (`export material OmniHair_Wet(*) = OmniHair(...)`). That's 4,641 parameters across 202 materials
+and 1,116 functions. It reads 47 parameters of `OmniPBR` and 156 of `OmniSurface`.
+
+The parser's limits: it can't tell a module is broken, which the renderer reports; it won't evaluate a default that's a real
+expression, which then shows as no default; and it doesn't read `.mdle`. If those start to matter, the helper can replace it
+behind the same interface, as nothing else sees where definitions come from.
+
+**What it reads, and where it goes in the generated definition:**
+
+| In the `.mdl` | Becomes | How common (of 4,641) |
+|---|---|---|
+| `anno::display_name` | `label` | 1,807 |
+| `anno::in_group` | `page` (nested with ":") | 1,497 |
+| `anno::description` | `help` | 1,377 |
+| `anno::hard_range`, `soft_range` | limits | 429, 237 |
+| `anno::ui_order` | port order | 238 |
+| `anno::hidden`, `anno::unused` | no port | 123, 196 |
+| `anno::enable_if` | ignored at first: it's an MDL expression, not an `SdfBooleanExpression` | 143 |
+| `export material` / other return type | context `surface` / `pattern`, with the return type for `outputs:out` | |
+
+**MDL types to USD types.** Only the first group is confirmed against an authored file. The rest are what I expect, and need checking
+against a real MDL network before relying on them (§6, question 4):
+
+| MDL | USD | Count | State |
+|---|---|---|---|
+| `float`, `bool`, `int` | `float`, `bool`, `int` | 1,350, 333, 232 | Seen in BuiltInMaterials |
+| `color` | `color3f` | 447 | Seen |
+| `material`, and a shader's output | `token` | 106 | Output seen; input expected |
+| `float2`, `float3`, `float4`, `int2` | `float2`, `float3`, `float4`, `int2` | 377, 452, 321, 15 | Expected |
+| `texture_2d` | `asset` | 250 | Expected |
+| `string` | `string` | 105 | Expected |
+| `float3x3`, `float4x4` | `matrix3d`, `matrix4d` | 20, 20 | Expected |
+| an enum | `int`, with its names as options | about 200 | Expected |
+| a struct (`texture_return`, 90) | `token`: no value, connection only | | Unknown |
+
+Enums and structs can be declared in another module (`::OmniSurface::OmniImage::alpha_mode`), so the parser follows `import`s.
+
+#### Into the catalog
+
+1. **Searching:** a new setting, `Materials/mdlSearchPaths` (the `FolderList` type, on a Materials page), plus `MDL_USER_PATH` and
+   `MDL_SYSTEM_PATH`, plus ovrtx's `bin/library/mdl` if the RTX plugin has installed it. The folders' `.mdl` files are listed at startup without being read,
+   and each is parsed the first time it's needed, so startup stays quick.
+2. **Registering:** each parsed definition becomes a generated `.usda` in the user data folder, keyed by the file's path and time, and is registered as in §3.4 with
+   identifier `mdl:<module>::<name>` and shading system `mdl`. So palette, tab search and Attribute Editor treat it as any other Sdr node.
+3. **Finding a prim's definition:** `ShaderNodeCatalog::definitionOf(UsdShadeShader)` is the one way everything asks. It uses `info:id` if there is one, or else reads
+   `info:mdl:sourceAsset` and its subIdentifier, parses the module if it hasn't, and returns the registered node. A bare `@OmniPBR.mdl@` is looked up in the search paths, as
+   USD's resolver doesn't know them.
+4. **A module that can't be found** still draws: the node shows its authored inputs and `outputs:out`, with a warning naming the module. Nothing is lost or rewritten.
+
+A parser plugin (`SdrParserPlugin` for discovery type `mdl`) would make `GetShaderNodeForSourceType()` work for all USD code, Python included. It's cleaner, but needs a DLL with a `plugInfo.json` and I haven't
+tested that USD would call it for an asset. `definitionOf()` doesn't stop that being added later.
+
+#### In the editor
+
+- **Palette:** shading system MDL → context (Materials, Functions) → the module's folder. Presets are listed under their base material. `anno::hidden` definitions are left out.
+- **Creating:** an MDL node authors `info:implementationSource`, `info:mdl:sourceAsset` with the bare module name when a search path finds it (relative otherwise), its subIdentifier, and `token outputs:out`. **It authors no `info:id`.**
+  "New Material" connects it to all three terminals, as Omniverse does.
+- **Large nodes:** `OmniSurface` has 156 inputs, so a node's pages start closed, and only connected ports show (`expansionState`).
+- **Connecting:** `shade_connections.h` compares value types, which works for matching USD types, but several struct types may all be `token`. So when both ends have definitions, MDL's own types decide.
+- **The interface:** promoting an input to the Material copies `displayGroup` and `displayName` from the definition, which is how the sample's interface is authored.
+- **Beside other terminals:** a Material can have `outputs:mdl:surface` and `outputs:surface` together, as the sample's OpenPBR one does with `mtlx`. Adding a preview shader this way is what makes MDL materials readable in Storm, and it's an explicit action, not automatic.
 
 ## 4. The panel
 
@@ -204,8 +347,9 @@ Where each generated file comes from:
   - A pin keeps the panel on one Material.
 - **Selection is two-way:**
   - Selecting nodes selects their prims, so the Attribute Editor edits them.
-  - The Attribute Editor already reads Sdr metadata for limits and connections
-    (ATTRIBUTE_EDITOR.md §4.3).
+  - **The Attribute Editor needs work for this, despite what its doc says.** ATTRIBUTE_EDITOR.md §4 says it
+    reads Sdr metadata for shader inputs, but a search of `src/` finds no Sdr call. An unauthored input of an
+    MDL or MaterialX node isn't an attribute yet, so it also needs to list the definition's inputs (§5, phase 3).
 - **Ports:**
   - A Shader node shows the **Sdr** inputs and outputs, not only the authored ones. They are grouped
     into collapsible pages by `GetPage()`.
@@ -220,7 +364,8 @@ Where each generated file comes from:
 - **Edits:** each of these is one `prim_actions` call and one undo step: create, delete, rename,
   duplicate, copy/paste, connect, disconnect, group into a NodeGraph, ungroup, promote an input to the
   interface, add/remove a Material terminal, create a backdrop, and auto-layout.
-  - Creating a node authors `info:id` and the `UsdUINodeGraphNodeAPI` position, and nothing else.
+  - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
+    `UsdUINodeGraphNodeAPI` position, and nothing else.
   - Deleting a node also removes connections to it.
 - **Live refresh:** a `UsdNotice::ObjectsChanged` listener scoped to the shown Material. It updates the
   model incrementally, so edits from Python, the Attribute Editor or undo show at once.
@@ -233,14 +378,35 @@ Where each generated file comes from:
 
 | Phase | Deliverable | Exit criteria |
 |---|---|---|
-| **0. Spike** | QtNodes overlay port pinned to a commit with #533; a throwaway panel with a minimal `AbstractGraphModel` over one Material, inside an ADS dock | Nodes draw in the app theme; dragging writes `ui:nodegraph:node:pos` through an edit session and undoes in one step; no black viewport in a floating or tabbed dock. **Decide QtNodes vs OpenDCC here** |
-| **1. Node catalog** | Qt-free `ShaderNodeCatalog` in `usdcc_usd`: Sdr query, version filter, the grouping of §3.2, renderer profiles, delegate filtering; Debug > Shader Nodes browser | Unit tests for the grouping of the preview and MaterialX nodes; counts match `GetAllShaderNodes()` minus the hidden ones |
+| **0. Spike** | QtNodes overlay port pinned to a commit with #533; a throwaway panel with a minimal `AbstractGraphModel` over one Material, inside an ADS dock | Nodes draw in the app theme; dragging writes `ui:nodegraph:node:pos` through an edit session and undoes in one step; no black viewport in a floating or tabbed dock. **Decide QtNodes vs our own `QGraphicsScene` view here** |
+| **1. Node catalog** | Qt-free `ShaderNodeCatalog` in `usdcc_usd`: Sdr query, version filter, the grouping of §3.2, renderer profiles, delegate filtering, `definitionOf()`; Debug > Shader Nodes browser | Unit tests for the grouping of the preview and MaterialX nodes; counts match `GetAllShaderNodes()` minus the hidden ones |
 | **2. Read-only graph** | `MaterialEditorViewPanel`, `UsdShadeGraphModel`, node painter, Sdr ports and pages, selection sync, NodeGraph enter/exit, breadcrumb | Shows the test_data materials, MaterialX and preview, matching `usdcat`; follows selection both ways |
-| **3. Editing** | Create (palette and tab search), connect, disconnect, delete, rename, duplicate, copy/paste, Material terminals, live refresh | Every edit is one undo step; a Python edit shows at once; Storm renders a network built only in the editor |
-| **4. Organisation** | Group into a NodeGraph and promote its interface, ungroup, backdrops, Graphviz auto-layout, shake to disconnect | Group/ungroup round-trips without changing the render; layout saved and reloaded |
-| **5. Renderers** | Arnold plugin build; Cycles definition generator; V-Ray definition export in the helper; per-renderer "New Material" | Palettes for all five systems; an Arnold and a V-Ray material built in the editor render in their panels |
+| **3. Editing** | Create (palette and tab search), connect, disconnect, delete, rename, duplicate, copy/paste, Material terminals, live refresh; the Attribute Editor listing a definition's unauthored inputs | Every edit is one undo step; a Python edit shows at once; Storm renders a network built only in the editor |
+| **4. Organisation** | Group into a NodeGraph and promote its interface, ungroup, backdrops, our layered auto-layout, shake to disconnect | Group/ungroup round-trips without changing the render; layout saved and reloaded |
+| **5. MDL** | The parser, including `(*)` presets and enums across modules; generated definitions and their cache; `Materials/mdlSearchPaths`; MDL in `definitionOf()`, palette and "New Material"; MDL's own connection types | Parses all 89 files in the ovrtx wheel with nothing missed (a local check, as they aren't ours to commit; tests use small `.mdl` files written for them). BuiltInMaterials.usda and `omniverse_preview.usda` draw with their real labels and pages. **An OmniPBR material built in the editor renders in the RTX panel**, and a missing module draws with a warning |
+| **6. Other renderers** | Arnold plugin build; Cycles definition generator; V-Ray definition export in the helper; per-renderer "New Material" | Palettes for all six systems; an Arnold and a V-Ray material built in the editor render in their panels |
 
-Phases 1 and 0 can run in parallel. Phase 5's generators only depend on phase 1.
+Phases 1 and 0 can run in parallel. Phases 5 and 6 only depend on phase 1 for their definitions, and on phase 3 to author anything, and either can go first.
+
+### 5.1 Results of phases 0 and 1
+
+**Decision: QtNodes stays.** All three exit criteria pass with an unmodified library plus the #533 patch.
+Everything that went wrong was a model requirement or a view default (§2.2), each fixed in a few lines
+of our code. The spike only drew and moved nodes. Custom geometry and subnet navigation first get tried
+in phase 2, so the fallback in §2.2 still stands.
+
+| Criterion | Result | Checked by |
+|---|---|---|
+| Nodes draw in the app theme | Yes, after the fixes in §2.2. The first run drew black boxes | Screenshots from the deployed app; `usdcc_ui_tests` counts a node's body pixels |
+| A drag writes `pos` through an edit session, one undo step | Yes. Only the dragged prim is authored, the step is "Move Node", Edit > Undo removes the API and Redo restores it | Script-sent mouse events in the deployed app, and `usdcc_ui_tests` |
+| No black viewport | None in a floating window, or when its tab comes back. Beside the 3D viewport in one tab area it was tested only with a plain widget, offscreen | Floating: deployed app. Tabs: `usdcc_ui_tests` |
+| Catalog grouping and counts | 814 nodes plus 23 hidden; systems `glslfx` and `mtlx` | `usdcc_tests`, deployed app |
+
+Still open for phase 2: **position units.** The spike uses `ui:nodegraph:node:pos` 1:1 as scene
+pixels. Check what other DCCs write before relying on that, or layouts won't round-trip as §1 promises.
+
+The spike's files go when phase 2's panel replaces them: `material_graph_spike_*` and
+`tests/material_graph_spike_test.cpp`, which also holds the Shader Nodes dialog's test, to keep.
 
 ## 6. Open questions
 
@@ -251,8 +417,10 @@ Phases 1 and 0 can run in parallel. Phase 5's generators only depend on phase 1.
    and phase 5 drops its generator.
 3. **Arnold:** do we ship arnold-usd built against our USD, or find a user's install? Its Sdr plugin
    needs the Arnold core at discovery time, so startup gets slower when it is on the path.
-4. **RTX/MDL:** is MaterialX plus preview enough for ovrtx? ovrtx's own material-editor example uses
-   MaterialX.
+4. **MDL types:** the types marked "Expected" in §3.5, above all structs and enums, need a real MDL function network. BuiltInMaterials has only materials with simple inputs, and I couldn't
+   find `omniverse_preview.usda` (RTX_RENDER.md §7), with its 1,550 shaders, on this machine. That's the first thing to do in phase 5.
 5. **Unauthored defaults:** a port shows the Sdr default. Should "Reset" remove the authored value
    (the current Attribute Editor behaviour), or author the Sdr default explicitly for renderers that
    don't read Sdr?
+6. **ovrtx and our search paths:** a module from `Materials/mdlSearchPaths` has to reach ovrtx in its helper process too. Not checked how it's told. It may need `MDL_USER_PATH` set for the helper.
+7. **The Omniverse MDL files' licence:** I haven't read it. The plan is only to read them where ovrtx installed them, never to copy them. Without ovrtx, there's no `OmniPBR` to offer, so "New Material" for MDL needs a module from a search path or says why it can't.

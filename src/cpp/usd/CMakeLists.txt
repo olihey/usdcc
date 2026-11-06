@@ -11,6 +11,8 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
     include/usdcc/usd/scene_bounds.h
+    include/usdcc/usd/shader_node_catalog.h
+    src/shader_node_catalog.cpp
     include/usdcc/usd/shade_connections.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
@@ -56,6 +58,12 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/main_menu_actions.h
     src/main_menu_actions.cpp
+    include/usdcc/usd/material_graph_spike_model.h
+    src/material_graph_spike_model.cpp
+    include/usdcc/usd/material_graph_spike_panel.h
+    src/material_graph_spike_panel.cpp
+    include/usdcc/usd/shader_nodes_dialog.h
+    src/shader_nodes_dialog.cpp
     include/usdcc/usd/recent_files.h
     src/recent_files.cpp
     include/usdcc/usd/dependencies_view_panel.h
@@ -157,6 +165,8 @@ add_library(usdcc_usd_ui SHARED
 # src/cpp/ui/CMakeLists.txt.
 usdcc_add_resources(usdcc_usd_ui_resources resources/prim_icons.qrc)
 target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg usdcc_usd_ui_resources)
+# Only the spike's panel sees it, so plugins built against the SDK don't need it.
+target_link_libraries(usdcc_usd_ui PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_usd_ui PRIVATE USDCC_USD_UI_BUILD)
 usdcc_export_library(usdcc_usd_ui)
 usdcc_precompile_headers(usdcc_usd_ui ui_pch.h)
