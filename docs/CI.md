@@ -47,6 +47,10 @@ package files and OpenImageIO's. `tools/ci/relocate-usd.ps1` rewrites them befor
 - `pxrConfig.cmake` uses its stored Python paths only if they exist on the machine;
   otherwise CMake finds Python 3.12 itself. So CI, with the same Python as the build,
   needs no `-DPython3_EXECUTABLE`, and a plugin author's own Python 3.12 install works.
+  Under vcpkg's toolchain, as in usdcc's own build, "finds it itself" would mean vcpkg's
+  python3, which can't be embedded (vcpkg's `find_package` wrapper insists on it), so
+  usdcc's `FindUSD.cmake` first looks for the machine's Python of the same version (in the
+  registry, then on PATH) and sets the paths as `pxrConfig.cmake` would.
 - The Python include folder in `pxrTargets.cmake` becomes `${Python3_INCLUDE_DIRS}`, which
   `pxrConfig.cmake` has found by then.
 
@@ -148,10 +152,18 @@ Runs on pushes to `master` and on pull requests.
    with `gh release download`, and unzip it to `C:\deps\usd`. If it's missing, fail with
    a message saying to run `deps-usd.yml`.
 4. **vcpkg binary cache.** `VCPKG_BINARY_SOURCES=clear;files,<dir>,readwrite`, with that
-   directory saved by `actions/cache`. The key is the triplet, `vcpkg.json` and the
-   vcpkg submodule commit. The first run builds Qt (an hour or more), and later runs
-   restore it in minutes. vcpkg's old `x-gha` cache backend is gone, so it's the `files`
-   backend plus `actions/cache`.
+   directory saved by `actions/cache`. vcpkg's old `x-gha` cache backend is gone, so it's
+   the `files` backend plus `actions/cache`. The first run builds Qt (an hour or more), and
+   later runs restore it in minutes.
+   - The key is the triplet, the runner image (`ImageOS` and `ImageVersion`), `vcpkg.json`
+     and the vcpkg submodule commit. The image is in it because its compiler is part of
+     every package's ABI hash: with an unchanged key after an image update, vcpkg would
+     rebuild everything on every run and never save it.
+   - A new key restores the newest older cache (by prefix), so only what changed is
+     rebuilt, and saves the result under the new key.
+   - Saved even when the build fails, so Qt isn't built again after a usdcc compile
+     error. Only from pushes, not pull requests: a pull request's caches would crowd
+     `master`'s out of the repository's 10 GB, and pull requests can restore `master`'s.
 5. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
    `RelWithDebInfo` like local builds.
 6. Run the tests (phase 3).
@@ -167,6 +179,9 @@ Runs on pushes to `master` and on pull requests.
 2. **usdcc builds in CI.** `build.yml` up to step 5, with the vcpkg cache, without
    PySide6 (the CMake configure already turns off `usdcc.ui` and Python-made panels
    without it). Done when `master` is green and a second run restores Qt from the cache.
+   *Written: `.github/workflows/build.yml`. usdcc configures against the published asset
+   locally (which is how `FindUSD.cmake`'s Python lookup above turned up). The first CI
+   run is pending.*
 3. **Tests in CI.** `ctest` for `usdcc_tests`, `usdcc_ui_tests` and
    `usdcc_python_tests`; the UI tests already run with `QT_QPA_PLATFORM=offscreen`.
    Hosted runners have no GPU, so tests that need Hydra/OpenGL (the viewport, picking,

@@ -1,0 +1,105 @@
+# Builds usdcc on Windows against the prebuilt OpenUSD that deps-usd.yml
+# publishes (docs/CI.md §4). vcpkg's packages (Qt above all) are kept between
+# runs in vcpkg's files binary cache, saved with actions/cache.
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
+    runs-on: windows-2022
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      USD_INSTALL: C:\deps\usd
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Name the OpenUSD asset
+        id: asset
+        run: tools/ci/usd-asset.ps1 -GitHubOutput
+
+      # The Python OpenUSD was built with: its pxrConfig.cmake points at this
+      # exact interpreter, and usdcc embeds the same one.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      - name: Download OpenUSD
+        run: |
+          gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.zip }}' --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) {
+            Write-Host "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json first."
+            exit 1
+          }
+          7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$env:USD_INSTALL" | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+          Remove-Item "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
+
+      # The key changes with the dependencies (vcpkg.json and the vcpkg commit)
+      # and with the runner image, whose compiler is part of every package's ABI
+      # hash. An older cache is restored when the key is new, so only what
+      # changed gets rebuilt, and the result is saved under the new key.
+      - name: Name the vcpkg cache
+        id: vcpkg
+        run: |
+          $commit = git rev-parse HEAD:external/vcpkg
+          $dir = "$env:RUNNER_TEMP\vcpkg-cache"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> $env:GITHUB_ENV
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+          "prefix=vcpkg-x64-windows-$env:ImageOS-" >> $env:GITHUB_OUTPUT
+          "key=vcpkg-x64-windows-$env:ImageOS-${{ hashFiles('vcpkg.json') }}-$commit-$env:ImageVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Restore the vcpkg cache
+        id: vcpkg-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: ${{ steps.vcpkg.outputs.prefix }}
+
+      - name: Build
+        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL
+
+      # Even when the build failed, so the packages vcpkg did build (Qt takes
+      # over an hour) aren't built again next time. Only from master: a pull
+      # request's caches would crowd master's out of the 10 GB the repository
+      # gets, and pull requests restore master's.
+      - name: Save the vcpkg cache
+        if: >-
+          always() && github.event_name != 'pull_request' && steps.vcpkg.outputs.key != ''
+          && steps.vcpkg-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+
+      - name: Upload vcpkg's logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs
+          path: |
+            external/vcpkg/buildtrees/**/*.log
+            build/vcpkg-manifest-install.log
+          if-no-files-found: ignore

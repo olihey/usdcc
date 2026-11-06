@@ -30,6 +30,66 @@ if(USD_INSTALL)
     list(APPEND CMAKE_PREFIX_PATH "${USD_INSTALL}")
 endif()
 
+# pxrConfig.cmake names the Python OpenUSD was built with. In the prebuilt
+# OpenUSD from CI (docs/CI.md) it only uses that one if it exists, which on
+# another machine it doesn't, and then its find_package(Python3) would get
+# vcpkg's python3: vcpkg's find_package wrapper insists on it whenever
+# Development is asked for, and it can't be embedded, so scripting would be
+# off. So find this machine's own Python of the same version first, where
+# Python's installer registers it or on PATH, and set it as pxrConfig would.
+if(WIN32 AND NOT DEFINED Python3_EXECUTABLE AND EXISTS "${USD_INSTALL}/pxrConfig.cmake")
+    file(READ "${USD_INSTALL}/pxrConfig.cmake" _usd_config)
+    set(_usd_python_built "")
+    if(_usd_config MATCHES "set\\(Python3_EXECUTABLE \\[\\[([^]]*)\\]\\]\\)")
+        set(_usd_python_built "${CMAKE_MATCH_1}")
+    endif()
+    if(NOT EXISTS "${_usd_python_built}"
+       AND _usd_config MATCHES "find_dependency\\(Python3 \"([0-9]+)\\.([0-9]+)\"")
+        set(_usd_python_version "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+        set(_usd_python_candidates "")
+        foreach(_root HKEY_CURRENT_USER HKEY_LOCAL_MACHINE)
+            get_filename_component(_dir "[${_root}\\SOFTWARE\\Python\\PythonCore\\${_usd_python_version}\\InstallPath]"
+                                   ABSOLUTE)
+            list(APPEND _usd_python_candidates "${_dir}/python.exe")
+        endforeach()
+        string(REPLACE "\\" "/" _usd_path "$ENV{PATH}")
+        foreach(_dir IN LISTS _usd_path)
+            list(APPEND _usd_python_candidates "${_dir}/python.exe")
+        endforeach()
+        foreach(_python IN LISTS _usd_python_candidates)
+            if(NOT EXISTS "${_python}" OR _python MATCHES "/vcpkg_installed/|/WindowsApps/")
+                continue()
+            endif()
+            execute_process(
+                COMMAND "${_python}" -c "import sys; print('%d.%d' % sys.version_info[:2]); print(sys.base_prefix)"
+                OUTPUT_VARIABLE _probe RESULT_VARIABLE _result ERROR_QUIET)
+            string(STRIP "${_probe}" _probe)
+            string(REPLACE "\n" ";" _probe "${_probe}")
+            list(LENGTH _probe _probe_length)
+            if(NOT _result EQUAL 0 OR NOT _probe_length EQUAL 2)
+                continue()
+            endif()
+            list(GET _probe 0 _version)
+            list(GET _probe 1 _home)
+            file(TO_CMAKE_PATH "${_home}" _home)
+            string(REPLACE "." "" _nodot "${_version}")
+            if(_version STREQUAL _usd_python_version AND EXISTS "${_home}/libs/python${_nodot}.lib")
+                set(Python3_EXECUTABLE "${_home}/python.exe" CACHE FILEPATH "OpenUSD's Python")
+                set(Python3_LIBRARY "${_home}/libs/python${_nodot}.lib" CACHE FILEPATH "OpenUSD's Python")
+                set(Python3_INCLUDE_DIR "${_home}/Include" CACHE PATH "OpenUSD's Python")
+                message(STATUS "OpenUSD's Python ${_usd_python_version}: ${_home} (built with ${_usd_python_built})")
+                break()
+            endif()
+        endforeach()
+        if(NOT DEFINED Python3_EXECUTABLE)
+            message(WARNING "OpenUSD was built with Python ${_usd_python_version} (${_usd_python_built}), which isn't "
+                            "on this machine, and no other Python ${_usd_python_version} was found. Install it, or "
+                            "pass -DPython3_EXECUTABLE=<its python.exe>; without it scripting is off.")
+        endif()
+    endif()
+    unset(_usd_config)
+endif()
+
 find_package(pxr CONFIG QUIET)
 
 # OpenUSD's pxrConfig.cmake gives TBB::tbb TBB_USE_DEBUG=1 for Debug and
