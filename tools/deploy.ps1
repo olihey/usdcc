@@ -17,8 +17,10 @@
           python\       the Python OpenUSD was built with (Lib, DLLs, and python.exe,
                         which uv needs to install packages), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
-          plugins\      plugins shipped with the app (none by default)
-          examples\plugins\   the example plugins, loaded with --plugin-path
+          plugins\      plugins shipped with the app, always looked in: V-Ray
+                        Render and RTX Render
+          examples\plugins\   the example plugins, loaded with --plugin-path or
+                        added in Settings > Plugins
           sdk\          headers, import libraries and CMake files for C++ plugins
           tools\ruff\   ruff.exe and its LICENSE, for the Script Editor's Ruff
                         Format and Ruff Check (the build's pinned version)
@@ -263,11 +265,18 @@ if ($hasUv) {
 
 # --- plugins ---------------------------------------------------------------
 
-# plugins\ is where the app looks for plugins shipped with it. The examples sit
-# apart, so they don't load unless asked: usdcc.cmd --plugin-path examples\plugins
+# plugins\ is where the app always looks for the plugins it ships (docs/PLUGINS.md).
+# The examples sit apart, so they don't load unless asked: usdcc.cmd --plugin-path
+# examples\plugins, or Settings > Plugins.
+$shippedPlugins = @('vray_render', 'rtx_render')
+Write-Host '  Shipped plugins'
+foreach ($plugin in $shippedPlugins) {
+    Copy-Tree -From (Join-Path $repoRoot "src/plugins/$plugin") -To (Join-Path $deployDir "plugins/$plugin") -ExcludeDirs @('__pycache__')
+    # An older deploy had them among the examples.
+    Remove-Item -Recurse -Force (Join-Path $deployDir "examples/plugins/$plugin") -ErrorAction SilentlyContinue
+}
 Write-Host '  Example plugins'
-New-Item -ItemType Directory -Force (Join-Path $deployDir 'plugins') | Out-Null
-Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs @('__pycache__', 'cpp_example')
+Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs (@('__pycache__', 'cpp_example') + $shippedPlugins)
 Copy-Tree -From (Join-Path $buildDir 'plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeFiles $buildOnlyFiles
 
 # --- SDK for C++ plugins (docs/PLUGIN_SDK.md) --------------------------------
@@ -297,6 +306,7 @@ $required = @(
     'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
     'plugin/usd/hdStorm.dll', 'python/python.exe', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
     'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
+    'plugins/vray_render/usdcc-plugin.json', 'plugins/rtx_render/usdcc-plugin.json',
     'examples/plugins/measure_example/usdcc-plugin.json', 'examples/plugins/cpp_example/usdcc-plugin.json',
     'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h'
 )

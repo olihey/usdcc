@@ -16,8 +16,9 @@ without NVIDIA's permission, so this page gives no timings.
 
 ## 1. Setup
 
-1. **Load the plugin.** Run `usdcc --plugin-path src/plugins`, or copy the folder into
-   `%LOCALAPPDATA%\usdcc\plugins`.
+1. **The plugin ships with usdcc:** a deploy has it in `plugins\`, always looked in. From a
+   build, run `usdcc --plugin-path src/plugins`, or add `src\plugins` in Edit > Settings >
+   Plugins. A copy in `%LOCALAPPDATA%\usdcc\plugins` wins over the shipped one.
 2. **Install its packages.** The plugin shows **Needs packages** in View > Plugins, and a
    toast offers **Install**. The dialog lists ovrtx, ovstage and numpy, and says they come
    from `https://pypi.nvidia.com`, named by RTX Render. The download is about 1.3 GB.
