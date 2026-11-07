@@ -234,6 +234,11 @@ add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
 add_subdirectory(src/plugins/cpp_example)
 
+option(USDCC_BUILD_RTX_PLUGIN "Build the optional native RTX Render plugin (Windows M1 prototype)" OFF)
+if(USDCC_BUILD_RTX_PLUGIN)
+    add_subdirectory(src/plugins/rtx_render_native)
+endif()
+
 option(USDCC_BUILD_TESTS "Build the usdcc_tests executable and register it with CTest" ON)
 if(USDCC_BUILD_TESTS)
     enable_testing()

@@ -1,0 +1,13 @@
+{
+  "platform": "windows-x64",
+  "ovrtx": {
+    "version": "0.6.0",
+    "build": "0.6.0+release.1791947691.c6d71501.gl",
+    "loader_sha256": "dcec16be95a19269b791ac73f64b4ad879952e8f0ffb370a421be0339c8a454d"
+  },
+  "ovstage": {
+    "version": "0.3.0",
+    "build": "0.3.0+mr.0.36fe3c44.local",
+    "loader_sha256": "eaf99b25fcdb16a8ecfd5fc35d0eb4f9610ec94b061af4240f78b88eee7b152b"
+  }
+}

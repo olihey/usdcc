@@ -132,6 +132,15 @@ target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
 add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
+target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
+    ../src/plugins/rtx_render_native/stage_bridge.cpp)
+target_include_directories(usdcc_python_tests PRIVATE ../src/plugins/rtx_render_native)
+if(TARGET rtx_render_native)
+    target_sources(usdcc_python_tests PRIVATE rtx_native_plugin_test.cpp)
+    target_compile_definitions(usdcc_python_tests PRIVATE
+        USDCC_NATIVE_RTX_PLUGIN="${CMAKE_BINARY_DIR}/plugins/rtx_render_native")
+    add_dependencies(usdcc_python_tests rtx_render_native)
+endif()
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp

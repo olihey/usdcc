@@ -139,7 +139,22 @@ void RenderImageView::setImage(QImage image) {
 
 void RenderImageView::setMessage(const QString& message) {
     m_message = message;
+    if (m_presentation) m_presentation->setVisible(message.isEmpty());
     update();
+}
+
+void RenderImageView::setPresentationWidget(QWidget* widget) {
+    if (m_presentation == widget) return;
+    delete m_presentation;
+    m_presentation = widget;
+    if (!layout()) {
+        auto* box = new QVBoxLayout(this);
+        box->setContentsMargins(0, 0, 0, 0);
+    }
+    if (widget) {
+        layout()->addWidget(widget);
+        widget->setVisible(m_message.isEmpty());
+    }
 }
 
 void RenderImageView::paintEvent(QPaintEvent*) {
@@ -304,6 +319,14 @@ void RenderViewPanel::showImage(const QImage& image) {
 }
 
 const QImage& RenderViewPanel::image() const { return m_view->image(); }
+
+void RenderViewPanel::setPresentationWidget(QWidget* widget) { m_view->setPresentationWidget(widget); }
+
+void RenderViewPanel::showPresentedFrame(const QSize& size) {
+    m_presentedSize = size;
+    m_view->setMessage({});
+    showProgress();
+}
 
 void RenderViewPanel::setState(const QString& state) {
     m_state = state;
@@ -509,10 +532,14 @@ void RenderViewPanel::fillCameras() {
 }
 
 void RenderViewPanel::saveImage() {
-    if (m_view->image().isNull()) return;
+    if (m_view->image().isNull() && !m_presentedSize.isValid()) return;
     const QString path = QFileDialog::getSaveFileName(this, tr("Save Image"), QStringLiteral("render.png"),
                                                       tr("PNG (*.png);;JPEG (*.jpg);;TIFF (*.tif)"));
-    if (!path.isEmpty() && !m_view->image().save(path)) {
+    if (!path.isEmpty()) saveRenderedImage(path);
+}
+
+void RenderViewPanel::saveRenderedImage(const QString& path) {
+    if (!m_view->image().save(path)) {
         USDCC_LOG_TOAST(usdcc::core::LogLevel::Error, "usdcc.render", "Could not save {}.", path.toStdString());
     }
 }
@@ -525,7 +552,8 @@ void RenderViewPanel::openSettings() {
 void RenderViewPanel::showProgress() {
     QStringList parts{m_state.isEmpty() ? tr("Rendering") : m_state};
     if (m_clock.isValid()) parts << tr("%1 s").arg(m_clock.elapsed() / 1000.0, 0, 'f', 1);
-    if (!m_view->image().isNull()) parts << tr("%1 × %2").arg(m_view->image().width()).arg(m_view->image().height());
+    const QSize size = m_presentedSize.isValid() ? m_presentedSize : m_view->image().size();
+    if (size.isValid()) parts << tr("%1 × %2").arg(size.width()).arg(size.height());
     setStatus(parts.join(QStringLiteral(" · ")));
 }
 

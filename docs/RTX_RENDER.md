@@ -1,239 +1,517 @@
-# RTX Render
+# RTX Render: native C++ replacement plan
 
-A view panel that renders its stage with NVIDIA's Omniverse RTX renderer, through
-[ovrtx](https://nvidia-omniverse.github.io/ovrtx), NVIDIA's C and Python SDK for it. It
-follows the viewport camera or a camera in the stage, and renders again after edits.
-Moved prims, camera moves and size changes are written into the renderer's stage in place,
-with no reload. It's a Python plugin, [src/plugins/rtx_render](../src/plugins/rtx_render):
-- The panel is the app's render view panel ([RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md)).
-- The plugin supplies ovrtx, which runs in a helper process: usdcc's own Python, with
-  ovrtx installed as the plugin's packages.
+Status: M1-M3 implementation in progress, 2026-11-07. The optional native plugin,
+GPU presenter, shared controls, render worker, and scene bridge build. The GPU
+presenter passes an independent CUDA/Vulkan diagnostic with validation enabled.
+The end-to-end RTX image proof remains blocked at native SDK scene attachment;
+M1-M3 acceptance is not complete. The shipped plugin remains Python-based.
+M4-M6 have not started.
 
-ovrtx is pre-release, under NVIDIA's proprietary licence, and needs an NVIDIA RTX GPU with
-a recent driver. usdcc doesn't ship it: it's downloaded from NVIDIA's package index when the
-user installs the plugin's packages. The licence also forbids publishing benchmark results
-without NVIDIA's permission, so this page gives no timings.
+## 1. Objective and completion criteria
 
-## 1. Setup
+Replace the Python RTX Render plugin with a native C++ plugin using NVIDIA
+[ovrtx](https://nvidia-omniverse.github.io/ovrtx/) and ovstage. Adapt the
+[Vulkan interop example](https://github.com/NVIDIA-Omniverse/ovrtx/tree/main/examples/c/vulkan-interop)
+for GPU presentation and camera navigation inside usdcc's render view.
 
-1. **The plugin ships with usdcc:** a deploy has it in `plugins\`, always looked in. From a
-   build, run `usdcc --plugin-path src/plugins`, or add `src\plugins` in Edit > Settings >
-   Plugins. A copy in `%LOCALAPPDATA%\usdcc\plugins` wins over the shipped one.
-2. **Install its packages.** The plugin shows **Needs packages** in View > Plugins, and a
-   toast offers **Install**. The dialog lists ovrtx, ovstage and numpy, and says they come
-   from `https://pypi.nvidia.com`, named by RTX Render. The download is about 1.3 GB.
-   Unattended: `usdcc --install-plugin-packages`.
-3. **Restart usdcc,** as for any package install. Then open the panel from Stages > RTX
-   Render, and press Render.
+The finished replacement must:
 
-**Why NVIDIA's index:** PyPI has no ovrtx wheel, only NVIDIA's "wheel stub". That is a
-source package whose build downloads the real wheel from `pypi.nvidia.com`. usdcc's installer
-only takes wheels, so that no package code runs during an install. The manifest names
-NVIDIA's index (`python.indexes`, PYTHON_PACKAGES.md §4), which has the wheels. numpy comes
-from PyPI, as NVIDIA's index doesn't have it.
+- Render without a Python RTX module, numpy, a helper process, or image pipes.
+- Keep normal image presentation on the GPU through CUDA/Vulkan interop.
+  CPU readback is allowed for Save Image and verification.
+- Preserve existing render controls and add orbit, pan, zoom, and scene framing
+  directly in the rendered image.
+- Highlight prims selected elsewhere in usdcc, following the selection for the
+  stage shown by the RTX panel.
+- Render unsaved and session-layer changes without adding renderer setup to the
+  user's stage.
+- Remain optional: Storm and usdcc must work without RTX runtime files, an NVIDIA
+  GPU, or CUDA/Vulkan development tools.
+- Remove the Python implementation, deployment entries, package requirements, and
+  obsolete tests after the native acceptance checks pass.
 
-**The versions are pinned to `ovrtx>=0.6,<0.7` and `ovstage>=0.3,<0.4`:** ovrtx changes its
-API between minor versions, and Update Packages would otherwise move to the next one.
-*Settings > RTX > Other Python* can name a `python.exe` with another ovrtx installed instead.
+The old implementation may remain during development for comparison. It is not a
+permanent fallback or a second RTX implementation in the completed release.
 
-The first render on a machine compiles ovrtx's shaders, which takes a minute or two; the
-panel says so. They're cached in `%LOCALAPPDATA%\ovrtx`, and later starts take seconds.
+The view displays the rendered image, highlights the app's selected prims, and lets
+the user navigate the scene with its viewing camera. Selection synchronization is
+one-way: app selection -> RTX highlight. Picking, changing selection from the RTX
+image, gizmos, and scene-editing tools are outside this replacement's scope. Edits
+made elsewhere in usdcc still update the image through Update on Edits.
 
-## 2. The panel
+## 2. Baseline and integration work
 
-The toolbar, the image, the status line and following the camera are the app's render view
-panel (RENDER_VIEW_PANEL.md §1). What RTX adds or decides:
+The current [Python plugin](../src/plugins/rtx_render) exports a flattened temporary
+USD stage, renders in a helper, maps pixels to CPU memory, and sends RGBA bytes to
+a `QImage` through a pipe. Camera, resolution, and transform changes use in-place
+ovstage writes; other edits load another snapshot.
 
-| Control | What it does |
+Preserve Real-Time, Path Tracing, Minimal, Render/Stop, Refresh, camera choices,
+resolution choices, Update on Edits, status/errors, settings, and Save Image.
+Preserve progressive Path Tracing: a one-sample preview followed by increasing
+budgets to the requested total. Coalesce obsolete camera, resize, and edit work.
+
+Reuse the [C++ plugin SDK](PLUGIN_SDK.md), `ViewPanel`, `StageManager`, camera
+calculations, stage notifications, and per-stage selection notifications. The SDK
+already exposes panel registration and the app's shared services; the render view
+does not need `ToolSet` or direct undo-manager integration.
+
+Two core integration tasks are required:
+
+1. [RenderViewPanel](RENDER_VIEW_PANEL.md) currently owns a CPU image surface.
+   Extract reusable controls/controller behavior or introduce a small presentation
+   interface for a Vulkan surface. Preserve its existing image implementation and
+   Python hooks used by V-Ray and other plugins.
+2. Reuse orbit-camera calculations and usdcc's navigation conventions in a small
+   render-view camera controller. Share only camera/input helpers if necessary;
+   no Hydra picking, gizmo, or editing-tool refactor is required. Keep
+   ovrtx/CUDA/Vulkan dependencies out of the app core.
+
+## 3. Proposed architecture
+
+Develop in `src/plugins/rtx_render_native`, using `usdcc_add_plugin()`.
+
+| Component | Responsibility |
 |---|---|
-| Render / Stop | The helper starts with the first render and stays until the panel is deleted. Stop stops rendering frames |
-| Mode | **Real-Time** (real-time path tracing, denoised), **Path Tracing** (progressive) or **Minimal** (rasterized). Changing it loads the stage again |
-| Update on Edits | Transform edits are written in place, *Update after edits* ms after the last one (30 by default). Anything else loads the stage again (§3) |
-| Settings… | The RTX page of the Settings dialog |
+| Plugin entry point | Register panel/settings, locate runtime files, connect host services, and route logs |
+| `RtxRenderPanel` | Docking, stage association, toolbar/status, navigation input, duplication, and visibility |
+| `RtxEngine` | Own ovrtx/ovstage handles, asynchronous work, sample/frame budgets, and result lifetimes |
+| `RtxStageBridge` | Snapshot the app stage, translate edits, manage ordinals, and replace runtime scenes |
+| `RtxVulkanWindow` / presenter | Qt surface, device matching, shared image ring, synchronization, and presentation |
+| Camera controller | Free viewing camera, orbit/pan/zoom, scene framing, and camera-source switching |
+| Selection highlight adapter | Observe the panel stage's selected prim paths and update renderer-only outline groups |
 
-- **The state:** "Starting RTX…", Rendering, Done, Stopped. After each change the helper
-  renders *Frames after a change* frames (128 by default), sending an image every *Image
-  updates* ms. Then it's Done and stops using the GPU until the next change.
-  In **Path Tracing**, that setting is the final samples-per-pixel budget. ovrtx completes
-  the whole sample budget inside each step, so the helper first requests a one-sample
-  preview, then doubles the budget up to the requested total, sending images and handling
-  commands between refinements. It does not wait for ovrtx's default 512 samples before
-  showing the first image.
-- **The Log panel:** the helper's output and ovrtx's messages go there under
-  `plugin:org.usdcc.rtx-render`.
-- **A failed start** (ovrtx not installed in that Python, no RTX GPU) or a crashed helper is a
-  fatal error: Render goes off, and a sticky toast says so.
-- **Without a Python set,** or with one that doesn't exist, `setup_problem()` says so, and
-  Render starts nothing.
+The normal image path becomes:
 
-## 3. What ovrtx gets
+```text
+ovrtx CUDA output -> shared Vulkan buffer -> Vulkan image/blit -> Qt window
+```
 
-**The stage.** `stage.Flatten()` with unsaved edits and the session layer, exported to
-`%TEMP%\usdcc-rtx-*\scene_<n>.usdc` (the last two are kept; the folder goes with the panel).
-ovrtx's own OpenUSD reads the `.usdc` that usdcc's OpenUSD writes.
+Replace GLFW with Qt. First prove `QVulkanWindow`, embedded through
+`QWidget::createWindowContainer()`, can expose the required device extensions and
+external-memory/semaphore facilities. Use a custom Vulkan `QWindow` if Qt's device
+ownership is too restrictive. Resolve this in M1 before implementing the full UI.
 
-The export adds, under `/__usdccRtx`:
-- **`Camera`**: a `UsdGeom.Camera` with focal length 10 mm, whose apertures carry the panel
-  camera's fields of view, and its clipping range.
-- **`Product`**: a `RenderProduct` with the image's `resolution`, `camera` pointing at that
-  camera, `omni:rtx:rendermode` from the Mode menu, and one `RenderVar`, `LdrColor`. ovrtx
-  hands that back as 8-bit sRGB RGBA, which goes to the panel as it is.
+Adapt the example's asynchronous polling and synchronization; do not import its
+entire application, remote default scene, fixed camera/product paths, or unit
+assumptions. The Qt material-editor example is useful for UI wiring, but its CPU
+image display and deprecated scene-management APIs are not the target architecture.
+Reuse its native selection-outline setup for externally supplied prim paths.
+Do not port its picking or marquee-selection input/overlay code.
 
-The user's stage isn't changed. Its own render settings and products are left alone, and
-ovrtx renders only `/__usdccRtx/Product`.
+### Process, threading, and lifetime
 
-**In place, without a reload** ([rtx_helper.py](../src/plugins/rtx_render/python/usdcc_rtx_render/helper/rtx_helper.py)):
+Run ovrtx in process through its C API. The previous claim that it cannot coexist
+with another OpenUSD is obsolete: NVIDIA namespaced its bundled OpenUSD in
+[ovrtx 0.3](https://github.com/NVIDIA-Omniverse/ovrtx/blob/main/CHANGELOG.md#030---2026-05-15).
+Test coexistence with usdcc's exact OpenUSD, Storm, Qt, and dependencies. Keep both
+USD implementations behind their APIs; do not pass app `UsdStage*` pointers into
+ovrtx or import ovrtx's Python bindings.
 
-| Change | Written to |
+- The UI thread owns widgets, navigation input, and access to the app stage.
+- A render worker owns the ovrtx/ovstage lifecycle and serialized command stream.
+  Give it immutable snapshots/edit values, not live app-stage pointers.
+- Specify Vulkan device/queue/surface/image ownership and synchronized queue use.
+- Poll pending render/fetch/map operations without blocking the Qt event loop.
+  Keep the last completed image visible while work is pending.
+- Bound command queues and in-flight frames. Tag commands/results with scene
+  and camera generations; discard results that refer to an obsolete view. Coalesce
+  selection updates and reject highlight commands for an obsolete stage generation.
+- Stop prevents new submissions and safely drains outstanding work. It does not
+  promise cancellation inside a driver operation.
+- Hiding stops new rendering. Deletion disconnects callbacks and retires resources
+  only after their GPU users finish; do not wait indefinitely on the GUI thread.
+- Destroy mappings/results, shared GPU resources, renderer, and stage in dependency
+  order. Coordinate process-wide initialization/shutdown across multiple panels.
+- Log native errors, runtime build identities, initialization, and slow operations.
+
+The helper's crash isolation is deliberately lost: a native renderer/driver crash
+can affect usdcc. Exceptions do not restore process isolation. Do not use process
+termination or free in-flight resources to imitate the old helper's shutdown.
+
+### Scene synchronization
+
+usdcc's stage remains authoritative. Edits and undo/redo performed elsewhere in
+the app reach ovstage through stage notifications. The render view does not author
+scene changes or create undo transactions. Its free viewing camera is panel-local
+state, written only to the renderer's private camera.
+
+- Start with a flattened snapshot including unsaved/session edits. Snapshot safely
+  on the stage-owning thread, then give the worker an owned result. Temporary USD
+  files remain acceptable for full scene transfer; GPU image presentation does not
+  require eliminating scene files.
+- Preserve asset anchoring/resolver context for relative textures, MDL, references,
+  and packaged assets after export to a different directory.
+- Create collision-free private camera/product prims in the snapshot only. Render
+  the plugin's chosen product and leave source render settings/products untouched.
+- Preserve units, up axis, projection, apertures, clipping, and matrix conventions.
+- Apply camera, size, and supported transform changes in place with increasing
+  ordinals, committed before rendering. Coalesce repeated updates.
+- Unsupported edits or failed writes trigger a full snapshot. Reset/replace the
+  previous runtime scene and invalidate cached queries: population open alone can
+  merge content and leave deleted prims behind.
+- Cover stage switches, add/delete/rename, visibility/material changes, undo/redo,
+  and projection changes. Never apply old queued edits to a replacement stage.
+- Keep USD default-time rendering for parity. Timeline/simulation, sensor
+  scheduling, and DLSS frame generation are outside this replacement.
+
+### Presentation and camera navigation
+
+- Match CUDA/Vulkan devices by UUID and validate the device of mapped outputs.
+  Explain unsupported combinations instead of showing a blank panel. Do not impose
+  the example's picking-related GPU-0 restriction on this image-only render view.
+- Use a bounded shared-image ring with explicit synchronization. Keep mappings
+  and step results alive until GPU copies and consumers have completed.
+- Verify sRGB, alpha, orientation, high DPI, letterboxing, and image formats.
+  Scale navigation input consistently across display sizes and device-pixel ratios.
+- Support orbit/pan/zoom, Fit to View, and Reset Camera using usdcc conventions.
+  Frame the scene bounds without depending on selected prims.
+  Preserve following another viewport or choosing a stage camera. Free navigation
+  switches explicitly to a panel-local camera initialized from the current view;
+  it must not edit an authored camera or move the followed viewport.
+- Navigation resets accumulation and schedules a fresh preview followed by
+  refinement. Coalesce rapid movements and preserve the last completed image
+  while rendering catches up. Do not add scene-selection or edit gestures.
+- Save Image explicitly reads back a completed real frame, without making CPU
+  readback part of every displayed frame. Save the render without selection
+  highlights by default; hide the renderer-only outline pass for the capture and
+  restore the current highlight state afterwards.
+
+### One-way selection highlighting
+
+- Read `StageManager::selectedPaths(currentStage())` on panel creation, stage
+  changes, and after a scene reload. Subscribe to `StageManager::selectionChanged`
+  and filter notifications by the panel's stage, not the globally current stage.
+- Send copied prim paths to the worker. Use ovrtx's native selection outline groups
+  and styles; do not add picking, hit buffers, or a second Vulkan selection overlay.
+  Verify the outline APIs and mode support against the pinned SDK in M1.
+- Clear the old outline group when selection changes or becomes empty. Support
+  multiple selected prims and highlighting renderable descendants of selected
+  container prims. Skip deleted, non-renderable, or unresolved paths safely.
+- Keep highlighting renderer-local. Do not author selection attributes into the
+  user's stage, call `setSelectedPaths()` from the RTX view, or create undo entries.
+- Request a display refresh when selection changes, even after refinement is Done
+  or Update on Edits is off. Stop and hiding still suppress new submissions; retain
+  the newest selection and apply it when rendering resumes or the panel is shown.
+- Reapply highlights after runtime scene replacement and refresh them on show.
+  Disconnect subscriptions on deletion; selections in another stage must not affect
+  this panel. Navigation must preserve the app's selection.
+
+## 4. Identity, settings, and distribution
+
+Keep plugin ID `org.usdcc.rtx-render`, panel ID `org.usdcc.rtx-render.view`, and
+display name **RTX Render** in the finished replacement. Preserve plugin enablement
+and saved layouts. During development load one implementation per app run; do not
+scan two manifests with the same ID.
+
+Keep `RtxRender/mode` and `RtxRender/editDelay`. Migrate `maxFrames` into explicit
+Real-Time frame and Path Tracing sample budgets, initializing both from the old
+value when new keys are absent. Remove `RtxRender/python`. Retire `imageInterval`
+unless the presenter needs an equivalent display-update setting. Make migration
+idempotent and test old settings/layouts.
+
+Build and packaging work:
+
+- Add opt-in `USDCC_BUILD_RTX_PLUGIN`, initially OFF. A default app configure/build
+  must not fetch RTX dependencies or require CUDA/Vulkan development tools.
+- Pin exact compatible ovrtx/ovstage builds, origins, and checksums. Start from the
+  current 0.6/0.3 pair; verify required APIs against installed binaries, not only
+  upstream main. Support both in-tree and deployed `UsdccPlugin` SDK builds.
+- Honor native `built_for` checks and matching compiler, Qt, OpenUSD, and CRT.
+- Locate the runtime relative to the plugin using the vendor loader and explicit
+  package root. Avoid global PATH/Python/USD plugin-path changes.
+- Activation registers UI without creating a GPU renderer. A missing runtime must
+  not prevent app startup; defer loading vendor DLLs accordingly.
+- Produce a versioned native plugin artifact with required notices and verified
+  runtime/example redistribution terms. If native runtime redistribution is not
+  available, support a user-installed runtime root. No Python package-install step
+  is required for rendering. Distinguish build tools from end-user runtime files.
+- Change `tools/deploy.ps1` to install the built artifact into
+  `deploy/plugins/rtx_render`, rather than copying Python source. Update required
+  file checks and example-copy exclusions. Validate distributions without RTX too.
+- Clean stale legacy files from the known RTX deploy folder. Detect old user-folder
+  copies, which currently override shipped plugins, and provide an explicit
+  migration action that backs up the recognized legacy copy. Do not silently load
+  the old implementation or delete unrelated plugins.
+- Remove RTX package declarations without deleting shared Python environments or
+  packages that other plugins may still require.
+
+## 5. Implementation milestones
+
+Milestone exits describe required evidence. Complete M1-M5 before the final
+removal in M6. The implementation record below distinguishes working setup
+from the unvalidated rendering path.
+
+### M1. Native plugin and coexistence proof
+
+- [x] Add optional native target/manifest through the existing SDK.
+- [x] Create a docked Qt Vulkan surface and resolve the window implementation.
+- [ ] Initialize the pinned SDK pair; display a local scene while Storm is open.
+- [x] Verify deferred initialization, panel creation/duplication/destruction, stage
+  close/reassignment, and an actionable missing-runtime error without a GPU.
+- [ ] Verify panel close/reopen during actual rendering and unsupported-GPU
+  behavior; the app still starts.
+
+Exit: a real RTX image inside usdcc with no Python RTX module imported, working
+Storm coexistence, and recorded SDK/app builds and surface design.
+
+#### M1 implementation and validation record
+
+`USDCC_BUILD_RTX_PLUGIN` defaults to `OFF`. Enabling it builds
+`src/plugins/rtx_render_native` with the existing plugin SDK. The plugin preserves
+`org.usdcc.rtx-render` and `org.usdcc.rtx-render.view`; use an explicit plugin path
+for development. Do not install it over the shipped Python plugin yet.
+
+The current Qt build has `QT_FEATURE_vulkan=-1`. M1 therefore uses a custom Win32
+Vulkan `QWindow` embedded through `QWidget::createWindowContainer()`. Vulkan and
+Volk headers are confined to the optional plugin target and fetched with SHA256
+pins. Vulkan instance, surface, NVIDIA device, swapchain, and external-memory /
+external-semaphore / timeline capability checks initialized successfully while
+Storm was open. CUDA/Vulkan resource sharing is M2 work and is not proven by
+these capability checks.
+
+The native engine uses delayed DLL loading, explicit runtime roots, a flattened
+temporary stage, and asynchronous status polling. The user's stage is not passed
+to the vendor SDK. M2 replaces the original M1 CPU-transfer prototype with GPU
+presentation; M3 uses the shared render panel's camera and resolution choices.
+Snapshots and GPU work outlive closed panels safely through owned worker state.
+The remaining attachment stall means an RTX-produced frame has not yet reached
+the new presenter. Its successful synthetic GPU diagnostic is separate evidence.
+
+Native SDK identities are pinned in `deps/rtx-native.json`: ovrtx
+`0.6.0+release.1791947691.c6d71501.gl` and ovstage
+`0.3.0+mr.0.36fe3c44.local`, Windows x64. CMake checks build strings and forwarding
+DLL SHA256 values, then records SDK metadata in the plugin's
+`sdk-build-info.txt`. Supply installed native package roots containing `bin`,
+`include`, and `lib/cmake`; CMake does not install Python packages or download
+the vendor SDKs. The optional native build also requires CUDA Toolkit headers
+(tested with 12.8); it loads the CUDA driver dynamically and does not link the
+CUDA runtime or require CUDA compilation. The default app build remains free of
+CUDA/Vulkan development dependencies.
+
+```powershell
+cmake -S . -B build -DUSDCC_BUILD_RTX_PLUGIN=ON `
+  -DUSDCC_RTX_OVRTX_ROOT=C:/path/to/ovrtx `
+  -DUSDCC_RTX_OVSTAGE_ROOT=C:/path/to/ovstage
+cmake --build build --config RelWithDebInfo --target usdcc rtx_render_native usdcc_python_tests
+build/src/cpp/app/RelWithDebInfo/usdcc.exe --no-startup-scripts --plugin-path build/plugins test_data/rtx_native_m1.usda
+```
+
+Use the current app build: the shared render-panel presentation API changed in
+M3, so an older deployed app is not a compatible test host. Set the OpenUSD
+install's `bin` and `lib` on `PATH` and its `plugin/usd` as
+`PXR_PLUGINPATH_NAME`, as `tools/run.ps1 -UsdInstall ...` does.
+The app and plugin must use matching app SDK/Qt/USD builds. The generated
+`build/plugins/rtx_render_native/runtime.json` locates the development runtimes;
+`USDCC_RTX_OVRTX_ROOT` and `USDCC_RTX_OVSTAGE_ROOT` override its values at runtime.
+Without either locator, the plugin searches `runtime/ovrtx` and
+`runtime/ovstage` under its own folder. Missing runtime DLLs produce an error
+when Render is pressed, without loading a renderer at app startup.
+
+Observed environment: OpenUSD 26.08, Qt 6.11.1, MSVC 19.44.35229.0,
+RTX 4090, NVIDIA driver 621.14, Vulkan 1.4.357. The native target builds. Current
+test results are recorded under M2 and M3 below. Configuring with
+`USDCC_BUILD_RTX_PLUGIN=OFF` succeeds with empty native SDK roots. The full
+`tools/build.ps1 -UsdInstall C:\Users\olive\DEV\git\USD\build\usd_typhoon`
+build also succeeds with the native target enabled.
+
+**Open blocker:** `ovrtx_attach_ovstage()` does not return in the native call
+path. The UI continues polling and reports the pending phase. An isolated
+native SDK probe reproduces the stall without the app or Storm; the vendor's
+minimal C example also stalled with the same local scene. A deprecated
+standalone scene-loading experiment reached the first frame and stalled there,
+so it was not retained as a fallback. The existing Python helper still renders
+with the same installed SDK DLLs. These observations do not yet identify the
+cause. No successful native image or Python-free rendering proof is claimed.
+
+Build and run the isolated diagnostic explicitly (it is excluded from normal
+builds and CTest; it times out with failure after 60 seconds):
+
+```powershell
+cmake --build build --config RelWithDebInfo --target rtx_native_sdk_probe
+build/src/plugins/rtx_render_native/RelWithDebInfo/rtx_native_sdk_probe.exe `
+  C:/path/to/ovrtx C:/path/to/ovstage test_data/rtx_native_m1.usda /Render/Product
+```
+
+Run with the matching Qt runtime and `build/src/cpp/core/RelWithDebInfo` on
+`PATH`. The diagnostic now reports named phases; `Attaching the scene to RTX`
+is the stalled call. A `GPU image` size message and exit code zero are required
+for success. Resolve this blocker and display the fixture plus the reported
+cube-stacks scene alongside Storm before marking M1 complete.
+
+### M2. GPU presentation and asynchronous lifecycle
+
+- [x] Implement UUID matching, CUDA output mapping/copy, a three-slot shared GPU
+  buffer/image ring, and external semaphores.
+- [x] Implement worker ownership, timed operation polling, generation/revision
+  tags, and coalesced desired state with one pending display/save result per panel.
+- [x] Implement resize, hide/show, duplicate panels, stage close, and asynchronous
+  shutdown/draining; preserve the last displayed image during slow work.
+- [ ] Validate these lifecycle paths with an attached RTX renderer, including
+  multiple panels and normal app exit after real rendering.
+
+Exit: no CPU readback or image IPC in normal display; repeated lifecycle operations
+have no validation errors, leaked handles, or callbacks into deleted UI.
+
+#### M2 implementation and validation record
+
+The normal display path maps `LdrColor` to CUDA, copies it into one of three
+exported Win32 Vulkan buffers, and blits a Vulkan image into the swapchain. There
+is no CPU pixel mapping or image IPC in this path. Buffers are reused at a fixed
+resolution; discarded ready signals are consumed before reuse. Device selection
+matches CUDA/Vulkan UUIDs, configures RTX's active CUDA device, and checks every
+mapped tensor's device, RGBA8 layout, dimensions, and strides.
+
+External binary semaphores order the CUDA copy before Vulkan reads; Vulkan queue
+ownership barriers and fences retire consumers before a slot is reused. UI fence
+polling continues while hidden. Device waits, resizing retirement, and destruction
+run on a retirement worker. Native windows survive until their surfaces retire.
+
+One persistent render service serializes process initialization, per-panel
+sessions, ordinal writes, and frames. Stop/hide suppress subsequent submissions;
+work already accepted by the SDK drains before mappings/results are released.
+Closing a panel clears its queued work and disconnects UI callbacks without
+joining a GPU job on the GUI thread. Normal main-window closing polls SDK and
+GPU retirement before closing; its progress dialog can cancel the close while
+the app remains responsive. A vendor call that never returns cannot be cancelled
+safely. The attachment blocker therefore still prevents proving a full drain
+after real RTX initialization.
+
+The explicit `--interop` diagnostic requires an NVIDIA GPU but no initialized
+RTX renderer. It fills the ring, abandons frames, presents a known gradient,
+resizes, hides/shows, verifies an exact RGBA GPU round trip, and retires resources
+before destroying the native window. On the recorded RTX 4090 it passed with
+22 presentations and zero Vulkan validation errors; its captured window also
+showed the expected gradient and letterboxing. This does **not** count as an RTX
+scene-rendering test.
+
+```powershell
+cmake --build build --config RelWithDebInfo --target rtx_native_sdk_probe
+$env:PATH = "$PWD/build/src/cpp/core/RelWithDebInfo;$PWD/build/vcpkg_installed/x64-windows/bin;$env:PATH"
+$env:QT_QPA_PLATFORM_PLUGIN_PATH = "$PWD/build/vcpkg_installed/x64-windows/Qt6/plugins/platforms"
+$env:USDCC_RTX_VULKAN_VALIDATION = "1" # requires VK_LAYER_KHRONOS_validation
+build/src/plugins/rtx_render_native/RelWithDebInfo/rtx_native_sdk_probe.exe --interop
+```
+
+An optional filename after `--interop` captures the diagnostic window. Validation
+is opt-in for development; end-user machines do not need validation layers.
+
+### M3. Render parity and scene synchronization
+
+- [x] Reuse render controls through an optional presentation widget and Save Image
+  hook; preserve the existing CPU image implementation and Python hooks.
+- [x] Implement flattened snapshots, full renderer/stage replacement, and
+  ordinal-based camera, size, and transform updates with snapshot fallback.
+- [x] Wire all three modes, camera/resolution choices, settings migration, and
+  asynchronous Save Image readback of the retained displayed GPU frame.
+- [x] Schedule progressive Path Tracing previews with an exact final sample budget.
+- [x] Test unsaved/session snapshots, relative assets, collision-free setup,
+  projection/units/up axis, deleted prims, source-layer isolation, and undo/redo.
+- [ ] Verify mode fidelity, real incremental writes, stage switching during live
+  rendering, and the reported scene end-to-end after attachment is fixed.
+
+Exit: existing RTX render behavior works in C++ and renderer setup leaves the
+user's stage unchanged.
+
+#### M3 implementation and validation record
+
+The C++ panel derives from `RenderViewPanel`, sharing Render/Stop, Refresh,
+viewport/prim cameras, resolution, Update on Edits, Save Image, and Settings.
+V-Ray and Python render panels continue using `QImage` presentation. Native Save
+Image retains the displayed GPU frame and reads it back only on request; an I/O
+failure reports an error without stopping rendering.
+
+`stage_bridge.cpp` exports under the source resolver context with unsaved/session
+opinions, resolved asset paths, preserved metadata, and collision-free private
+camera/product prims. Supported edits use local transforms and increasing
+ordinals; projection changes, structural/unsupported edits, and failed writes
+replace the runtime scene completely. No app USD pointer reaches the worker.
+
+`RtxRender/mode` and `RtxRender/editDelay` remain. Existing `maxFrames` seeds
+`frameBudget` and `sampleBudget` only when those new keys are absent. Native
+rendering does not consume `python` or `imageInterval`. Path Tracing uses budgets
+1, 2, 4, ... capped at the exact requested sample count; Real-Time and Minimal
+use frame counts. Camera/size/edit updates invalidate older view generations.
+Modes remain independent between panels; the mode setting supplies the default
+for newly opened panels.
+
+Three native tests pass 46 checks, covering deferred setup, settings migration,
+generation rejection, sample budgets, snapshots, edits, and undo/redo. Existing
+Python render-panel (76), Python RTX (47), V-Ray (31), and C++ render-panel (30)
+checks pass. Qt's isolated test-settings file needs filesystem write access;
+GPU tests remain separate from these tests. Actual RTX output fidelity and
+incremental-update success remain unverified because attachment still stalls.
+The scheduling and stage-bridge tests build without the optional native target
+or vendor SDK; configuring with RTX off and empty SDK roots, building, and running
+those two tests passes 30 checks. The plugin activation test is enabled with the
+native target. An app smoke test also passed native control creation, an
+actionable unsupported-driver error, no Python RTX import, and clean close.
+
+### M4. Camera navigation and selection highlighting
+
+- [ ] Connect orbit/pan/zoom, scene framing, and camera reset to the rendered image.
+- [ ] Reuse camera calculations and navigation conventions without editing-tool dependencies.
+- [ ] Preserve scene-camera and follow-viewport choices; switch to a local free
+  camera explicitly when navigating directly in the render view.
+- [ ] Coalesce navigation updates, reset accumulation, and render new previews.
+- [ ] Mirror per-stage app selection into native RTX outlines, including initial
+  selection, multiple prims, selected containers, deselection, and reloads.
+- [ ] Refresh highlights independently of Update on Edits and preserve Stop/hide
+  behavior; save clean images without selection highlights.
+- [ ] Verify high-DPI input, independent cameras in duplicate panels, and that
+  navigation changes neither the source stage nor its selection or undo history.
+
+Exit: users can navigate and frame the rendered scene directly, with responsive
+image updates and highlights matching selection elsewhere in the app. The RTX
+view does not pick, change selection, or edit the scene.
+
+### M5. Regression coverage and deploy validation
+
+- [ ] Add SDK-independent scheduler/stage-bridge tests and Qt tests with a fake engine.
+- [ ] Add explicitly labeled GPU tests requiring an RTX device and native runtime.
+- [ ] Test a clean packaged plugin without development SDK paths or Python RTX packages.
+- [ ] Test settings/layout migration, a shadowing legacy user copy, and RTX omission.
+- [ ] Complete the acceptance matrix below and record results before cutover.
+
+Exit: non-GPU CI works without the SDK; actual GPU and clean-deploy results prove
+the replacement. Skipped GPU tests do not count as successful GPU validation.
+
+### M6. Cutover and remove Python RTX
+
+- [ ] Ship only the native artifact under the preserved plugin/panel IDs.
+- [ ] Remove `src/plugins/rtx_render`, including Python module, client, helper,
+  protocol, fake-renderer environment variables, and RTX package declarations.
+- [ ] Replace/remove `tests/rtx_render_plugin_test.cpp`, `tests/rtx_helper_test.py`,
+  their CMake entries, and RTX-specific Python module cleanup.
+- [ ] Retain generic package/index tests, Python render-panel support, and helper
+  functionality still needed by V-Ray or other plugins.
+- [ ] Complete deployment/release checks, example-copy changes, and stale-file cleanup.
+- [ ] Update `RENDER_VIEW_PANEL.md`, `PLUGINS.md`, `PLUGIN_SDK.md`,
+  `PYTHON_PACKAGES.md`, `CI.md`, `VRAY_RENDER.md`, and `MATERIAL_EDITOR.md`
+  wherever they describe the old RTX implementation.
+- [ ] Rewrite this document as native setup/usage documentation with verified limits.
+- [ ] Audit source/tests/scripts/docs for old RTX imports, helpers, install steps,
+  settings, and process assumptions; resolve every remaining reference.
+
+Exit: clean source/deploy contain one C++ RTX implementation, no legacy Python
+RTX plugin, and no RTX Python package-install prompt. Upgrades are verified.
+
+## 6. Acceptance matrix
+
+| Area | Required checks |
 |---|---|
-| Camera move or another camera | The camera's `omni:xform` (camera-to-world, USD's row layout), and `horizontalAperture`/`verticalAperture` |
-| Image size | The product's `resolution` |
-| Transform edits | Each edited prim's `omni:xform`: its local transform as usdcc's OpenUSD computes it |
+| Reported scene | Open `C:\Users\olive\DEV\git\ovrtx\tests\data\cube_stacks_scene.usda`; display/refine inside the app in all three modes, with free and scene cameras |
+| Portable fixtures | Add repository-owned small scenes; automated coverage must not depend on the external ovrtx checkout or network assets |
+| Difficult content | Recheck the previously problematic MDL/dome-light scene; maintain UI responsiveness and honest progress during slow GPU work; C++ does not remove shader/material cost |
+| Fidelity | Unsaved/session edits, relative textures/MDL, UsdPreviewSurface/MaterialX, units/up axis, projection/clipping, alpha, and color |
+| Changes | Transforms, visibility/material edits, add/delete/rename, undo/redo, full reload, rapid camera/size changes, and stage switches with work pending |
+| Navigation | Orbit/pan/zoom/frame/reset, high-DPI input, camera-source switching, independent panel cameras, accumulation restart, and no changes to the stage, selection, or undo history |
+| Selection highlights | Initial and changed app selection, multiple prims, container descendants, deselection/deletion, stage isolation, reload/show/resume, changes after Done or with Update on Edits off, and clean saved images; no picking or selection writes from RTX |
+| Lifecycle | Render/Stop/restart, slow initialization/frame, hiding, deletion/duplication, multiple RTX panels, Storm coexistence, and app exit |
+| Deployment | Matching build identity, missing runtime/driver/GPU, optional RTX omission, old layouts/settings, and stale deploy/user copies |
+| Presentation | GPU-only steady display, correct memory/semaphore lifetimes, no stale frames, explicit Save Image readback, and stable resource use across repeated cycles |
+| Existing app | V-Ray/generic Python render panels, viewport tools, docking/layout restoration, stage editing, and plugin enablement still work |
 
-- **What counts as a transform edit** (`scene.in_place_edits()`): when all an edit changed is
-  `xformOp:*` or `xformOpOrder` properties of transformable prims. The camera follows too, in
-  case the panel looks through a camera prim that moved.
-- **Everything else loads the stage again:** a prim added, removed or renamed; a material,
-  visibility or other value; metadata; another mode; switching between a perspective and an
-  orthographic camera.
-- **A write that fails** makes the helper send `stale`, and the panel loads the stage again.
-- **Queued work is skipped:** a load waiting in the helper's queue drops the camera moves,
-  sizes and edits queued before it.
-
-## 4. The helper process
-
-[rtx_helper.py](../src/plugins/rtx_render/python/usdcc_rtx_render/helper/rtx_helper.py) runs
-in usdcc's own `python.exe`, in a process of its own, never inside usdcc:
-- **A separate process isolates crashes:** a GPU renderer's crash shouldn't take the app with
-  it.
-- **ovrtx can't share a process with another OpenUSD.** ovrtx says so, and usdcc's plugins on
-  `PXR_PLUGINPATH_NAME` would meet ovrtx's OpenUSD.
-
-**Its packages** ([client.py](../src/plugins/rtx_render/python/usdcc_rtx_render/client.py)):
-- **The plugin finds the folders** ovrtx, ovstage and numpy are installed in with
-  `importlib.util.find_spec()`, so they're never imported into usdcc. It passes them to the
-  helper as `--packages`.
-- **The helper puts them on `sys.path`,** and takes off the entry holding usdcc's `pxr`.
-- **The app never loads them either:** its check at start reads their metadata only.
-- **A `python.exe` in *Other Python*** runs with its own packages instead, and gets no
-  `--packages`.
-
-**Its environment:**
-- `PYTHONHOME`, `PYTHONPATH`, `PXR_PLUGINPATH_NAME` and the like are removed.
-- **`PATH`** is the Python's folder, its DLL's folder and the Windows folders.
-  - In a deploy, `python312.dll` is in `bin`, beside usdcc's OpenUSD DLLs (`usd_*.dll`).
-    That's harmless: ovrtx's OpenUSD is one DLL named its own way, `ov_<version>usd_ms.dll`.
-  - Checked: the helper in the deploy's `python.exe`, with `bin` on `PATH`, rendered the same
-    images as in a separate Python.
-  - *Other Python* gets only its own folder.
-- **`OMNICLIENT_HUB_MODE=disabled`.** Without it, ovrtx tries to start an Omniverse Hub
-  installed on the machine. It waits for the Hub for seconds on every start, and logs about
-  forty warnings when the Hub doesn't come up.
-
-**Protocol** ([protocol.py](../src/plugins/rtx_render/python/usdcc_rtx_render/helper/protocol.py)):
-
-| Direction | Format | Messages |
-|---|---|---|
-| Commands, to the helper's stdin | One JSON line each | `init {max_frames, image_ms}`, `load {path, width, height, mode}`, `camera {transform[16], h_aperture, v_aperture}`, `size {width, height}`, `xforms {items: [{path, matrix[16]}]}`, `start`, `stop`, `quit` |
-| Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, seconds}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, frame}` with RGBA8888 pixels, `log {level, msg}`, `error {msg, fatal}`, `stale`, `slow {seconds, frame}` |
-
-**How it runs:**
-- **ovrtx renders on the helper's main thread,** one `step()` per frame. Commands are read on
-  a thread of their own and queued.
-- **Stdin is moved out of the way first.** The helper reads commands from a copy of its stdin
-  and points stdin itself at `NUL`. On Windows, while one thread waits in a read on a pipe,
-  anything else touching that pipe's handle waits too. ovrtx's start-up did, and stalled
-  until the next command arrived.
-- **So is stdout:** before importing ovrtx, the event stream moves to a copy of stdout, and
-  stdout points at stderr. Native output can't break into the stream.
-- **Images are coalesced:** only the newest one waiting is sent.
-- **A frame that takes long is reported.** `step()` returns only when ovrtx is done. For a
-  scene with many complex MDL materials, the first frame can take minutes, with the GPU
-  busy throughout. A watchdog thread sends `slow` after 10 s and every 5 s after that. The
-  panel shows how long it's been, in the status line and in place of the image, and logs it
-  every minute. Meanwhile commands wait: Stop takes effect once the frame is done, and
-  deleting the panel kills the helper after 3 s. `--fake` takes
-  `USDCC_RTX_FAKE_FIRST_FRAME` (seconds) and `USDCC_RTX_FAKE_SLOW_AFTER` for the tests.
-- **Quitting:** stdin closing, or `quit`, ends the helper at once, with `os._exit()`. ovrtx's
-  own shutdown takes seconds, and the process ending frees its GPU memory anyway. Deleting
-  the panel sends `quit`, waits up to 3 s, then kills the helper.
-- **`--fake`** renders a gradient instead of importing ovrtx, in usdcc's own Python. The tests
-  use it.
-
-## 5. Settings
-
-On the RTX page of the Settings dialog
-([config.py](../src/plugins/rtx_render/python/usdcc_rtx_render/config.py)):
-
-| Key | Type | Default |
-|---|---|---|
-| `RtxRender/python` (*Other Python*) | String | empty: usdcc's own Python, with the plugin's packages |
-| `RtxRender/mode` | Choice | Real-Time |
-| `RtxRender/maxFrames` | Int 1–4096 | 128 |
-| `RtxRender/imageInterval` | Int 10–2000 ms | 33 |
-| `RtxRender/editDelay` | Int 0–10000 ms | 30 |
-
-## 6. Tests
-
-`rtx_render_plugin` in `usdcc_python_tests`
-([rtx_render_plugin_test.cpp](../tests/rtx_render_plugin_test.cpp)) checks that the plugin as
-shipped shows **Needs packages** naming ovrtx, with none of its code run. Test machines don't
-have ovrtx. Then it loads a copy without `requires` and `indexes`, uses the fake renderer,
-and records what the panel sends. It checks that:
-- the panel starts the helper and shows images at the asked size;
-- the export has the render product, looking through its own camera, and leaves the stage
-  alone;
-- a viewport's camera is sent;
-- a transform edit is written in place (`xforms`) without a load;
-- moving the camera prim the panel looks through moves the render's camera;
-- a new prim, and another mode, load the stage again, in that mode;
-- Stop keeps the helper, and deleting the panel ends it and removes its files;
-- ovrtx not installed, and an *Other Python* that isn't there, are reported.
-
-`package_extra_index` and `plugin_package_indexes` cover `python.indexes`
-(PYTHON_PACKAGES.md §7).
-
-`usdcc_rtx_helper_tests` exercises the real backend's scheduling with an SDK stub:
-preview delivery, increasing sample budgets, the exact final sample count, stopping,
-restarting after edits, and the unchanged Real-Time frame budget. It needs no GPU or
-third-party Python packages.
-
-**Checked by hand, with ovrtx 0.6 on an RTX 4090:**
-- **The helper on its own,** driven over its pipes: load, a camera orbit, a prim moved in
-  place, a resize, and quitting. Both in a separate Python and in the deploy's `python.exe`
-  with `bin` on `PATH`.
-- **The install:** `usdcc --install-plugin-packages`, into a scratch packages folder. ovrtx
-  and ovstage came from NVIDIA's index as wheels, and numpy from PyPI.
-- **In the app,** with ovrtx from that install and a script driving a real panel: the first
-  render, a viewport zoom followed, a prim moved in place (only `xforms` and `camera` sent),
-  and Path Tracing. The images were right.
-- **Not checked by hand:** the install dialog itself, clicked through. Its list of indexes
-  is the same plan that `--install-plugin-packages` logged.
-
-## 7. Limits and next steps
-
-- **Heavy first frames:** a product scene (`omniverse_preview.usda`: 10 MDL materials built
-  on OmniSurface, about 1,550 shaders, lit by a dome light) didn't finish its first frame within ten minutes
-  in ovrtx 0.6, in any mode (Real-Time, Path Tracing, Minimal), whatever the texture
-  streaming or sync mode. The GPU stayed busy at 45–80 % and over 200 W, and nothing was
-  logged. Without the dome light, or with only some of the materials, it rendered in
-  seconds. It's ovrtx's own work, not the plugin's: the plugin shows it's still working, but
-  can't make that frame finish.
-- **Light units:** RTX's lights are physical. A stage lit for Storm, with a distant light of
-  intensity 3, renders almost black. There's no exposure control in the panel yet.
-- **Implicit shapes** (`Sphere`, `Cube`, ...) are tessellated coarsely by ovrtx: a sphere
-  shows its facets.
-- **Materials:** only display colours are checked so far. RTX's own materials are MDL;
-  how UsdPreviewSurface and MaterialX look compared with Storm isn't checked.
-- **More could be written in place:** visibility, display colours and material bindings
-  still load the whole stage.
-- **Time:** the stage renders at the default time; usdcc has no timeline yet.
-- **Hiding the tab** stops rendering but keeps the helper and its GPU memory. Only deleting
-  the panel ends it.
-- **Live tests need an RTX GPU and ovrtx:** the real helper is checked by hand, not in CI.
-- **Size:** about 2.5 GB in the shared packages folder once installed.
-- **Everyone who loads `src/plugins` is asked:** the plugin shows **Needs packages**, with
-  the install offer, also on machines without an RTX GPU. Turn it off in View > Plugins there.
-- **ovrtx is importable in usdcc's own Python** once installed, like any shared package.
-  Nothing imports it there, and nothing should: `import ovrtx` in the Script Editor would load
-  a second renderer and OpenUSD into the app.
+Windows with the current RTX 4090 is the initial validation platform. Additional
+GPU/driver or Linux support requires separate tests and documentation; upstream
+example support alone does not establish support in usdcc.

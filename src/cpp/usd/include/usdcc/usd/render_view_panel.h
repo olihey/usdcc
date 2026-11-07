@@ -73,6 +73,9 @@ public:
     void setImage(QImage image);
     const QString& message() const { return m_message; }
     void setMessage(const QString& message);
+    // Optional native surface, owned by this view. Messages cover it until a
+    // renderer explicitly publishes a frame; ordinary QImage users are unchanged.
+    void setPresentationWidget(QWidget* widget);
 
 Q_SIGNALS:
     void resized();
@@ -84,6 +87,7 @@ protected:
 private:
     QImage m_image;
     QString m_message;
+    QWidget* m_presentation = nullptr;
 };
 
 // A view panel that shows its stage rendered by a renderer that isn't Hydra's,
@@ -118,6 +122,8 @@ public:
     // Shows a rendered image (copied).
     void showImage(const QImage& image);
     const QImage& image() const;
+    void setPresentationWidget(QWidget* widget);
+    void showPresentedFrame(const QSize& size);
     // What the renderer is doing, for the status line: "Rendering", "Done", ...
     void setState(const QString& state);
     // A message in the image area instead of the image; empty shows the image.
@@ -170,6 +176,7 @@ protected:
     // The panel is going away: end what it started. Called once, from the
     // subclass's destructor (closePanel()) or this one's.
     virtual void closing() {}
+    virtual void saveRenderedImage(const QString& path);
 
     // Ends a subclass's constructor: the setup message, the camera list, the stage.
     void finishSetup();
@@ -221,6 +228,7 @@ private:
     StageChanges m_pendingChanges;
     bool m_closed = false;
     bool m_setUp = false;
+    QSize m_presentedSize;
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_viewportConnection;
