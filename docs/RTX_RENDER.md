@@ -3,8 +3,12 @@
 Status: M1-M3 implementation in progress, 2026-11-07. The optional native plugin,
 GPU presenter, shared controls, render worker, and scene bridge build. The GPU
 presenter passes an independent CUDA/Vulkan diagnostic with validation enabled.
-The end-to-end RTX image proof remains blocked at native SDK scene attachment;
-M1-M3 acceptance is not complete. The shipped plugin remains Python-based.
+The isolated native SDK probe renders and presents a real RTX image, saves it,
+and drains SDK/GPU resources with zero Vulkan validation errors. The app also
+displays and saves both test scenes in all three modes alongside Storm. The
+apparent attachment blocker was cold shader compilation exceeding the old probe timeout;
+compilation progress now reaches the UI. M1-M3 acceptance is not complete.
+The shipped plugin remains Python-based.
 M4-M6 have not started.
 
 ## 1. Objective and completion criteria
@@ -246,7 +250,7 @@ from the unvalidated rendering path.
 
 - [x] Add optional native target/manifest through the existing SDK.
 - [x] Create a docked Qt Vulkan surface and resolve the window implementation.
-- [ ] Initialize the pinned SDK pair; display a local scene while Storm is open.
+- [x] Initialize the pinned SDK pair; display a local scene while Storm is open.
 - [x] Verify deferred initialization, panel creation/duplication/destruction, stage
   close/reassignment, and an actionable missing-runtime error without a GPU.
 - [ ] Verify panel close/reopen during actual rendering and unsupported-GPU
@@ -275,8 +279,8 @@ temporary stage, and asynchronous status polling. The user's stage is not passed
 to the vendor SDK. M2 replaces the original M1 CPU-transfer prototype with GPU
 presentation; M3 uses the shared render panel's camera and resolution choices.
 Snapshots and GPU work outlive closed panels safely through owned worker state.
-The remaining attachment stall means an RTX-produced frame has not yet reached
-the new presenter. Its successful synthetic GPU diagnostic is separate evidence.
+An RTX-produced fixture frame now reaches the presenter and saves correctly in
+the isolated native probe. Its synthetic GPU diagnostic remains separate evidence.
 
 Native SDK identities are pinned in `deps/rtx-native.json`: ovrtx
 `0.6.0+release.1791947691.c6d71501.gl` and ovstage
@@ -315,29 +319,63 @@ test results are recorded under M2 and M3 below. Configuring with
 `tools/build.ps1 -UsdInstall C:\Users\olive\DEV\git\USD\build\usd_typhoon`
 build also succeeds with the native target enabled.
 
-**Open blocker:** `ovrtx_attach_ovstage()` does not return in the native call
-path. The UI continues polling and reports the pending phase. An isolated
-native SDK probe reproduces the stall without the app or Storm; the vendor's
-minimal C example also stalled with the same local scene. A deprecated
-standalone scene-loading experiment reached the first frame and stalled there,
-so it was not retained as a fallback. The existing Python helper still renders
-with the same installed SDK DLLs. These observations do not yet identify the
-cause. No successful native image or Python-free rendering proof is claimed.
+**Attachment blocker resolved (2026-11-07):** longer isolated runs show that
+`ovrtx_attach_ovstage()` waits for initial ray-tracing pipeline compilation.
+Native stacks show active work in NVIDIA's shader compiler, and SDK INFO logs
+report `Waiting for RtPso async group async compilation`. A minimal C++
+bootstrap returned successfully after roughly 100 seconds. The same binary
+renamed `python.exe` attached in about five seconds; the observed cache behavior
+explains why successful Python rendering did not establish warm native startup.
+No executable renaming, Python initialization, driver-profile changes, or Vulkan
+layer disabling is used in the fix.
+
+The engine receives SDK INFO messages for `omni.rtx`, forwards compilation waits
+to the active request's status and app log, and preserves warning/error delivery.
+Routing is synchronized, ignores stopped/hidden/closed or superseded requests,
+and holds no panel pointer. Other INFO messages are filtered out. The callback
+is disabled before SDK shutdown. Production rendering has no artificial attach
+timeout; Stop suppresses new work while an accepted SDK call drains.
+
+On the validation RTX 4090, the native probe displayed and saved the local
+fixture at 960×540 after about 55 seconds of compilation. It then completed
+SDK/GPU shutdown with zero Vulkan validation errors. A repeat of the unchanged
+executable completed the entire render-and-drain probe in 6.65 seconds. The
+saved image was inspected and shows the fixture's cube and blue sphere. This
+probe uses C++ only, without an interpreter or Python RTX imports.
+
+App validation with the matching current build also displays and saves
+1280×720 images for `test_data/rtx_native_m1.usda` and the reported
+`cube_stacks_scene.usda` in Real-Time, Path Tracing, and Minimal. Storm remains
+open beside RTX. The fixture uses its scene camera; the reported scene also
+passes with a viewport camera on that same stage. For the cube-stack image,
+frame `/World/StackGroup0` in Storm and choose Viewport Camera in RTX; fitting
+the entire scene includes its oversized ground plane. Source-stage flattenings are
+unchanged after rendering. Mode changes, Stop/Render between modes, separate
+panels for the two stages, Save Image, and normal app shutdown pass. No Python
+RTX/ovrtx/ovstage modules are imported, and no Vulkan validation errors are
+reported. Automated non-GPU native tests still pass all 46 checks. This closes
+the attachment blocker; broader edit, lifecycle, and fidelity acceptance below
+remains open.
 
 Build and run the isolated diagnostic explicitly (it is excluded from normal
-builds and CTest; it times out with failure after 60 seconds):
+builds and CTest; its default timeout is ten minutes to accommodate cold caches):
 
 ```powershell
 cmake --build build --config RelWithDebInfo --target rtx_native_sdk_probe
 build/src/plugins/rtx_render_native/RelWithDebInfo/rtx_native_sdk_probe.exe `
-  C:/path/to/ovrtx C:/path/to/ovstage test_data/rtx_native_m1.usda /Render/Product
+  C:/path/to/ovrtx C:/path/to/ovstage test_data/rtx_native_m1.usda /Render/Product `
+  build/rtx-native-fixture.png
 ```
 
 Run with the matching Qt runtime and `build/src/cpp/core/RelWithDebInfo` on
-`PATH`. The diagnostic now reports named phases; `Attaching the scene to RTX`
-is the stalled call. A `GPU image` size message and exit code zero are required
-for success. Resolve this blocker and display the fixture plus the reported
-cube-stacks scene alongside Storm before marking M1 complete.
+`PATH`, and set `USDCC_RTX_VULKAN_VALIDATION=1` to enable validation. The optional
+last argument saves the displayed RTX frame through the engine's explicit Save
+Image path. `USDCC_RTX_PROBE_TIMEOUT_SECONDS` overrides the timeout (1–3600).
+The diagnostic reports named phases and compilation progress, then waits for
+SDK and GPU retirement. A `GPU image` size message, completed drain, and exit
+code zero are required for success. The fixture and reported scene have now
+displayed alongside Storm; finish the remaining lifecycle checks before marking
+M1 complete.
 
 ### M2. GPU presentation and asynchronous lifecycle
 
@@ -374,8 +412,10 @@ Closing a panel clears its queued work and disconnects UI callbacks without
 joining a GPU job on the GUI thread. Normal main-window closing polls SDK and
 GPU retirement before closing; its progress dialog can cancel the close while
 the app remains responsive. A vendor call that never returns cannot be cancelled
-safely. The attachment blocker therefore still prevents proving a full drain
-after real RTX initialization.
+safely. The isolated native probe now proves a full drain after rendering and
+saving a real RTX frame; broader app lifecycle acceptance remains below.
+The close-progress dialog is constructed only after an actual close request,
+preventing Qt's automatic progress timer from displaying it during rendering.
 
 The explicit `--interop` diagnostic requires an NVIDIA GPU but no initialized
 RTX renderer. It fills the ring, abandons frames, presents a known gradient,
@@ -440,7 +480,7 @@ generation rejection, sample budgets, snapshots, edits, and undo/redo. Existing
 Python render-panel (76), Python RTX (47), V-Ray (31), and C++ render-panel (30)
 checks pass. Qt's isolated test-settings file needs filesystem write access;
 GPU tests remain separate from these tests. Actual RTX output fidelity and
-incremental-update success remain unverified because attachment still stalls.
+incremental-update success still require the broader acceptance checks below.
 The scheduling and stage-bridge tests build without the optional native target
 or vendor SDK; configuring with RTX off and empty SDK roots, building, and running
 those two tests passes 30 checks. The plugin activation test is enabled with the

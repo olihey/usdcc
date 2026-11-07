@@ -14,6 +14,7 @@
 #include <QShowEvent>
 #include <QTimer>
 #include <algorithm>
+#include <limits>
 
 #include "rtx_engine.h"
 #include "stage_bridge.h"
@@ -304,11 +305,6 @@ private:
 class ShutdownGate final : public QObject {
 public:
     explicit ShutdownGate(usdcc::ui::MainWindow* window) : QObject(window), window(window) {
-        progress = new QProgressDialog("Finishing pending RTX work…", "Cancel close", 0, 0, window);
-        progress->setWindowModality(Qt::NonModal);
-        progress->setAutoClose(false);
-        progress->setAutoReset(false);
-        progress->hide();
         timer.setInterval(50);
         connect(&timer, &QTimer::timeout, this, [this] {
             if (drained()) {
@@ -321,10 +317,6 @@ public:
                     QStringLiteral(
                         "Finishing pending RTX work — %1 s. The scene remains available while the native SDK drains.")
                         .arg(elapsed.elapsed() / 1000));
-        });
-        connect(progress, &QProgressDialog::canceled, this, [this] {
-            timer.stop();
-            progress->hide();
         });
         window->installEventFilter(this);
     }
@@ -340,6 +332,19 @@ protected:
         if (drained()) return false;
         static_cast<QCloseEvent*>(event)->ignore();
         elapsed.start();
+        // Construct only after Close: an idle QProgressDialog can otherwise
+        // show itself during normal rendering through its automatic timer.
+        if (!progress) {
+            progress = new QProgressDialog("Finishing pending RTX work…", "Cancel close", 0, 0, window);
+            progress->setMinimumDuration(std::numeric_limits<int>::max());
+            progress->setWindowModality(Qt::NonModal);
+            progress->setAutoClose(false);
+            progress->setAutoReset(false);
+            connect(progress, &QProgressDialog::canceled, this, [this] {
+                timer.stop();
+                progress->hide();
+            });
+        }
         progress->show();
         timer.start();
         return true;
@@ -353,7 +358,7 @@ private:
         return VulkanWindow::retirementIdle();
     }
     usdcc::ui::MainWindow* window;
-    QProgressDialog* progress;
+    QProgressDialog* progress{};
     QTimer timer;
     QElapsedTimer elapsed;
     bool allowNext = false;

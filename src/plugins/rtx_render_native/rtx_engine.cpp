@@ -94,6 +94,33 @@ struct Runtime {
     QString root, stageRoot;
     std::vector<DLL_DIRECTORY_COOKIE> directories;
     bool initialized = false;
+    std::mutex progressMutex;
+    std::shared_ptr<State> progressState;
+    uint64_t progressGeneration = 0, progressRevision = 0;
+    // The SDK callback is process-global and can run on any thread. Route its
+    // compilation messages only to the request currently executing SDK calls.
+    struct ProgressScope {
+        Runtime& runtime;
+        ProgressScope(Runtime& runtime, const std::shared_ptr<State>& state, const Request& request)
+            : runtime(runtime) {
+            std::lock_guard lock(runtime.progressMutex);
+            runtime.progressState = state;
+            runtime.progressGeneration = request.generation;
+            runtime.progressRevision = request.revision;
+        }
+        ~ProgressScope() {
+            std::lock_guard lock(runtime.progressMutex);
+            runtime.progressState.reset();
+        }
+    };
+    void compilationProgress(const QString& message) {
+        std::lock_guard lock(progressMutex);
+        if (!progressState) return;
+        std::lock_guard stateLock(progressState->mutex);
+        if (progressState->schedule.accepts(progressGeneration, progressRevision))
+            progressState->output.status = "Compiling RTX shaders — " + message +
+                                           " (first render can take several minutes)";
+    }
     void open(const State& state) {
         if (initialized) {
             if (root != state.rtxRoot || stageRoot != state.stageRoot)
@@ -126,21 +153,30 @@ struct Runtime {
         ovrtx_config_t config{entries, std::size(entries)};
         check(ovrtx_initialize(&config).status, "initialize RTX");
         initialized = true;
-        ovrtx_set_log_callback(
-            OVX_LOG_WARNING, nullptr,
-            [](const ovx_log_message_t* message, void*) {
+        const QByteArray filter = "omni.rtx=info";
+        const auto channelFilter = string(filter);
+        check(ovrtx_set_log_callback(
+            OVX_LOG_WARNING, &channelFilter,
+            [](const ovx_log_message_t* message, void* context) {
                 try {
+                    const auto value = text(message->message);
+                    const auto compilation = value.indexOf("compilation:");
+                    const bool progress = value.contains("Waiting for") && compilation >= 0;
+                    if (progress)
+                        static_cast<Runtime*>(context)->compilationProgress(value.mid(compilation + 12).trimmed());
+                    if (message->severity < OVX_LOG_WARNING && !progress) return;
                     usdcc::core::LogRecord record;
                     record.level = message->severity >= OVX_LOG_ERROR ? usdcc::core::LogLevel::Error
-                                                                      : usdcc::core::LogLevel::Warning;
+                                   : message->severity >= OVX_LOG_WARNING ? usdcc::core::LogLevel::Warning
+                                                                         : usdcc::core::LogLevel::Info;
                     record.source = "plugin:org.usdcc.rtx-render";
                     record.category = "rtx.native.sdk";
-                    record.message = text(message->channel).toStdString() + ": " + text(message->message).toStdString();
+                    record.message = text(message->channel).toStdString() + ": " + value.toStdString();
                     usdcc::core::LogHub::instance().post(std::move(record));
                 } catch (...) { /* callbacks cannot throw into the vendor runtime */
                 }
             },
-            nullptr);
+            this).status, "set RTX log callback");
     }
     ~Runtime() {
         if (initialized) {
@@ -470,8 +506,9 @@ private:
                                 }
                             }
                             if (active && request.snapshot) {
-                            if (!runtime.initialized) status(state,"Initializing RTX");
-                            runtime.open(*state);
+                                if (!runtime.initialized) status(state, "Initializing RTX");
+                                runtime.open(*state);
+                                Runtime::ProgressScope progress(runtime, state, request);
                                 if (!session || session->generation != request.generation) {
                                     session.reset();  // fully replace: deleted prims cannot survive population
                                     session = std::make_unique<Session>();
