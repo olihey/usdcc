@@ -409,7 +409,7 @@ int main(int argc, char** argv) {
         }
     });
 
-    // File > Open Recent: built as it opens, so it's current and says what's gone.
+    // File > Open Recent: build from history without probing file availability.
     // Through the handler Open as Stage uses, so a file that's open comes forward.
     QMenu* recentMenu = fileMenu->addMenu(QObject::tr("Open &Recent"));
     QObject::connect(fileMenu, &QMenu::aboutToShow, recentMenu, [recentMenu]() {

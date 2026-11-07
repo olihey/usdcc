@@ -108,6 +108,12 @@ take them for a `bool`.
 | `Python/wheelsFolder` | Folder | none | `PluginManager` |
 | `Python/offline` | Bool | off | `PluginManager` |
 
+File > Open Recent builds its list from saved paths without checking whether files
+are currently available, so disconnected shares, mapped drives, and network mounts
+do not delay the menu. Entries remain selectable; the normal stage-opening flow
+reports missing or unreachable files when you choose one. Clear Recent also works
+while a listed path is offline.
+
 **Accent color.** `dark.qss` and `dock.qss` use three tokens:
 
 | Token | Replaced with |

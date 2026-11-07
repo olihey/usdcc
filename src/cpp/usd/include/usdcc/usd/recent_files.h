@@ -33,8 +33,9 @@ void removeRecentFile(const QString& path);
 void clearRecentFiles();
 
 // Fills `menu`, emptied first: a numbered entry per file with its whole path, newest
-// first, calling `open` with it, then Clear Recent. A file that's no longer there is
-// greyed out and says so.
+// first, calling `open` with it, then Clear Recent. Does not check file availability:
+// offline network paths must not block menu construction. The open handler owns
+// loading and error reporting, including missing files.
 void populateRecentFilesMenu(QMenu* menu, const std::function<void(const QString& path)>& open);
 
 // Adds every file `stages` opens from now on, whichever way it's opened. In-memory

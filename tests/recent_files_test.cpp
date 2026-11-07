@@ -125,7 +125,9 @@ USDCC_TEST(recent_files_menu) {
     CHECK(ampersand, "an & in a name is shown, not a mnemonic");
 
     QAction* missing = entry(menu, "gone.usda");
-    CHECK(missing && !missing->isEnabled() && missing->toolTip().contains("can't be found"), "a file that's gone is greyed out, saying why");
+    CHECK(missing && missing->isEnabled(), "missing files stay selectable without an availability check");
+    missing->trigger();
+    CHECK(opened == QDir::cleanPath(gone), "the open handler owns missing-file error reporting");
 
     CHECK(menu.actions().at(menu.actions().size() - 2)->isSeparator(), "a separator");
     QAction* clear = menu.actions().last();
@@ -145,6 +147,41 @@ USDCC_TEST(recent_files_menu) {
     populateRecentFilesMenu(&menu, open);
     CHECK(menu.actions().at(8)->text().startsWith("&9  ") && menu.actions().at(9)->text() == QDir::toNativeSeparators(QDir::cleanPath(recentFiles().at(9))),
           "numbers end at nine");
+}
+
+USDCC_TEST(recent_files_menu_offline_paths) {
+    TestSettings settings;
+    QObject owner;
+    defineRecentFilesSetting(&owner);
+
+    // Seed history directly: none of these paths needs to be reachable, and
+    // populating or triggering with a recording handler must not access them.
+    QStringList paths{QStringLiteral("//usdcc-offline.invalid/share/scene.usda")};
+#ifdef Q_OS_WIN
+    paths << QStringLiteral("Z:/usdcc-offline/project.usda");
+#else
+    paths << QStringLiteral("/mnt/usdcc-offline/project.usda");
+#endif
+    usdcc::ui::appSettings().setValue("RecentFiles/paths", paths);
+    QMenu menu;
+    QStringList opened;
+    const auto open = [&opened](const QString& path) { opened << path; };
+    populateRecentFilesMenu(&menu, open);
+    CHECK(menu.actions().size() == paths.size() + 2, "offline paths and Clear Recent are listed");
+    CHECK(opened.isEmpty(), "opening the menu does not invoke the open handler");
+    for (int i = 0; i < paths.size(); ++i) {
+        QAction* action = menu.actions().at(i);
+        CHECK(action->isEnabled() && action->toolTip() == QDir::toNativeSeparators(paths.at(i)),
+              "an offline path stays selectable with its full path as tooltip");
+        action->trigger();
+    }
+    CHECK(opened == paths, "the selected network and drive/mount paths reach the open handler unchanged");
+    CHECK(recentFiles() == paths, "menu construction keeps offline paths in history");
+
+    populateRecentFilesMenu(&menu, open);
+    CHECK(menu.actions().size() == paths.size() + 2, "reopening the menu retains offline entries");
+    menu.actions().last()->trigger();
+    CHECK(recentFiles().isEmpty(), "offline entries can be cleared without opening them");
 }
 
 USDCC_TEST(recent_files_from_opened_stages) {

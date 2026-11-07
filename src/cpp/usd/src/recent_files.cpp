@@ -95,20 +95,18 @@ void populateRecentFilesMenu(QMenu* menu, const std::function<void(const QString
     const QStringList paths = recentFiles();
     int number = 0;
     for (const QString& path : paths) {
-        const QFileInfo info(path);
         const QString nativePath = QDir::toNativeSeparators(path);
         QString label = nativePath;
         label.replace(QLatin1Char('&'), QLatin1String("&&"));  // not a mnemonic
         ++number;
         // Only the first nine can have a number key.
         const QString text = number <= 9 ? QStringLiteral("&%1  %2").arg(number).arg(label) : label;
+        // Menu construction must not query the filesystem: an offline UNC
+        // share, mapped drive, or network mount can block for minutes. Let the
+        // open handler load the chosen path and report any failure instead.
         QAction* action = menu->addAction(text);
-        if (info.exists()) {
-            QObject::connect(action, &QAction::triggered, menu, [open, path]() { open(path); });
-        } else {
-            action->setEnabled(false);
-            action->setToolTip(QObject::tr("%1 can't be found").arg(nativePath));
-        }
+        action->setToolTip(nativePath);
+        QObject::connect(action, &QAction::triggered, menu, [open, path]() { open(path); });
     }
     if (!paths.isEmpty()) {
         menu->addSeparator();
