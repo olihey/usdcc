@@ -12,6 +12,8 @@ quits.
 ovrtx renders a frame per step(), on this process's main thread. After a change
 (the stage, the camera, the size, an edit) the helper steps until it has rendered
 `max_frames` frames, sending an image every `image_ms`, then says "done" and waits.
+For Path Tracing, max_frames is the final samples-per-pixel budget; each step
+completes a growing sample budget, starting with a one-sample preview.
 
 --fake renders a gradient instead of importing ovrtx: the tests use it, and it
 needs no GPU.
@@ -111,7 +113,10 @@ class Backend:
         self.frame_started = None  # perf_counter() while step() runs
 
     def wants_frames(self):
-        return self.rendering and self.loaded and self.frames < self.max_frames
+        return self.rendering and self.loaded and self.frames < self.frame_limit()
+
+    def frame_limit(self):
+        return self.max_frames
 
     def changed(self):
         self.frames = 0
@@ -134,7 +139,7 @@ class Backend:
             self.frame_started = None
         self.frames += 1
         now = time.perf_counter()
-        last = self.frames >= self.max_frames
+        last = self.frames >= self.frame_limit()
         if self.frames == 1 or last or now - self._sent >= self.image_seconds:
             self._sent = now
             self.writer.image(pixels.shape[1], pixels.shape[0], pixels.tobytes(), self.frames)
@@ -162,6 +167,7 @@ class RtxBackend(Backend):
         self.ordinal = 0
         self._queries = {}  # paths: (path list, query)
         self._tokens = {}
+        self.path_tracing = False
 
     def cmd_init(self, max_frames=128, image_ms=33):
         self.max_frames = max(1, int(max_frames))
@@ -184,7 +190,7 @@ class RtxBackend(Backend):
         version = ".".join(str(v) for v in self.renderer.version)
         self.writer.event("ready", version=version, seconds=round(time.perf_counter() - started, 2))
 
-    def cmd_load(self, path, width, height):
+    def cmd_load(self, path, width, height, mode="Real-Time"):
         started = time.perf_counter()
         self._forget_queries()
         self.ordinal += 1
@@ -192,6 +198,7 @@ class RtxBackend(Backend):
         self._commit()
         self.paths = self.ovstage.PathDictionary(self.stage)
         self.size = (int(width), int(height))
+        self.path_tracing = mode == "Path Tracing"
         self.loaded = True
         self.writer.event("loaded", path=path, seconds=round(time.perf_counter() - started, 3))
         self.changed()
@@ -226,6 +233,15 @@ class RtxBackend(Backend):
 
     def step(self):
         ovrtx, np = self.ovrtx, self.np
+        if self.path_tracing:
+            # ovrtx completes the entire samplesPerPixel budget inside step(),
+            # rather than returning one sample per call. Start with a preview,
+            # then raise the budget geometrically so images and queued commands
+            # get through between refinements. The final budget is max_frames.
+            self.ordinal += 1
+            samples = min(1 << self.frames, self.max_frames)
+            self._write([PRODUCT], "omni:rtx:pt:samplesPerPixel", np.array([samples], dtype=np.uint32))
+            self._commit()
         products = self.renderer.step(render_products={PRODUCT}, delta_time=1.0 / 60, ordinal=self.ordinal)
         pixels = None
         for product in products.values():
@@ -241,6 +257,11 @@ class RtxBackend(Backend):
         if pixels is None:
             raise RuntimeError("ovrtx rendered no LdrColor for %s" % PRODUCT)
         return pixels
+
+    def frame_limit(self):
+        if self.path_tracing:
+            return (self.max_frames - 1).bit_length() + 1
+        return super().frame_limit()
 
     def _write(self, paths, name, tensor, semantic=0):
         key = tuple(paths)
@@ -280,7 +301,7 @@ class FakeBackend(Backend):
         self.max_frames = min(3, max(1, int(max_frames)))
         self.writer.event("ready", version="fake", seconds=0.0)
 
-    def cmd_load(self, path, width, height):
+    def cmd_load(self, path, width, height, mode="Real-Time"):
         self.size = (int(width), int(height))
         self.loaded = True
         self.writer.event("loaded", path=path, seconds=0.0)

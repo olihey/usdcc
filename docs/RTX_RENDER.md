@@ -54,6 +54,11 @@ panel (RENDER_VIEW_PANEL.md §1). What RTX adds or decides:
 - **The state:** "Starting RTX…", Rendering, Done, Stopped. After each change the helper
   renders *Frames after a change* frames (128 by default), sending an image every *Image
   updates* ms. Then it's Done and stops using the GPU until the next change.
+  In **Path Tracing**, that setting is the final samples-per-pixel budget. ovrtx completes
+  the whole sample budget inside each step, so the helper first requests a one-sample
+  preview, then doubles the budget up to the requested total, sending images and handling
+  commands between refinements. It does not wait for ovrtx's default 512 samples before
+  showing the first image.
 - **The Log panel:** the helper's output and ovrtx's messages go there under
   `plugin:org.usdcc.rtx-render`.
 - **A failed start** (ovrtx not installed in that Python, no RTX GPU) or a crashed helper is a
@@ -129,7 +134,7 @@ in usdcc's own `python.exe`, in a process of its own, never inside usdcc:
 
 | Direction | Format | Messages |
 |---|---|---|
-| Commands, to the helper's stdin | One JSON line each | `init {max_frames, image_ms}`, `load {path, width, height}`, `camera {transform[16], h_aperture, v_aperture}`, `size {width, height}`, `xforms {items: [{path, matrix[16]}]}`, `start`, `stop`, `quit` |
+| Commands, to the helper's stdin | One JSON line each | `init {max_frames, image_ms}`, `load {path, width, height, mode}`, `camera {transform[16], h_aperture, v_aperture}`, `size {width, height}`, `xforms {items: [{path, matrix[16]}]}`, `start`, `stop`, `quit` |
 | Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, seconds}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, frame}` with RGBA8888 pixels, `log {level, msg}`, `error {msg, fatal}`, `stale`, `slow {seconds, frame}` |
 
 **How it runs:**
@@ -187,6 +192,11 @@ and records what the panel sends. It checks that:
 
 `package_extra_index` and `plugin_package_indexes` cover `python.indexes`
 (PYTHON_PACKAGES.md §7).
+
+`usdcc_rtx_helper_tests` exercises the real backend's scheduling with an SDK stub:
+preview delivery, increasing sample budgets, the exact final sample count, stopping,
+restarting after edits, and the unchanged Real-Time frame budget. It needs no GPU or
+third-party Python packages.
 
 **Checked by hand, with ovrtx 0.6 on an RTX 4090:**
 - **The helper on its own,** driven over its pipes: load, a camera orbit, a prim moved in

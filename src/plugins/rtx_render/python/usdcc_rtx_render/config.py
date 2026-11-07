@@ -26,7 +26,8 @@ def define():
                           description="What a new RTX Render panel renders with: real-time path tracing, "
                                       "path tracing, or minimal rasterizing.", choices=MODES)
     usdcc.settings.define(MAX_FRAMES, "int", 128, label="Frames after a change", category=CATEGORY, group="Rendering",
-                          description="How many frames are rendered after a change before the image is done.",
+                          description="How many frames are rendered after a change before the image is done. "
+                                      "In Path Tracing, the final samples per pixel, with progressive previews.",
                           minimum=1, maximum=4096)
     usdcc.settings.define(IMAGE_MS, "int", 33, label="Image updates (ms)", category=CATEGORY, group="Rendering",
                           description="How often a new image is sent to the panel at most.", minimum=10, maximum=2000)

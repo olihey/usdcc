@@ -198,6 +198,7 @@ builtins.rtx_usdcc = usdcc
     CHECK(waitFor("rtx_test.image_size() == (1280, 720)"),
           "starts the helper, which sends back an image at the asked size: %s", evaluated("rtx_status.text()").c_str());
     CHECK(evaluated("rtx_names()[:2]") == "['init', 'load']", "init, then the stage: %s", evaluated("rtx_names()").c_str());
+    CHECK(evaluated("rtx_last('load')['mode']") == "Real-Time", "the helper knows the selected render mode");
 
     // What the helper was given: the stage, with a camera and a render product of our own.
     CHECK(run(R"(
@@ -244,6 +245,7 @@ builtins.rtx_exported = (product.GetTypeName(), product.GetRelationship("camera"
     CHECK(waitFor("rtx_names().count('load') == rtx_loads + 1"), "a new prim loads the stage again");
     CHECK(run("rtx_test.mode_combo.setCurrentText('Path Tracing')"), "picking Path Tracing");
     CHECK(evaluated("rtx_names().count('load') == rtx_loads + 2") == "True", "loads the stage again");
+    CHECK(evaluated("rtx_last('load')['mode']") == "Path Tracing", "the helper switches to progressive sample budgets");
     // The stage is held while its prim is asked about: a prim outliving its stage has expired.
     CHECK(evaluated("(lambda s: s.GetPrimAtPath('/__usdccRtx/Product').GetAttribute('omni:rtx:rendermode').Get())"
                     "(__import__('pxr').Usd.Stage.Open(rtx_last('load')['path']))") == "PathTracing",

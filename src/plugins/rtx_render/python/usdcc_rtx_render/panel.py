@@ -69,7 +69,7 @@ class RtxRenderPanel(usdcc.ui.RenderViewPanel):
             self.report_error("Exporting the stage failed: %s" % error)
             return
         self.orthographic = camera.orthographic
-        self.client.send("load", path=path, width=size[0], height=size[1])
+        self.client.send("load", path=path, width=size[0], height=size[1], mode=self.mode_combo.currentText())
         self.set_state("Loading the stage…")
 
     def camera_changed(self, camera):

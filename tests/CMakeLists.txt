@@ -96,6 +96,8 @@ usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
 #                    executable because Python can only be started once per
 #                    process; python_test_main.cpp starts it for every test.
+add_test(NAME usdcc_rtx_helper_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/rtx_helper_test.py")
+
 add_executable(usdcc_python_tests
     test_harness.h
     test_harness.cpp
