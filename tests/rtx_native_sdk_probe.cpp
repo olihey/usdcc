@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
+#include <future>
+#include <chrono>
 
 #include "cuda_driver.h"
 #include "rtx_engine.h"
@@ -45,11 +47,11 @@ int interop(QGuiApplication& app, const QString& screenshot) {
     tensor.dtype = {kDLUInt, 8, 1};
     tensor.shape = shape;
     tensor.strides = strides;
-    // All three GPU leases fill the ring. Release them without presentation to
+    // All six GPU leases fill the ring. Release them without presentation to
     // exercise consuming abandoned CUDA-ready signals on the next reuse.
-    std::array<std::shared_ptr<GpuFrame>, 3> held;
+    std::array<std::shared_ptr<GpuFrame>, 6> held;
     for (auto& image : held) image = bridge->copy(tensor);
-    if (bridge->copy(tensor)) throw std::runtime_error("GPU ring exceeded three frames");
+    if (bridge->copy(tensor)) throw std::runtime_error("GPU ring exceeded six frames");
     for (auto& image : held)
         while (!image->copied()) QThread::msleep(1);
     held = {};
@@ -153,10 +155,16 @@ int main(int argc, char** argv) {
     scene->file = QString::fromLocal8Bit(argv[3]);
     scene->product = QString::fromLocal8Bit(argv[4]);
     scene->size = QSize(960, 540);
+    if (qEnvironmentVariable("USDCC_RTX_PROBE_MODE") == "Path Tracing") scene->mode = usdcc::rtx::Mode::PathTracing;
+    else if (qEnvironmentVariable("USDCC_RTX_PROBE_MODE") == "Minimal") scene->mode = usdcc::rtx::Mode::Minimal;
     engine->replace(scene, 1);
+    const auto selection = qEnvironmentVariable("USDCC_RTX_PROBE_SELECTION").split(';', Qt::SkipEmptyParts);
+    engine->setSelection(selection);
     engine->setActive(true);
     QString last;
     bool draining = false, imageReceived = false;
+    bool saved = false;
+    std::future<void> highlightedReadback;
     int result = 0;
     const auto finish = [&](int code) {
         result = code;
@@ -176,9 +184,14 @@ int main(int argc, char** argv) {
         imageReceived = true;
         std::printf("GPU image %dx%d\n", size.width(), size.height());
         std::fflush(stdout);
-        if (argc == 6)
+        if (argc == 6) {
+            if (!selection.isEmpty()) {
+                auto frame = window.currentFrame();
+                const auto file = QString::fromLocal8Bit(argv[5]) + ".with-selection.png";
+                highlightedReadback = std::async(std::launch::async, [frame, file] { frame->save(file); });
+            }
             engine->save(QString::fromLocal8Bit(argv[5]), window.currentFrame());
-        else
+        } else
             finish(0);
     };
     QTimer poll;
@@ -209,6 +222,28 @@ int main(int argc, char** argv) {
         }
         if (!update.saved.isEmpty()) {
             std::printf("Saved RTX image: %s\n", update.saved.toUtf8().constData());
+            saved = true;
+        }
+        if (saved) {
+            if (highlightedReadback.valid()) {
+                if (highlightedReadback.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+                try { highlightedReadback.get(); }
+                catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); finish(1); return; }
+                const QImage clean(QString::fromLocal8Bit(argv[5]));
+                const QImage highlighted(QString::fromLocal8Bit(argv[5]) + ".with-selection.png");
+                const auto orange = [](const QImage& image) {
+                    int pixels = 0;
+                    for (int y = 0; y < image.height(); ++y) for (int x = 0; x < image.width(); ++x) {
+                        const auto c = image.pixelColor(x, y);
+                        if (c.red() > 240 && c.green() > 100 && c.green() < 190 && c.blue() < 40) ++pixels;
+                    }
+                    return pixels;
+                };
+                const int cleanCount = orange(clean), highlightedCount = orange(highlighted);
+                std::printf("Selection orange pixels: display %d; clean save %d\n", highlightedCount, cleanCount);
+                if (clean.isNull() || highlighted.isNull() || clean.size() != highlighted.size() ||
+                    highlightedCount <= cleanCount + 8) { finish(1); return; }
+            }
             finish(0);
             return;
         }

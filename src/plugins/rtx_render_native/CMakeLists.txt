@@ -67,7 +67,7 @@ usdcc_add_plugin(rtx_render_native
     ID org.usdcc.rtx-render NAME "RTX Render" VERSION 0.3.0
     DESCRIPTION "Native C++ RTX Render (development)"
     SOURCES plugin.cpp rtx_engine.cpp rtx_engine.h stage_bridge.cpp stage_bridge.h
-        render_types.h gpu_bridge.h cuda_driver.h vulkan_window.cpp vulkan_window.h)
+        render_types.h gpu_bridge.h cuda_driver.h vulkan_window.cpp vulkan_window.h navigation.cpp navigation.h)
 target_include_directories(rtx_render_native PRIVATE
     "${usdcc_vulkan_headers_SOURCE_DIR}/include" "${usdcc_volk_SOURCE_DIR}" "${CUDAToolkit_INCLUDE_DIRS}")
 target_compile_definitions(rtx_render_native PRIVATE VK_USE_PLATFORM_WIN32_KHR NOMINMAX WIN32_LEAN_AND_MEAN)

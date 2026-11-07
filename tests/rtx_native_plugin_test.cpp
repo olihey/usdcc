@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QTemporaryDir>
 #include <QToolButton>
+#include <QUndoStack>
 #include <filesystem>
 #include <memory>
 
@@ -20,6 +21,8 @@
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/render_view_panel.h"
+#include "usdcc/usd/undo_manager.h"
 
 USDCC_TEST(rtx_native_plugin_deferred_initialization) {
     TestSettings settings;
@@ -87,6 +90,22 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
                       "duplicate panels choose modes independently");
                 CHECK(usdcc::core::Settings::instance().get<std::string>("RtxRender/mode") == "Real-Time",
                       "panel mode does not overwrite the default for new panels");
+                const auto selectionBefore = app.stages.selectedPaths(stage);
+                const int undoBefore = app.undo.stack(stage)->count();
+                panel->findChild<QToolButton*>("nativeRtxReset")->click();
+                auto* originalRender = qobject_cast<usdcc::usd::RenderViewPanel*>(panel.get());
+                std::unique_ptr<usdcc::ui::ViewPanel> freeCopy(panel->duplicate(&window));
+                auto* copiedRender = qobject_cast<usdcc::usd::RenderViewPanel*>(freeCopy.get());
+                CHECK(originalRender->usesLocalCamera() && copiedRender->usesLocalCamera() &&
+                      originalRender->currentCamera().cameraToWorld == copiedRender->currentCamera().cameraToWorld,
+                      "duplicating Free Camera preserves its pose");
+                auto moved = originalRender->currentCamera();
+                moved.cameraToWorld.SetTranslateOnly(PXR_NS::GfVec3d(50, 40, 30));
+                originalRender->setLocalCamera(moved);
+                CHECK(originalRender->currentCamera().cameraToWorld != copiedRender->currentCamera().cameraToWorld,
+                      "duplicate panels own independent viewing cameras");
+                CHECK(app.stages.selectedPaths(stage) == selectionBefore && app.undo.stack(stage)->count() == undoBefore,
+                      "camera reset/navigation does not change selection or undo history");
                 panel->setStage({});
                 CHECK(!render->isChecked(), "stage close stops rendering");
                 panel->setStage(stage);

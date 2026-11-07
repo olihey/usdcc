@@ -199,6 +199,25 @@ USDCC_TEST(render_view_panel) {
     CHECK(closeTo(shot.cameraToWorld.ExtractTranslation()[1], 1.0) && closeTo(shot.cameraToWorld.ExtractTranslation()[2], 8.0),
           "from where it is");
 
+    std::string sourceBefore;
+    stage->usdStage()->GetRootLayer()->ExportToString(&sourceBefore);
+    RenderCamera free = shot;
+    free.cameraToWorld.SetTranslateOnly(PXR_NS::GfVec3d(3, 4, 12));
+    panel->cameras.clear();
+    panel->setLocalCamera(free);
+    free.cameraToWorld.SetTranslateOnly(PXR_NS::GfVec3d(5, 4, 12));
+    panel->setLocalCamera(free);
+    settle(RenderViewPanel::kCameraIntervalMs + 50);
+    CHECK(panel->usesLocalCamera() && cameras->currentText() == "Free Camera", "navigation explicitly chooses Free Camera");
+    CHECK(panel->cameras.size() == 1 && panel->cameras.back().cameraToWorld == free.cameraToWorld,
+          "rapid local camera changes are coalesced to the newest view");
+    cameras->setCurrentIndex(cameras->findData(QStringLiteral("/Shot")));
+    CHECK(!panel->usesLocalCamera() && panel->currentCamera().prim == PXR_NS::SdfPath("/Shot"),
+          "the authored camera remains selectable after free navigation");
+    std::string sourceAfter;
+    stage->usdStage()->GetRootLayer()->ExportToString(&sourceAfter);
+    CHECK(sourceBefore == sourceAfter, "free navigation does not edit an authored camera");
+
     // Render, edits.
     renderButton->setChecked(true);
     CHECK(panel->calls.back() == "start" && renderButton->text() == "Stop", "Render calls startRender()");

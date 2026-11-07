@@ -141,6 +141,10 @@ public:
     int editDelay() const;
     // What the image is seen through now, at renderSize()'s aspect ratio.
     RenderCamera currentCamera() const;
+    // Renderer-local viewing camera. Adds/selects Free Camera without authoring
+    // a scene camera; normal viewport/prim choices remain available.
+    void setLocalCamera(const RenderCamera& camera);
+    bool usesLocalCamera() const;
     // The image's size in pixels, from the Resolution choice and the panel's size.
     QSize renderSize() const;
     // Where a renderer adds its own controls (an engine choice), after the shared
@@ -225,6 +229,7 @@ private:
     QSize m_size;           // the last size sent
     // The last camera sent, kept for when no viewport shows the stage.
     std::optional<RenderCamera> m_camera;
+    std::optional<RenderCamera> m_localCamera;
     StageChanges m_pendingChanges;
     bool m_closed = false;
     bool m_setUp = false;

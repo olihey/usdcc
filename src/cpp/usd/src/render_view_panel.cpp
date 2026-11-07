@@ -377,6 +377,7 @@ RenderCamera RenderViewPanel::currentCamera() const {
     const double aspect = double(size.width()) / std::max(1, size.height());
     const StageRefPtr& stage = currentStage();
     const QString source = m_cameraCombo->currentData().toString();
+    if (source == "local" && m_localCamera) return m_localCamera->atAspect(aspect);
     if (source != kViewportCamera && stage) {
         const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath(source.toStdString()));
         if (std::optional<RenderCamera> camera = primRenderCamera(prim, aspect)) return *camera;
@@ -391,6 +392,23 @@ RenderCamera RenderViewPanel::currentCamera() const {
     camera.fovY = HydraViewportWindow::verticalFieldOfView();
     return camera.atAspect(aspect);
 }
+
+void RenderViewPanel::setLocalCamera(const RenderCamera& camera) {
+    m_localCamera = camera;
+    m_localCamera->prim = {};
+    {
+        const QSignalBlocker blocker(m_cameraCombo);
+        int index = m_cameraCombo->findData(QStringLiteral("local"));
+        if (index < 0) {
+            m_cameraCombo->addItem(tr("Free Camera"), QStringLiteral("local"));
+            index = m_cameraCombo->count() - 1;
+        }
+        m_cameraCombo->setCurrentIndex(index);
+    }
+    if (!m_cameraTimer->isActive()) m_cameraTimer->start();
+}
+
+bool RenderViewPanel::usesLocalCamera() const { return m_cameraCombo->currentData().toString() == "local"; }
 
 void RenderViewPanel::setRendererName(const QString& name) {
     const bool showingIdle = m_view->message() == idleMessage();
@@ -415,6 +433,7 @@ void RenderViewPanel::populateOptionsMenu(QMenu* menu) {
 }
 
 void RenderViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_localCamera.reset();
     if (!m_setUp || m_closed) return;
     connectStage();
     fillCameras();
@@ -522,6 +541,7 @@ void RenderViewPanel::fillCameras() {
         const QSignalBlocker blocker(m_cameraCombo);
         m_cameraCombo->clear();
         m_cameraCombo->addItem(tr("Viewport Camera"), kViewportCamera);
+        if (m_localCamera) m_cameraCombo->addItem(tr("Free Camera"), QStringLiteral("local"));
         for (const PXR_NS::SdfPath& path : cameraPrims(currentStage())) {
             m_cameraCombo->addItem(QString::fromStdString(path.GetName()), QString::fromStdString(path.GetString()));
         }

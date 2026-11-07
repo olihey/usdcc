@@ -194,6 +194,8 @@ struct Session {
     uint64_t generation = 0, revision = 0, ordinal = 0;
     int frame = 0;
     bool attached = false;
+    QStringList selected;
+    uint64_t selectionRevision = 0;
     std::shared_ptr<Snapshot> snapshot;
     ~Session() {
         if (step) ovrtx_destroy_results(renderer, step);
@@ -203,8 +205,16 @@ struct Session {
     }
     void load(const std::shared_ptr<State>& state, const Request& request) {
         status(state, "Initializing RTX");
-        ovrtx_config_t config{};
+        const ovrtx_config_entry_t entries[] = {
+            ovrtx_config_entry_bool(OVRTX_CONFIG_SELECTION_OUTLINE_ENABLED, true),
+            ovrtx_config_entry_int(OVRTX_CONFIG_SELECTION_OUTLINE_WIDTH, 2),
+            ovrtx_config_entry_int(OVRTX_CONFIG_SELECTION_FILL_MODE, OVRTX_SELECTION_FILL_MODE_EDGE_ONLY),
+        };
+        ovrtx_config_t config{entries, std::size(entries)};
         check(ovrtx_create_renderer(&config, &renderer).status, "create renderer");
+        const uint8_t group = 1;
+        const ovrtx_selection_group_style_t style{{1.f, .55f, .05f, 1.f}, {0.f, 0.f, 0.f, 0.f}};
+        wait(ovrtx_set_selection_group_styles(renderer, &group, &style, 1));
         ovstage_instance_desc_t desc{};
         desc.name = "usdcc.rtx.native";
         checkStage(ovstage_create_instance(&desc, &stage), "create stage");
@@ -241,6 +251,31 @@ struct Session {
             request.camera.horizontal == snapshot->view.horizontal &&
             request.camera.vertical == snapshot->view.vertical && request.size == snapshot->size)
             revision = request.revision;
+    }
+    void wait(ovrtx_enqueue_result_t operation) {
+        check(operation.status, "enqueue RTX selection");
+        ovrtx_op_wait_result_t result{};
+        for (;;) {
+            auto code = ovrtx_wait_op(renderer, operation.op_index, {10000000}, &result).status;
+            if (code == OVRTX_API_TIMEOUT) continue;
+            check(code, "wait RTX selection");
+            if (result.num_error_ops) throw std::runtime_error("RTX selection update failed");
+            if (!result.lowest_pending_op_id || result.lowest_pending_op_id > operation.op_index) break;
+        }
+    }
+    void groups(QStringList paths) {
+        if (snapshot && snapshot->geometryKnown)
+            paths.removeIf([this](const auto& path) { return !snapshot->geometry.contains(path); });
+        if (paths == selected) return;
+        std::vector<QByteArray> encoded;
+        std::vector<uint8_t> groups;
+        for (auto& path : selected) { encoded.push_back(path.toUtf8()); groups.push_back(0); }
+        for (auto& path : paths) { encoded.push_back(path.toUtf8()); groups.push_back(1); }
+        std::vector<ovx_string_t> strings;
+        for (auto& path : encoded) strings.push_back(string(path));
+        if (!strings.empty())
+            wait(ovrtx_set_selection_outline_group_strings(renderer, strings.data(), strings.size(), groups.data()));
+        selected = paths;
     }
     void commit() {
         ovstage_write_floor_desc_t floor{};
@@ -315,7 +350,7 @@ struct Session {
         revision = request.revision;
         frame = 0;
     }
-    void render(const std::shared_ptr<State>& state, const Request& request) {
+    std::shared_ptr<GpuFrame> renderImage(const std::shared_ptr<State>& state, const Request& request) {
         if (request.mode == Mode::PathTracing) {
             uint32_t samples = sampleBudget(frame, request.budget);
             ++ordinal;
@@ -364,7 +399,7 @@ struct Session {
                         color = output.output_render_vars[v].output_handle;
             }
         if (!color) throw std::runtime_error("RTX returned no LdrColor image");
-        if (!accepts(state, request)) return;
+        if (!accepts(state, request)) return {};
         ovrtx_map_output_description_t desc{};
         desc.device_type = OVRTX_MAP_DEVICE_TYPE_CUDA;
         desc.sync_stream = state->bridge->stream();
@@ -387,13 +422,30 @@ struct Session {
         std::shared_ptr<GpuFrame> image;
         while (accepts(state, request) && !(image = state->bridge->copy(*mapped.tensors[0].dl)))
             std::this_thread::sleep_for(2ms);
-        if (image) {
-            while (!image->copied()) std::this_thread::sleep_for(1ms);
+        if (image) while (!image->copied()) std::this_thread::sleep_for(1ms);
+        return image;
+    }
+    void render(const std::shared_ptr<State>& state, const Request& request) {
+        // Retain a clean GPU companion at the same camera/sample budget. Saving
+        // it needs no scene replay, extra work after Stop, or steady CPU readback.
+        groups({});
+        auto image = renderImage(state, request);
+        if (!image) return;
+        groups(request.selection);
+        if (!selected.isEmpty()) {
+            auto clean = std::move(image);
+            image = renderImage(state, request);
+            if (!image) return;
+            image->cleanFrame = std::move(clean);
+        }
+        selectionRevision = request.selectionRevision;
+        {
             std::lock_guard lock(state->mutex);
-            if (state->schedule.accepts(request.generation, request.revision)) {
+            if (state->schedule.acceptsFrame(request.generation, request.revision, request.selectionRevision)) {
                 state->output.frame = std::move(image);
                 state->output.generation = generation;
                 state->output.revision = revision;
+                state->output.selectionRevision = selectionRevision;
                 ++frame;
                 const bool done = request.mode == Mode::PathTracing
                                       ? sampleBudget(frame - 1, request.budget) >= request.budget
@@ -497,7 +549,8 @@ private:
                             if (!save.isEmpty()) {
                                 try {
                                     if (!saveFrame) throw std::runtime_error("No displayed frame to save");
-                                    saveFrame->save(save);
+                                    auto clean = saveFrame->cleanFrame ? saveFrame->cleanFrame : saveFrame;
+                                    clean->save(save);
                                     std::lock_guard lock(state->mutex);
                                     state->output.saved = save;
                                 } catch (const std::exception& error) {
@@ -535,7 +588,8 @@ private:
                                             ? session->frame &&
                                                   sampleBudget(session->frame - 1, request.budget) >= request.budget
                                             : session->frame >= request.budget;
-                                    if (!done) session->render(state, request);
+                                    if (!done || session->selectionRevision != request.selectionRevision)
+                                        session->render(state, request);
                                 }
                             }
                         } catch (const std::exception& error) {
@@ -602,6 +656,15 @@ void RtxEngine::update(Camera camera, QSize size, const std::map<QString, std::a
     m->output.frame.reset();
     Service::instance().notify();
 }
+void RtxEngine::setSelection(QStringList paths) {
+    std::lock_guard lock(m->mutex);
+    if (m->schedule.desired.selection == paths) return;
+    m->schedule.desired.selection = std::move(paths);
+    ++m->schedule.desired.selectionRevision;
+    m->output.done = false;
+    m->output.frame.reset();
+    Service::instance().notify();
+}
 void RtxEngine::setActive(bool active) {
     std::lock_guard lock(m->mutex);
     m->schedule.active = active;
@@ -636,7 +699,7 @@ EngineUpdate RtxEngine::poll() {
     m->output.saved.clear();
     m->output.saveError.clear();
     m->output.reloadNeeded = false;
-    if (!m->schedule.accepts(update.generation, update.revision)) update.frame.reset();
+    if (!m->schedule.acceptsFrame(update.generation, update.revision, update.selectionRevision)) update.frame.reset();
     return update;
 }
 void RtxEngine::close() {

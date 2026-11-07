@@ -13,13 +13,19 @@
 #include <QProgressDialog>
 #include <QShowEvent>
 #include <QTimer>
+#include <QToolButton>
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 #include "rtx_engine.h"
+#include "navigation.h"
 #include "stage_bridge.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/scene_bounds.h"
+#include "usdcc/usd/stage_manager.h"
+#include <pxr/usd/usd/stage.h>
 #include "vulkan_window.h"
 
 namespace usdcc::rtx {
@@ -46,8 +52,10 @@ public:
         : RenderViewPanel(host.stageManager, std::move(stage), title, parent), m_host(host) {
         setRendererName("RTX");
         m_window = new VulkanWindow;
+        m_window->setObjectName("nativeRtxWindow");
         auto* container = QWidget::createWindowContainer(m_window);
         container->setObjectName("nativeRtxSurface");
+        container->setFocusPolicy(Qt::StrongFocus);
         setPresentationWidget(container);
         m_mode = new QComboBox(this);
         m_mode->setObjectName("nativeRtxMode");
@@ -57,6 +65,32 @@ public:
         setEditDelay(settings.get<int>("RtxRender/editDelay", 30));
         extraToolbarLayout()->addWidget(m_mode);
         connect(m_mode, &QComboBox::currentTextChanged, this, [this](const QString&) { reload(); });
+        auto* fit = new QToolButton(this);
+        fit->setObjectName("nativeRtxFit");
+        fit->setText("Fit to View");
+        fit->setToolTip("Frame the whole scene in this RTX camera (F over the image)");
+        extraToolbarLayout()->addWidget(fit);
+        connect(fit, &QToolButton::clicked, this, [this] { frameScene(); });
+        auto* reset = new QToolButton(this);
+        reset->setObjectName("nativeRtxReset");
+        reset->setText("Reset Camera");
+        reset->setToolTip("Reset this RTX camera (Home over the image)");
+        extraToolbarLayout()->addWidget(reset);
+        connect(reset, &QToolButton::clicked, this, [this] { m_navigation.reset(); publishNavigation(); });
+        m_input = new NavigationInput(m_window, this);
+        m_input->imageSize = [this] { return m_lastFrame ? m_lastFrame->size() : renderSize(); };
+        m_input->begin = [this](bool orbit) { prepareNavigation(); if (orbit) m_navigation.beginOrbit(); };
+        m_input->orbit = [this](QPointF delta) { m_navigation.orbit(delta); publishNavigation(); };
+        m_input->pan = [this](QPointF delta) { m_navigation.pan(delta); publishNavigation(); };
+        m_input->zoom = [this](double steps) { m_navigation.zoom(steps); publishNavigation(); };
+        m_input->fit = [this] { frameScene(); };
+        m_input->reset = [this] { m_navigation.reset(); publishNavigation(); };
+        m_selectionTimer.setSingleShot(true);
+        m_selectionTimer.setInterval(kCameraIntervalMs);
+        connect(&m_selectionTimer, &QTimer::timeout, this, [this] { refreshSelection(); });
+        m_selectionConnection = m_host.stageManager->selectionChanged.connect(
+            [this](const auto& stage, const auto&) { if (stage == currentStage()) refreshSelection(); });
+        bindSelection();
         m_settings = settings.changed.connect([this](const std::string& key) {
             if (key == "RtxRender/editDelay")
                 setEditDelay(usdcc::core::Settings::instance().get<int>(key, 30));
@@ -75,6 +109,7 @@ public:
         m_poll.setInterval(30);
         connect(&m_poll, &QTimer::timeout, this, [this] { poll(); });
         setProperty("nativeRtxImageSize", QSize());
+        setProperty("nativeRtxFrameSerial", qulonglong(0));
         finishSetup();
         setSettingsCategory("RTX");
         panels.push_back(this);
@@ -99,6 +134,12 @@ public:
     usdcc::ui::ViewPanel* duplicate(QWidget* parent) const override {
         auto* panel = new RtxRenderPanel(m_host, currentStage(), windowTitle(), parent);
         panel->m_mode->setCurrentIndex(m_mode->currentIndex());
+        if (usesLocalCamera()) { panel->m_navigation = m_navigation; panel->publishNavigation(); }
+        else {
+            auto* from = findChild<QComboBox*>("renderCamera");
+            auto* to = panel->findChild<QComboBox*>("renderCamera");
+            to->setCurrentIndex(std::max(0, to->findData(from->currentData())));
+        }
         return panel;
     }
 
@@ -124,12 +165,14 @@ protected:
                 m_host.log(usdcc::core::LogLevel::Info, device.toStdString());
                 auto runtime = roots(m_host.folder);
                 m_engine = std::make_unique<RtxEngine>(runtime.rtx, runtime.stage, m_window->bridge());
+                m_engine->setSelection(m_selection);
                 m_engine->setVisible(!isHidden());
                 reload();
             } else if (m_dirty)
                 reload();
             if (m_engine) m_engine->setActive(true);
             m_elapsed.start();
+            m_lastStatus.clear();
             m_poll.start();
             setState("Starting RTX…");
         } catch (const std::exception& error) {
@@ -150,6 +193,7 @@ protected:
             m_engine->replace(std::move(scene), budget());
             m_engine->setActive(isRendering());
             m_dirty = false;
+            m_lastStatus.clear();
             m_elapsed.restart();
             setState(isRendering() ? "Loading the scene…" : "Stopped — changes queued");
         } catch (const std::exception& error) {
@@ -192,10 +236,15 @@ protected:
         showPresentedFrame({});
         setProperty("nativeRtxImageSize", QSize());
         m_dirty = true;
+        bindSelection();
         RenderViewPanel::onStageChanged(stage);
         if (stage && isRendering()) startRender();
     }
     void closing() override {
+        m_selectionTimer.stop();
+        m_selectionConnection = {};
+        m_selectionStageConnection = {};
+        delete std::exchange(m_input, nullptr);
         m_poll.stop();
         if (m_engine) m_engine->close();
         m_engine.reset();
@@ -232,10 +281,42 @@ protected:
     }
     void showEvent(QShowEvent* event) override {
         RenderViewPanel::showEvent(event);
+        refreshSelection();
         if (m_engine) m_engine->setVisible(true);
     }
 
 private:
+    double cameraAspect() const { const auto size = renderSize(); return double(size.width()) / std::max(1, size.height()); }
+    void prepareNavigation() {
+        if (!usesLocalCamera())
+            m_navigation.seed(currentCamera(), currentStage() ? usdcc::usd::sceneBounds(currentStage()->usdStage(), {})
+                                                              : std::nullopt);
+        m_navigation.setAspect(cameraAspect());
+    }
+    void publishNavigation() {
+        setLocalCamera(m_navigation.camera(cameraAspect()));
+    }
+    void frameScene() {
+        if (!currentStage()) return;
+        const auto bounds = usdcc::usd::sceneBounds(currentStage()->usdStage(), {});
+        if (!bounds) { setState("The scene has no visible geometry to frame"); return; }
+        prepareNavigation();
+        m_navigation.frame(*bounds);
+        publishNavigation();
+    }
+    void refreshSelection() {
+        m_selection = selectionGeometry(currentStage(), m_host.stageManager->selectedPaths(currentStage()));
+        if (m_engine) m_engine->setSelection(m_selection);
+    }
+    void bindSelection() {
+        m_selectionTimer.stop();
+        m_selectionStageConnection = {};
+        if (currentStage())
+            m_selectionStageConnection = currentStage()->changed.connect([this](const auto& changes) {
+                if (!changes.resyncedPaths.empty()) m_selectionTimer.start();
+            });
+        refreshSelection();
+    }
     Mode mode() const {
         return m_mode->currentIndex() == 1   ? Mode::PathTracing
                : m_mode->currentIndex() == 2 ? Mode::Minimal
@@ -275,6 +356,7 @@ private:
             return;
         }
         if (update.frame) {
+            setProperty("nativeRtxFrameSerial", ++m_frameSerial);
             showMessage({});
             m_window->setFrame(std::move(update.frame));
         }
@@ -296,7 +378,14 @@ private:
     QElapsedTimer m_elapsed;
     QString m_slowPhase, m_lastStatus;
     bool m_dirty = true, m_orthographic = false;
+    qulonglong m_frameSerial = 0;
     std::unique_ptr<RtxEngine> m_engine;
+    NavigationCamera m_navigation;
+    NavigationInput* m_input{};
+    QStringList m_selection;
+    QTimer m_selectionTimer;
+    usdcc::core::Signal<usdcc::usd::StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
+    usdcc::core::Signal<const usdcc::usd::StageChanges&>::Connection m_selectionStageConnection;
     std::shared_ptr<GpuFrame> m_lastFrame;
     usdcc::core::Signal<const std::string&>::Connection m_settings;
 };

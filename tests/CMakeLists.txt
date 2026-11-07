@@ -133,7 +133,9 @@ add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
 target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
-    ../src/plugins/rtx_render_native/stage_bridge.cpp)
+    rtx_native_navigation_test.cpp
+    ../src/plugins/rtx_render_native/stage_bridge.cpp
+    ../src/plugins/rtx_render_native/navigation.cpp)
 target_include_directories(usdcc_python_tests PRIVATE ../src/plugins/rtx_render_native)
 if(TARGET rtx_render_native)
     target_sources(usdcc_python_tests PRIVATE rtx_native_plugin_test.cpp)

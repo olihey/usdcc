@@ -68,6 +68,8 @@ USDCC_TEST(rtx_native_snapshot_and_edits) {
     source->GetSessionLayer()->ExportToString(&sessionBefore);
     auto snapshot = makeSnapshot(wrapped, camera, QSize(320, 160), Mode::PathTracing);
     auto exported = UsdStage::Open(snapshot->file.toStdString());
+    CHECK(snapshot->geometryKnown && snapshot->geometry.contains("/Cube") &&
+          snapshot->geometry.contains("/UnsavedSphere"), "snapshot records which geometry can receive native highlights");
     CHECK(exported && exported->GetPrimAtPath(SdfPath("/UnsavedSphere")), "snapshot includes unsaved session opinions");
     CHECK(snapshot->camera.startsWith("/__usdccRtxNative_1/"), "private prims avoid collisions");
     UsdGeomCamera exportedCamera(exported->GetPrimAtPath(SdfPath(snapshot->camera.toStdString())));

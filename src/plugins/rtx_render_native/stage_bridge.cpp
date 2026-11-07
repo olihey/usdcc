@@ -5,13 +5,29 @@
 #include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/scope.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usdGeom/gprim.h>
+#include <pxr/usd/usdGeom/pointInstancer.h>
 
 #include <QDir>
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
+#include <set>
 
 namespace usdcc::rtx {
+QStringList selectionGeometry(const usdcc::usd::StageRefPtr& source,
+                              const std::vector<PXR_NS::SdfPath>& selected) {
+    std::set<QString> paths;
+    if (source) for (const auto& path : selected) {
+        auto prim = source->usdStage()->GetPrimAtPath(path.GetPrimPath());
+        if (!prim) continue;
+        for (auto descendant : PXR_NS::UsdPrimRange(prim, PXR_NS::UsdTraverseInstanceProxies()))
+            if (descendant.IsA<PXR_NS::UsdGeomGprim>() || descendant.IsA<PXR_NS::UsdGeomPointInstancer>())
+                paths.insert(QString::fromStdString(descendant.GetPath().GetString()));
+    }
+    return QStringList(paths.begin(), paths.end());
+}
 Camera cameraValues(const usdcc::usd::RenderCamera& input) {
     Camera result;
     std::copy(input.cameraToWorld.GetArray(), input.cameraToWorld.GetArray() + 16, result.matrix.begin());
@@ -71,6 +87,9 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     result->view = view;
     result->size = size;
     result->mode = mode;
+    const auto geometry = selectionGeometry(source, {SdfPath::AbsoluteRootPath()});
+    result->geometry = std::set<QString>(geometry.begin(), geometry.end());
+    result->geometryKnown = true;
     if (!layer->Export(result->file.toStdString())) throw std::runtime_error("Could not export RTX snapshot");
     return result;
 }

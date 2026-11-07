@@ -7,6 +7,7 @@
 namespace usdcc::rtx {
 struct EngineUpdate {
     uint64_t generation = 0, revision = 0;
+    uint64_t selectionRevision = 0;
     QString status, error, saved, saveError;
     std::shared_ptr<GpuFrame> frame;
     bool done = false, reloadNeeded = false;
@@ -20,6 +21,7 @@ public:
     ~RtxEngine();
     uint64_t replace(std::shared_ptr<Snapshot> snapshot, int budget);
     void update(Camera camera, QSize size, const std::map<QString, std::array<double, 16>>& transforms = {});
+    void setSelection(QStringList paths);
     void setActive(bool active);
     void setVisible(bool visible);
     void save(QString file, std::shared_ptr<GpuFrame> frame);

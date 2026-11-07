@@ -65,6 +65,14 @@ When it's sent:
 
 `usdcc.app.active_viewport_camera()` uses the same viewport code (`viewportRenderCamera()`).
 
+C++ renderers can call `setLocalCamera(RenderCamera)` to add/select **Free Camera**.
+It holds viewing state in the panel and coalesces camera callbacks at the same
+30 ms interval, without changing an authored camera or the followed viewport.
+`usesLocalCamera()` reports whether it is selected. Existing viewport/prim choices
+remain available, and a stage change discards the local camera. The native RTX
+plugin uses this for image navigation; ordinary Python render panels keep their
+existing behavior.
+
 ## 3. Edits
 
 The panel collects the stage's change notices while Update on Edits is on. It calls

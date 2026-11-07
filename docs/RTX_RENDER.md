@@ -1,6 +1,7 @@
 # RTX Render: native C++ replacement plan
 
-Status: M1-M3 implementation in progress, 2026-11-07. The optional native plugin,
+Status: M1-M4 implemented in the optional native development plugin, 2026-11-07.
+Broader acceptance and cutover remain in progress. The optional native plugin,
 GPU presenter, shared controls, render worker, and scene bridge build. The GPU
 presenter passes an independent CUDA/Vulkan diagnostic with validation enabled.
 The isolated native SDK probe renders and presents a real RTX image, saves it,
@@ -9,7 +10,7 @@ displays and saves both test scenes in all three modes alongside Storm. The
 apparent attachment blocker was cold shader compilation exceeding the old probe timeout;
 compilation progress now reaches the UI. M1-M3 acceptance is not complete.
 The shipped plugin remains Python-based.
-M4-M6 have not started.
+M4 navigation/highlighting and real-GPU app checks pass. M5-M6 have not started.
 
 ## 1. Objective and completion criteria
 
@@ -178,8 +179,9 @@ state, written only to the renderer's private camera.
   while rendering catches up. Do not add scene-selection or edit gestures.
 - Save Image explicitly reads back a completed real frame, without making CPU
   readback part of every displayed frame. Save the render without selection
-  highlights by default; hide the renderer-only outline pass for the capture and
-  restore the current highlight state afterwards.
+  highlights by default. Retain a clean GPU companion before the outline pass,
+  then apply selection for presentation. Save reads that retained image without
+  submitting new render work when rendering is stopped.
 
 ### One-way selection highlighting
 
@@ -379,8 +381,8 @@ M1 complete.
 
 ### M2. GPU presentation and asynchronous lifecycle
 
-- [x] Implement UUID matching, CUDA output mapping/copy, a three-slot shared GPU
-  buffer/image ring, and external semaphores.
+- [x] Implement UUID matching, CUDA output mapping/copy, a bounded shared GPU
+  buffer/image ring, and external semaphores (six slots for M4 display/clean pairs).
 - [x] Implement worker ownership, timed operation polling, generation/revision
   tags, and coalesced desired state with one pending display/save result per panel.
 - [x] Implement resize, hide/show, duplicate panels, stage close, and asynchronous
@@ -393,7 +395,7 @@ have no validation errors, leaked handles, or callbacks into deleted UI.
 
 #### M2 implementation and validation record
 
-The normal display path maps `LdrColor` to CUDA, copies it into one of three
+The normal display path maps `LdrColor` to CUDA, copies it into one of six
 exported Win32 Vulkan buffers, and blits a Vulkan image into the swapchain. There
 is no CPU pixel mapping or image IPC in this path. Buffers are reused at a fixed
 resolution; discarded ready signals are consumed before reuse. Device selection
@@ -489,14 +491,14 @@ actionable unsupported-driver error, no Python RTX import, and clean close.
 
 ### M4. Camera navigation and selection highlighting
 
-- [ ] Connect orbit/pan/zoom, scene framing, and camera reset to the rendered image.
-- [ ] Reuse camera calculations and navigation conventions without editing-tool dependencies.
-- [ ] Preserve scene-camera and follow-viewport choices; switch to a local free
+- [x] Connect orbit/pan/zoom, scene framing, and camera reset to the rendered image.
+- [x] Reuse camera calculations and navigation conventions without editing-tool dependencies.
+- [x] Preserve scene-camera and follow-viewport choices; switch to a local free
   camera explicitly when navigating directly in the render view.
-- [ ] Coalesce navigation updates, reset accumulation, and render new previews.
-- [ ] Mirror per-stage app selection into native RTX outlines, including initial
+- [x] Coalesce navigation updates, reset accumulation, and render new previews.
+- [x] Mirror per-stage app selection into native RTX outlines, including initial
   selection, multiple prims, selected containers, deselection, and reloads.
-- [ ] Refresh highlights independently of Update on Edits and preserve Stop/hide
+- [x] Refresh highlights independently of Update on Edits and preserve Stop/hide
   behavior; save clean images without selection highlights.
 - [ ] Verify high-DPI input, independent cameras in duplicate panels, and that
   navigation changes neither the source stage nor its selection or undo history.
@@ -504,6 +506,70 @@ actionable unsupported-driver error, no Python RTX import, and clean close.
 Exit: users can navigate and frame the rendered scene directly, with responsive
 image updates and highlights matching selection elsewhere in the app. The RTX
 view does not pick, change selection, or edit the scene.
+
+#### M4 implementation and validation record
+
+In the native RTX image, drag the left button to orbit, the middle button to pan,
+and use the wheel to zoom. Alt+left drag also orbits. Fit to View (`F` over the
+image) frames all visible scene geometry, independently of selection. Reset
+Camera (`Home`) uses the viewport's default orbit pose. Both actions are also
+on the toolbar and image context menu. Letterbox bars ignore navigation input.
+
+`navigation.cpp` reuses `orbitCameraAxes`, `frameOrbitCamera`, `orbitClipping`,
+pole handling, and cursor wrapping. Input uses logical image coordinates, so
+device pixel ratios are not applied twice. Navigation initializes from the
+currently viewed camera, preserves its roll/projection, and explicitly selects
+Free Camera. The shared panel coalesces changes at 30 ms. Viewport and authored
+camera choices remain available; duplicated native panels copy their viewing
+state independently. Source cameras, selection, and undo history are untouched.
+
+Selection subscriptions are per stage and independent of Update on Edits.
+Selected containers expand to unique renderable descendants, including instance
+proxies. Deleted/non-renderable paths are skipped. Snapshots record geometry
+membership so new source prims absent from the rendered snapshot are not sent
+to the renderer. A separate selection revision rejects stale highlight frames
+without cancelling scene loading. Selection changes after Done request a fresh
+display; Stop/hide retain updates until rendering resumes. Reload reapplies them.
+The SDK's renderer-only outline groups use an orange, two-pixel edge with no fill.
+
+With selection active, a render cycle copies a clean GPU image, applies outline
+groups, and produces its highlighted companion at the same camera/sample budget.
+The display frame retains the clean frame for Save Image. Empty selection needs
+one pass. The ring grows from three slots to six, bounding three display/clean
+pairs. This increases selected-view GPU work and potential VRAM use; no CPU pixel
+readback occurs until Save or an explicit diagnostic. Saving while stopped reads
+the retained clean frame and does not submit another render. Fast completed
+renders also restore Done correctly after Stop/Render or reload.
+
+Validation on the recorded RTX 4090/Windows environment:
+
+- Six non-GPU native tests passed 61 checks; the shared C++ render-panel
+  test passed 34, including local-camera coalescing and source isolation.
+- Native GPU probes passed in Real-Time, Path Tracing, and Minimal: 540 orange
+  outline pixels in the selected-sphere display and zero in the clean save;
+  complete SDK/GPU drain and zero Vulkan validation errors in each mode.
+- The six-slot interop diagnostic passed 21 presentations, resize/hide/show,
+  discarded-frame reuse, and exact RGBA readback.
+- An app run passed 18 scenarios: initial/container/multiple selection,
+  deselection after Done, Update on Edits off, Stop/resume, hide/show, wheel,
+  orbit, pan, frame/reset, camera-source switching, per-stage selection isolation,
+  reload, and clean Save while stopped. Source flattening, selection, undo state,
+  and the followed viewport camera remained unchanged by navigation; no Python
+  RTX import or Vulkan validation error occurred. Normal app exit returned zero.
+- Additional snapshot-membership and plugin-duplication/undo checks build. The
+  final regression rerun was declined, so those added assertions have not been
+  executed. The final M4 acceptance checkbox remains open for that verification.
+
+For an explicit outline/clean-save GPU check, use the SDK probe above with an
+output filename and `USDCC_RTX_PROBE_SELECTION=/World/Sphere`. It also writes
+`<filename>.with-selection.png` for comparison. `USDCC_RTX_PROBE_MODE` can be
+`Path Tracing` or `Minimal` when the supplied scene's RenderProduct uses that mode.
+These variables affect the diagnostic only.
+
+The separately reported `omniverse_preview.usda` MDL scene remains an open
+first-frame investigation: the shipped Python RTX helper loads it, but a 512×512
+one-sample diagnostic produced no frame within ten minutes. Its stacks show MDL
+translation work. M4 does not claim to fix that scene's material/rendering issue.
 
 ### M5. Regression coverage and deploy validation
 

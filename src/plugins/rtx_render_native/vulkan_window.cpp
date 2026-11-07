@@ -242,7 +242,9 @@ struct Frame final : GpuFrame {
 struct Bridge final : GpuBridge {
     std::shared_ptr<Device> device;
     CUstream copyStream{};
-    std::array<std::shared_ptr<Frame>, 3> slots;
+    // Three display/clean pairs. Old displayed frames and presentation fences
+    // may retain a pair while the next selected image is being produced.
+    std::array<std::shared_ptr<Frame>, 6> slots;
     explicit Bridge(std::shared_ptr<Device> value) : device(std::move(value)) {
         CudaContext current(device->cuda, device->context);
         cudaCheck(device->cuda.cuStreamCreate(&copyStream, CU_STREAM_NON_BLOCKING), "create CUDA copy stream");
@@ -270,6 +272,8 @@ struct Bridge final : GpuBridge {
             throw std::runtime_error("RTX output must be RGBA8 CUDA data on the Vulkan-matched device");
         CudaContext current(device->cuda, device->context);
         const QSize size(int(tensor.shape[1]), int(tensor.shape[0]));
+        for (auto& slot : slots)
+            if (slot && slot.use_count() == 1) slot->cleanFrame.reset();
         for (auto& slot : slots) {
             if (slot && slot.use_count() != 1) continue;
             if (!slot || slot->size() != size) {
