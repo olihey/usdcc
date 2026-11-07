@@ -145,6 +145,14 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
 
+    // Integration tests need isolation before settings, plugins, Python and
+    // layouts load. APPDATA alone does not redirect Qt's Windows known folders.
+    const auto testProfile = qEnvironmentVariable("USDCC_TEST_PROFILE");
+    if (!testProfile.isEmpty() && !testProfile.contains('/') && !testProfile.contains('\\')) {
+        QStandardPaths::setTestModeEnabled(true);
+        app.setApplicationName("usdcc-test-" + testProfile);
+    }
+
     // usdcc [--script file.py]... [--no-startup-scripts] [--no-plugins]
     // [--plugin-path folder]... [stage] (docs/SCRIPTING.md §6, docs/PLUGINS.md §2). Qt's own options (-platform, ...) are already
     // gone from the arguments here.

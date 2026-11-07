@@ -31,6 +31,16 @@
 .PARAMETER Run
     Launch usdcc.exe after a successful build.
 
+.PARAMETER WithRtx
+    Enable native RTX. Supply matching OvrtxRoot/OvstageRoot package roots and a
+    CUDA toolkit; subsequent builds retain these CMake cache values.
+
+.PARAMETER WithoutRtx
+    Disable native RTX and GPU tests. Fresh builds default to RTX disabled.
+
+.PARAMETER RtxGpuTests
+    Enable labeled GPU tests; build rtx_gpu_test_bins before running CTest.
+
 .PARAMETER Scene
     Optional path to a USD stage to open on launch (forwarded to usdcc.exe as
     its command-line argument). Only meaningful together with -Run.
@@ -62,12 +72,21 @@ param(
 
     [string]$Scene,
 
+    [switch]$WithRtx,
+    [switch]$WithoutRtx,
+    [string]$OvrtxRoot,
+    [string]$OvstageRoot,
+    [switch]$RtxGpuTests,
+
     [switch]$Clean,
 
     [switch]$Run
 )
 
 $ErrorActionPreference = 'Stop'
+if ($WithoutRtx -and ($WithRtx -or $OvrtxRoot -or $OvstageRoot -or $RtxGpuTests)) {
+    throw '-WithoutRtx cannot be combined with native RTX options.'
+}
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $buildDir = Join-Path $repoRoot 'build'
@@ -111,6 +130,11 @@ if ($UsdInstall) {
 # Always, so a release build's version doesn't stay in the CMake cache for the
 # development builds after it.
 $configureArgs += "-DUSDCC_VERSION=$UsdccVersion"
+if ($WithRtx -or $OvrtxRoot -or $OvstageRoot -or $RtxGpuTests) { $configureArgs += '-DUSDCC_BUILD_RTX_PLUGIN=ON' }
+if ($WithoutRtx) { $configureArgs += @('-DUSDCC_BUILD_RTX_PLUGIN=OFF', '-DUSDCC_RTX_GPU_TESTS=OFF') }
+if ($OvrtxRoot) { $configureArgs += "-DUSDCC_RTX_OVRTX_ROOT=$OvrtxRoot" }
+if ($OvstageRoot) { $configureArgs += "-DUSDCC_RTX_OVSTAGE_ROOT=$OvstageRoot" }
+if ($RtxGpuTests) { $configureArgs += '-DUSDCC_RTX_GPU_TESTS=ON' }
 
 Write-Host "Configuring ($Generator, $Arch)..."
 Invoke-Checked -FilePath 'cmake' -ArgumentList $configureArgs
@@ -157,6 +181,10 @@ if ($Run) {
         $env:PXR_PLUGINPATH_NAME = "$effectiveUsdInstall\plugin\usd"
     }
 
+    $launchArgs = @()
+    if (Select-String -Path (Join-Path $buildDir 'CMakeCache.txt') -Pattern '^USDCC_BUILD_RTX_PLUGIN:BOOL=(ON|1|YES|TRUE)$' -Quiet) {
+        $launchArgs += @('--plugin-path', "`"$(Join-Path $buildDir 'plugins')`"")
+    }
     if ($Scene) {
         # Start-Process defaults -WorkingDirectory to the *executable's*
         # directory (deep under build/), not the caller's — a relative
@@ -165,8 +193,9 @@ if ($Run) {
         # like it launched normally with nothing loaded. Resolve against the
         # caller's cwd first so relative paths (the common case) work.
         $resolvedScene = Resolve-Path -LiteralPath $Scene
-        Start-Process -FilePath $exePath -ArgumentList @("`"$resolvedScene`"")
-    } else {
-        Start-Process -FilePath $exePath
+        $launchArgs += "`"$resolvedScene`""
     }
+    # This is the user's interactive app, so keep its window visible.
+    if ($launchArgs) { Start-Process -FilePath $exePath -ArgumentList $launchArgs }
+    else { Start-Process -FilePath $exePath }
 }

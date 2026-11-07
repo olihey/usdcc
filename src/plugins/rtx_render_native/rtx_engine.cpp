@@ -1,4 +1,6 @@
 #include "rtx_engine.h"
+#include "gpu_bridge.h"
+#include "runtime_pins.h"
 
 // delayimp.h requires the Win32 declarations; preserve this include order.
 // clang-format off
@@ -129,6 +131,10 @@ struct Runtime {
         }
         root = state.rtxRoot;
         stageRoot = state.stageRoot;
+        for (const auto& entry : {std::pair{root, kRtxPin}, std::pair{stageRoot, kStagePin}}) {
+            const auto problem = runtimeProblem(entry.first, entry.second);
+            if (!problem.isEmpty()) throw std::runtime_error(problem.toStdString());
+        }
         for (const auto& package : {root, stageRoot}) {
             QStringList paths{package + "/bin", package + "/bin/plugins"};
             QDir plugins(package + "/bin/plugins");

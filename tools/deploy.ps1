@@ -21,8 +21,7 @@
           python\       the Python OpenUSD was built with (Lib, DLLs, and python.exe,
                         which uv needs to install packages), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
-          plugins\      plugins shipped with the app, always looked in: V-Ray
-                        Render and RTX Render
+          plugins\      V-Ray Render and, when enabled, native RTX Render
           examples\plugins\   the example plugins, loaded with --plugin-path or
                         added in Settings > Plugins
           sdk\          headers, import libraries and CMake files for C++ plugins
@@ -42,6 +41,13 @@
 
 .PARAMETER Configuration
     Build configuration to deploy. Default: RelWithDebInfo.
+
+.PARAMETER OmitRtx
+    Omit RTX even when enabled in the CMake cache; ignore stale native build files.
+
+.PARAMETER BundleRtxRuntime
+    Explicitly copy pinned native SDK bin trees, metadata and licenses into RTX.
+    Otherwise configure external runtime roots on the target.
 
 .PARAMETER UsdInstall
     Optional path to the OpenUSD install/build directory to take OpenUSD's
@@ -67,7 +73,11 @@ param(
     [ValidateSet('Debug', 'RelWithDebInfo', 'Release', 'MinSizeRel')]
     [string]$Configuration = 'RelWithDebInfo',
 
-    [string]$UsdInstall
+    [string]$UsdInstall,
+
+    # Native RTX is optional. Runtime bundling is explicit; otherwise use external roots.
+    [switch]$OmitRtx,
+    [switch]$BundleRtxRuntime
 )
 
 $ErrorActionPreference = 'Stop'
@@ -161,11 +171,44 @@ if (-not (Test-Path (Join-Path $packageDir '__init__.py'))) {
 
 # --- the destination ----------------------------------------------------
 
+$includeRtx = -not $OmitRtx -and (Get-CacheValue 'USDCC_BUILD_RTX_PLUGIN') -match '^(ON|1|YES|TRUE)$'
+$nativeRtx = Join-Path $buildDir 'plugins/rtx_render_native'
+if ($BundleRtxRuntime -and -not $includeRtx) { throw '-BundleRtxRuntime requires an enabled native RTX build without -OmitRtx.' }
+if ($includeRtx -and -not (Test-Path (Join-Path $nativeRtx 'bin/windows-x64/rtx_render_native.dll'))) {
+    throw 'Native RTX is enabled but not built. Build rtx_render_native first, or pass -OmitRtx.'
+}
+$runtimeRoots = @{}
+if ($BundleRtxRuntime) {
+    $pins = Get-Content -Raw (Join-Path $repoRoot 'deps/rtx-native.json') | ConvertFrom-Json
+    foreach ($name in 'ovrtx', 'ovstage') {
+        $root = Get-CacheValue "USDCC_RTX_$($name.ToUpper())_ROOT"
+        $info = Get-Content -Raw (Join-Path $root "$name-build-info.json") | ConvertFrom-Json
+        $hash = (Get-FileHash -LiteralPath (Join-Path $root "bin/$name-dynamic.dll") -Algorithm SHA256).Hash
+        if ($info.build_string -ne $pins.$name.build -or $hash -ne $pins.$name.loader_sha256) {
+            throw "The $name runtime does not match deps/rtx-native.json."
+        }
+        foreach ($license in 'LICENSE', 'THIRD-PARTY-NOTICES.txt') {
+            if (-not (Test-Path (Join-Path $root $license))) { throw "Missing $name/$license" }
+        }
+        $runtimeRoots[$name] = $root
+    }
+}
+
+# Before replacing a deploy, reject roots and folders containing source/dependencies.
+$deployDir = $deployDir.TrimEnd('\', '/')
+foreach ($protected in @([string]$repoRoot, [string]$buildDir, [string]$usdInstall, [string]$pythonHome)) {
+    $absolute = [IO.Path]::GetFullPath($protected).TrimEnd('\', '/')
+    if ($absolute -eq $deployDir -or $absolute.StartsWith($deployDir + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe deploy destination '$deployDir' contains '$absolute'."
+    }
+}
+if ($deployDir -eq [IO.Path]::GetPathRoot($deployDir).TrimEnd('\', '/')) { throw 'Cannot deploy to a drive root.' }
+
 if (Test-Path $deployDir) {
     $previous = Join-Path $deployDir 'bin/usdcc.exe'
     if (Test-Path $previous) {
         Write-Host "Replacing the earlier deploy in $deployDir"
-        Remove-Item -Recurse -Force -Confirm:$false $deployDir
+        Remove-Item -LiteralPath $deployDir -Recurse -Force -Confirm:$false
     } elseif (Get-ChildItem -Force $deployDir | Select-Object -First 1) {
         throw "$deployDir exists and isn't an earlier deploy (no bin\usdcc.exe); pick an empty or new folder."
     }
@@ -272,16 +315,26 @@ if ($hasUv) {
 # plugins\ is where the app always looks for the plugins it ships (docs/PLUGINS.md).
 # The examples sit apart, so they don't load unless asked: usdcc.cmd --plugin-path
 # examples\plugins, or Settings > Plugins.
-$shippedPlugins = @('vray_render', 'rtx_render')
+$shippedPlugins = @('vray_render')
 Write-Host '  Shipped plugins'
 foreach ($plugin in $shippedPlugins) {
     Copy-Tree -From (Join-Path $repoRoot "src/plugins/$plugin") -To (Join-Path $deployDir "plugins/$plugin") -ExcludeDirs @('__pycache__')
-    # An older deploy had them among the examples.
-    Remove-Item -Recurse -Force (Join-Path $deployDir "examples/plugins/$plugin") -ErrorAction SilentlyContinue
+}
+if ($includeRtx) {
+    $target = Join-Path $deployDir 'plugins/rtx_render'
+    Copy-Tree -From $nativeRtx -To $target -ExcludeFiles ($buildOnlyFiles + @('runtime.json')) -ExcludeDirs @('runtime')
+    foreach ($name in $runtimeRoots.Keys) {
+        $root = $runtimeRoots[$name]
+        $runtimeTarget = Join-Path $target "runtime/$name"
+        Copy-Tree -From (Join-Path $root 'bin') -To (Join-Path $runtimeTarget 'bin') -ExcludeFiles @('*.log', 'crash_*.txt', '*.dmp', 'ucode.elf')
+        foreach ($file in @("$name-build-info.json", 'LICENSE', 'THIRD-PARTY-NOTICES.txt')) {
+            Copy-Item -LiteralPath (Join-Path $root $file) -Destination $runtimeTarget
+        }
+    }
 }
 Write-Host '  Example plugins'
-Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs (@('__pycache__', 'cpp_example') + $shippedPlugins)
-Copy-Tree -From (Join-Path $buildDir 'plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeFiles $buildOnlyFiles
+Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs (@('__pycache__', 'cpp_example', 'rtx_render', 'rtx_render_native') + $shippedPlugins)
+Copy-Tree -From (Join-Path $buildDir 'plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeFiles $buildOnlyFiles -ExcludeDirs @('rtx_render', 'rtx_render_native')
 
 # --- SDK for C++ plugins (docs/PLUGIN_SDK.md) --------------------------------
 
@@ -401,11 +454,12 @@ $required = @(
     'bin/usdcc.exe', 'bin/usd_plug.dll', 'bin/QtNodes.dll', 'bin/platforms/qwindows.dll', 'bin/usd/plugInfo.json',
     'plugin/usd/hdStorm.dll', 'python/python.exe', 'python/Lib/encodings/__init__.py', 'python/Lib/site-packages/usdcc/__init__.py',
     'python/Lib/site-packages/pxr/__init__.py', 'python/Lib/site-packages/usdcc/_vendor/packaging/version.py',
-    'plugins/vray_render/usdcc-plugin.json', 'plugins/rtx_render/usdcc-plugin.json',
+    'plugins/vray_render/usdcc-plugin.json',
     'examples/plugins/measure_example/usdcc-plugin.json', 'examples/plugins/cpp_example/usdcc-plugin.json',
     'sdk/UsdccPluginConfig.cmake', 'sdk/lib/usdcc_ui.lib', 'sdk/include/usdcc/plugin/plugin.h',
     'LICENSE.txt', 'licenses/OpenUSD/LICENSE', 'licenses/vcpkg/qtbase.txt', 'licenses/SOURCES.txt'
 )
+if ($includeRtx) { $required += @('plugins/rtx_render/usdcc-plugin.json', 'plugins/rtx_render/bin/windows-x64/rtx_render_native.dll') }
 $missing = @($required | Where-Object { -not (Test-Path (Join-Path $deployDir $_)) })
 if ($missing) {
     throw "The deploy is incomplete; missing: $($missing -join ', ')"

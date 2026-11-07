@@ -98,10 +98,11 @@ which the app puts on `PATH` when it runs uv. `tools/deploy.ps1` checks that the
 each line with `packaging` first, so a manifest can't slip in `--index-url` through a requirement. Also taken off the list is what the app provides, what a plugin's own `deps/` meets, and what
 ready-made folders meet.
 
-**Extra indexes, named in the open: `python.indexes`.** Some packages have no wheel on PyPI. ovrtx (RTX_RENDER.md) is NVIDIA's "wheel stub" there: a source package whose build fetches the real wheel from NVIDIA's own index. A manifest may name such indexes:
+**Extra indexes, named in the open: `python.indexes`.** A plugin may need wheels
+from a studio's own index rather than PyPI. A manifest may name that index:
 
 ```json
-"python": { "module": "usdcc_rtx_render", "requires": ["ovrtx>=0.6,<0.7"], "indexes": ["https://pypi.nvidia.com"] }
+"python": { "module": "studio_render", "requires": ["studio-sdk>=1,<2"], "indexes": ["https://packages.example.com/simple"] }
 ```
 
 - **Only plain https URLs,** with no user name, password, query or fragment, and only with `requires`. Anything else refuses the plugin (`packageIndexProblem()` in plugin_manager.cpp).
@@ -172,7 +173,10 @@ Fixed along the way: a marker on a manifest's requirement wasn't honoured, so `f
 
 **Tested with the real uv and wheels the tests make:** conflicts, indirect blocked packages, kept versions, updates, new folders, `.in-use` protection, no network, cancelling between resolving and installing, two installs at once, no uv, and `--offline` with `--find-links` together. A plugin's own index (`package_extra_index`), as a local simple index: its package comes from there for the plugin that named it, and the plugin that didn't can't get it. Manifest indexes that are refused: http, file, with a password, and without `requires` (`plugin_package_indexes`).
 
-**Tested with the real NVIDIA index:** `--install-plugin-packages` for RTX Render, into a scratch packages folder: ovrtx and ovstage as wheels from `pypi.nvidia.com`, numpy from PyPI, and the plugin rendering from them afterwards.
+The retired Python RTX plugin previously exercised the NVIDIA index in a local
+scratch-folder test. Native RTX now loads SDK DLLs directly and declares no Python
+requirements or indexes; its old user copies are excluded from package planning.
+Generic extra-index support and its tests remain for other plugins.
 
 **Not tested:**
 

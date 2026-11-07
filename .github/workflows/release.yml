@@ -106,7 +106,7 @@ jobs:
             ${{ steps.vcpkg.outputs.any }}
 
       - name: Build
-        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL -UsdccVersion ${{ steps.tag.outputs.version }}
+        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL -WithoutRtx -UsdccVersion ${{ steps.tag.outputs.version }}
 
       - name: Test
         run: |

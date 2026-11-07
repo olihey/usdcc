@@ -49,7 +49,7 @@ def deactivate(plugin):  # optional: at quit and before a reload, to stop what y
 
 [src/plugins/measure_example](../src/plugins/measure_example) is a working example of all of it. Try it with `usdcc --plugin-path src/plugins`. The C++ example builds to
 `build/plugins`, so `usdcc --plugin-path build/plugins` loads that. [src/plugins/vray_render](../src/plugins/vray_render) is a bigger one: a view panel that renders
-with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)), and [src/plugins/rtx_render](../src/plugins/rtx_render) does the same with NVIDIA's ovrtx ([RTX_RENDER.md](RTX_RENDER.md)).
+with V-Ray in a helper process, following the viewport camera and edits ([VRAY_RENDER.md](VRAY_RENDER.md)). The optional [native RTX plugin](../src/plugins/rtx_render_native) uses NVIDIA's C API and GPU presentation ([RTX_RENDER.md](RTX_RENDER.md)); it requests no Python packages. Old Python copies with its reserved ID are ignored so they cannot shadow the native plugin.
 
 **Found in, the first with an id winning (logged):**
 1. `--plugin-path` folders;

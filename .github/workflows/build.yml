@@ -97,7 +97,7 @@ jobs:
 
       - name: Build
         id: build
-        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL
+        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL -WithoutRtx
 
       # A crash on a hosted runner can sit behind an error dialog nobody closes,
       # so every test executable gets a timeout. Verbose, so the log shows each

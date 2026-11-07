@@ -1,5 +1,11 @@
 # Releases
 
+Hosted release builds explicitly omit the optional native RTX target. To make an
+RTX-enabled package locally, build with the pinned native SDKs and use the
+deployment/clean-package checks in [RTX_RENDER.md](RTX_RENDER.md). Runtime DLLs
+are external by default; `-BundleRtxRuntime` is explicit and includes the SDK's
+licenses. The retired Python RTX plugin is never copied into a release.
+
 How a usdcc release is made: you create a release on GitHub, and CI builds the Windows zip
 and attaches it. The app shows its version in a new **Help > About usdcc** dialog. Windows
 only for now, like the rest of CI ([CI.md](CI.md)). This is part of M11 (packaging), and

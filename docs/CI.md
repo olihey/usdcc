@@ -243,8 +243,15 @@ published like OpenUSD.
    [`deps/pyside-6.11.1-qt6.11.1-c0e9afd2`](https://github.com/olihey/usdcc/releases/tag/deps/pyside-6.11.1-qt6.11.1-c0e9afd2),
    75 MB, in 7 minutes: Qt came from the cache and PySide's build of Core, Gui and Widgets
    is small. With it, `build.yml` builds `usdcc._ui` and the Python tests went from 56 to
-   71 test cases, all green, including the RTX and V-Ray render plugins against their
-   helpers' fake renderers.*
+   71 test cases, all green, including the then-current Python render plugins.*
+
+Native RTX now has SDK-independent stage/navigation/controller tests using a fake
+engine and presentation, included in normal CI with `-WithoutRtx`. V-Ray keeps
+its helper tests. `rtx-gpu.yml` is a manually dispatched workflow on a prepared
+self-hosted Windows RTX runner: it builds pinned native SDKs, runs the labeled
+GPU tests in all three modes and CUDA/Vulkan interop, and validates a packaged
+application with isolated PATH/profile. See [RTX_RENDER.md](RTX_RENDER.md).
+GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 6. Open questions
 

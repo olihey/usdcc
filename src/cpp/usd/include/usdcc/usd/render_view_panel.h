@@ -91,7 +91,7 @@ private:
 };
 
 // A view panel that shows its stage rendered by a renderer that isn't Hydra's,
-// such as V-Ray or RTX in a helper process (docs/RENDER_VIEW_PANEL.md). This
+// such as native RTX or V-Ray in a helper process (docs/RENDER_VIEW_PANEL.md). This
 // class is the renderer-independent part: the toolbar (Render, Refresh, Camera,
 // Resolution, Update on Edits, Save Image, Settings), the image, the status line,
 // and following the camera, the panel's size and the stage's edits. A subclass

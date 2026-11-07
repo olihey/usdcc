@@ -96,7 +96,6 @@ usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
 #                    executable because Python can only be started once per
 #                    process; python_test_main.cpp starts it for every test.
-add_test(NAME usdcc_rtx_helper_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/rtx_helper_test.py")
 
 add_executable(usdcc_python_tests
     test_harness.h
@@ -132,10 +131,14 @@ target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
 add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
+target_link_libraries(usdcc_python_tests PRIVATE Qt6::Test)
 target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
     rtx_native_navigation_test.cpp
+    rtx_native_panel_test.cpp
     ../src/plugins/rtx_render_native/stage_bridge.cpp
-    ../src/plugins/rtx_render_native/navigation.cpp)
+    ../src/plugins/rtx_render_native/navigation.cpp
+    ../src/plugins/rtx_render_native/runtime_identity.cpp
+    ../src/plugins/rtx_render_native/rtx_panel.cpp)
 target_include_directories(usdcc_python_tests PRIVATE ../src/plugins/rtx_render_native)
 if(TARGET rtx_render_native)
     target_sources(usdcc_python_tests PRIVATE rtx_native_plugin_test.cpp)
@@ -146,7 +149,7 @@ endif()
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp
-                                              render_view_panel_python_test.cpp rtx_render_plugin_test.cpp
+                                              render_view_panel_python_test.cpp
                                               vray_render_plugin_test.cpp)
     target_compile_definitions(usdcc_python_tests PRIVATE USDCC_EXAMPLE_PLUGINS="${CMAKE_SOURCE_DIR}/src/plugins")
     add_dependencies(usdcc_python_tests usdcc_ui_python)

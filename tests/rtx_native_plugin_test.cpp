@@ -51,7 +51,14 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
     qunsetenv("USDCC_RTX_OVSTAGE_ROOT");
 
     usdcc::scripting::PluginManager::Options options;
-    options.folders = {copy.parent_path()};
+    const auto legacyRoot = std::filesystem::u8path(folder.path().toStdString()) / "old-user-copy";
+    std::filesystem::create_directories(legacyRoot / "rtx");
+    QFile legacy(QString::fromStdU16String((legacyRoot / "rtx/usdcc-plugin.json").u16string()));
+    legacy.open(QIODevice::WriteOnly);
+    legacy.write(R"({"id":"org.usdcc.rtx-render","name":"Old RTX","version":"0.2.0","api":1,
+        "python":{"module":"usdcc_rtx_render","requires":["ovrtx>=0.6","ovstage","numpy"]}})");
+    legacy.close();
+    options.folders = {legacyRoot, copy.parent_path()};
     usdcc::scripting::PluginManager manager(options);
     manager.scan();
     usdcc::ui::MainWindow window;
@@ -63,6 +70,9 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
     CHECK(usdcc::core::Settings::instance().get<int>("RtxRender/frameBudget") == 91,
           "migration preserves an existing native frame budget");
     const auto* plugin = manager.find("org.usdcc.rtx-render");
+    CHECK(plugin && plugin->manifest.pythonModule.empty() && plugin->manifest.folder == copy,
+          "a shadowing Python RTX user copy is ignored in favor of the native artifact");
+    CHECK(manager.packageRequests(app.python, nullptr).empty(), "native RTX asks for no Python package installation");
     CHECK(plugin && plugin->state == usdcc::scripting::PluginState::Active,
           "a native plugin activates without runtime DLLs: %s", plugin ? plugin->reason.c_str() : "missing");
     const auto* entry = registry.find(QStringLiteral("org.usdcc.rtx-render.view"));
@@ -112,6 +122,19 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
                 CHECK(render->isEnabled(), "another stage enables rendering again");
             }
         }
+        // This is the saved entry format used by the retired Python panel.
+        const QVariantMap saved{{"type", "org.usdcc.rtx-render.view"}, {"name", "legacy-rtx-dock"},
+                                {"title", "RTX Render - previous session"}, {"stage", "legacy-stage.usda"}};
+        usdcc::ui::appSettings().setValue("ViewPanels/opened", QVariantList{saved});
+        registry.restorePanels(window.dockManager(), &window, [&](const QString& id) {
+            return id == "legacy-stage.usda" ? stage : usdcc::usd::StageRefPtr{};
+        });
+        auto* restored = window.findChild<usdcc::usd::RenderViewPanel*>("legacy-rtx-dock");
+        CHECK(restored && restored->currentStage() == stage &&
+              restored->property("nativeRtxImageSize").isValid(), "an old layout entry restores a native RTX panel and its stage");
+        CHECK(restored && !restored->findChild<QToolButton*>("renderButton")->isChecked(),
+              "restoring a legacy layout never starts SDK/GPU work");
+        delete restored;
         app.stages.closeStage(stage);
     }
     CHECK(app.python.evaluate("'usdcc_rtx_render' in __import__('sys').modules") == "False",

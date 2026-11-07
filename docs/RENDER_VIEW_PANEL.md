@@ -1,7 +1,7 @@
 # Render View Panel
 
-A view panel that shows its stage rendered by a renderer that isn't Hydra's: V-Ray or RTX
-in a helper process, say. The app makes the panel, and a plugin supplies the renderer. The
+A view panel that shows its stage rendered by another renderer: native C++ RTX or
+V-Ray in a helper process. The app makes the panel, and a plugin supplies the renderer. The
 panel is the renderer-independent part:
 - the toolbar and the image;
 - following the viewport's camera, the panel's size and the stage's edits.
@@ -15,7 +15,11 @@ The renderer does the rendering, behind a handful of hooks.
 - **Used by:** the V-Ray Render and RTX Render plugins ([VRAY_RENDER.md](VRAY_RENDER.md), [RTX_RENDER.md](RTX_RENDER.md)).
 
 Plugins don't share code with each other. Anything two renderers both need belongs here.
-Each renderer keeps its own helper process, protocol, stage export and settings.
+Each renderer owns its engine lifetime, stage transfer, presentation and settings.
+RTX supplies a native GPU surface through `setPresentationWidget()` and uses
+`showPresentedFrame()` for shared image controls. V-Ray retains the CPU image and
+Python hooks. `setLocalCamera()` selects a panel-local Free Camera and coalesces
+updates without editing scene cameras; duplicated panels can copy it independently.
 
 ## 1. The panel
 

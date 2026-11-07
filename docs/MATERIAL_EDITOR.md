@@ -118,8 +118,9 @@ Ndr was removed in 25.08, so everything below is Sdr.
   - `GetMaterialRenderContexts()` lists its Material terminals.
   - Filtering Sdr nodes by those systems answers "which nodes does this delegate offer" without a
     hand-written list.
-  - V-Ray and RTX don't run as Hydra delegates in-process, so their plugin manifest declares the same
-    two lists.
+  - V-Ray and native RTX use separate render panels rather than Hydra delegates.
+    Planned shading profiles supply these lists independently of their engine
+    process model; current native RTX does not yet declare a material catalog.
 - **Node fields** (26.05 renamed family → *function* and sourceType → *shadingSystem*):
   - `GetShadingSystem()`
   - `GetContext()` (surface, displacement, volume, pattern, light, ...)
@@ -257,13 +258,16 @@ anyway.
 (§3.4), a shader with `info:id` finds it, and one with the `.mdl` asset still doesn't. Authoring an `info:id` to
 make that work isn't an option, as that's what a renderer reads instead. So the catalog needs a lookup of its own (below).
 
-**The definition files might not be on the machine.** `OmniPBR.mdl` and the other 88 files come with the ovrtx wheel
-(`ovrtx/bin/library/mdl`), 1.4 GB, which only the RTX plugin installs. usdcc shouldn't copy them, as they aren't ours to
-ship (their licence not yet read), so a stage can name a module nobody here has.
+**The definition files might not be on the machine.** `OmniPBR.mdl` and the other
+88 files were inspected in an ovrtx package (`bin/library/mdl`, about 1.4 GB).
+Native RTX does not install Python packages. Definitions may exist in an external
+native runtime or an explicitly bundled runtime; redistribution must follow the
+supplied SDK terms. A stage can name a module absent from the machine.
 
 **Storm can't draw it.** Storm's material contexts are the universal one and `mtlx` (§3.1), so an MDL-only material
 falls back to Storm's default look in the viewport. *Not tested.* Only the RTX panel shows it properly. And each material
-edit reloads the whole stage in that panel (RTX_RENDER.md §3), with heavy scenes taking minutes (§7 there).
+edit reloads the native RTX snapshot, with heavy scenes potentially taking minutes
+([RTX_RENDER.md](RTX_RENDER.md#architecture-and-limits)).
 
 #### Where the definitions come from: our own parser
 
@@ -317,7 +321,9 @@ Enums and structs can be declared in another module (`::OmniSurface::OmniImage::
 #### Into the catalog
 
 1. **Searching:** a new setting, `Materials/mdlSearchPaths` (the `FolderList` type, on a Materials page), plus `MDL_USER_PATH` and
-   `MDL_SYSTEM_PATH`, plus ovrtx's `bin/library/mdl` if the RTX plugin has installed it. The folders' `.mdl` files are listed at startup without being read,
+   `MDL_SYSTEM_PATH`, plus a configured native runtime's `bin/library/mdl` (external
+   root or plugin runtime folder; no Python import). This is planned MDL catalog
+   discovery, not implemented in the current phase. The folders' `.mdl` files are listed at startup without being read,
    and each is parsed the first time it's needed, so startup stays quick.
 2. **Registering:** each parsed definition becomes a generated `.usda` in the user data folder, keyed by the file's path and time, and is registered as in §3.4 with
    identifier `mdl:<module>::<name>` and shading system `mdl`. So palette, tab search and Attribute Editor treat it as any other Sdr node.
@@ -475,12 +481,12 @@ dragging from the palette (not run), a real person's hand on any of it.
 3. **Arnold:** do we ship arnold-usd built against our USD, or find a user's install? Its Sdr plugin
    needs the Arnold core at discovery time, so startup gets slower when it is on the path.
 4. **MDL types:** the types marked "Expected" in §3.5, above all structs and enums, need a real MDL function network. BuiltInMaterials has only materials with simple inputs, and I couldn't
-   find `omniverse_preview.usda` (RTX_RENDER.md §7), with its 1,550 shaders, on this machine. That's the first thing to do in phase 5.
+   find `omniverse_preview.usda`, with its 1,550 shaders, in the original research pass. It has since reproduced a ten-minute first-frame failure; see [RTX_RENDER.md](RTX_RENDER.md#architecture-and-limits). That's the first thing to investigate in phase 5.
 5. **Unauthored defaults:** a port shows the Sdr default. Should "Reset" remove the authored value
    (the current Attribute Editor behaviour), or author the Sdr default explicitly for renderers that
    don't read Sdr?
-6. **ovrtx and our search paths:** a module from `Materials/mdlSearchPaths` has to reach ovrtx in its helper process too. Not checked how it's told. It may need `MDL_USER_PATH` set for the helper.
-7. **The Omniverse MDL files' licence:** I haven't read it. The plan is only to read them where ovrtx installed them, never to copy them. Without ovrtx, there's no `OmniPBR` to offer, so "New Material" for MDL needs a module from a search path or says why it can't.
+6. **ovrtx and our search paths:** the planned `Materials/mdlSearchPaths` must reach the native renderer. Propagation is not implemented or validated; there is no Python RTX helper.
+7. **The Omniverse MDL files' licence:** the native runtime includes NVIDIA's SDK terms; redistribution review remains separate from bundling support. Catalog discovery should read configured runtime/search roots. Without those files, there's no `OmniPBR` to offer, so "New Material" for MDL needs a module from a search path or says why it can't.
 8. **Positions in other DCCs' files:** USD's docs say a node is about 1.0×1.0, and we store pixels / 200. Files
    that store pixels anyway would open with their nodes spread 200 times too far. Check a real export, and
    consider guessing the scale per file from how far apart its nodes are.

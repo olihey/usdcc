@@ -1,0 +1,6 @@
+#pragma once
+#include "runtime_identity.h"
+namespace usdcc::rtx {
+inline constexpr RuntimePin kRtxPin{"ovrtx", "@_rtx_pin_build@", "@_rtx_pin_sha@"};
+inline constexpr RuntimePin kStagePin{"ovstage", "@_stage_pin_build@", "@_stage_pin_sha@"};
+}

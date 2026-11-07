@@ -20,7 +20,8 @@ QStringList selectionGeometry(const usdcc::usd::StageRefPtr& source,
                               const std::vector<PXR_NS::SdfPath>& selected) {
     std::set<QString> paths;
     if (source) for (const auto& path : selected) {
-        auto prim = source->usdStage()->GetPrimAtPath(path.GetPrimPath());
+        auto prim = path == PXR_NS::SdfPath::AbsoluteRootPath()
+            ? source->usdStage()->GetPseudoRoot() : source->usdStage()->GetPrimAtPath(path.GetPrimPath());
         if (!prim) continue;
         for (auto descendant : PXR_NS::UsdPrimRange(prim, PXR_NS::UsdTraverseInstanceProxies()))
             if (descendant.IsA<PXR_NS::UsdGeomGprim>() || descendant.IsA<PXR_NS::UsdGeomPointInstancer>())

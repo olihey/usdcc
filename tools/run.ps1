@@ -28,6 +28,12 @@ param(
 
     [string]$Scene,
 
+    [switch]$WithRtx,
+    [switch]$WithoutRtx,
+    [string]$OvrtxRoot,
+    [string]$OvstageRoot,
+    [switch]$RtxGpuTests,
+
     [switch]$Clean
 )
 
@@ -44,5 +50,8 @@ $buildParams = @{
 if ($UsdInstall) { $buildParams.UsdInstall = $UsdInstall }
 if ($Scene) { $buildParams.Scene = $Scene }
 if ($Clean) { $buildParams.Clean = $true }
+foreach ($name in 'WithRtx', 'WithoutRtx', 'OvrtxRoot', 'OvstageRoot', 'RtxGpuTests') {
+    if ($PSBoundParameters.ContainsKey($name)) { $buildParams[$name] = $PSBoundParameters[$name] }
+}
 
 & $buildScript @buildParams

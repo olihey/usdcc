@@ -5,6 +5,10 @@ most plugins are better off in Python: it has no build, and doesn't have to matc
 from a C++ class such as `ViewPanel`.
 
 [src/plugins/cpp_example](../src/plugins/cpp_example) is a working example.
+The optional [native RTX renderer](../src/plugins/rtx_render_native) is a larger
+example using `RenderViewPanel`, an injected engine/presentation interface, and a
+worker with deferred SDK loading. See [RTX_RENDER.md](RTX_RENDER.md) for its SDK,
+runtime and deployment requirements; it is not required to build other plugins.
 
 ## 1. The code
 

@@ -355,6 +355,13 @@ void PluginManager::readManifests() {
             PluginInfo plugin;
             plugin.manifest.folder = folder;
             const std::string problem = parseManifest(folder / kManifestName, plugin.manifest);
+            // Skip retired RTX copies even when their package declarations are
+            // invalid, before an unusable ID can affect the native replacement.
+            if (plugin.manifest.id == "org.usdcc.rtx-render" && !plugin.manifest.pythonModule.empty()) {
+                USDCC_LOG_WARNING("usdcc.plugins",
+                    "Ignoring retired Python RTX plugin in {}. Remove that copy and use native RTX Render.", toUtf8(folder));
+                continue;
+            }
             if (!problem.empty()) {
                 plugin.state = PluginState::Refused;
                 plugin.reason = problem;

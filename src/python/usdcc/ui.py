@@ -90,7 +90,7 @@ class RenderCamera:
 
 class RenderViewPanel:
     """Base class for a view panel that renders its stage with a renderer of a
-    plugin's own, such as V-Ray or RTX in a helper process (docs/RENDER_VIEW_PANEL.md).
+    plugin's own, such as V-Ray in a helper process (docs/RENDER_VIEW_PANEL.md).
 
     The app makes the panel: the toolbar (Render, Refresh, Camera, Resolution,
     Update on Edits, Save Image, Settings), the image, the status line, and

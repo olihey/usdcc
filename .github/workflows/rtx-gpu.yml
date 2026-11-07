@@ -1,0 +1,45 @@
+name: Native RTX GPU validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rtx:
+    # Explicit opt-in: runner supplies pinned SDKs, CUDA, USD, PySide and an RTX GPU.
+    runs-on: [self-hosted, Windows, X64, rtx]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build native RTX and tests
+        run: |
+          if (-not (Test-Path "$env:USDCC_PYSIDE_DIR/PySide6/__init__.py")) { throw 'Set USDCC_PYSIDE_DIR to matching PySide6/shiboken6 packages on the runner' }
+          external/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DUSD_INSTALL=$env:USD_INSTALL" "-DUSDCC_PYSIDE_DIR=$env:USDCC_PYSIDE_DIR" -DUSDCC_BUILD_RTX_PLUGIN=ON -DUSDCC_RTX_GPU_TESTS=ON "-DUSDCC_RTX_OVRTX_ROOT=$env:USDCC_RTX_OVRTX_ROOT" "-DUSDCC_RTX_OVSTAGE_ROOT=$env:USDCC_RTX_OVSTAGE_ROOT"
+          if ($LASTEXITCODE) { throw 'native RTX configure failed' }
+          cmake --build build --config RelWithDebInfo --parallel
+          if ($LASTEXITCODE) { throw 'app build failed' }
+          cmake --build build --config RelWithDebInfo --target rtx_gpu_test_bins
+          if ($LASTEXITCODE) { throw 'GPU test build failed' }
+      - name: Validate all renderer modes and GPU interop
+        run: |
+          ctest --test-dir build -C RelWithDebInfo -L gpu --output-on-failure
+          if ($LASTEXITCODE) { throw 'GPU tests failed' }
+      - name: Validate clean packaged application
+        run: |
+          tools/deploy.ps1 -Destination build/rtx-package -BundleRtxRuntime
+          tools/ci/rtx-smoke-test.ps1 -Deploy build/rtx-package
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-rtx-validation
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/rtx-packaged-smoke/result.json
+            build/rtx-packaged-smoke/*.log
+            build/rtx-packaged-smoke/clean.png

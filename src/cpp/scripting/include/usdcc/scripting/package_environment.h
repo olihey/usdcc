@@ -25,7 +25,7 @@ struct PackageRequest {
     std::string problem;                    // why it can't even be tried; else empty
     std::vector<std::string> declared;      // as its manifest has them
     // Package indexes its manifest names besides the usual one (python.indexes), such
-    // as NVIDIA's for ovrtx: https URLs, checked when the manifest is read.
+    // as a studio's private package index: https URLs, checked with the manifest.
     std::vector<std::string> indexes;
 };
 

@@ -82,7 +82,7 @@ std::string evaluated(const std::string& expression) {
 // loaded already: a plugin isn't loaded over a module of the same name.
 void forgetExampleModules() {
     run("import sys\n"
-        "for name in [n for n in sys.modules if n.split('.')[0] in ('usdcc_vray_render', 'usdcc_rtx_render', 'usdcc_measure_example')]:\n"
+        "for name in [n for n in sys.modules if n.split('.')[0] in ('usdcc_vray_render', 'usdcc_measure_example')]:\n"
         "    del sys.modules[name]\n");
 }
 

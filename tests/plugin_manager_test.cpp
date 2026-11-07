@@ -151,6 +151,21 @@ USDCC_TEST(plugin_manifests) {
     CHECK(skipped.plugins().empty(), "--no-plugins finds nothing");
 }
 
+USDCC_TEST(plugin_retired_python_rtx_without_native) {
+    Plugins plugins("retired_rtx");
+    plugins.plugin("org.usdcc.rtx-render", "usdcc_test_retired_rtx",
+                   "raise RuntimeError('retired RTX must never be imported')\n",
+                   {}, ", \"requires\": [\"ovrtx==0.6.0\"]");
+    plugins.write("bad-copy/usdcc-plugin.json", R"({"id":"org.usdcc.rtx-render","name":"Bad old copy",
+        "version":"0.2.0","api":1,"python":{"module":"usdcc_test_retired_rtx","requires":["https://invalid.example/wheel"]}})");
+    PluginManager manager(plugins.options());
+    manager.scan();
+    manager.activate(python());
+    CHECK(!manager.find("org.usdcc.rtx-render"), "an RTX-free build ignores an old Python RTX user copy");
+    CHECK(manager.packageRequests(python(), nullptr).empty(), "a retired copy cannot request Python RTX packages");
+    CHECK(evaluated("'usdcc_test_retired_rtx' in __import__('sys').modules") == "False", "the retired module is not imported");
+}
+
 USDCC_TEST(plugin_order_and_failures) {
     Plugins plugins("order");
     python().runString("import builtins\nbuiltins.usdcc_test_order = []\n");

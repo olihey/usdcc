@@ -78,6 +78,10 @@ but a big one takes longer, and V-Ray starts again from a noisy image.
 
 ## 4. The helper process
 
+This helper remains specific to V-Ray. RTX now runs through a separate native
+C++ plugin with GPU presentation; removing Python RTX does not change V-Ray's
+protocol, package support or CPU image hooks.
+
 [helper/vray_helper.py](../src/plugins/vray_render/python/usdcc_vray_render/helper/vray_helper.py)
 runs in a `python.exe` of its own: usdcc's (`sys.base_prefix`), or *Settings > V-Ray >
 Python*.
