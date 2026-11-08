@@ -26,6 +26,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPointer>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QSurfaceFormat>
@@ -45,6 +46,8 @@
 #include "usdcc/scripting/python_settings.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/scripting/script_editor_side_panel.h"
+#include "usdcc/scripting/session_controller.h"
+#include "usdcc/scripting/sessions_dialog.h"
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/close_stage_dialog.h"
@@ -153,7 +156,7 @@ int main(int argc, char** argv) {
         app.setApplicationName("usdcc-test-" + testProfile);
     }
 
-    // usdcc [--script file.py]... [--no-startup-scripts] [--no-plugins]
+    // usdcc [--script file.py]... [--no-startup-scripts] [--no-plugins] [--open-session name]
     // [--plugin-path folder]... [stage] (docs/SCRIPTING.md §6, docs/PLUGINS.md §2). Qt's own options (-platform, ...) are already
     // gone from the arguments here.
     QCommandLineParser commandLine;
@@ -173,6 +176,11 @@ int main(int argc, char** argv) {
     commandLine.addOption(noStartupScriptsOption);
     commandLine.addOption(noPluginsOption);
     commandLine.addOption(pluginPathOption);
+    const QCommandLineOption sessionOption(
+        QStringLiteral("open-session"),
+        QObject::tr("Start with a session: its name, or a session file's path (docs/SESSIONS.md)."),
+        QObject::tr("name"));
+    commandLine.addOption(sessionOption);
     const QCommandLineOption installPackagesOption(
         QStringLiteral("install-plugin-packages"),
         QObject::tr("Install the Python packages the plugins ask for, and exit. Exit code: 0 done, 2 some left out, 1 failed."));
@@ -205,6 +213,7 @@ int main(int argc, char** argv) {
     // Read by the plugin manager and Python, just below.
     usdcc::scripting::definePythonSettings();
     usdcc::scripting::definePluginSettings();
+    usdcc::scripting::SessionController::defineSettings();
 
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry
@@ -269,12 +278,37 @@ int main(int argc, char** argv) {
     // set does. ScriptRunner makes each run one undo step per stage it
     // changes. Python view panel types registered in panelTypes outlive the
     // interpreter; they let go of their Python class without it.
+    // Sessions (docs/SESSIONS.md). While one loads, a stage opened doesn't get a
+    // viewport of its own (below): the session says which panels there are.
+    bool sessionLoading = false;
+    bool restartRequested = false;
+    QStringList restartArguments;
+    usdcc::scripting::SessionController::Context sessionContext;
+    sessionContext.stageManager = &stageManager;
+    sessionContext.window = &window;
+    sessionContext.panelTypes = &panelTypes;
+    sessionContext.plugins = &plugins;
+    sessionContext.python = &python;
+    sessionContext.fixedPanels = {QStringLiteral("Viewport"), QStringLiteral("Outliner"), QStringLiteral("Attributes")};
+    sessionContext.setLoading = [&sessionLoading](bool loading) { sessionLoading = loading; };
+    // Restart and Load (§4.3): closes the window, asking what closing asks, and once
+    // the app has quit starts it again with `arguments` (end of main()).
+    sessionContext.restart = [&window, &restartRequested, &restartArguments](const QStringList& arguments) {
+        restartRequested = true;
+        restartArguments = arguments;
+        window.close();
+        if (window.isVisible()) restartRequested = false;
+        return restartRequested;
+    };
+    usdcc::scripting::SessionController sessions(sessionContext);
+
     const usdcc::scripting::AppContextScope scriptingContext(
-        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins});
+        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins, &sessions});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     auto* scriptEditor = new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner);
     window.addSidePanel(scriptEditor, Qt::RightDockWidgetArea);
+    sessions.setScriptEditor(scriptEditor);
 
     // Panels created on demand get a "<type> - <stage>" title and a unique
     // objectName (see ViewPanelRegistry::open()); the three startup panels
@@ -321,8 +355,15 @@ int main(int argc, char** argv) {
     // failed to open) the app starts with no stage: the panels below are
     // empty, with their Stage dropdowns disabled, until one is opened.
     const QStringList positional = commandLine.positionalArguments();
+    // A session to start with (docs/SESSIONS.md §4.5): --open-session, or the Last session
+    // when Settings > Files > Sessions > On start says so. A stage named too opens after it.
+    QString startSession = commandLine.value(sessionOption);
+    if (startSession.isEmpty() && usdcc::scripting::SessionController::loadsLastSessionAtStart() &&
+        usdcc::ui::SessionStore().contains(QLatin1String(usdcc::ui::session::kLastSessionName))) {
+        startSession = QLatin1String(usdcc::ui::session::kLastSessionName);
+    }
     usdcc::usd::StageRefPtr initialStage;
-    if (!positional.isEmpty()) {
+    if (!positional.isEmpty() && startSession.isEmpty()) {
         initialStage = stageManager.openStage(positional.front().toStdString());
     }
     if (positional.size() > 1) {
@@ -370,7 +411,8 @@ int main(int argc, char** argv) {
     // bringing a tab to the front doesn't move ADS's focus, so the panel
     // focused before would otherwise keep its stage current.
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&window, &panelTypes, &stageManager](const usdcc::usd::StageRefPtr& stage) {
+        [&window, &panelTypes, &stageManager, &sessionLoading](const usdcc::usd::StageRefPtr& stage) {
+            if (sessionLoading) return;
             auto focus = [&](usdcc::ui::ViewPanel* panel) {
                 if (panel) window.dockManager()->setDockWidgetFocused(panel);
                 stageManager.setCurrentStage(stage);
@@ -426,6 +468,42 @@ int main(int argc, char** argv) {
     QObject::connect(recentMenu, &QMenu::aboutToShow, recentMenu, [recentMenu]() {
         usdcc::usd::populateRecentFilesMenu(recentMenu, [](const QString& path) { usdcc::usd::openStageFile(path); });
     });
+
+    // File > Sessions... and File > Open Session > the newest five (docs/SESSIONS.md §6).
+    QAction* sessionsAction = fileMenu->addAction(QObject::tr("Sess&ions..."));
+    sessionsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+    sessionsAction->setStatusTip(QObject::tr("Save the app as a session, or load one"));
+    QObject::connect(sessionsAction, &QAction::triggered, &window,
+                     [&sessions, &window]() { usdcc::scripting::SessionsDialog::showDialog(&sessions, &window); });
+    QMenu* openSessionMenu = fileMenu->addMenu(QObject::tr("Open Sess&ion"));
+    QObject::connect(openSessionMenu, &QMenu::aboutToShow, &window, [openSessionMenu, &sessions, &window]() {
+        openSessionMenu->clear();
+        const QList<usdcc::ui::SessionInfo> list = sessions.store().list();
+        for (int i = 0; i < std::min<int>(5, list.size()); ++i) {
+            const QString name = list[i].name;
+            QAction* action = openSessionMenu->addAction(name);
+            action->setEnabled(list[i].problem.isEmpty());
+            // Queued: the questions a load may ask don't run inside the menu.
+            QObject::connect(action, &QAction::triggered, &window, [name, &sessions, &window]() {
+                QMetaObject::invokeMethod(
+                    &window,
+                    [name, &sessions, &window]() {
+                        usdcc::scripting::SessionController::LoadOptions options;
+                        options.source = name;
+                        QString error;
+                        if (sessions.load(name, options, &error) == usdcc::scripting::SessionController::LoadResult::Failed) {
+                            QMessageBox::warning(&window, QObject::tr("Load Session"), error);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            });
+        }
+        if (list.isEmpty()) openSessionMenu->addAction(QObject::tr("No sessions yet"))->setEnabled(false);
+        openSessionMenu->addSeparator();
+        openSessionMenu->addAction(QObject::tr("More..."), &window,
+                                   [&sessions, &window]() { usdcc::scripting::SessionsDialog::showDialog(&sessions, &window); });
+    });
+    fileMenu->addSeparator();
 
     // File > Save Stage: every file layer of the current stage with unsaved
     // changes (docs/LAYER_EDITOR.md §5). Ctrl+Shift+S, as Ctrl+S is the
@@ -741,6 +819,25 @@ int main(int argc, char** argv) {
         return usdcc::usd::StageRefPtr();
     });
     window.restoreLayout();
+    if (!startSession.isEmpty()) {
+        usdcc::scripting::SessionController::LoadOptions options;
+        options.atStart = true;
+        options.interactive = false;
+        options.discardUnsaved = true;
+        QString error;
+        if (sessions.load(startSession, options, &error) != usdcc::scripting::SessionController::LoadResult::Loaded) {
+            USDCC_LOG_WARNING("usdcc.session", "Couldn't start with the session {}: {}", startSession.toStdString(),
+                              error.toStdString());
+        }
+        if (!positional.isEmpty()) stageManager.openStage(positional.front().toStdString());
+    }
+    // The Last session, as the window closes and while it's still on screen (§4.5).
+    QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions]() {
+        QString error;
+        if (!sessions.save(QLatin1String(usdcc::ui::session::kLastSessionName), sessions.takePreview(), false, &error)) {
+            USDCC_LOG_WARNING("usdcc.session", "Couldn't save the Last session: {}", error.toStdString());
+        }
+    });
 
     // The current stage follows the focused view panel, and the title says
     // which it is.
@@ -804,5 +901,15 @@ int main(int argc, char** argv) {
     // The window is closed (and its layout saved) but its panels still exist.
     panelTypes.savePanels(window.dockManager());
     plugins.deactivate(python);
+    if (restartRequested) {
+        // The same app, with what it was started with that still applies.
+        QStringList arguments = restartArguments;
+        for (const QString& folder : commandLine.values(pluginPathOption)) arguments << QStringLiteral("--plugin-path") << folder;
+        if (commandLine.isSet(noStartupScriptsOption)) arguments << QStringLiteral("--no-startup-scripts");
+        USDCC_LOG_INFO("usdcc.app", "Restarting: {}", arguments.join(QLatin1Char(' ')).toStdString());
+        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments)) {
+            USDCC_LOG_ERROR("usdcc.app", "Couldn't start the app again");
+        }
+    }
     return result;
 }

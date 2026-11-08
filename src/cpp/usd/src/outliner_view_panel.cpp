@@ -18,6 +18,7 @@
 #include <pxr/usd/usd/primFlags.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <QJsonArray>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -317,6 +318,52 @@ void OutlinerViewPanel::restoreViewState() {
     // After the view has laid out the restored rows.
     const int scrollPosition = m_scrollPosition;
     QTimer::singleShot(0, this, [this, scrollPosition]() { m_treeView->verticalScrollBar()->setValue(scrollPosition); });
+}
+
+QJsonObject OutlinerViewPanel::saveSessionState() const {
+    QJsonObject state;
+    QJsonArray expanded;
+    std::vector<QModelIndex> pending{QModelIndex()};
+    while (!pending.empty()) {
+        const QModelIndex parent = pending.back();
+        pending.pop_back();
+        for (int row = 0; row < m_proxy->rowCount(parent); ++row) {
+            const QModelIndex index = m_proxy->index(row, 0, parent);
+            if (!m_treeView->isExpanded(index)) continue;
+            expanded << QString::fromStdString(m_model->pathForIndex(m_proxy->mapToSource(index)).GetString());
+            pending.push_back(index);
+        }
+    }
+    state.insert(QStringLiteral("expanded"), expanded);
+    if (!m_proxy->nameFilter().isEmpty()) state.insert(QStringLiteral("search"), m_proxy->nameFilter());
+    if (const auto& types = m_proxy->typeFilter()) {
+        QJsonArray list;
+        for (const std::string& type : *types) list << QString::fromStdString(type);
+        state.insert(QStringLiteral("types"), list);
+    }
+    state.insert(QStringLiteral("scroll"), m_treeView->verticalScrollBar()->value());
+    return state;
+}
+
+void OutlinerViewPanel::restoreSessionState(const QJsonObject& state) {
+    if (!currentStage()) return;
+    // Expanded first, unfiltered: the filter remembers them to go back to.
+    m_filterBar->clear();
+    for (const QJsonValue& value : state.value(QStringLiteral("expanded")).toArray()) {
+        const std::string text = value.toString().toStdString();
+        if (!PXR_NS::SdfPath::IsValidPathString(text)) continue;
+        const QModelIndex index = m_proxy->mapFromSource(m_model->fetchPath(PXR_NS::SdfPath(text)));
+        if (index.isValid()) m_treeView->setExpanded(index, true);  // a prim that's gone is skipped
+    }
+    if (state.contains(QStringLiteral("types"))) {
+        std::set<std::string> types;
+        for (const QJsonValue& value : state.value(QStringLiteral("types")).toArray()) types.insert(value.toString().toStdString());
+        m_filterBar->setTypeFilter(types);
+    }
+    if (state.contains(QStringLiteral("search"))) m_filterBar->setNameFilter(state.value(QStringLiteral("search")).toString());
+    // After the view has laid out the rows.
+    const int scroll = state.value(QStringLiteral("scroll")).toInt();
+    QTimer::singleShot(0, this, [this, scroll]() { m_treeView->verticalScrollBar()->setValue(scroll); });
 }
 
 void OutlinerViewPanel::onTreeSelectionChanged() {

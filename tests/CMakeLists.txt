@@ -83,6 +83,7 @@ add_executable(usdcc_ui_tests
     material_editor_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
+    session_store_test.cpp
     side_panel_test.cpp
     toast_test.cpp
     usda_view_test.cpp
@@ -111,11 +112,13 @@ add_executable(usdcc_python_tests
     python_app_test.cpp
     python_runtime_test.cpp
     script_editor_panel_test.cpp
+    session_test.cpp
     startup_scripts_test.cpp
     viewport_camera_test.cpp
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 
 # A C++ plugin for plugin_native_test.cpp, with a DLL of its own beside it.
 set(_usdcc_test_plugins "${CMAKE_CURRENT_BINARY_DIR}/plugins")

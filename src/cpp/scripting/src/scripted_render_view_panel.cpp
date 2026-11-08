@@ -4,6 +4,8 @@
 
 #include "usdcc/scripting/scripted_render_view_panel.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <pybind11/stl.h>
 
 #include <QHBoxLayout>
@@ -263,6 +265,36 @@ void ScriptedRenderViewPanel::closing() { closeInstance(); }
 void ScriptedRenderViewPanel::onStageChanged(const StageRefPtr& stage) {
     tellStage(stage);
     RenderViewPanel::onStageChanged(stage);
+}
+
+QJsonObject ScriptedRenderViewPanel::saveSessionState() const {
+    if (!m_instance) return {};
+    std::string text;
+    {
+        py::gil_scoped_acquire gil;
+        try {
+            text = bridge("_view_panel_save_state")(m_instance->object).cast<std::string>();
+        } catch (py::error_already_set& error) {
+            logPythonError(error);
+        }
+    }
+    if (text.empty()) return {};
+    QJsonObject state;
+    // Kept as the JSON value save_state() returned, whatever its kind.
+    state.insert(QStringLiteral("python"), QJsonDocument::fromJson("[" + QByteArray::fromStdString(text) + "]").array().at(0));
+    return state;
+}
+
+void ScriptedRenderViewPanel::restoreSessionState(const QJsonObject& state) {
+    if (!m_instance || !state.contains(QStringLiteral("python"))) return;
+    const QByteArray array = QJsonDocument(QJsonArray{state.value(QStringLiteral("python"))}).toJson(QJsonDocument::Compact);
+    const std::string text = array.mid(1, array.size() - 2).toStdString();
+    py::gil_scoped_acquire gil;
+    try {
+        bridge("_view_panel_restore_state")(m_instance->object, text);
+    } catch (py::error_already_set& error) {
+        logPythonError(error);
+    }
 }
 
 }  // namespace usdcc::scripting

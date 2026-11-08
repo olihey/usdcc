@@ -26,6 +26,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -955,6 +956,128 @@ void ScriptEditorSidePanel::restoreSession() {
         if (const auto* plugin = dynamic_cast<const Project*>(tab)) m_editors->setCurrentWidget(plugin->page);
     }
     updateRunButton();
+}
+
+QJsonObject ScriptEditorSidePanel::sessionState() const {
+    QJsonObject state;
+    if (!m_tabBar) return state;
+    const auto fileState = [](const Script* each) {
+        QJsonObject tab;
+        if (each->file.isEmpty()) {
+            tab.insert(QStringLiteral("name"), each->name);
+            tab.insert(QStringLiteral("text"), each->editor->toPlainText());
+        } else {
+            tab.insert(QStringLiteral("file"), each->file);
+            if (each->editor->document()->isModified()) tab.insert(QStringLiteral("text"), each->editor->toPlainText());
+        }
+        return tab;
+    };
+    QJsonArray tabs;
+    for (int i = 0; i < m_tabBar->count(); ++i) {
+        if (const Project* plugin = project(i)) {
+            QJsonObject tab;
+            tab.insert(QStringLiteral("plugin"), plugin->id);
+            tab.insert(QStringLiteral("name"), plugin->name);
+            tab.insert(QStringLiteral("folder"), plugin->folder);
+            tab.insert(QStringLiteral("split"), QString::fromLatin1(plugin->page->saveState().toBase64()));
+            tab.insert(QStringLiteral("current"), plugin->bar->currentIndex());
+            QJsonArray files;
+            for (int file = 0; file < plugin->bar->count(); ++file) files << fileState(scriptIn(plugin->bar, file));
+            tab.insert(QStringLiteral("files"), files);
+            tabs << tab;
+        } else if (const Script* each = script(i)) {
+            tabs << fileState(each);
+        }
+    }
+    state.insert(QStringLiteral("tabs"), tabs);
+    state.insert(QStringLiteral("current"), currentTab());
+    return state;
+}
+
+QStringList ScriptEditorSidePanel::untitledWithText() const {
+    QStringList names;
+    for (const Script* each : m_scripts) {
+        if (each->file.isEmpty() && !each->editor->toPlainText().trimmed().isEmpty()) names << displayName(*each);
+    }
+    return names;
+}
+
+void ScriptEditorSidePanel::restoreSessionState(const QJsonObject& state, QStringList* warnings) {
+    if (!m_tabBar) return;
+    const auto warn = [warnings](const QString& text) {
+        USDCC_LOG_WARNING("usdcc.scripting", "{}", text.toStdString());
+        if (warnings) *warnings << text;
+    };
+    // The tabs there are now go once the new ones are in (closing the last tab
+    // would open an empty one). Asked about already (canClose()).
+    const std::vector<Script*> oldScripts(m_scripts.begin(), m_scripts.end());
+    const std::vector<Project*> oldProjects(m_projects.begin(), m_projects.end());
+
+    const auto restoreFile = [this, &warn](const QJsonObject& tab, Project* owner) {
+        const QString file = tab.value(QStringLiteral("file")).toString();
+        const bool hasText = tab.contains(QStringLiteral("text"));
+        const QString text = tab.value(QStringLiteral("text")).toString();
+        if (file.isEmpty()) {
+            addScript({}, tab.value(QStringLiteral("name")).toString(), text, !text.isEmpty(), owner);
+        } else if (hasText) {
+            addScript(file, {}, text, true, owner);
+        } else {
+            bool ok = false;
+            const QString saved = readFile(file, &ok);
+            if (ok) {
+                addScript(file, {}, saved, false, owner);
+            } else {
+                warn(tr("Script Editor: %1 isn't there, so its tab is left out.").arg(QDir::toNativeSeparators(file)));
+            }
+        }
+    };
+    for (const QJsonValue& value : state.value(QStringLiteral("tabs")).toArray()) {
+        const QJsonObject tab = value.toObject();
+        const QString pluginId = tab.value(QStringLiteral("plugin")).toString();
+        if (pluginId.isEmpty()) {
+            restoreFile(tab, nullptr);
+            continue;
+        }
+        const QString folder = tab.value(QStringLiteral("folder")).toString();
+        if (!QFileInfo(folder).isDir()) {
+            warn(tr("Script Editor: the plugin %1 isn't in %2, so its tab is left out.")
+                     .arg(tab.value(QStringLiteral("name")).toString(), QDir::toNativeSeparators(folder)));
+            continue;
+        }
+        Project* plugin = projectById(pluginId);
+        if (plugin && std::find(oldProjects.begin(), oldProjects.end(), plugin) != oldProjects.end()) {
+            plugin = nullptr;  // the old tab goes; a new one is made below
+        }
+        if (!plugin) plugin = addProject(pluginId, tab.value(QStringLiteral("name")).toString(), folder);
+        plugin->page->restoreState(QByteArray::fromBase64(tab.value(QStringLiteral("split")).toString().toLatin1()));
+        for (const QJsonValue& file : tab.value(QStringLiteral("files")).toArray()) restoreFile(file.toObject(), plugin);
+        const int current = tab.value(QStringLiteral("current")).toInt();
+        if (current >= 0 && current < plugin->bar->count()) plugin->bar->setCurrentIndex(current);
+    }
+    if (m_tabBar->count() == int(oldScripts.size() + oldProjects.size())) {
+        // Nothing came back from the session: start from one empty tab, as at first.
+        addScript({}, {}, {}, false);
+    }
+
+    for (Project* plugin : oldProjects) {
+        for (Script* each : m_scripts) {
+            if (each->project == plugin) each->editor->document()->setModified(false);
+        }
+        closeProject(plugin);
+    }
+    for (Script* each : oldScripts) {
+        if (std::find(m_scripts.begin(), m_scripts.end(), each) == m_scripts.end()) continue;  // a plugin's, gone
+        each->editor->document()->setModified(false);  // so closing doesn't ask
+        closeScript(each);
+    }
+
+    setCurrentTab(std::clamp(state.value(QStringLiteral("current")).toInt(), 0, m_tabBar->count() - 1));
+    if (const TopTab* tab = topTab(currentTab())) {
+        if (const auto* file = dynamic_cast<const Script*>(tab)) m_editors->setCurrentWidget(file->editor);
+        if (const auto* plugin = dynamic_cast<const Project*>(tab)) m_editors->setCurrentWidget(plugin->page);
+    }
+    updateRunButton();
+    scheduleSave();
 }
 
 // --- Running -----------------------------------------------------------------------

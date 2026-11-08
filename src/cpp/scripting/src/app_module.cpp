@@ -668,6 +668,39 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             if (s_context && s_context->plugins) s_context->plugins->addContribution(id, kind, name);
         },
         py::arg("id"), py::arg("kind"), py::arg("name"));
+
+    // Sessions (docs/SESSIONS.md §7); usdcc/app.py wraps these.
+    const auto sessions = []() -> SessionHost& {
+        if (!s_context || !s_context->sessions) throw std::runtime_error("sessions aren't available here");
+        return *s_context->sessions;
+    };
+    const auto check = [](const std::string& error) {
+        if (!error.empty()) throw std::runtime_error(error);
+    };
+    m.def("sessions", [sessions]() { return sessions().sessionNames(); });
+    m.def("current_session", [sessions]() { return sessions().currentSessionName(); });
+    m.def(
+        "save_session", [sessions, check](const std::string& name) { check(sessions().saveSession(name)); },
+        py::arg("name"));
+    m.def(
+        "load_session",
+        [sessions, check](const std::string& name, bool discard) { check(sessions().loadSession(name, discard)); },
+        py::arg("name"), py::arg("discard_unsaved") = false);
+    m.def(
+        "delete_session", [sessions, check](const std::string& name) { check(sessions().deleteSession(name)); },
+        py::arg("name"));
+    m.def(
+        "import_session",
+        [sessions, check](const std::string& path, bool replace) {
+            std::string name;
+            check(sessions().importSession(path, replace, &name));
+            return name;
+        },
+        py::arg("path"), py::arg("replace") = false);
+    m.def(
+        "export_session",
+        [sessions, check](const std::string& name, const std::string& path) { check(sessions().exportSession(name, path)); },
+        py::arg("name"), py::arg("path"));
 }
 
 void rebuildScriptedPanels(const std::vector<std::string>& types) {

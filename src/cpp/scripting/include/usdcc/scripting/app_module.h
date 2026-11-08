@@ -21,6 +21,22 @@ namespace usdcc::scripting {
 
 class PluginManager;
 
+// Sessions, for usdcc.app.save_session() and the rest (docs/SESSIONS.md §7).
+// SessionController implements it. Each returns an error, empty when it went well.
+class SessionHost {
+public:
+    virtual ~SessionHost() = default;
+    virtual std::vector<std::string> sessionNames() const = 0;
+    virtual std::string currentSessionName() const = 0;
+    virtual std::string saveSession(const std::string& name) = 0;
+    // Without asking: refuses while layers have unsaved edits unless `discardUnsaved`,
+    // and when the session needs other plugins (a restart).
+    virtual std::string loadSession(const std::string& nameOrPath, bool discardUnsaved) = 0;
+    virtual std::string deleteSession(const std::string& name) = 0;
+    virtual std::string importSession(const std::string& path, bool replace, std::string* name) = 0;
+    virtual std::string exportSession(const std::string& name, const std::string& path) = 0;
+};
+
 // The running app's objects scripts work on (docs/SCRIPTING.md §4.1).
 struct AppContext {
     usdcc::usd::StageManager* stageManager = nullptr;
@@ -34,6 +50,8 @@ struct AppContext {
     usdcc::ui::ViewPanelRegistry* viewPanels = nullptr;
     // Told what each plugin adds; may be null.
     PluginManager* plugins = nullptr;
+    // Saves and loads sessions; null without, and then those raise.
+    SessionHost* sessions = nullptr;
 };
 
 // Makes `context` what the embedded module _usdcc_app — and through it

@@ -16,6 +16,14 @@
 #include <QTabBar>
 #include <QToolBar>
 #include <QXmlStreamReader>
+#include <QGuiApplication>
+#include <QJsonArray>
+#include <QScreen>
+
+#include <FloatingDockContainer.h>
+
+#include <algorithm>
+#include <cstdlib>
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/log_side_panel.h"
@@ -183,6 +191,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         }
     }
     m_panelMaximizer->restore();  // the user's layout is what gets saved
+    Q_EMIT closing();
     saveLayout();
     QMainWindow::closeEvent(event);
 }
@@ -240,16 +249,26 @@ void MainWindow::restoreLayout() {
     if (settings.contains(kGeometryKey)) {
         restoreGeometry(settings.value(kGeometryKey).toByteArray());
     }
-    // Toolbars and side panels, which are all created by now (see this
-    // method's declaration), keyed by their objectNames.
-    if (settings.contains(kWindowStateKey) &&
-        !restoreState(settings.value(kWindowStateKey).toByteArray(), kWindowStateVersion)) {
+    applyLayout(settings.value(kWindowStateKey).toByteArray(), settings.value(kCollapsedPanelsKey).toMap(),
+                settings.value(kDockLayoutKey).toByteArray());
+    keepFloatingPanelsOnScreen();
+    USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
+}
+
+void MainWindow::applyLayout(const QByteArray& windowState, const QVariantMap& collapsed, const QByteArray& dockLayout) {
+    // Toolbars and side panels, which are all created by now (see
+    // restoreLayout()'s declaration), keyed by their objectNames.
+    if (!windowState.isEmpty() && !restoreState(windowState, kWindowStateVersion)) {
         USDCC_LOG_WARNING("usdcc.layout", "Ignored the saved toolbar and side panel layout (older version)");
     }
-    m_savedCollapsed = settings.value(kCollapsedPanelsKey).toMap();
-    for (SidePanel* panel : std::as_const(m_sidePanels)) restoreCollapsed(panel);
-    if (settings.contains(kDockLayoutKey)) {
-        const QByteArray dockLayout = settings.value(kDockLayoutKey).toByteArray();
+    m_savedCollapsed = collapsed;
+    for (SidePanel* panel : std::as_const(m_sidePanels)) {
+        if (m_layoutRestored && panel->isCollapsed() && !m_savedCollapsed.contains(panel->objectName())) {
+            panel->setCollapsed(false);  // a later restore: one that isn't collapsed there opens
+        }
+        restoreCollapsed(panel);
+    }
+    if (!dockLayout.isEmpty()) {
         if (m_dockManager->restoreState(dockLayout)) {
             showPanelsMissingFrom(dockLayout);
         } else {
@@ -257,7 +276,142 @@ void MainWindow::restoreLayout() {
         }
     }
     m_layoutRestored = true;
-    USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
+}
+
+QJsonObject MainWindow::layoutState() const {
+    QJsonObject state;
+    state.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
+    state.insert(QStringLiteral("maximized"), isMaximized());
+    state.insert(QStringLiteral("windowState"), QString::fromLatin1(saveState(kWindowStateVersion).toBase64()));
+    QJsonObject collapsed;
+    QJsonObject shares;
+    const QSize window = size();
+    for (SidePanel* panel : m_sidePanels) {
+        if (panel->isCollapsed()) {
+            collapsed.insert(panel->objectName(), panel->expandedSize());
+            continue;
+        }
+        if (panel->isFloating() || !panel->isVisible() || window.isEmpty()) continue;
+        const Qt::DockWidgetArea area = dockWidgetArea(panel);
+        if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+            shares.insert(panel->objectName(), double(panel->width()) / window.width());
+        } else if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
+            shares.insert(panel->objectName(), double(panel->height()) / window.height());
+        }
+    }
+    state.insert(QStringLiteral("collapsedSidePanels"), collapsed);
+    state.insert(QStringLiteral("windowSize"), QJsonArray{window.width(), window.height()});
+    state.insert(QStringLiteral("sidePanelShares"), shares);
+    // As XML, readable in the session file; ADS compresses it by default.
+    const QByteArray dock = m_dockManager->saveState();
+    state.insert(QStringLiteral("dockLayout"), QString::fromUtf8(dock.startsWith("<?xml") ? dock : qUncompress(dock)));
+    return state;
+}
+
+void MainWindow::restoreLayoutState(const QJsonObject& state, bool withGeometry) {
+    m_panelMaximizer->restore();
+    if (withGeometry) {
+        restoreGeometry(QByteArray::fromBase64(state.value(QStringLiteral("geometry")).toString().toLatin1()));
+    } else if (state.value(QStringLiteral("maximized")).toBool() && !isMaximized() && isVisible()) {
+        showMaximized();
+    }
+    applyLayout(QByteArray::fromBase64(state.value(QStringLiteral("windowState")).toString().toLatin1()),
+                state.value(QStringLiteral("collapsedSidePanels")).toObject().toVariantMap(),
+                state.value(QStringLiteral("dockLayout")).toString().toUtf8());
+    keepFloatingPanelsOnScreen();
+
+    // Side panels keep their size in pixels; in a window much smaller or larger than
+    // the one saved, they're given their share of it instead (§5.2). Once the window
+    // has its size: at start, after it's shown and settled.
+    const QJsonArray saved = state.value(QStringLiteral("windowSize")).toArray();
+    const QSize savedSize(saved.at(0).toInt(), saved.at(1).toInt());
+    const QVariantMap shares = state.value(QStringLiteral("sidePanelShares")).toObject().toVariantMap();
+    if (savedSize.isEmpty() || shares.isEmpty()) return;
+    auto scale = [this, savedSize, shares]() {
+        const QSize now = size();
+        const auto differs = [](int a, int b) { return std::abs(a - b) > b / 10; };
+        if (differs(now.width(), savedSize.width()) || differs(now.height(), savedSize.height())) {
+            applySidePanelShares(shares);
+        }
+    };
+    if (m_layoutSettled) {
+        scale();
+    } else {
+        connect(this, &MainWindow::layoutSettled, this, scale, Qt::SingleShotConnection);
+    }
+}
+
+void MainWindow::applySidePanelShares(const QVariantMap& shares) {
+    QList<QDockWidget*> horizontal;
+    QList<int> widths;
+    QList<QDockWidget*> vertical;
+    QList<int> heights;
+    for (SidePanel* panel : std::as_const(m_sidePanels)) {
+        const auto share = shares.constFind(panel->objectName());
+        if (share == shares.cend() || panel->isFloating() || panel->isCollapsed() || !panel->isVisible()) continue;
+        const Qt::DockWidgetArea area = dockWidgetArea(panel);
+        if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+            horizontal << panel;
+            widths << qRound(share->toDouble() * width());
+        } else if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
+            vertical << panel;
+            heights << qRound(share->toDouble() * height());
+        }
+    }
+    if (!horizontal.isEmpty()) resizeDocks(horizontal, widths, Qt::Horizontal);
+    if (!vertical.isEmpty()) resizeDocks(vertical, heights, Qt::Vertical);
+}
+
+void MainWindow::keepFloatingPanelsOnScreen() {
+    QList<QRect> screens;
+    for (const QScreen* screen : QGuiApplication::screens()) screens << screen->availableGeometry();
+    if (screens.isEmpty()) return;
+    QList<QWidget*> floating;
+    for (ads::CFloatingDockContainer* container : m_dockManager->floatingWidgets()) floating << container;
+    for (SidePanel* panel : std::as_const(m_sidePanels)) {
+        if (panel->isFloating()) floating << panel;
+    }
+    for (QWidget* widget : floating) {
+        const QRect frame = widget->frameGeometry();
+        const QRect fitted = fitOnScreens(frame, screens);
+        if (fitted == frame) continue;
+        // The frame is what has to fit; geometry() is the inside of it.
+        const QSize border = frame.size() - widget->geometry().size();
+        widget->resize(fitted.size() - border);
+        widget->move(fitted.topLeft());
+        USDCC_LOG_DEBUG("usdcc.layout", "Moved the floating {} onto a screen", widget->objectName().toStdString());
+    }
+}
+
+QRect fitOnScreens(const QRect& rect, const QList<QRect>& screens) {
+    if (screens.isEmpty()) return rect;
+    const QRect* best = nullptr;
+    qint64 bestArea = 0;
+    for (const QRect& screen : screens) {
+        if (screen.contains(rect)) return rect;
+        const QRect overlap = screen.intersected(rect);
+        const qint64 area = qint64(overlap.width()) * overlap.height();
+        if (area > bestArea) {
+            bestArea = area;
+            best = &screen;
+        }
+    }
+    if (!best) {
+        // Off every screen: the nearest, by the distance between centres.
+        qint64 nearest = -1;
+        for (const QRect& screen : screens) {
+            const QPoint d = screen.center() - rect.center();
+            const qint64 distance = qint64(d.x()) * d.x() + qint64(d.y()) * d.y();
+            if (nearest < 0 || distance < nearest) {
+                nearest = distance;
+                best = &screen;
+            }
+        }
+    }
+    QRect fitted(rect.topLeft(), rect.size().boundedTo(best->size()));
+    fitted.moveLeft(std::clamp(fitted.left(), best->left(), best->right() - fitted.width() + 1));
+    fitted.moveTop(std::clamp(fitted.top(), best->top(), best->bottom() - fitted.height() + 1));
+    return fitted;
 }
 
 void MainWindow::showPanelsMissingFrom(const QByteArray& dockLayout) {

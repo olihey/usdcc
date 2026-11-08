@@ -108,7 +108,9 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/create_menu.h
     include/usdcc/usd/current_stage_ui.h
+    include/usdcc/usd/session_stages.h
     include/usdcc/usd/stage_opener.h
+    include/usdcc/usd/window_preview.h
     include/usdcc/usd/stages_menu.h
     include/usdcc/usd/render_view_panel.h
     include/usdcc/usd/tool_options_bar.h
@@ -156,7 +158,9 @@ add_library(usdcc_usd_ui SHARED
     src/close_stage_dialog.cpp
     src/create_menu.cpp
     src/current_stage_ui.cpp
+    src/session_stages.cpp
     src/stage_opener.cpp
+    src/window_preview.cpp
     src/stages_menu.cpp
     src/tool_options_bar.cpp
     src/tool_rail.cpp

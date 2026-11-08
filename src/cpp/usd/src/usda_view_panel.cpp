@@ -1,11 +1,17 @@
 #include "usdcc/usd/usda_view_panel.h"
 
+#include <pxr/usd/sdf/layer.h>
+
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <QAction>
+#include <QFileInfo>
+#include <QJsonObject>
 #include <QMenu>
+#include <QScrollBar>
 #include <QSettings>
+#include <QTimer>
 
 #include <utility>
 
@@ -80,6 +86,29 @@ void UsdaViewPanel::followSelection(const std::vector<PXR_NS::SdfPath>& paths) {
     // A linked file's prims aren't the stage's.
     if (paths.empty() || source().kind == Source::Kind::File) return;
     m_view->scrollToPrim(paths.front());
+}
+
+QJsonObject UsdaViewPanel::saveSessionState() const {
+    QJsonObject state;
+    state.insert(QStringLiteral("kind"), static_cast<int>(source().kind));
+    if (!source().identifier.empty()) state.insert(QStringLiteral("identifier"), QString::fromStdString(source().identifier));
+    state.insert(QStringLiteral("scroll"), lineView()->verticalScrollBar()->value());
+    return state;
+}
+
+void UsdaViewPanel::restoreSessionState(const QJsonObject& state) {
+    if (!currentStage()) return;
+    Source wanted;
+    const int kind = state.value(QStringLiteral("kind")).toInt();
+    if (kind < 0 || kind > static_cast<int>(Source::Kind::File)) return;
+    wanted.kind = static_cast<Source::Kind>(kind);
+    wanted.identifier = state.value(QStringLiteral("identifier")).toString().toStdString();
+    // A layer that's gone, or a file that isn't there, leaves it on the root layer.
+    if (wanted.kind == Source::Kind::File && !QFileInfo::exists(QString::fromStdString(wanted.identifier))) return;
+    if (wanted.kind == Source::Kind::Layer && !wanted.identifier.empty() && !PXR_NS::SdfLayer::Find(wanted.identifier)) return;
+    setSource(wanted);
+    const int scroll = state.value(QStringLiteral("scroll")).toInt();
+    QTimer::singleShot(0, this, [this, scroll]() { lineView()->verticalScrollBar()->setValue(scroll); });
 }
 
 }  // namespace usdcc::usd

@@ -14,6 +14,7 @@
 #include <pxr/usd/usd/common.h>
 
 #include <QPoint>
+#include <QImage>
 #include <QWindow>
 
 #include <memory>
@@ -63,6 +64,9 @@ public:
     // Whether firstFrameRendered() has already fired for the current stage —
     // a viewport that was already on screen draws it inside setStage().
     bool hasRenderedFirstFrame() const { return m_firstFrameRendered; }
+    // The last frame drawn, at the window's size in pixels; null before the first. For a
+    // session's preview where the screen can't be captured (docs/SESSIONS.md §6.2).
+    QImage grabFrame();
 
     // Valid once the GL context has initialized; rendererPluginsChanged()
     // fires at that point.

@@ -75,6 +75,9 @@ public:
     // the camera position onto the duplicate — see ViewPanel::duplicate().
     // The duplicate shares this panel's ToolSet.
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+    // The camera and the renderer (docs/SESSIONS.md §2.4).
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
 
 protected:
     // Adds "Fit to View" and "Reset Camera" entries on top of ViewPanel's base "Duplicate" —

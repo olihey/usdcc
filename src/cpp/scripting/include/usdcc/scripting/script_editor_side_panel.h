@@ -4,7 +4,9 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/side_panel.h"
 
+#include <QJsonObject>
 #include <QMessageBox>
+#include <QStringList>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -127,6 +129,17 @@ public:
 
     // Asks about each file with unsaved changes (SidePanel::canClose()).
     bool canClose() override;
+
+    // Every tab, for a session (docs/SESSIONS.md §2.5): untitled scripts with their
+    // text, files by path (with their text while it has unsaved changes), plugin tabs
+    // with their files, and which tab is current.
+    QJsonObject sessionState() const;
+    // Replaces every tab with `state`'s, without asking: ask canClose() first. A file
+    // that isn't there comes back with its stored text if it has any, and is left
+    // out (with a warning in `warnings`) if not; so is a plugin tab whose folder is gone.
+    void restoreSessionState(const QJsonObject& state, QStringList* warnings = nullptr);
+    // The untitled tabs that have text, by name: what loading a session replaces.
+    QStringList untitledWithText() const;
 
     // Asks whether to save `name`'s changes: Save, Discard or Cancel. A
     // message box unless set (tests answer without one).

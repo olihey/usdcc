@@ -25,6 +25,7 @@
 #include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -214,6 +215,20 @@ assert ("prim_count", "Prim Count") in usdcc.app.view_panel_types()
               "Duplicate makes another instance on the same stage: [%s]",
               copy ? qPrintable(labelText(copy.get())) : "?");
         copy.reset();
+
+        // What a session keeps of it: what save_state() returns, given back to restore_state().
+        CHECK(app.python.runString("import usdcc._plugins\n"
+                                   "cls = usdcc._plugins.panel_class('prim_count')\n"
+                                   "cls.save_state = lambda self: {'zoom': 2, 'path': '/World'}\n"
+                                   "cls.restore_state = lambda self, state: setattr(type(self), 'restored', state)\n"),
+              "a Python panel keeps a state");
+        const QJsonObject state = panel->saveSessionState();
+        CHECK(state.value("python").toObject().value("zoom").toInt() == 2, "saveSessionState() holds what save_state() returned");
+        panel->restoreSessionState(state);
+        const auto restored = app.python.evaluate(""
+                                                  "sorted(__import__('usdcc._plugins', fromlist=['x']).panel_class('prim_count').restored.items())");
+        CHECK(restored && *restored == "[('path', '/World'), ('zoom', 2)]", "and restore_state() gets it back: %s",
+              restored ? restored->c_str() : "?");
 
         // A panel with its own options panel: the button shows and hides it, and opens no menu.
         CHECK(app.python.runString("stage_id = " + std::to_string(stage->cacheId()) + R"(

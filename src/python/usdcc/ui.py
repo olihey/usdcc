@@ -83,6 +83,15 @@ class ViewPanel:
         built again, as a popup menu is each time it opens."""
         _notify_options_changed(self.widget)
 
+    def save_state(self):
+        """What a session keeps of this panel (docs/SESSIONS.md §2.4): anything that
+        converts to JSON, such as a dict. None keeps nothing."""
+        return None
+
+    def restore_state(self, state):
+        """Gets back what ``save_state()`` returned, when a session is loaded."""
+        pass
+
 
 class RenderCamera:
     """A camera as a ``RenderViewPanel`` gives it to its renderer: the viewport's,
@@ -193,6 +202,15 @@ class RenderViewPanel:
     def options_changed(self):
         """Says what the options show has changed: a pinned menu is built again."""
         _notify_options_changed(self._widget)
+
+    def save_state(self):
+        """What a session keeps of this panel (docs/SESSIONS.md §2.4): anything that
+        converts to JSON, such as a dict. None keeps nothing."""
+        return None
+
+    def restore_state(self, state):
+        """Gets back what ``save_state()`` returned, when a session is loaded."""
+        pass
 
     def close(self):
         pass
@@ -307,6 +325,19 @@ def _view_panel_options_panel(panel, host_address):
     widget.setParent(host)
     host.layout().addWidget(widget)
     return True
+
+
+def _view_panel_save_state(panel):
+    import json
+
+    state = panel.save_state()
+    return "" if state is None else json.dumps(state)
+
+
+def _view_panel_restore_state(panel, text):
+    import json
+
+    panel.restore_state(json.loads(text) if text else None)
 
 
 # The C++ side of a render view panel (ScriptedRenderViewPanel) calls these.

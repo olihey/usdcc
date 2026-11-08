@@ -38,6 +38,9 @@ public:
                            const QString& title = QStringLiteral("USDA"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+    // What it shows (which layer, flattened or a file) and where it's scrolled (docs/SESSIONS.md §2.4).
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
 
     // How Open in New Panel makes the panel (main.cpp sets it: the panel
     // registry, docked next to this one). Without one, links open here.

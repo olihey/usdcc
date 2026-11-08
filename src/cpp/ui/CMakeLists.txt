@@ -14,6 +14,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/qt_message_bridge.h
     include/usdcc/ui/scale_controller.h
     include/usdcc/ui/scaled_metrics.h
+    include/usdcc/ui/session_store.h
     include/usdcc/ui/settings.h
     include/usdcc/ui/settings_dialog.h
     include/usdcc/ui/side_panel.h
@@ -39,6 +40,7 @@ add_library(usdcc_ui SHARED
     src/panel_menu_button.cpp
     src/qt_message_bridge.cpp
     src/scale_controller.cpp
+    src/session_store.cpp
     src/settings.cpp
     src/settings_dialog.cpp
     src/side_panel.cpp

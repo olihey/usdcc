@@ -43,6 +43,9 @@ public:
                                 const QString& title = QStringLiteral("Outliner"), QWidget* parent = nullptr);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+    // Expanded prims, the search and type filter, and the scroll position (docs/SESSIONS.md §2.4).
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
 
     // What a drop does, once it's allowed: asks first if it changes other layers
     // (docs/OUTLINER_REPARENT.md §6). `keepWorldPosition` unless Alt was held.

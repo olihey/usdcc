@@ -13,6 +13,7 @@
 
 #include <DockManager.h>
 
+#include <QJsonArray>
 #include <QAction>
 #include <QActionGroup>
 #include <QHBoxLayout>
@@ -188,6 +189,44 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
             });
 
     return copy;
+}
+
+QJsonObject ViewportViewPanel::saveSessionState() const {
+    const HydraViewportWindow::CameraState camera = m_viewport->cameraState();
+    QJsonObject orbit;
+    orbit.insert(QStringLiteral("target"), QJsonArray{camera.target[0], camera.target[1], camera.target[2]});
+    orbit.insert(QStringLiteral("distance"), camera.distance);
+    orbit.insert(QStringLiteral("yaw"), camera.yaw);
+    orbit.insert(QStringLiteral("pitch"), camera.pitch);
+    QJsonObject state;
+    state.insert(QStringLiteral("camera"), orbit);
+    const PXR_NS::TfToken renderer = m_viewport->currentRendererPlugin();
+    if (!renderer.IsEmpty()) state.insert(QStringLiteral("renderer"), QString::fromStdString(renderer.GetString()));
+    return state;
+}
+
+void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
+    HydraViewportWindow::CameraState camera = m_viewport->cameraState();
+    const QJsonObject orbit = state.value(QStringLiteral("camera")).toObject();
+    const QJsonArray target = orbit.value(QStringLiteral("target")).toArray();
+    if (target.size() == 3) camera.target = PXR_NS::GfVec3d(target[0].toDouble(), target[1].toDouble(), target[2].toDouble());
+    camera.distance = orbit.value(QStringLiteral("distance")).toDouble(camera.distance);
+    camera.yaw = orbit.value(QStringLiteral("yaw")).toDouble(camera.yaw);
+    camera.pitch = orbit.value(QStringLiteral("pitch")).toDouble(camera.pitch);
+    const PXR_NS::TfToken renderer(state.value(QStringLiteral("renderer")).toString().toStdString());
+    auto apply = [this, camera, renderer]() {
+        const std::vector<PXR_NS::TfToken> plugins = m_viewport->rendererPlugins();
+        if (!renderer.IsEmpty() && std::find(plugins.begin(), plugins.end(), renderer) != plugins.end()) {
+            m_viewport->setRendererPlugin(renderer);
+        }
+        m_viewport->setCameraState(camera);
+    };
+    // As for duplicate(): a viewport that hasn't drawn yet has no renderers to pick from.
+    if (!m_viewport->rendererPlugins().empty()) {
+        apply();
+    } else {
+        connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, apply, Qt::SingleShotConnection);
+    }
 }
 
 bool ViewportViewPanel::fitToView() {

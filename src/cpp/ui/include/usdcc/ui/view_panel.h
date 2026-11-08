@@ -7,6 +7,8 @@
 
 #include <DockWidget.h>
 
+#include <QJsonObject>
+
 class QBoxLayout;
 class QComboBox;
 class QSplitter;
@@ -103,6 +105,14 @@ public:
     virtual ViewPanel* duplicate(QWidget* parent = nullptr) const = 0;
     // Tab > Duplicate: a copy in a tab beside it, with the same title and a name of its own.
     ViewPanel* duplicateBeside();
+
+    // What a session keeps of the panel besides its type, stage and place
+    // (docs/SESSIONS.md §2.4): the camera, the expanded rows, ... Empty by default,
+    // and then the panel comes back as it starts. restoreSessionState() gets what
+    // saveSessionState() returned, after the panel has its stage and the layout is
+    // restored; it skips what no longer fits (a prim that's gone).
+    virtual QJsonObject saveSessionState() const { return {}; }
+    virtual void restoreSessionState(const QJsonObject& state) { Q_UNUSED(state); }
 
 Q_SIGNALS:
     // After the panel switched to another stage (or to none): setStage() or

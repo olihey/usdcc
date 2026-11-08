@@ -302,3 +302,105 @@ def reload_plugin(id):
     """Reloads a plugin, once what's running now has finished, so a plugin's own menu
     action can ask for it (docs/PLUGIN_DEV.md). The Plugins panel shows how it went."""
     _app().reload_plugin(id)
+
+
+# --- Sessions (docs/SESSIONS.md) ----------------------------------------------
+
+
+def sessions():
+    """The saved sessions' names, newest first."""
+    return list(_app().sessions())
+
+
+def current_session():
+    """The name of the session last loaded or saved, or None."""
+    return _app().current_session() or None
+
+
+def save_session(name):
+    """Saves the app as it is now as the session ``name``, replacing one of that name.
+    Unsaved edits to layers aren't in it."""
+    _app().save_session(name)
+
+
+def load_session(name, discard_unsaved=False):
+    """Loads a session by name, or a session file by path, replacing the stages, panels
+    and Script Editor tabs open now. Raises RuntimeError while layers have unsaved edits
+    (unless ``discard_unsaved``), and when the session needs other plugins, which takes
+    a restart: load it from File > Sessions for that."""
+    _app().load_session(name, discard_unsaved)
+
+
+def delete_session(name):
+    """Moves the session's file to the recycle bin."""
+    _app().delete_session(name)
+
+
+def import_session(path, replace=False):
+    """Copies a session file (one someone sent) into the sessions folder and returns
+    its name. Raises if one of that name exists, unless ``replace``."""
+    return _app().import_session(path, replace)
+
+
+def export_session(name, path):
+    """Writes a copy of the session's file to ``path``, to send to someone."""
+    _app().export_session(name, path)
+
+
+_session_savers = {}
+_session_loaders = {}
+
+
+def _session_key(callback, key):
+    key = key or _plugins._owner_of(callback) or (_plugins.current().id if _plugins.current() else None)
+    if not key:
+        raise ValueError("give a key: the callback isn't from a plugin")
+    return key
+
+
+def on_session_save(callback, key=None):
+    """Calls ``callback()`` when a session is saved; what it returns (anything that
+    converts to JSON) is stored in the session under ``key``, by default the id of the
+    plugin the callback is from."""
+    key = _session_key(callback, key)
+    _session_savers[key] = callback
+    _plugins.track(lambda: _session_savers.pop(key, None), callback)
+
+
+def on_session_load(callback, key=None):
+    """Calls ``callback(data)`` when a session is loaded, with what ``on_session_save``'s
+    callback returned for that key, or ``{}`` when the session has nothing for it."""
+    key = _session_key(callback, key)
+    _session_loaders[key] = callback
+    _plugins.track(lambda: _session_loaders.pop(key, None), callback)
+
+
+def _session_save_data():
+    import json
+
+    data = {}
+    for key, callback in list(_session_savers.items()):
+        try:
+            data[key] = callback()
+            json.dumps(data[key])
+        except Exception as error:
+            data.pop(key, None)
+            from usdcc import log
+
+            log.log_exception(type(error), error, error.__traceback__, "session", "session:" + key)
+    return json.dumps(data)
+
+
+def _session_load_data(encoded):
+    import base64
+    import json
+
+    data = json.loads(base64.b64decode(encoded).decode("utf-8")) if encoded else {}
+    for key, callback in list(_session_loaders.items()):
+        try:
+            callback(data.get(key, {}))
+        except Exception as error:
+            from usdcc import log
+
+            log.log_exception(type(error), error, error.__traceback__, "session", "session:" + key)
+    return True

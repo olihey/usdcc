@@ -2,8 +2,10 @@
 
 #include "usdcc/core/export.h"
 
+#include <QJsonObject>
 #include <QList>
 #include <QMainWindow>
+#include <QRect>
 #include <QTimer>
 #include <QVariantMap>
 
@@ -95,6 +97,10 @@ Q_SIGNALS:
     // drops dock widgets added in between; so code that adds panels after
     // start-up (startup scripts) waits for this.
     void layoutSettled();
+    // While the window closes, once every close check has agreed and while it's
+    // still on screen, before its layout is saved: the last chance to look at it
+    // (the Last session is saved from here, docs/SESSIONS.md §4.5).
+    void closing();
 
 public:
 
@@ -108,6 +114,20 @@ public:
     // and cause later-added panels to not display at all. See docs/PLAN.md
     // milestone M3 for how this was diagnosed.
     void restoreLayout();
+
+    // The same layout as a session holds it (docs/SESSIONS.md §2.3): geometry and
+    // window state as base64, the dock layout as XML, collapsed side panels, and the
+    // side panels' sizes as a share of the window.
+    QJsonObject layoutState() const;
+    // Restores one from layoutState(), the panels having been made first (as for
+    // restoreLayout()). `withGeometry`: the window's size and position too (at start);
+    // otherwise only whether it's maximised. Then floating panels are put back on a
+    // screen, and side panels scaled when the window differs in size (§5.2).
+    void restoreLayoutState(const QJsonObject& state, bool withGeometry);
+
+    // Moves every floating panel (view or side panel) that isn't wholly on a screen
+    // onto the nearest one, shrinking it to fit. Done after every restore.
+    void keepFloatingPanelsOnScreen();
 
     // Builds the "View" menu from m_sidePanels, one entry per instance —
     // a future LogSidePanel/ScriptEditorSidePanel/USDASidePanel just needs to
@@ -140,6 +160,11 @@ private:
     SidePanel* sidePanelOfTab(const QTabBar* tabBar, int index) const;
     // Collapses `panel` if the saved layout had it collapsed.
     void restoreCollapsed(SidePanel* panel);
+    // The dock layout, window state and collapsed panels, shared by restoreLayout()
+    // and restoreLayoutState().
+    void applyLayout(const QByteArray& windowState, const QVariantMap& collapsed, const QByteArray& dockLayout);
+    // Side panels to their share of the window (`shares`: objectName -> share).
+    void applySidePanelShares(const QVariantMap& shares);
 
     ads::CDockManager* m_dockManager = nullptr;
     PanelMaximizer* m_panelMaximizer = nullptr;
@@ -161,5 +186,10 @@ private:
     QMenu* m_viewMenu = nullptr;
     QAction* m_viewMenuPanelsEnd = nullptr;
 };
+
+// `rect` moved, and shrunk if it must, so that it lies wholly inside one of
+// `screens` (their available areas): the one it overlaps most, or else the nearest.
+// Unchanged if it's inside one already, or there are none.
+USDCC_UI_API QRect fitOnScreens(const QRect& rect, const QList<QRect>& screens);
 
 }  // namespace usdcc::ui

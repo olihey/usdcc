@@ -41,6 +41,9 @@ public:
     void rebuild(std::shared_ptr<PythonObject> pythonClass);
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+    // The Python panel's save_state() and restore_state() (docs/SESSIONS.md §2.4).
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
     // Public (protected in ViewPanel) so it can be checked without opening
     // the menu.
     void populateOptionsMenu(QMenu* menu) override;

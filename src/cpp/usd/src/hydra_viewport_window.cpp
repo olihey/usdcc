@@ -158,6 +158,13 @@ void HydraViewportWindow::ensureEngine() {
     }
 }
 
+QImage HydraViewportWindow::grabFrame() {
+    if (!m_context || !m_framebuffer || !m_firstFrameRendered || !m_context->makeCurrent(this)) return {};
+    QImage image = m_framebuffer->toImage();
+    m_context->doneCurrent();
+    return image;
+}
+
 void HydraViewportWindow::bindFramebuffer(int width, int height) {
     if (!m_framebuffer || m_framebuffer->size() != QSize(width, height)) {
         m_framebuffer.reset();  // before its replacement exists: one at a time in GPU memory
