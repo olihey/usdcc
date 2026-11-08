@@ -44,6 +44,7 @@ public:
     // Public (protected in ViewPanel) so it can be checked without opening
     // the menu.
     void populateOptionsMenu(QMenu* menu) override;
+    QWidget* createOptionsPanel() override;
 
 protected:
     void onStageChanged(const usdcc::usd::StageRefPtr& stage) override;

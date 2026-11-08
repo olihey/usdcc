@@ -19,11 +19,14 @@ class USDCC_UI_API PanelMenuButton : public PanelIconButton {
 
 public:
     PanelMenuButton(const QString& toolTip, std::function<void(QMenu*)> populate, QWidget* parent = nullptr);
+    // Asked first on each click: true when it took the click, so no menu opens.
+    void setClickHandler(std::function<bool()> handler) { m_clickHandler = std::move(handler); }
 
 private:
     void showMenu();
 
     std::function<void(QMenu*)> m_populate;
+    std::function<bool()> m_clickHandler;
 };
 
 }  // namespace usdcc::ui

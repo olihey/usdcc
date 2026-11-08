@@ -9,6 +9,7 @@
 
 class QBoxLayout;
 class QComboBox;
+class QSplitter;
 class QMenu;
 
 namespace usdcc::usd {
@@ -17,6 +18,7 @@ class StageManager;
 
 namespace usdcc::ui {
 
+class OptionsMenuView;
 class PanelMenuButton;
 
 // Base class for panels living inside the Qt Advanced Docking System
@@ -71,6 +73,27 @@ public:
     void setContentWidget(QWidget* widget);
     QWidget* contentWidget() const;
 
+    // The options: the menu, or the panel's own options panel when it has one
+    // (createOptionsPanel()). Unpinned, the options button opens them in a popup. Pinned, they
+    // stay in a column on the panel's left, a pinned menu as widgets (OptionsMenuView), and the
+    // button unpins them. Pinning is remembered for the panel across a restart.
+    bool hasOptionsPanel();
+    bool isOptionsPinned() const { return m_pinned; }
+    // An options panel's popup, while unpinned: null until first opened.
+    QWidget* optionsPopup() const { return m_popup; }
+    void showOptionsPopup();
+    // The pinned column's menu, for tests: null unless a menu is pinned.
+    OptionsMenuView* pinnedMenu() const { return m_menuView; }
+
+public Q_SLOTS:
+    void setOptionsPinned(bool pinned);
+    // What the options show may have changed, outside them: a renderer switched by a script,
+    // say. A pinned menu is built again; a popup menu is anyway, each time it opens. Python
+    // panels call it as options_changed().
+    void notifyOptionsChanged();
+
+public:
+
     // Creates a copy of this panel, showing the same stage. Subclasses
     // construct their own type (passing currentStage(), not
     // stageManager()->currentStage() — a sibling panel may be showing a
@@ -102,6 +125,11 @@ protected:
     // Fills the options button's menu, built afresh each time it opens so it
     // reflects the current state (e.g. the available renderers).
     virtual void populateOptionsMenu(QMenu* menu) = 0;
+    // A widget for the options instead of the menu, or null (the default) for the menu.
+    // Asked once, when first needed; the panel owns what it returns.
+    virtual QWidget* createOptionsPanel() { return nullptr; }
+
+    void showEvent(QShowEvent* event) override;
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -143,6 +171,16 @@ private:
     usdcc::usd::StageManager* m_stageManager;
     usdcc::usd::StageRefPtr m_stage;
     PanelMenuButton* m_optionsButton;
+    QSplitter* m_split = nullptr;  // the options panel, then the content
+    QWidget* m_content = nullptr;
+    QWidget* m_optionsHost = nullptr;    // the pinned column
+    QWidget* m_optionsBody = nullptr;    // in it, below its header
+    QWidget* m_popup = nullptr;          // an unpinned options panel's
+    QWidget* m_optionsWidget = nullptr;  // from createOptionsPanel()
+    OptionsMenuView* m_menuView = nullptr;  // a pinned menu
+    enum class OptionsPanel { NotAsked, None, Made } m_optionsPanel = OptionsPanel::NotAsked;
+    bool m_pinned = false;
+    bool m_restoredPin = false;
     QComboBox* m_stageCombo;
 
     // Kept alive for as long as this panel should keep receiving

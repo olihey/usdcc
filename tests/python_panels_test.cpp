@@ -14,6 +14,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -28,6 +29,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QStandardPaths>
+#include <QToolButton>
 
 #include <filesystem>
 #include <fstream>
@@ -135,7 +137,10 @@ USDCC_TEST(python_side_panel) {
 
 namespace {
 QString labelText(QWidget* panel) {
-    const auto labels = panel->findChildren<QLabel*>();
+    // In its content: the options column has a label of its own.
+    auto* view = qobject_cast<usdcc::ui::ViewPanel*>(panel);
+    QWidget* content = view && view->contentWidget() ? view->contentWidget() : panel;
+    const auto labels = content->findChildren<QLabel*>();
     return labels.isEmpty() ? QString() : labels.back()->text();
 }
 
@@ -209,6 +214,57 @@ assert ("prim_count", "Prim Count") in usdcc.app.view_panel_types()
               "Duplicate makes another instance on the same stage: [%s]",
               copy ? qPrintable(labelText(copy.get())) : "?");
         copy.reset();
+
+        // A panel with its own options panel: the button shows and hides it, and opens no menu.
+        CHECK(app.python.runString("stage_id = " + std::to_string(stage->cacheId()) + R"(
+import usdcc.app, usdcc.ui, usdcc.usd
+from PySide6 import QtWidgets
+
+class WithOptions(usdcc.ui.ViewPanel):
+    def create_widget(self):
+        return QtWidgets.QLabel("content")
+    def create_options_panel(self):
+        self.options = QtWidgets.QCheckBox("Count Inactive Prims")
+        self.options.setObjectName("pythonOptions")
+        return self.options
+
+usdcc.app.register_view_panel("with_options", "With Options", WithOptions)
+usdcc.app.open_view_panel("with_options", [s for s in usdcc.usd.stages() if usdcc.usd.stage_id(s) == stage_id][0])
+)", "options_panel.py"),
+              "a Python panel with an options panel opens");
+        ScriptedViewPanel* withOptions = nullptr;
+        for (ScriptedViewPanel* scripted : scriptedPanels(window)) {
+            if (scripted->windowTitle() == "With Options") withOptions = scripted;
+        }
+        CHECK(withOptions && withOptions->hasOptionsPanel(), "Python gave it one");
+        CHECK(!panel->hasOptionsPanel(), "one that doesn't keeps its menu");
+        if (withOptions) {
+            auto* button = withOptions->findChild<QToolButton*>(QStringLiteral("panelMenuButton"));
+            CHECK(button != nullptr, "the options button");
+            if (button) button->click();  // a menu would block here, until closed
+            QWidget* popup = withOptions->optionsPopup();
+            CHECK(popup && popup->isVisible(), "the button opens it in a popup");
+            auto* box = popup ? popup->findChild<QWidget*>(QStringLiteral("pythonOptions")) : nullptr;
+            CHECK(box && !box->isHidden(), "the Python widget, in it");
+            if (popup) popup->close();
+            withOptions->setOptionsPinned(true);
+            CHECK(withOptions->isOptionsPinned() && box && !box->isHidden() && !popup->isAncestorOf(box), "and pinned beside the panel");
+            withOptions->setOptionsPinned(false);
+        }
+
+        // options_changed() reaches the panel: a pinned menu is built again.
+        panel->setOptionsPinned(true);
+        const int builds = panel->pinnedMenu() ? panel->pinnedMenu()->rebuildCount() : -1;
+        CHECK(app.python.runString("import gc\nfrom usdcc import ui\n"
+                                   "[o for o in gc.get_objects() if type(o).__name__ == 'PrimCount'][0].options_changed()\n",
+                                   "options_changed.py"),
+              "a Python panel says its options changed");
+        QElapsedTimer waited;
+        waited.start();
+        while (waited.elapsed() < 80) QCoreApplication::processEvents();
+        CHECK(panel->pinnedMenu() && panel->pinnedMenu()->rebuildCount() == builds + 1, "and its pinned menu is built again: %d",
+              panel->pinnedMenu() ? panel->pinnedMenu()->rebuildCount() - builds : -1);
+        panel->setOptionsPinned(false);
 
         CHECK(!app.python.runString("import usdcc.app, usdcc.ui\n"
                                     "class X(usdcc.ui.ViewPanel): pass\n"

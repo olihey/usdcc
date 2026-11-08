@@ -106,6 +106,23 @@ void ScriptedViewPanel::populateOptionsMenu(QMenu* menu) {
     }
 }
 
+QWidget* ScriptedViewPanel::createOptionsPanel() {
+    if (!m_instance) return nullptr;
+    // The Python widget goes in here, as the content does in m_host.
+    auto* host = new QWidget(this);
+    host->setObjectName(QStringLiteral("scriptedPanelOptions"));
+    auto* layout = new QVBoxLayout(host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    py::gil_scoped_acquire gil;
+    try {
+        if (bridge("_view_panel_options_panel")(m_instance->object, reinterpret_cast<std::uintptr_t>(host)).cast<bool>()) return host;
+    } catch (py::error_already_set& error) {
+        logPythonError(error);
+    }
+    delete host;
+    return nullptr;
+}
+
 void ScriptedViewPanel::onStageChanged(const StageRefPtr& stage) {
     if (!m_instance) return;
     py::gil_scoped_acquire gil;

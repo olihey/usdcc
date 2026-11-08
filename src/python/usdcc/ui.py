@@ -12,6 +12,7 @@ for usdcc (tools/build-pyside.ps1); without it, importing this raises ImportErro
 # PySide6 first: importing it adds its folder (Qt, shiboken6 and pyside6
 # DLLs) to the DLL search path that _ui.pyd needs.
 import shiboken6 as _shiboken
+from PySide6 import QtCore as _QtCore
 from PySide6 import QtGui as _QtGui
 from PySide6 import QtWidgets as _QtWidgets
 from pxr import Tf as _Tf
@@ -50,6 +51,13 @@ class ViewPanel:
       ``None``) right after that and whenever the user picks another one.
     - ``populate_options_menu(menu)`` may add actions to the options menu (a
       ``QMenu``, built afresh each time it opens).
+    - ``create_options_panel()`` may return a widget for the options instead of the
+      menu: the options button opens it in a popup. Called once, when first needed;
+      the panel takes ownership. ``None`` (the default) keeps the menu.
+    - Either can be pinned, from the menu or the popup: then it stays in a column on
+      the panel's left (a menu as checkboxes and buttons), until unpinned.
+      ``options_changed()`` says what the options show changed outside them, so a
+      pinned menu is built again.
 
     ``self.stage`` is the stage shown, ``self.widget`` the content widget.
     Exceptions raised from these methods are logged (python.exception).
@@ -66,6 +74,14 @@ class ViewPanel:
 
     def populate_options_menu(self, menu):
         pass
+
+    def create_options_panel(self):
+        return None
+
+    def options_changed(self):
+        """Says what the options show has changed, outside them: a pinned menu is
+        built again, as a popup menu is each time it opens."""
+        _notify_options_changed(self.widget)
 
 
 class RenderCamera:
@@ -174,6 +190,10 @@ class RenderViewPanel:
     def populate_options_menu(self, menu):
         pass
 
+    def options_changed(self):
+        """Says what the options show has changed: a pinned menu is built again."""
+        _notify_options_changed(self._widget)
+
     def close(self):
         pass
 
@@ -239,6 +259,15 @@ class RenderViewPanel:
         return self._panel is not None and self._panel.alive()
 
 
+def _notify_options_changed(widget):
+    # The panel is the content's first ancestor that has the slot.
+    while widget is not None:
+        if widget.metaObject().indexOfMethod("notifyOptionsChanged()") >= 0:
+            _QtCore.QMetaObject.invokeMethod(widget, "notifyOptionsChanged")
+            return
+        widget = widget.parentWidget()
+
+
 # The C++ side of a Python view panel (ScriptedViewPanel) calls these with
 # addresses and cache ids; they hand PySide objects and Usd.Stages on.
 
@@ -265,6 +294,19 @@ def _view_panel_stage_changed(panel, cache_id):
 
 def _view_panel_options(panel, menu_address):
     panel.populate_options_menu(_shiboken.wrapInstance(menu_address, _QtWidgets.QMenu))
+
+
+def _view_panel_options_panel(panel, host_address):
+    widget = panel.create_options_panel()
+    if widget is None:
+        return False
+    if not isinstance(widget, _QtWidgets.QWidget):
+        raise TypeError("%s.create_options_panel() returned %s, not a QWidget" % (type(panel).__name__, type(widget).__name__))
+    host = _shiboken.wrapInstance(host_address, _QtWidgets.QWidget)
+    # Parenting it from Python hands its ownership to the panel.
+    widget.setParent(host)
+    host.layout().addWidget(widget)
+    return True
 
 
 # The C++ side of a render view panel (ScriptedRenderViewPanel) calls these.

@@ -91,6 +91,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     setContentWidget(container);
 
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
+    // The options list the renderers, and tick the one in use, which a script can switch.
+    connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::notifyOptionsChanged);
+    connect(m_viewport, &HydraViewportWindow::rendererChanged, this, &ViewportViewPanel::notifyOptionsChanged);
     // A click in the viewport focuses this panel, which makes its stage the
     // current one (CurrentStageTracker): ADS doesn't see the native window's
     // focus. Only the highlight moves; the viewport keeps the keyboard.

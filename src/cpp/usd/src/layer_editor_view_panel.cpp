@@ -308,6 +308,7 @@ void LayerEditorViewPanel::refresh() {
                                            : tr("%1, in %2").arg(variant, qs(target->displayName)));
     m_editing->setToolTip(target ? qs(target->identifier) : QString());
     updateProperties();
+    notifyOptionsChanged();  // Save All is there when something's unsaved
 }
 
 void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* parent) {

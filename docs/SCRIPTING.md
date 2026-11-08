@@ -335,7 +335,22 @@ usdcc.app.add_side_panel(NotesPanel(), "left")
   - `create_widget()` returns the content, which the panel takes ownership of;
   - `stage_changed(stage)` gets the shown `Usd.Stage` (or `None`) at the start and on every
     change;
-  - `populate_options_menu(menu)` fills the options menu.
+  - `populate_options_menu(menu)` fills the options menu;
+  - `create_options_panel()` may return a widget for the options instead of the menu: the
+    options button opens it in a popup. It's asked once, when first needed. `None`, the
+    default, keeps the menu. C++ panels override `ViewPanel::createOptionsPanel()`. A
+    `RenderViewPanel` doesn't offer it yet.
+  - **Pinning:** the menu ("Pin to Side") or the popup (its Pin to Side button) can be pinned.
+    Then it stays in a column on the panel's left, full height, and the options button, or
+    the column's Unpin, puts it back. A pinned menu is drawn as widgets (`OptionsMenuView`): a
+    checkbox for an option that can be ticked, a radio button for one of a group, a button
+    for an action, a titled group for a submenu. Pinning is remembered for each panel across
+    a restart.
+  - **Keeping a pinned menu current:** it's built again after one of its entries is used,
+    when one of its actions changes, and when the panel changes stage. When what it shows
+    changes some other way, the panel calls `notifyOptionsChanged()` (C++) or
+    `self.options_changed()` (Python). The viewport does for its renderers, and Layers for
+    Save All.
 
   `self.stage` and `self.widget` hold the current stage and the content. An exception in
   this code is logged; if `create_widget()` fails, the panel says so instead.

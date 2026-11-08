@@ -116,6 +116,8 @@ public:
 
 Q_SIGNALS:
     void rendererPluginsChanged();
+    // setRendererPlugin() switched it.
+    void rendererChanged();
 
     // Any mouse button pressed in the viewport. Its panel takes this as
     // focus: a native window's focus doesn't reach ADS's focus tracking.

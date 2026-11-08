@@ -218,6 +218,7 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
     m_context->makeCurrent(this);
     if (m_engine->SetRendererPlugin(pluginId)) {
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}", m_engine->GetRendererDisplayName(pluginId));
+        Q_EMIT rendererChanged();
     } else {
         USDCC_LOG_WARNING("usdcc.viewport", "Could not switch the viewport to renderer {}", pluginId.GetString());
     }

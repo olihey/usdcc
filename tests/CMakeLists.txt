@@ -88,6 +88,7 @@ add_executable(usdcc_ui_tests
     usda_view_test.cpp
     variant_editor_test.cpp
     view_panel_layout_test.cpp
+    view_panel_options_test.cpp
     panel_maximizer_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
