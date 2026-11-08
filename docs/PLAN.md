@@ -546,7 +546,7 @@ things that will bite later if not addressed early:
     captured pointer dangled (reproducible `0xc0000005` crash in `Qt6Core.dll`); (b) an ADS
     dock widget's objectName (defaults to its title) must be unique and is its identity in saved
     layouts, so the startup viewport keeps the stable name `"Viewport"` and later ones get a
-    pretty title (`Viewport - <stage>`) plus a separate unique objectName (`Viewport-<cacheId>`).
+    plain title (`Viewport`: a tab never names its stage or says "copy") plus a separate unique objectName (`Viewport-<cacheId>`).
     Two things a future verifier should know: Qt's `AppConfigLocation` on Windows resolves via the
     Known Folder API, so overriding `%LOCALAPPDATA%` does **not** isolate `usdcc.ini` — move the
     file aside to test a clean layout; and `Stop-Process` kills skip `closeEvent`, so test runs

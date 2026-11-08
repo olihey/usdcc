@@ -78,6 +78,8 @@ public:
     // values make the duplicate meaningfully match the original (e.g. the
     // camera position, selection).
     virtual ViewPanel* duplicate(QWidget* parent = nullptr) const = 0;
+    // Tab > Duplicate: a copy in a tab beside it, with the same title and a name of its own.
+    ViewPanel* duplicateBeside();
 
 Q_SIGNALS:
     // After the panel switched to another stage (or to none): setStage() or

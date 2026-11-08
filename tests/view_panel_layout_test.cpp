@@ -92,6 +92,10 @@ USDCC_TEST(view_panel_opened_from_stages_menu_survives_restart) {
         ViewPanel* opened = first.registry.open(QStringLiteral("outliner"), stage, first.window.dockManager(), &first.window);
         CHECK(opened && !opened->isClosed(), "an Outliner opened for the stage");
         if (!opened) return;
+        CHECK(opened->windowTitle() == "Outliner", "its tab says what it is, not its stage: %s", qPrintable(opened->windowTitle()));
+        ViewPanel* copy = opened->duplicateBeside();
+        CHECK(copy && copy->windowTitle() == "Outliner", "a duplicate has the same title, without \"copy\": %s", copy ? qPrintable(copy->windowTitle()) : "");
+        CHECK(copy && copy->objectName() != opened->objectName() && first.window.dockManager()->findDockWidget(opened->objectName()) == opened, "and a name of its own, so the first is still found by its own");
         name = opened->objectName();
         first.close();
     }
@@ -99,6 +103,7 @@ USDCC_TEST(view_panel_opened_from_stages_menu_survives_restart) {
         Session second(stages, undo);
         ads::CDockWidget* restored = second.panel(name);
         CHECK(restored && !restored->isClosed(), "it's back after a restart: %s", qPrintable(name));
+        CHECK(restored && restored->windowTitle() == "Outliner", "with the same plain title: %s", restored ? qPrintable(restored->windowTitle()) : "");
         auto* outliner = qobject_cast<OutlinerViewPanel*>(restored);
         CHECK(outliner && outliner->currentStage() == stage, "showing its stage, which is still open");
         CHECK(second.panel("Outliner") && !second.panel("Outliner")->isClosed(), "the startup Outliner too");

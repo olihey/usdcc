@@ -137,28 +137,26 @@ void ViewPanel::populateContextMenu(QMenu* menu) {
         menu->addAction(maximizer->isMaximized(this) ? tr("Restore Layout") : tr("Maximize"), this,
                         [this, maximizer]() { maximizer->toggle(this); });
     }
-    menu->addAction(tr("Duplicate"), this, [this]() {
-        auto* copy = duplicate(window());
+    menu->addAction(tr("Duplicate"), this, [this]() { duplicateBeside(); });
+}
 
-        // ads::CDockManager looks dock widgets up by objectName() (CDockWidget's
-        // constructor sets that to its title); giving the duplicate the exact
-        // same title/objectName as this panel would silently overwrite this
-        // panel's entry in that lookup map once both are docked, since
-        // QMap::insert() replaces same-key entries rather than rejecting
-        // them. Find a free "<title> (Copy N)" name instead.
-        QString candidateTitle = tr("%1 (Copy)").arg(windowTitle());
-        for (int suffix = 2; dockManager() && dockManager()->findDockWidget(candidateTitle); ++suffix) {
-            candidateTitle = tr("%1 (Copy %2)").arg(windowTitle()).arg(suffix);
-        }
-        copy->setWindowTitle(candidateTitle);
-        copy->setObjectName(candidateTitle);
-        // So it is made again after a restart (ViewPanelRegistry::savePanels()).
-        copy->setProperty(ViewPanelRegistry::kTypeProperty, property(ViewPanelRegistry::kTypeProperty));
+ViewPanel* ViewPanel::duplicateBeside() {
+    auto* copy = duplicate(window());
 
-        if (auto* area = dockAreaWidget()) {
-            dockManager()->addDockWidgetTabToArea(copy, area);
-        }
-    });
+    // The same title: a tab never says "copy". ads::CDockManager looks dock widgets
+    // up by objectName(), and the same one would silently replace this panel's entry
+    // in that map once both are docked, so that one has to be new.
+    copy->setWindowTitle(windowTitle());
+    copy->setObjectName(uniqueName(objectName(), [this](const QString& name) {
+        return dockManager() && dockManager()->findDockWidget(name) != nullptr;
+    }));
+    // So it is made again after a restart (ViewPanelRegistry::savePanels()).
+    copy->setProperty(ViewPanelRegistry::kTypeProperty, property(ViewPanelRegistry::kTypeProperty));
+
+    if (auto* area = dockAreaWidget()) {
+        dockManager()->addDockWidgetTabToArea(copy, area);
+    }
+    return copy;
 }
 
 bool ViewPanel::eventFilter(QObject* watched, QEvent* event) {

@@ -48,10 +48,8 @@ ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRef
     if (!entry || !entry->create || !stage) {
         return nullptr;
     }
-    // An in-memory stage by its whole identifier, as they'd all read the same otherwise.
-    const PXR_NS::SdfLayerHandle rootLayer = stage->usdStage()->GetRootLayer();
-    const QString stageName = QString::fromStdString(rootLayer->IsAnonymous() ? rootLayer->GetIdentifier() : rootLayer->GetDisplayName());
-    ViewPanel* panel = entry->create(stage, QStringLiteral("%1 - %2").arg(entry->displayName, stageName), parent);
+    // Its type's name alone: a tab says nothing of its stage, which its own dropdown shows.
+    ViewPanel* panel = entry->create(stage, entry->displayName, parent);
     if (!panel) {
         return nullptr;
     }
@@ -115,9 +113,8 @@ void ViewPanelRegistry::restorePanels(ads::CDockManager* dockManager, QWidget* p
         if (!entry || !entry->create || name.isEmpty() || dockManager->findDockWidget(name)) continue;
         const QString identifier = saved.value(QStringLiteral("stage")).toString();
         const usdcc::usd::StageRefPtr stage = identifier.isEmpty() || !findStage ? nullptr : findStage(identifier);
-        // Without its stage the title would name a file that isn't open.
-        const QString title = stage ? saved.value(QStringLiteral("title")).toString() : entry->displayName;
-        ViewPanel* panel = entry->create(stage, title, parent);
+        // Its type's name, not the saved title, which may have named its stage.
+        ViewPanel* panel = entry->create(stage, entry->displayName, parent);
         if (!panel) continue;
         panel->setProperty(kTypeProperty, entry->id);
         panel->setObjectName(name);
