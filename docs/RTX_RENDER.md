@@ -138,6 +138,33 @@ they cannot serve as a fallback. Deploy replacement removes stale deploy files.
 Previously installed shared Python packages remain because user scripts may use
 them.
 
+### Licensing: ship the plugin, not the runtime
+
+Checked on 2026-11-08 against what NVIDIA publishes online. This is not legal advice, and the LICENSE
+in the pinned ovrtx 0.6.0 package wasn't read, as no copy was on the machine; GitHub's current one was.
+
+- **The plugin** is usdcc's own code under its BSD-3-Clause licence, and ships with every deploy.
+- **ovrtx and ovstage** are NVIDIA's. PyPI marks ovrtx `LicenseRef-NvidiaProprietary` and Alpha; its
+  LICENSE points to the NVIDIA Software License Agreement and the Product Specific Terms for AI Products.
+  ovstage states no licence of its own. Those terms allow distribution only "as part of a Customer
+  Product", and with conditions:
+  - the grant is "subject to the Part Number or Order Form and payment of fees", and it isn't clear that
+    covers a free download with no order;
+  - end users need terms "at least as protective as" NVIDIA's, which usdcc's BSD licence isn't;
+  - Omniverse software is "licensed solely to run on systems with NVIDIA Platforms";
+  - no modifying the runtime or removing its notices, and NVIDIA may ask for usage reports, up to monthly;
+  - pre-release software is "not intended for use in business-critical systems".
+- **The Omniverse MDL files** that come with ovrtx haven't been reviewed (MATERIAL_EDITOR.md §6, 7).
+
+So a public deploy omits the runtime, as the default deploy does, and each user installs ovrtx and accepts
+NVIDIA's terms themselves. Don't publish a `-BundleRtxRuntime` deploy without NVIDIA's written agreement
+that free ovrtx can be redistributed inside a BSD-licensed app, and on which end-user terms.
+
+Sources: [ovrtx on PyPI](https://pypi.org/project/ovrtx/),
+[its LICENSE](https://github.com/NVIDIA-Omniverse/ovrtx/blob/main/LICENSE),
+[NVIDIA Software License Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/),
+[Product Specific Terms for AI Products](https://www.nvidia.com/en-us/agreements/enterprise-software/product-specific-terms-for-ai-products/).
+
 ## Validation and milestone record
 
 M1-M4 supplied the native plugin, presentation, stage bridge, navigation and
