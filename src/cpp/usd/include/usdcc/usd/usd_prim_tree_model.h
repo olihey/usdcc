@@ -48,6 +48,7 @@ public:
     explicit UsdPrimTreeModel(QObject* parent = nullptr);
 
     void setStage(const PXR_NS::UsdStageRefPtr& stage);
+    const PXR_NS::UsdStageRefPtr& stage() const { return m_stage; }
     // Only to look at (Show Prims): no rename, no active checkbox.
     void setReadOnly(bool readOnly) { m_readOnly = readOnly; }
     // Asked for each row when one is needed (a relationship's target dialog): one

@@ -4,6 +4,7 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/outliner_item_delegate.h"
+#include "usdcc/usd/prim_tree_filter.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/stage_manager.h"
@@ -66,8 +67,10 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     m_expandToSelection->setChecked(usdcc::ui::appSettings().value(kExpandToSelectionKey, true).toBool());
 
     m_model = new UsdPrimTreeModel(this);
+    m_proxy = new PrimTreeFilterProxy(this);
+    m_proxy->setPrimModel(m_model);
     m_treeView = new QTreeView(container);
-    m_treeView->setModel(m_model);
+    m_treeView->setModel(m_proxy);
     // Prim icons, and the active checkbox at the row's right edge.
     m_treeView->setItemDelegate(new OutlinerItemDelegate(m_treeView));
     usdcc::ui::scaled::iconSize(m_treeView, 16, 16);
@@ -87,7 +90,17 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     usdcc::ui::scaled::margins(m_dropNote, 8, 4, 8, 4);
     m_dropNote->hide();
 
+    // A search and the types to show, on a row of their own below the toolbar.
+    auto* filterRow = new QWidget(container);
+    filterRow->setObjectName(QStringLiteral("panelToolbar"));
+    filterRow->setAttribute(Qt::WA_StyledBackground);
+    auto* filterLayout = new QHBoxLayout(filterRow);
+    usdcc::ui::scaled::margins(filterLayout, 4, 0, 4, 4);
+    m_filterBar = new PrimTreeFilterBar(m_treeView, m_proxy, filterRow);
+    filterLayout->addWidget(m_filterBar);
+
     layout->addWidget(toolbar);
+    layout->addWidget(filterRow);
     layout->addWidget(m_treeView, 1);
     layout->addWidget(m_dropNote);
 
@@ -198,7 +211,7 @@ void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
     context.stageManager = stageManager();
     context.stage = currentStage();
     context.paths = stageManager()->selectedPaths(currentStage());
-    context.clicked = m_model->pathForIndex(index);
+    context.clicked = m_model->pathForIndex(m_proxy->mapToSource(index));
     context.dialogParent = this;
     context.move = [this](int direction) { moveSelectedPrim(direction); };
     context.loadChanged = [this]() { dropMissingSelection(); };
@@ -277,10 +290,10 @@ void OutlinerViewPanel::saveViewState() {
     while (!pending.empty()) {
         const QModelIndex parent = pending.back();
         pending.pop_back();
-        for (int row = 0; row < m_model->rowCount(parent); ++row) {
-            const QModelIndex index = m_model->index(row, 0, parent);
+        for (int row = 0; row < m_proxy->rowCount(parent); ++row) {
+            const QModelIndex index = m_proxy->index(row, 0, parent);
             if (m_treeView->isExpanded(index)) {
-                m_expandedPaths.insert(m_model->pathForIndex(index));
+                m_expandedPaths.insert(m_model->pathForIndex(m_proxy->mapToSource(index)));
                 pending.push_back(index);  // collapsed subtrees keep their children's state hidden anyway
             }
         }
@@ -293,12 +306,13 @@ void OutlinerViewPanel::restoreViewState() {
     }
     for (const PXR_NS::SdfPath& saved : m_expandedPaths) {
         const PXR_NS::SdfPath path = pathAfterMoves(saved, m_movesToRestore);
-        const QModelIndex index = m_model->fetchPath(path);  // loads instance proxies as needed
+        const QModelIndex index = m_proxy->mapFromSource(m_model->fetchPath(path));  // loads instance proxies as needed
         if (index.isValid()) {
             m_treeView->setExpanded(index, true);
         }
     }
     m_movesToRestore.clear();
+    m_filterBar->reapply();  // while filtering, everything that shows is open
     onStageSelectionChanged(currentStage(), stageManager()->selectedPaths(currentStage()));
     // After the view has laid out the restored rows.
     const int scrollPosition = m_scrollPosition;
@@ -311,7 +325,7 @@ void OutlinerViewPanel::onTreeSelectionChanged() {
     }
     std::vector<PXR_NS::SdfPath> paths;
     for (const QModelIndex& index : m_treeView->selectionModel()->selectedIndexes()) {
-        paths.push_back(m_model->pathForIndex(index));
+        paths.push_back(m_model->pathForIndex(m_proxy->mapToSource(index)));
     }
     stageManager()->setSelectedPaths(currentStage(), paths);
 }
@@ -325,7 +339,7 @@ void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
     for (const auto& path : paths) {
         // A prim inside an instance (picked in a viewport) is an instance
         // proxy, which the tree loads on demand.
-        const QModelIndex index = m_model->fetchPath(path);
+        const QModelIndex index = m_proxy->mapFromSource(m_model->fetchPath(path));  // invalid when filtered out
         if (index.isValid()) {
             selection.select(index, index);
         }
@@ -341,7 +355,7 @@ void OutlinerViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
 void OutlinerViewPanel::expandToSelection(const std::vector<PXR_NS::SdfPath>& paths) {
     QModelIndex first;
     for (const PXR_NS::SdfPath& path : paths) {
-        const QModelIndex index = m_model->fetchPath(path);
+        const QModelIndex index = m_proxy->mapFromSource(m_model->fetchPath(path));
         if (!index.isValid()) {
             continue;
         }
@@ -363,14 +377,16 @@ void OutlinerViewPanel::moveSelectedPrim(int direction) {
         return;
     }
 
-    const PXR_NS::SdfPath path = m_model->pathForIndex(selected.first());
+    // In the model, not as filtered: a move is among all its siblings.
+    const QModelIndex source = m_proxy->mapToSource(selected.first());
+    const PXR_NS::SdfPath path = m_model->pathForIndex(source);
     const PXR_NS::UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
     const PXR_NS::UsdPrim parent = prim ? prim.GetParent() : PXR_NS::UsdPrim();
     if (!prim || !parent) {
         return;
     }
     const int row = selected.first().row();
-    const int siblings = m_model->rowCount(selected.first().parent());
+    const int siblings = m_model->rowCount(source.parent());
     if ((direction < 0 && row == 0) || (direction > 0 && row + 1 >= siblings)) {
         return;  // already first/last
     }

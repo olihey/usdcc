@@ -12,16 +12,18 @@
 #include <set>
 
 class QLineEdit;
-class QSortFilterProxyModel;
 class QTimer;
 class QTreeView;
 
 namespace usdcc::usd {
 
+class PrimTreeFilterBar;
+class PrimTreeFilterProxy;
+
 // A stage's prims as a read-only tree that looks like the Outliner (its model and
-// delegate), with a name filter above it: Show Prims and the relationship target
-// dialog. The filter keeps the prims whose name contains its text, and their
-// ancestors, then restores what was open when it's cleared. An instance's contents
+// delegate), with a search and a type filter above it (PrimTreeFilterBar): Show Prims and
+// the relationship target dialog. They keep the prims that match, and their
+// ancestors, then restore what was open when cleared. An instance's contents
 // load when it's expanded, so until then they can't match.
 class USDCC_USD_UI_API PrimTreeWidget : public QWidget {
     Q_OBJECT
@@ -40,10 +42,13 @@ public:
     // Selects it, opening its ancestors; false if it isn't in the tree.
     bool selectPath(const PXR_NS::SdfPath& path);
 
-    QLineEdit* filterEdit() const { return m_filter; }
-    // Filters at once (typing waits for a pause).
+    QLineEdit* filterEdit() const;
+    PrimTreeFilterBar* filterBar() const { return m_filterBar; }
+    // By name, at once (typing waits for a pause). The bar also filters by type.
     void setFilter(const QString& text);
-    bool isFiltering() const { return m_filtering; }
+    // Name and types both.
+    void clearFilter();
+    bool isFiltering() const;
     // The prims the filter matches, not counting their ancestors.
     int matchCount() const;
 
@@ -54,20 +59,16 @@ Q_SIGNALS:
     void rowActivated();
 
 private:
-    void applyFilter();
     std::set<PXR_NS::SdfPath> expandedPaths() const;
     void expandPaths(const std::set<PXR_NS::SdfPath>& paths);
     void expandRoots();
 
     UsdPrimTreeModel* m_model;
-    QSortFilterProxyModel* m_proxy;
-    QLineEdit* m_filter;
+    PrimTreeFilterProxy* m_proxy;
+    PrimTreeFilterBar* m_filterBar;
     QTreeView* m_tree;
-    QTimer* m_filterTimer;
-    bool m_filtering = false;  // the proxy has a filter
-    // What was open: across a rebuild, and while a filter opens everything.
+    // What was open across a rebuild.
     std::set<PXR_NS::SdfPath> m_expanded;
-    std::set<PXR_NS::SdfPath> m_expandedBeforeFilter;
 };
 
 }  // namespace usdcc::usd

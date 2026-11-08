@@ -91,11 +91,15 @@ Below Show USDA, enabled exactly where it is:
 ## 7. As built
 
 - **The filter:**
-  - Above the tree, "Filter by name", applied 200 ms after typing pauses (a `QSortFilterProxyModel`
-    over the Outliner's model). It ignores case and keeps each match's ancestors.
+  - Above the tree, "Search prims by name", applied 200 ms after typing pauses, and a Types menu
+    listing the types the stage has, with how many of each. Ticking types shows only prims of those,
+    and a prim has to match both. It's `PrimTreeFilterBar` over a `PrimTreeFilterProxy`
+    (`prim_tree_filter.h`), the same as above the Outliner and in the relationship target dialog. It
+    ignores case and keeps each match's ancestors.
   - Everything left is expanded so every match shows. The status line says "12 matches", counting
     the matches only, not their ancestors.
-  - Clearing it restores what was open before. Esc clears it first, then closes the dialog.
+  - Clearing it restores what was open before, including what the filter hid. Esc clears both the
+    search and the types first, then closes the dialog.
   - While the stage has instances, the status line adds "instances: expand to search inside".
 - **Status line:** the prim count (instance contents not included) and how many payloads aren't
   loaded.

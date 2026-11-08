@@ -19,6 +19,8 @@ class QTreeView;
 namespace usdcc::usd {
 
 class StageManager;
+class PrimTreeFilterBar;
+class PrimTreeFilterProxy;
 class UsdPrimTreeModel;
 class UndoManager;
 
@@ -81,6 +83,8 @@ private:
 
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
+    PrimTreeFilterProxy* m_proxy = nullptr;
+    PrimTreeFilterBar* m_filterBar = nullptr;
     QLabel* m_dropNote;  // why a drop is refused, while hovering it
     QAction* m_expandToSelection;
     bool m_updatingSelection = false;

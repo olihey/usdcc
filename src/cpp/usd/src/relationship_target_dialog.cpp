@@ -80,10 +80,10 @@ PXR_NS::SdfPath RelationshipTargetDialog::selectedPath() const {
 }
 
 void RelationshipTargetDialog::reject() {
-    if (m_tree->filterEdit()->text().isEmpty()) {
+    if (!m_tree->isFiltering()) {
         QDialog::reject();
     } else {
-        m_tree->setFilter(QString());
+        m_tree->clearFilter();
     }
 }
 

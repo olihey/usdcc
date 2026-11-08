@@ -27,6 +27,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QSortFilterProxyModel>
 #include <QTreeView>
 #include <QUndoStack>
 
@@ -135,12 +136,14 @@ USDCC_TEST(outliner_drag_reparents_and_reorders) {
     panel.show();
     settle();
     auto* tree = panel.findChild<QTreeView*>();
-    auto* model = static_cast<UsdPrimTreeModel*>(tree->model());
+    auto* proxy = static_cast<QSortFilterProxyModel*>(tree->model());  // the search and type filter
+    auto* model = static_cast<UsdPrimTreeModel*>(proxy->sourceModel());
+    [[maybe_unused]] const auto view = [proxy](const QModelIndex& index) { return proxy->mapFromSource(index); };
     CHECK(tree->dragEnabled() && tree->acceptDrops() && tree->dragDropMode() == QAbstractItemView::InternalMove, "the tree drags");
 
     s.manager.setSelectedPaths(s.stage, {SdfPath("/A/Kid")});
-    tree->expand(model->fetchPath(SdfPath("/A/Kid")));
-    tree->collapse(model->fetchPath(SdfPath("/B")));
+    tree->expand(view(model->fetchPath(SdfPath("/A/Kid"))));
+    tree->collapse(view(model->fetchPath(SdfPath("/B"))));
     settle();
 
     CHECK(drop(model, {"/A/Kid"}, "/B"), "the drop's accepted");
@@ -149,15 +152,15 @@ USDCC_TEST(outliner_drag_reparents_and_reorders) {
     CHECK(s.has("/B/Kid/Deep") && !s.has("/A/Kid"), "then it moves");
     CHECK(s.manager.selectedPaths(s.stage) == std::vector<SdfPath>{SdfPath("/B/Kid")}, "the selection follows");
     QModelIndex moved = model->fetchPath(SdfPath("/B/Kid"));
-    CHECK(moved.isValid() && tree->isExpanded(moved), "it stays expanded");
-    CHECK(tree->isExpanded(model->fetchPath(SdfPath("/B"))), "and shows, under a parent that was collapsed");
-    CHECK(tree->selectionModel()->isSelected(moved), "selected in the tree");
+    CHECK(moved.isValid() && tree->isExpanded(view(moved)), "it stays expanded");
+    CHECK(tree->isExpanded(view(model->fetchPath(SdfPath("/B")))), "and shows, under a parent that was collapsed");
+    CHECK(tree->selectionModel()->isSelected(view(moved)), "selected in the tree");
 
     s.undo->stack(s.stage)->undo();
     settle();
     CHECK(s.has("/A/Kid") && !s.has("/B/Kid"), "undo");
     CHECK(s.manager.selectedPaths(s.stage) == std::vector<SdfPath>{SdfPath("/A/Kid")}, "the selection goes back too");
-    CHECK(tree->isExpanded(model->fetchPath(SdfPath("/A/Kid"))), "still expanded");
+    CHECK(tree->isExpanded(view(model->fetchPath(SdfPath("/A/Kid")))), "still expanded");
 
     // Between rows: the row is where among the parent's children.
     CHECK(drop(model, {"/B/Two"}, "/B", 0), "between rows");
@@ -183,7 +186,9 @@ USDCC_TEST(outliner_drag_shows_why_not) {
     panel.show();
     settle();
     auto* tree = panel.findChild<QTreeView*>();
-    auto* model = static_cast<UsdPrimTreeModel*>(tree->model());
+    auto* proxy = static_cast<QSortFilterProxyModel*>(tree->model());  // the search and type filter
+    auto* model = static_cast<UsdPrimTreeModel*>(proxy->sourceModel());
+    [[maybe_unused]] const auto view = [proxy](const QModelIndex& index) { return proxy->mapFromSource(index); };
     QLabel* note = nullptr;
     for (auto* label : panel.findChildren<QLabel*>(QStringLiteral("propertyNote"))) note = label;
     CHECK(note && !note->isVisible(), "no note at first");
@@ -213,7 +218,7 @@ USDCC_TEST(outliner_drag_asks_before_changing_other_layers) {
     OutlinerViewPanel panel(&s.manager, s.stage, s.undo, QStringLiteral("Outliner"));
     panel.show();
     settle();
-    auto* model = static_cast<UsdPrimTreeModel*>(panel.findChild<QTreeView*>()->model());
+    auto* model = static_cast<UsdPrimTreeModel*>(static_cast<QSortFilterProxyModel*>(panel.findChild<QTreeView*>()->model())->sourceModel());
 
     bool asked = false;
     QString text;
@@ -263,16 +268,18 @@ USDCC_TEST(outliner_rename_follows_on_undo) {
     panel.show();
     settle();
     auto* tree = panel.findChild<QTreeView*>();
-    auto* model = static_cast<UsdPrimTreeModel*>(tree->model());
+    auto* proxy = static_cast<QSortFilterProxyModel*>(tree->model());  // the search and type filter
+    auto* model = static_cast<UsdPrimTreeModel*>(proxy->sourceModel());
+    [[maybe_unused]] const auto view = [proxy](const QModelIndex& index) { return proxy->mapFromSource(index); };
     s.manager.setSelectedPaths(s.stage, {SdfPath("/A")});
-    tree->expand(model->fetchPath(SdfPath("/A")));
+    tree->expand(view(model->fetchPath(SdfPath("/A"))));
     settle();
     CHECK(model->setData(model->fetchPath(SdfPath("/A")), QStringLiteral("Z"), Qt::EditRole), "renames");
     settle();
     CHECK(s.manager.selectedPaths(s.stage) == std::vector<SdfPath>{SdfPath("/Z")}, "the selection follows");
-    CHECK(tree->isExpanded(model->fetchPath(SdfPath("/Z"))), "stays expanded");
+    CHECK(tree->isExpanded(view(model->fetchPath(SdfPath("/Z")))), "stays expanded");
     s.undo->stack(s.stage)->undo();
     settle();
     CHECK(s.manager.selectedPaths(s.stage) == std::vector<SdfPath>{SdfPath("/A")}, "undo: the selection comes back");
-    CHECK(tree->isExpanded(model->fetchPath(SdfPath("/A"))), "still expanded");
+    CHECK(tree->isExpanded(view(model->fetchPath(SdfPath("/A")))), "still expanded");
 }

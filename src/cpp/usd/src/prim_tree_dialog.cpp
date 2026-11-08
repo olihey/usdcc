@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/prim_tree_filter.h"
 #include "usdcc/usd/prim_tree_widget.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -47,7 +48,7 @@ PrimTreeDialog::PrimTreeDialog(const QString& path, QWidget* parent) : QDialog(p
     layout->setSpacing(0);
 
     m_tree = new PrimTreeWidget(this);
-    m_tree->filterEdit()->setEnabled(false);  // until there's something to filter
+    m_tree->filterBar()->setEnabled(false);  // until there's something to filter
     connect(m_tree, &PrimTreeWidget::filterApplied, this, &PrimTreeDialog::updateStatus);
     layout->addWidget(m_tree, 1);
 
@@ -91,7 +92,7 @@ void PrimTreeDialog::onStageLoaded(const StageRefPtr& stage, const QString& erro
     }
     m_stage = stage;
     m_tree->setStage(stage->usdStage());
-    m_tree->filterEdit()->setEnabled(true);
+    m_tree->filterBar()->setEnabled(true);
     // Layers are shared with the app's stages, so its edits can recompose this
     // one; only the ones that touch the hierarchy rebuild the tree.
     m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
@@ -137,10 +138,10 @@ void PrimTreeDialog::updateStatus() {
 }
 
 void PrimTreeDialog::reject() {
-    if (m_tree->filterEdit()->text().isEmpty()) {
+    if (!m_tree->isFiltering()) {
         QDialog::reject();
     } else {
-        setFilter(QString());
+        m_tree->clearFilter();
     }
 }
 

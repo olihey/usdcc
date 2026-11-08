@@ -87,6 +87,8 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/preview_stage.h
     include/usdcc/usd/prim_picker_dialog.h
     include/usdcc/usd/prim_tree_dialog.h
+    include/usdcc/usd/prim_tree_filter.h
+    src/prim_tree_filter.cpp
     include/usdcc/usd/prim_tree_widget.h
     include/usdcc/usd/relationship_target_dialog.h
     include/usdcc/usd/shader_connection_dialog.h
