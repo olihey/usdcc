@@ -901,11 +901,7 @@ void AttributesViewPanel::addArcInteractively(int typeValue) {
         const QString file = QFileDialog::getOpenFileName(this, tr("Add %1").arg(typeName), layerDir,
                                                           tr("USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)"));
         if (file.isEmpty()) return;
-        QString assetPath = file;
-        if (!layerDir.isEmpty()) {
-            assetPath = QDir(layerDir).relativeFilePath(file);
-            if (!assetPath.startsWith(QStringLiteral("../"))) assetPath.prepend(QStringLiteral("./"));
-        }
+        const QString assetPath = properties::assetPathForFile(file, layerDir);
         prim_actions::addArc(*m_undoManager, currentStage(), prim.GetPath(), type, assetPath.toStdString(), SdfPath());
         return;
     }

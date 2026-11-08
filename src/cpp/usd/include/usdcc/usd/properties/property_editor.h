@@ -27,8 +27,11 @@ struct EditorHints {
     // a hard range clamps. From UsdAttribute::GetSoftLimits()/GetHardLimits().
     std::optional<std::pair<double, double>> softRange;
     std::optional<std::pair<double, double>> hardRange;
-    // Asset paths are shown resolved against, and made relative to, this layer.
+    // An asset path's value is resolved against this layer: the one it's authored in.
     PXR_NS::SdfLayerHandle anchorLayer;
+    // And a new one is written to this layer, the edit target, so it's made relative to it.
+    // Without it, the anchor layer.
+    PXR_NS::SdfLayerHandle editLayer;
     QString suffix;  // e.g. "°"
     // Text fields: shown while empty (e.g. "defaultPrim").
     QString placeholder;
@@ -80,6 +83,13 @@ protected:
     ValueTypeInfo m_info;
     bool m_readOnly = false;
 };
+
+// How a file is written as an asset path in a layer in `layerDir`: "./tex.png" or
+// "../maps/tex.png" relative to it, or the absolute path when there's no relative one, such
+// as on another drive, or when the layer isn't saved yet (an empty `layerDir`).
+USDCC_USD_UI_API QString assetPathForFile(const QString& file, const QString& layerDir);
+// The folder of a layer that's a file, or empty.
+USDCC_USD_UI_API QString layerFolder(const PXR_NS::SdfLayerHandle& layer);
 
 // The editor for `typeName` (scalar or array), or a read-only fallback if no
 // editor handles it. Never null.

@@ -75,6 +75,7 @@ EditorHints EditorHints::forAttribute(const UsdAttribute& attribute) {
     if (!hints.anchorLayer) {
         hints.anchorLayer = attribute.GetStage()->GetEditTarget().GetLayer();
     }
+    hints.editLayer = attribute.GetStage()->GetEditTarget().GetLayer();
     return hints;
 }
 
@@ -458,7 +459,7 @@ private:
 class AssetEditor : public PropertyEditor {
 public:
     AssetEditor(const ValueTypeInfo& info, const EditorHints& hints, QWidget* parent)
-        : PropertyEditor(info, parent), m_anchor(hints.anchorLayer) {
+        : PropertyEditor(info, parent), m_anchor(hints.anchorLayer), m_editLayer(hints.editLayer ? hints.editLayer : hints.anchorLayer) {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         usdcc::ui::scaled::spacing(layout, 2);
@@ -503,10 +504,8 @@ public:
     }
 
 private:
-    QString layerDir() const {
-        if (!m_anchor || m_anchor->IsAnonymous() || m_anchor->GetRealPath().empty()) return {};
-        return QFileInfo(QString::fromStdString(m_anchor->GetRealPath())).absolutePath();
-    }
+    // Where a new path goes, which is what it has to be relative to.
+    QString layerDir() const { return layerFolder(m_editLayer); }
     QString resolvedPath() const {
         if (m_path.isEmpty()) return {};
         const std::string anchored = m_anchor ? SdfComputeAssetPathRelativeToLayer(m_anchor, m_path.toStdString())
@@ -535,6 +534,8 @@ private:
     void commit(const QString& path) {
         if (m_readOnly || path == m_path) return;
         m_path = path;
+        // It goes into the edit target now, which is what it's relative to.
+        m_anchor = m_editLayer;
         updateDisplay();
         emitSingleEdit(value());
     }
@@ -543,7 +544,7 @@ private:
         const QString file = QFileDialog::getOpenFileName(this, tr("Choose Asset"), start);
         if (file.isEmpty()) return;
         const QString dir = layerDir();
-        commit(dir.isEmpty() ? file : QStringLiteral("./") + QDir(dir).relativeFilePath(file));
+        commit(assetPathForFile(file, dir));
     }
     void toggleRelative() {
         const QString dir = layerDir();
@@ -552,13 +553,12 @@ private:
         if (isRelative(m_path)) {
             commit(QDir::cleanPath(resolved));
         } else {
-            QString rel = QDir(dir).relativeFilePath(resolved);
-            if (!rel.startsWith(QStringLiteral("../"))) rel.prepend(QStringLiteral("./"));
-            commit(rel);
+            commit(assetPathForFile(resolved, dir));
         }
     }
 
     SdfLayerHandle m_anchor;
+    SdfLayerHandle m_editLayer;
     QString m_path;
     QLineEdit* m_edit;
     QToolButton* m_relative;
@@ -649,6 +649,21 @@ private:
 };
 
 }  // namespace
+
+QString assetPathForFile(const QString& file, const QString& layerDir) {
+    const QString absolute = QDir::cleanPath(QFileInfo(file).absoluteFilePath());
+    if (layerDir.isEmpty()) return absolute;
+    // On another drive QDir gives back the absolute path, which "./" would break.
+    QString relative = QDir(layerDir).relativeFilePath(absolute);
+    if (QDir::isAbsolutePath(relative)) return absolute;
+    if (!relative.startsWith(QStringLiteral("../"))) relative.prepend(QStringLiteral("./"));
+    return relative;
+}
+
+QString layerFolder(const SdfLayerHandle& layer) {
+    if (!layer || layer->IsAnonymous() || layer->GetRealPath().empty()) return {};
+    return QFileInfo(QString::fromStdString(layer->GetRealPath())).absolutePath();
+}
 
 PropertyEditor* createPropertyEditor(const SdfValueTypeName& typeName, const EditorHints& hints, QWidget* parent) {
     const ValueTypeInfo info = ValueTypeInfo::classify(typeName);
