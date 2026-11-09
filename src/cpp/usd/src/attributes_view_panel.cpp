@@ -956,12 +956,12 @@ void AttributesViewPanel::addArcInteractively(int typeValue) {
         // Relative to the layer being edited, when it's a file, as an asset
         // field makes it.
         const SdfLayerHandle layer = currentStage()->usdStage()->GetEditTarget().GetLayer();
-        const QString layerDir =
-            layer->GetRealPath().empty() ? QString() : QFileInfo(qs(layer->GetRealPath())).absolutePath();
-        const QString file = QFileDialog::getOpenFileName(this, tr("Add %1").arg(typeName), layerDir,
-                                                          tr("USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)"));
+        const QString file =
+            QFileDialog::getOpenFileName(this, tr("Add %1").arg(typeName), properties::layerFileFolder(layer),
+                                         tr("USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)"));
         if (file.isEmpty()) return;
-        const QString assetPath = properties::assetPathForFile(file, layerDir);
+        // Absolute in a .usdz, where a relative path is anchored inside it.
+        const QString assetPath = properties::assetPathForFile(file, properties::layerFolder(layer));
         prim_actions::addArc(*m_undoManager, currentStage(), prim.GetPath(), type, assetPath.toStdString(), SdfPath());
         return;
     }

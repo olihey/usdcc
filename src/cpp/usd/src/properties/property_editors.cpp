@@ -8,8 +8,10 @@
 #include "usdcc/usd/properties/property_style.h"
 
 #include <pxr/base/tf/errorMark.h>
+#include <pxr/usd/ar/packageUtils.h>
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/sdf/assetPath.h>
+#include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/sdf/pathExpression.h>
 #include <pxr/usd/sdf/schema.h>
@@ -526,6 +528,9 @@ private:
         m_edit->setText(m_path);
         m_relative->setText(isRelative(m_path) ? tr("Rel") : tr("Abs"));
         m_relative->setEnabled(!m_readOnly && !layerDir().isEmpty() && !m_path.isEmpty());
+        m_relative->setToolTip(isPackageLayer(m_editLayer)
+                                   ? tr("A path in a .usdz can only be relative to a file inside it, so a file outside it is written absolute")
+                                   : tr("Switch between a path relative to the layer and an absolute path"));
         const QString resolved = resolvedPath();
         if (m_path.isEmpty()) {
             m_resolved->setText(QString());
@@ -548,7 +553,11 @@ private:
         emitSingleEdit(value());
     }
     void browse() {
-        const QString start = !resolvedPath().isEmpty() ? QFileInfo(resolvedPath()).absolutePath() : layerDir();
+        const QString resolved = resolvedPath();
+        // A file inside a .usdz resolves to "bike.usdz[tex.png]", which isn't a folder.
+        const QString start = !resolved.isEmpty() && !resolved.contains(QLatin1Char('['))
+                                  ? QFileInfo(resolved).absolutePath()
+                                  : layerFileFolder(m_editLayer);
         const QString file = QFileDialog::getOpenFileName(this, tr("Choose Asset"), start);
         if (file.isEmpty()) return;
         const QString dir = layerDir();
@@ -668,9 +677,29 @@ QString assetPathForFile(const QString& file, const QString& layerDir) {
     return relative;
 }
 
+bool isPackageLayer(const SdfLayerHandle& layer) {
+    if (!layer) return false;
+    if (ArIsPackageRelativePath(layer->GetIdentifier())) return true;
+    const SdfFileFormatConstPtr format = layer->GetFileFormat();
+    return format && format->IsPackage();
+}
+
 QString layerFolder(const SdfLayerHandle& layer) {
     if (!layer || layer->IsAnonymous() || layer->GetRealPath().empty()) return {};
+    // USD anchors a relative path in a package (.usdz) inside the package, so
+    // "../tex.png" there is never the file beside the .usdz: only an absolute
+    // path reaches a file outside it.
+    if (isPackageLayer(layer)) return {};
     return QFileInfo(QString::fromStdString(layer->GetRealPath())).absolutePath();
+}
+
+QString layerFileFolder(const SdfLayerHandle& layer) {
+    if (!layer || layer->IsAnonymous()) return {};
+    std::string path = layer->GetRealPath();
+    // "bike.usdz[bike.usdc]": the folder of the .usdz.
+    if (ArIsPackageRelativePath(path)) path = ArSplitPackageRelativePathOuter(path).first;
+    if (path.empty()) return {};
+    return QFileInfo(QString::fromStdString(path)).absolutePath();
 }
 
 PropertyEditor* createPropertyEditor(const SdfValueTypeName& typeName, const EditorHints& hints, QWidget* parent) {

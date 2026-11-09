@@ -526,7 +526,7 @@ Each of these can be changed before the phase that needs it starts:
 |---|---|---|
 | 1 | Time-sampled attributes, with no timeline yet | Show the value at `Default` (or the first sample if there is no default), editing disabled, with an "animated" badge |
 | 2 | Units like "5.0 m" in the mockup | No distance units at first. Degrees get `°`. Unit display based on `metersPerUnit` is a later option |
-| 3 | The link button on the asset field | Toggles between a layer-relative path and an absolute path. The resolved path is always shown below |
+| 3 | The link button on the asset field | Toggles between a layer-relative path and an absolute path. The resolved path is always shown below. In a `.usdz`, which anchors relative paths inside itself, a file outside it is always written absolute and the toggle is off |
 | 4 | Debug menu visibility | Always shown until a setting exists (M10) |
 | 5 | A row selected for a tool the user hasn't picked | Auto-switch to the matching tool (§7.2) |
 | 6 | Removing an op | Remove from `xformOpOrder`, and delete the attribute when that is safe (§6) |

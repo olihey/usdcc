@@ -88,8 +88,15 @@ protected:
 // "../maps/tex.png" relative to it, or the absolute path when there's no relative one, such
 // as on another drive, or when the layer isn't saved yet (an empty `layerDir`).
 USDCC_USD_UI_API QString assetPathForFile(const QString& file, const QString& layerDir);
-// The folder of a layer that's a file, or empty.
+// The folder a relative asset path in `layer` is relative to: that of a layer that's a file,
+// or empty for one that isn't, and for a package (.usdz) or a layer inside one, which USD
+// anchors relative paths inside of, so a file outside it can only be written absolute.
 USDCC_USD_UI_API QString layerFolder(const PXR_NS::SdfLayerHandle& layer);
+// The folder of the file `layer` is in, a .usdz's for a layer inside one, or empty: where a
+// file dialog starts.
+USDCC_USD_UI_API QString layerFileFolder(const PXR_NS::SdfLayerHandle& layer);
+// A .usdz, or a layer inside one.
+USDCC_USD_UI_API bool isPackageLayer(const PXR_NS::SdfLayerHandle& layer);
 
 // The editor for `typeName` (scalar or array), or a read-only fallback if no
 // editor handles it. Never null.
