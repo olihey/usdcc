@@ -6,7 +6,7 @@ camera, the size and edits; this starts the helper and talks to it."""
 import logging
 
 import usdcc.ui
-from PySide6 import QtWidgets
+from PySide6 import QtGui
 
 from . import client as clients
 from . import config, scene
@@ -37,11 +37,8 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
         return clients.sdk_problem(config.get(config.SDK))
 
     def create_toolbar(self, layout):
-        self.engine_combo = QtWidgets.QComboBox(toolTip="Render on the CPU, or on an NVIDIA GPU with CUDA or RTX")
-        self.engine_combo.addItems(config.ENGINES)
-        self.engine_combo.setCurrentText(config.get(config.ENGINE))
-        self.engine_combo.currentTextChanged.connect(self._engine_changed)
-        layout.addWidget(self.engine_combo)
+        # Nothing on the toolbar, which holds the app's icons: the engine is in the options menu.
+        self.engine = config.get(config.ENGINE)
         self.set_edit_delay(config.get(config.EDIT_DELAY_MS))
 
     def start(self):
@@ -82,7 +79,16 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
             self.client.send("size", width=width, height=height)
 
     def populate_options_menu(self, menu):
-        pass  # the app's panel has V-Ray Settings… already
+        """Engine: CPU, CUDA or RTX, after the app's Camera, Resolution and Update on Edits."""
+        engines = menu.addMenu("Engine")
+        group = QtGui.QActionGroup(engines)
+        for engine in config.ENGINES:
+            action = engines.addAction(engine)
+            action.setCheckable(True)
+            action.setChecked(engine == self.engine)
+            action.setToolTip("Render on the CPU, or on an NVIDIA GPU with CUDA or RTX")
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, engine=engine: self._engine_changed(engine))
 
     def close(self):
         if self.client is not None:
@@ -106,7 +112,7 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
         self.client.output.connect(lambda line: LOG.info("%s", line))
         self.client.finished.connect(self._helper_finished)
         self.client.start()
-        self.client.send("init", sdk=sdk, engine=self.engine_combo.currentText().lower(),
+        self.client.send("init", sdk=sdk, engine=self.engine.lower(),
                          update_ms=config.get(config.UPDATE_MS), license_servers=config.get(config.LICENSE_SERVERS))
         self.show_message("Starting V-Ray…")
         self.set_state("Starting V-Ray…")
@@ -129,6 +135,8 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
             self.report_error(why, fatal=True)
 
     def _engine_changed(self, text):
+        self.engine = text
+        self.options_changed()
         if self.ready:
             self.client.send("engine", engine=text.lower())
 

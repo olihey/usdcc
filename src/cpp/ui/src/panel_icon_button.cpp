@@ -9,6 +9,8 @@ namespace usdcc::ui {
 PanelIconButton::PanelIconButton(const QString& iconPath, const QString& toolTip, QWidget* parent)
     : QToolButton(parent) {
     setObjectName(QStringLiteral("panelIconButton"));  // styled by theme/dark.qss
+    // Also by this, for one that takes a name of its own (a render view panel's Render).
+    setProperty("panelIcon", true);
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     setIcon(QIcon(iconPath));
     scaled::iconSize(this, 16, 16);

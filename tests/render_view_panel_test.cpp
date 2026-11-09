@@ -7,6 +7,7 @@
 #include "test_harness.h"
 #include "test_settings.h"
 
+#include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/render_view_panel.h"
@@ -21,6 +22,8 @@
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QLabel>
+#include <QMenu>
+#include <QRadioButton>
 #include <QMainWindow>
 #include <QTemporaryDir>
 #include <QToolButton>
@@ -94,6 +97,9 @@ protected:
         edits.push_back(changes);
     }
     void closing() override { ++*m_closings; }
+    void populateRendererOptions(QMenu* menu) override {
+        menu->addAction(QStringLiteral("Test Option"), [this] { calls.push_back("option"); });
+    }
 
 private:
     int* m_closings;
@@ -257,6 +263,61 @@ USDCC_TEST(render_view_panel) {
           "a setup problem keeps Render off");
     CHECK(status->text() == "No SDK here.", "and says why");
     panel->problem.reset();
+
+    // The toolbar holds icons only: Render (play, then stop), Refresh, Save Image and
+    // Settings. The other controls are in the options menu.
+    {
+        QStringList shown;
+        for (auto* button : panel->findChildren<QToolButton*>()) {
+            if (button->isVisibleTo(panel.get()) && button->property("panelIcon").toBool()) shown << button->objectName();
+        }
+        CHECK(shown.contains("renderButton") && shown.contains("renderRefresh") && shown.contains("renderSave"),
+              "Render, Refresh and Save Image are icon buttons: %s", qPrintable(shown.join(", ")));
+        CHECK(!cameras->isVisibleTo(panel.get()) && !resolution->isVisibleTo(panel.get()) && !live->isVisibleTo(panel.get()),
+              "Camera, Resolution and Update on Edits aren't on the toolbar");
+        CHECK(!renderButton->icon().isNull() && renderButton->toolTip() == "Render", "Render shows its icon");
+        renderButton->setChecked(true);
+        CHECK(renderButton->toolTip() == "Stop rendering" && renderButton->text() == "Stop", "and becomes Stop while rendering");
+        panel->setRendering(false);
+        CHECK(renderButton->toolTip() == "Render", "and Render again when it stops");
+    }
+    {
+        panel->setSettingsCategory(QStringLiteral("Test"));
+        auto* settingsButton = panel->findChild<QToolButton*>(QStringLiteral("renderSettings"));
+        CHECK(settingsButton && settingsButton->isVisibleTo(panel.get()) && settingsButton->property("panelIcon").toBool(),
+              "Settings is an icon button too, once there's a category");
+        panel->setOptionsPinned(true);
+        auto* options = panel->pinnedMenu();
+        CHECK(options, "the options can be pinned beside the panel");
+        if (options) {
+            QStringList titles, radios, entries;
+            for (auto* title : options->findChildren<QLabel*>(QStringLiteral("optionsGroupTitle"))) titles << title->text();
+            for (auto* radio : options->findChildren<QRadioButton*>()) radios << radio->text();
+            for (auto* entry : options->findChildren<QAbstractButton*>(QStringLiteral("optionsEntry"))) entries << entry->text();
+            CHECK(titles.contains("Camera") && titles.contains("Resolution"), "with Camera and Resolution: %s", qPrintable(titles.join(", ")));
+            CHECK(radios.contains("Shot") && radios.contains(QString::fromUtf8("1920 × 1080")), "as choices: %s", qPrintable(radios.join(", ")));
+            CHECK(entries.indexOf("Update on Edits") >= 0 && entries.indexOf("Update on Edits") < entries.indexOf("Test Option") &&
+                      entries.indexOf("Test Option") < entries.indexOf(QString::fromUtf8("Test Settings…")),
+                  "then Update on Edits, the renderer's own, and Settings… last: %s", qPrintable(entries.join(", ")));
+            for (auto* radio : options->findChildren<QRadioButton*>()) {
+                if (radio->text() == QString::fromUtf8("1920 × 1080")) radio->click();
+            }
+            CHECK(panel->renderSize() == QSize(1920, 1080), "choosing a resolution there sets it");
+            settle(50);
+            options = panel->pinnedMenu();
+            bool checked = false;
+            for (auto* radio : options->findChildren<QRadioButton*>()) {
+                if (radio->text() == QString::fromUtf8("1920 × 1080")) checked = radio->isChecked();
+            }
+            CHECK(checked, "and the pinned options show it chosen");
+            for (auto* entry : options->findChildren<QCheckBox*>(QStringLiteral("optionsEntry"))) {
+                if (entry->text() == "Update on Edits") entry->click();
+            }
+            CHECK(!panel->updatesOnEdits(), "Update on Edits there turns it off");
+            panel->findChild<QCheckBox*>(QStringLiteral("renderLive"))->setChecked(true);
+        }
+        panel->setOptionsPinned(false);
+    }
 
     // Duplicate.
     std::unique_ptr<usdcc::ui::ViewPanel> copy(panel->duplicate());

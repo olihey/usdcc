@@ -1,5 +1,6 @@
 #include "usdcc/plugin/plugin.h"
 
+#include <QActionGroup>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QCloseEvent>
@@ -9,11 +10,11 @@
 #include <QHideEvent>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMenu>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QShowEvent>
 #include <QTimer>
-#include <QToolButton>
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -54,26 +55,18 @@ public:
         container->setObjectName("nativeRtxSurface");
         container->setFocusPolicy(Qt::StrongFocus);
         setPresentationWidget(container);
+        // The mode, as the options menu's Mode shows it (populateRendererOptions()); not shown.
         m_mode = new QComboBox(this);
+        m_mode->hide();
         m_mode->setObjectName("nativeRtxMode");
         m_mode->addItems({"Real-Time", "Path Tracing", "Minimal"});
         auto& settings = usdcc::core::Settings::instance();
         m_mode->setCurrentText(QString::fromStdString(settings.get<std::string>("RtxRender/mode", "Real-Time")));
         setEditDelay(settings.get<int>("RtxRender/editDelay", 30));
-        extraToolbarLayout()->addWidget(m_mode);
-        connect(m_mode, &QComboBox::currentTextChanged, this, [this](const QString&) { reload(); });
-        auto* fit = new QToolButton(this);
-        fit->setObjectName("nativeRtxFit");
-        fit->setText("Fit to View");
-        fit->setToolTip("Frame the whole scene in this RTX camera (F over the image)");
-        extraToolbarLayout()->addWidget(fit);
-        connect(fit, &QToolButton::clicked, this, [this] { frameScene(); });
-        auto* reset = new QToolButton(this);
-        reset->setObjectName("nativeRtxReset");
-        reset->setText("Reset Camera");
-        reset->setToolTip("Reset this RTX camera (Home over the image)");
-        extraToolbarLayout()->addWidget(reset);
-        connect(reset, &QToolButton::clicked, this, [this] { m_navigation.reset(); publishNavigation(); });
+        connect(m_mode, &QComboBox::currentTextChanged, this, [this](const QString&) {
+            notifyOptionsChanged();
+            reload();
+        });
         if (auto* inputWindow = m_window->window()) {
             m_input = new NavigationInput(inputWindow, this);
             m_input->imageSize = [this] { return m_lastFrame ? m_lastFrame->size() : renderSize(); };
@@ -143,6 +136,22 @@ public:
     }
 
 protected:
+    // Mode, Fit to View and Reset Camera, after the app's Camera, Resolution and Update on Edits.
+    void populateRendererOptions(QMenu* menu) override {
+        QMenu* modes = menu->addMenu("Mode");
+        auto* group = new QActionGroup(modes);
+        for (int i = 0; i < m_mode->count(); ++i) {
+            QAction* action = modes->addAction(m_mode->itemText(i));
+            action->setCheckable(true);
+            action->setChecked(i == m_mode->currentIndex());
+            group->addAction(action);
+            connect(action, &QAction::triggered, m_mode, [this, i] { m_mode->setCurrentIndex(i); });
+        }
+        QAction* fit = menu->addAction("Fit to View", this, [this] { frameScene(); });
+        fit->setToolTip("Frame the whole scene in this RTX camera (F over the image)");
+        QAction* reset = menu->addAction("Reset Camera", this, [this] { m_navigation.reset(); publishNavigation(); });
+        reset->setToolTip("Reset this RTX camera (Home over the image)");
+    }
     std::optional<QString> setupProblem() override {
         const auto runtime = roots(m_host.folder);
         for (auto& [name, root] :

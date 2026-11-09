@@ -23,16 +23,28 @@ updates without editing scene cameras; duplicated panels can copy it independent
 
 ## 1. The panel
 
-| Control | What it does |
+The toolbar holds icons only, each with a tooltip:
+
+| Icon | What it does |
 |---|---|
-| Render / Stop | Calls the renderer's `start()` / `stop()`. While `setup_problem()` gives a reason, Render shows it and stays off |
-| Refresh | `reload()`: send the whole stage again |
+| ▶ Render / ■ Stop | Calls the renderer's `start()` / `stop()`; the icon shows which one a click does. While `setup_problem()` gives a reason, Render shows it and stays off |
+| ⟳ Refresh | `reload()`: send the whole stage again |
+| *(the renderer's own)* | Icon buttons `create_toolbar(layout)` adds; choices belong in the options menu |
+| 💾 Save Image… | PNG, JPEG or TIFF of the image shown |
+| ⚙ Settings… | The Settings dialog at the renderer's `settings_category`; hidden without one |
+
+The other controls are in the options menu (☰, which can be pinned beside the panel):
+
+| Entry | What it does |
+|---|---|
 | Camera | **Viewport Camera**: the viewport the user last clicked in, when it shows this panel's stage. Or one of the stage's `UsdGeom.Camera` prims; the list follows the stage |
 | Resolution | **Fit Panel** at full, ½ or ¼ of the image area (in device pixels), or 1280 × 720 or 1920 × 1080. The longest side is at most 8192 |
-| *(the renderer's own)* | What `create_toolbar(layout)` adds, such as V-Ray's engine choice |
 | Update on Edits | Edits reach the renderer (`stage_edited()`), `edit_delay()` after the last one |
-| Save Image… | PNG, JPEG or TIFF of the image shown |
-| Settings… | The Settings dialog at the renderer's `settings_category`; hidden without one. The options menu has it too |
+| *(the renderer's own)* | What `populate_options_menu(menu)` adds (C++: `populateRendererOptions()`), such as V-Ray's Engine or RTX's Mode |
+| *Renderer* Settings… | As the ⚙ icon |
+
+A pinned options menu follows changes made elsewhere: a renderer that changes one of its
+choices calls `options_changed()` (C++: `notifyOptionsChanged()`).
 
 - **Status line:** the renderer's state (`set_state()`), the seconds since the last reload or
   camera change, and the image's size.
@@ -117,14 +129,14 @@ Each panel makes one instance of the class, without arguments.
 | Hook | When |
 |---|---|
 | `setup_problem()` | When the panel is made and when Render is pressed. A string stops Render and is shown |
-| `create_toolbar(layout)` | Once, at the start. `layout` is a `QHBoxLayout` on the toolbar |
+| `create_toolbar(layout)` | Once, at the start. `layout` is a `QHBoxLayout` on the toolbar, for icon buttons |
 | `start()`, `stop()` | Render pressed, Stop pressed |
 | `reload()` | Refresh, another stage, and by default an edit |
 | `camera_changed(camera)` | The camera moved or another was picked: a `RenderCamera` |
 | `size_changed(width, height)` | The image's size changed |
 | `stage_edited(resynced, changed)` | Edits, as Sdf.Paths (§3) |
 | `stage_changed(stage)` | Another stage, or None. A `reload()` follows when there is one |
-| `populate_options_menu(menu)` | The options menu opens |
+| `populate_options_menu(menu)` | The options menu opens or a pinned one refreshes: the renderer's entries, after Update on Edits |
 | `close()` | The panel is going away. Called once |
 
 **Calls:**

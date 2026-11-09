@@ -28,9 +28,9 @@ panel (RENDER_VIEW_PANEL.md §1). What V-Ray adds or decides:
 | Control | What it does |
 |---|---|
 | Render / Stop | The helper process starts with the first render and stays until the panel is deleted, so a second render starts at once. Stop only stops sampling |
-| Engine | CPU, CUDA or RTX (NVIDIA GPUs); added with `create_toolbar()` |
-| Update on Edits | Sends the whole stage again, *Re-render after edits* ms after the last edit (`set_edit_delay()`) |
-| Settings… | The V-Ray page of the Settings dialog |
+| Engine | In the options menu: CPU, CUDA or RTX (NVIDIA GPUs); added with `populate_options_menu()` |
+| Update on Edits | In the options menu: sends the whole stage again, *Re-render after edits* ms after the last edit (`set_edit_delay()`) |
+| Settings (⚙) | The V-Ray page of the Settings dialog |
 
 - **The state** is V-Ray's (Preparing, Rendering, Done, ...) or the helper's ("Starting
   V-Ray…", "Loading the stage…").

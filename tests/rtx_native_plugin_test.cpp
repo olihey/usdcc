@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QComboBox>
 #include <QLabel>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QUndoStack>
@@ -16,6 +17,7 @@
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/view_panel.h"
@@ -102,7 +104,17 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
                       "panel mode does not overwrite the default for new panels");
                 const auto selectionBefore = app.stages.selectedPaths(stage);
                 const int undoBefore = app.undo.stack(stage)->count();
-                panel->findChild<QToolButton*>("nativeRtxReset")->click();
+                // Reset Camera, from the options pinned beside the panel.
+                panel->setOptionsPinned(true);
+                QPushButton* reset = nullptr;
+                if (auto* options = panel->pinnedMenu()) {
+                    for (auto* entry : options->findChildren<QPushButton*>(QStringLiteral("optionsEntry"))) {
+                        if (entry->text() == QStringLiteral("Reset Camera")) reset = entry;
+                    }
+                }
+                CHECK(reset, "the options have Reset Camera");
+                if (reset) reset->click();
+                panel->setOptionsPinned(false);
                 auto* originalRender = qobject_cast<usdcc::usd::RenderViewPanel*>(panel.get());
                 std::unique_ptr<usdcc::ui::ViewPanel> freeCopy(panel->duplicate(&window));
                 auto* copiedRender = qobject_cast<usdcc::usd::RenderViewPanel*>(freeCopy.get());

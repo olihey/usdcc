@@ -189,8 +189,10 @@ usdcc::ui::ViewPanel* ScriptedRenderViewPanel::duplicate(QWidget* parent) const 
     return new ScriptedRenderViewPanel(stageManager(), currentStage(), windowTitle(), m_class, parent);
 }
 
-void ScriptedRenderViewPanel::populateOptionsMenu(QMenu* menu) {
-    RenderViewPanel::populateOptionsMenu(menu);
+void ScriptedRenderViewPanel::populateOptionsMenu(QMenu* menu) { RenderViewPanel::populateOptionsMenu(menu); }
+
+void ScriptedRenderViewPanel::populateRendererOptions(QMenu* menu) {
+    // The Python class's populate_options_menu(): between the shared choices and Settings….
     if (!m_instance) return;
     py::gil_scoped_acquire gil;
     try {

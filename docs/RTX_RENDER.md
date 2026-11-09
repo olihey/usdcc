@@ -48,19 +48,24 @@ the sample budget in Settings > RTX; the other modes use a frame budget. Cold
 shader compilation can take minutes. Status and Log report progress while Qt
 continues processing events.
 
-| Control | Behavior |
-|---|---|
-| Render / Stop | Start or prevent new submissions; retain the latest image and queued changes |
-| Refresh | Replace the snapshot with the current app stage |
-| Camera | Follow the viewport, choose a scene camera, or use a panel-local Free Camera |
-| Resolution | Fit the panel or use a fixed output size |
-| Update on Edits | Follow edits elsewhere; unsupported incremental edits reload the snapshot |
-| Left / Alt+left drag | Orbit |
-| Middle drag | Pan |
-| Wheel | Zoom |
-| Fit to View / F | Frame the whole scene |
-| Reset Camera / Home | Restore the default orbit pose |
-| Save Image | Read back the completed clean GPU frame without selection outlines |
+The toolbar has the app's icons (▶/■, ⟳, 💾, ⚙); everything else is in the options
+menu (☰), as [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md) §1 describes.
+
+| Control | Where | Behavior |
+|---|---|---|
+| Render / Stop | ▶ / ■ | Start or prevent new submissions; retain the latest image and queued changes |
+| Refresh | ⟳ | Replace the snapshot with the current app stage |
+| Save Image | 💾 | Read back the completed clean GPU frame without selection outlines |
+| Settings | ⚙ | Settings > RTX |
+| Camera | Options | Follow the viewport, choose a scene camera, or use a panel-local Free Camera |
+| Resolution | Options | Fit the panel or use a fixed output size |
+| Update on Edits | Options | Follow edits elsewhere; unsupported incremental edits reload the snapshot |
+| Mode | Options | Real-Time, Path Tracing or Minimal; a change reloads |
+| Fit to View | Options, or F over the image | Frame the whole scene |
+| Reset Camera | Options, or Home over the image | Restore the default orbit pose |
+| Orbit | Left / Alt+left drag | |
+| Pan | Middle drag | |
+| Zoom | Wheel | |
 
 Navigation switches to Free Camera. It never edits authored cameras, moves the
 followed viewport, changes selection or creates undo entries. Duplicate panels

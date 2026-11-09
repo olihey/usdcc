@@ -45,6 +45,7 @@ protected:
     std::optional<QString> setupProblem() override;
     void startRender() override;
     void stopRender() override;
+    void populateRendererOptions(QMenu* menu) override;
     void reload() override;
     void cameraChanged(const usdcc::usd::RenderCamera& camera) override;
     void sizeChanged(const QSize& size) override;

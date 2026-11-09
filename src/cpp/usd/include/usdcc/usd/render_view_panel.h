@@ -92,9 +92,10 @@ private:
 
 // A view panel that shows its stage rendered by a renderer that isn't Hydra's,
 // such as native RTX or V-Ray in a helper process (docs/RENDER_VIEW_PANEL.md). This
-// class is the renderer-independent part: the toolbar (Render, Refresh, Camera,
-// Resolution, Update on Edits, Save Image, Settings), the image, the status line,
-// and following the camera, the panel's size and the stage's edits. A subclass
+// class is the renderer-independent part: the toolbar's icons (Render/Stop, Refresh,
+// Save Image, Settings), the options menu (Camera, Resolution, Update on Edits, then
+// the renderer's own options), the image, the status line, and following the camera,
+// the panel's size and the stage's edits. A subclass
 // does the rendering through the hooks below and hands back images with
 // showImage(). ScriptedRenderViewPanel is the subclass for renderers written in
 // Python (usdcc.ui.RenderViewPanel).
@@ -147,8 +148,9 @@ public:
     bool usesLocalCamera() const;
     // The image's size in pixels, from the Resolution choice and the panel's size.
     QSize renderSize() const;
-    // Where a renderer adds its own controls (an engine choice), after the shared
-    // ones on the toolbar.
+    // Where a renderer adds its own toolbar buttons, after Render and Refresh. Keep
+    // the toolbar to icons (usdcc::ui::PanelIconButton); choices belong in the options
+    // menu (populateRendererOptions()).
     QHBoxLayout* extraToolbarLayout() const { return m_extraToolbar; }
     // The renderer's name, in "Press Render to render the stage with %1."
     void setRendererName(const QString& name);
@@ -180,6 +182,9 @@ protected:
     // The panel is going away: end what it started. Called once, from the
     // subclass's destructor (closePanel()) or this one's.
     virtual void closing() {}
+    // The renderer's own entries in the options menu (a render mode, Fit to View),
+    // after the shared Camera, Resolution and Update on Edits, before Settings….
+    virtual void populateRendererOptions(QMenu* menu) { (void)menu; }
     virtual void saveRenderedImage(const QString& path);
 
     // Ends a subclass's constructor: the setup message, the camera list, the stage.
@@ -193,6 +198,8 @@ protected:
 
 private:
     void onRenderToggled(bool on);
+    // Render's icon, text and tooltip: play, or stop while rendering.
+    void showRenderButton(bool rendering);
     void onRefresh();
     void onStageObjectsChanged(const StageChanges& changes);
     void onViewportCameraChanged();

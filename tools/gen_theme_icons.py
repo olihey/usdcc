@@ -196,6 +196,22 @@ ICONS["unlink"] = (
     ],
 )
 
+def _cog(cx, cy, teeth=8, outer=6.6, inner=4.9, half_top=7.0, half_root=15.0):
+    """A gear's outline: `teeth` flat-topped teeth around (cx, cy)."""
+    points = []
+    step = 360.0 / teeth
+    for i in range(teeth):
+        a = i * step
+        for angle, r in ((a - half_root, inner), (a - half_top, outer), (a + half_top, outer), (a + half_root, inner)):
+            points.append((cx + r * math.cos(math.radians(angle)), cy + r * math.sin(math.radians(angle))))
+    return points + [points[0]]
+
+
+# Render view panels' toolbar (docs/RENDER_VIEW_PANEL.md): Stop beside Render's play
+# triangle, and Settings as a cog.
+ICONS["stop"] = (1.3, LIGHT, [[(4, 4), (12, 4), (12, 12), (4, 12), (4, 4)]])
+ICONS["cog"] = (1.2, LIGHT, [_cog(8, 8), _arc(8, 8, 2.1, 0, 360)])
+
 for _name, (_width, _lines) in TOOL_GLYPHS.items():
     ICONS[_name] = (_width, LIGHT, _lines)
     ICONS[_name + "-active"] = (_width, WHITE, _lines)

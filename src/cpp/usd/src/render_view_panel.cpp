@@ -1,6 +1,7 @@
 #include "usdcc/usd/render_view_panel.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -13,10 +14,12 @@
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
 
+#include <QActionGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
@@ -192,26 +195,30 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     auto* row = new QHBoxLayout(toolbar);
     addPanelControls(row);
 
-    m_renderButton = new QToolButton(toolbar);
-    m_renderButton->setObjectName(QStringLiteral("renderButton"));
-    m_renderButton->setText(tr("Render"));
+    // The toolbar holds icons only; the other controls are in the options menu.
+    const auto iconButton = [toolbar](const char* name, const char* icon, const QString& text, const QString& tip) {
+        auto* button = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/%1.png").arg(QLatin1String(icon)), tip, toolbar);
+        button->setObjectName(QLatin1String(name));
+        button->setText(text);  // not shown; for accessibility and tests
+        return button;
+    };
+    m_renderButton = iconButton("renderButton", "play", tr("Render"), tr("Render"));
     m_renderButton->setCheckable(true);
-    m_renderButton->setToolTip(tr("Start or stop rendering"));
     connect(m_renderButton, &QToolButton::toggled, this, &RenderViewPanel::onRenderToggled);
-
-    m_refreshButton = new QToolButton(toolbar);
-    m_refreshButton->setObjectName(QStringLiteral("renderRefresh"));
-    m_refreshButton->setText(tr("Refresh"));
-    m_refreshButton->setToolTip(tr("Send the stage to the renderer again"));
+    m_refreshButton = iconButton("renderRefresh", "reload", tr("Refresh"), tr("Refresh: send the stage to the renderer again"));
     connect(m_refreshButton, &QToolButton::clicked, this, &RenderViewPanel::onRefresh);
 
-    m_cameraCombo = new QComboBox(toolbar);
+    // These hold the choices the options menu shows (populateOptionsMenu()), and aren't
+    // shown themselves.
+    m_cameraCombo = new QComboBox(container);
+    m_cameraCombo->hide();
     m_cameraCombo->setObjectName(QStringLiteral("renderCamera"));
     m_cameraCombo->setToolTip(tr("What the image is seen through"));
     m_cameraCombo->addItem(tr("Viewport Camera"), kViewportCamera);
     connect(m_cameraCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { sendCamera(); });
 
-    m_resolutionCombo = new QComboBox(toolbar);
+    m_resolutionCombo = new QComboBox(container);
+    m_resolutionCombo->hide();
     m_resolutionCombo->setObjectName(QStringLiteral("renderResolution"));
     m_resolutionCombo->setToolTip(tr("The image's size"));
     for (const Resolution& resolution : kResolutions) {
@@ -222,7 +229,8 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     m_extraToolbar = new QHBoxLayout();
     m_extraToolbar->setContentsMargins(0, 0, 0, 0);
 
-    m_liveCheck = new QCheckBox(tr("Update on Edits"), toolbar);
+    m_liveCheck = new QCheckBox(tr("Update on Edits"), container);
+    m_liveCheck->hide();
     m_liveCheck->setObjectName(QStringLiteral("renderLive"));
     m_liveCheck->setChecked(true);
     m_liveCheck->setToolTip(tr("Render again after the stage is edited"));
@@ -233,23 +241,20 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
         }
     });
 
-    m_saveButton = new QToolButton(toolbar);
-    m_saveButton->setObjectName(QStringLiteral("renderSave"));
-    m_saveButton->setText(tr("Save Image…"));
-    connect(m_saveButton, &QToolButton::clicked, this, &RenderViewPanel::saveImage);
+    // A pinned options menu shows them as widgets: it follows their changes.
+    connect(m_cameraCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { notifyOptionsChanged(); });
+    connect(m_resolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { notifyOptionsChanged(); });
+    connect(m_liveCheck, &QCheckBox::toggled, this, [this]() { notifyOptionsChanged(); });
 
-    m_settingsButton = new QToolButton(toolbar);
-    m_settingsButton->setObjectName(QStringLiteral("renderSettings"));
-    m_settingsButton->setText(tr("Settings…"));
+    m_saveButton = iconButton("renderSave", "save", tr("Save Image…"), tr("Save Image…"));
+    connect(m_saveButton, &QToolButton::clicked, this, &RenderViewPanel::saveImage);
+    m_settingsButton = iconButton("renderSettings", "cog", tr("Settings…"), tr("Settings…"));
     m_settingsButton->setVisible(false);  // until setSettingsCategory()
     connect(m_settingsButton, &QToolButton::clicked, this, &RenderViewPanel::openSettings);
 
     row->addWidget(m_renderButton);
     row->addWidget(m_refreshButton);
-    row->addWidget(m_cameraCombo);
-    row->addWidget(m_resolutionCombo);
     row->addLayout(m_extraToolbar);
-    row->addWidget(m_liveCheck);
     row->addStretch(1);
     row->addWidget(m_saveButton);
     row->addWidget(m_settingsButton);
@@ -346,7 +351,13 @@ void RenderViewPanel::reportError(const QString& message, bool fatal) {
 void RenderViewPanel::setRendering(bool on) {
     const QSignalBlocker blocker(m_renderButton);
     m_renderButton->setChecked(on);
-    m_renderButton->setText(on ? tr("Stop") : tr("Render"));
+    showRenderButton(on);
+}
+
+void RenderViewPanel::showRenderButton(bool rendering) {
+    m_renderButton->setIcon(QIcon(rendering ? QStringLiteral(":/usdcc/theme/stop.png") : QStringLiteral(":/usdcc/theme/play.png")));
+    m_renderButton->setText(rendering ? tr("Stop") : tr("Render"));
+    m_renderButton->setToolTip(rendering ? tr("Stop rendering") : tr("Render"));
 }
 
 bool RenderViewPanel::isRendering() const { return m_renderButton->isChecked(); }
@@ -427,7 +438,33 @@ void RenderViewPanel::stageEdited(const StageChanges&) { reload(); }
 // --- The view panel's own calls.
 
 void RenderViewPanel::populateOptionsMenu(QMenu* menu) {
+    // A combo box's items as a submenu of choices, the current one checked.
+    const auto choices = [menu](const QString& title, QComboBox* combo) {
+        QMenu* submenu = menu->addMenu(title);
+        auto* group = new QActionGroup(submenu);
+        for (int i = 0; i < combo->count(); ++i) {
+            QAction* action = submenu->addAction(combo->itemText(i));
+            action->setCheckable(true);
+            action->setChecked(i == combo->currentIndex());
+            group->addAction(action);
+            QObject::connect(action, &QAction::triggered, combo, [combo, i]() { combo->setCurrentIndex(i); });
+        }
+    };
+    choices(tr("Camera"), m_cameraCombo);
+    choices(tr("Resolution"), m_resolutionCombo);
+    QAction* live = menu->addAction(tr("Update on Edits"));
+    live->setCheckable(true);
+    live->setChecked(m_liveCheck->isChecked());
+    live->setToolTip(m_liveCheck->toolTip());
+    connect(live, &QAction::toggled, m_liveCheck, &QCheckBox::setChecked);
+
+    const int before = int(menu->actions().size());
+    menu->addSeparator();
+    populateRendererOptions(menu);
+    if (int(menu->actions().size()) == before + 1) menu->removeAction(menu->actions().last());  // nothing came
+
     if (!m_settingsCategory.isEmpty()) {
+        menu->addSeparator();
         menu->addAction(tr("%1 Settings…").arg(m_settingsCategory), this, &RenderViewPanel::openSettings);
     }
 }
@@ -451,7 +488,7 @@ void RenderViewPanel::onStageChanged(const StageRefPtr& stage) {
 // --- What happens.
 
 void RenderViewPanel::onRenderToggled(bool on) {
-    m_renderButton->setText(on ? tr("Stop") : tr("Render"));
+    showRenderButton(on);
     if (!on) {
         stopRender();
         return;
@@ -549,6 +586,7 @@ void RenderViewPanel::fillCameras() {
         m_cameraCombo->setCurrentIndex(std::max(0, index));
     }
     if (index < 0 && current != kViewportCamera && !current.isEmpty()) sendCamera();  // its camera went away
+    notifyOptionsChanged();  // the Camera menu's entries
 }
 
 void RenderViewPanel::saveImage() {

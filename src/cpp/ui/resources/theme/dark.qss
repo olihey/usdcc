@@ -680,7 +680,8 @@ QWidget#panelToolbar {
 /* Icon-only squares in panel toolbars: the options/filter menu button and
    PanelIconButtons such as the Log panel's Clear and Log Folder. */
 QToolButton#panelMenuButton,
-QToolButton#panelIconButton {
+QToolButton#panelIconButton,
+QToolButton[panelIcon="true"] {
     padding: 0;
 }
 
