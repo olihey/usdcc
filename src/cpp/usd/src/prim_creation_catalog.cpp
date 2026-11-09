@@ -56,29 +56,43 @@ std::string familyOf(const std::string& type) {
     return parsed.first.IsEmpty() ? type : parsed.first.GetString();
 }
 
-// Every concrete type by family, each its newest version.
-std::map<std::string, Item> concreteFamilies() {
+// Every concrete type by family. A family with several versions lists each, oldest first:
+// the first by the family's name (DomeLight), the others by their own (DomeLight_1).
+std::map<std::string, std::vector<Item>> concreteFamilies() {
     // First: making the registry is what loads the plugins' types.
     PXR_NS::UsdSchemaRegistry& registry = PXR_NS::UsdSchemaRegistry::GetInstance();
     std::set<PXR_NS::TfType> types;
     PXR_NS::TfType::Find<PXR_NS::UsdTyped>().GetAllDerivedTypes(&types);
-    std::map<std::string, std::pair<PXR_NS::UsdSchemaVersion, Item>> newest;
+    std::map<std::string, std::map<PXR_NS::UsdSchemaVersion, Item>> versions;
     for (const PXR_NS::TfType& type : types) {
         const PXR_NS::TfToken name = PXR_NS::UsdSchemaRegistry::GetConcreteSchemaTypeName(type);
         if (name.IsEmpty()) continue;
         const auto [family, version] = PXR_NS::UsdSchemaRegistry::ParseSchemaFamilyAndVersionFromIdentifier(name);
-        const auto it = newest.find(family.GetString());
-        if (it != newest.end() && it->second.first >= version) continue;
         Item item;
-        item.label = family.GetString();
         item.type = name.GetString();
         if (const PXR_NS::UsdPrimDefinition* definition = registry.FindConcretePrimDefinition(name)) {
             item.documentation = definition->GetDocumentation();
         }
-        newest[family.GetString()] = {version, std::move(item)};
+        versions[family.GetString()][version] = std::move(item);
     }
-    std::map<std::string, Item> families;
-    for (auto& [family, entry] : newest) families.emplace(family, std::move(entry.second));
+    std::map<std::string, std::vector<Item>> families;
+    for (auto& [family, byVersion] : versions) {
+        const bool several = byVersion.size() > 1;
+        const std::string newest = byVersion.rbegin()->second.type;
+        std::vector<Item>& items = families[family];
+        for (auto& [version, item] : byVersion) {
+            const bool first = items.empty();
+            item.label = first ? family : item.type;
+            // Which one this is, before the schema's own text (the menu's tooltip).
+            if (several) {
+                const std::string note = item.type == newest
+                                             ? "The newest version of " + family + ". "
+                                             : "The original version; " + newest + " is newer, and some renderers only know this one. ";
+                item.documentation = note + item.documentation;
+            }
+            items.push_back(std::move(item));
+        }
+    }
     return families;
 }
 
@@ -100,12 +114,12 @@ bool PrimCreationCatalog::remove(const std::string& type) { return m_entries.era
 void PrimCreationCatalog::reset() { m_entries = builtInEntries(); }
 
 std::vector<PrimCreationCatalog::Category> PrimCreationCatalog::categories() const {
-    // category -> group -> (order, label) -> item
-    std::map<std::string, std::map<int, std::map<std::pair<int, std::string>, Item>>> sorted;
-    for (auto& [family, item] : concreteFamilies()) {
+    // category -> group -> (order, family) -> its items, every version
+    std::map<std::string, std::map<int, std::map<std::pair<int, std::string>, std::vector<Item>>>> sorted;
+    for (auto& [family, items] : concreteFamilies()) {
         const auto found = m_entries.find(family);
         const Entry entry = found == m_entries.end() ? Entry{} : found->second;
-        if (!entry.hidden) sorted[entry.category][entry.group][{entry.order, family}] = std::move(item);
+        if (!entry.hidden) sorted[entry.category][entry.group][{entry.order, family}] = std::move(items);
     }
 
     std::vector<std::string> order{kTopLevel};
@@ -123,7 +137,9 @@ std::vector<PrimCreationCatalog::Category> PrimCreationCatalog::categories() con
         category.name = name;
         for (auto& [group, items] : found->second) {
             std::vector<Item> line;
-            for (auto& [key, item] : items) line.push_back(std::move(item));
+            for (auto& [key, versions] : items) {
+                for (Item& item : versions) line.push_back(std::move(item));
+            }
             category.groups.push_back(std::move(line));
         }
         result.push_back(std::move(category));

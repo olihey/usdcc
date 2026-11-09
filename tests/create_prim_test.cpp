@@ -20,8 +20,12 @@
 
 #include <QUndoStack>
 
+#include <algorithm>
 #include <memory>
+#include <optional>
 #include <set>
+#include <string>
+#include <utility>
 
 using usdcc::usd::PrimCreationCatalog;
 using usdcc::usd::Stage;
@@ -210,13 +214,33 @@ USDCC_TEST(create_catalog_order_and_versions) {
     CHECK(categories[1].name == "Geometry" && categories[1].groups.size() == 4, "then Geometry, in its groups");
     CHECK(categories[1].groups[0][0].label == "Cube", "Cube first");
 
-    const auto* capsule = findItem(catalog, "Geometry", "Capsule");
-    CHECK(capsule && capsule->type == "Capsule_1", "a family makes its newest");
-    const auto* dome = findItem(catalog, "Lights", "DomeLight");
-    CHECK(dome && dome->type == "DomeLight_1", "here too");
+    // A family with two versions has both, the original by the family's name: not every
+    // renderer knows the newer ones (RTX draws neither DomeLight_1 nor Capsule_1).
+    for (const auto& [category, family] : {std::pair{"Geometry", "Capsule"}, std::pair{"Geometry", "Cylinder"},
+                                           std::pair{"Lights", "DomeLight"}}) {
+        const std::string newer = std::string(family) + "_1";
+        // Copies: findItem()'s pointer is only good until its next call.
+        const auto copy = [](const PrimCreationCatalog::Item* item) {
+            return item ? std::optional<PrimCreationCatalog::Item>(*item) : std::nullopt;
+        };
+        const auto original = copy(findItem(catalog, category, family));
+        CHECK(original && original->type == family, "%s makes %s", family, family);
+        const auto latest = copy(findItem(catalog, category, newer));
+        CHECK(latest && latest->type == newer, "and %s its own line", newer.c_str());
+        CHECK(original && latest && original->documentation.starts_with("The original version; " + newer + " is newer") &&
+                  latest->documentation.starts_with(std::string("The newest version of ") + family),
+              "their tooltips say which is which");
+    }
+    // Next to each other, the original first.
+    for (const auto& category : catalog.categories()) {
+        if (category.name != "Lights") continue;
+        const auto& line = category.groups.front();
+        const auto at = std::find_if(line.begin(), line.end(), [](const auto& item) { return item.type == "DomeLight"; });
+        CHECK(at != line.end() && at + 1 != line.end() && (at + 1)->type == "DomeLight_1", "side by side");
+    }
     const auto* cube = findItem(catalog, "Geometry", "Cube");
-    CHECK(cube && cube->type == "Cube" && !cube->documentation.empty(), "with its documentation");
-    CHECK(!findItem(catalog, "Geometry", "Capsule_1"), "listed once, by family");
+    CHECK(cube && cube->type == "Cube" && !cube->documentation.empty() && !cube->documentation.starts_with("The "),
+          "with its documentation, and no version note for a type with one version");
 }
 
 USDCC_TEST(create_catalog_changes_at_runtime) {
@@ -239,7 +263,8 @@ USDCC_TEST(create_catalog_changes_at_runtime) {
     CHECK(!findItem(catalog, "Geometry", "Sphere"), "hidden");
 
     catalog.hide("Capsule_1");
-    CHECK(!findItem(catalog, "Geometry", "Capsule"), "either spelling names the family");
+    CHECK(!findItem(catalog, "Geometry", "Capsule") && !findItem(catalog, "Geometry", "Capsule_1"),
+          "either spelling names the family, both versions");
 
     PrimCreationCatalog::Entry future;
     future.category = "Future";

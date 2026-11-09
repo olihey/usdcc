@@ -137,8 +137,12 @@ usdcc.usd.create_entries()   # what the menu lists now
 - **Under the selected prim,** with the menu's first line saying where, rather than always at the root: the app can't
   reparent yet, so a prim made in the wrong place would stay there.
 - **Still under a selected Gprim** (a Cube, then Create Sphere): one rule is easier to predict, and USD accepts it.
-- **Types with two versions make the newest:** Capsule creates `Capsule_1`. usdImaging's Capsule and Cylinder adapters
-  handle both versions (`capsuleAdapter.cpp`, `cylinderAdapter.cpp`), and DomeLight_1 has an adapter of its own.
+- **Types with two versions offer both,** side by side: DomeLight then DomeLight_1, Capsule then Capsule_1, Cylinder then
+  Cylinder_1. The original is labelled with the family's name, a newer one with its own, and each tooltip says which is
+  which. Not every renderer knows the newer ones: RTX Render draws neither DomeLight_1 nor Capsule_1 nor Cylinder_1, so a
+  scene lit only by a DomeLight_1 renders black there. usdImaging handles both (`capsuleAdapter.cpp`,
+  `cylinderAdapter.cpp`, and DomeLight_1 has an adapter of its own). An entry is still per family: setting, hiding or
+  removing Capsule or Capsule_1 applies to both lines. (Until 2026-11 only the newest was offered.)
 - **Types that start empty stay empty,** as this is about default values. A Mesh with starter content would be authored
   data, and a feature of its own.
 - **Curated categories,** rather than grouping by plugin, where Camera would share a list with Cube.

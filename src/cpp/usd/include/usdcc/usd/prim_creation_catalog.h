@@ -11,8 +11,10 @@ namespace usdcc::usd {
 // registry, from C++ and from Python (usdcc.usd), that the app fills with the same
 // calls a plugin uses.
 //
-// Types are named by their family: "Capsule" for Capsule and Capsule_1. The menu
-// creates a family's newest version.
+// Entries are by family: "Capsule" sets, hides or removes both Capsule and Capsule_1.
+// A family with several versions has a menu line for each, next to each other: the
+// original by the family's name, the newer ones by their own (Capsule_1), since not
+// every renderer knows the newer ones.
 class PrimCreationCatalog {
 public:
     // Directly in the menu rather than in a submenu.
@@ -30,8 +32,8 @@ public:
 
     // One line of the menu.
     struct Item {
-        std::string label;  // the family's name: "Capsule"
-        std::string type;   // what's created: "Capsule_1"
+        std::string label;  // "Capsule" for the family's first version, "Capsule_1" for a later one
+        std::string type;   // what's created: "Capsule", "Capsule_1"
         std::string documentation;
     };
     struct Category {

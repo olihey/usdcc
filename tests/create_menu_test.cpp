@@ -127,8 +127,12 @@ USDCC_TEST(create_menu_entries_and_icons) {
     CHECK(sameIcon(cube, "Cube"), "a submenu's entry, with its own icon");
     CHECK(cube && !cube->toolTip().isEmpty(), "and its schema's documentation");
     CHECK(sameIcon(entry(&menu, QStringLiteral("Lights"), QStringLiteral("RectLight")), "RectLight"), "each light its own");
-    CHECK(sameIcon(entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Capsule")), "Capsule_1"), "a family's icon");
-    CHECK(!entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Capsule_1")), "listed by family only");
+    CHECK(sameIcon(entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Capsule")), "Capsule"), "a family's icon");
+    CHECK(sameIcon(entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Capsule_1")), "Capsule_1"),
+          "and its newer version on a line of its own");
+    CHECK(entry(&menu, QStringLiteral("Lights"), QStringLiteral("DomeLight")) &&
+              entry(&menu, QStringLiteral("Lights"), QStringLiteral("DomeLight_1")),
+          "both dome lights");
     CHECK(sameIcon(entry(&menu, QStringLiteral("Geometry")), "Cube"), "a submenu has its first entry's icon");
     CHECK(!entry(&menu, QStringLiteral("Plugins")), "no Plugins with nothing in it");
 

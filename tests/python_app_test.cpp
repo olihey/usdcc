@@ -264,8 +264,9 @@ USDCC_TEST(python_app_api) {
     CHECK(catalogHas("Studio", "Cube") && !catalogHas("Geometry", "Cube"), "the menu's catalog sees it");
     CHECK(evaluate("[e['category'] for e in __import__('usdcc.usd').usd.create_entries() if e['label'] == 'Cube']") == "['Studio']",
           "create_entries()");
-    CHECK(evaluate("[e['type'] for e in __import__('usdcc.usd').usd.create_entries() if e['label'] == 'Capsule']") == "['Capsule_1']",
-          "create_entries() says what's made");
+    CHECK(evaluate("[e['type'] for e in __import__('usdcc.usd').usd.create_entries() if e['label'].startswith('Capsule')]") ==
+              "['Capsule', 'Capsule_1']",
+          "create_entries() says what's made, each version");
     CHECK(evaluate("__import__('usdcc.usd').usd.remove_create_entry('Cube')") == "True" && catalogHas("Plugins", "Cube"),
           "remove_create_entry(): to Plugins");
     CHECK(evaluate("__import__('usdcc.usd').usd.remove_create_entry('Cube')") == "False", "there's none now");
