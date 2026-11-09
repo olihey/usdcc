@@ -23,6 +23,7 @@
 #include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/properties/attribute_binding.h"
 #include "usdcc/usd/properties/category_section.h"
+#include "usdcc/usd/properties/number_field.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/properties/transform_stack_editor.h"
@@ -42,7 +43,9 @@
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/xformable.h>
 
+#include <QAbstractSpinBox>
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
@@ -314,8 +317,59 @@ CategorySection* AttributesViewPanel::makeSection(const QString& key, const QStr
     return section;
 }
 
+namespace {
+
+// A field Tab stops at: a number field or a text field that can be typed in now.
+// A number field's own typing box, and the line edits inside combo and spin boxes,
+// aren't fields of their own.
+bool isTabStop(const QWidget* widget) {
+    if (!widget->isEnabled()) return false;
+    if (const auto* number = qobject_cast<const properties::NumberField*>(widget)) return !number->isReadOnly();
+    if (const auto* edit = qobject_cast<const QLineEdit*>(widget)) {
+        const QWidget* parent = edit->parentWidget();
+        if (qobject_cast<const properties::NumberField*>(parent) || qobject_cast<const QComboBox*>(parent) ||
+            qobject_cast<const QAbstractSpinBox*>(parent)) {
+            return false;
+        }
+        return !edit->isReadOnly() && (edit->focusPolicy() & Qt::TabFocus);
+    }
+    return false;
+}
+
+// The field `widget` is, or is typing in (a number field's typing box); null if none.
+QWidget* owningTabStop(QWidget* widget, const QWidget* content) {
+    for (QWidget* at = widget; at && at != content; at = at->parentWidget()) {
+        if (isTabStop(at)) return at;
+    }
+    return nullptr;
+}
+
+// Moves the focus into `stop` the way a user starting to type there would: a number
+// field opens its typing box, a text field selects its text.
+void activateTabStop(QWidget* stop) {
+    if (auto* number = qobject_cast<properties::NumberField*>(stop)) {
+        number->beginTextEdit();
+    } else if (auto* edit = qobject_cast<QLineEdit*>(stop)) {
+        edit->setFocus(Qt::TabFocusReason);
+        edit->selectAll();
+    }
+}
+
+}  // namespace
+
 void AttributesViewPanel::rebuild() {
     const int scrollPosition = m_scroll->verticalScrollBar()->value();
+    // Typing in a field when the rows are rebuilt (an edit that changes what's shown,
+    // such as a rename committed by Tab): the same field of the new rows takes over.
+    int typingIn = -1;
+    if (QWidget* focus = QApplication::focusWidget(); m_content && qobject_cast<QLineEdit*>(focus) &&
+                                                      m_content->isAncestorOf(focus)) {
+        if (QWidget* stop = owningTabStop(focus, m_content)) {
+            const std::vector<QWidget*> stops = tabStops();
+            const auto at = std::find(stops.begin(), stops.end(), stop);
+            if (at != stops.end()) typingIn = static_cast<int>(at - stops.begin());
+        }
+    }
     if (QWidget* old = m_scroll->takeWidget()) {
         // Deferred: a rebuild can be triggered from inside one of the old
         // widgets' own signal handlers.
@@ -440,7 +494,13 @@ void AttributesViewPanel::rebuild() {
 
     applyFilter();
     // The scroll range is only known once the new content has been laid out.
-    QTimer::singleShot(0, this, [this, scrollPosition]() { m_scroll->verticalScrollBar()->setValue(scrollPosition); });
+    QTimer::singleShot(0, this, [this, scrollPosition, typingIn]() {
+        m_scroll->verticalScrollBar()->setValue(scrollPosition);
+        const QWidget* focus = QApplication::focusWidget();
+        if (typingIn < 0 || (focus && focus != this && !isAncestorOf(focus))) return;  // the user went elsewhere
+        const std::vector<QWidget*> stops = tabStops();
+        if (typingIn < static_cast<int>(stops.size())) activateTabStop(stops[static_cast<size_t>(typingIn)]);
+    });
 }
 
 // A Shader's definition says what inputs it has, and one with no value isn't an attribute
@@ -1390,6 +1450,73 @@ void AttributesViewPanel::processPendingChanges() {
         return;
     }
     refreshValues();
+}
+
+std::vector<QWidget*> AttributesViewPanel::tabStops(QWidget* including) const {
+    if (!m_content) return {};
+    struct Stop {
+        QWidget* widget;
+        int centerY;
+        int left;
+    };
+    std::vector<Stop> stops;
+    for (QWidget* widget : m_content->findChildren<QWidget*>()) {
+        if (widget != including && !isTabStop(widget)) continue;
+        // Not in a collapsed section, a closed matrix grid or a row a search hides.
+        if (!widget->isVisibleTo(m_content)) continue;
+        const QPoint topLeft = widget->mapTo(m_content, QPoint(0, 0));
+        stops.push_back({widget, topLeft.y() + widget->height() / 2, topLeft.x()});
+    }
+    // Reading order: top to bottom by line, then left to right. Fields on one line
+    // can differ a little in height, so a line is everything whose middle is within
+    // a few pixels of its first field's.
+    std::sort(stops.begin(), stops.end(), [](const Stop& a, const Stop& b) { return a.centerY < b.centerY; });
+    const int tolerance = usdcc::ui::scaled::pixels(6);
+    for (auto line = stops.begin(); line != stops.end();) {
+        auto end = std::find_if(line, stops.end(), [&](const Stop& s) { return s.centerY - line->centerY > tolerance; });
+        std::sort(line, end, [](const Stop& a, const Stop& b) { return a.left < b.left; });
+        line = end;
+    }
+    std::vector<QWidget*> ordered;
+    ordered.reserve(stops.size());
+    for (const Stop& stop : stops) ordered.push_back(stop.widget);
+    return ordered;
+}
+
+bool AttributesViewPanel::focusNextPrevChild(bool next) {
+    QWidget* focus = QApplication::focusWidget();
+    if (!focus) focus = window()->focusWidget();
+    // Qt also calls this when the focused widget is hidden (QWidget::hide()), to move the
+    // focus off it: only a Tab key, from a widget still on screen, moves to a field.
+    if (!m_content || !focus || !m_content->isAncestorOf(focus) || !focus->isVisible()) {
+        return ViewPanel::focusNextPrevChild(next);
+    }
+
+    // Where Tab moves on from: the field being typed in, or whatever else has the
+    // focus (a check box, a combo box), placed among the fields.
+    QWidget* from = owningTabStop(focus, m_content);
+    if (!from) from = focus;
+    const std::vector<QWidget*> stops = tabStops(from);
+    const auto at = std::find(stops.begin(), stops.end(), from);
+    if (at == stops.end()) return ViewPanel::focusNextPrevChild(next);
+    const int count = static_cast<int>(stops.size());
+    if (count > 1) {
+        // The neighbour, wrapping round; every entry but `from` is a field.
+        const int index = static_cast<int>(at - stops.begin());
+        QWidget* target = stops[static_cast<size_t>((index + (next ? 1 : count - 1)) % count)];
+        // Taking the focus commits the field being left (its focus-out); the edit
+        // updates the rows later (queued), so `target` stays.
+        activateTabStop(target);
+        m_scroll->ensureWidgetVisible(target);
+        return true;
+    }
+    // The only field: commit it by leaving it and starting again.
+    if (isTabStop(from)) {
+        focus->clearFocus();
+        activateTabStop(from);
+        return true;
+    }
+    return ViewPanel::focusNextPrevChild(next);
 }
 
 }  // namespace usdcc::usd

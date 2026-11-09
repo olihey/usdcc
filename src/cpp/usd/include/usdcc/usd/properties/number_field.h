@@ -21,7 +21,9 @@ namespace usdcc::usd::properties {
 //   Slider mode: press/drag sets the value from the cursor position;
 //                a double-click types a value.
 //   Both:        Enter commits typed text, Esc cancels typing or a drag in
-//                progress (restoring the value it started from).
+//                progress (restoring the value it started from). Tab commits
+//                it too: the Attribute Editor moves on to the next field
+//                (AttributesViewPanel::focusNextPrevChild()).
 //
 // Edits are reported as editStarted / valueEdited (live, possibly many) /
 // editFinished, or editCanceled, so a caller can make one undo step per
@@ -45,9 +47,16 @@ public:
     // a typed value may lie outside it.
     void setSliderRange(double minimum, double maximum);
     void setReadOnly(bool readOnly);
+    bool isReadOnly() const { return m_readOnly; }
 
     double value() const { return m_value; }
     void setValue(double value);
+
+    // Starts typing a value, as a click does: a text box over the value, all of it
+    // selected, with the focus. Nothing when read-only. It commits when it loses the
+    // focus (or on Enter) and cancels on Esc.
+    void beginTextEdit();
+    bool isTextEditing() const { return m_textEditing; }
 
     QString text() const;
     QSize sizeHint() const override;
@@ -77,7 +86,6 @@ private:
     double valueAtX(int x) const;
     QRect valueRect() const;
     void applyLive(double value);
-    void beginTextEdit();
     void endTextEdit(bool commit);
 
     double m_value = 0.0;

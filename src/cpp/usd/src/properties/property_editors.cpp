@@ -373,7 +373,11 @@ public:
     }
 
     void setValue(const VtValue& value) override {
-        m_text = QString::fromStdString(formatValue(value));
+        const QString text = QString::fromStdString(formatValue(value));
+        // A refresh with the same value leaves a field being typed in alone: its text,
+        // cursor and selection (Tab selects all of it, so typing replaces it).
+        if (text == m_text && m_edit->hasFocus()) return;
+        m_text = text;
         m_edit->setText(m_text);
         setInvalid(false);
     }
@@ -489,8 +493,12 @@ public:
     }
 
     void setValue(const VtValue& value) override {
-        m_path = value.IsHolding<SdfAssetPath>() ? QString::fromStdString(value.UncheckedGet<SdfAssetPath>().GetAssetPath())
-                                                 : QString();
+        const QString path = value.IsHolding<SdfAssetPath>()
+                                 ? QString::fromStdString(value.UncheckedGet<SdfAssetPath>().GetAssetPath())
+                                 : QString();
+        // As TextEditor: the same value leaves a field being typed in alone.
+        if (path == m_path && m_edit->hasFocus()) return;
+        m_path = path;
         updateDisplay();
     }
     VtValue value() const override { return VtValue(SdfAssetPath(m_path.toStdString())); }

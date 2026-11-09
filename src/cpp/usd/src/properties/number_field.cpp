@@ -301,6 +301,9 @@ void NumberField::endTextEdit(bool commit) {
     }
     m_textEditing = false;
     const QString typed = m_editor->text().trimmed();
+    // Enter or Esc: the focus stays on this field, rather than Qt moving it on when the
+    // typing box it's in goes. (Leaving by Tab or a click, the focus has already gone.)
+    if (m_editor->hasFocus()) setFocus(Qt::OtherFocusReason);
     m_editor->hide();
     update();
     if (!commit) {

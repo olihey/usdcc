@@ -202,7 +202,8 @@ elements.
 
 - **`DragNumberField`:** a dark rounded field with an optional colored axis prefix.
   - A horizontal drag scrubs the value: Shift makes the step smaller, Ctrl larger.
-  - A click without dragging enters text-edit mode. Esc cancels.
+  - A click without dragging enters text-edit mode. Esc cancels, Enter commits, Tab
+    commits and moves on (§4.4).
   - Number formatting follows the mockup (`0.00`, plus a unit suffix such as `°`).
 - **`SliderField`:** a filled bar showing the value (e.g. "0.420"). Click-drag sets the
   value; double-click types it.
@@ -258,6 +259,28 @@ The rules are Qt-free, in `shade_connections.h` (`usdcc_usd`). The edits are
   pills list inputs on *other* prims, so while one is shown the panel also refreshes for
   changes anywhere under its connection scope.
 - **Plain attribute connections** (not UsdShade) show the link too, but have no buttons.
+
+### 4.4 Tab between fields
+
+Tab commits the field being typed in and starts typing in the next one, the way a form
+does (`AttributesViewPanel::focusNextPrevChild()`):
+
+- **Which next:** the next field to the right on the same line (a vector's Y after its X),
+  else the first one on a line below. Shift+Tab goes back. At the end it wraps round to
+  the first.
+- **Fields** are number fields and text fields (strings, tokens, asset paths, the prim's
+  name) that can be typed in now: not read-only (a connected input, an instance proxy's
+  name), not in a collapsed section, a closed matrix grid or a row the search hides. Check
+  boxes and combo boxes are skipped, but Tab from one moves on to the next field after it.
+- **Order** is reading order on screen (`tabStops()`): by line, top to bottom, then left
+  to right, so it follows the rows whatever widgets they are made of.
+- **Starting to type:** a number field opens its typing box with the value selected; a
+  text field selects its text. Typing replaces it.
+- **Rows rebuilt under the focus** (an edit that changes what's shown, such as a rename):
+  the field at the same place in the new rows takes the focus back.
+- **A refresh with the same value** leaves a text field being typed in alone, so the
+  selection Tab made survives the update the previous field's edit sends.
+- The search field in the toolbar keeps Qt's usual Tab.
 
 ## 5. Categories
 

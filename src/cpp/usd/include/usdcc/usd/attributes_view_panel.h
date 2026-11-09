@@ -77,6 +77,12 @@ protected:
     // Authored Only and Hidden Properties.
     void populateOptionsMenu(QMenu* menu) override;
     void onStageChanged(const StageRefPtr& stage) override;
+    // Tab and Shift+Tab in the rows (docs/ATTRIBUTE_EDITOR.md §4.4): commit the field
+    // and start typing in the next one to the right, else the first one on a line
+    // below, wrapping round at the end. Fields are number and text fields that can be
+    // typed in now (not read-only, not in a collapsed section). Elsewhere in the
+    // panel (the search field), Tab works as usual.
+    bool focusNextPrevChild(bool next) override;
 
 private Q_SLOTS:
     void onStageSelectionChanged(StageRefPtr stage, std::vector<PXR_NS::SdfPath> paths);
@@ -156,6 +162,10 @@ private:
     void processPendingChanges();
     void queueProcessPendingChanges();
     bool anyEditing() const;
+    // The fields Tab goes through, in reading order: by line, top to bottom, then
+    // left to right. `including`, if given, is placed among them wherever it is, so
+    // that Tab can move on from a check box or combo box too.
+    std::vector<QWidget*> tabStops(QWidget* including = nullptr) const;
     std::string layoutSignature(const PXR_NS::UsdPrim& prim) const;
 
     PXR_NS::SdfPath m_primPath;

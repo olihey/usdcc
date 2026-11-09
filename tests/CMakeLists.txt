@@ -58,6 +58,7 @@ add_executable(usdcc_ui_tests
     about_dialog_test.cpp
     attributes_primvar_groups_test.cpp
     attributes_rename_test.cpp
+    attributes_tab_test.cpp
     attributes_right_edge_test.cpp
     attributes_transform_section_test.cpp
     composition_edit_test.cpp
