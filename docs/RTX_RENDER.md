@@ -2,7 +2,8 @@
 
 RTX Render is an optional C++ plugin using NVIDIA ovrtx and ovstage. It displays
 images through CUDA/Vulkan interop, supports camera navigation, and highlights
-selection made elsewhere in usdcc. It has no picking or gizmos. The Python RTX
+selection made elsewhere in usdcc. It has no picking or gizmos, and no ground grid;
+it doesn't use the viewport background color ([VIEWPORT_GRID.md](VIEWPORT_GRID.md) §2). The Python RTX
 plugin and helper have been removed; V-Ray and generic Python panels remain.
 
 ## Setup

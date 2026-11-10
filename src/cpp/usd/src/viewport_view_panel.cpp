@@ -16,8 +16,20 @@
 #include <QJsonArray>
 #include <QAction>
 #include <QActionGroup>
+#include <QCheckBox>
+#include <QColorDialog>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QGridLayout>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -33,6 +45,118 @@ std::vector<ViewportViewPanel*>& openViewports() {
     return viewports;
 }
 ViewportViewPanel* s_clickedViewport = nullptr;
+
+QIcon colorSwatch(const QColor& color) {
+    QPixmap pixmap(28, 14);
+    pixmap.fill(color);
+    QPainter painter(&pixmap);
+    painter.setPen(QColor(255, 255, 255, 60));
+    painter.drawRect(pixmap.rect().adjusted(0, 0, -1, -1));
+    return QIcon(pixmap);
+}
+
+// The Grid & Background dialog: this viewport's values, each with a Default button that
+// shows while the viewport overrides it and drops the override. Edits apply at once.
+QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
+    auto* dialog = new QDialog(panel);
+    dialog->setObjectName(QStringLiteral("viewportDisplayDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QObject::tr("Grid & Background - %1").arg(panel->windowTitle()));
+
+    auto* layout = new QVBoxLayout(dialog);
+    auto* grid = new QGridLayout();
+    layout->addLayout(grid);
+
+    auto* showGrid = new QCheckBox(QObject::tr("Show grid"), dialog);
+    showGrid->setObjectName(QStringLiteral("displayShowGrid"));
+    auto* size = new QDoubleSpinBox(dialog);
+    size->setObjectName(QStringLiteral("displayGridSize"));
+    size->setRange(0.01, 1000000.0);
+    size->setDecimals(3);
+    auto* step = new QDoubleSpinBox(dialog);
+    step->setObjectName(QStringLiteral("displayGridStep"));
+    step->setRange(0.001, 100000.0);
+    step->setDecimals(3);
+    for (QDoubleSpinBox* spin : {size, step}) spin->setKeyboardTracking(false);  // a value per edit, not per key
+    auto* background = new QPushButton(dialog);
+    background->setObjectName(QStringLiteral("displayBackground"));
+    background->setIconSize(QSize(28, 14));
+
+    auto addRow = [dialog, grid](int row, const QString& label, QWidget* editor, const char* name) {
+        if (!label.isEmpty()) grid->addWidget(new QLabel(label, dialog), row, 0);
+        grid->addWidget(editor, row, 1);
+        auto* reset = new QToolButton(dialog);
+        reset->setObjectName(QString::fromLatin1(name));
+        reset->setText(QObject::tr("Default"));
+        reset->setToolTip(QObject::tr("Use the Settings > Viewport value"));
+        grid->addWidget(reset, row, 2);
+        return reset;
+    };
+    QToolButton* resetShow = addRow(0, QString(), showGrid, "resetShowGrid");
+    QToolButton* resetSize = addRow(1, QObject::tr("Grid size"), size, "resetGridSize");
+    QToolButton* resetStep = addRow(2, QObject::tr("Grid step"), step, "resetGridStep");
+    QToolButton* resetBackground = addRow(3, QObject::tr("Background"), background, "resetBackground");
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    layout->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+
+    // Shows the panel's values; run again whenever they change, from here or elsewhere.
+    auto refresh = [=]() {
+        const HydraViewportWindow::DisplayOptions shown = panel->displayOptions();
+        const ViewportDisplayOverrides overrides = panel->displayOverrides();
+        const QSignalBlocker blockShow(showGrid), blockSize(size), blockStep(step);
+        showGrid->setChecked(shown.showGrid);
+        size->setValue(shown.gridSize);
+        step->setValue(shown.gridStep);
+        background->setIcon(colorSwatch(shown.background));
+        background->setText(shown.background.name());
+        resetShow->setVisible(overrides.showGrid.has_value());
+        resetSize->setVisible(overrides.gridSize.has_value());
+        resetStep->setVisible(overrides.gridStep.has_value());
+        resetBackground->setVisible(overrides.background.has_value());
+    };
+    refresh();
+    QObject::connect(panel, &ViewportViewPanel::displayChanged, dialog, refresh);
+
+    // Changes one override, leaving the others as they are.
+    auto edit = [panel](auto change) {
+        ViewportDisplayOverrides overrides = panel->displayOverrides();
+        change(overrides);
+        panel->setDisplayOverrides(overrides);
+    };
+    QObject::connect(showGrid, &QCheckBox::toggled, dialog,
+                     [edit](bool on) { edit([on](ViewportDisplayOverrides& o) { o.showGrid = on; }); });
+    QObject::connect(size, &QDoubleSpinBox::valueChanged, dialog,
+                     [edit](double v) { edit([v](ViewportDisplayOverrides& o) { o.gridSize = v; }); });
+    QObject::connect(step, &QDoubleSpinBox::valueChanged, dialog,
+                     [edit](double v) { edit([v](ViewportDisplayOverrides& o) { o.gridStep = v; }); });
+    QObject::connect(background, &QPushButton::clicked, dialog, [dialog, panel, edit]() {
+        // The viewport follows the picker while it's open; Cancel puts back what was there.
+        const ViewportDisplayOverrides before = panel->displayOverrides();
+        QColorDialog picker(panel->displayOptions().background, dialog);
+        picker.setOption(QColorDialog::DontUseNativeDialog);
+        picker.setWindowTitle(QObject::tr("Viewport Background"));
+        QObject::connect(&picker, &QColorDialog::currentColorChanged, &picker, [edit](const QColor& c) {
+            edit([c](ViewportDisplayOverrides& o) { o.background = c; });
+        });
+        if (picker.exec() == QDialog::Accepted) {
+            const QColor chosen = picker.selectedColor();
+            edit([chosen](ViewportDisplayOverrides& o) { o.background = chosen; });
+        } else {
+            panel->setDisplayOverrides(before);
+        }
+    });
+    QObject::connect(resetShow, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.showGrid.reset(); }); });
+    QObject::connect(resetSize, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.gridSize.reset(); }); });
+    QObject::connect(resetStep, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.gridStep.reset(); }); });
+    QObject::connect(resetBackground, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.background.reset(); }); });
+    return dialog;
+}
 }  // namespace
 
 ViewportViewPanel* ViewportViewPanel::activeViewport() {
@@ -84,6 +208,14 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // see hydra_viewport_window.h for why.
     m_viewport = new HydraViewportWindow();
     m_viewport->setToolSet(m_toolSet);
+    m_viewport->setDisplayOptions(displayOptions());
+    // What isn't overridden follows Settings > Viewport as it changes.
+    usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
+        if (key == kViewportShowGridKey || key == kViewportGridSizeKey || key == kViewportGridStepKey ||
+            key == kViewportBackgroundKey) {
+            applyDisplay();
+        }
+    });
     QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
 
     layout->addWidget(toolbar);
@@ -170,8 +302,33 @@ void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
     }
 }
 
+HydraViewportWindow::DisplayOptions ViewportViewPanel::displayOptions() const {
+    return m_displayOverrides.applyTo(defaultViewportDisplay());
+}
+
+void ViewportViewPanel::setDisplayOverrides(const ViewportDisplayOverrides& overrides) {
+    if (overrides == m_displayOverrides) return;
+    m_displayOverrides = overrides;
+    applyDisplay();
+}
+
+void ViewportViewPanel::applyDisplay() {
+    m_viewport->setDisplayOptions(displayOptions());
+    Q_EMIT displayChanged();
+    notifyOptionsChanged();  // Show Grid's tick, Use Settings Defaults
+}
+
+QDialog* ViewportViewPanel::showDisplayDialog() {
+    if (!m_displayDialog) m_displayDialog = makeDisplayDialog(this);
+    m_displayDialog->show();
+    m_displayDialog->raise();
+    m_displayDialog->activateWindow();
+    return m_displayDialog;
+}
+
 usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, m_undoManager, windowTitle(), parent);
+    copy->setDisplayOverrides(m_displayOverrides);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so it has
@@ -202,10 +359,13 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     state.insert(QStringLiteral("camera"), orbit);
     const PXR_NS::TfToken renderer = m_viewport->currentRendererPlugin();
     if (!renderer.IsEmpty()) state.insert(QStringLiteral("renderer"), QString::fromStdString(renderer.GetString()));
+    if (!m_displayOverrides.isEmpty()) state.insert(QStringLiteral("display"), m_displayOverrides.toJson());
     return state;
 }
 
 void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
+    // Needs no renderer, so applies at once. None saved (an older session): no overrides.
+    setDisplayOverrides(ViewportDisplayOverrides::fromJson(state.value(QStringLiteral("display")).toObject()));
     HydraViewportWindow::CameraState camera = m_viewport->cameraState();
     const QJsonObject orbit = state.value(QStringLiteral("camera")).toObject();
     const QJsonArray target = orbit.value(QStringLiteral("target")).toArray();
@@ -300,6 +460,23 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
         group->addAction(action);
         connect(action, &QAction::triggered, this, [this, pluginId]() { m_viewport->setRendererPlugin(pluginId); });
     }
+
+    menu->addSeparator();
+    QAction* showGrid = menu->addAction(tr("Show Grid"));
+    showGrid->setObjectName(QStringLiteral("showGridAction"));
+    showGrid->setCheckable(true);
+    showGrid->setChecked(displayOptions().showGrid);
+    connect(showGrid, &QAction::triggered, this, [this](bool on) {
+        ViewportDisplayOverrides overrides = m_displayOverrides;
+        overrides.showGrid = on;
+        setDisplayOverrides(overrides);
+    });
+    QAction* dialog = menu->addAction(tr("Grid && Background..."), this, [this]() { showDisplayDialog(); });
+    dialog->setObjectName(QStringLiteral("displayDialogAction"));
+    QAction* defaults = menu->addAction(tr("Use Settings Defaults"), this, [this]() { setDisplayOverrides({}); });
+    defaults->setObjectName(QStringLiteral("displayDefaultsAction"));
+    defaults->setToolTip(tr("Drop this viewport's own grid and background values"));
+    defaults->setEnabled(!m_displayOverrides.isEmpty());
 }
 
 }  // namespace usdcc::usd

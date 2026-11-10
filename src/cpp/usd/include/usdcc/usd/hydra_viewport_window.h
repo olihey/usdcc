@@ -13,6 +13,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
+#include <QColor>
 #include <QPoint>
 #include <QImage>
 #include <QWindow>
@@ -101,6 +102,22 @@ public:
     // The vertical field of view frustum() uses, in degrees.
     static double verticalFieldOfView();
 
+    // What the viewport draws besides the stage: the ground grid and the background
+    // color (docs/VIEWPORT_GRID.md). ViewportViewPanel sets them from the Settings
+    // defaults and the panel's own overrides; this window just draws what it's given.
+    struct DisplayOptions {
+        bool showGrid = true;
+        double gridSize = 20.0;  // the grid's width, in scene units, centred on the origin
+        double gridStep = 1.0;   // between neighbouring lines
+        // The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss): the
+        // design's viewports sit on the same colour as the panels around them.
+        QColor background = QColor(0x1c, 0x1c, 0x1e);
+        bool operator==(const DisplayOptions&) const = default;
+    };
+    DisplayOptions displayOptions() const { return m_display; }
+    // Redraws when anything changed.
+    void setDisplayOptions(const DisplayOptions& options);
+
     // The editing tools this viewport draws gizmos for and sends mouse events
     // to. Normally one ToolSet is shared by every viewport and driven by the
     // main window's tool rail and options bar (see ViewportToolBars); the
@@ -181,6 +198,8 @@ private:
     void applyToolResult(const usdcc::tools::ToolResult& result);
     void finishToolEdit();
     void updateEngineSelection();
+    // The ground grid, depth-tested against what Hydra drew.
+    void drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix);
     void drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
                    const PXR_NS::GfMatrix4d& projMatrix);
     usdcc::tools::Tool* activeToolInstance() const;
@@ -212,6 +231,7 @@ private:
     usdcc::core::Signal<>::Connection m_optionsConnection;
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
     PXR_NS::TfToken m_targetOp;
+    DisplayOptions m_display;
 };
 
 }  // namespace usdcc::usd

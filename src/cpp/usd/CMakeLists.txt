@@ -2,6 +2,8 @@
 add_library(usdcc_usd SHARED
     include/usdcc/usd/orbit_camera.h
     src/orbit_camera.cpp
+    include/usdcc/usd/viewport_grid.h
+    src/viewport_grid.cpp
     include/usdcc/usd/applied_schemas.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
@@ -124,10 +126,12 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/usda_view_panel.h
     include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
+    include/usdcc/usd/viewport_display.h
     include/usdcc/usd/undo_manager.h
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
     src/hydra_viewport_window.cpp
+    src/viewport_display.cpp
     src/layer_actions.cpp
     src/layer_editor_view_panel.cpp
     src/log_test_messages.cpp

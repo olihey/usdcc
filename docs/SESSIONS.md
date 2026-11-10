@@ -88,7 +88,7 @@ What each panel would store:
 
 | Panel | State |
 |---|---|
-| Viewport | Orbit camera (`HydraViewportWindow::cameraState()`) and renderer. **Done.** (No scene camera to look through yet.) |
+| Viewport | Orbit camera (`HydraViewportWindow::cameraState()`), renderer, and grid/background overrides (`"display"`, [VIEWPORT_GRID.md](VIEWPORT_GRID.md) §4). **Done.** (No scene camera to look through yet.) |
 | Outliner | Expanded paths, search text, type filter, scroll position. **Done.** |
 | USDA | What it shows (a layer, flattened, or a file) and the scroll position. **Done.** |
 | Python panels | Whatever `save_state()` returns (anything that converts to JSON); `restore_state(state)` gets it back. **Done.** |

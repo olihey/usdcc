@@ -95,6 +95,9 @@ take them for a `bool`.
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
 | `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
 | `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport |
+| `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |
+| `Viewport/gridSize`, `gridStep` | Float | 20, 1 | `ViewportViewPanel`: the grid's width and line spacing |
+| `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |

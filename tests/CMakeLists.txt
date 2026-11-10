@@ -27,6 +27,7 @@ add_executable(usdcc_tests
     log_test.cpp
     move_tool_test.cpp
     orbit_camera_test.cpp
+    viewport_grid_test.cpp
     prim_move_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp
@@ -91,6 +92,7 @@ add_executable(usdcc_ui_tests
     variant_editor_test.cpp
     view_panel_layout_test.cpp
     view_panel_options_test.cpp
+    viewport_display_test.cpp
     panel_maximizer_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)

@@ -1,6 +1,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/viewport_grid.h"
 
 #include <QCursor>
 #include <QRect>
@@ -18,6 +19,8 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/timeCode.h>
+#include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usdImaging/usdImagingGL/engine.h>
 #include <pxr/usdImaging/usdImagingGL/renderParams.h>
 
@@ -42,9 +45,16 @@ namespace {
 constexpr double kFovY = 45.0;
 constexpr double kMinDistance = 0.01;
 
-// The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss) —
-// the design's viewports sit on the same colour as the panels around them.
-constexpr float kViewportBackground[3] = {28.0f / 255.0f, 28.0f / 255.0f, 30.0f / 255.0f};
+// The grid's colours: light lines on a dark background, dark ones on a light one, so the
+// grid shows whatever the background color is. The axes take the gizmo's axis colours.
+struct GridColors {
+    PXR_NS::GfVec4f minor, major, axisX, axisOther;
+};
+GridColors gridColors(const QColor& background, bool zUp) {
+    const float ink = background.lightnessF() < 0.5f ? 1.0f : 0.0f;
+    const PXR_NS::GfVec4f x(0.9f, 0.3f, 0.3f, 0.8f), y(0.4f, 0.8f, 0.3f, 0.8f), z(0.3f, 0.5f, 0.95f, 0.8f);
+    return {PXR_NS::GfVec4f(ink, ink, ink, 0.12f), PXR_NS::GfVec4f(ink, ink, ink, 0.28f), x, zUp ? y : z};
+}
 }  // namespace
 
 HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
@@ -259,6 +269,12 @@ void HydraViewportWindow::cameraMoved() {
     Q_EMIT cameraChanged();
 }
 
+void HydraViewportWindow::setDisplayOptions(const DisplayOptions& options) {
+    if (options == m_display) return;
+    m_display = options;
+    renderNow();
+}
+
 void HydraViewportWindow::setToolSet(std::shared_ptr<usdcc::tools::ToolSet> toolSet) {
     m_toolSet = std::move(toolSet);
     m_dragging = false;
@@ -387,6 +403,49 @@ void HydraViewportWindow::finishToolEdit() {
     }
 }
 
+void HydraViewportWindow::drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix) {
+    if (!m_legacyGl || !m_display.showGrid) return;
+    // On the stage's ground: XY for a Z-up stage. The camera itself stays Y-up.
+    const bool zUp = m_stage && PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
+    const std::vector<GridLine> lines = buildViewportGrid(m_display.gridSize, m_display.gridStep, zUp);
+    if (lines.empty()) return;
+    const GridColors colors = gridColors(m_display.background, zUp);
+
+    // As drawGizmo() explains, GfMatrix4d's array is already what GL expects.
+    m_legacyGl->glMatrixMode(GL_PROJECTION);
+    m_legacyGl->glLoadMatrixd(projMatrix.GetArray());
+    m_legacyGl->glMatrixMode(GL_MODELVIEW);
+    m_legacyGl->glLoadMatrixd(viewMatrix.GetArray());
+
+    // Behind the stage's geometry: Hydra's composite left its depth in our framebuffer
+    // (HgiInteropOpenGL writes it), so a depth test hides the grid where something is
+    // in front of it. The grid itself writes no depth, so its lines don't fight.
+    m_legacyGl->glEnable(GL_DEPTH_TEST);
+    m_legacyGl->glDepthFunc(GL_LEQUAL);
+    m_legacyGl->glDepthMask(GL_FALSE);
+    m_legacyGl->glEnable(GL_BLEND);
+    m_legacyGl->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    m_legacyGl->glLineWidth(1.0f);
+
+    m_legacyGl->glBegin(GL_LINES);
+    for (const GridLine& line : lines) {
+        const PXR_NS::GfVec4f& c = line.kind == GridLineKind::Minor   ? colors.minor
+                                   : line.kind == GridLineKind::Major ? colors.major
+                                   : line.kind == GridLineKind::AxisX ? colors.axisX
+                                                                       : colors.axisOther;
+        m_legacyGl->glColor4f(c[0], c[1], c[2], c[3]);
+        m_legacyGl->glVertex3d(line.a[0], line.a[1], line.a[2]);
+        m_legacyGl->glVertex3d(line.b[0], line.b[1], line.b[2]);
+    }
+    m_legacyGl->glEnd();
+
+    m_legacyGl->glDisable(GL_BLEND);
+    m_legacyGl->glDepthMask(GL_TRUE);
+    m_legacyGl->glDepthFunc(GL_LESS);
+    m_legacyGl->glMatrixMode(GL_MODELVIEW);
+    m_legacyGl->glLoadIdentity();
+}
+
 void HydraViewportWindow::drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
                                      const PXR_NS::GfMatrix4d& projMatrix) {
     if (!m_legacyGl || (geo.lines.empty() && geo.triangles.empty())) {
@@ -491,7 +550,8 @@ void HydraViewportWindow::renderNow() {
     // still show through.
     if (auto* gl = m_context->functions()) {
         gl->glViewport(0, 0, w, h);
-        gl->glClearColor(kViewportBackground[0], kViewportBackground[1], kViewportBackground[2], 1.0f);
+        gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
+                         static_cast<float>(m_display.background.blueF()), 1.0f);
         gl->glClearDepthf(1.0f);
         gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
@@ -512,8 +572,9 @@ void HydraViewportWindow::renderNow() {
     m_engine->SetLightingState(lights, material, sceneAmbient);
 
     PXR_NS::UsdImagingGLRenderParams params;
-    params.clearColor =
-        PXR_NS::GfVec4f(kViewportBackground[0], kViewportBackground[1], kViewportBackground[2], 1.0f);
+    params.clearColor = PXR_NS::GfVec4f(static_cast<float>(m_display.background.redF()),
+                                        static_cast<float>(m_display.background.greenF()),
+                                        static_cast<float>(m_display.background.blueF()), 1.0f);
     params.frame = PXR_NS::UsdTimeCode::Default();
     params.enableLighting = true;
     // SetSelected() only feeds the engine the selection; it is drawn solely
@@ -523,6 +584,8 @@ void HydraViewportWindow::renderNow() {
     if (m_stage) {
         m_engine->Render(m_stage->GetPseudoRoot(), params);
     }
+
+    drawGrid(toolCtx.viewMatrix, toolCtx.projMatrix);
 
     if (usdcc::tools::Tool* tool = activeToolInstance()) {
         drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);

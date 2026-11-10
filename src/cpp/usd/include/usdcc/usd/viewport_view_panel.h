@@ -5,15 +5,20 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/view_panel.h"
+#include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage.h"
+#include "usdcc/usd/viewport_display.h"
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+
+#include <QPointer>
 
 #include <memory>
 #include <vector>
 
 class QAction;
+class QDialog;
 
 namespace usdcc::usd {
 
@@ -71,11 +76,23 @@ public:
     // stages. Main thread only.
     static usdcc::core::Signal<>& activeViewportChanged();
 
-    // Copies the currently-viewed stage, the current render delegate, and
-    // the camera position onto the duplicate — see ViewPanel::duplicate().
+    // The grid and background (docs/VIEWPORT_GRID.md). A viewport shows the Settings >
+    // Viewport defaults, except for what it overrides; a value it doesn't override
+    // follows its setting when that changes.
+    ViewportDisplayOverrides displayOverrides() const { return m_displayOverrides; }
+    void setDisplayOverrides(const ViewportDisplayOverrides& overrides);
+    // What it shows: the defaults with the overrides applied.
+    HydraViewportWindow::DisplayOptions displayOptions() const;
+    // The Grid & Background dialog for this viewport (the options menu's entry); one
+    // at a time, raised if it's already open.
+    QDialog* showDisplayDialog();
+
+    // Copies the currently-viewed stage, the current render delegate, the
+    // camera position and the grid and background overrides onto the
+    // duplicate — see ViewPanel::duplicate().
     // The duplicate shares this panel's ToolSet.
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
-    // The camera and the renderer (docs/SESSIONS.md §2.4).
+    // The camera, the renderer and the display overrides (docs/SESSIONS.md §2.4).
     QJsonObject saveSessionState() const override;
     void restoreSessionState(const QJsonObject& state) override;
 
@@ -83,13 +100,18 @@ protected:
     // Adds "Fit to View" and "Reset Camera" entries on top of ViewPanel's base "Duplicate" —
     // see ViewPanel::populateContextMenu() for the extension mechanism.
     void populateContextMenu(QMenu* menu) override;
-    // A Renderer submenu listing the render delegates, the current one checked.
+    // A Renderer submenu listing the render delegates, the current one checked; Show
+    // Grid, Grid && Background… and Use Settings Defaults.
     void populateOptionsMenu(QMenu* menu) override;
 
     // Points the viewport at the new stage and restores its selection.
     void onStageChanged(const StageRefPtr& stage) override;
     // An opened stage goes to one viewport only, which main.cpp picks.
     bool adoptsOpenedStage() const override { return false; }
+
+Q_SIGNALS:
+    // displayOptions() changed: an override, or a default it follows.
+    void displayChanged();
 
 private Q_SLOTS:
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
@@ -100,11 +122,15 @@ private:
     void syncTarget();
     // Makes this the active viewport; tells activeViewportChanged() if it wasn't.
     void makeActive();
+    // Hands displayOptions() to the viewport and tells displayChanged().
+    void applyDisplay();
 
     HydraViewportWindow* m_viewport;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     std::shared_ptr<UndoManager> m_undoManager;
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on
+    ViewportDisplayOverrides m_displayOverrides;
+    QPointer<QDialog> m_displayDialog;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
