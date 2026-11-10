@@ -14,6 +14,8 @@
 
 class QAction;
 class QLabel;
+class QModelIndex;
+class QMouseEvent;
 class QTreeView;
 
 namespace usdcc::usd {
@@ -51,6 +53,10 @@ public:
     // (docs/OUTLINER_REPARENT.md §6). `keepWorldPosition` unless Alt was held.
     void performDrop(const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row, bool keepWorldPosition);
 
+    // Expands, or collapses, `index` (a tree view index) and every prim below
+    // it. Shift / Ctrl clicking a row's expand arrow does this.
+    void setSubtreeExpanded(const QModelIndex& index, bool expanded);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void populateOptionsMenu(QMenu* menu) override;
@@ -83,6 +89,9 @@ private:
     // Expands every ancestor of the selected prims and scrolls the first one
     // into view.
     void expandToSelection(const std::vector<PXR_NS::SdfPath>& paths);
+    // A Shift (expand) or Ctrl (collapse) click on a row's expand arrow:
+    // the whole subtree. False for any other click, which the tree handles.
+    bool handleSubtreeClick(const QMouseEvent* event);
 
     QTreeView* m_treeView;
     UsdPrimTreeModel* m_model;
@@ -100,6 +109,7 @@ private:
     bool m_keepViewState = true;
     std::set<PXR_NS::SdfPath> m_expandedPaths;
     int m_scrollPosition = 0;
+    bool m_eatRelease = false;  // the release of a press handleSubtreeClick took
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

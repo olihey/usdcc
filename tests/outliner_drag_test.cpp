@@ -22,6 +22,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
@@ -282,4 +283,48 @@ USDCC_TEST(outliner_rename_follows_on_undo) {
     settle();
     CHECK(s.manager.selectedPaths(s.stage) == std::vector<SdfPath>{SdfPath("/A")}, "undo: the selection comes back");
     CHECK(tree->isExpanded(view(model->fetchPath(SdfPath("/A")))), "still expanded");
+}
+
+namespace {
+void clickArrow(QTreeView* tree, const QModelIndex& index, Qt::KeyboardModifiers modifiers) {
+    const QRect rect = tree->visualRect(index);
+    const QPoint at(rect.left() - tree->indentation() / 2, rect.center().y());
+    for (QEvent::Type type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+        QMouseEvent event(type, at, tree->viewport()->mapToGlobal(at), Qt::LeftButton,
+                          type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton, modifiers);
+        QApplication::sendEvent(tree->viewport(), &event);
+    }
+}
+}  // namespace
+
+// Shift clicking a row's expand arrow expands its whole subtree; Ctrl clicking collapses it.
+USDCC_TEST(outliner_shift_ctrl_click_expands_subtree) {
+    Scene s;
+    for (const char* path : {"/A", "/A/Kid", "/A/Kid/Deep", "/A/Kid/Deep/Leaf", "/A/Other", "/A/Other/X", "/B", "/B/One"}) s.define(path);
+    s.manager.setCurrentStage(s.stage);
+    OutlinerViewPanel panel(&s.manager, s.stage, s.undo, QStringLiteral("Outliner"));
+    panel.resize(300, 400);
+    panel.show();
+    settle();
+    auto* tree = panel.findChild<QTreeView*>();
+    auto* proxy = static_cast<QSortFilterProxyModel*>(tree->model());
+    auto* model = static_cast<UsdPrimTreeModel*>(proxy->sourceModel());
+    const auto view = [proxy, model](const char* path) { return proxy->mapFromSource(model->fetchPath(SdfPath(path))); };
+    tree->collapse(view("/A"));
+    settle();
+
+    clickArrow(tree, view("/A"), Qt::ShiftModifier);
+    settle();
+    for (const char* path : {"/A", "/A/Kid", "/A/Kid/Deep", "/A/Other"})
+        CHECK(tree->isExpanded(view(path)), "Shift click expands %s", path);
+    CHECK(tree->selectionModel()->selectedIndexes().isEmpty(), "and selects nothing");
+
+    clickArrow(tree, view("/A"), Qt::ControlModifier);
+    settle();
+    for (const char* path : {"/A", "/A/Kid", "/A/Kid/Deep", "/A/Other"})
+        CHECK(!tree->isExpanded(view(path)), "Ctrl click collapses %s", path);
+
+    clickArrow(tree, view("/A"), Qt::NoModifier);
+    settle();
+    CHECK(tree->isExpanded(view("/A")) && !tree->isExpanded(view("/A/Kid")), "a plain click opens one level, as before");
 }

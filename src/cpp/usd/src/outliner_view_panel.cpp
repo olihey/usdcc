@@ -28,6 +28,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QSettings>
 #include <QTimer>
@@ -155,8 +156,72 @@ usdcc::ui::ViewPanel* OutlinerViewPanel::duplicate(QWidget* parent) const {
 }
 
 bool OutlinerViewPanel::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == m_treeView->viewport() && (event->type() == QEvent::DragLeave || event->type() == QEvent::Drop)) m_dropNote->hide();
+    if (watched == m_treeView->viewport()) {
+        switch (event->type()) {
+        case QEvent::DragLeave:
+        case QEvent::Drop:
+            m_dropNote->hide();
+            break;
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonDblClick:
+            if (handleSubtreeClick(static_cast<QMouseEvent*>(event))) {
+                m_eatRelease = true;
+                return true;
+            }
+            break;
+        case QEvent::MouseButtonRelease:
+            if (std::exchange(m_eatRelease, false)) return true;
+            break;
+        default:
+            break;
+        }
+    }
     return usdcc::ui::ViewPanel::eventFilter(watched, event);
+}
+
+bool OutlinerViewPanel::handleSubtreeClick(const QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton) return false;
+    const Qt::KeyboardModifiers modifiers = event->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier);
+    if (modifiers != Qt::ShiftModifier && modifiers != Qt::ControlModifier) return false;
+    const QPoint pos = event->position().toPoint();
+    const QModelIndex index = m_treeView->indexAt(pos).siblingAtColumn(0);
+    if (!index.isValid() || !m_proxy->hasChildren(index)) return false;
+    // The expand arrow sits in the indentation just left of the row's first column.
+    const QRect rect = m_treeView->visualRect(index);
+    if (pos.x() >= rect.left() || pos.x() < rect.left() - m_treeView->indentation()) return false;
+    setSubtreeExpanded(index, modifiers == Qt::ShiftModifier);
+    return true;
+}
+
+void OutlinerViewPanel::setSubtreeExpanded(const QModelIndex& index, bool expanded) {
+    if (!index.isValid()) return;
+    if (expanded) {
+        // Children load on first expand; expandRecursively doesn't fetch them, so load the subtree first.
+        std::vector<QModelIndex> pending{index};
+        while (!pending.empty()) {
+            const QModelIndex parent = pending.back();
+            pending.pop_back();
+            while (m_proxy->canFetchMore(parent)) m_proxy->fetchMore(parent);
+            for (int row = 0; row < m_proxy->rowCount(parent); ++row) {
+                const QModelIndex child = m_proxy->index(row, 0, parent);
+                if (m_proxy->hasChildren(child)) pending.push_back(child);
+            }
+        }
+        m_treeView->expandRecursively(index);
+        return;
+    }
+    // Collapse the loaded descendants too, so expanding the row again shows only its children.
+    std::vector<QModelIndex> pending{index};
+    std::vector<QModelIndex> toCollapse;
+    while (!pending.empty()) {
+        const QModelIndex parent = pending.back();
+        pending.pop_back();
+        if (!m_treeView->isExpanded(parent) && parent != index) continue;
+        toCollapse.push_back(parent);
+        for (int row = 0; row < m_proxy->rowCount(parent); ++row) pending.push_back(m_proxy->index(row, 0, parent));
+    }
+    // Deepest first, so no row is laid out again after its parent closed.
+    for (auto it = toCollapse.rbegin(); it != toCollapse.rend(); ++it) m_treeView->collapse(*it);
 }
 
 void OutlinerViewPanel::performDrop(const std::vector<PXR_NS::SdfPath>& paths, const PXR_NS::SdfPath& parent, int row, bool keepWorldPosition) {
