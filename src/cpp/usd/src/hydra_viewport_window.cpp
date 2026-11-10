@@ -404,9 +404,10 @@ void HydraViewportWindow::finishToolEdit() {
 }
 
 void HydraViewportWindow::drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix) {
-    if (!m_legacyGl || !m_display.showGrid) return;
+    // No stage, no ground: an empty viewport shows only its background.
+    if (!m_legacyGl || !m_display.showGrid || !m_stage) return;
     // On the stage's ground: XY for a Z-up stage. The camera itself stays Y-up.
-    const bool zUp = m_stage && PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
+    const bool zUp = PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
     const std::vector<GridLine> lines = buildViewportGrid(m_display.gridSize, m_display.gridStep, zUp);
     if (lines.empty()) return;
     const GridColors colors = gridColors(m_display.background, zUp);

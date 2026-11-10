@@ -6,6 +6,8 @@ Viewport holds the app-wide defaults. Each viewport panel can override any of th
 ## 1. The grid
 
 - A square **size** units wide, centred on the origin, with a line every **step**.
+- It shows only while the viewport has a stage. An empty viewport shows just its
+  background.
 - It lies on the stage's ground plane: XZ for a Y-up stage, XY for a Z-up one
   (`UsdGeomGetStageUpAxis`). The orbit camera itself is always Y-up.
 - The lines through the origin are the axes, in the gizmo's colours: X red, Z blue (Y
