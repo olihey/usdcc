@@ -14,12 +14,12 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QMainWindow>
 #include <QMenu>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -112,6 +112,27 @@ T* entry(ViewPanel* panel, const QString& text) {
     return nullptr;
 }
 
+// The pinned drop-down for a submenu of one choice, by its title.
+QComboBox* choice(ViewPanel* panel, const QString& title) {
+    if (!panel->pinnedMenu()) return nullptr;
+    for (QComboBox* combo : panel->pinnedMenu()->findChildren<QComboBox*>(QStringLiteral("optionsChoice"))) {
+        if (combo->accessibleName() == title && combo->isVisible()) return combo;
+    }
+    return nullptr;
+}
+
+QString chosen(ViewPanel* panel, const QString& title) {
+    QComboBox* combo = choice(panel, title);
+    return combo ? combo->currentText() : QStringLiteral("(no drop-down)");
+}
+
+// As picking it from the open list does.
+void choose(QComboBox* combo, const QString& text) {
+    const int index = combo->findText(text);
+    combo->setCurrentIndex(index);
+    Q_EMIT combo->activated(index);
+}
+
 struct Scale {
     QTemporaryDir temp;
     usdcc::ui::UiScaleController controller{*static_cast<QApplication*>(QCoreApplication::instance()), temp.filePath(QStringLiteral("ui.ini"))};
@@ -135,25 +156,28 @@ USDCC_TEST(view_panel_pinned_menu) {
         CHECK(panel->pinnedMenu()->mapTo(panel, QPoint(0, 0)).x() < panel->content->mapTo(panel, QPoint(0, 0)).x(), "on the left");
 
         QCheckBox* hidden = entry<QCheckBox>(panel, "Show Hidden");
-        QRadioButton* storm = entry<QRadioButton>(panel, "Storm");
-        QRadioButton* embree = entry<QRadioButton>(panel, "Embree");
+        QComboBox* renderers = choice(panel, "Renderer");
         QPushButton* refresh = entry<QPushButton>(panel, "Refresh");
         CHECK(hidden && !hidden->isChecked(), "an option is a checkbox");
-        CHECK(storm && embree && storm->isChecked() && !embree->isChecked(), "a group's choices are radio buttons");
+        CHECK(renderers && renderers->count() == 2 && renderers->itemText(1) == "Embree" && renderers->currentText() == "Storm",
+              "a submenu of one choice is a drop-down, showing the chosen one");
+        CHECK(renderers && renderers->parentWidget()->findChild<QLabel*>(QStringLiteral("optionsChoiceTitle")) &&
+                  renderers->parentWidget()->findChild<QLabel*>(QStringLiteral("optionsChoiceTitle"))->text() == "Renderer",
+              "beside its title");
         CHECK(refresh != nullptr, "an action is a button");
         CHECK(!entry<QPushButton>(panel, "Pin to Side"), "and pinning isn't one of them");
-        if (!hidden || !embree || !refresh) return;
+        if (!hidden || !renderers || !refresh) return;
 
         // Using them does what the menu would. Each use builds them again, so they're looked up again.
         hidden->click();
         settle();
         CHECK(panel->flag->isChecked(), "ticking an option sets it");
-        embree = entry<QRadioButton>(panel, "Embree");
-        if (!embree) return;
-        embree->click();
+        renderers = choice(panel, "Renderer");
+        if (!renderers) return;
+        choose(renderers, "Embree");
         settle();
-        CHECK(panel->renderer == "Embree", "choosing in a group chooses: %s", qPrintable(panel->renderer));
-        CHECK(entry<QRadioButton>(panel, "Embree") && entry<QRadioButton>(panel, "Embree")->isChecked(), "and shows it chosen");
+        CHECK(panel->renderer == "Embree", "choosing in the drop-down chooses: %s", qPrintable(panel->renderer));
+        CHECK(chosen(panel, "Renderer") == "Embree", "and shows it chosen: %s", qPrintable(chosen(panel, "Renderer")));
         refresh = entry<QPushButton>(panel, "Refresh");
         if (!refresh) return;
         refresh->click();
@@ -166,13 +190,13 @@ USDCC_TEST(view_panel_pinned_menu) {
         CHECK(entry<QCheckBox>(panel, "Show Hidden") && !entry<QCheckBox>(panel, "Show Hidden")->isChecked(), "an option set elsewhere shows at once");
         panel->renderer = QStringLiteral("Storm");
         settle();
-        CHECK(entry<QRadioButton>(panel, "Embree") && entry<QRadioButton>(panel, "Embree")->isChecked(), "state the panel keeps doesn't show until it says so");
+        CHECK(chosen(panel, "Renderer") == "Embree", "state the panel keeps doesn't show until it says so");
         if (!panel->pinnedMenu()) return;
         const int before = panel->pinnedMenu()->rebuildCount();
         panel->notifyOptionsChanged();
         panel->notifyOptionsChanged();
         settle();
-        CHECK(entry<QRadioButton>(panel, "Storm") && entry<QRadioButton>(panel, "Storm")->isChecked(), "and then does");
+        CHECK(chosen(panel, "Renderer") == "Storm", "and then does: %s", qPrintable(chosen(panel, "Renderer")));
         CHECK(panel->pinnedMenu()->rebuildCount() == before + 1, "built once for both: %d", panel->pinnedMenu()->rebuildCount() - before);
 
         // The button unpins.

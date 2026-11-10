@@ -344,8 +344,9 @@ usdcc.app.add_side_panel(NotesPanel(), "left")
     Then it stays in a column on the panel's left, full height, and the options button, or
     the column's Unpin, puts it back. A pinned menu is drawn as widgets (`OptionsMenuView`): a
     checkbox for an option that can be ticked, a radio button for one of a group, a button
-    for an action, a titled group for a submenu. Pinning is remembered for each panel across
-    a restart.
+    for an action. A submenu whose entries are all one exclusive `QActionGroup` (one choice,
+    such as a camera or a resolution) is a drop-down beside its title; any other submenu is a
+    titled group. Pinning is remembered for each panel across a restart.
   - **Keeping a pinned menu current:** it's built again after one of its entries is used,
     when one of its actions changes, and when the panel changes stage. When what it shows
     changes some other way, the panel calls `notifyOptionsChanged()` (C++) or

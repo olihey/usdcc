@@ -5,17 +5,23 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QEvent>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
 #include <QPointer>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QStandardItemModel>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include <utility>
+#include <vector>
 
 namespace usdcc::ui {
 
@@ -74,6 +80,11 @@ void OptionsMenuView::rebuild() {
     usdcc::ui::scaled::margins(contentLayout, 8, 6, 8, 6);
     usdcc::ui::scaled::spacing(contentLayout, 2);
     addEntries(m_menu, contentLayout, 0);
+    // The drop-downs line up: their titles take the widest one's width.
+    const QList<QLabel*> titles = content->findChildren<QLabel*>(QStringLiteral("optionsChoiceTitle"));
+    int titleWidth = 0;
+    for (QLabel* title : titles) titleWidth = qMax(titleWidth, title->sizeHint().width());
+    for (QLabel* title : titles) title->setMinimumWidth(titleWidth);
     contentLayout->addStretch(1);
     layout->addWidget(content);
 }
@@ -92,6 +103,7 @@ void OptionsMenuView::addEntries(QMenu* menu, QVBoxLayout* layout, int depth) {
             continue;
         }
         if (QMenu* submenu = action->menu()) {
+            if (addChoice(action, layout)) continue;
             // A group under its title, indented.
             auto* title = new QLabel(plainText(action), layout->parentWidget());
             title->setObjectName(QStringLiteral("optionsGroupTitle"));
@@ -134,6 +146,71 @@ void OptionsMenuView::addEntries(QMenu* menu, QVBoxLayout* layout, int depth) {
         });
         layout->addWidget(button);
     }
+}
+
+bool OptionsMenuView::addChoice(QAction* submenuAction, QVBoxLayout* layout) {
+    // One choice: every entry checkable and in the same exclusive group.
+    QActionGroup* group = nullptr;
+    std::vector<QPointer<QAction>> choices;
+    for (QAction* action : submenuAction->menu()->actions()) {
+        connect(action, &QAction::changed, this, &OptionsMenuView::scheduleRebuild, Qt::UniqueConnection);
+        if (!action->isVisible()) continue;
+        if (action->isSeparator() || action->menu() || !action->isCheckable() || !action->actionGroup() ||
+            !action->actionGroup()->isExclusive() || (group && action->actionGroup() != group)) {
+            return false;
+        }
+        group = action->actionGroup();
+        choices.emplace_back(action);
+    }
+    if (choices.empty()) return false;
+
+    auto* row = new QWidget(layout->parentWidget());
+    row->setObjectName(QStringLiteral("optionsChoiceRow"));
+    auto* rowLayout = new QHBoxLayout(row);
+    usdcc::ui::scaled::margins(rowLayout, 0, 1, 0, 1);
+    usdcc::ui::scaled::spacing(rowLayout, 6);
+    auto* title = new QLabel(plainText(submenuAction), row);
+    title->setObjectName(QStringLiteral("optionsChoiceTitle"));
+    auto* combo = new QComboBox(row);
+    combo->setObjectName(QStringLiteral("optionsChoice"));
+    combo->setAccessibleName(plainText(submenuAction));
+    // Long entries (camera paths) don't widen the column; the open list shows them whole.
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(8);
+    combo->setFocusPolicy(Qt::StrongFocus);
+    combo->installEventFilter(this);  // the wheel scrolls the column, not the choice
+    title->setBuddy(combo);
+    auto* model = qobject_cast<QStandardItemModel*>(combo->model());
+    int current = -1;
+    for (int i = 0; i < int(choices.size()); ++i) {
+        QAction* action = choices[size_t(i)];
+        combo->addItem(action->icon(), plainText(action));
+        if (action->toolTip() != plainText(action)) combo->setItemData(i, action->toolTip(), Qt::ToolTipRole);
+        if (model && !action->isEnabled()) model->item(i)->setEnabled(false);
+        if (action->isChecked()) current = i;
+    }
+    combo->setCurrentIndex(current);
+    combo->setEnabled(submenuAction->isEnabled());
+    if (submenuAction->toolTip() != plainText(submenuAction)) combo->setToolTip(submenuAction->toolTip());
+    connect(combo, &QComboBox::activated, this, [this, choices](int index) {
+        if (index < 0 || index >= int(choices.size()) || !choices[size_t(index)]) return;
+        if (!choices[size_t(index)]->isChecked()) choices[size_t(index)]->trigger();
+        scheduleRebuild();  // what it changed shows, as a menu's next opening would
+    });
+    rowLayout->addWidget(title);
+    rowLayout->addWidget(combo, 1);
+    layout->addWidget(row);
+    return true;
+}
+
+bool OptionsMenuView::eventFilter(QObject* watched, QEvent* event) {
+    // A drop-down that hasn't been clicked leaves the wheel to the column's scrolling.
+    auto* combo = qobject_cast<QComboBox*>(watched);
+    if (combo && event->type() == QEvent::Wheel && !combo->hasFocus()) {
+        if (auto* scroll = findChild<QScrollArea*>()) QCoreApplication::sendEvent(scroll->viewport(), event);
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 }  // namespace usdcc::ui

@@ -33,7 +33,8 @@ The toolbar holds icons only, each with a tooltip:
 | 💾 Save Image… | PNG, JPEG or TIFF of the image shown |
 | ⚙ Settings… | The Settings dialog at the renderer's `settings_category`; hidden without one |
 
-The other controls are in the options menu (☰, which can be pinned beside the panel):
+The other controls are in the options menu (☰, which can be pinned beside the panel, where
+Camera, Resolution and a renderer's own choices are drop-downs):
 
 | Entry | What it does |
 |---|---|

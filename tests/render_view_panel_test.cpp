@@ -23,7 +23,6 @@
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QMenu>
-#include <QRadioButton>
 #include <QMainWindow>
 #include <QTemporaryDir>
 #include <QToolButton>
@@ -290,26 +289,34 @@ USDCC_TEST(render_view_panel) {
         auto* options = panel->pinnedMenu();
         CHECK(options, "the options can be pinned beside the panel");
         if (options) {
-            QStringList titles, radios, entries;
-            for (auto* title : options->findChildren<QLabel*>(QStringLiteral("optionsGroupTitle"))) titles << title->text();
-            for (auto* radio : options->findChildren<QRadioButton*>()) radios << radio->text();
+            QStringList titles, entries;
+            QComboBox* cameras = nullptr;
+            QComboBox* resolutions = nullptr;
+            for (auto* combo : options->findChildren<QComboBox*>(QStringLiteral("optionsChoice"))) {
+                titles << combo->accessibleName();
+                if (combo->accessibleName() == "Camera") cameras = combo;
+                if (combo->accessibleName() == "Resolution") resolutions = combo;
+            }
             for (auto* entry : options->findChildren<QAbstractButton*>(QStringLiteral("optionsEntry"))) entries << entry->text();
-            CHECK(titles.contains("Camera") && titles.contains("Resolution"), "with Camera and Resolution: %s", qPrintable(titles.join(", ")));
-            CHECK(radios.contains("Shot") && radios.contains(QString::fromUtf8("1920 × 1080")), "as choices: %s", qPrintable(radios.join(", ")));
+            CHECK(cameras && resolutions, "with Camera and Resolution drop-downs: %s", qPrintable(titles.join(", ")));
+            CHECK(cameras && cameras->findText("Shot") >= 0 && resolutions && resolutions->findText(QString::fromUtf8("1920 × 1080")) >= 0,
+                  "holding the choices");
             CHECK(entries.indexOf("Update on Edits") >= 0 && entries.indexOf("Update on Edits") < entries.indexOf("Test Option") &&
                       entries.indexOf("Test Option") < entries.indexOf(QString::fromUtf8("Test Settings…")),
                   "then Update on Edits, the renderer's own, and Settings… last: %s", qPrintable(entries.join(", ")));
-            for (auto* radio : options->findChildren<QRadioButton*>()) {
-                if (radio->text() == QString::fromUtf8("1920 × 1080")) radio->click();
+            if (resolutions) {
+                const int index = resolutions->findText(QString::fromUtf8("1920 × 1080"));
+                resolutions->setCurrentIndex(index);
+                Q_EMIT resolutions->activated(index);  // as picking it from the open list does
             }
             CHECK(panel->renderSize() == QSize(1920, 1080), "choosing a resolution there sets it");
             settle(50);
             options = panel->pinnedMenu();
-            bool checked = false;
-            for (auto* radio : options->findChildren<QRadioButton*>()) {
-                if (radio->text() == QString::fromUtf8("1920 × 1080")) checked = radio->isChecked();
+            QString shown;
+            for (auto* combo : options->findChildren<QComboBox*>(QStringLiteral("optionsChoice"))) {
+                if (combo->accessibleName() == "Resolution") shown = combo->currentText();
             }
-            CHECK(checked, "and the pinned options show it chosen");
+            CHECK(shown == QString::fromUtf8("1920 × 1080"), "and the pinned options show it chosen: %s", qPrintable(shown));
             for (auto* entry : options->findChildren<QCheckBox*>(QStringLiteral("optionsEntry"))) {
                 if (entry->text() == "Update on Edits") entry->click();
             }
