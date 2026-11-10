@@ -95,11 +95,11 @@ void OptionsMenuView::addEntries(QMenu* menu, QVBoxLayout* layout, int depth) {
         connect(action, &QAction::changed, this, &OptionsMenuView::scheduleRebuild, Qt::UniqueConnection);
         if (!action->isVisible()) continue;
         if (action->isSeparator()) {
-            auto* line = new QFrame(layout->parentWidget());
-            line->setObjectName(QStringLiteral("optionsSeparator"));
-            line->setFrameShape(QFrame::HLine);
-            line->setFrameShadow(QFrame::Plain);
-            layout->addWidget(line);
+            // A gap, not a line: the groups stand apart without a rule between them.
+            auto* gap = new QWidget(layout->parentWidget());
+            gap->setObjectName(QStringLiteral("optionsSeparator"));
+            usdcc::ui::scaled::fixedHeight(gap, 10);
+            layout->addWidget(gap);
             continue;
         }
         if (QMenu* submenu = action->menu()) {

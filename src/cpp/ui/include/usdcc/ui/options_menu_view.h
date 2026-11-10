@@ -13,7 +13,7 @@ namespace usdcc::ui {
 
 // A panel's options menu as widgets, for when it's pinned beside the panel: an action is a
 // flat button, one that can be ticked a checkbox, one of a group a radio button, a separator a
-// line. A submenu of one choice (its entries all one exclusive group) is a drop-down beside its
+// gap. A submenu of one choice (its entries all one exclusive group) is a drop-down beside its
 // title; any other submenu is a group under its title. Using one triggers its action, as the
 // menu would.
 //
