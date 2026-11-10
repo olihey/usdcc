@@ -251,3 +251,45 @@ USDCC_TEST(prim_tree_filter_in_show_prims_tree) {
     widget.clearFilter();
     CHECK(!widget.isFiltering(), "and clears both");
 }
+
+// Filtering away the selected prim used to pass the tree's loss of it on to the stage,
+// from inside the proxy's update, and crash (a deep prim of a usdz, filtered for Material).
+USDCC_TEST(prim_tree_filter_hides_the_selection) {
+    Fixture f;
+    usdcc::usd::OutlinerViewPanel panel(&f.stages, f.stage, f.undo, "Outliner");
+    panel.resize(400, 500);
+    panel.show();
+    settle();
+    auto* tree = panel.findChild<QTreeView*>();
+    auto* bar = panel.findChild<PrimTreeFilterBar*>();
+    if (!tree || !bar) return;
+    auto* proxy = static_cast<PrimTreeFilterProxy*>(tree->model());
+    auto* model = proxy->primModel();
+    const std::vector<SdfPath> leg{SdfPath("/World/Chair/Leg")};
+
+    f.stages.setSelectedPaths(f.stage, leg);
+    settle();
+    bar->setTypeFilter(std::set<std::string>{"Material"});
+    settle();
+    CHECK(shown(tree) == (std::set<std::string>{"Looks", "Looks/Wood"}), "only the material shows");
+    CHECK(f.stages.selectedPaths(f.stage) == leg, "the hidden prim stays selected");
+    CHECK(tree->selectionModel()->selectedRows().isEmpty(), "and isn't selected in the tree");
+
+    bar->setNameFilter("le");  // a search over the type: still hidden
+    settle();
+    CHECK(f.stages.selectedPaths(f.stage) == leg, "still selected");
+
+    bar->clear();
+    settle();
+    const QModelIndex legRow = proxy->mapFromSource(model->fetchPath(leg.front()));
+    CHECK(tree->selectionModel()->isSelected(legRow), "shown again, it's selected in the tree again");
+    CHECK(f.stages.selectedPaths(f.stage) == leg, "and on the stage");
+
+    // Selecting in the tree while filtering still selects.
+    bar->setNameFilter("wood");
+    settle();
+    tree->selectionModel()->setCurrentIndex(proxy->mapFromSource(model->fetchPath(SdfPath("/Looks/Wood"))),
+                                            QItemSelectionModel::ClearAndSelect);
+    settle();
+    CHECK(f.stages.selectedPaths(f.stage) == std::vector<SdfPath>{SdfPath("/Looks/Wood")}, "a click in the filtered tree selects");
+}

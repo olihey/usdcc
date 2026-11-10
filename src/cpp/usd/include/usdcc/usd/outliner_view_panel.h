@@ -100,6 +100,7 @@ private:
     QLabel* m_dropNote;  // why a drop is refused, while hovering it
     QAction* m_expandToSelection;
     bool m_updatingSelection = false;
+    bool m_filterChanging = false;  // the filter hides rows: the stage's selection stays
     std::shared_ptr<UndoManager> m_undoManager;
     bool m_refreshQueued = false;
     PXR_NS::SdfPath m_revealAfterRefresh;  // a prim just created or moved

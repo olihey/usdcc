@@ -80,6 +80,9 @@ public:
     void reapply();
 
 Q_SIGNALS:
+    // Before the proxy changes what shows, and once it's done. In between the tree's
+    // selection loses the rows the filter hides: that isn't someone deselecting them.
+    void filterAboutToChange();
     void filterApplied();
 
 private:

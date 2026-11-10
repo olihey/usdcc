@@ -272,6 +272,7 @@ void PrimTreeFilterBar::clear() {
 bool PrimTreeFilterBar::isFiltering() const { return m_proxy->isFiltering(); }
 
 void PrimTreeFilterBar::remember() {
+    Q_EMIT filterAboutToChange();
     // Before the filter changes what shows: what it hides was open too.
     if (!m_filtering) m_expandedBefore = expandedPaths();
 }

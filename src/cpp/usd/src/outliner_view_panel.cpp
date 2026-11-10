@@ -110,6 +110,15 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
 
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             &OutlinerViewPanel::onTreeSelectionChanged);
+    // A prim the filter hides stays selected; the tree shows it selected again once the filter
+    // lets it through. Passing the tree's loss on would also change the model's rows (the
+    // ancestors' tint) while the proxy is still rearranging them, which crashes.
+    connect(m_filterBar, &PrimTreeFilterBar::filterAboutToChange, this, [this]() { m_filterChanging = true; });
+    connect(m_filterBar, &PrimTreeFilterBar::filterApplied, this, [this]() {
+        m_filterChanging = false;
+        // this->: the constructor parameter `stageManager` shadows the accessor here.
+        if (currentStage()) onStageSelectionChanged(currentStage(), this->stageManager()->selectedPaths(currentStage()));
+    });
     // The checkbox and the name editor ask; the edits are undo steps here.
     connect(m_model, &UsdPrimTreeModel::activeChangeRequested, this, [this](const PXR_NS::SdfPath& path, bool active) {
         if (currentStage()) prim_actions::setActive(*m_undoManager, currentStage(), {path}, active);
@@ -432,7 +441,7 @@ void OutlinerViewPanel::restoreSessionState(const QJsonObject& state) {
 }
 
 void OutlinerViewPanel::onTreeSelectionChanged() {
-    if (m_updatingSelection || !currentStage()) {
+    if (m_updatingSelection || m_filterChanging || !currentStage()) {
         return;
     }
     std::vector<PXR_NS::SdfPath> paths;
