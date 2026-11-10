@@ -23,6 +23,34 @@ AttributeBinding::AttributeBinding(UsdAttribute attribute, PropertyEditor* edito
     refresh();
 }
 
+AttributeBinding::AttributeBinding(const UsdPrim& prim, const TfToken& name, const SdfValueTypeName& type, VtValue fallback,
+                                   PropertyEditor* editor, StageRefPtr stage, UndoManager* undoManager, QObject* parent)
+    : QObject(parent),
+      m_attribute(prim.GetAttribute(name)),
+      m_editor(editor),
+      m_stage(std::move(stage)),
+      m_undoManager(undoManager),
+      m_prim(prim),
+      m_name(name),
+      m_type(type),
+      m_fallback(std::move(fallback)),
+      m_creates(true) {
+    connect(editor, &PropertyEditor::editStarted, this, &AttributeBinding::onEditStarted);
+    connect(editor, &PropertyEditor::valueEdited, this, &AttributeBinding::onValueEdited);
+    connect(editor, &PropertyEditor::editFinished, this, &AttributeBinding::onEditFinished);
+    connect(editor, &PropertyEditor::editCanceled, this, &AttributeBinding::onEditCanceled);
+    refresh();
+}
+
+bool AttributeBinding::exists() const { return m_attribute.IsValid() && m_attribute.IsDefined(); }
+
+bool AttributeBinding::ensureAttribute() {
+    if (exists()) return true;
+    if (!m_creates || !m_prim || !m_type) return false;
+    m_attribute = m_prim.CreateAttribute(m_name, m_type, /*custom=*/false);
+    return exists();
+}
+
 VtValue AttributeBinding::currentValue(const UsdAttribute& attribute) {
     VtValue value;
     if (!attribute.Get(&value, UsdTimeCode::Default()) && attribute.GetNumTimeSamples() > 0) {
@@ -32,13 +60,16 @@ VtValue AttributeBinding::currentValue(const UsdAttribute& attribute) {
 }
 
 void AttributeBinding::refresh() {
-    if (!m_editing && m_attribute) {
+    if (m_editing) return;
+    if (exists()) {
         m_editor->setValue(currentValue(m_attribute));
+    } else if (m_creates) {
+        m_editor->setValue(m_fallback);
     }
 }
 
 void AttributeBinding::resetToDefault() {
-    if (!m_attribute) return;
+    if (!exists()) return;
     if (m_undoManager && m_stage) {
         m_undoManager->apply(m_stage, tr("Reset %1").arg(QString::fromStdString(m_attribute.GetName().GetString())),
                              [this]() { return m_attribute.Clear(); });
@@ -51,21 +82,24 @@ void AttributeBinding::resetToDefault() {
 void AttributeBinding::onEditStarted() {
     if (m_editing) return;
     m_editing = true;
-    m_startValue = currentValue(m_attribute);
-    m_startAuthored = m_attribute.HasAuthoredValue();
+    const bool existed = exists();
+    m_startValue = existed ? currentValue(m_attribute) : m_fallback;
+    m_startAuthored = existed && m_attribute.HasAuthoredValue();
+    const std::string name = existed ? m_attribute.GetName().GetString() : m_name.GetString();
     if (m_undoManager && m_stage) {
-        m_undoManager->beginEdit(m_stage,
-                                 tr("Edit %1").arg(QString::fromStdString(m_attribute.GetName().GetString())));
+        m_undoManager->beginEdit(m_stage, tr("Edit %1").arg(QString::fromStdString(name)));
     }
+    // Inside the session, so that undoing the edit removes it again.
+    if (!existed) ensureAttribute();
 }
 
 void AttributeBinding::onValueEdited(const VtValue& value) {
-    if (value.IsEmpty() || !m_attribute) return;
+    if (value.IsEmpty() || (!exists() && !m_creates)) return;
     // A single-shot edit can arrive without a gesture around it in odd cases;
     // treat it as one.
     const bool implicitGesture = !m_editing;
     if (implicitGesture) onEditStarted();
-    if (m_attribute.Set(value, UsdTimeCode::Default())) {
+    if (exists() && m_attribute.Set(value, UsdTimeCode::Default())) {
         Q_EMIT valueWritten(value);
     }
     if (implicitGesture) onEditFinished();
@@ -88,7 +122,7 @@ void AttributeBinding::onEditCanceled() {
         m_undoManager->cancelEdit(m_stage);
     } else if (m_startAuthored) {
         m_attribute.Set(m_startValue, UsdTimeCode::Default());
-    } else {
+    } else if (exists()) {
         m_attribute.ClearDefault();
     }
     refresh();

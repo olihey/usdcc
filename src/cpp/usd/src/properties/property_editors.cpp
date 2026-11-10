@@ -435,12 +435,14 @@ public:
         layout->addWidget(m_combo, 1);
         for (const auto& token : allowed) m_combo->addItem(QString::fromStdString(token.GetString()));
         connect(m_combo, &QComboBox::activated, this, [this](int index) {
-            if (index >= 0) emitSingleEdit(VtValue(TfToken(m_combo->itemText(index).toStdString())));
+            if (index >= 0) emitSingleEdit(valueOf(m_combo->itemText(index)));
         });
     }
     void setValue(const VtValue& value) override {
-        const QString text = value.IsHolding<TfToken>() ? QString::fromStdString(value.UncheckedGet<TfToken>().GetString())
-                                                       : QString();
+        // A string input with options (docs/MATERIAL_EDITOR.md §7.1) is a combo too.
+        const QString text = value.IsHolding<TfToken>()       ? QString::fromStdString(value.UncheckedGet<TfToken>().GetString())
+                             : value.IsHolding<std::string>() ? QString::fromStdString(value.UncheckedGet<std::string>())
+                                                              : QString();
         int index = m_combo->findText(text);
         if (index < 0 && !text.isEmpty()) {
             // A value outside allowedTokens is still shown, not silently replaced.
@@ -449,13 +451,18 @@ public:
         }
         m_combo->setCurrentIndex(index);
     }
-    VtValue value() const override { return VtValue(TfToken(m_combo->currentText().toStdString())); }
+    VtValue value() const override { return valueOf(m_combo->currentText()); }
     void setReadOnly(bool readOnly) override {
         PropertyEditor::setReadOnly(readOnly);
         m_combo->setEnabled(!readOnly);
     }
 
 private:
+    VtValue valueOf(const QString& text) const {
+        if (m_info.scalarKind == ScalarKind::String) return VtValue(text.toStdString());
+        return VtValue(TfToken(text.toStdString()));
+    }
+
     std::vector<TfToken> m_allowed;
     QComboBox* m_combo;
 };
@@ -723,6 +730,9 @@ PropertyEditor* createPropertyEditor(const SdfValueTypeName& typeName, const Edi
                                                      : new TokenComboEditor(info, hints.allowedTokens, parent);
                 break;
             case ScalarKind::String:
+                editor = hints.allowedTokens.empty() ? static_cast<PropertyEditor*>(new TextEditor(info, hints, parent))
+                                                     : new TokenComboEditor(info, hints.allowedTokens, parent);
+                break;
             case ScalarKind::PathExpression:
                 editor = new TextEditor(info, hints, parent);
                 break;

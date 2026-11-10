@@ -74,6 +74,7 @@ public:
     std::vector<PXR_NS::TfToken> rendererPlugins() const;
     QString rendererDisplayName(const PXR_NS::TfToken& pluginId) const;
     PXR_NS::TfToken currentRendererPlugin() const;
+    // Before the first frame, the renderer it starts with.
     void setRendererPlugin(const PXR_NS::TfToken& pluginId);
 
     // The orbit/pan/zoom camera's state. Exposed so a caller duplicating a
@@ -135,6 +136,19 @@ public:
     // Auto); passed to them as ToolContext::targetOpName. See Stage::targetXformOp().
     void setTargetXformOp(const PXR_NS::TfToken& opName);
 
+    // The Material Editor's preview (docs/MATERIAL_EDITOR.md §7.5): no tools, gizmos, grid
+    // or highlight, the left button orbits, and only the stage's own lights, as it brings
+    // them. Set before the first frame.
+    void setPreviewMode(bool preview);
+    bool isPreviewMode() const { return m_previewMode; }
+    // Whether a dome light's map is drawn behind the scene, for renderers that can.
+    void setDomeLightVisible(bool visible);
+    bool isDomeLightVisible() const { return m_domeVisible; }
+    // Paused, nothing renders: the last frame stays, fitted to the window, until resumed,
+    // which renders at once with whatever changed meanwhile.
+    void setPaused(bool paused);
+    bool isPaused() const { return m_paused; }
+
 Q_SIGNALS:
     void rendererPluginsChanged();
     // setRendererPlugin() switched it.
@@ -181,6 +195,8 @@ private:
     // Destroys the engine with the context current, so its GL objects are
     // freed cleanly, and remembers its renderer for ensureEngine().
     void releaseEngine();
+    // Paused: the last frame again, fitted to the window, on the background.
+    void showLastFrame(int width, int height);
     // With a debug context (USDCC_GL_DEBUG=1, see main.cpp): logs each GL
     // error as the driver reports it, with the stack of the call.
     void startGlDebugLog();
@@ -232,6 +248,9 @@ private:
     std::vector<PXR_NS::SdfPath> m_selectedPaths;
     PXR_NS::TfToken m_targetOp;
     DisplayOptions m_display;
+    bool m_previewMode = false;
+    bool m_domeVisible = true;
+    bool m_paused = false;
 };
 
 }  // namespace usdcc::usd

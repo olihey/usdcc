@@ -1,5 +1,6 @@
 #include "usdcc/usd/shade_graph.h"
 
+#include "usdcc/usd/property_categorizer.h"
 #include "usdcc/usd/shade_connections.h"
 #include "usdcc/usd/shader_node_catalog.h"
 
@@ -25,7 +26,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <set>
+#include <string>
 #include <unordered_map>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -106,9 +109,8 @@ void readLayout(const UsdPrim& prim, ShadeGraphNode& node, bool* closed) {
     }
 }
 
-// Whether a definition's input has a port at all, as far as what's authored can't change it.
-bool inputIsOffered(const SdrShaderNode& definition, const SdrShaderProperty& property, const UsdPrim& prim) {
-    if (!property.IsConnectable() || property.GetWidget() == TfToken("null")) return false;
+// Whether a definition's input's shownIf holds for what's authored, or it has none.
+bool shownIfHolds(const SdrShaderNode& definition, const SdrShaderProperty& property, const UsdPrim& prim) {
     const SdfBooleanExpression shownIf(property.GetShownIf());
     if (shownIf.IsEmpty()) return true;
     const auto variable = [&definition, &prim](const TfToken& name) -> VtValue {
@@ -119,6 +121,12 @@ bool inputIsOffered(const SdrShaderNode& definition, const SdrShaderProperty& pr
         return other ? other->GetDefaultValueAsSdfType() : VtValue();
     };
     return shownIf.Evaluate(variable);
+}
+
+// Whether a definition's input has a port at all, as far as what's authored can't change it.
+bool inputIsOffered(const SdrShaderNode& definition, const SdrShaderProperty& property, const UsdPrim& prim) {
+    if (!property.IsConnectable() || property.GetWidget() == TfToken("null")) return false;
+    return shownIfHolds(definition, property, prim);
 }
 
 Draft readShader(const UsdPrim& prim) {
@@ -542,6 +550,90 @@ std::string defaultValueText(const UsdPrim& shader, const TfToken& attribute) {
     if (!property) return std::string();
     const VtValue value = property->GetDefaultValueAsSdfType();
     return value.IsEmpty() ? std::string() : TfStringify(value);
+}
+
+namespace {
+// A number from a definition's metadata or hints, under any of `keys`.
+std::optional<double> metadataNumber(const SdrShaderProperty& property, std::initializer_list<const char*> keys) {
+    for (const SdrTokenMap* map : {&property.GetHints(), &property.GetMetadata()}) {
+        for (const char* key : keys) {
+            const auto it = map->find(TfToken(key));
+            if (it == map->end() || it->second.empty()) continue;
+            try {
+                std::size_t used = 0;
+                const double value = std::stod(it->second, &used);
+                if (used > 0 && std::isfinite(value)) return value;
+            } catch (...) {
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::pair<double, double>> metadataRange(const SdrShaderProperty& property, std::initializer_list<const char*> lows,
+                                                        std::initializer_list<const char*> highs) {
+    const std::optional<double> low = metadataNumber(property, lows);
+    const std::optional<double> high = metadataNumber(property, highs);
+    if (!low || !high || !(*high > *low)) return std::nullopt;
+    return std::make_pair(*low, *high);
+}
+
+bool isTrue(const std::string& text) { return text == "1" || text == "true" || text == "True"; }
+}  // namespace
+
+std::vector<ShaderInputInfo> shaderInputs(const UsdPrim& prim) {
+    std::vector<ShaderInputInfo> inputs;
+    if (!prim || !prim.IsA<UsdShadeShader>()) return inputs;
+    const UsdShadeShader shader(prim);
+    const SdrShaderNodeConstPtr definition = ShaderNodeCatalog::definitionOf(shader);
+    std::set<TfToken> seen;
+    const auto fill = [&prim](ShaderInputInfo& info) {
+        const UsdAttribute attribute = prim.GetAttribute(info.attribute);
+        info.authored = attribute.IsValid() && attribute.IsDefined();
+        if (info.authored) {
+            info.type = attribute.GetTypeName();
+            info.connected = attribute.HasAuthoredConnections();
+        }
+    };
+    if (definition) {
+        for (const TfToken& name : definition->GetShaderInputNames()) {
+            const SdrShaderPropertyConstPtr property = definition->GetShaderInput(name);
+            if (!property) continue;
+            ShaderInputInfo info;
+            info.attribute = TfToken(UsdShadeTokens->inputs.GetString() + name.GetString());
+            info.fromDefinition = true;
+            info.label = property->GetLabel().IsEmpty() ? prettifyIdentifier(name.GetString()) : property->GetLabel().GetString();
+            info.page = property->GetPage().GetString();
+            info.help = property->GetHelp();
+            info.type = property->GetTypeAsSdfType().GetSdfType();
+            info.defaultValue = property->GetDefaultValueAsSdfType();
+            const SdfValueTypeName scalar = info.type.GetScalarType();
+            if (!info.type.IsArray() && (scalar == SdfValueTypeNames->Token || scalar == SdfValueTypeNames->String)) {
+                for (const auto& [option, value] : property->GetOptions()) {
+                    if (!option.IsEmpty()) info.options.push_back(option);
+                }
+            }
+            info.softRange = metadataRange(*property, {"softmin", "uisoftmin", "softMin"}, {"softmax", "uisoftmax", "softMax"});
+            info.hardRange = metadataRange(*property, {"min", "uimin"}, {"max", "uimax"});
+            if (!info.softRange && info.hardRange) info.softRange = info.hardRange;  // a slider within what's allowed
+            const auto hiddenIt = property->GetMetadata().find(TfToken("hidden"));
+            info.hidden = property->GetWidget() == TfToken("null") ||
+                          (hiddenIt != property->GetMetadata().end() && isTrue(hiddenIt->second));
+            info.shown = shownIfHolds(*definition, *property, prim);
+            fill(info);
+            seen.insert(info.attribute);
+            inputs.push_back(std::move(info));
+        }
+    }
+    for (const UsdShadeInput& input : UsdShadeConnectableAPI(prim).GetInputs()) {
+        if (seen.count(input.GetFullName())) continue;
+        ShaderInputInfo info;
+        info.attribute = input.GetFullName();
+        info.label = prettifyIdentifier(input.GetBaseName().GetString());
+        fill(info);
+        inputs.push_back(std::move(info));
+    }
+    return inputs;
 }
 
 void ShakeDetector::reset() { *this = ShakeDetector(); }

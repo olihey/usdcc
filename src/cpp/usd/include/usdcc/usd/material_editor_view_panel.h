@@ -31,8 +31,10 @@ class GraphicsView;
 
 namespace usdcc::usd {
 
+class PropertySheet;
 class ShadeBackdropItem;
 class ShaderNodePalette;
+class ShadingPreviewWidget;
 class ShaderNodeSearchPopup;
 class StageManager;
 class UndoManager;
@@ -41,6 +43,9 @@ class UsdShadeGraphModel;
 // A material's shading network as a node graph (docs/MATERIAL_EDITOR.md §4). It follows the
 // selection both ways, and a pin keeps it on what it's showing. A NodeGraph is one node until
 // double-clicked, which enters it; a breadcrumb walks back up. Every edit is one undo step.
+//
+// On its right (§7), each shown or hidden: a preview of the material on a shape, and the
+// shading parameters of the selected node, or of the level's interface.
 class USDCC_USD_UI_API MaterialEditorViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
@@ -50,6 +55,9 @@ public:
     ~MaterialEditorViewPanel() override;
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
+    // Which of the pane's parts show, and the preview's shape, light and pause.
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
 
     // Shows a Material's or a NodeGraph's insides.
     void showLevel(const PXR_NS::SdfPath& level);
@@ -75,6 +83,10 @@ public:
     // Tab's.
     ShaderNodeSearchPopup* showNodeSearch();
     void setPaletteShown(bool shown);
+    void setPreviewShown(bool shown);
+    bool isPreviewShown() const;
+    void setParametersShown(bool shown);
+    bool areParametersShown() const;
     // What a right-click there offers, on what's under it.
     void populateGraphMenu(QMenu* menu, QPointF scenePosition);
 
@@ -82,6 +94,8 @@ public:
     QtNodes::BasicGraphicsScene* scene() const { return m_scene.get(); }
     UsdShadeGraphModel* model() const { return m_model.get(); }
     ShaderNodePalette* palette() const { return m_palette; }
+    PropertySheet* parameters() const { return m_params; }
+    ShadingPreviewWidget* preview() const { return m_preview; }
     QLineEdit* inlineEdit() const { return m_inlineEdit; }
     const std::vector<ShadeBackdropItem*>& backdropItems() const { return m_backdropItems; }
     // The breadcrumb's prim names, outermost first.
@@ -110,11 +124,19 @@ private:
     void startInlineEdit(const QString& text, const QRectF& sceneRect, const std::function<void(const QString&)>& commit);
     QPointF mouseScenePosition() const;
     void selectAfterEdit(const std::vector<PXR_NS::SdfPath>& paths);
+    // What the pane on the right shows: the selected node, or the level, and its material.
+    void updateSidePane();
+    void updateSideVisibility();
 
     std::shared_ptr<UndoManager> m_undo;
     QSplitter* m_split = nullptr;
     ShaderNodePalette* m_palette = nullptr;
     QToolButton* m_paletteButton = nullptr;
+    QToolButton* m_previewButton = nullptr;
+    QToolButton* m_paramsButton = nullptr;
+    QSplitter* m_side = nullptr;
+    ShadingPreviewWidget* m_preview = nullptr;
+    PropertySheet* m_params = nullptr;
     QStackedWidget* m_stack = nullptr;
     QtNodes::GraphicsView* m_view = nullptr;
     QLabel* m_empty = nullptr;

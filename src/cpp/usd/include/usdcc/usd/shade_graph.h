@@ -3,13 +3,16 @@
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/token.h>
+#include <pxr/base/vt/value.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/valueTypeName.h>
 #include <pxr/usd/usd/prim.h>
 
 #include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace usdcc::usd {
@@ -107,6 +110,28 @@ ShadeGraph readShadeGraph(const PXR_NS::UsdPrim& level, const ShadePageStates& p
 
 // A definition's inputs that have no attribute yet and can be offered, for the Attribute Editor.
 std::vector<ShadeGraphPort> unauthoredInputs(const PXR_NS::UsdPrim& shader);
+
+// One of a Shader's inputs as a parameter editor lists it (docs/MATERIAL_EDITOR.md §7.1): from its
+// definition, authored or not, then what's authored that the definition doesn't know.
+struct ShaderInputInfo {
+    PXR_NS::TfToken attribute;  // inputs:x, which needn't exist yet
+    std::string label;          // the definition's, or the name made readable
+    std::string page;           // the definition's, "" for none; ":" nests
+    std::string help;
+    PXR_NS::SdfValueTypeName type;
+    PXR_NS::VtValue defaultValue;   // the definition's; empty if it has none
+    std::vector<PXR_NS::TfToken> options;  // the allowed values of a token or string input
+    std::optional<std::pair<double, double>> softRange;
+    std::optional<std::pair<double, double>> hardRange;
+    bool fromDefinition = false;
+    bool authored = false;     // it has an attribute
+    bool connected = false;
+    // Its shownIf holds, or it has none. Something authored or connected is listed anyway.
+    bool shown = true;
+    // A definition's input marked hidden, or with widget "null": never listed unless authored.
+    bool hidden = false;
+};
+std::vector<ShaderInputInfo> shaderInputs(const PXR_NS::UsdPrim& shader);
 // A definition's default for an input, as text. Empty if it has none.
 std::string defaultValueText(const PXR_NS::UsdPrim& shader, const PXR_NS::TfToken& attribute);
 

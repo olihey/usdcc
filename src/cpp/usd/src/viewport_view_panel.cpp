@@ -45,6 +45,11 @@ std::vector<ViewportViewPanel*>& openViewports() {
     return viewports;
 }
 ViewportViewPanel* s_clickedViewport = nullptr;
+// Every open viewport, the one clicked last at the back (see rendererFor()).
+std::vector<ViewportViewPanel*>& clickOrder() {
+    static std::vector<ViewportViewPanel*> viewports;
+    return viewports;
+}
 
 QIcon colorSwatch(const QColor& color) {
     QPixmap pixmap(28, 14);
@@ -169,14 +174,38 @@ usdcc::core::Signal<>& ViewportViewPanel::activeViewportChanged() {
     return signal;
 }
 
+usdcc::core::Signal<>& ViewportViewPanel::viewportsChanged() {
+    static usdcc::core::Signal<> signal;
+    return signal;
+}
+
+PXR_NS::TfToken ViewportViewPanel::rendererFor(const StageRefPtr& stage) {
+    if (!stage) return {};
+    const std::vector<ViewportViewPanel*>& clicked = clickOrder();
+    for (auto it = clicked.rbegin(); it != clicked.rend(); ++it) {
+        if ((*it)->currentStage() == stage) return (*it)->m_viewport->currentRendererPlugin();
+    }
+    for (ViewportViewPanel* viewport : openViewports()) {
+        if (viewport->currentStage() == stage) return viewport->m_viewport->currentRendererPlugin();
+    }
+    return {};
+}
+
 ViewportViewPanel::~ViewportViewPanel() {
     const bool wasActive = activeViewport() == this;
     std::erase(openViewports(), this);
+    std::erase(clickOrder(), this);
     if (s_clickedViewport == this) s_clickedViewport = nullptr;
     if (wasActive) activeViewportChanged()();
+    viewportsChanged()();
 }
 
 void ViewportViewPanel::makeActive() {
+    if (clickOrder().empty() || clickOrder().back() != this) {
+        std::erase(clickOrder(), this);
+        clickOrder().push_back(this);
+        viewportsChanged()();
+    }
     if (activeViewport() == this) {
         s_clickedViewport = this;
         return;
@@ -227,6 +256,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // The options list the renderers, and tick the one in use, which a script can switch.
     connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::notifyOptionsChanged);
     connect(m_viewport, &HydraViewportWindow::rendererChanged, this, &ViewportViewPanel::notifyOptionsChanged);
+    // What a Material Editor's preview follows (rendererFor()).
+    connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, []() { viewportsChanged()(); });
+    connect(m_viewport, &HydraViewportWindow::rendererChanged, this, []() { viewportsChanged()(); });
     // A click in the viewport focuses this panel, which makes its stage the
     // current one (CurrentStageTracker): ADS doesn't see the native window's
     // focus. Only the highlight moves; the viewport keeps the keyboard.
@@ -238,6 +270,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
         if (activeViewport() == this) activeViewportChanged()();
     });
     openViewports().push_back(this);
+    viewportsChanged()();
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.
     connect(m_viewport, &HydraViewportWindow::toolEditStarted, this, [this](const QString& description) {
@@ -270,6 +303,7 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_viewport->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
     if (activeViewport() == this) activeViewportChanged()();  // the active camera's stage
+    viewportsChanged()();
     if (!stage) {
         m_stageChangedConnection = {};
         m_targetConnection = {};

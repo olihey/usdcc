@@ -1,11 +1,14 @@
 #include "usdcc/usd/material_editor_view_panel.h"
 
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/shade_actions.h"
 #include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/shader_node_graphics.h"
 #include "usdcc/usd/shader_node_palette.h"
+#include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usd_shade_graph_model.h"
@@ -22,6 +25,8 @@
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdShade/material.h>
+#include <pxr/usd/usdShade/nodeGraph.h>
+#include <pxr/usd/usdShade/shader.h>
 #include <pxr/usd/usdUI/backdrop.h>
 
 #include <QAction>
@@ -32,6 +37,7 @@
 #include <QDropEvent>
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
@@ -62,6 +68,10 @@ constexpr double kSmallestToOpenAt = 0.6;  // smaller than this can't be read
 constexpr double kSmallestToFrame = 0.2;
 constexpr auto kClipboardMime = "application/x-usdcc-shade-nodes";
 constexpr float kPasteOffset = 0.25f;  // of a node's size, so a copy doesn't hide what it's of
+// Whether a new panel shows the preview and the parameters: as the last one changed them.
+constexpr auto kShowPreviewKey = "MaterialEditor/showPreview";
+constexpr auto kShowParametersKey = "MaterialEditor/showParameters";
+constexpr int kSideWidth = 320;
 
 // The app's dark theme, for what QtNodes draws itself. Its styles are process-wide.
 void applyTheme() {
@@ -122,11 +132,23 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_paletteButton->setCheckable(true);
     m_paletteButton->setToolTip(tr("Show the shader nodes to add. Tab searches them from the graph."));
     toolbarLayout->addWidget(m_paletteButton);
+    m_previewButton = new QToolButton(toolbar);
+    m_previewButton->setObjectName(QStringLiteral("materialEditorPreviewButton"));
+    m_previewButton->setText(tr("Preview"));
+    m_previewButton->setCheckable(true);
+    m_previewButton->setToolTip(tr("Show the material on a shape"));
+    m_paramsButton = new QToolButton(toolbar);
+    m_paramsButton->setObjectName(QStringLiteral("materialEditorParametersButton"));
+    m_paramsButton->setText(tr("Parameters"));
+    m_paramsButton->setCheckable(true);
+    m_paramsButton->setToolTip(tr("Show the selected node's inputs, or the material's interface"));
     m_breadcrumb = new QHBoxLayout;
     m_breadcrumb->setContentsMargins(6, 0, 0, 0);
     m_breadcrumb->setSpacing(2);
     toolbarLayout->addLayout(m_breadcrumb);
     toolbarLayout->addStretch(1);
+    toolbarLayout->addWidget(m_previewButton);
+    toolbarLayout->addWidget(m_paramsButton);
 
     m_split = new QSplitter(Qt::Horizontal, container);
     m_palette = new ShaderNodePalette(m_split);
@@ -142,15 +164,41 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_empty->setAlignment(Qt::AlignCenter);
     m_stack->addWidget(m_view);
     m_stack->addWidget(m_empty);
+    m_side = new QSplitter(Qt::Vertical, m_split);
+    m_side->setObjectName(QStringLiteral("materialEditorSide"));
+    m_preview = new ShadingPreviewWidget(m_side);
+    m_params = new PropertySheet(this->stageManager(), m_undo, PropertySheet::Mode::Shading, m_side);
+    m_params->setEmptyText(tr("Select a material, or a node in one."));
+    m_side->addWidget(m_preview);
+    m_side->addWidget(m_params);
+    m_side->setStretchFactor(0, 0);
+    m_side->setStretchFactor(1, 1);
+    m_side->setChildrenCollapsible(false);
     m_split->addWidget(m_palette);
     m_split->addWidget(m_stack);
+    m_split->addWidget(m_side);
     m_split->setStretchFactor(0, 0);
     m_split->setStretchFactor(1, 1);
+    m_split->setStretchFactor(2, 0);
     layout->addWidget(toolbar);
     layout->addWidget(m_split, 1);
     setContentWidget(container);
 
     connect(m_paletteButton, &QToolButton::toggled, this, [this](bool shown) { setPaletteShown(shown); });
+    {
+        const QSettings settings = usdcc::ui::appSettings();
+        m_previewButton->setChecked(settings.value(kShowPreviewKey, true).toBool());
+        m_paramsButton->setChecked(settings.value(kShowParametersKey, true).toBool());
+    }
+    connect(m_previewButton, &QToolButton::toggled, this, [this](bool shown) {
+        usdcc::ui::appSettings().setValue(kShowPreviewKey, shown);
+        updateSideVisibility();
+    });
+    connect(m_paramsButton, &QToolButton::toggled, this, [this](bool shown) {
+        usdcc::ui::appSettings().setValue(kShowParametersKey, shown);
+        updateSideVisibility();
+    });
+    updateSideVisibility();
     connect(m_palette, &ShaderNodePalette::nodeChosen, this, [this](const QString& identifier) {
         addNode(identifier, m_view->mapToScene(m_view->viewport()->rect().center()));
     });
@@ -160,7 +208,9 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     connect(frame, &QShortcut::activated, this, [this]() { fitGraph(kSmallestToFrame); });
 
     m_selectionChanged = this->stageManager()->selectionChanged.connect([this](StageRefPtr changed, std::vector<SdfPath> paths) {
-        if (changed == currentStage()) selectionFromStage(paths);
+        if (changed != currentStage()) return;
+        selectionFromStage(paths);
+        updateSidePane();
     });
 
     refreshStageCombo();
@@ -178,7 +228,20 @@ usdcc::ui::ViewPanel* MaterialEditorViewPanel::duplicate(QWidget* parent) const 
     auto* copy = new MaterialEditorViewPanel(stageManager(), currentStage(), m_undo, windowTitle(), parent);
     copy->showLevel(m_level);
     copy->setPinned(isPinned());
+    copy->restoreSessionState(saveSessionState());
     return copy;
+}
+
+QJsonObject MaterialEditorViewPanel::saveSessionState() const {
+    return {{QStringLiteral("preview"), isPreviewShown()},
+            {QStringLiteral("parameters"), areParametersShown()},
+            {QStringLiteral("previewState"), m_preview->saveState()}};
+}
+
+void MaterialEditorViewPanel::restoreSessionState(const QJsonObject& state) {
+    if (state.contains(QStringLiteral("preview"))) setPreviewShown(state.value(QStringLiteral("preview")).toBool());
+    if (state.contains(QStringLiteral("parameters"))) setParametersShown(state.value(QStringLiteral("parameters")).toBool());
+    if (state.contains(QStringLiteral("previewState"))) m_preview->restoreState(state.value(QStringLiteral("previewState")).toObject());
 }
 
 void MaterialEditorViewPanel::populateOptionsMenu(QMenu* menu) {
@@ -196,6 +259,8 @@ void MaterialEditorViewPanel::attachStage() {
     m_primsMoved = {};
     m_level = SdfPath();
     const StageRefPtr& stage = currentStage();
+    m_params->setStage(stage);
+    m_preview->setStage(stage);
     if (stage) {
         m_model = std::make_unique<UsdShadeGraphModel>(stage, m_undo);
         m_scene = std::make_unique<QtNodes::BasicGraphicsScene>(*m_model);
@@ -285,6 +350,54 @@ void MaterialEditorViewPanel::showLevel(const SdfPath& level) {
     rebuildBreadcrumb();
     if (changed) fitGraph(kSmallestToOpenAt);
     showSelectionInGraph();
+    updateSidePane();
+}
+
+void MaterialEditorViewPanel::setPreviewShown(bool shown) { m_previewButton->setChecked(shown); }
+bool MaterialEditorViewPanel::isPreviewShown() const { return m_previewButton->isChecked(); }
+void MaterialEditorViewPanel::setParametersShown(bool shown) { m_paramsButton->setChecked(shown); }
+bool MaterialEditorViewPanel::areParametersShown() const { return m_paramsButton->isChecked(); }
+
+void MaterialEditorViewPanel::updateSideVisibility() {
+    const bool preview = m_previewButton->isChecked();
+    const bool params = m_paramsButton->isChecked();
+    const bool wasShown = !m_side->isHidden();
+    m_preview->setVisible(preview);
+    m_params->setVisible(params);
+    m_side->setVisible(preview || params);
+    if ((preview || params) && !wasShown) {
+        const QList<int> sizes = m_split->sizes();
+        const int palette = m_palette->isHidden() ? 0 : sizes.value(0);
+        m_split->setSizes({palette, std::max(1, m_split->width() - palette - kSideWidth), kSideWidth});
+    }
+    if (preview && params) m_side->setSizes({kSideWidth, std::max(1, m_side->height() - kSideWidth)});
+}
+
+void MaterialEditorViewPanel::updateSidePane() {
+    const StageRefPtr& stage = currentStage();
+    SdfPath shown = m_level;
+    SdfPath material;
+    if (stage && !m_level.IsEmpty()) {
+        const UsdStageRefPtr usd = stage->usdStage();
+        // A node of this level that's selected; the level's own interface otherwise.
+        for (const SdfPath& path : stageManager()->selectedPaths(stage)) {
+            const UsdPrim prim = usd->GetPrimAtPath(path);
+            if (prim && path.HasPrefix(m_level) && (prim.IsA<UsdShadeShader>() || prim.IsA<UsdShadeNodeGraph>())) {
+                shown = path;
+                break;
+            }
+        }
+        for (const UsdPrim& level : shadeLevelChain(usd->GetPrimAtPath(m_level))) {
+            if (level.IsA<UsdShadeMaterial>()) {
+                material = level.GetPath();
+                break;
+            }
+        }
+    }
+    m_params->setPrimPath(shown);
+    m_preview->setMaterial(material);
+    const UsdPrim node = stage && !shown.IsEmpty() ? stage->usdStage()->GetPrimAtPath(shown) : UsdPrim();
+    m_preview->setSelectedNode(node && node.IsA<UsdShadeShader>() ? shown : SdfPath());
 }
 
 void MaterialEditorViewPanel::setPinned(bool pinned) { m_pin->setChecked(pinned); }
@@ -294,7 +407,11 @@ bool MaterialEditorViewPanel::isEmpty() const { return m_stack->currentWidget() 
 void MaterialEditorViewPanel::setPaletteShown(bool shown) {
     if (m_paletteButton->isChecked() != shown) m_paletteButton->setChecked(shown);
     m_palette->setVisible(shown);
-    if (shown) m_split->setSizes({260, std::max(1, m_split->width() - 260)});
+    if (shown) {
+        // The graph makes room; the pane on the right keeps its width.
+        const int side = m_side->isHidden() ? 0 : std::max(m_split->sizes().value(2), kSideWidth);
+        m_split->setSizes({260, std::max(1, m_split->width() - 260 - side), side});
+    }
 }
 
 QStringList MaterialEditorViewPanel::breadcrumb() const {

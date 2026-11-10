@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <regex>
+#include <set>
 #include <string>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -130,6 +131,48 @@ USDCC_TEST(shade_graph_materialx_has_pages) {
     CHECK(again->in.size() != surface->in.size(), "changes what's listed");
     CHECK(findPort(again->in, "inputs:base_color") != nullptr, "but a closed page still lists what's connected");
     CHECK(connected(changed, "Multiply.outputs:out>Surface.inputs:base_color"), "and the line still lands");
+}
+
+// What the Parameters pane and the Attribute Editor list (docs/MATERIAL_EDITOR.md §7.1).
+USDCC_TEST(shade_graph_shader_inputs_for_parameters) {
+    UsdStageRefPtr stage = materials();
+    const auto findInput = [](const std::vector<ShaderInputInfo>& inputs, const std::string& name) -> const ShaderInputInfo* {
+        for (const ShaderInputInfo& input : inputs) {
+            if (input.attribute.GetString() == name) return &input;
+        }
+        return nullptr;
+    };
+    const std::vector<ShaderInputInfo> preview = shaderInputs(stage->GetPrimAtPath(SdfPath("/World/Looks/Wood/Surface")));
+    const ShaderInputInfo* roughness = findInput(preview, "inputs:roughness");
+    const ShaderInputInfo* metallic = findInput(preview, "inputs:metallic");
+    const ShaderInputInfo* diffuse = findInput(preview, "inputs:diffuseColor");
+    CHECK(roughness && roughness->authored && roughness->fromDefinition, "an authored input of the definition");
+    CHECK(metallic && !metallic->authored && metallic->fromDefinition, "an unauthored one too");
+    CHECK(diffuse && diffuse->connected, "a connected one says so");
+    if (metallic) {
+        CHECK(metallic->label == "Metallic", "labelled: %s", metallic->label.c_str());
+        CHECK(metallic->type == SdfValueTypeNames->Float, "typed: %s", metallic->type.GetAsToken().GetText());
+        CHECK(metallic->defaultValue.IsHolding<float>(), "with the definition's default");
+    }
+    CHECK(preview.size() > 10, "every input of UsdPreviewSurface: %zu", preview.size());
+
+    const std::vector<ShaderInputInfo> mtlx = shaderInputs(stage->GetPrimAtPath(SdfPath("/World/Looks/Steel/Surface")));
+    std::set<std::string> pages;
+    for (const ShaderInputInfo& input : mtlx) pages.insert(input.page);
+    CHECK(pages.size() > 3, "standard_surface's inputs are on pages: %zu", pages.size());
+    CHECK(shaderInputs(stage->GetPrimAtPath(SdfPath("/World/Looks/Wood"))).empty(), "a Material isn't a shader");
+
+    // An input with options.
+    UsdStageRefPtr scratch = stageFrom(R"(#usda 1.0
+def Shader "Image"
+{
+    uniform token info:id = "ND_image_color3"
+}
+)");
+    const std::vector<ShaderInputInfo> image = shaderInputs(scratch->GetPrimAtPath(SdfPath("/Image")));
+    const ShaderInputInfo* filter = findInput(image, "inputs:filtertype");
+    CHECK(filter != nullptr, "ND_image has a filter type (of %zu inputs)", image.size());
+    if (filter) CHECK(filter->options.size() >= 2, "whose values are offered: %zu", filter->options.size());
 }
 
 USDCC_TEST(shade_graph_closed_node_lists_only_connected) {

@@ -5,6 +5,12 @@
 
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/material_editor_view_panel.h"
+#include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/properties/property_row.h"
+#include "usdcc/usd/property_sheet.h"
+#include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/shading_preview.h"
+#include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/shader_node_graphics.h"
 #include "usdcc/usd/shader_node_palette.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
@@ -763,22 +769,128 @@ USDCC_TEST(attribute_editor_offers_a_definitions_inputs) {
     usdcc::usd::AttributesViewPanel panel(&stages, stage, undo, "Attributes");
     stages.setSelectedPaths(stage, {kSurface});
     settle();
-    const auto rowFor = [&panel](const QString& attribute) -> QWidget* {
-        for (QWidget* row : panel.findChildren<QWidget*>("availableInput")) {
+    const auto rowFor = [&panel](const QString& attribute) -> usdcc::usd::properties::PropertyRow* {
+        for (auto* row : panel.findChildren<usdcc::usd::properties::PropertyRow*>("shaderInput")) {
             if (row->property("attribute").toString() == attribute) return row;
         }
         return nullptr;
     };
-    QWidget* row = rowFor("inputs:metallic");
-    CHECK(row != nullptr, "an unauthored input of the definition is listed");
-    CHECK(rowFor("inputs:roughness") == nullptr, "one that's authored isn't");
-    if (!row) return;
+    // The definition's inputs are in its pages (docs/MATERIAL_EDITOR.md §7.1), authored or not.
+    auto* metallic = rowFor("inputs:metallic");
+    CHECK(metallic != nullptr, "an unauthored input of the definition is listed");
+    CHECK(rowFor("inputs:roughness") != nullptr, "and an authored one");
+    CHECK(panel.findChildren<QWidget*>("availableInput").isEmpty(), "not in a section of its own any more");
+    if (!metallic) return;
+    CHECK(metallic->labelText() == "Metallic", "labelled from the definition: %s", qPrintable(metallic->labelText()));
+    CHECK(!stage->usdStage()->GetPrimAtPath(kSurface).GetAttribute(TfToken("inputs:metallic")), "showing it doesn't create it");
+
     QUndoStack* history = undo->stack(stage);
     const int steps = history->index();
-    row->findChild<QToolButton*>()->click();
+    usdcc::usd::properties::PropertyEditor* editor = metallic->editor();
+    Q_EMIT editor->editStarted();
+    Q_EMIT editor->valueEdited(VtValue(0.25f));
+    Q_EMIT editor->editFinished();
     settle();
     settle();
-    CHECK(stage->usdStage()->GetPrimAtPath(kSurface).GetAttribute(TfToken("inputs:metallic")), "Add creates it");
-    CHECK(history->index() == steps + 1, "one undo step");
-    CHECK(rowFor("inputs:metallic") == nullptr, "and it's not on offer any more");
+    const UsdAttribute made = stage->usdStage()->GetPrimAtPath(kSurface).GetAttribute(TfToken("inputs:metallic"));
+    float value = 0;
+    CHECK(made && made.Get(&value) && value == 0.25f, "editing it creates it, with the value");
+    CHECK(history->index() == steps + 1, "in one undo step");
+    history->undo();
+    settle();
+    CHECK(!stage->usdStage()->GetPrimAtPath(kSurface).GetAttribute(TfToken("inputs:metallic")), "which undo removes again");
+    CHECK(rowFor("inputs:metallic") != nullptr, "and the row is still there");
+}
+
+// The pane on the right (docs/MATERIAL_EDITOR.md §7): the parameters follow the graph's
+// selection, and edit the stage in one undo step each.
+USDCC_TEST(material_editor_parameters_follow_the_selection) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kWood});
+    settle();
+    usdcc::usd::PropertySheet* params = f.panel->parameters();
+    CHECK(f.panel->areParametersShown() && params->isVisible(), "the parameters show in a new panel");
+    CHECK(params->primPath() == kWood, "the material's interface with nothing else selected: %s", params->primPath().GetText());
+    const auto rowFor = [params](const QString& attribute) -> usdcc::usd::properties::PropertyRow* {
+        for (auto* row : params->findChildren<usdcc::usd::properties::PropertyRow*>()) {
+            if (row->isVisibleTo(params) && row->property("attribute").toString() == attribute) return row;
+            if (row->isVisibleTo(params) && row->labelText() == attribute) return row;
+        }
+        return nullptr;
+    };
+    CHECK(rowFor("Tiling") != nullptr, "its interface input");
+
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    CHECK(params->primPath() == kSurface, "a selected node's own inputs");
+    auto* roughness = rowFor("inputs:roughness");
+    CHECK(roughness != nullptr, "in its definition's pages");
+    CHECK(rowFor("inputs:metallic") != nullptr, "unauthored ones too");
+    CHECK(!rowFor("Name"), "and nothing but inputs");
+    if (!roughness) return;
+    QUndoStack* history = f.undo->stack(f.stage);
+    const int steps = history->index();
+    Q_EMIT roughness->editor()->editStarted();
+    Q_EMIT roughness->editor()->valueEdited(VtValue(0.3f));
+    Q_EMIT roughness->editor()->editFinished();
+    settle();
+    float value = 0;
+    f.stage->usdStage()->GetAttributeAtPath(kSurface.AppendProperty(TfToken("inputs:roughness"))).Get(&value);
+    CHECK(value == 0.3f && history->index() == steps + 1, "an edit is the stage's, in one undo step");
+
+    // Opening the Nodes palette leaves the pane where it was.
+    const int width = params->width();
+    f.panel->setPaletteShown(true);
+    settle();
+    CHECK(f.panel->palette()->width() > 0, "the palette opens");
+    CHECK(params->isVisible() && params->width() >= width - 2, "and the parameters keep their width: %d of %d", params->width(), width);
+    CHECK(f.panel->preview()->isVisible() && f.panel->preview()->width() > 0, "and the preview its place");
+
+    f.panel->setParametersShown(false);
+    CHECK(!params->isVisibleTo(f.panel), "the Parameters button hides them");
+}
+
+USDCC_TEST(material_editor_preview_shows_the_material) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    usdcc::usd::ShadingPreviewWidget* preview = f.panel->preview();
+    CHECK(f.panel->isPreviewShown() && preview->isVisible(), "the preview shows in a new panel");
+    CHECK(preview->material() == kWood, "the material of the level shown: %s", preview->material().GetText());
+    usdcc::usd::ShadingPreviewStage* stage = preview->previewStage();
+    CHECK(stage && stage->stage()->GetPrimAtPath(kSurface), "on a preview stage that has its shaders");
+    CHECK(stage && !stage->stage()->GetPrimAtPath(SdfPath("/World/WoodBall")), "but not the scene");
+    CHECK(preview->shapeName() == "Shader Ball", "on the default shape: %s", qPrintable(preview->shapeName()));
+    CHECK(stage && !stage->shapeBounds().IsEmpty(), "which is loaded from what usdcc ships");
+    CHECK(preview->problem().isEmpty(), "with nothing wrong: %s", qPrintable(preview->problem()));
+
+    // Inside the NodeGraph, the material is still Wood; one node's output on its own.
+    f.panel->showLevel(kMaps);
+    f.stages.setSelectedPaths(f.stage, {kMaps.AppendChild(TfToken("Tex"))});
+    settle();
+    CHECK(preview->material() == kWood, "inside a NodeGraph, still its material");
+    preview->setSubject(usdcc::usd::ShadingPreviewWidget::Subject::SelectedNode);
+    CHECK(stage->previewedOutput() == kMaps.AppendChild(TfToken("Tex")).AppendProperty(TfToken("outputs:rgb")),
+          "a texture shows its rgb: %s", stage->previewedOutput().GetText());
+    f.stages.setSelectedPaths(f.stage, {kMaps.AppendChild(TfToken("UV"))});
+    settle();
+    CHECK(stage->previewedOutput().IsEmpty() && !preview->problem().isEmpty(), "a float2 can't be shown, and it says why: %s",
+          qPrintable(preview->problem()));
+    preview->setSubject(usdcc::usd::ShadingPreviewWidget::Subject::Material);
+    CHECK(preview->problem().isEmpty(), "the material again: %s", qPrintable(preview->problem()));
+
+    // Pause, and the rest of its state, survive a session and a duplicate.
+    preview->setPaused(true);
+    CHECK(preview->viewport()->isPaused(), "pausing stops the viewport");
+    preview->setShapeName("Cube");
+    preview->setHdriName("Sky");
+    preview->setHdriRotation(45);
+    f.panel->setParametersShown(false);
+    const QJsonObject state = f.panel->saveSessionState();
+    MaterialEditorViewPanel restored(&f.stages, f.stage, f.undo, "Material Editor");
+    restored.restoreSessionState(state);
+    CHECK(restored.preview()->isPaused() && restored.preview()->viewport()->isPaused(), "paused again");
+    CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "Sky", "the same shape and light");
+    CHECK(restored.preview()->hdriRotation() == 45, "turned the same");
+    CHECK(!restored.areParametersShown() && restored.isPreviewShown(), "the same parts shown");
 }

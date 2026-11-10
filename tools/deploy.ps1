@@ -22,6 +22,8 @@
                         which uv needs to install packages), and in
                         python\Lib\site-packages: usdcc, pxr, PySide6, shiboken6
           plugins\      V-Ray Render and, when enabled, native RTX Render
+          resources\preview\  the shapes and HDRIs the Material Editor's preview
+                        ships with (docs/MATERIAL_EDITOR.md section 7)
           examples\plugins\   the example plugins, loaded with --plugin-path or
                         added in Settings > Plugins
           sdk\          headers, import libraries and CMake files for C++ plugins
@@ -335,6 +337,13 @@ if ($includeRtx) {
 Write-Host '  Example plugins'
 Copy-Tree -From (Join-Path $repoRoot 'src/plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeDirs (@('__pycache__', 'cpp_example', 'rtx_render', 'rtx_render_native') + $shippedPlugins)
 Copy-Tree -From (Join-Path $buildDir 'plugins') -To (Join-Path $deployDir 'examples/plugins') -ExcludeFiles $buildOnlyFiles -ExcludeDirs @('rtx_render', 'rtx_render_native')
+
+# --- Material Editor preview (docs/MATERIAL_EDITOR.md section 7) -------------
+
+# Next to bin\, where shippedPreviewFolder() looks: the shapes and HDRIs that
+# tools/gen_preview_assets.py made.
+Write-Host '  Material preview shapes and HDRIs'
+Copy-Tree -From (Join-Path $repoRoot 'resources/preview') -To (Join-Path $deployDir 'resources/preview')
 
 # --- SDK for C++ plugins (docs/PLUGIN_SDK.md) --------------------------------
 

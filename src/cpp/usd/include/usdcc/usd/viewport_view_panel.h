@@ -75,6 +75,13 @@ public:
     // Fired when activeViewport() changes, its camera moves, or it switches
     // stages. Main thread only.
     static usdcc::core::Signal<>& activeViewportChanged();
+    // The renderer of the viewport showing `stage`: the one clicked last, else the oldest.
+    // Empty when no viewport shows it. The Material Editor's preview follows it
+    // (docs/MATERIAL_EDITOR.md §7.5).
+    static PXR_NS::TfToken rendererFor(const StageRefPtr& stage);
+    // Fired when a viewport opens or closes, is clicked, or switches stage or renderer:
+    // when rendererFor() may say something else. Main thread only.
+    static usdcc::core::Signal<>& viewportsChanged();
 
     // The grid and background (docs/VIEWPORT_GRID.md). A viewport shows the Settings >
     // Viewport defaults, except for what it overrides; a value it doesn't override

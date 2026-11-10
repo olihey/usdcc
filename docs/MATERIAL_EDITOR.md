@@ -6,7 +6,8 @@ and every edit is a USD edit through `UndoManager`, so the Outliner, the Attribu
 keep working without changes.
 
 Status: **phases 0 to 4 done** (§5.1): the panel draws a material's network, follows the selection and edits
-it. MDL (phase 5) and the other renderers (phase 6) are still a plan, as are a parameters pane and a material preview beside the graph (§7). §2 and §3 were researched in November 2026 against the
+it. The parameters pane and the material preview beside the graph are done too (§7, results in §7.8). MDL
+(phase 5) and the other renderers (phase 6) are still a plan. §2 and §3 were researched in November 2026 against the
 local USD build (`USD_INSTALL`, `pxr.h` 0.26.8) and the upstream repos named in each section. §3.5 was
 tested on 2026-11-06 against that build, and against the files in the ovrtx 0.6 wheel and the MDL SDK
 2026.0.2 package.
@@ -408,9 +409,7 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   double-clicking describes it.
 - **Shaking** a dragged node takes its lines off, as one step with the move: three turns of at least 24
   pixels within 600 ms.
-- **Attribute Editor:** a Shader's inputs with no attribute yet are listed in an "Available Inputs" section,
-  with their type and default, and Add creates one. They aren't editable until then, its search doesn't
-  find them, and Authored Only hides them. It still has no labels or pages from Sdr for what's authored.
+- **Attribute Editor:** a Shader's inputs are in its definition's pages, authored or not (§7.1).
 - **Live refresh:** `Stage::changed`, for anything under the shown Material. A position only moves its
   node. Otherwise the level is read again on the next event loop pass, and the scene is replaced only if
   what's drawn differs, so a new value leaves it alone. During a mouse gesture a read waits for the
@@ -493,7 +492,7 @@ dragging from the palette (not run), a real person's hand on any of it.
    that store pixels anyway would open with their nodes spread 200 times too far. Check a real export, and
    consider guessing the scale per file from how far apart its nodes are.
 
-## 7. Parameters and preview (plan)
+## 7. Parameters and preview
 
 A pane on the right of the graph, in two parts: a live preview of the material on a shape, and the
 shading parameters of what's selected. Both can be shown or hidden, like the Nodes palette on the left.
@@ -583,19 +582,27 @@ Rejected:
 - **What gets the material:** the prims in a `collection:preview` on the default prim, or every gprim when
   there's none. So the cloth can lie on a neutral ball, and a shader ball can keep its grey stand.
   The preview session layer binds the material to that collection (a collection binding).
-- **Placing it:** referenced at `/__usdccPreview/Shape`, turned for the scene's `upAxis` and scaled by
-  its `metersPerUnit`, so textures keep their real-world size. The camera frames its bounds.
+- **Placing it:** referenced at `/__usdccPreview/Shape/Asset`, scaled by the shape's `metersPerUnit`
+  over the scene's, so textures keep their real-world size. The camera frames its bounds. The preview is
+  always Y-up, as the viewport's orbit camera is, so it doesn't turn for the scene's `upAxis`: only a shape
+  file authored Z-up is turned.
+- **The binding** is `strongerThanDescendants`, so a shape's own placeholder binding doesn't hide the
+  material; what a shape keeps for itself it leaves out of `collection:preview`.
 - **A file that won't load** gives a warning in the preview and keeps the last good shape.
 
 ### 7.4 HDRIs
 
-- **Folders:** `resources/preview/hdri/` ships two or three small CC0 maps (Poly Haven, 1k–2k, `.hdr` or
-  `.exr`). A new setting, `Materials/previewHdriPaths` (`FolderList`), adds the user's folders.
+- **Folders:** `resources/preview/hdri/` ships Studio, Sky and Neutral, 512×256 `.hdr` maps that
+  `tools/gen_preview_assets.py` draws (soft boxes, a sky with a sun, an even grey), so they carry no
+  licence of their own and cost 1.5 MB. A Poly Haven map, or any `.hdr` or `.exr`, can go in a folder of
+  `Materials/previewHdriPaths` (`FolderList`). The script makes the shapes too.
 - **Lighting:** a `DomeLight` at `/__usdccPreview/Env` with the chosen file, its rotation and its exposure.
-- **Background:** the HDRI, or the panel's colour. A toggle.
+  With no HDRI ("None"), a grey dome and a `DistantLight` key from above and in front.
+- **Background:** the HDRI, or the panel's colour: Show as Background, the `domeLightCameraVisibility`
+  render setting.
 
-The Shape and HDRI menus sit under the preview. The choice persists per panel, and Settings has the
-defaults for a new panel.
+The Shape and HDRI menus sit above the preview. The choice persists per panel (a session, a duplicate),
+and `Materials/previewShape` and `Materials/previewHdri` name the ones a new panel starts with.
 
 ### 7.5 The view
 
@@ -606,24 +613,33 @@ defaults for a new panel.
   follows that viewport's `rendererChanged()`. With no viewport open on the stage, Storm. A material
   the renderer can't draw (MDL in Storm, §3.5) gets a line saying so, rather than a default-grey shape.
 - **Pause:** a button in the preview's toolbar.
-  - Paused, the last frame stays with a "Paused" badge and nothing renders, which also stops a
-    progressive renderer refining.
+  - Paused, the last frame stays, fitted to the window, and the button reads "Paused". Nothing renders,
+    which also stops a progressive renderer refining. A badge over the picture isn't possible: the
+    picture is a native window, which no widget can draw over.
   - Edits still reach the masked stage, which is cheap. Hydra takes them on the next render.
   - Resuming renders at once.
-  - It is also paused, without the button changing, while the preview is collapsed or hidden or the
-    panel's tab isn't showing.
+  - It also draws nothing, without the button changing, while the preview is hidden or the panel's tab
+    isn't showing: the window isn't exposed then.
+- **Without OpenGL** (Qt's offscreen platform, which the tests run on), the preview isn't embedded and
+  says so. A native child window there gains nothing, and Qt's offscreen backing store crashes when one
+  is moved into a floating dock.
   - The button's state persists per panel.
 
 ### 7.6 Previewing a selected node
 
 A switch on the preview, Material or Selected Node, shows one node's output on the shape:
 
-- In the preview session layer, an `over` on the material adds a hidden shader and points the active
-  terminal at it: `outputs:surface` for glslfx, `outputs:mtlx:surface` for MaterialX (the renderer
-  profile's prefix, §3.3).
-  - A colour or vector output drives the emission of a black, unlit surface.
-  - A float output goes through a convert node (MaterialX) first, to show as grey.
-  - A BSDF or surface output connects to the terminal directly.
+- In the preview session layer, an `over` on the material adds a hidden shader and points a terminal at
+  it: `outputs:surface` for a glslfx node, `outputs:mtlx:surface` for a MaterialX one. The material's other
+  surface terminals are blocked (an empty connection list), so a renderer that prefers another context
+  falls back to this one.
+  - MaterialX: a colour drives `ND_surface_unlit`'s emission colour. Anything else that has one goes
+    through `ND_convert_*` nodes first: a float shows as grey, vectors as colours. A BSDF or EDF goes
+    into `ND_surface`; a surface straight to the terminal.
+  - glslfx: a colour or vector drives the emission of a black `UsdPreviewSurface`. USD's preview nodes
+    have nothing to convert with, so a float or a float2 output says it can't be shown.
+  - Which output: `rgb` if the node has one, else its first colour, vector, then surface output. One
+    its definition has but nobody authored is made in the preview's session layer.
 - The scene never sees it. Switching back, or selecting something else, clears the `over`.
 
 ### 7.7 Phases
@@ -638,9 +654,26 @@ A switch on the preview, Material or Selected Node, shows one node's output on t
 
 P1 is useful on its own, in the Attribute Editor. P3 doesn't need P1 or P2.
 
-Open:
+### 7.8 Results
 
-1. **Instance prototypes:** whether a mask reaches a material selected through an instance proxy (§7.2).
-2. **Two engines:** GPU memory with the viewport and the preview loading the same textures. Pause is the
+All five phases are done.
+
+| Criterion | Result | Checked by |
+|---|---|---|
+| The Attribute Editor behaves as before | Yes: its 134 UI tests pass with it hosting a `PropertySheet`. The sheet now holds the focus while its rows are rebuilt, as the search field is outside it | `usdcc_ui_tests` |
+| Sdr pages and labels | UsdPreviewSurface's inputs, labelled, unauthored ones dimmed; standard_surface's pages, with sliders from `uimin`/`uimax` and combos from string options | `usdcc_tests` (`shaderInputs()`), `usdcc_ui_tests`, the app |
+| An edit in the pane is one undo step | Yes, also one that creates an input | `usdcc_ui_tests` |
+| Edits from anywhere reach the preview, nothing reaches the scene | A root layer and a session layer edit show at once; the scene's layers export the same before and after a node preview | `usdcc_tests` (`shading_preview_test.cpp`) |
+| Shapes and `collection:preview` | A collection keeps a stand's own material; without one everything shows it; a file with no `defaultPrim` is refused and the last shape stays; a metre is 100 units in a centimetre scene | `usdcc_tests`, the app |
+| Pause | The last frame stays; a session and a duplicate keep it | `usdcc_ui_tests`, the app |
+| Node preview in Storm | A texture's `rgb` (glslfx) and a multiply's colour (MaterialX) show on the cloth | the app, with Storm |
+
+Not done or not right yet:
+
+1. **The HDRI isn't drawn behind the shape** in Storm, although the setting is on and it lights the shape.
+2. **`ND_surface_unlit` shows some shading** in Storm, so a node's colour isn't shown flat.
+3. **Instance prototypes:** whether a mask reaches a material selected through an instance proxy isn't
+   tested (§7.2).
+4. **Two engines:** GPU memory with the viewport and the preview loading the same textures. Pause is the
    way out for now.
-3. **Which HDRIs and shapes ship,** and their sizes in the deploy.
+5. **Following the renderer** was checked with Storm only: the app has no other delegate built here.

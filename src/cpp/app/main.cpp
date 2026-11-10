@@ -64,6 +64,7 @@
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/material_editor_view_panel.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
+#include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/properties/data_type_gallery_dialog.h"
@@ -216,6 +217,7 @@ int main(int argc, char** argv) {
     usdcc::scripting::SessionController::defineSettings();
     // Settings > Viewport's grid and background, there before any viewport opens.
     usdcc::usd::defineViewportDisplaySettings();
+    usdcc::usd::defineMaterialPreviewSettings();
 
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry

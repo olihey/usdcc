@@ -15,6 +15,7 @@
 #include <pxr/base/tf/stackTrace.h>
 #include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/glf/simpleMaterial.h>
+#include <pxr/imaging/hd/tokens.h>
 #include <pxr/imaging/hdx/pickTask.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -122,8 +123,11 @@ void HydraViewportWindow::ensureEngine() {
     if (!m_context) {
         m_context = new QOpenGLContext(this);
         m_context->setFormat(requestedFormat());
-        m_context->create();
-        m_context->makeCurrent(this);
+        if (!m_context->create() || !m_context->makeCurrent(this)) {
+            // No GL here (a platform without it, such as tests' offscreen one): draw nothing.
+            USDCC_LOG_WARNING("usdcc.viewport", "No OpenGL context for a viewport: it stays empty");
+            return;
+        }
         const QSurfaceFormat format = m_context->format();
         const auto glString = [this](GLenum name) {
             const GLubyte* text = m_context->functions()->glGetString(name);
@@ -141,7 +145,7 @@ void HydraViewportWindow::ensureEngine() {
         }
     }
     if (!m_engine) {
-        m_context->makeCurrent(this);
+        if (!m_context->isValid() || !m_context->makeCurrent(this)) return;
         m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
         if (!m_rendererPluginId.IsEmpty()) {
             m_engine->SetRendererPlugin(m_rendererPluginId);  // the one in use before releaseEngine()
@@ -213,7 +217,50 @@ void HydraViewportWindow::startGlDebugLog() {
 
 void HydraViewportWindow::configureEngine() {
     m_engine->SetSelectionColor(PXR_NS::GfVec4f(1.0f, 0.65f, 0.0f, 1.0f));
+    m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility, PXR_NS::VtValue(m_domeVisible));
     updateEngineSelection();
+}
+
+void HydraViewportWindow::setPreviewMode(bool preview) {
+    if (preview == m_previewMode) return;
+    m_previewMode = preview;
+    m_dragging = false;
+    renderNow();
+}
+
+void HydraViewportWindow::setDomeLightVisible(bool visible) {
+    if (visible == m_domeVisible) return;
+    m_domeVisible = visible;
+    if (m_engine) {
+        m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility, PXR_NS::VtValue(visible));
+    }
+    renderNow();
+}
+
+void HydraViewportWindow::setPaused(bool paused) {
+    if (paused == m_paused) return;
+    m_paused = paused;
+    renderNow();
+}
+
+void HydraViewportWindow::showLastFrame(int width, int height) {
+    auto* gl = m_context->functions();
+    QOpenGLFramebufferObject::bindDefault();
+    gl->glViewport(0, 0, width, height);
+    gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
+                     static_cast<float>(m_display.background.blueF()), 1.0f);
+    gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (m_framebuffer) {
+        // Fitted, keeping its shape, as the window may have been resized since.
+        const QSize frame = m_framebuffer->size();
+        const double scale = std::min(static_cast<double>(width) / frame.width(), static_cast<double>(height) / frame.height());
+        const int w = std::max(1, static_cast<int>(frame.width() * scale));
+        const int h = std::max(1, static_cast<int>(frame.height() * scale));
+        const QRect target((width - w) / 2, (height - h) / 2, w, h);
+        QOpenGLFramebufferObject::blitFramebuffer(nullptr, target, m_framebuffer.get(), QRect(QPoint(0, 0), frame),
+                                                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+    m_context->swapBuffers(this);
 }
 
 std::vector<PXR_NS::TfToken> HydraViewportWindow::rendererPlugins() const {
@@ -225,11 +272,16 @@ QString HydraViewportWindow::rendererDisplayName(const PXR_NS::TfToken& pluginId
 }
 
 PXR_NS::TfToken HydraViewportWindow::currentRendererPlugin() const {
-    return m_engine ? m_engine->GetCurrentRendererId() : PXR_NS::TfToken();
+    return m_engine ? m_engine->GetCurrentRendererId() : m_rendererPluginId;
 }
 
 void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
-    if (!m_engine || pluginId.IsEmpty()) {
+    if (pluginId.IsEmpty()) {
+        return;
+    }
+    if (!m_engine) {
+        // Before the first frame: the engine starts with it (ensureEngine()).
+        m_rendererPluginId = pluginId;
         return;
     }
     m_context->makeCurrent(this);
@@ -521,11 +573,15 @@ void HydraViewportWindow::renderNow() {
     }
 
     ensureEngine();
-    m_context->makeCurrent(this);
+    if (!m_engine || !m_context->makeCurrent(this)) return;
 
     const qreal pixelRatio = devicePixelRatio();
     const int w = std::max(1, static_cast<int>(width() * pixelRatio));
     const int h = std::max(1, static_cast<int>(height() * pixelRatio));
+    if (m_paused) {
+        showLastFrame(w, h);
+        return;
+    }
 
     // Storm draws into our own framebuffer, not the window's default one: some
     // of its passes ask the bound framebuffer about GL_COLOR_ATTACHMENT0 (the
@@ -567,9 +623,12 @@ void HydraViewportWindow::renderNow() {
     cameraLight.SetPosition(PXR_NS::GfVec4f(static_cast<float>(toolCtx.cameraPos[0]),
                                              static_cast<float>(toolCtx.cameraPos[1]),
                                              static_cast<float>(toolCtx.cameraPos[2]), 1.0f));
-    PXR_NS::GlfSimpleLightVector lights{cameraLight};
+    // A preview brings its own lights (a dome, a key), and a camera light would flatten them.
+    const PXR_NS::GlfSimpleLightVector lights =
+        m_previewMode ? PXR_NS::GlfSimpleLightVector{} : PXR_NS::GlfSimpleLightVector{cameraLight};
     PXR_NS::GlfSimpleMaterial material;
-    const PXR_NS::GfVec4f sceneAmbient(0.15f, 0.15f, 0.15f, 1.0f);
+    const PXR_NS::GfVec4f sceneAmbient = m_previewMode ? PXR_NS::GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)
+                                                       : PXR_NS::GfVec4f(0.15f, 0.15f, 0.15f, 1.0f);
     m_engine->SetLightingState(lights, material, sceneAmbient);
 
     PXR_NS::UsdImagingGLRenderParams params;
@@ -580,16 +639,17 @@ void HydraViewportWindow::renderNow() {
     params.enableLighting = true;
     // SetSelected() only feeds the engine the selection; it is drawn solely
     // when the render params ask for it (the flag defaults to off).
-    params.highlight = true;
+    params.highlight = !m_previewMode;
 
     if (m_stage) {
         m_engine->Render(m_stage->GetPseudoRoot(), params);
     }
 
-    drawGrid(toolCtx.viewMatrix, toolCtx.projMatrix);
-
-    if (usdcc::tools::Tool* tool = activeToolInstance()) {
-        drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
+    if (!m_previewMode) {
+        drawGrid(toolCtx.viewMatrix, toolCtx.projMatrix);
+        if (usdcc::tools::Tool* tool = activeToolInstance()) {
+            drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
+        }
     }
 
     const QRect frame(0, 0, w, h);
@@ -619,7 +679,7 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         // "select nothing", and Move/Rotate/Scale are SelectTools that fall
         // back to that when no gizmo handle is under the cursor), so
         // m_dragging would latch and the view could never be orbited.
-        if (!(event->modifiers() & Qt::AltModifier)) {
+        if (!(event->modifiers() & Qt::AltModifier) && !m_previewMode) {
             if (usdcc::tools::Tool* tool = activeToolInstance()) {
                 const usdcc::tools::ToolContext ctx = buildToolContext();
                 const PXR_NS::GfVec2d ndc = ndcFromPixel(event->position());
