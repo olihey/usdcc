@@ -6,7 +6,7 @@ and every edit is a USD edit through `UndoManager`, so the Outliner, the Attribu
 keep working without changes.
 
 Status: **phases 0 to 4 done** (§5.1): the panel draws a material's network, follows the selection and edits
-it. MDL (phase 5) and the other renderers (phase 6) are still a plan. §2 and §3 were researched in November 2026 against the
+it. MDL (phase 5) and the other renderers (phase 6) are still a plan, as are a parameters pane and a material preview beside the graph (§7). §2 and §3 were researched in November 2026 against the
 local USD build (`USD_INSTALL`, `pxr.h` 0.26.8) and the upstream repos named in each section. §3.5 was
 tested on 2026-11-06 against that build, and against the files in the ovrtx 0.6 wheel and the MDL SDK
 2026.0.2 package.
@@ -24,7 +24,9 @@ QtNodes doesn't provide is written here.
   therefore survives a save and round-trips to other DCCs.
 - **Shader systems:** USD preview (`glslfx`), MaterialX (`mtlx`), MDL (`mdl`, §3.5), Arnold (`arnold`),
   V-Ray and Cycles.
-- **Not in scope:** shader preview swatches, editing `.mtlx` documents, and OSL authoring.
+- **Parameters and preview:** the selection's shading inputs, and the material on a shape under an
+  HDRI, beside the graph (§7).
+- **Not in scope:** thumbnails or swatches for shaders, editing `.mtlx` documents, and OSL authoring.
 
 ## 2. The node graph framework
 
@@ -490,3 +492,155 @@ dragging from the palette (not run), a real person's hand on any of it.
 8. **Positions in other DCCs' files:** USD's docs say a node is about 1.0×1.0, and we store pixels / 200. Files
    that store pixels anyway would open with their nodes spread 200 times too far. Check a real export, and
    consider guessing the scale per file from how far apart its nodes are.
+
+## 7. Parameters and preview (plan)
+
+A pane on the right of the graph, in two parts: a live preview of the material on a shape, and the
+shading parameters of what's selected. Both can be shown or hidden, like the Nodes palette on the left.
+Not planned: thumbnails or swatches, on nodes or in the palette.
+
+```
+┌ Material Editor ───────────────────────────────┬────────────────┐
+│ [Nodes] breadcrumb …         [Preview] [Params]│  ┌──────────┐  │
+│                                                │  │  shape   │  │  HydraViewportWindow,
+│              node graph                        │  └──────────┘  │  preview mode
+│                                                │ ⏸ Shape▾ HDRI▾ │
+│                                                ├────────────────┤
+│                                                │ PropertySheet  │  Shading mode
+│                                                │  (Sdr pages)   │
+└────────────────────────────────────────────────┴────────────────┘
+```
+
+A vertical splitter separates the two parts. Its sizes, and which parts are shown, persist per panel.
+
+### 7.1 Parameters
+
+Parameters go in the pane, not on the nodes: widgets in a `QGraphicsProxyWidget` are slow, and a node
+like `OmniSurface` has 156 inputs.
+
+- **`PropertySheet`:** the rows of `AttributesViewPanel` become a widget of their own: row building,
+  `AttributeBinding`, live refresh, search, Tab order. It takes a stage, the `UndoManager`, a prim path
+  and a mode:
+  - **Full:** what the Attribute Editor shows today (prim header, composition, transform stack, all
+    categories). The Attribute Editor becomes a host for it.
+  - **Shading:** only `inputs:`, in the Sdr pages.
+- **Sdr metadata for authored inputs** (the gap in §4): label, page, help, options as a combo box, ranges,
+  `shownIf`. Both editors get it. "Available Inputs" becomes part of the pages: an unauthored input shows
+  its definition's default, dimmed, and editing it authors it.
+- **What the pane shows:**
+  - A selected node: its inputs.
+  - Nothing selected, or the Material or NodeGraph itself: the level's interface inputs, the material's
+    public parameters.
+- **Edits** go to the main stage, through its `UndoManager` and edit target, never to the preview stage.
+
+### 7.2 The preview stage
+
+**Chosen: a masked stage over the scene's own layers.** It shares the root layer, and its own session
+layer sublayers the scene's session layer and the preview scene:
+
+```
+previewSession (anonymous, the preview's own)
+  subLayers = [ sourceStage session layer, preview scene layer ]
+previewStage = UsdStage::OpenMasked(sourceStage root layer, previewSession,
+                                     mask = { <material path>, /__usdccPreview })
+previewStage->ExpandPopulationMask(...)   // follows connections out of the material
+```
+
+- **The material composes as in the scene:** the same layers, the scene's session layer (usdcc edits
+  there, `session_stages.cpp`), variant selections, ancestral arcs, edits inside variants. Asset paths
+  resolve the same way.
+- **Live with no sync code:** the layers are the same `SdfLayer` objects, so an edit from the graph, the
+  Attribute Editor, Python or undo reaches the preview through USD's change notices.
+- **No path remapping:** the shape binds to the material at its own path.
+- **The scene's lights and geometry are masked out.** Changing the material only changes the mask.
+- **Kept in step by hand,** as they're per stage: muted layers, load rules (a material inside a payload)
+  and `upAxis`/`metersPerUnit` (§7.3).
+- **The preview session layer is strongest, and only the preview sees it.** It holds the shape's binding
+  and the selected-node preview (§7.6). Nothing written there reaches the scene.
+- **Not registered with `StageManager`,** like `loadPreviewStage()`. It is dropped when the panel's stage
+  closes or changes, so it doesn't keep the scene's layers alive.
+- **To test:** a material inside an instance prototype, selected through an instance proxy. If masking
+  can't reach it, the preview says so.
+
+Rejected:
+
+| Option | Why not |
+|---|---|
+| Copy the composed material into a new stage | Has to be copied again on every edit, and asset paths need re-anchoring |
+| Reference the material from the root layer | Misses the session layer, which usdcc edits |
+| The shape as a layer on the scene's stage | Shows in the Outliner, bounds and viewport; the scene's lights reach it and its lights reach the scene; it could be saved |
+
+`ShadingPreviewStage` builds and updates this, Qt-free and unit-tested in `usdcc_usd`.
+
+### 7.3 Shapes
+
+- **Folders:** `resources/preview/shapes/` ships a shader ball, sphere, cube, plane and a cloth over a
+  ball. A new setting, `Materials/previewShapePaths` (`FolderList`), adds the user's folders. Each
+  `.usd`, `.usda`, `.usdc` or `.usdz` is one entry, named after the file. Folders are listed when the
+  menu opens.
+- **What a shape file holds:** its geometry under the `defaultPrim`, with UVs (`primvars:st`), Y-up, in
+  metres.
+- **What gets the material:** the prims in a `collection:preview` on the default prim, or every gprim when
+  there's none. So the cloth can lie on a neutral ball, and a shader ball can keep its grey stand.
+  The preview session layer binds the material to that collection (a collection binding).
+- **Placing it:** referenced at `/__usdccPreview/Shape`, turned for the scene's `upAxis` and scaled by
+  its `metersPerUnit`, so textures keep their real-world size. The camera frames its bounds.
+- **A file that won't load** gives a warning in the preview and keeps the last good shape.
+
+### 7.4 HDRIs
+
+- **Folders:** `resources/preview/hdri/` ships two or three small CC0 maps (Poly Haven, 1k–2k, `.hdr` or
+  `.exr`). A new setting, `Materials/previewHdriPaths` (`FolderList`), adds the user's folders.
+- **Lighting:** a `DomeLight` at `/__usdccPreview/Env` with the chosen file, its rotation and its exposure.
+- **Background:** the HDRI, or the panel's colour. A toggle.
+
+The Shape and HDRI menus sit under the preview. The choice persists per panel, and Settings has the
+defaults for a new panel.
+
+### 7.5 The view
+
+- **`HydraViewportWindow` in a preview mode:** no tools or gizmos, no grid, a turntable orbit, framing
+  on the shape, the preview's own camera and lights instead of the default lighting. It is already a
+  `QWindow` in a container, so QtNodes' black-viewport issue (§2.2) doesn't apply.
+- **Renderer:** the one of the viewport showing the same stage, the last focused if there are several. It
+  follows that viewport's `rendererChanged()`. With no viewport open on the stage, Storm. A material
+  the renderer can't draw (MDL in Storm, §3.5) gets a line saying so, rather than a default-grey shape.
+- **Pause:** a button in the preview's toolbar.
+  - Paused, the last frame stays with a "Paused" badge and nothing renders, which also stops a
+    progressive renderer refining.
+  - Edits still reach the masked stage, which is cheap. Hydra takes them on the next render.
+  - Resuming renders at once.
+  - It is also paused, without the button changing, while the preview is collapsed or hidden or the
+    panel's tab isn't showing.
+  - The button's state persists per panel.
+
+### 7.6 Previewing a selected node
+
+A switch on the preview, Material or Selected Node, shows one node's output on the shape:
+
+- In the preview session layer, an `over` on the material adds a hidden shader and points the active
+  terminal at it: `outputs:surface` for glslfx, `outputs:mtlx:surface` for MaterialX (the renderer
+  profile's prefix, §3.3).
+  - A colour or vector output drives the emission of a black, unlit surface.
+  - A float output goes through a convert node (MaterialX) first, to show as grey.
+  - A BSDF or surface output connects to the terminal directly.
+- The scene never sees it. Switching back, or selecting something else, clears the `over`.
+
+### 7.7 Phases
+
+| Phase | Deliverable | Exit criteria |
+|---|---|---|
+| **P1. Property sheet** | `PropertySheet` out of `AttributesViewPanel`; Sdr labels, pages, options, ranges and `shownIf` for shader inputs; unauthored inputs in the pages; the interface view | The Attribute Editor behaves as before, with tests; a UsdPreviewSurface and a MaterialX surface show their Sdr pages and labels |
+| **P2. Parameters pane** | The pane in the Material Editor, Shading mode, following the graph's selection and the pin | An edit there is one undo step and shows in the graph and the viewport |
+| **P3. Preview** | `ShadingPreviewStage` (mask, session layer, mutes, load rules, up axis and units, binding, dome); the preview mode of `HydraViewportWindow`; following the viewport's renderer; pause | An edit from anywhere, including the scene's session layer, shows in the preview; nothing appears in the scene's stage or its saved layers; pause stops rendering and resume picks the edits up |
+| **P4. Shapes and HDRIs** | The two folders, their settings and menus; the shipped shapes and maps | A user's folder shows up without a restart; `collection:preview` decides what gets the material; a broken file warns and keeps the last |
+| **P5. Selected node** | §7.6 | A texture's and a float's output show on the shape in Storm, for glslfx and MaterialX, and the scene's layers stay unchanged |
+
+P1 is useful on its own, in the Attribute Editor. P3 doesn't need P1 or P2.
+
+Open:
+
+1. **Instance prototypes:** whether a mask reaches a material selected through an instance proxy (§7.2).
+2. **Two engines:** GPU memory with the viewport and the preview loading the same textures. Pause is the
+   way out for now.
+3. **Which HDRIs and shapes ship,** and their sizes in the deploy.
