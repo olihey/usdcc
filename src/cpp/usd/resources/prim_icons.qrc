@@ -21,6 +21,8 @@
         <file alias="cube.svg">prim-icons/cube.svg</file>
         <file alias="cylinder.svg">prim-icons/cylinder.svg</file>
         <file alias="disk-light.svg">prim-icons/disk-light.svg</file>
+        <file alias="eye-off.svg">prim-icons/eye-off.svg</file>
+        <file alias="eye.svg">prim-icons/eye.svg</file>
         <file alias="filter-cog.svg">prim-icons/filter-cog.svg</file>
         <file alias="filter.svg">prim-icons/filter.svg</file>
         <file alias="folder.svg">prim-icons/folder.svg</file>

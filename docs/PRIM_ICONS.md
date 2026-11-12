@@ -188,7 +188,9 @@ pipelines with their own schemas.
 2. **Xform icon**: custom axes (`xform-axes.svg`).
 3. **`class` and `over`**: their own icon instead of the type's.
 4. **The active checkbox** moved from before the icon to the row's right edge
-   (`OutlinerItemDelegate`), so the icons line up down the tree.
+   (`OutlinerItemDelegate`), so the icons line up down the tree. It is drawn as an eye
+   (Tabler's `eye`), struck through (`eye-off`) when the prim is inactive, at the prim
+   icon's size and in its grey, white on a selected row.
 
 ## 7. Phases
 

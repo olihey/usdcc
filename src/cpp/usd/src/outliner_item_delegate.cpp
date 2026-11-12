@@ -1,6 +1,7 @@
 #include "usdcc/usd/outliner_item_delegate.h"
 
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/usd/prim_icons.h"
 
 #include <QApplication>
 #include <QKeyEvent>
@@ -15,7 +16,8 @@ namespace usdcc::usd {
 namespace {
 constexpr int kItemRadius = 3;  // dark.qss, QTreeView::item border-radius
 constexpr int kCheckMargin = 6;  // from the row's right edge: dark.qss, QTreeView::item padding
-constexpr int kCheckGap = 6;     // between the name and the checkbox
+constexpr int kCheckGap = 6;     // between the name and the eye
+constexpr int kEyeSize = 16;     // the prim icons' size (docs/PRIM_ICONS.md §4)
 
 QStyle* styleOf(const QStyleOptionViewItem& option) {
     return option.widget ? option.widget->style() : QApplication::style();
@@ -32,11 +34,9 @@ QStyleOptionViewItem OutlinerItemDelegate::rowOption(const QStyleOptionViewItem&
 
 QRect OutlinerItemDelegate::checkRect(const QStyleOptionViewItem& option, const QModelIndex& index) const {
     if (!(index.flags() & Qt::ItemIsUserCheckable) || !index.data(Qt::CheckStateRole).isValid()) return {};
-    QStyleOptionViewItem withCheck = option;
-    initStyleOption(&withCheck, index);
-    // The style's size for it (dark.qss, QTreeView::indicator), at the right.
-    const QSize size =
-        styleOf(withCheck)->subElementRect(QStyle::SE_ItemViewItemCheckIndicator, &withCheck, withCheck.widget).size();
+    // The eye, as big as the prim's icon, at the right.
+    const int side = std::min(usdcc::ui::scaled::pixels(kEyeSize), option.rect.height());
+    const QSize size(side, side);
     const int right = option.rect.right() - usdcc::ui::scaled::pixels(kCheckMargin);
     return {QPoint(right - size.width() + 1, option.rect.center().y() - size.height() / 2), size};
 }
@@ -63,7 +63,7 @@ void OutlinerItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     QStyleOptionViewItem row = rowOption(option, index);
     const QRect check = checkRect(option, index);
     const QRect text = textRect(row, check);
-    // Cut the name short of the checkbox; the style lays it out to the row's end.
+    // Cut the name short of the eye; the style lays it out to the row's end.
     const QString name = row.fontMetrics.elidedText(row.text, row.textElideMode, text.width());
     // A selected row's name is white (dark.qss), but a coloured one (an
     // instance, a prim with arcs) keeps its colour, so selecting it doesn't
@@ -85,21 +85,17 @@ void OutlinerItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     }
 
     if (check.isValid()) {
-        QStyleOptionViewItem box = row;
-        box.rect = check;
-        box.features |= QStyleOptionViewItem::HasCheckIndicator;
-        box.checkState = index.data(Qt::CheckStateRole).value<Qt::CheckState>();
-        box.state &= ~(QStyle::State_On | QStyle::State_Off | QStyle::State_NoChange);
-        box.state |= box.checkState == Qt::Checked     ? QStyle::State_On
-                     : box.checkState == Qt::Unchecked ? QStyle::State_Off
-                                                       : QStyle::State_NoChange;
-        style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &box, painter, row.widget);
+        // An eye while the prim is active, the eye struck through once it's not; white on a
+        // selected row, like the prim's icon.
+        const bool active = index.data(Qt::CheckStateRole).value<Qt::CheckState>() == Qt::Checked;
+        const QIcon eye = prim_icons::icon(active ? QStringLiteral("eye") : QStringLiteral("eye-off"));
+        eye.paint(painter, check, Qt::AlignCenter, (row.state & QStyle::State_Selected) ? QIcon::Selected : QIcon::Normal);
     }
 }
 
 void OutlinerItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
                                                 const QModelIndex& index) const {
-    // Over the name only, clear of the checkbox.
+    // Over the name only, clear of the eye.
     editor->setGeometry(textRect(rowOption(option, index), checkRect(option, index)));
 }
 
@@ -117,7 +113,7 @@ bool OutlinerItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model,
         case QEvent::MouseButtonDblClick:
         case QEvent::MouseButtonRelease: {
             const auto* mouse = static_cast<QMouseEvent*>(event);
-            // A little slack around the 11px box.
+            // A little slack around the eye.
             const QRect target = check.adjusted(-2, -2, 2, 2);
             if (mouse->button() != Qt::LeftButton || !target.contains(mouse->position().toPoint())) return false;
             // Press and double-click are taken too, so they neither rename nor

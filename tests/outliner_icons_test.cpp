@@ -1,6 +1,6 @@
 // The Outliner's prim icons (docs/PRIM_ICONS.md): every concrete prim type
 // OpenUSD ships has an icon of its own that renders, typeless prims, classes
-// and overs get theirs, and the active checkbox sits at the row's right edge
+// and overs get theirs, and the active toggle (an eye) sits at the row's right edge
 // (OutlinerItemDelegate), where a click toggles it. Runs in usdcc_ui_tests
 // (Qt's offscreen platform).
 #include "test_harness.h"
@@ -175,8 +175,14 @@ USDCC_TEST(outliner_checkbox_on_the_right) {
     click(view.viewport(), QPoint(option.rect.left() + 8, option.rect.center().y()));
     CHECK(requests == 0, "no request from a click on the name");
     CHECK(stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "a click on the name leaves it active");
+    CHECK(!prim_icons::icon(QStringLiteral("eye")).isNull() && !prim_icons::icon(QStringLiteral("eye-off")).isNull(),
+          "the eye icons are there");
+    const QImage activeEye = view.viewport()->grab(check).toImage();
     click(view.viewport(), check.center());
-    CHECK(!stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "a click on the box deactivates the prim");
+    CHECK(!stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "a click on the eye deactivates the prim");
+    const QImage inactiveEye = view.viewport()->grab(check).toImage();
+    CHECK(activeEye != inactiveEye, "the eye is struck through once the prim is inactive");
     click(view.viewport(), check.center());
     CHECK(stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "and another activates it again");
+    CHECK(view.viewport()->grab(check).toImage() == activeEye, "and the eye is open again");
 }
