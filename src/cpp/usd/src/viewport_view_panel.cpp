@@ -18,6 +18,7 @@
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -29,6 +30,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -60,13 +62,14 @@ QIcon colorSwatch(const QColor& color) {
     return QIcon(pixmap);
 }
 
-// The Grid & Background dialog: this viewport's values, each with a Default button that
-// shows while the viewport overrides it and drops the override. Edits apply at once.
+// The Display dialog (grid, background and selection): this viewport's values, each with a
+// Default button that shows while the viewport overrides it and drops the override. Edits
+// apply at once.
 QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     auto* dialog = new QDialog(panel);
     dialog->setObjectName(QStringLiteral("viewportDisplayDialog"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle(QObject::tr("Grid & Background - %1").arg(panel->windowTitle()));
+    dialog->setWindowTitle(QObject::tr("Viewport Display - %1").arg(panel->windowTitle()));
 
     auto* layout = new QVBoxLayout(dialog);
     auto* grid = new QGridLayout();
@@ -89,6 +92,20 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     // Enter in a spin box only commits its value: not the dialog's default button, so it
     // doesn't open the picker (or, below, close the dialog).
     background->setAutoDefault(false);
+    auto* selectionStyle = new QComboBox(dialog);
+    selectionStyle->setObjectName(QStringLiteral("displaySelectionStyle"));
+    for (SelectionStyle style : {SelectionStyle::Solid, SelectionStyle::Outline, SelectionStyle::Wireframe}) {
+        selectionStyle->addItem(QObject::tr(qPrintable(selectionStyleLabel(style))), static_cast<int>(style));
+    }
+    auto* selectionColor = new QPushButton(dialog);
+    selectionColor->setObjectName(QStringLiteral("displaySelectionColor"));
+    selectionColor->setIconSize(QSize(28, 14));
+    selectionColor->setAutoDefault(false);
+    auto* selectionWidth = new QSpinBox(dialog);
+    selectionWidth->setObjectName(QStringLiteral("displaySelectionWidth"));
+    selectionWidth->setRange(kMinSelectionWidth, kMaxSelectionWidth);
+    selectionWidth->setSuffix(QObject::tr(" px"));
+    selectionWidth->setKeyboardTracking(false);
 
     auto addRow = [dialog, grid](int row, const QString& label, QWidget* editor, const char* name) {
         if (!label.isEmpty()) grid->addWidget(new QLabel(label, dialog), row, 0);
@@ -104,6 +121,9 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     QToolButton* resetSize = addRow(1, QObject::tr("Grid size"), size, "resetGridSize");
     QToolButton* resetStep = addRow(2, QObject::tr("Grid step"), step, "resetGridStep");
     QToolButton* resetBackground = addRow(3, QObject::tr("Background"), background, "resetBackground");
+    QToolButton* resetSelectionStyle = addRow(4, QObject::tr("Selection"), selectionStyle, "resetSelectionStyle");
+    QToolButton* resetSelectionColor = addRow(5, QObject::tr("Selection color"), selectionColor, "resetSelectionColor");
+    QToolButton* resetSelectionWidth = addRow(6, QObject::tr("Line width"), selectionWidth, "resetSelectionWidth");
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
     buttons->button(QDialogButtonBox::Close)->setAutoDefault(false);
@@ -114,16 +134,25 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     auto refresh = [=]() {
         const HydraViewportWindow::DisplayOptions shown = panel->displayOptions();
         const ViewportDisplayOverrides overrides = panel->displayOverrides();
-        const QSignalBlocker blockShow(showGrid), blockSize(size), blockStep(step);
+        const QSignalBlocker blockShow(showGrid), blockSize(size), blockStep(step), blockStyle(selectionStyle),
+            blockWidth(selectionWidth);
         showGrid->setChecked(shown.showGrid);
         size->setValue(shown.gridSize);
         step->setValue(shown.gridStep);
         background->setIcon(colorSwatch(shown.background));
         background->setText(shown.background.name());
+        selectionStyle->setCurrentIndex(selectionStyle->findData(static_cast<int>(shown.selectionStyle)));
+        selectionColor->setIcon(colorSwatch(shown.selectionColor));
+        selectionColor->setText(shown.selectionColor.name());
+        selectionWidth->setValue(shown.selectionWidth);
+        selectionWidth->setEnabled(shown.selectionStyle != SelectionStyle::Solid);  // Solid draws no lines
         resetShow->setVisible(overrides.showGrid.has_value());
         resetSize->setVisible(overrides.gridSize.has_value());
         resetStep->setVisible(overrides.gridStep.has_value());
         resetBackground->setVisible(overrides.background.has_value());
+        resetSelectionStyle->setVisible(overrides.selectionStyle.has_value());
+        resetSelectionColor->setVisible(overrides.selectionColor.has_value());
+        resetSelectionWidth->setVisible(overrides.selectionWidth.has_value());
     };
     refresh();
     QObject::connect(panel, &ViewportViewPanel::displayChanged, dialog, refresh);
@@ -140,22 +169,37 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
                      [edit](double v) { edit([v](ViewportDisplayOverrides& o) { o.gridSize = v; }); });
     QObject::connect(step, &QDoubleSpinBox::valueChanged, dialog,
                      [edit](double v) { edit([v](ViewportDisplayOverrides& o) { o.gridStep = v; }); });
-    QObject::connect(background, &QPushButton::clicked, dialog, [dialog, panel, edit]() {
-        // The viewport follows the picker while it's open; Cancel puts back what was there.
+    // A swatch's picker: the viewport follows it while it's open; Cancel puts back what was there.
+    auto pickColor = [dialog, panel, edit](const QString& title, QColor HydraViewportWindow::DisplayOptions::*shown,
+                                           std::optional<QColor> ViewportDisplayOverrides::*override) {
         const ViewportDisplayOverrides before = panel->displayOverrides();
-        QColorDialog picker(panel->displayOptions().background, dialog);
+        QColorDialog picker(panel->displayOptions().*shown, dialog);
         picker.setOption(QColorDialog::DontUseNativeDialog);
-        picker.setWindowTitle(QObject::tr("Viewport Background"));
-        QObject::connect(&picker, &QColorDialog::currentColorChanged, &picker, [edit](const QColor& c) {
-            edit([c](ViewportDisplayOverrides& o) { o.background = c; });
+        picker.setWindowTitle(title);
+        QObject::connect(&picker, &QColorDialog::currentColorChanged, &picker, [edit, override](const QColor& c) {
+            edit([c, override](ViewportDisplayOverrides& o) { o.*override = c; });
         });
         if (picker.exec() == QDialog::Accepted) {
             const QColor chosen = picker.selectedColor();
-            edit([chosen](ViewportDisplayOverrides& o) { o.background = chosen; });
+            edit([chosen, override](ViewportDisplayOverrides& o) { o.*override = chosen; });
         } else {
             panel->setDisplayOverrides(before);
         }
+    };
+    QObject::connect(background, &QPushButton::clicked, dialog, [pickColor]() {
+        pickColor(QObject::tr("Viewport Background"), &HydraViewportWindow::DisplayOptions::background,
+                  &ViewportDisplayOverrides::background);
     });
+    QObject::connect(selectionColor, &QPushButton::clicked, dialog, [pickColor]() {
+        pickColor(QObject::tr("Selection Color"), &HydraViewportWindow::DisplayOptions::selectionColor,
+                  &ViewportDisplayOverrides::selectionColor);
+    });
+    QObject::connect(selectionStyle, &QComboBox::currentIndexChanged, dialog, [edit, selectionStyle](int) {
+        const auto style = static_cast<SelectionStyle>(selectionStyle->currentData().toInt());
+        edit([style](ViewportDisplayOverrides& o) { o.selectionStyle = style; });
+    });
+    QObject::connect(selectionWidth, &QSpinBox::valueChanged, dialog,
+                     [edit](int v) { edit([v](ViewportDisplayOverrides& o) { o.selectionWidth = v; }); });
     QObject::connect(resetShow, &QToolButton::clicked, dialog,
                      [edit]() { edit([](ViewportDisplayOverrides& o) { o.showGrid.reset(); }); });
     QObject::connect(resetSize, &QToolButton::clicked, dialog,
@@ -164,6 +208,12 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
                      [edit]() { edit([](ViewportDisplayOverrides& o) { o.gridStep.reset(); }); });
     QObject::connect(resetBackground, &QToolButton::clicked, dialog,
                      [edit]() { edit([](ViewportDisplayOverrides& o) { o.background.reset(); }); });
+    QObject::connect(resetSelectionStyle, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.selectionStyle.reset(); }); });
+    QObject::connect(resetSelectionColor, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.selectionColor.reset(); }); });
+    QObject::connect(resetSelectionWidth, &QToolButton::clicked, dialog,
+                     [edit]() { edit([](ViewportDisplayOverrides& o) { o.selectionWidth.reset(); }); });
     return dialog;
 }
 }  // namespace
@@ -245,7 +295,8 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // What isn't overridden follows Settings > Viewport as it changes.
     usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
         if (key == kViewportShowGridKey || key == kViewportGridSizeKey || key == kViewportGridStepKey ||
-            key == kViewportBackgroundKey) {
+            key == kViewportBackgroundKey || key == kViewportSelectionStyleKey || key == kViewportSelectionColorKey ||
+            key == kViewportSelectionWidthKey) {
             applyDisplay();
         }
     });
@@ -509,11 +560,27 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
         overrides.showGrid = on;
         setDisplayOverrides(overrides);
     });
-    QAction* dialog = menu->addAction(tr("Grid && Background..."), this, [this]() { showDisplayDialog(); });
+    QMenu* selection = menu->addMenu(tr("Selection"));
+    selection->setObjectName(QStringLiteral("selectionStyleMenu"));
+    auto* styles = new QActionGroup(selection);  // exclusive: one style checked
+    const SelectionStyle currentStyle = displayOptions().selectionStyle;
+    for (SelectionStyle style : {SelectionStyle::Solid, SelectionStyle::Outline, SelectionStyle::Wireframe}) {
+        QAction* action = selection->addAction(tr(qPrintable(selectionStyleLabel(style))));
+        action->setObjectName(QStringLiteral("selectionStyle_%1").arg(QLatin1String(selectionStyleName(style))));
+        action->setCheckable(true);
+        action->setChecked(style == currentStyle);
+        styles->addAction(action);
+        connect(action, &QAction::triggered, this, [this, style]() {
+            ViewportDisplayOverrides overrides = m_displayOverrides;
+            overrides.selectionStyle = style;
+            setDisplayOverrides(overrides);
+        });
+    }
+    QAction* dialog = menu->addAction(tr("Display..."), this, [this]() { showDisplayDialog(); });
     dialog->setObjectName(QStringLiteral("displayDialogAction"));
     QAction* defaults = menu->addAction(tr("Use Settings Defaults"), this, [this]() { setDisplayOverrides({}); });
     defaults->setObjectName(QStringLiteral("displayDefaultsAction"));
-    defaults->setToolTip(tr("Drop this viewport's own grid and background values"));
+    defaults->setToolTip(tr("Drop this viewport's own grid, background and selection values"));
     defaults->setEnabled(!m_displayOverrides.isEmpty());
 }
 

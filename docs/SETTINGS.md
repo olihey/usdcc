@@ -98,6 +98,9 @@ take them for a `bool`.
 | `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |
 | `Viewport/gridSize`, `gridStep` | Float | 20, 1 | `ViewportViewPanel`: the grid's width and line spacing |
 | `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |
+| `Viewport/selectionStyle` | Choice: Solid, Outline, Wireframe | Solid | `ViewportViewPanel`: how the selection is drawn ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)); a viewport can override it, and the next two |
+| `Viewport/selectionColor` | Color | `#ffa600` | `ViewportViewPanel`: the selection's color, in every style |
+| `Viewport/selectionWidth` | Int 1–8 | 2 | `ViewportViewPanel`: the Outline and Wireframe lines' width, in pixels at 100% UI scale |
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
 | `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `Studio` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |

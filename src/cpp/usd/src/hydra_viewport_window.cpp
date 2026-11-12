@@ -1,5 +1,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
+#include "selection_overlay.h"
+#include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/viewport_grid.h"
 
@@ -83,6 +85,7 @@ void HydraViewportWindow::releaseEngine() {
         USDCC_LOG_WARNING("usdcc.viewport", "Releasing the Hydra engine without a current GL context");
     }
     m_rendererPluginId = m_engine->GetCurrentRendererId();
+    m_selectionOverlay.reset();
     m_engine.reset();
     m_framebuffer.reset();
     if (current) {
@@ -216,7 +219,9 @@ void HydraViewportWindow::startGlDebugLog() {
 }
 
 void HydraViewportWindow::configureEngine() {
-    m_engine->SetSelectionColor(PXR_NS::GfVec4f(1.0f, 0.65f, 0.0f, 1.0f));
+    const QColor& selection = m_display.selectionColor;
+    m_engine->SetSelectionColor(PXR_NS::GfVec4f(static_cast<float>(selection.redF()), static_cast<float>(selection.greenF()),
+                                                static_cast<float>(selection.blueF()), 1.0f));
     m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility, PXR_NS::VtValue(m_domeVisible));
     updateEngineSelection();
 }
@@ -323,7 +328,9 @@ void HydraViewportWindow::cameraMoved() {
 
 void HydraViewportWindow::setDisplayOptions(const DisplayOptions& options) {
     if (options == m_display) return;
+    const bool newColor = options.selectionColor != m_display.selectionColor;
     m_display = options;
+    if (m_engine && newColor) configureEngine();
     renderNow();
 }
 
@@ -453,6 +460,30 @@ void HydraViewportWindow::finishToolEdit() {
         m_toolEditActive = false;
         Q_EMIT toolEditFinished();
     }
+}
+
+void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& ctx, int width, int height) {
+    if (m_previewMode || m_display.selectionStyle == SelectionStyle::Solid) {
+        m_selectionOverlay.reset();  // its engine holds a copy of the scene: not kept for later
+        return;
+    }
+    if (!m_stage || m_selectedPaths.empty() || !m_framebuffer) return;  // kept: the selection comes back
+    if (!m_selectionOverlay) m_selectionOverlay = std::make_unique<SelectionOverlay>();
+    SelectionOverlay::Frame frame;
+    frame.stage = m_stage;
+    frame.selection = m_selectedPaths;
+    frame.style = m_display.selectionStyle;
+    frame.color = m_display.selectionColor;
+    // In UI pixels, scaled as the rest of the app is, then to the screen's.
+    frame.width = usdcc::ui::UiScaleController::instance().pixels(m_display.selectionWidth) * devicePixelRatio();
+    frame.viewMatrix = ctx.viewMatrix;
+    frame.projMatrix = ctx.projMatrix;
+    const OrbitClipping clipping = orbitClipping(m_distance);
+    frame.nearClip = clipping.nearClip;
+    frame.farClip = clipping.farClip;
+    frame.size = QSize(width, height);
+    frame.targetFramebuffer = m_framebuffer->handle();
+    m_selectionOverlay->draw(frame);
 }
 
 void HydraViewportWindow::drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix) {
@@ -638,8 +669,9 @@ void HydraViewportWindow::renderNow() {
     params.frame = PXR_NS::UsdTimeCode::Default();
     params.enableLighting = true;
     // SetSelected() only feeds the engine the selection; it is drawn solely
-    // when the render params ask for it (the flag defaults to off).
-    params.highlight = !m_previewMode;
+    // when the render params ask for it (the flag defaults to off). Only Solid has
+    // Hydra fill it: the line styles leave the prims' shading as it is.
+    params.highlight = !m_previewMode && m_display.selectionStyle == SelectionStyle::Solid;
 
     if (m_stage) {
         m_engine->Render(m_stage->GetPseudoRoot(), params);
@@ -647,6 +679,7 @@ void HydraViewportWindow::renderNow() {
 
     if (!m_previewMode) {
         drawGrid(toolCtx.viewMatrix, toolCtx.projMatrix);
+        drawSelectionOverlay(toolCtx, w, h);
         if (usdcc::tools::Tool* tool = activeToolInstance()) {
             drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
         }

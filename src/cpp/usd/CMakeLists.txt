@@ -137,6 +137,8 @@ add_library(usdcc_usd_ui SHARED
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
     src/hydra_viewport_window.cpp
+    src/selection_overlay.cpp
+    src/selection_overlay.h
     src/viewport_display.cpp
     src/layer_actions.cpp
     src/layer_editor_view_panel.cpp

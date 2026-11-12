@@ -1,6 +1,7 @@
-// The viewport's grid and background (docs/VIEWPORT_GRID.md): the Settings > Viewport
-// defaults, a viewport's own overrides of them (kept when a default changes, followed
-// otherwise), the options menu and the Grid & Background dialog, and the overrides
+// The viewport's grid and background (docs/VIEWPORT_GRID.md) and selection style
+// (docs/VIEWPORT_SELECTION.md): the Settings > Viewport defaults, a viewport's own
+// overrides of them (kept when a default changes, followed otherwise), the options menu
+// and the Display dialog, and the overrides
 // carried by a duplicate and a session. The viewports are never shown, so nothing here
 // needs a GL context. Runs in usdcc_ui_tests (offscreen).
 #include "test_harness.h"
@@ -22,7 +23,9 @@
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QComboBox>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QToolButton>
 
@@ -30,6 +33,7 @@
 #include <string>
 
 using usdcc::core::Settings;
+using usdcc::usd::SelectionStyle;
 using usdcc::usd::ViewportDisplayOverrides;
 using usdcc::usd::ViewportViewPanel;
 
@@ -55,6 +59,36 @@ USDCC_TEST(viewport_display_settings) {
     CHECK(!settings.setValue(usdcc::usd::kViewportGridStepKey, 0.0), "a step of 0 doesn't fit");
     CHECK(settings.setValue(usdcc::usd::kViewportBackgroundKey, std::string("#336699")), "a color");
     CHECK(usdcc::usd::defaultViewportDisplay().background == QColor(0x33, 0x66, 0x99), "the default follows its setting");
+
+    // The selection's three.
+    CHECK(settings.contains(usdcc::usd::kViewportSelectionStyleKey) && settings.contains(usdcc::usd::kViewportSelectionColorKey) &&
+              settings.contains(usdcc::usd::kViewportSelectionWidthKey),
+          "the selection settings are defined");
+    CHECK(defaults.selectionStyle == SelectionStyle::Solid && defaults.selectionColor == QColor("#ffa600") &&
+              defaults.selectionWidth == 2,
+          "Solid, orange, 2px by default");
+    CHECK(settings.definition(usdcc::usd::kViewportSelectionStyleKey)->choices ==
+              std::vector<std::string>({"Solid", "Outline", "Wireframe"}),
+          "the style's choices");
+    CHECK(settings.setValue(usdcc::usd::kViewportSelectionStyleKey, std::string("Wireframe")), "a style");
+    CHECK(!settings.setValue(usdcc::usd::kViewportSelectionStyleKey, std::string("Dotted")), "not a style");
+    CHECK(!settings.setValue(usdcc::usd::kViewportSelectionWidthKey, 9), "a width over 8 doesn't fit");
+    CHECK(settings.setValue(usdcc::usd::kViewportSelectionWidthKey, 5), "a width");
+    CHECK(settings.setValue(usdcc::usd::kViewportSelectionColorKey, std::string("#33ccff")), "a selection color");
+    const auto selection = usdcc::usd::defaultViewportDisplay();
+    CHECK(selection.selectionStyle == SelectionStyle::Wireframe && selection.selectionWidth == 5 &&
+              selection.selectionColor == QColor("#33ccff"),
+          "the defaults follow their settings");
+}
+
+USDCC_TEST(viewport_selection_style_names) {
+    for (SelectionStyle style : {SelectionStyle::Solid, SelectionStyle::Outline, SelectionStyle::Wireframe}) {
+        CHECK(usdcc::usd::selectionStyleFromName(QString::fromLatin1(usdcc::usd::selectionStyleName(style))) == style,
+              "%s round trips", usdcc::usd::selectionStyleName(style));
+        CHECK(usdcc::usd::selectionStyleFromName(usdcc::usd::selectionStyleLabel(style)) == style,
+              "and its label (the setting's value) reads back");
+    }
+    CHECK(!usdcc::usd::selectionStyleFromName(QStringLiteral("dotted")), "not a style");
 }
 
 USDCC_TEST(viewport_display_overrides_json) {
@@ -73,6 +107,26 @@ USDCC_TEST(viewport_display_overrides_json) {
     CHECK(applied.gridStep == 0.5 && applied.background == QColor(Qt::white) && applied.gridSize == defaults.gridSize &&
               applied.showGrid == defaults.showGrid,
           "applied over the defaults");
+
+    // The selection's.
+    ViewportDisplayOverrides selection;
+    selection.selectionStyle = SelectionStyle::Outline;
+    selection.selectionColor = QColor("#33ccff");
+    selection.selectionWidth = 3;
+    CHECK(!selection.isEmpty(), "selection overrides aren't none");
+    const QJsonObject selectionJson = selection.toJson();
+    CHECK(selectionJson.value("selectionStyle").toString() == "outline" && selectionJson.value("selectionColor").toString() == "#33ccff" &&
+              selectionJson.value("selectionWidth").toInt() == 3,
+          "saved as named");
+    CHECK(ViewportDisplayOverrides::fromJson(selectionJson) == selection, "selection round trip");
+    const ViewportDisplayOverrides badSelection = ViewportDisplayOverrides::fromJson(
+        QJsonObject{{"selectionStyle", "dotted"}, {"selectionColor", "nope"}, {"selectionWidth", 9}});
+    CHECK(badSelection.isEmpty(), "a style, color or width that doesn't fit is ignored");
+    CHECK(ViewportDisplayOverrides::fromJson(QJsonObject{{"selectionWidth", 2.5}}).isEmpty(), "a width is whole");
+    const auto selectionApplied = selection.applyTo(defaults);
+    CHECK(selectionApplied.selectionStyle == SelectionStyle::Outline && selectionApplied.selectionWidth == 3 &&
+              selectionApplied.background == defaults.background,
+          "selection applied over the defaults");
 }
 
 USDCC_TEST(viewport_display_panel) {
@@ -124,6 +178,21 @@ USDCC_TEST(viewport_display_panel) {
         CHECK(panel->displayOverrides().showGrid == false && !window->displayOptions().showGrid, "Show Grid turns it off here");
         settings.setValue(usdcc::usd::kViewportShowGridKey, true);
         CHECK(!window->displayOptions().showGrid, "and it stays off");
+
+        // The Selection submenu: radio entries, Solid ticked, a choice overrides.
+        QMenu* selection = menu.findChild<QMenu*>("selectionStyleMenu");
+        CHECK(selection && selection->actions().size() == 3, "a Selection submenu with three styles");
+        QAction* solid = menuAction(*selection, "selectionStyle_solid");
+        QAction* outline = menuAction(*selection, "selectionStyle_outline");
+        CHECK(solid && solid->isChecked() && outline && !outline->isChecked(), "Solid ticked");
+        if (outline) outline->trigger();
+        CHECK(panel->displayOverrides().selectionStyle == SelectionStyle::Outline &&
+                  window->displayOptions().selectionStyle == SelectionStyle::Outline,
+              "Outline chosen here");
+        settings.setValue(usdcc::usd::kViewportSelectionStyleKey, std::string("Wireframe"));
+        CHECK(window->displayOptions().selectionStyle == SelectionStyle::Outline, "and it stays");
+        settings.setValue(usdcc::usd::kViewportSelectionColorKey, std::string("#00ff00"));
+        CHECK(window->displayOptions().selectionColor == QColor("#00ff00"), "the color, not overridden, follows");
     }
 
     // Duplicate and session carry the overrides.
@@ -173,5 +242,27 @@ USDCC_TEST(viewport_display_panel) {
         panel->setDisplayOverrides({});
         CHECK(showGrid->isChecked() && step->value() == 2.0, "the dialog follows a change made elsewhere");
     }
+    auto* style = dialog->findChild<QComboBox*>("displaySelectionStyle");
+    auto* width = dialog->findChild<QSpinBox*>("displaySelectionWidth");
+    auto* resetStyle = dialog->findChild<QToolButton*>("resetSelectionStyle");
+    auto* resetWidth = dialog->findChild<QToolButton*>("resetSelectionWidth");
+    CHECK(style && width && resetStyle && resetWidth && dialog->findChild<QPushButton*>("displaySelectionColor"),
+          "the selection rows");
+    if (style && width && resetStyle && resetWidth) {
+        CHECK(style->currentText() == "Wireframe" && resetStyle->isHidden() && width->isEnabled(),
+              "the setting's style, not overridden; the width is used");
+        style->setCurrentIndex(style->findText("Solid"));
+        CHECK(panel->displayOverrides().selectionStyle == SelectionStyle::Solid && !resetStyle->isHidden(), "a style overrides");
+        CHECK(!width->isEnabled(), "Solid has no lines: no width");
+        style->setCurrentIndex(style->findText("Outline"));
+        width->setValue(6);
+        CHECK(panel->displayOverrides().selectionWidth == 6 && window->displayOptions().selectionWidth == 6 && !resetWidth->isHidden(),
+              "a width overrides");
+        resetWidth->click();
+        CHECK(!panel->displayOverrides().selectionWidth && width->value() == 2, "Default: the setting's width again");
+        resetStyle->click();
+        CHECK(!panel->displayOverrides().selectionStyle && style->currentText() == "Wireframe", "Default: the setting's style");
+    }
+    CHECK(dialog->windowTitle().startsWith("Viewport Display"), "the dialog is Display now");
     dialog->close();
 }

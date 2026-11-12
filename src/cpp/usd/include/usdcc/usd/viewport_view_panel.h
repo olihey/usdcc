@@ -90,7 +90,7 @@ public:
     void setDisplayOverrides(const ViewportDisplayOverrides& overrides);
     // What it shows: the defaults with the overrides applied.
     HydraViewportWindow::DisplayOptions displayOptions() const;
-    // The Grid & Background dialog for this viewport (the options menu's entry); one
+    // The Display dialog (grid, background, selection) for this viewport (the options menu's entry); one
     // at a time, raised if it's already open.
     QDialog* showDisplayDialog();
 
@@ -108,7 +108,7 @@ protected:
     // see ViewPanel::populateContextMenu() for the extension mechanism.
     void populateContextMenu(QMenu* menu) override;
     // A Renderer submenu listing the render delegates, the current one checked; Show
-    // Grid, Grid && Background… and Use Settings Defaults.
+    // Grid, Selection, Display… and Use Settings Defaults.
     void populateOptionsMenu(QMenu* menu) override;
 
     // Points the viewport at the new stage and restores its selection.

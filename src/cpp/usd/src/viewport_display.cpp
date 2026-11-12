@@ -3,7 +3,10 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 
+#include <algorithm>
+#include <cmath>
 #include <string>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -16,7 +19,34 @@ constexpr double kMinGridStep = 0.001;
 constexpr double kMaxGridStep = 100000.0;
 
 bool positive(double value, double minimum, double maximum) { return value >= minimum && value <= maximum; }
+
+constexpr SelectionStyle kSelectionStyles[] = {SelectionStyle::Solid, SelectionStyle::Outline, SelectionStyle::Wireframe};
 }  // namespace
+
+const char* selectionStyleName(SelectionStyle style) {
+    switch (style) {
+        case SelectionStyle::Outline: return "outline";
+        case SelectionStyle::Wireframe: return "wireframe";
+        case SelectionStyle::Solid: break;
+    }
+    return "solid";
+}
+
+std::optional<SelectionStyle> selectionStyleFromName(const QString& name) {
+    for (SelectionStyle style : kSelectionStyles) {
+        if (name.compare(QLatin1String(selectionStyleName(style)), Qt::CaseInsensitive) == 0) return style;
+    }
+    return std::nullopt;
+}
+
+QString selectionStyleLabel(SelectionStyle style) {
+    switch (style) {
+        case SelectionStyle::Outline: return QStringLiteral("Outline");
+        case SelectionStyle::Wireframe: return QStringLiteral("Wireframe");
+        case SelectionStyle::Solid: break;
+    }
+    return QStringLiteral("Solid");
+}
 
 void defineViewportDisplaySettings() {
     using usdcc::core::SettingType;
@@ -28,7 +58,7 @@ void defineViewportDisplaySettings() {
         .group = "Grid",
         .label = "Show grid",
         .description = "Draw a grid on the ground plane in new viewports. A viewport can turn it on or off for itself "
-                       "(its options menu, Grid & Background...).",
+                       "(its options menu, Display...).",
         .type = SettingType::Bool,
         .defaultValue = builtIn.showGrid,
     });
@@ -64,11 +94,45 @@ void defineViewportDisplaySettings() {
         .type = SettingType::Color,
         .defaultValue = builtIn.background.name().toStdString(),
     });
+    std::vector<std::string> styles;
+    for (SelectionStyle style : kSelectionStyles) styles.push_back(selectionStyleLabel(style).toStdString());
+    settings.define({
+        .key = kViewportSelectionStyleKey,
+        .category = "Viewport",
+        .group = "Selection",
+        .label = "Selection style",
+        .description = "How the viewport shows what's selected: filled with the selection color (Solid), a line "
+                       "around it (Outline), or its edges (Wireframe). A viewport can choose its own (its options "
+                       "menu, Selection).",
+        .type = SettingType::Choice,
+        .defaultValue = selectionStyleLabel(builtIn.selectionStyle).toStdString(),
+        .choices = styles,
+    });
+    settings.define({
+        .key = kViewportSelectionColorKey,
+        .category = "Viewport",
+        .group = "Selection",
+        .label = "Selection color",
+        .description = "The color the selection is drawn in, in every style.",
+        .type = SettingType::Color,
+        .defaultValue = builtIn.selectionColor.name().toStdString(),
+    });
+    settings.define({
+        .key = kViewportSelectionWidthKey,
+        .category = "Viewport",
+        .group = "Selection",
+        .label = "Selection line width",
+        .description = "How wide the Outline and Wireframe styles draw their lines, in pixels at 100% UI scale.",
+        .type = SettingType::Int,
+        .defaultValue = builtIn.selectionWidth,
+        .minimum = kMinSelectionWidth,
+        .maximum = kMaxSelectionWidth,
+    });
 }
 
 HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
     // So a viewport made without main.cpp's call (tests) has them.
-    if (!usdcc::core::Settings::instance().contains(kViewportBackgroundKey)) defineViewportDisplaySettings();
+    if (!usdcc::core::Settings::instance().contains(kViewportSelectionWidthKey)) defineViewportDisplaySettings();
     const auto& settings = usdcc::core::Settings::instance();
     HydraViewportWindow::DisplayOptions options;
     options.showGrid = settings.get<bool>(kViewportShowGridKey);
@@ -76,6 +140,12 @@ HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
     options.gridStep = settings.get<double>(kViewportGridStepKey);
     const QColor background = usdcc::ui::settingColor(kViewportBackgroundKey);
     if (background.isValid()) options.background = background;
+    if (const auto style = selectionStyleFromName(QString::fromStdString(settings.get<std::string>(kViewportSelectionStyleKey)))) {
+        options.selectionStyle = *style;
+    }
+    const QColor selection = usdcc::ui::settingColor(kViewportSelectionColorKey);
+    if (selection.isValid()) options.selectionColor = selection;
+    options.selectionWidth = std::clamp(settings.get<int>(kViewportSelectionWidthKey), kMinSelectionWidth, kMaxSelectionWidth);
     return options;
 }
 
@@ -84,6 +154,9 @@ HydraViewportWindow::DisplayOptions ViewportDisplayOverrides::applyTo(HydraViewp
     if (gridSize) defaults.gridSize = *gridSize;
     if (gridStep) defaults.gridStep = *gridStep;
     if (background) defaults.background = *background;
+    if (selectionStyle) defaults.selectionStyle = *selectionStyle;
+    if (selectionColor) defaults.selectionColor = *selectionColor;
+    if (selectionWidth) defaults.selectionWidth = *selectionWidth;
     return defaults;
 }
 
@@ -93,6 +166,9 @@ QJsonObject ViewportDisplayOverrides::toJson() const {
     if (gridSize) json.insert(QStringLiteral("gridSize"), *gridSize);
     if (gridStep) json.insert(QStringLiteral("gridStep"), *gridStep);
     if (background) json.insert(QStringLiteral("background"), background->name());
+    if (selectionStyle) json.insert(QStringLiteral("selectionStyle"), QLatin1String(selectionStyleName(*selectionStyle)));
+    if (selectionColor) json.insert(QStringLiteral("selectionColor"), selectionColor->name());
+    if (selectionWidth) json.insert(QStringLiteral("selectionWidth"), *selectionWidth);
     return json;
 }
 
@@ -108,6 +184,19 @@ ViewportDisplayOverrides ViewportDisplayOverrides::fromJson(const QJsonObject& j
     if (const QJsonValue v = json.value(QStringLiteral("background")); v.isString()) {
         const QColor color = QColor::fromString(v.toString());
         if (color.isValid()) overrides.background = color;
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("selectionStyle")); v.isString()) {
+        overrides.selectionStyle = selectionStyleFromName(v.toString());
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("selectionColor")); v.isString()) {
+        const QColor color = QColor::fromString(v.toString());
+        if (color.isValid()) overrides.selectionColor = color;
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("selectionWidth")); v.isDouble()) {
+        const double width = v.toDouble();
+        if (width == std::floor(width) && width >= kMinSelectionWidth && width <= kMaxSelectionWidth) {
+            overrides.selectionWidth = static_cast<int>(width);
+        }
     }
     return overrides;
 }

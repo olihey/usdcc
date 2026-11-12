@@ -65,7 +65,8 @@ The options menu (☰, or pinned beside the panel) has:
 | Entry | Does |
 |---|---|
 | Show Grid | Ticked while the grid shows. Toggling it overrides Show grid for this viewport |
-| Grid & Background... | Opens this viewport's dialog. Its rows are Show grid, Grid size, Grid step and Background (a swatch that opens Qt's color picker). The viewport follows the picker live, and Cancel puts the color back. Each row has a **Default** button, shown while the value is overridden, that drops the override. Edits apply at once |
+| Selection | Solid, Outline or Wireframe, the one in use ticked. Choosing one overrides the selection style for this viewport ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)) |
+| Display... | Opens this viewport's dialog. Its rows are Show grid, Grid size, Grid step, Background (a swatch that opens Qt's color picker), Selection, Selection color and Line width. The viewport follows a picker live, and Cancel puts the color back. Each row has a **Default** button, shown while the value is overridden, that drops the override. Edits apply at once |
 | Use Settings Defaults | Drops all of this viewport's overrides. Disabled when there are none |
 
 **Duplicate** copies the overrides.
@@ -73,16 +74,17 @@ The options menu (☰, or pinned beside the panel) has:
 **Sessions** save them under the viewport's `"display"` key, only the values that are set:
 
 ```json
-"display": {"showGrid": false, "gridSize": 50, "gridStep": 0.5, "background": "#202830"}
+"display": {"showGrid": false, "gridSize": 50, "gridStep": 0.5, "background": "#202830",
+            "selectionStyle": "outline", "selectionColor": "#33ccff", "selectionWidth": 3}
 ```
 
 - A session without the key, such as an older one, restores no overrides.
-- Values that don't fit are ignored: a size or step out of range, or something that isn't
-  a color.
+- Values that don't fit are ignored: a size or step out of range, something that isn't
+  a color, a style that isn't one of the three, or a width outside 1–8.
 
 ## 5. Tests
 
 | Suite | File | Covers |
 |---|---|---|
 | `usdcc_tests` | `viewport_grid_test.cpp` | line positions, axes and major lines, the Z-up ground, the line cap, invalid sizes |
-| `usdcc_ui_tests` | `viewport_display_test.cpp` | the settings, overrides kept and defaults followed, the options menu, the dialog, duplicate and session round trip |
+| `usdcc_ui_tests` | `viewport_display_test.cpp` | the settings (grid, background and selection), overrides kept and defaults followed, the options menu and its Selection submenu, the dialog, duplicate and session round trip |

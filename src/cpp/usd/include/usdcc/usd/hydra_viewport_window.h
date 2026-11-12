@@ -37,6 +37,15 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 namespace usdcc::usd {
 
+class SelectionOverlay;
+
+// How the viewport draws what's selected (docs/VIEWPORT_SELECTION.md).
+enum class SelectionStyle {
+    Solid,      // filled with the selection color
+    Outline,    // a line around the selection's silhouette
+    Wireframe,  // the selection's edges
+};
+
 // Renders a USD stage via Hydra directly into a native QWindow surface, with
 // its own QOpenGLContext calling swapBuffers() itself — rather than
 // QOpenGLWidget's approach of rendering into an offscreen FBO that Qt then
@@ -104,7 +113,7 @@ public:
     static double verticalFieldOfView();
 
     // What the viewport draws besides the stage: the ground grid and the background
-    // color (docs/VIEWPORT_GRID.md). ViewportViewPanel sets them from the Settings
+    // color (docs/VIEWPORT_GRID.md), and how the selection looks (docs/VIEWPORT_SELECTION.md). ViewportViewPanel sets them from the Settings
     // defaults and the panel's own overrides; this window just draws what it's given.
     struct DisplayOptions {
         bool showGrid = true;
@@ -113,6 +122,11 @@ public:
         // The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss): the
         // design's viewports sit on the same colour as the panels around them.
         QColor background = QColor(0x1c, 0x1c, 0x1e);
+        // How the selection is drawn (docs/VIEWPORT_SELECTION.md): the style, its color
+        // (opaque), and the width of the line styles' lines, in UI pixels (1-8).
+        SelectionStyle selectionStyle = SelectionStyle::Solid;
+        QColor selectionColor = QColor(0xff, 0xa6, 0x00);
+        int selectionWidth = 2;
         bool operator==(const DisplayOptions&) const = default;
     };
     DisplayOptions displayOptions() const { return m_display; }
@@ -214,6 +228,9 @@ private:
     void applyToolResult(const usdcc::tools::ToolResult& result);
     void finishToolEdit();
     void updateEngineSelection();
+    // Outline and Wireframe (docs/VIEWPORT_SELECTION.md): the selection's lines over the
+    // frame, from a second engine (SelectionOverlay). Nothing for Solid, which Hydra draws.
+    void drawSelectionOverlay(const usdcc::tools::ToolContext& ctx, int width, int height);
     // The ground grid, depth-tested against what Hydra drew.
     void drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix);
     void drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
@@ -223,6 +240,8 @@ private:
     QOpenGLContext* m_context = nullptr;
     QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
+    // While a line style is in use (drawSelectionOverlay()); freed with the engine.
+    std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
     // What Storm and the gizmo draw into; copied to the window each frame.
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
