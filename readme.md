@@ -140,10 +140,11 @@ python tools/deploy.py                       # into .\deploy
 python tools/deploy.py D:\dist\usdcc         # into another folder
 python tools/deploy.py --configuration Release
 python tools/deploy.py --usd-install C:\usd\install   # OpenUSD from there instead of the build's
+python tools/deploy.py D:\dist\usdcc --clean # delete the folder first, whatever it holds
 ```
 
 Build first. An earlier deploy in the folder is replaced; any other non-empty folder is
-refused.
+refused, unless `--clean` says to delete it first.
 
 ## Repository Layout
 

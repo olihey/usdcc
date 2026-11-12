@@ -31,10 +31,12 @@ into a self-contained folder that runs on a machine without the dev environment:
 OpenUSD finds its plugins relative to usd_plug.dll (bin\\usd and ..\\plugin\\usd),
 and usdcc uses python\\ instead of the build's Python when it finds it next to
 bin\\, so nothing needs setting up on the target machine. The folder is replaced
-if it holds an earlier deploy; any other non-empty folder is refused.
+if it holds an earlier deploy; any other non-empty folder is refused, unless
+--clean says to delete it first, whatever it holds.
 
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
+    python tools/deploy.py D:\\dist\\usdcc --clean
     python tools/deploy.py --usd-install C:\\usd\\install
 
 Windows only so far: the layout above is Windows'. Standard library only.
@@ -136,6 +138,9 @@ def main(argv=None):
                         help="the OpenUSD install to take OpenUSD's files from (default: the one the build was "
                              "configured with). usdcc is compiled against that one, so another one gets a "
                              "warning: it may not run with it")
+    parser.add_argument("--clean", action="store_true",
+                        help="delete the destination folder first, whatever it holds; without it only an earlier "
+                             "deploy is replaced, and any other non-empty folder is refused")
     parser.add_argument("--omit-rtx", action="store_true",
                         help="omit RTX even when enabled in the CMake cache; ignore stale native build files")
     parser.add_argument("--bundle-rtx-runtime", action="store_true",
@@ -211,11 +216,19 @@ def main(argv=None):
     deploy_dir = Path(deploy_dir)
 
     if deploy_dir.exists():
-        if (deploy_dir / "bin/usdcc.exe").is_file():
+        if not deploy_dir.is_dir():
+            fail(f"{deploy_dir} is a file, not a folder.")
+        if args.clean:
+            # Asked for, so whatever it holds; the checks above have kept it off
+            # the folders the deploy is made from.
+            print(f"Deleting {deploy_dir}")
+            remove_tree(deploy_dir)
+        elif (deploy_dir / "bin/usdcc.exe").is_file():
             print(f"Replacing the earlier deploy in {deploy_dir}")
             remove_tree(deploy_dir)
         elif any(deploy_dir.iterdir()):
-            fail(f"{deploy_dir} exists and isn't an earlier deploy (no bin\\usdcc.exe); pick an empty or new folder.")
+            fail(f"{deploy_dir} exists and isn't an earlier deploy (no bin\\usdcc.exe); pick an empty or new folder, "
+                 "or pass --clean to delete it first.")
 
     bin_dir = deploy_dir / "bin"
     python_dir = deploy_dir / "python"
