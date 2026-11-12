@@ -241,9 +241,22 @@ USDCC_TEST(viewport_hud_layout) {
     off.showAxes = false;
     layout = buildViewportHud(off, font);
     CHECK(!findText(layout, "Persp") && layout.axes.empty(), "no labels, no triad");
-    off.hasStage = false;
-    layout = buildViewportHud(off, font);
-    CHECK(findText(layout, "No stage") && !findText(layout, "Y up"), "an empty viewport: the hint only");
+    // No stage: the hint only, whatever is switched on.
+    HudInput empty = baseInput();
+    empty.hasStage = false;
+    empty.paused = true;
+    empty.showStats = true;
+    empty.showPerformance = true;
+    empty.frameMs = 16.0;
+    empty.hover = HudItem::AxisPosX;
+    empty.rollover = QStringLiteral("/World/Box");
+    layout = buildViewportHud(empty, font);
+    CHECK(layout.texts.size() == 1 && findText(layout, "No stage"), "an empty viewport: the hint only (%d texts)",
+          static_cast<int>(layout.texts.size()));
+    CHECK(layout.axes.empty() && layout.plates.empty(), "no triad and no plates without a stage");
+    CHECK(hudItemAt(layout, QPointF(empty.size.width() - 40, 40)) == HudItem::None &&
+              hudItemAt(layout, QPointF(20, 16)) == HudItem::None,
+          "nothing to click where the triad and the labels were");
 
     // Light background: dark ink.
     HudInput light = baseInput();

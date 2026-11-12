@@ -145,6 +145,15 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         return maxWidth <= 0 ? QString() : metrics.elidedText(text, Qt::ElideRight, maxWidth);
     };
     const QColor dim = withAlpha(layout.ink, 120);
+
+    // An empty viewport says so, and nothing else: no labels, no triad, no badges.
+    if (!input.hasStage) {
+        const QString hint = elided(QStringLiteral("No stage. Open one from the File menu."), width - 2 * kMargin);
+        const double w = textWidth(hint);
+        layout.texts.push_back({hint, QRectF((width - w) / 2.0, (height - lineHeight) / 2.0, w, lineHeight), dim});
+        return layout;
+    }
+
     // Each corner's text, unpadded, for its plate.
     QRectF topLeftText, bottomLeftText, bottomRightText;
     const auto addPlate = [&](const QRectF& text) {
@@ -218,7 +227,7 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
 
     // Bottom right: how fast, bottom up.
     QStringList rightLines;
-    if (input.showPerformance && input.hasStage) {
+    if (input.showPerformance) {
         if (input.frameMs) {
             QString line = QStringLiteral("%1 ms").arg(QString::number(*input.frameMs, 'f', 1));
             if (input.fps) line += kDot + QStringLiteral("%1 fps").arg(QString::number(*input.fps, 'f', 0));
@@ -258,40 +267,33 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         layout.texts.push_back(hudText);
         y -= lineHeight;
     };
-    if (input.hasStage) {
-        if (!input.upAxis.isEmpty()) {
-            QString line = QStringLiteral("%1 up").arg(input.upAxis);
-            if (input.metersPerUnit > 0) line += kDot + QStringLiteral("1 unit = %1").arg(formatMetersPerUnit(input.metersPerUnit));
-            addLeft(line, kPlateDim);
-        }
-        if (!input.editTarget.isEmpty()) {
-            addLeft(QStringLiteral("Edit target: %1").arg(input.editTarget) + kMenuMark, kPlateWarning, HudItem::EditTarget);
-        }
-        if (input.showStats) {
-            addLeft(QStringLiteral("Stage: ") + (input.stageCounts ? countsText(*input.stageCounts, true) : QStringLiteral("counting…")),
-                    kPlateInk);
-            if (input.selectedPrims > 0) {
-                QString line = QStringLiteral("Selection: ");
-                if (!input.selectionType.isEmpty()) line += input.selectionType + kDot;
-                if (!input.selectionCounts) {
-                    line += QStringLiteral("counting…");
-                } else {
-                    // One selected prim of a type, with nothing below it: its type says it.
-                    const bool single = !input.selectionType.isEmpty() && input.selectionCounts->prims <= 1;
-                    line += countsText(*input.selectionCounts, !single);
-                }
-                addLeft(line, kPlateInk);
+    if (!input.upAxis.isEmpty()) {
+        QString line = QStringLiteral("%1 up").arg(input.upAxis);
+        if (input.metersPerUnit > 0) line += kDot + QStringLiteral("1 unit = %1").arg(formatMetersPerUnit(input.metersPerUnit));
+        addLeft(line, kPlateDim);
+    }
+    if (!input.editTarget.isEmpty()) {
+        addLeft(QStringLiteral("Edit target: %1").arg(input.editTarget) + kMenuMark, kPlateWarning, HudItem::EditTarget);
+    }
+    if (input.showStats) {
+        addLeft(QStringLiteral("Stage: ") + (input.stageCounts ? countsText(*input.stageCounts, true) : QStringLiteral("counting…")),
+                kPlateInk);
+        if (input.selectedPrims > 0) {
+            QString line = QStringLiteral("Selection: ");
+            if (!input.selectionType.isEmpty()) line += input.selectionType + kDot;
+            if (!input.selectionCounts) {
+                line += QStringLiteral("counting…");
+            } else {
+                // One selected prim of a type, with nothing below it: its type says it.
+                const bool single = !input.selectionType.isEmpty() && input.selectionCounts->prims <= 1;
+                line += countsText(*input.selectionCounts, !single);
             }
+            addLeft(line, kPlateInk);
         }
-        addPlate(bottomLeftText);
     }
+    addPlate(bottomLeftText);
 
-    // Centre: an empty viewport says so; Paused sits at the top.
-    if (!input.hasStage) {
-        const QString hint = elided(QStringLiteral("No stage. Open one from the File menu."), width - 2 * kMargin);
-        const double w = textWidth(hint);
-        layout.texts.push_back({hint, QRectF((width - w) / 2.0, (height - lineHeight) / 2.0, w, lineHeight), dim});
-    }
+    // Paused sits at the top, in the centre.
     const auto addBadge = [&](const QString& text, QPointF topLeft, bool centred) {
         const QString shown = elided(text, width - 2 * kMargin - 2 * kPadX);
         QRectF rect(topLeft, QSizeF(textWidth(shown) + 2 * kPadX, lineHeight + 2 * kPadY));

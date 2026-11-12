@@ -113,7 +113,8 @@ Converging 43%
   high value.*
 - **Paused** badge while `isPaused()`. *v1.*
 - **Empty viewport**: "No stage. File > Open, or drop a .usd file here." *v1* (the drop
-  itself is a separate feature).
+  itself is a separate feature). Nothing else of the HUD shows without a stage: no labels,
+  no triad, no Paused badge, and so nothing to click.
 - **Rollover prim info** (usdview's Show Rollover Prim Info): path and type of the prim
   under the cursor, after the cursor rests ~400 ms (one pick, not one per mouse move).
   *Candidate, off by default.*
