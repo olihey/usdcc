@@ -177,6 +177,7 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
     }
     m_lastVector = *vector;
     m_dragTotalDegrees = 0.0;
+    m_readout = std::string("Rotate ") + axisLetter(m_activeHandle) + "  0\xC2\xB0";
 
     m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
     if (m_targetOp) {
@@ -240,6 +241,7 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
     // op had at press.
     m_dragTotalDegrees += deltaDegrees;
     const double appliedDegrees = snapped(m_dragTotalDegrees);
+    m_readout = std::string("Rotate ") + axisLetter(m_activeHandle) + "  " + formatReadoutNumber(appliedDegrees, 1) + "\xC2\xB0";
 
     // Spin the orientation the op had at press about the ring's axis (the
     // op's own axis — the frame follows its rotation), then express the
@@ -324,6 +326,7 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
 
 void RotateTool::mouseRelease() {
     m_activeHandle = Handle::None;
+    m_readout.clear();
     m_targetOp = PXR_NS::UsdGeomXformOp();
 }
 

@@ -33,6 +33,8 @@ private:
     Handle pickHandle(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
     // The gizmo frame: the prim's (Auto) or the targeted op's, with Space applied.
     GizmoFrame frameFor(const Target& target, const PXR_NS::UsdGeomXformable& xformable) const;
+    // The readout for a drag that has moved `delta` along the gizmo's axes.
+    void setMoveReadout(const PXR_NS::GfVec3d& delta);
 
     PXR_NS::GfVec3d m_dragAnchor{0.0};      // world-space point the drag started at, on the constrained axis/plane
     PXR_NS::GfVec3d m_dragStartLocal{0.0};  // the translate op's value when the drag started

@@ -31,6 +31,9 @@ public:
 
     ToolResult mousePress(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const PXR_NS::GfRay& ray) final;
 
+    // While a gizmo drag is under way: what it has done so far (set by each tool).
+    std::string readout() const override { return m_activeHandle == Handle::None ? std::string() : m_readout; }
+
     bool snapEnabled() const { return m_snapEnabled; }
     double snapIncrement() const { return m_snapIncrement; }
 
@@ -160,6 +163,10 @@ protected:
                                                  PXR_NS::UsdGeomXformOp::Type opType);
 
     Handle m_activeHandle = Handle::None;
+    std::string m_readout;  // see readout()
+
+    // "X", "Y" or "Z" for an axis handle; empty for the others.
+    static const char* axisLetter(Handle handle);
 
 private:
     SnapSpec m_snapSpec;

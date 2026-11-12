@@ -5,6 +5,7 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/viewport_hud.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/range3d.h>
@@ -14,14 +15,18 @@
 #include <pxr/usd/usd/common.h>
 
 #include <QColor>
+#include <QElapsedTimer>
 #include <QPoint>
 #include <QImage>
 #include <QWindow>
 
+#include <deque>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QOpenGLContext;
+class QTimer;
 class QOpenGLFramebufferObject;
 class QOpenGLFunctions_1_1;
 
@@ -155,6 +160,15 @@ public:
         bool sceneLights = true;
         bool cameraLight = true;
         bool domeLight = false;
+        // The heads-up display (docs/VIEWPORT_HUD.md): on at all, and each of its parts.
+        // Units, edit target, Paused and the empty-viewport hint come with `hud` itself.
+        bool hud = true;
+        bool hudCamera = true;       // top left: camera, renderer, shading
+        bool hudAxes = true;         // top right: the axis triad
+        bool hudStats = false;       // bottom left: stage and selection counts
+        bool hudPerformance = false; // bottom right: frame time, convergence
+        bool hudToolReadout = true;  // what a gizmo drag is doing
+        bool hudRollover = false;    // the prim under the cursor
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -194,7 +208,31 @@ public:
     void setPaused(bool paused);
     bool isPaused() const { return m_paused; }
 
+    // The heads-up display (docs/VIEWPORT_HUD.md), drawn over the frame while the display
+    // options' `hud` is on. Not in grabFrame(): a session's preview shows the scene only.
+    //
+    // The counts it shows (displayOptions().hudStats): ViewportViewPanel counts them, as it
+    // sees the stage's change notices. Nothing: still counting.
+    struct HudCounts {
+        std::optional<SceneCounts> stage;
+        std::optional<SceneCounts> selection;
+        bool operator==(const HudCounts&) const = default;
+    };
+    void setHudCounts(const HudCounts& counts);
+    // What the HUD would show now, and where it put it last frame (empty before one).
+    HudInput hudInput() const;
+    const HudLayout& hudLayout() const { return m_hudLayout; }
+    // Draws the last frame again with the HUD as it is now: for what changes only the HUD.
+    void refreshHud();
+    // Clicking an axis end of the triad: looks along that axis (keeping target and
+    // distance), or for its centre, takes the default yaw and pitch.
+    void snapToAxis(HudItem item);
+
 Q_SIGNALS:
+    // A HUD label was clicked (Camera, Renderer, Shading, EditTarget): its menu belongs
+    // under `globalPos`.
+    void hudMenuRequested(usdcc::usd::HudItem item, QPoint globalPos);
+
     void rendererPluginsChanged();
     // setRendererPlugin() switched it.
     void rendererChanged();
@@ -268,6 +306,15 @@ private:
                    const PXR_NS::GfMatrix4d& projMatrix);
     usdcc::tools::Tool* activeToolInstance() const;
 
+    // The HUD (docs/VIEWPORT_HUD.md §4): laid out, painted into m_hudImage when the layout
+    // changed, and drawn as one textured quad over the default framebuffer.
+    bool hudActive() const { return m_display.hud && !m_previewMode; }
+    void drawHud(int width, int height);
+    // After a frame: its time, for the performance line.
+    void recordFrame(double milliseconds);
+    void updateHover(const QPointF& position);
+    void showRollover();
+
     QOpenGLContext* m_context = nullptr;
     QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
@@ -300,6 +347,24 @@ private:
     DisplayOptions m_display;
     bool m_previewMode = false;
     bool m_paused = false;
+
+    HudLayout m_hudLayout;
+    QImage m_hudImage;
+    unsigned int m_hudTexture = 0;  // GL name; freed with the engine, made again when needed
+    bool m_hudTextureStale = true;
+    HudItem m_hudHover = HudItem::None;
+    HudCounts m_hudCounts;
+    QPointF m_cursorPos;
+    QString m_rollover;
+    QTimer* m_rolloverTimer = nullptr;  // the cursor has rested
+    QTimer* m_idleTimer = nullptr;      // no frame for a while: the frame time goes
+    QElapsedTimer m_clock;
+    std::deque<qint64> m_frameTimes;  // when the last second's frames were drawn
+    std::optional<double> m_shownFrameMs;
+    std::optional<double> m_shownFps;
+    qint64 m_shownAt = 0;
+    bool m_converging = false;
+    std::optional<double> m_percentDone;
 };
 
 }  // namespace usdcc::usd

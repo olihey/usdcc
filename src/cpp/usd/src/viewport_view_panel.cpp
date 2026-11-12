@@ -4,6 +4,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/layer_stack.h"
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -23,6 +24,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -32,6 +34,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -289,6 +292,19 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
               &Overrides::cameraLight, true);
     addSwitch(QObject::tr("Dome light"), "displayDomeLight", "resetDomeLight", &Options::domeLight, &Overrides::domeLight,
               true);
+    // The HUD (docs/VIEWPORT_HUD.md).
+    addSwitch(QObject::tr("Show HUD"), "displayHud", "resetHud", &Options::hud, &Overrides::hud, true);
+    addSwitch(QObject::tr("HUD: camera and renderer"), "displayHudCamera", "resetHudCamera", &Options::hudCamera,
+              &Overrides::hudCamera, true);
+    addSwitch(QObject::tr("HUD: axes"), "displayHudAxes", "resetHudAxes", &Options::hudAxes, &Overrides::hudAxes, true);
+    addSwitch(QObject::tr("HUD: scene counts"), "displayHudStats", "resetHudStats", &Options::hudStats,
+              &Overrides::hudStats, true);
+    addSwitch(QObject::tr("HUD: performance"), "displayHudPerformance", "resetHudPerformance", &Options::hudPerformance,
+              &Overrides::hudPerformance, true);
+    addSwitch(QObject::tr("HUD: tool readout"), "displayHudToolReadout", "resetHudToolReadout", &Options::hudToolReadout,
+              &Overrides::hudToolReadout, true);
+    addSwitch(QObject::tr("HUD: prim under cursor"), "displayHudRollover", "resetHudRollover", &Options::hudRollover,
+              &Overrides::hudRollover, true);
 
     auto updateAll = [updates]() {
         for (const std::function<void()>& update : *updates) update();
@@ -401,6 +417,17 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_viewport, &HydraViewportWindow::cameraChanged, this, [this]() {
         if (activeViewport() == this) activeViewportChanged()();
     });
+    // A HUD label's menu, under it (docs/VIEWPORT_HUD.md §3).
+    connect(m_viewport, &HydraViewportWindow::hudMenuRequested, this, [this](HudItem item, QPoint globalPos) {
+        makeActive();
+        QMenu menu(this);
+        populateHudMenu(&menu, item);
+        if (!menu.isEmpty()) menu.exec(globalPos);
+    });
+    // The HUD's counts: a slice at a time, a moment after the last change.
+    m_countTimer = new QTimer(this);
+    m_countTimer->setSingleShot(true);
+    connect(m_countTimer, &QTimer::timeout, this, &ViewportViewPanel::runCounts);
     openViewports().push_back(this);
     viewportsChanged()();
     // One undo step per gizmo drag. The stage is remembered at the start so the
@@ -436,9 +463,13 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
     if (activeViewport() == this) activeViewportChanged()();  // the active camera's stage
     viewportsChanged()();
+    m_countsOn = countsWanted();
+    recountStage(true);
+    recountSelection(true);
     if (!stage) {
         m_stageChangedConnection = {};
         m_targetConnection = {};
+        m_editTargetConnection = {};
         m_viewport->setTargetXformOp(PXR_NS::TfToken());
         m_viewport->requestUpdate();
         return;
@@ -446,10 +477,91 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // The viewport only draws when asked: redraw after every edit, wherever it
     // came from (undo/redo, another panel, a script) — requestUpdate() folds a
     // burst of notices into one frame.
-    m_stageChangedConnection = stage->changed.connect([this](const StageChanges&) { m_viewport->requestUpdate(); });
+    m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
+        m_viewport->requestUpdate();
+        // The HUD's counts change with what's there, and with what decides whether it's
+        // drawn or how big it is; not with a transform or a color.
+        static const PXR_NS::TfToken counted[] = {
+            PXR_NS::TfToken("points"),     PXR_NS::TfToken("faceVertexCounts"), PXR_NS::TfToken("visibility"),
+            PXR_NS::TfToken("purpose"),    PXR_NS::TfToken("protoIndices"),     PXR_NS::TfToken("prototypes")};
+        bool recount = !changes.resyncedPaths.empty();
+        for (const PXR_NS::SdfPath& path : changes.changedInfoOnlyPaths) {
+            if (recount) break;
+            recount = path.IsPropertyPath() && std::find(std::begin(counted), std::end(counted), path.GetNameToken()) != std::end(counted);
+        }
+        if (recount) {
+            recountStage(false);
+            recountSelection(false);
+        }
+    });
     m_targetConnection = stage->targetXformOpChanged.connect([this]() { syncTarget(); });
+    // The HUD names the edit target when it isn't the root layer.
+    m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_viewport->refreshHud(); });
     syncTarget();
 }
+
+bool ViewportViewPanel::countsWanted() const {
+    const HydraViewportWindow::DisplayOptions shown = displayOptions();
+    return shown.hud && shown.hudStats && currentStage();
+}
+
+void ViewportViewPanel::recountStage(bool reset) {
+    m_stageCountJob.reset();
+    if (reset || !countsWanted()) m_counts.stage.reset();
+    if (countsWanted()) {
+        m_countedPurposes = viewportPurposes(displayOptions());
+        m_stageCountJob = std::make_unique<SceneCountJob>(currentStage()->usdStage(), std::vector<PXR_NS::SdfPath>{},
+                                                          m_countedPurposes);
+        m_stageCountSlices = 0;
+        m_countTimer->start(100);  // a moment after the last change
+    }
+    publishCounts();
+}
+
+void ViewportViewPanel::recountSelection(bool reset) {
+    m_selectionCountJob.reset();
+    const std::vector<PXR_NS::SdfPath> selection =
+        currentStage() ? stageManager()->selectedPaths(currentStage()) : std::vector<PXR_NS::SdfPath>{};
+    if (reset || selection.empty() || !countsWanted()) m_counts.selection.reset();
+    if (countsWanted() && !selection.empty()) {
+        m_countedPurposes = viewportPurposes(displayOptions());
+        m_selectionCountJob = std::make_unique<SceneCountJob>(currentStage()->usdStage(), countRoots(selection),
+                                                              m_countedPurposes);
+        m_selectionCountSlices = 0;
+        // Debounced, so drag-selecting doesn't count every step of the way.
+        m_countTimer->start(100);
+    }
+    publishCounts();
+}
+
+void ViewportViewPanel::runCounts() {
+    // About half a frame each time round, then the UI gets its turn.
+    QElapsedTimer slice;
+    slice.start();
+    while (slice.elapsed() < 8) {
+        // The selection first: it's what the user is looking at, and usually small.
+        if (m_selectionCountJob) {
+            if (m_selectionCountJob->step(256)) {
+                m_counts.selection = m_selectionCountJob->counts();
+                m_selectionCountJob.reset();
+            }
+        } else if (m_stageCountJob) {
+            if (m_stageCountJob->step(256)) {
+                m_counts.stage = m_stageCountJob->counts();
+                m_stageCountJob.reset();
+            }
+        } else {
+            break;
+        }
+    }
+    // Still under way after a slice: the old numbers aren't right any more.
+    if (m_selectionCountJob && ++m_selectionCountSlices > 1) m_counts.selection.reset();
+    if (m_stageCountJob && ++m_stageCountSlices > 1) m_counts.stage.reset();
+    publishCounts();
+    if (m_selectionCountJob || m_stageCountJob) m_countTimer->start(0);
+}
+
+void ViewportViewPanel::publishCounts() { m_viewport->setHudCounts(m_counts); }
 
 void ViewportViewPanel::syncTarget() {
     const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(currentStage());
@@ -465,6 +577,7 @@ void ViewportViewPanel::onStageSelectionChanged(StageRefPtr stage, std::vector<P
     if (stage == currentStage()) {
         m_viewport->setSelectedPaths(std::move(paths));
         syncTarget();
+        recountSelection(false);
     }
 }
 
@@ -480,8 +593,21 @@ void ViewportViewPanel::setDisplayOverrides(const ViewportDisplayOverrides& over
 
 void ViewportViewPanel::applyDisplay() {
     m_viewport->setDisplayOptions(displayOptions());
+    // The counts: wanted now and not before, or the purposes they count changed.
+    const bool wanted = countsWanted();
+    if (wanted != m_countsOn || (wanted && viewportPurposes(displayOptions()) != m_countedPurposes)) {
+        m_countsOn = wanted;
+        recountStage(true);
+        recountSelection(true);
+    }
     Q_EMIT displayChanged();
     notifyOptionsChanged();  // Show Grid's tick, Use Settings Defaults
+}
+
+void ViewportViewPanel::editOverrides(const std::function<void(ViewportDisplayOverrides&)>& change) {
+    ViewportDisplayOverrides overrides = m_displayOverrides;
+    change(overrides);
+    setDisplayOverrides(overrides);
 }
 
 QDialog* ViewportViewPanel::showDisplayDialog() {
@@ -600,6 +726,30 @@ QAction* ViewportViewPanel::addFitToViewAction(QWidget* window) {
     return action;
 }
 
+QAction* ViewportViewPanel::addToggleHudAction(QWidget* window) {
+    usdcc::core::Settings::instance().define({
+        .key = kToggleHudShortcutKey,
+        .category = "Shortcuts",
+        .group = "Viewport",
+        .label = "Toggle HUD",
+        .description = "Show or hide the heads-up display in the viewport you worked in last.",
+        .type = usdcc::core::SettingType::Shortcut,
+        .defaultValue = std::string(),
+    });
+    auto* action = new QAction(tr("Toggle HUD"), window);
+    action->setObjectName(QStringLiteral("toggleHudAction"));
+    action->setShortcutContext(Qt::ApplicationShortcut);  // as Fit to View
+    usdcc::ui::bindShortcut(action, kToggleHudShortcutKey);
+    window->addAction(action);
+    connect(action, &QAction::triggered, window, []() {
+        if (ViewportViewPanel* viewport = activeViewport()) {
+            const bool on = viewport->displayOptions().hud;
+            viewport->editOverrides([on](ViewportDisplayOverrides& o) { o.hud = !on; });
+        }
+    });
+    return action;
+}
+
 void ViewportViewPanel::populateContextMenu(QMenu* menu) {
     usdcc::ui::ViewPanel::populateContextMenu(menu);
     // The key is shown, not set: the main window's action has it (addFitToViewAction()).
@@ -610,22 +760,98 @@ void ViewportViewPanel::populateContextMenu(QMenu* menu) {
     menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
 }
 
-void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
-    QMenu* renderers = menu->addMenu(tr("Renderer"));
+void ViewportViewPanel::addRendererEntries(QMenu* menu) {
     // Empty until the viewport has been shown once: its GL context, and with
     // it the Hydra engine that lists the plugins, is created on first expose.
     const std::vector<PXR_NS::TfToken> plugins = m_viewport->rendererPlugins();
-    renderers->setEnabled(!plugins.empty());
-
-    auto* group = new QActionGroup(renderers);  // exclusive: one renderer checked
+    menu->setEnabled(!plugins.empty());
+    auto* group = new QActionGroup(menu);  // exclusive: one renderer checked
     const PXR_NS::TfToken current = m_viewport->currentRendererPlugin();
     for (const PXR_NS::TfToken& pluginId : plugins) {
-        QAction* action = renderers->addAction(m_viewport->rendererDisplayName(pluginId));
+        QAction* action = menu->addAction(m_viewport->rendererDisplayName(pluginId));
         action->setCheckable(true);
         action->setChecked(pluginId == current);
         group->addAction(action);
         connect(action, &QAction::triggered, this, [this, pluginId]() { m_viewport->setRendererPlugin(pluginId); });
     }
+}
+
+void ViewportViewPanel::addShadingEntries(QMenu* menu) {
+    // Only Storm draws the modes; for any other renderer they are greyed.
+    const bool drawsShading = HydraViewportWindow::rendererDrawsShadingModes(m_viewport->currentRendererPlugin());
+    const ShadingMode current = displayOptions().shading;
+    auto* shadings = new QActionGroup(menu);
+    for (ShadingMode shading : kShadingModes) {
+        QAction* action = menu->addAction(tr(qPrintable(shadingModeLabel(shading))));
+        action->setObjectName(QStringLiteral("shading_%1").arg(QLatin1String(shadingModeName(shading))));
+        action->setCheckable(true);
+        action->setChecked(shading == current);
+        action->setEnabled(drawsShading);
+        shadings->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [this, shading]() { editOverrides([shading](ViewportDisplayOverrides& o) { o.shading = shading; }); });
+    }
+}
+
+void ViewportViewPanel::populateHudMenu(QMenu* menu, HudItem item) {
+    switch (item) {
+        case HudItem::Camera: {
+            // Only the orbit camera so far; the stage's cameras will be listed here.
+            QAction* persp = menu->addAction(tr("Persp"));
+            persp->setObjectName(QStringLiteral("hudCameraPersp"));
+            persp->setCheckable(true);
+            persp->setChecked(true);
+            menu->addSeparator();
+            const QKeySequence key = usdcc::ui::settingShortcut(kFitToViewShortcutKey);
+            const QString fitText = key.isEmpty() ? tr("Fit to View")
+                                                  : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
+            menu->addAction(fitText, this, [this]() { fitToView(); });
+            menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
+            break;
+        }
+        case HudItem::Renderer:
+            addRendererEntries(menu);
+            break;
+        case HudItem::Shading: {
+            addShadingEntries(menu);
+            if (!HydraViewportWindow::rendererDrawsShadingModes(m_viewport->currentRendererPlugin())) {
+                menu->addSeparator();
+                menu->addAction(tr("Only Storm draws the shading modes"))->setEnabled(false);
+            }
+            break;
+        }
+        case HudItem::EditTarget: {
+            // The stage's layers, as the Layer Editor lists them: picking one makes it the
+            // edit target.
+            const StageRefPtr stage = currentStage();
+            if (!stage) break;
+            auto* group = new QActionGroup(menu);
+            std::function<void(const std::vector<LayerEntry>&, int)> addLayers = [&](const std::vector<LayerEntry>& entries,
+                                                                                  int depth) {
+                for (const LayerEntry& entry : entries) {
+                    QString text = QString(depth * 4, QLatin1Char(' ')) + QString::fromStdString(entry.displayName);
+                    if (entry.session) text += tr(" (session)");
+                    QAction* action = menu->addAction(text);
+                    action->setCheckable(true);
+                    action->setChecked(entry.editTarget);
+                    action->setEnabled(entry.layer && !entry.muted && !entry.missing);
+                    group->addAction(action);
+                    const PXR_NS::SdfLayerHandle layer = entry.layer;
+                    connect(action, &QAction::triggered, this, [stage, layer]() { stage->setEditTargetLayer(layer); });
+                    addLayers(entry.children, depth + 1);
+                }
+            };
+            addLayers(layerTree(stage->usdStage()), 0);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
+    QMenu* renderers = menu->addMenu(tr("Renderer"));
+    addRendererEntries(renderers);
 
     menu->addSeparator();
     const HydraViewportWindow::DisplayOptions shown = displayOptions();
@@ -642,16 +868,7 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     const bool drawsShading = HydraViewportWindow::rendererDrawsShadingModes(m_viewport->currentRendererPlugin());
     shadingMenu->setEnabled(drawsShading);
     shadingMenu->menuAction()->setToolTip(drawsShading ? QString() : tr("Only Storm draws the shading modes"));
-    auto* shadings = new QActionGroup(shadingMenu);
-    for (ShadingMode shading : kShadingModes) {
-        QAction* action = shadingMenu->addAction(tr(qPrintable(shadingModeLabel(shading))));
-        action->setObjectName(QStringLiteral("shading_%1").arg(QLatin1String(shadingModeName(shading))));
-        action->setCheckable(true);
-        action->setChecked(shading == shown.shading);
-        shadings->addAction(action);
-        connect(action, &QAction::triggered, this,
-                [edit, shading]() { edit([shading](ViewportDisplayOverrides& o) { o.shading = shading; }); });
-    }
+    addShadingEntries(shadingMenu);
 
     QMenu* complexityMenu = menu->addMenu(tr("Complexity"));
     complexityMenu->setObjectName(QStringLiteral("complexityMenu"));
@@ -723,6 +940,28 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
             setDisplayOverrides(overrides);
         });
     }
+    // The heads-up display and its parts (docs/VIEWPORT_HUD.md §5).
+    QMenu* hud = menu->addMenu(tr("HUD"));
+    hud->setObjectName(QStringLiteral("hudMenu"));
+    addSwitch(hud, tr("Show HUD"), "hudAction", &Options::hud, &Overrides::hud);
+    hud->addSeparator();
+    const struct {
+        const char* text;
+        const char* name;
+        bool Options::*option;
+        std::optional<bool> Overrides::*override;
+    } hudParts[] = {
+        {"Camera and Renderer", "hudCameraAction", &Options::hudCamera, &Overrides::hudCamera},
+        {"Axes", "hudAxesAction", &Options::hudAxes, &Overrides::hudAxes},
+        {"Scene Counts", "hudStatsAction", &Options::hudStats, &Overrides::hudStats},
+        {"Performance", "hudPerformanceAction", &Options::hudPerformance, &Overrides::hudPerformance},
+        {"Tool Readout", "hudToolReadoutAction", &Options::hudToolReadout, &Overrides::hudToolReadout},
+        {"Prim Under Cursor", "hudRolloverAction", &Options::hudRollover, &Overrides::hudRollover},
+    };
+    for (const auto& part : hudParts) {
+        addSwitch(hud, tr(part.text), part.name, part.option, part.override)->setEnabled(shown.hud);
+    }
+
     QAction* dialog = menu->addAction(tr("Display..."), this, [this]() { showDisplayDialog(); });
     dialog->setObjectName(QStringLiteral("displayDialogAction"));
     QAction* defaults = menu->addAction(tr("Use Settings Defaults"), this, [this]() { setDisplayOverrides({}); });

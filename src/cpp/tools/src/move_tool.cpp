@@ -242,6 +242,7 @@ ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2
         return {};
     }
     m_dragAnchor = *anchor;
+    setMoveReadout(PXR_NS::GfVec3d(0.0));
     m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
     if (isMatrixOp(m_targetOp)) {
         // A matrix op: Move edits its translation row.
@@ -314,6 +315,9 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
                      m_dragFrame.axisY * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisY)) +
                      m_dragFrame.axisZ * snapped(PXR_NS::GfDot(worldDelta, m_dragFrame.axisZ));
     }
+    // Along the gizmo's axes, as drawn.
+    setMoveReadout(PXR_NS::GfVec3d(PXR_NS::GfDot(worldDelta, m_dragFrame.axisX), PXR_NS::GfDot(worldDelta, m_dragFrame.axisY),
+                                   PXR_NS::GfDot(worldDelta, m_dragFrame.axisZ)));
 
     // A targeted op: its value lives in the space before it in the stack.
     if (m_targetOp) {
@@ -358,8 +362,15 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
     return result;
 }
 
+void MoveTool::setMoveReadout(const PXR_NS::GfVec3d& delta) {
+    // "\xCE\x94" is the UTF-8 Greek capital delta.
+    m_readout = "Move  \xCE\x94X " + formatReadoutNumber(delta[0]) + "  \xCE\x94Y " + formatReadoutNumber(delta[1]) +
+                "  \xCE\x94Z " + formatReadoutNumber(delta[2]);
+}
+
 void MoveTool::mouseRelease() {
     m_activeHandle = Handle::None;
+    m_readout.clear();
     m_targetOp = PXR_NS::UsdGeomXformOp();
 }
 

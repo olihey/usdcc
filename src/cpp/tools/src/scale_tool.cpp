@@ -192,6 +192,7 @@ ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec
             m_dragStartParam = m_dragStartParam < 0.0 ? -1e-6 : 1e-6;
         }
     }
+    setScaleReadout(1.0);
 
     ToolResult result;
     result.handled = true;
@@ -240,6 +241,7 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
     // Round the change in factor (not the factor itself) so snapping steps
     // outward from the scale the drag started with.
     ratio = 1.0 + snapped(ratio - 1.0);
+    if (std::isfinite(ratio)) setScaleReadout(ratio);
 
     if (!std::isfinite(ratio) || std::abs(ratio) < kMinScaleRatio) {
         ToolResult result;
@@ -283,8 +285,16 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
     return result;
 }
 
+void ScaleTool::setScaleReadout(double ratio) {
+    // "\xC3\x97" is the UTF-8 multiplication sign. The centre handle scales all three.
+    const char* axis = axisLetter(m_activeHandle);
+    m_readout = std::string("Scale") + (*axis ? std::string(" ") + axis : std::string()) + "  \xC3\x97" +
+                formatReadoutNumber(ratio);
+}
+
 void ScaleTool::mouseRelease() {
     m_activeHandle = Handle::None;
+    m_readout.clear();
     m_targetOp = PXR_NS::UsdGeomXformOp();
 }
 

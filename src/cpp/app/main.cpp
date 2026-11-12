@@ -287,6 +287,8 @@ int main(int argc, char** argv) {
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
     // F: fit the active viewport to the selection, or to the whole stage.
     usdcc::usd::ViewportViewPanel::addFitToViewAction(&window);
+    // The active viewport's HUD on or off (no key until one is set).
+    usdcc::usd::ViewportViewPanel::addToggleHudAction(&window);
 
     // Scripts reach the app's stages, undo history, tools, window and view
     // panel types through these (usdcc.usd / usdcc.app / usdcc.tools,

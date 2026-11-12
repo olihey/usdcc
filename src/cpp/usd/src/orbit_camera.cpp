@@ -43,6 +43,17 @@ OrbitClipping orbitClipping(double distance) {
     return {atDefault.nearClip * scale, atDefault.farClip * std::max(1.0, scale)};
 }
 
+OrbitAngles orbitAnglesLookingFrom(const GfVec3d& direction, double currentYaw) {
+    const double length = direction.GetLength();
+    if (length <= 0.0) return {currentYaw, 0.0};
+    const GfVec3d d = direction / length;
+    OrbitAngles angles;
+    angles.pitch = PXR_NS::GfRadiansToDegrees(std::asin(std::clamp(d[1], -1.0, 1.0)));
+    const double horizontal = std::hypot(d[0], d[2]);
+    angles.yaw = horizontal < 1e-9 ? currentYaw : PXR_NS::GfRadiansToDegrees(std::atan2(d[0], d[2]));
+    return angles;
+}
+
 double wrapDegrees(double degrees) {
     const double wrapped = std::fmod(degrees, 360.0);
     if (wrapped > 180.0) return wrapped - 360.0;

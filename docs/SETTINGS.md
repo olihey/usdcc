@@ -95,6 +95,7 @@ take them for a `bool`.
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
 | `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
 | `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport |
+| `Shortcuts/viewport.toggleHud` | Shortcut | none | `ViewportViewPanel::addToggleHudAction()`: the active viewport's HUD on or off |
 | `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |
 | `Viewport/gridSize`, `gridStep` | Float | 20, 1 | `ViewportViewPanel`: the grid's width and line spacing |
 | `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |
@@ -105,6 +106,8 @@ take them for a `bool`.
 | `Viewport/showGuides`, `showProxy`, `showRender` | Bool | off, on, off | `ViewportViewPanel`: which purposes the viewport draws, picks and frames |
 | `Viewport/cullBackfaces` | Bool | off | `ViewportViewPanel`: leave out the back of faces, except double-sided ones |
 | `Viewport/sceneLights`, `cameraLight`, `domeLight` | Bool | on, on, off | `ViewportViewPanel`: the stage's own lights, a light at the camera, Hydra's default dome light |
+| `Viewport/hud` | Bool | on | `ViewportViewPanel`: the heads-up display over the viewport ([VIEWPORT_HUD.md](VIEWPORT_HUD.md)); a viewport can override it, and each part below |
+| `Viewport/hudCamera`, `hudAxes`, `hudStats`, `hudPerformance`, `hudToolReadout`, `hudRollover` | Bool | on, on, off, off, on, off | `ViewportViewPanel`: the HUD's labels, axis triad, scene counts, frame time, drag readout and prim under the cursor |
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
 | `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `Studio` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |

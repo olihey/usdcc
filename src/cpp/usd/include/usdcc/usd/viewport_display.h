@@ -31,6 +31,14 @@ inline constexpr const char* kViewportCullBackfacesKey = "Viewport/cullBackfaces
 inline constexpr const char* kViewportSceneLightsKey = "Viewport/sceneLights";
 inline constexpr const char* kViewportCameraLightKey = "Viewport/cameraLight";
 inline constexpr const char* kViewportDomeLightKey = "Viewport/domeLight";
+// The HUD's (docs/VIEWPORT_HUD.md §5).
+inline constexpr const char* kViewportHudKey = "Viewport/hud";
+inline constexpr const char* kViewportHudCameraKey = "Viewport/hudCamera";
+inline constexpr const char* kViewportHudAxesKey = "Viewport/hudAxes";
+inline constexpr const char* kViewportHudStatsKey = "Viewport/hudStats";
+inline constexpr const char* kViewportHudPerformanceKey = "Viewport/hudPerformance";
+inline constexpr const char* kViewportHudToolReadoutKey = "Viewport/hudToolReadout";
+inline constexpr const char* kViewportHudRolloverKey = "Viewport/hudRollover";
 
 // Whether `key` is one of the settings above: a viewport follows them as they change.
 bool isViewportDisplayKey(const std::string& key);
@@ -95,6 +103,13 @@ struct ViewportDisplayOverrides {
     std::optional<bool> sceneLights;
     std::optional<bool> cameraLight;
     std::optional<bool> domeLight;
+    std::optional<bool> hud;
+    std::optional<bool> hudCamera;
+    std::optional<bool> hudAxes;
+    std::optional<bool> hudStats;
+    std::optional<bool> hudPerformance;
+    std::optional<bool> hudToolReadout;
+    std::optional<bool> hudRollover;
 
     bool isEmpty() const { return *this == ViewportDisplayOverrides{}; }
     bool operator==(const ViewportDisplayOverrides&) const = default;
@@ -107,7 +122,8 @@ struct ViewportDisplayOverrides {
     //  "selectionStyle": "outline", "selectionColor": "#rrggbb", "selectionWidth": int,
     //  "shading": "hiddenLine", "complexity": "high", and the switches as bools:
     //  "showGuides", "showProxy", "showRender", "sceneMaterials", "cullBackfaces",
-    //  "domeLightTextures", "sceneLights", "cameraLight", "domeLight"}.
+    //  "domeLightTextures", "sceneLights", "cameraLight", "domeLight", "hud", "hudCamera",
+    //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover"}.
     QJsonObject toJson() const;
     // Ignores what doesn't fit: a size or step that isn't positive, a color that isn't one,
     // a style, shading or complexity that isn't one, a width outside 1-8, a switch that

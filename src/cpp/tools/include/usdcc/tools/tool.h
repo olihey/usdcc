@@ -188,6 +188,14 @@ public:
         return {};
     }
     virtual void mouseRelease() {}
+
+    // What the drag under way has done so far, for the viewport HUD to show
+    // (docs/VIEWPORT_HUD.md §2.5), e.g. "Move  ΔX 1.25  ΔY 0  ΔZ 0". Empty when no
+    // drag is under way, or the tool has nothing to say about it. UTF-8.
+    virtual std::string readout() const { return {}; }
 };
+
+// `value` with up to `decimals` decimals, trailing zeros dropped ("1.25", "0", "-3").
+std::string formatReadoutNumber(double value, int decimals = 3);
 
 }  // namespace usdcc::tools

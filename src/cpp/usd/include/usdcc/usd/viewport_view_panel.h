@@ -6,6 +6,7 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/scene_counts.h"
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/viewport_display.h"
 
@@ -14,11 +15,13 @@
 
 #include <QPointer>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
 class QAction;
 class QDialog;
+class QTimer;
 
 namespace usdcc::usd {
 
@@ -27,6 +30,8 @@ class HydraViewportWindow;
 
 // The Shortcut setting for Fit to View (F by default).
 inline constexpr const char* kFitToViewShortcutKey = "Shortcuts/viewport.fitToView";
+// The Shortcut setting for Toggle HUD (none by default).
+inline constexpr const char* kToggleHudShortcutKey = "Shortcuts/viewport.toggleHud";
 class UndoManager;
 
 // ViewPanel subclass that renders a USD stage via Hydra and lets the user
@@ -67,6 +72,14 @@ public:
     // The application-wide Fit to View action, for the active viewport: added to
     // `window`, which owns it, with its key from kFitToViewShortcutKey (defined here).
     static QAction* addFitToViewAction(QWidget* window);
+    // The same for Toggle HUD: turns the active viewport's HUD on or off (its own
+    // override), with its key from kToggleHudShortcutKey.
+    static QAction* addToggleHudAction(QWidget* window);
+
+    // The menu a HUD label opens (docs/VIEWPORT_HUD.md §3), filled in: Camera (Persp, Fit
+    // to View, Reset Camera), Renderer, Shading, or EditTarget (the stage's layers, the
+    // edit target checked). The caller shows it.
+    void populateHudMenu(QMenu* menu, HudItem item);
 
     // The viewport the user last worked in: the last one clicked, or until then
     // the oldest one open. Null when no viewport is open. What follows "the
@@ -131,6 +144,19 @@ private:
     void makeActive();
     // Hands displayOptions() to the viewport and tells displayChanged().
     void applyDisplay();
+    // Changes some overrides, leaving the others as they are.
+    void editOverrides(const std::function<void(ViewportDisplayOverrides&)>& change);
+    // The Renderer and Shading entries, for the options menu and the HUD's.
+    void addRendererEntries(QMenu* menu);
+    void addShadingEntries(QMenu* menu);
+
+    // The HUD's counts (docs/VIEWPORT_HUD.md §2.3), a slice at a time on the main thread,
+    // as the stage is edited there. `reset` drops the numbers shown until new ones come.
+    bool countsWanted() const;
+    void recountStage(bool reset);
+    void recountSelection(bool reset);
+    void runCounts();
+    void publishCounts();
 
     HydraViewportWindow* m_viewport;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
@@ -145,6 +171,17 @@ private:
     // The viewed stage's change notices, which trigger a redraw.
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_targetConnection;
+    usdcc::core::Signal<>::Connection m_editTargetConnection;
+
+    QTimer* m_countTimer = nullptr;
+    std::unique_ptr<SceneCountJob> m_stageCountJob;
+    std::unique_ptr<SceneCountJob> m_selectionCountJob;
+    int m_stageCountSlices = 0;  // how many slices the job under way has had
+    int m_selectionCountSlices = 0;
+    HydraViewportWindow::HudCounts m_counts;
+    // What was counted with: a change to either counts again.
+    bool m_countsOn = false;
+    PXR_NS::TfTokenVector m_countedPurposes;
 };
 
 }  // namespace usdcc::usd

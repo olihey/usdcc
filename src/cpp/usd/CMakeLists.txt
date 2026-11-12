@@ -13,6 +13,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
     include/usdcc/usd/scene_bounds.h
+    include/usdcc/usd/scene_counts.h
     include/usdcc/usd/shader_node_catalog.h
     src/shader_node_catalog.cpp
     include/usdcc/usd/shade_graph.h
@@ -34,6 +35,7 @@ add_library(usdcc_usd SHARED
     src/property_categorizer.cpp
     src/relationship_targets.cpp
     src/scene_bounds.cpp
+    src/scene_counts.cpp
     src/shade_connections.cpp
     src/stage.cpp
     src/stage_manager.cpp
@@ -134,6 +136,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
     include/usdcc/usd/viewport_display.h
+    include/usdcc/usd/viewport_hud.h
     include/usdcc/usd/viewport_render_params.h
     include/usdcc/usd/undo_manager.h
     src/attributes_view_panel.cpp
@@ -142,6 +145,7 @@ add_library(usdcc_usd_ui SHARED
     src/selection_overlay.cpp
     src/selection_overlay.h
     src/viewport_display.cpp
+    src/viewport_hud.cpp
     src/viewport_render_params.cpp
     src/layer_actions.cpp
     src/layer_editor_view_panel.cpp

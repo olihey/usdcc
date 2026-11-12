@@ -34,6 +34,7 @@ add_executable(usdcc_tests
     relationship_targets_test.cpp
     rotate_tool_test.cpp
     scene_bounds_test.cpp
+    scene_counts_test.cpp
     settings_test.cpp
     shade_connections_test.cpp
     stage_changes_test.cpp
@@ -94,6 +95,7 @@ add_executable(usdcc_ui_tests
     view_panel_layout_test.cpp
     view_panel_options_test.cpp
     viewport_display_test.cpp
+    viewport_hud_test.cpp
     panel_maximizer_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)

@@ -3,12 +3,17 @@
 #include "selection_overlay.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_grid.h"
 #include "usdcc/usd/viewport_render_params.h"
 
 #include <QCursor>
+#include <QGuiApplication>
+#include <QOpenGLExtraFunctions>
+#include <QPainter>
 #include <QRect>
 #include <QScreen>
+#include <QTimer>
 
 #include "usdcc/core/log.h"
 
@@ -17,6 +22,9 @@
 #include <pxr/base/gf/rotation.h>
 #include <pxr/base/gf/vec2i.h>
 #include <pxr/base/tf/stackTrace.h>
+#include <pxr/base/vt/dictionary.h>
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/usd/editTarget.h>
 #include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/glf/simpleMaterial.h>
 #include <pxr/imaging/hd/tokens.h>
@@ -70,6 +78,25 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
     // Until a shared set is installed (see setToolSet()), use a private one so
     // the viewport always has working tools.
     setToolSet(std::make_shared<usdcc::tools::ToolSet>());
+
+    m_clock.start();
+    // The HUD's prim under the cursor, once it has rested there (docs/VIEWPORT_HUD.md §2.5).
+    m_rolloverTimer = new QTimer(this);
+    m_rolloverTimer->setSingleShot(true);
+    m_rolloverTimer->setInterval(400);
+    connect(m_rolloverTimer, &QTimer::timeout, this, &HydraViewportWindow::showRollover);
+    // The frame time only means something while frames keep coming.
+    m_idleTimer = new QTimer(this);
+    m_idleTimer->setSingleShot(true);
+    m_idleTimer->setInterval(1500);
+    connect(m_idleTimer, &QTimer::timeout, this, [this]() {
+        m_frameTimes.clear();
+        if (m_shownFrameMs || m_shownFps) {
+            m_shownFrameMs.reset();
+            m_shownFps.reset();
+            refreshHud();
+        }
+    });
 }
 
 HydraViewportWindow::~HydraViewportWindow() {
@@ -93,6 +120,9 @@ void HydraViewportWindow::releaseEngine() {
     m_selectionOverlay.reset();
     m_engine.reset();
     m_framebuffer.reset();
+    if (current && m_hudTexture) m_context->functions()->glDeleteTextures(1, &m_hudTexture);
+    m_hudTexture = 0;
+    m_hudTextureStale = true;
     if (current) {
         m_context->doneCurrent();
     }
@@ -268,7 +298,225 @@ void HydraViewportWindow::showLastFrame(int width, int height) {
         QOpenGLFramebufferObject::blitFramebuffer(nullptr, target, m_framebuffer.get(), QRect(QPoint(0, 0), frame),
                                                   GL_COLOR_BUFFER_BIT, GL_LINEAR);
     }
+    QOpenGLFramebufferObject::bindDefault();
+    drawHud(width, height);
     m_context->swapBuffers(this);
+}
+
+void HydraViewportWindow::setHudCounts(const HudCounts& counts) {
+    if (counts == m_hudCounts) return;
+    m_hudCounts = counts;
+    refreshHud();
+}
+
+HudInput HydraViewportWindow::hudInput() const {
+    HudInput input;
+    input.size = QSizeF(width(), height());
+    input.background = m_display.background;
+    input.hasStage = static_cast<bool>(m_stage);
+    input.paused = m_paused;
+    input.hover = m_hudHover;
+    input.cursor = m_cursorPos;
+
+    input.showCamera = m_display.hudCamera;
+    // The orbit camera, until the viewport can look through the stage's cameras.
+    input.camera = QStringLiteral("Persp");
+    const PXR_NS::TfToken renderer = currentRendererPlugin();
+    input.renderer = rendererDisplayName(renderer);
+    input.shading = shadingModeLabel(effectiveShading(m_display, renderer));
+    input.shadingAvailable = renderer.IsEmpty() || rendererDrawsShadingModes(renderer);
+
+    input.showAxes = m_display.hudAxes;
+    input.viewMatrix = currentFrustum().ComputeViewMatrix();
+
+    if (m_stage) {
+        input.zUp = PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
+        input.upAxis = input.zUp ? QStringLiteral("Z") : QStringLiteral("Y");
+        input.metersPerUnit = PXR_NS::UsdGeomGetStageMetersPerUnit(m_stage);
+        const PXR_NS::SdfLayerHandle target = m_stage->GetEditTarget().GetLayer();
+        if (target && target != m_stage->GetRootLayer()) input.editTarget = QString::fromStdString(target->GetDisplayName());
+
+        input.showStats = m_display.hudStats;
+        input.stageCounts = m_hudCounts.stage;
+        input.selectedPrims = m_selectedPaths.size();
+        if (!m_selectedPaths.empty()) input.selectionCounts = m_hudCounts.selection;
+        if (m_selectedPaths.size() == 1) {
+            if (const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(m_selectedPaths.front())) {
+                input.selectionType = QString::fromStdString(prim.GetTypeName().GetString());
+            }
+        }
+    }
+
+    input.showPerformance = m_display.hudPerformance;
+    input.frameMs = m_shownFrameMs;
+    input.fps = m_shownFps;
+    input.converging = m_converging;
+    input.percentDone = m_percentDone;
+
+    if (m_display.hudToolReadout && m_dragging) {
+        if (const usdcc::tools::Tool* tool = activeToolInstance()) input.toolReadout = QString::fromStdString(tool->readout());
+    }
+    if (m_display.hudRollover) input.rollover = m_rollover;
+    return input;
+}
+
+void HydraViewportWindow::drawHud(int width, int height) {
+    if (!hudActive() || !m_legacyGl) {
+        m_hudLayout = {};
+        return;
+    }
+    const QFont font = QGuiApplication::font();
+    HudLayout layout = buildViewportHud(hudInput(), font);
+    if (layout != m_hudLayout || m_hudImage.size() != QSize(width, height)) {
+        m_hudLayout = std::move(layout);
+        m_hudImage = QImage(width, height, QImage::Format_RGBA8888_Premultiplied);
+        m_hudImage.setDevicePixelRatio(devicePixelRatio());
+        m_hudImage.fill(Qt::transparent);
+        QPainter painter(&m_hudImage);
+        paintViewportHud(painter, m_hudLayout, font);
+        painter.end();
+        m_hudTextureStale = true;
+    }
+    if (m_hudLayout.isEmpty()) return;
+
+    // Whatever Hydra left bound, the HUD needs none of it: no program, no sampler, no
+    // unpack buffer, texture unit 0, no depth test, culling, scissor or sRGB conversion.
+    auto* gl = m_context->extraFunctions();
+    gl->glUseProgram(0);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glBindSampler(0, 0);
+    gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    gl->glDisable(GL_DEPTH_TEST);
+    gl->glDisable(GL_CULL_FACE);
+    gl->glDisable(GL_SCISSOR_TEST);
+    gl->glDisable(0x8DB9);  // GL_FRAMEBUFFER_SRGB
+    gl->glViewport(0, 0, width, height);
+
+    if (!m_hudTexture) {
+        gl->glGenTextures(1, &m_hudTexture);
+        m_hudTextureStale = true;
+    }
+    gl->glBindTexture(GL_TEXTURE_2D, m_hudTexture);
+    if (m_hudTextureStale) {
+        gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        gl->glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, m_hudImage.constBits());
+        m_hudTextureStale = false;
+    }
+
+    // The image, premultiplied, over the whole window: its first row is the top.
+    m_legacyGl->glMatrixMode(GL_PROJECTION);
+    m_legacyGl->glLoadIdentity();
+    m_legacyGl->glMatrixMode(GL_MODELVIEW);
+    m_legacyGl->glLoadIdentity();
+    m_legacyGl->glEnable(GL_TEXTURE_2D);
+    m_legacyGl->glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    gl->glEnable(GL_BLEND);
+    gl->glBlendEquation(GL_FUNC_ADD);
+    gl->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    m_legacyGl->glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    m_legacyGl->glBegin(GL_QUADS);
+    m_legacyGl->glTexCoord2f(0.0f, 1.0f);
+    m_legacyGl->glVertex2f(-1.0f, -1.0f);
+    m_legacyGl->glTexCoord2f(1.0f, 1.0f);
+    m_legacyGl->glVertex2f(1.0f, -1.0f);
+    m_legacyGl->glTexCoord2f(1.0f, 0.0f);
+    m_legacyGl->glVertex2f(1.0f, 1.0f);
+    m_legacyGl->glTexCoord2f(0.0f, 0.0f);
+    m_legacyGl->glVertex2f(-1.0f, 1.0f);
+    m_legacyGl->glEnd();
+    m_legacyGl->glDisable(GL_TEXTURE_2D);
+    gl->glDisable(GL_BLEND);
+    gl->glBindTexture(GL_TEXTURE_2D, 0);
+    gl->glEnable(GL_DEPTH_TEST);
+}
+
+void HydraViewportWindow::refreshHud() {
+    if (!isExposed() || !m_context || !m_framebuffer || m_previewMode) return;
+    if (!m_context->makeCurrent(this)) return;
+    const qreal pixelRatio = devicePixelRatio();
+    const int w = std::max(1, static_cast<int>(width() * pixelRatio));
+    const int h = std::max(1, static_cast<int>(height() * pixelRatio));
+    if (m_paused) {
+        showLastFrame(w, h);  // draws the HUD
+        return;
+    }
+    if (m_framebuffer->size() != QSize(w, h)) {
+        requestUpdate();  // resized since the last frame: draw a new one
+        return;
+    }
+    const QRect frame(0, 0, w, h);
+    QOpenGLFramebufferObject::blitFramebuffer(nullptr, frame, m_framebuffer.get(), frame);
+    QOpenGLFramebufferObject::bindDefault();
+    drawHud(w, h);
+    m_context->swapBuffers(this);
+}
+
+void HydraViewportWindow::recordFrame(double milliseconds) {
+    if (!m_display.hudPerformance || !hudActive()) return;
+    const qint64 now = m_clock.elapsed();
+    m_frameTimes.push_back(now);
+    while (!m_frameTimes.empty() && now - m_frameTimes.front() > 1000) m_frameTimes.pop_front();
+    // A few times a second, or the numbers can't be read.
+    if (!m_shownFrameMs || now - m_shownAt >= 250) {
+        m_shownFrameMs = milliseconds;
+        if (m_frameTimes.size() >= 3 && m_frameTimes.back() > m_frameTimes.front()) {
+            m_shownFps = 1000.0 * static_cast<double>(m_frameTimes.size() - 1) /
+                         static_cast<double>(m_frameTimes.back() - m_frameTimes.front());
+        } else {
+            m_shownFps.reset();
+        }
+        m_shownAt = now;
+    }
+    m_idleTimer->start();
+}
+
+void HydraViewportWindow::snapToAxis(HudItem item) {
+    if (item == HudItem::AxisCenter) {
+        m_yaw = kDefaultOrbitYaw;
+        m_pitch = kDefaultOrbitPitch;
+    } else if (const std::optional<PXR_NS::GfVec3d> direction = hudAxisDirection(item)) {
+        // Straight down or up the camera's Y, any yaw looks that way: 0 puts X to the right.
+        const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0);
+        m_yaw = angles.yaw;
+        m_pitch = angles.pitch;
+    } else {
+        return;
+    }
+    cameraMoved();
+}
+
+void HydraViewportWindow::updateHover(const QPointF& position) {
+    const HudItem item = hudActive() ? hudItemAt(m_hudLayout, position) : HudItem::None;
+    if (item == m_hudHover) return;
+    m_hudHover = item;
+    if (item == HudItem::None) {
+        unsetCursor();
+    } else {
+        setCursor(Qt::PointingHandCursor);
+    }
+    refreshHud();
+}
+
+void HydraViewportWindow::showRollover() {
+    if (!hudActive() || !m_display.hudRollover || !m_stage || m_hudHover != HudItem::None) return;
+    const PXR_NS::SdfPath path = pickPrim(ndcFromPixel(m_cursorPos));
+    QString text;
+    if (!path.IsEmpty()) {
+        text = QString::fromStdString(path.GetString());
+        if (const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(path); prim && !prim.GetTypeName().IsEmpty()) {
+            text += QStringLiteral(" · ") + QString::fromStdString(prim.GetTypeName().GetString());
+        }
+    }
+    if (text == m_rollover) return;
+    m_rollover = text;
+    // A full frame: the pick drew with the frame's framebuffer bound.
+    requestUpdate();
 }
 
 std::vector<PXR_NS::TfToken> HydraViewportWindow::rendererPlugins() const {
@@ -593,6 +841,14 @@ bool HydraViewportWindow::event(QEvent* ev) {
         renderNow();
         return true;
     }
+    if (ev->type() == QEvent::Leave) {
+        m_rolloverTimer->stop();
+        const bool shown = m_hudHover != HudItem::None || !m_rollover.isEmpty();
+        m_hudHover = HudItem::None;
+        m_rollover.clear();
+        unsetCursor();
+        if (shown) refreshHud();
+    }
     // The native surface goes before this object does (the window container
     // and the main window destroy it on close), and with it the last chance to
     // make the context current: release the engine now. It is recreated, with
@@ -623,6 +879,8 @@ void HydraViewportWindow::renderNow() {
         showLastFrame(w, h);
         return;
     }
+    QElapsedTimer frameTimer;  // for the HUD's frame time
+    frameTimer.start();
 
     // Storm draws into our own framebuffer, not the window's default one: some
     // of its passes ask the bound framebuffer about GL_COLOR_ATTACHMENT0 (the
@@ -734,9 +992,24 @@ void HydraViewportWindow::renderNow() {
         }
     }
 
+    // How far a progressive renderer has got, for the HUD's performance line.
+    m_converging = m_stage && !m_engine->IsConverged();
+    m_percentDone.reset();
+    if (m_converging && m_display.hudPerformance) {
+        const PXR_NS::VtDictionary stats = m_engine->GetRenderStats();
+        if (const auto it = stats.find("percentDone"); it != stats.end()) {
+            const PXR_NS::VtValue& value = it->second;
+            if (value.IsHolding<double>()) m_percentDone = value.UncheckedGet<double>();
+            else if (value.IsHolding<float>()) m_percentDone = value.UncheckedGet<float>();
+            else if (value.IsHolding<int>()) m_percentDone = value.UncheckedGet<int>();
+        }
+    }
+    if (m_stage) recordFrame(static_cast<double>(frameTimer.nsecsElapsed()) / 1e6);
+
     const QRect frame(0, 0, w, h);
     QOpenGLFramebufferObject::blitFramebuffer(nullptr, frame, m_framebuffer.get(), frame);
     QOpenGLFramebufferObject::bindDefault();
+    drawHud(w, h);
     m_context->swapBuffers(this);
 
     if (m_stage && !m_firstFrameRendered) {
@@ -751,7 +1024,28 @@ void HydraViewportWindow::renderNow() {
 
 void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
     m_lastMousePos = event->pos();
+    m_cursorPos = event->position();
     Q_EMIT pressed();
+    m_rolloverTimer->stop();
+    if (!m_rollover.isEmpty()) {
+        m_rollover.clear();
+        refreshHud();
+    }
+
+    // The HUD gets first refusal (docs/VIEWPORT_HUD.md §4): a click on one of its labels or
+    // on the axis triad goes nowhere else.
+    if (event->button() == Qt::LeftButton && hudActive()) {
+        const HudItem item = hudItemAt(m_hudLayout, event->position());
+        if (isHudAxis(item)) {
+            snapToAxis(item);
+            return;
+        }
+        if (item != HudItem::None) {
+            const QRectF rect = hudItemRect(m_hudLayout, item);
+            Q_EMIT hudMenuRequested(item, mapToGlobal(QPointF(rect.left(), rect.bottom() + 2.0)).toPoint());
+            return;
+        }
+    }
 
     if (event->button() == Qt::LeftButton) {
         // Alt+drag is the camera-navigation override: it must always orbit,
@@ -790,6 +1084,21 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
 void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
+    m_cursorPos = event->position();
+
+    if (event->buttons() == Qt::NoButton) {
+        // Hovering: the HUD's labels and axes light up, and once the cursor rests the
+        // prim under it shows.
+        updateHover(event->position());
+        if (hudActive() && m_display.hudRollover && m_stage) {
+            if (!m_rollover.isEmpty()) {
+                m_rollover.clear();
+                refreshHud();
+            }
+            m_rolloverTimer->start();
+        }
+        return;
+    }
 
     if (m_dragging) {
         if (usdcc::tools::Tool* tool = activeToolInstance()) {

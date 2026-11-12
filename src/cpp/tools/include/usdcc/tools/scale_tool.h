@@ -28,6 +28,8 @@ protected:
 
 private:
     Handle pickHandle(const ToolContext& ctx, const PXR_NS::GfVec2d& ndcPos, const GizmoFrame& frame) const;
+    // The readout for a drag that has scaled by `ratio`.
+    void setScaleReadout(double ratio);
 
     GizmoFrame m_dragFrame;          // gizmo origin/axes (the prim's object space) at drag start
     double m_dragStartParam = 1.0;  // signed distance along the axis, or from the origin (uniform), at drag start

@@ -134,13 +134,21 @@ USDCC_TEST(move_scale_select_tools) {
         const double s0 = gizmoScale(cam, GfVec3d(0.0));
         ToolContext ctx = ctxFor(s, {SdfPath(P)}, cam);
         const GfVec3d from(0.5 * s0, 0, 0);
+        CHECK(t.readout().empty(), "no readout before a drag");
         CHECK(t.mousePress(ctx, cam.ndc(from), cam.ray(cam.ndc(from))).handled, "pick");
+        CHECK(t.readout() == "Move  \xCE\x94X 0  \xCE\x94Y 0  \xCE\x94Z 0", "the readout as the drag starts: %s", t.readout().c_str());
         for (double x : {2.0, 3.0, 1.0, -1.5}) {
             const GfVec3d p = from + GfVec3d(x, 0, 0);
             t.mouseMove(ctx, cam.ndc(p), cam.ray(cam.ndc(p)));
             CHECK(near3(localT(s, P), GfVec3d(x, 0, 0)), "move to %g -> %s", x, str(localT(s, P)).c_str());
         }
+        // The HUD's readout (docs/VIEWPORT_HUD.md §2.5): the whole drag, along the gizmo's axes.
+        CHECK(t.readout() == "Move  \xCE\x94X -1.5  \xCE\x94Y 0  \xCE\x94Z 0", "the readout: %s", t.readout().c_str());
         t.mouseRelease();
+        CHECK(t.readout().empty(), "no readout after the drag");
+        CHECK(usdcc::tools::formatReadoutNumber(1.25) == "1.25" && usdcc::tools::formatReadoutNumber(-0.0001) == "0" &&
+                  usdcc::tools::formatReadoutNumber(3.0) == "3" && usdcc::tools::formatReadoutNumber(37.46, 1) == "37.5",
+              "readout numbers: trailing zeros dropped, no -0");
         // After release a stray move must do nothing.
         const GfVec3d before = localT(s, P);
         t.mouseMove(ctx, cam.ndc(GfVec3d(9, 0, 0)), cam.ray(cam.ndc(GfVec3d(9, 0, 0))));

@@ -12,6 +12,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 
 namespace usdcc::tools {
 
@@ -19,6 +22,29 @@ namespace {
 constexpr const char* kSnapId = "snap";
 constexpr const char* kSnapIncrementId = "snapIncrement";
 }  // namespace
+
+std::string formatReadoutNumber(double value, int decimals) {
+    if (!std::isfinite(value)) return "?";
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::fixed << std::setprecision(std::max(0, decimals)) << value;
+    std::string text = stream.str();
+    if (text.find('.') != std::string::npos) {
+        while (!text.empty() && text.back() == '0') text.pop_back();
+        if (!text.empty() && text.back() == '.') text.pop_back();
+    }
+    if (text == "-0") text = "0";
+    return text;
+}
+
+const char* TransformGizmoTool::axisLetter(Handle handle) {
+    switch (handle) {
+        case Handle::AxisX: return "X";
+        case Handle::AxisY: return "Y";
+        case Handle::AxisZ: return "Z";
+        default: return "";
+    }
+}
 
 std::vector<ToolOption> TransformGizmoTool::options() const {
     std::vector<ToolOption> opts = {

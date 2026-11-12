@@ -48,6 +48,16 @@ OrbitClipping orbitClipping(double distance);
 // the poles and it ends up upside down, rather than flipping or breaking there.
 OrbitCameraAxes orbitCameraAxes(const PXR_NS::GfVec3d& target, double distance, double yawDegrees, double pitchDegrees);
 
+// The yaw and pitch, in degrees, that put the eye on the side `direction` points to from
+// the target (any length but zero), looking back at it: (1, 0, 0) looks along -X from +X.
+// Straight up or down (a pole) keeps `currentYaw`, as any yaw looks the same way there.
+// The viewport HUD's axis triad snaps the camera with it (docs/VIEWPORT_HUD.md §2.2).
+struct OrbitAngles {
+    double yaw = kDefaultOrbitYaw;
+    double pitch = kDefaultOrbitPitch;
+};
+OrbitAngles orbitAnglesLookingFrom(const PXR_NS::GfVec3d& direction, double currentYaw);
+
 // `degrees` as the same angle in (-180, 180], so that turning on and on doesn't lose
 // precision.
 double wrapDegrees(double degrees);

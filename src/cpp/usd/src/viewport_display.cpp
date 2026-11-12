@@ -43,6 +43,13 @@ constexpr Switch kSwitches[] = {
     {"sceneLights", &Overrides::sceneLights, &Options::sceneLights, kViewportSceneLightsKey},
     {"cameraLight", &Overrides::cameraLight, &Options::cameraLight, kViewportCameraLightKey},
     {"domeLight", &Overrides::domeLight, &Options::domeLight, kViewportDomeLightKey},
+    {"hud", &Overrides::hud, &Options::hud, kViewportHudKey},
+    {"hudCamera", &Overrides::hudCamera, &Options::hudCamera, kViewportHudCameraKey},
+    {"hudAxes", &Overrides::hudAxes, &Options::hudAxes, kViewportHudAxesKey},
+    {"hudStats", &Overrides::hudStats, &Options::hudStats, kViewportHudStatsKey},
+    {"hudPerformance", &Overrides::hudPerformance, &Options::hudPerformance, kViewportHudPerformanceKey},
+    {"hudToolReadout", &Overrides::hudToolReadout, &Options::hudToolReadout, kViewportHudToolReadoutKey},
+    {"hudRollover", &Overrides::hudRollover, &Options::hudRollover, kViewportHudRolloverKey},
 };
 
 // A name or label back to its value, ignoring case.
@@ -303,11 +310,54 @@ void defineViewportDisplaySettings() {
         .type = SettingType::Bool,
         .defaultValue = builtIn.domeLight,
     });
+
+    // The heads-up display (docs/VIEWPORT_HUD.md).
+    const struct {
+        const char* key;
+        const char* label;
+        const char* description;
+        bool value;
+    } hudSwitches[] = {
+        {kViewportHudKey, "Show HUD",
+         "Show information over the viewport: the up axis and units, the edit target when it isn't the root layer, "
+         "and the parts below that are on. A viewport can turn it on or off for itself (its options menu, HUD).",
+         builtIn.hud},
+        {kViewportHudCameraKey, "Camera and renderer",
+         "Top left: the camera, the renderer and the shading mode. Click one to change it.", builtIn.hudCamera},
+        {kViewportHudAxesKey, "Axes",
+         "Top right: the world axes as the camera sees them. Click an axis to look along it, the centre for the "
+         "default view.",
+         builtIn.hudAxes},
+        {kViewportHudStatsKey, "Scene counts",
+         "Bottom left: the prims, meshes, faces and points the viewport draws, of the stage and of the selection. "
+         "Counting a big stage takes a moment.",
+         builtIn.hudStats},
+        {kViewportHudPerformanceKey, "Performance",
+         "Bottom right: how long a frame takes while the view moves, and how far a progressive renderer has "
+         "converged.",
+         builtIn.hudPerformance},
+        {kViewportHudToolReadoutKey, "Tool readout",
+         "Beside the cursor while dragging a Move, Rotate or Scale gizmo: how far it has moved, turned or scaled.",
+         builtIn.hudToolReadout},
+        {kViewportHudRolloverKey, "Prim under cursor",
+         "Beside the cursor when it rests: the path and type of the prim under it.", builtIn.hudRollover},
+    };
+    for (const auto& hudSwitch : hudSwitches) {
+        settings.define({
+            .key = hudSwitch.key,
+            .category = "Viewport",
+            .group = "HUD",
+            .label = hudSwitch.label,
+            .description = hudSwitch.description,
+            .type = SettingType::Bool,
+            .defaultValue = hudSwitch.value,
+        });
+    }
 }
 
 HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
     // So a viewport made without main.cpp's call (tests) has them.
-    if (!usdcc::core::Settings::instance().contains(kViewportDomeLightKey)) defineViewportDisplaySettings();
+    if (!usdcc::core::Settings::instance().contains(kViewportHudRolloverKey)) defineViewportDisplaySettings();
     const auto& settings = usdcc::core::Settings::instance();
     HydraViewportWindow::DisplayOptions options;
     options.showGrid = settings.get<bool>(kViewportShowGridKey);
