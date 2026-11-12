@@ -46,6 +46,19 @@ enum class SelectionStyle {
     Wireframe,  // the selection's edges
 };
 
+// How the viewport shades the stage (docs/VIEWPORT_DISPLAY.md §3.1). Only Storm draws
+// them; any other renderer is always Smooth Shaded.
+enum class ShadingMode {
+    SmoothShaded,       // DRAW_SHADED_SMOOTH
+    FlatShaded,         // DRAW_SHADED_FLAT
+    WireframeOnShaded,  // DRAW_WIREFRAME_ON_SURFACE
+    Wireframe,          // DRAW_WIREFRAME
+    HiddenLine,         // the edges in front only: a depth pass, then DRAW_WIREFRAME
+};
+
+// How finely subdivision surfaces are refined (params.complexity 1.0-1.3).
+enum class Complexity { Low, Medium, High, VeryHigh };
+
 // Renders a USD stage via Hydra directly into a native QWindow surface, with
 // its own QOpenGLContext calling swapBuffers() itself — rather than
 // QOpenGLWidget's approach of rendering into an offscreen FBO that Qt then
@@ -127,8 +140,25 @@ public:
         SelectionStyle selectionStyle = SelectionStyle::Solid;
         QColor selectionColor = QColor(0xff, 0xa6, 0x00);
         int selectionWidth = 2;
+        // How Hydra draws the stage (docs/VIEWPORT_DISPLAY.md): shading, refinement, which
+        // purposes show, the stage's materials, culling, and the dome light's map behind.
+        ShadingMode shading = ShadingMode::SmoothShaded;
+        Complexity complexity = Complexity::Low;
+        bool showGuides = false;
+        bool showProxy = true;
+        bool showRender = false;
+        bool sceneMaterials = true;
+        bool cullBackfaces = false;
+        bool domeLightTextures = true;
+        // The lights: the stage's own, a light at the camera, and Hydra's default dome.
+        // The default ones only in the shaded modes.
+        bool sceneLights = true;
+        bool cameraLight = true;
+        bool domeLight = false;
         bool operator==(const DisplayOptions&) const = default;
     };
+    // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
+    static bool rendererDrawsShadingModes(const PXR_NS::TfToken& pluginId);
     DisplayOptions displayOptions() const { return m_display; }
     // Redraws when anything changed.
     void setDisplayOptions(const DisplayOptions& options);
@@ -155,9 +185,10 @@ public:
     // them. Set before the first frame.
     void setPreviewMode(bool preview);
     bool isPreviewMode() const { return m_previewMode; }
-    // Whether a dome light's map is drawn behind the scene, for renderers that can.
+    // Whether a dome light's map is drawn behind the scene, for renderers that can: the
+    // display options' domeLightTextures.
     void setDomeLightVisible(bool visible);
-    bool isDomeLightVisible() const { return m_domeVisible; }
+    bool isDomeLightVisible() const { return m_display.domeLightTextures; }
     // Paused, nothing renders: the last frame stays, fitted to the window, until resumed,
     // which renders at once with whatever changed meanwhile.
     void setPaused(bool paused);
@@ -268,7 +299,6 @@ private:
     PXR_NS::TfToken m_targetOp;
     DisplayOptions m_display;
     bool m_previewMode = false;
-    bool m_domeVisible = true;
     bool m_paused = false;
 };
 

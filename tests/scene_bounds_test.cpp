@@ -7,6 +7,7 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/imageable.h>
+#include <pxr/usd/usdGeom/tokens.h>
 
 #include <cstdio>
 #include <optional>
@@ -110,6 +111,15 @@ USDCC_TEST(scene_bounds_of_the_whole_stage) {
     const auto bounds = sceneBounds(stage, {});
     CHECK(bounds && closeTo(*bounds, GfRange3d(GfVec3d(9, -1, -1), GfVec3d(11, 6, 1))),
           "nothing selected: everything drawn: %s", text(bounds).c_str());
+
+    // With guides shown (docs/VIEWPORT_DISPLAY.md): the guide cube counts too.
+    const auto withGuides = sceneBounds(stage, {}, UsdTimeCode::Default(),
+                                        {UsdGeomTokens->default_, UsdGeomTokens->guide, UsdGeomTokens->proxy});
+    CHECK(withGuides && closeTo(*withGuides, GfRange3d(GfVec3d(9, -101, -1), GfVec3d(11, 6, 1))),
+          "guides shown: the guide adds its box: %s", text(withGuides).c_str());
+    CHECK(sceneBounds(stage, {SdfPath("/World/Guide")}, UsdTimeCode::Default(),
+                      {UsdGeomTokens->default_, UsdGeomTokens->guide}),
+          "and a selected guide has bounds");
 
     const UsdStageRefPtr empty = UsdStage::CreateInMemory();
     empty->DefinePrim(SdfPath("/Empty"), TfToken("Xform"));

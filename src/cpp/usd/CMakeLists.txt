@@ -134,6 +134,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/viewport_tool_bars.h
     include/usdcc/usd/viewport_view_panel.h
     include/usdcc/usd/viewport_display.h
+    include/usdcc/usd/viewport_render_params.h
     include/usdcc/usd/undo_manager.h
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
@@ -141,6 +142,7 @@ add_library(usdcc_usd_ui SHARED
     src/selection_overlay.cpp
     src/selection_overlay.h
     src/viewport_display.cpp
+    src/viewport_render_params.cpp
     src/layer_actions.cpp
     src/layer_editor_view_panel.cpp
     src/log_test_messages.cpp

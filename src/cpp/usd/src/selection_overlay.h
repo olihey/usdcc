@@ -10,6 +10,7 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usdImaging/usdImagingGL/renderParams.h>
 
 #include <QColor>
 #include <QSize>
@@ -45,6 +46,9 @@ public:
         double nearClip = 0.1, farClip = 10000.0;  // of projMatrix, to compare depths
         QSize size;  // the viewport framebuffer's, in device pixels
         unsigned int targetFramebuffer = 0;  // drawn onto; holds Hydra's color and depth
+        // The viewport's params: the overlay draws the geometry they do (purposes,
+        // complexity, culling), in its own draw mode and colors.
+        PXR_NS::UsdImagingGLRenderParams params;
     };
     // Draws the selection's lines onto `frame.targetFramebuffer`, which is bound again
     // afterwards. A stage other than the last one starts a new engine (Hydra populates

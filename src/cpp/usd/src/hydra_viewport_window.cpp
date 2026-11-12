@@ -4,6 +4,7 @@
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/viewport_grid.h"
+#include "usdcc/usd/viewport_render_params.h"
 
 #include <QCursor>
 #include <QRect>
@@ -13,6 +14,7 @@
 
 #include <pxr/base/gf/math.h>
 #include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/rotation.h>
 #include <pxr/base/gf/vec2i.h>
 #include <pxr/base/tf/stackTrace.h>
 #include <pxr/imaging/glf/simpleLight.h>
@@ -47,6 +49,9 @@ namespace usdcc::usd {
 namespace {
 constexpr double kFovY = 45.0;
 constexpr double kMinDistance = 0.01;
+// Hidden Line's depth pass is drawn this much farther, in NDC depth (-1 to 1), so the
+// wires in front of a surface win over it.
+constexpr double kHiddenLineDepthBias = 0.0005;
 
 // The grid's colours: light lines on a dark background, dark ones on a light one, so the
 // grid shows whatever the background color is. The axes take the gizmo's axis colours.
@@ -222,7 +227,8 @@ void HydraViewportWindow::configureEngine() {
     const QColor& selection = m_display.selectionColor;
     m_engine->SetSelectionColor(PXR_NS::GfVec4f(static_cast<float>(selection.redF()), static_cast<float>(selection.greenF()),
                                                 static_cast<float>(selection.blueF()), 1.0f));
-    m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility, PXR_NS::VtValue(m_domeVisible));
+    m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility,
+                                 PXR_NS::VtValue(m_display.domeLightTextures));
     updateEngineSelection();
 }
 
@@ -234,12 +240,9 @@ void HydraViewportWindow::setPreviewMode(bool preview) {
 }
 
 void HydraViewportWindow::setDomeLightVisible(bool visible) {
-    if (visible == m_domeVisible) return;
-    m_domeVisible = visible;
-    if (m_engine) {
-        m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility, PXR_NS::VtValue(visible));
-    }
-    renderNow();
+    DisplayOptions options = m_display;
+    options.domeLightTextures = visible;
+    setDisplayOptions(options);
 }
 
 void HydraViewportWindow::setPaused(bool paused) {
@@ -328,9 +331,11 @@ void HydraViewportWindow::cameraMoved() {
 
 void HydraViewportWindow::setDisplayOptions(const DisplayOptions& options) {
     if (options == m_display) return;
-    const bool newColor = options.selectionColor != m_display.selectionColor;
+    // What the engine holds rather than takes per frame.
+    const bool reconfigure = options.selectionColor != m_display.selectionColor ||
+                             options.domeLightTextures != m_display.domeLightTextures;
     m_display = options;
-    if (m_engine && newColor) configureEngine();
+    if (m_engine && reconfigure) configureEngine();
     renderNow();
 }
 
@@ -416,8 +421,11 @@ PXR_NS::SdfPath HydraViewportWindow::pickPrim(const PXR_NS::GfVec2d& ndcPos) {
     const PXR_NS::GfFrustum pickFrustum =
         currentFrustum().ComputeNarrowedFrustum(ndcPos, PXR_NS::GfVec2d(4.0 / w, 4.0 / h));
 
-    PXR_NS::UsdImagingGLRenderParams params;
-    params.frame = PXR_NS::UsdTimeCode::Default();
+    // What the frame draws, so what's picked is what's shown (purposes, culling,
+    // refinement). Hidden Line picks its surfaces, which hide what's behind them.
+    const ShadingMode shading = effectiveShading(m_display, currentRendererPlugin());
+    PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
+    if (shading == ShadingMode::HiddenLine) params.drawMode = PXR_NS::UsdImagingGLDrawMode::DRAW_GEOM_ONLY;
 
     PXR_NS::UsdImagingGLEngine::PickParams pickParams;
     pickParams.resolveMode = PXR_NS::HdxPickResolveModeTokens->resolveNearestToCamera;
@@ -483,6 +491,8 @@ void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& 
     frame.farClip = clipping.farClip;
     frame.size = QSize(width, height);
     frame.targetFramebuffer = m_framebuffer->handle();
+    // The same geometry as the frame: purposes, refinement, culling.
+    frame.params = viewportRenderParams(m_display, ShadingMode::SmoothShaded);
     m_selectionOverlay->draw(frame);
 }
 
@@ -650,30 +660,69 @@ void HydraViewportWindow::renderNow() {
     m_engine->SetRenderViewport(PXR_NS::GfVec4d(0, 0, w, h));
     m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
 
-    PXR_NS::GlfSimpleLight cameraLight;
-    cameraLight.SetPosition(PXR_NS::GfVec4f(static_cast<float>(toolCtx.cameraPos[0]),
-                                             static_cast<float>(toolCtx.cameraPos[1]),
-                                             static_cast<float>(toolCtx.cameraPos[2]), 1.0f));
+    // The shading this renderer draws: Storm draws them all, any other Smooth Shaded only.
+    const ShadingMode shading = effectiveShading(m_display, m_engine->GetCurrentRendererId());
+
+    // The default lights, in every mode: Storm shades a wire as it would the surface, so
+    // without them the line modes' wires are near black (usdview leaves them out there).
     // A preview brings its own lights (a dome, a key), and a camera light would flatten them.
-    const PXR_NS::GlfSimpleLightVector lights =
-        m_previewMode ? PXR_NS::GlfSimpleLightVector{} : PXR_NS::GlfSimpleLightVector{cameraLight};
+    PXR_NS::GlfSimpleLightVector lights;
+    if (!m_previewMode) {
+        if (m_display.cameraLight) {
+            PXR_NS::GlfSimpleLight cameraLight;
+            cameraLight.SetPosition(PXR_NS::GfVec4f(static_cast<float>(toolCtx.cameraPos[0]),
+                                                     static_cast<float>(toolCtx.cameraPos[1]),
+                                                     static_cast<float>(toolCtx.cameraPos[2]), 1.0f));
+            lights.push_back(cameraLight);
+        }
+        if (m_display.domeLight) {
+            // Hydra's packaged map (HdxPackageDefaultDomeLightTexture()). A dome's map has
+            // Y up: turned onto a Z-up stage's sky, as usdview does.
+            PXR_NS::GlfSimpleLight dome;
+            dome.SetIsDomeLight(true);
+            if (m_stage && PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z) {
+                dome.SetTransform(PXR_NS::GfMatrix4d().SetRotate(PXR_NS::GfRotation(PXR_NS::GfVec3d::XAxis(), 90.0)));
+            }
+            lights.push_back(dome);
+        }
+    }
     PXR_NS::GlfSimpleMaterial material;
     const PXR_NS::GfVec4f sceneAmbient = m_previewMode ? PXR_NS::GfVec4f(0.0f, 0.0f, 0.0f, 1.0f)
                                                        : PXR_NS::GfVec4f(0.15f, 0.15f, 0.15f, 1.0f);
     m_engine->SetLightingState(lights, material, sceneAmbient);
 
-    PXR_NS::UsdImagingGLRenderParams params;
-    params.clearColor = PXR_NS::GfVec4f(static_cast<float>(m_display.background.redF()),
-                                        static_cast<float>(m_display.background.greenF()),
-                                        static_cast<float>(m_display.background.blueF()), 1.0f);
-    params.frame = PXR_NS::UsdTimeCode::Default();
-    params.enableLighting = true;
+    PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
+    if (m_previewMode) params.enableSceneLights = true;  // a preview's lights are its stage's
     // SetSelected() only feeds the engine the selection; it is drawn solely
     // when the render params ask for it (the flag defaults to off). Only Solid has
     // Hydra fill it: the line styles leave the prims' shading as it is.
     params.highlight = !m_previewMode && m_display.selectionStyle == SelectionStyle::Solid;
 
     if (m_stage) {
+        if (shading == ShadingMode::HiddenLine) {
+            // usdview's Hidden Surface Wireframe: the surfaces first, for their depth only
+            // (their color is cleared to the background again), then the edges, which
+            // Hydra's composite depth-tests against it: those behind a surface are left out.
+            // The surfaces' depth is pushed back a little, or a wire and its own surface tie
+            // and the wire comes out dashed. usdview's glPolygonOffset() doesn't reach Hydra's
+            // own pipeline; a projection that adds to every depth does (NDC z + bias).
+            PXR_NS::UsdImagingGLRenderParams surfaces = params;
+            surfaces.drawMode = PXR_NS::UsdImagingGLDrawMode::DRAW_GEOM_ONLY;
+            surfaces.highlight = false;
+            PXR_NS::GfMatrix4d pushedBack = toolCtx.projMatrix;
+            for (int row = 0; row < 4; ++row) pushedBack[row][2] += kHiddenLineDepthBias * pushedBack[row][3];
+            m_engine->SetCameraState(toolCtx.viewMatrix, pushedBack);
+            m_engine->Render(m_stage->GetPseudoRoot(), surfaces);
+            m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
+            m_framebuffer->bind();
+            if (auto* gl = m_context->functions()) {
+                gl->glViewport(0, 0, w, h);
+                gl->glClearColor(static_cast<float>(m_display.background.redF()),
+                                 static_cast<float>(m_display.background.greenF()),
+                                 static_cast<float>(m_display.background.blueF()), 1.0f);
+                gl->glClear(GL_COLOR_BUFFER_BIT);
+            }
+        }
         m_engine->Render(m_stage->GetPseudoRoot(), params);
     }
 

@@ -7,6 +7,7 @@
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_render_params.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
@@ -36,7 +37,11 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <functional>
+#include <memory>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -62,7 +67,7 @@ QIcon colorSwatch(const QColor& color) {
     return QIcon(pixmap);
 }
 
-// The Display dialog (grid, background and selection): this viewport's values, each with a
+// The Display dialog (grid, background, selection, and how Hydra draws): this viewport's values, each with a
 // Default button that shows while the viewport overrides it and drops the override. Edits
 // apply at once.
 QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
@@ -214,6 +219,82 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
                      [edit]() { edit([](ViewportDisplayOverrides& o) { o.selectionColor.reset(); }); });
     QObject::connect(resetSelectionWidth, &QToolButton::clicked, dialog,
                      [edit]() { edit([](ViewportDisplayOverrides& o) { o.selectionWidth.reset(); }); });
+
+    // How Hydra draws the stage (docs/VIEWPORT_DISPLAY.md): a row each, below the selection's.
+    // Each keeps itself up to date as refresh() does for the rows above.
+    auto updates = std::make_shared<std::vector<std::function<void()>>>();
+    int row = 7;
+    const QString builtInTip = QObject::tr("Use the built-in value");
+    // A choice: a combo of `values`, labelled by `labelOf`.
+    auto addChoice = [&](const QString& label, const char* editorName, const char* resetName, const auto& values, auto labelOf,
+                         auto option, auto override, bool hasSetting) {
+        auto* combo = new QComboBox(dialog);
+        combo->setObjectName(QString::fromLatin1(editorName));
+        for (auto value : values) combo->addItem(QObject::tr(qPrintable(labelOf(value))), static_cast<int>(value));
+        QToolButton* reset = addRow(row++, label, combo, resetName);
+        if (!hasSetting) reset->setToolTip(builtInTip);
+        updates->push_back([panel, combo, reset, option, override]() {
+            const QSignalBlocker block(combo);
+            combo->setCurrentIndex(combo->findData(static_cast<int>(panel->displayOptions().*option)));
+            reset->setVisible((panel->displayOverrides().*override).has_value());
+        });
+        QObject::connect(combo, &QComboBox::currentIndexChanged, dialog, [edit, combo, override](int) {
+            using Value = typename std::remove_reference_t<decltype(std::declval<ViewportDisplayOverrides>().*override)>::value_type;
+            const auto value = static_cast<Value>(combo->currentData().toInt());
+            edit([value, override](ViewportDisplayOverrides& o) { o.*override = value; });
+        });
+        QObject::connect(reset, &QToolButton::clicked, dialog,
+                         [edit, override]() { edit([override](ViewportDisplayOverrides& o) { (o.*override).reset(); }); });
+    };
+    addChoice(QObject::tr("Shading"), "displayShading", "resetShading", kShadingModes, &shadingModeLabel,
+              &HydraViewportWindow::DisplayOptions::shading, &ViewportDisplayOverrides::shading, false);
+    addChoice(QObject::tr("Complexity"), "displayComplexity", "resetComplexity", kComplexities, &complexityLabel,
+              &HydraViewportWindow::DisplayOptions::complexity, &ViewportDisplayOverrides::complexity, true);
+
+    // An on/off option: a checkbox.
+    auto addSwitch = [&](const QString& text, const char* editorName, const char* resetName,
+                         bool HydraViewportWindow::DisplayOptions::*option,
+                         std::optional<bool> ViewportDisplayOverrides::*override, bool hasSetting) {
+        auto* box = new QCheckBox(text, dialog);
+        box->setObjectName(QString::fromLatin1(editorName));
+        QToolButton* reset = addRow(row++, QString(), box, resetName);
+        if (!hasSetting) reset->setToolTip(builtInTip);
+        updates->push_back([panel, box, reset, option, override]() {
+            const QSignalBlocker block(box);
+            box->setChecked(panel->displayOptions().*option);
+            reset->setVisible((panel->displayOverrides().*override).has_value());
+        });
+        QObject::connect(box, &QCheckBox::toggled, dialog,
+                         [edit, override](bool on) { edit([on, override](ViewportDisplayOverrides& o) { o.*override = on; }); });
+        QObject::connect(reset, &QToolButton::clicked, dialog,
+                         [edit, override]() { edit([override](ViewportDisplayOverrides& o) { (o.*override).reset(); }); });
+    };
+    using Options = HydraViewportWindow::DisplayOptions;
+    using Overrides = ViewportDisplayOverrides;
+    addSwitch(QObject::tr("Show guides"), "displayShowGuides", "resetShowGuides", &Options::showGuides,
+              &Overrides::showGuides, true);
+    addSwitch(QObject::tr("Show proxy"), "displayShowProxy", "resetShowProxy", &Options::showProxy, &Overrides::showProxy,
+              true);
+    addSwitch(QObject::tr("Show render"), "displayShowRender", "resetShowRender", &Options::showRender,
+              &Overrides::showRender, true);
+    addSwitch(QObject::tr("Scene materials"), "displaySceneMaterials", "resetSceneMaterials", &Options::sceneMaterials,
+              &Overrides::sceneMaterials, false);
+    addSwitch(QObject::tr("Cull backfaces"), "displayCullBackfaces", "resetCullBackfaces", &Options::cullBackfaces,
+              &Overrides::cullBackfaces, true);
+    addSwitch(QObject::tr("Dome light textures"), "displayDomeLightTextures", "resetDomeLightTextures",
+              &Options::domeLightTextures, &Overrides::domeLightTextures, false);
+    addSwitch(QObject::tr("Scene lights"), "displaySceneLights", "resetSceneLights", &Options::sceneLights,
+              &Overrides::sceneLights, true);
+    addSwitch(QObject::tr("Camera light"), "displayCameraLight", "resetCameraLight", &Options::cameraLight,
+              &Overrides::cameraLight, true);
+    addSwitch(QObject::tr("Dome light"), "displayDomeLight", "resetDomeLight", &Options::domeLight, &Overrides::domeLight,
+              true);
+
+    auto updateAll = [updates]() {
+        for (const std::function<void()>& update : *updates) update();
+    };
+    updateAll();
+    QObject::connect(panel, &ViewportViewPanel::displayChanged, dialog, updateAll);
     return dialog;
 }
 }  // namespace
@@ -294,11 +375,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     m_viewport->setDisplayOptions(displayOptions());
     // What isn't overridden follows Settings > Viewport as it changes.
     usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
-        if (key == kViewportShowGridKey || key == kViewportGridSizeKey || key == kViewportGridStepKey ||
-            key == kViewportBackgroundKey || key == kViewportSelectionStyleKey || key == kViewportSelectionColorKey ||
-            key == kViewportSelectionWidthKey) {
-            applyDisplay();
-        }
+        if (isViewportDisplayKey(key)) applyDisplay();
     });
     QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
 
@@ -482,7 +559,7 @@ bool ViewportViewPanel::fitToView() {
     const StageRefPtr stage = currentStage();
     if (!stage) return false;
     const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(stage);
-    const std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection);
+    const std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection, PXR_NS::UsdTimeCode::Default(), viewportPurposes(displayOptions()));
     if (!bounds) {
         const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Nothing to fit to view"};
         if (selection.empty()) {
@@ -551,10 +628,80 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     }
 
     menu->addSeparator();
+    const HydraViewportWindow::DisplayOptions shown = displayOptions();
+    // Changes one override, leaving the others as they are.
+    auto edit = [this](auto change) {
+        ViewportDisplayOverrides overrides = m_displayOverrides;
+        change(overrides);
+        setDisplayOverrides(overrides);
+    };
+
+    // Shading: only Storm draws the modes; for any other renderer the submenu says so.
+    QMenu* shadingMenu = menu->addMenu(tr("Shading"));
+    shadingMenu->setObjectName(QStringLiteral("shadingMenu"));
+    const bool drawsShading = HydraViewportWindow::rendererDrawsShadingModes(m_viewport->currentRendererPlugin());
+    shadingMenu->setEnabled(drawsShading);
+    shadingMenu->menuAction()->setToolTip(drawsShading ? QString() : tr("Only Storm draws the shading modes"));
+    auto* shadings = new QActionGroup(shadingMenu);
+    for (ShadingMode shading : kShadingModes) {
+        QAction* action = shadingMenu->addAction(tr(qPrintable(shadingModeLabel(shading))));
+        action->setObjectName(QStringLiteral("shading_%1").arg(QLatin1String(shadingModeName(shading))));
+        action->setCheckable(true);
+        action->setChecked(shading == shown.shading);
+        shadings->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [edit, shading]() { edit([shading](ViewportDisplayOverrides& o) { o.shading = shading; }); });
+    }
+
+    QMenu* complexityMenu = menu->addMenu(tr("Complexity"));
+    complexityMenu->setObjectName(QStringLiteral("complexityMenu"));
+    auto* complexities = new QActionGroup(complexityMenu);
+    for (Complexity complexity : kComplexities) {
+        QAction* action = complexityMenu->addAction(tr(qPrintable(complexityLabel(complexity))));
+        action->setObjectName(QStringLiteral("complexity_%1").arg(QLatin1String(complexityName(complexity))));
+        action->setCheckable(true);
+        action->setChecked(complexity == shown.complexity);
+        complexities->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [edit, complexity]() { edit([complexity](ViewportDisplayOverrides& o) { o.complexity = complexity; }); });
+    }
+
+    // A checkable entry for one on/off option.
+    auto addSwitch = [this, edit, &shown](QMenu* to, const QString& text, const char* name,
+                                          bool HydraViewportWindow::DisplayOptions::*option,
+                                          std::optional<bool> ViewportDisplayOverrides::*override) {
+        QAction* action = to->addAction(text);
+        action->setObjectName(QString::fromLatin1(name));
+        action->setCheckable(true);
+        action->setChecked(shown.*option);
+        connect(action, &QAction::triggered, this,
+                [edit, override](bool on) { edit([on, override](ViewportDisplayOverrides& o) { o.*override = on; }); });
+        return action;
+    };
+    using Options = HydraViewportWindow::DisplayOptions;
+    using Overrides = ViewportDisplayOverrides;
+    QMenu* purposes = menu->addMenu(tr("Purposes"));
+    purposes->setObjectName(QStringLiteral("purposesMenu"));
+    addSwitch(purposes, tr("Guide"), "showGuidesAction", &Options::showGuides, &Overrides::showGuides);
+    addSwitch(purposes, tr("Proxy"), "showProxyAction", &Options::showProxy, &Overrides::showProxy);
+    addSwitch(purposes, tr("Render"), "showRenderAction", &Options::showRender, &Overrides::showRender);
+    QMenu* lights = menu->addMenu(tr("Lights"));
+    lights->setObjectName(QStringLiteral("lightsMenu"));
+    addSwitch(lights, tr("Scene Lights"), "sceneLightsAction", &Options::sceneLights, &Overrides::sceneLights);
+    QAction* cameraLight =
+        addSwitch(lights, tr("Camera Light"), "cameraLightAction", &Options::cameraLight, &Overrides::cameraLight);
+    cameraLight->setToolTip(tr("Storm only"));
+    addSwitch(lights, tr("Dome Light"), "domeLightAction", &Options::domeLight, &Overrides::domeLight);
+    addSwitch(menu, tr("Scene Materials"), "sceneMaterialsAction", &Options::sceneMaterials, &Overrides::sceneMaterials);
+    addSwitch(menu, tr("Cull Backfaces"), "cullBackfacesAction", &Options::cullBackfaces, &Overrides::cullBackfaces);
+    addSwitch(menu, tr("Dome Light Textures"), "domeLightTexturesAction", &Options::domeLightTextures,
+              &Overrides::domeLightTextures);
+
+    menu->addSeparator();
     QAction* showGrid = menu->addAction(tr("Show Grid"));
     showGrid->setObjectName(QStringLiteral("showGridAction"));
     showGrid->setCheckable(true);
-    showGrid->setChecked(displayOptions().showGrid);
+    showGrid->setChecked(shown.showGrid);
     connect(showGrid, &QAction::triggered, this, [this](bool on) {
         ViewportDisplayOverrides overrides = m_displayOverrides;
         overrides.showGrid = on;
@@ -563,7 +710,7 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     QMenu* selection = menu->addMenu(tr("Selection"));
     selection->setObjectName(QStringLiteral("selectionStyleMenu"));
     auto* styles = new QActionGroup(selection);  // exclusive: one style checked
-    const SelectionStyle currentStyle = displayOptions().selectionStyle;
+    const SelectionStyle currentStyle = shown.selectionStyle;
     for (SelectionStyle style : {SelectionStyle::Solid, SelectionStyle::Outline, SelectionStyle::Wireframe}) {
         QAction* action = selection->addAction(tr(qPrintable(selectionStyleLabel(style))));
         action->setObjectName(QStringLiteral("selectionStyle_%1").arg(QLatin1String(selectionStyleName(style))));
@@ -580,7 +727,7 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     dialog->setObjectName(QStringLiteral("displayDialogAction"));
     QAction* defaults = menu->addAction(tr("Use Settings Defaults"), this, [this]() { setDisplayOverrides({}); });
     defaults->setObjectName(QStringLiteral("displayDefaultsAction"));
-    defaults->setToolTip(tr("Drop this viewport's own grid, background and selection values"));
+    defaults->setToolTip(tr("Drop all of this viewport's own display values"));
     defaults->setEnabled(!m_displayOverrides.isEmpty());
 }
 

@@ -60,13 +60,14 @@ top (`ViewportViewPanel::displayOptions()`).
   panel.
 - A new viewport overrides nothing.
 
-The options menu (☰, or pinned beside the panel) has:
+The options menu (☰, or pinned beside the panel) has, below the renderer and the draw options
+([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md) §4):
 
 | Entry | Does |
 |---|---|
 | Show Grid | Ticked while the grid shows. Toggling it overrides Show grid for this viewport |
 | Selection | Solid, Outline or Wireframe, the one in use ticked. Choosing one overrides the selection style for this viewport ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)) |
-| Display... | Opens this viewport's dialog. Its rows are Show grid, Grid size, Grid step, Background (a swatch that opens Qt's color picker), Selection, Selection color and Line width. The viewport follows a picker live, and Cancel puts the color back. Each row has a **Default** button, shown while the value is overridden, that drops the override. Edits apply at once |
+| Display... | Opens this viewport's dialog. Its rows are Show grid, Grid size, Grid step, Background (a swatch that opens Qt's color picker), Selection, Selection color and Line width, then the draw options (VIEWPORT_DISPLAY.md §4). The viewport follows a picker live, and Cancel puts the color back. Each row has a **Default** button, shown while the value is overridden, that drops the override. Edits apply at once |
 | Use Settings Defaults | Drops all of this viewport's overrides. Disabled when there are none |
 
 **Duplicate** copies the overrides.

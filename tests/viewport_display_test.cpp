@@ -13,6 +13,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_display.h"
+#include "usdcc/usd/viewport_render_params.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <QAction>
@@ -29,8 +30,12 @@
 #include <QTemporaryDir>
 #include <QToolButton>
 
+#include <pxr/usd/usdGeom/tokens.h>
+
+#include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 using usdcc::core::Settings;
 using usdcc::usd::SelectionStyle;
@@ -264,5 +269,230 @@ USDCC_TEST(viewport_display_panel) {
         CHECK(!panel->displayOverrides().selectionStyle && style->currentText() == "Wireframe", "Default: the setting's style");
     }
     CHECK(dialog->windowTitle().startsWith("Viewport Display"), "the dialog is Display now");
+    dialog->close();
+}
+
+// How Hydra draws the stage (docs/VIEWPORT_DISPLAY.md): shading, complexity, purposes,
+// materials, culling, dome light textures and lights.
+USDCC_TEST(viewport_draw_settings) {
+    TestSettings testSettings;
+    usdcc::usd::defineViewportDisplaySettings();
+    Settings& settings = Settings::instance();
+    for (const char* key : {usdcc::usd::kViewportComplexityKey, usdcc::usd::kViewportShowGuidesKey,
+                            usdcc::usd::kViewportShowProxyKey, usdcc::usd::kViewportShowRenderKey,
+                            usdcc::usd::kViewportCullBackfacesKey, usdcc::usd::kViewportSceneLightsKey,
+                            usdcc::usd::kViewportCameraLightKey, usdcc::usd::kViewportDomeLightKey}) {
+        CHECK(settings.contains(key) && usdcc::usd::isViewportDisplayKey(key), "%s is a viewport setting", key);
+    }
+    CHECK(!settings.contains("Viewport/shading") && !settings.contains("Viewport/sceneMaterials") &&
+              !settings.contains("Viewport/domeLightTextures"),
+          "shading, scene materials and dome textures have no Settings default");
+    CHECK(!usdcc::usd::isViewportDisplayKey("Viewport/other"), "another key isn't one");
+    CHECK(settings.definition(usdcc::usd::kViewportComplexityKey)->choices ==
+              std::vector<std::string>({"Low", "Medium", "High", "Very High"}),
+          "the complexities");
+
+    const auto builtIn = usdcc::usd::defaultViewportDisplay();
+    CHECK(builtIn.shading == usdcc::usd::ShadingMode::SmoothShaded && builtIn.complexity == usdcc::usd::Complexity::Low &&
+              !builtIn.showGuides && builtIn.showProxy && !builtIn.showRender && builtIn.sceneMaterials &&
+              !builtIn.cullBackfaces && builtIn.domeLightTextures && builtIn.sceneLights && builtIn.cameraLight &&
+              !builtIn.domeLight,
+          "usdview's defaults: smooth, low, proxy only, materials, scene and camera lights");
+
+    settings.setValue(usdcc::usd::kViewportComplexityKey, std::string("Very High"));
+    settings.setValue(usdcc::usd::kViewportShowRenderKey, true);
+    settings.setValue(usdcc::usd::kViewportShowProxyKey, false);
+    settings.setValue(usdcc::usd::kViewportCullBackfacesKey, true);
+    settings.setValue(usdcc::usd::kViewportCameraLightKey, false);
+    settings.setValue(usdcc::usd::kViewportDomeLightKey, true);
+    const auto set = usdcc::usd::defaultViewportDisplay();
+    CHECK(set.complexity == usdcc::usd::Complexity::VeryHigh && set.showRender && !set.showProxy && set.cullBackfaces &&
+              !set.cameraLight && set.domeLight,
+          "the defaults follow their settings");
+}
+
+USDCC_TEST(viewport_shading_and_complexity_names) {
+    for (usdcc::usd::ShadingMode shading : usdcc::usd::kShadingModes) {
+        CHECK(usdcc::usd::shadingModeFromName(QString::fromLatin1(usdcc::usd::shadingModeName(shading))) == shading,
+              "%s round trips", usdcc::usd::shadingModeName(shading));
+        CHECK(usdcc::usd::shadingModeFromName(usdcc::usd::shadingModeLabel(shading)) == shading, "and its label");
+    }
+    for (usdcc::usd::Complexity complexity : usdcc::usd::kComplexities) {
+        CHECK(usdcc::usd::complexityFromName(QString::fromLatin1(usdcc::usd::complexityName(complexity))) == complexity,
+              "%s round trips", usdcc::usd::complexityName(complexity));
+        CHECK(usdcc::usd::complexityFromName(usdcc::usd::complexityLabel(complexity)) == complexity, "and its label");
+    }
+    CHECK(!usdcc::usd::shadingModeFromName("points") && !usdcc::usd::complexityFromName("extreme"), "not one");
+}
+
+USDCC_TEST(viewport_draw_overrides_json) {
+    ViewportDisplayOverrides overrides;
+    overrides.shading = usdcc::usd::ShadingMode::HiddenLine;
+    overrides.complexity = usdcc::usd::Complexity::High;
+    overrides.showGuides = true;
+    overrides.sceneMaterials = false;
+    overrides.domeLight = true;
+    const QJsonObject json = overrides.toJson();
+    CHECK(json.size() == 5 && json.value("shading").toString() == "hiddenLine" &&
+              json.value("complexity").toString() == "high" && json.value("showGuides").toBool() &&
+              !json.value("sceneMaterials").toBool(true) && json.value("domeLight").toBool(),
+          "saved as named");
+    CHECK(ViewportDisplayOverrides::fromJson(json) == overrides, "round trip");
+    const ViewportDisplayOverrides bad = ViewportDisplayOverrides::fromJson(
+        QJsonObject{{"shading", "points"}, {"complexity", 3}, {"showGuides", "yes"}, {"cameraLight", 1}});
+    CHECK(bad.isEmpty(), "what doesn't fit is ignored");
+    const auto applied = overrides.applyTo({});
+    CHECK(applied.shading == usdcc::usd::ShadingMode::HiddenLine && applied.complexity == usdcc::usd::Complexity::High &&
+              applied.showGuides && !applied.sceneMaterials && applied.domeLight && applied.showProxy && applied.cameraLight,
+          "applied over the defaults, the rest kept");
+}
+
+USDCC_TEST(viewport_render_params) {
+    using usdcc::usd::ShadingMode;
+    usdcc::usd::HydraViewportWindow::DisplayOptions display;
+    display.shading = ShadingMode::FlatShaded;
+    display.complexity = usdcc::usd::Complexity::Medium;
+    display.showGuides = true;
+    display.showProxy = false;
+    display.showRender = true;
+    display.sceneMaterials = false;
+    display.cullBackfaces = true;
+    display.sceneLights = false;
+    const auto params = usdcc::usd::viewportRenderParams(display, display.shading);
+    CHECK(params.drawMode == PXR_NS::UsdImagingGLDrawMode::DRAW_SHADED_FLAT, "the draw mode");
+    CHECK(std::abs(params.complexity - 1.1f) < 1e-6f, "Medium is 1.1");
+    CHECK(params.showGuides && !params.showProxy && params.showRender, "the purposes");
+    CHECK(!params.enableSceneMaterials && !params.enableSceneLights, "materials and scene lights off");
+    CHECK(params.cullStyle == PXR_NS::UsdImagingGLCullStyle::CULL_STYLE_BACK_UNLESS_DOUBLE_SIDED, "culling");
+    CHECK(usdcc::usd::drawModeFor(ShadingMode::HiddenLine) == PXR_NS::UsdImagingGLDrawMode::DRAW_WIREFRAME &&
+              usdcc::usd::drawModeFor(ShadingMode::WireframeOnShaded) ==
+                  PXR_NS::UsdImagingGLDrawMode::DRAW_WIREFRAME_ON_SURFACE,
+          "the line modes' draw modes");
+    CHECK(usdcc::usd::effectiveShading(display, PXR_NS::TfToken("HdStormRendererPlugin")) == ShadingMode::FlatShaded &&
+              usdcc::usd::effectiveShading(display, PXR_NS::TfToken()) == ShadingMode::FlatShaded,
+          "Storm (and no renderer yet) draws the mode");
+    CHECK(usdcc::usd::effectiveShading(display, PXR_NS::TfToken("HdEmbreeRendererPlugin")) == ShadingMode::SmoothShaded,
+          "another renderer is smooth shaded");
+    CHECK(usdcc::usd::viewportPurposes(display) == PXR_NS::TfTokenVector({PXR_NS::UsdGeomTokens->default_,
+                                                                         PXR_NS::UsdGeomTokens->guide,
+                                                                         PXR_NS::UsdGeomTokens->render}),
+          "the purposes for bounds");
+}
+
+USDCC_TEST(viewport_draw_panel) {
+    TestSettings testSettings;
+    QTemporaryDir dir;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       dir.filePath(QStringLiteral("ui.ini")));
+    usdcc::usd::StageManager stages;
+    auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
+    auto panel = std::make_unique<ViewportViewPanel>(&stages, nullptr, toolSet, nullptr);
+    Settings& settings = Settings::instance();
+    auto* window = panel->hydraWindow();
+
+    // A setting reaches a viewport that doesn't override it.
+    settings.setValue(usdcc::usd::kViewportShowGuidesKey, true);
+    settings.setValue(usdcc::usd::kViewportComplexityKey, std::string("High"));
+    CHECK(window->displayOptions().showGuides && window->displayOptions().complexity == usdcc::usd::Complexity::High,
+          "purposes and complexity follow Settings");
+
+    struct Opener : ViewportViewPanel {
+        static void populate(ViewportViewPanel* p, QMenu* m) { (p->*(&Opener::populateOptionsMenu))(m); }
+    };
+    {
+        QMenu menu;
+        Opener::populate(panel.get(), &menu);
+        QMenu* shading = menu.findChild<QMenu*>("shadingMenu");
+        CHECK(shading && shading->actions().size() == 5 && shading->isEnabled(), "Shading: five modes, Storm draws them");
+        QAction* smooth = shading ? menuAction(*shading, "shading_smooth") : nullptr;
+        QAction* hidden = shading ? menuAction(*shading, "shading_hiddenLine") : nullptr;
+        CHECK(smooth && smooth->isChecked() && hidden && !hidden->isChecked(), "Smooth Shaded ticked");
+        if (hidden) hidden->trigger();
+        CHECK(panel->displayOverrides().shading == usdcc::usd::ShadingMode::HiddenLine &&
+                  window->displayOptions().shading == usdcc::usd::ShadingMode::HiddenLine,
+              "Hidden Line chosen here");
+
+        QMenu* complexity = menu.findChild<QMenu*>("complexityMenu");
+        QAction* high = complexity ? menuAction(*complexity, "complexity_high") : nullptr;
+        QAction* low = complexity ? menuAction(*complexity, "complexity_low") : nullptr;
+        CHECK(complexity && complexity->actions().size() == 4 && high && high->isChecked(),
+              "Complexity: the setting's High");
+        if (low) low->trigger();
+        CHECK(panel->displayOverrides().complexity == usdcc::usd::Complexity::Low, "Low chosen here");
+
+        QMenu* purposes = menu.findChild<QMenu*>("purposesMenu");
+        QAction* guides = purposes ? menuAction(*purposes, "showGuidesAction") : nullptr;
+        QAction* proxy = purposes ? menuAction(*purposes, "showProxyAction") : nullptr;
+        CHECK(guides && guides->isChecked() && proxy && proxy->isChecked() && menuAction(*purposes, "showRenderAction"),
+              "Purposes: Guide (the setting's) and Proxy ticked");
+        if (guides) guides->trigger();
+        CHECK(panel->displayOverrides().showGuides == false && !window->displayOptions().showGuides, "guides off here");
+
+        QMenu* lights = menu.findChild<QMenu*>("lightsMenu");
+        QAction* dome = lights ? menuAction(*lights, "domeLightAction") : nullptr;
+        QAction* scene = lights ? menuAction(*lights, "sceneLightsAction") : nullptr;
+        QAction* camera = lights ? menuAction(*lights, "cameraLightAction") : nullptr;
+        CHECK(lights && lights->actions().size() == 3 && dome && !dome->isChecked() && scene && scene->isChecked() &&
+                  camera && camera->isChecked(),
+              "Lights: scene and camera on, dome off");
+        if (dome) dome->trigger();
+        CHECK(window->displayOptions().domeLight, "the dome light on here");
+
+        QAction* materials = menuAction(menu, "sceneMaterialsAction");
+        QAction* cull = menuAction(menu, "cullBackfacesAction");
+        QAction* textures = menuAction(menu, "domeLightTexturesAction");
+        CHECK(materials && materials->isChecked() && cull && !cull->isChecked() && textures && textures->isChecked(),
+              "the three switches");
+        if (materials) materials->trigger();
+        if (textures) textures->trigger();
+        CHECK(!window->displayOptions().sceneMaterials && !window->isDomeLightVisible(), "materials and dome maps off here");
+    }
+
+    // Another renderer: no shading modes.
+    window->setRendererPlugin(PXR_NS::TfToken("HdEmbreeRendererPlugin"));
+    {
+        QMenu menu;
+        Opener::populate(panel.get(), &menu);
+        QMenu* shading = menu.findChild<QMenu*>("shadingMenu");
+        CHECK(shading && !shading->isEnabled(), "Shading greyed out for Embree");
+    }
+    window->setRendererPlugin(PXR_NS::TfToken("HdStormRendererPlugin"));
+
+    // Duplicate and session.
+    std::unique_ptr<usdcc::ui::ViewPanel> copy(panel->duplicate());
+    CHECK(static_cast<ViewportViewPanel*>(copy.get())->displayOverrides() == panel->displayOverrides(),
+          "the duplicate has them");
+    auto restored = std::make_unique<ViewportViewPanel>(&stages, nullptr, toolSet, nullptr);
+    restored->restoreSessionState(panel->saveSessionState());
+    CHECK(restored->displayOverrides() == panel->displayOverrides(), "and a restored session");
+
+    // The dialog's rows.
+    QDialog* dialog = panel->showDisplayDialog();
+    auto* shading = dialog->findChild<QComboBox*>("displayShading");
+    auto* resetShading = dialog->findChild<QToolButton*>("resetShading");
+    auto* render = dialog->findChild<QCheckBox*>("displayShowRender");
+    auto* resetRender = dialog->findChild<QToolButton*>("resetShowRender");
+    auto* domeLight = dialog->findChild<QCheckBox*>("displayDomeLight");
+    auto* resetDome = dialog->findChild<QToolButton*>("resetDomeLight");
+    CHECK(shading && resetShading && render && resetRender && domeLight && resetDome &&
+              dialog->findChild<QComboBox*>("displayComplexity") && dialog->findChild<QCheckBox*>("displaySceneMaterials") &&
+              dialog->findChild<QCheckBox*>("displayCullBackfaces") && dialog->findChild<QCheckBox*>("displayCameraLight"),
+          "the dialog's draw rows");
+    if (shading && resetShading && render && resetRender && domeLight && resetDome) {
+        CHECK(shading->currentText() == "Hidden Line" && !resetShading->isHidden(), "the viewport's shading, overridden");
+        CHECK(resetShading->toolTip() == "Use the built-in value", "shading has no Settings default");
+        CHECK(domeLight->isChecked() && !resetDome->isHidden() && resetRender->isHidden(), "the dome light, overridden");
+        render->setChecked(true);
+        CHECK(panel->displayOverrides().showRender == true && window->displayOptions().showRender && !resetRender->isHidden(),
+              "a switch overrides");
+        shading->setCurrentIndex(shading->findText("Wireframe"));
+        CHECK(window->displayOptions().shading == usdcc::usd::ShadingMode::Wireframe, "a choice overrides");
+        resetShading->click();
+        CHECK(!panel->displayOverrides().shading && shading->currentText() == "Smooth Shaded", "Default: the built-in one");
+        resetDome->click();
+        CHECK(!domeLight->isChecked(), "Default: the setting's off");
+        panel->setDisplayOverrides({});
+        CHECK(!render->isChecked() && resetRender->isHidden(), "the dialog follows a change made elsewhere");
+    }
     dialog->close();
 }

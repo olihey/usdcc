@@ -285,8 +285,14 @@ void SelectionOverlay::renderMask(const Frame& frame) {
     m_engine->SetLightingState(PXR_NS::GlfSimpleLightVector{}, PXR_NS::GlfSimpleMaterial(),
                                PXR_NS::GfVec4f(0.0f, 0.0f, 0.0f, 1.0f));
 
+    // The viewport's geometry, or the lines don't sit on what it shows.
     PXR_NS::UsdImagingGLRenderParams params;
     params.frame = PXR_NS::UsdTimeCode::Default();
+    params.complexity = frame.params.complexity;
+    params.showGuides = frame.params.showGuides;
+    params.showProxy = frame.params.showProxy;
+    params.showRender = frame.params.showRender;
+    params.cullStyle = frame.params.cullStyle;
     params.drawMode = frame.style == SelectionStyle::Wireframe ? PXR_NS::UsdImagingGLDrawMode::DRAW_WIREFRAME
                                                                : PXR_NS::UsdImagingGLDrawMode::DRAW_SHADED_FLAT;
     params.enableLighting = false;

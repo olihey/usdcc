@@ -101,6 +101,10 @@ take them for a `bool`.
 | `Viewport/selectionStyle` | Choice: Solid, Outline, Wireframe | Solid | `ViewportViewPanel`: how the selection is drawn ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)); a viewport can override it, and the next two |
 | `Viewport/selectionColor` | Color | `#ffa600` | `ViewportViewPanel`: the selection's color, in every style |
 | `Viewport/selectionWidth` | Int 1–8 | 2 | `ViewportViewPanel`: the Outline and Wireframe lines' width, in pixels at 100% UI scale |
+| `Viewport/complexity` | Choice: Low, Medium, High, Very High | Low | `ViewportViewPanel`: how finely subdivision surfaces are refined ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)); a viewport can override it, and each one below |
+| `Viewport/showGuides`, `showProxy`, `showRender` | Bool | off, on, off | `ViewportViewPanel`: which purposes the viewport draws, picks and frames |
+| `Viewport/cullBackfaces` | Bool | off | `ViewportViewPanel`: leave out the back of faces, except double-sided ones |
+| `Viewport/sceneLights`, `cameraLight`, `domeLight` | Bool | on, on, off | `ViewportViewPanel`: the stage's own lights, a light at the camera, Hydra's default dome light |
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
 | `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `Studio` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |

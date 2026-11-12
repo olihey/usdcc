@@ -16,12 +16,13 @@ bool isFinite(const PXR_NS::GfVec3d& v) { return std::isfinite(v[0]) && std::isf
 }  // namespace
 
 std::optional<PXR_NS::GfRange3d> sceneBounds(const PXR_NS::UsdStagePtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
-                                             PXR_NS::UsdTimeCode time) {
+                                             PXR_NS::UsdTimeCode time, const PXR_NS::TfTokenVector& purposes) {
     if (!stage) return std::nullopt;
-    // The purposes the viewport draws (UsdImagingGLRenderParams shows proxies, not
-    // render or guide geometry). Invisible prims have no bounds in the cache.
-    PXR_NS::UsdGeomBBoxCache cache(time, {PXR_NS::UsdGeomTokens->default_, PXR_NS::UsdGeomTokens->proxy},
-                                   /*useExtentsHint=*/true);
+    // The purposes the viewport draws (by default UsdImagingGLRenderParams shows proxies,
+    // not render or guide geometry). Invisible prims have no bounds in the cache.
+    const PXR_NS::TfTokenVector drawn =
+        purposes.empty() ? PXR_NS::TfTokenVector{PXR_NS::UsdGeomTokens->default_, PXR_NS::UsdGeomTokens->proxy} : purposes;
+    PXR_NS::UsdGeomBBoxCache cache(time, drawn, /*useExtentsHint=*/true);
 
     std::vector<PXR_NS::UsdPrim> prims;
     if (paths.empty()) {
