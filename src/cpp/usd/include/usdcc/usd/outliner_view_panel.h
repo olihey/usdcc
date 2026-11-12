@@ -83,9 +83,13 @@ private:
     void onStageObjectsChanged(const StageChanges& changes);
     // Around every model reset: remember which prims are expanded (and the
     // scroll position), then expand them again and reselect, so a rebuild
-    // doesn't collapse the tree.
+    // doesn't collapse the tree. A stage with a single root prim shows it
+    // expanded: on a new stage, and after a rebuild that leaves a lone root
+    // that wasn't the lone root before. Collapsing it sticks until then.
     void saveViewState();
     void restoreViewState();
+    // The stage's only root prim as the tree shows it, or empty if there are none or several.
+    PXR_NS::SdfPath singleRootPath() const;
     // Expands every ancestor of the selected prims and scrolls the first one
     // into view.
     void expandToSelection(const std::vector<PXR_NS::SdfPath>& paths);
@@ -109,6 +113,7 @@ private:
     // whose paths belong to another stage.
     bool m_keepViewState = true;
     std::set<PXR_NS::SdfPath> m_expandedPaths;
+    PXR_NS::SdfPath m_singleRootBefore;  // the lone root before a model reset, if there was one
     int m_scrollPosition = 0;
     bool m_eatRelease = false;  // the release of a press handleSubtreeClick took
 

@@ -75,6 +75,7 @@ add_executable(usdcc_ui_tests
     outliner_context_menu_test.cpp
     outliner_drag_test.cpp
     outliner_names_test.cpp
+    outliner_single_root_test.cpp
     prim_tree_dialog_test.cpp
     property_row_test.cpp
     asset_path_test.cpp

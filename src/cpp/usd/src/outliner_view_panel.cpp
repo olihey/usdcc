@@ -355,12 +355,19 @@ void OutlinerViewPanel::onStageObjectsChanged(const StageChanges& changes) {
     });
 }
 
+PXR_NS::SdfPath OutlinerViewPanel::singleRootPath() const {
+    if (m_model->rowCount(QModelIndex()) != 1) return {};
+    return m_model->pathForIndex(m_model->index(0, 0, QModelIndex()));
+}
+
 void OutlinerViewPanel::saveViewState() {
     m_expandedPaths.clear();
     m_scrollPosition = m_treeView->verticalScrollBar()->value();
+    m_singleRootBefore = PXR_NS::SdfPath();
     if (!m_keepViewState) {
         return;
     }
+    m_singleRootBefore = singleRootPath();
     std::vector<QModelIndex> pending{QModelIndex()};
     while (!pending.empty()) {
         const QModelIndex parent = pending.back();
@@ -376,6 +383,15 @@ void OutlinerViewPanel::saveViewState() {
 }
 
 void OutlinerViewPanel::restoreViewState() {
+    // A lone root prim opens on its own: on a new stage, and when an edit leaves one
+    // (another way round, it's the same root as before, which keeps how it was left).
+    const PXR_NS::SdfPath singleRoot = singleRootPath();
+    const bool expandSingleRoot = !singleRoot.IsEmpty() &&
+                                  (!m_keepViewState || pathAfterMoves(m_singleRootBefore, m_movesToRestore) != singleRoot);
+    if (expandSingleRoot) {
+        const QModelIndex index = m_proxy->mapFromSource(m_model->fetchPath(singleRoot));
+        if (index.isValid()) m_treeView->setExpanded(index, true);  // unless the filter hides it
+    }
     if (!m_keepViewState) {
         return;
     }
@@ -423,6 +439,8 @@ void OutlinerViewPanel::restoreSessionState(const QJsonObject& state) {
     if (!currentStage()) return;
     // Expanded first, unfiltered: the filter remembers them to go back to.
     m_filterBar->clear();
+    // Exactly what was open: a lone root the user had closed stays closed.
+    if (state.contains(QStringLiteral("expanded"))) m_treeView->collapseAll();
     for (const QJsonValue& value : state.value(QStringLiteral("expanded")).toArray()) {
         const std::string text = value.toString().toStdString();
         if (!PXR_NS::SdfPath::IsValidPathString(text)) continue;
