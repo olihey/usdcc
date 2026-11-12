@@ -86,6 +86,9 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     auto* background = new QPushButton(dialog);
     background->setObjectName(QStringLiteral("displayBackground"));
     background->setIconSize(QSize(28, 14));
+    // Enter in a spin box only commits its value: not the dialog's default button, so it
+    // doesn't open the picker (or, below, close the dialog).
+    background->setAutoDefault(false);
 
     auto addRow = [dialog, grid](int row, const QString& label, QWidget* editor, const char* name) {
         if (!label.isEmpty()) grid->addWidget(new QLabel(label, dialog), row, 0);
@@ -103,6 +106,7 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     QToolButton* resetBackground = addRow(3, QObject::tr("Background"), background, "resetBackground");
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    buttons->button(QDialogButtonBox::Close)->setAutoDefault(false);
     layout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
 

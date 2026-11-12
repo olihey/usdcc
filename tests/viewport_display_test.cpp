@@ -20,7 +20,9 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QMenu>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QToolButton>
 
@@ -145,6 +147,20 @@ USDCC_TEST(viewport_display_panel) {
     auto* resetSize = dialog->findChild<QToolButton*>("resetGridSize");
     auto* showGrid = dialog->findChild<QCheckBox*>("displayShowGrid");
     CHECK(step && resetStep && resetSize && showGrid, "the dialog's editors");
+    {
+        // Enter in a spin box must not reach a button: no default, none that becomes one.
+        bool anyDefault = false;
+        for (QPushButton* button : dialog->findChildren<QPushButton*>()) {
+            anyDefault = anyDefault || button->isDefault() || button->autoDefault();
+        }
+        CHECK(!anyDefault, "no default button: Enter doesn't open the color picker");
+        if (step && !anyDefault) {  // with a default button, Enter would block in the picker's exec()
+            const bool wasVisible = dialog->isVisible();
+            QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+            QApplication::sendEvent(step, &enter);
+            CHECK(dialog->isVisible() == wasVisible, "Enter in Grid step leaves the dialog as it was");
+        }
+    }
     if (step && resetStep && resetSize && showGrid) {
         CHECK(step->value() == 2.0 && resetStep->isHidden() && !resetSize->isHidden() && !showGrid->isChecked(),
               "it shows the viewport's values, Default where overridden");
