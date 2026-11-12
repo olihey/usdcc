@@ -1,4 +1,4 @@
-# Builds PySide6/shiboken6 against vcpkg's Qt with tools/build-pyside.ps1 and
+# Builds PySide6/shiboken6 against vcpkg's Qt with tools/build_pyside.py and
 # publishes them as a prerelease asset, which build.yml downloads to build
 # usdcc.ui and its tests (docs/CI.md section 4.1). It only runs when what the
 # asset is named after changes, or by hand, and skips the build when that asset
@@ -13,8 +13,8 @@ on:
       - external/vcpkg
       - cmake/ports/qtbase/**
       - deps/usd.json
-      - tools/build-pyside.ps1
-      - tools/ci/pyside-asset.ps1
+      - tools/build_pyside.py
+      - tools/ci/pyside_asset.py
       - .github/workflows/deps-pyside.yml
 
 permissions:
@@ -42,7 +42,7 @@ jobs:
 
       - name: Name the asset
         id: asset
-        run: tools/ci/pyside-asset.ps1 -GitHubOutput
+        run: python tools/ci/pyside_asset.py --github-output
 
       - name: Check whether it's already published
         id: published
@@ -66,7 +66,7 @@ jobs:
       - name: Name the vcpkg cache
         if: steps.published.outputs.found != 'true'
         id: vcpkg
-        run: tools/ci/vcpkg-cache.ps1 -Access read
+        run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
         if: steps.published.outputs.found != 'true'
@@ -79,7 +79,7 @@ jobs:
             ${{ steps.vcpkg.outputs.any }}
 
       # Into build/vcpkg_installed, as usdcc's CMake configure would, which is
-      # where tools/build-pyside.ps1 looks for Qt.
+      # where tools/build_pyside.py looks for Qt.
       - name: Install Qt
         if: steps.published.outputs.found != 'true'
         run: |
@@ -90,7 +90,7 @@ jobs:
 
       - name: Build PySide6
         if: steps.published.outputs.found != 'true'
-        run: tools/build-pyside.ps1 -Python (Get-Command python).Source
+        run: python tools/build_pyside.py --python (Get-Command python).Source
 
       # The two folders the usdcc build uses: PySide6/shiboken6/the generator,
       # and clang's own headers, which the generator parses with.
@@ -125,7 +125,7 @@ jobs:
           PySide6 and shiboken6 built from source against vcpkg's Qt, for usdcc's CI (docs/CI.md, phase 4). Not a usdcc release.
 
           - PySide ``${{ steps.asset.outputs.pyside }}``, Qt ``${{ steps.asset.outputs.qt }}`` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} x64 (limited API)
-          - Built by ``tools/build-pyside.ps1``, Visual Studio 2022 (runner image ``windows-2022``)
+          - Built by ``tools/build_pyside.py``, Visual Studio 2022 (runner image ``windows-2022``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
 
           Unzip into usdcc's ``external`` folder: it holds ``pyside-install`` and ``libclang/lib/clang``.

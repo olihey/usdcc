@@ -1,4 +1,4 @@
-"""Run by tools/ci/rtx-smoke-test.ps1 inside the packaged application."""
+"""Run by tools/ci/rtx_smoke_test.py inside the packaged application."""
 
 import builtins
 import ctypes

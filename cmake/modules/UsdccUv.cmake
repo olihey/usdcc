@@ -2,7 +2,7 @@
 # scripts ask for (docs/PYTHON_PACKAGES.md), bundled at a pinned version.
 # Downloaded once at configure time from PyPI's Windows wheel, checked against
 # its SHA-256, and unpacked into build/uv (uv.exe and its licenses);
-# tools/deploy.ps1 copies that into the deploy's tools/uv. Offline, or with
+# tools/deploy.py copies that into the deploy's tools/uv. Offline, or with
 # USDCC_BUNDLE_UV off, the app falls back to a uv on PATH.
 #
 # To upgrade: pick a release at least two weeks old, and take the
@@ -62,5 +62,5 @@ if(WIN32 AND USDCC_BUNDLE_UV)
     endif()
 endif()
 
-# For tools/deploy.ps1, which reads the cache.
+# For tools/deploy.py, which reads the cache.
 set(USDCC_UV_EXE_PATH "${USDCC_UV_EXE}" CACHE INTERNAL "The bundled uv.exe, if downloaded")

@@ -56,7 +56,7 @@ if(MSVC)
     # Build in parallel. /MP compiles a target's files at once; MSBuild's
     # multi-tool task does the same across projects, sharing one limit (the
     # core count) between them, so building several projects at a time
-    # (`cmake --build --parallel`, as tools/build.ps1 does, or Visual Studio)
+    # (`cmake --build --parallel`, as tools/build.py does, or Visual Studio)
     # doesn't start cores x cores compilers.
     add_compile_options(/MP)
     set(CMAKE_VS_GLOBALS "UseMultiToolTask=true" "EnforceProcessCountAcrossBuilds=true")
@@ -162,17 +162,17 @@ if(USDCC_LINK_RELEASE_QT)
     endforeach()
 endif()
 include(UsdccPython)
-# PySide6 and shiboken6 as tools/build-pyside.ps1 builds them, against vcpkg's
+# PySide6 and shiboken6 as tools/build_pyside.py builds them, against vcpkg's
 # Qt for OpenUSD's Python (docs/SCRIPTING.md §8). Without them the usdcc.ui
 # module isn't built and scripts can't make panels; everything else works.
 set(USDCC_PYSIDE_DIR "${CMAKE_SOURCE_DIR}/external/pyside-install"
-    CACHE PATH "PySide6/shiboken6 built against vcpkg's Qt (tools/build-pyside.ps1)")
+    CACHE PATH "PySide6/shiboken6 built against vcpkg's Qt (tools/build_pyside.py)")
 if(EXISTS "${USDCC_PYSIDE_DIR}/PySide6/__init__.py" AND EXISTS "${USDCC_PYSIDE_DIR}/shiboken6/__init__.py")
     set(USDCC_PYSIDE_FOUND TRUE)
     message(STATUS "PySide6 for usdcc: ${USDCC_PYSIDE_DIR}")
 else()
     set(USDCC_PYSIDE_FOUND FALSE)
-    message(STATUS "PySide6 for usdcc: none in ${USDCC_PYSIDE_DIR} (run tools/build-pyside.ps1); "
+    message(STATUS "PySide6 for usdcc: none in ${USDCC_PYSIDE_DIR} (run tools/build_pyside.py); "
                    "usdcc.ui and Python-made panels are disabled")
 endif()
 include(UsdccRuff)

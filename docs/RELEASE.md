@@ -3,7 +3,7 @@
 Hosted release builds explicitly omit the optional native RTX target. To make an
 RTX-enabled package locally, build with the pinned native SDKs and use the
 deployment/clean-package checks in [RTX_RENDER.md](RTX_RENDER.md). Runtime DLLs
-are external by default; `-BundleRtxRuntime` is explicit and includes the SDK's
+are external by default; `--bundle-rtx-runtime` is explicit and includes the SDK's
 licenses. The retired Python RTX plugin is never copied into a release.
 
 How a usdcc release is made: you create a release on GitHub, and CI builds the Windows zip
@@ -29,7 +29,7 @@ same tag (Actions > Release > Run workflow).
   `0.2.0+5.3b70ef2` is 5 commits after `v0.2.0`, at commit `3b70ef2`. The About dialog
   says "Development build" for these. With no release tag yet, it's `0.0.0+<commit>`.
 - **CI builds the zip from the tag, not from `master`:** exactly the commit you released.
-- **The zip is `tools/deploy.ps1`'s folder**, as it is today, so a release is what you
+- **The zip is `tools/deploy.py`'s folder**, as it is today, so a release is what you
   already run locally.
 - **Tests gate the release.** If they fail, nothing is attached, and the run says why.
 - **Symbols ship separately.** The build is `RelWithDebInfo`, like local builds; the PDBs go
@@ -56,7 +56,7 @@ same tag (Actions > Release > Run workflow).
   It's rewritten only when it changes, so a new commit recompiles one file, and the About
   dialog never shows a stale commit.
 
-`tools/build.ps1` always passes `-DUSDCC_VERSION`, empty without `-UsdccVersion`, so a
+`tools/build.py` always passes `-DUSDCC_VERSION`, empty without `--usdcc-version`, so a
 release build's version doesn't stay in the CMake cache for the builds after it. A new tag
 reaches the release number at the next configure. CI's ordinary builds check out without
 tags, so they're `0.0.0+<commit>`.
@@ -110,12 +110,12 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
 3. **The same steps as `build.yml`:** OpenUSD and PySide6 from their release assets, Qt
    from the vcpkg cache. PySide6 is required here, not optional: a release without
    scripting panels would be broken.
-4. **Build** with `tools/build.ps1 -UsdccVersion <version>` (a new parameter that passes
+4. **Build** with `tools/build.py --usdcc-version <version>` (a new parameter that passes
    `-DUSDCC_VERSION`).
 5. **Run the tests.**
-6. **Deploy** with `tools/deploy.ps1` into `usdcc-<version>/`, and check it has the
+6. **Deploy** with `tools/deploy.py` into `usdcc-<version>/`, and check it has the
    licences of OpenUSD's dependencies, PySide6's and vcpkg's (§6).
-7. **Start the deploy** (`tools/ci/smoke-test.ps1`). `bin\usdcc.exe` from the deploy
+7. **Start the deploy** (`tools/ci/smoke_test.py`). `bin\usdcc.exe` from the deploy
    folder, with a `PATH` of Windows' own folders only, on Qt's offscreen platform, with
    `--no-startup-scripts --script check.py` (the shipped plugins load as usual). The script
    records `usdcc.app.version()`, the OpenUSD, Python and PySide6 versions, and where `pxr`,
@@ -141,9 +141,9 @@ It uses `build.yml`'s vcpkg cache, read-only.
 
 1. **Version and About dialog.** `cmake/modules/UsdccVersion.cmake`, `usdcc/core/version.h`,
    the startup log line, `usdcc.app.version()`, the `.exe` version resource, the Help menu
-   and `AboutDialog` with its test, and `tools/build.ps1 -UsdccVersion`. All local, testable
+   and `AboutDialog` with its test, and `tools/build.py --usdcc-version`. All local, testable
    without a release. Done when a local build shows `0.0.0+<commit>` as a development
-   build, and `tools/build.ps1 -UsdccVersion 0.2.0` shows `0.2.0` as a release.
+   build, and `tools/build.py --usdcc-version 0.2.0` shows `0.2.0` as a release.
    *Done. A local build is `0.0.0+5cb3857.dirty`; `write_version.cmake` gives
    `0.2.0-beta.1` for a release and `0.1.0+1.5cb3857.dirty` one commit after a (temporary)
    `v0.1.0` tag; a version such as `v0.3` is refused at configure time.*
@@ -177,18 +177,18 @@ them requires usdcc to be under the GPL:
 
 What the release has to do, whatever usdcc's own licence:
 
-- **Ship the licence texts.** `tools/deploy.ps1` gathers them into `licenses/`, and usdcc's
+- **Ship the licence texts.** `tools/deploy.py` gathers them into `licenses/`, and usdcc's
   own `LICENSE` goes at the top as `LICENSE.txt`:
   - `vcpkg/<port>.txt`: each vcpkg package's `share/<port>/copyright` (not vcpkg's own
     build helpers).
   - `OpenUSD/`: OpenUSD's `LICENSE` and `THIRD-PARTY.md`, from its install.
   - `OpenUSD-dependencies/<library>/`: the licence and NOTICE files of the libraries
-    `build_usd.py` builds, which its install leaves out. `tools/ci/usd-licenses.ps1`
+    `build_usd.py` builds, which its install leaves out. `tools/ci/usd_licenses.py`
     collects them from its source and build folders (top-level licence files of each
     source, and the libraries OpenColorIO and OpenEXR build in themselves).
     `deps-usd.yml` runs it before deleting those folders, into the asset's `licenses/`;
-    `deploy.ps1` runs it for a local install that still has them.
-  - `PySide6/`: pyside-setup's `LICENSES`, which `tools/build-pyside.ps1` copies into its
+    `deploy.py` runs it for a local install that still has them.
+  - `PySide6/`: pyside-setup's `LICENSES`, which `tools/build_pyside.py` copies into its
     install.
   - `Python/`, `QWindowKit/`, `ruff/`, `uv/`.
 - **Make the LGPL libraries' sources available.** `licenses/SOURCES.txt` names, for every

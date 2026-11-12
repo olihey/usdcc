@@ -22,14 +22,14 @@ native SDK packages, containing bin, headers/import libraries for building, and
 Python packages.
 
 ```powershell
-.\tools\build.ps1 -UsdInstall C:\usd\install -WithRtx `
-  -OvrtxRoot C:\sdk\ovrtx -OvstageRoot C:\sdk\ovstage
-.\tools\run.ps1 -UsdInstall C:\usd\install
+python tools/build.py --usd-install C:\usd\install --with-rtx `
+  --ovrtx-root C:\sdk\ovrtx --ovstage-root C:\sdk\ovstage
+python tools/run.py --usd-install C:\usd\install
 ```
 
-Options remain in the CMake cache. run.ps1 adds build/plugins to the plugin search
+Options remain in the CMake cache. run.py adds build/plugins to the plugin search
 path when native RTX is enabled. Direct executable launches need
-`--plugin-path <repo>\build\plugins`. `-WithoutRtx` disables native RTX and GPU
+`--plugin-path <repo>\build\plugins`. `--without-rtx` disables native RTX and GPU
 tests. Fresh default builds omit RTX and need no vendor SDK or CUDA toolkit.
 
 Runtime roots resolve in this order: `USDCC_RTX_OVRTX_ROOT` and
@@ -126,11 +126,11 @@ Portable fixtures do not prove every production scene.
 
 ```powershell
 # Native plugin using external runtime roots on the target:
-.\tools\deploy.ps1
+python tools/deploy.py
 # Explicit local portable bundle with native runtime bins and licenses:
-.\tools\deploy.ps1 -Destination build\rtx-package -BundleRtxRuntime
+python tools/deploy.py build\rtx-package --bundle-rtx-runtime
 # Omit RTX even when it was built:
-.\tools\deploy.ps1 -Destination build\without-rtx -OmitRtx
+python tools/deploy.py build\without-rtx --omit-rtx
 ```
 
 Deploy copies only the built native artifact into plugins/rtx_render, excluding
@@ -169,7 +169,7 @@ in the pinned ovrtx 0.6.0 package wasn't read, as no copy was on the machine; Gi
 - **The Omniverse MDL files** that come with ovrtx haven't been reviewed (MATERIAL_EDITOR.md §6, 7).
 
 So a public deploy omits the runtime, as the default deploy does, and each user installs ovrtx and accepts
-NVIDIA's terms themselves. Don't publish a `-BundleRtxRuntime` deploy without NVIDIA's written agreement
+NVIDIA's terms themselves. Don't publish a `--bundle-rtx-runtime` deploy without NVIDIA's written agreement
 that free ovrtx can be redistributed inside a BSD-licensed app, and on which end-user terms.
 
 Sources: [ovrtx on PyPI](https://pypi.org/project/ovrtx/),
@@ -188,17 +188,17 @@ and updates documentation. Generic Python package/index tests and V-Ray remain.
 M5's automated coverage and deploy checks and M6's implementation cutover are
 complete. Broader production-content acceptance remains open as recorded below.
 
-Normal CI uses -WithoutRtx. The real native controller, stage bridge and navigation
+Normal CI uses --without-rtx. The real native controller, stage bridge and navigation
 tests still build without vendor headers, DLLs, CUDA, Vulkan or a GPU. The native
 activation/layout/migration test additionally runs when the plugin is built and
 checks missing roots without initializing a GPU.
 
 ```powershell
-.\tools\build.ps1 -WithRtx -RtxGpuTests
+python tools/build.py --with-rtx --rtx-gpu-tests
 cmake --build build --config RelWithDebInfo --target rtx_gpu_test_bins
 ctest --test-dir build -C RelWithDebInfo -L gpu --output-on-failure
 ctest --test-dir build -C RelWithDebInfo -LE gpu --output-on-failure --timeout 900
-.\tools\ci\rtx-smoke-test.ps1 -Deploy build\rtx-package
+python tools/ci/rtx_smoke_test.py --deploy build\rtx-package
 ```
 
 GPU tests are opt-in, labeled gpu/rtx, serialized and bounded. They use the
@@ -211,8 +211,8 @@ runner; hosted CI skipping GPU work does not count as GPU validation.
 The packaged test uses a fresh profile, Windows-only PATH, no development locator
 or RTX Python packages. It verifies DLLs load inside the package, a frame and
 clean save complete, the source stays unchanged, no Python RTX imports occur,
-and app exit drains normally. Use -Mode MissingRuntime for an external-root
-deploy with no roots, or -Mode Omitted for an -OmitRtx deploy. Artifacts remain
+and app exit drains normally. Use --mode MissingRuntime for an external-root
+deploy with no roots, or --mode Omitted for an --omit-rtx deploy. Artifacts remain
 under build/rtx-packaged-smoke by default.
 
 Validation record, 2026-11-07, on the environment above:
@@ -224,7 +224,7 @@ Validation record, 2026-11-07, on the environment above:
 | Regression | Full non-GPU suite passed: 328 test cases across core, UI and Python/plugin executables; final targeted native run passed 91 checks |
 | Build without RTX | Separate build with native target off and both SDK roots empty passed 7 native tests / 68 checks, including the real Qt controller |
 | Packaged native render | Fresh pre-startup test profile, Windows-only PATH and bundled native SDKs: 1280 x 720 frame, clean Save while stopped, unchanged source, no Python RTX imports and normal exit |
-| Missing runtime / omission | Both isolated packaged-app checks passed; replacing a deploy with -OmitRtx removed stale native files |
+| Missing runtime / omission | Both isolated packaged-app checks passed; replacing a deploy with --omit-rtx removed stale native files |
 | Upgrades | Tests passed settings migration, valid/malformed legacy-copy exclusion, old saved-layout restoration, independent duplicate cameras and deferred GPU initialization |
 | Difficult MDL content | Open; ten-minute first-frame failure above |
 | Content/driver matrix | Broader materials, alpha/color, multi-GPU, stability and additional drivers unverified |

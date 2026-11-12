@@ -6,7 +6,7 @@ panels, the tabs in the centre that show one stage each; register one with
 ``usdcc.app.register_view_panel()``. ``RenderViewPanel`` is the base class for a
 view panel that renders its stage with a renderer of a plugin's own
 (docs/RENDER_VIEW_PANEL.md); it is registered the same way. Needs PySide6 built
-for usdcc (tools/build-pyside.ps1); without it, importing this raises ImportError.
+for usdcc (tools/build_pyside.py); without it, importing this raises ImportError.
 """
 
 # PySide6 first: importing it adds its folder (Qt, shiboken6 and pyside6

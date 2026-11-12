@@ -203,7 +203,7 @@ target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Wi
 target_link_libraries(usdcc_usd_ui PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_usd_ui PRIVATE USDCC_USD_UI_BUILD
     # The Material Editor preview's shapes and HDRIs, for a build that isn't deployed
-    # (deployed, they're in resources/preview next to bin/; tools/deploy.ps1).
+    # (deployed, they're in resources/preview next to bin/; tools/deploy.py).
     USDCC_PREVIEW_ASSETS_DIR="${CMAKE_SOURCE_DIR}/resources/preview")
 usdcc_export_library(usdcc_usd_ui)
 usdcc_precompile_headers(usdcc_usd_ui ui_pch.h)

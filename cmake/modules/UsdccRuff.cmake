@@ -2,7 +2,7 @@
 # and Ruff Check run, bundled at a pinned version so formatting is the same
 # for everyone (docs/SCRIPTING.md §7). Downloaded once at configure time from
 # PyPI's Windows wheel, checked against its SHA-256, and unpacked into
-# build/ruff (ruff.exe and its MIT LICENSE); tools/deploy.ps1 copies that into
+# build/ruff (ruff.exe and its MIT LICENSE); tools/deploy.py copies that into
 # the deploy's tools/ruff. Offline, or with USDCC_BUNDLE_RUFF off, the app
 # falls back to a ruff on PATH.
 #
@@ -63,5 +63,5 @@ if(WIN32 AND USDCC_BUNDLE_RUFF)
     endif()
 endif()
 
-# For tools/deploy.ps1, which reads the cache.
+# For tools/deploy.py, which reads the cache.
 set(USDCC_RUFF_EXE_PATH "${USDCC_RUFF_EXE}" CACHE INTERNAL "The bundled ruff.exe, if downloaded")

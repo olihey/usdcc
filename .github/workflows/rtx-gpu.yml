@@ -32,8 +32,9 @@ jobs:
           if ($LASTEXITCODE) { throw 'GPU tests failed' }
       - name: Validate clean packaged application
         run: |
-          tools/deploy.ps1 -Destination build/rtx-package -BundleRtxRuntime
-          tools/ci/rtx-smoke-test.ps1 -Deploy build/rtx-package
+          python tools/deploy.py build/rtx-package --bundle-rtx-runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tools/ci/rtx_smoke_test.py --deploy build/rtx-package
       - uses: actions/upload-artifact@v4
         if: always()
         with:

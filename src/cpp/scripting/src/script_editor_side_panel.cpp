@@ -1168,7 +1168,7 @@ void ScriptEditorSidePanel::clearOutput() {
 
 QString ScriptEditorSidePanel::ruffProgram() const {
     // The pinned ruff first, so formatting doesn't depend on what is installed:
-    // a deploy's tools/ruff next to bin/ (tools/deploy.ps1), then the build's.
+    // a deploy's tools/ruff next to bin/ (tools/deploy.py), then the build's.
     const QString deployed =
         QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/ruff/ruff.exe"));
     if (QFileInfo(deployed).isExecutable()) return QDir::cleanPath(deployed);

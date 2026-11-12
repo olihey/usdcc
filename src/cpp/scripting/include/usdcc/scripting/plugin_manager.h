@@ -104,7 +104,7 @@ public:
     static Options defaultOptions(const std::vector<std::filesystem::path>& extraFolders, bool enabled);
     // <AppLocalData>/plugins.
     static std::filesystem::path userFolder();
-    // plugins/ beside bin/ in a deploy (tools/deploy.ps1): the plugins usdcc ships.
+    // plugins/ beside bin/ in a deploy (tools/deploy.py): the plugins usdcc ships.
     static std::filesystem::path shippedFolder();
     // The folders added in Settings > Plugins, in order.
     static std::vector<std::filesystem::path> addedFolders();

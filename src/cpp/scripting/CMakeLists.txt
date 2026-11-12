@@ -41,7 +41,7 @@ target_compile_definitions(
             USDCC_BUILT_FOR_USD="${USDCC_BUILT_FOR_USD}"
             USDCC_BUILT_FOR_USDCC="${USDCC_BUILT_FOR_USDCC}")
 # The build's pinned uv (UsdccUv.cmake), used unless the app finds one bundled
-# next to it (tools/deploy.ps1).
+# next to it (tools/deploy.py).
 if(USDCC_UV_EXE)
     target_compile_definitions(usdcc_scripting_app PRIVATE USDCC_UV_EXE="${USDCC_UV_EXE}")
 endif()
@@ -67,7 +67,7 @@ add_library(usdcc_scripting_ui STATIC
 target_include_directories(usdcc_scripting_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(usdcc_scripting_ui PUBLIC usdcc_scripting_app usdcc_ui Qt6::Widgets)
 # The build's pinned ruff (UsdccRuff.cmake), used unless the app finds one
-# bundled next to it (tools/deploy.ps1).
+# bundled next to it (tools/deploy.py).
 if(USDCC_RUFF_EXE)
     target_compile_definitions(usdcc_scripting_ui PRIVATE USDCC_RUFF_EXE="${USDCC_RUFF_EXE}")
 endif()
@@ -79,7 +79,7 @@ if(USDCC_PYTHON_FOUND)
     # find_package(pybind11) found, which is vcpkg's (see UsdccPython.cmake).
     target_link_libraries(usdcc_scripting PRIVATE pybind11::headers PUBLIC "${USDCC_PYTHON_LIBRARY}")
     # Build-time defaults for PythonSettings::defaults(), used unless the app
-    # finds a Python bundled next to it (tools/deploy.ps1).
+    # finds a Python bundled next to it (tools/deploy.py).
     target_compile_definitions(
         usdcc_scripting
         PRIVATE USDCC_HAS_PYTHON=1

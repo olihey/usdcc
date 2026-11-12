@@ -104,7 +104,7 @@ PythonSettings PythonSettings::defaults() {
     PythonSettings settings;
     settings.userSite = usdcc::core::Settings::instance().get<bool>(kPythonUserSiteKey, false);
 #if USDCC_HAS_PYTHON
-    // A deployed usdcc (tools/deploy.ps1) brings its own Python: bin/usdcc.exe
+    // A deployed usdcc (tools/deploy.py) brings its own Python: bin/usdcc.exe
     // next to python/, whose Lib/site-packages holds usdcc, pxr and PySide6.
     const std::filesystem::path bundled = executableDir().parent_path() / "python";
     if (hasStandardLibrary(bundled)) {

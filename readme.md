@@ -62,10 +62,10 @@ This requires PySide6 and Shiboken6 built **from source against usdcc's own vcpk
 Qt**, for OpenUSD's Python. A pip-installed PySide6 ships a different,
 independently-compiled Qt, and loading both in one process causes intermittent
 DLL-load crashes (see [docs/PLAN.md](docs/PLAN.md) §6 item 11). After a first
-`tools/build.ps1`, build it once with:
+`tools/build.py`, build it once with:
 
 ```
-tools/build-pyside.ps1
+python tools/build_pyside.py
 ```
 
 It downloads libclang (~700 MB) and pyside-setup and takes 20+ minutes. The result
@@ -108,33 +108,38 @@ Try the examples with `usdcc --plugin-path src/plugins --plugin-path build/plugi
 
 ### Convenience scripts
 
-[tools/build.ps1](tools/build.ps1) and [tools/run.ps1](tools/run.ps1) wrap the
+[tools/build.py](tools/build.py) and [tools/run.py](tools/run.py) wrap the
 steps above (including the one-time vcpkg bootstrap):
 
 ```
-tools/build.ps1              # configure + build
-tools/run.ps1                # configure + build + launch
-tools/run.ps1 -Scene test_data\cube_and_sphere.usda   # ...and open a stage on launch
+python tools/build.py              # configure + build
+python tools/run.py                # configure + build + launch
+python tools/run.py --scene test_data\cube_and_sphere.usda   # ...and open a stage on launch
 ```
 
-Both accept `-Configuration`, `-Generator`, `-Arch`, `-UsdInstall`, `-Scene`, and
-`-Clean`; `build.ps1` additionally takes `-Run` (which is what `run.ps1` wraps).
-`-UsdInstall` only needs to be passed once — it's cached by CMake and reused by
-later `-Run`/`run.ps1` invocations automatically. See each script's help
-(`Get-Help tools/build.ps1 -Full`) for details.
+Both accept `--configuration`, `--generator`, `--arch`, `--usd-install`, `--scene`, and
+`--clean`; `build.py` additionally takes `--run` (which is what `run.py` wraps).
+`--usd-install` only needs to be passed once — it's cached by CMake and reused by
+later `--run`/`run.py` invocations automatically. See each script's help
+(`python tools/build.py --help`) for details.
+
+The scripts in `tools/` are Python (3.9 or later, standard library only), so they
+aren't tied to Windows. `build.py` and `run.py` pick Ninja and vcpkg's dynamic
+triplet on Linux and macOS, where usdcc hasn't been built yet; `deploy.py` and
+`build_pyside.py` only know Windows' layout so far, and say so elsewhere.
 
 ### Deploying
 
-[tools/deploy.ps1](tools/deploy.ps1) copies a build and everything it needs to run
+[tools/deploy.py](tools/deploy.py) copies a build and everything it needs to run
 (OpenUSD's DLLs and plugins, Qt, the Python OpenUSD was built with, and the usdcc, pxr
 and PySide6 packages) into one folder that runs on a machine without the dev
 environment. Zip it to distribute; start it with `usdcc.cmd` or `bin\usdcc.exe`.
 
 ```
-tools/deploy.ps1                       # into .\deploy
-tools/deploy.ps1 D:\dist\usdcc         # into another folder
-tools/deploy.ps1 -Configuration Release
-tools/deploy.ps1 -UsdInstall C:\usd\install   # OpenUSD from there instead of the build's
+python tools/deploy.py                       # into .\deploy
+python tools/deploy.py D:\dist\usdcc         # into another folder
+python tools/deploy.py --configuration Release
+python tools/deploy.py --usd-install C:\usd\install   # OpenUSD from there instead of the build's
 ```
 
 Build first. An earlier deploy in the folder is replaced; any other non-empty folder is

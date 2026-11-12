@@ -92,7 +92,7 @@ removal means "leave this folder". Two apps installing at once are kept apart wi
 **uv, bundled and pinned, like ruff** (`cmake/modules/UsdccUv.cmake`, deploy `tools\uv\`). It adds 31 MB. pip would also need pip in the deploy, and has no equivalent of `sync --target` to remove what's no longer listed.
 
 **uv needs a Python, so the deploy has one.** Even resolving fails without an interpreter (*tested*). `python\python.exe` is 105 KB and reuses the deploy's `Lib` and `DLLs`. It finds `python312.dll` in `bin\`,
-which the app puts on `PATH` when it runs uv. `tools/deploy.ps1` checks that the two work together.
+which the app puts on `PATH` when it runs uv. `tools/deploy.py` checks that the two work together.
 
 **Only requirements reach uv.** `python.requires` is the one place, with no separate `requirements.txt`. Only names, versions and markers are allowed: **a URL refuses the plugin,** and `_plugins.py` validates
 each line with `packaging` first, so a manifest can't slip in `--index-url` through a requirement. Also taken off the list is what the app provides, what a plugin's own `deps/` meets, and what
@@ -157,7 +157,7 @@ Fixed along the way: a marker on a manifest's requirement wasn't honoured, so `f
 - **`scripting/package_install_dialog.h`, `plugin_manager_side_panel.cpp`:** the UI.
 - **`scripting/python_settings.h`:** the page.
 - **`core/settings.h`, `ui/settings_dialog.cpp`:** the `Folder` type and `appliesAtNextStart`.
-- **`cmake/modules/UsdccUv.cmake`, `tools/deploy.ps1`:** uv and `python.exe`.
+- **`cmake/modules/UsdccUv.cmake`, `tools/deploy.py`:** uv and `python.exe`.
 - **`tests/package_environment_test.cpp`:** the real uv, with wheels the tests make, and no network.
 
 ## 7. Tested, and not

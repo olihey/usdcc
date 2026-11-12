@@ -16,9 +16,9 @@ on:
     paths:
       - deps/usd.json
       - deps/patches/**
-      - tools/ci/usd-asset.ps1
-      - tools/ci/relocate-usd.ps1
-      - tools/ci/usd-licenses.ps1
+      - tools/ci/usd_asset.py
+      - tools/ci/relocate_usd.py
+      - tools/ci/usd_licenses.py
       - tools/ci/usd-sdk-check/**
       - .github/workflows/deps-usd.yml
 
@@ -47,7 +47,7 @@ jobs:
 
       - name: Name the asset
         id: asset
-        run: tools/ci/usd-asset.ps1 -GitHubOutput
+        run: python tools/ci/usd_asset.py --github-output
 
       - name: Check whether it's already published
         id: published
@@ -115,7 +115,8 @@ jobs:
       - name: Collect the licences
         if: steps.published.outputs.found != 'true'
         run: |
-          tools/ci/usd-licenses.ps1 -Src "$env:WORK\src" -Build "$env:WORK\build" -Destination "$env:USD_INSTALL\licenses"
+          python tools/ci/usd_licenses.py --src "$env:WORK\src" --build "$env:WORK\build" --destination "$env:USD_INSTALL\licenses"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if (@(Get-ChildItem -Directory "$env:USD_INSTALL\licenses").Count -lt 10) { throw 'Fewer licences than expected' }
 
       - name: Make it relocatable
@@ -125,7 +126,7 @@ jobs:
             $path = Join-Path $env:USD_INSTALL $dir
             if (Test-Path $path) { Remove-Item -Recurse -Force $path }
           }
-          tools/ci/relocate-usd.ps1 -Install $env:USD_INSTALL
+          python tools/ci/relocate_usd.py --install $env:USD_INSTALL
 
       - name: Zip it
         if: steps.published.outputs.found != 'true'
@@ -138,7 +139,7 @@ jobs:
           if ($size -ge 2GB) { throw 'Over GitHub''s 2 GiB per-asset limit' }
 
       # From a different folder than it was built in, with the original gone, so
-      # a path relocate-usd.ps1 missed can't quietly still work.
+      # a path relocate_usd.py missed can't quietly still work.
       - name: Check it as an SDK
         if: steps.published.outputs.found != 'true'
         run: |

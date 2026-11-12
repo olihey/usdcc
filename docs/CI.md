@@ -30,7 +30,7 @@ one difference: `--no-usdview`.
 | Patch | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change |
 | Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release --generator="Visual Studio 17 2022"` |
 | Python | 3.12.10 x64 from `actions/setup-python` (the same patch version as the local build) |
-| Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.ps1` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
+| Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.py` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
 | Install path | `C:\deps\usd` on CI. The asset itself works from any folder |
 
 **Why `--no-usdview`.** usdview needs a pip-installed PySide6 on the build machine. usdcc
@@ -40,7 +40,7 @@ must never mix pip PySide6 into its process (PLAN §6 item 11), and it doesn't u
 an install only works where it was built. In a local build they are in 12 files:
 `pxrConfig.cmake` (the TBB target, `MaterialX_DIR`, `Imath_DIR`, the Python paths),
 `cmake/pxrTargets.cmake` (an OpenColorIO library, the Python include folder), the boost
-package files and OpenImageIO's. `tools/ci/relocate-usd.ps1` rewrites them before zipping:
+package files and OpenImageIO's. `tools/ci/relocate_usd.py` rewrites them before zipping:
 
 - The install folder becomes `${_usdcc_usd_prefix}`, which a line added at the top of each
   changed file works out from `${CMAKE_CURRENT_LIST_DIR}`.
@@ -111,7 +111,7 @@ One file pins the build:
 
 The asset's name comes from it: `usd-<short commit>-<hash>-win64-py312.zip`, where
 `<hash>` is the first 8 hex characters of a SHA-256 over `usd.json` and the patch files
-(line endings normalised). `tools/ci/usd-asset.ps1` prints it, with the tag. Any
+(line endings normalised). `tools/ci/usd_asset.py` prints it, with the tag. Any
 change to the pin, the flags or a patch gives a new name, so a stale asset is never used.
 It's published under the tag `deps/usd-<short commit>-<hash>` as a **prerelease**, so it
 stays out of the way of real usdcc releases.
@@ -122,13 +122,13 @@ stays out of the way of real usdcc releases.
 `workflow_dispatch`, and on pushes to `master` that change `deps/`, its scripts or
 itself. It skips the build if the asset for the current hash is already published.
 
-1. Name the asset (`tools/ci/usd-asset.ps1`) and check whether it's published.
+1. Name the asset (`tools/ci/usd_asset.py`) and check whether it's published.
 2. Set up Python; fetch OpenUSD at the pinned commit (a shallow fetch of that one
    commit, without line-ending conversion) and apply the patches with `git apply`.
 3. `python build_scripts/build_usd.py <flags> --src C:\b\src --build C:\b\build C:\deps\usd`.
    The downloads and build trees go outside the install. On failure, `build_usd.py`'s
    logs are uploaded as an artifact.
-4. Make it relocatable (`tools/ci/relocate-usd.ps1`, §2).
+4. Make it relocatable (`tools/ci/relocate_usd.py`, §2).
 5. Zip it and check it's under GitHub's 2 GiB per-asset limit. The local install is
    ~830 MB unzipped.
 6. **Check it as an SDK:** delete `C:\deps\usd`, unzip the asset into another folder, and
@@ -156,7 +156,7 @@ Runs on pushes to `master` and on pull requests.
    panel tests, with a warning: after a Qt update, `deps-pyside.yml` needs a few minutes
    to catch up, and the build shouldn't fail in the meantime.
 5. **vcpkg binary cache.** `VCPKG_BINARY_SOURCES=clear;files,<dir>,readwrite`, with that
-   directory saved by `actions/cache`. `tools/ci/vcpkg-cache.ps1` sets it up and names the
+   directory saved by `actions/cache`. `tools/ci/vcpkg_cache.py` sets it up and names the
    keys, for this workflow and `deps-pyside.yml`. vcpkg's old `x-gha` cache backend is gone, so it's
    the `files` backend plus `actions/cache`. The first run builds Qt (an hour or more), and
    later runs restore it in minutes.
@@ -175,7 +175,7 @@ Runs on pushes to `master` and on pull requests.
      old compiler's or a replaced port's packages would be carried from cache to cache.
    - Only from pushes, not pull requests: a pull request's caches would crowd `master`'s
      out of the repository's 10 GB, and pull requests can restore `master`'s.
-6. Configure and build with `tools/build.ps1 -UsdInstall C:\deps\usd`, in
+6. Configure and build with `tools/build.py --usd-install C:\deps\usd`, in
    `RelWithDebInfo` like local builds.
 7. Run the tests: `ctest --verbose --timeout 900`, so the log shows every test case and
    the check counts, and a crash waiting behind an error dialog ends after 15 minutes.
@@ -184,18 +184,18 @@ Runs on pushes to `master` and on pull requests.
 
 PySide6 and shiboken6 can't come from pip: their Qt is a different build from vcpkg's, and
 two Qts in one process fail at random (`src/cpp/ui/python/CMakeLists.txt`). So they're
-built from source against vcpkg's Qt, as `tools/build-pyside.ps1` does locally, and
+built from source against vcpkg's Qt, as `tools/build_pyside.py` does locally, and
 published like OpenUSD.
 
-- **Name.** `tools/ci/pyside-asset.ps1`: `pyside-<tag>-qt<version>-<hash>-win64-py312`,
+- **Name.** `tools/ci/pyside_asset.py`: `pyside-<tag>-qt<version>-<hash>-win64-py312`,
   tag `deps/pyside-<tag>-qt<version>-<hash>`. The hash covers the PySide tag, qtbase's
   vcpkg version and port version (an overlay port in `cmake/ports` wins), the Python
-  version from `deps/usd.json`, `build-pyside.ps1` and the naming script itself. Other
+  version from `deps/usd.json`, `build_pyside.py` and the naming script itself. Other
   `vcpkg.json` changes, such as adding QtNodes, don't need a new build.
 - **Runs** by hand, or on a push that changes one of those inputs. It skips the build when
   the asset exists.
 - **Steps.** Restore `build.yml`'s vcpkg cache, read-only; `vcpkg install` into
-  `build/vcpkg_installed`, where `build-pyside.ps1` looks for Qt; run `build-pyside.ps1`
+  `build/vcpkg_installed`, where `build_pyside.py` looks for Qt; run `build_pyside.py`
   for the Python from `setup-python`; zip `external/pyside-install` with
   `external/libclang/lib/clang` (clang's headers, which the generator parses usdcc's
   header with); check the zip from another folder with vcpkg's Qt deleted (PySide6
@@ -207,8 +207,8 @@ published like OpenUSD.
 
 ## 5. Phases
 
-1. **OpenUSD asset.** `deps/usd.json`, the patch, `tools/ci/usd-asset.ps1`,
-   `tools/ci/relocate-usd.ps1`, `tools/ci/usd-sdk-check` and `deps-usd.yml`;
+1. **OpenUSD asset.** `deps/usd.json`, the patch, `tools/ci/usd_asset.py`,
+   `tools/ci/relocate_usd.py`, `tools/ci/usd-sdk-check` and `deps-usd.yml`;
    PLUGIN_SDK.md points plugin authors at the asset. Done when the first asset is
    published, which `deps-usd.yml` only does after the SDK check passed against it in
    another folder. *Done: the first run published
@@ -235,7 +235,7 @@ published like OpenUSD.
    it now waits for the result. Since then, two runs in a row were green (134, 112 and
    56 test cases), with the test step taking under a minute. Without PySide6, the six
    test files for Python-made panels and the render plugins aren't built (phase 4).*
-4. **PySide6.** A second deps asset built by `tools/build-pyside.ps1` against vcpkg's
+4. **PySide6.** A second deps asset built by `tools/build_pyside.py` against vcpkg's
    Qt, keyed on the vcpkg baseline, the pyside-setup tag and the Python version, so it
    always matches the Qt usdcc builds against. With it, `usdcc.ui` and the Python panel
    tests build and run in CI.
@@ -246,7 +246,7 @@ published like OpenUSD.
    71 test cases, all green, including the then-current Python render plugins.*
 
 Native RTX now has SDK-independent stage/navigation/controller tests using a fake
-engine and presentation, included in normal CI with `-WithoutRtx`. V-Ray keeps
+engine and presentation, included in normal CI with `--without-rtx`. V-Ray keeps
 its helper tests. `rtx-gpu.yml` is a manually dispatched workflow on a prepared
 self-hosted Windows RTX runner: it builds pinned native SDKs, runs the labeled
 GPU tests in all three modes and CUDA/Vulkan interop, and validates a packaged
@@ -264,11 +264,15 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 ## 7. Later
 
 - **Linux and macOS.** Hosted `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-latest`, each
-  with its own OpenUSD asset.
+  with its own OpenUSD asset. The scripts in `tools/` are Python, so they run there, and
+  `tools/build.py` and the naming, relocating and licence scripts in `tools/ci` already
+  take the platform into account (`tools/_common.py`). Still Windows only: `deps/usd.json`
+  (its `platform` and generator flag), `tools/deploy.py`'s folder layout with the smoke
+  tests that check it, and `tools/build_pyside.py`. None of it has run there yet.
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
-  render delegates), built against it and unzipped over it, so `tools/deploy.ps1` picks
+  render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
-- **Deploy artifact.** Upload `tools/deploy.ps1`'s output once M11 lands. Releases are
+- **Deploy artifact.** Upload `tools/deploy.py`'s output once M11 lands. Releases are
   planned in [RELEASE.md](RELEASE.md): a GitHub release gets its Windows zip from
   `release.yml`.
 - **Self-hosted runners** (the Windows PC, the Mac) for faster incremental builds, only

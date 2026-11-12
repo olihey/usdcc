@@ -61,7 +61,7 @@ jobs:
 
       - name: Name the OpenUSD asset
         id: asset
-        run: tools/ci/usd-asset.ps1 -GitHubOutput
+        run: python tools/ci/usd_asset.py --github-output
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -82,7 +82,8 @@ jobs:
       # panels from Python.
       - name: Download PySide6
         run: |
-          $asset = tools/ci/pyside-asset.ps1 | ConvertFrom-Json
+          $asset = python tools/ci/pyside_asset.py | ConvertFrom-Json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           gh release download $asset.tag --pattern $asset.zip --dir $env:RUNNER_TEMP
           if ($LASTEXITCODE) {
             Write-Host "::error::No $($asset.zip) in release $($asset.tag). Run the PySide6 workflow (deps-pyside.yml) first."
@@ -94,7 +95,7 @@ jobs:
       # build.yml's cache, only read: build.yml keeps it.
       - name: Name the vcpkg cache
         id: vcpkg
-        run: tools/ci/vcpkg-cache.ps1 -Access read
+        run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
         uses: actions/cache/restore@v4
@@ -106,7 +107,7 @@ jobs:
             ${{ steps.vcpkg.outputs.any }}
 
       - name: Build
-        run: tools/build.ps1 -UsdInstall $env:USD_INSTALL -WithoutRtx -UsdccVersion ${{ steps.tag.outputs.version }}
+        run: python tools/build.py --usd-install $env:USD_INSTALL --without-rtx --usdcc-version ${{ steps.tag.outputs.version }}
 
       - name: Test
         run: |
@@ -116,7 +117,8 @@ jobs:
       - name: Deploy
         run: |
           $deploy = "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}"
-          tools/deploy.ps1 $deploy
+          python tools/deploy.py $deploy
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           # A release has to ship every licence (docs/RELEASE.md section 6).
           foreach ($folder in 'OpenUSD-dependencies', 'PySide6', 'vcpkg') {
             if (-not (Get-ChildItem "$deploy\licenses\$folder" -ErrorAction SilentlyContinue)) {
@@ -126,9 +128,9 @@ jobs:
 
       - name: Start the deploy
         run: |
-          tools/ci/smoke-test.ps1 -Deploy "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" `
-            -ExpectVersion ${{ steps.tag.outputs.version }} `
-            -PlatformPlugins build\vcpkg_installed\x64-windows\Qt6\plugins\platforms
+          python tools/ci/smoke_test.py --deploy "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" `
+            --expect-version ${{ steps.tag.outputs.version }} `
+            --platform-plugins build\vcpkg_installed\x64-windows\Qt6\plugins\platforms
 
       # The deploy, in a folder of its own; and the PDBs of usdcc's own
       # programs and libraries, laid out as they are in the deploy, for reading

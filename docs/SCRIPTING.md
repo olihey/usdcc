@@ -36,7 +36,7 @@ These facts constrain the plan (checked in this checkout, 2026-11-02):
   an earlier configure. It can't be imported next to `pxr` in either interpreter.
 - **PySide6/Shiboken6 is not built here**, so the Shiboken `usdcc.ui` module (only
   `SidePanel`) is skipped by the build. `ViewPanel` isn't bound at all (PLAN.md §6 item 22).
-  Python access to Qt widgets therefore depends on `tools/build-pyside.ps1` and can't be part
+  Python access to Qt widgets therefore depends on `tools/build_pyside.py` and can't be part
   of M7's core.
 - **Every usdcc library except `usdcc_core` is static.** `usd.pyd` links its own copy of
   `usdcc_usd`, with its own `StageManager` class, so it can't reach the app's
@@ -85,7 +85,7 @@ The app embeds **the Python OpenUSD was built with**: `Python3_EXECUTABLE` from
   `PYTHONPATH` is still honoured, and so is the Python's own `site-packages`, so a user can
   `import numpy`.
 - **Deployed**, the app uses a Python bundled next to it instead: `..\python` from the
-  executable, with usdcc, pxr and PySide6 in its `Lib\site-packages` (tools/deploy.ps1;
+  executable, with usdcc, pxr and PySide6 in its `Lib\site-packages` (tools/deploy.py;
   PLAN.md §6 item 37).
   Nothing else changes.
 
@@ -271,7 +271,7 @@ first if the tab has unsaved changes.
   one undo step, and lists what it couldn't fix), Close and Close Others. Ruff is bundled at a
   pinned version (`cmake/modules/UsdccRuff.cmake` downloads PyPI's Windows wheel at configure
   time, checks its SHA-256 and unpacks `ruff.exe` and its LICENSE into `build/ruff`;
-  `tools/deploy.ps1` copies them into the deploy's `tools/ruff`). The app uses the deploy's,
+  `tools/deploy.py` copies them into the deploy's `tools/ruff`). The app uses the deploy's,
   then the build's, then one on PATH or in the Python's Scripts folder; without any, both
   entries are disabled and say why. Ruff gets the file's path as `--stdin-filename`, so the
   folder's `pyproject.toml`/`ruff.toml` settings apply. `-DUSDCC_BUNDLE_RUFF=OFF` skips the
@@ -294,7 +294,7 @@ first if the tab has unsaved changes.
 
 ## 8. Python-made UI (needs PySide)
 
-Only once `tools/build-pyside.ps1` has run, and CMake then finds it in `USDCC_PYSIDE_DIR`
+Only once `tools/build_pyside.py` has run, and CMake then finds it in `USDCC_PYSIDE_DIR`
 (default `external/pyside-install`) and builds `usdcc.ui`:
 
 - `usdcc.app.main_window()` returns the main window as a PySide6 `QMainWindow`, through
@@ -307,7 +307,7 @@ Only once `tools/build-pyside.ps1` has run, and CMake then finds it in `USDCC_PY
     doesn't know it;
   - it's added to the View menu above the toolbars;
   - it leaves the menu when it's deleted.
-- PySide is built for the same Python as §3.1 (OpenUSD's, which `build-pyside.ps1` reads from
+- PySide is built for the same Python as §3.1 (OpenUSD's, which `build_pyside.py` reads from
   usdcc's CMake cache) and against vcpkg's Qt. Its folder is on the embedded `sys.path`.
 
 ```python
@@ -400,7 +400,7 @@ build. `ViewPanel` from Python stays out of M7 (PLAN.md §6 item 22).
 | **2. App API and undo** *(done)* | `bindUsd()` shared; embedded `usdcc.usd`, `usdcc.app`, `usdcc.core`, `usdcc.tools`; Python helpers; `UndoManager` global edits; `ScriptRunner` with undo chunks and error handling | The exit-criterion test: open, edit, one undo step per stage, undo/redo match a UI edit; a failing script leaves one undoable step; `usd.pyd` still imports in a plain `python` |
 | **3. Script Editor panel** *(done)* | `ScriptEditorSidePanel`, `CodeEditor`, `PythonHighlighter`, run/run selection, output pane, files, persistence, icons | Panel tests (offscreen): highlighting spans, indentation, run → output → log, unsaved marker. In the app: the exit criterion done by hand from the panel |
 | **4. Startup scripts and CLI** *(done)* | Startup folder, `--script`, `--no-startup-scripts` | A failing startup script doesn't stop the others; `--script` output is in the log |
-| **5. PySide integration** *(done)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build-pyside.ps1` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
+| **5. PySide integration** *(done)* | `main_window()`, `add_side_panel()`, `MainWindow::addSidePanel()`, `build_pyside.py` on USD's Python | A Python `SidePanel` shows in the View menu and survives a layout restore |
 
 Phases 1 → 2 → 3 in order; 4 needs 2; 5 only needs 1, plus a PySide build.
 
@@ -479,7 +479,7 @@ Found for later:
   itself. Inside the app the DLLs are already loaded. Phase 2's "still imports in a plain
   python" check will make `usdcc/__init__.py` add them.
 - **`usdcc.ui` still uses the stale Python 3.11.** Its CMake keeps the PATH lookup (cached at
-  3.11) for PySide; phase 5 moves it to `USDCC_PYTHON_*`, together with `build-pyside.ps1`.
+  3.11) for PySide; phase 5 moves it to `USDCC_PYTHON_*`, together with `build_pyside.py`.
 
 ### Phase 2
 
@@ -570,8 +570,8 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
 
 ### Phase 5
 
-- **PySide6 for OpenUSD's Python.** `tools/build-pyside.ps1` now:
-  - builds for the `Python3_EXECUTABLE` in usdcc's CMake cache (OpenUSD's 3.12), or `-Python`;
+- **PySide6 for OpenUSD's Python.** `tools/build_pyside.py` now:
+  - builds for the `Python3_EXECUTABLE` in usdcc's CMake cache (OpenUSD's 3.12), or `--python`;
   - enters the Visual Studio developer environment itself when `cl.exe` isn't on PATH;
   - finds pip's `ninja.exe` (`ninja.BIN_DIR`; the old path guess was wrong for `--user`
     installs);

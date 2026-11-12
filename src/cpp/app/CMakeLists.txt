@@ -68,7 +68,7 @@ set_target_properties(usdcc PROPERTIES WIN32_EXECUTABLE ON)
 
 if(WIN32)
     # Visual Studio's own debugger (Start Debugging / F5) launches usdcc.exe
-    # directly, without USD's bin/lib on PATH — unlike tools/run.ps1, which
+    # directly, without USD's bin/lib on PATH — unlike tools/run.py, which
     # sets this by hand before launching — so Storm/Hydra fails to load with
     # "usd_usdImagingGL.dll was not found" the moment a stage is opened.
     # VS_DEBUGGER_ENVIRONMENT becomes <LocalDebuggerEnvironment> in the

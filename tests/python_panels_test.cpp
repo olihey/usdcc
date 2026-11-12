@@ -4,7 +4,7 @@
 // saved layout had it when a later session adds it again. View panels (M1): a
 // usdcc.ui.ViewPanel subclass registered with register_view_panel() opens as
 // a ScriptedViewPanel that follows its stage, fills its options menu, floats,
-// and duplicates. Needs PySide6 (tools/build-pyside.ps1); without it this
+// and duplicates. Needs PySide6 (tools/build_pyside.py); without it this
 // file isn't built.
 #include "python_test_app.h"
 #include "test_harness.h"

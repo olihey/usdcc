@@ -10,11 +10,11 @@
 # PySide6 can't be used for that reason.
 #
 # So PySide6/Shiboken6 are built from source against usdcc's own vcpkg Qt,
-# for OpenUSD's Python (the one the app embeds): tools/build-pyside.ps1,
+# for OpenUSD's Python (the one the app embeds): tools/build_pyside.py,
 # which leaves them in USDCC_PYSIDE_DIR (see the top-level CMakeLists.txt).
 # Without that build this module is skipped.
 if(NOT USDCC_PYSIDE_FOUND OR NOT USDCC_PYTHON_FOUND)
-    message(STATUS "usdcc.ui Python bindings: skipped (needs OpenUSD's Python and tools/build-pyside.ps1)")
+    message(STATUS "usdcc.ui Python bindings: skipped (needs OpenUSD's Python and tools/build_pyside.py)")
     return()
 endif()
 
@@ -23,7 +23,7 @@ set(_shiboken6_dir "${USDCC_PYSIDE_DIR}/shiboken6")
 set(_pyside6_dir "${USDCC_PYSIDE_DIR}/PySide6")
 # Set the package dirs outright rather than adding search hints: find_package()
 # prefers a <Package>_DIR already in the cache, and a build directory
-# configured before tools/build-pyside.ps1 existed has pip's packages there —
+# configured before tools/build_pyside.py existed has pip's packages there —
 # a PySide6 built against another Qt, and a shiboken6 whose bundled libclang
 # 20 can't parse external/libclang's version 19 headers.
 set(Shiboken6Tools_DIR "${_shiboken6_generator_dir}/lib/cmake/Shiboken6Tools" CACHE PATH "" FORCE)
@@ -89,7 +89,7 @@ set(_generated_sources
     "${_gen_dir}/usdcc/_ui/_ui_module_wrapper.cpp")
 
 # libclang's own headers, which shiboken6 otherwise can't find (it warns that
-# parse errors may follow); tools/build-pyside.ps1 leaves them here.
+# parse errors may follow); tools/build_pyside.py leaves them here.
 set(_shiboken_env "")
 if(EXISTS "${CMAKE_SOURCE_DIR}/external/libclang/lib/clang")
     set(_shiboken_env ${CMAKE_COMMAND} -E env "LLVM_INSTALL_DIR=${CMAKE_SOURCE_DIR}/external/libclang")

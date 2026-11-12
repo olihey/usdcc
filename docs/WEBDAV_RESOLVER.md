@@ -202,7 +202,7 @@ usdcc shows them in its Log ([LOGGING.md](LOGGING.md)).
 - **vcpkg:** `{ "name": "curl", "default-features": false, "features": ["openssl"] }` in
   `vcpkg.json`. Default features off drops FTP, SMTP and the other non-HTTP protocols. OpenSSL is
   already installed by vcpkg and already in the release's licences ([RELEASE.md](RELEASE.md) §6), so
-  curl's licence (`curl`, MIT-style) is the only new one. `tools/deploy.ps1` collects
+  curl's licence (`curl`, MIT-style) is the only new one. `tools/deploy.py` collects
   `licenses/vcpkg/curl.txt` automatically.
 - **Source:** `src/usd_plugins/webdav_resolver/`, a `webdavResolver` shared library and its
   `resources/plugInfo.json`:
@@ -218,7 +218,7 @@ usdcc shows them in its Log ([LOGGING.md](LOGGING.md)).
   ```
 
 - **Deploy:** `bin/usd/webdavResolver/resources/plugInfo.json`, which the existing
-  `bin/usd/plugInfo.json` (`"*/resources/"`) already picks up. Add it to deploy.ps1's required files.
+  `bin/usd/plugInfo.json` (`"*/resources/"`) already picks up. Add it to deploy.py's required files.
 - **Python:** `ArWrapResolverContextForPython<WebDavResolverContext>` and a small module, so
   scripts can make a context and pass it to `Usd.Stage.Open` ([SCRIPTING.md](SCRIPTING.md)).
 
