@@ -10,11 +10,13 @@
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
 #include "usdcc/usd/stages_menu.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -22,11 +24,15 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QMenu>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUndoStack>
 
+#include <algorithm>
 #include <memory>
 
 using usdcc::ui::CurrentStageTracker;
@@ -178,4 +184,71 @@ USDCC_TEST(stages_menu_make_current) {
     CHECK(left->currentStage() == two && front->currentStage() == two, "the panels on screen show it");
     CHECK(behind->currentStage() == one && closed->currentStage() == one, "a tab behind and a closed panel don't");
     CHECK(stages.currentStage() == two, "and it is the current stage");
+}
+
+// File > Save Stage As goes on in the new file: it takes the old stage's place in its
+// panels, as the current stage, with its selection and unsaved sublayer edits.
+USDCC_TEST(save_stage_as_switches_to_the_file) {
+    TestMode testMode;
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("out"));
+    {
+        QFile anim(dir.filePath(QStringLiteral("anim.usda")));
+        if (anim.open(QIODevice::WriteOnly)) anim.write("#usda 1.0\n");
+        QFile shot(dir.filePath(QStringLiteral("shot.usda")));
+        if (shot.open(QIODevice::WriteOnly)) shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\ndef \"Chair\" {}\n");
+    }
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr other = stages.createStage();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    stage->setEditTargetLayer(anim);
+    stage->usdStage()->DefinePrim(SdfPath("/Walk"));
+    stage->setEditTargetLayer(stage->usdStage()->GetRootLayer());
+    stage->usdStage()->DefinePrim(SdfPath("/Unsaved"));
+    stages.setSelectedPaths(stage, {SdfPath("/Chair")});
+    stages.setCurrentStage(stage);
+
+    MainWindow window;
+    ads::CDockManager* docks = window.dockManager();
+    auto* shown = new OutlinerViewPanel(&stages, stage, undo, QStringLiteral("Shown"), &window);
+    auto* hidden = new OutlinerViewPanel(&stages, stage, undo, QStringLiteral("Hidden"), &window);
+    auto* elsewhere = new OutlinerViewPanel(&stages, other, undo, QStringLiteral("Elsewhere"), &window);
+    docks->addDockWidget(ads::LeftDockWidgetArea, shown);
+    docks->addDockWidget(ads::CenterDockWidgetArea, hidden);
+    docks->addDockWidget(ads::RightDockWidgetArea, elsewhere);
+    window.show();
+    hidden->toggleView(false);
+    QApplication::processEvents();
+
+    QString error;
+    const QString path = dir.filePath(QStringLiteral("out/shot_v2.usda"));
+    const StageRefPtr saved = usdcc::usd::saveStageAsAndSwitch(stages, stage, path.toStdString(), &error);
+    CHECK(saved && saved != stage, "a new stage: %s", qPrintable(error));
+    if (!saved) return;
+    CHECK(QFileInfo(QString::fromStdString(saved->usdStage()->GetRootLayer()->GetRealPath())) == QFileInfo(path) &&
+              !saved->usdStage()->GetRootLayer()->IsDirty(),
+          "on the new file, saved");
+    CHECK(std::find(stages.stages().begin(), stages.stages().end(), stage) == stages.stages().end() &&
+              stages.stages().size() == 2,
+          "in the old stage's place");
+    CHECK(shown->currentStage() == saved && hidden->currentStage() == saved && elsewhere->currentStage() == other,
+          "its panels, closed ones too, show the new one; others don't change");
+    CHECK(stages.currentStage() == saved, "it is current");
+    CHECK(stages.selectedPaths(saved) == std::vector<SdfPath>({SdfPath("/Chair")}), "with the selection");
+    CHECK(saved->usdStage()->GetPrimAtPath(SdfPath("/Unsaved")) && saved->usdStage()->GetPrimAtPath(SdfPath("/Walk")),
+          "the root's unsaved edit, and the sublayer's, still unsaved");
+    CHECK(anim && anim->IsDirty() && saved->usdStage()->HasLocalLayer(anim), "in the same sublayer");
+
+    // Its own file: a plain save, the same stage.
+    saved->usdStage()->DefinePrim(SdfPath("/More"));
+    CHECK(usdcc::usd::saveStageAsAndSwitch(stages, saved, path.toStdString(), &error) == saved &&
+              !saved->usdStage()->GetRootLayer()->IsDirty(),
+          "its own file: saved in place");
 }

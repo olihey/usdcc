@@ -213,14 +213,18 @@ Phase 3 as built:
 - **File > Save Stage** (Ctrl+Shift+S, since Ctrl+S is the Script Editor's and the Layers
   panel's own Save) saves every unsaved file layer of the current stage.
 - **File > Save Stage As...** writes the current stage's root layer, unsaved edits included,
-  to another file (`layer_actions::saveStageAs()`), which goes in Open Recent:
-  - A copy, as Save As on a file layer: the stage keeps using its own root layer, and its
-    sublayers' unsaved edits stay theirs.
-  - Relative asset paths in it (sublayers, references, payloads, asset values) are rewritten
-    to find the same files from the new folder. Absolute paths and URIs stay; a search path
-    ("props/chair.usd") is rewritten only when the file is next to the root. An in-memory
-    root's paths stay as they are.
-  - Its own file: a plain save of the root layer.
+  to another file, then goes on in that file (`saveStageAsAndSwitch()`). It goes in Open Recent.
+  - The file opens as a stage in the old one's place, and the old one closes. Every panel
+    showing it switches over, keeping its camera, expanded rows and the rest (its session
+    state). So do the selection, the edit target and variant edit, muted layers, which
+    payloads are loaded, the session layer, and being the current stage.
+  - Its sublayers' unsaved edits stay unsaved, in the same layers, now the new stage's.
+  - The undo history doesn't come along.
+  - Relative asset paths in the file (sublayers, references, payloads, asset values) are
+    rewritten to find the same files from the new folder (`layer_actions::saveStageAs()`).
+    Absolute paths and URIs stay; a search path ("props/chair.usd") is rewritten only when
+    the file is next to the root. An in-memory root's paths stay as they are.
+  - Its own file: a plain save of the root layer, and the stage stays.
 - **Unsaved changes on close:**
   - `confirmUnsavedLayers()` lists the unsaved file layers and asks Save All, Discard or Cancel.
   - It runs before File > Close Stage (and the Stages menu's Close Stage) and when the window

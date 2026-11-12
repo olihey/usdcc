@@ -58,6 +58,7 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/recent_files.h"
+#include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/variant_editor_dialog.h"
@@ -296,6 +297,9 @@ int main(int argc, char** argv) {
     // Sessions (docs/SESSIONS.md). While one loads, a stage opened doesn't get a
     // viewport of its own (below): the session says which panels there are.
     bool sessionLoading = false;
+    // While File > Save Stage As puts the new file in the old stage's panels, the
+    // stage it opens gets no viewport of its own.
+    bool stageSwitching = false;
     bool restartRequested = false;
     QStringList restartArguments;
     usdcc::scripting::SessionController::Context sessionContext;
@@ -426,8 +430,8 @@ int main(int argc, char** argv) {
     // bringing a tab to the front doesn't move ADS's focus, so the panel
     // focused before would otherwise keep its stage current.
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&window, &panelTypes, &stageManager, &sessionLoading](const usdcc::usd::StageRefPtr& stage) {
-            if (sessionLoading) return;
+        [&window, &panelTypes, &stageManager, &sessionLoading, &stageSwitching](const usdcc::usd::StageRefPtr& stage) {
+            if (sessionLoading || stageSwitching) return;
             auto focus = [&](usdcc::ui::ViewPanel* panel) {
                 if (panel) window.dockManager()->setDockWidgetFocused(panel);
                 stageManager.setCurrentStage(stage);
@@ -539,14 +543,15 @@ int main(int argc, char** argv) {
             QMessageBox::warning(&window, QObject::tr("Save Stage"), error);
         }
     });
-    // File > Save Stage As: the current stage's root layer as a copy in another
-    // file, which goes in Open Recent (layer_actions::saveStageAs()).
+    // File > Save Stage As: the current stage's root layer to another file, which
+    // the app then goes on in, in the old stage's place (saveStageAsAndSwitch()). It
+    // goes in Open Recent.
     QAction* saveStageAsAction = fileMenu->addAction(QObject::tr("Save Stage &As..."));
-    saveStageAsAction->setStatusTip(QObject::tr("Save the current stage's root layer to another file"));
+    saveStageAsAction->setStatusTip(QObject::tr("Save the current stage to another file, and go on in that file"));
     QObject::connect(fileMenu, &QMenu::aboutToShow, saveStageAsAction, [&stageManager, saveStageAsAction]() {
         saveStageAsAction->setEnabled(stageManager.currentStage() != nullptr);
     });
-    QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, &window]() {
+    QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, &window, &stageSwitching]() {
         const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
         if (!stage) return;
         const std::string real = stage->usdStage()->GetRootLayer()->GetRealPath();
@@ -557,7 +562,11 @@ int main(int argc, char** argv) {
         if (path.isEmpty()) return;
         if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
         QString error;
-        if (!usdcc::usd::layer_actions::saveStageAs(stage, path.toStdString(), &error)) {
+        stageSwitching = true;
+        const usdcc::usd::StageRefPtr saved =
+            usdcc::usd::saveStageAsAndSwitch(stageManager, stage, path.toStdString(), &error);
+        stageSwitching = false;
+        if (!saved) {
             QMessageBox::warning(&window, QObject::tr("Save Stage As"), error);
             return;
         }

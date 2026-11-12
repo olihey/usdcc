@@ -114,6 +114,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/properties/schema_pills.h
     include/usdcc/usd/properties/transform_stack_editor.h
     include/usdcc/usd/close_stage_dialog.h
+    include/usdcc/usd/save_stage_as.h
     include/usdcc/usd/create_menu.h
     include/usdcc/usd/current_stage_ui.h
     include/usdcc/usd/session_stages.h
@@ -168,6 +169,7 @@ add_library(usdcc_usd_ui SHARED
     src/properties/schema_pills.cpp
     src/properties/transform_stack_editor.cpp
     src/close_stage_dialog.cpp
+    src/save_stage_as.cpp
     src/create_menu.cpp
     src/current_stage_ui.cpp
     src/session_stages.cpp
