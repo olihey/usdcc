@@ -168,9 +168,12 @@ set_target_properties(
     PROPERTIES
         OUTPUT_NAME "_ui"
         PREFIX ""
-        SUFFIX ".pyd"
         LIBRARY_OUTPUT_DIRECTORY "${_python_package_dir}"
         RUNTIME_OUTPUT_DIRECTORY "${_python_package_dir}")
+# Elsewhere a module's own suffix (.so) is the one Python imports.
+if(WIN32)
+    set_target_properties(usdcc_ui_python PROPERTIES SUFFIX ".pyd")
+endif()
 foreach(_config ${CMAKE_CONFIGURATION_TYPES})
     string(TOUPPER "${_config}" _config_upper)
     set_target_properties(

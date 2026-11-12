@@ -206,4 +206,17 @@ if(WIN32)
         PROPERTIES
             VS_DEBUGGER_ENVIRONMENT
             "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")
+else()
+    # Not yet run on Linux or macOS: USD's plugins, and its libraries for
+    # whatever the executables' rpath doesn't reach.
+    if(APPLE)
+        set(_usdcc_library_path DYLD_LIBRARY_PATH)
+    else()
+        set(_usdcc_library_path LD_LIBRARY_PATH)
+    endif()
+    set_tests_properties(
+        usdcc_tests usdcc_ui_tests usdcc_python_tests
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+            "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
 endif()

@@ -12,6 +12,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 #include "usdcc/scripting/python_runtime.h"
@@ -81,6 +83,15 @@ std::filesystem::path executableDir() {
         buffer.resize(buffer.size() * 2);  // truncated: try a bigger buffer
     }
     return std::filesystem::path(buffer).parent_path();
+#elif defined(__APPLE__)
+    // macOS has no /proc. Not yet run there.
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);  // fails, and says how long the path is
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
+    std::error_code error;
+    const std::filesystem::path path = std::filesystem::canonical(buffer.c_str(), error);
+    return error ? std::filesystem::path() : path.parent_path();
 #else
     std::error_code error;
     return std::filesystem::read_symlink("/proc/self/exe", error).parent_path();
