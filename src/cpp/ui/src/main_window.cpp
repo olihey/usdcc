@@ -100,6 +100,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
     ads::CDockManager::setConfigFlag(ads::CDockManager::FocusHighlighting, true);
+    // Background tabs show their close button too, so a panel can be closed
+    // without bringing it to the front first.
+    ads::CDockManager::setConfigFlag(ads::CDockManager::AllTabsHaveCloseButton, true);
     m_dockManager = new ads::CDockManager(this);
     theme::applyToDockManager(m_dockManager);
     setCentralWidget(m_dockManager);
