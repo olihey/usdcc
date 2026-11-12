@@ -112,6 +112,19 @@ bool readTextFile(const QString& path, std::string* text) {
     return true;
 }
 
+// Whether `path` is a text USDA file (whatever its extension), without reading it.
+bool isTextFile(const QString& path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) && file.peek(5) == "#usda";
+}
+
+// The size of a layer's file; 0 for an anonymous layer or one with no file.
+std::size_t layerFileBytes(const PXR_NS::SdfLayerHandle& layer) {
+    if (!layer || layer->IsAnonymous() || layer->GetRealPath().empty()) return 0;
+    const QFileInfo info(QString::fromStdString(layer->GetRealPath()));
+    return info.exists() ? std::size_t(info.size()) : 0;
+}
+
 // A layer's text as it is in its file, when that's the same as the layer: a
 // text file with no unsaved changes. False when it has to be exported.
 bool readLayerFile(const PXR_NS::SdfLayerHandle& layer, std::string* text) {
@@ -272,6 +285,14 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     auto* showAllButton = barButton(tr("Show All"), m_limitBar);
     m_limitBar->layout()->addWidget(showAllButton);
     connect(showAllButton, &QPushButton::clicked, this, &UsdaView::showAll);
+    // Before converting a big file (§5.1): the size, and Convert to go ahead.
+    m_askBar = makeBar(this, &m_askLabel);
+    m_askLabel->setWordWrap(true);
+    auto* convertButton = barButton(tr("Convert"), m_askBar);
+    convertButton->setObjectName(QStringLiteral("usdaConvertButton"));
+    m_askBar->layout()->addWidget(convertButton);
+    connect(convertButton, &QPushButton::clicked, this, &UsdaView::convert);
+    m_askBar->setVisible(false);
 
     m_status = new QLabel(this);
     m_status->setObjectName(QStringLiteral("propertyNote"));
@@ -279,6 +300,7 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
 
     layout->addWidget(toolbar);
     layout->addWidget(m_findBar);
+    layout->addWidget(m_askBar);
     layout->addWidget(m_text, 1);
     layout->addWidget(m_limitBar);
     layout->addWidget(m_staleBar);
@@ -337,9 +359,10 @@ void UsdaView::setStage(const StageRefPtr& stage) {
     m_showAll = false;
     m_back.clear();  // another stage's places
     m_forward.clear();
+    m_convertApproved = false;
     updateHistoryButtons();
     refreshShowMenu();
-    refresh();
+    requestRefresh();
 }
 
 void UsdaView::adoptStage(const StageRefPtr& stage) {
@@ -370,8 +393,77 @@ void UsdaView::setStatusNote(const QString& note) {
 void UsdaView::setSource(const Source& source) {
     m_source = source;
     m_showAll = false;
+    m_convertApproved = false;
     refreshShowMenu();
+    requestRefresh();
+}
+
+void UsdaView::requestRefresh() {
+    if (isVisible()) {
+        refresh();
+        return;
+    }
+    // Hidden (§5.1): nothing is made until it's shown, and what was there is another
+    // source's, so it goes.
+    m_autoRefresh->stop();
+    m_refreshPending = true;
+    m_text->setText(std::string());
+    m_lineStates.clear();
+    m_primLinesValid = false;
+    m_name.clear();
+    m_textBytes = 0;
+    m_truncated = false;
+    m_outOfDate = false;
+    m_awaitingConvert = false;
+    m_askBar->setVisible(false);
+    m_limitBar->setVisible(false);
+    m_staleBar->setVisible(false);
+    updateStatus();
+}
+
+std::size_t UsdaView::exportSourceBytes() const {
+    switch (m_source.kind) {
+        case Source::Kind::File: {
+            const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(m_source.identifier);
+            if (open && open->IsDirty()) return layerFileBytes(open);
+            const QString path = qs(m_source.identifier);
+            if (isTextFile(path)) return 0;  // read as it is
+            const QFileInfo info(path);
+            return info.exists() ? std::size_t(info.size()) : 0;
+        }
+        case Source::Kind::Layer: {
+            if (!m_stage) return 0;
+            const PXR_NS::SdfLayerHandle layer = m_source.identifier.empty() ? m_stage->usdStage()->GetRootLayer()
+                                                                             : PXR_NS::SdfLayer::Find(m_source.identifier);
+            if (!layer) return 0;
+            if (!layer->IsDirty() && !layer->IsAnonymous() && isTextFile(qs(layer->GetRealPath()))) return 0;
+            return layerFileBytes(layer);
+        }
+        case Source::Kind::FlattenedLayerStack:
+        case Source::Kind::FlattenedStage: {
+            // Its layer stack at least; a flattened stage composes in more.
+            if (!m_stage) return 0;
+            std::size_t bytes = 0;
+            for (const PXR_NS::SdfLayerHandle& layer : m_stage->usdStage()->GetLayerStack(/*includeSessionLayers=*/false)) {
+                bytes += layerFileBytes(layer);
+            }
+            return bytes;
+        }
+    }
+    return 0;
+}
+
+void UsdaView::convert() {
+    m_convertApproved = true;
     refresh();
+}
+
+void UsdaView::scrollToLine(int line) {
+    if (m_refreshPending || m_awaitingConvert) {
+        m_pendingScrollLine = line;
+        return;
+    }
+    m_text->verticalScrollBar()->setValue(line);
 }
 
 void UsdaView::refreshShowMenu() {
@@ -442,6 +534,49 @@ void UsdaView::refreshShowMenu() {
 
 void UsdaView::refresh() {
     m_autoRefresh->stop();
+    m_refreshPending = false;
+    m_awaitingConvert = false;
+    m_askBar->setVisible(false);
+
+    // A big file isn't converted until Convert says so (§5.1): it would hold up the
+    // whole app for as long as it takes.
+    if (!m_convertApproved) {
+        const std::size_t bytes = exportSourceBytes();
+        if (bytes > 0 && bytes >= m_askBytes) {
+            m_awaitingConvert = true;
+            m_text->setText(std::string());
+            m_lineStates.clear();
+            m_primLinesValid = false;
+            m_textBytes = 0;
+            m_truncated = false;
+            m_outOfDate = false;
+            m_fromFile = false;
+            m_payloadNote.clear();
+            const QLocale locale;
+            const QString size = locale.formattedDataSize(qint64(bytes));
+            if (m_source.kind == Source::Kind::FlattenedLayerStack || m_source.kind == Source::Kind::FlattenedStage) {
+                m_name = m_source.kind == Source::Kind::FlattenedStage ? tr("Flattened Stage") : tr("Flattened Layer Stack");
+                m_askLabel->setText(tr("The stage's layers are %1 on disk. Flattening them to text can take minutes, "
+                                       "and the app waits meanwhile.")
+                                        .arg(size));
+            } else {
+                PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(m_source.identifier);
+                if (m_source.kind == Source::Kind::Layer && m_source.identifier.empty() && m_stage) {
+                    layer = m_stage->usdStage()->GetRootLayer();
+                }
+                m_name = layer ? qs(layer->GetDisplayName()) : QFileInfo(qs(m_source.identifier)).fileName();
+                m_askLabel->setText(tr("%1 is a %2 binary file. Converting it to text can take minutes, and the "
+                                       "app waits meanwhile.")
+                                        .arg(m_name, size));
+            }
+            m_askBar->setVisible(true);
+            m_limitBar->setVisible(false);
+            m_staleBar->setVisible(false);
+            updateStatus();
+            return;
+        }
+    }
+
     // All of it on this thread (§5): a big layer takes seconds, so at least say so.
     QApplication::setOverrideCursor(Qt::WaitCursor);
     std::string text;
@@ -529,8 +664,10 @@ void UsdaView::refresh() {
     const int line = m_text->verticalScrollBar()->value();
     const int column = m_text->horizontalScrollBar()->value();
     m_text->setText(std::move(text));
-    m_text->verticalScrollBar()->setValue(line);
-    m_text->horizontalScrollBar()->setValue(column);
+    // A place asked for before the text was there (a session's scroll), else where it was.
+    m_text->verticalScrollBar()->setValue(m_pendingScrollLine >= 0 ? m_pendingScrollLine : line);
+    m_text->horizontalScrollBar()->setValue(m_pendingScrollLine >= 0 ? 0 : column);
+    m_pendingScrollLine = -1;
     m_text->viewport()->repaint();  // the first paint, timed with the rest
     m_timings.documentMs = timer.elapsed();
     QApplication::restoreOverrideCursor();
@@ -552,6 +689,11 @@ void UsdaView::updateStatus() {
     }
     const QLocale locale;
     const QString dot = QStringLiteral("  \xC2\xB7  ");
+    if (m_awaitingConvert) {
+        m_status->setText(m_name + dot + tr("not converted"));
+        m_status->setToolTip(QString());
+        return;
+    }
     QString status = tr("%1%4%2 lines%4%3")
                          .arg(m_name, locale.toString(m_text->lineCount()),
                               locale.formattedDataSize(qint64(m_textBytes)), dot);
@@ -584,6 +726,11 @@ bool UsdaView::autoRefreshes() const {
 
 void UsdaView::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
+    // A new stage or source while hidden: its text now. A big file only shows the bar.
+    if (m_refreshPending) {
+        refresh();
+        return;
+    }
     // Changed while hidden: catch up now.
     if (m_outOfDate && autoRefreshes()) m_autoRefresh->start();
 }

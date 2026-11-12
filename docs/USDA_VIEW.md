@@ -116,6 +116,28 @@ line file: under a second to first paint, smooth scrolling, and no stall while t
   sits behind the same panel API, so nothing else changes, but it costs selection, find and
   later editing written by hand. That's why it isn't the first choice.
 
+### 5.1 Only on screen, and asking first for big files
+
+Added 2026-11-12, after a 1.95 GB usdc (two meshes, 14M faces) hung the app for over a minute once
+the viewport had drawn it: a USDA panel in a tab behind the viewport converted its root layer.
+`ExportToString()` took 77 s and made 2.15 GB of text in 112 lines, so "USD's writer is fast" above
+holds for text-sized layers, not for big binary ones.
+
+- **Only on screen.** A new stage or source while the view is hidden (a panel's tab behind another,
+  a panel not shown yet) makes nothing: the old text goes and the view is marked pending
+  (`UsdaView::isRefreshPending()`). It makes its text when it's shown, in its `showEvent()`. A
+  session's scroll position waits for that text (`scrollToLine()`). Edits while hidden already
+  waited (the auto-refresh only runs while visible).
+- **Asking first.** When the text would be converted rather than read from a text file, and the file
+  it comes from is `kAskBeforeExportBytes` (64 MB) or more on disk, the view converts nothing. A bar
+  says what and how big ("lion_statue_hq.usd is a 1.82 GB binary file. Converting it to text can take
+  minutes, and the app waits meanwhile.") with **Convert**, the text stays empty, and the status line
+  says "not converted". The flattened views count the sizes of the stage's layer stack. Convert holds
+  for that source on that stage; another source or stage asks again. A text file is read as it is,
+  whatever its size, and never asks. The Show USDA dialog asks the same way.
+- Tests: `usda_view_waits_while_hidden`, `usda_view_asks_before_converting`. In the app with the
+  1.95 GB file: the panel opened with the bar, and no stall.
+
 ## 6. Links
 
 - **What's a link:**

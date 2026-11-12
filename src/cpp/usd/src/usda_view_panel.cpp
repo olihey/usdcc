@@ -108,7 +108,8 @@ void UsdaViewPanel::restoreSessionState(const QJsonObject& state) {
     if (wanted.kind == Source::Kind::Layer && !wanted.identifier.empty() && !PXR_NS::SdfLayer::Find(wanted.identifier)) return;
     setSource(wanted);
     const int scroll = state.value(QStringLiteral("scroll")).toInt();
-    QTimer::singleShot(0, this, [this, scroll]() { lineView()->verticalScrollBar()->setValue(scroll); });
+    // Once laid out; a panel behind another tab gets its text, and so the place, when shown.
+    QTimer::singleShot(0, this, [this, scroll]() { m_view->scrollToLine(scroll); });
 }
 
 }  // namespace usdcc::usd

@@ -25,6 +25,8 @@
 #include <QLabel>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonObject>
+#include <QPushButton>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
@@ -414,6 +416,7 @@ USDCC_TEST(usda_view_links) {
     });
     Q_EMIT view->linkActivated(link, Qt::LeftButton, Qt::ControlModifier);
     wait(50);
+    if (made) made->show();  // as the app docks it; a panel makes its text once shown
     CHECK(made && made->source().kind == UsdaViewPanel::Source::Kind::File &&
               shown(*made).contains("def Xform \"Chair\"") && panel.source().kind == UsdaViewPanel::Source::Kind::Layer,
           "Ctrl+click opens it in a new panel, this one stays");
@@ -559,6 +562,7 @@ USDCC_TEST(usda_preview_dialog) {
 
     // A file that can't load as a stage: its text stays, the status says why.
     usdcc::usd::UsdaPreviewDialog broken(dir.filePath(QStringLiteral("broken.usda")));
+    broken.show();
     CHECK(QString::fromStdString(broken.view()->lineView()->text()).contains("not usda"), "a broken file's text shows");
     CHECK(waitForStage(broken) && !broken.view()->stage(), "no stage");
     CHECK(broken.view()->statusLabel()->text().contains("Couldn't load"), "and it says why: [%s]",
@@ -703,5 +707,109 @@ USDCC_TEST(line_view_very_long_lines) {
     view.setCursorPosition({0, 5003});
     QApplication::processEvents();
     CHECK(view.cursorPosition().column == 5003, "the very end");
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// docs/USDA_VIEW.md §5.1: a panel makes its text only on screen, so a tab behind
+// another costs nothing when its stage changes.
+USDCC_TEST(usda_view_waits_while_hidden) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    const StageRefPtr first = stages.createStage();
+    first->usdStage()->DefinePrim(SdfPath("/First"));
+    const StageRefPtr second = stages.createStage();
+    second->usdStage()->DefinePrim(SdfPath("/Second"));
+    for (int i = 0; i < 200; ++i) second->usdStage()->DefinePrim(SdfPath("/Second/P" + std::to_string(i)));
+
+    UsdaViewPanel panel(&stages, first);
+    auto* view = panel.findChild<UsdaView*>();
+    CHECK(view && view->isRefreshPending() && shown(panel).isEmpty(), "never shown: no text made yet");
+    panel.resize(700, 300);
+    panel.show();
+    CHECK(!view->isRefreshPending() && shown(panel).contains("First"), "shown: the text at once");
+
+    // Behind another tab: a new stage waits, and the old text goes.
+    panel.hide();
+    panel.setStage(second);
+    CHECK(view->isRefreshPending() && shown(panel).isEmpty(), "hidden: the new stage waits");
+    panel.show();
+    CHECK(!view->isRefreshPending() && shown(panel).contains("Second") && !shown(panel).contains("First"),
+          "shown again: the new stage's text");
+
+    // A session restored into a hidden panel keeps its place for when it's shown.
+    panel.hide();
+    panel.setStage(first);
+    panel.setStage(second);
+    QJsonObject state;
+    state.insert(QStringLiteral("kind"), 0);
+    state.insert(QStringLiteral("scroll"), 40);
+    panel.restoreSessionState(state);
+    wait(20);
+    panel.show();
+    wait(20);
+    CHECK(panel.lineView()->verticalScrollBar()->value() == 40, "the session's place: [%d]",
+          panel.lineView()->verticalScrollBar()->value());
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// docs/USDA_VIEW.md §5.1: converting a big binary file waits for Convert.
+USDCC_TEST(usda_view_asks_before_converting) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    const std::string binary = dir.filePath(QStringLiteral("big.usdc")).toStdString();
+    const std::string text = dir.filePath(QStringLiteral("big.usda")).toStdString();
+    {
+        const SdfLayerRefPtr layer = SdfLayer::CreateNew(binary);
+        SdfCreatePrimInLayer(layer, SdfPath("/Statue"))->SetSpecifier(SdfSpecifierDef);
+        layer->Save();
+        layer->Export(text);
+    }
+    const std::size_t binaryBytes = std::size_t(QFileInfo(QString::fromStdString(binary)).size());
+    CHECK(binaryBytes > 0, "a binary layer on disk");
+
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(binary);
+    if (!stage) return;
+    UsdaViewPanel panel(&stages, stage);
+    auto* view = panel.findChild<UsdaView*>();
+    view->setAskBeforeExportBytes(binaryBytes);  // as big as the threshold: it asks
+    panel.resize(700, 300);
+    panel.show();
+    QLabel* askLabel = nullptr;
+    for (QLabel* label : panel.findChildren<QLabel*>()) {
+        if (label->text().contains("binary file")) askLabel = label;
+    }
+    CHECK(view->isAwaitingConvert() && shown(panel).isEmpty(), "a big binary root layer: not converted yet");
+    CHECK(askLabel && askLabel->isVisible() && askLabel->text().contains("big.usdc"), "the bar says what and how big: [%s]",
+          askLabel ? qPrintable(askLabel->text()) : "none");
+    CHECK(view->statusLabel()->text().contains("not converted"), "and so does the status: [%s]",
+          qPrintable(view->statusLabel()->text()));
+    auto* convertButton = panel.findChild<QPushButton*>(QStringLiteral("usdaConvertButton"));
+    CHECK(convertButton && convertButton->isVisible(), "with Convert");
+    if (convertButton) convertButton->click();
+    CHECK(!view->isAwaitingConvert() && shown(panel).startsWith("#usda") && shown(panel).contains("Statue") &&
+              askLabel && !askLabel->isVisible(),
+          "Convert: the text, the bar gone");
+
+    // Another source asks again: the flattened views start from the same file.
+    UsdaView::Source flat;
+    flat.kind = UsdaView::Source::Kind::FlattenedStage;
+    panel.setSource(flat);
+    CHECK(view->isAwaitingConvert() && shown(panel).isEmpty(), "the flattened stage asks too");
+    view->convert();
+    CHECK(!view->isAwaitingConvert() && shown(panel).contains("Statue"), "and converts when told");
+
+    // A text file is read as it is, however big: no question.
+    const StageRefPtr textStage = stages.openStage(text);
+    if (!textStage) return;
+    view->setAskBeforeExportBytes(1);
+    panel.setStage(textStage);
+    CHECK(!view->isAwaitingConvert() && panel.isFromFile() && shown(panel).contains("Statue"), "a text layer never asks");
     QStandardPaths::setTestModeEnabled(false);
 }

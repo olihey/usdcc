@@ -54,11 +54,19 @@ namespace usdcc::usd {
 // A file can show with no stage (setSource() with a File source): a text file
 // no stage has open is read without parsing it, so it's instant. A stage can
 // then arrive with adoptStage(), without disturbing the text (§10.3).
+//
+// Only a view on screen makes its text (§5.1): a new stage or source while it's
+// hidden (a panel's tab behind another) waits until it's shown. And a layer that
+// has to be converted from a big binary file (kAskBeforeExportBytes on disk or
+// more), or a flattened view of layers that big, waits for Convert in a bar,
+// with the text empty: converting a 2 GB usdc takes over a minute.
 class USDCC_USD_UI_API UsdaView : public QWidget {
     Q_OBJECT
 
 public:
     static constexpr std::size_t kAutoRefreshBytes = 5u << 20;  // 5 MB
+    // From this much on disk, converting to text waits for Convert (§5.1).
+    static constexpr std::size_t kAskBeforeExportBytes = std::size_t(64) << 20;  // 64 MB
     // Only a matter of memory now, not time (§9.2).
     static constexpr std::size_t kShowLimitBytes = std::size_t(1) << 30;  // 1 GB
 
@@ -124,6 +132,16 @@ public:
     bool isTruncated() const { return m_truncated; }
     // The whole text's size, shown or not.
     std::size_t textBytes() const { return m_textBytes; }
+    // Hidden with a new stage or source: the text comes when the view is shown.
+    bool isRefreshPending() const { return m_refreshPending; }
+    // Waiting for Convert: what's shown would be converted from a big file.
+    bool isAwaitingConvert() const { return m_awaitingConvert; }
+    // How much on disk makes it ask; kAskBeforeExportBytes unless a test sets less.
+    void setAskBeforeExportBytes(std::size_t bytes) { m_askBytes = bytes; }
+    // Converts what's shown even though it's big, as the bar's Convert does.
+    void convert();
+    // Scrolls to `line` once the text is there: now, or after a pending refresh.
+    void scrollToLine(int line);
     // Closes the Find bar if it's open; false if it wasn't.
     bool closeFind();
 
@@ -157,6 +175,11 @@ private:
     void watchStage();
     void updateStatus();
     bool autoRefreshes() const;
+    // refresh() now when the view is on screen, else when it's shown.
+    void requestRefresh();
+    // What converting the source would start from, on disk, when it has to be
+    // converted rather than read as text: 0 when it's read, or unknown (anonymous).
+    std::size_t exportSourceBytes() const;
     void goToLine();
     void startCounting();
     // Shows `source` as a step in the history.
@@ -184,6 +207,8 @@ private:
     QWidget* m_staleBar;
     QWidget* m_limitBar;
     QLabel* m_limitLabel;
+    QWidget* m_askBar;
+    QLabel* m_askLabel;
     QWidget* m_findBar;
     QLineEdit* m_findText;
     QLabel* m_findCount;
@@ -202,6 +227,12 @@ private:
     bool m_showAll = false;
     bool m_fillingShow = false;
     bool m_fromFile = false;
+    bool m_refreshPending = false;
+    bool m_awaitingConvert = false;
+    // Convert was clicked for this source on this stage: it converts, however big.
+    bool m_convertApproved = false;
+    std::size_t m_askBytes = kAskBeforeExportBytes;
+    int m_pendingScrollLine = -1;
     std::size_t m_textBytes = 0;
     Timings m_timings;
     std::vector<HistoryEntry> m_back;
