@@ -80,15 +80,16 @@ tags, so they're `0.0.0+<commit>`.
 - The app icon, "usdcc", the version in large type, and "Development build" under it when
   it isn't a release.
 - The commit, linked to it on GitHub, and the build date.
-- The components it runs with: OpenUSD, Qt, Python, PySide6 (when present), and the
-  compiler. Read at run time where possible (`qVersion()`, Python's `sys.version`), so the
+- The components it runs with: OpenUSD, MaterialX (when OpenUSD was built with it), Qt,
+  Python, PySide6 (when present), and the compiler. Read at run time where possible (`qVersion()`, Python's `sys.version`), so the
   dialog shows what is actually loaded.
 - Links to the repository and its releases.
 - **Copy**, which copies all of it as plain text for a bug report.
 
 `usdcc::ui::AboutDialog` lives in `usdcc_ui` and is given its rows. The app fills them in
 (`main.cpp`), because `usdcc_ui` doesn't know about Python: OpenUSD's version from
-`pxr/pxr.h`, Python's from the running interpreter, PySide6's from the module when it's
+`pxr/pxr.h`, MaterialX's from `MaterialXCore/Generated.h` (the version OpenUSD was built
+with; the row is left out when the header isn't there), Python's from the running interpreter, PySide6's from the module when it's
 there. A test in `usdcc_ui_tests` checks the rows and the copied text. The app's stylesheet
 sets font sizes, so the larger title and version are sized with a stylesheet on the label.
 

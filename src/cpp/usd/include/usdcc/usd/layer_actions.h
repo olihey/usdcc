@@ -85,6 +85,12 @@ bool saveAll(const StageRefPtr& stage, QString* error);
 // Returns the identifier of the layer now at `path`, or empty with `error` set.
 std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
                         const std::string& path, QString* error);
+// File > Save Stage As: writes the stage's root layer, unsaved edits included,
+// to the file `path` as a copy; the stage keeps using its own root layer. Relative
+// asset paths in it (sublayers, references, payloads, asset values) are rewritten
+// to still find the same files from `path`'s folder. Its sublayers' own unsaved
+// edits stay where they are. False, with `error` set, if it can't.
+bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* error);
 
 // Layer properties (§6), each one undo step. editLayer() runs `edit` on the
 // layer `identifier` (its default prim, time codes, comment, ...);

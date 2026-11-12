@@ -367,7 +367,7 @@ quarters the width.
 
 ### 6.1 Layout
 
-File > Sessions... (Ctrl+Alt+S), and File > Open Session > (the five most recent, then "More...").
+File > Sessions > (the five most recent, then "Manage...", Ctrl+Alt+S, which opens this dialog).
 
 ```
 ┌ Sessions ──────────────────────────────────────────────────────────┐
@@ -458,7 +458,7 @@ Phases 0 and 1 are useful alone. 2 and 3 are independent of each other; 4 and 5 
     and `captureWindowPreview()`.
   - `usdcc_scripting_ui`: `SessionController` (capture, save, load, plugins, Locate, Python's
     `SessionHost`) and `SessionsDialog`. The Script Editor's `sessionState()`/`restoreSessionState()`.
-  - `main.cpp`: File > Sessions... (Ctrl+Alt+S) and File > Open Session >, `--open-session`, the Last
+  - `main.cpp`: File > Sessions > (its Manage..., Ctrl+Alt+S, opens the dialog), `--open-session`, the Last
     session on close, and the restart.
 - **Differs from the plan**:
   - `--open-session`, not `--session` (§4.5).

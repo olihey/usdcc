@@ -7,10 +7,12 @@
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
+#include "usdcc/usd/stages_menu.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/usd/prim.h>
@@ -20,6 +22,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QMenu>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUndoStack>
@@ -123,4 +126,56 @@ USDCC_TEST(current_stage_undo_and_title) {
     CHECK(stages.currentStage() == one && undoAction->text() == "&Undo Add Apple", "back on one: [%s]",
           qPrintable(undoAction->text()));
     delete undoAction;
+}
+
+// Stages > a stage: Make Current first, then the panel types under Views, then
+// Close Stage. Make Current switches the panels on screen only.
+USDCC_TEST(stages_menu_make_current) {
+    TestMode testMode;
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr one = stages.createStage();
+    const StageRefPtr two = stages.createStage();
+
+    MainWindow window;
+    ads::CDockManager* docks = window.dockManager();
+    auto* left = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Left"), &window);
+    auto* front = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Front"), &window);
+    auto* behind = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Behind"), &window);
+    auto* closed = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Closed"), &window);
+    docks->addDockWidget(ads::LeftDockWidgetArea, left);
+    ads::CDockAreaWidget* area = docks->addDockWidget(ads::CenterDockWidgetArea, behind);
+    docks->addDockWidgetTabToArea(front, area);
+    docks->addDockWidget(ads::RightDockWidgetArea, closed);
+    window.resize(900, 500);
+    window.show();
+    front->setAsCurrentTab();
+    closed->toggleView(false);
+    QApplication::processEvents();
+
+    usdcc::ui::ViewPanelRegistry types;
+    types.add(QStringLiteral("outliner"), QStringLiteral("Outliner"), {});
+    usdcc::usd::StagesMenu menu(&stages, &types, docks, &window);
+    Q_EMIT menu.aboutToShow();
+    const QList<QMenu*> stageMenus = menu.findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK(stageMenus.size() == 2, "a submenu per stage: [%d]", int(stageMenus.size()));
+    if (stageMenus.size() != 2) return;
+    QMenu* second = stageMenus[1];
+    const QList<QAction*> actions = second->actions();
+    QMenu* views = second->findChild<QMenu*>(QStringLiteral("views"));
+    CHECK(actions.size() == 5 && actions[0]->objectName() == QStringLiteral("makeCurrent") &&
+              actions[0]->text() == QStringLiteral("Make &Current") && actions[1]->isSeparator() && views &&
+              actions[2] == views->menuAction() && actions[2]->text() == QStringLiteral("&Views") &&
+              actions[4]->text() == QStringLiteral("&Close Stage..."),
+          "Make Current, a separator, Views, a separator, Close Stage...: [%d]", int(actions.size()));
+    CHECK(views && views->actions().size() == 1 && views->actions()[0]->text() == QStringLiteral("Outliner"),
+          "Views lists the panel types");
+
+    actions[0]->trigger();
+    CHECK(left->currentStage() == two && front->currentStage() == two, "the panels on screen show it");
+    CHECK(behind->currentStage() == one && closed->currentStage() == one, "a tab behind and a closed panel don't");
+    CHECK(stages.currentStage() == two, "and it is the current stage");
 }

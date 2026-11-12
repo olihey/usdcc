@@ -18,7 +18,7 @@ camera, or a camera in the stage, and renders again after edits. It is a Python 
 3. **The plugin ships with usdcc:** a deploy has it in `plugins\`, always looked in. From a
    build, run `usdcc --plugin-path src/plugins`, or add `src\plugins` in Edit > Settings >
    Plugins. A copy in `%LOCALAPPDATA%\usdcc\plugins` wins over the shipped one.
-4. **Open the panel** from Stages > V-Ray Render, and press Render.
+4. **Open the panel** from Stages > (a stage) > Views > V-Ray Render, and press Render.
 
 ## 2. The panel
 

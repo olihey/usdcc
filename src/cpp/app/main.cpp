@@ -78,6 +78,17 @@
 #include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
+// MaterialX's version, for Help > About, when OpenUSD was built with it: its
+// generated header is self-contained, so nothing else of MaterialX is needed.
+#if __has_include(<MaterialXCore/Generated.h>)
+#include <MaterialXCore/Generated.h>
+#define USDCC_MATERIALX_STR2(x) #x
+#define USDCC_MATERIALX_STR(x) USDCC_MATERIALX_STR2(x)
+#define USDCC_MATERIALX_VERSION                                                                    \
+    USDCC_MATERIALX_STR(MATERIALX_MAJOR_VERSION) "." USDCC_MATERIALX_STR(MATERIALX_MINOR_VERSION) "." \
+        USDCC_MATERIALX_STR(MATERIALX_BUILD_VERSION)
+#endif
+
 namespace {
 // Detaches a sink from the hub when it goes out of scope. Declared right after
 // QApplication in main(), so it outlives the window and the stage manager and
@@ -473,14 +484,19 @@ int main(int argc, char** argv) {
         usdcc::usd::populateRecentFilesMenu(recentMenu, [](const QString& path) { usdcc::usd::openStageFile(path); });
     });
 
-    // File > Sessions... and File > Open Session > the newest five (docs/SESSIONS.md §6).
-    QAction* sessionsAction = fileMenu->addAction(QObject::tr("Sess&ions..."));
-    sessionsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
-    sessionsAction->setStatusTip(QObject::tr("Save the app as a session, or load one"));
-    QObject::connect(sessionsAction, &QAction::triggered, &window,
+    // File > Sessions > the newest five, then Manage... (docs/SESSIONS.md §6).
+    // Manage... lives on the window too, so Ctrl+Alt+S works with the menu shut;
+    // the window owns it, so the menu's clear() below leaves it alone.
+    QAction* manageSessionsAction = new QAction(QObject::tr("&Manage..."), &window);
+    manageSessionsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+    manageSessionsAction->setStatusTip(QObject::tr("Save the app as a session, or load one"));
+    window.addAction(manageSessionsAction);
+    QObject::connect(manageSessionsAction, &QAction::triggered, &window,
                      [&sessions, &window]() { usdcc::scripting::SessionsDialog::showDialog(&sessions, &window); });
-    QMenu* openSessionMenu = fileMenu->addMenu(QObject::tr("Open Sess&ion"));
-    QObject::connect(openSessionMenu, &QMenu::aboutToShow, &window, [openSessionMenu, &sessions, &window]() {
+    QMenu* openSessionMenu = fileMenu->addMenu(QObject::tr("Sess&ions"));
+    openSessionMenu->setObjectName(QStringLiteral("sessionsMenu"));
+    QObject::connect(openSessionMenu, &QMenu::aboutToShow, &window,
+                     [openSessionMenu, manageSessionsAction, &sessions, &window]() {
         openSessionMenu->clear();
         const QList<usdcc::ui::SessionInfo> list = sessions.store().list();
         for (int i = 0; i < std::min<int>(5, list.size()); ++i) {
@@ -504,8 +520,7 @@ int main(int argc, char** argv) {
         }
         if (list.isEmpty()) openSessionMenu->addAction(QObject::tr("No sessions yet"))->setEnabled(false);
         openSessionMenu->addSeparator();
-        openSessionMenu->addAction(QObject::tr("More..."), &window,
-                                   [&sessions, &window]() { usdcc::scripting::SessionsDialog::showDialog(&sessions, &window); });
+        openSessionMenu->addAction(manageSessionsAction);
     });
     fileMenu->addSeparator();
 
@@ -523,6 +538,30 @@ int main(int argc, char** argv) {
         if (!usdcc::usd::layer_actions::saveAll(stageManager.currentStage(), &error)) {
             QMessageBox::warning(&window, QObject::tr("Save Stage"), error);
         }
+    });
+    // File > Save Stage As: the current stage's root layer as a copy in another
+    // file, which goes in Open Recent (layer_actions::saveStageAs()).
+    QAction* saveStageAsAction = fileMenu->addAction(QObject::tr("Save Stage &As..."));
+    saveStageAsAction->setStatusTip(QObject::tr("Save the current stage's root layer to another file"));
+    QObject::connect(fileMenu, &QMenu::aboutToShow, saveStageAsAction, [&stageManager, saveStageAsAction]() {
+        saveStageAsAction->setEnabled(stageManager.currentStage() != nullptr);
+    });
+    QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, &window]() {
+        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
+        if (!stage) return;
+        const std::string real = stage->usdStage()->GetRootLayer()->GetRealPath();
+        QString path = QFileDialog::getSaveFileName(
+            &window, QObject::tr("Save Stage As"),
+            real.empty() ? QString() : QFileInfo(QString::fromStdString(real)).absolutePath(),
+            QObject::tr("USD Text (*.usda);;USD Binary (*.usdc);;USD (*.usd)"));
+        if (path.isEmpty()) return;
+        if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+        QString error;
+        if (!usdcc::usd::layer_actions::saveStageAs(stage, path.toStdString(), &error)) {
+            QMessageBox::warning(&window, QObject::tr("Save Stage As"), error);
+            return;
+        }
+        usdcc::usd::addRecentFile(path);
     });
     // Closing the window asks about unsaved layers of every open stage.
     window.addCloseCheck([&stageManager, &window]() {
@@ -755,6 +794,9 @@ int main(int argc, char** argv) {
                                                                  .arg(PXR_MAJOR_VERSION)
                                                                  .arg(PXR_MINOR_VERSION)
                                                                  .arg(PXR_PATCH_VERSION)});
+#ifdef USDCC_MATERIALX_VERSION
+        info.components.insert(1, {QStringLiteral("MaterialX"), QStringLiteral(USDCC_MATERIALX_VERSION)});
+#endif
         if (python.isAvailable()) {
             info.components.append({QStringLiteral("Python"), QString::fromStdString(python.version())});
             // Without raising (evaluate() logs that) when PySide6 isn't there.

@@ -212,6 +212,15 @@ Phase 3 as built:
     and becomes the edit target if the in-memory layer was.
 - **File > Save Stage** (Ctrl+Shift+S, since Ctrl+S is the Script Editor's and the Layers
   panel's own Save) saves every unsaved file layer of the current stage.
+- **File > Save Stage As...** writes the current stage's root layer, unsaved edits included,
+  to another file (`layer_actions::saveStageAs()`), which goes in Open Recent:
+  - A copy, as Save As on a file layer: the stage keeps using its own root layer, and its
+    sublayers' unsaved edits stay theirs.
+  - Relative asset paths in it (sublayers, references, payloads, asset values) are rewritten
+    to find the same files from the new folder. Absolute paths and URIs stay; a search path
+    ("props/chair.usd") is rewritten only when the file is next to the root. An in-memory
+    root's paths stay as they are.
+  - Its own file: a plain save of the root layer.
 - **Unsaved changes on close:**
   - `confirmUnsavedLayers()` lists the unsaved file layers and asks Save All, Discard or Cancel.
   - It runs before File > Close Stage (and the Stages menu's Close Stage) and when the window

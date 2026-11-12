@@ -350,7 +350,7 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
 
 ## 4. The panel
 
-- **`MaterialEditorViewPanel`** is a view panel type, opened from Stages > (a stage) > Material Editor.
+- **`MaterialEditorViewPanel`** is a view panel type, opened from Stages > (a stage) > Views > Material Editor.
   - It follows the selection: a Material, a NodeGraph or Shader (the level it's drawn on), or a prim with
     a bound material. A selection that's already on this level, or the level itself or one around it,
     doesn't move it, and neither does a prim with no material.

@@ -370,6 +370,58 @@ USDCC_TEST(layer_editor_save_and_properties) {
 
 // The properties follow the selected layer when it's clicked: a click makes
 // a row current before it selects it (to the session layer and back).
+// File > Save Stage As: the root layer, unsaved edits included, as a copy;
+// relative paths rewritten for the new folder.
+USDCC_TEST(layer_actions_save_stage_as) {
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("out"));
+    {
+        QFile anim(dir.filePath(QStringLiteral("anim.usda")));
+        if (anim.open(QIODevice::WriteOnly)) anim.write("#usda 1.0\n");
+        QFile shot(dir.filePath(QStringLiteral("shot.usda")));
+        if (shot.open(QIODevice::WriteOnly)) {
+            shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@, @/abs/elsewhere.usda@]\n)\n"
+                       "def \"Chair\" (references = @./anim.usda@) {}\n");
+        }
+    }
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const SdfLayerHandle root = stage->usdStage()->GetRootLayer();
+    stage->setEditTargetLayer(root);
+    stage->usdStage()->DefinePrim(SdfPath("/Unsaved"));
+    namespace actions = usdcc::usd::layer_actions;
+    QString error;
+
+    // Into another folder: ./anim.usda becomes ../anim.usda; absolute stays.
+    const QString other = dir.filePath(QStringLiteral("out/shot_v2.usda"));
+    CHECK(actions::saveStageAs(stage, other.toStdString(), &error), "saved: %s", qPrintable(error));
+    const SdfLayerRefPtr written = SdfLayer::OpenAsAnonymous(other.toStdString());
+    CHECK(written && written->GetPrimAtPath(SdfPath("/Unsaved")), "with the unsaved edit");
+    if (written) {
+        const std::vector<std::string> subs = written->GetSubLayerPaths();
+        CHECK(subs == std::vector<std::string>({"../anim.usda", "/abs/elsewhere.usda"}),
+              "sublayers rewritten for the new folder: [%s]", subs.empty() ? "" : subs[0].c_str());
+        const SdfPrimSpecHandle chair = written->GetPrimAtPath(SdfPath("/Chair"));
+        std::vector<SdfReference> refs;
+        if (chair) refs = chair->GetReferenceList().GetAppliedItems();
+        CHECK(refs.size() == 1 && refs[0].GetAssetPath() == "../anim.usda", "and the reference");
+    }
+    CHECK(root->IsDirty() && stage->usdStage()->GetRootLayer() == root, "the stage keeps its own, unsaved, root");
+
+    // The same folder: the paths as they were.
+    const QString beside = dir.filePath(QStringLiteral("shot_v3.usdc"));
+    CHECK(actions::saveStageAs(stage, beside.toStdString(), &error), "saved as .usdc: %s", qPrintable(error));
+    const SdfLayerRefPtr binary = SdfLayer::OpenAsAnonymous(beside.toStdString());
+    CHECK(binary && binary->GetSubLayerPaths()[0] == std::string("./anim.usda"), "same folder: paths unchanged");
+
+    // A name USD has no format for.
+    CHECK(!actions::saveStageAs(stage, dir.filePath(QStringLiteral("shot.txt")).toStdString(), &error) &&
+              !error.isEmpty(),
+          "an unknown extension is refused");
+}
+
 USDCC_TEST(layer_editor_properties_follow_clicks) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir settings;

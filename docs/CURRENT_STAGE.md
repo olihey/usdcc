@@ -23,7 +23,8 @@ What reads it:
 | `usdcc.app.open_view_panel()` | the stage a new panel shows when none is given |
 
 What doesn't, and shouldn't: each view panel (viewport, Outliner, Attributes) and its tools,
-the Outliner's context menu, the Stages menu. They act on their own panel's stage.
+the Outliner's context menu, the Stages menu's Views and Close Stage. They act on their own
+panel's stage.
 
 ## 2. The rule
 
@@ -36,6 +37,9 @@ the Outliner's context menu, the Stages menu. They act on their own panel's stag
 - Focus moves to anything else (the Script Editor, the Log, a dialog, a toolbar): the current stage
   stays, so a script run from the Script Editor acts on the stage you were just looking at.
 - A panel with no stage gains focus: the current stage stays.
+- Stages > a stage > **Make Current**: every view panel on screen (open, its tab in front)
+  switches to that stage, which becomes current. Tabs behind others and closed panels keep
+  theirs (`StagesMenu::makeCurrentEverywhere()`).
 - The current stage is closed: the stage of the focused panel if it has one, else the first open
   stage, else none.
 - A stage is opened: the viewport it is shown in (an empty one, or a new one, brought to the

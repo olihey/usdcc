@@ -2,7 +2,9 @@
 
 #include "usdcc/usd/undo_manager.h"
 
+#include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layerUtils.h>
+#include <pxr/usd/usdUtils/dependencies.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -361,6 +363,68 @@ std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::
     }
     if (wasTarget) stage->setEditTargetLayer(saved);
     return PXR_NS::SdfComputeAssetPathRelativeToLayer(parentLayer, authored);
+}
+
+bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* error) {
+    if (!stage) return false;
+    const PXR_NS::SdfLayerHandle root = stage->usdStage()->GetRootLayer();
+    const QString file = QString::fromStdString(path);
+    const PXR_NS::SdfLayerHandle existing = PXR_NS::SdfLayer::Find(path);
+    if (existing && existing != root) {
+        if (error) *error = tr("%1 is open as another layer.").arg(QFileInfo(file).fileName());
+        return false;
+    }
+    if (existing == root) {  // its own file: a plain save
+        if (root->Save()) {
+            stage->layersSaved();
+            return true;
+        }
+        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        return false;
+    }
+    const PXR_NS::SdfFileFormatConstPtr format = PXR_NS::SdfFileFormat::FindByExtension(path);
+    const PXR_NS::SdfLayerRefPtr copy =
+        format ? PXR_NS::SdfLayer::CreateAnonymous("saveStageAs", format) : PXR_NS::SdfLayerRefPtr();
+    if (!copy) {
+        if (error) *error = tr("%1 isn't a USD file name.").arg(QFileInfo(file).fileName());
+        return false;
+    }
+    copy->TransferContent(root);
+
+    // A relative path is anchored at the root's folder; written from another
+    // folder it must say where that is from there. An in-memory root has no
+    // folder, and its paths are kept as they are.
+    const QString from = root->GetRealPath().empty()
+                             ? QString()
+                             : QFileInfo(QString::fromStdString(root->GetRealPath())).absolutePath();
+    const QDir to = QFileInfo(file).absoluteDir();
+    if (!from.isEmpty() && QDir(from) != to) {
+        PXR_NS::UsdUtilsModifyAssetPaths(copy, [&](const std::string& asset) -> std::string {
+            const QString text = QString::fromStdString(asset);
+            // Absolute, a URI or an anonymous layer: the same from anywhere.
+            if (text.isEmpty() || QDir::isAbsolutePath(text) || text.contains(QStringLiteral("://")) ||
+                PXR_NS::SdfLayer::IsAnonymousLayerIdentifier(asset)) {
+                return asset;
+            }
+            // A search path ("props/chair.usd") is anchored only if the file is there.
+            const QString anchored = QDir(from).absoluteFilePath(text);
+            const bool dotted = text.startsWith(QStringLiteral("./")) || text.startsWith(QStringLiteral("../"));
+            if (!dotted && !QFileInfo::exists(anchored) && !text.contains(QStringLiteral("<UDIM>"))) return asset;
+            QString relative = to.relativeFilePath(QDir::cleanPath(anchored));
+            if (QDir::isAbsolutePath(relative)) return QDir::fromNativeSeparators(relative).toStdString();
+            if (!relative.startsWith(QStringLiteral("../"))) relative.prepend(QStringLiteral("./"));
+            return relative.toStdString();
+        });
+    }
+    if (!copy->Export(path)) {
+        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        return false;
+    }
+    // Open before (from an earlier save): what was just written.
+    if (const PXR_NS::SdfLayerHandle saved = PXR_NS::SdfLayer::Find(path); saved && saved != root) {
+        saved->Reload(/*force=*/true);
+    }
+    return true;
 }
 
 bool editLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, const QString& description,

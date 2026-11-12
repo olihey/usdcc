@@ -1,5 +1,6 @@
 #include "usdcc/usd/stages_menu.h"
 
+#include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/stage_manager.h"
@@ -7,6 +8,9 @@
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
+
+#include <DockManager.h>
+#include <DockWidget.h>
 
 #include <QAction>
 
@@ -46,8 +50,16 @@ void StagesMenu::rebuild() {
         QMenu* stageMenu = addMenu(name);
         stageMenu->menuAction()->setToolTip(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier()));
 
+        QAction* makeCurrent = stageMenu->addAction(tr("Make &Current"));
+        makeCurrent->setObjectName(QStringLiteral("makeCurrent"));
+        makeCurrent->setStatusTip(tr("Show %1 in every panel on screen, and make it the current stage").arg(name));
+        connect(makeCurrent, &QAction::triggered, this, [this, stage]() { makeCurrentEverywhere(stage); });
+        stageMenu->addSeparator();
+
+        QMenu* views = stageMenu->addMenu(tr("&Views"));
+        views->setObjectName(QStringLiteral("views"));
         for (const usdcc::ui::ViewPanelRegistry::Entry& type : m_panelTypes->entries()) {
-            QAction* action = stageMenu->addAction(type.displayName);
+            QAction* action = views->addAction(type.displayName);
             action->setStatusTip(tr("Open a new %1 showing %2").arg(type.displayName, name));
             const QString id = type.id;
             connect(action, &QAction::triggered, this, [this, id, stage]() {
@@ -65,6 +77,16 @@ void StagesMenu::rebuild() {
                 Qt::QueuedConnection);
         });
     }
+}
+
+void StagesMenu::makeCurrentEverywhere(const StageRefPtr& stage) {
+    // The panels on screen: open, and the tab in front (a tab behind another,
+    // or a closed panel, isn't visible).
+    for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
+        auto* panel = qobject_cast<usdcc::ui::ViewPanel*>(dockWidget);
+        if (panel && !panel->isClosed() && panel->isVisible()) panel->setStage(stage);
+    }
+    m_stageManager->setCurrentStage(stage);
 }
 
 }  // namespace usdcc::usd
