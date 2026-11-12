@@ -49,6 +49,12 @@ the sample budget in Settings > RTX; the other modes use a frame budget. Cold
 shader compilation can take minutes. Status and Log report progress while Qt
 continues processing events.
 
+With its own camera exposure, ovrtx renders lights about 1/1134 as bright as Storm.
+Settings > RTX > Lighting > **Match Storm light intensities** (on by default) gives the RTX
+camera unit exposure instead, with **Intensity multiplier** on top. Turn it off for scenes
+lit for Omniverse. Lights themselves aren't changed, so distant and normalized sphere
+lights still differ ([RTX_LIGHT_INTENSITY.md](RTX_LIGHT_INTENSITY.md)).
+
 The toolbar has the app's icons (▶/■, ⟳, 💾, ⚙); everything else is in the options
 menu (☰), as [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md) §1 describes.
 

@@ -45,7 +45,7 @@ Camera cameraValues(const usdcc::usd::RenderCamera& input) {
     return result;
 }
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
-                                       QSize size, Mode mode) {
+                                       QSize size, Mode mode, LightMatch light) {
     using namespace PXR_NS;
     if (!source) throw std::runtime_error("No stage to render");
     auto result = std::make_shared<Snapshot>();
@@ -69,6 +69,14 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     privateCamera.CreateHorizontalApertureAttr().Set(view.horizontal);
     privateCamera.CreateVerticalApertureAttr().Set(view.vertical);
     privateCamera.CreateClippingRangeAttr().Set(GfVec2f(view.nearClip, view.farClip));
+    if (light.on) {
+        // Unit exposure puts ovrtx's output in Storm's units; responsivity carries the
+        // multiplier, as ovrtx 0.6 ignores the `exposure` (EV) attribute.
+        privateCamera.CreateExposureFStopAttr().Set(1.0f);
+        privateCamera.CreateExposureTimeAttr().Set(1.0f);
+        privateCamera.CreateExposureIsoAttr().Set(100.0f);
+        privateCamera.CreateExposureResponsivityAttr().Set(float(light.multiplier));
+    }
     auto product = stage->DefinePrim(root.AppendChild(TfToken("Product")), TfToken("RenderProduct"));
     product.CreateAttribute(TfToken("resolution"), SdfValueTypeNames->Int2, false)
         .Set(GfVec2i(size.width(), size.height()));
@@ -88,6 +96,7 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     result->view = view;
     result->size = size;
     result->mode = mode;
+    result->light = light;
     const auto geometry = selectionGeometry(source, {SdfPath::AbsoluteRootPath()});
     result->geometry = std::set<QString>(geometry.begin(), geometry.end());
     result->geometryKnown = true;

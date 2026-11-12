@@ -108,6 +108,8 @@ take them for a `bool`.
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
 | `Notifications/errorsSticky` | Bool | on | `ToastManager` |
 | `Notifications/maxVisible` | Int 1–10 | 5 | `ToastManager` |
+| `RtxRender/matchStormLights` | Bool | on | RTX plugin, `rtx_panel.cpp`: render RTX at Storm's brightness by giving its camera unit exposure ([RTX_LIGHT_INTENSITY.md](RTX_LIGHT_INTENSITY.md) §4). A change reloads open RTX panels |
+| `RtxRender/lightMultiplier` | Float 0.001–1000 | 1 | RTX plugin: the exposure multiplier while matching Storm, 1 being Storm's brightness |
 | `Python/userSite` | Bool, next start | off | `PythonRuntime` ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md) §1) |
 | `Python/packagesFolder` | Folder, next start | `%LOCALAPPDATA%\usdcc\python-env` | `PluginManager` |
 | `Python/extraPackageFolders` | String, next start | none | `PluginManager` |

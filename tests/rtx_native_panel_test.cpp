@@ -135,6 +135,24 @@ USDCC_TEST(rtx_native_panel_controller_without_sdk) {
           "initial stage selection is expanded before rendering");
     CHECK(first->schedule.desired.snapshot && QFile::exists(first->schedule.desired.snapshot->file),
           "the real controller gives the engine an owned snapshot");
+    auto& registry = usdcc::core::Settings::instance();
+    CHECK(registry.get<bool>(kMatchStormLightsKey, false) && registry.get<double>(kLightMultiplierKey) == 1.0,
+          "Match Storm light intensities is on by default, with multiplier 1");
+    const LightMatch matched{.on = true, .multiplier = 1.0};
+    CHECK(first->schedule.desired.snapshot && first->schedule.desired.snapshot->light == matched,
+          "a default snapshot matches Storm");
+    const int beforeLight = first->replacements;
+    registry.setValue(kMatchStormLightsKey, false);
+    CHECK(first->replacements == beforeLight + 1 && !first->schedule.desired.snapshot->light.on,
+          "turning light matching off reloads the snapshot without it");
+    registry.setValue(kMatchStormLightsKey, true);
+    registry.setValue(kLightMultiplierKey, 2.0);
+    CHECK(first->replacements == beforeLight + 3 && first->schedule.desired.snapshot->light.on &&
+              first->schedule.desired.snapshot->light.multiplier == 2.0,
+          "turning it on again and changing the multiplier reload the snapshot with them");
+    CHECK(!registry.setValue(kLightMultiplierKey, 5000.0) && registry.get<double>(kLightMultiplierKey) == 2.0,
+          "a multiplier out of range is refused");
+    registry.reset(kLightMultiplierKey);
     panel->findChild<QCheckBox*>("renderLive")->setChecked(false);
     stages.setSelectedPaths(stage, {});
     CHECK(first->schedule.desired.selection.isEmpty(), "selection follows the app with Update on Edits off");

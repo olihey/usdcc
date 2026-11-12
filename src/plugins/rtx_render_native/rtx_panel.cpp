@@ -86,7 +86,8 @@ public:
         m_settings = settings.changed.connect([this](const std::string& key) {
             if (key == "RtxRender/editDelay")
                 setEditDelay(usdcc::core::Settings::instance().get<int>(key, 30));
-            else if (key == "RtxRender/frameBudget" || key == "RtxRender/sampleBudget")
+            else if (key == "RtxRender/frameBudget" || key == "RtxRender/sampleBudget" ||
+                     key == kMatchStormLightsKey || key == kLightMultiplierKey)
                 reload();
         });
         m_window->presented = [this](QSize size, const QString& error) {
@@ -196,7 +197,7 @@ protected:
         if (!m_engine || !currentStage()) return;
         try {
             const auto camera = currentCamera();
-            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode());
+            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch());
             m_orthographic = camera.orthographic;
             m_engine->replace(std::move(scene), budget());
             m_engine->setActive(isRendering());
@@ -320,6 +321,12 @@ private:
                               mode() == Mode::PathTracing ? "RtxRender/sampleBudget" : "RtxRender/frameBudget", 128),
                           1, 4096);
     }
+    static LightMatch lightMatch() {
+        auto& settings = usdcc::core::Settings::instance();
+        return {.on = settings.get<bool>(kMatchStormLightsKey, true),
+                .multiplier = std::clamp(settings.get<double>(kLightMultiplierKey, 1.0), kMinLightMultiplier,
+                                         kMaxLightMultiplier)};
+    }
     void fail(const QString& error) {
         m_dirty = true;
         if (m_engine) m_engine->setActive(false);
@@ -432,6 +439,25 @@ void defineRtxSettings() {
                      .defaultValue = 30,
                      .minimum = 0,
                      .maximum = 10000});
+    settings.define({.key = kMatchStormLightsKey,
+                     .category = "RTX",
+                     .group = "Lighting",
+                     .label = "Match Storm light intensities",
+                     .description = "Render at the viewport's brightness: the RTX camera gets unit exposure "
+                                    "(f/1, 1 s, ISO 100) instead of ovrtx's default, which is about 1/1134 as "
+                                    "bright. Lights aren't changed. Off suits scenes lit for Omniverse.",
+                     .type = SettingType::Bool,
+                     .defaultValue = true});
+    settings.define({.key = kLightMultiplierKey,
+                     .category = "RTX",
+                     .group = "Lighting",
+                     .label = "Intensity multiplier",
+                     .description = "While matching Storm: 1 is the viewport's brightness, 2 one stop brighter, "
+                                    "0.5 one stop darker.",
+                     .type = SettingType::Float,
+                     .defaultValue = 1.0,
+                     .minimum = kMinLightMultiplier,
+                     .maximum = kMaxLightMultiplier});
 }
 usdcc::usd::RenderViewPanel* createRtxPanel(usdcc::plugin::Host& host, usdcc::usd::StageRefPtr stage,
     const QString& title, QWidget* parent, EngineFactory engine, PresentationFactory presentation) {

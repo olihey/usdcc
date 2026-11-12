@@ -79,6 +79,25 @@ USDCC_TEST(rtx_native_snapshot_and_edits) {
     float aperture = 0;
     exportedCamera.GetHorizontalApertureAttr().Get(&aperture);
     CHECK(aperture == 80, "orthographic aperture uses tenths of scene units");
+    CHECK(!snapshot->light.on && !exportedCamera.GetExposureFStopAttr().HasAuthoredValue() &&
+              !exportedCamera.GetExposureTimeAttr().HasAuthoredValue() &&
+              !exportedCamera.GetExposureIsoAttr().HasAuthoredValue() &&
+              !exportedCamera.GetExposureResponsivityAttr().HasAuthoredValue(),
+          "without light matching the private camera leaves ovrtx its own exposure");
+    const LightMatch light{.on = true, .multiplier = 2.0};
+    auto matched = makeSnapshot(wrapped, camera, QSize(320, 160), Mode::RealTime, light);
+    auto matchedStage = UsdStage::Open(matched->file.toStdString());
+    UsdGeomCamera matchedCamera(matchedStage->GetPrimAtPath(SdfPath(matched->camera.toStdString())));
+    float fStop = 0, time = 0, iso = 0, responsivity = 0, ev = 0;
+    matchedCamera.GetExposureFStopAttr().Get(&fStop);
+    matchedCamera.GetExposureTimeAttr().Get(&time);
+    matchedCamera.GetExposureIsoAttr().Get(&iso);
+    matchedCamera.GetExposureResponsivityAttr().Get(&responsivity);
+    matchedCamera.GetExposureAttr().Get(&ev);
+    CHECK(matched->light.on && matched->light.multiplier == 2.0 && fStop == 1 && time == 1 && iso == 100 &&
+              responsivity == 2 && ev == 0 && !matchedCamera.GetExposureAttr().HasAuthoredValue(),
+          "light matching gives the private camera unit exposure with the multiplier as responsivity");
+    CHECK(matchedCamera.ComputeLinearExposureScale() == 2.0f, "the camera's exposure scale is the multiplier");
     SdfAssetPath asset;
     exported->GetPrimAtPath(SdfPath("/Cube")).GetAttribute(TfToken("texture")).Get(&asset);
     CHECK(asset.GetAssetPath().find(folder.path().toStdString()) != std::string::npos,

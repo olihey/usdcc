@@ -19,12 +19,21 @@ struct Camera {
     float nearClip = .1f, farClip = 10000;
     bool orthographic = false;
 };
+// Match Storm light intensities (docs/RTX_LIGHT_INTENSITY.md §4). On, the private camera
+// gets unit exposure with `multiplier` as its responsivity; off, it gets none and ovrtx
+// uses its own camera defaults (about 1/1134).
+struct LightMatch {
+    bool on = false;
+    double multiplier = 1.0;
+    bool operator==(const LightMatch&) const = default;
+};
 struct Snapshot {
     QString file, product, camera;
     std::shared_ptr<QTemporaryDir> folder;
     Camera view;
     QSize size;
     Mode mode = Mode::RealTime;
+    LightMatch light;
     bool geometryKnown = false;
     std::set<QString> geometry;
 };

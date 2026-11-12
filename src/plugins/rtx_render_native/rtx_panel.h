@@ -24,6 +24,12 @@ using PresentationFactory = std::function<std::unique_ptr<Presentation>()>;
 std::unique_ptr<Presentation> createVulkanPresentation();
 usdcc::usd::RenderViewPanel* createRtxPanel(usdcc::plugin::Host&, usdcc::usd::StageRefPtr,
     const QString&, QWidget*, EngineFactory, PresentationFactory);
+// Settings > RTX > Lighting (docs/RTX_LIGHT_INTENSITY.md §4).
+inline constexpr const char* kMatchStormLightsKey = "RtxRender/matchStormLights";
+inline constexpr const char* kLightMultiplierKey = "RtxRender/lightMultiplier";
+// ±10 stops; the dialog shows three decimals.
+inline constexpr double kMinLightMultiplier = 0.001;
+inline constexpr double kMaxLightMultiplier = 1000.0;
 void defineRtxSettings();
 void quiesceRtxPanels();
 }
