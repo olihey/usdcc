@@ -16,6 +16,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QStandardPaths>
 #include <QTabBar>
@@ -153,4 +154,42 @@ USDCC_TEST(side_panel_collapse) {
         log->setCollapsed(true);
         CHECK(!log->isCollapsed(), "a floating panel doesn't collapse");
     }
+}
+
+// View > Full Screen, under UI Scale: toggles the window and follows its state.
+USDCC_TEST(main_window_full_screen) {
+    TestSettings settings;
+    MainWindow window;
+    window.buildViewMenu();
+    window.resize(900, 600);
+    window.show();
+    QApplication::processEvents();
+    QAction* action = window.fullScreenAction();
+    CHECK(action && action->isCheckable() && !action->isChecked(), "a toggle, off to begin with");
+    if (!action) return;
+    QMenu* viewMenu = nullptr;
+    for (QObject* object : action->associatedObjects()) {
+        if (auto* menu = qobject_cast<QMenu*>(object)) viewMenu = menu;
+    }
+    CHECK(viewMenu, "in the View menu");
+    if (!viewMenu) return;
+    const QList<QAction*> actions = viewMenu->actions();
+    const qsizetype at = actions.indexOf(action);
+    CHECK(at > 0 && actions[at - 1]->menu() && actions[at - 1]->menu()->title().startsWith(QStringLiteral("UI Scale")),
+          "right under UI Scale");
+    CHECK(action->shortcuts() == QKeySequence::keyBindings(QKeySequence::FullScreen), "the platform's shortcut");
+
+    action->trigger();
+    QApplication::processEvents();
+    CHECK(window.isFullScreen() && action->isChecked(), "on: full screen");
+    action->trigger();
+    QApplication::processEvents();
+    CHECK(!window.isFullScreen() && !action->isChecked(), "off: back as it was");
+
+    window.showFullScreen();
+    QApplication::processEvents();
+    CHECK(action->isChecked(), "full screen some other way: checked too");
+    window.showNormal();
+    QApplication::processEvents();
+    CHECK(!action->isChecked(), "and unchecked when it leaves");
 }

@@ -12,6 +12,8 @@
 #include <QMouseEvent>
 #include <QSet>
 #include <QSettings>
+#include <QSignalBlocker>
+#include <QWindow>
 #include <QStandardPaths>
 #include <QTabBar>
 #include <QToolBar>
@@ -37,6 +39,10 @@
 #include "usdcc/ui/toast_manager.h"
 
 #include <QWKWidgets/widgetwindowagent.h>
+
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 #include <utility>
 
@@ -201,6 +207,12 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
+    // The native window's own changes too, which the widget's state can miss
+    // (isFullScreenNow()).
+    if (QWindow* window = windowHandle(); window && !m_windowStatesWatched) {
+        m_windowStatesWatched = true;
+        connect(window, &QWindow::windowStateChanged, this, [this]() { syncFullScreenAction(); });
+    }
     if (!m_layoutSettled) m_settleTimer.start();
 }
 
@@ -490,6 +502,96 @@ void MainWindow::buildViewMenu() {
         viewMenu->addAction(toolBar->toggleViewAction());
     }
     UiScaleController::instance().addMenu(viewMenu);
+
+    // Under UI Scale. On the window too, so its shortcut works with the menu bar
+    // out of reach.
+    m_fullScreenAction = viewMenu->addAction(tr("&Full Screen"));
+    m_fullScreenAction->setObjectName(QStringLiteral("fullScreen"));
+    m_fullScreenAction->setCheckable(true);
+    m_fullScreenAction->setChecked(isFullScreenNow());
+    m_fullScreenAction->setShortcuts(QKeySequence::FullScreen);
+    m_fullScreenAction->setStatusTip(tr("Fill the screen with the window"));
+    addAction(m_fullScreenAction);
+    // From what the window is, not the check mark, which may be behind it.
+    connect(m_fullScreenAction, &QAction::triggered, this, [this]() {
+        setFullScreen(!isFullScreenNow());
+        syncFullScreenAction();
+    });
+}
+
+bool MainWindow::isFullScreenNow() const {
+    // The native window's state. From maximized, Windows reports the window
+    // restored on the way to full screen, and the widget's state can stay
+    // there (isFullScreen() false) while the window is full screen.
+    if (const QWindow* window = windowHandle()) return window->windowStates().testFlag(Qt::WindowFullScreen);
+    return isFullScreen();
+}
+
+void MainWindow::syncFullScreenAction() {
+#ifdef Q_OS_WIN
+    // Out of full screen, however: the normal place setFullScreen() stood in for
+    // goes back. Queued, as this can run halfway through Qt's way out.
+    if (m_normalBeforeFullScreen.isValid() && !isFullScreenNow()) {
+        QMetaObject::invokeMethod(this, [this]() {
+            if (!m_normalBeforeFullScreen.isValid() || isFullScreenNow()) return;
+            const HWND hwnd = reinterpret_cast<HWND>(winId());
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(placement);
+            if (GetWindowPlacement(hwnd, &placement)) {
+                int left, top, right, bottom;
+                m_normalBeforeFullScreen.getCoords(&left, &top, &right, &bottom);
+                placement.rcNormalPosition = {left, top, right, bottom};
+                SetWindowPlacement(hwnd, &placement);
+            }
+            m_normalBeforeFullScreen = QRect();
+        }, Qt::QueuedConnection);
+    }
+#endif
+    if (!m_fullScreenAction) return;
+    const QSignalBlocker blocker(m_fullScreenAction);
+    m_fullScreenAction->setChecked(isFullScreenNow());
+}
+
+void MainWindow::setFullScreen(bool fullScreen) {
+    if (fullScreen == isFullScreenNow()) return;
+    if (fullScreen) {
+        m_maximizedBeforeFullScreen = isMaximized();
+#ifdef Q_OS_WIN
+        // Qt leaves full screen by putting the window back at its normal place, then
+        // maximizing it, which shows the window small and Windows growing it. That
+        // normal place is read here, from the window's placement: make it the
+        // maximized window's own rect for the time being, so the way back is
+        // maximized throughout. The real one is put back once out of full screen.
+        const HWND hwnd = reinterpret_cast<HWND>(winId());
+        WINDOWPLACEMENT placement{};
+        placement.length = sizeof(placement);
+        RECT maximized{};
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (m_maximizedBeforeFullScreen && GetWindowPlacement(hwnd, &placement) && GetWindowRect(hwnd, &maximized) &&
+            GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const RECT normal = placement.rcNormalPosition;
+            m_normalBeforeFullScreen.setCoords(normal.left, normal.top, normal.right, normal.bottom);
+            // The placement is in workspace coordinates: offset by a taskbar at the top or left.
+            const LONG dx = monitor.rcWork.left - monitor.rcMonitor.left;
+            const LONG dy = monitor.rcWork.top - monitor.rcMonitor.top;
+            placement.rcNormalPosition = {maximized.left - dx, maximized.top - dy, maximized.right - dx,
+                                          maximized.bottom - dy};
+            SetWindowPlacement(hwnd, &placement);
+        }
+#endif
+        showFullScreen();
+    } else if (m_maximizedBeforeFullScreen) {
+        showMaximized();
+    } else {
+        showNormal();
+    }
+}
+
+void MainWindow::changeEvent(QEvent* event) {
+    QMainWindow::changeEvent(event);
+    // However the window got there (the action, a script, the system).
+    if (event->type() == QEvent::WindowStateChange) syncFullScreenAction();
 }
 
 }  // namespace usdcc::ui

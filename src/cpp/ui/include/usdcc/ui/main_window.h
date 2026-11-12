@@ -137,6 +137,13 @@ public:
     // "File" menu, so "File" stays first.
     void buildViewMenu();
 
+    // View > Full Screen (F11), under UI Scale: checked while the window is full
+    // screen. Leaving it goes back to maximized if the window was, else normal.
+    void setFullScreen(bool fullScreen);
+    QAction* fullScreenAction() const { return m_fullScreenAction; }
+    // Whether the window is full screen, from the native window's state.
+    bool isFullScreenNow() const;
+
     // Asked, in the order added, before the window closes (after the side
     // panels' canClose()); one returning false keeps it open. main.cpp adds
     // the unsaved-layers question (docs/LAYER_EDITOR.md §5).
@@ -146,6 +153,7 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void changeEvent(QEvent* event) override;
     // Watches the tab bars of side panels sharing a spot: double-clicking a
     // tab collapses the panels (SidePanel::setCollapsed()).
     void childEvent(QChildEvent* event) override;
@@ -153,6 +161,8 @@ protected:
 
 private:
     void saveLayout() const;
+    // Ticks View > Full Screen as the window is.
+    void syncFullScreenAction();
     // After restoring `dockLayout`: opens the panels it doesn't name, which
     // ADS would otherwise leave hidden for good (one deleted when the layout
     // was saved, then made again by the app at startup).
@@ -185,6 +195,12 @@ private:
     // m_viewMenuPanelsEnd (the separator above the toolbars, if any).
     QMenu* m_viewMenu = nullptr;
     QAction* m_viewMenuPanelsEnd = nullptr;
+    QAction* m_fullScreenAction = nullptr;
+    bool m_maximizedBeforeFullScreen = false;
+    // Windows: the window's normal place (workspace coordinates, setCoords()) while
+    // full screen from maximized stands it in for the maximized rect (setFullScreen()).
+    QRect m_normalBeforeFullScreen;
+    bool m_windowStatesWatched = false;
 };
 
 // `rect` moved, and shrunk if it must, so that it lies wholly inside one of
