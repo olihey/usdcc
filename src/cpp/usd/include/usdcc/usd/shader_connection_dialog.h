@@ -1,6 +1,7 @@
 #pragma once
 
 #include "usdcc/core/export.h"
+#include "usdcc/usd/shade_connections.h"
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/attribute.h>
@@ -39,7 +40,9 @@ class USDCC_USD_UI_API ShaderConnectionDialog : public QDialog {
 public:
     enum class Mode { PickSource, PickReceiver };
 
-    ShaderConnectionDialog(const PXR_NS::UsdAttribute& attribute, Mode mode, QWidget* parent = nullptr);
+    // `end` is the receiver (PickSource), which needn't be authored yet, or the output
+    // (PickReceiver).
+    ShaderConnectionDialog(const ConnectionEnd& end, Mode mode, QWidget* parent = nullptr);
 
     // The picked attribute's path; empty until one is selected.
     PXR_NS::SdfPath selected() const;
@@ -60,7 +63,8 @@ private:
     // be picked (empty when it can).
     std::vector<std::pair<PXR_NS::UsdAttribute, std::string>> candidates(const PXR_NS::UsdPrim& node) const;
 
-    PXR_NS::UsdAttribute m_attribute;
+    ConnectionEnd m_end;
+    PXR_NS::UsdAttribute m_attribute;  // m_end's, invalid while it isn't authored
     Mode m_mode;
     QTreeWidget* m_nodes;
     QTreeWidget* m_attributes;

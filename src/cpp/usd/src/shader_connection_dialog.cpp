@@ -23,7 +23,8 @@ constexpr int kPathRole = Qt::UserRole;
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
-QString typeText(const PXR_NS::UsdAttribute& attribute) { return qs(attribute.GetTypeName().GetAsToken().GetString()); }
+QString typeText(const PXR_NS::SdfValueTypeName& type) { return qs(type.GetAsToken().GetString()); }
+QString typeText(const PXR_NS::UsdAttribute& attribute) { return typeText(attribute.GetTypeName()); }
 
 // Shown greyed but, unlike a disabled item, without disabling the children: a
 // node that can't be picked may hold nodes that can.
@@ -37,10 +38,10 @@ void markUnpickable(QTreeWidgetItem* item, const QString& why, const QPalette& p
 }
 }  // namespace
 
-ShaderConnectionDialog::ShaderConnectionDialog(const PXR_NS::UsdAttribute& attribute, Mode mode, QWidget* parent)
-    : QDialog(parent), m_attribute(attribute), m_mode(mode) {
-    const QString name = qs(attribute.GetName().GetString());
-    const QString type = typeText(attribute);
+ShaderConnectionDialog::ShaderConnectionDialog(const ConnectionEnd& end, Mode mode, QWidget* parent)
+    : QDialog(parent), m_end(end), m_attribute(end.attribute()), m_mode(mode) {
+    const QString name = qs(end.name.GetString());
+    const QString type = typeText(end.type);
     setWindowTitle(mode == Mode::PickSource ? tr("Connect %1").arg(name) : tr("Connect %1 to\xE2\x80\xA6").arg(name));
 
     auto* layout = new QVBoxLayout(this);
@@ -86,21 +87,21 @@ ShaderConnectionDialog::ShaderConnectionDialog(const PXR_NS::UsdAttribute& attri
         if (item->flags() & Qt::ItemIsEnabled) accept();
     });
 
-    const PXR_NS::UsdPrim scope = connectionScope(attribute.GetPrim());
+    const PXR_NS::UsdPrim scope = connectionScope(end.prim);
     if (scope) addNode(scope, nullptr);
     m_nodes->expandAll();
 
     // Start on the node of the current source, else on the first one that can be picked.
     QTreeWidgetItem* start = nullptr;
     if (mode == Mode::PickSource) {
-        if (const PXR_NS::SdfPath source = connectedSource(attribute); !source.IsEmpty()) start = nodeItem(source.GetPrimPath());
+        if (const PXR_NS::SdfPath source = connectedSource(m_attribute); !source.IsEmpty()) start = nodeItem(source.GetPrimPath());
     }
     for (QTreeWidgetItemIterator it(m_nodes); *it && !start; ++it) {
         if ((*it)->flags() & Qt::ItemIsSelectable) start = *it;
     }
     if (start) m_nodes->setCurrentItem(start);
     if (mode == Mode::PickSource && start) {
-        if (const PXR_NS::SdfPath source = connectedSource(attribute); !source.IsEmpty()) {
+        if (const PXR_NS::SdfPath source = connectedSource(m_attribute); !source.IsEmpty()) {
             if (QTreeWidgetItem* item = attributeItem(PXR_NS::TfToken(source.GetName()))) m_attributes->setCurrentItem(item);
         }
     }
@@ -113,12 +114,12 @@ void ShaderConnectionDialog::addNode(const PXR_NS::UsdPrim& prim, QTreeWidgetIte
     item->setText(1, qs(prim.GetTypeName().GetString()));
     item->setIcon(0, prim_icons::icon(prim));
     item->setData(0, kPathRole, qs(prim.GetPath().GetString()));
-    if (prim.GetPath() == m_attribute.GetPrim().GetPath()) {
+    if (prim.GetPath() == m_end.prim.GetPath()) {
         markUnpickable(item, tr("The prim being edited"), palette());
     } else if (candidates(prim).empty()) {
         markUnpickable(item,
-                       m_mode == Mode::PickReceiver ? tr("No unconnected %1 input here").arg(typeText(m_attribute))
-                                                    : tr("Nothing here %1 can take its value from").arg(qs(m_attribute.GetName())),
+                       m_mode == Mode::PickReceiver ? tr("No unconnected %1 input here").arg(typeText(m_end.type))
+                                                    : tr("Nothing here %1 can take its value from").arg(qs(m_end.name.GetString())),
                        palette());
     }
     for (const PXR_NS::UsdPrim& child : prim.GetChildren()) addNode(child, item);
@@ -130,8 +131,8 @@ std::vector<std::pair<PXR_NS::UsdAttribute, std::string>> ShaderConnectionDialog
         if (m_mode == Mode::PickSource) {
             // Only what could be a source at all: other nodes' outputs, the inputs of the
             // materials and node graphs it is inside. Of those, the wrong type is greyed.
-            if (whyNotPossibleSource(m_attribute, candidate)) continue;
-            result.emplace_back(candidate, whyNotSource(m_attribute, candidate).value_or(std::string()));
+            if (whyNotPossibleSource(m_end, candidate)) continue;
+            result.emplace_back(candidate, whyNotSource(m_end, candidate).value_or(std::string()));
         } else if (isReceiver(candidate) && connectedSource(candidate).IsEmpty() && !whyNotSource(candidate, m_attribute)) {
             result.emplace_back(candidate, std::string());
         }
@@ -144,7 +145,7 @@ void ShaderConnectionDialog::showAttributes() {
     const QList<QTreeWidgetItem*> picked = m_nodes->selectedItems();
     if (!picked.isEmpty()) {
         const PXR_NS::SdfPath path(picked.front()->data(0, kPathRole).toString().toStdString());
-        const PXR_NS::UsdPrim node = m_attribute.GetStage()->GetPrimAtPath(path);
+        const PXR_NS::UsdPrim node = m_end.prim.GetStage()->GetPrimAtPath(path);
         for (const auto& [candidate, why] : candidates(node)) {
             auto* item = new QTreeWidgetItem(m_attributes);
             item->setText(0, qs(candidate.GetName().GetString()));

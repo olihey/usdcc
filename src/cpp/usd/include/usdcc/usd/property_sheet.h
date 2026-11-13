@@ -6,6 +6,7 @@
 #include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/valueTypeName.h>
 #include <pxr/usd/usd/common.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/property.h>
@@ -174,10 +175,12 @@ private:
     void addRelationshipTargetInteractively(const PXR_NS::TfToken& name);
     // UsdShade connections (docs/ATTRIBUTE_EDITOR.md §4.3): a receiver's
     // connect/disconnect button, and a shader output's pills of the inputs it feeds.
-    void addConnectionButton(Row& row, const PXR_NS::SdfPath& attribute);
+    // `pendingType` for a definition's input that isn't authored yet: connecting creates it.
+    void addConnectionButton(Row& row, const PXR_NS::SdfPath& attribute, const PXR_NS::SdfValueTypeName& pendingType = {});
     void buildShaderOutputEditor(Row& row, const PXR_NS::SdfPath& output, const QString& label);
-    // The dialog, from a receiver (pick its source) or a shader output (pick an input).
-    void connectInteractively(const PXR_NS::SdfPath& attribute, bool fromOutput);
+    // The dialog, from a receiver (pick its source) or a shader output (pick an input). A
+    // receiver that doesn't exist yet is created with `pendingType`, in the same undo step.
+    void connectInteractively(const PXR_NS::SdfPath& attribute, bool fromOutput, const PXR_NS::SdfValueTypeName& pendingType = {});
     void disconnectReceiver(const PXR_NS::SdfPath& receiver);
     // Selects the prim of `path` (a prim or property path), after the current event.
     void selectPrimLater(const PXR_NS::SdfPath& path);

@@ -230,6 +230,10 @@ The rules are Qt-free, in `shade_connections.h` (`usdcc_usd`). The edits are
   property: `Tex.outputs:rgb`, `Nodes/Inner.inputs:in`. A property of the scope prim itself
   starts with its name (`Mat.inputs:roughness`); one outside the scope keeps its full path.
   The tooltip has the full path. Clicking selects that prim.
+- **A definition's input that isn't authored yet** (a new shader node's, shown dimmed with its
+  default) has the connect button too. The dialog checks types against the definition's
+  (`ConnectionEnd`), and Connect creates the input with that type and connects it, in one undo
+  step (`shade_actions::connect()`, as the graph does).
 - **Connection scope** (`connectionScope()`): the outermost Material the prim is in, or the
   prim itself if it is one; without one, the outermost NodeGraph; without that, its parent.
 - **The dialog** (`ShaderConnectionDialog`): the scope and everything under it as a tree on

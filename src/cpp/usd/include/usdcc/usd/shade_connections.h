@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/sdf/valueTypeName.h>
 #include <pxr/usd/usd/attribute.h>
@@ -36,6 +37,22 @@ std::vector<PXR_NS::UsdAttribute> connectableAttributes(const PXR_NS::UsdPrim& p
 // (color3f and float3 match, float and float3 don't, an array never a scalar).
 bool typesMatch(const PXR_NS::SdfValueTypeName& a, const PXR_NS::SdfValueTypeName& b);
 
+// One end of a connection: an attribute, or an input a shader's definition has that
+// isn't authored yet, by its prim, name and type. Converts from an attribute.
+struct ConnectionEnd {
+    ConnectionEnd(const PXR_NS::UsdAttribute& attribute);  // NOLINT: an attribute is one
+    ConnectionEnd(const PXR_NS::UsdPrim& prim, const PXR_NS::TfToken& name, const PXR_NS::SdfValueTypeName& type);
+
+    PXR_NS::UsdPrim prim;
+    PXR_NS::TfToken name;  // inputs:x or outputs:x
+    PXR_NS::SdfValueTypeName type;
+
+    PXR_NS::SdfPath path() const;
+    // The attribute, or an invalid one while it isn't authored.
+    PXR_NS::UsdAttribute attribute() const;
+    explicit operator bool() const { return prim && !name.IsEmpty(); }
+};
+
 // Why `receiver` can't take `source` as its source, or nothing if it can:
 // - an input takes an output of another node (not of its own prim or of a
 //   container it is inside), or an input of any Material or NodeGraph it is
@@ -44,11 +61,11 @@ bool typesMatch(const PXR_NS::SdfValueTypeName& a, const PXR_NS::SdfValueTypeNam
 //   output of a node inside it (that would be a loop);
 // - a container's output takes an output of a node inside it;
 // - and the value types match (typesMatch()).
-std::optional<std::string> whyNotSource(const PXR_NS::UsdAttribute& receiver, const PXR_NS::UsdAttribute& source);
+// `receiver` needn't be authored yet.
+std::optional<std::string> whyNotSource(const ConnectionEnd& receiver, const PXR_NS::UsdAttribute& source);
 // The same without the type check: whether `source` is the kind of attribute
 // `receiver` could take its value from at all. The source dialog lists only those.
-std::optional<std::string> whyNotPossibleSource(const PXR_NS::UsdAttribute& receiver,
-                                                const PXR_NS::UsdAttribute& source);
+std::optional<std::string> whyNotPossibleSource(const ConnectionEnd& receiver, const PXR_NS::UsdAttribute& source);
 
 // The receivers in `output`'s connection scope that are connected to it.
 std::vector<PXR_NS::UsdAttribute> receiversOf(const PXR_NS::UsdAttribute& output);

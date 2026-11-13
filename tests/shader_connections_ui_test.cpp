@@ -264,3 +264,64 @@ USDCC_TEST(shader_connection_rows) {
     CHECK(stages.selectedPaths(stage) == std::vector<SdfPath>({SdfPath("/Mat/Surface")}), "a pill selects the input's prim");
     QStandardPaths::setTestModeEnabled(false);
 }
+
+USDCC_TEST(shader_connection_unauthored_input) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    const UsdStageRefPtr& s = stage->usdStage();
+    UsdShadeMaterial::Define(s, SdfPath("/Mat"));
+    // As the Material Editor creates a node: its id, and no inputs.
+    UsdShadeShader::Define(s, SdfPath("/Mat/Surface")).CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    UsdShadeShader tex = UsdShadeShader::Define(s, SdfPath("/Mat/Tex"));
+    tex.CreateOutput(TfToken("rgb"), SdfValueTypeNames->Float3);
+    tex.CreateOutput(TfToken("r"), SdfValueTypeNames->Float);
+    QUndoStack* stack = undo->stack(stage);
+
+    AttributesViewPanel panel(&stages, stage, undo, QStringLiteral("Attributes"));
+    panel.resize(700, 900);
+    panel.show();
+    stages.setSelectedPaths(stage, {SdfPath("/Mat/Surface")});
+    settle();
+
+    const SdfPath diffusePath("/Mat/Surface.inputs:diffuseColor");
+    CHECK(!s->GetAttributeAtPath(diffusePath), "the input isn't authored");
+    QToolButton* button = connectButtonOf(rowFor(panel, QString::fromStdString(diffusePath.GetString())));
+    CHECK(button && button->isVisibleTo(&panel) && button->toolTip().startsWith("Connect"),
+          "a definition's input that isn't authored has the connect button too");
+    if (!button) return;
+
+    answerNextDialog([](ShaderConnectionDialog* dialog) { dialog->reject(); });
+    button->click();
+    settle();
+    CHECK(stack->count() == 0 && !s->GetAttributeAtPath(diffusePath), "Cancel creates nothing");
+
+    // Its definition's type decides what fits.
+    answerNextDialog([](ShaderConnectionDialog* dialog) {
+        CHECK(dialog->windowTitle() == "Connect inputs:diffuseColor", "the title: %s", qPrintable(dialog->windowTitle()));
+        CHECK(!pickable(dialog->nodeItem(SdfPath("/Mat/Surface"))), "its own shader can't be picked");
+        dialog->nodeTree()->setCurrentItem(dialog->nodeItem(SdfPath("/Mat/Tex")));
+        QTreeWidgetItem* r = dialog->attributeItem(TfToken("outputs:r"));
+        CHECK(r && !enabled(r), "a float output doesn't fit a color3f input");
+        dialog->attributeList()->setCurrentItem(dialog->attributeItem(TfToken("outputs:rgb")));
+        dialog->connectButton()->click();
+    });
+    button->click();
+    settle();
+    const UsdAttribute diffuse = s->GetAttributeAtPath(diffusePath);
+    CHECK(diffuse && diffuse.GetTypeName() == SdfValueTypeNames->Color3f, "connecting creates it with its definition's type");
+    CHECK(usdcc::usd::connectedSource(diffuse) == SdfPath("/Mat/Tex.outputs:rgb"), "and connects it");
+    CHECK(stack->count() == 1, "in one undo step: %d", stack->count());
+    button = connectButtonOf(rowFor(panel, QString::fromStdString(diffusePath.GetString())));
+    CHECK(button && button->toolTip() == "Disconnect from Tex.outputs:rgb", "the row now disconnects: %s",
+          button ? qPrintable(button->toolTip()) : "");
+
+    stack->undo();
+    settle();
+    CHECK(!s->GetAttributeAtPath(diffusePath), "undo takes the input away again");
+    QStandardPaths::setTestModeEnabled(false);
+}

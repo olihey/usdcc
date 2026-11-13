@@ -1,11 +1,13 @@
 #include "usdcc/usd/shade_connections.h"
 
+#include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/input.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/nodeGraph.h>
 #include <pxr/usd/usdShade/output.h>
+#include <pxr/usd/usdShade/tokens.h>
 
 #include <algorithm>
 
@@ -74,25 +76,39 @@ bool typesMatch(const PXR_NS::SdfValueTypeName& a, const PXR_NS::SdfValueTypeNam
     return a && b && a.GetType() == b.GetType();
 }
 
-std::optional<std::string> whyNotSource(const UsdAttribute& receiver, const UsdAttribute& source) {
+ConnectionEnd::ConnectionEnd(const UsdAttribute& attribute) {
+    if (!attribute) return;
+    prim = attribute.GetPrim();
+    name = attribute.GetName();
+    type = attribute.GetTypeName();
+}
+
+ConnectionEnd::ConnectionEnd(const UsdPrim& prim, const PXR_NS::TfToken& name, const PXR_NS::SdfValueTypeName& type)
+    : prim(prim), name(name), type(type) {}
+
+SdfPath ConnectionEnd::path() const { return prim ? prim.GetPath().AppendProperty(name) : SdfPath(); }
+
+UsdAttribute ConnectionEnd::attribute() const { return prim ? prim.GetAttribute(name) : UsdAttribute(); }
+
+std::optional<std::string> whyNotSource(const ConnectionEnd& receiver, const UsdAttribute& source) {
     if (std::optional<std::string> why = whyNotPossibleSource(receiver, source)) return why;
-    if (!typesMatch(receiver.GetTypeName(), source.GetTypeName())) {
+    if (!typesMatch(receiver.type, source.GetTypeName())) {
         return "Its type, " + source.GetTypeName().GetAsToken().GetString() + ", doesn't match " +
-               receiver.GetTypeName().GetAsToken().GetString() + ".";
+               receiver.type.GetAsToken().GetString() + ".";
     }
     return std::nullopt;
 }
 
-std::optional<std::string> whyNotPossibleSource(const UsdAttribute& receiver, const UsdAttribute& source) {
+std::optional<std::string> whyNotPossibleSource(const ConnectionEnd& receiver, const UsdAttribute& source) {
     if (!receiver || !source) return std::string("It doesn't exist.");
-    if (receiver.GetPath() == source.GetPath()) return std::string("It is the attribute itself.");
-    const UsdPrim to = receiver.GetPrim();
+    if (receiver.path() == source.GetPath()) return std::string("It is the attribute itself.");
+    const UsdPrim to = receiver.prim;
     const UsdPrim from = source.GetPrim();
     const bool sourceIsOutput = UsdShadeOutput::IsOutput(source);
     const bool sourceIsInput = UsdShadeInput::IsInput(source);
     if (!sourceIsOutput && !sourceIsInput) return std::string("It isn't a shader input or output.");
 
-    if (UsdShadeOutput::IsOutput(receiver)) {
+    if (PXR_NS::TfStringStartsWith(receiver.name.GetString(), PXR_NS::UsdShadeTokens->outputs.GetString())) {
         // A Material's or NodeGraph's output: what a node inside it makes.
         if (!sourceIsOutput || !isInside(from, to)) {
             return std::string("A material's or node graph's output takes an output of a node inside it.");

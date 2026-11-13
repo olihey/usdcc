@@ -45,6 +45,7 @@
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/sdr/shaderNode.h>
+#include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/input.h>
 #include <pxr/usd/usdShade/nodeGraph.h>
 #include <pxr/usd/usdShade/shader.h>
@@ -673,7 +674,12 @@ PropertySheet::Row PropertySheet::buildShaderInputRow(const UsdPrim& prim, const
     connect(row.row, &PropertyRow::resetRequested, row.binding, &AttributeBinding::resetToDefault);
     connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
     row.row->setReadOnly(!prim_actions::isEditable(prim));
-    if (exists && isReceiver(attr)) addConnectionButton(row, attr.GetPath());
+    if (exists && isReceiver(attr)) {
+        addConnectionButton(row, attr.GetPath());
+    } else if (!exists && UsdShadeConnectableAPI(prim)) {
+        // Not authored yet: connecting creates it, as editing its value does.
+        addConnectionButton(row, prim.GetPath().AppendProperty(input.attribute), type);
+    }
     if (exists) {
         connect(row.row, &PropertyRow::connectedSourceClicked, this, [this, path = attr.GetPath()]() {
             if (const UsdAttribute connected = m_stage->usdStage()->GetAttributeAtPath(path)) {
@@ -1387,6 +1393,10 @@ void PropertySheet::updateRowState(Row& row) {
         row.row->setResettable(false);
         row.row->setAnimated(false);
         row.row->setConnectedSource(QString(), QString());
+        if (row.connectButton) {
+            const UsdPrim prim = currentPrim();
+            row.connectButton->setVisible(prim && prim_actions::isEditable(prim));
+        }
     } else if (!row.relationship.IsEmpty()) {
         const UsdPrim prim = currentPrim();
         const UsdRelationship rel = prim ? prim.GetRelationship(row.relationship) : UsdRelationship();
@@ -1427,21 +1437,21 @@ void PropertySheet::selectPrimLater(const SdfPath& path) {
         Qt::QueuedConnection);
 }
 
-void PropertySheet::addConnectionButton(Row& row, const SdfPath& attribute) {
+void PropertySheet::addConnectionButton(Row& row, const SdfPath& attribute, const SdfValueTypeName& pendingType) {
     row.connectButton = properties::iconButton(QStringLiteral(":/usdcc/theme/link.png"), tr("Connect\xE2\x80\xA6"));
     row.connectButton->setProperty("connectionButton", true);  // keeps the #propertyIconButton look
     row.row->addLastWidget(row.connectButton);  // the rightmost control
     QToolButton* button = row.connectButton;
-    connect(button, &QToolButton::clicked, this, [this, button, attribute]() {
+    connect(button, &QToolButton::clicked, this, [this, button, attribute, pendingType]() {
         const bool connected = button->property("connected").toBool();
         // Queued: an edit can rebuild this panel, the button included.
         QMetaObject::invokeMethod(
             this,
-            [this, attribute, connected]() {
+            [this, attribute, connected, pendingType]() {
                 if (connected) {
                     disconnectReceiver(attribute);
                 } else {
-                    connectInteractively(attribute, /*fromOutput=*/false);
+                    connectInteractively(attribute, /*fromOutput=*/false, pendingType);
                 }
             },
             Qt::QueuedConnection);
@@ -1464,14 +1474,28 @@ void PropertySheet::buildShaderOutputEditor(Row& row, const SdfPath& output, con
     });
 }
 
-void PropertySheet::connectInteractively(const SdfPath& attribute, bool fromOutput) {
+void PropertySheet::connectInteractively(const SdfPath& attribute, bool fromOutput, const SdfValueTypeName& pendingType) {
     if (!m_stage) return;
-    const UsdAttribute attr = m_stage->usdStage()->GetAttributeAtPath(attribute);
-    if (!attr) return;
-    ShaderConnectionDialog dialog(attr,
+    const UsdStageRefPtr usd = m_stage->usdStage();
+    const UsdAttribute attr = usd->GetAttributeAtPath(attribute);
+    const UsdPrim prim = usd->GetPrimAtPath(attribute.GetPrimPath());
+    // A definition's input not authored yet, which only a receiver can be.
+    const bool pending = !attr && !fromOutput && prim && pendingType;
+    if (!attr && !pending) return;
+    const ConnectionEnd end = pending ? ConnectionEnd(prim, attribute.GetNameToken(), pendingType) : ConnectionEnd(attr);
+    ShaderConnectionDialog dialog(end,
                                   fromOutput ? ShaderConnectionDialog::Mode::PickReceiver : ShaderConnectionDialog::Mode::PickSource,
                                   this);
     if (dialog.exec() != QDialog::Accepted || dialog.selected().IsEmpty()) return;
+    if (pending) {
+        // Created and connected in one undo step.
+        const UsdAttribute source = usd->GetAttributeAtPath(dialog.selected());
+        if (!source) return;
+        shade_actions::connect(*m_undoManager, m_stage,
+                               {attribute.GetPrimPath(), attribute.GetNameToken(), pendingType.GetAsToken().GetString()},
+                               {source.GetPrim().GetPath(), source.GetName(), source.GetTypeName().GetAsToken().GetString()});
+        return;
+    }
     if (fromOutput) {
         prim_actions::connectSource(*m_undoManager, m_stage, dialog.selected(), attribute);
     } else {
