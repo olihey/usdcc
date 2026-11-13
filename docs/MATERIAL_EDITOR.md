@@ -650,13 +650,15 @@ as the native window gets no context menu event its container would see). The ch
   the renderer can't draw (MDL in Storm, §3.5) gets a line saying so, rather than a default-grey shape.
 - **Pause:** an icon button in the preview's toolbar, showing what a click does: pause bars while it
   renders, a play triangle while it's paused.
-  - Paused, the last frame stays, fitted to the window. Nothing renders,
-    which also stops a progressive renderer refining. A badge over the picture isn't possible: the
+  - Paused, the last frame stays, fitted to the window. Nothing renders, and a progressive
+    renderer's own threads pause too (`PauseRenderer()`, or `StopRenderer()` for one that can't
+    pause), so it stops refining. A badge over the picture isn't possible: the
     picture is a native window, which no widget can draw over.
   - Edits still reach the masked stage, which is cheap. Hydra takes them on the next render.
   - Resuming renders at once.
-  - It also draws nothing, without the button changing, while the preview is hidden or the panel's tab
-    isn't showing: the window isn't exposed then.
+  - It also draws nothing and pauses the renderer, without the button changing, while the preview
+    is hidden, the panel's tab isn't showing or the main window is minimized
+    (`HydraViewportWindow::isOnScreen()`), as every viewport does. Back on screen, it renders at once.
 - **Without OpenGL** (Qt's offscreen platform, which the tests run on), the preview isn't embedded and
   says so. A native child window there gains nothing, and Qt's offscreen backing store crashes when one
   is moved into a floating dock.

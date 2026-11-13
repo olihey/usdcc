@@ -17,6 +17,7 @@
 #include <QColor>
 #include <QElapsedTimer>
 #include <QPoint>
+#include <QPointer>
 #include <QImage>
 #include <QWindow>
 
@@ -211,6 +212,11 @@ public:
     // which renders at once with whatever changed meanwhile.
     void setPaused(bool paused);
     bool isPaused() const { return m_paused; }
+    // Whether anyone can see the viewport: exposed (not a dock tab behind another, not
+    // closed) and its top-level window not minimized. Off screen, nothing renders, and
+    // the renderer's own threads pause too (see updateRendererActivity()); back on
+    // screen, it renders at once with whatever changed meanwhile.
+    bool isOnScreen() const;
 
     // The heads-up display (docs/VIEWPORT_HUD.md), drawn over the frame while the display
     // options' `hud` is on. Not in grabFrame(): a session's preview shows the scene only.
@@ -294,6 +300,15 @@ private:
     // Binds m_framebuffer, (re)made at `width` x `height` device pixels.
     void bindFramebuffer(int width, int height);
     void renderNow();
+    // A progressive renderer (Embree, a path tracer) keeps refining on its own threads
+    // between frames: paused or off screen, this pauses it (or stops it, for one that
+    // can't pause), and resumes it otherwise. Storm has nothing to pause.
+    void updateRendererActivity();
+    // The engine was replaced: its renderer starts out running.
+    void forgetRendererHalt() { m_rendererHalt = RendererHalt::None; }
+    // Follows the top-level window's minimizing (isOnScreen()); a minimized top level
+    // doesn't take the exposure of its native child windows, this one included.
+    void watchTopLevel();
     // After the camera changed: redraw and tell cameraChanged()'s listeners.
     void cameraMoved();
     PXR_NS::GfVec3d cameraPosition() const;
@@ -356,6 +371,10 @@ private:
     DisplayOptions m_display;
     bool m_previewMode = false;
     bool m_paused = false;
+    enum class RendererHalt { None, Paused, Stopped };
+    RendererHalt m_rendererHalt = RendererHalt::None;  // what updateRendererActivity() did
+    QPointer<QWindow> m_topLevel;  // the one watchTopLevel() follows
+    QMetaObject::Connection m_topLevelConnection;
 
     HudLayout m_hudLayout;
     QImage m_hudImage;

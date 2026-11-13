@@ -119,6 +119,7 @@ void HydraViewportWindow::releaseEngine() {
     m_rendererPluginId = m_engine->GetCurrentRendererId();
     m_selectionOverlay.reset();
     m_engine.reset();
+    forgetRendererHalt();
     m_framebuffer.reset();
     if (current && m_hudTexture) m_context->functions()->glDeleteTextures(1, &m_hudTexture);
     m_hudTexture = 0;
@@ -150,6 +151,7 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
         const PXR_NS::TfToken rendererPluginId = m_engine->GetCurrentRendererId();
         m_context->makeCurrent(this);
         m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
+        forgetRendererHalt();
         m_engine->SetRendererPlugin(rendererPluginId);
         configureEngine();
     }
@@ -279,6 +281,56 @@ void HydraViewportWindow::setPaused(bool paused) {
     if (paused == m_paused) return;
     m_paused = paused;
     renderNow();
+}
+
+bool HydraViewportWindow::isOnScreen() const {
+    if (!isExposed()) return false;
+    const QWindow* top = this;
+    while (top->parent()) top = top->parent();
+    return !(top->windowStates() & Qt::WindowMinimized);
+}
+
+void HydraViewportWindow::watchTopLevel() {
+    QWindow* top = this;
+    while (top->parent()) top = top->parent();
+    if (top == m_topLevel) return;
+    disconnect(m_topLevelConnection);
+    m_topLevel = top;
+    m_topLevelConnection = connect(top, &QWindow::windowStateChanged, this, [this](Qt::WindowState) {
+        // Restored, the native child gets no expose event of its own to render on.
+        if (isOnScreen()) {
+            requestUpdate();
+        } else {
+            updateRendererActivity();
+        }
+    });
+}
+
+void HydraViewportWindow::updateRendererActivity() {
+    if (!m_engine) return;
+    const bool run = !m_paused && isOnScreen();
+    if (run == (m_rendererHalt == RendererHalt::None)) return;
+    const auto rendererName = [this]() { return m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()); };
+    if (run) {
+        const bool resumed = m_rendererHalt == RendererHalt::Paused ? m_engine->ResumeRenderer() : m_engine->RestartRenderer();
+        if (resumed) {
+            USDCC_LOG_DEBUG("usdcc.viewport", "Viewport renderer {} resumed", rendererName());
+        } else {
+            USDCC_LOG_WARNING("usdcc.viewport", "Could not resume the viewport's renderer {}", rendererName());
+        }
+        m_rendererHalt = RendererHalt::None;
+        return;
+    }
+    if (m_engine->IsPauseRendererSupported() && m_engine->PauseRenderer()) {
+        m_rendererHalt = RendererHalt::Paused;
+    } else if (m_engine->IsStopRendererSupported() && m_engine->StopRenderer()) {
+        m_rendererHalt = RendererHalt::Stopped;
+    } else {
+        return;  // nothing runs between frames (Storm)
+    }
+    USDCC_LOG_DEBUG("usdcc.viewport", "Viewport renderer {} {} ({})", rendererName(),
+                    m_rendererHalt == RendererHalt::Paused ? "paused" : "stopped",
+                    m_paused ? "the viewport is paused" : "the viewport is off screen");
 }
 
 void HydraViewportWindow::showLastFrame(int width, int height) {
@@ -541,7 +593,9 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
         return;
     }
     m_context->makeCurrent(this);
+    const PXR_NS::TfToken previous = m_engine->GetCurrentRendererId();
     if (m_engine->SetRendererPlugin(pluginId)) {
+        if (m_engine->GetCurrentRendererId() != previous) forgetRendererHalt();  // a new one, running
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}", m_engine->GetRendererDisplayName(pluginId));
         Q_EMIT rendererChanged();
     } else {
@@ -836,9 +890,8 @@ void HydraViewportWindow::drawGizmo(const usdcc::tools::GizmoGeometry& geo, cons
 }
 
 void HydraViewportWindow::exposeEvent(QExposeEvent*) {
-    if (isExposed()) {
-        renderNow();
-    }
+    watchTopLevel();
+    renderNow();  // or, no longer exposed, pauses the renderer
 }
 
 void HydraViewportWindow::resizeEvent(QResizeEvent*) { cameraMoved(); }  // the aspect ratio
@@ -847,6 +900,9 @@ bool HydraViewportWindow::event(QEvent* ev) {
     if (ev->type() == QEvent::UpdateRequest) {
         renderNow();
         return true;
+    }
+    if (ev->type() == QEvent::ParentWindowChange) {
+        watchTopLevel();  // docked, floated, or moved to another window
     }
     if (ev->type() == QEvent::Leave) {
         m_rolloverTimer->stop();
@@ -872,12 +928,14 @@ bool HydraViewportWindow::event(QEvent* ev) {
 }
 
 void HydraViewportWindow::renderNow() {
-    if (!isExposed()) {
+    if (!isOnScreen()) {
+        updateRendererActivity();  // nobody would see what it renders
         return;
     }
 
     ensureEngine();
     if (!m_engine || !m_context->makeCurrent(this)) return;
+    updateRendererActivity();  // resumed before it renders again, or paused with the viewport
 
     const qreal pixelRatio = devicePixelRatio();
     const int w = std::max(1, static_cast<int>(width() * pixelRatio));

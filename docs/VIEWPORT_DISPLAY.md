@@ -167,6 +167,11 @@ blank `UsdImagingGLRenderParams`, and Fit to View's bounds hard-coded default + 
 - **The Display... dialog** has the same rows below the selection's, each with its Default
   button.
 - **Python** has no access to a viewport's display options yet (nor to the grid's).
+- **Off screen** — its dock tab behind another, its panel closed, or the main window minimized
+  (`HydraViewportWindow::isOnScreen()`) — a viewport renders nothing, and a progressive renderer's
+  own threads (Embree, a path tracer) pause with `PauseRenderer()`, or `StopRenderer()` where it
+  can't pause. Back on screen, it resumes and renders at once with whatever changed meanwhile.
+  Minimizing needs watching the top-level window: it doesn't take its native children's exposure.
 
 ## 5. Phases
 
