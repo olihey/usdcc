@@ -31,6 +31,7 @@
 #include <QUndoStack>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 
 using usdcc::usd::AttributesViewPanel;
@@ -45,6 +46,15 @@ void settle() {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < 60) QApplication::processEvents();
+}
+
+// Settles until `done`, for up to two seconds: a question answered from a timer can take
+// longer than settle() on a slow machine (CI).
+bool settleUntil(const std::function<bool()>& done) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!done() && timer.elapsed() < 2000) QApplication::processEvents();
+    return done();
 }
 
 QFrame* pillNamed(SchemaPillsEditor* pills, const QString& name) {
@@ -171,21 +181,23 @@ USDCC_TEST(schema_pills) {
     // Schema only: the value stays.
     answerNextQuestion(QStringLiteral("Remove Schema Only"));
     removeButton(pillNamed(pills(), "PhysicsRigidBodyAPI"))->click();
-    settle();
-    CHECK(!pillNamed(pills(), "PhysicsRigidBodyAPI") && mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue(),
+    CHECK(settleUntil([&]() { return !pillNamed(pills(), "PhysicsRigidBodyAPI"); }) &&
+              mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue(),
           "Remove Schema Only leaves the property");
     stack->undo();
-    settle();
+    CHECK(settleUntil([&]() { return pillNamed(pills(), "PhysicsRigidBodyAPI") != nullptr; }), "undo brings it back");
 
     // Clean up: the value goes too, in one undo step.
     answerNextQuestion(QStringLiteral("Remove and Clean Up"));
     removeButton(pillNamed(pills(), "PhysicsRigidBodyAPI"))->click();
-    settle();
-    CHECK(!pillNamed(pills(), "PhysicsRigidBodyAPI") && !mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue(),
+    CHECK(settleUntil([&]() {
+              return !pillNamed(pills(), "PhysicsRigidBodyAPI") && !mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue();
+          }),
           "Remove and Clean Up removes it");
     stack->undo();
-    settle();
-    CHECK(pillNamed(pills(), "PhysicsRigidBodyAPI") && mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue(),
+    CHECK(settleUntil([&]() {
+              return pillNamed(pills(), "PhysicsRigidBodyAPI") && mesh.GetAttribute(TfToken("physics:velocity")).HasAuthoredValue();
+          }),
           "undo brings back both");
 
     // An unregistered one can be removed; a built-in one can't.
