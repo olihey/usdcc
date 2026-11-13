@@ -7,6 +7,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <string>
 
 class QKeyEvent;
@@ -40,6 +41,9 @@ public:
 
     // The open dialog (created on first use), shown and brought to the front.
     static SettingsDialog* showDialog(QWidget* parent);
+    // Run by showDialog() before it makes the dialog: defines settings that are only
+    // defined when needed, such as the render delegates', which take a while to list.
+    static void setBeforeShow(std::function<void()> prepare);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;

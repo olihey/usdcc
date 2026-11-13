@@ -58,6 +58,7 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/recent_files.h"
+#include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
@@ -243,6 +244,13 @@ int main(int argc, char** argv) {
     usdcc::scripting::PluginManager plugins(
         usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
     plugins.scan();
+    // Settings > Renderers: each render delegate's own settings, all of them listed only
+    // when the dialog opens, as some take a while (a viewport defines its renderer's itself).
+    usdcc::ui::SettingsDialog::setBeforeShow([]() {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        usdcc::usd::defineRendererSettings();
+        QApplication::restoreOverrideCursor();
+    });
 
     // Declared before `window` (and so destroyed after it, per C++'s
     // reverse-construction-order rule) since the viewport panel created

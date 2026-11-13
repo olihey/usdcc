@@ -49,7 +49,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 // Categories the app knows come first, in this order; any other (a plugin's)
 // follows in the order it was defined.
 const QStringList& knownCategoryOrder() {
-    static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"),
+    static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"), QStringLiteral("Renderers"),
                                       QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Notifications"),
                                       QStringLiteral("Python")};
     return order;
@@ -406,9 +406,19 @@ void SettingsDialog::keyPressEvent(QKeyEvent* event) {
     QDialog::keyPressEvent(event);
 }
 
+namespace {
+std::function<void()>& beforeShow() {
+    static std::function<void()> prepare;
+    return prepare;
+}
+}  // namespace
+
+void SettingsDialog::setBeforeShow(std::function<void()> prepare) { beforeShow() = std::move(prepare); }
+
 SettingsDialog* SettingsDialog::showDialog(QWidget* parent) {
     static QPointer<SettingsDialog> dialog;
     if (!dialog) {
+        if (beforeShow()) beforeShow()();
         dialog = new SettingsDialog(parent);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
     }

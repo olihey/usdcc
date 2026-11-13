@@ -108,6 +108,7 @@ take them for a `bool`.
 | `Viewport/sceneLights`, `cameraLight`, `domeLight` | Bool | on, on, off | `ViewportViewPanel`: the stage's own lights, a light at the camera, Hydra's default dome light |
 | `Viewport/hud` | Bool | on | `ViewportViewPanel`: the heads-up display over the viewport ([VIEWPORT_HUD.md](VIEWPORT_HUD.md)); a viewport can override it, and each part below |
 | `Viewport/hudCamera`, `hudAxes`, `hudStats`, `hudPerformance`, `hudToolReadout`, `hudRollover` | Bool | on, on, off, off, on, off | `ViewportViewPanel`: the HUD's labels, axis triad, scene counts, frame time, drag readout and prim under the cursor |
+| `Renderers/<pluginId>/<key>` | Bool, Int, Float or String | the delegate's | `ViewportViewPanel`: a render delegate's own settings, one group each on Settings > Renderers, defined when a viewport first uses the renderer or the dialog opens ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md) §7); a viewport can override each |
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
 | `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `Studio` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |

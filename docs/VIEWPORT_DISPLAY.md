@@ -199,3 +199,35 @@ had nothing to show them), and Embree.
    another render geometry of the same stage.
 4. **The default dome light's texture.** Taken: **Hydra's packaged one**, as usdview. The
    Material Editor preview's HDRIs (Neutral, Sky, Studio) would be the next step if it's wanted.
+
+## 7. Renderer settings
+
+Each Hydra render delegate lists settings of its own (`HdRenderDelegate::GetRenderSettingDescriptors()`:
+a key, a name and a default), and some have one-shot commands. usdcc shows both, on the
+Display options' model: app-wide defaults with a viewport's own overrides.
+
+- **What a delegate offers** (`renderer_settings.h`): `rendererSettings(pluginId)` reads them from a
+  delegate made for the purpose, as `renderDelegateShading()` does (no GPU or GL context), and keeps
+  them. Bools, numbers and strings are shown (an unsigned as an Int, a token or asset path as a
+  String); other types are left out, as is `domeLightCameraVisibility`, which Display's Dome Light
+  Textures sets. Here: Storm 7, Embree 20 (its path tracer's `ty:` settings), Gatling 15.
+- **Settings > Renderers:** a group per delegate, keyed `Renderers/<pluginId>/<key>`, defaulting to the
+  delegate's own default, so Reset gives its value back. Defined when needed, not at start: making a
+  delegate to list them takes Gatling about 0.7 s (its MDL runtime), Storm and Embree about 10 ms.
+  A viewport defines its renderer's as it starts using it (so the saved values apply), and all of them
+  are defined before the Settings dialog opens (`SettingsDialog::setBeforeShow()`, set in main.cpp).
+- **A viewport's overrides:** per renderer, kept for a renderer that isn't in use. The viewport hands
+  the current renderer's values to `HydraViewportWindow::setRendererSettings()`, which sets those that
+  differ from the delegate's, and again whenever the engine gets a new delegate (a new stage, a switch
+  of renderer), which starts from its defaults. A value it doesn't override follows its setting.
+- **Renderer > Renderer Settings...** (the options menu and the HUD's Renderer label): a row per setting
+  of the current renderer, with a Default button while it's overridden; rebuilt for another renderer.
+- **Commands** (`GetRendererCommandDescriptors()`): listed under it in the Renderer menu, run with their
+  arguments' defaults. Here only Gatling has one: Print Licenses.
+- **Sessions** keep the overrides as `"rendererSettings": {"HdEmbreeRendererPlugin": {"ty:maxBounces": 8}}`;
+  a renderer this installation hasn't keeps its values for the next save. Duplicate copies them.
+- **Not done:** ranges and choices (delegates don't publish them), argument dialogs for commands,
+  `UsdRenderSettings` prims, AOVs, and Python.
+- **Tests:** `renderer_settings_test` (Embree's list and types, the conversions, the Settings
+  defaults, overrides through a duplicate and a session, the dialog). What reaches the engine is
+  checked in the app.

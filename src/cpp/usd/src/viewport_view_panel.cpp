@@ -5,6 +5,7 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/layer_stack.h"
+#include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -28,10 +29,12 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTimer>
@@ -41,9 +44,12 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace usdcc::usd {
@@ -313,6 +319,177 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     QObject::connect(panel, &ViewportViewPanel::displayChanged, dialog, updateAll);
     return dialog;
 }
+
+QJsonValue jsonOf(const usdcc::core::SettingValue& value) {
+    return std::visit(
+        [](const auto& v) -> QJsonValue {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+                return QString::fromStdString(v);
+            } else {
+                return QJsonValue(v);
+            }
+        },
+        value);
+}
+
+// A session's value: as the delegate's type when it has the setting, else as the JSON's.
+std::optional<PXR_NS::VtValue> rendererValueFromJson(const PXR_NS::TfToken& pluginId, const PXR_NS::TfToken& key,
+                                                     const QJsonValue& json) {
+    usdcc::core::SettingValue value;
+    if (json.isBool()) {
+        value = json.toBool();
+    } else if (json.isDouble()) {
+        value = json.toDouble();
+    } else if (json.isString()) {
+        value = json.toString().toStdString();
+    } else {
+        return std::nullopt;
+    }
+    for (const RendererSettingInfo& setting : rendererSettings(pluginId)) {
+        if (setting.key == key) return toRendererValue(value, setting.defaultValue);
+    }
+    // A renderer (or setting) this installation hasn't: kept as it is for a session saved later.
+    return std::visit([](const auto& v) { return PXR_NS::VtValue(v); }, value);
+}
+
+// The Renderer Settings dialog: the current renderer's settings, each with a Default button
+// that shows while this viewport overrides it and drops the override. Edits apply at once.
+// Built again when the viewport switches renderer.
+QDialog* makeRendererSettingsDialog(ViewportViewPanel* panel) {
+    auto* dialog = new QDialog(panel);
+    dialog->setObjectName(QStringLiteral("viewportRendererSettingsDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* layout = new QVBoxLayout(dialog);
+    auto* scroll = new QScrollArea(dialog);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    layout->addWidget(scroll, 1);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    buttons->button(QDialogButtonBox::Close)->setAutoDefault(false);
+    layout->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+
+    struct State {
+        PXR_NS::TfToken pluginId;
+        std::vector<std::function<void()>> updates;  // a row each: shows the value, and its Default button
+    };
+    auto state = std::make_shared<State>();
+    auto build = [panel, dialog, scroll, state]() {
+        HydraViewportWindow* viewport = panel->hydraWindow();
+        const PXR_NS::TfToken pluginId = viewport->currentRendererPlugin();
+        state->pluginId = pluginId;
+        state->updates.clear();
+        const QString name = pluginId.IsEmpty() ? QString() : viewport->rendererDisplayName(pluginId);
+        dialog->setWindowTitle(QObject::tr("Renderer Settings - %1 - %2")
+                                   .arg(name.isEmpty() ? QString::fromStdString(pluginId.GetString()) : name, panel->windowTitle()));
+        auto* content = new QWidget;
+        auto* grid = new QGridLayout(content);
+        grid->setColumnStretch(1, 1);
+        const std::vector<RendererSettingInfo> settings = pluginId.IsEmpty() ? std::vector<RendererSettingInfo>{}
+                                                                             : rendererSettings(pluginId);
+        int row = 0;
+        if (pluginId.IsEmpty()) {
+            grid->addWidget(new QLabel(QObject::tr("The viewport has no renderer until it has drawn."), content), row++, 0, 1, 3);
+        } else if (settings.empty()) {
+            grid->addWidget(new QLabel(QObject::tr("%1 has no settings of its own.").arg(name), content), row++, 0, 1, 3);
+        }
+        for (const RendererSettingInfo& setting : settings) {
+            const PXR_NS::TfToken key = setting.key;
+            const PXR_NS::VtValue like = setting.defaultValue;
+            const auto set = [panel, pluginId, key, like](const usdcc::core::SettingValue& value) {
+                if (const std::optional<PXR_NS::VtValue> converted = toRendererValue(value, like)) {
+                    panel->setRendererOverride(pluginId, key, converted);
+                }
+            };
+            const QString objectName = QStringLiteral("rendererSetting_%1").arg(QString::fromStdString(key.GetString()));
+            QWidget* editor = nullptr;
+            std::function<void(const usdcc::core::SettingValue&)> show;
+            switch (setting.type) {
+                case usdcc::core::SettingType::Bool: {
+                    auto* box = new QCheckBox(QString::fromStdString(setting.label), content);
+                    QObject::connect(box, &QCheckBox::toggled, box, [set](bool on) { set(on); });
+                    show = [box](const usdcc::core::SettingValue& v) {
+                        const QSignalBlocker block(box);
+                        if (const bool* on = std::get_if<bool>(&v)) box->setChecked(*on);
+                    };
+                    editor = box;
+                    break;
+                }
+                case usdcc::core::SettingType::Int: {
+                    auto* spin = new QSpinBox(content);
+                    spin->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+                    spin->setKeyboardTracking(false);  // a value per edit, not per key
+                    QObject::connect(spin, &QSpinBox::valueChanged, spin, [set](int v) { set(v); });
+                    show = [spin](const usdcc::core::SettingValue& v) {
+                        const QSignalBlocker block(spin);
+                        if (const int* number = std::get_if<int>(&v)) spin->setValue(*number);
+                    };
+                    editor = spin;
+                    break;
+                }
+                case usdcc::core::SettingType::Float: {
+                    auto* spin = new QDoubleSpinBox(content);
+                    spin->setRange(-1e9, 1e9);
+                    spin->setDecimals(4);
+                    spin->setKeyboardTracking(false);
+                    QObject::connect(spin, &QDoubleSpinBox::valueChanged, spin, [set](double v) { set(v); });
+                    show = [spin](const usdcc::core::SettingValue& v) {
+                        const QSignalBlocker block(spin);
+                        if (const double* number = std::get_if<double>(&v)) spin->setValue(*number);
+                    };
+                    editor = spin;
+                    break;
+                }
+                default: {
+                    auto* edit = new QLineEdit(content);
+                    QObject::connect(edit, &QLineEdit::editingFinished, edit, [set, edit]() { set(edit->text().toStdString()); });
+                    show = [edit](const usdcc::core::SettingValue& v) {
+                        const QSignalBlocker block(edit);
+                        if (const std::string* text = std::get_if<std::string>(&v)) edit->setText(QString::fromStdString(*text));
+                    };
+                    editor = edit;
+                    break;
+                }
+            }
+            editor->setObjectName(objectName);
+            editor->setToolTip(QString::fromStdString(key.GetString()));
+            if (setting.type != usdcc::core::SettingType::Bool) {
+                grid->addWidget(new QLabel(QString::fromStdString(setting.label), content), row, 0);
+            }
+            grid->addWidget(editor, row, setting.type == usdcc::core::SettingType::Bool ? 0 : 1, 1,
+                            setting.type == usdcc::core::SettingType::Bool ? 2 : 1);
+            auto* reset = new QToolButton(content);
+            reset->setObjectName(objectName + QStringLiteral("_default"));
+            reset->setText(QObject::tr("Default"));
+            reset->setToolTip(QObject::tr("Use the Settings > Renderers value"));
+            QObject::connect(reset, &QToolButton::clicked, reset,
+                             [panel, pluginId, key]() { panel->setRendererOverride(pluginId, key, std::nullopt); });
+            grid->addWidget(reset, row++, 2);
+            state->updates.push_back([panel, pluginId, key, show, reset]() {
+                const RendererSettingValues values = panel->rendererSettingValues(pluginId);
+                if (auto found = values.find(key); found != values.end()) {
+                    if (const std::optional<usdcc::core::SettingValue> value = toSettingValue(found->second)) show(*value);
+                }
+                const auto overrides = panel->rendererOverrides().find(pluginId);
+                reset->setVisible(overrides != panel->rendererOverrides().end() && overrides->second.contains(key));
+            });
+        }
+        grid->setRowStretch(row, 1);
+        scroll->setWidget(content);  // deletes the last renderer's
+        for (const auto& update : state->updates) update();
+    };
+    build();
+    QObject::connect(panel, &ViewportViewPanel::rendererSettingsChanged, dialog, [panel, state, build]() {
+        if (panel->hydraWindow()->currentRendererPlugin() != state->pluginId) {
+            build();
+            return;
+        }
+        for (const auto& update : state->updates) update();
+    });
+    dialog->resize(dialog->sizeHint().width() + 80, std::min(dialog->sizeHint().height() + 40, 640));
+    return dialog;
+}
 }  // namespace
 
 ViewportViewPanel* ViewportViewPanel::activeViewport() {
@@ -392,6 +569,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // What isn't overridden follows Settings > Viewport as it changes.
     usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
         if (isViewportDisplayKey(key)) applyDisplay();
+        if (isRendererSettingKey(key)) applyRendererSettings();
     });
     QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
 
@@ -407,6 +585,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // What a Material Editor's preview follows (rendererFor()).
     connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, []() { viewportsChanged()(); });
     connect(m_viewport, &HydraViewportWindow::rendererChanged, this, []() { viewportsChanged()(); });
+    // The delegate's own settings: the first renderer's once there is one, and each new one's.
+    connect(m_viewport, &HydraViewportWindow::rendererPluginsChanged, this, &ViewportViewPanel::applyRendererSettings);
+    connect(m_viewport, &HydraViewportWindow::rendererChanged, this, &ViewportViewPanel::applyRendererSettings);
     // A click in the viewport focuses this panel, which makes its stage the
     // current one (CurrentStageTracker): ADS doesn't see the native window's
     // focus. Only the highlight moves; the viewport keeps the keyboard.
@@ -618,9 +799,54 @@ QDialog* ViewportViewPanel::showDisplayDialog() {
     return m_displayDialog;
 }
 
+void ViewportViewPanel::setRendererOverrides(const RendererOverrides& overrides) {
+    RendererOverrides kept = overrides;
+    std::erase_if(kept, [](const auto& entry) { return entry.second.empty(); });
+    if (kept == m_rendererOverrides) return;
+    m_rendererOverrides = std::move(kept);
+    applyRendererSettings();
+}
+
+void ViewportViewPanel::setRendererOverride(const PXR_NS::TfToken& pluginId, const PXR_NS::TfToken& key,
+                                            const std::optional<PXR_NS::VtValue>& value) {
+    RendererOverrides overrides = m_rendererOverrides;
+    if (value) {
+        overrides[pluginId][key] = *value;
+    } else if (auto found = overrides.find(pluginId); found != overrides.end()) {
+        found->second.erase(key);
+    }
+    setRendererOverrides(overrides);
+}
+
+RendererSettingValues ViewportViewPanel::rendererSettingValues(const PXR_NS::TfToken& pluginId) const {
+    RendererSettingValues values = rendererSettingDefaults(pluginId);
+    if (auto found = m_rendererOverrides.find(pluginId); found != m_rendererOverrides.end()) {
+        for (const auto& [key, value] : found->second) {
+            // Not a setting the delegate has (here): kept, not handed to it.
+            if (values.contains(key)) values[key] = value;
+        }
+    }
+    return values;
+}
+
+void ViewportViewPanel::applyRendererSettings() {
+    const PXR_NS::TfToken pluginId = m_viewport->currentRendererPlugin();
+    if (!pluginId.IsEmpty()) m_viewport->setRendererSettings(pluginId, rendererSettingValues(pluginId));
+    Q_EMIT rendererSettingsChanged();
+}
+
+QDialog* ViewportViewPanel::showRendererSettingsDialog() {
+    if (!m_rendererSettingsDialog) m_rendererSettingsDialog = makeRendererSettingsDialog(this);
+    m_rendererSettingsDialog->show();
+    m_rendererSettingsDialog->raise();
+    m_rendererSettingsDialog->activateWindow();
+    return m_rendererSettingsDialog;
+}
+
 usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, m_undoManager, windowTitle(), parent);
     copy->setDisplayOverrides(m_displayOverrides);
+    copy->setRendererOverrides(m_rendererOverrides);
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so it has
@@ -652,12 +878,38 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     const PXR_NS::TfToken renderer = m_viewport->currentRendererPlugin();
     if (!renderer.IsEmpty()) state.insert(QStringLiteral("renderer"), QString::fromStdString(renderer.GetString()));
     if (!m_displayOverrides.isEmpty()) state.insert(QStringLiteral("display"), m_displayOverrides.toJson());
+    // {"HdEmbreeRendererPlugin": {"ty:maxBounces": 8}}: only what's overridden.
+    QJsonObject renderers;
+    for (const auto& [pluginId, values] : m_rendererOverrides) {
+        QJsonObject settings;
+        for (const auto& [key, value] : values) {
+            if (const std::optional<usdcc::core::SettingValue> setting = toSettingValue(value)) {
+                settings.insert(QString::fromStdString(key.GetString()), jsonOf(*setting));
+            }
+        }
+        if (!settings.isEmpty()) renderers.insert(QString::fromStdString(pluginId.GetString()), settings);
+    }
+    if (!renderers.isEmpty()) state.insert(QStringLiteral("rendererSettings"), renderers);
     return state;
 }
 
 void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
     // Needs no renderer, so applies at once. None saved (an older session): no overrides.
     setDisplayOverrides(ViewportDisplayOverrides::fromJson(state.value(QStringLiteral("display")).toObject()));
+    // Before the renderer below: it gets them as it's switched to.
+    RendererOverrides renderers;
+    const QJsonObject savedRenderers = state.value(QStringLiteral("rendererSettings")).toObject();
+    for (auto plugin = savedRenderers.begin(); plugin != savedRenderers.end(); ++plugin) {
+        const PXR_NS::TfToken pluginId(plugin.key().toStdString());
+        const QJsonObject settings = plugin.value().toObject();
+        for (auto setting = settings.begin(); setting != settings.end(); ++setting) {
+            const PXR_NS::TfToken key(setting.key().toStdString());
+            if (const std::optional<PXR_NS::VtValue> value = rendererValueFromJson(pluginId, key, setting.value())) {
+                renderers[pluginId][key] = *value;
+            }
+        }
+    }
+    setRendererOverrides(renderers);
     HydraViewportWindow::CameraState camera = m_viewport->cameraState();
     const QJsonObject orbit = state.value(QStringLiteral("camera")).toObject();
     const QJsonArray target = orbit.value(QStringLiteral("target")).toArray();
@@ -773,6 +1025,23 @@ void ViewportViewPanel::addRendererEntries(QMenu* menu) {
         action->setChecked(pluginId == current);
         group->addAction(action);
         connect(action, &QAction::triggered, this, [this, pluginId]() { m_viewport->setRendererPlugin(pluginId); });
+    }
+    if (plugins.empty()) return;
+
+    // The current renderer's own settings, and its commands.
+    menu->addSeparator();
+    QAction* settings = menu->addAction(tr("Renderer Settings..."), this, [this]() { showRendererSettingsDialog(); });
+    settings->setObjectName(QStringLiteral("rendererSettingsAction"));
+    const PXR_NS::HdCommandDescriptors commands = m_viewport->rendererCommands();
+    if (commands.empty()) return;
+    menu->addSeparator();
+    for (const PXR_NS::HdCommandDescriptor& command : commands) {
+        QString text = QString::fromStdString(command.commandDescription.empty() ? command.commandName.GetString()
+                                                                                 : command.commandDescription);
+        QAction* action = menu->addAction(text.replace(QLatin1Char('&'), QStringLiteral("&&")));
+        action->setObjectName(QStringLiteral("rendererCommand_%1").arg(QString::fromStdString(command.commandName.GetString())));
+        const PXR_NS::TfToken name = command.commandName;
+        connect(action, &QAction::triggered, this, [this, name]() { m_viewport->runRendererCommand(name); });
     }
 }
 

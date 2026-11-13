@@ -261,7 +261,45 @@ void HydraViewportWindow::configureEngine() {
                                                 static_cast<float>(selection.blueF()), 1.0f));
     m_engine->SetRendererSetting(PXR_NS::HdRenderSettingsTokens->domeLightCameraVisibility,
                                  PXR_NS::VtValue(m_display.domeLightTextures));
+    applyRendererSettings();
     updateEngineSelection();
+}
+
+void HydraViewportWindow::setRendererSettings(const PXR_NS::TfToken& pluginId, const RendererSettingValues& values) {
+    if (pluginId == m_rendererSettingsPlugin && values == m_rendererSettings) return;
+    m_rendererSettingsPlugin = pluginId;
+    m_rendererSettings = values;
+    applyRendererSettings();
+}
+
+void HydraViewportWindow::applyRendererSettings() {
+    if (!m_engine || m_rendererSettingsPlugin != m_engine->GetCurrentRendererId()) return;
+    bool changed = false;
+    for (const auto& [key, value] : m_rendererSettings) {
+        if (m_engine->GetRendererSetting(key) == value) continue;
+        m_engine->SetRendererSetting(key, value);
+        changed = true;
+    }
+    // Not renderNow(): this also runs inside it, from ensureEngine()'s configureEngine().
+    if (changed) requestUpdate();
+}
+
+PXR_NS::HdCommandDescriptors HydraViewportWindow::rendererCommands() const {
+    return m_engine ? m_engine->GetRendererCommandDescriptors() : PXR_NS::HdCommandDescriptors{};
+}
+
+bool HydraViewportWindow::runRendererCommand(const PXR_NS::TfToken& name) {
+    if (!m_engine) return false;
+    m_context->makeCurrent(this);
+    const bool ran = m_engine->InvokeRendererCommand(name);
+    if (ran) {
+        USDCC_LOG_INFO("usdcc.viewport", "Ran renderer command {} of {}", name.GetString(),
+                       m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()));
+    } else {
+        USDCC_LOG_WARNING("usdcc.viewport", "The viewport's renderer has no command {}", name.GetString());
+    }
+    renderNow();
+    return ran;
 }
 
 void HydraViewportWindow::setPreviewMode(bool preview) {
@@ -596,6 +634,7 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
     const PXR_NS::TfToken previous = m_engine->GetCurrentRendererId();
     if (m_engine->SetRendererPlugin(pluginId)) {
         if (m_engine->GetCurrentRendererId() != previous) forgetRendererHalt();  // a new one, running
+        applyRendererSettings();  // a new delegate starts from its defaults
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}", m_engine->GetRendererDisplayName(pluginId));
         Q_EMIT rendererChanged();
     } else {

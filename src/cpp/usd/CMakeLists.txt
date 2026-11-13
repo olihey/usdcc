@@ -16,6 +16,8 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/scene_counts.h
     include/usdcc/usd/shader_node_catalog.h
     src/shader_node_catalog.cpp
+    include/usdcc/usd/renderer_settings.h
+    src/renderer_settings.cpp
     include/usdcc/usd/shade_graph.h
     src/shade_graph.cpp
     include/usdcc/usd/shading_preview.h

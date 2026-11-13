@@ -16,7 +16,9 @@
 #include <QPointer>
 
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QAction;
@@ -107,12 +109,28 @@ public:
     // at a time, raised if it's already open.
     QDialog* showDisplayDialog();
 
+    // The render delegates' own settings (docs/VIEWPORT_DISPLAY.md §7): a viewport uses
+    // Settings > Renderers' values, except for what it overrides, per renderer. Overrides
+    // of a renderer that isn't in use are kept for when it is.
+    using RendererOverrides = std::map<PXR_NS::TfToken, RendererSettingValues>;  // by plugin
+    const RendererOverrides& rendererOverrides() const { return m_rendererOverrides; }
+    void setRendererOverrides(const RendererOverrides& overrides);
+    // Sets one override, or drops it (an empty `value`).
+    void setRendererOverride(const PXR_NS::TfToken& pluginId, const PXR_NS::TfToken& key,
+                             const std::optional<PXR_NS::VtValue>& value);
+    // What `pluginId`'s delegate gets here: the defaults with the overrides applied.
+    RendererSettingValues rendererSettingValues(const PXR_NS::TfToken& pluginId) const;
+    // The Renderer Settings dialog for the current renderer (the Renderer menu's entry);
+    // one at a time, raised if it's already open.
+    QDialog* showRendererSettingsDialog();
+
     // Copies the currently-viewed stage, the current render delegate, the
-    // camera position and the grid and background overrides onto the
+    // camera position, and the display and renderer settings overrides onto the
     // duplicate — see ViewPanel::duplicate().
     // The duplicate shares this panel's ToolSet.
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
-    // The camera, the renderer and the display overrides (docs/SESSIONS.md §2.4).
+    // The camera, the renderer, and the display and renderer settings overrides
+    // (docs/SESSIONS.md §2.4).
     QJsonObject saveSessionState() const override;
     void restoreSessionState(const QJsonObject& state) override;
 
@@ -132,6 +150,9 @@ protected:
 Q_SIGNALS:
     // displayOptions() changed: an override, or a default it follows.
     void displayChanged();
+    // rendererSettingValues() may say something else: an override, a default, or the
+    // renderer changed.
+    void rendererSettingsChanged();
 
 private Q_SLOTS:
     void onSelectionRequested(std::vector<PXR_NS::SdfPath> paths);
@@ -146,6 +167,9 @@ private:
     void applyDisplay();
     // Changes some overrides, leaving the others as they are.
     void editOverrides(const std::function<void(ViewportDisplayOverrides&)>& change);
+    // Hands the current renderer's rendererSettingValues() to the viewport and tells
+    // rendererSettingsChanged().
+    void applyRendererSettings();
     // The Renderer and Shading entries, for the options menu and the HUD's.
     void addRendererEntries(QMenu* menu);
     void addShadingEntries(QMenu* menu);
@@ -164,6 +188,8 @@ private:
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on
     ViewportDisplayOverrides m_displayOverrides;
     QPointer<QDialog> m_displayDialog;
+    RendererOverrides m_rendererOverrides;
+    QPointer<QDialog> m_rendererSettingsDialog;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

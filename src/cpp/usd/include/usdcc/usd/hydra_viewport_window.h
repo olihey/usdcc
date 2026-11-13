@@ -5,12 +5,14 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/viewport_hud.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/range3d.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/base/tf/token.h>
+#include <pxr/imaging/hd/command.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -104,6 +106,17 @@ public:
     PXR_NS::TfToken currentRendererPlugin() const;
     // Before the first frame, the renderer it starts with.
     void setRendererPlugin(const PXR_NS::TfToken& pluginId);
+
+    // The render delegate's own settings (renderer_settings.h), for `pluginId`'s
+    // delegate: handed to the engine while it's that renderer, and again whenever it
+    // gets a new delegate of it (a new engine, a switch back), which starts from its
+    // defaults. Only values that differ from the delegate's are set, so a progressive
+    // renderer restarts only for a real change.
+    void setRendererSettings(const PXR_NS::TfToken& pluginId, const RendererSettingValues& values);
+    // The current delegate's commands ("Reload Shaders", ...); none before the first frame.
+    PXR_NS::HdCommandDescriptors rendererCommands() const;
+    // Runs one with its arguments' defaults; false if the delegate doesn't have it.
+    bool runRendererCommand(const PXR_NS::TfToken& name);
 
     // The orbit/pan/zoom camera's state. Exposed so a caller duplicating a
     // ViewportViewPanel (see ViewPanel::duplicate()) can make the copy start
@@ -289,6 +302,8 @@ protected:
 private:
     void ensureEngine();
     void configureEngine();
+    // Hands m_rendererSettings to the engine, if it's their renderer (setRendererSettings()).
+    void applyRendererSettings();
     // Destroys the engine with the context current, so its GL objects are
     // freed cleanly, and remembers its renderer for ensureEngine().
     void releaseEngine();
@@ -344,6 +359,8 @@ private:
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
+    PXR_NS::TfToken m_rendererSettingsPlugin;  // whose m_rendererSettings are
+    RendererSettingValues m_rendererSettings;
     // What Storm and the gizmo draw into; copied to the window each frame.
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
     PXR_NS::UsdStageRefPtr m_stage;
