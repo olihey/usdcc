@@ -231,7 +231,12 @@ Display options' model: app-wide defaults with a viewport's own overrides.
   reads, overrides and resets its renderer's settings, as the dialog does, with `renderer=` for one
   it isn't using; values are bools, ints, floats and strs, checked against the setting's type (an
   int does for a float). `renderer_settings_info(renderer)` lists a renderer's settings and defines
-  their defaults, which `usdcc.settings` then reads and changes by `settings_key`.
+  their defaults, which `usdcc.settings` then reads and changes by `settings_key`. The
+  `"viewport_renderer_settings_changed"` event (`usdcc.app.connect()`) calls back with the `Viewport`
+  when its renderer, the values that renderer gets, or its overrides of any renderer change
+  (`ViewportViewPanel::anyRendererSettingsChanged()`). Only for a real change: each viewport
+  remembers what it last told, as a Settings change reaches every viewport whether or not it
+  uses that renderer or overrides that setting.
 
   ```python
   import usdcc.app
@@ -242,8 +247,8 @@ Display options' model: app-wide defaults with a viewport's own overrides.
   viewport.reset_renderer_setting("ty:maxBounces")         # back to Settings > Renderers' value
   ```
 - **Not done:** ranges and choices (delegates don't publish them), argument dialogs for commands,
-  `UsdRenderSettings` prims, AOVs, and a Python event for a changed setting.
+  `UsdRenderSettings` prims and AOVs.
 - **Tests:** `renderer_settings_test` (Embree's list and types, the conversions, the Settings
   defaults, overrides through a duplicate and a session, the dialog) and
   `viewport_renderer_python_test` (the Python API, its errors, another renderer's overrides, a
-  closed viewport). What reaches the engine is checked in the app.
+  closed viewport, and the event: what calls it, what doesn't, and disconnecting). What reaches the engine is checked in the app.

@@ -424,6 +424,11 @@ def connect(event, callback):
     - "viewport_camera_changed": ``callback(camera)``, a ``ViewportCamera`` or None,
       when the active viewport's camera moves, it shows another stage, or another
       viewport becomes the active one (see ``active_viewport_camera()``)
+    - "viewport_renderer_settings_changed": ``callback(viewport)``, a ``Viewport``, when its
+      renderer settings change: it switches renderer, a value its renderer gets changes (an
+      override, from a script or its Renderer Settings dialog, or a Settings > Renderers
+      default it follows), or it overrides another renderer's. Only for a real change: setting
+      a value it already has doesn't call it
     """
     from pxr import Sdf
     from usdcc import usd
@@ -438,6 +443,8 @@ def connect(event, callback):
         )
     elif event == "viewport_camera_changed":
         plain = lambda: callback(active_viewport_camera())
+    elif event == "viewport_renderer_settings_changed":
+        plain = lambda id: callback(Viewport(id))
     else:
         plain = callback  # stage_closed; an unknown name raises below
     connection = Connection(_app().connect_event(event, plain))

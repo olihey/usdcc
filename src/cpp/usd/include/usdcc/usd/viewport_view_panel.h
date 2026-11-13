@@ -103,6 +103,11 @@ public:
     // Fired when a viewport opens or closes, is clicked, or switches stage or renderer:
     // when rendererFor() may say something else. Main thread only.
     static usdcc::core::Signal<>& viewportsChanged();
+    // Fired with a viewport whose renderer settings changed: its renderer, the values that
+    // renderer gets (an override, or a default it follows), or its overrides of any
+    // renderer. Only for a real change, unlike rendererSettingsChanged(). Main thread only;
+    // the "viewport_renderer_settings_changed" Python event.
+    static usdcc::core::Signal<ViewportViewPanel*>& anyRendererSettingsChanged();
 
     // The grid and background (docs/VIEWPORT_GRID.md). A viewport shows the Settings >
     // Viewport defaults, except for what it overrides; a value it doesn't override
@@ -126,6 +131,10 @@ public:
                              const std::optional<PXR_NS::VtValue>& value);
     // What `pluginId`'s delegate gets here: the defaults with the overrides applied.
     RendererSettingValues rendererSettingValues(const PXR_NS::TfToken& pluginId) const;
+    // Switches the renderer, as the Renderer menu does; before the first frame, the one it
+    // starts with (HydraViewportWindow::setRendererPlugin()). Tells anyRendererSettingsChanged()
+    // either way.
+    void setRenderer(const PXR_NS::TfToken& pluginId);
     // The Renderer Settings dialog for the current renderer (the Renderer menu's entry);
     // one at a time, raised if it's already open.
     QDialog* showRendererSettingsDialog();
@@ -197,6 +206,14 @@ private:
     QPointer<QDialog> m_displayDialog;
     RendererOverrides m_rendererOverrides;
     QPointer<QDialog> m_rendererSettingsDialog;
+    // What anyRendererSettingsChanged() last told, to tell only a real change.
+    struct RendererState {
+        PXR_NS::TfToken pluginId;
+        RendererSettingValues values;
+        RendererOverrides overrides;
+        bool operator==(const RendererState&) const = default;
+    };
+    RendererState m_toldRendererState;
 
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

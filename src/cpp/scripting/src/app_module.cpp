@@ -701,7 +701,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         [](int id, const std::string& renderer) {
             ViewportViewPanel& viewport = viewportWithId(id);
             if (!isKnownRenderer(PXR_NS::TfToken(renderer))) throw py::value_error("no renderer '" + renderer + "'");
-            viewport.hydraWindow()->setRendererPlugin(PXR_NS::TfToken(renderer));
+            viewport.setRenderer(PXR_NS::TfToken(renderer));
             return viewport.hydraWindow()->currentRendererPlugin().GetString() == renderer;
         },
         py::arg("id"), py::arg("renderer"));
@@ -829,6 +829,11 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                 // usdcc/app.py reads the camera with active_viewport_camera().
                 return keepConnection(usdcc::usd::ViewportViewPanel::activeViewportChanged(),
                                       [held]() { callLogged(held); });
+            }
+            if (event == "viewport_renderer_settings_changed") {
+                // The viewport's id: usdcc/app.py makes it a Viewport.
+                return keepConnection(usdcc::usd::ViewportViewPanel::anyRendererSettingsChanged(),
+                                      [held](usdcc::usd::ViewportViewPanel* viewport) { callLogged(held, viewport->id()); });
             }
             throw py::value_error("no event named '" + event + "'");
         },

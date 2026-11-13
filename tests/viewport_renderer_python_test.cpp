@@ -123,3 +123,47 @@ USDCC_TEST(python_viewport_renderer_settings) {
     CHECK(evaluated("app.active_viewport().id") == std::to_string(second->id()), "the other is the active one now");
     usdcc::core::Settings::instance().reset("Renderers/HdEmbreeRendererPlugin/ty:maxBounces");
 }
+
+USDCC_TEST(python_viewport_renderer_settings_event) {
+    TestSettings testSettings;
+    auto& app = pythonTestApp();
+    const AppContextScope scope({&app.stages, &app.undo, &app.tools});
+    auto first = makeViewport();
+    auto second = makeViewport();
+    const std::string a = std::to_string(first->id());
+    const std::string b = std::to_string(second->id());
+    CHECK(run(R"(
+import builtins, usdcc.app, usdcc.settings
+builtins.usdcc = usdcc
+builtins.usdcc_test_events = []
+builtins.usdcc_test_events_connection = usdcc.app.connect(
+    "viewport_renderer_settings_changed", lambda viewport: builtins.usdcc_test_events.append(viewport.id))
+builtins.v, builtins.w = usdcc.app.viewports()
+)"),
+          "connecting");
+    const auto events = []() { return evaluated("usdcc_test_events"); };
+
+    CHECK(run("v.set_renderer('HdEmbreeRendererPlugin')\n") && events() == "[" + a + "]", "a renderer set tells: %s",
+          events().c_str());
+    CHECK(run("v.set_renderer_setting('ty:maxBounces', 3)\n") && events() == "[" + a + ", " + a + "]", "an override tells");
+    CHECK(run("v.set_renderer_setting('ty:maxBounces', 3)\n") && events() == "[" + a + ", " + a + "]",
+          "the same value again doesn't");
+    CHECK(run("usdcc.settings.set('Renderers/HdEmbreeRendererPlugin/ty:maxBounces', 9)\n") &&
+              events() == "[" + a + ", " + a + "]",
+          "nor does a default it overrides");
+    CHECK(run("k = 'Renderers/HdEmbreeRendererPlugin/ty:tileSize'\nusdcc.settings.set(k, usdcc.settings.get(k) + 1)\n") &&
+              events() == "[" + a + ", " + a + ", " + a + "]",
+          "a default it follows does, for that viewport only (the other has no renderer): %s", events().c_str());
+    CHECK(run("w.set_renderer_setting('maxLights', 2, renderer='HdStormRendererPlugin')\n") &&
+              events() == "[" + a + ", " + a + ", " + a + ", " + b + "]",
+          "another renderer's override tells too");
+    CHECK(run("v.reset_renderer_setting()\n") && evaluated("usdcc_test_events[-1]") == a && evaluated("len(usdcc_test_events)") == "5",
+          "and a reset");
+
+    CHECK(run("usdcc_test_events_connection.disconnect()\nv.set_renderer_setting('ty:maxBounces', 5)\n") &&
+              evaluated("len(usdcc_test_events)") == "5",
+          "disconnecting ends the calls");
+    usdcc::core::Settings& settings = usdcc::core::Settings::instance();
+    settings.reset("Renderers/HdEmbreeRendererPlugin/ty:maxBounces");
+    settings.reset("Renderers/HdEmbreeRendererPlugin/ty:tileSize");
+}

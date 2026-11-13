@@ -842,8 +842,23 @@ RendererSettingValues ViewportViewPanel::rendererSettingValues(const PXR_NS::TfT
 
 void ViewportViewPanel::applyRendererSettings() {
     const PXR_NS::TfToken pluginId = m_viewport->currentRendererPlugin();
-    if (!pluginId.IsEmpty()) m_viewport->setRendererSettings(pluginId, rendererSettingValues(pluginId));
+    RendererState state{pluginId, pluginId.IsEmpty() ? RendererSettingValues{} : rendererSettingValues(pluginId),
+                        m_rendererOverrides};
+    if (!pluginId.IsEmpty()) m_viewport->setRendererSettings(pluginId, state.values);
     Q_EMIT rendererSettingsChanged();
+    if (state == m_toldRendererState) return;
+    m_toldRendererState = std::move(state);
+    anyRendererSettingsChanged()(this);
+}
+
+void ViewportViewPanel::setRenderer(const PXR_NS::TfToken& pluginId) {
+    m_viewport->setRendererPlugin(pluginId);  // with an engine, rendererChanged() applies them already
+    applyRendererSettings();
+}
+
+usdcc::core::Signal<ViewportViewPanel*>& ViewportViewPanel::anyRendererSettingsChanged() {
+    static usdcc::core::Signal<ViewportViewPanel*> signal;
+    return signal;
 }
 
 QDialog* ViewportViewPanel::showRendererSettingsDialog() {
