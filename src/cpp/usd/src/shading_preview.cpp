@@ -2,6 +2,8 @@
 
 #include "usdcc/usd/shader_node_catalog.h"
 
+#include <pxr/base/gf/camera.h>
+#include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/sdf/changeBlock.h>
@@ -13,11 +15,13 @@
 #include <pxr/usd/usd/editContext.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primFlags.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stagePopulationMask.h>
 #include <pxr/usd/usdGeom/bboxCache.h>
+#include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
@@ -281,6 +285,46 @@ GfRange3d ShadingPreviewStage::shapeBounds() const {
     if (!shape) return {};
     UsdGeomBBoxCache cache(UsdTimeCode::Default(), {UsdGeomTokens->default_, UsdGeomTokens->render});
     return cache.ComputeWorldBound(shape).ComputeAlignedRange();
+}
+
+std::optional<ShadingPreviewStage::ShapeCamera> ShadingPreviewStage::shapeCamera() const {
+    if (!m_stage || m_shapeFile.empty()) return std::nullopt;
+    const UsdPrim asset = m_stage->GetPrimAtPath(assetPath());
+    if (!asset) return std::nullopt;
+    UsdGeomCamera camera;
+    for (const UsdPrim& prim : UsdPrimRange(asset)) {
+        const UsdGeomCamera candidate(prim);
+        TfToken projection;
+        if (candidate && candidate.GetProjectionAttr().Get(&projection) && projection == UsdGeomTokens->perspective) {
+            camera = candidate;
+            break;
+        }
+    }
+    if (!camera) return std::nullopt;
+    const GfCamera view = camera.GetCamera(UsdTimeCode::Default());
+    const GfFrustum frustum = view.GetFrustum();
+    ShapeCamera result;
+    result.path = camera.GetPath();
+    result.eye = frustum.GetPosition();
+    result.verticalFov = view.GetFieldOfView(GfCamera::FOVVertical);
+
+    // What shows the material, else the whole shape.
+    UsdGeomBBoxCache cache(UsdTimeCode::Default(), {UsdGeomTokens->default_, UsdGeomTokens->render});
+    GfRange3d shown;
+    if (asset.HasAPI<UsdCollectionAPI>(kPreviewCollection)) {
+        const UsdCollectionAPI collection(asset, kPreviewCollection);
+        for (const SdfPath& path : UsdCollectionAPI::ComputeIncludedPaths(collection.ComputeMembershipQuery(), m_stage)) {
+            if (const UsdPrim prim = m_stage->GetPrimAtPath(path)) shown.UnionWith(cache.ComputeWorldBound(prim).ComputeAlignedRange());
+        }
+    }
+    if (shown.IsEmpty()) shown = shapeBounds();
+    GfVec3d forward = frustum.ComputeViewDirection();
+    forward.Normalize();
+    const GfVec3d toMiddle = shown.IsEmpty() ? forward : shown.GetMidpoint() - result.eye;
+    double distance = GfDot(toMiddle, forward);
+    if (distance <= 1e-6) distance = std::max(toMiddle.GetLength(), 1e-3);  // behind it: turn about a point as far ahead
+    result.target = result.eye + forward * distance;
+    return result;
 }
 
 std::vector<std::string> ShadingPreviewStage::surfaceTerminals() const {

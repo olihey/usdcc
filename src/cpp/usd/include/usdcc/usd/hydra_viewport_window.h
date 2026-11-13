@@ -127,8 +127,12 @@ public:
     // What an external renderer needs to frame the same view (usdcc.app's
     // active_viewport_camera(), docs/VRAY_RENDER.md).
     PXR_NS::GfFrustum frustum() const { return currentFrustum(); }
-    // The vertical field of view frustum() uses, in degrees.
+    // The vertical field of view a viewport starts with, in degrees.
     static double verticalFieldOfView();
+    // The one frustum() uses: verticalFieldOfView() unless set, as the Material Editor's
+    // preview does to look through a shape's camera. Clamped to (0, 180).
+    double fieldOfView() const { return m_fovY; }
+    void setFieldOfView(double degrees);
 
     // What the viewport draws besides the stage: the ground grid and the background
     // color (docs/VIEWPORT_GRID.md), and how the selection looks (docs/VIEWPORT_SELECTION.md). ViewportViewPanel sets them from the Settings
@@ -329,6 +333,7 @@ private:
     double m_distance = kDefaultOrbitDistance;
     double m_yaw = kDefaultOrbitYaw;
     double m_pitch = kDefaultOrbitPitch;
+    double m_fovY = verticalFieldOfView();
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;

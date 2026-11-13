@@ -9,6 +9,7 @@
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/shading_preview.h"
 #include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/shader_node_graphics.h"
@@ -27,7 +28,9 @@
 #include <DockManager.h>
 #include <DockWidget.h>
 
+#include <pxr/base/gf/math.h>
 #include <pxr/base/gf/vec2f.h>
+#include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -49,6 +52,7 @@
 #include <QTreeWidget>
 #include <QUndoStack>
 
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -847,7 +851,10 @@ USDCC_TEST(material_editor_parameters_follow_the_selection) {
     f.stage->usdStage()->GetAttributeAtPath(kSurface.AppendProperty(TfToken("inputs:roughness"))).Get(&value);
     CHECK(value == 0.3f && history->index() == steps + 1, "an edit is the stage's, in one undo step");
 
-    // Opening the Nodes palette leaves the pane where it was.
+    // Opening the Nodes palette leaves the pane where it was, given room for the palette, the
+    // graph (its toolbar is about 660 wide) and the pane.
+    f.window.resize(2000, 800);
+    settle();
     const int width = params->width();
     f.panel->setPaletteShown(true);
     settle();
@@ -902,4 +909,95 @@ USDCC_TEST(material_editor_preview_shows_the_material) {
     CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "Sky", "the same shape and light");
     CHECK(restored.preview()->hdriRotation() == 45, "turned the same");
     CHECK(!restored.areParametersShown() && restored.isPreviewShown(), "the same parts shown");
+}
+
+USDCC_TEST(material_editor_preview_toolbar_and_camera) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    usdcc::usd::ShadingPreviewWidget* preview = f.panel->preview();
+
+    // Pause shows what a click does: pause while it renders, play while it's paused.
+    auto* pause = preview->findChild<QToolButton*>("previewPause");
+    CHECK(pause && pause->text() == "Pause", "a pause button: %s", pause ? qPrintable(pause->text()) : "none");
+    pause->click();
+    CHECK(preview->isPaused() && pause->text() == "Play", "a click pauses it, and it turns to play");
+    pause->click();
+    CHECK(!preview->isPaused() && pause->text() == "Pause", "and back");
+    CHECK(preview->findChild<QToolButton*>("previewMore"), "the rest is behind a ... button");
+
+    const auto menuOf = [preview]() {
+        auto* menu = new QMenu();
+        preview->populateOptionsMenu(menu);
+        return std::unique_ptr<QMenu>(menu);
+    };
+    const auto find = [](QMenu* menu, const QString& text) -> QAction* {
+        for (QAction* action : menu->actions()) {
+            if (action->text() == text || (action->menu() && action->text().startsWith(text))) return action;
+        }
+        return nullptr;
+    };
+    {
+        const auto menu = menuOf();
+        QAction* node = find(menu.get(), "Selected Node");
+        CHECK(find(menu.get(), "Material") && find(menu.get(), "Material")->isChecked() && node, "what's shown");
+        CHECK(find(menu.get(), "Shape: Shader Ball") && find(menu.get(), "HDRI: Studio"), "the shape and the light, as submenus");
+        CHECK(!menu->findChild<QAction*>("previewResetView"), "no Reset View: the Shader Ball has no camera");
+        node->trigger();
+        CHECK(preview->subject() == usdcc::usd::ShadingPreviewWidget::Subject::SelectedNode, "the menu picks what's shown");
+        preview->setSubject(usdcc::usd::ShadingPreviewWidget::Subject::Material);
+    }
+
+    // A shape with a camera: the preview looks through it, and Reset View goes back to it.
+    QTemporaryDir shapes;
+    QFile file(shapes.filePath("Camera Ball.usda"));
+    CHECK(file.open(QIODevice::WriteOnly), "a shape file to write");
+    file.write(R"(#usda 1.0
+(
+    defaultPrim = "Shape"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "Shape"
+{
+    def Sphere "Ball" {}
+    def Camera "Camera"
+    {
+        float focalLength = 50
+        float verticalAperture = 24
+        double3 xformOp:translate = (0, 0, 6)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}
+)");
+    file.close();
+    usdcc::usd::defineMaterialPreviewSettings();
+    usdcc::core::Settings::instance().setValue(usdcc::usd::kPreviewShapeFoldersKey, shapes.path().toStdString());
+    preview->setShapeName("Camera Ball");
+    CHECK(preview->shapeName() == "Camera Ball" && preview->hasShapeCamera(), "a shape with a camera: %s", qPrintable(preview->problem()));
+    usdcc::usd::HydraViewportWindow* viewport = preview->viewport();
+    CHECK(std::abs(viewport->fieldOfView() - 2.0 * GfRadiansToDegrees(std::atan(12.0 / 50.0))) < 1e-3, "through its lens: %f",
+          viewport->fieldOfView());
+    const auto looksThroughIt = [viewport]() {
+        const auto state = viewport->cameraState();
+        const auto axes = usdcc::usd::orbitCameraAxes(state.target, state.distance, state.yaw, state.pitch);
+        return GfIsClose(axes.eye, GfVec3d(0, 0, 6), 1e-6) && GfIsClose(axes.forward, GfVec3d(0, 0, -1), 1e-6);
+    };
+    CHECK(looksThroughIt(), "from where it is");
+    auto moved = viewport->cameraState();
+    moved.yaw += 60;
+    viewport->setCameraState(moved);
+    CHECK(!looksThroughIt(), "orbiting moves away");
+    {
+        const auto menu = menuOf();
+        QAction* reset = menu->findChild<QAction*>("previewResetView");
+        CHECK(reset, "the menu has Reset View");
+        if (reset) reset->trigger();
+    }
+    CHECK(looksThroughIt(), "which looks through the camera again");
+
+    preview->setShapeName("Shader Ball");
+    CHECK(!preview->hasShapeCamera() && viewport->fieldOfView() == usdcc::usd::HydraViewportWindow::verticalFieldOfView(),
+          "a shape without one goes back to the usual lens");
 }

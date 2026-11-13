@@ -211,6 +211,9 @@ def _cog(cx, cy, teeth=8, outer=6.6, inner=4.9, half_top=7.0, half_root=15.0):
 # triangle, and Settings as a cog.
 ICONS["stop"] = (1.3, LIGHT, [[(4, 4), (12, 4), (12, 12), (4, 12), (4, 4)]])
 ICONS["cog"] = (1.2, LIGHT, [_cog(8, 8), _arc(8, 8, 2.1, 0, 360)])
+# The Material Editor preview's Pause, which turns into play while paused: two bars,
+# drawn as outlines like play and stop.
+ICONS["pause"] = (1.3, LIGHT, [[(4, 3), (6.5, 3), (6.5, 13), (4, 13), (4, 3)], [(9.5, 3), (12, 3), (12, 13), (9.5, 13), (9.5, 3)]])
 
 for _name, (_width, _lines) in TOOL_GLYPHS.items():
     ICONS[_name] = (_width, LIGHT, _lines)

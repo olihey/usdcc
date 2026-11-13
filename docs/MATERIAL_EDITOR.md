@@ -592,6 +592,13 @@ Rejected:
   over the scene's, so textures keep their real-world size. The camera frames its bounds. The preview is
   always Y-up, as the viewport's orbit camera is, so it doesn't turn for the scene's `upAxis`: only a shape
   file authored Z-up is turned.
+- **A camera in the shape file:** the first perspective `Camera` under the default prim is looked through
+  instead of framing the bounds: its position, direction and vertical field of view
+  (`ShadingPreviewStage::shapeCamera()`). The orbit turns about the point on its line of sight nearest the
+  middle of `collection:preview` (else the whole shape), and keeps its lens. The orbit camera has no roll,
+  so a rolled camera is looked through level. Reset View in the ... menu goes back to it.
+  - Everything else in the file renders too, its lights included, so a shape with a camera is usually a
+    whole set, such as the Standard USD Shader Ball's box and lights.
 - **The binding** is `strongerThanDescendants`, so a shape's own placeholder binding doesn't hide the
   material; what a shape keeps for itself it leaves out of `collection:preview`.
 - **A file that won't load** gives a warning in the preview and keeps the last good shape.
@@ -607,8 +614,10 @@ Rejected:
 - **Background:** the HDRI, or the panel's colour: Show as Background, the `domeLightCameraVisibility`
   render setting.
 
-The Shape and HDRI menus sit above the preview. The choice persists per panel (a session, a duplicate),
-and `Materials/previewShape` and `Materials/previewHdri` name the ones a new panel starts with.
+The preview's toolbar holds Pause (§7.5) and a ... button. Its menu holds what's shown (Material or
+Selected Node, §7.6), the Shape and HDRI submenus, and Reset View when the shape has a camera. The
+choice persists per panel (a session, a duplicate), and `Materials/previewShape` and
+`Materials/previewHdri` name the ones a new panel starts with.
 
 ### 7.5 The view
 
@@ -618,8 +627,9 @@ and `Materials/previewShape` and `Materials/previewHdri` name the ones a new pan
 - **Renderer:** the one of the viewport showing the same stage, the last focused if there are several. It
   follows that viewport's `rendererChanged()`. With no viewport open on the stage, Storm. A material
   the renderer can't draw (MDL in Storm, §3.5) gets a line saying so, rather than a default-grey shape.
-- **Pause:** a button in the preview's toolbar.
-  - Paused, the last frame stays, fitted to the window, and the button reads "Paused". Nothing renders,
+- **Pause:** an icon button in the preview's toolbar, showing what a click does: pause bars while it
+  renders, a play triangle while it's paused.
+  - Paused, the last frame stays, fitted to the window. Nothing renders,
     which also stops a progressive renderer refining. A badge over the picture isn't possible: the
     picture is a native window, which no widget can draw over.
   - Edits still reach the masked stage, which is cheap. Hydra takes them on the next render.
@@ -633,7 +643,7 @@ and `Materials/previewShape` and `Materials/previewHdri` name the ones a new pan
 
 ### 7.6 Previewing a selected node
 
-A switch on the preview, Material or Selected Node, shows one node's output on the shape:
+A switch in the preview's ... menu, Material or Selected Node, shows one node's output on the shape:
 
 - In the preview session layer, an `over` on the material adds a hidden shader and points a terminal at
   it: `outputs:surface` for a glslfx node, `outputs:mtlx:surface` for a MaterialX one. The material's other

@@ -1,8 +1,11 @@
 #include "usdcc/usd/shading_preview_widget.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/ui/panel_icon_button.h"
+#include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/shading_preview.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -14,12 +17,12 @@
 
 #include <QAction>
 #include <QActionGroup>
-#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QOpenGLContext>
 #include <QLabel>
 #include <QMenu>
@@ -51,17 +54,6 @@ bool canRenderHere() {
 }
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
-
-// Lists its items again each time it opens, so a file dropped into a folder shows up.
-class RefreshingComboBox : public QComboBox {
-public:
-    using QComboBox::QComboBox;
-    std::function<void()> beforePopup;
-    void showPopup() override {
-        if (beforePopup) beforePopup();
-        QComboBox::showPopup();
-    }
-};
 
 QStringList foldersOf(const char* key, const QString& shipped) {
     QStringList folders;
@@ -176,45 +168,21 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     usdcc::ui::scaled::margins(bar, 4, 2, 4, 2);
     usdcc::ui::scaled::spacing(bar, 4);
 
-    m_pause = new QToolButton(toolbar);
+    // Pause shows the bars while it renders and play while it's paused: what a click does.
+    m_pause = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/pause.png"), QString(), toolbar);
     m_pause->setObjectName(QStringLiteral("previewPause"));
     m_pause->setCheckable(true);
-    m_pause->setText(tr("Pause"));
-    m_pause->setToolTip(tr("Stop rendering the preview; the last frame stays"));
     bar->addWidget(m_pause);
-
-    m_materialButton = new QToolButton(toolbar);
-    m_materialButton->setObjectName(QStringLiteral("previewMaterial"));
-    m_materialButton->setText(tr("Material"));
-    m_materialButton->setCheckable(true);
-    m_materialButton->setChecked(true);
-    m_materialButton->setToolTip(tr("Show the material"));
-    m_nodeButton = new QToolButton(toolbar);
-    m_nodeButton->setObjectName(QStringLiteral("previewNode"));
-    m_nodeButton->setText(tr("Node"));
-    m_nodeButton->setCheckable(true);
-    m_nodeButton->setToolTip(tr("Show the selected node's output on the shape"));
-    bar->addWidget(m_materialButton);
-    bar->addWidget(m_nodeButton);
     bar->addStretch(1);
 
-    auto* shapes = new RefreshingComboBox(toolbar);
-    shapes->setObjectName(QStringLiteral("previewShape"));
-    shapes->setToolTip(tr("The shape the material is shown on"));
-    shapes->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-    shapes->beforePopup = [this]() { populateShapes(); };
-    m_shapes = shapes;
-    bar->addWidget(m_shapes);
-
-    m_hdri = new QToolButton(toolbar);
-    m_hdri->setObjectName(QStringLiteral("previewHdri"));
-    m_hdri->setText(tr("HDRI"));
-    m_hdri->setToolTip(tr("The light: an HDRI, its rotation and exposure, and whether it shows behind"));
-    m_hdri->setPopupMode(QToolButton::InstantPopup);
-    auto* hdriMenu = new QMenu(m_hdri);
-    connect(hdriMenu, &QMenu::aboutToShow, this, [this, hdriMenu]() { populateHdriMenu(hdriMenu); });
-    m_hdri->setMenu(hdriMenu);
-    bar->addWidget(m_hdri);
+    // Everything else: what's shown, the shape, the light and Reset View.
+    auto* more = new usdcc::ui::PanelMenuButton(tr("Preview options: what's shown, the shape, the light"),
+                                                [this](QMenu* menu) { populateOptionsMenu(menu); }, toolbar);
+    more->setObjectName(QStringLiteral("previewMore"));
+    more->setIcon(QIcon(QStringLiteral(":/usdcc/theme/more.png")));
+    m_more = more;
+    bar->addWidget(m_more);
+    updatePauseButton();
 
     m_viewport = new HydraViewportWindow();
     m_viewport->setPreviewMode(true);
@@ -253,13 +221,8 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
 
     connect(m_pause, &QToolButton::toggled, this, [this](bool paused) {
         m_viewport->setPaused(paused);
-        m_pause->setText(paused ? tr("Paused") : tr("Pause"));
+        updatePauseButton();
         Q_EMIT stateChanged();
-    });
-    connect(m_materialButton, &QToolButton::clicked, this, [this]() { setSubject(Subject::Material); });
-    connect(m_nodeButton, &QToolButton::clicked, this, [this]() { setSubject(Subject::SelectedNode); });
-    connect(m_shapes, &QComboBox::activated, this, [this](int index) {
-        if (index >= 0) setShapeName(m_shapes->itemText(index));
     });
     connect(m_viewport, &HydraViewportWindow::firstFrameRendered, this, [this]() {
         if (!m_framed) frame();
@@ -267,8 +230,14 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     connect(m_viewport, &HydraViewportWindow::rendererChanged, this, [this]() { checkRenderer(); });
     m_viewportsChanged = ViewportViewPanel::viewportsChanged().connect([this]() { followRenderer(); });
 
-    populateShapes();
     updateShown();
+}
+
+void ShadingPreviewWidget::updatePauseButton() {
+    const bool paused = m_pause->isChecked();
+    m_pause->setIcon(QIcon(paused ? QStringLiteral(":/usdcc/theme/play.png") : QStringLiteral(":/usdcc/theme/pause.png")));
+    m_pause->setText(paused ? tr("Play") : tr("Pause"));  // not shown; for accessibility and tests
+    m_pause->setToolTip(paused ? tr("Render the preview again") : tr("Stop rendering the preview; the last frame stays"));
 }
 
 ShadingPreviewWidget::~ShadingPreviewWidget() = default;
@@ -298,6 +267,7 @@ void ShadingPreviewWidget::rebuildPreview() {
     m_preview.reset();
     m_problems.clear();
     m_framed = false;
+    m_hasCamera = false;
     if (m_stage) m_preview = std::make_unique<ShadingPreviewStage>(m_stage->usdStage());
     if (m_preview) {
         applyShape();
@@ -335,8 +305,6 @@ void ShadingPreviewWidget::setSelectedNode(const SdfPath& node) {
 }
 
 void ShadingPreviewWidget::setSubject(Subject subject) {
-    m_materialButton->setChecked(subject == Subject::Material);
-    m_nodeButton->setChecked(subject == Subject::SelectedNode);
     if (subject == m_subject) return;
     m_subject = subject;
     applySubject();
@@ -371,7 +339,6 @@ void ShadingPreviewWidget::setShapeName(const QString& name) {
     if (name == m_shapeName && m_preview && !m_preview->shape().empty()) return;
     m_shapeName = name;
     applyShape();
-    populateShapes();
     Q_EMIT stateChanged();
 }
 
@@ -389,12 +356,29 @@ void ShadingPreviewWidget::applyShape() {
     if (m_preview->setShape(chosen.file, &why)) {
         m_shapeName = qs(chosen.name);
         setProblem("shape", QString());
+        applyCamera();
         m_framed = false;
         frame();
     } else {
         setProblem("shape", qs(why));
     }
     m_viewport->requestUpdate();
+}
+
+void ShadingPreviewWidget::applyCamera() {
+    const auto camera = m_preview ? m_preview->shapeCamera() : std::nullopt;
+    m_hasCamera = camera.has_value();
+    // The camera's lens while it's looked through and orbited from; the usual one otherwise.
+    m_viewport->setFieldOfView(camera ? camera->verticalFov : HydraViewportWindow::verticalFieldOfView());
+}
+
+void ShadingPreviewWidget::resetView() {
+    const auto camera = m_preview ? m_preview->shapeCamera() : std::nullopt;
+    if (!camera) return;
+    m_viewport->setFieldOfView(camera->verticalFov);
+    const GfVec3d fromTarget = camera->eye - camera->target;
+    const OrbitAngles angles = orbitAnglesLookingFrom(fromTarget, m_viewport->cameraState().yaw);
+    m_viewport->setCameraState({camera->target, fromTarget.GetLength(), angles.yaw, angles.pitch});
 }
 
 void ShadingPreviewWidget::setHdriName(const QString& name) {
@@ -436,19 +420,53 @@ void ShadingPreviewWidget::applyEnvironment() {
         setProblem("hdri", QString());
     }
     m_preview->setEnvironment(environment);
-    m_hdri->setText(m_hdriName.isEmpty() ? tr("No HDRI") : m_hdriName);
     m_viewport->requestUpdate();
 }
 
-void ShadingPreviewWidget::populateShapes() {
-    const QSignalBlocker blocker(m_shapes);
-    m_shapes->clear();
-    for (const PreviewAsset& asset : listPreviewAssets(utf8(previewShapeFolders()), previewShapeExtensions())) {
-        m_shapes->addItem(qs(asset.name));
-        m_shapes->setItemData(m_shapes->count() - 1, qs(asset.file), Qt::ToolTipRole);
+void ShadingPreviewWidget::populateOptionsMenu(QMenu* menu) {
+    menu->setToolTipsVisible(true);
+    menu->addSection(tr("Show"));
+    auto* subjects = new QActionGroup(menu);
+    const auto addSubject = [this, menu, subjects](const QString& label, const QString& tip, Subject subject) {
+        QAction* action = menu->addAction(label, this, [this, subject]() { setSubject(subject); });
+        action->setCheckable(true);
+        action->setChecked(m_subject == subject);
+        action->setToolTip(tip);
+        subjects->addAction(action);
+    };
+    addSubject(tr("Material"), tr("Show the material"), Subject::Material);
+    addSubject(tr("Selected Node"), tr("Show the selected node's output on the shape"), Subject::SelectedNode);
+    menu->addSeparator();
+
+    // The menu is built each time it opens, so a file dropped into a folder shows up.
+    QMenu* shapes = menu->addMenu(tr("Shape: %1").arg(m_shapeName));
+    shapes->setObjectName(QStringLiteral("previewShapeMenu"));
+    populateShapeMenu(shapes);
+    QMenu* hdri = menu->addMenu(tr("HDRI: %1").arg(m_hdriName.isEmpty() ? tr("None") : m_hdriName));
+    hdri->setObjectName(QStringLiteral("previewHdriMenu"));
+    populateHdriMenu(hdri);
+
+    if (m_hasCamera) {
+        menu->addSeparator();
+        QAction* reset = menu->addAction(tr("Reset View"), this, [this]() { resetView(); });
+        reset->setObjectName(QStringLiteral("previewResetView"));
+        reset->setToolTip(tr("Look through the shape file's camera again"));
     }
-    const int index = m_shapes->findText(m_shapeName, Qt::MatchFixedString);
-    m_shapes->setCurrentIndex(index);
+}
+
+void ShadingPreviewWidget::populateShapeMenu(QMenu* menu) {
+    menu->clear();
+    menu->setToolTipsVisible(true);
+    auto* group = new QActionGroup(menu);
+    for (const PreviewAsset& asset : listPreviewAssets(utf8(previewShapeFolders()), previewShapeExtensions())) {
+        const QString name = qs(asset.name);
+        QAction* action = menu->addAction(name, this, [this, name]() { setShapeName(name); });
+        action->setCheckable(true);
+        action->setChecked(name.compare(m_shapeName, Qt::CaseInsensitive) == 0);
+        action->setToolTip(qs(asset.file));
+        group->addAction(action);
+    }
+    if (menu->isEmpty()) menu->addAction(tr("No shapes found"))->setEnabled(false);
 }
 
 void ShadingPreviewWidget::populateHdriMenu(QMenu* menu) {
@@ -572,9 +590,13 @@ void ShadingPreviewWidget::updateShown() {
 
 void ShadingPreviewWidget::frame() {
     if (!m_preview) return;
-    const GfRange3d bounds = m_preview->shapeBounds();
-    if (bounds.IsEmpty()) return;
-    m_viewport->frameBox(bounds);
+    if (m_hasCamera) {
+        resetView();
+    } else {
+        const GfRange3d bounds = m_preview->shapeBounds();
+        if (bounds.IsEmpty()) return;
+        m_viewport->frameBox(bounds);
+    }
     m_framed = m_viewport->hasRenderedFirstFrame();
 }
 
@@ -592,7 +614,6 @@ void ShadingPreviewWidget::restoreState(const QJsonObject& state) {
     if (state.contains(QStringLiteral("shape"))) {
         m_shapeName = state.value(QStringLiteral("shape")).toString();
         applyShape();
-        populateShapes();
     }
     if (state.contains(QStringLiteral("hdri"))) m_hdriName = state.value(QStringLiteral("hdri")).toString();
     m_rotation = state.value(QStringLiteral("rotation")).toDouble(m_rotation);

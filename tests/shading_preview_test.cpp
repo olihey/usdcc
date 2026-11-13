@@ -3,6 +3,8 @@
 
 #include "usdcc/usd/shading_preview.h"
 
+#include <pxr/base/gf/math.h>
+#include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/editContext.h>
@@ -147,6 +149,62 @@ USDCC_TEST(shading_preview_scales_for_the_scenes_units) {
     preview.syncWithSource();
     const double centimetres = preview.shapeBounds().GetSize()[1];
     CHECK(std::abs(centimetres / metres - 100.0) < 1e-6, "a metre is 100 units in a centimetre scene: %f / %f", centimetres, metres);
+}
+
+USDCC_TEST(shading_preview_finds_the_shapes_camera) {
+    QTemporaryDir temp;
+    const std::string folder = temp.path().toStdString();
+    UsdStageRefPtr source = materials();  // metersPerUnit = 1
+    ShadingPreviewStage preview(source);
+    preview.setShape(shapeFile(folder, true));
+    CHECK(!preview.shapeCamera(), "a shape without a camera has none");
+
+    // In centimetres, a camera 4 m back along +Z and 1 m up, looking along -Z; 50 mm on a
+    // 24 mm high aperture. The ball, what shows the material, is a 2 cm sphere at the origin.
+    const std::string file = folder + "/with_camera.usda";
+    write(file, R"(#usda 1.0
+(
+    defaultPrim = "Shape"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Shape" (
+    prepend apiSchemas = ["CollectionAPI:preview"]
+)
+{
+    rel collection:preview:includes = </Shape/Ball>
+    def Sphere "Ball" {}
+    def Cube "Floor"
+    {
+        double3 xformOp:translate = (0, -50, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def Camera "Ortho"
+    {
+        token projection = "orthographic"
+    }
+    def Camera "Camera"
+    {
+        float focalLength = 50
+        float verticalAperture = 24
+        double3 xformOp:translate = (0, 100, 400)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}
+)");
+    std::string why;
+    CHECK(preview.setShape(file, &why), "a shape with a camera: %s", why.c_str());
+    const auto camera = preview.shapeCamera();
+    CHECK(camera.has_value(), "has one");
+    if (!camera) return;
+    CHECK(camera->path.GetName() == "Camera", "the first perspective one: %s", camera->path.GetText());
+    CHECK(GfIsClose(camera->eye, GfVec3d(0, 1, 4), 1e-6), "where it is, scaled to the scene's metres: %f %f %f", camera->eye[0],
+          camera->eye[1], camera->eye[2]);
+    CHECK(GfIsClose(camera->target, GfVec3d(0, 1, 0), 1e-6), "turning about the ball, on its line of sight: %f %f %f", camera->target[0],
+          camera->target[1], camera->target[2]);
+    const double fov = 2.0 * GfRadiansToDegrees(std::atan(12.0 / 50.0));
+    CHECK(std::abs(camera->verticalFov - fov) < 1e-3, "its lens: %f, not %f", camera->verticalFov, fov);
 }
 
 USDCC_TEST(shading_preview_shows_one_output) {

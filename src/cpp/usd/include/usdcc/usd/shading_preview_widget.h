@@ -17,7 +17,6 @@
 #include <memory>
 #include <string>
 
-class QComboBox;
 class QLabel;
 class QMenu;
 class QStackedWidget;
@@ -42,7 +41,7 @@ USDCC_USD_UI_API QStringList previewHdriFolders();
 
 // The Material Editor's preview (docs/MATERIAL_EDITOR.md §7.2–§7.6): a material, or one node's
 // output, on a shape under an HDRI, rendered by the renderer of the viewport showing the same
-// stage. Above it: pause, what's shown, the shape and the HDRI's menu.
+// stage. Above it: pause/play, and a menu of what's shown, the shape, the HDRI and Reset View.
 class USDCC_USD_UI_API ShadingPreviewWidget : public QWidget {
     Q_OBJECT
 
@@ -87,8 +86,14 @@ public:
 
     HydraViewportWindow* viewport() const { return m_viewport; }
     ShadingPreviewStage* previewStage() const { return m_preview.get(); }
-    // Frames the shape.
+    // Looks through the shape's camera when it has one, else frames the shape.
     void frame();
+    // Whether the shape file has a camera to look through, which Reset View goes back to.
+    bool hasShapeCamera() const { return m_hasCamera; }
+    void resetView();
+
+    // What the ... button's menu holds, built afresh each time it opens.
+    void populateOptionsMenu(QMenu* menu);
 
 Q_SIGNALS:
     // Something saveState() holds changed.
@@ -99,11 +104,13 @@ private:
     void applyMaterial();
     void applySubject();
     void applyShape();
+    void applyCamera();
     void applyEnvironment();
     void followRenderer();
     void checkRenderer();
     void updateShown();
-    void populateShapes();
+    void updatePauseButton();
+    void populateShapeMenu(QMenu* menu);
     void populateHdriMenu(QMenu* menu);
     void setProblem(const std::string& key, const QString& text);
 
@@ -118,6 +125,7 @@ private:
     double m_exposure = 0;
     bool m_background = true;
     bool m_framed = false;
+    bool m_hasCamera = false;
 
     // Why something can't be shown, by what it's about ("shape", "renderer", "node").
     std::map<std::string, QString> m_problems;
@@ -129,10 +137,7 @@ private:
     QLabel* m_empty = nullptr;
     QLabel* m_problem = nullptr;
     QToolButton* m_pause = nullptr;
-    QToolButton* m_materialButton = nullptr;
-    QToolButton* m_nodeButton = nullptr;
-    QComboBox* m_shapes = nullptr;
-    QToolButton* m_hdri = nullptr;
+    QToolButton* m_more = nullptr;
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChanged;
     usdcc::core::Signal<>::Connection m_viewportsChanged;

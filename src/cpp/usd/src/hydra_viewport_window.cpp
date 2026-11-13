@@ -564,13 +564,20 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
-    const OrbitFraming framing = frameOrbitCamera(box, kFovY, aspect, m_distance);
+    const OrbitFraming framing = frameOrbitCamera(box, m_fovY, aspect, m_distance);
     m_target = framing.target;
     m_distance = std::max(kMinDistance, framing.distance);
     cameraMoved();
 }
 
 double HydraViewportWindow::verticalFieldOfView() { return kFovY; }
+
+void HydraViewportWindow::setFieldOfView(double degrees) {
+    degrees = std::clamp(degrees, 1.0, 179.0);
+    if (degrees == m_fovY) return;
+    m_fovY = degrees;
+    cameraMoved();
+}
 
 void HydraViewportWindow::cameraMoved() {
     renderNow();
@@ -644,7 +651,7 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     PXR_NS::GfFrustum frustum;
     frustum.SetPositionAndRotationFromMatrix(cameraToWorld);
     const OrbitClipping clipping = orbitClipping(m_distance);
-    frustum.SetPerspective(kFovY, /*isFovVertical=*/true, static_cast<double>(w) / static_cast<double>(h),
+    frustum.SetPerspective(m_fovY, /*isFovVertical=*/true, static_cast<double>(w) / static_cast<double>(h),
                            clipping.nearClip, clipping.farClip);
     return frustum;
 }

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <pxr/base/gf/range3d.h>
+#include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 #include <pxr/usd/usd/prim.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -65,6 +67,19 @@ public:
 
     // The shape's bounds in the preview stage, for framing it.
     PXR_NS::GfRange3d shapeBounds() const;
+
+    // The view from the shape file's first perspective Camera (§7.3), in the preview stage's
+    // space: the preview looks through it instead of framing the bounds. Nothing when the
+    // shape has none.
+    struct ShapeCamera {
+        PXR_NS::SdfPath path;
+        PXR_NS::GfVec3d eye;
+        // What the view turns about: the point on its line of sight nearest the middle of
+        // what shows the material (collection:preview, else the whole shape).
+        PXR_NS::GfVec3d target;
+        double verticalFov = 0;  // degrees
+    };
+    std::optional<ShapeCamera> shapeCamera() const;
 
     // The material's surface terminals that something is connected to, such as
     // "outputs:surface" and "outputs:mtlx:surface": what a renderer can choose from.
