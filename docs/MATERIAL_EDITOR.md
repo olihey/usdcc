@@ -257,6 +257,12 @@ and one shader can feed all three terminals. In that sample every one of the 16 
 usdShade only. Its `omni.usdMdl.dll` has no `plugInfo.json` of its own, and it isn't a library we could load
 anyway.
 
+*Since 2026-11-11 the USD build has Gatling*, whose plugin registers an MDL discovery and parser plugin
+(`HdGatlingMdlDiscoveryPlugin`, `HdGatlingMdlParserPlugin`) and ships `OmniPBR.mdl` and the other Omni modules. With
+it, `definitionOf()` finds the shader above through `GetShaderNodeForSourceType("mdl")`, with no code of ours.
+Without it there is still none. `shader_node_catalog_test` checks whichever applies, by whether Sdr lists `mdl` as
+a source type. Our own parser (below) is still what makes MDL work without Gatling.
+
 **Registered definitions are found by id, and MDL shaders have none.** *Tested:* after registering a definition
 (§3.4), a shader with `info:id` finds it, and one with the `.mdl` asset still doesn't. Authoring an `info:id` to
 make that work isn't an option, as that's what a renderer reads instead. So the catalog needs a lookup of its own (below).

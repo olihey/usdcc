@@ -193,11 +193,21 @@ USDCC_TEST(shader_catalog_definition_of_a_prim) {
     CHECK(!ShaderNodeCatalog::definitionOf(UsdShadeShader::Define(stage, SdfPath("/Empty"))), "nor has a shader with no id");
     CHECK(!ShaderNodeCatalog::definitionOf(UsdShadeShader()), "nor an invalid one");
 
-    // Until phase 5 (docs/MATERIAL_EDITOR.md §3.5).
+    // MDL by its asset: known only where a plugin parses MDL, as Gatling's does (it registers an
+    // MDL discovery and parser plugin, and ships OmniPBR.mdl); else there's no definition, and
+    // asking doesn't fail (docs/MATERIAL_EDITOR.md §3.5).
     UsdShadeShader mdl = UsdShadeShader::Define(stage, SdfPath("/Mdl"));
     mdl.SetSourceAsset(SdfAssetPath("OmniPBR.mdl"), TfToken("mdl"));
     mdl.SetSourceAssetSubIdentifier(TfToken("OmniPBR"), TfToken("mdl"));
-    CHECK(!ShaderNodeCatalog::definitionOf(mdl), "MDL isn't known yet, and doesn't fail");
+    const SdrTokenVec sourceTypes = SdrRegistry::GetInstance().GetAllShaderNodeSourceTypes();
+    const bool mdlParsed = std::find(sourceTypes.begin(), sourceTypes.end(), TfToken("mdl")) != sourceTypes.end();
+    node = ShaderNodeCatalog::definitionOf(mdl);
+    if (mdlParsed) {
+        CHECK(node && node->GetSourceType() == "mdl", "with an MDL parser, OmniPBR's definition: %s",
+              node ? node->GetIdentifier().GetText() : "none");
+    } else {
+        CHECK(!node, "without an MDL parser, none, and asking doesn't fail");
+    }
 }
 
 USDCC_TEST(shader_catalog_render_delegate) {
