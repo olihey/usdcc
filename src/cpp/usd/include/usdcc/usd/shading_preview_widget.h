@@ -98,7 +98,8 @@ public:
     bool hasShapeCamera() const { return m_hasCamera; }
     void resetView();
 
-    // What the ... button's menu holds, built afresh each time it opens.
+    // What the ... button's menu holds, built afresh each time it opens. A right-click on
+    // the picture opens the same menu there.
     void populateOptionsMenu(QMenu* menu);
 
     // How tall this must be, at `width`, for the picture to be square: the toolbar and the

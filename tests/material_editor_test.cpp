@@ -45,12 +45,14 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QSlider>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
@@ -991,6 +993,28 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
         node->trigger();
         CHECK(preview->subject() == usdcc::usd::ShadingPreviewWidget::Subject::SelectedNode, "the menu picks what's shown");
         preview->setSubject(usdcc::usd::ShadingPreviewWidget::Subject::Material);
+    }
+
+    // A right-click on the picture opens the same menu there.
+    {
+        QStringList seen;
+        auto* poll = new QTimer(qApp);
+        poll->setInterval(5);
+        QObject::connect(poll, &QTimer::timeout, qApp, [poll, &seen]() {
+            auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+            if (!popup) return;
+            poll->stop();
+            poll->deleteLater();
+            for (QAction* action : popup->actions()) seen << action->text();
+            popup->close();
+        });
+        poll->start();
+        const QPointF at(20, 20);
+        QMouseEvent release(QEvent::MouseButtonRelease, at, preview->viewport()->mapToGlobal(at), Qt::RightButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QCoreApplication::sendEvent(preview->viewport(), &release);
+        CHECK(seen.contains("Selected Node") && seen.contains("Shape: Shader Ball") && seen.contains("Light: Studio"),
+              "a right-click on the preview opens its menu: %s", qPrintable(seen.join(", ")));
     }
 
     // A shape with a camera: the preview looks through it, and Reset View goes back to it.

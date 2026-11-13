@@ -245,6 +245,10 @@ Q_SIGNALS:
     // focus: a native window's focus doesn't reach ADS's focus tracking.
     void pressed();
 
+    // The right mouse button was released over the viewport: a context menu belongs at
+    // `globalPos`. A native window gets no QContextMenuEvent its container would see.
+    void contextMenuRequested(QPoint globalPos);
+
     // Emitted once per stage, after its first frame has been rendered. That
     // first Render() is when Hydra populates its scene from the stage, so it is
     // where a big stage's viewport actually stalls the UI.

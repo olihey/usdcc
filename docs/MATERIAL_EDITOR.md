@@ -630,8 +630,9 @@ Rejected:
     keeps what it had. For a shape without lights it does nothing.
 
 The preview's toolbar holds Pause (§7.5) and a ... button. Its menu holds what's shown (Material or
-Selected Node, §7.6), the Shape and HDRI submenus, and Reset View when the shape has a camera. The
-choice persists per panel (a session, a duplicate), and `Materials/previewShape` and
+Selected Node, §7.6), the Shape and Light submenus, and Reset View when the shape has a camera. A
+right-click on the picture opens the same menu there (`HydraViewportWindow::contextMenuRequested()`,
+as the native window gets no context menu event its container would see). The choice persists per panel (a session, a duplicate), and `Materials/previewShape` and
 `Materials/previewHdri` name the ones a new panel starts with.
 
 ### 7.5 The view

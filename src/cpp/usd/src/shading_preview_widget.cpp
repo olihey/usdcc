@@ -232,6 +232,13 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
         if (!m_framed) frame();
     });
     connect(m_viewport, &HydraViewportWindow::rendererChanged, this, [this]() { checkRenderer(); });
+    connect(m_viewport, &HydraViewportWindow::contextMenuRequested, this, [this](const QPoint& globalPos) {
+        // Parented to the top-level window, as PanelMenuButton's: the viewport's native
+        // container can't be a popup's transient parent.
+        QMenu menu(window());
+        populateOptionsMenu(&menu);
+        menu.exec(globalPos);
+    });
     m_viewportsChanged = ViewportViewPanel::viewportsChanged().connect([this]() { followRenderer(); });
 
     updateShown();

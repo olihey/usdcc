@@ -1158,6 +1158,8 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         m_panning = false;
     }
+    // Nothing else uses the right button.
+    if (event->button() == Qt::RightButton) Q_EMIT contextMenuRequested(event->globalPosition().toPoint());
 }
 
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
