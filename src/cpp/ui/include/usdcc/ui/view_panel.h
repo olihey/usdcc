@@ -9,6 +9,8 @@
 
 #include <QJsonObject>
 
+#include <functional>
+
 class QBoxLayout;
 class QComboBox;
 class QSplitter;
@@ -131,6 +133,15 @@ protected:
     // then add their own — see ViewportViewPanel::populateContextMenu() for
     // an example.
     virtual void populateContextMenu(QMenu* menu);
+
+public:
+    // What the app adds to every panel's tab menu, after the panel's own entries:
+    // main.cpp's Save Stage, which needs more than this library has. One at a time; an
+    // empty one adds nothing.
+    using TabMenuExtension = std::function<void(ViewPanel* panel, QMenu* menu)>;
+    static void setTabMenuExtension(TabMenuExtension extension);
+
+protected:
 
     // Fills the options button's menu, built afresh each time it opens so it
     // reflects the current state (e.g. the available renderers).

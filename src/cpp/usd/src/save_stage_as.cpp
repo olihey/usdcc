@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/recent_files.h"
 #include "usdcc/usd/session_stages.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -10,15 +11,55 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QJsonObject>
+#include <QMessageBox>
+#include <QScopedValueRollback>
 
 #include <vector>
 
 namespace usdcc::usd {
 
+namespace {
+bool s_switching = false;
+}  // namespace
+
+bool isSwitchingStage() { return s_switching; }
+
+bool stageHasUnsavedLayers(const StageRefPtr& stage) { return stage && !layer_actions::unsavedLayers(stage).empty(); }
+
+bool saveStageInteractively(const StageRefPtr& stage, QWidget* parent) {
+    if (!stage) return false;
+    QString error;
+    if (layer_actions::saveAll(stage, &error)) return true;
+    QMessageBox::warning(parent, QObject::tr("Save Stage"), error);
+    return false;
+}
+
+StageRefPtr saveStageAsInteractively(StageManager& stageManager, const StageRefPtr& stage, QWidget* parent) {
+    if (!stage) return {};
+    const std::string real = stage->usdStage()->GetRootLayer()->GetRealPath();
+    QString path = QFileDialog::getSaveFileName(parent, QObject::tr("Save Stage As"),
+                                                real.empty() ? QString() : QFileInfo(QString::fromStdString(real)).absolutePath(),
+                                                QObject::tr("USD Text (*.usda);;USD Binary (*.usdc);;USD (*.usd)"));
+    if (path.isEmpty()) return {};
+    // USD needs an extension to know the format.
+    if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+    QString error;
+    const StageRefPtr saved = saveStageAsAndSwitch(stageManager, stage, path.toStdString(), &error);
+    if (!saved) {
+        QMessageBox::warning(parent, QObject::tr("Save Stage As"), error);
+        return {};
+    }
+    addRecentFile(path);
+    return saved;
+}
+
 StageRefPtr saveStageAsAndSwitch(StageManager& stageManager, const StageRefPtr& stage, const std::string& path,
                                  QString* error) {
     if (!stage) return {};
+    const QScopedValueRollback<bool> switching(s_switching, true);
     const bool ownFile = PXR_NS::SdfLayer::Find(path) == stage->usdStage()->GetRootLayer();
     // Before writing: what the new stage takes over.
     QJsonObject state = session_stages::capture(stageManager, stage);

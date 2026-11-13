@@ -21,6 +21,7 @@
 #include <pxr/usd/usd/stage.h>
 
 #include <DockManager.h>
+#include <DockWidgetTab.h>
 
 #include <QAction>
 #include <QApplication>
@@ -29,7 +30,9 @@
 #include <QFileInfo>
 #include <QMenu>
 #include <QStandardPaths>
+#include <QContextMenuEvent>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUndoStack>
 
 #include <algorithm>
@@ -134,8 +137,8 @@ USDCC_TEST(current_stage_undo_and_title) {
     delete undoAction;
 }
 
-// Stages > a stage: Make Current first, then the panel types under Views, then
-// Close Stage. Make Current switches the panels on screen only.
+// Stages > a stage: Make Current, Save Stage and Save Stage As first, then the panel
+// types under Views, then Close Stage. Make Current switches the panels on screen only.
 USDCC_TEST(stages_menu_make_current) {
     TestMode testMode;
     QTemporaryDir settings;
@@ -172,11 +175,14 @@ USDCC_TEST(stages_menu_make_current) {
     QMenu* second = stageMenus[1];
     const QList<QAction*> actions = second->actions();
     QMenu* views = second->findChild<QMenu*>(QStringLiteral("views"));
-    CHECK(actions.size() == 5 && actions[0]->objectName() == QStringLiteral("makeCurrent") &&
-              actions[0]->text() == QStringLiteral("Make &Current") && actions[1]->isSeparator() && views &&
-              actions[2] == views->menuAction() && actions[2]->text() == QStringLiteral("&Views") &&
-              actions[4]->text() == QStringLiteral("&Close Stage..."),
-          "Make Current, a separator, Views, a separator, Close Stage...: [%d]", int(actions.size()));
+    CHECK(actions.size() == 7 && actions[0]->objectName() == QStringLiteral("makeCurrent") &&
+              actions[0]->text() == QStringLiteral("Make &Current") && actions[1]->objectName() == QStringLiteral("saveStage") &&
+              actions[2]->objectName() == QStringLiteral("saveStageAs") && actions[3]->isSeparator() && views &&
+              actions[4] == views->menuAction() && actions[4]->text() == QStringLiteral("&Views") &&
+              actions[6]->text() == QStringLiteral("&Close Stage..."),
+          "Make Current, Save Stage, Save Stage As..., a separator, Views, a separator, Close Stage...: [%d]",
+          int(actions.size()));
+    CHECK(!actions[1]->isEnabled() && actions[2]->isEnabled(), "nothing to save in a new stage; Save As can");
     CHECK(views && views->actions().size() == 1 && views->actions()[0]->text() == QStringLiteral("Outliner"),
           "Views lists the panel types");
 
@@ -186,7 +192,72 @@ USDCC_TEST(stages_menu_make_current) {
     CHECK(stages.currentStage() == two, "and it is the current stage");
 }
 
-// File > Save Stage As goes on in the new file: it takes the old stage's place in its
+// Stages > a stage > Save Stage saves that stage's edited file layers, whichever stage is
+// current. And a panel tab's menu ends with what the app adds (ViewPanel::setTabMenuExtension(),
+// main.cpp's Save Stage).
+USDCC_TEST(stages_menu_save_stage) {
+    TestMode testMode;
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("saved.usda"));
+    {
+        QFile file(path);
+        CHECK(file.open(QIODevice::WriteOnly), "a stage file");
+        file.write("#usda 1.0\n");
+    }
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr edited = stages.openStage(path.toStdString());
+    const StageRefPtr other = stages.createStage();
+    stages.setCurrentStage(other);
+    CHECK(edited && !usdcc::usd::stageHasUnsavedLayers(edited), "opened, nothing to save yet");
+    if (!edited) return;
+    edited->usdStage()->DefinePrim(PXR_NS::SdfPath("/Saved"));
+    CHECK(usdcc::usd::stageHasUnsavedLayers(edited), "edited: something to save");
+
+    MainWindow window;
+    usdcc::ui::ViewPanelRegistry types;
+    usdcc::usd::StagesMenu menu(&stages, &types, window.dockManager(), &window);
+    Q_EMIT menu.aboutToShow();
+    const QList<QMenu*> stageMenus = menu.findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK(stageMenus.size() == 2, "a submenu per stage");
+    if (stageMenus.size() != 2) return;
+    QAction* save = stageMenus[0]->findChild<QAction*>(QStringLiteral("saveStage"));
+    CHECK(save && save->isEnabled(), "Save Stage is on for the edited stage");
+    if (!save) return;
+    save->trigger();
+    QApplication::processEvents();  // queued, out of the menu
+    CHECK(!usdcc::usd::stageHasUnsavedLayers(edited), "and saves it, though another stage is current");
+    QFile file(path);
+    CHECK(file.open(QIODevice::ReadOnly) && file.readAll().contains("def \"Saved\""), "into its file");
+
+    // The tab's menu: the panel's own entries, then the extension's.
+    auto* panel = new OutlinerViewPanel(&stages, edited, undo, QStringLiteral("Tab"), &window);
+    window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, panel);
+    window.show();
+    QApplication::processEvents();
+    usdcc::ui::ViewPanel* extendedFor = nullptr;
+    usdcc::ui::ViewPanel::setTabMenuExtension([&extendedFor](usdcc::ui::ViewPanel* shown, QMenu* tabMenu) {
+        extendedFor = shown;
+        tabMenu->addAction(QStringLiteral("Extended"))->setObjectName(QStringLiteral("extended"));
+    });
+    QStringList shownActions;
+    QTimer::singleShot(0, [&shownActions]() {
+        if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+            for (QAction* action : popup->actions()) shownActions << action->objectName();
+            popup->close();
+        }
+    });
+    QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(4, 4), panel->tabWidget()->mapToGlobal(QPoint(4, 4)));
+    QApplication::sendEvent(panel->tabWidget(), &event);
+    usdcc::ui::ViewPanel::setTabMenuExtension({});
+    CHECK(extendedFor == panel && !shownActions.isEmpty() && shownActions.last() == QStringLiteral("extended"),
+          "the tab menu ends with the app's entries: %s", qPrintable(shownActions.join(QLatin1Char(','))));
+}
+
+// Save Stage As goes on in the new file: it takes the old stage's place in its
 // panels, as the current stage, with its selection and unsaved sublayer edits.
 USDCC_TEST(save_stage_as_switches_to_the_file) {
     TestMode testMode;

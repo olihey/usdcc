@@ -307,9 +307,6 @@ int main(int argc, char** argv) {
     // Sessions (docs/SESSIONS.md). While one loads, a stage opened doesn't get a
     // viewport of its own (below): the session says which panels there are.
     bool sessionLoading = false;
-    // While File > Save Stage As puts the new file in the old stage's panels, the
-    // stage it opens gets no viewport of its own.
-    bool stageSwitching = false;
     bool restartRequested = false;
     QStringList restartArguments;
     usdcc::scripting::SessionController::Context sessionContext;
@@ -440,8 +437,10 @@ int main(int argc, char** argv) {
     // bringing a tab to the front doesn't move ADS's focus, so the panel
     // focused before would otherwise keep its stage current.
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&window, &panelTypes, &stageManager, &sessionLoading, &stageSwitching](const usdcc::usd::StageRefPtr& stage) {
-            if (sessionLoading || stageSwitching) return;
+        [&window, &panelTypes, &stageManager, &sessionLoading](const usdcc::usd::StageRefPtr& stage) {
+            // While Save Stage As puts the new file in the old stage's panels, the stage
+            // it opens gets no viewport of its own.
+            if (sessionLoading || usdcc::usd::isSwitchingStage()) return;
             auto focus = [&](usdcc::ui::ViewPanel* panel) {
                 if (panel) window.dockManager()->setDockWidgetFocused(panel);
                 stageManager.setCurrentStage(stage);
@@ -538,49 +537,18 @@ int main(int argc, char** argv) {
     });
     fileMenu->addSeparator();
 
-    // File > Save Stage: every file layer of the current stage with unsaved
-    // changes (docs/LAYER_EDITOR.md §5). Ctrl+Shift+S, as Ctrl+S is the
-    // Script Editor's and the Layers panel's own Save.
-    QAction* saveStageAction = fileMenu->addAction(QObject::tr("&Save Stage"));
-    saveStageAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    saveStageAction->setStatusTip(QObject::tr("Save every layer of the current stage that has unsaved changes"));
-    QObject::connect(fileMenu, &QMenu::aboutToShow, saveStageAction, [&stageManager, saveStageAction]() {
-        saveStageAction->setEnabled(!usdcc::usd::layer_actions::unsavedLayers(stageManager.currentStage()).empty());
-    });
-    QObject::connect(saveStageAction, &QAction::triggered, &window, [&stageManager, &window]() {
-        QString error;
-        if (!usdcc::usd::layer_actions::saveAll(stageManager.currentStage(), &error)) {
-            QMessageBox::warning(&window, QObject::tr("Save Stage"), error);
-        }
-    });
-    // File > Save Stage As: the current stage's root layer to another file, which
-    // the app then goes on in, in the old stage's place (saveStageAsAndSwitch()). It
-    // goes in Open Recent.
-    QAction* saveStageAsAction = fileMenu->addAction(QObject::tr("Save Stage &As..."));
-    saveStageAsAction->setStatusTip(QObject::tr("Save the current stage to another file, and go on in that file"));
-    QObject::connect(fileMenu, &QMenu::aboutToShow, saveStageAsAction, [&stageManager, saveStageAsAction]() {
-        saveStageAsAction->setEnabled(stageManager.currentStage() != nullptr);
-    });
-    QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, &window, &stageSwitching]() {
-        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
-        if (!stage) return;
-        const std::string real = stage->usdStage()->GetRootLayer()->GetRealPath();
-        QString path = QFileDialog::getSaveFileName(
-            &window, QObject::tr("Save Stage As"),
-            real.empty() ? QString() : QFileInfo(QString::fromStdString(real)).absolutePath(),
-            QObject::tr("USD Text (*.usda);;USD Binary (*.usdc);;USD (*.usd)"));
-        if (path.isEmpty()) return;
-        if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
-        QString error;
-        stageSwitching = true;
-        const usdcc::usd::StageRefPtr saved =
-            usdcc::usd::saveStageAsAndSwitch(stageManager, stage, path.toStdString(), &error);
-        stageSwitching = false;
-        if (!saved) {
-            QMessageBox::warning(&window, QObject::tr("Save Stage As"), error);
-            return;
-        }
-        usdcc::usd::addRecentFile(path);
+    // Saving a stage is per stage: Stages > a stage > Save Stage / Save Stage As..., and a
+    // panel tab's Save Stage for the stage it shows (docs/LAYER_EDITOR.md §5).
+    usdcc::ui::ViewPanel::setTabMenuExtension([&window](usdcc::ui::ViewPanel* panel, QMenu* menu) {
+        const usdcc::usd::StageRefPtr stage = panel->currentStage();
+        menu->addSeparator();
+        QAction* save = menu->addAction(QObject::tr("Save Stage"));
+        save->setObjectName(QStringLiteral("tabSaveStage"));
+        save->setEnabled(usdcc::usd::stageHasUnsavedLayers(stage));
+        QObject::connect(save, &QAction::triggered, &window, [stage, &window]() {
+            QMetaObject::invokeMethod(
+                &window, [stage, &window]() { usdcc::usd::saveStageInteractively(stage, &window); }, Qt::QueuedConnection);
+        });
     });
     // Closing the window asks about unsaved layers of every open stage.
     window.addCloseCheck([&stageManager, &window]() {

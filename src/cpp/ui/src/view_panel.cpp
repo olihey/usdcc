@@ -317,11 +317,21 @@ ViewPanel* ViewPanel::duplicateBeside() {
     return copy;
 }
 
+namespace {
+ViewPanel::TabMenuExtension& tabMenuExtension() {
+    static ViewPanel::TabMenuExtension extension;
+    return extension;
+}
+}  // namespace
+
+void ViewPanel::setTabMenuExtension(TabMenuExtension extension) { tabMenuExtension() = std::move(extension); }
+
 bool ViewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == tabWidget() && event->type() == QEvent::ContextMenu) {
         auto* menuEvent = static_cast<QContextMenuEvent*>(event);
         QMenu* menu = tabWidget()->buildContextMenu(nullptr);
         populateContextMenu(menu);
+        if (tabMenuExtension()) tabMenuExtension()(this, menu);
         menu->exec(menuEvent->globalPos());
         menu->deleteLater();
         return true;

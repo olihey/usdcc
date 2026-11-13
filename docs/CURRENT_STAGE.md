@@ -39,7 +39,8 @@ panel's stage.
 - A panel with no stage gains focus: the current stage stays.
 - Stages > a stage > **Make Current**: every view panel on screen (open, its tab in front)
   switches to that stage, which becomes current. Tabs behind others and closed panels keep
-  theirs (`StagesMenu::makeCurrentEverywhere()`).
+  theirs (`StagesMenu::makeCurrentEverywhere()`). Its Save Stage and Save Stage As... act on
+  that stage, current or not ([LAYER_EDITOR.md](LAYER_EDITOR.md) §8).
 - The current stage is closed: the stage of the focused panel if it has one, else the first open
   stage, else none.
 - A stage is opened: the viewport it is shown in (an empty one, or a new one, brought to the

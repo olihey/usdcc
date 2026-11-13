@@ -19,7 +19,8 @@ class StageManager;
 
 // The menu bar's Stages menu: one submenu per open stage (titled with its
 // short name, see shortStageNames(); the full identifier is the tooltip),
-// each with "Make Current" first (makeCurrentEverywhere()), then "Views", a
+// each with "Make Current" first (makeCurrentEverywhere()), "Save Stage" and
+// "Save Stage As..." (saveStageInteractively(), saveStageAsInteractively()), then "Views", a
 // new panel of every registered ViewPanel type showing that stage, then
 // "Close Stage..." (closeStageInteractively()). Rebuilt each time it opens;
 // shows a disabled "No stages open" entry while there are none.

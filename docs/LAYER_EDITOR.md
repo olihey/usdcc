@@ -115,8 +115,8 @@ The app has no saving yet, and a layer editor that can create layers needs it:
 
 - **Save** (Ctrl+S on the panel, toolbar 💾, right-click): `SdfLayer::Save()` on the selected
   layer, or on the edit target.
-- **Save All:** every dirty file layer of the stage. Also File > Save Stage (Ctrl+Shift+S) in
-  the main menu.
+- **Save All:** every dirty file layer of the stage. Also Stages > a stage > Save Stage, and
+  Save Stage on a panel's tab (§8).
 - **Save As...:**
   - For a file layer it writes a copy (`Export()`); the stage keeps using the original.
   - For an in-memory layer it writes the file and points the parent's sublayer path at it,
@@ -210,10 +210,15 @@ Phase 3 as built:
   - On a file layer, or a layer with no parent here, it writes a copy, as §5 planned.
   - On an in-memory sublayer, the file takes its place in the parent's list (one undo step)
     and becomes the edit target if the in-memory layer was.
-- **File > Save Stage** (Ctrl+Shift+S, since Ctrl+S is the Script Editor's and the Layers
-  panel's own Save) saves every unsaved file layer of the current stage.
-- **File > Save Stage As...** writes the current stage's root layer, unsaved edits included,
-  to another file, then goes on in that file (`saveStageAsAndSwitch()`). It goes in Open Recent.
+- **Saving is per stage**, not in the File menu: the current stage isn't always the one you
+  mean, and there's no shortcut (Ctrl+S stays the Layers panel's and the Script Editor's own).
+  - **Stages > a stage > Save Stage** saves every unsaved file layer of that stage
+    (`saveStageInteractively()`), greyed while it has none. So does **Save Stage** on a view
+    panel's tab menu, for the stage the panel shows (`ViewPanel::setTabMenuExtension()`, set in
+    main.cpp, as `usdcc_ui` can't save a stage itself).
+  - **Stages > a stage > Save Stage As...** (`saveStageAsInteractively()`) writes that stage's
+    root layer, unsaved edits included, to another file, then goes on in that file
+    (`saveStageAsAndSwitch()`). It goes in Open Recent.
   - The file opens as a stage in the old one's place, and the old one closes. Every panel
     showing it switches over, keeping its camera, expanded rows and the rest (its session
     state). So do the selection, the edit target and variant edit, muted layers, which

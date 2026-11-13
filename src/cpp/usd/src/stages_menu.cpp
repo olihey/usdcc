@@ -3,6 +3,7 @@
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/close_stage_dialog.h"
+#include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/stage_names.h"
 
@@ -54,6 +55,22 @@ void StagesMenu::rebuild() {
         makeCurrent->setObjectName(QStringLiteral("makeCurrent"));
         makeCurrent->setStatusTip(tr("Show %1 in every panel on screen, and make it the current stage").arg(name));
         connect(makeCurrent, &QAction::triggered, this, [this, stage]() { makeCurrentEverywhere(stage); });
+
+        // Queued, as Close Stage below: a message box or file dialog doesn't run inside the menu.
+        QAction* save = stageMenu->addAction(tr("&Save Stage"));
+        save->setObjectName(QStringLiteral("saveStage"));
+        save->setStatusTip(tr("Save every layer of %1 that has unsaved changes").arg(name));
+        save->setEnabled(stageHasUnsavedLayers(stage));
+        connect(save, &QAction::triggered, this, [this, stage]() {
+            QMetaObject::invokeMethod(this, [this, stage]() { saveStageInteractively(stage, m_window); }, Qt::QueuedConnection);
+        });
+        QAction* saveAs = stageMenu->addAction(tr("Save Stage &As..."));
+        saveAs->setObjectName(QStringLiteral("saveStageAs"));
+        saveAs->setStatusTip(tr("Save %1 to another file, and go on in that file").arg(name));
+        connect(saveAs, &QAction::triggered, this, [this, stage]() {
+            QMetaObject::invokeMethod(
+                this, [this, stage]() { saveStageAsInteractively(*m_stageManager, stage, m_window); }, Qt::QueuedConnection);
+        });
         stageMenu->addSeparator();
 
         QMenu* views = stageMenu->addMenu(tr("&Views"));
