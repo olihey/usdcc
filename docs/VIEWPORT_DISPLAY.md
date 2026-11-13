@@ -226,8 +226,24 @@ Display options' model: app-wide defaults with a viewport's own overrides.
   arguments' defaults. Here only Gatling has one: Print Licenses.
 - **Sessions** keep the overrides as `"rendererSettings": {"HdEmbreeRendererPlugin": {"ty:maxBounces": 8}}`;
   a renderer this installation hasn't keeps its values for the next save. Duplicate copies them.
+- **Python** (`usdcc.app`, [SCRIPTING.md](SCRIPTING.md) §4.1): `viewports()` and `active_viewport()` give
+  `Viewport` handles, by `ViewportViewPanel::id()`. A `Viewport` reads and switches its renderer and
+  reads, overrides and resets its renderer's settings, as the dialog does, with `renderer=` for one
+  it isn't using; values are bools, ints, floats and strs, checked against the setting's type (an
+  int does for a float). `renderer_settings_info(renderer)` lists a renderer's settings and defines
+  their defaults, which `usdcc.settings` then reads and changes by `settings_key`.
+
+  ```python
+  import usdcc.app
+  viewport = usdcc.app.active_viewport()
+  viewport.set_renderer("HdEmbreeRendererPlugin")
+  viewport.set_renderer_setting("ty:maxBounces", 4)
+  viewport.renderer_settings()["ty:maxBounces"]            # 4
+  viewport.reset_renderer_setting("ty:maxBounces")         # back to Settings > Renderers' value
+  ```
 - **Not done:** ranges and choices (delegates don't publish them), argument dialogs for commands,
-  `UsdRenderSettings` prims, AOVs, and Python.
+  `UsdRenderSettings` prims, AOVs, and a Python event for a changed setting.
 - **Tests:** `renderer_settings_test` (Embree's list and types, the conversions, the Settings
-  defaults, overrides through a duplicate and a session, the dialog). What reaches the engine is
-  checked in the app.
+  defaults, overrides through a duplicate and a session, the dialog) and
+  `viewport_renderer_python_test` (the Python API, its errors, another renderer's overrides, a
+  closed viewport). What reaches the engine is checked in the app.

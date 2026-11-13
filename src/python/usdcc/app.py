@@ -7,8 +7,9 @@ scripts use the friendlier usdcc.usd functions instead. With PySide6,
 in Python, and ``register_view_panel()`` adds a view panel type
 (docs/SCRIPTING.md section 8). ``add_menu_action()``, ``add_prim_menu_action()``
 and ``connect()`` are how plugins add to the app (docs/PLUGINS.md).
-``active_viewport_camera()`` is what the viewport looks through, and
-``version()`` is usdcc's version.
+``active_viewport_camera()`` is what the viewport looks through;
+``viewports()`` and ``active_viewport()`` give ``Viewport``s, whose renderer and
+renderer settings a script can read and change. ``version()`` is usdcc's version.
 """
 
 import math
@@ -247,6 +248,152 @@ def active_viewport_camera():
     camera.near = near
     camera.far = far
     return camera
+
+
+class RendererSetting:
+    """One of a render delegate's own settings, as ``renderer_settings_info()`` lists them.
+
+    - ``key``: what the delegate takes it by ("ty:maxBounces")
+    - ``label``: what it calls it ("Max Bounces")
+    - ``type``: "bool", "int", "float" or "string"
+    - ``default``: the delegate's own default
+    - ``settings_key``: its app-wide default's key in ``usdcc.settings``
+      ("Renderers/HdEmbreeRendererPlugin/ty:maxBounces")
+    """
+
+    __slots__ = ("key", "label", "type", "default", "settings_key")
+
+    def __repr__(self):
+        return f"RendererSetting({self.key!r}, {self.type}, default={self.default!r})"
+
+
+def renderers():
+    """Every Hydra renderer, as {id: display name}: {"HdStormRendererPlugin": "GL", ...}."""
+    return dict(_app().renderers())
+
+
+def renderer_settings_info(renderer):
+    """The settings of a renderer (an id from ``renderers()``), as ``RendererSetting``s in its
+    order. Their app-wide defaults are on Settings > Renderers; after this call
+    ``usdcc.settings`` can read and change them by ``settings_key``. Raises ValueError for an
+    unknown renderer."""
+    result = []
+    for key, label, type, default, settings_key in _app().renderer_settings_info(renderer):
+        setting = RendererSetting()
+        setting.key, setting.label, setting.type, setting.default, setting.settings_key = key, label, type, default, settings_key
+        result.append(setting)
+    return result
+
+
+class Viewport:
+    """An open viewport (``viewports()``, ``active_viewport()``). Once it's closed, every call
+    but ``is_open()`` raises ValueError.
+
+    Its renderer's own settings (docs/VIEWPORT_DISPLAY.md section 7): a viewport uses the
+    app-wide defaults on Settings > Renderers, except for what it overrides, per renderer, as
+    its Renderer Settings dialog does. Calls about settings take ``renderer=None``, the
+    viewport's own renderer, or a renderer's id to work on one it isn't using (its overrides
+    apply once it switches to it). A viewport has a renderer once it has drawn, or one has
+    been set; until then, name one.
+    """
+
+    __slots__ = ("_id",)
+
+    def __init__(self, id):
+        self._id = id
+
+    def __eq__(self, other):
+        return isinstance(other, Viewport) and other._id == self._id
+
+    def __hash__(self):
+        return hash(self._id)
+
+    def __repr__(self):
+        if not self.is_open():
+            return f"Viewport({self._id}, closed)"
+        return f"Viewport({self._id}, {self.title()!r}, renderer={self.renderer()!r})"
+
+    @property
+    def id(self):
+        """A number for this viewport, never given to another while the app runs."""
+        return self._id
+
+    def is_open(self):
+        return _app().viewport_exists(self._id)
+
+    def title(self):
+        """Its panel's title ("Viewport")."""
+        return _app().viewport_title(self._id)
+
+    def stage(self):
+        """The Usd.Stage it shows, or None."""
+        from usdcc import usd
+
+        return usd._stage(_app().viewport_stage(self._id))
+
+    def renderer(self):
+        """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
+        return _app().viewport_renderer(self._id)
+
+    def renderers(self):
+        """The renderers it can switch to: once it has drawn, those that can render here;
+        before, every one Hydra knows."""
+        return list(_app().viewport_renderers(self._id))
+
+    def set_renderer(self, renderer):
+        """Switches it to ``renderer`` (an id), as its Renderer menu does. Before it has
+        drawn, the renderer it starts with. Returns whether it uses it now; raises
+        ValueError for an unknown renderer."""
+        return _app().set_viewport_renderer(self._id, renderer)
+
+    def renderer_settings(self, renderer=None):
+        """What the renderer gets here, as {key: value}: the defaults with this viewport's
+        overrides applied."""
+        return dict(_app().viewport_renderer_settings(self._id, renderer or ""))
+
+    def renderer_setting(self, key, renderer=None):
+        """One of ``renderer_settings()``; KeyError if the renderer hasn't it."""
+        values = self.renderer_settings(renderer)
+        if key not in values:
+            raise KeyError(f"{renderer or self.renderer()} has no setting {key!r}")
+        return values[key]
+
+    def renderer_setting_overrides(self, renderer=None):
+        """Only what this viewport overrides, as {key: value}."""
+        return dict(_app().viewport_renderer_overrides(self._id, renderer or ""))
+
+    def set_renderer_setting(self, key, value, renderer=None):
+        """Overrides one setting in this viewport, as its Renderer Settings dialog does. The
+        value is a bool, int, float or str as the setting's type takes it (an int does for a
+        float); KeyError for a setting the renderer hasn't, TypeError for a value that
+        doesn't fit."""
+        _app().set_viewport_renderer_setting(self._id, renderer or "", key, value)
+
+    def reset_renderer_setting(self, key=None, renderer=None):
+        """Drops this viewport's override of ``key``, so it follows Settings > Renderers again;
+        with no key, all of the renderer's."""
+        _app().reset_viewport_renderer_setting(self._id, renderer or "", key or "")
+
+    def renderer_commands(self):
+        """Its renderer's commands, as {name: description}; none before it has drawn."""
+        return dict(_app().viewport_renderer_commands(self._id))
+
+    def run_renderer_command(self, name):
+        """Runs one of ``renderer_commands()`` with its arguments' defaults, as the Renderer
+        menu does. Returns whether the renderer ran it."""
+        return _app().run_viewport_renderer_command(self._id, name)
+
+
+def viewports():
+    """Every open viewport, oldest first, as ``Viewport``s."""
+    return [Viewport(id) for id in _app().viewports()]
+
+
+def active_viewport():
+    """The viewport the user last worked in (the last one clicked, or else the oldest one
+    open), as a ``Viewport``; None with no viewport open."""
+    id = _app().active_viewport()
+    return None if id is None else Viewport(id)
 
 
 class Connection:

@@ -124,6 +124,7 @@ add_executable(usdcc_python_tests
     session_test.cpp
     startup_scripts_test.cpp
     viewport_camera_test.cpp
+    viewport_renderer_python_test.cpp
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)

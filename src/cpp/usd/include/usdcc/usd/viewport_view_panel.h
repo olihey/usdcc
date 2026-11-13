@@ -87,6 +87,12 @@ public:
     // the oldest one open. Null when no viewport is open. What follows "the
     // viewport camera" uses it (usdcc.app.active_viewport_camera()).
     static ViewportViewPanel* activeViewport();
+    // Every open viewport, oldest first.
+    static std::vector<ViewportViewPanel*> openViewports();
+    // A number for this viewport, never given to another in this run: how a script refers
+    // to it (usdcc.app.Viewport). withId() finds it, or null once it's closed.
+    int id() const { return m_id; }
+    static ViewportViewPanel* withId(int id);
     // Fired when activeViewport() changes, its camera moves, or it switches
     // stages. Main thread only.
     static usdcc::core::Signal<>& activeViewportChanged();
@@ -183,6 +189,7 @@ private:
     void publishCounts();
 
     HydraViewportWindow* m_viewport;
+    int m_id;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     std::shared_ptr<UndoManager> m_undoManager;
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on

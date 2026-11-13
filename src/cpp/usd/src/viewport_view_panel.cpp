@@ -56,11 +56,12 @@ namespace usdcc::usd {
 
 namespace {
 // Every open viewport, oldest first, and the one clicked last (see activeViewport()).
-std::vector<ViewportViewPanel*>& openViewports() {
+std::vector<ViewportViewPanel*>& viewportList() {
     static std::vector<ViewportViewPanel*> viewports;
     return viewports;
 }
 ViewportViewPanel* s_clickedViewport = nullptr;
+int s_lastViewportId = 0;  // ViewportViewPanel::id()
 // Every open viewport, the one clicked last at the back (see rendererFor()).
 std::vector<ViewportViewPanel*>& clickOrder() {
     static std::vector<ViewportViewPanel*> viewports;
@@ -494,7 +495,16 @@ QDialog* makeRendererSettingsDialog(ViewportViewPanel* panel) {
 
 ViewportViewPanel* ViewportViewPanel::activeViewport() {
     if (s_clickedViewport) return s_clickedViewport;
-    return openViewports().empty() ? nullptr : openViewports().front();
+    return viewportList().empty() ? nullptr : viewportList().front();
+}
+
+std::vector<ViewportViewPanel*> ViewportViewPanel::openViewports() { return viewportList(); }
+
+ViewportViewPanel* ViewportViewPanel::withId(int id) {
+    for (ViewportViewPanel* viewport : viewportList()) {
+        if (viewport->m_id == id) return viewport;
+    }
+    return nullptr;
 }
 
 usdcc::core::Signal<>& ViewportViewPanel::activeViewportChanged() {
@@ -513,7 +523,7 @@ PXR_NS::TfToken ViewportViewPanel::rendererFor(const StageRefPtr& stage) {
     for (auto it = clicked.rbegin(); it != clicked.rend(); ++it) {
         if ((*it)->currentStage() == stage) return (*it)->m_viewport->currentRendererPlugin();
     }
-    for (ViewportViewPanel* viewport : openViewports()) {
+    for (ViewportViewPanel* viewport : viewportList()) {
         if (viewport->currentStage() == stage) return viewport->m_viewport->currentRendererPlugin();
     }
     return {};
@@ -521,7 +531,7 @@ PXR_NS::TfToken ViewportViewPanel::rendererFor(const StageRefPtr& stage) {
 
 ViewportViewPanel::~ViewportViewPanel() {
     const bool wasActive = activeViewport() == this;
-    std::erase(openViewports(), this);
+    std::erase(viewportList(), this);
     std::erase(clickOrder(), this);
     if (s_clickedViewport == this) s_clickedViewport = nullptr;
     if (wasActive) activeViewportChanged()();
@@ -547,6 +557,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
                                       std::shared_ptr<UndoManager> undoManager, const QString& title,
                                       QWidget* parent)
     : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent),
+      m_id(++s_lastViewportId),
       m_toolSet(std::move(toolSet)),
       m_undoManager(std::move(undoManager)) {
     auto* container = new QWidget(this);
@@ -609,7 +620,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     m_countTimer = new QTimer(this);
     m_countTimer->setSingleShot(true);
     connect(m_countTimer, &QTimer::timeout, this, &ViewportViewPanel::runCounts);
-    openViewports().push_back(this);
+    viewportList().push_back(this);
     viewportsChanged()();
     // One undo step per gizmo drag. The stage is remembered at the start so the
     // session is closed on the same stage it was opened on.

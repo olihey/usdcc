@@ -28,12 +28,14 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
+#include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/matrix4d.h>
+#include <pxr/imaging/hd/rendererPluginRegistry.h>
 
 #include <QCoreApplication>
 #include <QSettings>
@@ -46,6 +48,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -53,6 +56,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace usdcc::scripting {
@@ -179,6 +183,67 @@ private:
     usdcc::core::Signal<StageRefPtr>::Connection m_opened;
     usdcc::core::Signal<StageRefPtr>::Connection m_closed;
 };
+
+// usdcc.app.Viewport's: the open viewport with that id, or a ValueError.
+usdcc::usd::ViewportViewPanel& viewportWithId(int id) {
+    usdcc::usd::ViewportViewPanel* viewport = usdcc::usd::ViewportViewPanel::withId(id);
+    if (!viewport) throw py::value_error("viewport " + std::to_string(id) + " has been closed");
+    return *viewport;
+}
+
+bool isKnownRenderer(const PXR_NS::TfToken& pluginId) {
+    PXR_NS::HfPluginDesc desc;
+    return PXR_NS::HdRendererPluginRegistry::GetInstance().GetPluginDesc(pluginId, &desc);
+}
+
+// The renderer a call is about: `renderer` when given, which must be one Hydra knows, else
+// the viewport's own, which it has once it has drawn (or a renderer was set for it).
+PXR_NS::TfToken rendererOf(usdcc::usd::ViewportViewPanel& viewport, const std::string& renderer) {
+    if (!renderer.empty()) {
+        const PXR_NS::TfToken pluginId(renderer);
+        if (!isKnownRenderer(pluginId)) throw py::value_error("no renderer '" + renderer + "'");
+        return pluginId;
+    }
+    const PXR_NS::TfToken current = viewport.hydraWindow()->currentRendererPlugin();
+    if (current.IsEmpty()) {
+        throw py::value_error("the viewport has no renderer until it has drawn: name one with renderer=");
+    }
+    return current;
+}
+
+const usdcc::usd::RendererSettingInfo& rendererSettingInfo(const PXR_NS::TfToken& pluginId, const std::string& key) {
+    for (const usdcc::usd::RendererSettingInfo& setting : usdcc::usd::rendererSettings(pluginId)) {
+        if (setting.key == key) return setting;
+    }
+    throw py::key_error(pluginId.GetString() + " has no setting '" + key + "'");
+}
+
+py::object pythonValue(const usdcc::core::SettingValue& value) {
+    return std::visit([](const auto& v) -> py::object { return py::cast(v); }, value);
+}
+
+py::dict pythonValues(const usdcc::usd::RendererSettingValues& values) {
+    py::dict result;
+    for (const auto& [key, value] : values) {
+        if (const std::optional<usdcc::core::SettingValue> setting = usdcc::usd::toSettingValue(value)) {
+            result[py::str(key.GetString())] = pythonValue(*setting);
+        }
+    }
+    return result;
+}
+
+// A bool, int, float or str from Python; nothing for anything else.
+std::optional<usdcc::core::SettingValue> settingValueOf(const py::handle& value) {
+    if (py::isinstance<py::bool_>(value)) return value.cast<bool>();  // before int: a bool is one
+    if (py::isinstance<py::int_>(value)) {
+        const long long number = value.cast<long long>();
+        if (number < std::numeric_limits<int>::min() || number > std::numeric_limits<int>::max()) return std::nullopt;
+        return static_cast<int>(number);
+    }
+    if (py::isinstance<py::float_>(value)) return value.cast<double>();
+    if (py::isinstance<py::str>(value)) return value.cast<std::string>();
+    return std::nullopt;
+}
 
 // For a callback that a Signal holds: logged rather than thrown into C++.
 template <typename... Args>
@@ -587,6 +652,139 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         return py::make_tuple(cacheIdOf(viewport->currentStage()), matrix, camera.fovY, camera.aspect, camera.nearClip,
                               camera.farClip);
     });
+
+    // The viewports, by id (ViewportViewPanel::id()), for usdcc/app.py's Viewport, and
+    // their renderers' settings (docs/VIEWPORT_DISPLAY.md §7). A `renderer` of "" is the
+    // viewport's own.
+    using usdcc::usd::ViewportViewPanel;
+    m.def("viewports", []() {
+        std::vector<int> ids;
+        for (const ViewportViewPanel* viewport : ViewportViewPanel::openViewports()) ids.push_back(viewport->id());
+        return ids;
+    });
+    m.def("active_viewport", []() -> py::object {
+        const ViewportViewPanel* viewport = ViewportViewPanel::activeViewport();
+        return viewport ? py::object(py::int_(viewport->id())) : py::none();
+    });
+    m.def("viewport_exists", [](int id) { return ViewportViewPanel::withId(id) != nullptr; }, py::arg("id"));
+    m.def(
+        "viewport_title", [](int id) { return viewportWithId(id).windowTitle().toStdString(); }, py::arg("id"));
+    m.def(
+        "viewport_stage", [](int id) { return cacheIdOf(viewportWithId(id).currentStage()); }, py::arg("id"));
+    // Every renderer Hydra knows, as {id: display name}.
+    m.def("renderers", []() {
+        PXR_NS::HfPluginDescVector plugins;
+        PXR_NS::HdRendererPluginRegistry::GetInstance().GetPluginDescs(&plugins);
+        std::map<std::string, std::string> names;
+        for (const PXR_NS::HfPluginDesc& plugin : plugins) names[plugin.id.GetString()] = plugin.displayName;
+        return names;
+    });
+    m.def(
+        "viewport_renderer", [](int id) { return viewportWithId(id).hydraWindow()->currentRendererPlugin().GetString(); },
+        py::arg("id"));
+    // The ones it can switch to: once it has drawn, those that can render here; before, all.
+    m.def(
+        "viewport_renderers",
+        [](int id) {
+            std::vector<std::string> ids;
+            for (const PXR_NS::TfToken& plugin : viewportWithId(id).hydraWindow()->rendererPlugins()) ids.push_back(plugin.GetString());
+            if (ids.empty()) {
+                PXR_NS::HfPluginDescVector plugins;
+                PXR_NS::HdRendererPluginRegistry::GetInstance().GetPluginDescs(&plugins);
+                for (const PXR_NS::HfPluginDesc& plugin : plugins) ids.push_back(plugin.id.GetString());
+            }
+            return ids;
+        },
+        py::arg("id"));
+    m.def(
+        "set_viewport_renderer",
+        [](int id, const std::string& renderer) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            if (!isKnownRenderer(PXR_NS::TfToken(renderer))) throw py::value_error("no renderer '" + renderer + "'");
+            viewport.hydraWindow()->setRendererPlugin(PXR_NS::TfToken(renderer));
+            return viewport.hydraWindow()->currentRendererPlugin().GetString() == renderer;
+        },
+        py::arg("id"), py::arg("renderer"));
+    // A renderer's settings: (key, label, type name, default, Settings key) each. Defines
+    // their Settings > Renderers defaults, so usdcc.settings has them.
+    m.def(
+        "renderer_settings_info",
+        [](const std::string& renderer) {
+            const PXR_NS::TfToken pluginId(renderer);
+            if (!isKnownRenderer(pluginId)) throw py::value_error("no renderer '" + renderer + "'");
+            usdcc::usd::defineRendererSettings(pluginId);
+            py::list result;
+            for (const usdcc::usd::RendererSettingInfo& setting : usdcc::usd::rendererSettings(pluginId)) {
+                const std::optional<usdcc::core::SettingValue> defaultValue = usdcc::usd::toSettingValue(setting.defaultValue);
+                result.append(py::make_tuple(setting.key.GetString(), setting.label,
+                                             std::string(usdcc::core::settingTypeName(setting.type)),
+                                             defaultValue ? pythonValue(*defaultValue) : py::none(),
+                                             usdcc::usd::rendererSettingKey(pluginId, setting.key)));
+            }
+            return result;
+        },
+        py::arg("renderer"));
+    m.def(
+        "viewport_renderer_settings",
+        [](int id, const std::string& renderer) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            return pythonValues(viewport.rendererSettingValues(rendererOf(viewport, renderer)));
+        },
+        py::arg("id"), py::arg("renderer"));
+    m.def(
+        "viewport_renderer_overrides",
+        [](int id, const std::string& renderer) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            const auto found = viewport.rendererOverrides().find(rendererOf(viewport, renderer));
+            return found == viewport.rendererOverrides().end() ? py::dict() : pythonValues(found->second);
+        },
+        py::arg("id"), py::arg("renderer"));
+    m.def(
+        "set_viewport_renderer_setting",
+        [](int id, const std::string& renderer, const std::string& key, const py::object& value) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            const PXR_NS::TfToken pluginId = rendererOf(viewport, renderer);
+            const usdcc::usd::RendererSettingInfo& setting = rendererSettingInfo(pluginId, key);
+            const std::optional<usdcc::core::SettingValue> plain = settingValueOf(value);
+            const std::optional<PXR_NS::VtValue> converted =
+                plain ? usdcc::usd::toRendererValue(*plain, setting.defaultValue) : std::nullopt;
+            if (!converted) {
+                throw py::type_error(key + " takes a " + std::string(usdcc::core::settingTypeName(setting.type)) + ", not " +
+                                     py::str(py::type::of(value).attr("__name__")).cast<std::string>());
+            }
+            viewport.setRendererOverride(pluginId, setting.key, converted);
+        },
+        py::arg("id"), py::arg("renderer"), py::arg("key"), py::arg("value"));
+    // One override dropped, or with a `key` of "", all of the renderer's.
+    m.def(
+        "reset_viewport_renderer_setting",
+        [](int id, const std::string& renderer, const std::string& key) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            const PXR_NS::TfToken pluginId = rendererOf(viewport, renderer);
+            if (!key.empty()) {
+                viewport.setRendererOverride(pluginId, rendererSettingInfo(pluginId, key).key, std::nullopt);
+                return;
+            }
+            ViewportViewPanel::RendererOverrides overrides = viewport.rendererOverrides();
+            overrides.erase(pluginId);
+            viewport.setRendererOverrides(overrides);
+        },
+        py::arg("id"), py::arg("renderer"), py::arg("key"));
+    // The current renderer's commands, (name, description) each; none before it has drawn.
+    m.def(
+        "viewport_renderer_commands",
+        [](int id) {
+            std::vector<std::pair<std::string, std::string>> commands;
+            for (const PXR_NS::HdCommandDescriptor& command : viewportWithId(id).hydraWindow()->rendererCommands()) {
+                commands.emplace_back(command.commandName.GetString(), command.commandDescription);
+            }
+            return commands;
+        },
+        py::arg("id"));
+    m.def(
+        "run_viewport_renderer_command",
+        [](int id, const std::string& name) { return viewportWithId(id).hydraWindow()->runRendererCommand(PXR_NS::TfToken(name)); },
+        py::arg("id"), py::arg("name"));
 
     // App events: returns an id for disconnect_event().
     m.def(
