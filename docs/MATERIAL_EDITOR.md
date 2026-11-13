@@ -618,6 +618,16 @@ Rejected:
   With no HDRI ("None"), a grey dome and a `DistantLight` key from above and in front.
 - **Background:** the HDRI, or the panel's colour: Show as Background, the `domeLightCameraVisibility`
   render setting.
+- **The shape's own lights** (any prim with `UsdLuxLightAPI` in the shape file,
+  `ShadingPreviewStage::shapeHasLights()`):
+  - Under an HDRI image they're deactivated (`active = false` in the preview's own layer), so the HDRI
+    lights the shape alone. A mesh light stays, as it's geometry too.
+  - With no HDRI (the grey dome and key light), they light it along with those.
+  - The Light menu offers **Use scene lights**, which leaves only them: the dome and the key light are
+    deactivated (`Environment::sceneLights`), and the HDRI's options in the menu are disabled.
+  - It's on whenever a shape file with lights is chosen, so a lit set shows as it was lit. Unchecked,
+    it stays off for that shape, also when the panel shows another stage; a session or a duplicate
+    keeps what it had. For a shape without lights it does nothing.
 
 The preview's toolbar holds Pause (§7.5) and a ... button. Its menu holds what's shown (Material or
 Selected Node, §7.6), the Shape and HDRI submenus, and Reset View when the shape has a camera. The

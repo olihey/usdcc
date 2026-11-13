@@ -74,6 +74,12 @@ public:
     double hdriExposure() const { return m_exposure; }
     void setHdriBackground(bool shown);
     bool hdriBackground() const { return m_background; }
+    // Light the shape with its own lights only, switching off the dome and key light. Turned
+    // on whenever a shape file with lights is chosen; does nothing for one without.
+    void setUseSceneLights(bool use);
+    bool useSceneLights() const { return m_sceneLights; }
+    // Whether the shape file has lights, so the Light menu offers Use scene lights.
+    bool shapeHasLights() const { return m_hasLights; }
 
     // The above, for a session or a duplicate.
     QJsonObject saveState() const;
@@ -121,7 +127,7 @@ private:
     void updateShown();
     void updatePauseButton();
     void populateShapeMenu(QMenu* menu);
-    void populateHdriMenu(QMenu* menu);
+    void populateLightMenu(QMenu* menu);
     void setProblem(const std::string& key, const QString& text);
 
     StageRefPtr m_stage;
@@ -136,6 +142,9 @@ private:
     bool m_background = true;
     bool m_framed = false;
     bool m_hasCamera = false;
+    bool m_hasLights = false;
+    bool m_sceneLights = false;
+    std::string m_lightsShape;  // the shape file m_sceneLights was last defaulted for
 
     // Why something can't be shown, by what it's about ("shape", "renderer", "node").
     std::map<std::string, QString> m_problems;

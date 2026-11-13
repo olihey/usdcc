@@ -272,6 +272,7 @@ void ShadingPreviewWidget::rebuildPreview() {
     m_problems.clear();
     m_framed = false;
     m_hasCamera = false;
+    m_hasLights = false;
     if (m_stage) m_preview = std::make_unique<ShadingPreviewStage>(m_stage->usdStage());
     if (m_preview) {
         applyShape();
@@ -361,6 +362,15 @@ void ShadingPreviewWidget::applyShape() {
         m_shapeName = qs(chosen.name);
         setProblem("shape", QString());
         applyCamera();
+        // Use scene lights applies to a shape that has some, and is where one starts. Only for
+        // another file: the same one again (a new stage) keeps what was chosen for it.
+        m_hasLights = m_preview->shapeHasLights();
+        if (m_hasLights && chosen.file != m_lightsShape) {
+            m_sceneLights = true;
+            Q_EMIT stateChanged();
+        }
+        m_lightsShape = chosen.file;
+        applyEnvironment();
         m_framed = false;
         frame();
     } else {
@@ -409,12 +419,22 @@ void ShadingPreviewWidget::setHdriBackground(bool shown) {
     Q_EMIT stateChanged();
 }
 
+void ShadingPreviewWidget::setUseSceneLights(bool use) {
+    if (use == m_sceneLights) return;
+    m_sceneLights = use;
+    applyEnvironment();
+    Q_EMIT stateChanged();
+}
+
 void ShadingPreviewWidget::applyEnvironment() {
     if (!m_preview) return;
     ShadingPreviewStage::Environment environment;
     environment.rotation = m_rotation;
     environment.exposure = m_exposure;
-    if (!m_hdriName.isEmpty()) {
+    environment.sceneLights = m_sceneLights && m_hasLights;
+    if (environment.sceneLights) {
+        setProblem("hdri", QString());  // the HDRI isn't used
+    } else if (!m_hdriName.isEmpty()) {
         const std::vector<PreviewAsset> maps = listPreviewAssets(utf8(previewHdriFolders()), previewHdriExtensions());
         const auto it = std::find_if(maps.begin(), maps.end(),
                                      [this](const PreviewAsset& asset) { return qs(asset.name).compare(m_hdriName, Qt::CaseInsensitive) == 0; });
@@ -446,9 +466,10 @@ void ShadingPreviewWidget::populateOptionsMenu(QMenu* menu) {
     QMenu* shapes = menu->addMenu(tr("Shape: %1").arg(m_shapeName));
     shapes->setObjectName(QStringLiteral("previewShapeMenu"));
     populateShapeMenu(shapes);
-    QMenu* hdri = menu->addMenu(tr("HDRI: %1").arg(m_hdriName.isEmpty() ? tr("None") : m_hdriName));
-    hdri->setObjectName(QStringLiteral("previewHdriMenu"));
-    populateHdriMenu(hdri);
+    const QString light = m_sceneLights && m_hasLights ? tr("Scene lights") : m_hdriName.isEmpty() ? tr("None") : m_hdriName;
+    QMenu* lights = menu->addMenu(tr("Light: %1").arg(light));
+    lights->setObjectName(QStringLiteral("previewLightMenu"));
+    populateLightMenu(lights);
 
     if (m_hasCamera) {
         menu->addSeparator();
@@ -473,14 +494,26 @@ void ShadingPreviewWidget::populateShapeMenu(QMenu* menu) {
     if (menu->isEmpty()) menu->addAction(tr("No shapes found"))->setEnabled(false);
 }
 
-void ShadingPreviewWidget::populateHdriMenu(QMenu* menu) {
+void ShadingPreviewWidget::populateLightMenu(QMenu* menu) {
     menu->clear();
+    // A shape with lights of its own can be lit by them alone; the HDRI's options then
+    // don't apply, and are disabled.
+    const bool sceneLights = m_sceneLights && m_hasLights;
+    if (m_hasLights) {
+        QAction* use = menu->addAction(tr("Use scene lights"), this, [this](bool on) { setUseSceneLights(on); });
+        use->setObjectName(QStringLiteral("previewSceneLights"));
+        use->setCheckable(true);
+        use->setChecked(sceneLights);
+        use->setToolTip(tr("Light the shape with its own lights only: no HDRI dome or key light"));
+        menu->addSeparator();
+    }
     auto* group = new QActionGroup(menu);
-    const auto add = [this, menu, group](const QString& label, const QString& name, const QString& tip) {
+    const auto add = [this, menu, group, sceneLights](const QString& label, const QString& name, const QString& tip) {
         QAction* action = menu->addAction(label, this, [this, name]() { setHdriName(name); });
         action->setCheckable(true);
         action->setChecked(m_hdriName.compare(name, Qt::CaseInsensitive) == 0);
         action->setToolTip(tip);
+        action->setEnabled(!sceneLights);
         group->addAction(action);
     };
     add(tr("None (Grey Dome)"), QString(), QString());
@@ -492,6 +525,7 @@ void ShadingPreviewWidget::populateHdriMenu(QMenu* menu) {
     QAction* background = menu->addAction(tr("Show as Background"), this, [this](bool on) { setHdriBackground(on); });
     background->setCheckable(true);
     background->setChecked(m_background);
+    background->setEnabled(!sceneLights);
 
     // Rotation and exposure, live as they're dragged.
     auto* controls = new QWidget(menu);
@@ -519,8 +553,10 @@ void ShadingPreviewWidget::populateHdriMenu(QMenu* menu) {
     grid->addWidget(rotationLabel);
     grid->addWidget(rotation);
     grid->addLayout(exposureRow);
+    controls->setEnabled(!sceneLights);
     auto* action = new QWidgetAction(menu);
     action->setDefaultWidget(controls);
+    action->setEnabled(!sceneLights);
     menu->addAction(action);
 }
 
@@ -623,6 +659,7 @@ QJsonObject ShadingPreviewWidget::saveState() const {
             {QStringLiteral("rotation"), m_rotation},
             {QStringLiteral("exposure"), m_exposure},
             {QStringLiteral("background"), m_background},
+            {QStringLiteral("sceneLights"), m_sceneLights},
             {QStringLiteral("paused"), isPaused()},
             {QStringLiteral("subject"), m_subject == Subject::SelectedNode ? QStringLiteral("node") : QStringLiteral("material")}};
 }
@@ -634,6 +671,7 @@ void ShadingPreviewWidget::restoreState(const QJsonObject& state) {
     }
     if (state.contains(QStringLiteral("hdri"))) m_hdriName = state.value(QStringLiteral("hdri")).toString();
     m_rotation = state.value(QStringLiteral("rotation")).toDouble(m_rotation);
+    m_sceneLights = state.value(QStringLiteral("sceneLights")).toBool(m_sceneLights);
     m_exposure = state.value(QStringLiteral("exposure")).toDouble(m_exposure);
     applyEnvironment();
     setHdriBackground(state.value(QStringLiteral("background")).toBool(m_background));

@@ -30,6 +30,8 @@ public:
         std::string hdriFile;  // empty: a plain grey dome and a key light
         double rotation = 0;   // degrees, about the scene's up axis
         double exposure = 0;
+        // Only the shape's own lights: the dome and the key light are switched off.
+        bool sceneLights = false;
         bool operator==(const Environment&) const = default;
     };
 
@@ -81,6 +83,11 @@ public:
     };
     std::optional<ShapeCamera> shapeCamera() const;
 
+    // Whether the shape file has lights of its own (a prim with UsdLuxLightAPI), which
+    // Environment::sceneLights can light it with alone. Under an HDRI (without
+    // sceneLights) they're switched off, all but mesh lights, which are geometry too.
+    bool shapeHasLights() const;
+
     // The material's surface terminals that something is connected to, such as
     // "outputs:surface" and "outputs:mtlx:surface": what a renderer can choose from.
     std::vector<std::string> surfaceTerminals() const;
@@ -90,6 +97,10 @@ private:
     void writeShape();
     void writeBinding();
     void writeEnvironment();
+    // Switches the shape's lights off under an HDRI, on otherwise, in m_scene.
+    void writeShapeLights();
+    // Takes back what writeShapeLights() wrote for the last shape.
+    void clearShapeLights();
     void applyMask();
 
     PXR_NS::UsdStageRefPtr m_source;
@@ -103,6 +114,8 @@ private:
     bool m_shapeZUp = false;          // as the shape file says
     double m_shapeMetersPerUnit = 1;  // the same
     double m_metersPerUnit = 0.01;    // the scene's, the last time the shape was scaled
+    bool m_shapeHasLights = false;
+    std::vector<PXR_NS::SdfPath> m_shapeLights;  // what an HDRI switches off: not mesh lights
 };
 
 // The output of a shader to preview when it's selected: "rgb" if it has one, else its first

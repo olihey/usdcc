@@ -10,6 +10,7 @@
 #include <pxr/usd/usd/editContext.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdLux/domeLight.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
@@ -205,6 +206,78 @@ def Xform "Shape" (
           camera->target[1], camera->target[2]);
     const double fov = 2.0 * GfRadiansToDegrees(std::atan(12.0 / 50.0));
     CHECK(std::abs(camera->verticalFov - fov) < 1e-3, "its lens: %f, not %f", camera->verticalFov, fov);
+}
+
+USDCC_TEST(shading_preview_uses_the_shapes_lights) {
+    QTemporaryDir temp;
+    const std::string folder = temp.path().toStdString();
+    ShadingPreviewStage preview(materials());
+    preview.setShape(shapeFile(folder, false));
+    CHECK(!preview.shapeHasLights(), "a shape without lights has none");
+
+    const std::string file = folder + "/lit.usda";
+    write(file, R"(#usda 1.0
+(
+    defaultPrim = "Shape"
+)
+
+def Xform "Shape"
+{
+    def Sphere "Ball" {}
+    def Xform "Rig"
+    {
+        def SphereLight "Lamp" {}
+    }
+    def Mesh "Glow" (
+        prepend apiSchemas = ["MeshLightAPI"]
+    )
+    {
+    }
+}
+)");
+    std::string why;
+    CHECK(preview.setShape(file, &why), "a shape with a light: %s", why.c_str());
+    CHECK(preview.shapeHasLights(), "has one, however deep");
+
+    const SdfPath dome = ShadingPreviewStage::root().AppendChild(TfToken("Env"));
+    const SdfPath key = ShadingPreviewStage::root().AppendChild(TfToken("Key"));
+    const auto active = [&preview](const SdfPath& path) { return preview.stage()->GetPrimAtPath(path).IsActive(); };
+    CHECK(active(dome) && active(key), "the dome and, with no HDRI, the key light are on");
+    ShadingPreviewStage::Environment environment;
+    environment.sceneLights = true;
+    preview.setEnvironment(environment);
+    CHECK(!active(dome) && !active(key), "the shape's lights alone: both off");
+    environment.sceneLights = false;
+    environment.exposure = 1;
+    preview.setEnvironment(environment);
+    CHECK(active(dome) && active(key), "and on again");
+    float exposure = 0;
+    UsdLuxDomeLight(preview.stage()->GetPrimAtPath(dome)).GetExposureAttr().Get(&exposure);
+    CHECK(exposure == 1.0f, "still written while it was off: %f", exposure);
+
+    // An HDRI lights the shape alone: its lights go off, but a mesh light is geometry too.
+    const SdfPath lamp = ShadingPreviewStage::root().AppendPath(SdfPath("Shape/Asset/Rig/Lamp"));
+    const SdfPath glow = ShadingPreviewStage::root().AppendPath(SdfPath("Shape/Asset/Glow"));
+    CHECK(active(lamp) && active(glow), "with the grey dome, the shape's lights are on");
+    environment.hdriFile = "studio.hdr";  // only its name matters here
+    preview.setEnvironment(environment);
+    CHECK(!active(lamp) && active(glow), "under an HDRI, its lights are off but its mesh light");
+    CHECK(preview.shapeHasLights(), "and it still has lights to offer");
+    environment.sceneLights = true;
+    preview.setEnvironment(environment);
+    CHECK(active(lamp) && !active(dome), "Use scene lights turns them on, and the dome off");
+    environment.sceneLights = false;
+    preview.setEnvironment(environment);
+    CHECK(!active(lamp), "off again under the HDRI");
+
+    // Another shape, and back: what was switched off for this one doesn't stay behind.
+    preview.setShape(shapeFile(folder, false));
+    CHECK(!preview.shapeHasLights(), "a shape without lights");
+    CHECK(preview.setShape(file, &why) && preview.shapeHasLights() && !active(lamp), "back again, its lamp off under the HDRI");
+    environment.hdriFile.clear();
+    preview.setEnvironment(environment);
+    CHECK(active(lamp), "and on with the grey dome");
+    CHECK(!preview.stage()->GetPrimAtPath(lamp).HasAuthoredActive(), "with no active opinion left behind");
 }
 
 USDCC_TEST(shading_preview_shows_one_output) {

@@ -7,6 +7,7 @@
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/sdf/changeBlock.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdr/registry.h>
 #include <pxr/usd/sdr/shaderNode.h>
@@ -22,12 +23,14 @@
 #include <pxr/usd/usd/stagePopulationMask.h>
 #include <pxr/usd/usdGeom/bboxCache.h>
 #include <pxr/usd/usdGeom/camera.h>
+#include <pxr/usd/usdGeom/gprim.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdGeom/xformOp.h>
 #include <pxr/usd/usdLux/distantLight.h>
 #include <pxr/usd/usdLux/domeLight.h>
+#include <pxr/usd/usdLux/lightAPI.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/usd/usdShade/output.h>
@@ -111,11 +114,20 @@ void ShadingPreviewStage::writeShape() {
     const UsdEditContext context(m_stage, UsdEditTarget(m_scene));
     UsdPrim asset = m_stage->GetPrimAtPath(assetPath());
     if (!asset) asset = m_stage->DefinePrim(assetPath());
+    // The last shape's lights, switched off, mustn't hide this one's.
+    clearShapeLights();
     if (m_shapeFile.empty()) {
         asset.GetReferences().ClearReferences();
     } else {
         asset.GetReferences().SetReferences({SdfReference(m_shapeFile)});
     }
+    for (const UsdPrim& prim : UsdPrimRange(asset)) {
+        if (!prim.HasAPI<UsdLuxLightAPI>()) continue;
+        m_shapeHasLights = true;
+        // A mesh light is geometry too: it stays.
+        if (!prim.IsA<UsdGeomGprim>()) m_shapeLights.push_back(prim.GetPath());
+    }
+    writeShapeLights();
     m_metersPerUnit = UsdGeomGetStageMetersPerUnit(m_stage);
     const UsdGeomXform shape(m_stage->GetPrimAtPath(shapePath()));
     bool resets = false;
@@ -155,6 +167,10 @@ void ShadingPreviewStage::writeEnvironment() {
     if (!m_stage) return;
     const UsdEditContext context(m_stage, UsdEditTarget(m_scene));
     const bool hdri = !m_environment.hdriFile.empty();
+    // Active while it's written; switched off again below for the shape's own lights.
+    for (const SdfPath& path : {domePath(), keyPath()}) {
+        if (UsdPrim prim = m_stage->GetPrimAtPath(path)) prim.SetActive(true);
+    }
     const UsdLuxDomeLight dome = UsdLuxDomeLight::Define(m_stage, domePath());
     dome.CreateTextureFileAttr().Set(SdfAssetPath(m_environment.hdriFile));
     dome.CreateTextureFormatAttr().Set(UsdLuxTokens->latlong);
@@ -180,7 +196,36 @@ void ShadingPreviewStage::writeEnvironment() {
     }
     if (!aim) aim = key.AddRotateXYZOp();
     aim.Set(GfVec3f(-40.0f, 35.0f + static_cast<float>(m_environment.rotation), 0.0f));
-    key.GetPrim().SetActive(!hdri);
+    dome.GetPrim().SetActive(!m_environment.sceneLights);
+    key.GetPrim().SetActive(!hdri && !m_environment.sceneLights);
+    writeShapeLights();
+}
+
+void ShadingPreviewStage::writeShapeLights() {
+    // An HDRI lights the shape alone; without one (the grey dome) or with Use scene lights,
+    // the shape's lights stay on.
+    const bool off = !m_environment.hdriFile.empty() && !m_environment.sceneLights;
+    SdfChangeBlock block;
+    for (const SdfPath& path : m_shapeLights) {
+        if (off) {
+            SdfCreatePrimInLayer(m_scene, path)->SetActive(false);
+        } else if (const SdfPrimSpecHandle spec = m_scene->GetPrimAtPath(path)) {
+            spec->ClearActive();
+        }
+    }
+    if (!off) m_scene->RemoveInertSceneDescription();
+}
+
+void ShadingPreviewStage::clearShapeLights() {
+    {
+        SdfChangeBlock block;
+        for (const SdfPath& path : m_shapeLights) {
+            if (const SdfPrimSpecHandle spec = m_scene->GetPrimAtPath(path)) spec->ClearActive();
+        }
+        m_scene->RemoveInertSceneDescription();
+    }
+    m_shapeLights.clear();
+    m_shapeHasLights = false;
 }
 
 void ShadingPreviewStage::applyMask() {
@@ -286,6 +331,8 @@ GfRange3d ShadingPreviewStage::shapeBounds() const {
     UsdGeomBBoxCache cache(UsdTimeCode::Default(), {UsdGeomTokens->default_, UsdGeomTokens->render});
     return cache.ComputeWorldBound(shape).ComputeAlignedRange();
 }
+
+bool ShadingPreviewStage::shapeHasLights() const { return m_shapeHasLights; }
 
 std::optional<ShadingPreviewStage::ShapeCamera> ShadingPreviewStage::shapeCamera() const {
     if (!m_stage || m_shapeFile.empty()) return std::nullopt;

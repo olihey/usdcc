@@ -46,6 +46,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QSlider>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTemporaryDir>
@@ -984,8 +985,9 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
         const auto menu = menuOf();
         QAction* node = find(menu.get(), "Selected Node");
         CHECK(find(menu.get(), "Material") && find(menu.get(), "Material")->isChecked() && node, "what's shown");
-        CHECK(find(menu.get(), "Shape: Shader Ball") && find(menu.get(), "HDRI: Studio"), "the shape and the light, as submenus");
+        CHECK(find(menu.get(), "Shape: Shader Ball") && find(menu.get(), "Light: Studio"), "the shape and the light, as submenus");
         CHECK(!menu->findChild<QAction*>("previewResetView"), "no Reset View: the Shader Ball has no camera");
+        CHECK(!menu->findChild<QAction*>("previewSceneLights"), "nor Use scene lights: it has no lights");
         node->trigger();
         CHECK(preview->subject() == usdcc::usd::ShadingPreviewWidget::Subject::SelectedNode, "the menu picks what's shown");
         preview->setSubject(usdcc::usd::ShadingPreviewWidget::Subject::Material);
@@ -1005,6 +1007,7 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
 def Xform "Shape"
 {
     def Sphere "Ball" {}
+    def SphereLight "Lamp" {}
     def Camera "Camera"
     {
         float focalLength = 50
@@ -1040,7 +1043,56 @@ def Xform "Shape"
     }
     CHECK(looksThroughIt(), "which looks through the camera again");
 
+    // Its light: a shape with lights starts on them, which switches the dome and key light off,
+    // and the HDRI's options.
+    const UsdStageRefPtr previewStage = preview->previewStage()->stage();
+    const SdfPath dome = usdcc::usd::ShadingPreviewStage::root().AppendChild(TfToken("Env"));
+    CHECK(preview->shapeHasLights() && preview->useSceneLights() && !previewStage->GetPrimAtPath(dome).IsActive(),
+          "a shape with a light starts on its lights, the dome off");
+    {
+        const auto menu = menuOf();
+        QAction* use = menu->findChild<QAction*>("previewSceneLights");
+        CHECK(use && use->isCheckable() && use->isChecked() && use->text() == "Use scene lights", "the Light menu says so, checked");
+        if (use) use->trigger();
+    }
+    CHECK(!preview->useSceneLights() && previewStage->GetPrimAtPath(dome).IsActive(), "unchecking it brings the dome back");
+    CHECK(!preview->saveState().value("sceneLights").toBool(), "kept with the panel's state");
+    preview->setStage(nullptr);
+    preview->setStage(f.stage);
+    CHECK(!preview->useSceneLights(), "the same shape on a new stage keeps the choice");
+    preview->setUseSceneLights(true);
+    {
+        const auto menu = menuOf();
+        QAction* light = find(menu.get(), "Light: Scene lights");
+        CHECK(light, "the menu says so");
+        int enabled = 0;
+        for (QAction* action : light ? light->menu()->actions() : QList<QAction*>()) {
+            if (!action->isSeparator() && action->objectName() != "previewSceneLights" && action->isEnabled()) ++enabled;
+        }
+        auto* widgets = light ? light->menu()->findChild<QSlider*>("previewHdriRotation") : nullptr;
+        CHECK(light && enabled == 0 && widgets && !widgets->isEnabled(), "and the HDRI's options are disabled: %d enabled", enabled);
+    }
+    CHECK(preview->saveState().value("sceneLights").toBool(), "kept with the panel's state");
+
     preview->setShapeName("Shader Ball");
     CHECK(!preview->hasShapeCamera() && viewport->fieldOfView() == usdcc::usd::HydraViewportWindow::verticalFieldOfView(),
           "a shape without one goes back to the usual lens");
+    const UsdStageRefPtr shownStage = preview->previewStage()->stage();
+    CHECK(!preview->shapeHasLights() && shownStage->GetPrimAtPath(dome).IsActive(), "and one without lights to the dome");
+
+    // Unchecked, then another shape and back: a lit shape starts on its lights again.
+    preview->setShapeName("Camera Ball");
+    preview->setUseSceneLights(false);
+    preview->setShapeName("Shader Ball");
+    preview->setShapeName("Camera Ball");
+    CHECK(preview->useSceneLights(), "choosing a lit shape again turns its lights on");
+
+    // A session keeps what it saved, though the shape has lights.
+    preview->setUseSceneLights(false);
+    const QJsonObject state = preview->saveState();
+    usdcc::usd::ShadingPreviewWidget restored;
+    restored.setStage(f.stage);
+    restored.restoreState(state);
+    CHECK(restored.shapeName() == "Camera Ball" && restored.shapeHasLights() && !restored.useSceneLights(),
+          "a restored panel keeps its choice");
 }
