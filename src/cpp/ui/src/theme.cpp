@@ -7,7 +7,13 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QIconEngine>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPainterPathStroker>
 #include <QPalette>
+#include <QPixmap>
+#include <QProxyStyle>
 #include <QStyleFactory>
 #include <QVariant>
 
@@ -65,6 +71,83 @@ QPalette darkPalette(const QColor& accent) {
     p.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
     return p;
 }
+
+// The clear button of line edits (setClearButtonEnabled): a rounded square
+// with the X cut out of it, square like the inputs it sits in rather than
+// Fusion's round bitmap. Drawn as a path at whatever size and device pixel
+// ratio is asked for, so it stays sharp at every UI scale.
+class ClearIconEngine : public QIconEngine {
+public:
+    void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State) override {
+        const qreal side = qMin(rect.width(), rect.height()) * 0.75;
+        QRectF box(0, 0, side, side);
+        box.moveCenter(QRectF(rect).center());
+        QPainterPath shape;
+        shape.addRoundedRect(box, side * 0.16, side * 0.16);
+        const qreal arm = side * 0.27;
+        QPainterPath cross;
+        cross.moveTo(box.center() + QPointF(-arm, -arm));
+        cross.lineTo(box.center() + QPointF(arm, arm));
+        cross.moveTo(box.center() + QPointF(arm, -arm));
+        cross.lineTo(box.center() + QPointF(-arm, arm));
+        QPainterPathStroker stroker;
+        stroker.setWidth(qMax(1.0, side * 0.13));
+        stroker.setCapStyle(Qt::FlatCap);
+        shape = shape.subtracted(stroker.createStroke(cross));
+
+        const int alpha = mode == QIcon::Disabled ? 50 : mode == QIcon::Active ? 190 : 115;
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->fillPath(shape, QColor(255, 255, 255, alpha));
+        painter->restore();
+    }
+
+    QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override {
+        return scaledPixmap(size, mode, state, 1.0);
+    }
+
+    QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) override {
+        QPixmap result(size * scale);
+        result.setDevicePixelRatio(scale);
+        result.fill(Qt::transparent);
+        QPainter painter(&result);
+        paint(&painter, QRect(QPoint(0, 0), size), mode, state);
+        return result;
+    }
+
+    QIconEngine* clone() const override { return new ClearIconEngine; }
+};
+
+// Fusion, plus what the stylesheet can't reach: the clear button's icon and
+// its size, which Qt takes from pixelMetric() in device-independent pixels and
+// so would otherwise ignore the UI scale.
+class Style : public QProxyStyle {
+public:
+    Style() : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion"))) {}
+
+    int pixelMetric(PixelMetric metric, const QStyleOption* option, const QWidget* widget) const override {
+        if (metric == PM_LineEditIconMargin && widget) {
+            // QLineEdit centres the clear button, (icon + 6) x (icon + 2),
+            // vertically and puts it this far from the right edge; the icon
+            // has 3 px either side of it in the button. Taking the margin from
+            // the field's height makes the gap on the right the same as above
+            // and below it, whatever the height and UI scale.
+            const int icon = pixelMetric(PM_LineEditIconSize, option, widget);
+            return qMax(0, (widget->height() - icon) / 2 - 3);
+        }
+        const int base = QProxyStyle::pixelMetric(metric, option, widget);
+        if (metric != PM_LineEditIconSize && metric != PM_LineEditIconMargin) return base;
+        // Looked up rather than created: a metric query must not make a
+        // controller (and read the user's settings) as a side effect.
+        const auto* scale = qApp->findChild<UiScaleController*>(QString(), Qt::FindDirectChildrenOnly);
+        return scale ? scale->pixels(base) : base;
+    }
+
+    QIcon standardIcon(StandardPixmap icon, const QStyleOption* option, const QWidget* widget) const override {
+        if (icon == SP_LineEditClearButton) return QIcon(new ClearIconEngine);
+        return QProxyStyle::standardIcon(icon, option, widget);
+    }
+};
 
 // The final stylesheet: tokens resolved, then dimensions scaled.
 QString themed(const QString& original) {
@@ -127,7 +210,7 @@ void apply(QApplication& app) {
     // its launcher entry by this name — which is how they find usdcc.desktop's
     // Icon= and the installed hicolor icons. Harmless elsewhere.
     QGuiApplication::setDesktopFileName(QStringLiteral("usdcc"));
-    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    app.setStyle(new Style);
     defineSettings();
     auto& scale = UiScaleController::instance();
     const auto refresh = [&app]() {

@@ -182,6 +182,17 @@ QToolButton {
     border-radius: 3px;
 }
 
+/* A line edit's clear button is a QToolButton too, but Qt sizes and places it
+   itself (theme.cpp's Style keeps it as far from the right edge as from the
+   top and bottom): a min-height here would stretch it and push the icon down. */
+QLineEdit > QToolButton {
+    min-height: 0;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
 QPushButton:hover,
 QToolButton:hover {
     background: #2c2c30;

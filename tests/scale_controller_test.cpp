@@ -18,11 +18,15 @@
 #include <QAction>
 #include <QApplication>
 #include <QDoubleSpinBox>
+#include <QEventLoop>
+#include <QImage>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
 #include <QSettings>
+#include <QStyle>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QWindow>
 
 using usdcc::ui::UiScaleController;
@@ -32,6 +36,12 @@ namespace {
 constexpr auto kKeypadControl = Qt::ControlModifier | Qt::KeypadModifier;
 
 QApplication& application() { return *static_cast<QApplication*>(QCoreApplication::instance()); }
+
+void waitMs(int ms) {
+    QEventLoop loop;
+    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+    loop.exec();
+}
 
 void press(QObject* target, int key, Qt::KeyboardModifiers modifiers) {
     QKeyEvent event(QEvent::KeyPress, key, modifiers);
@@ -101,6 +111,32 @@ USDCC_TEST(scale_controller) {
         CHECK(application().styleSheet().contains(QStringLiteral("font-size: 22px")),
               "app stylesheet font sizes scale (11px -> 22px)");
         CHECK(docks.styleSheet() != baseDockStyle, "dock stylesheet scales");
+        const int clearIconSize = editor.style()->pixelMetric(QStyle::PM_LineEditIconSize, nullptr, &editor);
+        CHECK(clearIconSize == 32, "line edit clear button 16 -> 32 px (got %d)", clearIconSize);
+        const QIcon clearIcon = editor.style()->standardIcon(QStyle::SP_LineEditClearButton, nullptr, &editor);
+        CHECK(!clearIcon.pixmap(QSize(32, 32), 2.0).isNull(), "the clear icon renders at any size");
+        for (const int percent : {100, 150, 200}) {
+            scale.setPercent(percent);
+            QLineEdit search;
+            search.setClearButtonEnabled(true);
+            search.setText(QStringLiteral("layer"));
+            search.resize(scale.pixels(200), search.sizeHint().height());
+            search.show();
+            waitMs(300);  // the clear button fades in
+            const QImage shot = search.grab().toImage();
+            QRect icon;
+            for (int y = 0; y < shot.height(); ++y) {
+                for (int x = shot.width() / 2; x < shot.width(); ++x) {
+                    if (qRed(shot.pixel(x, y)) > 80) icon |= QRect(x, y, 1, 1);
+                }
+            }
+            const int top = icon.top();
+            const int bottom = shot.height() - 1 - icon.bottom();
+            const int right = shot.width() - 1 - icon.right();
+            CHECK(!icon.isEmpty() && qAbs(top - bottom) <= 1 && qAbs(right - top) <= 1,
+                  "clear icon gaps at %d%%: top %d, bottom %d, right %d", percent, top, bottom, right);
+        }
+        scale.setPercent(200);
 
         QWidget late;
         usdcc::ui::scaled::fixedWidth(&late, 72);

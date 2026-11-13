@@ -557,8 +557,8 @@ things that will bite later if not addressed early:
     (option 1a, "Classic — Blender-style dense workspace").** Style only — the design's layout
     (left tool rail, segmented tool controls, status bar, right-hand property panel) is *not*
     implemented; the existing panels keep their structure and just take on the look. Lives in
-    `usdcc_ui` as `usdcc::ui::theme` (`theme.h`/`.cpp`): `apply(QApplication&)` (Fusion style +
-    dark `QPalette` + `resources/theme/dark.qss`), called from `main.cpp` right after the
+    `usdcc_ui` as `usdcc::ui::theme` (`theme.h`/`.cpp`): `apply(QApplication&)` (Fusion style, behind a
+    proxy that draws the line-edit clear button as a UI-scaled rounded square + dark `QPalette` + `resources/theme/dark.qss`), called from `main.cpp` right after the
     `QApplication`; `applyToDockManager()` (appends `resources/theme/dock.qss`), called from
     `MainWindow`'s constructor right after it creates the `CDockManager`. Design tokens
     (surfaces `#161618/#1a1a1c/#1c1c1e/#141416`, accent `#3d8bfd`, 6/8/10% white hairlines,
