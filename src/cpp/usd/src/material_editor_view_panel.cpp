@@ -1,5 +1,6 @@
 #include "usdcc/usd/material_editor_view_panel.h"
 
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/usd/add_shade_input_dialog.h"
@@ -73,6 +74,8 @@ constexpr float kPasteOffset = 0.25f;  // of a node's size, so a copy doesn't hi
 constexpr auto kShowPreviewKey = "MaterialEditor/showPreview";
 constexpr auto kShowParametersKey = "MaterialEditor/showParameters";
 constexpr int kSideWidth = 320;
+// What the Parameters keep below the preview, however wide the pane on the right.
+constexpr int kMinParametersHeight = 120;
 
 // The app's dark theme, for what QtNodes draws itself. Its styles are process-wide.
 void applyTheme() {
@@ -175,6 +178,12 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_side->setStretchFactor(0, 0);
     m_side->setStretchFactor(1, 1);
     m_side->setChildrenCollapsible(false);
+    // The preview's height follows the pane's width (fitPreview()), so the handle between it
+    // and the Parameters doesn't move.
+    m_side->handle(1)->setEnabled(false);
+    m_side->handle(1)->setCursor(Qt::ArrowCursor);
+    m_side->installEventFilter(this);
+    connect(m_preview, &ShadingPreviewWidget::squareHeightChanged, this, [this]() { fitPreview(); });
     m_split->addWidget(m_palette);
     m_split->addWidget(m_stack);
     m_split->addWidget(m_side);
@@ -371,7 +380,17 @@ void MaterialEditorViewPanel::updateSideVisibility() {
         const int palette = m_palette->isHidden() ? 0 : sizes.value(0);
         m_split->setSizes({palette, std::max(1, m_split->width() - palette - kSideWidth), kSideWidth});
     }
-    if (preview && params) m_side->setSizes({kSideWidth, std::max(1, m_side->height() - kSideWidth)});
+    fitPreview();
+}
+
+void MaterialEditorViewPanel::fitPreview() {
+    // Alone, the preview fills the pane and keeps its picture square itself.
+    if (m_preview->isHidden() || m_params->isHidden()) return;
+    const int square = m_preview->heightForSquare(m_side->width());
+    // In a short pane, the Parameters keep some room and the picture is wider than tall.
+    const int room = m_side->height() - m_side->handleWidth();
+    const int height = std::clamp(square, 1, std::max(1, room - usdcc::ui::scaled::pixels(kMinParametersHeight)));
+    if (m_side->sizes().value(0) != height) m_side->setSizes({height, std::max(1, room - height)});
 }
 
 void MaterialEditorViewPanel::updateSidePane() {
@@ -942,6 +961,7 @@ bool MaterialEditorViewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_view && event->type() == QEvent::Show) {
         QTimer::singleShot(0, this, [this]() { fitGraph(kSmallestToOpenAt); });
     }
+    if (watched == m_side && event->type() == QEvent::Resize) fitPreview();
     if (watched == m_view->viewport() && handleViewportEvent(event)) return true;
     if (watched == m_view && (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride)) {
         auto* key = static_cast<QKeyEvent*>(event);

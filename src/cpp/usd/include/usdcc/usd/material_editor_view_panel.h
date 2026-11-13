@@ -127,6 +127,9 @@ private:
     // What the pane on the right shows: the selected node, or the level, and its material.
     void updateSidePane();
     void updateSideVisibility();
+    // Keeps the preview's picture square, as wide as the pane on the right, with the
+    // Parameters below in what's left (docs/MATERIAL_EDITOR.md §7.5).
+    void fitPreview();
 
     std::shared_ptr<UndoManager> m_undo;
     QSplitter* m_split = nullptr;

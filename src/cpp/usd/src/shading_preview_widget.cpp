@@ -27,6 +27,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QSlider>
+#include <QResizeEvent>
 #include <QStackedWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -162,6 +163,7 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(this);
+    m_toolbar = toolbar;
     toolbar->setObjectName(QStringLiteral("panelToolbar"));
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* bar = new QHBoxLayout(toolbar);
@@ -218,6 +220,8 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     layout->addWidget(toolbar);
     layout->addWidget(m_stack, 1);
     layout->addWidget(m_problem);
+    // Given more height than its width, the picture stays square and the rest is left below.
+    layout->addStretch(0);
 
     connect(m_pause, &QToolButton::toggled, this, [this](bool paused) {
         m_viewport->setPaused(paused);
@@ -563,8 +567,21 @@ void ShadingPreviewWidget::setProblem(const std::string& key, const QString& tex
         m_problems[key] = text;
     }
     const QString all = problem();
+    if (all == m_problem->text()) return;
     m_problem->setText(all);
     m_problem->setVisible(!all.isEmpty());
+    Q_EMIT squareHeightChanged();
+}
+
+void ShadingPreviewWidget::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    m_stack->setMaximumHeight(std::max(m_stack->minimumHeight(), width()));
+}
+
+int ShadingPreviewWidget::heightForSquare(int width) const {
+    int height = width + m_toolbar->sizeHint().height();
+    if (!m_problem->isHidden()) height += m_problem->heightForWidth(width);
+    return height;
 }
 
 QString ShadingPreviewWidget::problem() const {

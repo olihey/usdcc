@@ -46,6 +46,8 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QToolButton>
@@ -909,6 +911,47 @@ USDCC_TEST(material_editor_preview_shows_the_material) {
     CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "Sky", "the same shape and light");
     CHECK(restored.preview()->hdriRotation() == 45, "turned the same");
     CHECK(!restored.areParametersShown() && restored.isPreviewShown(), "the same parts shown");
+}
+
+USDCC_TEST(material_editor_preview_stays_square) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    auto* side = f.panel->findChild<QSplitter*>("materialEditorSide");
+    auto* split = qobject_cast<QSplitter*>(side ? side->parentWidget() : nullptr);
+    auto* picture = f.panel->preview()->findChild<QStackedWidget*>();
+    CHECK(side && split && picture, "the pane on the right, its splitter and the preview's picture");
+    if (!side || !split || !picture) return;
+    CHECK(!side->handle(1)->isEnabled(), "the handle between the preview and the Parameters doesn't move");
+
+    const auto square = [picture]() { return std::abs(picture->width() - picture->height()) <= 1; };
+    CHECK(square(), "the picture starts square: %d x %d", picture->width(), picture->height());
+    const auto widen = [&](int width) {
+        const QList<int> sizes = split->sizes();
+        split->setSizes({sizes.value(0), sizes.value(1) + sizes.value(2) - width, width});
+        settle();
+    };
+    widen(420);
+    CHECK(side->width() >= 400 && square(), "and stays square as the pane widens: %d x %d", picture->width(), picture->height());
+    widen(260);
+    CHECK(square(), "or narrows: %d x %d", picture->width(), picture->height());
+
+    // Wider than the pane is tall: the Parameters keep some room.
+    f.window.resize(1100, 420);
+    settle();
+    widen(420);
+    CHECK(f.panel->parameters()->height() >= 110 && picture->width() > picture->height(),
+          "a short pane keeps the Parameters, so the picture is wider: %d x %d, Parameters %d", picture->width(), picture->height(),
+          f.panel->parameters()->height());
+
+    // Alone, the preview fills the pane and its picture stays square at the top.
+    f.window.resize(1100, 800);
+    settle();
+    widen(300);
+    f.panel->setParametersShown(false);
+    settle();
+    CHECK(square() && f.panel->preview()->height() == side->height() && picture->y() < f.panel->preview()->height() / 4,
+          "alone, still square, at the top: %d x %d at %d in %d", picture->width(), picture->height(), picture->y(), side->height());
 }
 
 USDCC_TEST(material_editor_preview_toolbar_and_camera) {

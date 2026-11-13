@@ -629,6 +629,11 @@ choice persists per panel (a session, a duplicate), and `Materials/previewShape`
 - **`HydraViewportWindow` in a preview mode:** no tools or gizmos, no grid, a turntable orbit, framing
   on the shape, the preview's own camera and lights instead of the default lighting. It is already a
   `QWindow` in a container, so QtNodes' black-viewport issue (§2.2) doesn't apply.
+- **Square:** the picture is as tall as the pane on the right is wide, so widening the pane grows it, and
+  the Parameters take what's left below. The handle between them doesn't move. In a pane too short for
+  that, the Parameters keep 120 px and the picture is wider than tall. With the Parameters hidden, the
+  picture stays square at the top. `MaterialEditorViewPanel::fitPreview()` sizes it, from
+  `ShadingPreviewWidget::heightForSquare()` (the toolbar and any warning line on top of the width).
 - **Renderer:** the one of the viewport showing the same stage, the last focused if there are several. It
   follows that viewport's `rendererChanged()`. With no viewport open on the stage, Storm. A material
   the renderer can't draw (MDL in Storm, §3.5) gets a line saying so, rather than a default-grey shape.

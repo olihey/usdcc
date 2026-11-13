@@ -95,9 +95,19 @@ public:
     // What the ... button's menu holds, built afresh each time it opens.
     void populateOptionsMenu(QMenu* menu);
 
+    // How tall this must be, at `width`, for the picture to be square: the toolbar and the
+    // warning line, when one shows, take their share on top.
+    int heightForSquare(int width) const;
+
 Q_SIGNALS:
     // Something saveState() holds changed.
     void stateChanged();
+    // heightForSquare() may have changed: the warning line came, went or says something else.
+    void squareHeightChanged();
+
+protected:
+    // The picture is never taller than wide: what's left goes below it.
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void rebuildPreview();
@@ -132,6 +142,7 @@ private:
     std::map<std::string, std::vector<std::string>> m_rendererContexts;  // by renderer, cached
 
     HydraViewportWindow* m_viewport = nullptr;
+    QWidget* m_toolbar = nullptr;
     QWidget* m_viewportContainer = nullptr;
     QStackedWidget* m_stack = nullptr;
     QLabel* m_empty = nullptr;
