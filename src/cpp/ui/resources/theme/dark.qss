@@ -196,8 +196,13 @@ QToolButton:checked {
     color: #ffffff;
 }
 
+/* One look for every button that can't be pressed, a dialog's main one (Add Input, Connect,
+   ...) and a checked one included: the plain button, dimmed, never the accent. After
+   :default and :checked, which it overrides. */
 QPushButton:disabled,
 QToolButton:disabled {
+    background: #232326;
+    border-color: rgba(255, 255, 255, 8%);
     color: rgba(255, 255, 255, 30%);
 }
 

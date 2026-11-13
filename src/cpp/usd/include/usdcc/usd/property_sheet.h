@@ -145,6 +145,9 @@ private:
     // A Shader's inputs in its definition's pages, authored or not.
     void buildShaderPages(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
     Row buildShaderInputRow(const PXR_NS::UsdPrim& prim, const ShaderInputInfo& input);
+    // The + in the header of a Material's, NodeGraph's or Shader's inputs section: the Add
+    // Input dialog (add_shade_input_dialog.h). Nothing for another prim or one not editable.
+    void addInputButton(properties::CategorySection* section, const PXR_NS::UsdPrim& prim);
     void buildTransformStack(const PXR_NS::UsdPrim& prim, properties::CategorySection* section,
                              std::set<PXR_NS::TfToken>& inStack);
     // `primvarGroup`: the namespace of the frame it's going in, which its label leaves out.

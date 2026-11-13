@@ -3,6 +3,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/add_shade_input_dialog.h"
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/prim_actions.h"
@@ -413,15 +414,26 @@ void PropertySheet::rebuild() {
                 layout->addWidget(section);
                 m_sections.push_back(section);
             }
+            if (m_sections.empty() && prim.IsA<UsdShadeNodeGraph>()) {
+                // An empty Inputs section, for its + (one can be promoted too).
+                CategorySection* section = makeSection(QStringLiteral("inputs"), tr("Inputs"));
+                auto* none = new QLabel(prim_actions::isEditable(prim) ? tr("No interface inputs. Add one with +, or promote a node's input.")
+                                                                       : tr("No interface inputs."),
+                                        section);
+                none->setObjectName(QStringLiteral("propertyNote"));
+                none->setWordWrap(true);
+                section->addRow(none);
+                layout->addWidget(section);
+                m_sections.push_back(section);
+            }
             if (m_sections.empty()) {
-                auto* none = new QLabel(prim.IsA<UsdShadeNodeGraph>()
-                                            ? tr("No interface inputs. Promote a node's input to add one.")
-                                            : tr("Not a shader, material or node graph."),
-                                        m_content);
+                auto* none = new QLabel(tr("Not a shader, material or node graph."), m_content);
                 none->setObjectName(QStringLiteral("propertyNote"));
                 none->setWordWrap(true);
                 usdcc::ui::scaled::margins(none, 12, 12, 12, 0);
                 layout->addWidget(none);
+            } else {
+                addInputButton(m_sections.front(), prim);
             }
         }
         layout->addStretch(1);
@@ -442,6 +454,15 @@ void PropertySheet::rebuild() {
     const bool xformable = static_cast<bool>(UsdGeomXformable(prim));
     if (xformable && (categories.empty() || categories.front().key != "transform")) {
         categories.insert(categories.begin(), PropertyCategory{"transform", "Transform", {}});
+    }
+    // The same for a Material's or NodeGraph's Inputs, where its + adds one: before its
+    // Outputs, or last. (A Shader's + is on its first page.)
+    const bool interfaceInputs = !shader && shade_actions::canAddInput(prim) && prim_actions::isEditable(prim);
+    if (interfaceInputs) {
+        const auto has = [&categories](const char* key) {
+            return std::find_if(categories.begin(), categories.end(), [key](const PropertyCategory& c) { return c.key == key; });
+        };
+        if (has("inputs") == categories.end()) categories.insert(has("outputs"), PropertyCategory{"inputs", "Inputs", {}});
     }
     // The material near the top, after Transform, rather than with the namespaces
     // at the end. With MaterialBindingAPI it's there even with no binding yet: the
@@ -477,6 +498,7 @@ void PropertySheet::rebuild() {
             if (category.properties.empty()) continue;
         }
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
+        if (interfaceInputs && category.key == "inputs") addInputButton(section, prim);
         std::set<TfToken> inStack;
         const std::set<std::string> groups = primvarGroups(category);
         std::map<std::string, GroupFrame> frames;
@@ -581,15 +603,41 @@ void PropertySheet::buildShaderPages(const UsdPrim& prim, QVBoxLayout* layout) {
             section->addRow(row.row);
             m_rows.push_back(row);
         }
+        if (page == pages.front()) addInputButton(section, prim);
         layout->addWidget(section);
         m_sections.push_back(section);
     }
-    if (pages.empty() && m_mode == Mode::Shading) {
-        auto* none = new QLabel(m_authoredOnly ? tr("No inputs authored.") : tr("This shader has no inputs."), m_content);
+    if (!pages.empty()) return;
+    const QString note = m_authoredOnly ? tr("No inputs authored.") : tr("This shader has no inputs.");
+    if (shade_actions::canAddInput(prim) && prim_actions::isEditable(prim)) {
+        // An empty Inputs section, for its +.
+        CategorySection* section = makeSection(QStringLiteral("shaderPage:"), tr("Inputs"));
+        addInputButton(section, prim);
+        if (m_mode == Mode::Shading) {
+            auto* none = new QLabel(note, section);
+            none->setObjectName(QStringLiteral("propertyNote"));
+            section->addRow(none);
+        }
+        layout->addWidget(section);
+        m_sections.push_back(section);
+    } else if (m_mode == Mode::Shading) {
+        auto* none = new QLabel(note, m_content);
         none->setObjectName(QStringLiteral("propertyNote"));
         usdcc::ui::scaled::margins(none, 12, 12, 12, 0);
         layout->addWidget(none);
     }
+}
+
+void PropertySheet::addInputButton(CategorySection* section, const UsdPrim& prim) {
+    if (!section || !shade_actions::canAddInput(prim) || !prim_actions::isEditable(prim)) return;
+    QToolButton* add = properties::iconButton(QStringLiteral(":/usdcc/theme/plus.png"), tr("Add an input..."));
+    add->setProperty("addInputButton", true);  // keeps the #propertyIconButton look
+    connect(add, &QToolButton::clicked, this, [this, path = prim.GetPath()]() {
+        // Queued: adding rebuilds this panel, the button included.
+        QMetaObject::invokeMethod(
+            this, [this, path]() { addShadeInputInteractively(*m_undoManager, m_stage, path, this); }, Qt::QueuedConnection);
+    });
+    section->addHeaderWidget(add);
 }
 
 PropertySheet::Row PropertySheet::buildShaderInputRow(const UsdPrim& prim, const ShaderInputInfo& input) {

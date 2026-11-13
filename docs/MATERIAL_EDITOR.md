@@ -386,8 +386,8 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   are a hash of the type's name, not these.
 - **Edits:** each of these is one call in `shade_actions.h` (`prim_actions` for rename and disconnect) and
   one undo step: create, delete, rename, duplicate, copy/paste, connect, disconnect, group into a NodeGraph,
-  ungroup, promote an input to the interface, add/remove a Material terminal, create a backdrop, and
-  auto-layout.
+  ungroup, promote an input to the interface, add an input, add/remove a Material terminal, create a
+  backdrop, and auto-layout.
   - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
     `UsdUINodeGraphNodeAPI` position, and nothing else.
   - Deleting a node also removes connections to it. A prim a weaker layer defines is deactivated instead.
@@ -397,6 +397,12 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
     than moving specs, so they work on a prim from a reference. The old one is removed or deactivated.
   - Paste drops a connection to anything that isn't in the Material it lands in.
   - Ungrouping sends an interface input's value to whatever read it, and follows connections through.
+  - **Add Input...** (right-click the Material's node, the Inputs node or a NodeGraph, or the + on the
+    Attribute Editor's Inputs header for a Material, NodeGraph or Shader) asks for a name, a type of
+    `canonicalValueTypes()` (Array for its array type), a default value in the Attribute Editor's own
+    editor for that type, allowed tokens (for a token), connectability, display name and group, and
+    documentation (`AddShadeInputDialog`). It refuses a name that's taken, and on a Shader one its
+    definition has. `shade_actions::addInput()` authors only what was given.
 - **Keys, over the graph:** Tab searches nodes, Delete or Backspace deletes, F2 renames, Ctrl+D duplicates,
   Ctrl+C, X and V copy, cut and paste, Ctrl+G groups, Ctrl+Shift+G ungroups, L lays out, F frames. They're
   caught before QtNodes' own, whose Delete would edit its own copy. Right-click offers the same, plus

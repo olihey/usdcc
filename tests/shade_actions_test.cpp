@@ -14,6 +14,7 @@
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/shader.h>
+#include <pxr/usd/usdShade/tokens.h>
 #include <pxr/usd/usdShade/utils.h>
 #include <pxr/usd/usdUI/backdrop.h>
 #include <pxr/usd/usdUI/nodeGraphNodeAPI.h>
@@ -257,6 +258,59 @@ USDCC_TEST(shade_actions_terminals) {
     CHECK(!actions::addTerminal(f.undo, f.stage, SdfPath("/M"), "mtlx:surface"), "not twice");
     CHECK(actions::removeTerminal(f.undo, f.stage, SdfPath("/M"), TfToken("outputs:mtlx:surface")) && f.oneMoreStep(), "removing is one too");
     CHECK(!f.prim("/M").GetAttribute(TfToken("outputs:mtlx:surface")), "and it goes");
+}
+
+USDCC_TEST(shade_actions_add_input) {
+    Fixture f;
+    actions::InputSpec spec;
+    spec.name = "gloss";
+    spec.typeName = "float";
+    spec.value = VtValue(0.5f);
+    spec.connectability = UsdShadeTokens->interfaceOnly;
+    spec.displayName = "Glossiness";
+    spec.displayGroup = "Surface";
+    spec.documentation = "How shiny";
+    CHECK(actions::addInput(f.undo, f.stage, SdfPath("/M"), spec) && f.oneMoreStep(), "one undo step");
+    const UsdShadeInput input(f.prim("/M").GetAttribute(TfToken("inputs:gloss")));
+    CHECK(input && input.GetTypeName() == SdfValueTypeNames->Float, "a float input");
+    float value = -1;
+    CHECK(input.Get(&value) && value == 0.5f, "with its value: %g", value);
+    CHECK(input.GetConnectability() == UsdShadeTokens->interfaceOnly, "its connectability");
+    CHECK(input.GetAttr().GetDisplayName() == "Glossiness" && input.GetDisplayGroup() == "Surface" && input.GetDocumentation() == "How shiny",
+          "and its display name, group and documentation");
+    CHECK(!actions::addInput(f.undo, f.stage, SdfPath("/M"), spec), "not twice");
+    CHECK(!actions::inputNameProblem(f.prim("/M"), "gloss").empty(), "and the dialog is told why");
+
+    actions::InputSpec plain;
+    plain.typeName = "float";
+    for (const char* bad : {"", "1st", "a b", "a::b"}) {
+        plain.name = bad;
+        CHECK(!actions::addInput(f.undo, f.stage, SdfPath("/M"), plain), "not a name: '%s'", bad);
+    }
+    plain.name = "ns:weights";
+    plain.typeName = "float[]";
+    CHECK(actions::addInput(f.undo, f.stage, SdfPath("/M"), plain) && f.oneMoreStep(), "a namespaced array, with no value");
+    const UsdAttribute weights = f.prim("/M").GetAttribute(TfToken("inputs:ns:weights"));
+    CHECK(weights && weights.GetTypeName() == SdfValueTypeNames->FloatArray && !weights.HasAuthoredValue(), "is created with no value");
+    CHECK(UsdShadeInput(weights).GetConnectability() == UsdShadeTokens->full, "and connectable as usual");
+
+    actions::InputSpec mode;
+    mode.name = "mode";
+    mode.typeName = "token";
+    mode.value = VtValue(TfToken("b"));
+    mode.allowedTokens = {TfToken("a"), TfToken("b")};
+    CHECK(actions::addInput(f.undo, f.stage, SdfPath("/M/S"), mode), "a shader takes one its definition hasn't");
+    VtTokenArray allowed;
+    CHECK(f.prim("/M/S").GetAttribute(TfToken("inputs:mode")).GetMetadata(SdfFieldKeys->AllowedTokens, &allowed) && allowed.size() == 2,
+          "with its allowed tokens");
+    CHECK(!actions::inputNameProblem(f.prim("/M/S"), "metallic").empty(), "but not one its definition has");
+    CHECK(!actions::addInput(f.undo, f.stage, SdfPath("/M/R"), {"x", "not a type"}), "nor of no type");
+    CHECK(!actions::canAddInput(f.usd()->GetPseudoRoot()), "and only shading prims take them");
+
+    f.history->undo();
+    f.history->undo();
+    f.history->undo();
+    CHECK(!f.prim("/M").GetAttribute(TfToken("inputs:gloss")) && !f.prim("/M").GetAttribute(TfToken("inputs:ns:weights")), "undo takes them away");
 }
 
 USDCC_TEST(shade_graph_offers_terminals) {

@@ -102,6 +102,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/prim_tree_widget.h
     include/usdcc/usd/relationship_target_dialog.h
     include/usdcc/usd/shader_connection_dialog.h
+    include/usdcc/usd/add_shade_input_dialog.h
     include/usdcc/usd/properties/array_editor_dialog.h
     include/usdcc/usd/properties/attribute_binding.h
     include/usdcc/usd/properties/category_section.h
@@ -162,6 +163,7 @@ add_library(usdcc_usd_ui SHARED
     src/relationship_target_dialog.cpp
     src/render_view_panel.cpp
     src/shader_connection_dialog.cpp
+    src/add_shade_input_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
     src/properties/category_section.cpp

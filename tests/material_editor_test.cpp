@@ -752,6 +752,15 @@ USDCC_TEST(material_editor_menu_offers_what_is_under_the_mouse) {
     CHECK(!shader.contains("Enter"), "not what's for a NodeGraph");
     const QStringList group = texts(grabPoint(f.item(kMaps)));
     CHECK(group.contains("Enter") && group.contains("Ungroup"), "on a NodeGraph: %s", qPrintable(group.join(",")));
+    CHECK(group.contains("Add Input..."), "a NodeGraph takes a new input: %s", qPrintable(group.join(",")));
+    CHECK(!shader.contains("Add Input..."), "a shader's node doesn't offer one");
+    // The Material's node, and its Inputs node if it has one: both stand for its interface.
+    const auto materialNodes = f.panel->model()->nodesFor(kWood);
+    CHECK(!materialNodes.empty(), "the Material has a node");
+    for (const auto id : materialNodes) {
+        const QStringList material = texts(grabPoint(f.panel->scene()->nodeGraphicsObject(id)));
+        CHECK(material.contains("Add Input..."), "on the Material's interface: %s", qPrintable(material.join(",")));
+    }
     const QStringList port = texts(portScene(f, kSurface, QtNodes::PortType::In, "inputs:normal") + QPointF(30, 0));
     CHECK(port.contains("Disconnect normal"), "on a connected port: %s", qPrintable(port.join(",")));
     const QStringList free = texts(portScene(f, kSurface, QtNodes::PortType::In, "inputs:metallic") + QPointF(30, 0));

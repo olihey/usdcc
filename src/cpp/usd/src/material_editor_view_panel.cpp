@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/usd/add_shade_input_dialog.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/shade_actions.h"
@@ -787,7 +788,20 @@ void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePositi
         menu->addSeparator();
     }
 
-    if (shade.kind == ShadeNodeKind::Outputs && currentStage()->usdStage()->GetPrimAtPath(shade.path).IsA<UsdShadeMaterial>()) {
+    // A new input of the Material's or a NodeGraph's interface.
+    const UsdPrim shadePrim = currentStage()->usdStage()->GetPrimAtPath(shade.path);
+    const auto addInputAction = [&]() {
+        menu->addAction(tr("Add Input..."), this, [this, path = shade.path]() {
+            addShadeInputInteractively(*m_undo, currentStage(), path, this);
+        })->setEnabled(editable && prim_actions::isEditable(shadePrim));
+    };
+    if (shade.kind == ShadeNodeKind::Inputs) {
+        addInputAction();
+        return;
+    }
+
+    if (shade.kind == ShadeNodeKind::Outputs && shadePrim.IsA<UsdShadeMaterial>()) {
+        addInputAction();
         QMenu* terminals = menu->addMenu(tr("Add Terminal"));
         terminals->setEnabled(editable);
         for (const RendererProfile& profile : ShaderNodeCatalog::instance().profiles()) {
@@ -806,6 +820,7 @@ void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePositi
     if (shade.kind == ShadeNodeKind::NodeGraph) {
         menu->addAction(tr("Enter"), this, [this, path = shade.path]() { showLevel(path); });
         menu->addAction(tr("Ungroup"), this, [this]() { ungroupSelected(); })->setEnabled(editable);
+        addInputAction();
     }
     menu->addAction(tr("Group into NodeGraph"), this, [this]() { groupSelected(); })->setEnabled(editable);
     menu->addSeparator();

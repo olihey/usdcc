@@ -88,6 +88,7 @@ add_executable(usdcc_ui_tests
     material_editor_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
+    add_shade_input_ui_test.cpp
     session_store_test.cpp
     side_panel_test.cpp
     toast_test.cpp

@@ -358,6 +358,45 @@ bool removeTerminal(UndoManager& undo, const StageRefPtr& stage, const SdfPath& 
     return undo.apply(stage, tr("Remove Terminal %1").arg(QString::fromStdString(attribute.GetString())), [&]() { return prim.RemoveProperty(attribute); });
 }
 
+bool canAddInput(const UsdPrim& prim) {
+    return prim && (prim.IsA<UsdShadeNodeGraph>() || prim.IsA<UsdShadeShader>());  // a Material is a NodeGraph
+}
+
+std::string inputNameProblem(const UsdPrim& prim, const std::string& name) {
+    if (name.empty()) return tr("Give it a name.").toStdString();
+    if (!SdfPath::IsValidNamespacedIdentifier(name)) {
+        return tr("Not a valid name: letters, digits and _, not starting with a digit; : between parts.").toStdString();
+    }
+    if (prim && prim.HasProperty(TfToken(UsdShadeTokens->inputs.GetString() + name))) return tr("It has that input already.").toStdString();
+    if (prim && prim.IsA<UsdShadeShader>()) {
+        if (SdrShaderNodeConstPtr definition = ShaderNodeCatalog::definitionOf(UsdShadeShader(prim))) {
+            if (definition->GetShaderInput(TfToken(name))) return tr("Its definition has that input: edit its row instead.").toStdString();
+        }
+    }
+    return {};
+}
+
+bool addInput(UndoManager& undo, const StageRefPtr& stage, const SdfPath& path, const InputSpec& spec) {
+    UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    if (!canAddInput(prim) || !prim_actions::isEditable(prim) || !inputNameProblem(prim, spec.name).empty()) return false;
+    const SdfValueTypeName type = SdfSchema::GetInstance().FindType(spec.typeName);
+    if (!type) return false;
+    return undo.apply(stage, tr("Add Input %1").arg(QString::fromStdString(spec.name)), [&]() {
+        UsdShadeInput input = UsdShadeConnectableAPI(prim).CreateInput(TfToken(spec.name), type);
+        if (!input) return false;
+        UsdAttribute attr = input.GetAttr();
+        if (!spec.allowedTokens.empty()) {
+            attr.SetMetadata(SdfFieldKeys->AllowedTokens, VtTokenArray(spec.allowedTokens.begin(), spec.allowedTokens.end()));
+        }
+        if (!spec.value.IsEmpty() && !attr.Set(spec.value)) return false;
+        if (!spec.connectability.IsEmpty() && spec.connectability != UsdShadeTokens->full) input.SetConnectability(spec.connectability);
+        if (!spec.displayName.empty()) attr.SetDisplayName(spec.displayName);
+        if (!spec.displayGroup.empty()) input.SetDisplayGroup(spec.displayGroup);
+        if (!spec.documentation.empty()) input.SetDocumentation(spec.documentation);
+        return true;
+    });
+}
+
 SdfPath group(UndoManager& undo, const StageRefPtr& stage, const std::vector<SdfPath>& paths) {
     const UsdStageRefPtr usd = stage->usdStage();
     const std::vector<SdfPath> top = topmost(paths);

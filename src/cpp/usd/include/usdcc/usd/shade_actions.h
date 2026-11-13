@@ -5,7 +5,9 @@
 
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/tf/token.h>
+#include <pxr/base/vt/value.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/prim.h>
 
 #include <string>
 #include <utility>
@@ -54,6 +56,24 @@ USDCC_USD_UI_API std::vector<PXR_NS::SdfPath> pasteFromText(UndoManager& undo, c
 // A Material's output, unconnected. "surface" or "mtlx:surface".
 USDCC_USD_UI_API bool addTerminal(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& material, const std::string& name);
 USDCC_USD_UI_API bool removeTerminal(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& material, const PXR_NS::TfToken& attribute);
+
+// A new input, as the Add Input dialog describes it. Optional parts are authored only when given.
+struct InputSpec {
+    std::string name;      // without "inputs:"; may be namespaced, "a:b"
+    std::string typeName;  // "float", "color3f[]", ...
+    PXR_NS::VtValue value;  // empty: no default authored
+    PXR_NS::TfToken connectability;  // empty or "full": not authored
+    std::string displayName;
+    std::string displayGroup;
+    std::string documentation;
+    std::vector<PXR_NS::TfToken> allowedTokens;
+};
+// Why `name` can't be a new input of `prim`, or empty if it can: not an identifier, already
+// there, or (a Shader) one its definition has, which is authored by editing its row instead.
+USDCC_USD_UI_API std::string inputNameProblem(const PXR_NS::UsdPrim& prim, const std::string& name);
+// A Material's, NodeGraph's or Shader's: those are what take inputs.
+USDCC_USD_UI_API bool canAddInput(const PXR_NS::UsdPrim& prim);
+USDCC_USD_UI_API bool addInput(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& prim, const InputSpec& spec);
 
 // Moves the prims into a new NodeGraph beside them. What crossed its edge goes through its
 // interface: a new input for each source outside, a new output for each source inside
