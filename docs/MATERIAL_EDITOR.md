@@ -583,6 +583,11 @@ Rejected:
   ball. A new setting, `Materials/previewShapePaths` (`FolderList`), adds the user's folders. Each
   `.usd`, `.usda`, `.usdc` or `.usdz` is one entry, named after the file. Folders are listed when the
   menu opens.
+- **Only the top of each folder is listed,** not its subfolders, so a shape can keep its textures and
+  sublayers in a subfolder beside it without them showing in the menu. HDRI folders (§7.4) work the
+  same way.
+- **A name is taken once:** the first folder that has it wins, ignoring case, and the user's folders
+  come before the shipped one. So a user's `Shader Ball.usda` replaces the shipped shader ball.
 - **What a shape file holds:** its geometry under the `defaultPrim`, with UVs (`primvars:st`), Y-up, in
   metres.
 - **What gets the material:** the prims in a `collection:preview` on the default prim, or every gprim when

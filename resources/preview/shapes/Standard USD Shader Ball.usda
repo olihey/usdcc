@@ -1,0 +1,28 @@
+#usda 1.0
+(
+    defaultPrim = "StandardShaderBall"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+    doc = """The USD Working Group's Standard Shader Ball (https://github.com/usd-wg/assets,
+full_assets/StandardShaderBall, CC BY 4.0, see its LICENCE), as a Material Editor preview shape.
+
+The whole of upstream's standard_shader_ball_scene.usda: the ball and its stand in their box, with
+its lights, and its camera, which the preview looks through. The material goes on the outer
+surface; the base, core and SSS bars keep upstream's neutral materials."""
+)
+
+def Xform "StandardShaderBall" (
+    prepend apiSchemas = ["CollectionAPI:preview"]
+    prepend references = @./Standard USD Shader Ball/standard_shader_ball_scene.usda@
+)
+{
+    uniform token collection:preview:expansionRule = "expandPrims"
+    rel collection:preview:includes = </StandardShaderBall/shader_ball/material_surface>
+
+    # # The surface's mesh, which upstream's scene references in its own surface_geometry variant.
+    # over "shader_ball" (
+    #     prepend references = @./Standard USD Shader Ball/material_surface_geo/subdiv.usda@
+    # )
+    # {
+    # }
+}
