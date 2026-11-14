@@ -31,6 +31,7 @@ add_executable(usdcc_tests
     orbit_camera_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
+    prim_delete_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp
     rotate_tool_test.cpp

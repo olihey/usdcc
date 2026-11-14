@@ -18,7 +18,13 @@
 #include <pxr/usd/usd/payloads.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/specializes.h>
+#include <pxr/usd/pcp/layerStack.h>
+#include <pxr/usd/pcp/node.h>
+#include <pxr/usd/pcp/primIndex.h>
+#include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/primCompositionQuery.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/stageLoadRules.h>
@@ -610,6 +616,274 @@ QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector
         &why);
     if (!done && why.isEmpty()) why = tr("Couldn't move it");
     return done ? QString() : why;
+}
+
+namespace {
+// Whether `spec` is the one the edit target holds for the prim at `path`.
+bool isTargetSpec(const PXR_NS::UsdEditTarget& target, const PXR_NS::SdfPrimSpecHandle& spec, const PXR_NS::SdfPath& path) {
+    return spec->GetLayer() == target.GetLayer() && spec->GetPath() == target.MapToSpecPath(path);
+}
+
+std::ptrdiff_t indexOf(const PXR_NS::SdfLayerHandleVector& layers, const PXR_NS::SdfLayerHandle& layer) {
+    const auto it = std::find(layers.begin(), layers.end(), layer);
+    return it == layers.end() ? -1 : it - layers.begin();
+}
+
+// The specs that keep a prim there whatever else is removed: the local layers' at its
+// path, and those from arcs on its ancestors (a reference on its parent, a variant of
+// its parent). An arc on the prim itself goes with the opinions authoring it, so its
+// specs don't count.
+std::vector<PXR_NS::SdfPrimSpecHandle> standingSpecs(const PXR_NS::UsdPrim& prim) {
+    std::vector<PXR_NS::SdfPrimSpecHandle> specs;
+    for (const PXR_NS::PcpNodeRef& node : prim.GetPrimIndex().GetNodeRange()) {
+        if (node.IsInert() || node.IsCulled() || !node.HasSpecs()) continue;
+        bool standing = node.IsRootNode();
+        for (PXR_NS::PcpNodeRef up = node; !standing && up && !up.IsRootNode(); up = up.GetParentNode()) {
+            standing = up.IsDueToAncestor();
+        }
+        if (!standing) continue;
+        for (const PXR_NS::SdfLayerRefPtr& layer : node.GetLayerStack()->GetLayers()) {
+            if (const PXR_NS::SdfPrimSpecHandle spec = layer->GetPrimAtPath(node.GetPath())) specs.push_back(spec);
+        }
+    }
+    return specs;
+}
+
+bool allTargetSpecs(const PXR_NS::UsdPrim& prim) {
+    const PXR_NS::UsdEditTarget target = prim.GetStage()->GetEditTarget();
+    const std::vector<PXR_NS::SdfPrimSpecHandle> specs = standingSpecs(prim);
+    return !specs.empty() && std::all_of(specs.begin(), specs.end(), [&](const PXR_NS::SdfPrimSpecHandle& spec) {
+               return isTargetSpec(target, spec, prim.GetPath());
+           });
+}
+
+DeletePlan::Prim planOne(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::UsdPrim& prim) {
+    DeletePlan::Prim plan;
+    plan.path = prim.GetPath();
+    const PXR_NS::UsdEditTarget target = usdStage->GetEditTarget();
+    const PXR_NS::SdfLayerHandleVector local = usdStage->GetLayerStack(/*includeSessionLayers=*/true);
+    plan.removable = allTargetSpecs(prim);
+    plan.removableEverywhere = target.GetMapFunction().IsIdentity();
+    for (const PXR_NS::SdfPrimSpecHandle& spec : standingSpecs(prim)) {
+        const PXR_NS::SdfLayerHandle layer = spec->GetLayer();
+        if (isTargetSpec(target, spec, plan.path)) continue;
+        if (spec->GetPath() != plan.path || indexOf(local, layer) < 0) {
+            plan.fromArc = true;
+            plan.removableEverywhere = false;
+            continue;
+        }
+        if (!layer->PermissionToEdit()) plan.removableEverywhere = false;
+        const std::string name = layer->GetDisplayName();
+        if (layer != target.GetLayer() && std::find(plan.otherLayers.begin(), plan.otherLayers.end(), name) == plan.otherLayers.end()) {
+            plan.otherLayers.push_back(name);
+        }
+    }
+    // The strongest opinion on `active`: one saying true, stronger than the edit target, wins.
+    const PXR_NS::SdfPrimSpecHandleVector stack = prim.GetPrimStack();
+    std::ptrdiff_t targetSpec = -1;
+    for (std::size_t i = 0; i < stack.size() && targetSpec < 0; ++i) {
+        if (isTargetSpec(target, stack[i], plan.path)) targetSpec = std::ptrdiff_t(i);
+    }
+    for (std::size_t i = 0; i < stack.size(); ++i) {
+        const PXR_NS::SdfPrimSpecHandle& spec = stack[i];
+        if (!spec->HasActive()) continue;
+        if (!spec->GetActive() || std::ptrdiff_t(i) == targetSpec) break;
+        bool stronger = false;
+        if (targetSpec >= 0) {
+            stronger = std::ptrdiff_t(i) < targetSpec;
+        } else if (target.GetMapFunction().IsIdentity() && spec->GetPath() == plan.path) {
+            const std::ptrdiff_t at = indexOf(local, spec->GetLayer());
+            stronger = at >= 0 && at < indexOf(local, target.GetLayer());
+        }
+        if (stronger) {
+            plan.whyNotDeactivate = tr("%1 makes %2 active, and is stronger than the edit target")
+                                        .arg(qs(spec->GetLayer()->GetDisplayName()), qs(plan.path.GetName()));
+        }
+        break;
+    }
+    return plan;
+}
+
+bool underAny(const PXR_NS::SdfPath& path, const std::vector<PXR_NS::SdfPath>& roots) {
+    return std::any_of(roots.begin(), roots.end(), [&](const PXR_NS::SdfPath& root) { return path.HasPrefix(root); });
+}
+
+// Removes, in the edit target, relationship targets and connections pointing at or
+// under `gone`. Returns the properties that still do.
+std::vector<PXR_NS::SdfPath> dropPointers(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<PXR_NS::SdfPath>& gone) {
+    std::vector<PXR_NS::SdfPath> stuck;
+    const auto pointsAtGone = [&](const PXR_NS::SdfPathVector& paths) {
+        return std::any_of(paths.begin(), paths.end(), [&](const PXR_NS::SdfPath& path) { return underAny(path, gone); });
+    };
+    const PXR_NS::UsdEditTarget target = usdStage->GetEditTarget();
+    for (const PXR_NS::UsdPrim& prim : PXR_NS::UsdPrimRange::Stage(usdStage, PXR_NS::UsdPrimAllPrimsPredicate)) {
+        const bool editable = isEditable(prim);
+        for (const PXR_NS::UsdRelationship& rel : prim.GetAuthoredRelationships()) {
+            PXR_NS::SdfPathVector targets;
+            rel.GetTargets(&targets);
+            if (!pointsAtGone(targets)) continue;
+            if (editable) {
+                for (const PXR_NS::SdfPath& each : targets) {
+                    if (underAny(each, gone)) rel.RemoveTarget(each);
+                }
+            }
+            PXR_NS::SdfPathVector left;
+            rel.GetTargets(&left);
+            if (pointsAtGone(left)) {
+                stuck.push_back(rel.GetPath());
+            } else if (left.empty() && rel.GetPropertyStack().size() == 1 && target.GetPropertySpecForScenePath(rel.GetPath())) {
+                rel.ClearTargets(/*removeSpec=*/true);
+            }
+        }
+        for (const PXR_NS::UsdAttribute& attr : prim.GetAuthoredAttributes()) {
+            PXR_NS::SdfPathVector sources;
+            attr.GetConnections(&sources);
+            if (!pointsAtGone(sources)) continue;
+            if (editable) {
+                for (const PXR_NS::SdfPath& each : sources) {
+                    if (underAny(each, gone)) attr.RemoveConnection(each);
+                }
+            }
+            PXR_NS::SdfPathVector left;
+            attr.GetConnections(&left);
+            if (pointsAtGone(left)) stuck.push_back(attr.GetPath());
+        }
+    }
+    return stuck;
+}
+
+// A removed prim's name, out of its parent's child order in `layer`.
+void dropFromChildOrder(const PXR_NS::SdfLayerHandle& layer, const PXR_NS::SdfPath& parentSpecPath, const PXR_NS::TfToken& name) {
+    const PXR_NS::SdfPrimSpecHandle parent = layer->GetPrimAtPath(parentSpecPath);
+    if (!parent || !parent->HasNameChildrenOrder()) return;
+    const auto current = parent->GetNameChildrenOrder();
+    std::vector<PXR_NS::TfToken> order(current.begin(), current.end());
+    const auto it = std::find(order.begin(), order.end(), name);
+    if (it == order.end()) return;
+    order.erase(it);
+    if (order.empty()) {
+        layer->EraseField(parent->GetPath(), PXR_NS::SdfFieldKeys->PrimOrder);
+    } else {
+        parent->SetNameChildrenOrder(order);
+    }
+}
+}  // namespace
+
+bool DeletePlan::allRemovable() const {
+    return std::all_of(prims.begin(), prims.end(), [](const Prim& prim) { return prim.removable; });
+}
+
+bool DeletePlan::canRemoveEverywhere() const {
+    return std::all_of(prims.begin(), prims.end(), [](const Prim& prim) { return prim.removable || prim.removableEverywhere; });
+}
+
+DeletePlan planDelete(const PXR_NS::UsdStageRefPtr& usdStage, const std::vector<PXR_NS::SdfPath>& paths) {
+    DeletePlan plan;
+    const bool targetEditable = usdStage->GetEditTarget().GetLayer()->PermissionToEdit();
+    for (const PXR_NS::SdfPath& path : topMost(usdStage, paths)) {
+        const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(path);
+        const QString name = qs(path.GetString());
+        if (!prim || prim.IsPseudoRoot()) {
+            plan.skipped.emplace_back(path, tr("%1 doesn't exist").arg(name));
+        } else if (prim.IsInstanceProxy()) {
+            plan.skipped.emplace_back(path, tr("%1 is part of an instance").arg(name));
+        } else if (!isEditable(prim)) {
+            plan.skipped.emplace_back(path, tr("%1 is outside the variant being edited").arg(name));
+        } else if (!targetEditable) {
+            plan.skipped.emplace_back(path, tr("The edit target can't be edited"));
+        } else {
+            plan.prims.push_back(planOne(usdStage, prim));
+        }
+    }
+    return plan;
+}
+
+bool deleteInEditTarget(const PXR_NS::UsdStageRefPtr& usdStage, const PXR_NS::SdfPath& path) {
+    const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(path);
+    if (!prim) return true;
+    if (allTargetSpecs(prim)) {
+        usdStage->RemovePrim(path);
+        if (!usdStage->GetPrimAtPath(path)) return true;
+    }
+    // Not RemovePrim first: the overrides stay for when it's activated again.
+    usdStage->GetPrimAtPath(path).SetActive(false);
+    const PXR_NS::UsdPrim left = usdStage->GetPrimAtPath(path);
+    return !left || !left.IsActive();
+}
+
+QString deletePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths, DeleteMode mode) {
+    const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    const DeletePlan plan = planDelete(usdStage, paths);
+    std::vector<PXR_NS::SdfPath> removeHere, removeEverywhere, deactivate, all;
+    QStringList refused;
+    for (const auto& [path, why] : plan.skipped) refused << why;
+    for (const DeletePlan::Prim& prim : plan.prims) {
+        if (prim.removable) {
+            removeHere.push_back(prim.path);
+        } else if (mode == DeleteMode::RemoveEverywhere && prim.removableEverywhere) {
+            removeEverywhere.push_back(prim.path);
+        } else if (prim.whyNotDeactivate.isEmpty()) {
+            deactivate.push_back(prim.path);
+        } else {
+            refused << prim.whyNotDeactivate;
+            continue;
+        }
+        all.push_back(prim.path);
+    }
+    if (all.empty()) return refused.isEmpty() ? QString() : refused.front();
+
+    const PXR_NS::UsdEditTarget target = usdStage->GetEditTarget();
+    const PXR_NS::SdfLayerHandle root = usdStage->GetRootLayer();
+    std::vector<PXR_NS::SdfLayerHandle> layers{target.GetLayer()};
+    if (root != target.GetLayer() && root->PermissionToEdit()) layers.push_back(root);
+    for (const PXR_NS::SdfPath& path : removeEverywhere) {
+        for (const PXR_NS::SdfLayerHandle& layer : usdStage->GetLayerStack(/*includeSessionLayers=*/true)) {
+            if (layer->GetPrimAtPath(path) && std::find(layers.begin(), layers.end(), layer) == layers.end()) layers.push_back(layer);
+        }
+    }
+    std::vector<PXR_NS::SdfPath> removed = removeHere;
+    removed.insert(removed.end(), removeEverywhere.begin(), removeEverywhere.end());
+    const QString verb = removed.empty() ? tr("Deactivate") : tr("Delete");
+
+    QString why;
+    const bool done = undo.applyAcrossLayers(stage, layers, describe(verb, all), [&]() {
+        for (const PXR_NS::SdfPath& path : deactivate) usdStage->GetPrimAtPath(path).SetActive(false);
+        for (const PXR_NS::SdfPath& path : removeHere) {
+            usdStage->RemovePrim(path);
+            dropFromChildOrder(target.GetLayer(), target.MapToSpecPath(path.GetParentPath()), path.GetNameToken());
+        }
+        for (const PXR_NS::SdfPath& path : removeEverywhere) {
+            for (const PXR_NS::SdfLayerHandle& layer : layers) {
+                const PXR_NS::SdfPrimSpecHandle spec = layer->GetPrimAtPath(path);
+                if (spec) spec->GetRealNameParent()->RemoveNameChild(spec);
+                dropFromChildOrder(layer, path.GetParentPath(), path.GetNameToken());
+            }
+        }
+        for (const PXR_NS::SdfPath& path : removed) {
+            if (usdStage->GetPrimAtPath(path)) {
+                why = tr("Couldn't delete %1: something still defines it").arg(qs(path.GetString()));
+                return false;
+            }
+        }
+        for (const PXR_NS::SdfPath& path : deactivate) {
+            if (usdStage->GetPrimAtPath(path).IsActive()) {
+                why = tr("Couldn't deactivate %1: a stronger opinion keeps it active").arg(qs(path.GetString()));
+                return false;
+            }
+        }
+        if (root->PermissionToEdit() && root->HasDefaultPrim() && underAny(root->GetDefaultPrimAsPath(), removed)) {
+            root->ClearDefaultPrim();
+        }
+        if (!removed.empty()) {
+            for (const PXR_NS::SdfPath& property : dropPointers(usdStage, removed)) {
+                USDCC_LOG_WARNING("usdcc.stage", "{} still points at a deleted prim: a stronger layer or an instance holds it",
+                                  property.GetString());
+            }
+        }
+        return true;
+    });
+    if (!done) return why.isEmpty() ? tr("Couldn't delete it") : why;
+    return {};
 }
 
 QString whyNotCreateUnder(const PXR_NS::UsdPrim& parent) {

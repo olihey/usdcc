@@ -398,7 +398,7 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   backdrop, and auto-layout.
   - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
     `UsdUINodeGraphNodeAPI` position, and nothing else.
-  - Deleting a node also removes connections to it. A prim a weaker layer defines is deactivated instead.
+  - Deleting a node also removes connections to it. A prim a weaker layer defines is deactivated instead, keeping its overrides (docs/PRIM_DELETE.md §3.1).
   - Connecting checks the types with `typesMatch()`, and refuses a loop and a level's input straight to its
     own output. Pulling a line off and dropping it elsewhere is one step, ending on the mouse's release.
   - Duplicate, paste, group and ungroup write a copy of the prim as composed into the edit target, rather

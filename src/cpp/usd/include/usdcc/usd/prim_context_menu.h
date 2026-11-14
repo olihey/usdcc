@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -73,10 +74,19 @@ void revealFile(const QString& path);
 // prim, whatever else is selected; docs/CREATE_MENU.md), Active, Visibility, Load/Unload
 // Payload, Variants, Composition (the clicked prim's arcs, read-only, with
 // Open as Stage and Copy; compositionArcs()),
-// Move Up/Down, Copy Path and Prim Info. Entries that don't apply to the
+// Move Up/Down, Delete, Copy Path and Prim Info. Entries that don't apply to the
 // prims are left out; on an instance proxy the edits are disabled, with a
 // tooltip saying why. Each edit is one undo step (prim_actions.h).
 void populatePrimMenu(QMenu* menu, const PrimMenuContext& context);
+
+// Deleting prims (docs/PRIM_DELETE.md §4). What to ask before deleting them, empty when
+// there's nothing to ask: each can simply be removed, or none can be deleted at all.
+QString deleteQuestion(const prim_actions::DeletePlan& plan, const std::string& editTargetName);
+// What the Delete key and menu entry do: asks deleteQuestion() if there is one, deletes,
+// then drops the deleted prims from `stageManager`'s selection (it may be null). False
+// when cancelled or refused.
+bool deletePrimsAsking(UndoManager& undo, StageManager* stageManager, const StageRefPtr& stage,
+                       const std::vector<PXR_NS::SdfPath>& paths, QWidget* dialogParent);
 
 // A non-modal dialog with prim_actions::info(), and a Copy button.
 QWidget* showPrimInfo(const PXR_NS::UsdPrim& prim, QWidget* parent);

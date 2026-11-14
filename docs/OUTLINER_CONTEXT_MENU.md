@@ -45,6 +45,8 @@ disabled, with a tooltip saying why.
  ───────────────────────────
    Move Up / Move Down                (moved from the tab menu, §6 question 4)
  ───────────────────────────
+   Delete                     Del     docs/PRIM_DELETE.md
+ ───────────────────────────
    Copy Path
    Prim Info…
 ```

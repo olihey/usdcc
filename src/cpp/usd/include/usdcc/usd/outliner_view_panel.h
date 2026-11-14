@@ -57,6 +57,9 @@ public:
     // it. Shift / Ctrl clicking a row's expand arrow does this.
     void setSubtreeExpanded(const QModelIndex& index, bool expanded);
 
+    // What the Delete key does: the selection, asking first if need be (docs/PRIM_DELETE.md).
+    void deleteSelected();
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void populateOptionsMenu(QMenu* menu) override;

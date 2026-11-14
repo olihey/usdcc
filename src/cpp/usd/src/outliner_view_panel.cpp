@@ -31,6 +31,7 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSettings>
+#include <QShortcut>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -139,6 +140,9 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
             });
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &OutlinerViewPanel::showPrimMenu);
+    // Delete, on the selection (docs/PRIM_DELETE.md). Not while renaming: the editor has the focus then.
+    auto* deleteShortcut = new QShortcut(QKeySequence::Delete, m_treeView, nullptr, nullptr, Qt::WidgetShortcut);
+    connect(deleteShortcut, &QShortcut::activated, this, &OutlinerViewPanel::deleteSelected);
     connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, &OutlinerViewPanel::saveViewState);
     connect(m_model, &QAbstractItemModel::modelReset, this, &OutlinerViewPanel::restoreViewState);
     connect(m_expandToSelection, &QAction::toggled, this, [this](bool on) {
@@ -293,6 +297,12 @@ void OutlinerViewPanel::showPrimMenu(const QPoint& pos) {
     QMenu menu(this);
     populatePrimMenu(&menu, context);
     menu.exec(m_treeView->viewport()->mapToGlobal(pos));
+}
+
+void OutlinerViewPanel::deleteSelected() {
+    const StageRefPtr stage = currentStage();
+    if (!stage) return;
+    deletePrimsAsking(*m_undoManager, stageManager(), stage, stageManager()->selectedPaths(stage), this);
 }
 
 void OutlinerViewPanel::dropMissingSelection() {

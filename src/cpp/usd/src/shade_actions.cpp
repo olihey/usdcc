@@ -131,10 +131,9 @@ void shift(const UsdPrim& prim, const GfVec2f& offset) {
     UsdUINodeGraphNodeAPI::Apply(prim).CreatePosAttr().Set(at + offset);
 }
 
-void removeOrDeactivate(const UsdStageRefPtr& stage, const SdfPath& path) {
-    stage->RemovePrim(path);
-    if (const UsdPrim left = stage->GetPrimAtPath(path)) left.SetActive(false);
-}
+// Deactivated when the edit target can't remove all of it, keeping its overrides
+// (docs/PRIM_DELETE.md §3.1).
+void removeOrDeactivate(const UsdStageRefPtr& stage, const SdfPath& path) { prim_actions::deleteInEditTarget(stage, path); }
 
 // Replaces a connection's sources, saying "none" if a weaker layer still has some.
 void setSources(UsdAttribute attribute, const SdfPathVector& sources) {

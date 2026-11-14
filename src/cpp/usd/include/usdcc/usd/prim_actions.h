@@ -85,6 +85,45 @@ struct MoveOptions {
 QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
                   const PXR_NS::SdfPath& newParent, const MoveOptions& options = {});
 
+// Deleting prims (docs/PRIM_DELETE.md). What the edit target can do with each
+// prim, from its prim stack, changing nothing.
+struct DeletePlan {
+    struct Prim {
+        PXR_NS::SdfPath path;
+        // The edit target holds all of it: RemovePrim deletes it, with its subtree.
+        bool removable = false;
+        // Every opinion is a plain spec in an editable local layer: removing each deletes it.
+        bool removableEverywhere = false;
+        // Else, why deactivating it from the edit target won't work (a stronger `active`).
+        QString whyNotDeactivate;
+        std::vector<std::string> otherLayers;  // local layers also holding it, by display name
+        bool fromArc = false;                  // opinions from a reference, payload, class or variant
+    };
+    std::vector<Prim> prims;  // the topmost of those asked, in tree order
+    // Asked for but left alone: instance proxies, prims a variant edit target doesn't
+    // reach, ones that don't exist. With why.
+    std::vector<std::pair<PXR_NS::SdfPath, QString>> skipped;
+    bool allRemovable() const;
+    bool canRemoveEverywhere() const;  // every prim not removable is removable everywhere
+};
+DeletePlan planDelete(const PXR_NS::UsdStageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
+
+// For the prims the edit target can't remove: deactivate them, keeping their
+// overrides, or remove their specs from every local layer (only for those
+// removableEverywhere; the others are deactivated).
+enum class DeleteMode { Deactivate, RemoveEverywhere };
+// One undo step for all of them. Removed prims take with them, in the edit target,
+// relationship targets and connections pointing into them, the root layer's
+// defaultPrim when it's one of them, and their names in child order lists.
+// Empty if done (or nothing to do), else why not, with nothing changed.
+QString deletePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                    DeleteMode mode = DeleteMode::Deactivate);
+
+// Inside an undo step: removes the prim when the edit target holds all of it, else
+// deactivates it, leaving the edit target's overrides as they are. Returns whether
+// it's gone or inactive.
+bool deleteInEditTarget(const PXR_NS::UsdStageRefPtr& stage, const PXR_NS::SdfPath& path);
+
 // Creating a prim (docs/CREATE_MENU.md §3). The target is where a new prim goes for
 // this selection: under the one selected prim, else at the root. During variant edit
 // mode, a selection the variant doesn't reach means the prim whose variant it is.

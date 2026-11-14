@@ -1,9 +1,11 @@
 #include "usdcc/usd/prim_context_menu.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_tree_dialog.h"
+#include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/variant_editor_dialog.h"
 
@@ -24,6 +26,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
 #include <QStringList>
@@ -287,6 +290,15 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     }
 
     menu->addSeparator();
+    QAction* remove = menu->addAction(tr("Delete"), menu, [&undo, stageManager = context.stageManager, stage, paths,
+                                                          parent = context.dialogParent]() {
+        deletePrimsAsking(undo, stageManager, stage, paths, parent);
+    });
+    remove->setShortcut(QKeySequence::Delete);
+    remove->setShortcutVisibleInContextMenu(true);
+    readOnlyIf(remove, readOnly);
+
+    menu->addSeparator();
     menu->addAction(tr("Copy Path"), menu, [paths]() {
         QStringList text;
         for (const PXR_NS::SdfPath& path : paths) text << qs(path.GetString());
@@ -362,6 +374,98 @@ void revealFile(const QString& path) {
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
 #endif
+}
+
+QString deleteQuestion(const prim_actions::DeletePlan& plan, const std::string& editTargetName) {
+    std::vector<const prim_actions::DeletePlan::Prim*> asking;
+    for (const prim_actions::DeletePlan::Prim& prim : plan.prims) {
+        if (!prim.removable) asking.push_back(&prim);
+    }
+    if (plan.prims.empty() || (asking.empty() && plan.skipped.empty())) return {};
+    const QString target = qs(editTargetName);
+    QStringList lines;
+    constexpr std::size_t kMostLines = 8;
+    for (std::size_t i = 0; i < asking.size() && i < kMostLines; ++i) {
+        const prim_actions::DeletePlan::Prim& prim = *asking[i];
+        const QString name = qs(prim.path.GetName());
+        QString line;
+        if (prim.fromArc) {
+            line = tr("%1 comes from a reference, payload, class or variant, which the edit target (%2) can't change.").arg(name, target);
+        } else if (!prim.otherLayers.empty()) {
+            QStringList layers;
+            for (const std::string& layer : prim.otherLayers) layers << qs(layer);
+            line = tr("%1 is also in %2, which the edit target (%3) can't change.").arg(name, layers.join(QStringLiteral(", ")), target);
+        } else {
+            line = tr("The edit target (%1) holds only part of %2.").arg(target, name);
+        }
+        if (!prim.whyNotDeactivate.isEmpty()) line += QLatin1Char(' ') + tr("It can't be deactivated: %1.").arg(prim.whyNotDeactivate);
+        lines << line;
+    }
+    if (asking.size() > kMostLines) lines << tr("And %1 more like these.").arg(asking.size() - kMostLines);
+    for (std::size_t i = 0; i < plan.skipped.size() && i < kMostLines; ++i) lines << tr("Skipped: %1.").arg(plan.skipped[i].second);
+    if (plan.skipped.size() > kMostLines) lines << tr("And %1 more skipped.").arg(plan.skipped.size() - kMostLines);
+    const auto deactivatable = std::count_if(asking.begin(), asking.end(), [](const auto* prim) { return prim->whyNotDeactivate.isEmpty(); });
+    if (deactivatable > 0) {
+        lines << (deactivatable == 1 ? tr("Deactivating it hides it and keeps its overrides, so it can be activated again.")
+                                     : tr("Deactivating them hides them and keeps their overrides, so they can be activated again."));
+    }
+    const std::size_t removable = plan.prims.size() - asking.size();
+    if (removable == 1) lines << tr("1 other prim is deleted either way.");
+    if (removable > 1) lines << tr("%1 other prims are deleted either way.").arg(removable);
+    return lines.join(QStringLiteral("\n\n"));
+}
+
+bool deletePrimsAsking(UndoManager& undo, StageManager* stageManager, const StageRefPtr& stage,
+                       const std::vector<PXR_NS::SdfPath>& paths, QWidget* dialogParent) {
+    if (!stage || paths.empty()) return false;
+    const prim_actions::DeletePlan plan = prim_actions::planDelete(stage->usdStage(), paths);
+    prim_actions::DeleteMode mode = prim_actions::DeleteMode::Deactivate;
+    const QString question = deleteQuestion(plan, stage->editTargetLayer()->GetDisplayName());
+    if (!question.isEmpty()) {
+        const QString title = plan.prims.size() == 1 ? tr("Delete %1").arg(qs(plan.prims.front().path.GetName()))
+                                                     : tr("Delete %1 Prims").arg(plan.prims.size());
+        QMessageBox box(QMessageBox::Question, title, question, QMessageBox::NoButton, dialogParent);
+        box.setObjectName(QStringLiteral("deletePrimsQuestion"));
+        const bool anyToAsk = !plan.allRemovable();
+        const bool anyToDeactivate = std::any_of(plan.prims.begin(), plan.prims.end(), [](const auto& prim) {
+            return !prim.removable && prim.whyNotDeactivate.isEmpty();
+        });
+        QPushButton* proceed = box.addButton(anyToAsk ? tr("Deactivate") : tr("Delete"), QMessageBox::AcceptRole);
+        proceed->setObjectName(QStringLiteral("proceed"));
+        proceed->setEnabled(!anyToAsk || anyToDeactivate);
+        QPushButton* everywhere = nullptr;
+        if (anyToAsk && plan.canRemoveEverywhere()) {
+            everywhere = box.addButton(tr("Delete from All Layers"), QMessageBox::DestructiveRole);
+            everywhere->setObjectName(QStringLiteral("everywhere"));
+            QStringList layers{qs(stage->editTargetLayer()->GetDisplayName())};
+            for (const auto& prim : plan.prims) {
+                for (const std::string& layer : prim.otherLayers) {
+                    if (!layers.contains(qs(layer))) layers << qs(layer);
+                }
+            }
+            everywhere->setToolTip(tr("Removes it from %1, which will need saving").arg(layers.join(QStringLiteral(", "))));
+        }
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(proceed->isEnabled() ? proceed : nullptr);
+        box.exec();
+        if (box.clickedButton() == everywhere && everywhere) {
+            mode = prim_actions::DeleteMode::RemoveEverywhere;
+        } else if (box.clickedButton() != proceed) {
+            return false;
+        }
+    }
+    const QString why = prim_actions::deletePrims(undo, stage, paths, mode);
+    if (!why.isEmpty()) USDCC_LOG_WARNING("usdcc.stage", "{}", why.toStdString());
+    if (stageManager) {
+        std::vector<PXR_NS::SdfPath> selected = stageManager->selectedPaths(stage);
+        const auto gone = std::remove_if(selected.begin(), selected.end(),
+                                         [&](const PXR_NS::SdfPath& path) { return !stage->usdStage()->GetPrimAtPath(path); });
+        if (gone != selected.end()) {
+            selected.erase(gone, selected.end());
+            stageManager->setSelectedPaths(stage, selected);
+        }
+    }
+    return why.isEmpty();
 }
 
 QWidget* showPrimInfo(const PXR_NS::UsdPrim& prim, QWidget* parent) {

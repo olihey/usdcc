@@ -10,6 +10,7 @@
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/payloads.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/stage.h>
@@ -22,6 +23,9 @@
 #include <QClipboard>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QTimer>
 #include <QUndoStack>
 
 using usdcc::usd::PrimMenuContext;
@@ -272,4 +276,71 @@ USDCC_TEST(prim_info_dialog) {
     for (QLabel* label : dialog->findChildren<QLabel*>()) path = path || label->text() == "/Looks";
     CHECK(dialog->isVisible() && path && dialog->windowTitle().contains("Looks"), "the dialog shows the prim");
     dialog->close();
+}
+
+namespace {
+// Clicks the delete question's button `name` once it's shown.
+void answerDeleteQuestion(const char* name) {
+    QTimer::singleShot(0, [name]() {
+        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if (!box) return;
+        if (auto* button = box->findChild<QPushButton*>(QString::fromLatin1(name))) {
+            button->click();
+        } else {
+            box->button(QMessageBox::Cancel)->click();
+        }
+    });
+}
+}  // namespace
+
+// Delete (docs/PRIM_DELETE.md §4): nothing asked for a prim the edit target holds, the
+// question and each of its answers for one it can't, and the selection after.
+USDCC_TEST(prim_context_menu_delete) {
+    TestStage test;
+    const UsdStageRefPtr& s = test.stage->usdStage();
+    SdfLayerRefPtr weak = SdfLayer::CreateAnonymous("weak.usda");
+    weak->ImportFromString(R"(#usda 1.0
+def Cube "Split"
+{
+}
+)");
+    s->GetRootLayer()->GetSubLayerPaths().push_back(weak->GetIdentifier());
+    test.prim("/Split").CreateAttribute(TfToken("note"), SdfValueTypeNames->Int).Set(1);  // an override in the root layer
+    const std::string target = s->GetRootLayer()->GetDisplayName();
+
+    CHECK(usdcc::usd::deleteQuestion(prim_actions::planDelete(s, {SdfPath("/World/A")}), target).isEmpty(),
+          "nothing to ask for a prim the edit target holds");
+    const QString question =
+        usdcc::usd::deleteQuestion(prim_actions::planDelete(s, {SdfPath("/Split"), SdfPath("/World/A")}), target);
+    CHECK(question.contains(QString::fromStdString(weak->GetDisplayName())) && question.contains("1 other prim"),
+          "names the other layer, and the prim deleted either way: [%s]", qPrintable(question));
+
+    test.manager.setSelectedPaths(test.stage, {SdfPath("/World/A"), SdfPath("/World/B")});
+    {
+        QMenu menu;
+        PrimMenuContext context = contextFor(test, "/World/A");
+        context.stageManager = &test.manager;
+        usdcc::usd::populatePrimMenu(&menu, context);
+        QAction* remove = findAction(&menu, "Delete");
+        CHECK(remove && remove->isEnabled(), "Delete in the menu");
+        remove->trigger();
+        CHECK(!test.prim("/World/A"), "deleted without asking");
+        CHECK(test.manager.selectedPaths(test.stage) == std::vector{SdfPath("/World/B")}, "and dropped from the selection");
+    }
+
+    const std::vector<SdfPath> split{SdfPath("/Split")};
+    answerDeleteQuestion("cancel");
+    CHECK(!usdcc::usd::deletePrimsAsking(test.undo, &test.manager, test.stage, split, nullptr) && test.prim("/Split").IsActive(),
+          "Cancel changes nothing");
+    answerDeleteQuestion("proceed");
+    CHECK(usdcc::usd::deletePrimsAsking(test.undo, &test.manager, test.stage, split, nullptr) && !test.prim("/Split").IsActive(),
+          "Deactivate");
+    test.stack()->undo();
+    answerDeleteQuestion("everywhere");
+    CHECK(usdcc::usd::deletePrimsAsking(test.undo, &test.manager, test.stage, split, nullptr), "Delete from All Layers");
+    CHECK(!test.prim("/Split") && !weak->GetPrimAtPath(SdfPath("/Split")), "gone from both layers");
+
+    QMenu menu;
+    usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/inst/geo"));
+    CHECK(!findAction(&menu, "Delete")->isEnabled(), "not on an instance proxy");
 }
