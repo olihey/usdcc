@@ -26,14 +26,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, WINDOWS, fail, run  # noqa: E402
-
-
-def platform_flags(flags):
-    """The pin's build_usd.py flags, without the Windows-only ones elsewhere."""
-    if WINDOWS:
-        return list(flags)
-    return [flag for flag in flags if not flag.startswith("--generator")]
+sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
+from _common import REPO, fail, run  # noqa: E402
+from usd_asset import platform_flags  # noqa: E402
 
 
 def fetch(spec, pin_dir, source):

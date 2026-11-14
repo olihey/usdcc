@@ -12,7 +12,10 @@
 #include <fstream>
 #include <string>
 
-PXR_NAMESPACE_USING_DIRECTIVE
+// In OpenUSD's namespace, as its own formats are: SDF_FILE_FORMAT_FACTORY_ACCESS
+// befriends an unqualified Sdf_FileFormatFactory, which outside it GCC takes for
+// a new template of the enclosing namespace, leaving the constructor out of reach.
+PXR_NAMESPACE_OPEN_SCOPE
 
 class UsdccSdkCheckFileFormat : public SdfFileFormat
 {
@@ -52,3 +55,5 @@ TF_REGISTRY_FUNCTION(TfType)
 {
     SDF_DEFINE_FILE_FORMAT(UsdccSdkCheckFileFormat, SdfFileFormat);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

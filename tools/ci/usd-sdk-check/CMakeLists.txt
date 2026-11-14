@@ -44,13 +44,15 @@ target_link_libraries(usdccSdkCheck PRIVATE sdf tf)
 # TF_REGISTRY_FUNCTION names the library it's in through these.
 target_compile_definitions(usdccSdkCheck PRIVATE
     MFB_PACKAGE_NAME=usdccSdkCheck MFB_ALT_PACKAGE_NAME=usdccSdkCheck)
-set_target_properties(usdccSdkCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_out}")
+# RUNTIME for the Windows DLL, LIBRARY for the Linux .so.
+set_target_properties(usdccSdkCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_out}" LIBRARY_OUTPUT_DIRECTORY "${_out}")
+# file(GENERATE) evaluates $<TARGET_FILE_NAME>, the bracket argument notwithstanding.
 file(GENERATE OUTPUT "${_out}/plugInfo.json" CONTENT [[{
     "Plugins": [{
         "Type": "library",
         "Name": "usdccSdkCheck",
         "Root": ".",
-        "LibraryPath": "usdccSdkCheck.dll",
+        "LibraryPath": "$<TARGET_FILE_NAME:usdccSdkCheck>",
         "ResourcePath": ".",
         "Info": {
             "Types": {

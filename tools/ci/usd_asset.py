@@ -5,12 +5,18 @@ to the pin, the flags or a patch gives a new asset, and a stale one is never use
 (docs/CI.md section 2). Line endings are normalised before hashing, so a CRLF
 checkout gives the same name as an LF one.
 
+The platform in the name is the one this runs on (win64, linux-x64, ...), so each
+platform's zip sits in the same release, under the same tag. deps/usd.json's own
+"platform" is the Windows build's, which named the assets before there were others.
+
 Prints the result as JSON, and with --github-output also appends it to
 $GITHUB_OUTPUT for later workflow steps:
-  name    usd-<short commit>-<hash>-win64-py312
-  tag     deps/usd-<short commit>-<hash>
+  name    usd-<short commit>-<hash>-<platform>-py312
+  base    usd-<short commit>-<hash>, what every platform's asset shares
+  tag     deps/<base>
   zip     <name>.zip
-  commit, repository, python, flags (space-separated), patches (;-separated)
+  commit, repository, python, patches (;-separated)
+  flags   build_usd.py's flags on this platform (space-separated)
 
     python tools/ci/usd_asset.py
 """
@@ -23,7 +29,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import REPO, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import ASSET_PLATFORM, REPO, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+
+
+def platform_flags(flags):
+    """deps/usd.json's build_usd.py flags for this platform: without the Windows-only
+    --generator elsewhere, where build_usd.py picks the platform's own."""
+    if WINDOWS:
+        return list(flags)
+    return [flag for flag in flags if not flag.startswith("--generator")]
 
 
 def describe(pin):
@@ -40,15 +54,16 @@ def describe(pin):
 
     python = spec["python"].split(".")
     base = f"usd-{spec['commit'][:9]}-{short_hash(hashed, 4)}"
-    name = f"{base}-{spec['platform']}-py{python[0]}{python[1]}"
+    name = f"{base}-{ASSET_PLATFORM}-py{python[0]}{python[1]}"
     return {
         "name": name,
+        "base": base,
         "tag": f"deps/{base}",
         "zip": f"{name}.zip",
         "commit": spec["commit"],
         "repository": spec["repository"],
         "python": spec["python"],
-        "flags": " ".join(spec["flags"]),
+        "flags": " ".join(platform_flags(spec["flags"])),
         "patches": ";".join(patch.as_posix() for patch in patches),
     }
 

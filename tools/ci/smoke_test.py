@@ -7,13 +7,15 @@ get there, if the version isn't --expect-version, or if anything came from
 outside the deploy: a DLL or Python file the build's own folders were hiding
 (docs/RELEASE.md section 4).
 
-The deploy only has Qt's windows platform plugin; the offscreen one comes from
---platform-plugins (vcpkg's Qt6\\plugins\\platforms).
+On Windows the deploy only has Qt's windows platform plugin; the offscreen one
+comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux deploy
+has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
+LD_LIBRARY_PATH, nothing of the build's. PySide6 is required on Windows; Linux
+doesn't deploy it yet, so there it's only checked when present.
 
     python tools/ci/smoke_test.py --deploy deploy --expect-version 0.2.0
         --platform-plugins build\\vcpkg_installed\\x64-windows\\Qt6\\plugins\\platforms
-
-Windows only so far, like the deploy it checks.
+    python3 tools/ci/smoke_test.py --deploy ~/usdcc-0.2.0 --expect-version 0.2.0
 """
 
 from __future__ import annotations
@@ -28,14 +30,19 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import fail, remove_tree, require_windows  # noqa: E402
+from _common import WINDOWS, fail, remove_tree  # noqa: E402
 
 CHECK = """\
 import json
 import sys
 
-from PySide6 import QtCore, QtWidgets
-import PySide6
+try:
+    from PySide6 import QtCore, QtWidgets
+    import PySide6
+except ImportError:
+    if NEED_PYSIDE:
+        raise
+    PySide6 = None
 import pxr
 from pxr import Usd
 import usdcc
@@ -46,18 +53,30 @@ result = {
     "release": usdcc.app.is_release_build(),
     "usd": ".".join(str(part) for part in Usd.GetVersion()),
     "python": sys.version.split()[0],
-    "pyside": PySide6.__version__,
-    "files": {"pxr": pxr.__file__, "usdcc": usdcc.__file__, "PySide6": PySide6.__file__},
+    "pyside": PySide6.__version__ if PySide6 else None,
+    "files": {"pxr": pxr.__file__, "usdcc": usdcc.__file__},
 }
+if PySide6:
+    result["files"]["PySide6"] = PySide6.__file__
 with open(RESULT, "w") as f:
     json.dump(result, f)
-QtCore.QTimer.singleShot(0, QtWidgets.QApplication.quit)
+if PySide6:
+    QtCore.QTimer.singleShot(0, QtWidgets.QApplication.quit)
+else:
+    # No way to ask the app to quit without PySide6 (Linux doesn't deploy it yet):
+    # it has started and run this, which is what is checked.
+    import os
+
+    os._exit(0)
 """
 
 
 def _print_latest_log(started):
     """The end of the log the app wrote, to say why it failed."""
-    folder = Path(os.environ.get("LOCALAPPDATA", "")) / "usdcc/logs"
+    if WINDOWS:
+        folder = Path(os.environ.get("LOCALAPPDATA", "")) / "usdcc/logs"
+    else:
+        folder = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "usdcc/logs"
     if not folder.is_dir():
         return
     logs = [file for file in folder.iterdir() if file.is_file() and file.stat().st_mtime >= started - 5]
@@ -71,33 +90,38 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--deploy", required=True, help="the deploy to start")
     parser.add_argument("--expect-version", help="the version the app has to report")
-    parser.add_argument("--platform-plugins", required=True, help="a folder holding Qt's qoffscreen.dll")
+    parser.add_argument("--platform-plugins", required=WINDOWS,
+                        help="a folder holding Qt's qoffscreen.dll (Windows; a Linux deploy has its own)")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     args = parser.parse_args(argv)
-    require_windows("tools/ci/smoke_test.py")
 
     deploy_dir = os.path.abspath(args.deploy)
-    exe = os.path.join(deploy_dir, "bin", "usdcc.exe")
+    exe = os.path.join(deploy_dir, "bin", "usdcc.exe" if WINDOWS else "usdcc")
     if not os.path.isfile(exe):
-        fail(f"No usdcc.exe in {deploy_dir}\\bin")
-    platform_plugins = os.path.abspath(args.platform_plugins)
-    if not os.path.isfile(os.path.join(platform_plugins, "qoffscreen.dll")):
-        fail(f"No qoffscreen.dll in {args.platform_plugins}")
+        fail(f"No {os.path.basename(exe)} in {os.path.join(deploy_dir, 'bin')}")
+    platform_plugins = None
+    if WINDOWS:
+        platform_plugins = os.path.abspath(args.platform_plugins)
+        if not os.path.isfile(os.path.join(platform_plugins, "qoffscreen.dll")):
+            fail(f"No qoffscreen.dll in {args.platform_plugins}")
 
     work = Path(tempfile.gettempdir()) / f"usdcc-smoke-{os.getpid()}"
     work.mkdir(parents=True, exist_ok=True)
     result = work / "result.json"
     script = work / "check.py"
-    script.write_text(f"RESULT = {str(result)!r}\n" + CHECK, encoding="utf-8")
+    script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {WINDOWS!r}\n" + CHECK, encoding="utf-8")
 
-    # Only what a user's machine has: Windows, and the deploy itself.
-    environment = dict(os.environ)
-    for name in ("PYTHONHOME", "PYTHONPATH", "PXR_PLUGINPATH_NAME", "QT_PLUGIN_PATH"):
-        environment.pop(name, None)
-    system_root = os.environ.get("SystemRoot", r"C:\Windows")
-    environment["PATH"] = f"{system_root}\\System32;{system_root};{system_root}\\System32\\Wbem"
+    # Only what a user's machine has: the system, and the deploy itself.
+    if WINDOWS:
+        environment = dict(os.environ)
+        for name in ("PYTHONHOME", "PYTHONPATH", "PXR_PLUGINPATH_NAME", "QT_PLUGIN_PATH"):
+            environment.pop(name, None)
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        environment["PATH"] = f"{system_root}\\System32;{system_root};{system_root}\\System32\\Wbem"
+        environment["QT_QPA_PLATFORM_PLUGIN_PATH"] = platform_plugins
+    else:
+        environment = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}
     environment["QT_QPA_PLATFORM"] = "offscreen"
-    environment["QT_QPA_PLATFORM_PLUGIN_PATH"] = platform_plugins
 
     problems = []
     started = time.time()

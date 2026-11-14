@@ -1,8 +1,9 @@
 # CI
 
 usdcc's continuous integration on GitHub Actions. Part of M0 (docs/PLAN.md §6 item 2,
-§8). **Windows only for now.** Linux, macOS, USD plugins (file formats, render delegates)
-and self-hosted runners come later (§7).
+§8). **Windows and Linux.** Each workflow has a `windows` job and a `linux` job
+(`ubuntu-24.04`, GCC 13): §8. macOS, USD plugins (file formats, render delegates) and
+self-hosted runners come later (§7).
 
 ## 1. Decisions
 
@@ -263,17 +264,10 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 7. Later
 
-- **Linux and macOS.** Hosted `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-latest`, each
-  with its own OpenUSD asset. The scripts in `tools/` are Python, so they run there, and
-  `tools/build.py` and the naming, relocating and licence scripts in `tools/ci` already
-  take the platform into account (`tools/_common.py`). Linux builds and passes the tests
-  in WSL 2 ([LINUX_WSL.md](LINUX_WSL.md)): OpenUSD from `tools/build_usd.py` (the steps
-  `deps-usd.yml` runs inline, as a script a Linux job can reuse), and the tests headless
-  under `xvfb-run` with llvmpipe, as a hosted runner would. Still Windows only:
-  `deps/usd.json` (its `platform`, and its generator flag, which `build_usd.py` drops off
-  Windows; giving it per-platform parts changes the Windows asset's name, so that waits for
-  the Linux job), `tools/deploy.py`'s folder layout with the smoke tests that check it, and
-  `tools/build_pyside.py`.
+- **macOS and Linux arm64.** Hosted `macos-latest` and `ubuntu-24.04-arm`, each with its
+  own OpenUSD asset, as the Linux x64 one (§8). Still Windows only: `tools/build_pyside.py`,
+  so Linux has no PySide6 (no `usdcc.ui`, no Python-made panels, no V-Ray Render).
+
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
@@ -282,3 +276,27 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
   `release.yml`.
 - **Self-hosted runners** (the Windows PC, the Mac) for faster incremental builds, only
   on `push` and `workflow_dispatch`, never on pull requests from forks.
+
+## 8. Linux
+
+The `linux` jobs mirror the `windows` ones on `ubuntu-24.04` ([LINUX_WSL.md](LINUX_WSL.md)
+has how Linux was brought up, in WSL 2):
+
+- **`deps-usd.yml`** builds OpenUSD with `tools/build_usd.py` (the steps the `windows` job
+  runs inline, as a script) against `actions/setup-python`'s CPython of the pinned version.
+  `tools/ci/relocate_usd.py` also rewrites the ELF files' RUNPATHs, which name the build
+  folder, relative to `$ORIGIN` (patchelf). The zip (`--symlinks`) is checked as an SDK from
+  another folder with a clean environment, and goes into the same release as the Windows
+  one: `tools/ci/usd_asset.py` names each platform's zip after the platform it runs on, so
+  `deps/usd.json`, and the Windows asset's name, are unchanged. Either job may make the
+  release; the other adds its zip, and the `windows` job writes the notes.
+- **`build.yml`** builds against it with the same CPython at the same path (pxrConfig.cmake
+  names it), and runs the tests under `xvfb-run` with llvmpipe. vcpkg's cache is the
+  `windows` job's scheme with the Linux triplet in its keys.
+- **`release.yml`** deploys with `tools/deploy.py`'s Linux layout (a prefix of its own,
+  RUNPATHs relative to `$ORIGIN`, the CPython bundled), moves usdcc's debug info out with
+  `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
+  `usdcc-<version>-linux-x64.tar.gz` and `...-symbols.tar.gz`.
+
+The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
+Each job first deletes the image's unused SDKs for disk space.

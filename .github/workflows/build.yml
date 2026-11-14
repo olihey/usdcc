@@ -1,6 +1,7 @@
-# Builds usdcc on Windows against the prebuilt OpenUSD that deps-usd.yml
-# publishes (docs/CI.md §4). vcpkg's packages (Qt above all) are kept between
-# runs in vcpkg's files binary cache, saved with actions/cache.
+# Builds usdcc on Windows and Linux against the prebuilt OpenUSD that
+# deps-usd.yml publishes, and runs the tests (docs/CI.md §4). vcpkg's packages
+# (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
+# actions/cache, one per platform.
 name: Build
 
 on:
@@ -148,6 +149,127 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vcpkg-logs
+          path: |
+            external/vcpkg/buildtrees/**/*.log
+            build/vcpkg-manifest-install.log
+          if-no-files-found: ignore
+
+  # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). No PySide6 yet
+  # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
+  # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Qt's sources and build in vcpkg's buildtrees need the room.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # What vcpkg's Qt needs from the system (X11, xcb, GL, Wayland), Ninja,
+      # and Xvfb for the tests (docs/LINUX_WSL.md §1).
+      - name: Install the build's packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ninja-build pkg-config autoconf autoconf-archive automake \
+            libtool bison flex gperf nasm zip unzip xvfb mesa-utils \
+            libgl-dev libegl-dev libegl1-mesa-dev libglu1-mesa-dev libx11-dev libx11-xcb-dev libxext-dev libxrender-dev \
+            libxi-dev libxt-dev libxtst-dev libxrandr-dev libxcursor-dev libxinerama-dev libsm-dev libice-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev '^libxcb.*-dev' libfontconfig1-dev libfreetype-dev libdbus-1-dev \
+            libwayland-dev wayland-protocols libwayland-bin
+
+      - name: Name the OpenUSD asset
+        id: asset
+        run: python3 tools/ci/usd_asset.py --github-output
+
+      # The Python OpenUSD was built with, at the same path: pxrConfig.cmake
+      # names it, and usdcc embeds it.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      - name: Download OpenUSD
+        run: |
+          if ! gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.zip }}' --dir "$RUNNER_TEMP"; then
+            echo "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json first."
+            exit 1
+          fi
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
+          rm "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
+          echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
+
+      - name: Name the vcpkg cache
+        id: vcpkg
+        run: python tools/ci/vcpkg_cache.py
+
+      - name: Restore the vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Note the cached packages
+        run: |
+          find '${{ steps.vcpkg.outputs.dir }}' -name '*.zip' -printf '%f\n' | sort > "$RUNNER_TEMP/vcpkg-cache-before.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/vcpkg-cache-before.txt") package(s) in the cache"
+
+      - name: Build
+        id: build
+        run: python tools/build.py --usd-install "$USD_INSTALL" --without-rtx
+
+      - name: Test
+        env:
+          LIBGL_ALWAYS_SOFTWARE: 1
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --test-dir build --verbose --timeout 900
+
+      # As the windows job's: after a successful build, drops the packages it
+      # didn't use; each installed package's vcpkg_abi_info.txt hashes to its zip's name.
+      - name: Prune the vcpkg cache
+        id: vcpkg-prune
+        if: always() && steps.vcpkg.outputs.key != ''
+        run: |
+          dir='${{ steps.vcpkg.outputs.dir }}'
+          installed=build/vcpkg_installed/x64-linux-dynamic/share
+          if [ '${{ steps.build.outcome }}' = success ] && [ -d "$installed" ]; then
+            find "$installed" -name vcpkg_abi_info.txt -exec sha256sum {} + | awk '{print $1 ".zip"}' | sort -u > "$RUNNER_TEMP/used.txt"
+            unused=0
+            while IFS= read -r zip; do
+              if ! grep -qxF "$(basename "$zip")" "$RUNNER_TEMP/used.txt"; then rm "$zip"; unused=$((unused + 1)); fi
+            done < <(find "$dir" -name '*.zip')
+            echo "$(wc -l < "$RUNNER_TEMP/used.txt") package(s) used, $unused unused one(s) dropped"
+          fi
+          find "$dir" -name '*.zip' -printf '%f\n' | sort > "$RUNNER_TEMP/vcpkg-cache-after.txt"
+          added=$(comm -13 "$RUNNER_TEMP/vcpkg-cache-before.txt" "$RUNNER_TEMP/vcpkg-cache-after.txt" | wc -l)
+          echo "$added package(s) built and added"
+          if [ "$added" -gt 0 ]; then echo "added=true" >> "$GITHUB_OUTPUT"; else echo "added=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save the vcpkg cache
+        if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+
+      - name: Upload vcpkg's logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-linux
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log

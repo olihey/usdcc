@@ -14,9 +14,14 @@ install only works where it was built. This rewrites them (docs/CI.md section 2)
   - The Python include folder in other files becomes ${Python3_INCLUDE_DIRS},
     which pxrConfig.cmake's find_dependency(Python3) has set by then.
 
+On Linux the libraries, plugins and Python modules have RUNPATHs naming the
+install folder too (OpenImageIO's has nothing else). Those entries become
+$ORIGIN-relative, and each library in lib/ gets $ORIGIN itself, so they find each
+other wherever the install is unpacked. That needs patchelf.
+
 Then it checks that no CMake file still names the install folder, and that the
-Python folder is left only in pxrConfig.cmake's guarded lines. Any leftover fails
-the script.
+Python folder is left only in pxrConfig.cmake's guarded lines, and on Linux that no
+RUNPATH names the install folder. Any leftover fails the script.
 
 Running it twice is harmless: the second run finds nothing to change.
 
@@ -35,6 +40,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import WINDOWS, fail  # noqa: E402
+
+if not WINDOWS:
+    from _elf import elf_files, origin_relative, runpath, set_runpath  # noqa: E402
 
 MARKER = "# Made relocatable by usdcc tools/ci/relocate_usd.py"
 # What this script wrote while it was relocate-usd.ps1.
@@ -63,6 +71,31 @@ def cmake_files(install):
 
 def read(file):
     return Path(file).read_bytes().decode("utf-8-sig", errors="replace")
+
+
+def relocate_runpaths(install, built_at, leftovers):
+    """Linux: RUNPATH entries in the install folder become $ORIGIN-relative."""
+    rewritten = 0
+    files = [file for top in ("lib", "plugin", "bin") if os.path.isdir(os.path.join(install, top))
+             for file in elf_files(os.path.join(install, top))]
+    lib = os.path.join(install, "lib")
+    for file in files:
+        entries = runpath(file)
+        relocated = []
+        for entry in entries:
+            if entry == built_at or entry.startswith(built_at + "/"):
+                entry = origin_relative(file, install + entry[len(built_at):])
+            if entry not in relocated:
+                relocated.append(entry)
+        if os.path.samefile(os.path.dirname(file), lib) and "$ORIGIN" not in relocated:
+            relocated.insert(0, "$ORIGIN")
+        if relocated != entries:
+            set_runpath(file, relocated)
+            rewritten += 1
+        for entry in runpath(file):
+            if entry == built_at or entry.startswith(built_at + "/"):
+                leftovers.append(f"{os.path.relpath(file, install)}: RUNPATH {entry}")
+    print(f"Rewrote the RUNPATH of {rewritten} of {len(files)} ELF file(s).")
 
 
 def main(argv=None):
@@ -136,6 +169,9 @@ def main(argv=None):
                 bad = not guarded
             if bad:
                 leftovers.append(f"{os.path.relpath(file, install)}:{number}: {line.strip()}")
+
+    if not WINDOWS:
+        relocate_runpaths(install, built_at, leftovers)
 
     print(f"Rewrote {len(changed)} file(s):")
     for name in changed:

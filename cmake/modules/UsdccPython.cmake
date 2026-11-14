@@ -85,8 +85,12 @@ foreach(_dir "${USD_INSTALL}/lib/site-packages" "${USD_INSTALL}/lib/python${USDC
     endif()
 endforeach()
 
+# For tools/deploy.py, which reads the cache: pxrConfig.cmake sets Python3_EXECUTABLE
+# as a plain variable on Linux, so it isn't there.
+set(USDCC_PYTHON_EXECUTABLE_PATH "${USDCC_PYTHON_EXECUTABLE}" CACHE INTERNAL "OpenUSD's Python, which usdcc embeds")
+
 if(USDCC_PYTHON_FOUND)
-    message(STATUS "Python for usdcc (OpenUSD's): ${USDCC_PYTHON_VERSION} at ${USDCC_PYTHON_HOME}; pxr in ${USDCC_USD_PYTHON_DIR}")
+    message(STATUS "Python for usdcc (OpenUSD's):${USDCC_PYTHON_VERSION} at ${USDCC_PYTHON_HOME}; pxr in ${USDCC_USD_PYTHON_DIR}")
 else()
     message(STATUS "Python for usdcc: OpenUSD's Python (${Python3_EXECUTABLE}) not usable; "
                    "scripting and the usdcc.* Python modules are disabled")

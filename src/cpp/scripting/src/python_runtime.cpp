@@ -104,12 +104,28 @@ PythonSettings PythonSettings::defaults() {
     PythonSettings settings;
     settings.userSite = usdcc::core::Settings::instance().get<bool>(kPythonUserSiteKey, false);
 #if USDCC_HAS_PYTHON
-    // A deployed usdcc (tools/deploy.py) brings its own Python: bin/usdcc.exe
-    // next to python/, whose Lib/site-packages holds usdcc, pxr and PySide6.
+    // A deployed usdcc (tools/deploy.py) brings its own Python. On Windows,
+    // bin/usdcc.exe next to python/, whose Lib/site-packages holds usdcc, pxr and
+    // PySide6; elsewhere the deploy is the Python's prefix itself: bin/usdcc next
+    // to lib/python3.XY/site-packages.
+#if defined(_WIN32)
     const std::filesystem::path bundled = executableDir().parent_path() / "python";
-    if (hasStandardLibrary(bundled)) {
+    const std::filesystem::path bundledSite = bundled / "Lib" / "site-packages";
+#else
+    const std::filesystem::path bundled = executableDir().parent_path();
+    std::filesystem::path bundledSite;
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(bundled / "lib", error)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("python3", 0) == 0 && std::filesystem::exists(entry.path() / "encodings" / "__init__.py", error)) {
+            bundledSite = entry.path() / "site-packages";
+            break;
+        }
+    }
+#endif
+    if (!bundledSite.empty() && hasStandardLibrary(bundled) && std::filesystem::is_directory(bundledSite)) {
         settings.home = bundled;
-        settings.paths = {bundled / "Lib" / "site-packages"};
+        settings.paths = {bundledSite};
     } else {
         settings.home = std::filesystem::u8path(USDCC_PYTHON_HOME);
         settings.paths = {std::filesystem::u8path(USDCC_PYTHON_PACKAGE_ROOT),
