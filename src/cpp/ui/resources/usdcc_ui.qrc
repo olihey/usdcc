@@ -46,10 +46,6 @@
         <file alias="save@2x.png">theme/save@2x.png</file>
         <file alias="save-all.png">theme/save-all.png</file>
         <file alias="save-all@2x.png">theme/save-all@2x.png</file>
-        <file alias="speaker.png">theme/speaker.png</file>
-        <file alias="speaker@2x.png">theme/speaker@2x.png</file>
-        <file alias="speaker-muted.png">theme/speaker-muted.png</file>
-        <file alias="speaker-muted@2x.png">theme/speaker-muted@2x.png</file>
         <file alias="stop.png">theme/stop.png</file>
         <file alias="stop@2x.png">theme/stop@2x.png</file>
         <file alias="cog.png">theme/cog.png</file>

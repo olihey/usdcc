@@ -54,6 +54,7 @@
         <file alias="vector-spline.svg">prim-icons/vector-spline.svg</file>
         <file alias="vector.svg">prim-icons/vector.svg</file>
         <file alias="video.svg">prim-icons/video.svg</file>
+        <file alias="volume-off.svg">prim-icons/volume-off.svg</file>
         <file alias="volume.svg">prim-icons/volume.svg</file>
         <file alias="walk.svg">prim-icons/walk.svg</file>
         <file alias="window.svg">prim-icons/window.svg</file>

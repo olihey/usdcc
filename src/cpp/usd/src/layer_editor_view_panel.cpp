@@ -7,6 +7,7 @@
 #include "usdcc/ui/theme.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
@@ -40,12 +41,14 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
+#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <functional>
 #include <utility>
 
@@ -97,6 +100,31 @@ QString unitsText(double metersPerUnit) {
     }
     return number;
 }
+
+// The Mute column's speaker, as big as the Outliner's eye (the prim icons'
+// size, docs/PRIM_ICONS.md §4) where the tree's other icons are smaller.
+class MuteColumnDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    // Every row tall enough for it: the rows are uniform, sized by the first
+    // (the session layer's, which has no speaker).
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QSize size = QStyledItemDelegate::sizeHint(option, index);
+        size.setHeight(std::max(size.height(), side() + usdcc::ui::scaled::pixels(4)));
+        size.setWidth(std::max(size.width(), side() + usdcc::ui::scaled::pixels(8)));
+        return size;
+    }
+
+protected:
+    void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        option->decorationSize = QSize(side(), side());
+    }
+
+private:
+    static int side() { return usdcc::ui::scaled::pixels(16); }
+};
 
 // A drop above or below a sibling reorders the sublayers (through
 // `onMove`); every other drop is refused. The tree itself never moves an
@@ -195,6 +223,7 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     m_tree->header()->setSectionResizeMode(Mute, QHeaderView::ResizeToContents);
     m_tree->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     usdcc::ui::scaled::iconSize(m_tree, 12, 12);
+    m_tree->setItemDelegateForColumn(Mute, new MuteColumnDelegate(m_tree));
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &LayerEditorViewPanel::showMenu);
     connect(m_tree, &QTreeWidget::itemClicked, this, &LayerEditorViewPanel::onItemClicked);
@@ -446,11 +475,10 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     // Only a sublayer can be dragged, to reorder it among its siblings.
     item->setFlags(layer_actions::canRemove(entry) ? item->flags() | Qt::ItemIsDragEnabled
                                                    : item->flags() & ~Qt::ItemIsDragEnabled);
-    // A speaker; struck out while muted. A click toggles it.
+    // A speaker, struck through while muted, as the Outliner's eye. A click toggles it.
     if (layer_actions::canMute(entry)) {
         item->setData(Mute, kMutedRole, entry.muted);
-        item->setIcon(Mute, QIcon(entry.muted ? QStringLiteral(":/usdcc/theme/speaker-muted.png")
-                                              : QStringLiteral(":/usdcc/theme/speaker.png")));
+        item->setIcon(Mute, prim_icons::icon(entry.muted ? QStringLiteral("volume-off") : QStringLiteral("volume")));
         item->setToolTip(Mute, entry.muted ? tr("Muted. Click to compose this layer again")
                                            : tr("Click to mute: leave this layer (and its sublayers) out of the stage"));
     }

@@ -226,12 +226,6 @@ ICONS["save-all"] = (
         [(3.8, 14.5), (3.8, 11.2), (9.2, 11.2), (9.2, 14.5)],
     ],
 )
-# Its Mute column: a speaker, dim while the layer plays, and struck out (in
-# full light) while it's muted.
-_SPEAKER = [(2.5, 6), (5, 6), (8.5, 3), (8.5, 13), (5, 10), (2.5, 10), (2.5, 6)]
-MID = (112, 112, 118)
-ICONS["speaker"] = (1.2, MID, [_SPEAKER, _arc(8.5, 8, 2.6, -45, 45, 10), _arc(8.5, 8, 5.0, -45, 45, 14)])
-ICONS["speaker-muted"] = (1.2, LIGHT, [_SPEAKER, [(10.8, 6), (14.3, 10)], [(14.3, 6), (10.8, 10)]])
 
 for _name, (_width, _lines) in TOOL_GLYPHS.items():
     ICONS[_name] = (_width, LIGHT, _lines)

@@ -52,7 +52,7 @@ panel's stage:
   - Dimmed when it's muted.
   - A tooltip with the identifier, the real path, the format and its time offset/scale.
 - **Target column:** one radio-style mark, on the current edit target.
-- **Mute column:** a speaker, struck out while muted (a checkbox before phase 4); the root layer
+- **Mute column:** a speaker, struck through while muted (a checkbox before phase 4); the root layer
   and the session layer can't be muted.
 - **Toolbar:** "Editing: <layer>" (the edit target, always visible), an Add menu and Save.
 - Follows the stage's change notices (a sublayer added by a script shows up) and dirty
@@ -287,8 +287,10 @@ Phase 4 as built:
   under and its own sublayers, muting only the outermost (a muted layer's sublayers go with it);
   unmutes the clicked layer if it was muted. One undo step ("Mute All but anim.usda"):
   `MuteCommand` mutes and unmutes lists at once (`UsdStage::MuteAndUnmuteLayers()`).
-- **Mute column:** a speaker (dim) or a struck-out speaker (muted) instead of a checkbox; a click
-  toggles it. New icons `save-all`, `speaker` and `speaker-muted` in `tools/gen_theme_icons.py`.
+- **Mute column:** a speaker, struck through while muted, instead of a checkbox; a click toggles
+  it. Drawn as the Outliner's eye: Tabler's `volume` / `volume-off` from the prim icons, 16 px in
+  the icon grey, white on a selected row (a delegate on that column; the tree's other icons stay
+  12 px). New toolbar icon `save-all` in `tools/gen_theme_icons.py`.
 
 | Phase | Work | Tests |
 |---|---|---|

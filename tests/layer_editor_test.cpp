@@ -98,6 +98,13 @@ USDCC_TEST(layer_editor_panel) {
               !panel.itemFor(animId)->icon(LayerEditorViewPanel::Mute).isNull() &&
               !panel.itemFor(animId)->data(LayerEditorViewPanel::Mute, Qt::CheckStateRole).isValid(),
           "the panel shows it muted, with an icon, no checkbox");
+    {
+        // As big as the Outliner's eye: 16 px, every row tall enough for it.
+        const QModelIndex muteCell = tree->indexFromItem(panel.itemFor(animId), LayerEditorViewPanel::Mute);
+        CHECK(tree->visualRect(muteCell).height() >= 16 && tree->visualRect(muteCell).width() >= 16,
+              "the speaker's cell fits 16 px: [%dx%d]", tree->visualRect(muteCell).width(),
+              tree->visualRect(muteCell).height());
+    }
     stack->undo();
     settle();
     CHECK(!s->IsLayerMuted(animId) && s->GetPrimAtPath(SdfPath("/Tweak")), "undo: unmuted, its edit back");
