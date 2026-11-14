@@ -178,11 +178,12 @@ jobs:
           df -h /
 
       # What vcpkg's Qt needs from the system (X11, xcb, GL, Wayland), Ninja,
-      # and Xvfb for the tests (docs/LINUX_WSL.md §1).
+      # and Xvfb for the tests (docs/LINUX_WSL.md §1). With apt's recommended
+      # packages, as there: vcpkg's libxcrypt needs libltdl-dev, which libtool recommends.
       - name: Install the build's packages
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends ninja-build pkg-config autoconf autoconf-archive automake \
+          sudo apt-get install -y -q ninja-build pkg-config autoconf autoconf-archive automake libltdl-dev \
             libtool bison flex gperf nasm zip unzip xvfb mesa-utils \
             libgl-dev libegl-dev libegl1-mesa-dev libglu1-mesa-dev libx11-dev libx11-xcb-dev libxext-dev libxrender-dev \
             libxi-dev libxt-dev libxtst-dev libxrandr-dev libxcursor-dev libxinerama-dev libsm-dev libice-dev \

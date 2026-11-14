@@ -23,7 +23,7 @@ Packages installed for the build (on top of `build-essential` and `python3.12-de
 
 ```bash
 sudo apt install -y \
-  cmake ninja-build pkg-config zip unzip tar autoconf autoconf-archive automake libtool \
+  cmake ninja-build pkg-config zip unzip tar autoconf autoconf-archive automake libtool libltdl-dev \
   bison flex gperf nasm python3-venv python3-pip gdb mesa-utils xvfb \
   libgl-dev libegl-dev libegl1-mesa-dev libglu1-mesa-dev libx11-dev libx11-xcb-dev libxext-dev \
   libxrender-dev libxi-dev libxt-dev libxtst-dev libxrandr-dev libxcursor-dev libxinerama-dev \
