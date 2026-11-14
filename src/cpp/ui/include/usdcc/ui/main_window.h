@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+class QAbstractNativeEventFilter;
 class QAction;
 class QMenu;
 class QMenuBar;
@@ -201,6 +202,8 @@ private:
     // full screen from maximized stands it in for the maximized rect (setFullScreen()).
     QRect m_normalBeforeFullScreen;
     bool m_windowStatesWatched = false;
+    // Keeps QWindowKit's frame off the native child windows (see showEvent()).
+    std::unique_ptr<QAbstractNativeEventFilter> m_childFrameFilter;
 };
 
 // `rect` moved, and shrunk if it must, so that it lies wholly inside one of

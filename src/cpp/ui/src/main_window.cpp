@@ -4,6 +4,7 @@
 #include <DockManager.h>
 #include <DockWidget.h>
 #include <QAbstractButton>
+#include <QAbstractNativeEventFilter>
 #include <QChildEvent>
 #include <QCloseEvent>
 #include <QDir>
@@ -62,6 +63,29 @@ constexpr auto kCollapsedPanelsKey = "MainWindow/collapsedSidePanels";
 
 // See appSettings() for why this is a plain INI file.
 QSettings layoutSettings() { return appSettings(); }
+
+#ifdef Q_OS_WIN
+// QWindowKit computes the main window's custom frame in a global native event
+// filter, and applies it to every WM_NCCALCSIZE sent while the main window's
+// own message is being handled, whichever window it is for. When Windows
+// itself maximizes or restores the window (a title-bar double-click, Win+Up,
+// snapping; not the maximize button, which goes through Qt), Qt lays out the
+// widgets right then, so the native child windows (the viewport's container
+// and its native ancestors) get that frame too: on Windows 11 their client
+// area moves down a pixel, one more per nesting level, and the strips left
+// uncovered keep stale pixels. A child window has no frame; answer for those
+// before QWindowKit does, the way Qt would without it.
+class ChildWindowFrameFilter final : public QAbstractNativeEventFilter {
+public:
+    bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override {
+        if (eventType != "windows_generic_MSG" || !message || !result) return false;
+        const auto* msg = static_cast<const MSG*>(message);
+        if (msg->message != WM_NCCALCSIZE || !(::GetWindowLongPtrW(msg->hwnd, GWL_STYLE) & WS_CHILD)) return false;
+        *result = ::DefWindowProcW(msg->hwnd, msg->message, msg->wParam, msg->lParam);
+        return true;
+    }
+};
+#endif
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -213,6 +237,14 @@ void MainWindow::showEvent(QShowEvent* event) {
         m_windowStatesWatched = true;
         connect(window, &QWindow::windowStateChanged, this, [this]() { syncFullScreenAction(); });
     }
+#ifdef Q_OS_WIN
+    // Qt asks the most recently installed filter first, and QWindowKit installs
+    // its own once the native window exists, which it does by now.
+    if (!m_childFrameFilter) {
+        m_childFrameFilter = std::make_unique<ChildWindowFrameFilter>();
+        QCoreApplication::instance()->installNativeEventFilter(m_childFrameFilter.get());
+    }
+#endif
     if (!m_layoutSettled) m_settleTimer.start();
 }
 
