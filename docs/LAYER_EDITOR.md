@@ -1,6 +1,6 @@
 # Layer Editor — Plan
 
-Status: **all three phases done** (§8), with the recommended choices in §7.
+Status: **all four phases done** (§8), with the recommended choices in §7.
 
 A view panel that shows a stage's layer stack and manages it: add and remove in-memory
 (anonymous) and file layers, reorder and mute them, pick the layer edits go to (the edit
@@ -27,16 +27,18 @@ A "Layers" view panel type in the registry, on the Stages menu like the Outliner
 panel's stage:
 
 ```
- ☰  Stage: shot.usda ▾                    Editing: anim.usda    [+ ▾] [💾]
+ ☰  Stage: shot.usda ▾               Editing: anim.usda    [+ ▾] [💾] [💾💾]
  ───────────────────────────────────────────────────────────────────────────
                                                   Target  Mute
  ▸ Session Layer                     (in memory)    ○       
  ▾ shot.usda                        *               ○       
-     ✎ anim.usda                    *               ●       ☐
-       lighting.usda                                ○       ☐
-     ▸ set.usda                                     ○       ☑     (muted, dimmed)
-       Untitled 1                   (in memory)     ○       ☐
+     ✎ anim.usda                    *               ●       🔈
+       lighting.usda                                ○       🔈
+     ▸ set.usda                                     ○       🔇    (muted, dimmed)
+       Untitled 1                   (in memory)     ○       🔈
        missing.usda                 (not found)                   (red)
+ ───────────────────────────────────────────────────────────────────────────
+ ▾ Layer Properties                                   (folds to its header)
 ```
 
 - **A tree, strongest first:** the session layer, then the root layer, with each layer's
@@ -50,7 +52,8 @@ panel's stage:
   - Dimmed when it's muted.
   - A tooltip with the identifier, the real path, the format and its time offset/scale.
 - **Target column:** one radio-style mark, on the current edit target.
-- **Mute column:** a checkbox; the root layer and the session layer can't be muted.
+- **Mute column:** a speaker, struck out while muted (a checkbox before phase 4); the root layer
+  and the session layer can't be muted.
 - **Toolbar:** "Editing: <layer>" (the edit target, always visible), an Add menu and Save.
 - Follows the stage's change notices (a sublayer added by a script shows up) and dirty
   changes, coalesced like the Dependencies panel.
@@ -127,7 +130,11 @@ The app has no saving yet, and a layer editor that can create layers needs it:
   the undo recorder, so the reload is an undo step that brings the changes back. A layer that
   streams its data (usdc) is swapped whole, past the recorder: its reload can't be undone and
   clears the stage's undo history, which the warning says (it's shown whenever there's history
-  to lose). In-memory layers have no file to reload from.
+  to lose). In-memory layers have no file to reload from. Checked in phase 4 against files
+  changed outside the app (`layer_editor_reload_external`): a clean or edited text layer, a
+  sublayer added in the file, and a usdc file overwritten in place while the stage uses it (on
+  Windows too) all reload with the file's new content. There's no watching for such changes:
+  Reload is how they come in.
 - **Unsaved changes on close:** closing a stage, or the app, with dirty file layers asks Save
   All, Discard or Cancel, like the Script Editor's tabs.
 - **Not undo steps:** saving and reverting are file operations.
@@ -137,7 +144,9 @@ The app has no saving yet, and a layer editor that can create layers needs it:
 Under the tree, for the selected layer, editable as Attribute Editor rows (each one undo step):
 
 - Its time offset and scale in its parent (the `subLayerOffsets` entry).
-- Default prim, start and end time codes, time codes per second and frames per second.
+- Start and end time codes, time codes per second and frames per second.
+- Read-only since phase 4: the default prim (with a Show Prims button), up axis and meters per
+  unit (with a warning when a sublayer's differ from the stage's).
 - Comment and documentation.
 - Read-only: identifier, real path, file format, and whether it has unsaved changes.
 
@@ -238,8 +247,8 @@ Phase 3 as built:
 - **Layer properties:** under the tree, in a splitter, for the selected layer:
   - Read-only: Identifier, File and Format.
   - For a sublayer: Time Offset and Time Scale in its parent.
-  - Default Prim, Start and End Time Code, Time Codes per Second, Frames per Second, Comment
-    and Documentation.
+  - Default Prim (read-only since phase 4), Start and End Time Code, Time Codes per Second,
+    Frames per Second, Comment and Documentation.
   - Each edit is one undo step on that layer (`layer_actions::editLayer()`,
     `setSublayerOffset()`). A field not authored on the layer has the unauthored look and shows
     USD's fallback.
@@ -247,8 +256,43 @@ Phase 3 as built:
     field being typed in keeps its text.
 
 
+Phase 4 as built:
+
+- **Reload** checked against files changed outside the app (§5); it needed no change.
+- **Layer Properties fold** to a header above them; folded, the tree takes the room. The panel's
+  session state (and a duplicate) keeps it, with the splitter's sizes to unfold to.
+- **Default Prim is read-only** now, shown as authored (a root prim's name, or a path). Its button
+  opens Show Prims on the layer alone, with the default prim selected
+  (`PrimTreeDialog::selectWhenLoaded()`).
+- **Up Axis and Meters per Unit** (read-only): the layer's own metadata, USD's fallback (shown
+  unauthored) when it has none. A sublayer that authors other values than its stage
+  (`UsdGeomGetStageUpAxis()`, `UsdGeomGetStageMetersPerUnit()`) gets a warning line under the row,
+  "The stage is Y up" or "The stage uses 0.01 (centimeters)", its tooltip saying how its content
+  may come in (rotated, or how many times too small or large). Not for the root or session layer,
+  which make the stage's values, nor for a value the layer doesn't author. Rechecked on every
+  refresh, so a script changing the stage's values updates the warnings.
+- **Flatten** (right-click), with `UsdUtilsFlattenLayerStack()` on the layer composed alone, the
+  stage's muted layers left out; time offsets applied, references, payloads, inherits and
+  variants kept as arcs; relative asset paths rewritten for where the result is, with the rule
+  Save Stage As uses (`reanchor()`):
+  - **Flatten Sublayers:** into the layer itself, its sublayer list emptied; one undo step that
+    keeps the sublayers (and an in-memory one's content) for undo. The edit target, if under it,
+    moves to it. A usdc layer can't record it: a warning, then the undo history is cleared, as for
+    Reload. Also asked first when sublayers with unsaved changes leave the stack (their edits are
+    merged in; their files stay unsaved and aren't asked about on close).
+  - **Flatten to File...:** to a new file (`<name>_flat.usda` next to the layer to start with);
+    the stage is unchanged. Not over a file that's open as a layer.
+- **Save All** in the toolbar, right of Save (two floppies); greyed while nothing's unsaved.
+- **Mute Others** (right-click): mutes every mutable layer but the clicked one, the layers it's
+  under and its own sublayers, muting only the outermost (a muted layer's sublayers go with it);
+  unmutes the clicked layer if it was muted. One undo step ("Mute All but anim.usda"):
+  `MuteCommand` mutes and unmutes lists at once (`UsdStage::MuteAndUnmuteLayers()`).
+- **Mute column:** a speaker (dim) or a struck-out speaker (muted) instead of a checkbox; a click
+  toggles it. New icons `save-all`, `speaker` and `speaker-muted` in `tools/gen_theme_icons.py`.
+
 | Phase | Work | Tests |
 |---|---|---|
 | **1. See and target** *(done)* | `LayerEditorViewPanel` (the tree, dirty and missing marks, the Target and Mute columns, the "Editing:" label); setting the edit target; `Stage::editTargetChanged`, followed by the Attribute Editor and a status-bar label; mute and unmute as undo steps; the `usdcc.usd` edit-target calls | The tree of a stage with nested and missing sublayers; setting the target sends the notice and edits land in that layer; mute/unmute and their undo; muting the target moves it |
 | **2. Add, remove, reorder** *(done)* | `layer_actions` (Qt-free where it can be): add in-memory, new-file and existing layers; remove; move up/down and drag within a parent; relative paths; `UndoManager::apply()` on a given layer; references kept to in-memory layers | Each action and its undo; the authored path; an in-memory layer's content surviving remove and undo |
 | **3. Save and properties** *(done)* | Save, Save As (file and in-memory), Save All; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; the prompt's three answers |
+| **4. Polish** *(done)* | Folding properties; read-only Default Prim with Show Prims; Up Axis and Meters per Unit with mismatch warnings; Flatten Sublayers and Flatten to File; Save All button; Mute Others; mute icons | Reload after external changes (text and usdc); fold state in the session and a duplicate; the warnings and their refresh; flatten's offsets, muted layers, reanchored paths and undo; Mute Others' outermost-only rule, target move and undo; clicking the speaker |
