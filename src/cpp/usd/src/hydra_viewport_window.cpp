@@ -46,11 +46,13 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLFunctions_1_1>
 #include <QOpenGLVersionFunctionsFactory>
+#include <QPointer>
 #include <QResizeEvent>
 #include <QWheelEvent>
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -70,6 +72,28 @@ GridColors gridColors(const QColor& background, bool zUp) {
     const float ink = background.lightnessF() < 0.5f ? 1.0f : 0.0f;
     const PXR_NS::GfVec4f x(0.9f, 0.3f, 0.3f, 0.8f), y(0.4f, 0.8f, 0.3f, 0.8f), z(0.3f, 0.5f, 0.95f, 0.8f);
     return {PXR_NS::GfVec4f(ink, ink, ink, 0.12f), PXR_NS::GfVec4f(ink, ink, ink, 0.28f), x, zUp ? y : z};
+}
+
+// Every viewport's GL context (the main ones, the Material Editor's previews) shares one
+// group. Hydra's HgiGL frees GL objects through garbage lists that all its instances in
+// the process share (HgiGLGarbageCollector's are static), and whichever engine collects
+// next deletes them, in whatever context is current. A viewport that queues garbage
+// without drawing a frame to collect it (a renderer switched while it's paused or off
+// screen) then had it deleted in another viewport's context, where each name was some
+// live object of that viewport's own. Its next frame drew from a deleted buffer and the
+// driver crashed (a null read in nvoglv64 while HgiInteropOpenGL::CompositeToInterop
+// draws). Shared, a name is the same buffer, texture, shader or program everywhere, and
+// those are all HgiGL collects.
+std::vector<QPointer<QOpenGLContext>>& viewportContexts() {
+    static std::vector<QPointer<QOpenGLContext>> contexts;
+    return contexts;
+}
+
+// A context of the group to share with: any that's still alive.
+QOpenGLContext* viewportShareContext() {
+    auto& contexts = viewportContexts();
+    std::erase_if(contexts, [](const QPointer<QOpenGLContext>& context) { return context.isNull(); });
+    return contexts.empty() ? nullptr : contexts.front().data();
 }
 }  // namespace
 
@@ -187,7 +211,17 @@ void HydraViewportWindow::ensureEngine() {
     if (!m_context) {
         m_context = new QOpenGLContext(this);
         m_context->setFormat(requestedFormat());
-        if (!m_context->create() || !m_context->makeCurrent(this)) {
+        QOpenGLContext* const shareWith = viewportShareContext();
+        m_context->setShareContext(shareWith);
+        if (m_context->create()) {
+            if (shareWith && !QOpenGLContext::areSharing(m_context, shareWith)) {
+                USDCC_LOG_WARNING("usdcc.viewport",
+                                  "This viewport's OpenGL context couldn't share with the others': "
+                                  "Hydra may free its objects in the wrong one");
+            }
+            viewportContexts().emplace_back(m_context);
+        }
+        if (!m_context->isValid() || !m_context->makeCurrent(this)) {
             // No GL here (a platform without it, such as tests' offscreen one): draw nothing.
             USDCC_LOG_WARNING("usdcc.viewport", "No OpenGL context for a viewport: it stays empty");
             return;
