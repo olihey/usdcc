@@ -11,7 +11,6 @@
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
-#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -634,7 +633,7 @@ USDCC_TEST(layer_editor_properties_collapse) {
 }
 
 // Up Axis and Meters per Unit: a sublayer authoring other values than the
-// stage's gets a warning; Default Prim's button shows it in Show Prims.
+// stage's gets a warning; Default Prim is read-only, with no button.
 USDCC_TEST(layer_editor_metrics_and_default_prim) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir settings;
@@ -703,29 +702,8 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
     CHECK(row("Up Axis")->editor()->isReadOnly() && row("Meters per Unit")->editor()->isReadOnly(), "both read-only");
     CHECK(shown("Default Prim") == "World" && row("Default Prim")->editor()->isReadOnly(), "Default Prim World, read-only");
 
-    // Its button: Show Prims on the layer, the default prim selected.
-    QToolButton* showButton = nullptr;
-    for (auto* b : row("Default Prim")->findChildren<QToolButton*>()) {
-        if (b->toolTip() == "Show it in Show Prims") showButton = b;
-    }
-    CHECK(showButton && showButton->isEnabled(), "a Show Prims button");
-    if (showButton) {
-        showButton->click();
-        usdcc::usd::PrimTreeDialog* dialog = nullptr;
-        QElapsedTimer timer;
-        timer.start();
-        while (timer.elapsed() < 10000) {
-            QApplication::processEvents();
-            for (QWidget* w : QApplication::topLevelWidgets()) {
-                if (auto* d = qobject_cast<usdcc::usd::PrimTreeDialog*>(w)) dialog = d;
-            }
-            if (dialog && dialog->isStageLoaded()) break;
-        }
-        CHECK(dialog && dialog->isStageLoaded() && dialog->selectedPath() == SdfPath("/World"),
-              "Show Prims with /World selected: [%s]", dialog ? dialog->selectedPath().GetText() : "no dialog");
-        if (dialog) dialog->close();
-        QApplication::processEvents();
-    }
+    CHECK(row("Default Prim")->findChildren<QToolButton*>().size() == row("Up Axis")->findChildren<QToolButton*>().size(),
+          "and no button beside it, as Up Axis has none");
 
     // The stage's own values, and none at all: no warning.
     CHECK(select("same.usda") && warning("Up Axis").isEmpty() && warning("Meters per Unit").isEmpty(),
@@ -734,9 +712,6 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
               shown("Up Axis") == "Y" && shown("Meters per Unit") == "0.01",
           "unauthored: the fallback, no warning: [%s] [%s]", qPrintable(shown("Up Axis")),
           qPrintable(shown("Meters per Unit")));
-    QToolButton* plainShow = nullptr;
-    for (auto* b : row("Default Prim")->findChildren<QToolButton*>()) plainShow = b;
-    CHECK(plainShow && !plainShow->isEnabled(), "no default prim: the button is off");
     CHECK(select("shot.usda") && warning("Up Axis").isEmpty(), "the root layer: no warning");
 
     // The stage turns Z up: the warnings follow.

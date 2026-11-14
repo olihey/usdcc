@@ -6,8 +6,6 @@
 #include "usdcc/usd/preview_stage.h"
 #include "usdcc/usd/stage.h"
 
-#include <pxr/usd/sdf/path.h>
-
 #include <QDialog>
 #include <QString>
 
@@ -39,10 +37,6 @@ public:
     QLabel* statusLabel() const { return m_status; }
     // Filters at once (typing waits for a pause).
     void setFilter(const QString& text);
-    // Selects the prim at `path` (opening its ancestors) now, or once the
-    // stage has loaded.
-    void selectWhenLoaded(const PXR_NS::SdfPath& path);
-    PXR_NS::SdfPath selectedPath() const;
 
 public Q_SLOTS:
     // Esc: clears the filter first, then closes.
@@ -60,7 +54,6 @@ private:
     QPushButton* m_loadPayloads;
     bool m_loaded = false;
     bool m_refreshQueued = false;
-    PXR_NS::SdfPath m_selectOnLoad;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };
 

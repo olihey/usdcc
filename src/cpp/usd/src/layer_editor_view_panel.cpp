@@ -908,24 +908,13 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
         offsetField(tr("Time Scale"), true);
     }
 
-    // The default prim, as authored (a root prim's name, or a path): shown, not
-    // set here. Its button finds it in Show Prims, on the layer alone.
+    // The default prim, as authored (a root prim's name, or a path): shown, not set here.
     {
         PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
         editor->setReadOnly(true);
-        auto* show = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"), tr("Show it in Show Prims"));
-        connect(show, &QToolButton::clicked, this, [this, identifier]() {
-            const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
-            if (!layer || !layer->HasDefaultPrim()) return;
-            if (PrimTreeDialog* dialog = showPrimTree(qs(identifier), this)) {
-                dialog->selectWhenLoaded(layer->GetDefaultPrimAsPath());
-            }
-        });
         addField(
             tr("Default Prim"), editor, [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
             [](const LayerEntry& e) { return e.layer->HasDefaultPrim(); });
-        m_fields.back().row->addTrailingWidget(show);
-        m_fields.back().update = [show](const LayerEntry& e) { show->setEnabled(e.layer->HasDefaultPrim()); };
     }
 
     // Up axis and meters per unit, as this layer says (UsdGeom's fallback
