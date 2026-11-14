@@ -128,6 +128,32 @@ aren't tied to Windows. `build.py` and `run.py` pick Ninja and vcpkg's dynamic
 triplet on Linux and macOS, where usdcc hasn't been built yet; `deploy.py` and
 `build_pyside.py` only know Windows' layout so far, and say so elsewhere.
 
+### When usdcc crashes
+
+Windows saves a dump of every crash in `%LOCALAPPDATA%\CrashDumps`.
+[tools/analyze_crash.py](tools/analyze_crash.py) reads the newest one with WinDbg's `cdb`
+(`winget install Microsoft.WinDbg`, once) and prints the crashing and main threads'
+stacks and the end of that run's log:
+
+```
+python tools/analyze_crash.py              # the newest usdcc.exe dump
+python tools/analyze_crash.py --list       # all of them, test programs' too
+```
+
+Release and RelWithDebInfo both make PDBs (Release's code is unchanged by it). Each
+build of everything copies its new PDBs and binaries into
+`%USERPROFILE%\.usdcc-symbols\builds` (the last 5 of each file;
+[tools/symbol_store.py](tools/symbol_store.py), off with `-DUSDCC_ARCHIVE_SYMBOLS=OFF`),
+so a dump still gets names after a rebuild.
+
+For a full dump, which also holds the objects the stacks point to, run once in an
+administrator PowerShell (about the app's memory use per dump, the last 5 kept):
+
+```
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\usdcc.exe" /v DumpType /t REG_DWORD /d 2 /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\usdcc.exe" /v DumpCount /t REG_DWORD /d 5 /f
+```
+
 ### Deploying
 
 [tools/deploy.py](tools/deploy.py) copies a build and everything it needs to run

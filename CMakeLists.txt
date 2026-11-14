@@ -48,6 +48,11 @@ if(MSVC)
     # (value_type_info.cpp) has more sections than an object file allows by
     # default (C1128).
     add_compile_options(/bigobj)
+    # PDBs for Release too, so a crash dump of it names usdcc's own frames
+    # (tools/analyze_crash.py). They don't change the code: /OPT:REF and
+    # /OPT:ICF restore what /DEBUG turns off by default.
+    add_compile_options($<$<CONFIG:Release>:/Zi>)
+    add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
     # C++ exceptions, without /EHsc's "extern C functions never throw": a C++
     # plugin's entry points are extern "C" and may throw, and the app catches
     # that and fails the plugin (docs/PLUGIN_SDK.md). Under /EHsc that's
@@ -252,3 +257,7 @@ endif()
 # Set here (rather than left to whoever opens the generated .sln) so it
 # survives every CMake reconfigure instead of reverting to CMakePredefinedTargets.
 set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT usdcc)
+
+# Last, once every target exists: keep each build's PDBs and binaries.
+include(UsdccSymbols)
+usdcc_archive_symbols()
