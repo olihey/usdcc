@@ -126,6 +126,7 @@ private:
         properties::PropertyEditor* editor;
         std::function<PXR_NS::VtValue(const LayerEntry&)> value;
         std::function<bool(const LayerEntry&)> authored;  // unauthored look when false
+        std::function<void(const LayerEntry&)> update;    // anything else to refill (a warning, a button)
     };
 
     QTreeWidget* m_tree;

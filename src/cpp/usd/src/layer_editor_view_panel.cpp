@@ -17,6 +17,8 @@
 
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/tokens.h>
 
 #include <QAction>
 #include <QApplication>
@@ -77,6 +79,23 @@ QString realPath(const LayerEntry& entry) {
 }
 
 constexpr auto kEditNewLayerKey = "Layers/editNewLayer";
+
+// "0.01 (centimeters)", or the number alone for a unit without a name.
+QString unitsText(double metersPerUnit) {
+    using Units = PXR_NS::UsdGeomLinearUnits;
+    const QString number = QString::number(metersPerUnit, 'g', 6);
+    for (const auto& [units, name] : {std::pair{Units::millimeters, QObject::tr("millimeters")},
+                                      std::pair{Units::centimeters, QObject::tr("centimeters")},
+                                      std::pair{Units::decimeters, QObject::tr("decimeters")},
+                                      std::pair{Units::meters, QObject::tr("meters")},
+                                      std::pair{Units::kilometers, QObject::tr("kilometers")},
+                                      std::pair{Units::inches, QObject::tr("inches")},
+                                      std::pair{Units::feet, QObject::tr("feet")},
+                                      std::pair{Units::yards, QObject::tr("yards")}}) {
+        if (PXR_NS::UsdGeomLinearUnitsAre(metersPerUnit, units)) return QStringLiteral("%1 (%2)").arg(number, name);
+    }
+    return number;
+}
 
 // A drop above or below a sibling reorders the sublayers (through
 // `onMove`); every other drop is refused. The tree itself never moves an
@@ -681,6 +700,7 @@ void LayerEditorViewPanel::updateProperties() {
     }
     if (!entry) return;
     for (const PropertyField& field : m_fields) {
+        if (field.update) field.update(*entry);
         if (field.editor->isAncestorOf(QApplication::focusWidget())) continue;
         field.editor->setValue(field.value(*entry));
         if (field.authored) field.row->setUnauthored(!field.authored(*entry));
@@ -763,17 +783,90 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
         offsetField(tr("Time Scale"), true);
     }
 
-    PropertyEditor* defaultPrim = addField(
-        tr("Default Prim"), createPropertyEditor(PXR_NS::SdfValueTypeNames->String),
-        [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
-        [](const LayerEntry& e) { return e.layer->HasDefaultPrim(); });
-    connect(defaultPrim, &PropertyEditor::valueEdited, this, [edit, stringOf, name](const PXR_NS::VtValue& v) {
-        const std::string prim = stringOf(v);
-        edit(tr("Set Default Prim of %1").arg(name), [prim](const PXR_NS::SdfLayerHandle& layer) {
-            prim.empty() ? layer->ClearDefaultPrim() : layer->SetDefaultPrim(PXR_NS::TfToken(prim));
-            return true;
+    // The default prim, as authored (a root prim's name, or a path): shown, not
+    // set here. Its button finds it in Show Prims, on the layer alone.
+    {
+        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
+        editor->setReadOnly(true);
+        auto* show = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"), tr("Show it in Show Prims"));
+        connect(show, &QToolButton::clicked, this, [this, identifier]() {
+            const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
+            if (!layer || !layer->HasDefaultPrim()) return;
+            if (PrimTreeDialog* dialog = showPrimTree(qs(identifier), this)) {
+                dialog->selectWhenLoaded(layer->GetDefaultPrimAsPath());
+            }
         });
-    });
+        addField(
+            tr("Default Prim"), editor, [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
+            [](const LayerEntry& e) { return e.layer->HasDefaultPrim(); });
+        m_fields.back().row->addTrailingWidget(show);
+        m_fields.back().update = [show](const LayerEntry& e) { show->setEnabled(e.layer->HasDefaultPrim()); };
+    }
+
+    // Up axis and meters per unit, as this layer says (UsdGeom's fallback
+    // when it doesn't). A sublayer saying otherwise than the stage gets a
+    // warning: its content is likely to come in rotated or scaled.
+    const bool checkStage = !entry->root && !entry->session;
+    auto info = [](const LayerEntry& e, const PXR_NS::TfToken& key) { return e.layer->GetPseudoRoot()->GetInfo(key); };
+    auto hasInfo = [](const LayerEntry& e, const PXR_NS::TfToken& key) { return e.layer->GetPseudoRoot()->HasInfo(key); };
+    {
+        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
+        editor->setReadOnly(true);
+        auto axisOf = [info, hasInfo](const LayerEntry& e) {
+            const PXR_NS::VtValue value = info(e, PXR_NS::UsdGeomTokens->upAxis);
+            return hasInfo(e, PXR_NS::UsdGeomTokens->upAxis) && value.IsHolding<PXR_NS::TfToken>()
+                       ? value.UncheckedGet<PXR_NS::TfToken>()
+                       : PXR_NS::UsdGeomGetFallbackUpAxis();
+        };
+        addField(
+            tr("Up Axis"), editor, [text, axisOf](const LayerEntry& e) { return text(axisOf(e).GetString()); },
+            [hasInfo](const LayerEntry& e) { return hasInfo(e, PXR_NS::UsdGeomTokens->upAxis); });
+        properties::PropertyRow* row = m_fields.back().row;
+        m_fields.back().update = [this, row, axisOf, hasInfo, checkStage](const LayerEntry& e) {
+            QString warning;
+            QString tip;
+            if (checkStage && currentStage() && hasInfo(e, PXR_NS::UsdGeomTokens->upAxis)) {
+                const PXR_NS::TfToken stageAxis = PXR_NS::UsdGeomGetStageUpAxis(currentStage()->usdStage());
+                const PXR_NS::TfToken axis = axisOf(e);
+                if (axis != stageAxis) {
+                    warning = tr("The stage is %1 up").arg(qs(stageAxis.GetString()));
+                    tip = tr("This layer is %1 up, the stage it's in %2 up: its content may come in rotated.")
+                              .arg(qs(axis.GetString()), qs(stageAxis.GetString()));
+                }
+            }
+            row->setSubLine(warning, tip, /*warning=*/true);
+        };
+    }
+    {
+        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->Double);
+        editor->setReadOnly(true);
+        auto unitsOf = [info, hasInfo](const LayerEntry& e) {
+            const PXR_NS::VtValue value = info(e, PXR_NS::UsdGeomTokens->metersPerUnit);
+            return hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit) && value.IsHolding<double>()
+                       ? value.UncheckedGet<double>()
+                       : PXR_NS::UsdGeomLinearUnits::centimeters;
+        };
+        addField(
+            tr("Meters per Unit"), editor, [unitsOf](const LayerEntry& e) { return PXR_NS::VtValue(unitsOf(e)); },
+            [hasInfo](const LayerEntry& e) { return hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit); });
+        properties::PropertyRow* row = m_fields.back().row;
+        m_fields.back().update = [this, row, unitsOf, hasInfo, checkStage](const LayerEntry& e) {
+            QString warning;
+            QString tip;
+            if (checkStage && currentStage() && hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit)) {
+                const double stageUnits = PXR_NS::UsdGeomGetStageMetersPerUnit(currentStage()->usdStage());
+                const double units = unitsOf(e);
+                if (!PXR_NS::UsdGeomLinearUnitsAre(units, stageUnits)) {
+                    warning = tr("The stage uses %1").arg(unitsText(stageUnits));
+                    tip = tr("This layer uses %1, the stage it's in %2: its content may come in %3 times too %4.")
+                              .arg(unitsText(units), unitsText(stageUnits))
+                              .arg(units > stageUnits ? units / stageUnits : stageUnits / units, 0, 'g', 4)
+                              .arg(units > stageUnits ? tr("small") : tr("large"));
+                }
+            }
+            row->setSubLine(warning, tip, /*warning=*/true);
+        };
+    }
 
     // The layer's time metadata: shown unauthored (with USD's fallback) until set.
     struct TimeField {

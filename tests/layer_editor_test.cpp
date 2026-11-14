@@ -11,17 +11,20 @@
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/tokens.h>
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonObject>
+#include <QLabel>
 #include <QMenu>
 #include <QScrollArea>
 #include <QSplitter>
@@ -452,11 +455,7 @@ USDCC_TEST(layer_editor_save_and_properties) {
     }
     CHECK(defaultPrim && timeScale, "Default Prim and (for a sublayer) Time Scale rows");
     if (!defaultPrim || !timeScale) return;
-    Q_EMIT defaultPrim->editor()->valueEdited(VtValue(std::string("Walk")));
-    CHECK(anim->GetDefaultPrim() == TfToken("Walk") && stack->undoText() == "Set Default Prim of anim.usda",
-          "Default Prim: set, as an undo step: [%s]", qPrintable(stack->undoText()));
-    stack->undo();
-    CHECK(!anim->HasDefaultPrim(), "undo clears it");
+    CHECK(defaultPrim->editor()->isReadOnly(), "Default Prim is read-only");
     timeScale->editor()->setValue(VtValue(2.0));
     Q_EMIT timeScale->editor()->editFinished();
     CHECK(root->GetSubLayerOffset(1).GetScale() == 2.0, "Time Scale sets its offset in the parent: [%g]",
@@ -601,5 +600,120 @@ USDCC_TEST(layer_editor_properties_collapse) {
     QApplication::processEvents();
     CHECK(!panel.isPropertiesCollapsed() && scroll->isVisible() && splitter->sizes() == open,
           "unfolded to the sizes it had: [%d, %d]", splitter->sizes()[0], splitter->sizes()[1]);
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Up Axis and Meters per Unit: a sublayer authoring other values than the
+// stage's gets a warning; Default Prim's button shows it in Show Prims.
+USDCC_TEST(layer_editor_metrics_and_default_prim) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+        QFile file(dir.filePath(name));
+        if (file.open(QIODevice::WriteOnly)) file.write(text);
+    };
+    write(QStringLiteral("zup.usda"),
+          "#usda 1.0\n(\n    defaultPrim = \"World\"\n    metersPerUnit = 1\n    upAxis = \"Z\"\n)\n"
+          "def \"World\"\n{\n    def \"Asset\"\n    {\n    }\n}\n");
+    write(QStringLiteral("same.usda"), "#usda 1.0\n(\n    metersPerUnit = 0.01\n    upAxis = \"Y\"\n)\n");
+    write(QStringLiteral("plain.usda"), "#usda 1.0\n");
+    write(QStringLiteral("shot.usda"),
+          "#usda 1.0\n(\n    metersPerUnit = 0.01\n    upAxis = \"Y\"\n"
+          "    subLayers = [@./zup.usda@, @./same.usda@, @./plain.usda@]\n)\n");
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.resize(500, 900);
+    panel.show();
+    auto* tree = panel.findChild<QTreeWidget*>();
+    using usdcc::usd::properties::PropertyRow;
+    auto select = [&](const QString& file) {
+        const SdfLayerHandle layer = SdfLayer::Find(dir.filePath(file).toStdString());
+        QTreeWidgetItem* item = layer ? panel.itemFor(layer->GetIdentifier()) : nullptr;
+        if (item) {
+            tree->clearSelection();
+            tree->setCurrentItem(item);
+        }
+        return item != nullptr;
+    };
+    auto row = [&](const QString& label) -> PropertyRow* {
+        for (auto* r : panel.findChildren<PropertyRow*>()) {
+            if (r->labelText() == label) return r;
+        }
+        return nullptr;
+    };
+    auto shown = [&](const QString& label) {
+        PropertyRow* r = row(label);
+        const VtValue v = r ? r->editor()->value() : VtValue();
+        return v.IsHolding<std::string>() ? QString::fromStdString(v.UncheckedGet<std::string>())
+               : v.IsHolding<double>()    ? QString::number(v.UncheckedGet<double>())
+                                          : QString();
+    };
+    auto warning = [&](const QString& label) {
+        PropertyRow* r = row(label);
+        if (!r) return QString();
+        for (auto* l : r->findChildren<QLabel*>()) {
+            if (!l->isHidden() && l->text().startsWith("The stage")) return l->text();
+        }
+        return QString();
+    };
+
+    CHECK(select("zup.usda"), "select zup.usda");
+    CHECK(shown("Up Axis") == "Z" && shown("Meters per Unit") == "1", "its own values: [%s] [%s]",
+          qPrintable(shown("Up Axis")), qPrintable(shown("Meters per Unit")));
+    CHECK(warning("Up Axis") == "The stage is Y up", "an up axis warning: [%s]", qPrintable(warning("Up Axis")));
+    CHECK(warning("Meters per Unit") == "The stage uses 0.01 (centimeters)", "a units warning: [%s]",
+          qPrintable(warning("Meters per Unit")));
+    CHECK(row("Up Axis")->editor()->isReadOnly() && row("Meters per Unit")->editor()->isReadOnly(), "both read-only");
+    CHECK(shown("Default Prim") == "World" && row("Default Prim")->editor()->isReadOnly(), "Default Prim World, read-only");
+
+    // Its button: Show Prims on the layer, the default prim selected.
+    QToolButton* showButton = nullptr;
+    for (auto* b : row("Default Prim")->findChildren<QToolButton*>()) {
+        if (b->toolTip() == "Show it in Show Prims") showButton = b;
+    }
+    CHECK(showButton && showButton->isEnabled(), "a Show Prims button");
+    if (showButton) {
+        showButton->click();
+        usdcc::usd::PrimTreeDialog* dialog = nullptr;
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 10000) {
+            QApplication::processEvents();
+            for (QWidget* w : QApplication::topLevelWidgets()) {
+                if (auto* d = qobject_cast<usdcc::usd::PrimTreeDialog*>(w)) dialog = d;
+            }
+            if (dialog && dialog->isStageLoaded()) break;
+        }
+        CHECK(dialog && dialog->isStageLoaded() && dialog->selectedPath() == SdfPath("/World"),
+              "Show Prims with /World selected: [%s]", dialog ? dialog->selectedPath().GetText() : "no dialog");
+        if (dialog) dialog->close();
+        QApplication::processEvents();
+    }
+
+    // The stage's own values, and none at all: no warning.
+    CHECK(select("same.usda") && warning("Up Axis").isEmpty() && warning("Meters per Unit").isEmpty(),
+          "the same values: no warning");
+    CHECK(select("plain.usda") && warning("Up Axis").isEmpty() && warning("Meters per Unit").isEmpty() &&
+              shown("Up Axis") == "Y" && shown("Meters per Unit") == "0.01",
+          "unauthored: the fallback, no warning: [%s] [%s]", qPrintable(shown("Up Axis")),
+          qPrintable(shown("Meters per Unit")));
+    QToolButton* plainShow = nullptr;
+    for (auto* b : row("Default Prim")->findChildren<QToolButton*>()) plainShow = b;
+    CHECK(plainShow && !plainShow->isEnabled(), "no default prim: the button is off");
+    CHECK(select("shot.usda") && warning("Up Axis").isEmpty(), "the root layer: no warning");
+
+    // The stage turns Z up: the warnings follow.
+    stage->usdStage()->GetRootLayer()->GetPseudoRoot()->SetInfo(UsdGeomTokens->upAxis, VtValue(TfToken("Z")));
+    settle();
+    CHECK(select("zup.usda") && warning("Up Axis").isEmpty(), "the stage Z up now: no up axis warning");
+    CHECK(select("same.usda") && warning("Up Axis") == "The stage is Z up", "but same.usda gets one: [%s]",
+          qPrintable(warning("Up Axis")));
     QStandardPaths::setTestModeEnabled(false);
 }

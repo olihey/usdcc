@@ -93,6 +93,10 @@ void PrimTreeDialog::onStageLoaded(const StageRefPtr& stage, const QString& erro
     m_stage = stage;
     m_tree->setStage(stage->usdStage());
     m_tree->filterBar()->setEnabled(true);
+    if (!m_selectOnLoad.IsEmpty()) {
+        m_tree->selectPath(m_selectOnLoad);
+        m_selectOnLoad = PXR_NS::SdfPath();
+    }
     // Layers are shared with the app's stages, so its edits can recompose this
     // one; only the ones that touch the hierarchy rebuild the tree.
     m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
@@ -110,6 +114,16 @@ void PrimTreeDialog::onStageLoaded(const StageRefPtr& stage, const QString& erro
 }
 
 void PrimTreeDialog::setFilter(const QString& text) { m_tree->setFilter(text); }
+
+void PrimTreeDialog::selectWhenLoaded(const PXR_NS::SdfPath& path) {
+    if (m_stage) {
+        m_tree->selectPath(path);
+    } else if (!m_loaded) {
+        m_selectOnLoad = path;
+    }
+}
+
+PXR_NS::SdfPath PrimTreeDialog::selectedPath() const { return m_tree->selectedPath(); }
 
 void PrimTreeDialog::updateStatus() {
     if (!m_stage) return;
