@@ -92,6 +92,11 @@ public:
     bool flattenSublayers(const std::string& identifier);
     bool flattenToFile(const std::string& identifier, const QString& file = QString());
 
+    // The pencil on the Layer Properties header: every property of the layer
+    // that can change, in a LayerPropertiesDialog; OK sets them as one undo
+    // step (layer_actions::setLayerProperties()). True if something changed.
+    bool editLayerProperties(const std::string& identifier);
+
     // The layer properties under the tree fold to their header (click it);
     // the panel's session state keeps it, with the splitter's sizes.
     bool isPropertiesCollapsed() const { return m_propertiesCollapsed; }
@@ -126,10 +131,11 @@ private:
     void reloadLayer(const std::string& identifier);
     // What Save and Ctrl+S save: the selected layer, else the edit target.
     std::string layerToSave() const;
-    // The properties under the tree, for the selected layer (§6): read-only
-    // identifier, file and format; its time offset and scale in its parent;
-    // its default prim, time codes, comment and documentation, each edit one
-    // undo step. Rebuilt for another layer, else only refilled.
+    // The properties under the tree, for the selected layer (§6), all
+    // read-only: identifier, file and format; its time offset and scale in its
+    // parent; its default prim, up axis, meters per unit, time codes, comment
+    // and documentation. The header's pencil edits them (editLayerProperties()).
+    // Rebuilt for another layer, else only refilled.
     void updateProperties();
     void rebuildProperties(const LayerEntry* entry, bool sublayer);
     struct PropertyField {
@@ -147,6 +153,7 @@ private:
     QSplitter* m_splitter;
     QWidget* m_propertiesPane;  // the header and the scroll area
     QToolButton* m_propertiesHeader;
+    QToolButton* m_editProperties;
     QScrollArea* m_propertiesScroll;
     bool m_propertiesCollapsed = false;
     QList<int> m_expandedSizes;  // the splitter's, from before it folded

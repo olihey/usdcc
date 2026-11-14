@@ -6,6 +6,7 @@
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/layer_properties_dialog.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -264,6 +265,11 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
             [this]() { setPropertiesCollapsed(!m_propertiesCollapsed); });
     headerLayout->addWidget(m_propertiesHeader);
     headerLayout->addStretch(1);
+    // Edit: every property of the selected layer that can change, in a dialog.
+    m_editProperties = properties::iconButton(QStringLiteral(":/usdcc/theme/pencil.png"),
+                                              tr("Edit the layer's properties..."), headerRow);
+    connect(m_editProperties, &QToolButton::clicked, this, [this]() { editLayerProperties(selectedIdentifier()); });
+    headerLayout->addWidget(m_editProperties);
     paneLayout->addWidget(headerRow);
     m_propertiesScroll = new QScrollArea(m_propertiesPane);
     m_propertiesScroll->setWidgetResizable(true);
@@ -819,6 +825,7 @@ void LayerEditorViewPanel::updateProperties() {
     // a field being typed in keeps its text.
     const std::string key = entry ? identifier + (sublayer ? "|sublayer" : "") + (entry->layer ? "" : "|missing")
                                   : std::string();
+    m_editProperties->setEnabled(entry && entry->layer && currentStage() && m_undoManager);
     if (key != m_propertiesFor || m_properties->findChildren<QWidget*>().isEmpty()) {
         m_propertiesFor = key;
         rebuildProperties(entry, sublayer);
@@ -857,10 +864,10 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     }
 
     using namespace usdcc::usd::properties;
-    const std::string identifier = entry->identifier;
-    const QString name = entry->session ? tr("the session layer") : qs(entry->displayName);
+    // Every row read-only: the header's pencil edits them, in a dialog.
     auto addField = [this](const QString& label, PropertyEditor* editor, std::function<PXR_NS::VtValue(const LayerEntry&)> value,
                            std::function<bool(const LayerEntry&)> authored = {}) {
+        editor->setReadOnly(true);
         auto* row = new PropertyRow(label, editor, m_properties);
         row->setLabelWidth(130);
         m_propertiesLayout->addWidget(row);
@@ -868,18 +875,9 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
         return editor;
     };
     auto readOnly = [&](const QString& label, std::function<PXR_NS::VtValue(const LayerEntry&)> value) {
-        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
-        editor->setReadOnly(true);
-        addField(label, editor, std::move(value));
-    };
-    // An edit of the layer itself, one undo step; muted layers send no change
-    // notice, so the tree is refreshed here too.
-    auto edit = [this, identifier](const QString& description, std::function<bool(const PXR_NS::SdfLayerHandle&)> change) {
-        layer_actions::editLayer(*m_undoManager, currentStage(), identifier, description, change);
-        m_refreshTimer->start();
+        addField(label, createPropertyEditor(PXR_NS::SdfValueTypeNames->String), std::move(value));
     };
     auto text = [](const std::string& s) { return PXR_NS::VtValue(s); };
-    auto stringOf = [](const PXR_NS::VtValue& v) { return v.IsHolding<std::string>() ? v.UncheckedGet<std::string>() : std::string(); };
 
     readOnly(tr("Identifier"), [text](const LayerEntry& e) { return text(e.identifier); });
     readOnly(tr("File"), [text](const LayerEntry& e) {
@@ -891,29 +889,19 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     if (sublayer) {
         // Its offset and scale in the parent's subLayerOffsets.
         auto offsetField = [&](const QString& label, bool scale) {
-            PropertyEditor* editor = addField(
+            addField(
                 label, createPropertyEditor(PXR_NS::SdfValueTypeNames->Double),
                 [scale](const LayerEntry& e) { return PXR_NS::VtValue(scale ? e.offset.GetScale() : e.offset.GetOffset()); },
                 [](const LayerEntry& e) { return !e.offset.IsIdentity(); });
-            connect(editor, &PropertyEditor::editFinished, this, [this, editor, identifier, scale]() {
-                const PXR_NS::VtValue v = editor->value();
-                const LayerEntry* e = entryFor(identifier);
-                if (!e || !v.IsHolding<double>()) return;
-                PXR_NS::SdfLayerOffset offset = e->offset;
-                scale ? offset.SetScale(v.UncheckedGet<double>()) : offset.SetOffset(v.UncheckedGet<double>());
-                layer_actions::setSublayerOffset(*m_undoManager, currentStage(), identifier, offset);
-            });
         };
         offsetField(tr("Time Offset"), false);
         offsetField(tr("Time Scale"), true);
     }
 
-    // The default prim, as authored (a root prim's name, or a path): shown, not set here.
+    // The default prim, as authored (a root prim's name, or a path).
     {
-        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
-        editor->setReadOnly(true);
         addField(
-            tr("Default Prim"), editor, [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
+            tr("Default Prim"), createPropertyEditor(PXR_NS::SdfValueTypeNames->String), [text](const LayerEntry& e) { return text(e.layer->GetDefaultPrim().GetString()); },
             [](const LayerEntry& e) { return e.layer->HasDefaultPrim(); });
     }
 
@@ -925,7 +913,6 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     auto hasInfo = [](const LayerEntry& e, const PXR_NS::TfToken& key) { return e.layer->GetPseudoRoot()->HasInfo(key); };
     {
         PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
-        editor->setReadOnly(true);
         auto axisOf = [info, hasInfo](const LayerEntry& e) {
             const PXR_NS::VtValue value = info(e, PXR_NS::UsdGeomTokens->upAxis);
             return hasInfo(e, PXR_NS::UsdGeomTokens->upAxis) && value.IsHolding<PXR_NS::TfToken>()
@@ -953,7 +940,6 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     }
     {
         PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->Double);
-        editor->setReadOnly(true);
         auto unitsOf = [info, hasInfo](const LayerEntry& e) {
             const PXR_NS::VtValue value = info(e, PXR_NS::UsdGeomTokens->metersPerUnit);
             return hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit) && value.IsHolding<double>()
@@ -987,56 +973,48 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
         QString label;
         double (PXR_NS::SdfLayer::*get)() const;
         bool (PXR_NS::SdfLayer::*has)() const;
-        void (PXR_NS::SdfLayer::*set)(double);
     };
     for (const TimeField& field : {TimeField{tr("Start Time Code"), &PXR_NS::SdfLayer::GetStartTimeCode,
-                                             &PXR_NS::SdfLayer::HasStartTimeCode, &PXR_NS::SdfLayer::SetStartTimeCode},
+                                             &PXR_NS::SdfLayer::HasStartTimeCode},
                                    TimeField{tr("End Time Code"), &PXR_NS::SdfLayer::GetEndTimeCode,
-                                             &PXR_NS::SdfLayer::HasEndTimeCode, &PXR_NS::SdfLayer::SetEndTimeCode},
+                                             &PXR_NS::SdfLayer::HasEndTimeCode},
                                    TimeField{tr("Time Codes per Second"), &PXR_NS::SdfLayer::GetTimeCodesPerSecond,
-                                             &PXR_NS::SdfLayer::HasTimeCodesPerSecond,
-                                             &PXR_NS::SdfLayer::SetTimeCodesPerSecond},
+                                             &PXR_NS::SdfLayer::HasTimeCodesPerSecond},
                                    TimeField{tr("Frames per Second"), &PXR_NS::SdfLayer::GetFramesPerSecond,
-                                             &PXR_NS::SdfLayer::HasFramesPerSecond, &PXR_NS::SdfLayer::SetFramesPerSecond}}) {
+                                             &PXR_NS::SdfLayer::HasFramesPerSecond}}) {
         const TimeField f = field;
-        PropertyEditor* editor = addField(
+        addField(
             f.label, createPropertyEditor(PXR_NS::SdfValueTypeNames->Double),
             [f](const LayerEntry& e) { return PXR_NS::VtValue(((*e.layer).*f.get)()); },
             [f](const LayerEntry& e) { return ((*e.layer).*f.has)(); });
-        connect(editor, &PropertyEditor::editFinished, this, [edit, editor, f, name]() {
-            const PXR_NS::VtValue v = editor->value();
-            if (!v.IsHolding<double>()) return;
-            const double value = v.UncheckedGet<double>();
-            edit(tr("Set %1 of %2").arg(f.label, name), [f, value](const PXR_NS::SdfLayerHandle& layer) {
-                if (((*layer).*f.has)() && ((*layer).*f.get)() == value) return true;  // nothing to change
-                ((*layer).*f.set)(value);
-                return true;
-            });
-        });
     }
 
     struct TextField {
         QString label;
         std::string (PXR_NS::SdfLayer::*get)() const;
-        void (PXR_NS::SdfLayer::*set)(const std::string&);
     };
-    for (const TextField& field : {TextField{tr("Comment"), &PXR_NS::SdfLayer::GetComment, &PXR_NS::SdfLayer::SetComment},
-                                   TextField{tr("Documentation"), &PXR_NS::SdfLayer::GetDocumentation,
-                                             &PXR_NS::SdfLayer::SetDocumentation}}) {
+    for (const TextField& field : {TextField{tr("Comment"), &PXR_NS::SdfLayer::GetComment},
+                                   TextField{tr("Documentation"), &PXR_NS::SdfLayer::GetDocumentation}}) {
         const TextField f = field;
-        PropertyEditor* editor =
-            addField(f.label, createPropertyEditor(PXR_NS::SdfValueTypeNames->String),
-                     [f, text](const LayerEntry& e) { return text(((*e.layer).*f.get)()); },
-                     [f](const LayerEntry& e) { return !((*e.layer).*f.get)().empty(); });
-        connect(editor, &PropertyEditor::valueEdited, this, [edit, stringOf, f, name](const PXR_NS::VtValue& v) {
-            const std::string value = stringOf(v);
-            edit(tr("Set %1 of %2").arg(f.label, name), [f, value](const PXR_NS::SdfLayerHandle& layer) {
-                ((*layer).*f.set)(value);
-                return true;
-            });
-        });
+        addField(f.label, createPropertyEditor(PXR_NS::SdfValueTypeNames->String),
+                 [f, text](const LayerEntry& e) { return text(((*e.layer).*f.get)()); },
+                 [f](const LayerEntry& e) { return !((*e.layer).*f.get)().empty(); });
     }
     m_propertiesLayout->addStretch(1);
+}
+
+bool LayerEditorViewPanel::editLayerProperties(const std::string& identifier) {
+    layer_actions::LayerProperties current;
+    bool sublayer = false;
+    if (!currentStage() || !m_undoManager ||
+        !layer_actions::layerProperties(currentStage(), identifier, &current, &sublayer)) {
+        return false;
+    }
+    LayerPropertiesDialog dialog(PXR_NS::SdfLayer::Find(identifier), current, sublayer, this);
+    if (dialog.exec() != QDialog::Accepted) return false;
+    const bool changed = layer_actions::setLayerProperties(*m_undoManager, currentStage(), identifier, dialog.values());
+    m_refreshTimer->start();  // a muted layer's edits send no change notice
+    return changed;
 }
 
 void LayerEditorViewPanel::moveBy(const std::string& identifier, int delta) {

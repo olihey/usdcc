@@ -6,6 +6,7 @@
 #include <QString>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -116,6 +117,32 @@ std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::
 // to still find the same files from `path`'s folder. Its sublayers' own unsaved
 // edits stay where they are. False, with `error` set, if it can't.
 bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* error);
+
+// What the Edit Layer Properties dialog changes (§6): the layer's metadata,
+// each empty optional unset (USD's fallback), and for a sublayer its time
+// offset and scale in its parent.
+struct LayerProperties {
+    std::optional<std::string> defaultPrim;  // a root prim's name, or a prim path
+    std::optional<std::string> upAxis;       // "Y" or "Z"
+    std::optional<double> metersPerUnit;
+    std::optional<double> startTimeCode;
+    std::optional<double> endTimeCode;
+    std::optional<double> timeCodesPerSecond;
+    std::optional<double> framesPerSecond;
+    std::string comment;
+    std::string documentation;
+    PXR_NS::SdfLayerOffset offset;  // only for a sublayer
+    bool operator==(const LayerProperties&) const = default;
+};
+// The layer `identifier`'s properties as they are; false if it isn't open
+// in the stage's layer stack. `sublayer` says whether it has a parent here
+// (and so an offset).
+bool layerProperties(const StageRefPtr& stage, const std::string& identifier, LayerProperties* properties,
+                     bool* sublayer = nullptr);
+// Sets them, as one undo step on the layer and (for an offset) its parent:
+// "Edit Properties of anim.usda". False when nothing changes.
+bool setLayerProperties(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                        const LayerProperties& properties);
 
 // Layer properties (§6), each one undo step. editLayer() runs `edit` on the
 // layer `identifier` (its default prim, time codes, comment, ...);

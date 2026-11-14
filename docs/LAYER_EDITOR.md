@@ -141,14 +141,20 @@ The app has no saving yet, and a layer editor that can create layers needs it:
 
 ## 6. Layer properties
 
-Under the tree, for the selected layer, editable as Attribute Editor rows (each one undo step):
+Under the tree, for the selected layer, as Attribute Editor rows, all read-only since phase 4:
 
+- Identifier, real path and file format.
 - Its time offset and scale in its parent (the `subLayerOffsets` entry).
+- Default prim, up axis and meters per unit (with an amber warning when a sublayer's differ
+  from the stage's).
 - Start and end time codes, time codes per second and frames per second.
-- Read-only since phase 4: the default prim, up axis and meters per
-  unit (with a warning when a sublayer's differ from the stage's).
 - Comment and documentation.
-- Read-only: identifier, real path, file format, and whether it has unsaved changes.
+
+The pencil on the Layer Properties header opens **Edit Layer Properties** (`LayerPropertiesDialog`)
+for the selected layer: every one of them that can change (all but identifier, path and format),
+filled from the layer. An empty field is unset, USD's fallback shown as its placeholder. OK sets
+them all as one undo step, "Edit Properties of anim.usda", on the layer and, for the offset, its
+parent (`layer_actions::setLayerProperties()`, through `UndoManager::applyAcrossLayers()`).
 
 Right-click also has Copy Path, Reveal in Explorer and Open as Stage (both shared with the
 Attribute Editor and the Dependencies panel), and Show in Dependencies.
@@ -244,7 +250,8 @@ Phase 3 as built:
   - It runs before File > Close Stage (and the Stages menu's Close Stage) and when the window
     closes, through the new `MainWindow::addCloseCheck()`.
   - A layer another stage that stays open still uses isn't asked about, since nothing is lost.
-- **Layer properties:** under the tree, in a splitter, for the selected layer:
+- **Layer properties:** under the tree, in a splitter, for the selected layer (phase 4 made
+  every row read-only and moved editing to a dialog):
   - Read-only: Identifier, File and Format.
   - For a sublayer: Time Offset and Time Scale in its parent.
   - Default Prim (read-only since phase 4), Start and End Time Code, Time Codes per Second,
@@ -261,7 +268,12 @@ Phase 4 as built:
 - **Reload** checked against files changed outside the app (§5); it needed no change.
 - **Layer Properties fold** to a header above them; folded, the tree takes the room. The panel's
   session state (and a duplicate) keeps it, with the splitter's sizes to unfold to.
-- **Default Prim is read-only** now, shown as authored (a root prim's name, or a path).
+- **Layer Properties are read-only**, every row. The pencil on their header opens Edit Layer
+  Properties, a dialog with all that can change (§6): Default Prim (a name or a path), Up Axis
+  (unset, Y, Z), Meters per Unit (the common units, or any number), the four time fields, Time
+  Offset and Time Scale (a sublayer's), Comment and Documentation. Empty is unset. OK is off
+  while a value can't be used (a bad prim name, a rate or units not above 0, a scale of 0); an
+  end before the start only warns, in amber. One undo step for all of it.
 - **Up Axis and Meters per Unit** (read-only): the layer's own metadata, USD's fallback (shown
   unauthored) when it has none. A sublayer that authors other values than its stage
   (`UsdGeomGetStageUpAxis()`, `UsdGeomGetStageMetersPerUnit()`) gets a warning line under the row,
@@ -295,4 +307,4 @@ Phase 4 as built:
 | **1. See and target** *(done)* | `LayerEditorViewPanel` (the tree, dirty and missing marks, the Target and Mute columns, the "Editing:" label); setting the edit target; `Stage::editTargetChanged`, followed by the Attribute Editor and a status-bar label; mute and unmute as undo steps; the `usdcc.usd` edit-target calls | The tree of a stage with nested and missing sublayers; setting the target sends the notice and edits land in that layer; mute/unmute and their undo; muting the target moves it |
 | **2. Add, remove, reorder** *(done)* | `layer_actions` (Qt-free where it can be): add in-memory, new-file and existing layers; remove; move up/down and drag within a parent; relative paths; `UndoManager::apply()` on a given layer; references kept to in-memory layers | Each action and its undo; the authored path; an in-memory layer's content surviving remove and undo |
 | **3. Save and properties** *(done)* | Save, Save As (file and in-memory), Save All; the unsaved-changes prompt on Close Stage and app exit; File > Save Stage; the layer properties rows | Save writes the file and clears the dirty mark; Save As on an in-memory layer swaps the sublayer path; the prompt's three answers |
-| **4. Polish** *(done)* | Folding properties; read-only Default Prim; Up Axis and Meters per Unit with mismatch warnings; Flatten Sublayers and Flatten to File; Save All button; Mute Others; mute icons | Reload after external changes (text and usdc); fold state in the session and a duplicate; the warnings and their refresh; flatten's offsets, muted layers, reanchored paths and undo; Mute Others' outermost-only rule, target move and undo; clicking the speaker |
+| **4. Polish** *(done)* | Folding properties; read-only properties with an Edit dialog; Up Axis and Meters per Unit with mismatch warnings; Flatten Sublayers and Flatten to File; Save All button; Mute Others; mute icons | Reload after external changes (text and usdc); fold state in the session and a duplicate; the warnings and their refresh; flatten's offsets, muted layers, reanchored paths and undo; Mute Others' outermost-only rule, target move and undo; clicking the speaker |

@@ -11,6 +11,7 @@
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/layer_properties_dialog.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -26,6 +27,10 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QToolButton>
@@ -472,23 +477,19 @@ USDCC_TEST(layer_editor_save_and_properties) {
           "Save All leaves nothing unsaved, and greys out");
     CHECK(usdcc::usd::confirmUnsavedLayers(&stages, {stage}, nullptr), "nothing unsaved: closing needn't ask");
 
-    // Properties: the selected layer's, each edit one undo step.
+    // Properties: the selected layer's, every row read-only.
     panel.refresh();
     panel.itemFor(animId)->setSelected(true);
     panel.findChild<QTreeWidget*>()->setCurrentItem(panel.itemFor(animId));
-    usdcc::usd::properties::PropertyRow* defaultPrim = nullptr;
-    usdcc::usd::properties::PropertyRow* timeScale = nullptr;
+    QStringList labels;
+    bool allReadOnly = true;
     for (auto* row : panel.findChildren<usdcc::usd::properties::PropertyRow*>()) {
-        if (row->labelText() == "Default Prim") defaultPrim = row;
-        if (row->labelText() == "Time Scale") timeScale = row;
+        labels << row->labelText();
+        allReadOnly = allReadOnly && row->editor()->isReadOnly();
     }
-    CHECK(defaultPrim && timeScale, "Default Prim and (for a sublayer) Time Scale rows");
-    if (!defaultPrim || !timeScale) return;
-    CHECK(defaultPrim->editor()->isReadOnly(), "Default Prim is read-only");
-    timeScale->editor()->setValue(VtValue(2.0));
-    Q_EMIT timeScale->editor()->editFinished();
-    CHECK(root->GetSubLayerOffset(1).GetScale() == 2.0, "Time Scale sets its offset in the parent: [%g]",
-          root->GetSubLayerOffset(1).GetScale());
+    CHECK(labels.contains("Default Prim") && labels.contains("Time Scale") && labels.contains("Comment"),
+          "Default Prim, (for a sublayer) Time Scale, Comment: [%s]", qPrintable(labels.join(", ")));
+    CHECK(allReadOnly, "every row read-only");
     QStandardPaths::setTestModeEnabled(false);
 }
 
@@ -898,5 +899,134 @@ USDCC_TEST(layer_actions_mute_others) {
     bool listed = false;
     for (QAction* action : menu.actions()) listed = listed || action->text() == "Mute Others";
     CHECK(listed, "Mute Others in a layer's menu");
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Edit Layer Properties: the pencil on the Layer Properties header, its dialog
+// filled from the layer, and every change one undo step on the layer and its parent.
+USDCC_TEST(layer_editor_properties_dialog) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    {
+        QFile anim(dir.filePath(QStringLiteral("anim.usda")));
+        if (anim.open(QIODevice::WriteOnly)) {
+            anim.write("#usda 1.0\n(\n    comment = \"old\"\n    framesPerSecond = 30\n)\ndef \"Walk\"\n{\n}\n");
+        }
+        QFile shot(dir.filePath(QStringLiteral("shot.usda")));
+        if (shot.open(QIODevice::WriteOnly)) shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\n");
+    }
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const SdfLayerHandle root = stage->usdStage()->GetRootLayer();
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    if (!anim) return;
+    const std::string animId = anim->GetIdentifier();
+    namespace actions = usdcc::usd::layer_actions;
+
+    // The pencil: off with nothing selected, on for an open layer.
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.show();
+    auto* tree = panel.findChild<QTreeWidget*>();
+    QToolButton* pencil = nullptr;
+    for (auto* b : panel.findChildren<QToolButton*>()) {
+        if (b->toolTip() == "Edit the layer's properties...") pencil = b;
+    }
+    CHECK(pencil, "a pencil on the Layer Properties header");
+    if (!pencil) return;
+    tree->clearSelection();
+    QApplication::processEvents();
+    CHECK(!pencil->isEnabled(), "nothing selected: off");
+    tree->setCurrentItem(panel.itemFor(animId));
+    QApplication::processEvents();
+    CHECK(pencil->isEnabled(), "a layer selected: on");
+
+    // The dialog, filled from the layer: authored values shown, the rest empty.
+    actions::LayerProperties current;
+    bool sublayer = false;
+    CHECK(actions::layerProperties(stage, animId, &current, &sublayer) && sublayer, "anim.usda's properties, a sublayer");
+    {
+        usdcc::usd::LayerPropertiesDialog dialog(anim, current, sublayer);
+        CHECK(dialog.commentField()->text() == "old" && dialog.framesPerSecondField()->text() == "30",
+              "authored: comment and fps shown");
+        CHECK(dialog.startTimeCodeField()->text().isEmpty() && !dialog.startTimeCodeField()->placeholderText().isEmpty() &&
+                  dialog.defaultPrimField()->text().isEmpty() && dialog.metersPerUnitCombo()->currentText().isEmpty(),
+              "unauthored: empty, the fallback as placeholder [%s]",
+              qPrintable(dialog.startTimeCodeField()->placeholderText()));
+        CHECK(dialog.timeOffsetField() && dialog.timeScaleField(), "offset and scale for a sublayer");
+        CHECK(dialog.values() == current, "unchanged, it gives back what it was given");
+
+        // What can't be used turns OK off; an end before the start only warns.
+        dialog.timeScaleField()->setText("0");
+        CHECK(!dialog.okButton()->isEnabled(), "a scale of 0: OK off");
+        dialog.timeScaleField()->setText("2");
+        dialog.framesPerSecondField()->setText("-1");
+        CHECK(!dialog.okButton()->isEnabled(), "a negative rate: OK off");
+        dialog.framesPerSecondField()->setText("abc");
+        CHECK(!dialog.okButton()->isEnabled(), "not a number: OK off");
+        dialog.framesPerSecondField()->setText("");
+        dialog.defaultPrimField()->setText("not a name!");
+        CHECK(!dialog.okButton()->isEnabled(), "a bad prim name: OK off");
+        dialog.defaultPrimField()->setText("/World/Walk");
+        dialog.startTimeCodeField()->setText("10");
+        dialog.endTimeCodeField()->setText("5");
+        CHECK(dialog.okButton()->isEnabled() && dialog.problemLabel()->isVisibleTo(&dialog) &&
+                  dialog.problemLabel()->property("caution").toBool(),
+              "end before start: a warning, OK on");
+        dialog.metersPerUnitCombo()->setCurrentIndex(4);  // 1 (meters)
+        dialog.upAxisCombo()->setCurrentIndex(2);         // Z
+        const actions::LayerProperties v = dialog.values();
+        CHECK(v.defaultPrim == std::optional<std::string>("/World/Walk") && v.upAxis == std::optional<std::string>("Z") &&
+                  v.metersPerUnit == std::optional<double>(1.0) && v.startTimeCode == std::optional<double>(10.0) &&
+                  !v.framesPerSecond && v.offset == SdfLayerOffset(0, 2),
+              "values(): what was typed, empty fps unset");
+    }
+    {
+        usdcc::usd::LayerPropertiesDialog rootDialog(root, current, false);
+        CHECK(!rootDialog.timeOffsetField() && !rootDialog.timeScaleField(), "no offset or scale for the root layer");
+    }
+
+    // Setting them: one undo step on anim.usda and, for the offset, shot.usda.
+    QUndoStack* stack = undo->stack(stage);
+    const int before = stack->count();
+    actions::LayerProperties wanted = current;
+    wanted.defaultPrim = "Walk";
+    wanted.upAxis = "Z";
+    wanted.metersPerUnit = 1.0;
+    wanted.startTimeCode = 1.0;
+    wanted.endTimeCode = 48.0;
+    wanted.framesPerSecond.reset();  // unset
+    wanted.comment = "new";
+    wanted.offset = SdfLayerOffset(10, 2);
+    CHECK(actions::setLayerProperties(*undo, stage, animId, wanted), "set them");
+    CHECK(anim->GetDefaultPrim() == TfToken("Walk") && anim->GetStartTimeCode() == 1.0 && anim->GetEndTimeCode() == 48.0 &&
+              !anim->HasFramesPerSecond() && anim->GetComment() == "new" &&
+              anim->GetPseudoRoot()->GetInfo(UsdGeomTokens->upAxis) == VtValue(TfToken("Z")) &&
+              anim->GetPseudoRoot()->GetInfo(UsdGeomTokens->metersPerUnit) == VtValue(1.0),
+          "all authored on anim.usda, fps cleared");
+    CHECK(root->GetSubLayerOffset(0) == SdfLayerOffset(10, 2), "the offset in shot.usda");
+    CHECK(stack->count() == before + 1 && stack->undoText() == "Edit Properties of anim.usda", "one undo step: [%s]",
+          qPrintable(stack->undoText()));
+    CHECK(!actions::setLayerProperties(*undo, stage, animId, wanted), "the same again: nothing to change");
+    stack->undo();
+    actions::LayerProperties after;
+    actions::layerProperties(stage, animId, &after);
+    CHECK(after == current, "undo: all as it was, the offset included");
+    stack->redo();
+    settle();
+
+    // The panel shows them, read-only.
+    tree->setCurrentItem(panel.itemFor(animId));
+    QApplication::processEvents();
+    QString comment;
+    for (auto* row : panel.findChildren<usdcc::usd::properties::PropertyRow*>()) {
+        if (row->labelText() == "Comment") comment = QString::fromStdString(row->editor()->value().Get<std::string>());
+    }
+    CHECK(comment == "new", "the panel shows the new comment: [%s]", qPrintable(comment));
     QStandardPaths::setTestModeEnabled(false);
 }

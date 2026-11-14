@@ -8,6 +8,7 @@
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/tokens.h>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -605,6 +606,93 @@ bool editLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& i
     const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier);
     if (!stage || !layer || !edit) return false;
     return undo.apply(stage, layer, description, [&]() { return edit(layer); });
+}
+
+bool layerProperties(const StageRefPtr& stage, const std::string& identifier, LayerProperties* properties,
+                     bool* sublayer) {
+    if (!stage || !properties) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = nullptr;
+    const LayerEntry* parent = nullptr;
+    int index = -1;
+    if (!locate(tree, identifier, nullptr, &entry, &parent, &index) || !entry->layer) return false;
+    const PXR_NS::SdfLayerHandle layer = entry->layer;
+    const PXR_NS::SdfPrimSpecHandle root = layer->GetPseudoRoot();
+    LayerProperties p;
+    if (layer->HasDefaultPrim()) p.defaultPrim = layer->GetDefaultPrim().GetString();
+    if (const PXR_NS::VtValue axis = root->GetInfo(PXR_NS::UsdGeomTokens->upAxis);
+        root->HasInfo(PXR_NS::UsdGeomTokens->upAxis) && axis.IsHolding<PXR_NS::TfToken>()) {
+        p.upAxis = axis.UncheckedGet<PXR_NS::TfToken>().GetString();
+    }
+    if (const PXR_NS::VtValue units = root->GetInfo(PXR_NS::UsdGeomTokens->metersPerUnit);
+        root->HasInfo(PXR_NS::UsdGeomTokens->metersPerUnit) && units.IsHolding<double>()) {
+        p.metersPerUnit = units.UncheckedGet<double>();
+    }
+    if (layer->HasStartTimeCode()) p.startTimeCode = layer->GetStartTimeCode();
+    if (layer->HasEndTimeCode()) p.endTimeCode = layer->GetEndTimeCode();
+    if (layer->HasTimeCodesPerSecond()) p.timeCodesPerSecond = layer->GetTimeCodesPerSecond();
+    if (layer->HasFramesPerSecond()) p.framesPerSecond = layer->GetFramesPerSecond();
+    p.comment = layer->GetComment();
+    p.documentation = layer->GetDocumentation();
+    p.offset = entry->offset;
+    *properties = p;
+    if (sublayer) *sublayer = parent && parent->layer && !entry->root && !entry->session;
+    return true;
+}
+
+bool setLayerProperties(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
+                        const LayerProperties& wanted) {
+    LayerProperties now;
+    bool sublayer = false;
+    if (!layerProperties(stage, identifier, &now, &sublayer)) return false;
+    if (!sublayer) now.offset = wanted.offset;  // there's none to set
+    if (wanted == now) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = nullptr;
+    const LayerEntry* parent = nullptr;
+    int index = -1;
+    if (!locate(tree, identifier, nullptr, &entry, &parent, &index)) return false;
+    const PXR_NS::SdfLayerHandle layer = entry->layer;
+    const bool offsetChanges = sublayer && wanted.offset != entry->offset;
+    std::vector<PXR_NS::SdfLayerHandle> layers{layer};
+    if (offsetChanges) layers.push_back(parent->layer);
+
+    auto setDouble = [](const std::optional<double>& from, const std::optional<double>& to, auto set, auto clear) {
+        if (from == to) return;
+        to ? set(*to) : clear();
+    };
+    return undo.applyAcrossLayers(
+        stage, layers, tr("Edit Properties of %1").arg(QString::fromStdString(entry->displayName)), [&]() {
+            PXR_NS::SdfChangeBlock block;
+            const PXR_NS::SdfPrimSpecHandle root = layer->GetPseudoRoot();
+            if (wanted.defaultPrim != now.defaultPrim) {
+                wanted.defaultPrim ? layer->SetDefaultPrim(PXR_NS::TfToken(*wanted.defaultPrim)) : layer->ClearDefaultPrim();
+            }
+            if (wanted.upAxis != now.upAxis) {
+                wanted.upAxis ? root->SetInfo(PXR_NS::UsdGeomTokens->upAxis, PXR_NS::VtValue(PXR_NS::TfToken(*wanted.upAxis)))
+                              : root->ClearInfo(PXR_NS::UsdGeomTokens->upAxis);
+            }
+            setDouble(
+                now.metersPerUnit, wanted.metersPerUnit,
+                [&](double v) { root->SetInfo(PXR_NS::UsdGeomTokens->metersPerUnit, PXR_NS::VtValue(v)); },
+                [&]() { root->ClearInfo(PXR_NS::UsdGeomTokens->metersPerUnit); });
+            setDouble(
+                now.startTimeCode, wanted.startTimeCode, [&](double v) { layer->SetStartTimeCode(v); },
+                [&]() { layer->ClearStartTimeCode(); });
+            setDouble(
+                now.endTimeCode, wanted.endTimeCode, [&](double v) { layer->SetEndTimeCode(v); },
+                [&]() { layer->ClearEndTimeCode(); });
+            setDouble(
+                now.timeCodesPerSecond, wanted.timeCodesPerSecond, [&](double v) { layer->SetTimeCodesPerSecond(v); },
+                [&]() { layer->ClearTimeCodesPerSecond(); });
+            setDouble(
+                now.framesPerSecond, wanted.framesPerSecond, [&](double v) { layer->SetFramesPerSecond(v); },
+                [&]() { layer->ClearFramesPerSecond(); });
+            if (wanted.comment != now.comment) layer->SetComment(wanted.comment);
+            if (wanted.documentation != now.documentation) layer->SetDocumentation(wanted.documentation);
+            if (offsetChanges) parent->layer->SetSubLayerOffset(wanted.offset, index);
+            return true;
+        });
 }
 
 bool setSublayerOffset(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier,
