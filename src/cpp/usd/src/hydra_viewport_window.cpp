@@ -135,6 +135,7 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     }
     m_stage = stage;
     m_firstFrameRendered = false;  // firstFrameRendered() is per stage
+    m_engineFailures = 0;
 
     // UsdImagingGLEngine::Render()/PrepareBatch() only populates its scene
     // index/delegate from a stage once (see the _isPopulated flag in
@@ -147,16 +148,39 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     // switching to a genuinely different plugin: tear down and rebuild the
     // whole engine. So that's what happens here whenever the stage actually
     // changes, preserving whichever renderer plugin was already selected.
-    if (m_engine) {
-        const PXR_NS::TfToken rendererPluginId = m_engine->GetCurrentRendererId();
-        m_context->makeCurrent(this);
-        m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
-        forgetRendererHalt();
-        m_engine->SetRendererPlugin(rendererPluginId);
-        configureEngine();
-    }
+    if (m_engine) rebuildEngine();
 
     renderNow();
+}
+
+void HydraViewportWindow::rebuildEngine() {
+    const PXR_NS::TfToken rendererPluginId = m_engine->GetCurrentRendererId();
+    m_context->makeCurrent(this);
+    m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
+    forgetRendererHalt();
+    m_engine->SetRendererPlugin(rendererPluginId);
+    configureEngine();
+}
+
+// OpenUSD's material cache (HdsiLocatorCachingSceneIndex, which UsdImaging puts after its
+// stage scene index) keys a shader by its path below the Material, "NodeGraph/tex", but a
+// change to a shader clears the entry named after the shader alone, "tex"
+// (UsdImagingMaterialAdapter::InvalidateImagingSubprimFromDescendent). Inside a NodeGraph the
+// two differ, so a shader removed and made again at the same path, as Undo and Redo of a
+// group do, stays cached with its old, expired prim. Storm reads it on the next sync and
+// UsdShade throws (tests/shade_imaging_test.cpp). A new engine has no cache, so it reads the
+// stage as it is. Done again for each failure, but asks for another frame only after the
+// first in a row: an engine that fails straight after a fresh start waits for the next edit
+// or camera move rather than spinning.
+void HydraViewportWindow::recoverFromEngineError(const char* during, const std::exception& error) {
+    ++m_engineFailures;
+    if (m_engineFailures == 1) {
+        USDCC_LOG_WARNING("usdcc.viewport", "Hydra failed while {}: {}. Starting it afresh.", during, error.what());
+    } else {
+        USDCC_LOG_DEBUG("usdcc.viewport", "Hydra failed while {} again: {}", during, error.what());
+    }
+    rebuildEngine();
+    if (m_engineFailures == 1) requestUpdate();
 }
 
 void HydraViewportWindow::ensureEngine() {
@@ -780,9 +804,15 @@ PXR_NS::SdfPath HydraViewportWindow::pickPrim(const PXR_NS::GfVec2d& ndcPos) {
 
     PXR_NS::UsdImagingGLEngine::IntersectionResultVector results;
     bindFramebuffer(w, h);  // as for rendering, see renderNow()
-    const bool hit = m_engine->TestIntersection(pickParams, pickFrustum.ComputeViewMatrix(),
-                                                 pickFrustum.ComputeProjectionMatrix(), m_stage->GetPseudoRoot(),
-                                                 params, &results);
+    bool hit = false;
+    try {
+        hit = m_engine->TestIntersection(pickParams, pickFrustum.ComputeViewMatrix(),
+                                         pickFrustum.ComputeProjectionMatrix(), m_stage->GetPseudoRoot(), params, &results);
+    } catch (const std::exception& error) {
+        QOpenGLFramebufferObject::bindDefault();
+        recoverFromEngineError("picking", error);  // nothing picked: the next click works
+        return {};
+    }
     QOpenGLFramebufferObject::bindDefault();
     if (!hit || results.empty()) {
         return {};
@@ -1060,7 +1090,7 @@ void HydraViewportWindow::renderNow() {
     // Hydra fill it: the line styles leave the prims' shading as it is.
     params.highlight = !m_previewMode && m_display.selectionStyle == SelectionStyle::Solid;
 
-    if (m_stage) {
+    if (m_stage) try {
         if (shading == ShadingMode::HiddenLine) {
             // usdview's Hidden Surface Wireframe: the surfaces first, for their depth only
             // (their color is cleared to the background again), then the edges, which
@@ -1086,6 +1116,11 @@ void HydraViewportWindow::renderNow() {
             }
         }
         m_engine->Render(m_stage->GetPseudoRoot(), params);
+        m_engineFailures = 0;
+    } catch (const std::exception& error) {
+        QOpenGLFramebufferObject::bindDefault();
+        recoverFromEngineError("drawing", error);  // the last frame stays on screen
+        return;
     }
 
     if (!m_previewMode) {

@@ -24,6 +24,7 @@
 #include <QWindow>
 
 #include <deque>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -307,6 +308,12 @@ private:
     // Destroys the engine with the context current, so its GL objects are
     // freed cleanly, and remembers its renderer for ensureEngine().
     void releaseEngine();
+    // A new engine for the same renderer, which fills itself from the stage again.
+    void rebuildEngine();
+    // After the engine threw while drawing or picking: logs it and starts the engine afresh,
+    // dropping whatever it had cached. OpenUSD's material cache can hand Storm a shader prim
+    // that no longer exists, a C++ exception nothing in Hydra catches (see recoverFromEngineError()).
+    void recoverFromEngineError(const char* during, const std::exception& error);
     // Paused: the last frame again, fitted to the window, on the background.
     void showLastFrame(int width, int height);
     // With a debug context (USDCC_GL_DEBUG=1, see main.cpp): logs each GL
@@ -378,6 +385,7 @@ private:
     bool m_dragging = false;
     bool m_toolEditActive = false;  // between toolEditStarted() and toolEditFinished()
     bool m_firstFrameRendered = false;
+    int m_engineFailures = 0;  // in a row: reset by a frame that draws
 
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     // Redraw triggers; dropped automatically when this window goes away.
