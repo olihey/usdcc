@@ -850,6 +850,12 @@ USDCC_TEST(layer_actions_flatten) {
 // Mute Others: everything but the layer, the layers over it and its own
 // sublayers; the outermost only; one undo step; the target moves to the root.
 USDCC_TEST(layer_actions_mute_others) {
+    // Its own scale controller for the panel below: without it the panel would
+    // make a global one that outlives the test (scale_controller_test needs none).
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
     StageManager stages;
     auto undo = std::make_shared<UndoManager>();
     const StageRefPtr stage = stages.createStage();
@@ -903,4 +909,5 @@ USDCC_TEST(layer_actions_mute_others) {
     bool listed = false;
     for (QAction* action : menu.actions()) listed = listed || action->text() == "Mute Others";
     CHECK(listed, "Mute Others in a layer's menu");
+    QStandardPaths::setTestModeEnabled(false);
 }
