@@ -12,6 +12,7 @@
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/layer_properties_dialog.h"
+#include "usdcc/usd/prim_tree_widget.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -36,6 +37,7 @@
 #include <QToolButton>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUndoStack>
 
@@ -913,7 +915,8 @@ USDCC_TEST(layer_editor_properties_dialog) {
     {
         QFile anim(dir.filePath(QStringLiteral("anim.usda")));
         if (anim.open(QIODevice::WriteOnly)) {
-            anim.write("#usda 1.0\n(\n    comment = \"old\"\n    framesPerSecond = 30\n)\ndef \"Walk\"\n{\n}\n");
+            anim.write("#usda 1.0\n(\n    \"old\"\n    framesPerSecond = 30\n)\n"
+                       "def \"Walk\"\n{\n    def \"Leg\"\n    {\n    }\n}\n");
         }
         QFile shot(dir.filePath(QStringLiteral("shot.usda")));
         if (shot.open(QIODevice::WriteOnly)) shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\n");
@@ -925,6 +928,7 @@ USDCC_TEST(layer_editor_properties_dialog) {
     if (!stage) return;
     const SdfLayerHandle root = stage->usdStage()->GetRootLayer();
     const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    CHECK(anim && stage->usdStage()->GetPrimAtPath(SdfPath("/Walk/Leg")), "anim.usda opens, with /Walk/Leg");
     if (!anim) return;
     const std::string animId = anim->GetIdentifier();
     namespace actions = usdcc::usd::layer_actions;
@@ -960,6 +964,30 @@ USDCC_TEST(layer_editor_properties_dialog) {
               qPrintable(dialog.startTimeCodeField()->placeholderText()));
         CHECK(dialog.timeOffsetField() && dialog.timeScaleField(), "offset and scale for a sublayer");
         CHECK(dialog.values() == current, "unchanged, it gives back what it was given");
+
+        // Right of Default Prim: a picker of the layer's prims fills it.
+        QToolButton* pick = dialog.pickDefaultPrimButton();
+        CHECK(pick && pick->isEnabled(), "a pick button beside Default Prim");
+        auto pickPrim = [&](const SdfPath& path, bool accept) {
+            QTimer::singleShot(0, [&, path, accept]() {
+                auto* picker = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                auto* tree = picker ? picker->findChild<usdcc::usd::PrimTreeWidget*>() : nullptr;
+                CHECK(picker && picker->objectName() == "defaultPrimPicker" && tree, "the picker opens");
+                if (!picker || !tree) return;
+                tree->selectPath(path);
+                accept ? picker->accept() : picker->reject();
+            });
+            if (pick) pick->click();
+        };
+        pickPrim(SdfPath("/Walk"), true);
+        CHECK(dialog.defaultPrimField()->text() == "Walk", "a root prim: its name [%s]",
+              qPrintable(dialog.defaultPrimField()->text()));
+        pickPrim(SdfPath("/Walk/Leg"), true);
+        CHECK(dialog.defaultPrimField()->text() == "/Walk/Leg", "a nested prim: its path [%s]",
+              qPrintable(dialog.defaultPrimField()->text()));
+        pickPrim(SdfPath("/Walk"), false);
+        CHECK(dialog.defaultPrimField()->text() == "/Walk/Leg", "Cancel leaves the field as it was");
+        dialog.defaultPrimField()->clear();
 
         // What can't be used turns OK off; an end before the start only warns.
         dialog.timeScaleField()->setText("0");

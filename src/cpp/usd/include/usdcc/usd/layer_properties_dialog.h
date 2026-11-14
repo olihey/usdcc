@@ -12,6 +12,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
+class QToolButton;
 
 namespace usdcc::usd {
 
@@ -33,6 +34,10 @@ public:
     layer_actions::LayerProperties values() const;
 
     QLineEdit* defaultPrimField() const { return m_defaultPrim; }
+    // Right of Default Prim: a picker of the layer's prims (the layer composed on
+    // its own, in Show Prims' tree) that fills the field: a root prim's name, or
+    // another prim's path.
+    QToolButton* pickDefaultPrimButton() const { return m_pickDefaultPrim; }
     QComboBox* upAxisCombo() const { return m_upAxis; }
     QComboBox* metersPerUnitCombo() const { return m_metersPerUnit; }
     QLineEdit* startTimeCodeField() const { return m_start; }
@@ -48,8 +53,11 @@ public:
 
 private:
     void check();
+    void pickDefaultPrim();
 
+    PXR_NS::SdfLayerHandle m_layer;
     QLineEdit* m_defaultPrim;
+    QToolButton* m_pickDefaultPrim;
     QComboBox* m_upAxis;
     QComboBox* m_metersPerUnit;
     QLineEdit* m_start;

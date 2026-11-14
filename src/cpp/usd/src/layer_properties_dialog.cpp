@@ -1,14 +1,19 @@
 #include "usdcc/usd/layer_properties_dialog.h"
 
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/usd/prim_tree_widget.h"
+#include "usdcc/usd/properties/property_row.h"
 
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/sdf/schema.h>
+#include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/metrics.h>
 
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
+#include <QToolButton>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -45,7 +50,7 @@ QString text(const std::optional<double>& value) { return value ? number(*value)
 LayerPropertiesDialog::LayerPropertiesDialog(const PXR_NS::SdfLayerHandle& layer,
                                              const layer_actions::LayerProperties& current, bool sublayer,
                                              QWidget* parent)
-    : QDialog(parent) {
+    : QDialog(parent), m_layer(layer) {
     const QString name = layer ? QString::fromStdString(layer->GetDisplayName()) : QString();
     setWindowTitle(tr("Edit %1").arg(name));
     auto* layout = new QVBoxLayout(this);
@@ -57,7 +62,16 @@ LayerPropertiesDialog::LayerPropertiesDialog(const PXR_NS::SdfLayerHandle& layer
     m_defaultPrim = new QLineEdit(QString::fromStdString(current.defaultPrim.value_or(std::string())), this);
     m_defaultPrim->setPlaceholderText(tr("Not set"));
     m_defaultPrim->setToolTip(tr("A root prim's name (World), or a prim's path (/World/Asset)"));
-    form->addRow(tr("Default Prim"), m_defaultPrim);
+    // Right of it: pick one of the layer's prims.
+    m_pickDefaultPrim = properties::iconButton(QStringLiteral(":/usdcc/theme/tool-select.png"),
+                                               tr("Pick the default prim from the layer's prims..."), this);
+    m_pickDefaultPrim->setEnabled(bool(layer));
+    connect(m_pickDefaultPrim, &QToolButton::clicked, this, &LayerPropertiesDialog::pickDefaultPrim);
+    auto* defaultPrimRow = new QHBoxLayout;
+    defaultPrimRow->setContentsMargins(0, 0, 0, 0);
+    defaultPrimRow->addWidget(m_defaultPrim, 1);
+    defaultPrimRow->addWidget(m_pickDefaultPrim);
+    form->addRow(tr("Default Prim"), defaultPrimRow);
 
     // Up axis: unset (USD's fallback), Y or Z.
     m_upAxis = new QComboBox(this);
@@ -146,6 +160,45 @@ LayerPropertiesDialog::LayerPropertiesDialog(const PXR_NS::SdfLayerHandle& layer
     }
     check();
     resize(usdcc::ui::scaled::pixels(440), sizeHint().height());
+}
+
+void LayerPropertiesDialog::pickDefaultPrim() {
+    if (!m_layer) return;
+    // The layer composed on its own, its sublayers too, without payloads:
+    // what a reference to it brings in, so where its default prim can be.
+    const PXR_NS::UsdStageRefPtr alone = PXR_NS::UsdStage::Open(m_layer, PXR_NS::UsdStage::LoadNone);
+    if (!alone) return;
+    QDialog picker(this);
+    picker.setObjectName(QStringLiteral("defaultPrimPicker"));
+    picker.setWindowTitle(tr("Default Prim of %1").arg(QString::fromStdString(m_layer->GetDisplayName())));
+    auto* layout = new QVBoxLayout(&picker);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    auto* tree = new PrimTreeWidget(&picker);  // Show Prims' tree
+    tree->setStage(alone);
+    layout->addWidget(tree, 1);
+    auto* buttons = new QDialogButtonBox(&picker);
+    usdcc::ui::scaled::margins(buttons->layout(), 8, 6, 8, 8);
+    QPushButton* use = buttons->addButton(tr("Use Prim"), QDialogButtonBox::AcceptRole);
+    use->setDefault(true);
+    buttons->addButton(QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &picker, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &picker, &QDialog::reject);
+    connect(tree, &PrimTreeWidget::selectionChanged, &picker, [tree, use]() { use->setEnabled(!tree->selectedPath().IsEmpty()); });
+    connect(tree, &PrimTreeWidget::rowActivated, &picker, &QDialog::accept);
+    layout->addWidget(buttons);
+    // The one in the field, if it's there.
+    const std::string typed = m_defaultPrim->text().trimmed().toStdString();
+    if (!typed.empty() && (PXR_NS::SdfPath::IsValidIdentifier(typed) || PXR_NS::SdfPath::IsValidPathString(typed))) {
+        tree->selectPath(PXR_NS::SdfLayer::ConvertDefaultPrimTokenToPath(PXR_NS::TfToken(typed)));
+    }
+    use->setEnabled(!tree->selectedPath().IsEmpty());
+    tree->filterEdit()->setFocus();
+    picker.resize(usdcc::ui::scaled::size(420, 520));
+    if (picker.exec() != QDialog::Accepted || tree->selectedPath().IsEmpty()) return;
+    // A root prim as its name, any other as its path.
+    m_defaultPrim->setText(QString::fromStdString(
+        PXR_NS::SdfLayer::ConvertDefaultPrimPathToToken(tree->selectedPath().GetPrimPath()).GetString()));
 }
 
 layer_actions::LayerProperties LayerPropertiesDialog::values() const {

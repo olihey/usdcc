@@ -152,7 +152,9 @@ Under the tree, for the selected layer, as Attribute Editor rows, all read-only 
 
 The pencil on the Layer Properties header opens **Edit Layer Properties** (`LayerPropertiesDialog`)
 for the selected layer: every one of them that can change (all but identifier, path and format),
-filled from the layer. An empty field is unset, USD's fallback shown as its placeholder. OK sets
+filled from the layer. The button right of Default Prim picks it from the layer's prims (the layer
+composed on its own, as a reference to it would bring it in, in Show Prims' tree): a root prim
+goes in as its name, another as its path. An empty field is unset, USD's fallback shown as its placeholder. OK sets
 them all as one undo step, "Edit Properties of anim.usda", on the layer and, for the offset, its
 parent (`layer_actions::setLayerProperties()`, through `UndoManager::applyAcrossLayers()`).
 
@@ -269,7 +271,8 @@ Phase 4 as built:
 - **Layer Properties fold** to a header above them; folded, the tree takes the room. The panel's
   session state (and a duplicate) keeps it, with the splitter's sizes to unfold to.
 - **Layer Properties are read-only**, every row. The pencil on their header opens Edit Layer
-  Properties, a dialog with all that can change (§6): Default Prim (a name or a path), Up Axis
+  Properties, a dialog with all that can change (§6): Default Prim (a name or a path, or picked
+  with the button beside it from the layer's prims in Show Prims' tree), Up Axis
   (unset, Y, Z), Meters per Unit (the common units, or any number), the four time fields, Time
   Offset and Time Scale (a sublayer's), Comment and Documentation. Empty is unset. OK is off
   while a value can't be used (a bad prim name, a rate or units not above 0, a scale of 0); an
