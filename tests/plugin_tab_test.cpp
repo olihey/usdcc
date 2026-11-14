@@ -2,6 +2,7 @@
 // Reload saving first, the session, and files changing on disk.
 #include "python_test_app.h"
 #include "test_harness.h"
+#include "trash_temp_dir.h"
 
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/code_editor.h"
@@ -63,7 +64,7 @@ QStringList namesIn(QAbstractItemModel* model, const QModelIndex& parent) {
 }
 
 struct Fixture {
-    QTemporaryDir temp;
+    QTemporaryDir temp{usdcc::test::trashableTempTemplate()};  // plugin_tab_file_actions deletes
     QString folder;
     QString mainFile;
     Fixture() {
