@@ -518,6 +518,14 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
         QAction* reload = menu->addAction(tr("Reload"), this, [this, identifier]() { reloadLayer(identifier); });
         reload->setToolTip(tr("Discard its unsaved changes and load it fresh from its file"));
     }
+    QAction* flatten =
+        menu->addAction(tr("Flatten Sublayers"), this, [this, identifier]() { flattenSublayers(identifier); });
+    flatten->setEnabled(layer_actions::canFlatten(*entry));
+    flatten->setToolTip(tr("Merge its sublayers into it and take them out of its sublayer list"));
+    QAction* flattenFile =
+        menu->addAction(tr("Flatten to File..."), this, [this, identifier]() { flattenToFile(identifier); });
+    flattenFile->setEnabled(layer_actions::canFlattenToFile(*entry));
+    flattenFile->setToolTip(tr("Write it, its sublayers merged in, to a new file; the stage stays as it is"));
 
     menu->addSeparator();
     const QString path = realPath(*entry);
@@ -638,6 +646,75 @@ void LayerEditorViewPanel::reloadLayer(const std::string& identifier) {
     if (!layer_actions::reloadLayer(*m_undoManager, currentStage(), identifier, &error)) {
         QMessageBox::warning(this, tr("Reload Layer"), error);
     }
+}
+
+bool LayerEditorViewPanel::flattenSublayers(const std::string& identifier) {
+    const LayerEntry* entry = entryFor(identifier);
+    if (!entry || !currentStage() || !m_undoManager || !layer_actions::canFlatten(*entry)) return false;
+    const QString name = entry->session ? tr("the session layer") : qs(entry->displayName);
+    // Asked only when something would be lost: unsaved files leaving, or undo history.
+    QStringList unsaved;
+    std::function<void(const std::vector<LayerEntry>&)> collect = [&](const std::vector<LayerEntry>& entries) {
+        for (const LayerEntry& child : entries) {
+            if (child.dirty && !child.anonymous) unsaved << qs(child.displayName);
+            collect(child.children);
+        }
+    };
+    collect(entry->children);
+    QUndoStack* stack = m_undoManager->stack(currentStage());
+    const bool undoable = layer_actions::reloadIsUndoable(*entry);
+    const bool losesHistory = !undoable && stack && stack->count() > 0;
+    if (!unsaved.isEmpty() || losesHistory) {
+        QStringList text;
+        if (!unsaved.isEmpty()) {
+            text << (unsaved.size() == 1
+                         ? tr("%1 has unsaved changes. They're merged into %2, but its file stays as it is and "
+                              "won't be asked about when the stage closes.")
+                         : tr("%1 have unsaved changes. They're merged into %2, but their files stay as they are "
+                              "and won't be asked about when the stage closes."))
+                        .arg(unsaved.join(QStringLiteral(", ")), name);
+        }
+        if (losesHistory) {
+            text << tr("%1 can't be flattened as an undo step, so it can't be undone, and the stage's undo history "
+                       "is cleared.")
+                        .arg(name);
+        }
+        QMessageBox box(QMessageBox::Warning, tr("Flatten Sublayers"), text.join(QStringLiteral("\n\n")),
+                        QMessageBox::Cancel, this);
+        QPushButton* flatten = box.addButton(tr("Flatten"), QMessageBox::DestructiveRole);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != flatten) return false;
+    }
+    QString error;
+    if (!layer_actions::flattenSublayers(*m_undoManager, currentStage(), identifier, &error)) {
+        QMessageBox::warning(this, tr("Flatten Sublayers"), error);
+        return false;
+    }
+    m_selectAfterRefresh = identifier;
+    return true;
+}
+
+bool LayerEditorViewPanel::flattenToFile(const std::string& identifier, const QString& file) {
+    const LayerEntry* entry = entryFor(identifier);
+    if (!entry || !currentStage() || !layer_actions::canFlattenToFile(*entry)) return false;
+    QString path = file;
+    if (path.isEmpty()) {
+        const QString name = entry->session ? QStringLiteral("session") : QFileInfo(qs(entry->displayName)).completeBaseName();
+        const QString real = realPath(*entry);
+        const QString dir = real.isEmpty() ? QString() : QFileInfo(real).absolutePath();
+        const QString start = QDir(dir).filePath(name + QStringLiteral("_flat.usda"));
+        path = QFileDialog::getSaveFileName(this, tr("Flatten %1 to File").arg(qs(entry->displayName)), start,
+                                            tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)"));
+        if (path.isEmpty()) return false;
+        if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
+    }
+    QString error;
+    if (!layer_actions::flattenToFile(currentStage(), identifier, path.toStdString(), &error)) {
+        if (file.isEmpty()) QMessageBox::warning(this, tr("Flatten to File"), error);  // not from a test or script
+        return false;
+    }
+    return true;
 }
 
 std::string LayerEditorViewPanel::layerToSave() const {

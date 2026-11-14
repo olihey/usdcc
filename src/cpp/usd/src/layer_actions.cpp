@@ -5,6 +5,7 @@
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/usdUtils/dependencies.h>
+#include <pxr/usd/usdUtils/flattenLayerStack.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -29,6 +30,62 @@ const LayerEntry* find(const std::vector<LayerEntry>& entries, const std::string
         if (const LayerEntry* found = find(entry.children, identifier)) return found;
     }
     return nullptr;
+}
+
+// The folder of a file layer; empty for an in-memory one.
+QString layerFolder(const PXR_NS::SdfLayerHandle& layer) {
+    return !layer || layer->GetRealPath().empty() ? QString()
+                                                  : QFileInfo(QString::fromStdString(layer->GetRealPath())).absolutePath();
+}
+
+// `asset`, as written in a layer in the folder `from`, rewritten to find the
+// same file from the folder `to`.
+std::string reanchor(const std::string& asset, const QString& from, const QDir& to) {
+    const QString text = QString::fromStdString(asset);
+    // Absolute, a URI or an anonymous layer: the same from anywhere.
+    if (from.isEmpty() || QDir(from) == to || text.isEmpty() || QDir::isAbsolutePath(text) ||
+        text.contains(QStringLiteral("://")) || PXR_NS::SdfLayer::IsAnonymousLayerIdentifier(asset)) {
+        return asset;
+    }
+    // A search path ("props/chair.usd") is anchored only if the file is there.
+    const QString anchored = QDir(from).absoluteFilePath(text);
+    const bool dotted = text.startsWith(QStringLiteral("./")) || text.startsWith(QStringLiteral("../"));
+    if (!dotted && !QFileInfo::exists(anchored) && !text.contains(QStringLiteral("<UDIM>"))) return asset;
+    QString relative = to.relativeFilePath(QDir::cleanPath(anchored));
+    if (QDir::isAbsolutePath(relative)) return QDir::fromNativeSeparators(relative).toStdString();
+    if (!relative.startsWith(QStringLiteral("../"))) relative.prepend(QStringLiteral("./"));
+    return relative.toStdString();
+}
+
+// `layer` and its sublayers as one layer, as `stage` composes them (its
+// muted layers left out). Relative asset paths are rewritten for the folder
+// `to`; with none (an in-memory result), made absolute.
+PXR_NS::SdfLayerRefPtr flattenedLayerStack(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer,
+                                           const QString& to, QString* error) {
+    const PXR_NS::UsdStageRefPtr alone = PXR_NS::UsdStage::Open(layer, PXR_NS::UsdStage::LoadNone);
+    if (!alone) {
+        if (error) *error = tr("Can't compose %1 on its own.").arg(QString::fromStdString(layer->GetDisplayName()));
+        return {};
+    }
+    const std::vector<std::string> muted = stage->usdStage()->GetMutedLayers();
+    if (!muted.empty()) alone->MuteAndUnmuteLayers(muted, {});
+    const QDir toDir(to);
+    PXR_NS::SdfLayerRefPtr flat = PXR_NS::UsdUtilsFlattenLayerStack(
+        alone, [&](const PXR_NS::SdfLayerHandle& source, const std::string& asset) {
+            if (to.isEmpty() || layerFolder(source).isEmpty()) {
+                return PXR_NS::UsdUtilsFlattenLayerStackResolveAssetPath(source, asset);
+            }
+            return reanchor(asset, layerFolder(source), toDir);
+        });
+    if (!flat && error) *error = tr("Can't flatten %1.").arg(QString::fromStdString(layer->GetDisplayName()));
+    return flat;
+}
+
+void collectLayers(const std::vector<LayerEntry>& entries, std::vector<PXR_NS::SdfLayerRefPtr>* layers) {
+    for (const LayerEntry& entry : entries) {
+        if (entry.layer) layers->push_back(entry.layer);
+        collectLayers(entry.children, layers);
+    }
 }
 
 bool containsTarget(const LayerEntry& entry) {
@@ -279,6 +336,72 @@ bool reloadLayer(UndoManager& undo, const StageRefPtr& stage, const std::string&
     return ok;
 }
 
+bool canFlatten(const LayerEntry& entry) { return canFlattenToFile(entry) && !entry.children.empty(); }
+
+bool canFlattenToFile(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing; }
+
+bool flattenSublayers(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, QString* error) {
+    if (!stage) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = find(tree, identifier);
+    if (!entry || !canFlatten(*entry)) {
+        if (error) *error = tr("Only an open layer with sublayers can be flattened.");
+        return false;
+    }
+    const PXR_NS::SdfLayerHandle layer = entry->layer;
+    const PXR_NS::SdfLayerRefPtr flat = flattenedLayerStack(stage, layer, layerFolder(layer), error);
+    if (!flat) return false;
+    // Its sublayers leave the stack: kept while the step can be undone, so an
+    // in-memory one comes back with its content.
+    std::vector<PXR_NS::SdfLayerRefPtr> keep;
+    collectLayers(entry->children, &keep);
+    bool targetBelow = false;
+    for (const LayerEntry& child : entry->children) targetBelow = targetBelow || containsTarget(child);
+    if (targetBelow) stage->setEditTargetLayer(layer);
+    const QString name = QString::fromStdString(entry->displayName);
+    if (!reloadIsUndoable(*entry)) {  // its content swapped whole, past the recorder
+        layer->TransferContent(flat);
+        if (QUndoStack* stack = undo.stack(stage)) stack->clear();
+        return true;
+    }
+    const bool ok = undo.apply(
+        stage, layer, tr("Flatten Sublayers of %1").arg(name),
+        [&]() {
+            layer->TransferContent(flat);
+            return true;
+        },
+        std::move(keep));
+    if (!ok && error) *error = tr("Can't flatten %1.").arg(name);
+    return ok;
+}
+
+bool flattenToFile(const StageRefPtr& stage, const std::string& identifier, const std::string& path, QString* error) {
+    if (!stage) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = find(tree, identifier);
+    if (!entry || !canFlattenToFile(*entry)) {
+        if (error) *error = tr("Only an open layer can be flattened.");
+        return false;
+    }
+    const QString file = QString::fromStdString(path);
+    if (PXR_NS::SdfLayer::Find(path)) {
+        if (error) *error = tr("%1 is open as a layer; pick another file.").arg(QFileInfo(file).fileName());
+        return false;
+    }
+    if (!PXR_NS::SdfFileFormat::FindByExtension(path)) {
+        if (error) *error = tr("%1 isn't a USD file name.").arg(QFileInfo(file).fileName());
+        return false;
+    }
+    const PXR_NS::SdfLayerRefPtr flat =
+        flattenedLayerStack(stage, entry->layer, QFileInfo(file).absolutePath(), error);
+    if (!flat) return false;
+    if (!flat->Export(path)) {
+        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        return false;
+    }
+    return true;
+}
+
 std::vector<PXR_NS::SdfLayerHandle> unsavedLayers(const StageRefPtr& stage) {
     std::vector<PXR_NS::SdfLayerHandle> layers;
     if (!stage) return layers;
@@ -394,27 +517,10 @@ bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* err
     // A relative path is anchored at the root's folder; written from another
     // folder it must say where that is from there. An in-memory root has no
     // folder, and its paths are kept as they are.
-    const QString from = root->GetRealPath().empty()
-                             ? QString()
-                             : QFileInfo(QString::fromStdString(root->GetRealPath())).absolutePath();
+    const QString from = layerFolder(root);
     const QDir to = QFileInfo(file).absoluteDir();
     if (!from.isEmpty() && QDir(from) != to) {
-        PXR_NS::UsdUtilsModifyAssetPaths(copy, [&](const std::string& asset) -> std::string {
-            const QString text = QString::fromStdString(asset);
-            // Absolute, a URI or an anonymous layer: the same from anywhere.
-            if (text.isEmpty() || QDir::isAbsolutePath(text) || text.contains(QStringLiteral("://")) ||
-                PXR_NS::SdfLayer::IsAnonymousLayerIdentifier(asset)) {
-                return asset;
-            }
-            // A search path ("props/chair.usd") is anchored only if the file is there.
-            const QString anchored = QDir(from).absoluteFilePath(text);
-            const bool dotted = text.startsWith(QStringLiteral("./")) || text.startsWith(QStringLiteral("../"));
-            if (!dotted && !QFileInfo::exists(anchored) && !text.contains(QStringLiteral("<UDIM>"))) return asset;
-            QString relative = to.relativeFilePath(QDir::cleanPath(anchored));
-            if (QDir::isAbsolutePath(relative)) return QDir::fromNativeSeparators(relative).toStdString();
-            if (!relative.startsWith(QStringLiteral("../"))) relative.prepend(QStringLiteral("./"));
-            return relative.toStdString();
-        });
+        PXR_NS::UsdUtilsModifyAssetPaths(copy, [&](const std::string& asset) { return reanchor(asset, from, to); });
     }
     if (!copy->Export(path)) {
         if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));

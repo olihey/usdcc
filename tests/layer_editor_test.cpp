@@ -21,6 +21,7 @@
 #include <pxr/usd/usdGeom/tokens.h>
 
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonObject>
@@ -35,6 +36,7 @@
 #include <QUndoStack>
 
 #include <memory>
+#include <set>
 
 using usdcc::usd::LayerEditorViewPanel;
 using usdcc::usd::StageManager;
@@ -715,5 +717,111 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
     CHECK(select("zup.usda") && warning("Up Axis").isEmpty(), "the stage Z up now: no up axis warning");
     CHECK(select("same.usda") && warning("Up Axis") == "The stage is Z up", "but same.usda gets one: [%s]",
           qPrintable(warning("Up Axis")));
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// Flatten to File and Flatten Sublayers: offsets applied, muted layers left
+// out, a reference in a sublayer still found from where the result is.
+USDCC_TEST(layer_actions_flatten) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    for (const char* sub : {"layers", "props", "out"}) QDir(dir.path()).mkpath(QString::fromLatin1(sub));
+    auto write = [&](const QString& name, const QByteArray& text) {
+        QFile file(dir.filePath(name));
+        if (file.open(QIODevice::WriteOnly)) file.write(text);
+    };
+    write(QStringLiteral("props/chair.usda"), "#usda 1.0\n(\n    defaultPrim = \"Chair\"\n)\ndef \"Chair\"\n{\n    def \"Seat\"\n    {\n    }\n}\n");
+    write(QStringLiteral("layers/deep.usda"), "#usda 1.0\ndef \"Deep\"\n{\n}\n");
+    write(QStringLiteral("layers/muted.usda"), "#usda 1.0\ndef \"Muted\"\n{\n}\n");
+    write(QStringLiteral("layers/anim.usda"),
+          "#usda 1.0\n(\n    subLayers = [@./deep.usda@]\n)\n"
+          "over \"World\"\n{\n    double x.timeSamples = {\n        0: 1,\n        5: 2,\n    }\n}\n"
+          "def \"Chair\" (\n    references = @../props/chair.usda@\n)\n{\n}\n");
+    write(QStringLiteral("shot.usda"),
+          "#usda 1.0\n(\n    defaultPrim = \"World\"\n"
+          "    subLayers = [@./layers/anim.usda@ (offset = 10), @./layers/muted.usda@]\n)\ndef \"World\"\n{\n}\n");
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const UsdStageRefPtr& s = stage->usdStage();
+    const SdfLayerHandle root = s->GetRootLayer();
+    const std::string rootId = root->GetIdentifier();
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("layers/anim.usda")).toStdString());
+    const SdfLayerHandle deep = SdfLayer::Find(dir.filePath(QStringLiteral("layers/deep.usda")).toStdString());
+    const std::string mutedId = dir.filePath(QStringLiteral("layers/muted.usda")).toStdString();
+    CHECK(anim && deep, "the sublayers are open");
+    if (!anim || !deep) return;
+    namespace actions = usdcc::usd::layer_actions;
+    CHECK(actions::setMuted(*undo, stage, SdfLayer::Find(mutedId)->GetIdentifier(), true), "mute muted.usda");
+    QUndoStack* stack = undo->stack(stage);
+    QString error;
+
+    // To a file in another folder; the stage stays as it is.
+    const QString out = dir.filePath(QStringLiteral("out/flat.usda"));
+    CHECK(actions::flattenToFile(stage, rootId, out.toStdString(), &error), "flatten to file: %s", qPrintable(error));
+    CHECK(root->GetSubLayerPaths().size() == 2 && !root->IsDirty(), "the stage's root is untouched");
+    const SdfLayerRefPtr flat = SdfLayer::OpenAsAnonymous(out.toStdString());
+    CHECK(flat && flat->GetSubLayerPaths().empty() && flat->GetDefaultPrim() == TfToken("World"),
+          "one layer, no sublayers, the root's metadata");
+    if (flat) {
+        CHECK(flat->GetPrimAtPath(SdfPath("/Deep")) && !flat->GetPrimAtPath(SdfPath("/Muted")),
+              "the nested sublayer in, the muted one out");
+        const std::set<double> times = flat->ListTimeSamplesForPath(SdfPath("/World.x"));
+        CHECK(times == std::set<double>({10.0, 15.0}), "anim's offset applied to its samples");
+        std::vector<SdfReference> refs;
+        if (const SdfPrimSpecHandle chair = flat->GetPrimAtPath(SdfPath("/Chair"))) {
+            refs = chair->GetReferenceList().GetAddedOrExplicitItems();
+            if (refs.empty()) refs = chair->GetReferenceList().GetAppliedItems();
+        }
+        CHECK(refs.size() == 1 && refs[0].GetAssetPath() == "../props/chair.usda",
+              "the reference rewritten for out/: [%s]", refs.empty() ? "" : refs[0].GetAssetPath().c_str());
+    }
+    const UsdStageRefPtr flatStage = UsdStage::Open(out.toStdString());
+    CHECK(flatStage && flatStage->GetPrimAtPath(SdfPath("/Chair/Seat")), "and found from there");
+    CHECK(!actions::flattenToFile(stage, rootId, out.toStdString(), &error), "not over a file open as a layer");
+
+    // In place: the root takes its sublayers in; undo brings them back.
+    stage->setEditTargetLayer(anim);
+    CHECK(actions::flattenSublayers(*undo, stage, rootId, &error), "flatten sublayers: %s", qPrintable(error));
+    CHECK(root->GetSubLayerPaths().empty() && stage->editTargetLayer() == root, "no sublayers; the target on the root");
+    CHECK(s->GetPrimAtPath(SdfPath("/Deep")) && s->GetPrimAtPath(SdfPath("/Chair/Seat")) &&
+              !s->GetPrimAtPath(SdfPath("/Muted")),
+          "the stage composes the same");
+    CHECK(stack->undoText() == "Flatten Sublayers of shot.usda", "an undo step: [%s]", qPrintable(stack->undoText()));
+    {
+        std::vector<SdfReference> refs;
+        if (const SdfPrimSpecHandle chair = root->GetPrimAtPath(SdfPath("/Chair"))) {
+            refs = chair->GetReferenceList().GetAddedOrExplicitItems();
+        }
+        CHECK(refs.size() == 1 && refs[0].GetAssetPath() == "./props/chair.usda", "the reference for the root's folder: [%s]",
+              refs.empty() ? "" : refs[0].GetAssetPath().c_str());
+    }
+    stack->undo();
+    CHECK(root->GetSubLayerPaths().size() == 2 && root->GetSubLayerOffset(0) == SdfLayerOffset(10) &&
+              !root->GetPrimAtPath(SdfPath("/Chair")) && s->GetPrimAtPath(SdfPath("/Deep")),
+          "undo: the sublayers back, with the offset");
+    CHECK(s->IsLayerMuted(SdfLayer::Find(mutedId)->GetIdentifier()), "muted.usda still muted");
+
+    // What can be flattened, and the menu.
+    const std::vector<usdcc::usd::LayerEntry> tree = usdcc::usd::layerTree(s);
+    CHECK(actions::canFlatten(tree[1]) && !actions::canFlatten(tree[1].children[0].children[0]),
+          "the root can, deep.usda (no sublayers) can't");
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    auto enabled = [&](const std::string& identifier, const QString& text) {
+        QMenu menu;
+        panel.populateLayerMenu(&menu, identifier);
+        for (QAction* action : menu.actions()) {
+            if (action->text() == text) return action->isEnabled();
+        }
+        return false;
+    };
+    CHECK(enabled(rootId, "Flatten Sublayers") && !enabled(deep->GetIdentifier(), "Flatten Sublayers") &&
+              enabled(deep->GetIdentifier(), "Flatten to File..."),
+          "the menu's Flatten Sublayers and Flatten to File...");
     QStandardPaths::setTestModeEnabled(false);
 }

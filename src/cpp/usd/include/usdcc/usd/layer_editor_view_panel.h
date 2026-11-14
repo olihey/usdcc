@@ -80,6 +80,14 @@ public:
     bool saveLayer(const std::string& identifier);
     std::string saveLayerAs(const std::string& identifier, const QString& file = QString());
 
+    // Right-click > Flatten Sublayers (layer_actions::flattenSublayers()):
+    // asks first when sublayers with unsaved changes leave the stack or the
+    // undo history would be cleared. Flatten to File... writes it to `file`,
+    // or one asked for (layer_actions::flattenToFile()). Errors go to a
+    // message box.
+    bool flattenSublayers(const std::string& identifier);
+    bool flattenToFile(const std::string& identifier, const QString& file = QString());
+
     // The layer properties under the tree fold to their header (click it);
     // the panel's session state keeps it, with the splitter's sizes.
     bool isPropertiesCollapsed() const { return m_propertiesCollapsed; }

@@ -69,6 +69,24 @@ bool reloadIsUndoable(const LayerEntry& entry);
 // longer fit the layer. False, with `error` set, if the file can't be read.
 bool reloadLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, QString* error);
 
+// Flattening: the layer and its sublayers merged into one layer, as the
+// stage composes them (its muted layers left out), with UsdUtilsFlattenLayerStack():
+// time offsets applied; references, payloads, inherits and variants kept as
+// arcs. Relative asset paths are rewritten to find the same files from where
+// the result is.
+//   - flattenSublayers(): into the layer itself, its sublayer list emptied;
+//     one undo step that keeps the sublayers (and their content) for undo.
+//     The edit target, if under it, moves to it. For a layer that streams its
+//     data (usdc, see reloadIsUndoable()) not an undo step: the stage's undo
+//     history is cleared. canFlatten(): open, not muted, with sublayers.
+//   - flattenToFile(): to the new file `path`; the stage is unchanged.
+//     canFlattenToFile(): open and not muted.
+// False, with `error` set, when it can't.
+bool canFlatten(const LayerEntry& entry);
+bool canFlattenToFile(const LayerEntry& entry);
+bool flattenSublayers(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, QString* error);
+bool flattenToFile(const StageRefPtr& stage, const std::string& identifier, const std::string& path, QString* error);
+
 // Saving (§5). None of it is an undo step; each sends Stage::layersSaved.
 // The layers the stage uses (its layer stack and the files it references)
 // that are files with unsaved changes, by name.
