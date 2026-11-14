@@ -499,6 +499,13 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
                 [this, identifier, muted]() { layer_actions::setMuted(*m_undoManager, currentStage(), identifier, !muted); },
                 Qt::QueuedConnection);
         });
+        QAction* others = menu->addAction(tr("Mute Others"), this, [this, identifier]() {
+            QMetaObject::invokeMethod(
+                this, [this, identifier]() { layer_actions::muteOthers(*m_undoManager, currentStage(), identifier); },
+                Qt::QueuedConnection);
+        });
+        others->setToolTip(tr("Mute every other layer but the ones it's under and its own sublayers"));
+        others->setEnabled(layer_actions::canMuteOthers(currentStage(), identifier));
     }
 
     menu->addSeparator();

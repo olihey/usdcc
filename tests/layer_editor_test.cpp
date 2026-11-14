@@ -834,3 +834,61 @@ USDCC_TEST(layer_actions_flatten) {
           "the menu's Flatten Sublayers and Flatten to File...");
     QStandardPaths::setTestModeEnabled(false);
 }
+
+// Mute Others: everything but the layer, the layers over it and its own
+// sublayers; the outermost only; one undo step; the target moves to the root.
+USDCC_TEST(layer_actions_mute_others) {
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    const UsdStageRefPtr& s = stage->usdStage();
+    // root: a (a1, a2), b (b1), c; session: s1
+    std::vector<SdfLayerRefPtr> keep;
+    auto add = [&](const SdfLayerHandle& parent, const char* name) {
+        SdfLayerRefPtr layer = SdfLayer::CreateAnonymous(name);
+        parent->GetSubLayerPaths().push_back(layer->GetIdentifier());
+        keep.push_back(layer);
+        return std::string(layer->GetIdentifier());
+    };
+    const std::string a = add(s->GetRootLayer(), "a.usda");
+    const std::string b = add(s->GetRootLayer(), "b.usda");
+    const std::string c = add(s->GetRootLayer(), "c.usda");
+    const std::string a1 = add(SdfLayer::Find(a), "a1.usda");
+    const std::string a2 = add(SdfLayer::Find(a), "a2.usda");
+    const std::string b1 = add(SdfLayer::Find(b), "b1.usda");
+    const std::string s1 = add(s->GetSessionLayer(), "s1.usda");
+    namespace actions = usdcc::usd::layer_actions;
+    actions::setMuted(*undo, stage, c, true);
+    stage->setEditTargetLayer(SdfLayer::Find(b1));
+    QUndoStack* stack = undo->stack(stage);
+    const int before = stack->count();
+
+    CHECK(actions::canMuteOthers(stage, a1) && actions::muteOthers(*undo, stage, a1), "Mute Others of a1");
+    CHECK(s->IsLayerMuted(a2) && s->IsLayerMuted(b) && s->IsLayerMuted(s1) && s->IsLayerMuted(c),
+          "a2, b, the session's s1 muted; c stays muted");
+    CHECK(!s->IsLayerMuted(a1) && !s->IsLayerMuted(a) && !s->IsLayerMuted(b1),
+          "a1 and a play; b1 goes with b, not muted itself");
+    CHECK(stage->editTargetLayer() == s->GetRootLayer(), "the target, in b1, moved to the root");
+    CHECK(stack->count() == before + 1 && stack->undoText() == "Mute All but a1.usda", "one undo step: [%s]",
+          qPrintable(stack->undoText()));
+    CHECK(!actions::canMuteOthers(stage, a1), "nothing more to mute");
+    stack->undo();
+    CHECK(!s->IsLayerMuted(a2) && !s->IsLayerMuted(b) && !s->IsLayerMuted(s1) && s->IsLayerMuted(c),
+          "undo: all back but c, muted before");
+    CHECK(stage->editTargetLayer() == SdfLayer::Find(b1), "and the target back on b1");
+
+    // On a muted layer: it plays again, the others go.
+    CHECK(actions::muteOthers(*undo, stage, c), "Mute Others of c, itself muted");
+    CHECK(!s->IsLayerMuted(c) && s->IsLayerMuted(a) && s->IsLayerMuted(b) && s->IsLayerMuted(s1) &&
+              !s->IsLayerMuted(a1),
+          "c unmuted; a, b and s1 muted (a1 goes with a)");
+    CHECK(!actions::canMuteOthers(stage, s->GetRootLayer()->GetIdentifier()), "not for the root layer");
+
+    // In the menu.
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    QMenu menu;
+    panel.populateLayerMenu(&menu, c);
+    bool listed = false;
+    for (QAction* action : menu.actions()) listed = listed || action->text() == "Mute Others";
+    CHECK(listed, "Mute Others in a layer's menu");
+}

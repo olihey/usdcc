@@ -24,6 +24,13 @@ bool canMute(const LayerEntry& entry);
 // layer; undo puts it back. While muted the layer is kept open, so its
 // unsaved edits survive. False when there's nothing to change.
 bool setMuted(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier, bool muted);
+// Mute Others: mutes every mutable layer but `identifier`, the layers it's
+// under and its own sublayers (a muted layer's sublayers go with it, so only
+// the outermost are muted), and unmutes it if it's muted. One undo step, with
+// setMuted()'s edit-target rule. False when there's nothing to change;
+// canMuteOthers() says so without doing it.
+bool canMuteOthers(const StageRefPtr& stage, const std::string& identifier);
+bool muteOthers(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier);
 
 // Whether `entry` can be the edit target: in the layer stack, not muted.
 bool canTarget(const LayerEntry& entry);

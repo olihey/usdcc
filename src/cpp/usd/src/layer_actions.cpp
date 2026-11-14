@@ -96,44 +96,78 @@ bool containsTarget(const LayerEntry& entry) {
     return false;
 }
 
+// Mutes some layers and unmutes others, at once; undo the other way round.
 class MuteCommand : public QUndoCommand {
 public:
-    MuteCommand(StageRefPtr stage, std::string identifier, bool muted, bool moveTarget, const QString& text)
+    MuteCommand(StageRefPtr stage, std::vector<std::string> mute, std::vector<std::string> unmute, bool moveTarget,
+                const QString& text)
         : QUndoCommand(text),
           m_stage(std::move(stage)),
-          m_identifier(std::move(identifier)),
-          m_muted(muted),
+          m_mute(std::move(mute)),
+          m_unmute(std::move(unmute)),
           m_moveTarget(moveTarget),
-          m_keep(PXR_NS::SdfLayer::Find(m_identifier)),
-          m_target(m_stage->editTargetLayer()) {}
-
-    void redo() override { apply(m_muted); }
-    void undo() override { apply(!m_muted); }
-
-private:
-    void apply(bool mute) {
-        const PXR_NS::UsdStageRefPtr& stage = m_stage->usdStage();
-        if (mute) {
-            if (mute == m_muted && m_moveTarget) stage->SetEditTarget(PXR_NS::UsdEditTarget(stage->GetRootLayer()));
-            stage->MuteLayer(m_identifier);
-        } else {
-            stage->UnmuteLayer(m_identifier);
-            // Undoing a mute that moved the target: back to where it was.
-            if (mute != m_muted && m_moveTarget && m_target && stage->HasLocalLayer(m_target)) {
-                stage->SetEditTarget(PXR_NS::UsdEditTarget(m_target));
+          m_target(m_stage->editTargetLayer()) {
+        for (const std::vector<std::string>* list : {&m_mute, &m_unmute}) {
+            for (const std::string& identifier : *list) {
+                if (PXR_NS::SdfLayerRefPtr layer = PXR_NS::SdfLayer::Find(identifier)) m_keep.push_back(layer);
             }
         }
     }
 
+    void redo() override {
+        const PXR_NS::UsdStageRefPtr& stage = m_stage->usdStage();
+        if (m_moveTarget) stage->SetEditTarget(PXR_NS::UsdEditTarget(stage->GetRootLayer()));
+        stage->MuteAndUnmuteLayers(m_mute, m_unmute);
+    }
+
+    void undo() override {
+        const PXR_NS::UsdStageRefPtr& stage = m_stage->usdStage();
+        stage->MuteAndUnmuteLayers(m_unmute, m_mute);
+        // A mute that moved the target: back to where it was.
+        if (m_moveTarget && m_target && stage->HasLocalLayer(m_target)) {
+            stage->SetEditTarget(PXR_NS::UsdEditTarget(m_target));
+        }
+    }
+
+private:
     StageRefPtr m_stage;
-    std::string m_identifier;
-    bool m_muted;
+    std::vector<std::string> m_mute;
+    std::vector<std::string> m_unmute;
     bool m_moveTarget;
-    // Muting lets the stage drop the layer; this keeps it, and its unsaved
+    // Muting lets the stage drop a layer; this keeps it, and its unsaved
     // edits, for as long as it can be unmuted from here.
-    PXR_NS::SdfLayerRefPtr m_keep;
+    std::vector<PXR_NS::SdfLayerRefPtr> m_keep;
     PXR_NS::SdfLayerHandle m_target;
 };
+
+// What Mute Others of `identifier` mutes: the outermost mutable, unmuted
+// layers that aren't it, under it, or over it (its ancestors); and unmutes:
+// itself, if muted. False if it isn't in `entries`.
+bool othersToMute(const std::vector<LayerEntry>& entries, const std::string& identifier,
+                  std::vector<const LayerEntry*>* mute, std::vector<std::string>* unmute) {
+    const std::function<bool(const LayerEntry&)> holds = [&](const LayerEntry& entry) {
+        if (entry.identifier == identifier) return true;
+        for (const LayerEntry& child : entry.children) {
+            if (holds(child)) return true;
+        }
+        return false;
+    };
+    bool found = false;
+    const std::function<void(const LayerEntry&)> visit = [&](const LayerEntry& entry) {
+        if (entry.identifier == identifier) {
+            found = true;
+            if (entry.muted) unmute->push_back(entry.identifier);
+            return;  // it and everything under it play
+        }
+        if (holds(entry) || !canMute(entry)) {  // over it, or the root and session layers
+            for (const LayerEntry& child : entry.children) visit(child);
+            return;
+        }
+        if (!entry.muted) mute->push_back(&entry);  // its sublayers go with it
+    };
+    for (const LayerEntry& entry : entries) visit(entry);
+    return found;
+}
 
 }  // namespace
 
@@ -147,8 +181,41 @@ bool setMuted(UndoManager& undo, const StageRefPtr& stage, const std::string& id
     QUndoStack* stack = undo.stack(stage);
     if (!stack) return false;
     const QString name = QString::fromStdString(entry->displayName);
-    stack->push(new MuteCommand(stage, identifier, muted, muted && containsTarget(*entry),
+    const std::vector<std::string> one{identifier};
+    stack->push(new MuteCommand(stage, muted ? one : std::vector<std::string>(), muted ? std::vector<std::string>() : one,
+                                muted && containsTarget(*entry),
                                 muted ? tr("Mute %1").arg(name) : tr("Unmute %1").arg(name)));
+    return true;
+}
+
+bool canMuteOthers(const StageRefPtr& stage, const std::string& identifier) {
+    if (!stage) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = find(tree, identifier);
+    std::vector<const LayerEntry*> mute;
+    std::vector<std::string> unmute;
+    return entry && canMute(*entry) && othersToMute(tree, identifier, &mute, &unmute) &&
+           (!mute.empty() || !unmute.empty());
+}
+
+bool muteOthers(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier) {
+    if (!stage) return false;
+    const std::vector<LayerEntry> tree = layerTree(stage->usdStage());
+    const LayerEntry* entry = find(tree, identifier);
+    std::vector<const LayerEntry*> mute;
+    std::vector<std::string> unmute;
+    if (!entry || !canMute(*entry) || !othersToMute(tree, identifier, &mute, &unmute)) return false;
+    if (mute.empty() && unmute.empty()) return false;
+    QUndoStack* stack = undo.stack(stage);
+    if (!stack) return false;
+    std::vector<std::string> muteIds;
+    bool moveTarget = false;
+    for (const LayerEntry* other : mute) {
+        muteIds.push_back(other->identifier);
+        moveTarget = moveTarget || containsTarget(*other);
+    }
+    stack->push(new MuteCommand(stage, std::move(muteIds), std::move(unmute), moveTarget,
+                                tr("Mute All but %1").arg(QString::fromStdString(entry->displayName))));
     return true;
 }
 
