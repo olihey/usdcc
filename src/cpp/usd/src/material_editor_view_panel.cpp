@@ -38,6 +38,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QEvent>
+#include <QGraphicsSceneMouseEvent>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QKeyEvent>
@@ -277,6 +278,7 @@ void MaterialEditorViewPanel::attachStage() {
         m_scene->setNodeGeometry(std::make_unique<ShaderNodeGeometry>(*m_model));
         m_scene->setNodePainter(std::make_unique<ShaderNodePainter>());
         m_view->setScene(m_scene.get());
+        m_scene->installEventFilter(this);
         // QtNodes' own Undo, Redo, Delete, Cut, Copy and Paste work on a QUndoStack of its
         // own that saves its model as JSON. The stage is the only data here, and Edit > Undo
         // is its undo, so none of them can be left to catch those keys.
@@ -888,7 +890,40 @@ bool MaterialEditorViewPanel::handleKey(QKeyEvent* event, bool run) {
     return false;
 }
 
+// Shift adds what's clicked to the selection and Ctrl takes it out, where Qt's own Ctrl
+// toggles. A Ctrl click on a node goes no further, so it neither drags nor selects it.
+bool MaterialEditorViewPanel::clickWithSelectionKeys(QMouseEvent* mouse) {
+    m_keepSelectionOnRelease = false;
+    if (!m_scene || mouse->button() != Qt::LeftButton) return false;
+    const QPoint at = mouse->position().toPoint();
+    QGraphicsItem* item = nodeAt(m_view, at);
+    if (!item) item = backdropAt(m_view, at);
+    const Qt::KeyboardModifiers modifiers = mouse->modifiers();
+    if (modifiers & Qt::ControlModifier) {
+        if (!item) return false;
+        item->setSelected(false);
+        m_swallowingClick = true;
+        return true;
+    }
+    if (!(modifiers & Qt::ShiftModifier)) return false;
+    if (item) {
+        item->setSelected(true);
+        m_keepSelectionOnRelease = true;
+    } else {
+        // Qt's Ctrl: the click keeps the selection, and Shift's rubber band adds to it.
+        mouse->setModifiers(modifiers | Qt::ControlModifier);
+    }
+    return false;
+}
+
 bool MaterialEditorViewPanel::handleViewportEvent(QEvent* event) {
+    if (m_swallowingClick && (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)) {
+        if (event->type() == QEvent::MouseButtonRelease && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) m_swallowingClick = false;
+        return true;
+    }
+    if ((event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick) && clickWithSelectionKeys(static_cast<QMouseEvent*>(event))) {
+        return true;
+    }
     switch (event->type()) {
         case QEvent::MouseButtonPress: {
             const auto* mouse = static_cast<QMouseEvent*>(event);
@@ -963,6 +998,21 @@ bool MaterialEditorViewPanel::eventFilter(QObject* watched, QEvent* event) {
     }
     if (watched == m_side && event->type() == QEvent::Resize) fitPreview();
     if (watched == m_view->viewport() && handleViewportEvent(event)) return true;
+    if (m_scene && watched == m_scene.get() && event->type() == QEvent::GraphicsSceneMouseRelease && m_keepSelectionOnRelease) {
+        auto* mouse = static_cast<QGraphicsSceneMouseEvent*>(event);
+        if (mouse->button() == Qt::LeftButton) {
+            m_keepSelectionOnRelease = false;
+            // A click that didn't move leaves Qt's item the only one selected, or with its
+            // Ctrl, toggled: so that, with it unselected for a moment the stage doesn't see.
+            QGraphicsItem* item = m_scene->mouseGrabberItem();
+            if (item && item->isSelected() && mouse->scenePos() == mouse->buttonDownScenePos(Qt::LeftButton)) {
+                m_syncingSelection = true;
+                item->setSelected(false);
+                m_syncingSelection = false;
+                mouse->setModifiers(mouse->modifiers() | Qt::ControlModifier);
+            }
+        }
+    }
     if (watched == m_view && (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride)) {
         auto* key = static_cast<QKeyEvent*>(event);
         // Before anything else that wants them, such as QtNodes' own Delete.

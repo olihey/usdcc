@@ -57,10 +57,12 @@
 #include <QTreeWidget>
 #include <QUndoStack>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 using usdcc::usd::MaterialEditorViewPanel;
 using usdcc::usd::ShaderNodeGeometry;
@@ -281,6 +283,35 @@ USDCC_TEST(material_editor_selection_both_ways) {
     f.stages.setSelectedPaths(f.stage, {kSteel});
     settle();
     CHECK(f.panel->shownLevel() == kSteel, "unpinned, it follows");
+}
+
+USDCC_TEST(material_editor_shift_adds_ctrl_removes) {
+    Fixture f;
+    const auto click = [&f](const SdfPath& path, Qt::KeyboardModifiers modifiers) {
+        auto* node = f.item(path);
+        f.panel->view()->centerOn(node);
+        QTest::mouseClick(f.panel->view()->viewport(), Qt::LeftButton, modifiers, f.panel->view()->mapFromScene(grabPoint(node)));
+        QApplication::processEvents();
+    };
+    const auto selected = [&f]() {
+        std::vector<SdfPath> paths = f.stages.selectedPaths(f.stage);
+        std::sort(paths.begin(), paths.end());
+        return paths;
+    };
+    std::vector<SdfPath> both{kNormal, kSurface};
+    std::sort(both.begin(), both.end());
+
+    click(kNormal, Qt::NoModifier);
+    click(kSurface, Qt::ShiftModifier);
+    CHECK(selected() == both, "Shift adds a node: %zu selected", selected().size());
+    click(kSurface, Qt::ShiftModifier);
+    CHECK(selected() == both, "and again keeps them both");
+    click(kNormal, Qt::ControlModifier);
+    CHECK(selected() == std::vector<SdfPath>{kSurface}, "Ctrl takes a selected one out");
+    click(kNormal, Qt::ControlModifier);
+    CHECK(selected() == std::vector<SdfPath>{kSurface}, "and doesn't put an unselected one in");
+    click(kNormal, Qt::NoModifier);
+    CHECK(selected() == std::vector<SdfPath>{kNormal}, "a plain click still selects just the one");
 }
 
 USDCC_TEST(material_editor_enters_and_leaves_a_nodegraph) {

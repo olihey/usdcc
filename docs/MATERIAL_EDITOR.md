@@ -370,6 +370,8 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   nodes have nowhere in USD to keep one, so theirs last as long as the panel does.
 - **Selection is two-way:**
   - Selecting nodes selects their prims, so the Attribute Editor edits them.
+  - Shift+click adds a node or backdrop to the selection, and Shift+drag on empty space adds what the
+    rubber band covers. Ctrl+click takes a selected one out (Qt's own Ctrl toggles).
   - **The Attribute Editor needs work for this, despite what its doc says.** ATTRIBUTE_EDITOR.md §4 says it
     reads Sdr metadata for shader inputs, but a search of `src/` finds no Sdr call. An unauthored input of an
     MDL or MaterialX node isn't an attribute yet, so it also needs to list the definition's inputs (§5, phase 3).

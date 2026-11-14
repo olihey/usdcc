@@ -20,6 +20,7 @@ class QHBoxLayout;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QMouseEvent;
 class QSplitter;
 class QStackedWidget;
 class QToolButton;
@@ -119,6 +120,7 @@ private:
     bool pressOnPage(QPoint viewportPoint);
     bool handleKey(QKeyEvent* event, bool run);
     bool handleViewportEvent(QEvent* event);
+    bool clickWithSelectionKeys(QMouseEvent* mouse);
     std::vector<PXR_NS::SdfPath> selectedPrims() const;
     void rebuildBackdropItems();
     void startInlineEdit(const QString& text, const QRectF& sceneRect, const std::function<void(const QString&)>& commit);
@@ -155,6 +157,10 @@ private:
     ShakeDetector m_shake;
     QElapsedTimer m_shakeClock;
     bool m_syncingSelection = false;
+    // A Ctrl click on a node, whose move and release go no further than its press.
+    bool m_swallowingClick = false;
+    // A Shift click on a node, whose release mustn't leave it the only one selected.
+    bool m_keepSelectionOnRelease = false;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChanged;
     usdcc::core::Signal<const PrimMoves&>::Connection m_primsMoved;
 };
