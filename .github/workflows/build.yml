@@ -206,6 +206,7 @@ jobs:
             echo "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json first."
             exit 1
           fi
+          mkdir -p "$RUNNER_TEMP/deps"  # unzip makes only the last folder
           unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
           rm "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
           echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
