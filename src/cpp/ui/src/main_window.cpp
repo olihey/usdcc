@@ -165,6 +165,10 @@ PanelMaximizer* MainWindow::panelMaximizer() const { return m_panelMaximizer; }
 MainWindow::~MainWindow() {
     // Before m_toasts goes: the sink posts to it from any thread.
     usdcc::core::LogHub::instance().removeSink(m_toastSink.get());
+    // ~QWidget deletes the side panels after m_sidePanels is gone, and Qt only drops
+    // the connections to this window in ~QObject, later still: without this, each
+    // panel's destroyed() would erase from a destroyed list (a crash on Linux).
+    for (SidePanel* panel : std::as_const(m_sidePanels)) disconnect(panel, &QObject::destroyed, this, nullptr);
 }
 
 LogSidePanel* MainWindow::logPanel() const { return m_logPanel; }

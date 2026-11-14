@@ -23,6 +23,8 @@ find_package(pybind11 REQUIRED)
 add_library(usdcc_usd_bindings STATIC include/usdcc/usd/python/bind_usd.h bind_usd.cpp)
 target_include_directories(usdcc_usd_bindings PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${USDCC_PYTHON_INCLUDE_DIR}")
 target_link_libraries(usdcc_usd_bindings PUBLIC usdcc_usd pybind11::headers)
+# Linked into _usd's shared module (and usdcc_scripting_app): -fPIC on Linux/macOS.
+set_target_properties(usdcc_usd_bindings PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(_python_package_dir "${CMAKE_BINARY_DIR}/python/usdcc")
 # Before M7 this module was usdcc/usd.pyd; a stale copy would shadow usd.py.

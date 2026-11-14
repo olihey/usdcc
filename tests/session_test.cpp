@@ -4,6 +4,7 @@
 // differ; files that moved; unsaved edits; and the Python API.
 #include "python_test_app.h"
 #include "test_harness.h"
+#include "trash_temp_dir.h"
 #include "test_settings.h"
 
 #include "usdcc/scripting/app_module.h"
@@ -391,7 +392,7 @@ USDCC_TEST(session_plugins_differ) {
 
 USDCC_TEST(session_python_api) {
     TestSettings settings;
-    QTemporaryDir folder;
+    QTemporaryDir folder(usdcc::test::trashableTempTemplate());  // it deletes a session
     Scene scene;
     App app;
     SessionController sessions(app.context(), folder.filePath("sessions"));
@@ -457,7 +458,7 @@ USDCC_TEST(session_window_layout) {
 
 USDCC_TEST(session_dialog) {
     TestSettings settings;
-    QTemporaryDir folder;
+    QTemporaryDir folder(usdcc::test::trashableTempTemplate());  // it deletes a session
     Scene scene;
     App app;
     SessionController sessions(app.context(), folder.filePath("sessions"));

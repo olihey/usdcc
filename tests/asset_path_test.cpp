@@ -28,10 +28,16 @@ using usdcc::usd::properties::EditorHints;
 using usdcc::usd::properties::PropertyEditor;
 
 USDCC_TEST(asset_path_for_file) {
-    CHECK(assetPathForFile("C:/show/maps/wood.png", "C:/show") == "./maps/wood.png", "below the layer: %s", qPrintable(assetPathForFile("C:/show/maps/wood.png", "C:/show")));
-    CHECK(assetPathForFile("C:/show/wood.png", "C:/show") == "./wood.png", "beside it");
-    CHECK(assetPathForFile("C:/maps/wood.png", "C:/show/scenes") == "../../maps/wood.png", "above it: %s", qPrintable(assetPathForFile("C:/maps/wood.png", "C:/show/scenes")));
-    CHECK(assetPathForFile("C:/maps/wood.png", "") == "C:/maps/wood.png", "absolute for a layer that isn't saved");
+    // Absolute paths on this platform: C:/... on Windows, /... elsewhere.
+#ifdef Q_OS_WIN
+    const QString c = QStringLiteral("C:");
+#else
+    const QString c;
+#endif
+    CHECK(assetPathForFile(c + "/show/maps/wood.png", c + "/show") == "./maps/wood.png", "below the layer: %s", qPrintable(assetPathForFile(c + "/show/maps/wood.png", c + "/show")));
+    CHECK(assetPathForFile(c + "/show/wood.png", c + "/show") == "./wood.png", "beside it");
+    CHECK(assetPathForFile(c + "/maps/wood.png", c + "/show/scenes") == "../../maps/wood.png", "above it: %s", qPrintable(assetPathForFile(c + "/maps/wood.png", c + "/show/scenes")));
+    CHECK(assetPathForFile(c + "/maps/wood.png", "") == c + "/maps/wood.png", "absolute for a layer that isn't saved");
 #ifdef Q_OS_WIN
     // No relative path reaches another drive; "./D:/..." wouldn't resolve.
     CHECK(assetPathForFile("D:/maps/wood.png", "C:/show") == "D:/maps/wood.png", "absolute on another drive: %s", qPrintable(assetPathForFile("D:/maps/wood.png", "C:/show")));

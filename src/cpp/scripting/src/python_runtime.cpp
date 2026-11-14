@@ -366,6 +366,24 @@ const std::string& PythonRuntime::version() const { return m_impl->version; }
 
 const PythonSettings& PythonRuntime::settings() const { return m_impl->settings; }
 
+std::filesystem::path PythonRuntime::executable() const {
+    const std::filesystem::path& home = m_impl->settings.home;
+#if defined(_WIN32)
+    return home / "python.exe";
+#else
+    // "3.12.3" -> bin/python3.12, which a POSIX install always has; else bin/python3.
+    const std::string& version = m_impl->version;
+    const std::size_t major = version.find('.');
+    const std::size_t minor = major == std::string::npos ? major : version.find('.', major + 1);
+    std::error_code error;
+    if (minor != std::string::npos) {
+        const std::filesystem::path versioned = home / "bin" / ("python" + version.substr(0, minor));
+        if (std::filesystem::exists(versioned, error)) return versioned;
+    }
+    return home / "bin" / "python3";
+#endif
+}
+
 bool PythonRuntime::runString(const std::string& code, const std::string& fileName, Namespace scope) {
 #if USDCC_HAS_PYTHON
     return m_impl->run(code, fileName, nullptr, scope);

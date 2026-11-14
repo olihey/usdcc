@@ -974,7 +974,7 @@ PackageInstaller::Options PluginManager::installerOptions(const PythonRuntime& p
     PackageInstaller::Options options;
     options.root = m_options.packagesRoot;
     options.pythonTag = PackageEnvironment::pythonTag(python.version());
-    options.python = python.settings().home / "python.exe";
+    options.python = python.executable();
     options.uv = PackageInstaller::findUv();
     options.sources.index = settings.get<std::string>(kPackageIndexKey);
     options.sources.wheels = toPath(QString::fromStdString(settings.get<std::string>(kWheelsFolderKey)));

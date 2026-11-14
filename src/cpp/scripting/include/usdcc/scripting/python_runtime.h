@@ -69,6 +69,9 @@ public:
     // sys.version's first word, e.g. "3.12.10".
     const std::string& version() const;
     const PythonSettings& settings() const;
+    // The interpreter program of settings().home, for running it as a process
+    // (uv's --python): python.exe on Windows, bin/python3.XY elsewhere.
+    std::filesystem::path executable() const;
 
     // Runs `code` as a script in a fresh namespace (__name__ == "__main__";
     // `fileName` names it in tracebacks). Returns false if it raised: the

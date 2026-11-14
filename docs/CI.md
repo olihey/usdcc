@@ -266,9 +266,14 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 - **Linux and macOS.** Hosted `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-latest`, each
   with its own OpenUSD asset. The scripts in `tools/` are Python, so they run there, and
   `tools/build.py` and the naming, relocating and licence scripts in `tools/ci` already
-  take the platform into account (`tools/_common.py`). Still Windows only: `deps/usd.json`
-  (its `platform` and generator flag), `tools/deploy.py`'s folder layout with the smoke
-  tests that check it, and `tools/build_pyside.py`. None of it has run there yet.
+  take the platform into account (`tools/_common.py`). Linux builds and passes the tests
+  in WSL 2 ([LINUX_WSL.md](LINUX_WSL.md)): OpenUSD from `tools/build_usd.py` (the steps
+  `deps-usd.yml` runs inline, as a script a Linux job can reuse), and the tests headless
+  under `xvfb-run` with llvmpipe, as a hosted runner would. Still Windows only:
+  `deps/usd.json` (its `platform`, and its generator flag, which `build_usd.py` drops off
+  Windows; giving it per-platform parts changes the Windows asset's name, so that waits for
+  the Linux job), `tools/deploy.py`'s folder layout with the smoke tests that check it, and
+  `tools/build_pyside.py`.
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.

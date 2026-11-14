@@ -66,6 +66,9 @@ bool parseSettingType(std::string_view text, SettingType* type) {
     return false;
 }
 
+MemorySettingsBackend::MemorySettingsBackend() = default;
+MemorySettingsBackend::~MemorySettingsBackend() = default;
+
 std::optional<SettingValue> MemorySettingsBackend::read(const SettingDefinition& definition) {
     const auto it = m_values.find(definition.key);
     if (it == m_values.end()) {

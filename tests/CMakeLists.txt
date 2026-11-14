@@ -142,7 +142,8 @@ usdcc_add_plugin(usdcc_test_plugin
 add_library(usdcc_test_plugin_helper SHARED test_plugin/helper.cpp)
 set_target_properties(
     usdcc_test_plugin_helper
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${_usdcc_test_plugins}/test_native/bin/${USDCC_BUILT_FOR_PLATFORM}>"
+    PROPERTIES PREFIX ""  # usdcc_test_plugin_helper.so, as the test names it (not lib...)
+               RUNTIME_OUTPUT_DIRECTORY "$<1:${_usdcc_test_plugins}/test_native/bin/${USDCC_BUILT_FOR_PLATFORM}>"
                LIBRARY_OUTPUT_DIRECTORY "$<1:${_usdcc_test_plugins}/test_native/bin/${USDCC_BUILT_FOR_PLATFORM}>")
 target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
 add_dependencies(usdcc_python_tests usdcc_test_plugin)
@@ -211,8 +212,8 @@ if(WIN32)
             VS_DEBUGGER_ENVIRONMENT
             "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")
 else()
-    # Not yet run on Linux or macOS: USD's plugins, and its libraries for
-    # whatever the executables' rpath doesn't reach.
+    # USD's plugins, and its libraries for whatever the executables' rpath
+    # doesn't reach. Run on Linux (docs/LINUX_WSL.md), not yet on macOS.
     if(APPLE)
         set(_usdcc_library_path DYLD_LIBRARY_PATH)
     else()

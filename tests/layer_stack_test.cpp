@@ -46,7 +46,8 @@ USDCC_TEST(layer_tree) {
     CHECK(root.editTarget && root.dirty && root.displayName == "shot.usda", "the root: the target, dirty (edited)");
     CHECK(root.children.size() == 3, "three sublayers: [%zu]", root.children.size());
     if (root.children.size() != 3) return;
-    CHECK(root.children[0].anonymous && root.children[0].layer == memory, "the in-memory one first, as authored");
+    // Handle to handle: a handle == RefPtr comparison recurses for ever under GCC's C++20 rules (docs/LINUX_WSL.md).
+    CHECK(root.children[0].anonymous && root.children[0].layer == SdfLayerHandle(memory), "the in-memory one first, as authored");
     CHECK(root.children[1].displayName == "anim.usda" && root.children[1].authoredPath == "./anim.usda" &&
               root.children[1].children.size() == 1 && root.children[1].children[0].displayName == "base.usda",
           "anim.usda with its own sublayer");

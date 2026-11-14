@@ -3,7 +3,16 @@
   "version-string": "0.1.0",
   "builtin-baseline": "aeb844bc19b32a7f347182f7e1db80c77915dcd2",
   "dependencies": [
-    "qtbase",
+    {
+      "name": "qtbase",
+      "$comment": "wayland on Linux: QWindowKit's Linux code uses QNativeInterface::QWaylandApplication, which only exists in a Qt built with it (docs/LINUX_WSL.md)",
+      "features": [
+        {
+          "name": "wayland",
+          "platform": "linux"
+        }
+      ]
+    },
     "qtsvg",
     "qt-advanced-docking-system",
     "qtnodes",

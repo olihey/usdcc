@@ -9,6 +9,7 @@
 
 #include <QDialog>
 
+class QLabel;
 class QTableView;
 
 namespace usdcc::usd::properties {
@@ -41,7 +42,7 @@ private:
     PXR_NS::SdfValueTypeName m_arrayType;
     ArrayModel* m_model;
     QTableView* m_view;
-    class QLabel* m_countLabel;
+    QLabel* m_countLabel;
 };
 
 }  // namespace usdcc::usd::properties

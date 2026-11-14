@@ -380,7 +380,8 @@ USDCC_TEST(viewport_hud_settings_and_panel) {
         CHECK(subAction && !subAction->isChecked(), "the sublayer, not the edit target");
         if (subAction) subAction->trigger();
     }
-    CHECK(stage->editTargetLayer() == sub, "picking it makes it the edit target");
+    // Handle to handle: a handle == RefPtr comparison recurses for ever under GCC's C++20 rules (docs/LINUX_WSL.md).
+    CHECK(stage->editTargetLayer() == PXR_NS::SdfLayerHandle(sub), "picking it makes it the edit target");
     CHECK(window->hudInput().editTarget == QString::fromStdString(sub->GetDisplayName()), "and the HUD names it");
 
     // The Toggle HUD action works on the active viewport.

@@ -71,7 +71,7 @@ struct Sandbox {
         PackageInstaller::Options options;
         options.root = packages;
         options.pythonTag = PackageEnvironment::pythonTag(python().version());
-        options.python = python().settings().home / "python.exe";
+        options.python = python().executable();
         options.uv = PackageInstaller::findUv();
         options.sources.wheels = wheels;
         options.sources.offline = true;

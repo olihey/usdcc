@@ -355,8 +355,11 @@ USDCC_TEST(python_standalone_module) {
             << "print('OK' if (not usdcc.usd.EMBEDDED and not usdcc.app.is_embedded() and cache_id >= 0 "
             << "and manager.stage_cache_ids() == [cache_id] and needs_app) else 'WRONG')\n";
     }
-    const std::string command = "\"\"" + (settings.home / "python.exe").string() + "\" \"" + script.string() +
-                                "\" > \"" + output.string() + "\" 2>&1\"";
+    std::string command = "\"" + app.python.executable().string() + "\" \"" + script.string() + "\" > \"" +
+                          output.string() + "\" 2>&1";
+#ifdef _WIN32
+    command = "\"" + command + "\"";  // cmd.exe drops the first and last quote of a line starting with one
+#endif
     const int exitCode = std::system(command.c_str());
     std::ifstream in(output);
     std::stringstream text;

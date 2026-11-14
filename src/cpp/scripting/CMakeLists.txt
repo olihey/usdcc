@@ -85,7 +85,7 @@ if(USDCC_PYTHON_FOUND)
         PRIVATE USDCC_HAS_PYTHON=1
                 USDCC_PYTHON_HOME="${USDCC_PYTHON_HOME}"
                 USDCC_PYTHON_PACKAGE_ROOT="${USDCC_PYTHON_PACKAGE_ROOT}"
-                USDCC_USD_PYTHON_DIR="${USD_INSTALL}/lib/site-packages")
+                USDCC_USD_PYTHON_DIR="${USDCC_USD_PYTHON_DIR}")
     if(USDCC_PYSIDE_FOUND)
         target_compile_definitions(usdcc_scripting PRIVATE USDCC_PYSIDE_DIR="${USDCC_PYSIDE_DIR}")
     endif()

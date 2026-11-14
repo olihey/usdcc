@@ -90,6 +90,10 @@ public:
 // Keeps values in memory: the default backend, and the one tests install.
 class MemorySettingsBackend : public SettingsBackend {
 public:
+    // Out of line, so the vtable they set stays in usdcc_core, which hides
+    // what it doesn't export (Linux/macOS; its CMakeLists.txt).
+    USDCC_CORE_API MemorySettingsBackend();
+    USDCC_CORE_API ~MemorySettingsBackend() override;
     USDCC_CORE_API std::optional<SettingValue> read(const SettingDefinition& definition) override;
     USDCC_CORE_API void write(const SettingDefinition& definition, const SettingValue& value) override;
     USDCC_CORE_API void remove(const std::string& key) override;

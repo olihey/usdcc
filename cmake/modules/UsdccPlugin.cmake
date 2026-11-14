@@ -61,6 +61,12 @@ function(usdcc_add_plugin target)
                    AUTOMOC ON
                    LIBRARY_OUTPUT_DIRECTORY "$<1:${_bin}>"
                    RUNTIME_OUTPUT_DIRECTORY "$<1:${_bin}>")
+    if(NOT WIN32)
+        # A plugin's own libraries are found next to it, as Windows does for DLLs
+        # (docs/PLUGIN_SDK.md): $ORIGIN on the rpath, built and installed.
+        set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "$ORIGIN")
+        set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
+    endif()
 
     set(_json "{\n  \"id\": \"${ARG_ID}\",\n  \"name\": \"${ARG_NAME}\",\n  \"version\": \"${ARG_VERSION}\",\n")
     if(ARG_DESCRIPTION)

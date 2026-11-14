@@ -125,8 +125,36 @@ later `--run`/`run.py` invocations automatically. See each script's help
 
 The scripts in `tools/` are Python (3.9 or later, standard library only), so they
 aren't tied to Windows. `build.py` and `run.py` pick Ninja and vcpkg's dynamic
-triplet on Linux and macOS, where usdcc hasn't been built yet; `deploy.py` and
+triplet on Linux and macOS (macOS hasn't been built yet); `deploy.py` and
 `build_pyside.py` only know Windows' layout so far, and say so elsewhere.
+
+### Linux (and WSL 2)
+
+usdcc builds, runs and passes its tests on Ubuntu 24.04, so far in WSL 2 on Windows
+([docs/LINUX_WSL.md](docs/LINUX_WSL.md) has the packages to install and what was found).
+OpenUSD comes from [tools/build_usd.py](tools/build_usd.py), which builds the commit
+`deps/usd.json` pins with the system's Python 3.12:
+
+```
+python3 tools/build_usd.py ~/deps/usd           # about 40 minutes
+python3 tools/build.py --usd-install ~/deps/usd
+ctest --test-dir build --output-on-failure
+```
+
+From Windows, [tools/wsl.py](tools/wsl.py) does the same in a clone on WSL's own disk:
+it copies this working tree there first, so edits are built without committing them.
+
+```
+python tools/wsl.py setup     # once: the clone, its submodules and vcpkg
+python tools/wsl.py usd       # once: OpenUSD into ~/deps/usd
+python tools/wsl.py build
+python tools/wsl.py run --scene test_data/cube_and_sphere.usda
+python tools/wsl.py test      # --headless: under Xvfb; --software: without the GPU
+```
+
+Under WSLg, OpenGL needs `GALLIUM_DRIVER=d3d12` and `MESA_D3D12_DEFAULT_ADAPTER_NAME=<GPU>`
+to use the GPU (`tools/wsl.py` sets both); without them Mesa renders in software. PySide6
+isn't built for Linux yet, so `usdcc.ui` and Python-made panels are off there.
 
 ### When usdcc crashes
 

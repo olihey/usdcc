@@ -10,7 +10,8 @@ Mirrors the manual steps documented in readme.md.
 
 On Windows it builds with Visual Studio. On Linux and macOS it uses Ninja when
 there is one on PATH (else CMake's default generator) and vcpkg's dynamic
-triplet; neither has been built there yet (docs/CI.md).
+triplet. Linux is built and tested in WSL 2 (docs/LINUX_WSL.md, tools/wsl.py);
+macOS hasn't been built yet.
 
 Standard library only. `python tools/build.py --help` lists the options.
 """

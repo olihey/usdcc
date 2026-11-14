@@ -115,6 +115,15 @@ struct Scratch {
 
 const std::string platform() { return usdcc::scripting::pluginBuildInfo().at("platform"); }
 
+// A native library's file name, as PluginManager looks for it.
+std::string libraryFile(const std::string& name) {
+#ifdef _WIN32
+    return name + ".dll";
+#else
+    return name + ".so";
+#endif
+}
+
 const std::filesystem::path testPluginFolder() { return std::filesystem::u8path(USDCC_TEST_PLUGINS) / "test_native"; }
 
 QAction* findAction(const QList<QAction*>& actions, const QString& text) {
@@ -254,12 +263,12 @@ USDCC_TEST(native_plugin_refused_and_failing) {
     // Right build, but it can't load.
     scratch.manifest("missing", "dll.missing", "not_built");
     scratch.manifest("garbage", "dll.garbage", "garbage");
-    scratch.write("garbage/bin/" + platform() + "/garbage.dll", "this isn't a library");
+    scratch.write("garbage/bin/" + platform() + "/" + libraryFile("garbage"), "this isn't a library");
     // A real DLL with no entry point.
     scratch.manifest("no_entry", "dll.noentry", "usdcc_test_plugin_helper");
     std::filesystem::create_directories(scratch.root / "no_entry/bin" / platform());
-    std::filesystem::copy_file(testPluginFolder() / "bin" / platform() / "usdcc_test_plugin_helper.dll",
-                               scratch.root / "no_entry/bin" / platform() / "usdcc_test_plugin_helper.dll");
+    std::filesystem::copy_file(testPluginFolder() / "bin" / platform() / libraryFile("usdcc_test_plugin_helper"),
+                               scratch.root / "no_entry/bin" / platform() / libraryFile("usdcc_test_plugin_helper"));
     scratch.manifest("dependent", "dll.dependent", "not_built", {}, {}, R"(, "requires": ["dll.missing"])");
 
     PluginManager manager(scratch.options());

@@ -36,7 +36,8 @@ if(UNIX AND NOT APPLE)
     # Linux desktop integration: the freedesktop icon theme tree and the
     # launcher entry that refers to it. The project has no other install rules
     # yet (none for the executable itself), so this only covers these files.
-    # NOTE: not yet built or run on Linux.
+    # NOTE: usdcc builds and runs on Linux (docs/LINUX_WSL.md); these install
+    # rules haven't been tried there.
     install(DIRECTORY resources/linux/icons/ DESTINATION share/icons)
     install(FILES resources/linux/usdcc.desktop DESTINATION share/applications)
 endif()

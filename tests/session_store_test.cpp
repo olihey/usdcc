@@ -1,6 +1,7 @@
 // The sessions folder and a session's file (docs/SESSIONS.md §3): names, round trips,
 // versions, the preview, import and export, and mapping paths to another machine's.
 #include "test_harness.h"
+#include "trash_temp_dir.h"
 
 #include "usdcc/ui/session_store.h"
 
@@ -125,7 +126,7 @@ USDCC_TEST(session_store_versions) {
 }
 
 USDCC_TEST(session_store_import_export) {
-    QTemporaryDir temp;
+    QTemporaryDir temp(usdcc::test::trashableTempTemplate());  // it deletes a session
     const SessionStore store(temp.filePath("sessions"));
     QString error;
     store.write(sample("Shared"));
@@ -149,7 +150,13 @@ USDCC_TEST(session_store_import_export) {
 }
 
 USDCC_TEST(session_paths_remap) {
-    auto [from, to] = session::folderMapping("C:/Users/anna/proj/scenes/kitchen.usda", "D:\\work\\proj\\scenes\\kitchen.usda");
+#ifdef Q_OS_WIN
+    // As a file dialog gives it, with backslashes.
+    const char* moved = "D:\\work\\proj\\scenes\\kitchen.usda";
+#else
+    const char* moved = "D:/work/proj/scenes/kitchen.usda";  // a backslash is no separator here
+#endif
+    auto [from, to] = session::folderMapping("C:/Users/anna/proj/scenes/kitchen.usda", moved);
     CHECK(from == "C:/Users/anna" && to == "D:/work", "the folders that differ: %s -> %s", qPrintable(from), qPrintable(to));
     CHECK(session::folderMapping("C:/a/x.usda", "C:/b/y.usda").first.isEmpty(), "no mapping when the file names differ");
 

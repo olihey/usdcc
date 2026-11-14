@@ -144,6 +144,10 @@ int main(int argc, char** argv) {
     QSurfaceFormat format;
     format.setVersion(4, 5);
     format.setProfile(QSurfaceFormat::CompatibilityProfile);
+    // Without it Qt asks for a forward-compatible context (no deprecated
+    // functions), which Mesa answers with a Core profile despite the profile
+    // above (docs/LINUX_WSL.md). NVIDIA's Windows driver ignores the flag.
+    format.setOption(QSurfaceFormat::DeprecatedFunctions);
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
     // USDCC_GL_DEBUG=1 asks for a debug context: the viewport then logs each

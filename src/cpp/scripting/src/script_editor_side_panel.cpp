@@ -55,6 +55,16 @@
 #include <mutex>
 #include <utility>
 
+// The deploy's tools/ruff holds ruff.exe on Windows, ruff elsewhere; a Python
+// installs its scripts (pip's ruff) in Scripts on Windows, bin elsewhere.
+#if defined(_WIN32)
+#define USDCC_EXE_SUFFIX ".exe"
+#define USDCC_PYTHON_SCRIPTS_DIR "Scripts"
+#else
+#define USDCC_EXE_SUFFIX ""
+#define USDCC_PYTHON_SCRIPTS_DIR "bin"
+#endif
+
 namespace usdcc::scripting {
 
 using usdcc::core::LogLevel;
@@ -1170,14 +1180,14 @@ QString ScriptEditorSidePanel::ruffProgram() const {
     // The pinned ruff first, so formatting doesn't depend on what is installed:
     // a deploy's tools/ruff next to bin/ (tools/deploy.py), then the build's.
     const QString deployed =
-        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/ruff/ruff.exe"));
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/ruff/ruff" USDCC_EXE_SUFFIX));
     if (QFileInfo(deployed).isExecutable()) return QDir::cleanPath(deployed);
 #ifdef USDCC_RUFF_EXE
     if (QFileInfo(QStringLiteral(USDCC_RUFF_EXE)).isExecutable()) return QStringLiteral(USDCC_RUFF_EXE);
 #endif
     QString program = QStandardPaths::findExecutable(QStringLiteral("ruff"));
     if (program.isEmpty() && m_runtime.isAvailable()) {
-        const QString scripts = QString::fromStdU16String((m_runtime.settings().home / "Scripts").u16string());
+        const QString scripts = QString::fromStdU16String((m_runtime.settings().home / USDCC_PYTHON_SCRIPTS_DIR).u16string());
         program = QStandardPaths::findExecutable(QStringLiteral("ruff"), {scripts});
     }
     return program;
