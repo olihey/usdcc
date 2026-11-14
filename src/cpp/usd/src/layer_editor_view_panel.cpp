@@ -55,6 +55,7 @@ namespace {
 const QColor kMissingColor(0xff, 0x5f, 0x56);   // as the log's errors
 const QColor kMutedColor(255, 255, 255, 89);     // 35%, as a note
 constexpr int kIdentifierRole = Qt::UserRole;
+constexpr int kMutedRole = Qt::UserRole + 1;  // on the Mute column of a layer that can be muted
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
@@ -196,7 +197,6 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     usdcc::ui::scaled::iconSize(m_tree, 12, 12);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &LayerEditorViewPanel::showMenu);
-    connect(m_tree, &QTreeWidget::itemChanged, this, &LayerEditorViewPanel::onItemChanged);
     connect(m_tree, &QTreeWidget::itemClicked, this, &LayerEditorViewPanel::onItemClicked);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int column) {
         if (column == Name) setEditTarget(item->data(Name, kIdentifierRole).toString().toStdString());
@@ -446,28 +446,29 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     // Only a sublayer can be dragged, to reorder it among its siblings.
     item->setFlags(layer_actions::canRemove(entry) ? item->flags() | Qt::ItemIsDragEnabled
                                                    : item->flags() & ~Qt::ItemIsDragEnabled);
+    // A speaker; struck out while muted. A click toggles it.
     if (layer_actions::canMute(entry)) {
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(Mute, entry.muted ? Qt::Checked : Qt::Unchecked);
-        item->setToolTip(Mute, entry.muted ? tr("Unmute: compose this layer again")
-                                           : tr("Mute: leave this layer (and its sublayers) out of the stage"));
+        item->setData(Mute, kMutedRole, entry.muted);
+        item->setIcon(Mute, QIcon(entry.muted ? QStringLiteral(":/usdcc/theme/speaker-muted.png")
+                                              : QStringLiteral(":/usdcc/theme/speaker.png")));
+        item->setToolTip(Mute, entry.muted ? tr("Muted. Click to compose this layer again")
+                                           : tr("Click to mute: leave this layer (and its sublayers) out of the stage"));
     }
 
     for (const LayerEntry& child : entry.children) addItems(child, item);
 }
 
-void LayerEditorViewPanel::onItemChanged(QTreeWidgetItem* item, int column) {
-    if (m_filling || column != Mute || !currentStage() || !m_undoManager) return;
-    const std::string identifier = item->data(Name, kIdentifierRole).toString().toStdString();
-    const bool muted = item->checkState(Mute) == Qt::Checked;
-    // Queued: the change notice rebuilds this tree, item included.
-    QMetaObject::invokeMethod(
-        this, [this, identifier, muted]() { layer_actions::setMuted(*m_undoManager, currentStage(), identifier, muted); },
-        Qt::QueuedConnection);
-}
-
 void LayerEditorViewPanel::onItemClicked(QTreeWidgetItem* item, int column) {
-    if (column == Target) setEditTarget(item->data(Name, kIdentifierRole).toString().toStdString());
+    const std::string identifier = item->data(Name, kIdentifierRole).toString().toStdString();
+    if (column == Target) setEditTarget(identifier);
+    const QVariant muted = item->data(Mute, kMutedRole);
+    if (column == Mute && muted.isValid() && currentStage() && m_undoManager) {
+        const bool mute = !muted.toBool();
+        // Queued: the change notice rebuilds this tree, item included.
+        QMetaObject::invokeMethod(
+            this, [this, identifier, mute]() { layer_actions::setMuted(*m_undoManager, currentStage(), identifier, mute); },
+            Qt::QueuedConnection);
+    }
 }
 
 void LayerEditorViewPanel::setEditTarget(const std::string& identifier) {

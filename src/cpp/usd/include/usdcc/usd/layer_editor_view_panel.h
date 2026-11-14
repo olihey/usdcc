@@ -41,7 +41,9 @@ class PropertyRow;
 // anonymous one, red "(not found)" for a missing one, and is dimmed when
 // it's muted. The Target column marks the edit target; clicking it, a
 // double-click or Set as Edit Target moves it there (§3). The Mute column's
-// checkbox mutes a sublayer, one undo step (layer_actions::setMuted()). The
+// speaker (struck out while muted; the item's Qt::UserRole + 1 says which)
+// mutes or unmutes a sublayer when clicked, one undo step
+// (layer_actions::setMuted()); right-click > Mute Others mutes the rest. The
 // toolbar says which layer is being edited, and its + adds a new in-memory
 // layer, a new layer file or an existing one under the selected layer (§4).
 // Remove (Delete), Move Up/Down (Ctrl+Up/Down) and dragging a sublayer among
@@ -108,7 +110,6 @@ protected:
 private:
     const LayerEntry* entryFor(const std::string& identifier) const;
     void addItems(const LayerEntry& entry, QTreeWidgetItem* parent);
-    void onItemChanged(QTreeWidgetItem* item, int column);
     void onItemClicked(QTreeWidgetItem* item, int column);
     void showMenu(const QPoint& pos);
     void setEditTarget(const std::string& identifier);
@@ -157,7 +158,7 @@ private:
     QTimer* m_refreshTimer;
     std::shared_ptr<UndoManager> m_undoManager;
     std::vector<LayerEntry> m_layers;
-    bool m_filling = false;  // refresh() setting the checkboxes, not the user
+    bool m_filling = false;  // refresh() filling the tree, not the user
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_editTargetConnection;
     usdcc::core::Signal<>::Connection m_layersSavedConnection;

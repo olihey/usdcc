@@ -94,17 +94,29 @@ USDCC_TEST(layer_editor_panel) {
     CHECK(s->IsLayerMuted(animId) && stage->editTargetLayer() == s->GetRootLayer(), "muted; the target is the root");
     CHECK(!s->GetPrimAtPath(SdfPath("/Tweak")), "its prim is gone from the stage");
     CHECK(stack && stack->undoText() == "Mute anim.usda", "an undo step: [%s]", stack ? qPrintable(stack->undoText()) : "");
-    CHECK(panel.itemFor(animId) && panel.itemFor(animId)->checkState(LayerEditorViewPanel::Mute) == Qt::Checked,
-          "the panel shows it muted");
+    CHECK(panel.itemFor(animId) && panel.itemFor(animId)->data(LayerEditorViewPanel::Mute, Qt::UserRole + 1).toBool() &&
+              !panel.itemFor(animId)->icon(LayerEditorViewPanel::Mute).isNull() &&
+              !panel.itemFor(animId)->data(LayerEditorViewPanel::Mute, Qt::CheckStateRole).isValid(),
+          "the panel shows it muted, with an icon, no checkbox");
     stack->undo();
     settle();
     CHECK(!s->IsLayerMuted(animId) && s->GetPrimAtPath(SdfPath("/Tweak")), "undo: unmuted, its edit back");
     CHECK(stage->editTargetLayer() == animLayer, "and the target back on it");
 
-    // The Mute checkbox.
-    panel.itemFor(animId)->setCheckState(LayerEditorViewPanel::Mute, Qt::Checked);
+    // A click on the Mute column's speaker mutes it; another unmutes it.
+    CHECK(!panel.itemFor(animId)->data(LayerEditorViewPanel::Mute, Qt::UserRole + 1).toBool(), "shown unmuted");
+    Q_EMIT tree->itemClicked(panel.itemFor(animId), LayerEditorViewPanel::Mute);
     settle();
-    CHECK(s->IsLayerMuted(animId), "the checkbox mutes it");
+    CHECK(s->IsLayerMuted(animId), "a click on the speaker mutes it");
+    CHECK(panel.itemFor(animId)->data(LayerEditorViewPanel::Mute, Qt::UserRole + 1).toBool(), "shown muted");
+    Q_EMIT tree->itemClicked(panel.itemFor(animId), LayerEditorViewPanel::Mute);
+    settle();
+    CHECK(!s->IsLayerMuted(animId), "another click unmutes it");
+    Q_EMIT tree->itemClicked(panel.itemFor(s->GetRootLayer()->GetIdentifier()), LayerEditorViewPanel::Mute);
+    settle();
+    CHECK(!s->IsLayerMuted(s->GetRootLayer()->GetIdentifier()) &&
+              panel.itemFor(s->GetRootLayer()->GetIdentifier())->icon(LayerEditorViewPanel::Mute).isNull(),
+          "the root layer has no speaker, and a click there does nothing");
     CHECK(!usdcc::usd::layer_actions::setMuted(*undo, stage, s->GetRootLayer()->GetIdentifier(), true),
           "the root layer can't be muted");
     QStandardPaths::setTestModeEnabled(false);
