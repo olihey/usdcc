@@ -276,6 +276,98 @@ USDCC_TEST(layer_editor_reload) {
     QStandardPaths::setTestModeEnabled(false);
 }
 
+// Reload after the file changed outside the app: a clean text layer, one with
+// unsaved edits, a new sublayer in the file, and a usdc layer rewritten on disk.
+USDCC_TEST(layer_editor_reload_external) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+        QFile file(dir.filePath(name));
+        const bool ok = file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(text) == text.size();
+        CHECK(ok, "write %s", qPrintable(name));
+    };
+    write(QStringLiteral("anim.usda"), "#usda 1.0\ndef \"OnDisk\"\n{\n}\n");
+    write(QStringLiteral("extra.usda"), "#usda 1.0\ndef \"Extra\"\n{\n}\n");
+    write(QStringLiteral("shot.usda"), "#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\n");
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    const UsdStageRefPtr& s = stage->usdStage();
+    namespace actions = usdcc::usd::layer_actions;
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    if (!anim) return;
+    const std::string animId = anim->GetIdentifier();
+    QUndoStack* stack = undo->stack(stage);
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.show();
+
+    // A clean layer, its file changed: a new prim and a new sublayer.
+    write(QStringLiteral("anim.usda"),
+          "#usda 1.0\n(\n    subLayers = [@./extra.usda@]\n)\ndef \"OnDisk\"\n{\n}\ndef \"External\"\n{\n}\n");
+    QString error;
+    CHECK(actions::reloadLayer(*undo, stage, animId, &error), "reload: %s", qPrintable(error));
+    CHECK(s->GetPrimAtPath(SdfPath("/External")) && s->GetPrimAtPath(SdfPath("/Extra")),
+          "the file's new prim and its new sublayer's prim compose");
+    settle();
+    const SdfLayerHandle extra = SdfLayer::Find(dir.filePath(QStringLiteral("extra.usda")).toStdString());
+    CHECK(extra && panel.itemFor(extra->GetIdentifier()) &&
+              panel.itemFor(extra->GetIdentifier())->parent() == panel.itemFor(animId),
+          "the panel shows the new sublayer under anim.usda");
+    CHECK(stack->undoText() == "Reload anim.usda", "an undo step: [%s]", qPrintable(stack->undoText()));
+    stack->undo();
+    CHECK(!s->GetPrimAtPath(SdfPath("/External")) && !s->GetPrimAtPath(SdfPath("/Extra")), "undo: as it was");
+    stack->redo();
+    CHECK(s->GetPrimAtPath(SdfPath("/External")), "redo: the file's content again");
+
+    // Unsaved edits, and the file changed again meanwhile: the file wins.
+    stage->setEditTargetLayer(anim);
+    undo->apply(stage, QStringLiteral("Add Tweak"), [&]() { return bool(s->DefinePrim(SdfPath("/Tweak"))); });
+    write(QStringLiteral("anim.usda"), "#usda 1.0\ndef \"Second\"\n{\n}\n");
+    CHECK(actions::reloadLayer(*undo, stage, animId, &error), "reload: %s", qPrintable(error));
+    CHECK(!s->GetPrimAtPath(SdfPath("/Tweak")) && !s->GetPrimAtPath(SdfPath("/External")) &&
+              s->GetPrimAtPath(SdfPath("/Second")) && !anim->IsDirty(),
+          "the second version of the file, the edit gone");
+
+    // A usdc layer rewritten on disk while the stage uses it.
+    const QString crateFile = dir.filePath(QStringLiteral("cache.usdc"));
+    {
+        SdfLayerRefPtr crate = SdfLayer::CreateNew(crateFile.toStdString());
+        SdfCreatePrimInLayer(crate, SdfPath("/Cached"))->SetSpecifier(SdfSpecifierDef);
+        crate->Save();
+    }
+    const std::string cache =
+        actions::addExistingLayer(*undo, stage, s->GetRootLayer()->GetIdentifier(), crateFile.toStdString(), &error);
+    CHECK(!cache.empty() && s->GetPrimAtPath(SdfPath("/Cached")), "the usdc layer composes: %s", qPrintable(error));
+    const QString newCrate = dir.filePath(QStringLiteral("cache_new.usdc"));
+    {
+        SdfLayerRefPtr crate = SdfLayer::CreateNew(newCrate.toStdString());
+        SdfCreatePrimInLayer(crate, SdfPath("/Recached"))->SetSpecifier(SdfSpecifierDef);
+        crate->Save();
+    }
+    // As a tool writing it would: over the old file, in place.
+    bool replaced = false;
+    {
+        QFile source(newCrate);
+        QFile target(crateFile);
+        if (source.open(QIODevice::ReadOnly) && target.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            const QByteArray bytes = source.readAll();
+            replaced = target.write(bytes) == bytes.size();
+        }
+    }
+    std::printf("  usdc overwritten while open: %s\n", replaced ? "yes" : "no (the file is in use)");
+    if (replaced) {
+        CHECK(actions::reloadLayer(*undo, stage, cache, &error), "reload the usdc: %s", qPrintable(error));
+        CHECK(s->GetPrimAtPath(SdfPath("/Recached")) && !s->GetPrimAtPath(SdfPath("/Cached")),
+              "the usdc's new content");
+    }
+    QStandardPaths::setTestModeEnabled(false);
+}
+
 // Saving (docs/LAYER_EDITOR.md §5) and the layer properties (§6).
 USDCC_TEST(layer_editor_save_and_properties) {
     QStandardPaths::setTestModeEnabled(true);
