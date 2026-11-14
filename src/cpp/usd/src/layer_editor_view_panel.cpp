@@ -168,6 +168,11 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
                                                 tr("Save the selected layer (Ctrl+S)"), toolbar);
     connect(save, &QToolButton::clicked, this, [this]() { saveLayer(layerToSave()); });
     toolbarLayout->addWidget(save);
+    // Save All: every unsaved file layer of the stage; greyed while there's none.
+    m_saveAll = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/save-all.png"),
+                                               tr("Save all unsaved layers"), toolbar);
+    connect(m_saveAll, &QToolButton::clicked, this, &LayerEditorViewPanel::saveAll);
+    toolbarLayout->addWidget(m_saveAll);
 
     auto* tree = new LayerTree(container);
     tree->onMove = [this](QTreeWidgetItem* dragged, int index) {
@@ -312,11 +317,8 @@ void LayerEditorViewPanel::restoreSessionState(const QJsonObject& state) {
 }
 
 void LayerEditorViewPanel::populateOptionsMenu(QMenu* menu) {
-    QAction* saveAll = menu->addAction(tr("Save All"), this, [this]() {
-        QString error;
-        if (!layer_actions::saveAll(currentStage(), &error)) QMessageBox::warning(this, tr("Save All"), error);
-    });
-    saveAll->setEnabled(!layer_actions::unsavedLayers(currentStage()).empty());
+    QAction* saveAllAction = menu->addAction(tr("Save All"), this, &LayerEditorViewPanel::saveAll);
+    saveAllAction->setEnabled(!layer_actions::unsavedLayers(currentStage()).empty());
     menu->addSeparator();
     menu->addAction(tr("Refresh"), this, &LayerEditorViewPanel::refresh);
 }
@@ -386,7 +388,17 @@ void LayerEditorViewPanel::refresh() {
                                            : tr("%1, in %2").arg(variant, qs(target->displayName)));
     m_editing->setToolTip(target ? qs(target->identifier) : QString());
     updateProperties();
+    m_saveAll->setEnabled(!layer_actions::unsavedLayers(currentStage()).empty());
     notifyOptionsChanged();  // Save All is there when something's unsaved
+}
+
+bool LayerEditorViewPanel::saveAll() {
+    QString error;
+    if (!layer_actions::saveAll(currentStage(), &error)) {
+        QMessageBox::warning(this, tr("Save All"), error);
+        return false;
+    }
+    return true;
 }
 
 void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* parent) {

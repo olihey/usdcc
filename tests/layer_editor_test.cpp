@@ -441,8 +441,17 @@ USDCC_TEST(layer_editor_save_and_properties) {
 
     // Save All: every unsaved file layer of the stage.
     s->DefinePrim(SdfPath("/More"));
-    CHECK(!actions::unsavedLayers(stage).empty() && actions::saveAll(stage, &error) && actions::unsavedLayers(stage).empty(),
-          "Save All leaves nothing unsaved");
+    settle();
+    QToolButton* saveAllButton = nullptr;
+    for (auto* button : panel.findChildren<QToolButton*>()) {
+        if (button->toolTip() == "Save all unsaved layers") saveAllButton = button;
+    }
+    CHECK(saveAllButton && saveAllButton->isEnabled() && !actions::unsavedLayers(stage).empty(),
+          "something unsaved: the toolbar's Save All is on");
+    if (saveAllButton) saveAllButton->click();
+    settle();
+    CHECK(actions::unsavedLayers(stage).empty() && saveAllButton && !saveAllButton->isEnabled(),
+          "Save All leaves nothing unsaved, and greys out");
     CHECK(usdcc::usd::confirmUnsavedLayers(&stages, {stage}, nullptr), "nothing unsaved: closing needn't ask");
 
     // Properties: the selected layer's, each edit one undo step.

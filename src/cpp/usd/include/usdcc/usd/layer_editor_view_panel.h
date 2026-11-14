@@ -79,6 +79,8 @@ public:
     // layer_actions::saveLayerAs(). Errors go to a message box.
     bool saveLayer(const std::string& identifier);
     std::string saveLayerAs(const std::string& identifier, const QString& file = QString());
+    // Save All (the toolbar, the options menu): layer_actions::saveAll().
+    bool saveAll();
 
     // Right-click > Flatten Sublayers (layer_actions::flattenSublayers()):
     // asks first when sublayers with unsaved changes leave the stack or the
@@ -140,6 +142,7 @@ private:
     QTreeWidget* m_tree;
     QLabel* m_editing;
     QAction* m_editNewLayer;
+    QToolButton* m_saveAll;
     QSplitter* m_splitter;
     QWidget* m_propertiesPane;  // the header and the scroll area
     QToolButton* m_propertiesHeader;
