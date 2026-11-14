@@ -87,14 +87,14 @@ USDCC_TEST(rtx_native_runtime_identity) {
     const auto hash = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex();
     usdcc::rtx::RuntimePin pin{"ovrtx", "test-build", hash.constData()};
     CHECK(usdcc::rtx::runtimeProblem(dir.path(), pin).contains("metadata missing"), "missing runtime metadata is actionable");
-    QFile metadata(dir.filePath("ovrtx-build-info.json")); metadata.open(QIODevice::WriteOnly);
+    QFile metadata(dir.filePath("ovrtx-build-info.json")); CHECK(metadata.open(QIODevice::WriteOnly), "fake runtime metadata");
     metadata.write(QJsonDocument(QJsonObject{{"build_string", "wrong"}}).toJson()); metadata.close();
     CHECK(usdcc::rtx::runtimeProblem(dir.path(), pin).contains("requires ovrtx build"), "same API version is insufficient when builds differ");
-    metadata.open(QIODevice::WriteOnly|QIODevice::Truncate);
+    CHECK(metadata.open(QIODevice::WriteOnly|QIODevice::Truncate), "fake runtime metadata");
     metadata.write(QJsonDocument(QJsonObject{{"build_string", "test-build"}}).toJson()); metadata.close();
-    QFile loader(dir.filePath("bin/ovrtx-dynamic.dll")); loader.open(QIODevice::WriteOnly); loader.write(payload); loader.close();
+    QFile loader(dir.filePath("bin/ovrtx-dynamic.dll")); CHECK(loader.open(QIODevice::WriteOnly), "fake runtime loader"); loader.write(payload); loader.close();
     CHECK(usdcc::rtx::runtimeProblem(dir.path(), pin).isEmpty(), "matching runtime metadata and loader hash pass without loading a DLL");
-    loader.open(QIODevice::WriteOnly|QIODevice::Truncate); loader.write("modified"); loader.close();
+    CHECK(loader.open(QIODevice::WriteOnly|QIODevice::Truncate), "fake runtime loader"); loader.write("modified"); loader.close();
     CHECK(usdcc::rtx::runtimeProblem(dir.path(), pin).contains("does not match"), "a mismatched loader is refused before vendor code runs");
 }
 

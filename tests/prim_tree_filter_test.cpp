@@ -98,7 +98,7 @@ struct Fixture {
         scale = std::make_unique<usdcc::ui::UiScaleController>(*static_cast<QApplication*>(QCoreApplication::instance()), temp.filePath("ui.ini"));
         const QString path = temp.filePath("scene.usda");
         QFile file(path);
-        file.open(QIODevice::WriteOnly);
+        CHECK(file.open(QIODevice::WriteOnly), "test scene opens for writing");
         file.write(kScene);
         file.close();
         stage = stages.openStage(path.toStdString());

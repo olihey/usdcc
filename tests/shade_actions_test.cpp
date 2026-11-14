@@ -75,7 +75,7 @@ struct Fixture {
     explicit Fixture(const char* text = kNetwork) {
         const QString path = temp.filePath("net.usda");
         QFile file(path);
-        file.open(QIODevice::WriteOnly);
+        CHECK(file.open(QIODevice::WriteOnly), "test network opens for writing");
         file.write(text);
         file.close();
         stage = stages.openStage(path.toStdString());

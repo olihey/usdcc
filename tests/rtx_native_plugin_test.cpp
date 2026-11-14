@@ -56,7 +56,7 @@ USDCC_TEST(rtx_native_plugin_deferred_initialization) {
     const auto legacyRoot = std::filesystem::u8path(folder.path().toStdString()) / "old-user-copy";
     std::filesystem::create_directories(legacyRoot / "rtx");
     QFile legacy(QString::fromStdU16String((legacyRoot / "rtx/usdcc-plugin.json").u16string()));
-    legacy.open(QIODevice::WriteOnly);
+    CHECK(legacy.open(QIODevice::WriteOnly), "legacy plugin manifest opens for writing");
     legacy.write(R"({"id":"org.usdcc.rtx-render","name":"Old RTX","version":"0.2.0","api":1,
         "python":{"module":"usdcc_rtx_render","requires":["ovrtx>=0.6","ovstage","numpy"]}})");
     legacy.close();

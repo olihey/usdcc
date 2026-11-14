@@ -53,12 +53,12 @@ USDCC_TEST(asset_path_relative_to_the_edit_target) {
     texture.close();
     {
         QFile layer(root + "/sub/layer.usda");
-        layer.open(QIODevice::WriteOnly);
+        CHECK(layer.open(QIODevice::WriteOnly), "test layer opens for writing");
         layer.write("#usda 1.0\ndef \"P\"\n{\n    asset file = @./tex.png@\n}\n");
     }
     {
         QFile layer(root + "/root.usda");
-        layer.open(QIODevice::WriteOnly);
+        CHECK(layer.open(QIODevice::WriteOnly), "test layer opens for writing");
         layer.write("#usda 1.0\n(\n    subLayers = [@./sub/layer.usda@]\n)\n");
     }
     UsdStageRefPtr stage = UsdStage::Open((root + "/root.usda").toStdString());
