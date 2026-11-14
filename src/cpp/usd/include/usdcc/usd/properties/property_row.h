@@ -75,8 +75,10 @@ public:
     void setConnectedSource(const QString& text, const QString& fullPath = QString());
     QToolButton* connectedSourceLink() const { return m_sourceLink; }
     // A second line under the row (e.g. a read-only arc's resolved path),
-    // red when `warning`; empty hides it.
-    void setSubLine(const QString& text, const QString& toolTip = QString(), bool warning = false);
+    // in the accent colour, red for an Error (an unresolved path), amber for a
+    // Caution (something to look at, not broken); empty hides it.
+    enum class SubLineTone { Normal, Error, Caution };
+    void setSubLine(const QString& text, const QString& toolTip = QString(), SubLineTone tone = SubLineTone::Normal);
     void setReadOnly(bool readOnly);                  // forced, independent of the states above
     void setResettable(bool resettable) { m_resettable = resettable; }
 

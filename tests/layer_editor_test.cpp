@@ -699,6 +699,13 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
     CHECK(warning("Up Axis") == "The stage is Y up", "an up axis warning: [%s]", qPrintable(warning("Up Axis")));
     CHECK(warning("Meters per Unit") == "The stage uses 0.01 (centimeters)", "a units warning: [%s]",
           qPrintable(warning("Meters per Unit")));
+    for (const QString& label : {QStringLiteral("Up Axis"), QStringLiteral("Meters per Unit")}) {
+        bool amber = false;
+        for (auto* l : row(label)->findChildren<QLabel*>()) {
+            if (l->text().startsWith("The stage")) amber = l->property("caution").toBool() && !l->property("unresolved").toBool();
+        }
+        CHECK(amber, "%s: a caution (amber), not an error (red)", qPrintable(label));
+    }
     CHECK(row("Up Axis")->editor()->isReadOnly() && row("Meters per Unit")->editor()->isReadOnly(), "both read-only");
     CHECK(shown("Default Prim") == "World" && row("Default Prim")->editor()->isReadOnly(), "Default Prim World, read-only");
 

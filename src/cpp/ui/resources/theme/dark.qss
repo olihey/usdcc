@@ -734,6 +734,11 @@ QLabel#propertySubLine[unresolved="true"] {
     color: #ff5f56;
 }
 
+/* Something to look at, not broken: e.g. a sublayer's up axis not the stage's. */
+QLabel#propertySubLine[caution="true"] {
+    color: #ffb340;
+}
+
 /* A connected input's source, under its value: selects the source prim. */
 QToolButton#subLineLink {
     background: transparent;

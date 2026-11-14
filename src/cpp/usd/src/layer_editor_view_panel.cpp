@@ -948,7 +948,7 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
                               .arg(qs(axis.GetString()), qs(stageAxis.GetString()));
                 }
             }
-            row->setSubLine(warning, tip, /*warning=*/true);
+            row->setSubLine(warning, tip, properties::PropertyRow::SubLineTone::Caution);
         };
     }
     {
@@ -978,7 +978,7 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
                               .arg(units > stageUnits ? tr("small") : tr("large"));
                 }
             }
-            row->setSubLine(warning, tip, /*warning=*/true);
+            row->setSubLine(warning, tip, properties::PropertyRow::SubLineTone::Caution);
         };
     }
 

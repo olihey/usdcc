@@ -947,7 +947,8 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
                 const std::vector<std::string> names = set.GetVariantNames();
                 if (!arc.variantSelection.empty() &&
                     std::find(names.begin(), names.end(), arc.variantSelection) == names.end()) {
-                    row->setSubLine(tr("\"%1\" isn't a variant of this set").arg(qs(arc.variantSelection)), QString(), true);
+                    row->setSubLine(tr("\"%1\" isn't a variant of this set").arg(qs(arc.variantSelection)), QString(),
+                                    PropertyRow::SubLineTone::Error);
                 }
                 if (editablePrim) addVariantSetRowActions(row, arc.variantSet);
                 continue;
@@ -964,7 +965,7 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
                     // As the asset field shows it, U+00B7 as UTF-8 bytes.
                     const QString resolved = qs(arc.resolvedPath);
                     row->setSubLine(arc.missing ? tr("Unresolved") : tr("Resolved \xC2\xB7 %1").arg(resolved), resolved,
-                                    arc.missing);
+                                    arc.missing ? PropertyRow::SubLineTone::Error : PropertyRow::SubLineTone::Normal);
                 }
                 actionsButton(arc, row, false);
                 continue;

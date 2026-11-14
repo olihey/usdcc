@@ -162,10 +162,12 @@ void PropertyRow::setNote(const QString& note, int fixedWidth, const QString& to
     }
 }
 
-void PropertyRow::setSubLine(const QString& text, const QString& toolTip, bool warning) {
+void PropertyRow::setSubLine(const QString& text, const QString& toolTip, SubLineTone tone) {
     m_subLine->setText(text);
     m_subLine->setToolTip(toolTip.isEmpty() ? text : toolTip);
-    m_subLine->setProperty("unresolved", warning);  // the asset field's red (theme/dark.qss)
+    // The asset field's red, or the app's amber (theme/dark.qss).
+    m_subLine->setProperty("unresolved", tone == SubLineTone::Error);
+    m_subLine->setProperty("caution", tone == SubLineTone::Caution);
     repolish(m_subLine);
     m_subLine->setVisible(!text.isEmpty());
 }
