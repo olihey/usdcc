@@ -21,7 +21,11 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonObject>
 #include <QMenu>
+#include <QScrollArea>
+#include <QSplitter>
+#include <QToolButton>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -548,5 +552,54 @@ USDCC_TEST(layer_editor_properties_follow_clicks) {
     CHECK(identifierShown() == session, "then the session layer's: [%s]", identifierShown().c_str());
     click(root);
     CHECK(identifierShown() == root, "and back to the root layer's: [%s]", identifierShown().c_str());
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// The properties fold to their header, and the panel's session state (and a
+// duplicate) keeps that, with the sizes to unfold to.
+USDCC_TEST(layer_editor_properties_collapse) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    LayerEditorViewPanel panel(&stages, stage, undo);
+    panel.resize(500, 600);
+    panel.show();
+    QApplication::processEvents();
+    QSplitter* splitter = nullptr;  // the tree's, not the panel's own
+    for (auto* candidate : panel.findChildren<QSplitter*>()) {
+        if (candidate->orientation() == Qt::Vertical && candidate->count() == 2) splitter = candidate;
+    }
+    auto* scroll = splitter ? splitter->widget(1)->findChild<QScrollArea*>() : nullptr;
+    CHECK(splitter && scroll && !panel.isPropertiesCollapsed() && scroll->isVisible(), "open at first");
+    if (!splitter || !scroll) return;
+    splitter->setSizes({300, 250});
+    const QList<int> open = splitter->sizes();
+
+    QToolButton* header = nullptr;
+    for (auto* button : panel.findChildren<QToolButton*>()) {
+        if (button->text() == "Layer Properties") header = button;
+    }
+    CHECK(header, "a Layer Properties header");
+    if (!header) return;
+    header->click();
+    QApplication::processEvents();
+    CHECK(panel.isPropertiesCollapsed() && !scroll->isVisible(), "a click folds it");
+    CHECK(splitter->sizes()[1] < 60 && splitter->sizes()[0] > open[0], "to its header; the tree takes the room: [%d, %d]",
+          splitter->sizes()[0], splitter->sizes()[1]);
+
+    const QJsonObject state = panel.saveSessionState();
+    CHECK(state.value("propertiesCollapsed").toBool(), "the session state says folded");
+    std::unique_ptr<usdcc::ui::ViewPanel> copy(panel.duplicate());
+    auto* copyPanel = static_cast<LayerEditorViewPanel*>(copy.get());
+    CHECK(copyPanel->isPropertiesCollapsed(), "a duplicate is folded too");
+
+    header->click();
+    QApplication::processEvents();
+    CHECK(!panel.isPropertiesCollapsed() && scroll->isVisible() && splitter->sizes() == open,
+          "unfolded to the sizes it had: [%d, %d]", splitter->sizes()[0], splitter->sizes()[1]);
     QStandardPaths::setTestModeEnabled(false);
 }

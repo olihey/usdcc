@@ -27,6 +27,8 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -37,6 +39,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -189,30 +192,50 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     auto* saveShortcut = new QShortcut(QKeySequence::Save, container, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
     connect(saveShortcut, &QShortcut::activated, this, [this]() { saveLayer(layerToSave()); });
 
-    // The selected layer's properties, under the tree (§6).
-    auto* propertiesScroll = new QScrollArea(container);
-    propertiesScroll->setWidgetResizable(true);
-    propertiesScroll->setFrameShape(QFrame::NoFrame);
-    m_properties = new QWidget(propertiesScroll);
+    // The selected layer's properties, under the tree (§6), under a header
+    // that folds them away.
+    m_propertiesPane = new QWidget(container);
+    auto* paneLayout = new QVBoxLayout(m_propertiesPane);
+    paneLayout->setContentsMargins(0, 0, 0, 0);
+    paneLayout->setSpacing(0);
+    auto* headerRow = new QWidget(m_propertiesPane);
+    auto* headerLayout = new QHBoxLayout(headerRow);
+    usdcc::ui::scaled::margins(headerLayout, 4, 4, 0, 4);
+    m_propertiesHeader = new QToolButton(headerRow);
+    m_propertiesHeader->setObjectName(QStringLiteral("sectionHeader"));  // as CategorySection's
+    m_propertiesHeader->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_propertiesHeader->setArrowType(Qt::DownArrow);
+    m_propertiesHeader->setText(tr("Layer Properties"));
+    m_propertiesHeader->setCursor(Qt::PointingHandCursor);
+    connect(m_propertiesHeader, &QToolButton::clicked, this,
+            [this]() { setPropertiesCollapsed(!m_propertiesCollapsed); });
+    headerLayout->addWidget(m_propertiesHeader);
+    headerLayout->addStretch(1);
+    paneLayout->addWidget(headerRow);
+    m_propertiesScroll = new QScrollArea(m_propertiesPane);
+    m_propertiesScroll->setWidgetResizable(true);
+    m_propertiesScroll->setFrameShape(QFrame::NoFrame);
+    m_properties = new QWidget(m_propertiesScroll);
     m_propertiesLayout = new QVBoxLayout(m_properties);
-    usdcc::ui::scaled::margins(m_propertiesLayout, 10, 8, 10, 8);
+    usdcc::ui::scaled::margins(m_propertiesLayout, 10, 4, 10, 8);
     usdcc::ui::scaled::spacing(m_propertiesLayout, 6);
-    propertiesScroll->setWidget(m_properties);
+    m_propertiesScroll->setWidget(m_properties);
+    paneLayout->addWidget(m_propertiesScroll, 1);
     // On the selection, not the current item: a click makes a row current
     // before it selects it, so the current row isn't selected yet then.
     connect(m_tree, &QTreeWidget::itemSelectionChanged, this, [this]() {
         if (!m_filling) updateProperties();
     });
 
-    auto* splitter = new QSplitter(Qt::Vertical, container);
-    splitter->addWidget(m_tree);
-    splitter->addWidget(propertiesScroll);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
-    splitter->setChildrenCollapsible(false);
+    m_splitter = new QSplitter(Qt::Vertical, container);
+    m_splitter->addWidget(m_tree);
+    m_splitter->addWidget(m_propertiesPane);
+    m_splitter->setStretchFactor(0, 3);
+    m_splitter->setStretchFactor(1, 2);
+    m_splitter->setChildrenCollapsible(false);
 
     layout->addWidget(toolbar);
-    layout->addWidget(splitter, 1);
+    layout->addWidget(m_splitter, 1);
     setContentWidget(container);
 
     // An edit can send several notices, a drag many.
@@ -230,7 +253,43 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
 }
 
 usdcc::ui::ViewPanel* LayerEditorViewPanel::duplicate(QWidget* parent) const {
-    return new LayerEditorViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
+    auto* copy = new LayerEditorViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
+    copy->restoreSessionState(saveSessionState());
+    return copy;
+}
+
+void LayerEditorViewPanel::setPropertiesCollapsed(bool collapsed) {
+    if (collapsed == m_propertiesCollapsed) return;
+    m_propertiesCollapsed = collapsed;
+    m_propertiesHeader->setArrowType(collapsed ? Qt::RightArrow : Qt::DownArrow);
+    if (collapsed) {
+        m_expandedSizes = m_splitter->sizes();
+        m_propertiesScroll->hide();
+        // Just the header: the tree takes the rest.
+        m_propertiesPane->setMaximumHeight(m_propertiesHeader->parentWidget()->sizeHint().height());
+    } else {
+        m_propertiesPane->setMaximumHeight(QWIDGETSIZE_MAX);
+        m_propertiesScroll->show();
+        if (m_expandedSizes.size() == 2 && m_expandedSizes[1] > 0) m_splitter->setSizes(m_expandedSizes);
+    }
+}
+
+QJsonObject LayerEditorViewPanel::saveSessionState() const {
+    // While folded, the sizes to unfold to.
+    const QList<int> sizes = m_propertiesCollapsed ? m_expandedSizes : m_splitter->sizes();
+    QJsonArray sizesJson;
+    for (int size : sizes) sizesJson.append(size);
+    return {{QStringLiteral("propertiesCollapsed"), m_propertiesCollapsed}, {QStringLiteral("splitterSizes"), sizesJson}};
+}
+
+void LayerEditorViewPanel::restoreSessionState(const QJsonObject& state) {
+    const QJsonArray sizesJson = state.value(QStringLiteral("splitterSizes")).toArray();
+    QList<int> sizes;
+    for (const QJsonValue& size : sizesJson) sizes.append(size.toInt());
+    const bool collapsed = state.value(QStringLiteral("propertiesCollapsed")).toBool(m_propertiesCollapsed);
+    setPropertiesCollapsed(false);
+    if (sizes.size() == 2 && sizes[0] > 0 && sizes[1] > 0) m_splitter->setSizes(sizes);
+    setPropertiesCollapsed(collapsed);
 }
 
 void LayerEditorViewPanel::populateOptionsMenu(QMenu* menu) {

@@ -9,6 +9,8 @@
 
 #include <pxr/base/vt/value.h>
 
+#include <QList>
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -16,7 +18,10 @@
 
 class QAction;
 class QLabel;
+class QScrollArea;
+class QSplitter;
 class QTimer;
+class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QVBoxLayout;
@@ -75,6 +80,14 @@ public:
     bool saveLayer(const std::string& identifier);
     std::string saveLayerAs(const std::string& identifier, const QString& file = QString());
 
+    // The layer properties under the tree fold to their header (click it);
+    // the panel's session state keeps it, with the splitter's sizes.
+    bool isPropertiesCollapsed() const { return m_propertiesCollapsed; }
+    void setPropertiesCollapsed(bool collapsed);
+
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
+
 public Q_SLOTS:
     void refresh();
 
@@ -118,6 +131,12 @@ private:
     QTreeWidget* m_tree;
     QLabel* m_editing;
     QAction* m_editNewLayer;
+    QSplitter* m_splitter;
+    QWidget* m_propertiesPane;  // the header and the scroll area
+    QToolButton* m_propertiesHeader;
+    QScrollArea* m_propertiesScroll;
+    bool m_propertiesCollapsed = false;
+    QList<int> m_expandedSizes;  // the splitter's, from before it folded
     QWidget* m_properties;
     QVBoxLayout* m_propertiesLayout;
     std::string m_propertiesFor;
