@@ -128,9 +128,26 @@ public:
         double distance = kDefaultOrbitDistance;
         double yaw = kDefaultOrbitYaw;
         double pitch = kDefaultOrbitPitch;  // above the ground, looking down
+        // Orthographic: the view's height in scene units, instead of the distance
+        // (docs/WORKSPACES.md §3.5.3).
+        bool orthographic = false;
+        double orthoSize = kDefaultOrbitDistance;
+        // The named view it was put on (Top, Front, ...); Persp once orbited.
+        CameraView view = CameraView::Persp;
     };
     CameraState cameraState() const;
     void setCameraState(const CameraState& state);
+
+    // Looks from a named view (docs/WORKSPACES.md §3.5.2), keeping the target, on the
+    // stage's up axis. `orthographic` unset: orthographic for the axis views,
+    // perspective for Persp. Persp takes the default yaw and pitch.
+    void setView(CameraView view, std::optional<bool> orthographic = std::nullopt);
+    CameraView view() const { return m_view; }
+    bool isOrthographic() const { return m_orthographic; }
+    // Switches the projection, keeping the view and what's seen at the target.
+    void setOrthographic(bool orthographic);
+    // Whether the stage shown is Z-up (else Y-up).
+    bool stageIsZUp() const;
 
     // Fit to View: moves the camera, keeping the way it looks, so that `box` (world
     // space) fills the view. See frameOrbitCamera().
@@ -340,6 +357,11 @@ private:
     void cameraMoved();
     PXR_NS::GfVec3d cameraPosition() const;
     PXR_NS::GfFrustum currentFrustum() const;
+    // The near and far planes in use: from the distance, or for an orthographic view,
+    // around its target.
+    OrbitClipping clipping() const;
+    // How far the eye of an orthographic view is from its target.
+    double orthographicDepth() const;
 
     usdcc::tools::ToolContext buildToolContext();
     PXR_NS::GfVec2d ndcFromPixel(const QPointF& pixelPos) const;
@@ -382,6 +404,9 @@ private:
     double m_yaw = kDefaultOrbitYaw;
     double m_pitch = kDefaultOrbitPitch;
     double m_fovY = verticalFieldOfView();
+    bool m_orthographic = false;
+    double m_orthoSize = kDefaultOrbitDistance;
+    CameraView m_view = CameraView::Persp;
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;

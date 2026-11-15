@@ -20,6 +20,7 @@ into a self-contained folder that runs on a machine without the dev environment:
       plugins\\      V-Ray Render and, when enabled, native RTX Render
       resources\\preview\\  the shapes and HDRIs the Material Editor's preview
                     ships with (docs/MATERIAL_EDITOR.md section 7)
+      resources\\workspaces\\  the shipped workspaces (docs/WORKSPACES.md section 5)
       examples\\plugins\\   the example plugins, loaded with --plugin-path or
                     added in Settings > Plugins
       sdk\\          headers, import libraries and CMake files for C++ plugins
@@ -45,7 +46,7 @@ On Linux the folder is a prefix of its own, which is also the Python's
       lib/python3.XY/   the standard library, and in site-packages: usdcc, pxr
       Qt6/plugins/  Qt's plugins (platforms: xcb, wayland, offscreen, ...)
       plugin/usd/   OpenUSD's other plugins
-      plugins/, examples/plugins/, resources/preview/, tools/ruff/, tools/uv/,
+      plugins/, examples/plugins/, resources/preview/, resources/workspaces/, tools/ruff/, tools/uv/,
       sdk/ (its lib/ links to the libraries in lib/), LICENSE.txt, licenses/
 
 Every ELF file's RUNPATH is rewritten relative to $ORIGIN (with patchelf), so the
@@ -369,6 +370,9 @@ def main(argv=None):
     # tools/gen_preview_assets.py made.
     print("  Material preview shapes and HDRIs", flush=True)
     copy_tree(REPO / "resources/preview", deploy_dir / "resources/preview")
+    # Next to bin\, where WorkspaceLibrary::shippedFolder() looks (docs/WORKSPACES.md section 5).
+    print("  Workspaces", flush=True)
+    copy_tree(REPO / "resources/workspaces", deploy_dir / "resources/workspaces")
 
     # --- SDK for C++ plugins (docs/PLUGIN_SDK.md) -----------------------------
 
@@ -718,6 +722,9 @@ def deploy_linux(args):
                      exclude_dirs=["rtx_render", "rtx_render_native", "CMakeFiles"])
     print("  Material preview shapes and HDRIs", flush=True)
     copy_tree(REPO / "resources/preview", deploy_dir / "resources/preview")
+    # Next to bin\, where WorkspaceLibrary::shippedFolder() looks (docs/WORKSPACES.md section 5).
+    print("  Workspaces", flush=True)
+    copy_tree(REPO / "resources/workspaces", deploy_dir / "resources/workspaces")
 
     print("  Plugin SDK", flush=True)
     sdk_dir = deploy_dir / "sdk"

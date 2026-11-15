@@ -175,3 +175,48 @@ USDCC_TEST(orbit_camera_clipping_follows_the_distance) {
     const OrbitClipping closer = orbitClipping(kDefaultOrbitDistance / 100.0);
     CHECK(closeTo(closer.nearClip, 0.001) && closeTo(closer.farClip, 10000.0), "closer in, only the near plane");
 }
+
+// The named views (docs/WORKSPACES.md §3.5.2): the eye on the side the table says, for
+// both up axes, and their names both ways.
+USDCC_TEST(orbit_camera_named_views) {
+    for (bool zUp : {false, true}) {
+        for (CameraView view : kCameraViews) {
+            CHECK(cameraViewFromName(cameraViewName(view)) == view, "%s by its name", cameraViewName(view));
+            if (view == CameraView::Persp) continue;
+            const OrbitAngles angles = orbitAnglesForView(view, zUp);
+            const OrbitCameraAxes axes = orbitCameraAxes(GfVec3d(0), 1.0, angles.yaw, angles.pitch);
+            CHECK(closeTo(axes.eye, cameraViewEyeDirection(view, zUp), 1e-9), "%s's eye where the table says (z-up %d)",
+                  cameraViewName(view), zUp);
+            CHECK(cameraViewLookingFrom(cameraViewEyeDirection(view, zUp), zUp) == view, "and found from it");
+        }
+    }
+    CHECK(!cameraViewFromName("sideways"), "no such view");
+    CHECK(closeTo(cameraViewEyeDirection(CameraView::Top, false), GfVec3d(0, 1, 0)) &&
+              closeTo(cameraViewEyeDirection(CameraView::Top, true), GfVec3d(0, 0, 1)),
+          "Top is above the ground on either up axis");
+    CHECK(closeTo(cameraViewEyeDirection(CameraView::Front, false), GfVec3d(0, 0, 1)) &&
+              closeTo(cameraViewEyeDirection(CameraView::Front, true), GfVec3d(0, -1, 0)),
+          "Front on +Z, or on -Y for Z-up, as Maya");
+    // Y-up Top: X to the right. Z-up Front: Z up the screen.
+    OrbitAngles top = orbitAnglesForView(CameraView::Top, false);
+    CHECK(closeTo(orbitCameraAxes(GfVec3d(0), 1, top.yaw, top.pitch).right, GfVec3d(1, 0, 0)), "Top: X to the right");
+    OrbitAngles front = orbitAnglesForView(CameraView::Front, true);
+    CHECK(closeTo(orbitCameraAxes(GfVec3d(0), 1, front.yaw, front.pitch).up, GfVec3d(0, 0, 1)), "Z-up Front: Z up");
+    const OrbitAngles persp = orbitAnglesForView(CameraView::Persp, true);
+    CHECK(persp.yaw == kDefaultOrbitYaw && persp.pitch == kDefaultOrbitPitch, "Persp: the default angles");
+}
+
+USDCC_TEST(orbit_camera_orthographic_framing) {
+    const OrbitAngles front = orbitAnglesForView(CameraView::Front, false);
+    const OrbitCameraAxes axes = orbitCameraAxes(GfVec3d(0), 10.0, front.yaw, front.pitch);
+    // A box 4 wide, 1 high and 9 deep, seen from the front in a view twice as wide as high.
+    const PXR_NS::GfRange3d box(GfVec3d(-2, 0, -4.5), GfVec3d(2, 1, 4.5));
+    OrthographicFraming framing = frameOrthographic(box, axes, 2.0, 7.0);
+    CHECK(closeTo(framing.target, GfVec3d(0, 0.5, 0)), "at the box's centre");
+    CHECK(closeTo(framing.size, 2.2, 1e-9), "its width fits (4 / 2), with a tenth more: %f", framing.size);
+    framing = frameOrthographic(box, axes, 8.0, 7.0);
+    CHECK(closeTo(framing.size, 1.1, 1e-9), "or its height in a wide view: %f", framing.size);
+    framing = frameOrthographic(PXR_NS::GfRange3d(GfVec3d(1), GfVec3d(1)), axes, 1.0, 7.0);
+    CHECK(framing.size == 7.0, "a point keeps the size");
+    CHECK(closeTo(perspectiveDistanceFor(orthographicSizeFor(8.0, 45.0), 45.0), 8.0, 1e-9), "size and distance, both ways");
+}

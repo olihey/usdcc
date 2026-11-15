@@ -103,6 +103,7 @@ add_executable(usdcc_ui_tests
     viewport_hud_test.cpp
     viewport_delete_test.cpp
     panel_maximizer_test.cpp
+    workspace_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")

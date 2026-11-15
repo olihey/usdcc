@@ -1,0 +1,44 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "scripting",
+  "name": "Scripting",
+  "description": "The Script Editor and the Log beside the scene.",
+  "group": "Development",
+  "order": 70,
+  "sidePanels": {
+    "Script Editor": "shown",
+    "Log": "shown"
+  },
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.18,
+      0.57,
+      0.25
+    ],
+    "items": [
+      {
+        "tabs": [
+          {
+            "panel": "outliner"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "viewport"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "attributes"
+          }
+        ]
+      }
+    ]
+  }
+}

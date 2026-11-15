@@ -42,10 +42,10 @@ const ViewPanelRegistry::Entry* ViewPanelRegistry::find(const QString& id) const
     return it != m_entries.end() ? &*it : nullptr;
 }
 
-ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRefPtr& stage,
-                                   ads::CDockManager* dockManager, QWidget* parent) const {
+ViewPanel* ViewPanelRegistry::create(const QString& id, const usdcc::usd::StageRefPtr& stage,
+                                     ads::CDockManager* dockManager, QWidget* parent) const {
     const Entry* entry = find(id);
-    if (!entry || !entry->create || !stage) {
+    if (!entry || !entry->create) {
         return nullptr;
     }
     // Its type's name alone: a tab says nothing of its stage, which its own dropdown shows.
@@ -55,10 +55,22 @@ ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRef
     }
     panel->setProperty(kTypeProperty, id);
     // Must be unique and set before the dock manager registers the panel.
-    panel->setObjectName(uniqueName(QStringLiteral("%1-%2").arg(id).arg(stage->cacheId()),
-                                    [dockManager](const QString& name) {
-                                        return dockManager->findDockWidget(name) != nullptr;
-                                    }));
+    const QString base = stage ? QStringLiteral("%1-%2").arg(id).arg(stage->cacheId()) : id;
+    panel->setObjectName(uniqueName(base, [dockManager](const QString& name) {
+        return dockManager && dockManager->findDockWidget(name) != nullptr;
+    }));
+    return panel;
+}
+
+ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRefPtr& stage,
+                                   ads::CDockManager* dockManager, QWidget* parent) const {
+    if (!stage) {
+        return nullptr;
+    }
+    ViewPanel* panel = create(id, stage, dockManager, parent);
+    if (!panel) {
+        return nullptr;
+    }
 
     ads::CDockAreaWidget* nextTo = nullptr;
     for (ads::CDockWidget* existing : dockManager->dockWidgetsMap()) {

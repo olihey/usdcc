@@ -15,6 +15,7 @@ class ToolSet;
 namespace usdcc::ui {
 class MainWindow;
 class ViewPanelRegistry;
+class WorkspaceController;
 }  // namespace usdcc::ui
 
 namespace usdcc::scripting {
@@ -52,6 +53,8 @@ struct AppContext {
     PluginManager* plugins = nullptr;
     // Saves and loads sessions; null without, and then those raise.
     SessionHost* sessions = nullptr;
+    // The workspaces (docs/WORKSPACES.md §9.1); null without, and then those raise.
+    usdcc::ui::WorkspaceController* workspaces = nullptr;
 };
 
 // Makes `context` what the embedded module _usdcc_app — and through it

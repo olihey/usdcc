@@ -617,7 +617,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     });
     connect(m_viewport, &HydraViewportWindow::cameraChanged, this, [this]() {
         if (activeViewport() == this) activeViewportChanged()();
+        runPendingFit();  // a resize: it may have a size now
     });
+    connect(m_viewport, &HydraViewportWindow::firstFrameRendered, this, [this]() { runPendingFit(); });
     // A HUD label's menu, under it (docs/VIEWPORT_HUD.md §3).
     connect(m_viewport, &HydraViewportWindow::hudMenuRequested, this, [this](HudItem item, QPoint globalPos) {
         makeActive();
@@ -699,6 +701,131 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // The HUD names the edit target when it isn't the root layer.
     m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_viewport->refreshHud(); });
     syncTarget();
+    // An axis view looks the same way on a stage with the other up axis: Top stays above.
+    if (m_viewport->view() != CameraView::Persp) m_viewport->setView(m_viewport->view(), m_viewport->isOrthographic());
+    // A view following the current stage frames each stage it's given (§3.5.4).
+    if (followsCurrentStage() && !m_cameraSpec.isEmpty()) {
+        const QString fit = m_cameraSpec.value(QStringLiteral("fit")).toString(QStringLiteral("stage"));
+        if (fit != QLatin1String("none")) fitView(fit);
+    }
+}
+
+void ViewportViewPanel::resetCamera() {
+    const CameraView view = m_viewport->view();
+    const bool orthographic = m_viewport->isOrthographic();
+    m_viewport->setCameraState({});
+    if (view != CameraView::Persp || orthographic) m_viewport->setView(view, orthographic);
+}
+
+void ViewportViewPanel::applyWorkspaceCamera(const QJsonObject& camera) {
+    m_cameraSpec = camera;
+    const CameraView view =
+        cameraViewFromName(camera.value(QStringLiteral("view")).toString().toStdString()).value_or(CameraView::Persp);
+    std::optional<bool> orthographic;
+    const QString projection = camera.value(QStringLiteral("projection")).toString();
+    if (!projection.isEmpty()) orthographic = projection == QLatin1String("orthographic");
+    m_viewport->setView(view, orthographic);
+
+    HydraViewportWindow::CameraState state = m_viewport->cameraState();
+    state.yaw = camera.value(QStringLiteral("yaw")).toDouble(state.yaw);
+    state.pitch = camera.value(QStringLiteral("pitch")).toDouble(state.pitch);
+    const QJsonArray target = camera.value(QStringLiteral("target")).toArray();
+    const bool placed = target.size() == 3 || camera.contains(QStringLiteral("distance")) || camera.contains(QStringLiteral("size"));
+    if (target.size() == 3) state.target = PXR_NS::GfVec3d(target[0].toDouble(), target[1].toDouble(), target[2].toDouble());
+    state.distance = camera.value(QStringLiteral("distance")).toDouble(state.distance);
+    state.orthoSize = camera.value(QStringLiteral("size")).toDouble(state.orthoSize);
+    m_viewport->setCameraState(state);
+    if (camera.value(QStringLiteral("fov")).isDouble()) m_viewport->setFieldOfView(camera.value(QStringLiteral("fov")).toDouble());
+
+    // Exact placement means no fit, unless asked for.
+    const QString fit = camera.value(QStringLiteral("fit")).toString(placed ? QStringLiteral("none") : QStringLiteral("stage"));
+    if (fit != QLatin1String("none")) fitView(fit);
+}
+
+QString ViewportViewPanel::workspaceView() const {
+    const QString view = QString::fromLatin1(cameraViewName(m_viewport->view()));
+    return m_viewport->isOrthographic() ? view + QStringLiteral("/orthographic") : view;
+}
+
+QJsonObject ViewportViewPanel::workspaceCamera() const {
+    QJsonObject camera;
+    const CameraView view = m_viewport->view();
+    camera.insert(QStringLiteral("view"), QString::fromLatin1(cameraViewName(view)));
+    // Only when it isn't the view's usual one.
+    if (m_viewport->isOrthographic() != (view != CameraView::Persp)) {
+        camera.insert(QStringLiteral("projection"),
+                      m_viewport->isOrthographic() ? QStringLiteral("orthographic") : QStringLiteral("perspective"));
+    }
+    if (view == CameraView::Persp && camera.size() == 1) return {};
+    return camera;
+}
+
+bool ViewportViewPanel::fitView(const QString& what) {
+    if (!currentStage()) return false;
+    if (!m_viewport->isExposed() || m_viewport->width() <= 1 || m_viewport->height() <= 1) {
+        m_pendingFit = what;
+        return true;
+    }
+    m_pendingFit.clear();
+    return fitNow(what, true);
+}
+
+void ViewportViewPanel::runPendingFit() {
+    if (m_pendingFit.isEmpty() || !m_viewport->isExposed() || m_viewport->width() <= 1 || m_viewport->height() <= 1) return;
+    const QString what = std::exchange(m_pendingFit, QString());
+    fitNow(what, true);
+}
+
+bool ViewportViewPanel::fitNow(const QString& what, bool quiet) {
+    const StageRefPtr stage = currentStage();
+    if (!stage) return false;
+    const std::vector<PXR_NS::SdfPath> selection =
+        what == QLatin1String("stage") ? std::vector<PXR_NS::SdfPath>() : stageManager()->selectedPaths(stage);
+    const PXR_NS::TfTokenVector purposes = viewportPurposes(displayOptions());
+    std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection, PXR_NS::UsdTimeCode::Default(), purposes);
+    // Quietly, a selection with no bounds fits the stage instead.
+    if (!bounds && quiet && !selection.empty()) bounds = sceneBounds(stage->usdStage(), {}, PXR_NS::UsdTimeCode::Default(), purposes);
+    if (!bounds) {
+        if (quiet) return false;
+        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Nothing to fit to view"};
+        if (selection.empty()) {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "The stage has no geometry.");
+        } else if (selection.size() == 1) {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                               "{} has no bounds.", selection.front().GetName());
+        } else {
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                               "None of the {} selected prims has bounds.", selection.size());
+        }
+        return false;
+    }
+    m_viewport->frameBox(*bounds);
+    return true;
+}
+
+void ViewportViewPanel::fitAllViews(const QString& what) {
+    for (ViewportViewPanel* viewport : openViewports()) {
+        if (!viewport->isClosed() && viewport->isVisible()) viewport->fitView(what);
+    }
+}
+
+QAction* ViewportViewPanel::addFitAllViewsAction(QWidget* window) {
+    usdcc::core::Settings::instance().define({
+        .key = kFitAllViewsShortcutKey,
+        .category = "Shortcuts",
+        .group = "Viewport",
+        .label = "Fit all views",
+        .description = "Frame the selected prims in every viewport on screen, or the whole stage when nothing is selected.",
+        .type = usdcc::core::SettingType::Shortcut,
+        .defaultValue = std::string("Shift+F"),
+    });
+    auto* action = new QAction(tr("Fit All Views"), window);
+    action->setObjectName(QStringLiteral("fitAllViewsAction"));
+    action->setShortcutContext(Qt::ApplicationShortcut);  // as Fit to View
+    usdcc::ui::bindShortcut(action, kFitAllViewsShortcutKey);
+    window->addAction(action);
+    connect(action, &QAction::triggered, window, []() { fitAllViews(); });
+    return action;
 }
 
 bool ViewportViewPanel::countsWanted() const {
@@ -908,6 +1035,12 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     orbit.insert(QStringLiteral("distance"), camera.distance);
     orbit.insert(QStringLiteral("yaw"), camera.yaw);
     orbit.insert(QStringLiteral("pitch"), camera.pitch);
+    // Its view and projection (docs/WORKSPACES.md §3.5), when they aren't the defaults.
+    if (camera.view != CameraView::Persp) orbit.insert(QStringLiteral("view"), QString::fromLatin1(cameraViewName(camera.view)));
+    if (camera.orthographic) {
+        orbit.insert(QStringLiteral("orthographic"), true);
+        orbit.insert(QStringLiteral("size"), camera.orthoSize);
+    }
     QJsonObject state;
     state.insert(QStringLiteral("camera"), orbit);
     const PXR_NS::TfToken renderer = m_viewport->currentRendererPlugin();
@@ -952,6 +1085,9 @@ void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
     camera.distance = orbit.value(QStringLiteral("distance")).toDouble(camera.distance);
     camera.yaw = orbit.value(QStringLiteral("yaw")).toDouble(camera.yaw);
     camera.pitch = orbit.value(QStringLiteral("pitch")).toDouble(camera.pitch);
+    camera.view = cameraViewFromName(orbit.value(QStringLiteral("view")).toString().toStdString()).value_or(CameraView::Persp);
+    camera.orthographic = orbit.value(QStringLiteral("orthographic")).toBool(false);
+    camera.orthoSize = orbit.value(QStringLiteral("size")).toDouble(camera.orthoSize);
     const PXR_NS::TfToken renderer(state.value(QStringLiteral("renderer")).toString().toStdString());
     auto apply = [this, camera, renderer]() {
         const std::vector<PXR_NS::TfToken> plugins = m_viewport->rendererPlugins();
@@ -969,25 +1105,8 @@ void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
 }
 
 bool ViewportViewPanel::fitToView() {
-    const StageRefPtr stage = currentStage();
-    if (!stage) return false;
-    const std::vector<PXR_NS::SdfPath> selection = stageManager()->selectedPaths(stage);
-    const std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection, PXR_NS::UsdTimeCode::Default(), viewportPurposes(displayOptions()));
-    if (!bounds) {
-        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Nothing to fit to view"};
-        if (selection.empty()) {
-            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "The stage has no geometry.");
-        } else if (selection.size() == 1) {
-            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
-                               "{} has no bounds.", selection.front().GetName());
-        } else {
-            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
-                               "None of the {} selected prims has bounds.", selection.size());
-        }
-        return false;
-    }
-    m_viewport->frameBox(*bounds);
-    return true;
+    m_pendingFit.clear();
+    return fitNow(QStringLiteral("selection"), false);
 }
 
 QAction* ViewportViewPanel::addFitToViewAction(QWidget* window) {
@@ -1044,7 +1163,7 @@ void ViewportViewPanel::populateContextMenu(QMenu* menu) {
     const QString fitText = key.isEmpty() ? tr("Fit to View")
                                           : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
     menu->addAction(fitText, this, [this]() { fitToView(); });
-    menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
+    menu->addAction(tr("Reset Camera"), this, [this]() { resetCamera(); });
 }
 
 void ViewportViewPanel::addRendererEntries(QMenu* menu) {
@@ -1100,17 +1219,36 @@ void ViewportViewPanel::addShadingEntries(QMenu* menu) {
 void ViewportViewPanel::populateHudMenu(QMenu* menu, HudItem item) {
     switch (item) {
         case HudItem::Camera: {
-            // Only the orbit camera so far; the stage's cameras will be listed here.
-            QAction* persp = menu->addAction(tr("Persp"));
-            persp->setObjectName(QStringLiteral("hudCameraPersp"));
-            persp->setCheckable(true);
-            persp->setChecked(true);
+            // The orbit camera's views (docs/WORKSPACES.md §3.5.2); the stage's cameras
+            // will be listed here too.
+            auto* views = new QActionGroup(menu);
+            for (CameraView view : kCameraViews) {
+                QAction* action = menu->addAction(tr(cameraViewLabel(view)));
+                action->setObjectName(QStringLiteral("hudCamera%1").arg(QLatin1String(cameraViewLabel(view))));
+                action->setCheckable(true);
+                action->setChecked(view == m_viewport->view());
+                views->addAction(action);
+                connect(action, &QAction::triggered, this, [this, view]() {
+                    m_viewport->setView(view);
+                    fitView(QStringLiteral("selection"));
+                });
+            }
+            menu->addSeparator();
+            QAction* orthographic = menu->addAction(tr("Orthographic"));
+            orthographic->setObjectName(QStringLiteral("hudCameraOrthographic"));
+            orthographic->setCheckable(true);
+            orthographic->setChecked(m_viewport->isOrthographic());
+            connect(orthographic, &QAction::toggled, this, [this](bool on) { m_viewport->setOrthographic(on); });
             menu->addSeparator();
             const QKeySequence key = usdcc::ui::settingShortcut(kFitToViewShortcutKey);
             const QString fitText = key.isEmpty() ? tr("Fit to View")
                                                   : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
             menu->addAction(fitText, this, [this]() { fitToView(); });
-            menu->addAction(tr("Reset Camera"), this, [this]() { m_viewport->setCameraState({}); });
+            const QKeySequence allKey = usdcc::ui::settingShortcut(kFitAllViewsShortcutKey);
+            const QString allText = allKey.isEmpty() ? tr("Fit All Views")
+                                                     : tr("Fit All Views") + QStringLiteral("\t") + allKey.toString(QKeySequence::NativeText);
+            menu->addAction(allText, this, []() { fitAllViews(); });
+            menu->addAction(tr("Reset Camera"), this, [this]() { resetCamera(); });
             break;
         }
         case HudItem::Renderer:

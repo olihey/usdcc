@@ -4,6 +4,7 @@
 #include <pxr/base/gf/vec3d.h>
 
 #include <optional>
+#include <string_view>
 
 namespace usdcc::usd {
 
@@ -57,6 +58,39 @@ struct OrbitAngles {
     double pitch = kDefaultOrbitPitch;
 };
 OrbitAngles orbitAnglesLookingFrom(const PXR_NS::GfVec3d& direction, double currentYaw);
+
+// The named views a viewport can look from (docs/WORKSPACES.md §3.5.2), as in Maya
+// by where the eye is. Persp is the free orbit camera.
+enum class CameraView { Persp, Top, Bottom, Front, Back, Right, Left };
+inline constexpr CameraView kCameraViews[] = {CameraView::Persp, CameraView::Top,   CameraView::Front, CameraView::Right,
+                                              CameraView::Left,  CameraView::Back, CameraView::Bottom};
+// "persp", "top", ... as workspace files and sessions write them.
+const char* cameraViewName(CameraView view);
+// "Persp", "Top", ... as the HUD and menus show them.
+const char* cameraViewLabel(CameraView view);
+std::optional<CameraView> cameraViewFromName(std::string_view name);
+// The side of the target the eye is on for an axis view, following the stage's up
+// axis: Top is always above the ground. Zero for Persp.
+PXR_NS::GfVec3d cameraViewEyeDirection(CameraView view, bool zUp);
+// The orbit angles of a view: the default ones for Persp.
+OrbitAngles orbitAnglesForView(CameraView view, bool zUp);
+// The axis view whose eye direction is `direction` (a HUD axis), if one is.
+std::optional<CameraView> cameraViewLookingFrom(const PXR_NS::GfVec3d& direction, bool zUp);
+
+// Fit to View for an orthographic camera: the target at the box's centre, and the
+// view's height so that the box, seen along `forward` with `right` and `up` across
+// the view, fits both ways with a little room (`aspect`: width over height). A box
+// of no size keeps `currentSize`.
+struct OrthographicFraming {
+    PXR_NS::GfVec3d target;
+    double size = kDefaultOrbitDistance;
+};
+OrthographicFraming frameOrthographic(const PXR_NS::GfRange3d& box, const OrbitCameraAxes& axes, double aspect,
+                                      double currentSize);
+// The orthographic view height that shows at the target what a perspective camera
+// `distance` away with `verticalFovDegrees` does, and back.
+double orthographicSizeFor(double distance, double verticalFovDegrees);
+double perspectiveDistanceFor(double size, double verticalFovDegrees);
 
 // `degrees` as the same angle in (-180, 180], so that turning on and on doesn't lose
 // precision.

@@ -469,8 +469,10 @@ HudInput HydraViewportWindow::hudInput() const {
     input.cursor = m_cursorPos;
 
     input.showCamera = m_display.hudCamera;
-    // The orbit camera, until the viewport can look through the stage's cameras.
-    input.camera = QStringLiteral("Persp");
+    // The orbit camera's view, until the viewport can look through the stage's cameras.
+    input.camera = QString::fromLatin1(cameraViewLabel(m_view));
+    if (m_orthographic && m_view == CameraView::Persp) input.camera = QStringLiteral("Ortho");
+    if (!m_orthographic && m_view != CameraView::Persp) input.camera += QStringLiteral(" (Persp)");
     const PXR_NS::TfToken renderer = currentRendererPlugin();
     input.renderer = rendererDisplayName(renderer);
     input.shading = shadingModeLabel(effectiveShading(m_display, renderer));
@@ -628,16 +630,21 @@ void HydraViewportWindow::recordFrame(double milliseconds) {
 
 void HydraViewportWindow::snapToAxis(HudItem item) {
     if (item == HudItem::AxisCenter) {
-        m_yaw = kDefaultOrbitYaw;
-        m_pitch = kDefaultOrbitPitch;
-    } else if (const std::optional<PXR_NS::GfVec3d> direction = hudAxisDirection(item)) {
-        // Straight down or up the camera's Y, any yaw looks that way: 0 puts X to the right.
-        const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0);
-        m_yaw = angles.yaw;
-        m_pitch = angles.pitch;
-    } else {
+        // Back to the default perspective view.
+        setView(CameraView::Persp, false);
         return;
     }
+    const std::optional<PXR_NS::GfVec3d> direction = hudAxisDirection(item);
+    if (!direction) return;
+    if (const std::optional<CameraView> view = cameraViewLookingFrom(*direction, stageIsZUp())) {
+        // An orthographic view stays orthographic; a perspective one, perspective.
+        setView(*view, m_orthographic);
+        return;
+    }
+    // Straight down or up the camera's Y, any yaw looks that way: 0 puts X to the right.
+    const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0);
+    m_yaw = angles.yaw;
+    m_pitch = angles.pitch;
     cameraMoved();
 }
 
@@ -704,7 +711,7 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
 }
 
 HydraViewportWindow::CameraState HydraViewportWindow::cameraState() const {
-    return {m_target, m_distance, m_yaw, m_pitch};
+    return {m_target, m_distance, m_yaw, m_pitch, m_orthographic, m_orthoSize, m_view};
 }
 
 void HydraViewportWindow::setCameraState(const CameraState& state) {
@@ -712,11 +719,45 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
     m_distance = state.distance;
     m_yaw = state.yaw;
     m_pitch = state.pitch;
+    m_orthographic = state.orthographic;
+    m_orthoSize = std::max(kMinDistance, state.orthoSize);
+    m_view = state.view;
     cameraMoved();
 }
 
+bool HydraViewportWindow::stageIsZUp() const {
+    return m_stage && PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
+}
+
+void HydraViewportWindow::setView(CameraView view, std::optional<bool> orthographic) {
+    const bool ortho = orthographic.value_or(view != CameraView::Persp);
+    if (ortho != m_orthographic) {
+        if (ortho) {
+            m_orthoSize = std::max(kMinDistance, orthographicSizeFor(m_distance, m_fovY));
+        } else {
+            m_distance = std::max(kMinDistance, perspectiveDistanceFor(m_orthoSize, m_fovY));
+        }
+        m_orthographic = ortho;
+    }
+    const OrbitAngles angles = orbitAnglesForView(view, stageIsZUp());
+    m_yaw = angles.yaw;
+    m_pitch = angles.pitch;
+    m_view = view;
+    cameraMoved();
+}
+
+void HydraViewportWindow::setOrthographic(bool orthographic) { setView(m_view, orthographic); }
+
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
+    if (m_orthographic) {
+        const OrthographicFraming framing =
+            frameOrthographic(box, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch), aspect, m_orthoSize);
+        m_target = framing.target;
+        m_orthoSize = std::max(kMinDistance, framing.size);
+        cameraMoved();
+        return;
+    }
     const OrbitFraming framing = frameOrbitCamera(box, m_fovY, aspect, m_distance);
     m_target = framing.target;
     m_distance = std::max(kMinDistance, framing.distance);
@@ -785,11 +826,25 @@ void HydraViewportWindow::updateEngineSelection() {
 usdcc::tools::Tool* HydraViewportWindow::activeToolInstance() const { return &m_toolSet->activeTool(); }
 
 PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
-    return orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch).eye;
+    // Orthographic, where a perspective camera would see the same at the target: what
+    // sizes the gizmo (its eye is much further back).
+    const double distance = m_orthographic ? perspectiveDistanceFor(m_orthoSize, m_fovY) : m_distance;
+    return orbitCameraAxes(m_target, distance, m_yaw, m_pitch).eye;
+}
+
+double HydraViewportWindow::orthographicDepth() const { return std::max(1000.0, 50.0 * m_orthoSize); }
+
+OrbitClipping HydraViewportWindow::clipping() const {
+    if (!m_orthographic) return orbitClipping(m_distance);
+    // The eye is far back along the view; what's within that depth either side of the
+    // target is seen. Depth is linear in an orthographic view, so the ratio doesn't matter.
+    const double depth = orthographicDepth();
+    return {depth * 0.001, depth * 2.0};
 }
 
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
-    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
+    const double distance = m_orthographic ? orthographicDepth() : m_distance;
+    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, distance, m_yaw, m_pitch);
 
     PXR_NS::GfMatrix4d cameraToWorld(1.0);
     cameraToWorld.SetRow(0, PXR_NS::GfVec4d(right[0], right[1], right[2], 0.0));
@@ -800,12 +855,18 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     const qreal pixelRatio = devicePixelRatio();
     const int w = std::max(1, static_cast<int>(width() * pixelRatio));
     const int h = std::max(1, static_cast<int>(height() * pixelRatio));
+    const double aspect = static_cast<double>(w) / static_cast<double>(h);
 
     PXR_NS::GfFrustum frustum;
     frustum.SetPositionAndRotationFromMatrix(cameraToWorld);
-    const OrbitClipping clipping = orbitClipping(m_distance);
-    frustum.SetPerspective(m_fovY, /*isFovVertical=*/true, static_cast<double>(w) / static_cast<double>(h),
-                           clipping.nearClip, clipping.farClip);
+    const OrbitClipping range = clipping();
+    if (m_orthographic) {
+        const double halfHeight = m_orthoSize / 2.0;
+        const double halfWidth = halfHeight * aspect;
+        frustum.SetOrthographic(-halfWidth, halfWidth, -halfHeight, halfHeight, range.nearClip, range.farClip);
+    } else {
+        frustum.SetPerspective(m_fovY, /*isFovVertical=*/true, aspect, range.nearClip, range.farClip);
+    }
     return frustum;
 }
 
@@ -863,7 +924,8 @@ usdcc::tools::ToolContext HydraViewportWindow::buildToolContext() {
     const PXR_NS::GfFrustum frustum = currentFrustum();
     ctx.viewMatrix = frustum.ComputeViewMatrix();
     ctx.projMatrix = frustum.ComputeProjectionMatrix();
-    ctx.cameraPos = frustum.GetPosition();
+    // The gizmos size themselves by their distance from it (cameraPosition()).
+    ctx.cameraPos = cameraPosition();
     ctx.pickPrim = [this](const PXR_NS::GfVec2d& ndcPos) { return pickPrim(ndcPos); };
     ctx.targetOpName = m_targetOp;
     return ctx;
@@ -900,9 +962,9 @@ void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& 
     frame.width = usdcc::ui::UiScaleController::instance().pixels(m_display.selectionWidth) * devicePixelRatio();
     frame.viewMatrix = ctx.viewMatrix;
     frame.projMatrix = ctx.projMatrix;
-    const OrbitClipping clipping = orbitClipping(m_distance);
-    frame.nearClip = clipping.nearClip;
-    frame.farClip = clipping.farClip;
+    const OrbitClipping range = clipping();
+    frame.nearClip = range.nearClip;
+    frame.farClip = range.farClip;
     frame.size = QSize(width, height);
     frame.targetFramebuffer = m_framebuffer->handle();
     // The same geometry as the frame: purposes, refinement, culling.
@@ -1261,7 +1323,8 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
-        m_orbiting = true;
+        // An orthographic view doesn't tumble: a Top view stays a Top view (§3.5.3).
+        m_orbiting = !m_orthographic;
         // For the whole drag, so that crossing a pole during it doesn't reverse it.
         m_orbitReversed = orbitIsUpsideDown(m_pitch);
     } else if (event->button() == Qt::MiddleButton) {
@@ -1305,6 +1368,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         if (!stale) {
             m_yaw = wrapDegrees(m_yaw - (m_orbitReversed ? -1.0 : 1.0) * delta.x() * 0.5);
             m_pitch = wrapDegrees(m_pitch + delta.y() * 0.5);
+            m_view = CameraView::Persp;  // no longer looking along an axis
         }
         // At the screen's edge, on from the other side, so a drag never runs out.
         if (onScreen) {
@@ -1318,7 +1382,8 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         cameraMoved();
     } else if (m_panning) {
         const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
-        const double panScale = m_distance * 0.0015;
+        // Orthographic, the scene follows the cursor exactly.
+        const double panScale = m_orthographic ? m_orthoSize / std::max(1, height()) : m_distance * 0.0015;
         m_target += right * (-delta.x() * panScale) + up * (delta.y() * panScale);
         cameraMoved();
     }
@@ -1345,7 +1410,11 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
 
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
     const double factor = std::pow(0.9, event->angleDelta().y() / 120.0);
-    m_distance = std::max(kMinDistance, m_distance * factor);
+    if (m_orthographic) {
+        m_orthoSize = std::max(kMinDistance, m_orthoSize * factor);
+    } else {
+        m_distance = std::max(kMinDistance, m_distance * factor);
+    }
     cameraMoved();
 }
 

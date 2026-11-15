@@ -1,0 +1,64 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "inspect",
+  "name": "Inspect",
+  "description": "Reading a stage someone else built: structure, values and text at once.",
+  "group": "USD",
+  "order": 60,
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.3,
+      0.7
+    ],
+    "items": [
+      {
+        "split": "vertical",
+        "sizes": [
+          0.55,
+          0.45
+        ],
+        "items": [
+          {
+            "tabs": [
+              {
+                "panel": "outliner"
+              }
+            ]
+          },
+          {
+            "tabs": [
+              {
+                "panel": "attributes"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "split": "vertical",
+        "sizes": [
+          0.65,
+          0.35
+        ],
+        "items": [
+          {
+            "tabs": [
+              {
+                "panel": "viewport"
+              }
+            ]
+          },
+          {
+            "tabs": [
+              {
+                "panel": "usda"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

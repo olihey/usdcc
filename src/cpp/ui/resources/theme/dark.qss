@@ -561,6 +561,39 @@ QToolButton#titleBarCloseButton:pressed {
     background: #f1707a;
 }
 
+/* The workspace button (docs/WORKSPACES.md §6.1), left of the caption buttons:
+   its name in the accent colour, the icon drawn in it from code. */
+QToolButton#titleBarWorkspaceButton {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: @accent;
+    padding: 0 10px 0 8px;
+    margin-right: 6px;
+}
+
+QToolButton#titleBarWorkspaceButton:hover {
+    background: rgba(@accent-rgb, 15%);
+}
+
+QToolButton#titleBarWorkspaceButton:pressed,
+QToolButton#titleBarWorkspaceButton:open {
+    background: rgba(@accent-rgb, 25%);
+}
+
+QToolButton#titleBarWorkspaceButton::menu-indicator {
+    image: none;
+    width: 0;
+}
+
+/* The workspace menu's group headings: labels, not choices. */
+QLabel#workspaceMenuHeading {
+    color: rgba(255, 255, 255, 40%);
+    font-size: 8pt;
+    font-weight: 600;
+    padding: 6px 12px 2px 12px;
+}
+
 /* ---- Main-window tool rail and tool-options bar (the design's left rail
         and "tool options bar"). Both are QToolBars in the QMainWindow layout. */
 

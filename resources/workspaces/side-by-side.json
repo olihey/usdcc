@@ -1,0 +1,55 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "side-by-side",
+  "name": "Side by Side",
+  "description": "Two perspective views of the current stage, from opposite sides.",
+  "group": "Scene",
+  "order": 15,
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.15,
+      0.34,
+      0.34,
+      0.17
+    ],
+    "items": [
+      {
+        "tabs": [
+          {
+            "panel": "outliner"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "viewport"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "viewport",
+            "stage": "current",
+            "title": "Viewport 2",
+            "camera": {
+              "view": "persp",
+              "yaw": 225,
+              "pitch": 20
+            }
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "attributes"
+          }
+        ]
+      }
+    ]
+  }
+}

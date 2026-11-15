@@ -97,6 +97,18 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
             setStage(nullptr);
         }
     });
+    m_currentStageConnection = m_stageManager->currentStageChanged.connect([this](usdcc::usd::StageRefPtr current) {
+        // With none current (the last stage closed), stageClosed above has emptied it.
+        if (m_followsCurrentStage && current) setStage(std::move(current));
+    });
+}
+
+void ViewPanel::setFollowsCurrentStage(bool follows) {
+    if (follows == m_followsCurrentStage) return;
+    m_followsCurrentStage = follows;
+    if (follows) {
+        if (usdcc::usd::StageRefPtr current = m_stageManager->currentStage()) setStage(std::move(current));
+    }
 }
 
 void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
@@ -147,6 +159,8 @@ void ViewPanel::onStageComboChanged(int index) {
     }
     const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
     if (auto stage = m_stageManager->findByCacheId(cacheId)) {
+        // A stage picked by hand: this panel shows that one from now on.
+        m_followsCurrentStage = false;
         setStage(stage);
     }
 }
@@ -296,6 +310,12 @@ void ViewPanel::populateContextMenu(QMenu* menu) {
                         [this, maximizer]() { maximizer->toggle(this); });
     }
     menu->addAction(tr("Duplicate"), this, [this]() { duplicateBeside(); });
+    QAction* follow = menu->addAction(tr("Follow Current Stage"));
+    follow->setObjectName(QStringLiteral("followCurrentStage"));
+    follow->setCheckable(true);
+    follow->setChecked(m_followsCurrentStage);
+    follow->setStatusTip(tr("Show whichever stage is current, and switch with it"));
+    connect(follow, &QAction::toggled, this, [this](bool on) { setFollowsCurrentStage(on); });
 }
 
 ViewPanel* ViewPanel::duplicateBeside() {

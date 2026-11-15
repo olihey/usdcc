@@ -88,6 +88,13 @@ public:
     // with the same object name puts that one where this one was.
     void removeSidePanel(SidePanel* panel);
 
+    // The side panels docked around the dock area, in the order added.
+    const QList<SidePanel*>& sidePanels() const { return m_sidePanels; }
+
+    // Puts `widget` in the title bar, right of the title (TitleBar::addTrailingWidget()),
+    // clickable rather than dragging the window.
+    void addTitleBarWidget(QWidget* widget);
+
     // Whether layoutSettled() has been emitted.
     bool isLayoutSettled() const { return m_layoutSettled; }
 

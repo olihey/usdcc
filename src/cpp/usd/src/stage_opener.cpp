@@ -54,12 +54,13 @@ StageOpener::~StageOpener() {
     }
 }
 
-void StageOpener::open(const QString& path) {
+void StageOpener::open(const QString& path, const Options& options) {
     if (m_busy) {
         return;
     }
     setBusy(true);
     m_path = path;
+    m_options = options;
     m_elapsed.start();
 
     m_dialog = new QProgressDialog(tr("Opening %1...").arg(QFileInfo(path).fileName()), QString(), 0, 0,
@@ -85,10 +86,11 @@ void StageOpener::open(const QString& path) {
     };
     auto result = std::make_shared<Result>();
     const std::string identifier = path.toStdString();
-    m_thread = QThread::create([result, identifier]() {
+    const PXR_NS::UsdStage::InitialLoadSet load = options.loadPayloads ? PXR_NS::UsdStage::LoadAll : PXR_NS::UsdStage::LoadNone;
+    m_thread = QThread::create([result, identifier, load]() {
         usdcc::core::setThreadName("stage-loader");
         try {
-            result->stage = StageManager::loadUsdStage(identifier, &result->errors);
+            result->stage = StageManager::loadUsdStage(identifier, &result->errors, load);
         } catch (const std::exception& e) {
             USDCC_LOG_ERROR("usdcc.stage", "Opening {} threw an exception: {}", identifier, e.what());
             result->errors.push_back(e.what());
@@ -143,7 +145,13 @@ void StageOpener::onLoaded(const PXR_NS::UsdStageRefPtr& usdStage, const std::ve
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
+    bool wasOpen = false;
+    for (const StageRefPtr& open : m_stageManager->stages()) wasOpen = wasOpen || open->usdStage() == usdStage;
+    m_adopting = true;
     const StageRefPtr stage = m_stageManager->adoptStage(usdStage);
+    m_adopting = false;
+    const Options options = m_options;
+    Q_EMIT opened(stage, options, wasOpen);
     waitForFirstFrame(stage);
 }
 

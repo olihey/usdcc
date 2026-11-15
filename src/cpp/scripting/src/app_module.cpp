@@ -24,6 +24,8 @@
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/ui/workspace_controller.h"
+#include "usdcc/ui/workspace_library.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -904,6 +906,61 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "export_session",
         [sessions, check](const std::string& name, const std::string& path) { check(sessions().exportSession(name, path)); },
         py::arg("name"), py::arg("path"));
+
+    // Workspaces (docs/WORKSPACES.md §9.1); usdcc/app.py wraps these.
+    const auto workspaces = []() -> usdcc::ui::WorkspaceController& {
+        if (!s_context || !s_context->workspaces) throw std::runtime_error("workspaces aren't available here");
+        return *s_context->workspaces;
+    };
+    m.def("workspaces", [workspaces]() {
+        usdcc::ui::WorkspaceController& controller = workspaces();
+        std::vector<std::map<std::string, py::object>> list;
+        for (const usdcc::ui::workspace::Definition& definition : controller.library()->workspaces()) {
+            QStringList missing;
+            usdcc::ui::workspace::pruned(
+                definition.layout,
+                [&controller](const QString& type) {
+                    return controller.context().registry && controller.context().registry->find(type);
+                },
+                &missing);
+            std::vector<std::string> missingTypes;
+            for (const QString& type : missing) missingTypes.push_back(type.toStdString());
+            list.push_back({{"id", py::str(definition.id.toStdString())},
+                            {"name", py::str(definition.name.toStdString())},
+                            {"group", py::str(definition.group.toStdString())},
+                            {"description", py::str(definition.description.toStdString())},
+                            {"file", py::str(definition.file.toStdString())},
+                            {"source", py::str(definition.source.toStdString())},
+                            {"missing", py::cast(missingTypes)}});
+        }
+        return list;
+    });
+    m.def("current_workspace", [workspaces]() { return workspaces().currentId().toStdString(); });
+    m.def(
+        "set_workspace",
+        [workspaces](const std::string& id) {
+            usdcc::ui::WorkspaceController& controller = workspaces();
+            if (!controller.library()->find(QString::fromStdString(id))) throw py::key_error("no workspace \"" + id + "\"");
+            QString error;
+            return controller.switchTo(QString::fromStdString(id), &error);
+        },
+        py::arg("id"));
+    m.def(
+        "save_workspace",
+        [workspaces](const std::string& name, bool sidePanels) {
+            QString error;
+            const QString id = workspaces().saveCurrentLayout(QString::fromStdString(name), sidePanels, &error);
+            if (id.isEmpty()) throw std::runtime_error(error.toStdString());
+            return id.toStdString();
+        },
+        py::arg("name"), py::arg("side_panels") = true);
+    m.def("reload_workspaces", [workspaces]() { workspaces().library()->reload(); });
+    m.def(
+        "fit_all_views",
+        [workspaces](bool selection) {
+            workspaces().fitAllViews(selection ? QStringLiteral("selection") : QStringLiteral("stage"));
+        },
+        py::arg("selection") = true);
 }
 
 void rebuildScriptedPanels(const std::vector<std::string>& types) {

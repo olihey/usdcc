@@ -48,12 +48,32 @@ public:
 
     bool busy() const { return m_busy; }
 
+    // File > Open Stage with Options... (docs/WORKSPACES.md §8).
+    struct Options {
+        // Off: opened with UsdStage::LoadNone, its payloads unloaded.
+        bool loadPayloads = true;
+        // Default: Open Stage's way (its viewport in front and current, the other panels
+        // as they are). Everywhere: as Stages > Make Current, every panel on screen
+        // shows it. No: its viewport goes behind, and the current stage stays.
+        enum class MakeCurrent { Default, Everywhere, No };
+        MakeCurrent makeCurrent = MakeCurrent::Default;
+        // A workspace to switch to once it's open; empty to keep the layout.
+        QString workspace;
+    };
+
     // Starts opening `path` (a file path or resolvable USD asset path).
     // Failure is reported to the user in a message box.
-    void open(const QString& path);
+    void open(const QString& path, const Options& options = {});
+
+    // While a stage it opened is being registered (stageOpened is firing): the
+    // options it was opened with. Null otherwise.
+    const Options* adopting() const { return m_adopting ? &m_options : nullptr; }
 
 Q_SIGNALS:
     void busyChanged(bool busy);
+    // The stage is open and registered, before its first frame. `wasOpen`: the file
+    // was open already, so it came forward and `options.loadPayloads` didn't apply.
+    void opened(const usdcc::usd::StageRefPtr& stage, const usdcc::usd::StageOpener::Options& options, bool wasOpen);
     // The failure dialog's Show Log button was clicked.
     void showLogRequested();
 
@@ -68,6 +88,8 @@ private:
     QWidget* m_dialogParent;
 
     bool m_busy = false;
+    bool m_adopting = false;
+    Options m_options;
     QString m_path;
     QElapsedTimer m_elapsed;  // since open() was called
     QThread* m_thread = nullptr;

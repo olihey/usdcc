@@ -97,13 +97,17 @@ void StagesMenu::rebuild() {
 }
 
 void StagesMenu::makeCurrentEverywhere(const StageRefPtr& stage) {
+    usdcc::usd::makeCurrentEverywhere(m_stageManager, m_dockManager, stage);
+}
+
+void makeCurrentEverywhere(StageManager* stageManager, ads::CDockManager* dockManager, const StageRefPtr& stage) {
     // The panels on screen: open, and the tab in front (a tab behind another,
     // or a closed panel, isn't visible).
-    for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
+    for (ads::CDockWidget* dockWidget : dockManager->dockWidgetsMap()) {
         auto* panel = qobject_cast<usdcc::ui::ViewPanel*>(dockWidget);
         if (panel && !panel->isClosed() && panel->isVisible()) panel->setStage(stage);
     }
-    m_stageManager->setCurrentStage(stage);
+    stageManager->setCurrentStage(stage);
 }
 
 }  // namespace usdcc::usd

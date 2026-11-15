@@ -124,6 +124,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/create_menu.h
     include/usdcc/usd/current_stage_ui.h
     include/usdcc/usd/session_stages.h
+    include/usdcc/usd/open_stage_options_dialog.h
     include/usdcc/usd/stage_opener.h
     include/usdcc/usd/window_preview.h
     include/usdcc/usd/stages_menu.h
@@ -185,6 +186,7 @@ add_library(usdcc_usd_ui SHARED
     src/create_menu.cpp
     src/current_stage_ui.cpp
     src/session_stages.cpp
+    src/open_stage_options_dialog.cpp
     src/stage_opener.cpp
     src/window_preview.cpp
     src/stages_menu.cpp

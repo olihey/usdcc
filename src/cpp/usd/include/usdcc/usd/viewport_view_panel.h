@@ -32,6 +32,8 @@ class HydraViewportWindow;
 
 // The Shortcut setting for Fit to View (F by default).
 inline constexpr const char* kFitToViewShortcutKey = "Shortcuts/viewport.fitToView";
+// The Shortcut setting for Fit All Views (Shift+F by default, docs/WORKSPACES.md §3.5.7).
+inline constexpr const char* kFitAllViewsShortcutKey = "Shortcuts/viewport.fitAllViews";
 // The Shortcut setting for Toggle HUD (none by default).
 inline constexpr const char* kToggleHudShortcutKey = "Shortcuts/viewport.toggleHud";
 class UndoManager;
@@ -70,6 +72,26 @@ public:
     // left out; when none of them has any (or the stage is empty), a warning toast says
     // so and the camera stays. Returns whether it moved the camera.
     bool fitToView();
+
+    // Fit All Views (docs/WORKSPACES.md §3.5.7): fits every viewport on screen (open, its
+    // tab in front), each keeping its view. `what`: "selection" (else the whole stage),
+    // or "stage".
+    static void fitAllViews(const QString& what = QStringLiteral("selection"));
+    // The application-wide Fit All Views action, as addFitToViewAction(); its key from
+    // kFitAllViewsShortcutKey.
+    static QAction* addFitAllViewsAction(QWidget* window);
+
+    // Reset Camera: the default perspective view; an axis view stays that view, at the
+    // origin.
+    void resetCamera();
+
+    // Workspaces (docs/WORKSPACES.md §3.5): a workspace entry's camera, the view as a
+    // workspace names it, and fitting without a toast. A fit asked for before the
+    // viewport has a size happens once it has one.
+    void applyWorkspaceCamera(const QJsonObject& camera) override;
+    QString workspaceView() const override;
+    QJsonObject workspaceCamera() const override;
+    bool fitView(const QString& what) override;
 
     // The application-wide Fit to View action, for the active viewport: added to
     // `window`, which owns it, with its key from kFitToViewShortcutKey (defined here).
@@ -176,6 +198,11 @@ private Q_SLOTS:
 private:
     // Passes the stage's tool target (for the selected prim) to the viewport.
     void syncTarget();
+    // Fits now: "selection" (else the stage) or "stage". `quiet`: no toast when there's
+    // nothing to fit.
+    bool fitNow(const QString& what, bool quiet);
+    // A fit asked for before the viewport could do it, once it can.
+    void runPendingFit();
     // Makes this the active viewport; tells activeViewportChanged() if it wasn't.
     void makeActive();
     // Hands displayOptions() to the viewport and tells displayChanged().
@@ -199,6 +226,9 @@ private:
 
     HydraViewportWindow* m_viewport;
     int m_id;
+    // The workspace camera it was made with (§3.5.1): a following view refits by it.
+    QJsonObject m_cameraSpec;
+    QString m_pendingFit;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     std::shared_ptr<UndoManager> m_undoManager;
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on

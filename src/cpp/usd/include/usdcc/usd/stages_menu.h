@@ -17,6 +17,12 @@ namespace usdcc::usd {
 
 class StageManager;
 
+// Stages > a stage > Make Current: every view panel on screen (open, its tab in
+// front) in `dockManager` switches to `stage`, which becomes the current stage.
+// Open Stage with Options' Make current does the same (docs/WORKSPACES.md §8).
+USDCC_USD_UI_API void makeCurrentEverywhere(StageManager* stageManager, ads::CDockManager* dockManager,
+                                            const StageRefPtr& stage);
+
 // The menu bar's Stages menu: one submenu per open stage (titled with its
 // short name, see shortStageNames(); the full identifier is the tooltip),
 // each with "Make Current" first (makeCurrentEverywhere()), "Save Stage" and

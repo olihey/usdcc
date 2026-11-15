@@ -461,6 +461,41 @@ def reload_plugin(id):
 # --- Sessions (docs/SESSIONS.md) ----------------------------------------------
 
 
+def workspaces():
+    """The workspaces (docs/WORKSPACES.md), in menu order: a dict each with ``id``,
+    ``name``, ``group``, ``description``, ``file``, ``source`` (the folder's label) and
+    ``missing`` (panel types it names that aren't loaded)."""
+    return list(_app().workspaces())
+
+
+def current_workspace():
+    """The active workspace's id."""
+    return _app().current_workspace()
+
+
+def set_workspace(id):
+    """Switches to the workspace ``id``: KeyError if there's none; False if a panel
+    refused to close, and then nothing changed."""
+    return _app().set_workspace(id)
+
+
+def save_workspace(name, side_panels=True):
+    """Saves the window's layout as the workspace ``name`` in your workspaces folder,
+    replacing one of that name, and makes it the active one. Returns its id."""
+    return _app().save_workspace(name, side_panels)
+
+
+def reload_workspaces():
+    """Reads the workspace folders again."""
+    _app().reload_workspaces()
+
+
+def fit_all_views(selection=True):
+    """Fits every viewport on screen to the selection (else the stage), or with
+    ``selection=False`` to the whole stage."""
+    _app().fit_all_views(selection)
+
+
 def sessions():
     """The saved sessions' names, newest first."""
     return list(_app().sessions())

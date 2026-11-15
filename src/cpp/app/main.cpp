@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <tuple>
 
 #include "usdcc/ui/about_dialog.h"
 #include "usdcc/ui/app_settings.h"
@@ -10,15 +11,21 @@
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/qt_message_bridge.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/ui/workspace_applier.h"
+#include "usdcc/ui/workspace_controller.h"
+#include "usdcc/ui/workspace_library.h"
 
+#include <DockAreaWidget.h>
 #include <DockManager.h>
 
 #include <QAction>
 #include <QCommandLineParser>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
@@ -29,6 +36,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QToolButton>
 #include <QSurfaceFormat>
 
 #include <pxr/usd/sdf/layer.h>
@@ -38,6 +46,7 @@
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/native_stream_capture.h"
+#include "usdcc/core/settings.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
@@ -50,6 +59,7 @@
 #include "usdcc/scripting/sessions_dialog.h"
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
+#include "usdcc/usd/open_stage_options_dialog.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
@@ -301,6 +311,19 @@ int main(int argc, char** argv) {
     usdcc::usd::ViewportViewPanel::addFitToViewAction(&window);
     // The active viewport's HUD on or off (no key until one is set).
     usdcc::usd::ViewportViewPanel::addToggleHudAction(&window);
+    // Shift+F: fit every viewport on screen (docs/WORKSPACES.md §3.5.7).
+    QAction* fitAllViewsAction = usdcc::usd::ViewportViewPanel::addFitAllViewsAction(&window);
+
+    // Workspaces (docs/WORKSPACES.md): predefined layouts of the view panels, from JSON
+    // files in folders; the title bar's button switches between them. The app's three
+    // fixed panels are only ever closed, never deleted (sessions count on them).
+    usdcc::ui::WorkspaceLibrary workspaceLibrary;
+    usdcc::ui::WorkspaceController workspaces(
+        {&window, &panelTypes, &stageManager,
+         {QStringLiteral("Viewport"), QStringLiteral("Outliner"), QStringLiteral("Attributes")}},
+        &workspaceLibrary);
+    workspaces.setFitAllViewsAction(fitAllViewsAction);
+    window.addTitleBarWidget(workspaces.createButton(&window));
 
     // Scripts reach the app's stages, undo history, tools, window and view
     // panel types through these (usdcc.usd / usdcc.app / usdcc.tools,
@@ -321,6 +344,8 @@ int main(int argc, char** argv) {
     sessionContext.python = &python;
     sessionContext.fixedPanels = {QStringLiteral("Viewport"), QStringLiteral("Outliner"), QStringLiteral("Attributes")};
     sessionContext.setLoading = [&sessionLoading](bool loading) { sessionLoading = loading; };
+    sessionContext.workspace = [&workspaces]() { return workspaces.currentId(); };
+    sessionContext.setWorkspace = [&workspaces](const QString& id) { workspaces.setCurrentId(id); };
     // Restart and Load (§4.3): closes the window, asking what closing asks, and once
     // the app has quit starts it again with `arguments` (end of main()).
     sessionContext.restart = [&window, &restartRequested, &restartArguments](const QStringList& arguments) {
@@ -333,7 +358,7 @@ int main(int argc, char** argv) {
     usdcc::scripting::SessionController sessions(sessionContext);
 
     const usdcc::scripting::AppContextScope scriptingContext(
-        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins, &sessions});
+        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins, &sessions, &workspaces});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     auto* scriptEditor = new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner);
@@ -440,19 +465,30 @@ int main(int argc, char** argv) {
     // CURRENT_STAGE.md), as the stage just opened is the one being looked at:
     // bringing a tab to the front doesn't move ADS's focus, so the panel
     // focused before would otherwise keep its stage current.
+    // Opens off the UI thread behind a progress dialog (the stage named on the
+    // command line, above, deliberately just blocks instead: there is no window
+    // yet). Owned by `window`. Made before the handler below, which asks it how a
+    // stage is being opened (Open Stage with Options, docs/WORKSPACES.md §8).
+    auto* stageOpener = new usdcc::usd::StageOpener(&stageManager, &window);
     auto viewportOnStageOpened = stageManager.stageOpened.connect(
-        [&window, &panelTypes, &stageManager, &sessionLoading](const usdcc::usd::StageRefPtr& stage) {
+        [&window, &panelTypes, &stageManager, &sessionLoading, stageOpener](const usdcc::usd::StageRefPtr& stage) {
             // While Save Stage As puts the new file in the old stage's panels, the stage
             // it opens gets no viewport of its own.
             if (sessionLoading || usdcc::usd::isSwitchingStage()) return;
+            // Open Stage with Options, Make current off: its viewport goes behind, and
+            // the current stage stays (docs/WORKSPACES.md §8.2).
+            const usdcc::usd::StageOpener::Options* opening = stageOpener->adopting();
+            const bool behind = opening && opening->makeCurrent == usdcc::usd::StageOpener::Options::MakeCurrent::No;
             auto focus = [&](usdcc::ui::ViewPanel* panel) {
+                if (behind) return;
                 if (panel) window.dockManager()->setDockWidgetFocused(panel);
                 stageManager.setCurrentStage(stage);
             };
             usdcc::usd::ViewportViewPanel* empty = nullptr;
             for (ads::CDockWidget* dockWidget : window.dockManager()->dockWidgetsMap()) {
                 auto* existing = qobject_cast<usdcc::usd::ViewportViewPanel*>(dockWidget);
-                if (!existing) {
+                // One following the current stage isn't free: it shows whatever's current.
+                if (!existing || existing->followsCurrentStage()) {
                     continue;
                 }
                 if (!existing->currentStage() && (!empty || (empty->isClosed() && !existing->isClosed()))) {
@@ -465,20 +501,34 @@ int main(int argc, char** argv) {
                     empty->toggleView(true);
                 }
                 empty->setStage(stage);
-                empty->setAsCurrentTab();
+                if (!behind) empty->setAsCurrentTab();
                 focus(empty);
                 return;
             }
 
-            focus(panelTypes.open(QStringLiteral("viewport"), stage, window.dockManager(), &window));
+            // A new viewport, as a tab of the workspace's viewport area (§7.3); without
+            // one, beside any viewport.
+            ads::CDockManager* docks = window.dockManager();
+            usdcc::ui::ViewPanel* made = nullptr;
+            if (ads::CDockAreaWidget* area = usdcc::ui::workspace::viewportArea(docks)) {
+                ads::CDockWidget* front = area->currentDockWidget();
+                made = panelTypes.create(QStringLiteral("viewport"), stage, docks, &window);
+                if (made) {
+                    docks->addDockWidgetTabToArea(made, area);
+                    if (behind && front) {
+                        front->setAsCurrentTab();
+                    } else {
+                        made->setAsCurrentTab();
+                    }
+                }
+            } else {
+                made = panelTypes.open(QStringLiteral("viewport"), stage, docks, &window);
+            }
+            focus(made);
         });
 
     QMenu* fileMenu = window.mainMenuBar()->addMenu(QObject::tr("&File"));
     QAction* openStageAction = fileMenu->addAction(QObject::tr("&Open Stage..."));
-    // Opens off the UI thread behind a progress dialog (the stage named on the
-    // command line, above, deliberately just blocks instead: there is no window
-    // yet). Owned by `window`.
-    auto* stageOpener = new usdcc::usd::StageOpener(&stageManager, &window);
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openStageAction,
                      [openStageAction](bool busy) { openStageAction->setEnabled(!busy); });
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::showLogRequested, window.logPanel(),
@@ -490,6 +540,63 @@ int main(int argc, char** argv) {
             stageOpener->open(path);
         }
     });
+    // File > Open Stage with Options...: the file, then how to open it (docs/WORKSPACES.md §8).
+    QAction* openWithOptionsAction = fileMenu->addAction(QObject::tr("Open Stage with O&ptions..."));
+    openWithOptionsAction->setObjectName(QStringLiteral("openStageWithOptions"));
+    openWithOptionsAction->setStatusTip(
+        QObject::tr("Open a stage, choosing whether it becomes current, a workspace, and whether its payloads load"));
+    QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openWithOptionsAction,
+                     [openWithOptionsAction](bool busy) { openWithOptionsAction->setEnabled(!busy); });
+    QObject::connect(openWithOptionsAction, &QAction::triggered, &window, [stageOpener, &window, &workspaceLibrary]() {
+        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
+                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+        if (path.isEmpty()) return;
+        usdcc::usd::OpenStageOptionsDialog dialog(path, &workspaceLibrary, &window);
+        if (dialog.exec() == QDialog::Accepted) stageOpener->open(path, dialog.options());
+    });
+    // Both keys are settings (Shortcuts > File).
+    for (const auto& [key, label, fallback, action] :
+         {std::tuple{"Shortcuts/file.openStage", "Open stage", "Ctrl+O", openStageAction},
+          std::tuple{"Shortcuts/file.openStageWithOptions", "Open stage with options", "Ctrl+Shift+O", openWithOptionsAction}}) {
+        usdcc::core::Settings::instance().define({.key = key,
+                                                  .category = "Shortcuts",
+                                                  .group = "File",
+                                                  .label = label,
+                                                  .type = usdcc::core::SettingType::Shortcut,
+                                                  .defaultValue = std::string(fallback)});
+        usdcc::ui::bindShortcut(action, key);
+    }
+    // After a stage opened with options: Make current, the workspace, and a word when
+    // the file was open already, so its payloads stayed as they were.
+    QObject::connect(stageOpener, &usdcc::usd::StageOpener::opened, &window,
+                     [&stageManager, &window, &workspaces](const usdcc::usd::StageRefPtr& stage,
+                                                            const usdcc::usd::StageOpener::Options& options, bool wasOpen) {
+                         if (!stage) return;
+                         if (wasOpen && !options.loadPayloads) {
+                             USDCC_LOG_TOAST(usdcc::core::LogLevel::Info, "usdcc.stage",
+                                             "{} was open already; its payloads are as they were.",
+                                             QFileInfo(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier()))
+                                                 .fileName()
+                                                 .toStdString());
+                         }
+                         if (!options.workspace.isEmpty()) {
+                             QString error;
+                             if (!workspaces.switchTo(options.workspace, &error)) {
+                                 USDCC_LOG_WARNING("usdcc.workspaces", "{}", error.toStdString());
+                             }
+                         }
+                         if (options.makeCurrent == usdcc::usd::StageOpener::Options::MakeCurrent::Everywhere) {
+                             usdcc::usd::makeCurrentEverywhere(&stageManager, window.dockManager(), stage);
+                             for (ads::CDockWidget* dock : window.dockManager()->dockWidgetsMap()) {
+                                 auto* viewport = qobject_cast<usdcc::usd::ViewportViewPanel*>(dock);
+                                 if (viewport && viewport->currentStage() == stage && !viewport->isClosed()) {
+                                     viewport->setAsCurrentTab();
+                                     window.dockManager()->setDockWidgetFocused(viewport);
+                                     break;
+                                 }
+                             }
+                         }
+                     });
 
     // File > Open Recent: build from history without probing file availability.
     // Through the handler Open as Stage uses, so a file that's open comes forward.
@@ -828,6 +935,17 @@ int main(int argc, char** argv) {
     // built-in ones (docs/PLUGINS.md §3.3).
     plugins.activate(python);
     pluginPanel->refresh();
+    // A plugin's workspaces/ folder, looked in after the settings' (docs/WORKSPACES.md §5).
+    {
+        QList<usdcc::ui::WorkspaceLibrary::Folder> folders;
+        for (const usdcc::scripting::PluginInfo& plugin : plugins.plugins()) {
+            if (plugin.state != usdcc::scripting::PluginState::Active) continue;
+            const QString folder = QDir(QString::fromStdU16String(plugin.manifest.folder.u16string()))
+                                       .absoluteFilePath(QStringLiteral("workspaces"));
+            if (QFileInfo(folder).isDir()) folders.append({folder, QString::fromStdString(plugin.manifest.name)});
+        }
+        if (!folders.isEmpty()) workspaceLibrary.setPluginFolders(folders);
+    }
     if (const auto* crashed = plugins.find(plugins.crashedLastStart())) {
         window.statusBar()->showMessage(
             QObject::tr("The plugin %1 crashed the last start, so it's turned off. See View > Plugins.")
@@ -855,7 +973,21 @@ int main(int argc, char** argv) {
         }
         return usdcc::usd::StageRefPtr();
     });
+    // A first start has no layout saved: it gets the default workspace once the
+    // window has settled (docs/WORKSPACES.md §6.3).
+    const bool hadLayout = usdcc::ui::appSettings().contains(QStringLiteral("MainWindow/dockLayout"));
     window.restoreLayout();
+    if (!hadLayout && startSession.isEmpty()) {
+        QObject::connect(
+            &window, &usdcc::ui::MainWindow::layoutSettled, &workspaces,
+            [&workspaces]() {
+                QString error;
+                if (!workspaces.switchTo(QLatin1String(usdcc::ui::WorkspaceController::kDefaultId), &error)) {
+                    USDCC_LOG_WARNING("usdcc.workspaces", "{}", error.toStdString());
+                }
+            },
+            Qt::SingleShotConnection);
+    }
     if (!startSession.isEmpty()) {
         usdcc::scripting::SessionController::LoadOptions options;
         options.atStart = true;
@@ -869,7 +1001,9 @@ int main(int argc, char** argv) {
         if (!positional.isEmpty()) stageManager.openStage(positional.front().toStdString());
     }
     // The Last session, as the window closes and while it's still on screen (§4.5).
-    QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions]() {
+    QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions, &workspaces]() {
+        // How the workspace was left, for coming back to it (docs/WORKSPACES.md §11 #2).
+        workspaces.rememberArrangement();
         QString error;
         if (!sessions.save(QLatin1String(usdcc::ui::session::kLastSessionName), sessions.takePreview(), false, &error)) {
             USDCC_LOG_WARNING("usdcc.session", "Couldn't save the Last session: {}", error.toStdString());

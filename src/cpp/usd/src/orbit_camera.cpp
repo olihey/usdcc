@@ -54,6 +54,103 @@ OrbitAngles orbitAnglesLookingFrom(const GfVec3d& direction, double currentYaw) 
     return angles;
 }
 
+const char* cameraViewName(CameraView view) {
+    switch (view) {
+        case CameraView::Persp: return "persp";
+        case CameraView::Top: return "top";
+        case CameraView::Bottom: return "bottom";
+        case CameraView::Front: return "front";
+        case CameraView::Back: return "back";
+        case CameraView::Right: return "right";
+        case CameraView::Left: return "left";
+    }
+    return "persp";
+}
+
+const char* cameraViewLabel(CameraView view) {
+    switch (view) {
+        case CameraView::Persp: return "Persp";
+        case CameraView::Top: return "Top";
+        case CameraView::Bottom: return "Bottom";
+        case CameraView::Front: return "Front";
+        case CameraView::Back: return "Back";
+        case CameraView::Right: return "Right";
+        case CameraView::Left: return "Left";
+    }
+    return "Persp";
+}
+
+std::optional<CameraView> cameraViewFromName(std::string_view name) {
+    for (CameraView view : kCameraViews) {
+        if (name == cameraViewName(view)) return view;
+    }
+    return std::nullopt;
+}
+
+GfVec3d cameraViewEyeDirection(CameraView view, bool zUp) {
+    // Y-up: front on +Z; Z-up: front on -Y, as Maya and the HUD's triad name them.
+    switch (view) {
+        case CameraView::Persp: return GfVec3d(0.0);
+        case CameraView::Top: return zUp ? GfVec3d(0, 0, 1) : GfVec3d(0, 1, 0);
+        case CameraView::Bottom: return zUp ? GfVec3d(0, 0, -1) : GfVec3d(0, -1, 0);
+        case CameraView::Front: return zUp ? GfVec3d(0, -1, 0) : GfVec3d(0, 0, 1);
+        case CameraView::Back: return zUp ? GfVec3d(0, 1, 0) : GfVec3d(0, 0, -1);
+        case CameraView::Right: return GfVec3d(1, 0, 0);
+        case CameraView::Left: return GfVec3d(-1, 0, 0);
+    }
+    return GfVec3d(0.0);
+}
+
+OrbitAngles orbitAnglesForView(CameraView view, bool zUp) {
+    if (view == CameraView::Persp) return {};
+    // Straight down or up the orbit's Y, yaw 0 puts X to the right.
+    return orbitAnglesLookingFrom(cameraViewEyeDirection(view, zUp), 0.0);
+}
+
+std::optional<CameraView> cameraViewLookingFrom(const GfVec3d& direction, bool zUp) {
+    const double length = direction.GetLength();
+    if (length <= 0.0) return std::nullopt;
+    for (CameraView view : kCameraViews) {
+        if (view == CameraView::Persp) continue;
+        if (PXR_NS::GfDot(cameraViewEyeDirection(view, zUp), direction / length) > 0.999) return view;
+    }
+    return std::nullopt;
+}
+
+OrthographicFraming frameOrthographic(const PXR_NS::GfRange3d& box, const OrbitCameraAxes& axes, double aspect,
+                                      double currentSize) {
+    OrthographicFraming framing;
+    framing.target = box.GetMidpoint();
+    framing.size = currentSize;
+    if (box.IsEmpty()) return framing;
+    double minRight = 0.0, maxRight = 0.0, minUp = 0.0, maxUp = 0.0;
+    for (int corner = 0; corner < 8; ++corner) {
+        const GfVec3d offset = box.GetCorner(corner) - framing.target;
+        const double right = PXR_NS::GfDot(offset, axes.right);
+        const double up = PXR_NS::GfDot(offset, axes.up);
+        minRight = std::min(minRight, right);
+        maxRight = std::max(maxRight, right);
+        minUp = std::min(minUp, up);
+        maxUp = std::max(maxUp, up);
+    }
+    const double width = maxRight - minRight;
+    const double height = maxUp - minUp;
+    const double size = std::max(height, width / std::max(aspect, 1e-6));
+    if (!(size > 0.0) || !std::isfinite(size)) return framing;
+    // A tenth more, so the box doesn't touch the edges.
+    framing.size = size * 1.1;
+    return framing;
+}
+
+double orthographicSizeFor(double distance, double verticalFovDegrees) {
+    return 2.0 * distance * std::tan(PXR_NS::GfDegreesToRadians(verticalFovDegrees) / 2.0);
+}
+
+double perspectiveDistanceFor(double size, double verticalFovDegrees) {
+    const double tangent = std::tan(PXR_NS::GfDegreesToRadians(verticalFovDegrees) / 2.0);
+    return tangent > 0.0 ? size / (2.0 * tangent) : size;
+}
+
 double wrapDegrees(double degrees) {
     const double wrapped = std::fmod(degrees, 360.0);
     if (wrapped > 180.0) return wrapped - 360.0;

@@ -116,6 +116,28 @@ public:
     virtual QJsonObject saveSessionState() const { return {}; }
     virtual void restoreSessionState(const QJsonObject& state) { Q_UNUSED(state); }
 
+    // Following the current stage (docs/WORKSPACES.md §3.5.4): the panel shows
+    // whatever stage is current, and switches when it changes. Picking a stage in
+    // its dropdown stops it; the tab's menu has Follow Current Stage. Turning it on
+    // switches to the current stage now.
+    bool followsCurrentStage() const { return m_followsCurrentStage; }
+    void setFollowsCurrentStage(bool follows);
+
+    // Workspaces (docs/WORKSPACES.md). Asked before a workspace switch closes the
+    // panel: false keeps everything as it is (a panel holding something not yet
+    // applied asks the user first).
+    virtual bool canClose() { return true; }
+    // A workspace's "camera" for the panel (§3.5.1); only viewports have one.
+    virtual void applyWorkspaceCamera(const QJsonObject& camera) { Q_UNUSED(camera); }
+    // What the panel looks at, to match it to a workspace entry's camera ("persp",
+    // "top/orthographic", ...); empty for a panel without a camera.
+    virtual QString workspaceView() const { return {}; }
+    // As a workspace entry's camera describes it (§3.5.1): {"view", "projection"}.
+    virtual QJsonObject workspaceCamera() const { return {}; }
+    // Fit to View: "selection" (else the whole stage) or "stage". False if the panel
+    // can't, or has nothing to fit.
+    virtual bool fitView(const QString& what) { Q_UNUSED(what); return false; }
+
 Q_SIGNALS:
     // After the panel switched to another stage (or to none): setStage() or
     // the stage dropdown. CurrentStageTracker follows it for the focused panel.
@@ -202,12 +224,14 @@ private:
     enum class OptionsPanel { NotAsked, None, Made } m_optionsPanel = OptionsPanel::NotAsked;
     bool m_pinned = false;
     bool m_restoredPin = false;
+    bool m_followsCurrentStage = false;
     QComboBox* m_stageCombo;
 
     // Kept alive for as long as this panel should keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<usdcc::usd::StageRefPtr>::Connection m_stageOpenedConnection;
     usdcc::core::Signal<usdcc::usd::StageRefPtr>::Connection m_stageClosedConnection;
+    usdcc::core::Signal<usdcc::usd::StageRefPtr>::Connection m_currentStageConnection;
 };
 
 }  // namespace usdcc::ui

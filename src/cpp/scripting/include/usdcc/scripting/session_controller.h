@@ -51,6 +51,10 @@ public:
         // Quits and starts the app again with `arguments`; false if the window didn't
         // close (the user cancelled a question). Null: no restarts (§4.3).
         std::function<bool(const QStringList& arguments)> restart;
+        // The active workspace's id, kept in the session's layout (docs/WORKSPACES.md
+        // §6.3), and given back on loading. Null: none kept.
+        std::function<QString()> workspace;
+        std::function<void(const QString& id)> setWorkspace;
     };
 
     // The answers a load or save needs from the user. Each has a dialog by default.

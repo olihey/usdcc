@@ -214,6 +214,12 @@ void MainWindow::removeSidePanel(SidePanel* panel) {
 
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
+void MainWindow::addTitleBarWidget(QWidget* widget) {
+    if (!widget) return;
+    m_titleBar->addTrailingWidget(widget);
+    m_windowAgent->setHitTestVisible(widget, true);
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
     for (SidePanel* panel : std::as_const(m_sidePanels)) {
         if (!panel->canClose()) {

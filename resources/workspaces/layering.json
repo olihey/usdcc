@@ -1,0 +1,60 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "layering",
+  "name": "Layering",
+  "description": "Composition: the layer stack, what the stage depends on, and a layer's text.",
+  "group": "USD",
+  "order": 50,
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.18,
+      0.52,
+      0.3
+    ],
+    "items": [
+      {
+        "tabs": [
+          {
+            "panel": "outliner"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "viewport"
+          }
+        ]
+      },
+      {
+        "split": "vertical",
+        "sizes": [
+          0.5,
+          0.5
+        ],
+        "items": [
+          {
+            "tabs": [
+              {
+                "panel": "layers"
+              }
+            ]
+          },
+          {
+            "tabs": [
+              {
+                "panel": "dependencies"
+              },
+              {
+                "panel": "usda"
+              }
+            ],
+            "current": 0
+          }
+        ]
+      }
+    ]
+  }
+}

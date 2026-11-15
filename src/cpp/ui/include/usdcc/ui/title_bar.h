@@ -30,6 +30,12 @@ public:
     QMenuBar* menuBar() const { return m_menuBar; }
 
     QWidget* logoWidget() const;
+
+    // Adds `widget` right of the title, left of the caption buttons (the
+    // workspace button, docs/WORKSPACES.md §6). The bar takes it over. Whoever
+    // adds it must also make it clickable for the window agent
+    // (MainWindow::addTitleBarWidget() does both).
+    void addTrailingWidget(QWidget* widget);
     QAbstractButton* minimizeButton() const { return m_minimizeButton; }
     QAbstractButton* maximizeButton() const { return m_maximizeButton; }
     QAbstractButton* closeButton() const { return m_closeButton; }

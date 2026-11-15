@@ -53,6 +53,11 @@ public:
     // in the centre area, then brings it to the front. It is titled
     // "<display name> - <stage file name>" and gets a unique objectName (ADS's
     // identity for a dock widget). Returns null for an unknown id.
+    // Creates a panel of type `id` showing `stage` (null: none), with its type
+    // property and a unique objectName, without docking it. Null for an unknown id.
+    ViewPanel* create(const QString& id, const usdcc::usd::StageRefPtr& stage, ads::CDockManager* dockManager,
+                      QWidget* parent) const;
+
     ViewPanel* open(const QString& id, const usdcc::usd::StageRefPtr& stage, ads::CDockManager* dockManager,
                     QWidget* parent) const;
 

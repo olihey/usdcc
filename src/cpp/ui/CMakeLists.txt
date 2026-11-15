@@ -27,6 +27,10 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/panel_maximizer.h
     include/usdcc/ui/view_panel.h
     include/usdcc/ui/view_panel_registry.h
+    include/usdcc/ui/workspace.h
+    include/usdcc/ui/workspace_applier.h
+    include/usdcc/ui/workspace_controller.h
+    include/usdcc/ui/workspace_library.h
     src/about_dialog.cpp
     src/app_settings.cpp
     src/current_stage_tracker.cpp
@@ -53,6 +57,10 @@ add_library(usdcc_ui SHARED
     src/panel_maximizer.cpp
     src/view_panel.cpp
     src/view_panel_registry.cpp
+    src/workspace.cpp
+    src/workspace_applier.cpp
+    src/workspace_controller.cpp
+    src/workspace_library.cpp
 )
 # Theme stylesheets + icons (see theme.cpp). A library of their own, as CMake's
 # export step can't find an AUTORCC object in a target that uses it.
@@ -64,7 +72,10 @@ target_include_directories(usdcc_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 # QWindowKit is static, and private so that this DLL holds the only copy.
 target_link_libraries(usdcc_ui PUBLIC usdcc_core usdcc_usd Qt6::Widgets ads::qtadvanceddocking-qt6
                                PRIVATE QWindowKit::Widgets usdcc_ui_resources)
-target_compile_definitions(usdcc_ui PRIVATE USDCC_UI_BUILD)
+target_compile_definitions(usdcc_ui PRIVATE USDCC_UI_BUILD
+    # The shipped workspaces, for a build that isn't deployed (deployed, they're in
+    # resources/workspaces next to bin/; tools/deploy.py). docs/WORKSPACES.md §5.
+    USDCC_WORKSPACES_DIR="${CMAKE_SOURCE_DIR}/resources/workspaces")
 usdcc_export_library(usdcc_ui)
 usdcc_precompile_headers(usdcc_ui ui_pch.h)
 

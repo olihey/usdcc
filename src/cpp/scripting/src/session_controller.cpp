@@ -156,7 +156,12 @@ QJsonObject SessionController::capture(const QString& name, const QImage& previe
     }
 
     if (m_context.window) {
-        json.insert(QStringLiteral("layout"), m_context.window->layoutState());
+        QJsonObject layout = m_context.window->layoutState();
+        if (m_context.workspace) {
+            const QString workspace = m_context.workspace();
+            if (!workspace.isEmpty()) layout.insert(QStringLiteral("workspace"), workspace);
+        }
+        json.insert(QStringLiteral("layout"), layout);
         QJsonArray panels;
         for (ads::CDockWidget* dock : m_context.window->dockManager()->dockWidgetsMap()) {
             auto* panel = qobject_cast<usdcc::ui::ViewPanel*>(dock);
@@ -170,6 +175,8 @@ QJsonObject SessionController::capture(const QString& name, const QImage& previe
             const auto shown = std::find(order.begin(), order.end(), panel->currentStage());
             entry.insert(QStringLiteral("stage"), shown == order.end() ? -1 : int(shown - order.begin()));
             entry.insert(QStringLiteral("optionsPinned"), panel->isOptionsPinned());
+            // Following the current stage (docs/WORKSPACES.md §3.5.4).
+            if (panel->followsCurrentStage()) entry.insert(QStringLiteral("follows"), true);
             const QJsonObject state = panel->saveSessionState();
             if (!state.isEmpty()) entry.insert(QStringLiteral("state"), state);
             panels << entry;
@@ -500,13 +507,17 @@ SessionController::LoadResult SessionController::load(QJsonObject session, const
 
     // 7. The layout, now that every panel it places exists.
     if (m_context.window && session.contains(QStringLiteral("layout"))) {
-        m_context.window->restoreLayoutState(session.value(QStringLiteral("layout")).toObject(), options.atStart);
+        const QJsonObject layout = session.value(QStringLiteral("layout")).toObject();
+        m_context.window->restoreLayoutState(layout, options.atStart);
+        const QString workspace = layout.value(QStringLiteral("workspace")).toString();
+        if (!workspace.isEmpty() && m_context.setWorkspace) m_context.setWorkspace(workspace);
     }
 
     // 8. What each panel had.
     for (auto& [panel, entry] : made) {
         const bool pinned = entry.value(QStringLiteral("optionsPinned")).toBool();
         if (panel->isOptionsPinned() != pinned) panel->setOptionsPinned(pinned);
+        panel->setFollowsCurrentStage(entry.value(QStringLiteral("follows")).toBool());
         if (entry.contains(QStringLiteral("state"))) panel->restoreSessionState(entry.value(QStringLiteral("state")).toObject());
     }
     if (m_context.scriptEditor && session.contains(QStringLiteral("scriptEditor"))) {

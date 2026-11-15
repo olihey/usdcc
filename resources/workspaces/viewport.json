@@ -1,0 +1,21 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "viewport",
+  "name": "Viewport Only",
+  "description": "Only the viewports, the side panels collapsed: for review, screenshots or a small screen.",
+  "group": "Scene",
+  "order": 30,
+  "sidePanels": {
+    "Log": "collapsed",
+    "Script Editor": "collapsed",
+    "Plugins": "collapsed"
+  },
+  "layout": {
+    "tabs": [
+      {
+        "panel": "viewport"
+      }
+    ]
+  }
+}

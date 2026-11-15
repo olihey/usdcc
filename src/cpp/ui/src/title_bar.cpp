@@ -91,6 +91,12 @@ TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow)
 
 QWidget* TitleBar::logoWidget() const { return m_logo; }
 
+void TitleBar::addTrailingWidget(QWidget* widget) {
+    auto* box = static_cast<QHBoxLayout*>(layout());
+    // Before the minimize button, after anything added before.
+    box->insertWidget(box->indexOf(m_minimizeButton), widget, 0, Qt::AlignVCenter);
+}
+
 bool TitleBar::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_host) {
         switch (event->type()) {

@@ -1,0 +1,60 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "lookdev",
+  "name": "Look Dev",
+  "description": "Shade and light: the material graph under the viewports.",
+  "group": "Shading & Rendering",
+  "order": 40,
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.18,
+      0.57,
+      0.25
+    ],
+    "items": [
+      {
+        "tabs": [
+          {
+            "panel": "outliner"
+          }
+        ]
+      },
+      {
+        "split": "vertical",
+        "sizes": [
+          0.6,
+          0.4
+        ],
+        "items": [
+          {
+            "tabs": [
+              {
+                "panel": "viewport"
+              }
+            ]
+          },
+          {
+            "tabs": [
+              {
+                "panel": "materialEditor"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "attributes"
+          },
+          {
+            "panel": "layers"
+          }
+        ],
+        "current": 0
+      }
+    ]
+  }
+}

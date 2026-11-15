@@ -1,0 +1,96 @@
+{
+  "format": "usdcc-workspace",
+  "version": 1,
+  "id": "four-view",
+  "name": "Four View",
+  "description": "Top, front and right views beside the perspective one.",
+  "group": "Scene",
+  "order": 20,
+  "fitOnSwitch": "stage",
+  "layout": {
+    "split": "horizontal",
+    "sizes": [
+      0.15,
+      0.85
+    ],
+    "items": [
+      {
+        "tabs": [
+          {
+            "panel": "outliner"
+          }
+        ]
+      },
+      {
+        "split": "vertical",
+        "sizes": [
+          0.5,
+          0.5
+        ],
+        "items": [
+          {
+            "split": "horizontal",
+            "sizes": [
+              0.5,
+              0.5
+            ],
+            "items": [
+              {
+                "tabs": [
+                  {
+                    "panel": "viewport",
+                    "stage": "current",
+                    "camera": {
+                      "view": "top"
+                    }
+                  }
+                ]
+              },
+              {
+                "tabs": [
+                  {
+                    "panel": "viewport",
+                    "camera": {
+                      "view": "persp"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "split": "horizontal",
+            "sizes": [
+              0.5,
+              0.5
+            ],
+            "items": [
+              {
+                "tabs": [
+                  {
+                    "panel": "viewport",
+                    "stage": "current",
+                    "camera": {
+                      "view": "front"
+                    }
+                  }
+                ]
+              },
+              {
+                "tabs": [
+                  {
+                    "panel": "viewport",
+                    "stage": "current",
+                    "camera": {
+                      "view": "right"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
