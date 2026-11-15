@@ -1,6 +1,6 @@
 # Deleting Prims
 
-Delete prims from the Outliner, with **Delete** on the selection or from the prim menu, as one undo step.
+Delete prims from the Outliner or the viewport, with **Delete** on the selection or from the prim menu, as one undo step.
 
 Deleting looks like the simplest edit, but USD has no "delete" for a prim. A prim is opinions in several layers and behind arcs. The
 edit target can only remove its own opinions. Whatever any other layer or arc says stays, and the prim stays with it. The only
@@ -9,12 +9,15 @@ what still points at a prim once it's gone.
 
 ## 1. How it works
 
-- **Delete** (the key, in the Outliner) and **Delete** in the prim menu act on the selection. A prim whose ancestor is selected too
-  goes with it and isn't counted on its own.
+- **Delete** (the key, in the Outliner or the viewport) and **Delete** in the prim menu act on the stage's selection. A prim whose
+  ancestor is selected too goes with it and isn't counted on its own.
+- **In the viewport** the native window gets the key, not its panel: `HydraViewportWindow` emits `deleteRequested()`, except during a
+  gizmo drag, whose edit is still open. A click in the viewport now takes the keyboard (`requestActivate()`), which a native child
+  window doesn't do by itself. Undo and the other window shortcuts still work there, since Qt still counts the main window active.
 - **`prim_actions::planDelete()`** says, for each prim, what the edit target can do and why (§2), without changing anything.
   **`prim_actions::deletePrims()`** does it, with a `DeleteMode` for the prims the edit target can't remove.
 - **`deletePrimsAsking()`** (prim_context_menu.h) is what the key and the menu call. It asks only when some prim can't simply be
-  removed (§5), then drops the deleted prims from the selection.
+  removed (§4), then drops the deleted prims from the selection.
 - **One undo step,** named for what it did: "Delete Chair", "Deactivate Chair", "Delete 3 Prims". It records every layer it changes
   (`UndoManager::applyAcrossLayers()`), as Move does.
 
@@ -153,12 +156,14 @@ apply:
 - The default prim (§3.4) and child order (§3.5).
 
 `outliner_context_menu_test.cpp` (usdcc_ui_tests) checks the menu entry, the question's text, each of its three answers, the selection
-afterwards, and that the entry is disabled on an instance proxy. **The Delete key itself and the dialog's look haven't been tried by
-hand,** and nor has a delete during variant edit mode.
+afterwards, and that the entry is disabled on an instance proxy. `viewport_delete_test.cpp` sends Delete to a viewport's window: the
+selection goes, as one step, and another key or an empty selection does nothing.
+
+**Not tried by hand:** the Delete key in the running app (the tests send it to the window directly, so a click giving the viewport the
+keyboard is unchecked), the dialog's look, and a delete during variant edit mode.
 
 ## 7. Not done
 
-- **The viewport has no Delete key.** It has no keyboard handling at all yet. Delete works in the Outliner.
 - **Cut** (copy and delete) needs copying prims in the Outliner first.
 - **Speed on a large stage:** cleaning up pointers walks the whole stage once per delete. Not measured.
 - **Prototypes:** pointers inside an instance's prototype aren't visited, as the walk doesn't enter instances. They can't be edited

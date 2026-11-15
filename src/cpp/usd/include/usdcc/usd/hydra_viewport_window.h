@@ -269,6 +269,10 @@ Q_SIGNALS:
     // `globalPos`. A native window gets no QContextMenuEvent its container would see.
     void contextMenuRequested(QPoint globalPos);
 
+    // Delete was pressed with the viewport focused, and no drag going on: the selection
+    // should go (docs/PRIM_DELETE.md). The native window gets the key, not its panel.
+    void deleteRequested();
+
     // Emitted once per stage, after its first frame has been rendered. That
     // first Render() is when Hydra populates its scene from the stage, so it is
     // where a big stage's viewport actually stalls the UI.
@@ -299,6 +303,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void ensureEngine();

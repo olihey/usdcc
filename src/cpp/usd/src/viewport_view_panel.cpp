@@ -5,6 +5,7 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/layer_stack.h"
+#include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
@@ -605,6 +606,14 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_viewport, &HydraViewportWindow::pressed, this, [this]() {
         makeActive();
         if (dockManager()) dockManager()->setDockWidgetFocused(this);
+    });
+    // Delete, on the stage's selection, as in the Outliner (docs/PRIM_DELETE.md).
+    connect(m_viewport, &HydraViewportWindow::deleteRequested, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (!m_undoManager || !stage) return;
+        // this->: the constructor parameter `stageManager` shadows the accessor here.
+        StageManager* stages = this->stageManager();
+        deletePrimsAsking(*m_undoManager, stages, stage, stages->selectedPaths(stage), this);
     });
     connect(m_viewport, &HydraViewportWindow::cameraChanged, this, [this]() {
         if (activeViewport() == this) activeViewportChanged()();

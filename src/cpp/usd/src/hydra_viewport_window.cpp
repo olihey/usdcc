@@ -38,6 +38,8 @@
 #include <pxr/usdImaging/usdImagingGL/renderParams.h>
 
 #include <QExposeEvent>
+#include <QKeyEvent>
+#include <QKeySequence>
 #include <QMouseEvent>
 #include <QPlatformSurfaceEvent>
 #include <QOpenGLContext>
@@ -1195,9 +1197,22 @@ void HydraViewportWindow::renderNow() {
     }
 }
 
+void HydraViewportWindow::keyPressEvent(QKeyEvent* event) {
+    // Not mid-drag: the drag's edit session is still open.
+    if (event->matches(QKeySequence::Delete) && !m_dragging) {
+        Q_EMIT deleteRequested();
+        event->accept();
+        return;
+    }
+    QWindow::keyPressEvent(event);
+}
+
 void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
     m_lastMousePos = event->pos();
     m_cursorPos = event->position();
+    // The keyboard (Delete): a native child window doesn't take it on a click by itself.
+    // Window shortcuts (Undo) still work: Qt counts the main window active.
+    if (QGuiApplication::focusWindow() != this) requestActivate();
     Q_EMIT pressed();
     m_rolloverTimer->stop();
     if (!m_rollover.isEmpty()) {
