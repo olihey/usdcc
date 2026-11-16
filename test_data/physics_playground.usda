@@ -1,0 +1,602 @@
+#usda 1.0
+(
+    doc = """Rigid-body test scene for usdcc's physics simulation (docs/PHYSICS.md).
+Only UsdPhysics schemas, no PhysxSchema. Metres, kilograms, Y up, 24 fps, 10 seconds.
+
+What each group checks:
+  BounceTest      restitution: the rubber ball bounces, the dead ball doesn't
+  Stack           a tower of four crates, knocked over by a tumbling cube (material density)
+  ShapeRain       capsule, cylinder, cone (MassAPI density), convex-hull pyramid (explicit mass),
+                  and a dumbbell made of three colliders under one body (compound)
+  Ramp            friction: on a 30 degree slope the ice crate slides, the rubber crate holds
+  KinematicPush   a kinematic body animated by time samples pushes dynamic crates
+  Trough          a static triangle-mesh collider (approximation none) a ball rolls in
+  MassTest        two balls rolled at the same speed: 1 kg bounces off a crate wall, 500 kg plows through
+  Pendulum        a revolute joint to the world; the bob knocks the top crate off a stack"""
+    defaultPrim = "World"
+    endTimeCode = 240
+    framesPerSecond = 24
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 1
+    timeCodesPerSecond = 24
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def PhysicsScene "PhysicsScene"
+    {
+        vector3f physics:gravityDirection = (0, -1, 0)
+        float physics:gravityMagnitude = 9.81
+    }
+
+    def Camera "Camera"
+    {
+        float2 clippingRange = (0.1, 1000)
+        float focalLength = 24
+        float3 xformOp:rotateXYZ = (-29, 0, 0)
+        double3 xformOp:translate = (0, 18, 32)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+
+    def Scope "PhysicsMaterials"
+    {
+        def Material "Concrete" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 0.6
+            float physics:restitution = 0
+            float physics:staticFriction = 0.7
+        }
+
+        def Material "Rubber" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 1
+            float physics:restitution = 0.85
+            float physics:staticFriction = 1.1
+        }
+
+        def Material "Dead" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 0.5
+            float physics:restitution = 0
+            float physics:staticFriction = 0.6
+        }
+
+        def Material "Ice" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 0.02
+            float physics:restitution = 0
+            float physics:staticFriction = 0.03
+        }
+
+        def Material "Wood" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:density = 600
+            float physics:dynamicFriction = 0.4
+            float physics:restitution = 0.2
+            float physics:staticFriction = 0.5
+        }
+    }
+
+    def Cube "Ground" (
+        doc = "Static collider: CollisionAPI without RigidBodyAPI. Top face at y = 0."
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding:physics = </World/PhysicsMaterials/Concrete>
+        color3f[] primvars:displayColor = [(0.45, 0.45, 0.47)]
+        double size = 1
+        float3 xformOp:scale = (40, 0.2, 40)
+        double3 xformOp:translate = (0, -0.1, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+
+    def Xform "BounceTest"
+    {
+        def Sphere "RubberBall" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Rubber>
+            color3f[] primvars:displayColor = [(0.9, 0.2, 0.2)]
+            double radius = 0.5
+            double3 xformOp:translate = (-12, 5, -1.5)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Sphere "DeadBall" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Dead>
+            color3f[] primvars:displayColor = [(0.3, 0.3, 0.3)]
+            double radius = 0.5
+            double3 xformOp:translate = (-12, 5, 1.5)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "Stack"
+    {
+        def Cube "Crate1" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-6, 0.5, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Crate2" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (-6, 1.5, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Crate3" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-6, 2.5, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Crate4" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (-6, 3.5, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Wrecker" (
+            doc = "Starts rotated and spinning; lands on the stack's top corner."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+        )
+        {
+            vector3f physics:angularVelocity = (0, 0, 180)
+            color3f[] primvars:displayColor = [(0.2, 0.5, 0.9)]
+            double size = 1
+            float3 xformOp:rotateXYZ = (30, 20, 45)
+            double3 xformOp:translate = (-6, 9, 0.35)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+    }
+
+    def Xform "ShapeRain"
+    {
+        def Capsule "Capsule" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+        )
+        {
+            uniform token axis = "Y"
+            double height = 1
+            color3f[] primvars:displayColor = [(0.9, 0.7, 0.1)]
+            double radius = 0.35
+            float3 xformOp:rotateXYZ = (0, 0, 70)
+            double3 xformOp:translate = (0, 3, -4)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Cylinder "Cylinder" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+        )
+        {
+            uniform token axis = "Y"
+            double height = 1.2
+            color3f[] primvars:displayColor = [(0.2, 0.75, 0.4)]
+            double radius = 0.4
+            float3 xformOp:rotateXYZ = (40, 0, 0)
+            double3 xformOp:translate = (0, 4, -2)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Cone "Cone" (
+            doc = "Mass from MassAPI density (300 kg/m3)."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            uniform token axis = "Y"
+            double height = 1.2
+            float physics:density = 300
+            color3f[] primvars:displayColor = [(0.6, 0.3, 0.8)]
+            double radius = 0.5
+            float3 xformOp:rotateXYZ = (0, 0, 150)
+            double3 xformOp:translate = (0, 5, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Mesh "Pyramid" (
+            doc = "Mesh collider as a convex hull; explicit mass of 20 kg."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float3[] extent = [(-0.5, -0.4, -0.5), (0.5, 0.6, 0.5)]
+            int[] faceVertexCounts = [4, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 3, 0, 4, 1, 1, 4, 2, 2, 4, 3, 3, 4, 0]
+            uniform token physics:approximation = "convexHull"
+            float physics:mass = 20
+            point3f[] points = [(-0.5, -0.4, -0.5), (0.5, -0.4, -0.5), (0.5, -0.4, 0.5), (-0.5, -0.4, 0.5), (0, 0.6, 0)]
+            color3f[] primvars:displayColor = [(0.95, 0.5, 0.15)]
+            uniform token subdivisionScheme = "none"
+            float3 xformOp:rotateXYZ = (160, 0, 20)
+            double3 xformOp:translate = (0, 6, 2)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Xform "Dumbbell" (
+            doc = "One rigid body with three colliders below it (a compound shape)."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+        )
+        {
+            float3 xformOp:rotateXYZ = (0, 30, 25)
+            double3 xformOp:translate = (0, 7, 4)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+            def Sphere "WeightL" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                color3f[] primvars:displayColor = [(0.15, 0.15, 0.15)]
+                double radius = 0.35
+                double3 xformOp:translate = (-0.8, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+
+            def Sphere "WeightR" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                color3f[] primvars:displayColor = [(0.15, 0.15, 0.15)]
+                double radius = 0.35
+                double3 xformOp:translate = (0.8, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+
+            def Cylinder "Bar" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token axis = "X"
+                double height = 1.6
+                color3f[] primvars:displayColor = [(0.75, 0.75, 0.8)]
+                double radius = 0.08
+            }
+        }
+    }
+
+    def Xform "Ramp"
+    {
+        def Cube "Slope" (
+            doc = "Static collider tilted 30 degrees; its low end rests on the ground at x = 5.4."
+            prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.55, 0.6, 0.65)]
+            double size = 1
+            float3 xformOp:rotateXYZ = (0, 0, 30)
+            float3 xformOp:scale = (6, 0.2, 4)
+            double3 xformOp:translate = (8, 1.6, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+        }
+
+        def Cube "IceCrate" (
+            doc = "Friction below tan(30) = 0.58 under any combine rule: slides down and off."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Ice>
+            color3f[] primvars:displayColor = [(0.6, 0.85, 1)]
+            double size = 1
+            float3 xformOp:rotateXYZ = (0, 0, 30)
+            double3 xformOp:translate = (8.98, 2.9, -1)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Cube "RubberCrate" (
+            doc = "Friction above tan(30) = 0.58 under average or geometric-mean combining: stays put."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Rubber>
+            color3f[] primvars:displayColor = [(0.9, 0.2, 0.2)]
+            double size = 1
+            float3 xformOp:rotateXYZ = (0, 0, 30)
+            double3 xformOp:translate = (8.98, 2.9, 1)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+    }
+
+    def Xform "KinematicPush"
+    {
+        def Cube "Pusher" (
+            doc = "Kinematic: follows its animation and pushes dynamic bodies, is never pushed back."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI"]
+        )
+        {
+            bool physics:kinematicEnabled = 1
+            color3f[] primvars:displayColor = [(0.95, 0.85, 0.2)]
+            double size = 1
+            float3 xformOp:scale = (0.4, 1.5, 3)
+            double3 xformOp:translate.timeSamples = {
+                1: (-12, 0.8, -9),
+                24: (-12, 0.8, -9),
+                120: (4, 0.8, -9),
+            }
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "CrateLow" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-8, 0.5, -9)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "CrateHigh" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (-8, 1.5, -9)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "CrateAhead" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Wood>
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-4, 0.5, -9)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "Trough"
+    {
+        def Mesh "Valley" (
+            doc = "Static triangle-mesh collider (approximation none): a V-shaped trough along Z."
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI"]
+        )
+        {
+            uniform bool doubleSided = 1
+            float3[] extent = [(-2, 0.2, -2), (2, 1.5, 2)]
+            int[] faceVertexCounts = [4, 4]
+            int[] faceVertexIndices = [0, 3, 2, 1, 1, 2, 5, 4]
+            uniform token physics:approximation = "none"
+            point3f[] points = [(-2, 1.5, -2), (0, 0.2, -2), (0, 0.2, 2), (-2, 1.5, 2), (2, 1.5, -2), (2, 1.5, 2)]
+            color3f[] primvars:displayColor = [(0.4, 0.55, 0.4)]
+            uniform token subdivisionScheme = "none"
+            double3 xformOp:translate = (12, 0, -9)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Sphere "Roller" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </World/PhysicsMaterials/Dead>
+            color3f[] primvars:displayColor = [(0.9, 0.9, 0.9)]
+            double radius = 0.3
+            double3 xformOp:translate = (10.6, 3, -9)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "MassTest"
+    {
+        def Sphere "LightBall" (
+            doc = "1 kg at 8 m/s: bounces off the wall."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 1
+            vector3f physics:velocity = (8, 0, 0)
+            color3f[] primvars:displayColor = [(0.95, 0.95, 0.6)]
+            double radius = 0.5
+            double3 xformOp:translate = (-10, 0.5, -16)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Sphere "HeavyBall" (
+            doc = "500 kg at 8 m/s: plows through the wall."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 500
+            vector3f physics:velocity = (8, 0, 0)
+            color3f[] primvars:displayColor = [(0.25, 0.25, 0.3)]
+            double radius = 0.5
+            double3 xformOp:translate = (-10, 0.5, -13)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallA1" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-2, 0.5, -16)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallA2" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (-2, 1.5, -16)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallA3" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-2, 2.5, -16)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallB1" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-2, 0.5, -13)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallB2" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (-2, 1.5, -13)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "WallB3" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 10
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (-2, 2.5, -13)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "Pendulum"
+    {
+        def Sphere "Pivot" (
+            doc = "Visual only: no collider, no body. The joint attaches the bob to the world here."
+        )
+        {
+            color3f[] primvars:displayColor = [(0.1, 0.1, 0.1)]
+            double radius = 0.1
+            double3 xformOp:translate = (0, 6, 10)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Xform "Bob" (
+            doc = "Starts level with the pivot, 3 m out, and swings down through the stack."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 20
+            double3 xformOp:translate = (3, 6, 10)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Sphere "Ball" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                color3f[] primvars:displayColor = [(0.8, 0.1, 0.1)]
+                double radius = 0.4
+            }
+
+            def Cylinder "Rod" (
+                doc = "Visual only: part of the bob's body but has no CollisionAPI."
+            )
+            {
+                uniform token axis = "X"
+                double height = 3
+                color3f[] primvars:displayColor = [(0.6, 0.6, 0.6)]
+                double radius = 0.03
+                double3 xformOp:translate = (-1.5, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+        }
+
+        def PhysicsRevoluteJoint "Hinge" (
+            doc = "body0 unset: the joint is attached to the world, so localPos0 is a world position."
+        )
+        {
+            uniform token physics:axis = "Z"
+            rel physics:body1 = </World/Pendulum/Bob>
+            point3f physics:localPos0 = (0, 6, 10)
+            point3f physics:localPos1 = (-3, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        def Cube "Target1" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 2
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (0, 0.5, 10)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Target2" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 2
+            color3f[] primvars:displayColor = [(0.75, 0.55, 0.35)]
+            double size = 1
+            double3 xformOp:translate = (0, 1.5, 10)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cube "Target3" (
+            doc = "Spans y 2 to 3; the bob's lowest point spans 2.6 to 3.4, so it hits this one."
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 2
+            color3f[] primvars:displayColor = [(0.7, 0.5, 0.3)]
+            double size = 1
+            double3 xformOp:translate = (0, 2.5, 10)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+}
