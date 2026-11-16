@@ -272,3 +272,7 @@ Where it differs from the plan:
   as the triad does on its disc and Paused, the readout and the rollover on their own. The
   text on them is always light, whatever the background; only the empty viewport's hint,
   on no plate, follows the background (light ink on dark, dark on light).
+- **It follows the UI scale** (View > UI Scale): `HudInput::scale` multiplies its margins,
+  paddings, the triad, line widths and hit areas, and `hudFont()` its font, so the HUD grows and
+  shrinks with the panels around it. `HydraViewportWindow` redraws it on
+  `UiScaleController::scaleChanged`, at once.

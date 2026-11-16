@@ -61,6 +61,9 @@ QString formatMetersPerUnit(double metersPerUnit);
 // Everything the HUD shows; the window fills it in for each frame.
 struct HudInput {
     QSizeF size;  // the window, in logical pixels
+    // The app's UI scale (UiScaleController, 1.0 at 100%): every margin, radius, line width
+    // and hit area grows with it. The font is scaled by the caller (hudFont()).
+    double scale = 1.0;
     QColor background{0x1c, 0x1c, 0x1e};  // the HUD draws light ink on a dark one and dark on a light one
     bool hasStage = false;
     bool paused = false;
@@ -129,6 +132,7 @@ struct HudAxisEnd {
 
 struct HudLayout {
     QSizeF size;
+    double scale = 1.0;  // HudInput::scale, for hit testing and painting
     QColor ink;     // the color of text that isn't on a plate (the empty viewport's hint)
     QColor shadow;  // behind it, so it reads on anything
     std::vector<HudText> texts;
@@ -146,9 +150,12 @@ struct HudLayout {
     bool operator==(const HudLayout&) const = default;
 };
 
-// The radius of the triad's ends and centre, in logical pixels.
+// The radius of the triad's ends and centre, in logical pixels at 100% UI scale.
 inline constexpr double kHudAxisEndRadius = 8.0;
 inline constexpr double kHudAxisCenterRadius = 5.0;
+
+// `font` at the UI scale `scale` (1.0: as it is), for buildViewportHud() and paintViewportHud().
+QFont hudFont(QFont font, double scale);
 
 // Where everything goes, in `font`. Needs a QGuiApplication (for the font's metrics).
 HudLayout buildViewportHud(const HudInput& input, const QFont& font);

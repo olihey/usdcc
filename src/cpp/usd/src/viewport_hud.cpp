@@ -26,6 +26,9 @@ constexpr double kAlignedAxisOffset = 0.05;
 constexpr double kCursorOffset = 18.0;
 constexpr double kPlatePadX = 6.0;  // a corner's plate around its text
 constexpr double kPlatePadY = 4.0;
+// Every size above is at 100% UI scale; HudInput::scale multiplies them, as it does the font
+// (hudFont()).
+
 // The plates behind the corners' text and the badges: semi-transparent black, whatever
 // the background, so the text on them is always light.
 const QColor kPlate(0, 0, 0, 140);
@@ -73,9 +76,9 @@ const std::array<AxisSpec, 3>& axisSpecs() {
 }
 
 // `rect` moved inside `bounds` (as far as it fits).
-QRectF keptInside(QRectF rect, const QSizeF& bounds) {
-    rect.moveLeft(std::clamp(rect.left(), kMargin, std::max(kMargin, bounds.width() - kMargin - rect.width())));
-    rect.moveTop(std::clamp(rect.top(), kMargin, std::max(kMargin, bounds.height() - kMargin - rect.height())));
+QRectF keptInside(QRectF rect, const QSizeF& bounds, double margin) {
+    rect.moveLeft(std::clamp(rect.left(), margin, std::max(margin, bounds.width() - margin - rect.width())));
+    rect.moveTop(std::clamp(rect.top(), margin, std::max(margin, bounds.height() - margin - rect.height())));
     return rect;
 }
 }  // namespace
@@ -135,15 +138,36 @@ QString formatMetersPerUnit(double metersPerUnit) {
     return QStringLiteral("%1 m").arg(QString::number(metersPerUnit, 'g', 6));
 }
 
+QFont hudFont(QFont font, double scale) {
+    if (scale <= 0.0 || scale == 1.0) return font;
+    if (font.pixelSize() > 0) {
+        font.setPixelSize(std::max(1, static_cast<int>(std::lround(font.pixelSize() * scale))));
+    } else {
+        font.setPointSizeF(font.pointSizeF() * scale);
+    }
+    return font;
+}
+
 HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
     HudLayout layout;
     layout.size = input.size;
+    const double s = input.scale > 0.0 ? input.scale : 1.0;
+    layout.scale = s;
+    const double margin = kMargin * s;
+    const double padX = kPadX * s;
+    const double padY = kPadY * s;
+    const double labelGap = kLabelGap * s;
+    const double axesRadius = kAxesRadius * s;
+    const double cursorOffset = kCursorOffset * s;
+    const double platePadX = kPlatePadX * s;
+    const double platePadY = kPlatePadY * s;
+    const double endRadius = kHudAxisEndRadius * s;
     const bool dark = input.background.lightnessF() < 0.5;
     layout.ink = dark ? QColor(232, 232, 232) : QColor(28, 28, 30);
     layout.shadow = dark ? QColor(0, 0, 0, 170) : QColor(255, 255, 255, 170);
     const double width = input.size.width();
     const double height = input.size.height();
-    if (width < 40.0 || height < 40.0) return layout;
+    if (width < 40.0 * s || height < 40.0 * s) return layout;
 
     const QFontMetricsF metrics(font);
     const double lineHeight = std::ceil(metrics.height());
@@ -155,7 +179,7 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
 
     // An empty viewport says so, and nothing else: no labels, no triad, no badges.
     if (!input.hasStage) {
-        const QString hint = elided(QStringLiteral("No stage. Open one from the File menu."), width - 2 * kMargin);
+        const QString hint = elided(QStringLiteral("No stage. Open one from the File menu."), width - 2 * margin);
         const double w = textWidth(hint);
         layout.texts.push_back({hint, QRectF((width - w) / 2.0, (height - lineHeight) / 2.0, w, lineHeight), dim});
         return layout;
@@ -164,15 +188,15 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
     // Each corner's text, unpadded, for its plate.
     QRectF topLeftText, bottomLeftText, bottomRightText;
     const auto addPlate = [&](const QRectF& text) {
-        if (text.isValid()) layout.plates.push_back(text.adjusted(-kPlatePadX, -kPlatePadY, kPlatePadX, kPlatePadY));
+        if (text.isValid()) layout.plates.push_back(text.adjusted(-platePadX, -platePadY, platePadX, platePadY));
     };
 
     // Top right: the axis triad. Before the labels, which keep clear of it.
-    double topRightEdge = width - kMargin;
-    const bool showAxes = input.showAxes && width >= 160.0 && height >= 120.0;
+    double topRightEdge = width - margin;
+    const bool showAxes = input.showAxes && width >= 160.0 * s && height >= 120.0 * s;
     if (showAxes) {
-        layout.axesRadius = kAxesRadius;
-        layout.axesCenter = QPointF(width - kMargin - kAxesRadius - kHudAxisEndRadius, kMargin + kAxesRadius + kHudAxisEndRadius);
+        layout.axesRadius = axesRadius;
+        layout.axesCenter = QPointF(width - margin - axesRadius - endRadius, margin + axesRadius + endRadius);
         for (const AxisSpec& spec : axisSpecs()) {
             for (const bool positive : {true, false}) {
                 const PXR_NS::GfVec3d direction = positive ? spec.direction : -spec.direction;
@@ -183,7 +207,7 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
                 if (std::hypot(view[0], view[1]) < kAlignedAxisOffset) continue;
                 HudAxisEnd end;
                 end.item = positive ? spec.positive : spec.negative;
-                end.end = layout.axesCenter + QPointF(view[0], -view[1]) * kAxesRadius;
+                end.end = layout.axesCenter + QPointF(view[0], -view[1]) * axesRadius;
                 end.depth = view[2];
                 end.color = positive ? spec.color : withAlpha(spec.color, 150);
                 end.label = positive ? QLatin1String(spec.letter) : QString();
@@ -194,12 +218,12 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         std::stable_sort(layout.axes.begin(), layout.axes.end(),
                          [](const HudAxisEnd& a, const HudAxisEnd& b) { return a.depth < b.depth; });
         layout.centerHovered = input.hover == HudItem::AxisCenter;
-        topRightEdge = layout.axesCenter.x() - kAxesRadius - kHudAxisEndRadius - 8.0;
+        topRightEdge = layout.axesCenter.x() - axesRadius - endRadius - 8.0 * s;
         if (isHudAxis(input.hover)) {
             const QString name = hudAxisViewName(input.hover, input.zUp);
             const double w = textWidth(name);
-            const double y = layout.axesCenter.y() + kAxesRadius + kHudAxisEndRadius + 4.0;
-            const QRectF rect(std::min(layout.axesCenter.x() - w / 2.0, width - kMargin - w), y, w, lineHeight);
+            const double y = layout.axesCenter.y() + axesRadius + endRadius + 4.0 * s;
+            const QRectF rect(std::min(layout.axesCenter.x() - w / 2.0, width - margin - w), y, w, lineHeight);
             HudText label{name, rect, kPlateInk};
             label.plated = true;
             layout.texts.push_back(label);
@@ -210,7 +234,7 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
     // Top left: camera, renderer, shading, each opening its menu.
     if (input.showCamera) {
         // The label's text, not its padding, lines up with the other corners'.
-        double x = kMargin - kPadX;
+        double x = margin - padX;
         const struct {
             HudItem item;
             QString text;
@@ -220,17 +244,17 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
                       {HudItem::Shading, input.shading, input.shadingAvailable}};
         for (const auto& label : labels) {
             if (label.text.isEmpty()) continue;
-            const double room = topRightEdge - x - 2 * kPadX;
+            const double room = topRightEdge - x - 2 * padX;
             QString text = label.text + kMenuMark;
             if (textWidth(text) > room) text = elided(label.text, room - textWidth(kMenuMark)) + kMenuMark;
-            if (room < 30.0 || text.trimmed() == kMenuMark.trimmed()) break;
-            const QRectF rect(x, kMargin - kPadY, textWidth(text) + 2 * kPadX, lineHeight + 2 * kPadY);
+            if (room < 30.0 * s || text.trimmed() == kMenuMark.trimmed()) break;
+            const QRectF rect(x, margin - padY, textWidth(text) + 2 * padX, lineHeight + 2 * padY);
             HudText hudText{text, rect, label.available ? kPlateInk : kPlateDim, label.item};
             hudText.hovered = input.hover == label.item;
             hudText.plated = true;
-            topLeftText |= rect.adjusted(kPadX, kPadY, -kPadX, -kPadY);
+            topLeftText |= rect.adjusted(padX, padY, -padX, -padY);
             layout.texts.push_back(hudText);
-            x = rect.right() + kLabelGap;
+            x = rect.right() + labelGap;
         }
         addPlate(topLeftText);
     }
@@ -250,11 +274,11 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         }
     }
     double rightWidth = 0;
-    double y = height - kMargin - lineHeight;
+    double y = height - margin - lineHeight;
     for (const QString& line : rightLines) {
         const double w = textWidth(line);
         rightWidth = std::max(rightWidth, w);
-        HudText hudText{line, QRectF(width - kMargin - w, y, w, lineHeight), kPlateInk};
+        HudText hudText{line, QRectF(width - margin - w, y, w, lineHeight), kPlateInk};
         hudText.plated = true;
         bottomRightText |= hudText.rect;
         layout.texts.push_back(hudText);
@@ -263,18 +287,18 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
     addPlate(bottomRightText);
 
     // Bottom left, bottom up: units, edit target, counts.
-    const double leftRoom = width - 2 * kMargin - (rightWidth > 0 ? rightWidth + 16.0 : 0.0);
-    y = height - kMargin - lineHeight;
+    const double leftRoom = width - 2 * margin - (rightWidth > 0 ? rightWidth + 16.0 * s : 0.0);
+    y = height - margin - lineHeight;
     const auto addLeft = [&](const QString& text, const QColor& color, HudItem item = HudItem::None) {
-        if (leftRoom < 40.0) return;
-        const double pad = item == HudItem::None ? 0.0 : kPadX;
+        if (leftRoom < 40.0 * s) return;
+        const double pad = item == HudItem::None ? 0.0 : padX;
         const QString shown = elided(text, leftRoom - 2 * pad);
-        const double h = item == HudItem::None ? lineHeight : lineHeight + 2 * kPadY;
-        if (item != HudItem::None) y -= 2 * kPadY;
-        HudText hudText{shown, QRectF(kMargin - pad, y, textWidth(shown) + 2 * pad, h), color, item};
+        const double h = item == HudItem::None ? lineHeight : lineHeight + 2 * padY;
+        if (item != HudItem::None) y -= 2 * padY;
+        HudText hudText{shown, QRectF(margin - pad, y, textWidth(shown) + 2 * pad, h), color, item};
         hudText.hovered = item != HudItem::None && input.hover == item;
         hudText.plated = true;
-        bottomLeftText |= hudText.rect.adjusted(pad, item == HudItem::None ? 0.0 : kPadY, -pad, item == HudItem::None ? 0.0 : -kPadY);
+        bottomLeftText |= hudText.rect.adjusted(pad, item == HudItem::None ? 0.0 : padY, -pad, item == HudItem::None ? 0.0 : -padY);
         layout.texts.push_back(hudText);
         y -= lineHeight;
     };
@@ -306,35 +330,36 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
 
     // Paused sits at the top, in the centre.
     const auto addBadge = [&](const QString& text, QPointF topLeft, bool centred) {
-        const QString shown = elided(text, width - 2 * kMargin - 2 * kPadX);
-        QRectF rect(topLeft, QSizeF(textWidth(shown) + 2 * kPadX, lineHeight + 2 * kPadY));
+        const QString shown = elided(text, width - 2 * margin - 2 * padX);
+        QRectF rect(topLeft, QSizeF(textWidth(shown) + 2 * padX, lineHeight + 2 * padY));
         if (centred) rect.moveLeft((width - rect.width()) / 2.0);
-        HudText badge{shown, keptInside(rect, input.size), kPlateInk};
+        HudText badge{shown, keptInside(rect, input.size, margin), kPlateInk};
         badge.badge = true;
         layout.texts.push_back(badge);
     };
     if (input.paused) {
-        const double top = input.showCamera ? kMargin + lineHeight + 2 * kPadY + 6.0 : kMargin;
+        const double top = input.showCamera ? margin + lineHeight + 2 * padY + 6.0 * s : margin;
         addBadge(QStringLiteral("Paused"), QPointF(0, top), true);
     }
     // Beside the cursor: what a drag is doing, or the prim under it.
     if (!input.toolReadout.isEmpty()) {
-        addBadge(input.toolReadout, input.cursor + QPointF(kCursorOffset, kCursorOffset), false);
+        addBadge(input.toolReadout, input.cursor + QPointF(cursorOffset, cursorOffset), false);
     } else if (!input.rollover.isEmpty()) {
-        addBadge(input.rollover, input.cursor + QPointF(kCursorOffset, kCursorOffset), false);
+        addBadge(input.rollover, input.cursor + QPointF(cursorOffset, cursorOffset), false);
     }
     return layout;
 }
 
 HudItem hudItemAt(const HudLayout& layout, const QPointF& point) {
+    const double s = layout.scale;
     const auto within = [&](const QPointF& centre, double radius) {
         const QPointF d = point - centre;
         return d.x() * d.x() + d.y() * d.y() <= radius * radius;
     };
     for (auto it = layout.axes.rbegin(); it != layout.axes.rend(); ++it) {
-        if (within(it->end, kHudAxisEndRadius + 2.0)) return it->item;
+        if (within(it->end, (kHudAxisEndRadius + 2.0) * s)) return it->item;
     }
-    if (!layout.axes.empty() && within(layout.axesCenter, kHudAxisCenterRadius + 3.0)) return HudItem::AxisCenter;
+    if (!layout.axes.empty() && within(layout.axesCenter, (kHudAxisCenterRadius + 3.0) * s)) return HudItem::AxisCenter;
     for (const HudText& text : layout.texts) {
         if (text.item != HudItem::None && text.rect.contains(point)) return text.item;
     }
@@ -350,6 +375,8 @@ QRectF hudItemRect(const HudLayout& layout, HudItem item) {
 }
 
 void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& font) {
+    const double s = layout.scale;
+    const double endRadius = kHudAxisEndRadius * s;
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
@@ -358,21 +385,21 @@ void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& f
     // The corners' plates first, the text on them after.
     painter.setPen(Qt::NoPen);
     painter.setBrush(kPlate);
-    for (const QRectF& plate : layout.plates) painter.drawRoundedRect(plate, 5.0, 5.0);
+    for (const QRectF& plate : layout.plates) painter.drawRoundedRect(plate, 5.0 * s, 5.0 * s);
 
     for (const HudText& text : layout.texts) {
         if (text.badge) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(kBadgePlate);
-            painter.drawRoundedRect(text.rect, 4.0, 4.0);
+            painter.drawRoundedRect(text.rect, 4.0 * s, 4.0 * s);
         } else if (text.item != HudItem::None && text.hovered) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(withAlpha(text.plated ? kPlateInk : layout.ink, 40));
-            painter.drawRoundedRect(text.rect, 4.0, 4.0);
+            painter.drawRoundedRect(text.rect, 4.0 * s, 4.0 * s);
         }
         if (!text.badge && !text.plated) {
             painter.setPen(layout.shadow);
-            painter.drawText(text.rect.translated(1.0, 1.0), Qt::AlignCenter, text.text);
+            painter.drawText(text.rect.translated(1.0 * s, 1.0 * s), Qt::AlignCenter, text.text);
         }
         painter.setPen(text.color);
         painter.drawText(text.rect, Qt::AlignCenter, text.text);
@@ -382,16 +409,15 @@ void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& f
         // A plate behind, as the corners have, so the ends read over anything.
         painter.setPen(Qt::NoPen);
         painter.setBrush(kPlate);
-        painter.drawEllipse(layout.axesCenter, layout.axesRadius + kHudAxisEndRadius + 2.0,
-                            layout.axesRadius + kHudAxisEndRadius + 2.0);
+        painter.drawEllipse(layout.axesCenter, layout.axesRadius + endRadius + 2.0 * s, layout.axesRadius + endRadius + 2.0 * s);
         QFont letterFont = font;
         letterFont.setBold(true);
-        letterFont.setPixelSize(std::max(8, static_cast<int>(kHudAxisEndRadius * 1.3)));
+        letterFont.setPixelSize(std::max(static_cast<int>(8.0 * s), static_cast<int>(endRadius * 1.3)));
         painter.setFont(letterFont);
         const auto drawCenter = [&]() {
             painter.setPen(Qt::NoPen);
             painter.setBrush(withAlpha(kPlateInk, layout.centerHovered ? 230 : 120));
-            painter.drawEllipse(layout.axesCenter, kHudAxisCenterRadius - 1.0, kHudAxisCenterRadius - 1.0);
+            painter.drawEllipse(layout.axesCenter, (kHudAxisCenterRadius - 1.0) * s, (kHudAxisCenterRadius - 1.0) * s);
         };
         bool centerDrawn = false;
         for (const HudAxisEnd& end : layout.axes) {
@@ -400,18 +426,18 @@ void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& f
                 drawCenter();
                 centerDrawn = true;
             }
-            const double radius = kHudAxisEndRadius + (end.hovered ? 1.5 : 0.0) - (end.label.isEmpty() ? 2.0 : 0.0);
+            const double radius = endRadius + ((end.hovered ? 1.5 : 0.0) - (end.label.isEmpty() ? 2.0 : 0.0)) * s;
             if (!end.label.isEmpty()) {
-                painter.setPen(QPen(end.color, 2.0, Qt::SolidLine, Qt::RoundCap));
+                painter.setPen(QPen(end.color, 2.0 * s, Qt::SolidLine, Qt::RoundCap));
                 painter.drawLine(layout.axesCenter, end.end);
-                painter.setPen(end.hovered ? QPen(kPlateInk, 1.5) : QPen(Qt::NoPen));
+                painter.setPen(end.hovered ? QPen(kPlateInk, 1.5 * s) : QPen(Qt::NoPen));
                 painter.setBrush(end.color);
                 painter.drawEllipse(end.end, radius, radius);
                 painter.setPen(QColor(20, 20, 20));
                 painter.drawText(QRectF(end.end.x() - radius, end.end.y() - radius, 2 * radius, 2 * radius), Qt::AlignCenter,
                                  end.label);
             } else {
-                painter.setPen(QPen(end.color, end.hovered ? 2.0 : 1.5));
+                painter.setPen(QPen(end.color, (end.hovered ? 2.0 : 1.5) * s));
                 painter.setBrush(withAlpha(end.color, end.hovered ? 140 : 60));
                 painter.drawEllipse(end.end, radius, radius);
             }

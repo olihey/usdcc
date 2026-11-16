@@ -97,6 +97,17 @@ QOpenGLContext* viewportShareContext() {
     std::erase_if(contexts, [](const QPointer<QOpenGLContext>& context) { return context.isNull(); });
     return contexts.empty() ? nullptr : contexts.front().data();
 }
+// The app's UI scale, when it has one. Looked up rather than created
+// (UiScaleController::instance()), so a test without one gets 100% and leaves no
+// controller behind on the application.
+usdcc::ui::UiScaleController* uiScaleController() {
+    return qApp ? qApp->findChild<usdcc::ui::UiScaleController*>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
+}
+
+double uiScale() {
+    const usdcc::ui::UiScaleController* controller = uiScaleController();
+    return controller ? controller->percent() / 100.0 : 1.0;
+}
 }  // namespace
 
 HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
@@ -123,6 +134,10 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
             refreshHud();
         }
     });
+    // The HUD grows and shrinks with the UI scale (View > UI Scale), at once.
+    if (usdcc::ui::UiScaleController* controller = uiScaleController()) {
+        connect(controller, &usdcc::ui::UiScaleController::scaleChanged, this, &HydraViewportWindow::refreshHud);
+    }
 }
 
 HydraViewportWindow::~HydraViewportWindow() {
@@ -469,6 +484,7 @@ void HydraViewportWindow::setHudCounts(const HudCounts& counts) {
 HudInput HydraViewportWindow::hudInput() const {
     HudInput input;
     input.size = QSizeF(width(), height());
+    input.scale = uiScale();
     input.background = m_display.background;
     input.hasStage = static_cast<bool>(m_stage);
     input.paused = m_paused;
@@ -527,8 +543,9 @@ void HydraViewportWindow::drawHud(int width, int height) {
         m_hudLayout = {};
         return;
     }
-    const QFont font = QGuiApplication::font();
-    HudLayout layout = buildViewportHud(hudInput(), font);
+    const HudInput input = hudInput();
+    const QFont font = hudFont(QGuiApplication::font(), input.scale);
+    HudLayout layout = buildViewportHud(input, font);
     if (layout != m_hudLayout || m_hudImage.size() != QSize(width, height)) {
         m_hudLayout = std::move(layout);
         m_hudImage = QImage(width, height, QImage::Format_RGBA8888_Premultiplied);
@@ -1306,7 +1323,7 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         }
         if (item != HudItem::None) {
             const QRectF rect = hudItemRect(m_hudLayout, item);
-            Q_EMIT hudMenuRequested(item, mapToGlobal(QPointF(rect.left(), rect.bottom() + 2.0)).toPoint());
+            Q_EMIT hudMenuRequested(item, mapToGlobal(QPointF(rect.left(), rect.bottom() + 2.0 * m_hudLayout.scale)).toPoint());
             return;
         }
     }

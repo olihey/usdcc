@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFontMetricsF>
 #include <QImage>
 #include <QJsonObject>
 #include <QMenu>
@@ -140,6 +141,46 @@ USDCC_TEST(viewport_hud_axis_view) {
     view.SetLookAt(PXR_NS::GfVec3d(1, 1, 10), PXR_NS::GfVec3d(0.0), PXR_NS::GfVec3d(0, 1, 0));
     input.viewMatrix = view;
     CHECK(buildViewportHud(input, font).axes.size() == 6, "a little off the axis: all six ends");
+}
+
+USDCC_TEST(viewport_hud_ui_scale) {
+    // The HUD follows the app's UI scale: at 200% its margins, triad and hit areas are
+    // twice the size, and its font (hudFont()) twice the height.
+    const QFont font = QApplication::font();
+    HudInput input = baseInput();
+    input.size = QSizeF(1600, 1000);
+    const HudLayout normal = buildViewportHud(input, font);
+    input.scale = 2.0;
+    const QFont bigFont = hudFont(font, 2.0);
+    const HudLayout big = buildViewportHud(input, bigFont);
+
+    CHECK(hudFont(font, 1.0) == font, "100%: the font as it is");
+    CHECK(QFontMetricsF(bigFont).height() > 1.8 * QFontMetricsF(font).height(), "200%: a font twice as tall (%.1f, %.1f)",
+          QFontMetricsF(bigFont).height(), QFontMetricsF(font).height());
+    QFont pixelFont = font;
+    pixelFont.setPixelSize(11);
+    CHECK(hudFont(pixelFont, 1.5).pixelSize() == 17, "a pixel-sized font in pixels: %d", hudFont(pixelFont, 1.5).pixelSize());
+
+    CHECK(big.scale == 2.0 && normal.scale == 1.0, "the scale, kept for hit testing and painting");
+    CHECK(big.axesRadius == 2 * normal.axesRadius, "the triad twice as big");
+    CHECK(input.size.width() - big.axesCenter.x() == 2 * (input.size.width() - normal.axesCenter.x()) &&
+              big.axesCenter.y() == 2 * normal.axesCenter.y(),
+          "and twice as far from the corner");
+    const HudText* camera = findText(normal, "Persp");
+    const HudText* bigCamera = findText(big, "Persp");
+    CHECK(camera && bigCamera && bigCamera->rect.left() == 2 * camera->rect.left() && bigCamera->rect.top() == 2 * camera->rect.top(),
+          "the labels' margins and padding");
+    if (bigCamera) CHECK(hudItemAt(big, bigCamera->rect.center()) == HudItem::Camera, "a click on the bigger label");
+    CHECK(normal.plates.size() == big.plates.size() && big.plates.front().height() > 1.8 * normal.plates.front().height(),
+          "the plates around the bigger text");
+
+    // An end's hit area grows with it: a point just outside it at 100% is on it at 200%.
+    const HudAxisEnd& end = big.axes.back();
+    const QPointF beside = end.end + QPointF(kHudAxisEndRadius + 6.0, 0.0);
+    CHECK(hudItemAt(big, beside) == end.item, "an axis end's hit area, scaled");
+    const HudAxisEnd& normalEnd = normal.axes.back();
+    CHECK(hudItemAt(normal, normalEnd.end + QPointF(kHudAxisEndRadius + 6.0, 0.0)) != normalEnd.item, "but not at 100%");
+    snapshot(big, QStringLiteral("hud_200"));
 }
 
 USDCC_TEST(viewport_hud_layout) {
