@@ -13,8 +13,9 @@
   "layout": {
     "split": "horizontal",
     "sizes": [
-      0.15,
-      0.85
+      0.18,
+      0.57,
+      0.25
     ],
     "items": [
       {
@@ -94,6 +95,14 @@
             ]
           }
         ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "attributes"
+          }
+        ],
+        "maxWidth": 420
       }
     ]
   }
