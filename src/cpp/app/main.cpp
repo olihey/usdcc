@@ -70,6 +70,7 @@
 #include "usdcc/usd/recent_files.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/save_stage_as.h"
+#include "usdcc/usd/selection_menu.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view_panel.h"
 #include "usdcc/usd/variant_editor_dialog.h"
@@ -867,6 +868,9 @@ int main(int argc, char** argv) {
     QAction* redoAction = undoGroup->createRedoAction(&window, QObject::tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
     editMenu->addAction(redoAction);
+    editMenu->addSeparator();
+    // Edit > Selection: None, All, Invert, By Type, By Schema, By Name (docs/SELECTION_MENU.md).
+    editMenu->addMenu(new usdcc::usd::SelectionMenu(&stageManager, &window));
     editMenu->addSeparator();
     QAction* settingsAction = editMenu->addAction(QObject::tr("&Settings..."), &window,
                                                   [&window]() { usdcc::ui::SettingsDialog::showDialog(&window); });

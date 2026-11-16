@@ -5,6 +5,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/viewport_grid.h
     src/viewport_grid.cpp
     include/usdcc/usd/applied_schemas.h
+    include/usdcc/usd/prim_selection.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
     include/usdcc/usd/layer_stack.h
@@ -38,6 +39,7 @@ add_library(usdcc_usd SHARED
     src/dependencies.cpp
     src/layer_stack.cpp
     src/prim_creation_catalog.cpp
+    src/prim_selection.cpp
     src/property_categorizer.cpp
     src/relationship_targets.cpp
     src/scene_bounds.cpp
@@ -126,6 +128,8 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/save_stage_as.h
     include/usdcc/usd/create_menu.h
+    include/usdcc/usd/select_by_name_dialog.h
+    include/usdcc/usd/selection_menu.h
     include/usdcc/usd/current_stage_ui.h
     include/usdcc/usd/session_stages.h
     include/usdcc/usd/open_stage_options_dialog.h
@@ -198,6 +202,8 @@ add_library(usdcc_usd_ui SHARED
     src/close_stage_dialog.cpp
     src/save_stage_as.cpp
     src/create_menu.cpp
+    src/select_by_name_dialog.cpp
+    src/selection_menu.cpp
     src/current_stage_ui.cpp
     src/session_stages.cpp
     src/open_stage_options_dialog.cpp
