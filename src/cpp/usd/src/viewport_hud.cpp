@@ -20,6 +20,9 @@ constexpr double kPadX = 6.0;  // around a clickable label or a badge
 constexpr double kPadY = 3.0;
 constexpr double kLabelGap = 4.0;
 constexpr double kAxesRadius = 30.0;
+// An axis end this close to the triad's centre, as a fraction of its radius (1.5 px), points
+// straight at the viewer or away: an axis view.
+constexpr double kAlignedAxisOffset = 0.05;
 constexpr double kCursorOffset = 18.0;
 constexpr double kPlatePadX = 6.0;  // a corner's plate around its text
 constexpr double kPlatePadY = 4.0;
@@ -175,6 +178,9 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
                 const PXR_NS::GfVec3d direction = positive ? spec.direction : -spec.direction;
                 // In view space the camera looks down -Z: +Z comes towards the viewer.
                 const PXR_NS::GfVec3d view = input.viewMatrix.TransformDir(direction);
+                // Looking along this axis, both its ends land on the centre and would hide
+                // it: leave them out, so the centre (the default view) can be clicked.
+                if (std::hypot(view[0], view[1]) < kAlignedAxisOffset) continue;
                 HudAxisEnd end;
                 end.item = positive ? spec.positive : spec.negative;
                 end.end = layout.axesCenter + QPointF(view[0], -view[1]) * kAxesRadius;

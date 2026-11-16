@@ -135,7 +135,8 @@ struct HudLayout {
     // Semi-transparent black, behind each corner's text (top left, bottom left, bottom
     // right, and the view name under the triad), so it reads on anything.
     std::vector<QRectF> plates;
-    // Empty when the triad isn't shown.
+    // Empty when the triad isn't shown. Without the ends that point straight at the viewer
+    // or away (in an axis view), which would cover the centre: then 4, not 6.
     std::vector<HudAxisEnd> axes;  // back to front
     QPointF axesCenter;
     double axesRadius = 0;

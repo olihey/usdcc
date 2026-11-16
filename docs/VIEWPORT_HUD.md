@@ -50,6 +50,8 @@ on the stage's up axis (Y or Z, `UsdGeomGetStageUpAxis`, as the grid).
 - Click an axis end: the camera looks down that axis (front, side, top and their opposites),
   keeping its target and distance. Only yaw and pitch change, via `setCameraState()`.
 - Click the centre: back to the default yaw and pitch (`kDefaultOrbitYaw`/`Pitch`).
+  Looking down an axis, that axis's two ends would sit on the centre: they're hidden, so
+  the centre (Default View) is what shows and gets the click.
 - Hover: the axis end under the cursor brightens; a tooltip-like label says "Top", "Front"...
 
 An orientation **cube** (faces, edges, corners) is the bigger version; §8 asks which.

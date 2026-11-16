@@ -105,6 +105,43 @@ USDCC_TEST(viewport_hud_formats) {
           "an axis end's direction");
 }
 
+USDCC_TEST(viewport_hud_axis_view) {
+    // Looking down an axis, its two ends would sit on the triad's centre: they're left out,
+    // so the centre, the default view, is what's there to click.
+    const QFont font = QApplication::font();
+    HudInput input = baseInput();
+    struct View {
+        PXR_NS::GfVec3d eye, up;
+        HudItem positive, negative;
+        const char* name;
+    };
+    for (const View& v : {View{{0, 0, 10}, {0, 1, 0}, HudItem::AxisPosZ, HudItem::AxisNegZ, "front"},
+                          View{{0, 10, 0}, {0, 0, -1}, HudItem::AxisPosY, HudItem::AxisNegY, "top"},
+                          View{{-10, 0, 0}, {0, 1, 0}, HudItem::AxisPosX, HudItem::AxisNegX, "left"}}) {
+        PXR_NS::GfMatrix4d view;
+        view.SetLookAt(v.eye, PXR_NS::GfVec3d(0.0), v.up);
+        input.viewMatrix = view;
+        input.hover = HudItem::None;
+        HudLayout layout = buildViewportHud(input, font);
+        bool aligned = false;
+        for (const HudAxisEnd& end : layout.axes) {
+            if (end.item == v.positive || end.item == v.negative) aligned = true;
+        }
+        CHECK(layout.axes.size() == 4 && !aligned, "the %s view: four ends, not the ones on the centre", v.name);
+        CHECK(hudItemAt(layout, layout.axesCenter) == HudItem::AxisCenter, "the %s view: the centre gets the click", v.name);
+        input.hover = HudItem::AxisCenter;
+        layout = buildViewportHud(input, font);
+        CHECK(layout.centerHovered && findText(layout, "Default View"), "the %s view: hovering the centre names it", v.name);
+        if (v.positive == HudItem::AxisPosZ) snapshot(layout, QStringLiteral("hud_front_view"));
+    }
+
+    // Off the axis, if only a little, all six are back.
+    PXR_NS::GfMatrix4d view;
+    view.SetLookAt(PXR_NS::GfVec3d(1, 1, 10), PXR_NS::GfVec3d(0.0), PXR_NS::GfVec3d(0, 1, 0));
+    input.viewMatrix = view;
+    CHECK(buildViewportHud(input, font).axes.size() == 6, "a little off the axis: all six ends");
+}
+
 USDCC_TEST(viewport_hud_layout) {
     const QFont font = QApplication::font();
     HudInput input = baseInput();
