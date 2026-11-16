@@ -23,6 +23,29 @@ ads--CDockSplitter::handle {
     background-color: #0e0e10;
 }
 
+/* dark.qss makes every QSplitter handle 1px, which leaves the panel
+   dividers a ~5px grab strip (Qt pads handles under 5px out to that).
+   These are 7px to grab with a 3px line painted down the middle: a
+   hard-stopped gradient, transparent either side. Not margins or
+   borders — QSplitterHandle::sizeHint() runs the size through the
+   stylesheet again, adding them twice, and with the :vertical rule
+   for both orientations. */
+ads--CDockSplitter::handle:horizontal {
+    width: 7px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 transparent, stop: 0.25 transparent,
+        stop: 0.251 #0e0e10, stop: 0.66 #0e0e10,
+        stop: 0.661 transparent, stop: 1 transparent);
+}
+
+ads--CDockSplitter::handle:vertical {
+    height: 7px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 transparent, stop: 0.25 transparent,
+        stop: 0.251 #0e0e10, stop: 0.66 #0e0e10,
+        stop: 0.661 transparent, stop: 1 transparent);
+}
+
 ads--CDockAreaWidget {
     background: #1c1c1e;
 }
