@@ -58,7 +58,7 @@ with V-Ray in a helper process, following the viewport camera and edits ([VRAY_R
 4. the folders added in **Edit > Settings > Plugins > Plugin folders**, in their order;
 5. `plugins/` next to `bin/`, the plugins shipped with usdcc: V-Ray Render and RTX Render.
 
-The setting lists the user's folder and the shipped one as fixed rows, greyed, around the ones you add, remove and reorder. It takes effect at the next start, as plugins are found before the window opens. **Plugin Folders...** in View > Plugins opens it.
+The setting lists the user's folder and the shipped one as fixed rows, greyed, around the ones you add, remove and reorder. It takes effect at the next start, as plugins are found before the window opens. The cog button in View > Plugins opens it.
 
 A plugin in your own folder wins over a shipped one with the same id; the other is ignored, and the log says so. `--no-plugins` starts clean when one breaks the app. A deploy puts the examples in `examples/plugins`, where they don't load unless asked for (`--plugin-path`, or added in the setting), and the SDK for C++ plugins in `sdk`.
 
@@ -321,7 +321,7 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 3. **C++ plugins at all:** built, as the spec asks. Most plugins should still be Python (PLUGIN_SDK.md).
 4. **Turning a plugin on or off:** at the next start (§3.4).
 5. **A newly found plugin:** it just loads, as startup scripts do. Someone had to put it in that folder.
-6. **Installing:** copying a folder, with Open Plugins Folder in the panel. No zip installer or store for now.
+6. **Installing:** copying a folder, with the folder button in the panel to open it. No zip installer or store for now.
 7. **Manifest format:** JSON. Qt reads it with no new dependency, and USD's `plugInfo.json` is the same kind of file.
 8. **Compatibility:** `api` is a whole number, raised only when something breaks, and a plugin whose `api` doesn't match is refused with the reason. C++ also needs the exact build (§3.2).
 9. **Third-party Python modules:** declared in the manifest, installed by the app when asked into a shared folder ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md)) or carried in `deps/`, and checked before any plugin code runs (§3.10). Nothing is installed at startup.

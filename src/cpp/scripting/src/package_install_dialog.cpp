@@ -103,12 +103,15 @@ PackageInstallDialog::PackageInstallDialog(PluginManager& plugins, PythonRuntime
         m_details->clear();
         m_installer->install();
     });
+    // Cancel stops what's running and closes; there's nothing left to read.
     connect(m_cancel, &QPushButton::clicked, this, [this]() {
-        if (m_stage == Stage::Done) {
-            close();
-        } else {
+        if (m_stage != Stage::Done) {
+            if (m_stage == Stage::Installing) USDCC_LOG_INFO("usdcc.packages", "Installing packages was cancelled");
+            m_installer->disconnect(this);
             m_installer->cancel();
+            m_stage = Stage::Done;
         }
+        close();
     });
     setStage(Stage::Resolving, tr("Working out what's needed..."));
 }

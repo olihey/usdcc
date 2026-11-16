@@ -16,7 +16,7 @@ What you see:
 3. It downloads in the background. You can close the window, and a toast says when it's done.
 4. It takes effect at the next start, as turning a plugin on or off does.
 
-**Update Packages** in the same panel resolves everything again, moving packages to their newest versions, and retries what couldn't be installed before.
+**Update Packages** (the reload button) in the same panel resolves everything again, moving packages to their newest versions, and retries what couldn't be installed before.
 
 ## 1. The settings
 

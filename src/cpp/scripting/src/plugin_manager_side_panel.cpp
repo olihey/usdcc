@@ -7,6 +7,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/python_settings.h"
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings_dialog.h"
@@ -129,28 +130,31 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_install->setObjectName(QStringLiteral("pluginInstallPackages"));
     m_install->setToolTip(tr("Install the Python packages the plugins and My packages (Edit > Settings > Python) ask for"));
     buttons->addWidget(m_install);
-    m_update = new QPushButton(tr("Update Packages..."), content);
+    m_update = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/reload.png"),
+                                              tr("Update Packages: resolve everything again, moving Python packages to their newest versions"),
+                                              content);
     m_update->setObjectName(QStringLiteral("pluginUpdatePackages"));
-    m_update->setToolTip(tr("Resolve everything again, moving Python packages to their newest versions"));
     buttons->addWidget(m_update);
-    auto* folders = new QPushButton(tr("Plugin Folders..."), content);
-    folders->setObjectName(QStringLiteral("pluginFolders"));
-    folders->setToolTip(tr("Where plugins are looked for: Edit > Settings > Plugins"));
-    buttons->addWidget(folders);
-    auto* openFolder = new QPushButton(tr("Open Plugins Folder"), content);
-    openFolder->setToolTip(tr("Open your plugins folder"));
+    auto* openFolder =
+        new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/folder.png"), tr("Open your plugins folder"), content);
+    openFolder->setObjectName(QStringLiteral("pluginOpenFolder"));
     buttons->addWidget(openFolder);
+    auto* folders = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/cog.png"),
+                                                   tr("Plugin folders: where plugins are looked for (Edit > Settings > Plugins)"),
+                                                   content);
+    folders->setObjectName(QStringLiteral("pluginFolders"));
+    buttons->addWidget(folders);
     layout->addLayout(buttons);
     setWidget(content);
 
     connect(m_install, &QPushButton::clicked, this, [this]() { installPackages(false); });
-    connect(m_update, &QPushButton::clicked, this, [this]() { installPackages(true); });
+    connect(m_update, &QAbstractButton::clicked, this, [this]() { installPackages(true); });
     usdcc::ui::onSettingChanged(this, kUserPackagesKey, [this]() { updatePackages(); });
 
-    connect(folders, &QPushButton::clicked, this, [this]() {
+    connect(folders, &QAbstractButton::clicked, this, [this]() {
         usdcc::ui::SettingsDialog::showDialog(window())->showCategory(QStringLiteral("Plugins"));
     });
-    connect(openFolder, &QPushButton::clicked, this, []() {
+    connect(openFolder, &QAbstractButton::clicked, this, []() {
         const QString folder = QString::fromStdU16String(PluginManager::userFolder().u16string());
         QDir().mkpath(folder);
         QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
@@ -269,7 +273,7 @@ void PluginManagerSidePanel::updateDetails() {
     const QTreeWidgetItem* item = m_tree->currentItem();
     const PluginInfo* plugin = item ? m_plugins.find(item->data(0, Qt::UserRole).toString().toStdString()) : nullptr;
     if (!plugin) {
-        m_details->setText(m_plugins.plugins().empty() ? tr("No plugins found. Put one in your plugins folder, or add a folder with Plugin Folders..., and restart.")
+        m_details->setText(m_plugins.plugins().empty() ? tr("No plugins found. Put one in your plugins folder, or add a folder in Edit > Settings > Plugins, and restart.")
                                                        : QString());
         return;
     }
