@@ -90,6 +90,47 @@ if(WIN32 AND NOT DEFINED Python3_EXECUTABLE AND EXISTS "${USD_INSTALL}/pxrConfig
     unset(_usd_config)
 endif()
 
+# find_package() keeps the folder it found pxrConfig.cmake in (pxr_DIR) and
+# goes straight back there on every later configure, whatever USD_INSTALL says
+# by then. So after -DUSD_INSTALL (or run.py's --usd-install) names a different
+# OpenUSD, the build would still compile and link against the old one while
+# run.py puts the new one's DLLs on PATH; the app then won't start ("entry point
+# not found": each OpenUSD version has its own pxrInternal_v0_YY_MM namespace).
+# Forget a pxr_DIR that isn't USD_INSTALL, so the search below finds that one,
+# and with it the packages OpenUSD's config found inside the old install (TBB,
+# OpenSubdiv, ...): their cached <Package>_DIR would pull in its headers too.
+if(USD_INSTALL AND DEFINED CACHE{pxr_DIR})
+    file(REAL_PATH "${USD_INSTALL}" _usd_install_real)
+    if(EXISTS "${pxr_DIR}")
+        file(REAL_PATH "${pxr_DIR}" _usd_old_real)
+    else()
+        set(_usd_old_real "${pxr_DIR}")
+    endif()
+    if(NOT _usd_old_real STREQUAL _usd_install_real)
+        message(STATUS "OpenUSD: USD_INSTALL is now ${USD_INSTALL}; forgetting the earlier one at ${pxr_DIR}")
+        get_property(_usd_cached DIRECTORY PROPERTY CACHE_VARIABLES)
+        foreach(_usd_variable IN LISTS _usd_cached)
+            if(_usd_variable MATCHES "_DIR$" AND NOT _usd_variable STREQUAL "pxr_DIR")
+                set(_usd_value "${${_usd_variable}}")
+                if(EXISTS "${_usd_value}")
+                    file(REAL_PATH "${_usd_value}" _usd_value)
+                endif()
+                string(FIND "${_usd_value}" "${_usd_old_real}/" _usd_at)
+                if(_usd_at EQUAL 0)
+                    unset(${_usd_variable} CACHE)
+                endif()
+            endif()
+        endforeach()
+        unset(pxr_DIR CACHE)
+        unset(_usd_cached)
+        unset(_usd_variable)
+        unset(_usd_value)
+        unset(_usd_at)
+    endif()
+    unset(_usd_install_real)
+    unset(_usd_old_real)
+endif()
+
 find_package(pxr CONFIG QUIET)
 
 # OpenUSD's pxrConfig.cmake gives TBB::tbb TBB_USE_DEBUG=1 for Debug and

@@ -153,7 +153,8 @@ find_package(pybind11 REQUIRED)
 # be findable before pxrConfig.cmake sets up USD's own imported targets.
 find_package(OpenGL)
 find_package(USD REQUIRED)
-message(STATUS "OpenUSD ${PXR_VERSION} found at ${USD_INSTALL}")
+# Where it was actually found, which is what the build compiles and links against.
+message(STATUS "OpenUSD ${PXR_VERSION} found at ${pxr_DIR}")
 if(USDCC_LINK_RELEASE_QT)
     # USD's targets link Python3::Python, which in Debug is vcpkg's python312_d.lib.
     # The interpreter is OpenUSD's release Python, so anything resolved from the
