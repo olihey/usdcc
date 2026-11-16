@@ -6,6 +6,9 @@
   "description": "Reading a stage someone else built: structure, values and text at once.",
   "group": "USD",
   "order": 60,
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -34,7 +37,8 @@
               }
             ]
           }
-        ]
+        ],
+        "maxWidth": 420
       },
       {
         "split": "vertical",

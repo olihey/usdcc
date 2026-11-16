@@ -19,12 +19,40 @@
     },
     "sidePanels": {
       "type": "object",
-      "description": "Side panel name (Log, Script Editor, Plugins, ...) to its state; others are left as they are.",
-      "additionalProperties": { "enum": ["shown", "collapsed", "hidden"] }
+      "description": "Side panel objectName (Log, Script Editor, pluginManagerPanel, ...) or title to its state, or to an object with its state, edge and size. A side panel not named is hidden.",
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/sidePanelState" },
+          {
+            "type": "object",
+            "properties": {
+              "state": { "$ref": "#/$defs/sidePanelState" },
+              "area": { "enum": ["left", "right", "top", "bottom"], "description": "The window edge it's docked at." },
+              "size": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 1,
+                "description": "Shown: its share of the window's width (left, right) or height (top, bottom)."
+              }
+            }
+          }
+        ]
+      }
     },
     "layout": { "$ref": "#/$defs/node" }
   },
   "$defs": {
+    "sidePanelState": { "enum": ["shown", "collapsed", "hidden"] },
+    "maxWidth": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The most room this gets across a horizontal split, in pixels at 100% UI scale. A workspace with one gives the room left to its viewports, evenly."
+    },
+    "maxHeight": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The most room this gets across a vertical split, in pixels at 100% UI scale."
+    },
     "node": { "oneOf": [{ "$ref": "#/$defs/split" }, { "$ref": "#/$defs/area" }] },
     "split": {
       "type": "object",
@@ -32,6 +60,8 @@
       "properties": {
         "split": { "enum": ["horizontal", "vertical"], "description": "horizontal: side by side; vertical: stacked." },
         "sizes": { "type": "array", "items": { "type": "number", "minimum": 0 }, "description": "Shares, normalised." },
+        "maxWidth": { "$ref": "#/$defs/maxWidth" },
+        "maxHeight": { "$ref": "#/$defs/maxHeight" },
         "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } }
       }
     },
@@ -40,7 +70,9 @@
       "required": ["tabs"],
       "properties": {
         "tabs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/panel" } },
-        "current": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }] }
+        "current": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }] },
+        "maxWidth": { "$ref": "#/$defs/maxWidth" },
+        "maxHeight": { "$ref": "#/$defs/maxHeight" }
       }
     },
     "panel": {

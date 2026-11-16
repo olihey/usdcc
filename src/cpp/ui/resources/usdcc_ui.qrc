@@ -8,6 +8,8 @@
         <file alias="check-partial@2x.png">theme/check-partial@2x.png</file>
         <file alias="chevron-down.png">theme/chevron-down.png</file>
         <file alias="chevron-down@2x.png">theme/chevron-down@2x.png</file>
+        <file alias="chevron-down-white.png">theme/chevron-down-white.png</file>
+        <file alias="chevron-down-white@2x.png">theme/chevron-down-white@2x.png</file>
         <file alias="close.png">theme/close.png</file>
         <file alias="close@2x.png">theme/close@2x.png</file>
         <file alias="close-disabled.png">theme/close-disabled.png</file>

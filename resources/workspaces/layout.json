@@ -6,6 +6,9 @@
   "description": "The Outliner, the viewports and the Attributes side by side: for general scene work.",
   "group": "Scene",
   "order": 10,
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -19,7 +22,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "tabs": [
@@ -33,7 +37,8 @@
           {
             "panel": "attributes"
           }
-        ]
+        ],
+        "maxWidth": 420
       }
     ]
   }

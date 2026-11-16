@@ -8,7 +8,9 @@
 #include <QRegularExpression>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
+#include <utility>
 #include <numeric>
 
 namespace usdcc::ui::workspace {
@@ -18,6 +20,54 @@ namespace {
 const QSet<QString>& sidePanelStates() {
     static const QSet<QString> states{QStringLiteral("shown"), QStringLiteral("collapsed"), QStringLiteral("hidden")};
     return states;
+}
+
+const QSet<QString>& sidePanelAreas() {
+    static const QSet<QString> areas{QStringLiteral("left"), QStringLiteral("right"), QStringLiteral("top"),
+                                     QStringLiteral("bottom")};
+    return areas;
+}
+
+bool parseSidePanel(const QString& name, const QJsonValue& value, SidePanelEntry* entry, QString* error) {
+    QJsonObject object;
+    if (value.isString()) {
+        object.insert(QStringLiteral("state"), value);
+    } else if (value.isObject()) {
+        object = value.toObject();
+    } else {
+        *error = QStringLiteral("side panel \"%1\" is neither a state nor an object").arg(name);
+        return false;
+    }
+    entry->state = object.value(QStringLiteral("state")).toString(QStringLiteral("shown"));
+    if (!sidePanelStates().contains(entry->state)) {
+        *error = QStringLiteral("side panel \"%1\" is \"%2\", not \"shown\", \"collapsed\" or \"hidden\"")
+                     .arg(name, entry->state);
+        return false;
+    }
+    entry->area = object.value(QStringLiteral("area")).toString();
+    if (!entry->area.isEmpty() && !sidePanelAreas().contains(entry->area)) {
+        *error = QStringLiteral("side panel \"%1\" has the area \"%2\", not \"left\", \"right\", \"top\" or \"bottom\"")
+                     .arg(name, entry->area);
+        return false;
+    }
+    const double size = object.value(QStringLiteral("size")).toDouble(0.0);
+    entry->size = std::isfinite(size) && size > 0.0 && size < 1.0 ? size : 0.0;
+    return true;
+}
+
+// "maxWidth" and "maxHeight" of a layout node: whole pixels, 0 (none) when missing.
+bool parseMaxSizes(const QJsonObject& object, Node* node, QString* error) {
+    for (const auto& [key, target] : {std::pair{QStringLiteral("maxWidth"), &node->maxWidth},
+                                      std::pair{QStringLiteral("maxHeight"), &node->maxHeight}}) {
+        if (!object.contains(key)) continue;
+        const double value = object.value(key).toDouble(-1.0);
+        if (!std::isfinite(value) || value < 0.0) {
+            *error = QStringLiteral("\"%1\" isn't a number of pixels").arg(key);
+            return false;
+        }
+        *target = int(std::lround(value));
+    }
+    return true;
 }
 
 // The fit names of §3.5.1 and §3.5.7; `true`/`false` as their short forms.
@@ -101,7 +151,7 @@ bool parseNode(const QJsonValue& value, Node* node, QString* error, int depth = 
         std::vector<double> sizes;
         for (const QJsonValue& size : object.value(QStringLiteral("sizes")).toArray()) sizes.push_back(size.toDouble(-1.0));
         node->sizes = normalised(std::move(sizes), node->items.size());
-        return true;
+        return parseMaxSizes(object, node, error);
     }
     if (object.contains(QStringLiteral("tabs"))) {
         node->kind = Node::Kind::Area;
@@ -122,7 +172,7 @@ bool parseNode(const QJsonValue& value, Node* node, QString* error, int depth = 
         } else if (current.isString()) {
             node->currentPanel = current.toString();
         }
-        return true;
+        return parseMaxSizes(object, node, error);
     }
     *error = QStringLiteral("a layout node is neither a split nor an area of tabs");
     return false;
@@ -131,9 +181,11 @@ bool parseNode(const QJsonValue& value, Node* node, QString* error, int depth = 
 void flatten(Node& node) {
     if (!node.isSplit()) return;
     for (Node& child : node.items) flatten(child);
-    // A split of one is its child.
+    // A split of one is its child, with the split's limits where it has none.
     if (node.items.size() == 1) {
         Node child = std::move(node.items.front());
+        if (!child.maxWidth) child.maxWidth = node.maxWidth;
+        if (!child.maxHeight) child.maxHeight = node.maxHeight;
         node = std::move(child);
         return;
     }
@@ -212,6 +264,26 @@ void Node::forEachEntry(const std::function<void(const PanelEntry&)>& visit) con
     }
 }
 
+bool Node::hasMaxSize() const {
+    if (maxWidth > 0 || maxHeight > 0) return true;
+    for (const Node& child : items) {
+        if (child.hasMaxSize()) return true;
+    }
+    return false;
+}
+
+int Node::viewportCount(Qt::Orientation along) const {
+    if (!isSplit()) {
+        return std::any_of(tabs.begin(), tabs.end(), [](const PanelEntry& entry) { return entry.isViewport(); }) ? 1 : 0;
+    }
+    int count = 0;
+    for (const Node& child : items) {
+        const int inChild = child.viewportCount(along);
+        count = orientation == along ? count + inChild : std::max(count, inChild);
+    }
+    return count;
+}
+
 bool Node::containsPerStageViewport() const {
     bool found = false;
     forEachEntry([&found](const PanelEntry& entry) { found = found || entry.isPerStageViewport(); });
@@ -220,6 +292,8 @@ bool Node::containsPerStageViewport() const {
 
 QJsonObject Node::toJson() const {
     QJsonObject object;
+    if (maxWidth > 0) object.insert(QStringLiteral("maxWidth"), maxWidth);
+    if (maxHeight > 0) object.insert(QStringLiteral("maxHeight"), maxHeight);
     if (isSplit()) {
         object.insert(QStringLiteral("split"), orientation == Qt::Horizontal ? QStringLiteral("horizontal") : QStringLiteral("vertical"));
         QJsonArray shares;
@@ -241,6 +315,15 @@ QJsonObject Node::toJson() const {
     return object;
 }
 
+QJsonValue SidePanelEntry::toJson() const {
+    if (area.isEmpty() && size <= 0.0) return state;
+    QJsonObject object;
+    object.insert(QStringLiteral("state"), state);
+    if (!area.isEmpty()) object.insert(QStringLiteral("area"), area);
+    if (size > 0.0) object.insert(QStringLiteral("size"), std::round(size * 1000.0) / 1000.0);
+    return object;
+}
+
 QJsonObject Definition::toJson() const {
     QJsonObject object;
     object.insert(QStringLiteral("format"), QLatin1String(kFormat));
@@ -253,7 +336,7 @@ QJsonObject Definition::toJson() const {
     if (!fitOnSwitch.isEmpty()) object.insert(QStringLiteral("fitOnSwitch"), fitOnSwitch);
     if (!sidePanels.isEmpty()) {
         QJsonObject panels;
-        for (auto it = sidePanels.begin(); it != sidePanels.end(); ++it) panels.insert(it.key(), it.value());
+        for (auto it = sidePanels.begin(); it != sidePanels.end(); ++it) panels.insert(it.key(), it.value().toJson());
         object.insert(QStringLiteral("sidePanels"), panels);
     }
     object.insert(QStringLiteral("layout"), layout.toJson());
@@ -295,12 +378,9 @@ std::optional<Definition> fromJson(const QJsonObject& json, const QString& fallb
     }
     const QJsonObject sides = json.value(QStringLiteral("sidePanels")).toObject();
     for (auto it = sides.begin(); it != sides.end(); ++it) {
-        const QString state = it.value().toString();
-        if (!sidePanelStates().contains(state)) {
-            return fail(QStringLiteral("side panel \"%1\" is \"%2\", not \"shown\", \"collapsed\" or \"hidden\"")
-                            .arg(it.key(), state));
-        }
-        definition.sidePanels.insert(it.key(), state);
+        SidePanelEntry entry;
+        if (!parseSidePanel(it.key(), it.value(), &entry, &why)) return fail(why);
+        definition.sidePanels.insert(it.key(), entry);
     }
 
     if (!json.contains(QStringLiteral("layout"))) return fail(QStringLiteral("it has no \"layout\""));

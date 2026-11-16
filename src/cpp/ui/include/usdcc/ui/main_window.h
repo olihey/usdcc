@@ -90,6 +90,9 @@ public:
 
     // The side panels docked around the dock area, in the order added.
     const QList<SidePanel*>& sidePanels() const { return m_sidePanels; }
+    // Gives docked, shown side panels their share of the window: `shares` is objectName ->
+    // a share of its width (left, right) or height (top, bottom). Workspaces use it.
+    void resizeSidePanels(const QVariantMap& shares) { applySidePanelShares(shares); }
 
     // Puts `widget` in the title bar, right of the title (TitleBar::addTrailingWidget()),
     // clickable rather than dragging the window.
@@ -149,6 +152,8 @@ public:
     // screen. Leaving it goes back to maximized if the window was, else normal.
     void setFullScreen(bool fullScreen);
     QAction* fullScreenAction() const { return m_fullScreenAction; }
+    // The View menu, once buildViewMenu() has made it.
+    QMenu* viewMenu() const { return m_viewMenu; }
     // Whether the window is full screen, from the native window's state.
     bool isFullScreenNow() const;
 

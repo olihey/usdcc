@@ -18,6 +18,7 @@
 #include <QAction>
 #include <QDesktopServices>
 #include <QDir>
+#include <QHash>
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QJsonDocument>
@@ -25,8 +26,6 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPainter>
-#include <QPixmap>
 #include <QSet>
 #include <QSettings>
 #include <QToolButton>
@@ -37,32 +36,47 @@ namespace usdcc::ui {
 
 namespace {
 
-constexpr int kIconSize = 16;
 constexpr int kMaxNameWidth = 160;
+constexpr int kButtonHeight = 22;
 
 QString arrangedKey(const QString& id) { return QStringLiteral("%1/%2").arg(QLatin1String(WorkspaceController::kArrangedGroup), id); }
 
 std::string shortcutKey(const QString& id) { return "Shortcuts/workspace." + id.toStdString(); }
 
-// A 2×2 grid of panels in the accent colour, drawn rather than shipped so it
-// follows the setting.
-QIcon gridIcon(qreal pixelRatio) {
-    const int size = scaled::pixels(kIconSize);
-    QPixmap pixmap(QSize(size, size) * pixelRatio);
-    pixmap.setDevicePixelRatio(pixelRatio);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(theme::accent());
-    const qreal gap = size / 8.0;
-    const qreal cell = (size - 3 * gap) / 2.0;
-    for (int row = 0; row < 2; ++row) {
-        for (int column = 0; column < 2; ++column) {
-            painter.drawRoundedRect(QRectF(gap + column * (cell + gap), gap + row * (cell + gap), cell, cell), 1.5, 1.5);
-        }
+// What an area holds, to know it again in another arrangement of the same workspace:
+// its panel types, sorted.
+QString areaKey(const workspace::Node& area) {
+    QStringList types;
+    for (const workspace::PanelEntry& entry : area.tabs) types << entry.panel;
+    types.sort();
+    return types.join(QLatin1Char(','));
+}
+
+void collectLimits(const workspace::Node& node, QHash<QString, std::pair<int, int>>* limits) {
+    if (node.isSplit()) {
+        for (const workspace::Node& child : node.items) collectLimits(child, limits);
+    } else if (node.maxWidth > 0 || node.maxHeight > 0) {
+        limits->insert(areaKey(node), {node.maxWidth, node.maxHeight});
     }
-    return QIcon(pixmap);
+}
+
+void giveLimits(workspace::Node& node, const QHash<QString, std::pair<int, int>>& limits) {
+    if (node.isSplit()) {
+        for (workspace::Node& child : node.items) giveLimits(child, limits);
+        return;
+    }
+    const auto it = limits.constFind(areaKey(node));
+    if (it == limits.cend()) return;
+    node.maxWidth = it->first;
+    node.maxHeight = it->second;
+}
+
+// How a workspace was left keeps the file's limits (§3.3), on the areas holding the
+// same panels: a panel kept narrow stays so, and the viewports fill the rest again.
+void carryLimits(workspace::Node& arranged, const workspace::Node& file) {
+    QHash<QString, std::pair<int, int>> limits;
+    collectLimits(file, &limits);
+    if (!limits.isEmpty()) giveLimits(arranged, limits);
 }
 
 void addHeading(QMenu* menu, const QString& text) {
@@ -125,14 +139,20 @@ bool WorkspaceController::switchTo(const QString& id, QString* error) {
         if (error) *error = tr("There's no workspace \"%1\".").arg(id);
         return false;
     }
-    if (id != m_currentId) rememberArrangement();
+    // The active one too: choosing it again lays it out as it is now (a stage made
+    // current from the Stages menu goes in front), not as it was left before.
+    rememberArrangement();
     workspace::Definition definition = *found;
-    // How it was left, if it was (§11 #2): the layout only; the file's side panels and fit still apply.
+    // How it was left, if it was (§11 #2): the layout and the side panels; the file's
+    // limits and fit still apply.
     const QByteArray arranged = appSettings().value(arrangedKey(id)).toByteArray();
     if (!arranged.isEmpty()) {
-        const QJsonDocument document = QJsonDocument::fromJson(arranged);
-        if (std::optional<workspace::Definition> saved = workspace::fromJson(document.object(), id)) {
+        const QJsonObject json = QJsonDocument::fromJson(arranged).object();
+        if (std::optional<workspace::Definition> saved = workspace::fromJson(json, id)) {
+            carryLimits(saved->layout, definition.layout);
             definition.layout = saved->layout;
+            // Kept by an older version without them: the file's.
+            if (json.contains(QStringLiteral("sidePanels"))) definition.sidePanels = saved->sidePanels;
         }
     }
     return applyDefinition(definition, error);
@@ -209,7 +229,7 @@ void WorkspaceController::setCurrentId(const QString& id) {
 
 void WorkspaceController::rememberArrangement() {
     if (!m_chosen || !m_context.window || !m_library->find(m_currentId)) return;
-    const workspace::Definition arranged = workspace::capture(m_context.window, m_currentId, currentName(), false);
+    const workspace::Definition arranged = workspace::capture(m_context.window, m_currentId, currentName(), true);
     QSettings settings = appSettings();
     settings.setValue(arrangedKey(m_currentId), QJsonDocument(arranged.toJson()).toJson(QJsonDocument::Compact));
 }
@@ -224,33 +244,37 @@ void WorkspaceController::fitAllViews(const QString& what) {
 }
 
 QToolButton* WorkspaceController::createButton(QWidget* parent) {
+    // A push button in the accent colour, the workspace's name and a down arrow on its
+    // right (dark.qss), as tall as a control rather than the title bar.
     auto* button = new QToolButton(parent);
     button->setObjectName(QStringLiteral("titleBarWorkspaceButton"));
-    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    button->setToolButtonStyle(Qt::ToolButtonTextOnly);
     button->setPopupMode(QToolButton::InstantPopup);
     button->setFocusPolicy(Qt::NoFocus);
-    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    scaled::iconSize(button, kIconSize, kIconSize);
-    auto* menu = new QMenu(button);
+    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    scaled::fixedHeight(button, kButtonHeight);
+    button->setMenu(createMenu(QString(), button));
+    m_button = button;
+    updateButton();
+    // The name is elided at the scale's width.
+    UiScaleController::instance().bind(button, "workspaceName", [this]() { updateButton(); });
+    return button;
+}
+
+QMenu* WorkspaceController::createMenu(const QString& title, QWidget* parent) {
+    auto* menu = new QMenu(title, parent);
     menu->setObjectName(QStringLiteral("workspaceMenu"));
     menu->setToolTipsVisible(true);
     connect(menu, &QMenu::aboutToShow, this, [this, menu]() {
         menu->clear();
         populateMenu(menu);
     });
-    button->setMenu(menu);
-    m_button = button;
-    updateButton();
-    // The icon is drawn in the accent colour, at the scale's size.
-    onSettingChanged(button, theme::accentColorKey, [this]() { updateButton(); });
-    UiScaleController::instance().bind(button, "workspaceIcon", [this]() { updateButton(); });
-    return button;
+    return menu;
 }
 
 void WorkspaceController::updateButton() {
     if (!m_button) return;
     const QString name = currentName();
-    m_button->setIcon(gridIcon(m_button->devicePixelRatioF()));
     const QString shown = m_button->fontMetrics().elidedText(name, Qt::ElideRight, scaled::pixels(kMaxNameWidth));
     m_button->setText(shown);
     const workspace::Definition* definition = current();
@@ -260,43 +284,7 @@ void WorkspaceController::updateButton() {
 }
 
 void WorkspaceController::populateMenu(QMenu* menu) {
-    const std::vector<WorkspaceLibrary::Group> groups = m_library->groups();
-    // With one group, or none, no headings (§6.2).
-    const bool headings = groups.size() > 1 || (groups.size() == 1 && !groups.front().name.isEmpty());
-    for (const WorkspaceLibrary::Group& group : groups) {
-        if (headings) {
-            if (group.name.isEmpty()) {
-                menu->addSeparator();
-            } else {
-                addHeading(menu, group.name);
-            }
-        }
-        for (const workspace::Definition* definition : group.workspaces) {
-            QAction* action = menu->addAction(definition->name);
-            action->setObjectName(QStringLiteral("workspace:") + definition->id);
-            action->setCheckable(true);
-            action->setChecked(definition->id == m_currentId);
-            QStringList tip;
-            if (!definition->description.isEmpty()) tip << definition->description;
-            QStringList missing;
-            workspace::pruned(definition->layout,
-                              [this](const QString& type) { return m_context.registry && m_context.registry->find(type); },
-                              &missing);
-            if (!missing.isEmpty()) {
-                tip << tr("Needs %1, which isn't loaded: left out.").arg(missing.join(QStringLiteral(", ")));
-            }
-            tip << tr("%1: %2").arg(definition->source, QDir::toNativeSeparators(definition->file));
-            action->setToolTip(tip.join(QLatin1Char('\n')));
-            if (const QAction* shortcut = m_shortcutActions.value(definition->id)) action->setShortcut(shortcut->shortcut());
-            const QString id = definition->id;
-            connect(action, &QAction::triggered, this, [this, id]() {
-                QString error;
-                if (!switchTo(id, &error) && m_context.window) {
-                    QMessageBox::warning(m_context.window, tr("Workspace"), error);
-                }
-            });
-        }
-    }
+    addWorkspaceActions(menu);
 
     menu->addSeparator();
     if (m_fitAllViewsAction) menu->addAction(m_fitAllViewsAction);
@@ -329,7 +317,9 @@ void WorkspaceController::populateMenu(QMenu* menu) {
     connect(save, &QAction::triggered, this, [this]() { saveCurrentLayoutInteractively(m_context.window); });
 
     menu->addSeparator();
-    QAction* open = menu->addAction(tr("Open Workspaces Folder"));
+    QAction* open = menu->addAction(tr("Open Personal Workspace Folder"));
+    open->setObjectName(QStringLiteral("openPersonalWorkspaceFolder"));
+    open->setToolTip(QDir::toNativeSeparators(m_library->userFolder()));
     connect(open, &QAction::triggered, this, [this]() {
         QDir().mkpath(m_library->userFolder());
         QDesktopServices::openUrl(QUrl::fromLocalFile(m_library->userFolder()));
@@ -341,6 +331,47 @@ void WorkspaceController::populateMenu(QMenu* menu) {
     connect(folders, &QAction::triggered, this, [this]() {
         if (SettingsDialog* dialog = SettingsDialog::showDialog(m_context.window)) dialog->showCategory(QStringLiteral("Files"));
     });
+}
+
+void WorkspaceController::addWorkspaceActions(QMenu* menu, const std::function<void()>& before, bool markCurrent) {
+    const std::vector<WorkspaceLibrary::Group> groups = m_library->groups();
+    // With one group, or none, no headings (§6.2).
+    const bool headings = groups.size() > 1 || (groups.size() == 1 && !groups.front().name.isEmpty());
+    for (const WorkspaceLibrary::Group& group : groups) {
+        if (headings) {
+            if (group.name.isEmpty()) {
+                menu->addSeparator();
+            } else {
+                addHeading(menu, group.name);
+            }
+        }
+        for (const workspace::Definition* definition : group.workspaces) {
+            QAction* action = menu->addAction(definition->name);
+            action->setObjectName(QStringLiteral("workspace:") + definition->id);
+            action->setCheckable(true);
+            action->setChecked(markCurrent && definition->id == m_currentId);
+            QStringList tip;
+            if (!definition->description.isEmpty()) tip << definition->description;
+            QStringList missing;
+            workspace::pruned(definition->layout,
+                              [this](const QString& type) { return m_context.registry && m_context.registry->find(type); },
+                              &missing);
+            if (!missing.isEmpty()) {
+                tip << tr("Needs %1, which isn't loaded: left out.").arg(missing.join(QStringLiteral(", ")));
+            }
+            tip << tr("%1: %2").arg(definition->source, QDir::toNativeSeparators(definition->file));
+            action->setToolTip(tip.join(QLatin1Char('\n')));
+            if (const QAction* shortcut = m_shortcutActions.value(definition->id)) action->setShortcut(shortcut->shortcut());
+            const QString id = definition->id;
+            connect(action, &QAction::triggered, this, [this, id, before]() {
+                if (before) before();
+                QString error;
+                if (!switchTo(id, &error) && m_context.window) {
+                    QMessageBox::warning(m_context.window, tr("Workspace"), error);
+                }
+            });
+        }
+    }
 }
 
 void WorkspaceController::saveCurrentLayoutInteractively(QWidget* parent) {

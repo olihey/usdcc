@@ -6,6 +6,9 @@
   "description": "Shade and light: the material graph under the viewports.",
   "group": "Shading & Rendering",
   "order": 40,
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -19,7 +22,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "split": "vertical",
@@ -53,7 +57,8 @@
             "panel": "layers"
           }
         ],
-        "current": 0
+        "current": 0,
+        "maxWidth": 420
       }
     ]
   }

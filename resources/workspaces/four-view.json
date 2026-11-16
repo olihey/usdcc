@@ -7,6 +7,9 @@
   "group": "Scene",
   "order": 20,
   "fitOnSwitch": "stage",
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -19,7 +22,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "split": "vertical",

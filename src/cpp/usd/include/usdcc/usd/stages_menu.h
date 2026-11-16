@@ -11,6 +11,7 @@ class CDockManager;
 
 namespace usdcc::ui {
 class ViewPanelRegistry;
+class WorkspaceController;
 }
 
 namespace usdcc::usd {
@@ -26,7 +27,8 @@ USDCC_USD_UI_API void makeCurrentEverywhere(StageManager* stageManager, ads::CDo
 // The menu bar's Stages menu: one submenu per open stage (titled with its
 // short name, see shortStageNames(); the full identifier is the tooltip),
 // each with "Make Current" first (makeCurrentEverywhere()), "Save Stage" and
-// "Save Stage As..." (saveStageInteractively(), saveStageAsInteractively()), then "Views", a
+// "Save Stage As..." (saveStageInteractively(), saveStageAsInteractively()), then
+// "Workspace" (with setWorkspaces(): switching to one with that stage current), "Views", a
 // new panel of every registered ViewPanel type showing that stage, then
 // "Close Stage..." (closeStageInteractively()). Rebuilt each time it opens;
 // shows a disabled "No stages open" entry while there are none.
@@ -44,6 +46,10 @@ public:
     // tab in front) switches to `stage`, which becomes the current stage.
     void makeCurrentEverywhere(const StageRefPtr& stage);
 
+    // Gives each stage a Workspace submenu, above Views: the workspaces, each laid out
+    // with that stage current. `workspaces` must outlive the menu.
+    void setWorkspaces(usdcc::ui::WorkspaceController* workspaces) { m_workspaces = workspaces; }
+
 private:
     void rebuild();
 
@@ -51,6 +57,7 @@ private:
     const usdcc::ui::ViewPanelRegistry* m_panelTypes;
     ads::CDockManager* m_dockManager;
     QWidget* m_window;
+    usdcc::ui::WorkspaceController* m_workspaces = nullptr;
 };
 
 }  // namespace usdcc::usd

@@ -7,8 +7,20 @@
   "group": "Development",
   "order": 70,
   "sidePanels": {
-    "Script Editor": "shown",
-    "Log": "shown"
+    "Script Editor": {
+      "state": "shown",
+      "area": "right",
+      "size": 0.3
+    },
+    "pluginManagerPanel": {
+      "state": "collapsed",
+      "area": "right"
+    },
+    "Log": {
+      "state": "shown",
+      "area": "bottom",
+      "size": 0.25
+    }
   },
   "layout": {
     "split": "horizontal",
@@ -23,7 +35,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "tabs": [
@@ -37,7 +50,8 @@
           {
             "panel": "attributes"
           }
-        ]
+        ],
+        "maxWidth": 420
       }
     ]
   }

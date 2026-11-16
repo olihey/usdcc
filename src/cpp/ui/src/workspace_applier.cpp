@@ -3,6 +3,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/panel_maximizer.h"
+#include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
@@ -141,7 +142,14 @@ QWidget* rootWidget(ads::CDockManager* docks) {
 }
 
 // Gives each splitter of `widget` the shares of `node`, where the two match.
-void applySizes(const Node& node, QWidget* widget, QList<QPointer<QSplitter>>* touched) {
+//
+// With `limits` (the workspace gives a node a maxWidth or maxHeight, §3.3), a node
+// with a limit gets no more room than it, and what's left goes to the split's
+// viewports, evenly: each child holding viewports gets a part for each viewport it
+// has side by side along the split. Those children are also the ones that grow and
+// shrink with the window (the splitter's stretch factors); the rest keep their size.
+// A split without viewports gives what's left to its children without a limit.
+void applySizes(const Node& node, QWidget* widget, bool limits, QList<QPointer<QSplitter>>* touched) {
     widget = unwrap(widget);
     auto* splitter = qobject_cast<QSplitter*>(widget);
     if (!node.isSplit() || !splitter || splitter->orientation() != node.orientation) return;
@@ -150,45 +158,142 @@ void applySizes(const Node& node, QWidget* widget, QList<QPointer<QSplitter>>* t
     // In pixels of what there is, or a nominal total before the window has a size.
     const QList<int> current = splitter->sizes();
     int total = std::accumulate(current.begin(), current.end(), 0);
-    if (total < 100) total = 10000;
+    const bool laidOut = total >= 100;
+    if (!laidOut) total = 10000;
+
+    const std::size_t count = node.items.size();
+    std::vector<double> wanted(count);
+    std::vector<int> stretch(count, 0);
+    for (std::size_t i = 0; i < count; ++i) wanted[i] = node.sizes[i] * total;
+    if (limits) {
+        std::vector<int> caps(count, 0);
+        std::vector<int> viewports(count, 0);
+        int weights = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Node& child = node.items[i];
+            if (child.maxSize(node.orientation) > 0) {
+                caps[i] = scaled::pixels(child.maxSize(node.orientation));
+            } else {
+                viewports[i] = child.viewportCount(node.orientation);
+            }
+            weights += viewports[i];
+        }
+        double kept = 0.0;    // the room of the children that don't fill
+        double shares = 0.0;  // without viewports: the shares of the ones that do
+        for (std::size_t i = 0; i < count; ++i) {
+            // Before the window has a size the limits mean nothing yet: shares only.
+            if (caps[i] > 0 && laidOut) wanted[i] = std::min(wanted[i], double(caps[i]));
+            const bool fills = weights > 0 ? viewports[i] > 0 : caps[i] == 0;
+            if (fills) {
+                stretch[i] = weights > 0 ? viewports[i] : 1;
+                shares += node.sizes[i];
+            } else {
+                kept += wanted[i];
+            }
+        }
+        const double rest = std::max(0.0, total - kept);
+        for (std::size_t i = 0; i < count; ++i) {
+            if (stretch[i] == 0) continue;
+            wanted[i] = weights > 0 ? rest * viewports[i] / weights : (shares > 0.0 ? rest * node.sizes[i] / shares : 0.0);
+        }
+    }
     QList<int> sizes;
-    int child = 0;
+    std::size_t child = 0;
     for (int i = 0; i < splitter->count(); ++i) {
         if (splitter->widget(i)->isHidden()) {
             sizes << 0;
+            splitter->setStretchFactor(i, 0);
         } else {
-            sizes << std::max(1, int(node.sizes[child++] * total + 0.5));
+            sizes << std::max(1, int(wanted[child] + 0.5));
+            splitter->setStretchFactor(i, stretch[child]);
+            ++child;
         }
     }
     splitter->setSizes(sizes);
     touched->append(splitter);
-    for (std::size_t i = 0; i < node.items.size(); ++i) applySizes(node.items[i], children[int(i)], touched);
+    for (std::size_t i = 0; i < count; ++i) applySizes(node.items[i], children[int(i)], limits, touched);
 }
 
-void applySidePanels(MainWindow* window, const QMap<QString, QString>& states) {
+Qt::DockWidgetArea dockArea(const QString& name) {
+    if (name == QLatin1String("left")) return Qt::LeftDockWidgetArea;
+    if (name == QLatin1String("right")) return Qt::RightDockWidgetArea;
+    if (name == QLatin1String("top")) return Qt::TopDockWidgetArea;
+    if (name == QLatin1String("bottom")) return Qt::BottomDockWidgetArea;
+    return Qt::NoDockWidgetArea;
+}
+
+QString dockAreaName(Qt::DockWidgetArea area) {
+    switch (area) {
+        case Qt::LeftDockWidgetArea:
+            return QStringLiteral("left");
+        case Qt::RightDockWidgetArea:
+            return QStringLiteral("right");
+        case Qt::TopDockWidgetArea:
+            return QStringLiteral("top");
+        case Qt::BottomDockWidgetArea:
+            return QStringLiteral("bottom");
+        default:
+            return {};
+    }
+}
+
+// The side panels as the workspace has them (§3.2): each one it names where it says,
+// shown or collapsed; every other one hidden, so a workspace has only the side panels
+// it names. A panel is looked up by its objectName, then by its title.
+void applySidePanels(MainWindow* window, const QMap<QString, SidePanelEntry>& entries) {
+    QVariantMap shares;
     for (SidePanel* panel : window->sidePanels()) {
-        const auto it = states.find(panel->objectName());
-        if (it == states.end()) continue;
-        if (*it == QLatin1String("hidden")) {
+        auto it = entries.find(panel->objectName());
+        if (it == entries.end()) it = entries.find(panel->windowTitle());
+        if (it == entries.end() || it->state == QLatin1String("hidden")) {
             panel->setCollapsed(false);
             panel->hide();
-        } else {
-            panel->show();
-            panel->setCollapsed(*it == QLatin1String("collapsed"));
+            continue;
         }
+        const Qt::DockWidgetArea area = dockArea(it->area);
+        if (area != Qt::NoDockWidgetArea && !panel->isFloating() && window->dockWidgetArea(panel) != area) {
+            // Collapsing depends on the edge: open it before it moves.
+            panel->setCollapsed(false);
+            window->addDockWidget(area, panel);
+        }
+        panel->show();
+        panel->setCollapsed(it->state == QLatin1String("collapsed"));
+        if (it->size > 0.0 && it->state == QLatin1String("shown")) shares.insert(panel->objectName(), it->size);
     }
+    if (shares.isEmpty()) return;
+    // Now, and once the window has laid the moved panels out.
+    window->resizeSidePanels(shares);
+    QPointer<MainWindow> guard(window);
+    QTimer::singleShot(0, window, [guard, shares]() {
+        if (guard) guard->resizeSidePanels(shares);
+    });
 }
 
-// The side panels' states, as a workspace keeps them.
-QMap<QString, QString> sidePanelStates(MainWindow* window) {
-    QMap<QString, QString> states;
+// The side panels as a workspace keeps them: every one, hidden ones too, with its
+// edge and, when shown and docked, its share of the window.
+QMap<QString, SidePanelEntry> sidePanelEntries(MainWindow* window) {
+    QMap<QString, SidePanelEntry> entries;
+    const QSize size = window->size();
     for (SidePanel* panel : window->sidePanels()) {
         if (panel->objectName().isEmpty()) continue;
-        states.insert(panel->objectName(), panel->isHidden()      ? QStringLiteral("hidden")
-                                           : panel->isCollapsed() ? QStringLiteral("collapsed")
-                                                                  : QStringLiteral("shown"));
+        SidePanelEntry entry;
+        entry.state = panel->isHidden()      ? QStringLiteral("hidden")
+                      : panel->isCollapsed() ? QStringLiteral("collapsed")
+                                             : QStringLiteral("shown");
+        if (!panel->isFloating()) {
+            const Qt::DockWidgetArea area = window->dockWidgetArea(panel);
+            entry.area = dockAreaName(area);
+            if (entry.state == QLatin1String("shown") && !size.isEmpty()) {
+                if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+                    entry.size = double(panel->width()) / size.width();
+                } else if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
+                    entry.size = double(panel->height()) / size.height();
+                }
+            }
+        }
+        entries.insert(panel->objectName(), entry);
     }
-    return states;
+    return entries;
 }
 
 }  // namespace
@@ -431,16 +536,18 @@ ApplyResult apply(const Definition& definition, const ApplyContext& context) {
     }
 
     // 7. Sizes, now and once the window has laid them out.
+    // The side panels first: they take their room from the dock area's.
+    applySidePanels(window, definition.sidePanels);
+    const bool limits = layout.hasMaxSize();
     QList<QPointer<QSplitter>> touched;
-    applySizes(layout, rootWidget(docks), &touched);
+    applySizes(layout, rootWidget(docks), limits, &touched);
     QPointer<ads::CDockManager> guard(docks);
-    QTimer::singleShot(0, docks, [guard, layout]() {
+    QTimer::singleShot(0, docks, [guard, layout, limits]() {
         if (!guard) return;
         QList<QPointer<QSplitter>> again;
-        applySizes(layout, rootWidget(guard), &again);
+        applySizes(layout, rootWidget(guard), limits, &again);
     });
 
-    applySidePanels(window, definition.sidePanels);
     window->setUpdatesEnabled(true);
 
     // 8. Focus the current stage's viewport, so it stays current (step 8). Moving the
@@ -573,7 +680,7 @@ Definition capture(MainWindow* window, const QString& id, const QString& name, b
     std::optional<Node> layout;
     if (window) {
         if (QWidget* root = rootWidget(window->dockManager())) layout = captureWidget(root);
-        if (includeSidePanels) definition.sidePanels = sidePanelStates(window);
+        if (includeSidePanels) definition.sidePanels = sidePanelEntries(window);
     }
     if (!layout) {
         layout = Node{};

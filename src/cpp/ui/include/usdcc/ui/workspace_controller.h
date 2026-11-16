@@ -9,6 +9,8 @@
 #include <QPointer>
 #include <QString>
 
+#include <functional>
+
 class QAction;
 class QMenu;
 class QToolButton;
@@ -70,11 +72,19 @@ public:
     // Fit All Views in the menu: the window's action (with its shortcut), set by the app.
     void setFitAllViewsAction(QAction* action) { m_fitAllViewsAction = action; }
 
-    // The title bar's button: an accent-colored icon and the active workspace's name,
-    // opening the workspace menu. The caller places it (MainWindow::addTitleBarWidget()).
+    // The title bar's button: the active workspace's name and a down arrow, on the
+    // accent colour, opening the workspace menu. The caller places it
+    // (MainWindow::addTitleBarWidget()).
     QToolButton* createButton(QWidget* parent);
+    // The workspace menu, filled each time it opens (populateMenu()): the title bar
+    // button's, and View > Workspace.
+    QMenu* createMenu(const QString& title, QWidget* parent);
     // Fills `menu` with the workspaces, grouped, and the commands below them (§6.2).
     void populateMenu(QMenu* menu);
+    // Adds only the workspaces, grouped, each switching to it. `before`, when given, runs
+    // first (Stages > a stage > Workspace makes the stage current). `markCurrent`: a
+    // check on the active one.
+    void addWorkspaceActions(QMenu* menu, const std::function<void()>& before = {}, bool markCurrent = true);
 
     // Asks for a name and saves the layout (the menu's Save Current Layout as Workspace...).
     void saveCurrentLayoutInteractively(QWidget* parent);

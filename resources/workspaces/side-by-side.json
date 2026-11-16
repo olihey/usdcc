@@ -6,6 +6,9 @@
   "description": "Two perspective views of the current stage, from opposite sides.",
   "group": "Scene",
   "order": 15,
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -20,7 +23,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "tabs": [
@@ -48,7 +52,8 @@
           {
             "panel": "attributes"
           }
-        ]
+        ],
+        "maxWidth": 420
       }
     ]
   }

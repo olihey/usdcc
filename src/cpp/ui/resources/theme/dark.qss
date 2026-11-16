@@ -561,29 +561,35 @@ QToolButton#titleBarCloseButton:pressed {
     background: #f1707a;
 }
 
-/* The workspace button (docs/WORKSPACES.md §6.1), left of the caption buttons:
-   its name in the accent colour, the icon drawn in it from code. */
+/* The workspace button (docs/WORKSPACES.md §6.1), left of the caption buttons: a
+   push button on the accent fill, the workspace's name and a down arrow on its
+   right; as tall as a control (its height is set in code), not the title bar. */
 QToolButton#titleBarWorkspaceButton {
-    background: transparent;
+    background: @accent;
     border: none;
-    border-radius: 0;
-    color: @accent;
-    padding: 0 10px 0 8px;
-    margin-right: 6px;
+    border-radius: 3px;
+    color: #ffffff;
+    font-weight: 600;
+    padding: 0 22px 0 10px;
+    margin-right: 8px;
 }
 
 QToolButton#titleBarWorkspaceButton:hover {
-    background: rgba(@accent-rgb, 15%);
+    background: @accent-hover;
 }
 
 QToolButton#titleBarWorkspaceButton:pressed,
 QToolButton#titleBarWorkspaceButton:open {
-    background: rgba(@accent-rgb, 25%);
+    background: rgba(@accent-rgb, 75%);
 }
 
 QToolButton#titleBarWorkspaceButton::menu-indicator {
-    image: none;
-    width: 0;
+    image: url(:/usdcc/theme/chevron-down-white.png);
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    right: 4px;
+    width: 14px;
+    height: 14px;
 }
 
 /* The workspace menu's group headings: labels, not choices. */

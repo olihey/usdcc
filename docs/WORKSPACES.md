@@ -96,6 +96,8 @@ What they share, and what usdcc takes from it:
 }
 ```
 
+(The shipped Look Dev also gives the Outliner `"maxWidth": 320` and the Attributes `420`, §3.3.)
+
 ```
 ┌──────────┬──────────────────────────┬─────────────┐
 │          │ Viewport kitchen │ props │ Attributes  │
@@ -118,7 +120,7 @@ What they share, and what usdcc takes from it:
 | `group` | string | no | The heading it's listed under in the menu (§6.2), e.g. `"Shading & Rendering"`. Workspaces from any folder that name the same group are listed together, so a studio's or a plugin's workspace can join a built-in group, or start its own. Matched exactly, case included. None: listed without a heading |
 | `order` | int | no | Order within the menu, lowest first; ties by name. Default 1000. The built-ins use 10, 20, 30, … Also orders the groups: a group sits where its lowest `order` puts it |
 | `layout` | node (§3.3) | yes | The dock area's arrangement |
-| `sidePanels` | object | no | Side panel objectName → `"shown"`, `"collapsed"` or `"hidden"`. A side panel not named is left as it is. Unknown names are ignored |
+| `sidePanels` | object | no | Side panel objectName (or title) → `"shown"`, `"collapsed"` or `"hidden"`, or an object `{"state": …, "area": "left"/"right"/"top"/"bottom", "size": 0.3}`: the edge it's docked at, and when shown its share of the window's width (left, right) or height (top, bottom). **A side panel not named is hidden**: a workspace has the side panels it names and no others. Missing or `{}`: none. Unknown names are ignored. The names are `Log`, `Script Editor`, `pluginManagerPanel` (Plugins) and those Python panels set |
 | `fitOnSwitch` | bool, or `"stage"`/`"selection"` | no | Default `false`. When set, switching to the workspace fits **every** viewport it places, reused ones too, as *Fit All Views* does (§3.5.7); `true` means `"selection"`. Off, only viewports the workspace makes are fitted (their `fit`), and reused ones keep their cameras |
 
 Unknown keys are ignored anywhere, so a later version's or a studio tool's additions don't break loading.
@@ -134,6 +136,7 @@ A node is either a **split** or an **area**.
 | `split` | `"horizontal"` or `"vertical"` | Horizontal: side by side, left to right. Vertical: stacked, top to bottom |
 | `items` | array of nodes, at least one | A split of one is the same as its child |
 | `sizes` | array of numbers | Each child's share. Normalised, so `[1, 3]` and `[0.25, 0.75]` are the same. Missing or the wrong length: equal shares |
+| `maxWidth`, `maxHeight` | number | As for an area, below: the whole split's limit in its parent |
 
 **Area**: one dock area of tabs.
 
@@ -141,6 +144,18 @@ A node is either a **split** or an **area**.
 |---|---|---|
 | `tabs` | array of panel entries, at least one | In tab order |
 | `current` | int or panel id | The tab in front. Default: the first; in the viewport area, the current stage's viewport |
+| `maxWidth` | number | The most room the area gets across a horizontal split, in pixels at 100% UI scale (scaled with it). Default: no limit |
+| `maxHeight` | number | The same across a vertical split |
+
+**Limits.** When any node of a workspace has a `maxWidth` or `maxHeight`, the workspace is laid out by
+them rather than by shares alone: in each split, a child with a limit gets its share but no more than the
+limit, children without viewports keep their share, and **the room left goes to the viewports, evenly**,
+each child getting a part for every viewport it has side by side along the split (a column of two stacked
+viewports counts once across a horizontal split, a row of two twice). The children holding viewports are
+also the ones that grow and shrink with the window; the others keep their size. A split with no viewports
+gives the room left to its children without a limit, by their shares. The user can still drag a divider
+past a limit; switching back to the workspace or *Reset* applies it again. A limit on a split nested in
+one of the same direction is lost when the two are merged (§3.4).
 
 **Panel entry**:
 
@@ -433,12 +448,12 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 ┌─[◆] File Edit Stages View Help ───────── usdcc — kitchen.usda ───────── [▦ Look Dev ▾] [–] [□] [×]┐
 ```
 
-- A `QToolButton#titleBarWorkspaceButton`, right of the title and left of the minimize button: an icon (a
-  2×2 grid of panels) and the workspace's name, `Qt::ToolButtonTextBesideIcon`, popup mode
-  `InstantPopup`.
-- **Text and icon in the accent color.** In `dark.qss`: `color: @accent;`, hover
-  `background: rgba(@accent-rgb, 15%)`, pressed 25%. The icon is a white glyph tinted with
-  `theme::accent()` and tinted again when `Appearance/accentColor` changes (`onSettingChanged()`).
+- A `QToolButton#titleBarWorkspaceButton`, right of the title and left of the minimize button: **a push
+  button** with the workspace's name and a down arrow on its right, `Qt::ToolButtonTextOnly`, popup mode
+  `InstantPopup`, 22 pixels high (scaled) rather than the title bar's height.
+- **On the accent fill**, as a dialog's main button. In `dark.qss`: `background: @accent`, white bold text,
+  3px corners, hover `@accent-hover`, pressed or open 75% of the accent; the arrow is the menu indicator,
+  `chevron-down-white.png` (`tools/gen_theme_icons.py`).
 - The name is elided past about 160 pixels (scaled); below a narrow window width only the icon shows,
   with the name in the tooltip.
 - `TitleBar` gets a generic `addTrailingWidget(QWidget*)`, so it keeps knowing nothing of workspaces;
@@ -472,7 +487,7 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
   Reset to "Shipped with usdcc"          only on one that shadows another
   Save Current Layout as Workspace...
   ─────────────
-  Open Workspaces Folder
+  Open Personal Workspace Folder         your folder (§5, item 1)
   Reload Workspaces
   Workspace Folders...                   Settings > Files, on the setting's row
 ```
@@ -489,6 +504,12 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 - `usdcc.app.workspaces()` gives each one's `group`.
 - Each entry's tooltip: the description, then where its file is.
 - A workspace that needs a missing panel type is listed, its tooltip saying what's missing.
+- **The same menu is View > Workspace**, the View menu's first entry, for a window whose title bar is out of
+  reach (full screen) or for the keyboard.
+- **Stages > a stage > Workspace**, above Views: the workspaces alone (no commands below them), each laid
+  out with that stage made current first, so its viewport is in front and the other panels show it. The
+  check is on the active workspace only in the current stage's submenu. Choosing the active workspace lays
+  it out again as it is now, with that stage current.
 
 ### 6.3 Remembering
 
@@ -496,6 +517,10 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 - **At start** the saved dock layout is restored as today, and the button shows `Workspaces/current`. On a
   profile with no saved layout (the first start), **Layout** is applied once the window has settled
   (`MainWindow::layoutSettled()`), instead of today's three tabs.
+- **How each was left** (`Workspaces/arranged/<id>`) holds its layout and its side panels (each one's state,
+  edge and size), captured on leaving it, on quitting, and before choosing it again. Coming back lays out
+  that, with the file's limits (§3.3) on the areas holding the same panels, and the file's `fitOnSwitch`.
+  One kept by the first version, without side panels, gets the file's.
 - **Sessions** store the active workspace's id in `layout` (`"workspace": "lookdev"`). Loading one
   restores its exact layout, as now, and sets the button. The session format's `version` doesn't change:
   older apps ignore the key.
@@ -525,7 +550,8 @@ Given workspace *W* and the open stages *S₁…Sₙ*, with *C* the current one:
 6. **Build the tree** (§7.2), with the window's updates off so it appears in one step.
 7. **Tabs in front**: the viewport area shows *C*'s viewport; the others their `current`.
 8. **Focus** *C*'s viewport (`setDockWidgetFocused()`), so `CurrentStageTracker` keeps *C* current.
-9. **Side panels** to their `sidePanels` state.
+9. **Side panels** to their `sidePanels` state, edge and size; every side panel not named is hidden. Done
+   before the sizes of step 6's tree, since side panels take their room from the dock area.
 10. Save `Workspaces/current`; the button follows.
 
 Switching isn't an undo step and asks nothing (step 1 aside): it changes panels, not stages. What it does
@@ -723,6 +749,20 @@ All four phases and 2b, on 2026-11-15.
   its menu, following, Open Stage with Options with payloads off) and `tests/orbit_camera_test.cpp`
   (the views on both up axes, orthographic framing).
 
+### 10.2 Changes on 2026-11-16
+
+- The title bar button is a push button on the accent fill with a down arrow, no grid icon (§6.1).
+- View > Workspace, and Stages > a stage > Workspace above Views (§6.2).
+- *Open Workspaces Folder* is *Open Personal Workspace Folder*, its tooltip the folder.
+- `maxWidth` / `maxHeight` on areas and splits, the room left going to the viewports evenly (§3.3). The
+  shipped workspaces limit the Outliner column to 320 and the Attributes (or Layers) column to 420.
+- Side panels are part of a workspace (§3.2): with an edge and a size, captured by Save Current Layout and
+  in how a workspace was left, and **a side panel a workspace doesn't name is hidden**. The shipped ones
+  name theirs: the Log collapsed in all but Viewport Only (none) and Scripting (Script Editor on the right,
+  Plugins collapsed under it, the Log at the bottom). Viewport Only's `"Plugins"` was the wrong name; the
+  panel's objectName is `pluginManagerPanel` (a name is now also matched against the title).
+- Choosing the active workspace again lays it out as it is now, not as it was last left (§6.3).
+
 ## 11. Open questions
 
 | # | Question | Recommendation |
@@ -730,7 +770,7 @@ All four phases and 2b, on 2026-11-15.
 | 1 | Duplicate viewports of one stage on switching: close all but one, or keep them as extra tabs? | **Close** (§7.1): "one viewport per stage" stays true, and the area doesn't fill with copies |
 | 2 | Coming back to a workspace: its definition again, or how it was left (Maya, Blender)? | **How it was left**, from phase 4: the arrangement is captured when leaving (into `Workspaces/arranged/<id>`, UI state) and *Reset "<name>"* goes back to the file. Until then, the definition every time |
 | 3 | Do panels the workspace places switch to the current stage? | **Yes** (§7.1 step 4): a switch then always gives a predictable result. A panel on another stage is one dropdown away |
-| 4 | Do workspaces control side panels? | **Only when they say so** (`sidePanels`); untouched otherwise, so a user's Log stays where they keep it |
+| 4 | Do workspaces control side panels? | **Yes**, since 2026-11-16: a workspace has the side panels it names (`sidePanels`, with their edge and size) and hides the others; how it was left keeps them. The first version left unnamed ones alone |
 | 5 | Does the Open Stage with Options dialog remember its last choices? | **No**, as asked: the defaults each time. Easy to change later |
 | 6 | A four-view's dividers: two rows that split on their own, or one cross that moves all four? | **Two rows** (§3.5.6), as ADS does it. A linked cross would need a splitter of our own inside one dock widget, i.e. one "Four View" panel holding four viewports, which then can't be rearranged by docking |
 | 10 | May orthographic views tumble? | **No** (§3.5.3), as Maya by default; a setting could allow it later, turning the view into a perspective one as it starts to turn |

@@ -807,10 +807,18 @@ int main(int argc, char** argv) {
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).
     window.buildViewMenu();
+    // View > Workspace, first: the title bar button's menu (docs/WORKSPACES.md §6.2).
+    if (QMenu* viewMenu = window.viewMenu()) {
+        QAction* first = viewMenu->actions().value(0);
+        QMenu* workspaceMenu = workspaces.createMenu(QObject::tr("&Workspace"), viewMenu);
+        viewMenu->insertMenu(first, workspaceMenu);
+        viewMenu->insertSeparator(first);
+    }
 
-    // Stages > <stage> > a new panel of each type, or Close Stage.
-    window.mainMenuBar()->addMenu(
-        new usdcc::usd::StagesMenu(&stageManager, &panelTypes, window.dockManager(), &window));
+    // Stages > <stage> > Workspace, a new panel of each type, or Close Stage.
+    auto* stagesMenu = new usdcc::usd::StagesMenu(&stageManager, &panelTypes, window.dockManager(), &window);
+    stagesMenu->setWorkspaces(&workspaces);
+    window.mainMenuBar()->addMenu(stagesMenu);
 
     // Developer tools; always shown until a setting can hide it (M10).
     QMenu* debugMenu = window.mainMenuBar()->addMenu(QObject::tr("&Debug"));

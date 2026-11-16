@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/ui/workspace_controller.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/stage_manager.h"
@@ -72,6 +73,17 @@ void StagesMenu::rebuild() {
                 this, [this, stage]() { saveStageAsInteractively(*m_stageManager, stage, m_window); }, Qt::QueuedConnection);
         });
         stageMenu->addSeparator();
+
+        if (m_workspaces) {
+            QMenu* workspaces = stageMenu->addMenu(tr("&Workspace"));
+            workspaces->setObjectName(QStringLiteral("workspaces"));
+            workspaces->setToolTipsVisible(true);
+            // With this stage current, so its viewport goes in front and the other
+            // panels show it. A check on the active workspace only for the current stage.
+            const bool isCurrent = m_stageManager->currentStage() == stage;
+            m_workspaces->addWorkspaceActions(
+                workspaces, [this, stage]() { m_stageManager->setCurrentStage(stage); }, isCurrent);
+        }
 
         QMenu* views = stageMenu->addMenu(tr("&Views"));
         views->setObjectName(QStringLiteral("views"));

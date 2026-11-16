@@ -11,6 +11,7 @@
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/ui/workspace.h"
 #include "usdcc/ui/workspace_applier.h"
@@ -219,6 +220,49 @@ USDCC_TEST(workspace_format_rules) {
     CHECK(definition && definition->layout.items[0].tabs[0].camera.value("fit") == "none", "fit false means none");
     CHECK(workspace::idFromName(QStringLiteral("My  Look Dev!")) == "my-look-dev", "an id from a name: %s",
           qPrintable(workspace::idFromName(QStringLiteral("My  Look Dev!"))));
+
+    // Limits, and side panels with an edge and a size.
+    definition = workspace::fromJson(parse(R"({"format": "usdcc-workspace", "version": 1, "name": "L",
+        "sidePanels": {"Log": "collapsed", "Script Editor": {"state": "shown", "area": "right", "size": 0.3}},
+        "layout": {"split": "horizontal", "items": [
+            {"tabs": [{"panel": "outliner"}], "maxWidth": 300},
+            {"split": "vertical", "items": [
+                {"split": "horizontal", "items": [{"tabs": [{"panel": "viewport"}]}, {"tabs": [{"panel": "viewport", "stage": "current"}]}]},
+                {"tabs": [{"panel": "viewport", "stage": "current"}]}]},
+            {"split": "vertical", "maxWidth": 400, "items": [{"tabs": [{"panel": "attributes"}]}, {"tabs": [{"panel": "layers"}]}]}]}})"),
+                                     QStringLiteral("limits"), &error);
+    CHECK(definition.has_value(), "limits read: %s", qPrintable(error));
+    if (!definition) return;
+    const workspace::Node& limited = definition->layout;
+    CHECK(limited.items[0].maxWidth == 300 && limited.items[2].maxWidth == 400 && limited.items[1].maxWidth == 0,
+          "maxWidth on an area and a split");
+    CHECK(limited.hasMaxSize() && !limited.items[1].hasMaxSize(), "the layout has limits, the viewports' column none");
+    CHECK(limited.items[1].viewportCount(Qt::Horizontal) == 2 && limited.items[1].viewportCount(Qt::Vertical) == 2 &&
+              limited.items[0].viewportCount(Qt::Horizontal) == 0 && limited.viewportCount(Qt::Horizontal) == 2,
+          "viewports side by side and stacked");
+    const workspace::SidePanelEntry log = definition->sidePanels.value(QStringLiteral("Log"));
+    const workspace::SidePanelEntry editor = definition->sidePanels.value(QStringLiteral("Script Editor"));
+    CHECK(log.state == "collapsed" && log.area.isEmpty() && log.size == 0.0, "a side panel's state alone");
+    CHECK(editor.state == "shown" && editor.area == "right" && std::abs(editor.size - 0.3) < 1e-9,
+          "a side panel's edge and size");
+    again = workspace::fromJson(definition->toJson(), QString());
+    CHECK(again && again->toJson() == definition->toJson() && again->layout.items[2].maxWidth == 400 &&
+              again->sidePanels == definition->sidePanels,
+          "limits and side panels written and read back the same");
+    CHECK(definition->toJson().value("sidePanels").toObject().value("Log") == QJsonValue(QStringLiteral("collapsed")),
+          "a side panel with only a state written as one");
+    refused(R"({"format": "usdcc-workspace", "version": 1, "name": "A", "sidePanels": {"Log": {"area": "middle"}}, "layout": {"tabs": [{"panel": "viewport"}]}})",
+            "\"middle\"");
+    refused(R"({"format": "usdcc-workspace", "version": 1, "name": "A", "layout": {"tabs": [{"panel": "viewport"}], "maxWidth": "wide"}})",
+            "\"maxWidth\" isn't");
+    // A split of one keeps its limit on its child.
+    definition = workspace::fromJson(parse(R"({"format": "usdcc-workspace", "version": 1, "name": "O",
+        "layout": {"split": "horizontal", "items": [
+            {"split": "vertical", "maxWidth": 250, "items": [{"tabs": [{"panel": "outliner"}]}]},
+            {"tabs": [{"panel": "viewport"}]}]}})"),
+                                     QStringLiteral("one"));
+    CHECK(definition && definition->layout.items[0].maxWidth == 250 && !definition->layout.items[0].isSplit(),
+          "a split of one gives its limit to its child");
 }
 
 USDCC_TEST(workspace_unknown_panels_are_left_out) {
@@ -417,6 +461,90 @@ USDCC_TEST(workspace_capture_keeps_views) {
     CHECK(again == entries, "the same panels again: %s", qPrintable(again.join(' ')));
 }
 
+// The Outliner and the Attributes kept to their limits, the two viewport columns sharing
+// the rest evenly; side panels as the workspace says, the others hidden.
+USDCC_TEST(workspace_limits_and_side_panels) {
+    App app;
+    ads::CDockManager* docks = app.window.dockManager();
+    app.stages.createStage();
+    QApplication::processEvents();
+    std::optional<workspace::Definition> limited = workspace::fromJson(parse(R"({"format": "usdcc-workspace", "version": 1,
+        "name": "Limited", "sidePanels": {"Log": {"state": "shown", "area": "right"}},
+        "layout": {"split": "horizontal", "sizes": [3, 1, 1, 3], "items": [
+            {"tabs": [{"panel": "outliner"}], "maxWidth": 200},
+            {"tabs": [{"panel": "viewport"}]},
+            {"tabs": [{"panel": "viewport", "stage": "current", "camera": {"view": "top"}}]},
+            {"tabs": [{"panel": "attributes"}], "maxWidth": 250}]}})"),
+                                                                       QStringLiteral("limited"));
+    CHECK(limited.has_value(), "reads");
+    if (!limited) return;
+    CHECK(workspace::apply(*limited, app.context()).applied, "applied");
+    waitFor([] { return false; }, 200);  // the deferred second pass, once laid out
+
+    ViewPanel* outliner = nullptr;
+    ViewPanel* attributes = nullptr;
+    for (ViewPanel* panel : openPanels(docks)) {
+        if (typeOf(panel) == "outliner") outliner = panel;
+        if (typeOf(panel) == "attributes") attributes = panel;
+    }
+    QSplitter* columns = outliner ? qobject_cast<QSplitter*>(outliner->dockAreaWidget()->parentWidget()) : nullptr;
+    QList<int> sizes;
+    for (int i = 0; columns && i < columns->count(); ++i) {
+        if (!columns->widget(i)->isHidden()) sizes << columns->sizes()[i];
+    }
+    CHECK(sizes.size() == 4, "four columns: %d", int(sizes.size()));
+    if (sizes.size() == 4) {
+        const int scaled200 = usdcc::ui::UiScaleController::instance().pixels(200);
+        const int scaled250 = usdcc::ui::UiScaleController::instance().pixels(250);
+        // Its own minimum may hold a panel above its limit; within a few pixels otherwise.
+        CHECK(sizes[0] <= std::max(scaled200, outliner->dockAreaWidget()->minimumSizeHint().width()) + 4,
+              "the Outliner kept to its limit despite its share: %d", sizes[0]);
+        CHECK(sizes[3] <= std::max(scaled250, attributes->dockAreaWidget()->minimumSizeHint().width()) + 4,
+              "the Attributes kept to its limit: %d", sizes[3]);
+        CHECK(std::abs(sizes[1] - sizes[2]) <= 2, "the viewports share the rest evenly: %d %d", sizes[1], sizes[2]);
+        CHECK(sizes[1] > sizes[0] && sizes[1] > sizes[3], "and get the most: %d %d %d %d", sizes[0], sizes[1], sizes[2],
+              sizes[3]);
+    }
+    // Only the viewports grow with the window.
+    if (columns && sizes.size() == 4) {
+        const QList<int> before = columns->sizes();
+        app.window.resize(app.window.width() + 300, app.window.height());
+        waitFor([&] { return columns->sizes() != before; }, 1000);
+        QList<int> after;
+        for (int i = 0; i < columns->count(); ++i) {
+            if (!columns->widget(i)->isHidden()) after << columns->sizes()[i];
+        }
+        CHECK(after.size() == 4 && std::abs(after[0] - sizes[0]) <= 2 && std::abs(after[3] - sizes[3]) <= 2 &&
+                  after[1] > sizes[1] && after[2] > sizes[2],
+              "a wider window widens the viewports only: %d %d %d %d", after.value(0), after.value(1), after.value(2),
+              after.value(3));
+    }
+
+    usdcc::ui::SidePanel* logPanel = app.window.logPanel();
+    CHECK(!logPanel->isHidden() && !logPanel->isCollapsed() && app.window.dockWidgetArea(logPanel) == Qt::RightDockWidgetArea,
+          "the Log shown, moved to the right as it says");
+    const workspace::Definition captured = workspace::capture(&app.window, QStringLiteral("c"), QStringLiteral("C"), true);
+    const workspace::SidePanelEntry log = captured.sidePanels.value(QStringLiteral("Log"));
+    CHECK(log.state == "shown" && log.area == "right" && log.size > 0.0 && log.size < 1.0,
+          "captured with its edge and share: %s %s %f", qPrintable(log.state), qPrintable(log.area), log.size);
+
+    // One that names no side panels has none.
+    std::optional<workspace::Definition> bare = workspace::fromJson(
+        parse(R"({"format": "usdcc-workspace", "version": 1, "name": "Bare", "layout": {"tabs": [{"panel": "viewport"}]}})"),
+        QStringLiteral("bare"));
+    CHECK(bare && workspace::apply(*bare, app.context()).applied, "bare applied");
+    CHECK(logPanel->isHidden(), "the Log, not named, hidden");
+    // Named by its title works too.
+    std::optional<workspace::Definition> titled = workspace::fromJson(
+        parse(R"({"format": "usdcc-workspace", "version": 1, "name": "T", "sidePanels": {"Log": "collapsed"},
+                  "layout": {"tabs": [{"panel": "viewport"}]}})"),
+        QStringLiteral("titled"));
+    logPanel->setObjectName(QStringLiteral("logByAnotherName"));
+    CHECK(titled && workspace::apply(*titled, app.context()).applied, "titled applied");
+    CHECK(!logPanel->isHidden() && logPanel->isCollapsed(), "found by its title, collapsed");
+    logPanel->setObjectName(QStringLiteral("Log"));
+}
+
 USDCC_TEST(workspace_controller_and_button) {
     App app;
     QTemporaryDir user;
@@ -429,6 +557,8 @@ USDCC_TEST(workspace_controller_and_button) {
     app.window.addTitleBarWidget(button);
     CHECK(controller.currentId() == "layout" && button->text() == "Layout", "Layout before any is chosen: %s",
           qPrintable(button->text()));
+    CHECK(button->icon().isNull() && button->toolButtonStyle() == Qt::ToolButtonTextOnly && button->menu(),
+          "a push button: its name and the menu's arrow, no icon");
 
     CHECK(!controller.isChosen(), "none chosen yet");
     QString error;
@@ -454,6 +584,28 @@ USDCC_TEST(workspace_controller_and_button) {
         heading = heading || static_cast<QLabel*>(child)->text() == "TEST";
     }
     CHECK(heading, "headed by its group");
+    CHECK(texts.contains("Open Personal Workspace Folder") && !texts.contains("Open Workspaces Folder"),
+          "the personal folder's command");
+
+    // View > Workspace is the same menu; a stage's has the workspaces alone, unchecked.
+    QMenu* viewWorkspaces = controller.createMenu(QStringLiteral("Workspace"), &app.window);
+    Q_EMIT viewWorkspaces->aboutToShow();
+    CHECK(viewWorkspaces->actions().size() == menu.actions().size(), "View > Workspace is the same menu");
+    QMenu stageWorkspaces;
+    bool before = false;
+    controller.addWorkspaceActions(&stageWorkspaces, [&before] { before = true; }, false);
+    QAction* stageThree = stageWorkspaces.findChild<QAction*>(QStringLiteral("workspace:three"));
+    QAction* stageLayout = stageWorkspaces.findChild<QAction*>(QStringLiteral("workspace:layout"));
+    QStringList stageTexts;
+    for (QAction* action : stageWorkspaces.actions()) {
+        if (!action->text().isEmpty()) stageTexts << action->text();
+    }
+    CHECK(stageThree && !stageThree->isChecked() && !stageTexts.contains("Save Current Layout as Workspace..."),
+          "a stage's: the workspaces only, unchecked: %s", qPrintable(stageTexts.join('|')));
+    if (stageLayout) stageLayout->trigger();
+    QApplication::processEvents();
+    CHECK(before && controller.currentId() == "layout", "choosing one runs what comes first, then lays it out");
+    CHECK(controller.switchTo(QStringLiteral("three"), &error), "back to Three: %s", qPrintable(error));
 
     // Saving the layout as a new workspace makes it the active one.
     const QString id = controller.saveCurrentLayout(QStringLiteral("My Three"), false, &error);

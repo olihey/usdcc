@@ -3,6 +3,7 @@
 #include "usdcc/core/export.h"
 
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -57,6 +58,19 @@ struct USDCC_UI_API Node {
     int current = -1;       // index of the tab in front; -1: the first (the viewport area: the current stage's)
     QString currentPanel;   // or a panel id
 
+    // Either. The most room the node gets across a horizontal (maxWidth) or vertical
+    // (maxHeight) split, in pixels at 100% UI scale; 0: no limit (§3.3). When a
+    // workspace has one, the room left goes to its viewports, evenly.
+    int maxWidth = 0;
+    int maxHeight = 0;
+    // The limit across a split of `orientation`.
+    int maxSize(Qt::Orientation orientation) const { return orientation == Qt::Horizontal ? maxWidth : maxHeight; }
+    // Whether this node or one below it has a limit.
+    bool hasMaxSize() const;
+    // How many viewports sit side by side (Horizontal) or stacked (Vertical) in this node:
+    // an area holding one counts once, however many tabs.
+    int viewportCount(Qt::Orientation orientation) const;
+
     bool isSplit() const { return kind == Kind::Split; }
     // Every panel entry below this node, in order.
     void forEachEntry(const std::function<void(const PanelEntry&)>& visit) const;
@@ -66,6 +80,19 @@ struct USDCC_UI_API Node {
     QJsonObject toJson() const;
 };
 
+// A side panel's place in a workspace (§3.2): shown, collapsed to its title bar, or
+// hidden; optionally at an edge of the window, with a share of the window's width
+// (left, right) or height (top, bottom).
+struct USDCC_UI_API SidePanelEntry {
+    QString state = QStringLiteral("shown");  // "shown", "collapsed" or "hidden"
+    QString area;                             // "", "left", "right", "top" or "bottom"
+    double size = 0.0;                        // 0: as it is
+
+    // A string when only the state is set, else an object.
+    QJsonValue toJson() const;
+    bool operator==(const SidePanelEntry&) const = default;
+};
+
 struct USDCC_UI_API Definition {
     QString id;
     QString name;
@@ -73,8 +100,8 @@ struct USDCC_UI_API Definition {
     QString group;
     int order = 1000;
     Node layout;
-    // Side panel objectName -> "shown", "collapsed" or "hidden" (§3.2).
-    QMap<QString, QString> sidePanels;
+    // Side panel objectName -> its place (§3.2). A side panel not named is hidden.
+    QMap<QString, SidePanelEntry> sidePanels;
     // Fit every viewport placed when switching (§3.5.7): "", "stage" or "selection".
     QString fitOnSwitch;
 

@@ -6,6 +6,9 @@
   "description": "Composition: the layer stack, what the stage depends on, and a layer's text.",
   "group": "USD",
   "order": 50,
+  "sidePanels": {
+    "Log": "collapsed"
+  },
   "layout": {
     "split": "horizontal",
     "sizes": [
@@ -19,7 +22,8 @@
           {
             "panel": "outliner"
           }
-        ]
+        ],
+        "maxWidth": 320
       },
       {
         "tabs": [
@@ -53,7 +57,8 @@
             ],
             "current": 0
           }
-        ]
+        ],
+        "maxWidth": 420
       }
     ]
   }
