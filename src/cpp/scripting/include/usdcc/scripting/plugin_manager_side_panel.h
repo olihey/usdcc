@@ -7,7 +7,6 @@
 class QLabel;
 class QMenu;
 class QAbstractButton;
-class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -52,7 +51,7 @@ private:
     QLabel* m_details = nullptr;
     QLabel* m_pendingNote = nullptr;
     QLabel* m_packageFolders = nullptr;
-    QPushButton* m_install = nullptr;
+    QAbstractButton* m_install = nullptr;
     QAbstractButton* m_update = nullptr;
     QPointer<PackageInstallDialog> m_dialog;
     bool m_refreshing = false;

@@ -80,6 +80,12 @@ ICONS = {
         ],
     ),
     "plus": (1.4, LIGHT, [[(8, 3.5), (8, 12.5)], [(3.5, 8), (12.5, 8)]]),
+    # Plugins panel: Install Packages (an arrow down into a tray).
+    "download": (
+        1.3,
+        LIGHT,
+        [[(8, 2.5), (8, 10)], [(4.8, 6.8), (8, 10), (11.2, 6.8)], [(2.5, 10), (2.5, 13.5), (13.5, 13.5), (13.5, 10)]],
+    ),
     # Custom title-bar caption buttons (MainWindow's QWindowKit title bar).
     "win-minimize": (1.0, LIGHT, [[(3.5, 8), (12.5, 8)]]),
     "win-maximize": (1.0, LIGHT, [[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5), (3.5, 3.5)]]),

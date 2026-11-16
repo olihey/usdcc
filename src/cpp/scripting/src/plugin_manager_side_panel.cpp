@@ -126,9 +126,10 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
         if (!name.isEmpty()) createPlugin(name);
     });
     buttons->addStretch(1);
-    m_install = new QPushButton(tr("Install Packages..."), content);
+    m_install = new usdcc::ui::PanelIconButton(
+        QStringLiteral(":/usdcc/theme/download.png"),
+        tr("Install Packages: the Python packages the plugins and My packages (Edit > Settings > Python) ask for"), content);
     m_install->setObjectName(QStringLiteral("pluginInstallPackages"));
-    m_install->setToolTip(tr("Install the Python packages the plugins and My packages (Edit > Settings > Python) ask for"));
     buttons->addWidget(m_install);
     m_update = new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/reload.png"),
                                               tr("Update Packages: resolve everything again, moving Python packages to their newest versions"),
@@ -147,7 +148,7 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     layout->addLayout(buttons);
     setWidget(content);
 
-    connect(m_install, &QPushButton::clicked, this, [this]() { installPackages(false); });
+    connect(m_install, &QAbstractButton::clicked, this, [this]() { installPackages(false); });
     connect(m_update, &QAbstractButton::clicked, this, [this]() { installPackages(true); });
     usdcc::ui::onSettingChanged(this, kUserPackagesKey, [this]() { updatePackages(); });
 

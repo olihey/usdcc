@@ -34,6 +34,8 @@
         <file alias="trash@2x.png">theme/trash@2x.png</file>
         <file alias="folder.png">theme/folder.png</file>
         <file alias="folder@2x.png">theme/folder@2x.png</file>
+        <file alias="download.png">theme/download.png</file>
+        <file alias="download@2x.png">theme/download@2x.png</file>
         <file alias="python-file.png">theme/python-file.png</file>
         <file alias="python-file@2x.png">theme/python-file@2x.png</file>
         <file alias="reload.png">theme/reload.png</file>
