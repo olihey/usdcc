@@ -5,21 +5,27 @@
 // usdcc_ui_tests (a QApplication on Qt's offscreen platform); its settings
 // live in a temporary directory, never in the user's usdcc.ini.
 #include "test_harness.h"
+#include "test_settings.h"
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/title_bar.h"
+#include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/number_field.h"
+#include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/tool_rail.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include <DockManager.h>
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QEventLoop>
+#include <QFile>
 #include <QImage>
 #include <QKeyEvent>
 #include <QLayout>
@@ -27,9 +33,12 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QSettings>
+#include <QStringList>
 #include <QStyle>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QWindow>
 
 using usdcc::ui::UiScaleController;
@@ -241,4 +250,84 @@ USDCC_TEST(scale_controller_tool_rail_round_trip) {
     CHECK(styled->layout()->spacing() == 5, "a new rail's spacing from its own rule (got %d)", styled->layout()->spacing());
     delete styled;
     application().setStyleSheet(sheet);
+}
+
+USDCC_TEST(scale_controller_panel_round_trip) {
+    // After 100% -> 200% -> 100%, a panel's stage combo and the title bar's workspace
+    // button are the size they were at the start: the combo is sized by its "No stage"
+    // placeholder, not by whatever it held when first shown, and the button's height
+    // comes from the theme, which the theme's QToolButton min-height can't undercut.
+    TestSettings settings;
+    QTemporaryDir temp;
+    CHECK(temp.isValid(), "temporary directory");
+    UiScaleController scale(application(), temp.filePath(QStringLiteral("ui.ini")));
+    usdcc::ui::theme::apply(application());
+
+    usdcc::usd::StageManager stages;
+    auto undo = std::make_shared<usdcc::usd::UndoManager>();
+    QWidget window;
+    window.resize(320, 240);
+    auto* windowLayout = new QVBoxLayout(&window);
+    auto* workspace = new QToolButton(&window);
+    workspace->setObjectName(QStringLiteral("titleBarWorkspaceButton"));
+    workspace->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    workspace->setPopupMode(QToolButton::InstantPopup);
+    workspace->setMenu(new QMenu(workspace));
+    workspace->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    workspace->setText(QStringLiteral("Layout"));
+    windowLayout->addWidget(workspace);
+    ads::CDockManager docks(&window);
+    windowLayout->addWidget(&docks, 1);
+    usdcc::ui::theme::applyToDockManager(&docks);
+    auto* panel = new usdcc::usd::AttributesViewPanel(&stages, nullptr, undo, QStringLiteral("Attributes"), &window);
+    docks.addDockWidget(ads::CenterDockWidgetArea, panel);
+    window.show();
+    QApplication::processEvents();
+
+    QComboBox* combo = nullptr;
+    for (QComboBox* candidate : panel->findChildren<QComboBox*>()) {
+        if (candidate->placeholderText() == "No stage") combo = candidate;
+    }
+    CHECK(combo != nullptr, "the panel's stage combo");
+    if (!combo) return;
+    const QSize emptyHint = combo->sizeHint();
+    CHECK(workspace->height() == 22, "the workspace button is 22 px tall from the start (got %d)", workspace->height());
+
+    const QString path = temp.filePath(QStringLiteral("a_stage_with_a_rather_long_file_name.usda"));
+    {
+        QFile file(path);
+        CHECK(file.open(QIODevice::WriteOnly), "the stage file");
+        file.write("#usda 1.0\n");
+    }
+    CHECK(stages.openStage(path.toStdString()) != nullptr, "the stage opens");
+    QApplication::processEvents();
+    CHECK(combo->count() == 1 && combo->sizeHint() == emptyHint, "the combo's size hint doesn't follow its stage name (%dx%d, was %dx%d)",
+          combo->sizeHint().width(), combo->sizeHint().height(), emptyHint.width(), emptyHint.height());
+    const QSize comboSize = combo->size();
+    const auto toolbarState = [combo]() {
+        QStringList parts;
+        QWidget* bar = combo->parentWidget();
+        const QMargins m = bar->layout()->contentsMargins();
+        parts << QStringLiteral("bar %1 m%2,%3 sp%4").arg(bar->width()).arg(m.left()).arg(m.right()).arg(bar->layout()->spacing());
+        for (QWidget* child : bar->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+            parts << QStringLiteral("%6%1 x%2 w%3 hint%4 min%5")
+                         .arg(QString::fromLatin1(child->metaObject()->className()))
+                         .arg(child->x())
+                         .arg(child->width())
+                         .arg(child->sizeHint().width())
+                         .arg(child->minimumSizeHint().width())
+                         .arg(child->isVisible() ? QString() : QStringLiteral("(hidden) "));
+        }
+        return parts.join(QStringLiteral(" | "));
+    };
+    const QString before = toolbarState();
+
+    scale.setPercent(200);
+    waitMs(100);
+    CHECK(workspace->height() == 44, "44 px at 200%% (got %d)", workspace->height());
+    scale.setPercent(100);
+    waitMs(100);
+    CHECK(combo->sizeHint() == emptyHint && combo->size() == comboSize, "back at 100%%: the combo as before (%s; was %s)",
+          qPrintable(toolbarState()), qPrintable(before));
+    CHECK(workspace->height() == 22, "and the workspace button (got %d)", workspace->height());
 }

@@ -79,6 +79,11 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
 
     m_stageCombo = new QComboBox();
     m_stageCombo->setPlaceholderText(tr("No stage"));  // shown while the panel has none
+    // Sized by that placeholder, not by the stage names: by default a combo takes its size
+    // from what it holds when first shown (usually nothing yet) and again on every restyle,
+    // so a UI scale change and back left it wider than before. The layout's stretch gives
+    // it its room; a long name is elided.
+    m_stageCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     connect(m_stageCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ViewPanel::onStageComboChanged);
 
     m_stageOpenedConnection = m_stageManager->stageOpened.connect([this](usdcc::usd::StageRefPtr opened) {

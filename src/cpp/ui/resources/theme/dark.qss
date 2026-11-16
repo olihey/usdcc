@@ -563,7 +563,9 @@ QToolButton#titleBarCloseButton:pressed {
 
 /* The workspace button (docs/WORKSPACES.md §6.1), left of the caption buttons: a
    push button on the accent fill, the workspace's name and a down arrow on its
-   right; as tall as a control (its height is set in code), not the title bar. */
+   right; as tall as a control, not the title bar. Its height is set here, not in
+   code: QToolButton's min-height above would replace a height set in code when the
+   button is first shown, making it a pixel short until the first UI scale change. */
 QToolButton#titleBarWorkspaceButton {
     background: @accent;
     border: none;
@@ -572,6 +574,8 @@ QToolButton#titleBarWorkspaceButton {
     font-weight: 600;
     padding: 0 22px 0 10px;
     margin-right: 8px;
+    min-height: 22px;
+    max-height: 22px;
 }
 
 QToolButton#titleBarWorkspaceButton:hover {

@@ -35,7 +35,6 @@ namespace usdcc::ui {
 namespace {
 
 constexpr int kMaxNameWidth = 160;
-constexpr int kButtonHeight = 22;
 
 std::string shortcutKey(const QString& id) { return "Shortcuts/workspace." + id.toStdString(); }
 
@@ -175,8 +174,7 @@ QToolButton* WorkspaceController::createButton(QWidget* parent) {
     button->setToolButtonStyle(Qt::ToolButtonTextOnly);
     button->setPopupMode(QToolButton::InstantPopup);
     button->setFocusPolicy(Qt::NoFocus);
-    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    scaled::fixedHeight(button, kButtonHeight);
+    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);  // 22 px tall (dark.qss)
     button->setMenu(createMenu(QString(), button));
     m_button = button;
     updateButton();
