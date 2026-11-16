@@ -12,6 +12,7 @@
 #include "usdcc/ui/title_bar.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/number_field.h"
+#include "usdcc/usd/tool_rail.h"
 
 #include <DockManager.h>
 
@@ -21,7 +22,9 @@
 #include <QEventLoop>
 #include <QImage>
 #include <QKeyEvent>
+#include <QLayout>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenu>
 #include <QSettings>
 #include <QStyle>
@@ -192,4 +195,50 @@ USDCC_TEST(scale_controller) {
         UiScaleController restored(application(), settingsFile);
         CHECK(restored.percent() == 100, "an unreadable saved value falls back to 100%% (got %d)", restored.percent());
     }
+}
+
+USDCC_TEST(scale_controller_tool_rail_round_trip) {
+    // The main window's tool rail is as wide after 100% -> 200% -> 100% as it was at the
+    // start, and it takes its own stylesheet rules from the start, not only after the first
+    // restyle (a scale change), which once widened it from 24 to 36 px.
+    QTemporaryDir temp;
+    CHECK(temp.isValid(), "temporary settings directory");
+    UiScaleController scale(application(), temp.filePath(QStringLiteral("ui.ini")));
+    usdcc::ui::theme::apply(application());
+
+    QMainWindow window;
+    auto* rail = new usdcc::usd::ToolRail(&window);
+    for (const char* tool : {"Select", "Move", "Rotate", "Scale"}) rail->addTool(QString::fromLatin1(tool), QString::fromLatin1(tool), {});
+    window.addToolBar(Qt::LeftToolBarArea, rail);
+    window.setCentralWidget(new QWidget);
+    window.resize(400, 300);
+    window.show();
+    QApplication::processEvents();
+
+    const auto metrics = [rail]() {
+        const QMargins m = rail->layout()->contentsMargins();
+        return QStringLiteral("width %1, spacing %2, margins %3 %4 %5 %6")
+            .arg(rail->sizeHint().width())
+            .arg(rail->layout()->spacing())
+            .arg(m.left())
+            .arg(m.top())
+            .arg(m.right())
+            .arg(m.bottom());
+    };
+    const QString before = metrics();
+    CHECK(rail->sizeHint().width() == 24, "the rail is as wide as its 24 px buttons (%s)", qPrintable(before));
+    scale.setPercent(200);
+    QApplication::processEvents();
+    CHECK(rail->sizeHint().width() == 48, "twice as wide at 200%% (%s)", qPrintable(metrics()));
+    scale.setPercent(100);
+    QApplication::processEvents();
+    CHECK(metrics() == before, "back at 100%%: as at the start (%s, was %s)", qPrintable(metrics()), qPrintable(before));
+
+    // A rule for the rail by its name applies to a new rail at once.
+    const QString sheet = application().styleSheet();
+    application().setStyleSheet(sheet + QStringLiteral("\nQToolBar#toolRail { spacing: 5px; }"));
+    auto* styled = new usdcc::usd::ToolRail(&window);
+    CHECK(styled->layout()->spacing() == 5, "a new rail's spacing from its own rule (got %d)", styled->layout()->spacing());
+    delete styled;
+    application().setStyleSheet(sheet);
 }

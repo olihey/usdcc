@@ -6,10 +6,13 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QColor>
+#include <QCoreApplication>
+#include <QEvent>
 #include <QFont>
 #include <QIcon>
 #include <QPainter>
 #include <QPixmap>
+#include <QStyle>
 
 namespace usdcc::usd {
 
@@ -33,6 +36,14 @@ QPixmap letterIcon(const QString& text, const QColor& color) {
 
 ToolRail::ToolRail(QWidget* parent) : QToolBar(parent), m_group(new QActionGroup(this)) {
     setObjectName(QStringLiteral("toolRail"));
+    // QToolBar took its spacing and padding from the style in its constructor, before this
+    // name could match a "QToolBar#toolRail" rule, and reads them again only on a style
+    // change. Without this, the first restyle (a UI scale change) would be the first time
+    // the rail got its own rules, and it would come back from 200% wider than it started.
+    style()->unpolish(this);
+    style()->polish(this);
+    QEvent styleChange(QEvent::StyleChange);
+    QCoreApplication::sendEvent(this, &styleChange);
     setWindowTitle(tr("Tools"));  // names it in the main window's toolbar context menu
     setOrientation(Qt::Vertical);  // initially; the main window flips it if the user docks it top/bottom
     setToolButtonStyle(Qt::ToolButtonIconOnly);

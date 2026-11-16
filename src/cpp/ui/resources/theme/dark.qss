@@ -644,18 +644,8 @@ QToolBar::handle:vertical {
     height: 16px;
 }
 
-QToolBar#toolRail {
-    spacing: 6px;
-}
-
-QToolBar#toolRail:vertical {
-    padding: 4px 6px;
-}
-
-QToolBar#toolRail:horizontal {
-    padding: 6px 4px;
-}
-
+/* The rail has no spacing or padding of its own (QToolBar's 0 above): its 24 px
+   buttons sit edge to edge in a 24 px strip. */
 QToolBar#toolRail QToolButton {
     background: transparent;
     border: none;
