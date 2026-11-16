@@ -49,6 +49,8 @@ add_library(usdcc_usd SHARED
     src/usd_environment.cpp
     include/usdcc/usd/color_management.h
     src/color_management.cpp
+    include/usdcc/usd/linear_exr.h
+    src/linear_exr.cpp
     include/usdcc/usd/usd_runtime_info.h
     src/usd_runtime_info.cpp
     include/usdcc/usd/value_type_info.h
@@ -93,6 +95,23 @@ if(USDCC_OCIO_LIBRARY AND USDCC_OCIO_INCLUDE_DIR)
     target_compile_definitions(usdcc_usd PRIVATE USDCC_HAS_OCIO)
 else()
     message(STATUS "OpenColorIO for color management: none in the OpenUSD install; viewports show sRGB")
+endif()
+# OpenEXR, also from the OpenUSD install: Save Image's linear EXR (docs/COLOR_MANAGEMENT.md §6).
+find_library(USDCC_OPENEXR_LIBRARY NAMES OpenEXR-3_1 OpenEXR HINTS "${USD_INSTALL}/lib" "${pxr_DIR}/lib" NO_DEFAULT_PATH)
+find_library(USDCC_IEX_LIBRARY NAMES Iex-3_1 Iex HINTS "${USD_INSTALL}/lib" "${pxr_DIR}/lib" NO_DEFAULT_PATH)
+find_library(USDCC_IMATH_LIBRARY NAMES Imath-3_1 Imath HINTS "${USD_INSTALL}/lib" "${pxr_DIR}/lib" NO_DEFAULT_PATH)
+find_path(USDCC_OPENEXR_INCLUDE_DIR OpenEXR/ImfOutputFile.h HINTS "${USD_INSTALL}/include" "${pxr_DIR}/include"
+          NO_DEFAULT_PATH)
+if(USDCC_OPENEXR_LIBRARY AND USDCC_IEX_LIBRARY AND USDCC_IMATH_LIBRARY AND USDCC_OPENEXR_INCLUDE_DIR)
+    message(STATUS "OpenEXR for linear EXR images: ${USDCC_OPENEXR_LIBRARY}")
+    target_link_libraries(usdcc_usd PRIVATE "${USDCC_OPENEXR_LIBRARY}" "${USDCC_IEX_LIBRARY}" "${USDCC_IMATH_LIBRARY}")
+    # Its headers include <ImathBox.h> and friends without the folder.
+    target_include_directories(usdcc_usd PRIVATE "${USDCC_OPENEXR_INCLUDE_DIR}" "${USDCC_OPENEXR_INCLUDE_DIR}/Imath"
+                                                 "${USDCC_OPENEXR_INCLUDE_DIR}/OpenEXR")
+    # DLL builds, as OpenEXR's and Imath's own CMake targets say.
+    target_compile_definitions(usdcc_usd PRIVATE USDCC_HAS_OPENEXR $<$<PLATFORM_ID:Windows>:OPENEXR_DLL> $<$<PLATFORM_ID:Windows>:IMATH_DLL>)
+else()
+    message(STATUS "OpenEXR for linear EXR images: none in the OpenUSD install; Save Image offers no EXR")
 endif()
 usdcc_precompile_headers(usdcc_usd usd_pch.h)
 

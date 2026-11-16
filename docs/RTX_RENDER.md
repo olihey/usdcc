@@ -62,7 +62,7 @@ menu (☰), as [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md) §1 describes.
 |---|---|---|
 | Render / Stop | ▶ / ■ | Start or prevent new submissions; retain the latest image and queued changes |
 | Refresh | ⟳ | Replace the snapshot with the current app stage |
-| Save Image | 💾 | Read back the completed clean GPU frame without selection outlines |
+| Save Image | 💾 | Read back the completed clean GPU frame without selection outlines: through the view transform for PNG, JPEG or TIFF, linear for OpenEXR (not with RTX Tonemap) |
 | Settings | ⚙ | Settings > RTX |
 | Camera | Options | Follow the viewport, choose a scene camera, or use a panel-local Free Camera |
 | Resolution | Options | Fit the panel or use a fixed output size |

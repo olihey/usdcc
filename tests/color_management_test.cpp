@@ -4,15 +4,19 @@
 
 #include "usdcc/core/settings.h"
 #include "usdcc/usd/color_management.h"
+#include "usdcc/usd/linear_exr.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_render_params.h"
 
 #include <pxr/base/arch/env.h>
 #include <pxr/imaging/hdx/tokens.h>
+#include <pxr/imaging/hio/image.h>
 #include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/colorSpaceAPI.h>
 #include <pxr/usd/usd/stage.h>
+
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <cmath>
@@ -278,4 +282,37 @@ USDCC_TEST(color_management_images) {
     const size_t redCorner = static_cast<size_t>(size - 1) * 4;  // r at the top, g and b at the bottom
     CHECK(lut.rgba[redCorner] > lut.rgba[redCorner + 1], "red fastest");
     CHECK(color.bakeLut(1, {}, settings).size == 0, "too small: none");
+}
+
+USDCC_TEST(color_management_linear_exr) {
+    if (!usdcc::usd::linearExrAvailable()) {
+        CHECK(false, "built with OpenEXR");
+        return;
+    }
+    QTemporaryDir dir;
+    // Two rows of two, top row first: values above 1 and below 0 survive, as linear data does.
+    const std::vector<float> rgba{0.2f, 0.5f, 4.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.5f,
+                                  -0.1f, 0.0f, 1.0f, 1.0f, 10.0f, 10.0f, 10.0f, 0.0f};
+    const std::string path = dir.filePath(QStringLiteral("linear.exr")).toStdString();
+    std::string error;
+    CHECK(usdcc::usd::writeLinearExr(path, rgba.data(), 2, 2, &error), "writes: %s", error.c_str());
+
+    // Read back through OpenUSD's own reader (OpenImageIO): float RGBA, as written.
+    const PXR_NS::HioImageSharedPtr image = PXR_NS::HioImage::OpenForReading(path);
+    CHECK(image && image->GetWidth() == 2 && image->GetHeight() == 2, "a 2 × 2 EXR");
+    if (image) {
+        CHECK(image->GetFormat() == PXR_NS::HioFormatFloat32Vec4, "float RGBA: format %d", int(image->GetFormat()));
+        std::vector<float> back(16, -9.0f);
+        PXR_NS::HioImage::StorageSpec storage;
+        storage.width = storage.height = 2;
+        storage.depth = 1;
+        storage.format = PXR_NS::HioFormatFloat32Vec4;
+        storage.data = back.data();
+        CHECK(image->Read(storage) && back == rgba, "the values, unchanged: %f %f %f", back[0], back[2], back[12]);
+    }
+    CHECK(!usdcc::usd::writeLinearExr(dir.filePath(QStringLiteral("no/such/folder/x.exr")).toStdString(), rgba.data(), 2,
+                                      2, &error) &&
+              !error.empty(),
+          "a path it can't write fails, saying why: %s", error.c_str());
+    CHECK(!usdcc::usd::writeLinearExr(path, nullptr, 2, 2, &error), "no pixels fails");
 }
