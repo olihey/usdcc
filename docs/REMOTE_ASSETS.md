@@ -1,0 +1,378 @@
+# Remote Assets (plan)
+
+Loading USD assets from servers instead of the local disk: a shared library that does the caching,
+the server names and the TEST-over-PROD overlays, and one small resolver plugin per protocol on top
+of it. WebDAV is the first protocol ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker
+that browses servers is in [ASSET_PICKER.md](ASSET_PICKER.md).
+
+**Status:** planned 2026-11-16. Nothing is built yet. "Checked" below means looked at in this
+repository or the local OpenUSD build; everything else is still an assumption, and §13 phase 0 tests
+the two the design rests on.
+
+## 1. Decisions
+
+- **A shared library, `usdcc_assets`, holds everything that isn't a protocol.** The cache, the server
+  names, environments, credentials, the HTTP client and the resolver base class. A protocol adds a
+  *transport*: four calls (§6). A later S3 plugin reuses all of it.
+- **One resolver per protocol, each with its own scheme.** `webdav://` for WebDAV, `s3://` for a
+  later S3 plugin. A neutral scheme (`asset://`) was considered and rejected (§16).
+- **The name in the URL is logical.** `webdav://studio/chars/hero.usd`: `studio` is a name, never a
+  hostname. A configuration maps it to real servers (§4). No hostnames or secrets are written into
+  layers.
+- **A name maps to a stack of servers.** The first one that has a file wins, per file. This is how
+  a TEST server overrides single assets of PROD (§5).
+- **The resolved path stays a URI, and names the stack.** Never the cache file, and never one
+  server (§5).
+- **Each protocol ships as a usdcc plugin with only a `usd/` folder** (§11). It has no usdcc code:
+  the settings page, login dialog and browsing are the app's, written once for every protocol.
+- **Read-only first.** Writing is the last phase.
+
+## 2. The parts
+
+| Part | Where | Holds |
+|---|---|---|
+| `usdcc_assets` (DLL, no Qt) | `src/cpp/assets/`, in the app's `bin/` and in the SDK | Config and environments, stacks, the context, the cache, credentials, the HTTP client, `CachingResolver`, the transport registry |
+| A protocol plugin | `src/plugins/webdav/` | An `ArResolver` subclass of `CachingResolver`, its transport and its `plugInfo.json` |
+| usdcc | `usdcc_usd`, `usdcc_usd_ui` | Binding a context to each stage, the Assets settings page, the login dialog, download progress, the asset picker |
+
+`usdcc_assets` is a DLL and not a static library, because the credential provider, the stack
+registry and the transport registry must exist once in the process. It depends on OpenUSD (`ar`,
+`tf`, `plug`, `js`) and not on Qt or `usdcc_core`, so `usdcat` and `usdview` can load a protocol
+plugin with only `bin/` on the library path. It reports through `TF_WARN` and `TF_DEBUG`, which
+usdcc already shows in its Log ([LOGGING.md](LOGGING.md)).
+
+## 3. Asset paths
+
+```
+webdav://studio/chars/hero/hero.usd     name "studio", path /chars/hero/hero.usd
+chars/hero/tex/albedo.png               relative, anchored against the layer that contains it
+```
+
+- **Names** are lowercase letters, digits, `-`, `_` and `.`. An empty name (`webdav:///…`) is an
+  error.
+- **Identifiers** (`_CreateIdentifier`) are normalized: scheme and name lowercased, `.` and `..`
+  collapsed, slashes deduplicated, percent-encoding made canonical. Two spellings of one asset give
+  one identifier, as Sdf's layer registry needs.
+- **Relative paths** never escape above the name's root. A `..` past it is an error.
+- **`_GetExtension`** comes from the path, never from a query string.
+- **`_IsContextDependentPath`** is `true` for a logical path, because the same name can mean
+  different servers in different contexts.
+
+## 4. Endpoints, environments and stacks
+
+An **endpoint** is one real server location. An **environment** says, for each name, which
+endpoints make up its stack, top first.
+
+```json
+{
+  "environment": "prod",
+  "endpoints": {
+    "prod": { "scheme": "webdav", "url": "https://dav.studio.local/assets",
+              "credential": "studio-dav", "readOnly": true,
+              "mirrors": ["https://dav2.studio.local/assets"] },
+    "test": { "scheme": "webdav", "url": "https://dav-test.studio.local/assets",
+              "credential": "studio-dav-test" }
+  },
+  "environments": {
+    "prod": { "webdav": { "studio": ["prod"] } },
+    "test": { "webdav": { "studio": ["test", "prod"] } }
+  }
+}
+```
+
+- **A stack holds endpoints of one protocol.** `webdav://studio` can only stack WebDAV endpoints.
+- **`mirrors`** are other URLs with the same content, tried when the first is unreachable. This is
+  failover, and is separate from the stack (§5).
+- **`readOnly`** endpoints are skipped when saving (§5).
+- **`optional`** (default `false`) lets a stack carry on when that endpoint is unreachable.
+
+**Where the configuration comes from:** the file named by `USDCC_ASSETS_CONFIG`, or else
+`assets.json` in the user's usdcc data folder (`%LOCALAPPDATA%/usdcc` on Windows). usdcc's settings
+page writes that file, so tools outside usdcc see the same servers.
+
+**Which environment is used:** `USDCC_ASSET_ENV`, or else the file's `"environment"`. usdcc can
+also pick one per stage (§10).
+
+**The context.** One context type for every protocol, `usdcc::assets::Context`
+(`AR_DECLARE_RESOLVER_CONTEXT`): the environment's name and its stacks. It is made three ways,
+all giving the same context:
+
+1. **By default**, when nothing else is given (`_CreateDefaultContext`): from the configuration
+   above. This is what makes `usdcat webdav://studio/shot.usd` work.
+2. **From a string** (`CreateContextFromString("webdav", "env=test")`), for scripts and tests.
+3. **Explicitly**, from C++ or Python, which is how usdcc does it.
+
+Contexts are hashed, compared, printed and saved in sessions, so they hold credential ids and never
+secrets (§8). `_RefreshContext` reloads the file and drops what was remembered for that context.
+
+## 5. Resolving through a stack
+
+`_Resolve` asks each endpoint of the stack, top first, whether it has the path. The first that does
+wins. If none does, the result is empty, as for a missing local file.
+
+**The resolved path names the stack:** `webdav://studio~7c21/chars/hero/hero.usd`. `7c21` is a short
+hash of the stack's endpoints, in order. A process-wide registry maps it back, filled whenever a
+context is made. Two reasons:
+
+- **Relative references go through the whole stack again.** USD anchors a layer's relative
+  references against its resolved path. Naming one server there would pin them to it, and TEST
+  could not override a single texture beside a PROD layer.
+- **Opening works with no context bound.** Hydra loads textures on worker threads with no context,
+  so the resolved path alone must say where to look.
+
+A path with a stack id is not context-dependent. The id appears only in memory, never in a file:
+layers hold the logical URL or a relative path. usdcc strips it when showing a path.
+
+| Operation | Behaviour |
+|---|---|
+| Resolve | The first endpoint that has the file wins, decided per file |
+| Relative references | Resolved through the whole stack |
+| Folder listing | The union of all endpoints, the upper one winning, each entry marked with its origin |
+| Open | Downloads from the winner into the cache (§7) and returns an `ArFilesystemAsset` on that file |
+| Save (phase 6) | Goes to the first endpoint not marked `readOnly`. Saving a layer that came from PROD writes a copy to TEST |
+| Timestamp | Changes whenever the winner or its ETag changes, so `SdfLayer::Reload` notices a file that appears in TEST |
+| Asset info | The version is the ETag; the repository path is the real URL on the winning endpoint |
+
+**Unreachable is not missing.** A 404 moves on to the next endpoint. A network error does not: it
+tries the endpoint's mirrors, and if none answers the resolve fails with a warning naming the
+endpoint. Falling through would silently hand out PROD assets while TEST is down. `optional`
+endpoints are the exception.
+
+**The origin is shown.** Wherever usdcc shows a resolved path it also says which endpoint delivered
+it (§10).
+
+**Limits of the first version:** an upper endpoint can add and replace files but not hide a lower
+one's; and changing the environment of an open stage means reopening it.
+
+## 6. The transport
+
+What a protocol implements. Every call gets the endpoint (URL, credential) and a cancel token, may
+be called from any thread, and reports unreachable separately from missing.
+
+```cpp
+namespace usdcc::assets {
+
+struct Entry {
+    std::string name;
+    bool isFolder = false;
+    uint64_t size = 0;
+    double modified = 0;      // seconds since the epoch
+    std::string etag;         // or the nearest thing the server has
+};
+
+class Transport {
+public:
+    virtual ~Transport();
+    virtual Result<Entry> stat(const Endpoint&, const std::string& path, Cancel&) = 0;
+    virtual Result<std::vector<Entry>> list(const Endpoint&, const std::string& folder, Cancel&) = 0;
+    // Writes to `file`. With `knownEtag`, "not modified" is a result and nothing is written.
+    virtual Result<Entry> fetch(const Endpoint&, const std::string& path, const std::filesystem::path& file,
+                                const std::string& knownEtag, Progress&, Cancel&) = 0;
+    // Phase 6. `knownEtag` empty means "only if it doesn't exist yet".
+    virtual Result<Entry> put(const Endpoint&, const std::string& path, const std::filesystem::path& file,
+                              const std::string& knownEtag, Progress&, Cancel&);
+};
+
+}  // namespace usdcc::assets
+```
+
+`CachingResolver` implements every `ArResolver` method from these four. A protocol's resolver
+subclass only says which scheme and which transport.
+
+A transport registers itself with `usdcc_assets` when its library loads. USD loads a resolver's
+library lazily, so to browse a server before anything was resolved, `usdcc_assets` loads the plugin
+of every resolver type whose `plugInfo.json` entry says `"usdccAssetsProtocol": true`
+(`PlugRegistry::GetDataFromPluginMetaData`).
+
+## 7. The cache
+
+**Listings are what resolve asks for.** One listing of a folder answers "does it exist" for every
+file in it, with its ETag, time and size. Composition asks about many siblings and UDIM asks about
+tiles that don't exist, so a listing per folder is far fewer round trips than a request per file.
+The asset picker uses the same call. A folder over a size limit (to be measured) falls back to
+`stat` per file.
+
+- **In a scope** (`_BeginCacheScope`/`_EndCacheScope`, which a stage open or recomposition makes),
+  listings and winners are fixed, so one composition sees one consistent state.
+- **Outside a scope** they are remembered for a few seconds (configurable).
+
+**Files on disk are stored per version:** `<cache>/<endpoint id>/<path>@<etag hash>.<ext>`, with a
+small record beside each (ETag, modified time, size, last use). A new version is a new file, never
+an overwrite:
+
+- Windows can't replace a file the `.usdc` reader has memory-mapped.
+- An open layer keeps the bytes it loaded until Reload.
+- TEST's and PROD's versions of one path sit side by side, so switching environment downloads
+  nothing twice.
+
+The extension is kept, for renderers that are handed the cache file (§10).
+
+- **Revalidation:** before a cached version is used, its ETag is compared with the listing's. Equal
+  means no request at all; different means a conditional fetch.
+- **Downloads** go to a temporary file renamed when complete. Two threads or two processes wanting
+  the same version wait on a lock file, so it downloads once.
+- **Location:** `USDCC_ASSET_CACHE`, or else `asset-cache` in the user's usdcc data folder. Shared
+  by every usdcc process and tool.
+- **Size limit:** default 20 GB, least recently used first. A version in use isn't removed.
+- **Offline mode** (configuration, or the settings page): resolve and open from the cache only,
+  with a warning in the Log. What isn't cached is missing.
+
+## 8. HTTP and credentials
+
+**libcurl with OpenSSL**, the same on every platform, linked statically into `usdcc_assets` (§12).
+On Windows `CURLSSLOPT_NATIVE_CA` trusts the Windows certificate store, including company CAs.
+One easy handle per thread and host, a share handle for connections, DNS and TLS sessions.
+Timeouts: 5 s to connect, 60 s with no data, both configurable. Redirects only on the same host.
+Proxies come from the system or the usual environment variables. No Qt Network: resolver calls come
+from any thread and from tools without an event loop.
+
+libcurl signs S3 requests itself (`CURLOPT_AWS_SIGV4`), which is most of what an S3 transport would
+need. *Not tried.*
+
+**Credentials.** The configuration names a credential id. A provider turns it into a user and
+password or a token. Providers are tried in order:
+
+1. **A callback the host registers.** usdcc uses it to show a login dialog after a 401 (§10).
+2. **The OS credential store:** Windows Credential Manager (target `usdcc-assets:<id>`), Keychain
+   and libsecret later.
+3. **Environment variables:** `USDCC_ASSETS_<ID>_USER`, `_PASSWORD`, `_TOKEN`, for CI and tools.
+
+Secrets are never logged, never in a context's hash or debug string, never in a session. A 401 or
+403 names the credential id that failed.
+
+## 9. Threads, progress and cancel
+
+- **Any thread.** USD resolves and opens from worker threads. Everything in `usdcc_assets` is
+  thread-safe.
+- **Progress.** A listener gets "download started, bytes so far, finished" for each file. usdcc
+  shows it in the stage opener's progress dialog and the status bar ([PANEL_BUSY.md](PANEL_BUSY.md)).
+- **Cancel.** Every transport call takes a token. Cancelling a stage open stops its downloads.
+- **Not on the UI thread.** See §10.
+
+## 10. usdcc integration
+
+- **A context per stage.** `StageManager` opens each stage with a context for its environment
+  ([stage_manager.cpp](../src/cpp/usd/src/stage_manager.cpp)). The default environment is a
+  setting; **Open Stage with Options** can pick another, so two open stages can differ.
+- **Resolving outside composition.** These call `ArGetResolver().Resolve()` on the UI thread with
+  no context bound:
+  - [composition_arcs.cpp](../src/cpp/usd/src/composition_arcs.cpp) (resolved paths of arcs)
+  - [dependencies.cpp](../src/cpp/usd/src/dependencies.cpp) (Dependencies panel)
+  - [property_editors.cpp](../src/cpp/usd/src/properties/property_editors.cpp) (the asset field's second line)
+  - [usda_view.cpp](../src/cpp/usd/src/usda_view.cpp) (following links)
+
+  Each binds the stage's context, and none may wait for a server. A helper answers at once for a
+  local path or one the cache knows, and otherwise resolves on a worker and calls back, the field
+  showing "Resolving…" meanwhile.
+- **Places that assume a local file.** A search for `QFileInfo::exists` finds about a dozen that
+  would call a `webdav://` path missing: the session's missing-file check
+  ([session_store.cpp](../src/cpp/ui/src/session_store.cpp)), the Reveal buttons (Dependencies,
+  Layer Editor, composition arcs, USDA view), the USDA view's file check and
+  `layer_actions.cpp`'s path rewriting. They go through one `isLocalFile()` helper; Reveal is off
+  for a remote path, and **Copy URL** takes its place.
+- **Showing the origin.** The asset field's second line, the Dependencies panel and the Layer
+  Editor show the endpoint that delivered a file, for example `Resolved · test ·
+  webdav://studio/chars/hero/tex/albedo.png`.
+- **Settings > Assets** ([SETTINGS.md](SETTINGS.md)): endpoints (name, protocol, URL, mirrors,
+  credential id, read-only), environments and their stacks, the default environment, a **Test**
+  button per endpoint, the cache's size with **Clear cache**, and offline mode. It writes the
+  configuration file of §4. With no protocol plugin installed it says so.
+- **Login dialog.** usdcc registers the credential callback. On a 401 it asks for user and password
+  or a token on the UI thread, and offers to save them to the OS credential store.
+- **Sessions** ([SESSIONS.md](SESSIONS.md)) save each stage's root as its logical URL and its
+  environment's name. No secrets.
+- **Opening and choosing files:** [ASSET_PICKER.md](ASSET_PICKER.md).
+- **Renderers.** Check that the RTX and V-Ray plugins get paths they can read. Anything that
+  doesn't read through `ArAsset` (those two, Alembic) needs the cache file, which
+  `usdcc::assets::localFile(resolvedPath)` returns after downloading it.
+- **Python** ([SCRIPTING.md](SCRIPTING.md)): the context for `Usd.Stage.Open`
+  (`ArWrapResolverContextForPython`), and `usdcc.assets` to list and stat.
+
+## 11. A protocol as a plugin
+
+```
+webdav/
+  usdcc-plugin.json            "usd": ["usd"], no "native", no "python"
+  usd/
+    plugInfo.json
+    webdavResolver.dll
+```
+
+- **Registration already happens early enough for schemas.** `plugins.scan()` in
+  [main.cpp](../src/cpp/app/main.cpp) registers every plugin's `usd/` folder with
+  `PlugRegistry::RegisterPlugins()`, before the window and before any stage
+  ([PLUGINS.md](PLUGINS.md) §3.1). *Checked.*
+- **A resolver needs it before the first `ArGetResolver()` call,** because OpenUSD collects its URI
+  resolvers once. Nothing before `scan()` looks like it calls it. *Not checked; phase 0.*
+- **The library must match the app's OpenUSD exactly,** as any C++ plugin must. The `built_for`
+  check only covers a plugin's native library today. A manifest gains an optional `usd_built_for`
+  (platform, compiler, OpenUSD version), and `scan()` doesn't register a `usd/` folder that was
+  built for another, saying why in View > Plugins.
+- **Turning it off** in View > Plugins works like any plugin: at the next start, its folder isn't
+  registered and `webdav://` paths don't resolve.
+- **Outside usdcc:** `PXR_PLUGINPATH_NAME=<plugin>/usd`, with usdcc's `bin/` on the library path.
+- **Not covered:** the crash marker only protects `activate()`. A resolver library that crashes
+  when USD loads it isn't caught.
+- **Other resolvers.** A resolver that isn't built on `usdcc_assets` still works as a `usd/`
+  folder. It gets no settings page, and browsing only if its plugin registers an asset source
+  itself ([ASSET_PICKER.md](ASSET_PICKER.md) §2).
+
+## 12. Build and deploy
+
+- **vcpkg:** `curl` (default features off, `openssl` on) and `pugixml`, for the XML that WebDAV
+  and S3 listings come in. OpenSSL is already there through Qt. New licences: curl and pugixml,
+  both MIT-style; `tools/deploy.py` collects them.
+- **Static curl and OpenSSL** inside `usdcc_assets.dll`. PySide6 ships its own
+  `libcrypto-3-x64.dll`, the same file name as vcpkg's, and Windows reuses a DLL already loaded by
+  that name.
+- **Worktrees:** a new vcpkg port needs a private install root until it is on master, as the
+  shared install tree is reset by other checkouts.
+- **CMake:** `usdcc_add_asset_protocol()` builds a resolver library into a plugin folder with its
+  manifest and `plugInfo.json`, beside `usdcc_add_plugin()`
+  ([UsdccPlugin.cmake](../cmake/modules/UsdccPlugin.cmake)).
+- **Deploy:** `bin/usdcc_assets.dll`, `plugins/webdav/`, and the headers and import library in
+  `sdk`.
+
+## 13. Phases
+
+| Phase | Builds | Done when |
+|---|---|---|
+| **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
+| **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
+| **2. WebDAV, read-only** | The transport and plugin ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat webdav://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST |
+| **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | Reopening a large stage makes no downloads, and pulling the network cable falls back to the cache with a warning |
+| **4. usdcc** | Everything in §10 but the picker | A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
+| **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
+| **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
+| **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
+
+## 14. Testing
+
+- **`usdcc_assets`** (`tests/assets_test.cpp`): a fake transport over folders on disk, with
+  switches for "unreachable" and "slow". Identifier normalization and anchoring, configuration
+  parsing, context equality and hashing, the overlay rules of §5, the cache's versions and locks,
+  and that no secret reaches a debug string or the log.
+- **WebDAV:** [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6.
+- **In usdcc:** stages through `UsdStage::Open`, textures opened with no context bound, as Hydra
+  does, and the UI call sites with a slow transport, to show the UI doesn't wait.
+- **CI** ([CI.md](CI.md)): no external network.
+
+## 15. Open questions
+
+| # | Question | Recommendation |
+|---|---|---|
+| 1 | One configuration file, or a studio's file with the user's on top? | Start with one. A studio sets `USDCC_ASSETS_CONFIG`; layering can come when someone needs it |
+| 2 | Should an unreachable overlay endpoint fail the resolve, or warn and carry on? | Fail, unless the endpoint is `optional` (§5) |
+| 3 | Can an upper endpoint hide a lower one's file? | Not in the first version. A marker file could do it later |
+| 4 | How big may a folder be before resolve stops listing it? | Measure in phase 2 against a folder of 10,000 files |
+| 5 | Range requests, to read part of a large `.usdc` without downloading all of it? | Later. Whole files first: the usdc reader maps a local file |
+| 6 | Which authentication? | Per protocol; see [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §7 |
+
+## 16. Not planned
+
+- **NVIDIA Nucleus.** Dropped. It has no documented protocol, only NVIDIA's client library.
+- **A neutral scheme** (`asset://studio/…`, with the protocol only in the configuration). Rejected:
+  the scheme stays the protocol's. The cost is that moving a library from WebDAV to another
+  protocol means rewriting the absolute URLs in its layers. Relative references are unaffected.
+- **A stack mixing protocols.** Follows from the above.
+- **WebDAV `LOCK`,** or any other locking between users.
