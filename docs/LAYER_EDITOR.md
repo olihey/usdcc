@@ -227,8 +227,12 @@ Phase 3 as built:
   - On a file layer, or a layer with no parent here, it writes a copy, as §5 planned.
   - On an in-memory sublayer, the file takes its place in the parent's list (one undo step)
     and becomes the edit target if the in-memory layer was.
-- **Saving is per stage**, not in the File menu: the current stage isn't always the one you
-  mean, and there's no shortcut (Ctrl+S stays the Layers panel's and the Script Editor's own).
+- **Saving is per stage**, never "the current stage": the current stage isn't always the one
+  you mean, and there's no shortcut (Ctrl+S stays the Layers panel's and the Script Editor's own).
+  - **File > Save Stage** and **File > Save Stage As**, above Close Stage: with one stage open,
+    plain actions for that stage; with more, a submenu of the open stages each (as Close
+    Stage's), Save Stage's entries greyed for stages with nothing unsaved. Greyed with none open.
+    File > Close Stage works the same way.
   - **Stages > a stage > Save Stage** saves every unsaved file layer of that stage
     (`saveStageInteractively()`), greyed while it has none. So does **Save Stage** on a view
     panel's tab menu, for the stage the panel shows (`ViewPanel::setTabMenuExtension()`, set in

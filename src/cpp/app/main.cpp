@@ -655,8 +655,9 @@ int main(int argc, char** argv) {
     });
     fileMenu->addSeparator();
 
-    // Saving a stage is per stage: Stages > a stage > Save Stage / Save Stage As..., and a
-    // panel tab's Save Stage for the stage it shows (docs/LAYER_EDITOR.md §5).
+    // Saving a stage is per stage: File > Save Stage / Save Stage As (below), Stages > a stage
+    // > Save Stage / Save Stage As..., and a panel tab's Save Stage for the stage it shows
+    // (docs/LAYER_EDITOR.md §5).
     usdcc::ui::ViewPanel::setTabMenuExtension([&window](usdcc::ui::ViewPanel* panel, QMenu* menu) {
         const usdcc::usd::StageRefPtr stage = panel->currentStage();
         menu->addSeparator();
@@ -755,32 +756,96 @@ int main(int argc, char** argv) {
         stageOpener->open(path);
     });
 
-    // File > Close Stage > one entry per open stage, built when it opens.
-    QMenu* closeStageMenu = fileMenu->addMenu(QObject::tr("&Close Stage"));
-    closeStageMenu->setToolTipsVisible(true);
-    QObject::connect(fileMenu, &QMenu::aboutToShow, closeStageMenu,
-                     [&stageManager, closeStageMenu]() {
-                         closeStageMenu->menuAction()->setEnabled(!stageManager.stages().empty());
-                     });
-    QObject::connect(closeStageMenu, &QMenu::aboutToShow, &window, [&stageManager, &window, closeStageMenu]() {
-        closeStageMenu->clear();
+    // File > Save Stage and Save Stage As..., above Close Stage. With one stage open each is
+    // a plain action for it; with more, a submenu of the open stages, as Close Stage's, since
+    // the current stage isn't always the one you mean. Queued: a message box or file dialog
+    // doesn't run inside the menu, and the stage is held by value until it does.
+    const auto saveStage = [&window](const usdcc::usd::StageRefPtr& stage) {
+        QMetaObject::invokeMethod(
+            &window, [stage, &window]() { usdcc::usd::saveStageInteractively(stage, &window); }, Qt::QueuedConnection);
+    };
+    const auto saveStageAs = [&stageManager, &window](const usdcc::usd::StageRefPtr& stage) {
+        QMetaObject::invokeMethod(
+            &window, [&stageManager, stage, &window]() { usdcc::usd::saveStageAsInteractively(stageManager, stage, &window); },
+            Qt::QueuedConnection);
+    };
+    QAction* saveStageAction = fileMenu->addAction(QObject::tr("&Save Stage"));
+    saveStageAction->setObjectName(QStringLiteral("fileSaveStage"));
+    saveStageAction->setStatusTip(QObject::tr("Save every layer of the stage that has unsaved changes"));
+    QMenu* saveStageMenu = fileMenu->addMenu(QObject::tr("&Save Stage"));
+    saveStageMenu->setObjectName(QStringLiteral("fileSaveStageMenu"));
+    saveStageMenu->setToolTipsVisible(true);
+    QAction* saveStageAsAction = fileMenu->addAction(QObject::tr("Save Stage &As..."));
+    saveStageAsAction->setObjectName(QStringLiteral("fileSaveStageAs"));
+    saveStageAsAction->setStatusTip(QObject::tr("Save the stage to another file, and go on in that file"));
+    QMenu* saveStageAsMenu = fileMenu->addMenu(QObject::tr("Save Stage &As"));
+    saveStageAsMenu->setObjectName(QStringLiteral("fileSaveStageAsMenu"));
+    saveStageAsMenu->setToolTipsVisible(true);
+    // The only stage is looked up when the action runs, not when the menu opened.
+    QObject::connect(saveStageAction, &QAction::triggered, &window, [&stageManager, saveStage]() {
+        if (stageManager.stages().size() == 1) saveStage(stageManager.stages().front());
+    });
+    QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, saveStageAs]() {
+        if (stageManager.stages().size() == 1) saveStageAs(stageManager.stages().front());
+    });
+    QObject::connect(fileMenu, &QMenu::aboutToShow, &window,
+                     [&stageManager, saveStageAction, saveStageMenu, saveStageAsAction, saveStageAsMenu]() {
+        const auto& stages = stageManager.stages();
+        const bool several = stages.size() > 1;
+        bool anyUnsaved = false;
+        for (const usdcc::usd::StageRefPtr& stage : stages) anyUnsaved = anyUnsaved || usdcc::usd::stageHasUnsavedLayers(stage);
+        // No stage open: the plain actions, greyed.
+        saveStageAction->setVisible(!several);
+        saveStageAction->setEnabled(stages.size() == 1 && anyUnsaved);
+        saveStageAsAction->setVisible(!several);
+        saveStageAsAction->setEnabled(stages.size() == 1);
+        saveStageMenu->menuAction()->setVisible(several);
+        saveStageMenu->menuAction()->setEnabled(anyUnsaved);
+        saveStageAsMenu->menuAction()->setVisible(several);
+    });
+    // One entry per open stage, built when the submenu opens.
+    const auto fillStageMenu = [&stageManager](QMenu* menu, bool onlyUnsaved,
+                                               std::function<void(const usdcc::usd::StageRefPtr&)> run) {
+        menu->clear();
         const auto& stages = stageManager.stages();
         const std::vector<std::string> names = usdcc::usd::shortStageNames(stages);
         for (std::size_t i = 0; i < stages.size(); ++i) {
             const usdcc::usd::StageRefPtr stage = stages[i];
-            QAction* action = closeStageMenu->addAction(QString::fromStdString(names[i]));
+            QAction* action = menu->addAction(QString::fromStdString(names[i]));
             action->setToolTip(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetIdentifier()));
-            // Queued: the dialog must not run from inside the menu's own event
-            // handling, and the stage is held by value until it does.
-            QObject::connect(action, &QAction::triggered, &window, [&stageManager, &window, stage]() {
-                QMetaObject::invokeMethod(
-                    &window, [&stageManager, &window, stage]() {
-                        usdcc::usd::closeStageInteractively(&stageManager, stage, &window);
-                    },
-                    Qt::QueuedConnection);
-            });
+            if (onlyUnsaved) action->setEnabled(usdcc::usd::stageHasUnsavedLayers(stage));
+            QObject::connect(action, &QAction::triggered, menu, [run, stage]() { run(stage); });
         }
+    };
+    QObject::connect(saveStageMenu, &QMenu::aboutToShow, &window,
+                     [fillStageMenu, saveStageMenu, saveStage]() { fillStageMenu(saveStageMenu, true, saveStage); });
+    QObject::connect(saveStageAsMenu, &QMenu::aboutToShow, &window,
+                     [fillStageMenu, saveStageAsMenu, saveStageAs]() { fillStageMenu(saveStageAsMenu, false, saveStageAs); });
+
+    // File > Close Stage, as Save Stage above: a plain action with one stage open, else a
+    // submenu of the open stages.
+    const auto closeStage = [&stageManager, &window](const usdcc::usd::StageRefPtr& stage) {
+        QMetaObject::invokeMethod(
+            &window, [&stageManager, &window, stage]() { usdcc::usd::closeStageInteractively(&stageManager, stage, &window); },
+            Qt::QueuedConnection);
+    };
+    QAction* closeStageAction = fileMenu->addAction(QObject::tr("&Close Stage"));
+    closeStageAction->setObjectName(QStringLiteral("fileCloseStage"));
+    closeStageAction->setStatusTip(QObject::tr("Close the stage, with every panel showing it"));
+    QMenu* closeStageMenu = fileMenu->addMenu(QObject::tr("&Close Stage"));
+    closeStageMenu->setObjectName(QStringLiteral("fileCloseStageMenu"));
+    closeStageMenu->setToolTipsVisible(true);
+    QObject::connect(closeStageAction, &QAction::triggered, &window, [&stageManager, closeStage]() {
+        if (stageManager.stages().size() == 1) closeStage(stageManager.stages().front());
     });
+    QObject::connect(fileMenu, &QMenu::aboutToShow, &window, [&stageManager, closeStageAction, closeStageMenu]() {
+        const std::size_t count = stageManager.stages().size();
+        closeStageAction->setVisible(count <= 1);
+        closeStageAction->setEnabled(count == 1);
+        closeStageMenu->menuAction()->setVisible(count > 1);
+    });
+    QObject::connect(closeStageMenu, &QMenu::aboutToShow, &window,
+                     [fillStageMenu, closeStageMenu, closeStage]() { fillStageMenu(closeStageMenu, false, closeStage); });
     // File > Exit, last: closing the window, which asks about unsaved layers.
     fileMenu->addSeparator();
     QAction* exitAction = fileMenu->addAction(QObject::tr("E&xit"), &window, &QWidget::close);
