@@ -115,7 +115,7 @@ take them for a `bool`.
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
 | `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `studio_wizja_02_1k` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |
-| `Workspaces/folders` | Folders | none | `WorkspaceLibrary`: folders of workspace files, after your own and before the shipped ones; applies at once ([WORKSPACES.md](WORKSPACES.md) §5). The active workspace and how each was left are UI state (`Workspaces/current`, `Workspaces/arranged/<id>`) |
+| `Workspaces/folders` | Folders | none | `WorkspaceLibrary`: folders of workspace files, after your own and before the shipped ones; applies at once ([WORKSPACES.md](WORKSPACES.md) §5). The active workspace is UI state (`Workspaces/current`) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
 | `Notifications/duration`, `warningDuration` | Float 1–60 s | 5, 8 | `ToastManager` |
 | `Notifications/errorsSticky` | Bool | on | `ToastManager` |

@@ -563,8 +563,7 @@ USDCC_TEST(workspace_controller_and_button) {
     CHECK(!controller.isChosen(), "none chosen yet");
     QString error;
     CHECK(controller.switchTo(QStringLiteral("three"), &error), "switched: %s", qPrintable(error));
-    CHECK(controller.isChosen() && !usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/layout")),
-          "the layout before any was chosen isn't remembered as Layout's");
+    CHECK(controller.isChosen(), "chosen now");
     CHECK(controller.currentId() == "three" && button->text() == "Three", "the button says so");
     CHECK(usdcc::ui::appSettings().value(WorkspaceController::kCurrentKey).toString() == "three", "and it's remembered");
     CHECK(!controller.switchTo(QStringLiteral("nope"), &error) && !error.isEmpty(), "no such workspace");
@@ -612,9 +611,80 @@ USDCC_TEST(workspace_controller_and_button) {
     CHECK(id == "my-three" && QFile::exists(user.filePath("my-three.json")) && controller.currentId() == id,
           "saved as yours: %s %s", qPrintable(id), qPrintable(error));
     CHECK(controller.switchTo(QStringLiteral("layout"), &error), "back to Layout: %s", qPrintable(error));
-    CHECK(usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/my-three")),
-          "how My Three was left is remembered");
+    CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/my-three")),
+          "how My Three was left isn't kept");
     CHECK(usdcc::core::Settings::instance().contains("Shortcuts/workspace.three"), "a shortcut setting per workspace");
+}
+
+// Switching lays a workspace out as its file says every time: what was changed in the
+// window since, a panel closed or a divider dragged, isn't kept. And the arrangements an
+// earlier version remembered are removed.
+USDCC_TEST(workspace_switching_always_follows_the_file) {
+    App app;
+    ads::CDockManager* docks = app.window.dockManager();
+    app.stages.createStage();
+    {
+        QSettings settings = usdcc::ui::appSettings();
+        settings.setValue(QStringLiteral("Workspaces/arranged/three"), QByteArray(R"({"format": "usdcc-workspace"})"));
+    }
+    QTemporaryDir user;
+    QTemporaryDir shipped;
+    write(shipped.filePath("layout.json"), workspaceText("layout", "Layout", "Scene", 10));
+    write(shipped.filePath("three.json"), kThreeColumns);
+    WorkspaceLibrary library({user.path(), shipped.path(), false});
+    WorkspaceController controller(app.context(), &library);
+    CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/three")),
+          "the arrangements an earlier version kept are gone");
+
+    // The Attributes open, and the columns 1 : 3 : 2.
+    auto check = [&](const char* when) {
+        waitFor([] { return false; }, 200);
+        ViewPanel* outliner = nullptr;
+        ViewPanel* attributes = nullptr;
+        for (ViewPanel* panel : openPanels(docks)) {
+            if (typeOf(panel) == "outliner") outliner = panel;
+            if (typeOf(panel) == "attributes") attributes = panel;
+        }
+        CHECK(outliner && attributes, "%s: the Outliner and the Attributes open", when);
+        QSplitter* columns = outliner ? qobject_cast<QSplitter*>(outliner->dockAreaWidget()->parentWidget()) : nullptr;
+        QList<int> sizes;
+        for (int i = 0; columns && i < columns->count(); ++i) {
+            if (!columns->widget(i)->isHidden()) sizes << columns->sizes()[i];
+        }
+        const double total = sizes.size() == 3 ? sizes[0] + sizes[1] + sizes[2] : 0.0;
+        CHECK(total > 0 && std::abs(sizes[0] / total - 1.0 / 6.0) < 0.05 && std::abs(sizes[2] / total - 1.0 / 3.0) < 0.05,
+              "%s: the file's shares: %s", when, qPrintable([&] {
+                  QStringList list;
+                  for (int size : sizes) list << QString::number(size);
+                  return list.join(' ');
+              }()));
+        return columns;
+    };
+    // Closes the Attributes and drags the first divider far right.
+    auto tweak = [&](QSplitter* columns) {
+        if (auto* attributes = qobject_cast<ViewPanel*>(docks->findDockWidget(QStringLiteral("Attributes")))) {
+            attributes->toggleView(false);
+        }
+        if (columns && columns->count() >= 2) {
+            QList<int> sizes = columns->sizes();
+            sizes[0] += sizes[1] / 2;
+            sizes[1] -= sizes[1] / 2;
+            columns->setSizes(sizes);
+        }
+        QApplication::processEvents();
+    };
+
+    QString error;
+    CHECK(controller.switchTo(QStringLiteral("three"), &error), "Three: %s", qPrintable(error));
+    tweak(check("switched to"));
+    CHECK(controller.switchTo(QStringLiteral("layout"), &error) && controller.switchTo(QStringLiteral("three"), &error),
+          "away and back: %s", qPrintable(error));
+    tweak(check("back again"));
+    CHECK(controller.switchTo(QStringLiteral("three"), &error), "chosen again: %s", qPrintable(error));
+    check("the active one chosen again");
+    CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/three")) &&
+              !usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/layout")),
+          "nothing remembered");
 }
 
 USDCC_TEST(workspace_view_panel_follows_the_current_stage) {

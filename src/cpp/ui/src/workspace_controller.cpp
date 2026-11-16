@@ -18,10 +18,8 @@
 #include <QAction>
 #include <QDesktopServices>
 #include <QDir>
-#include <QHash>
 #include <QFileInfo>
 #include <QInputDialog>
-#include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -39,45 +37,7 @@ namespace {
 constexpr int kMaxNameWidth = 160;
 constexpr int kButtonHeight = 22;
 
-QString arrangedKey(const QString& id) { return QStringLiteral("%1/%2").arg(QLatin1String(WorkspaceController::kArrangedGroup), id); }
-
 std::string shortcutKey(const QString& id) { return "Shortcuts/workspace." + id.toStdString(); }
-
-// What an area holds, to know it again in another arrangement of the same workspace:
-// its panel types, sorted.
-QString areaKey(const workspace::Node& area) {
-    QStringList types;
-    for (const workspace::PanelEntry& entry : area.tabs) types << entry.panel;
-    types.sort();
-    return types.join(QLatin1Char(','));
-}
-
-void collectLimits(const workspace::Node& node, QHash<QString, std::pair<int, int>>* limits) {
-    if (node.isSplit()) {
-        for (const workspace::Node& child : node.items) collectLimits(child, limits);
-    } else if (node.maxWidth > 0 || node.maxHeight > 0) {
-        limits->insert(areaKey(node), {node.maxWidth, node.maxHeight});
-    }
-}
-
-void giveLimits(workspace::Node& node, const QHash<QString, std::pair<int, int>>& limits) {
-    if (node.isSplit()) {
-        for (workspace::Node& child : node.items) giveLimits(child, limits);
-        return;
-    }
-    const auto it = limits.constFind(areaKey(node));
-    if (it == limits.cend()) return;
-    node.maxWidth = it->first;
-    node.maxHeight = it->second;
-}
-
-// How a workspace was left keeps the file's limits (§3.3), on the areas holding the
-// same panels: a panel kept narrow stays so, and the viewports fill the rest again.
-void carryLimits(workspace::Node& arranged, const workspace::Node& file) {
-    QHash<QString, std::pair<int, int>> limits;
-    collectLimits(file, &limits);
-    if (!limits.isEmpty()) giveLimits(arranged, limits);
-}
 
 void addHeading(QMenu* menu, const QString& text) {
     auto* label = new QLabel(text.toUpper(), menu);
@@ -92,9 +52,15 @@ void addHeading(QMenu* menu, const QString& text) {
 
 WorkspaceController::WorkspaceController(const workspace::ApplyContext& context, WorkspaceLibrary* library, QObject* parent)
     : QObject(parent), m_context(context), m_library(library) {
-    const QSettings settings = appSettings();
+    QSettings settings = appSettings();
     m_chosen = settings.contains(QLatin1String(kCurrentKey));
     m_currentId = settings.value(QLatin1String(kCurrentKey), QLatin1String(kDefaultId)).toString();
+    // How each workspace was left, which an earlier version laid out again instead of
+    // its file: gone, so it doesn't sit in usdcc.ini for nothing.
+    settings.beginGroup(QLatin1String(kObsoleteArrangedGroup));
+    const bool obsolete = !settings.childKeys().isEmpty();
+    settings.endGroup();
+    if (obsolete) settings.remove(QLatin1String(kObsoleteArrangedGroup));
     connect(m_library, &WorkspaceLibrary::changed, this, [this]() {
         updateButton();
         syncShortcuts();
@@ -139,44 +105,13 @@ bool WorkspaceController::switchTo(const QString& id, QString* error) {
         if (error) *error = tr("There's no workspace \"%1\".").arg(id);
         return false;
     }
-    // The active one too: choosing it again lays it out as it is now (a stage made
-    // current from the Stages menu goes in front), not as it was left before.
-    rememberArrangement();
-    workspace::Definition definition = *found;
-    // How it was left, if it was (§11 #2): the layout and the side panels; the file's
-    // limits and fit still apply.
-    const QByteArray arranged = appSettings().value(arrangedKey(id)).toByteArray();
-    if (!arranged.isEmpty()) {
-        const QJsonObject json = QJsonDocument::fromJson(arranged).object();
-        if (std::optional<workspace::Definition> saved = workspace::fromJson(json, id)) {
-            carryLimits(saved->layout, definition.layout);
-            definition.layout = saved->layout;
-            // Kept by an older version without them: the file's.
-            if (json.contains(QStringLiteral("sidePanels"))) definition.sidePanels = saved->sidePanels;
-        }
-    }
-    return applyDefinition(definition, error);
-}
-
-bool WorkspaceController::reset(QString* error) {
-    const workspace::Definition* definition = current();
-    if (!definition) {
-        if (error) *error = tr("There's no workspace \"%1\".").arg(m_currentId);
-        return false;
-    }
-    {
-        QSettings settings = appSettings();
-        settings.remove(arrangedKey(m_currentId));
-    }
-    return applyDefinition(*definition, error);
+    // Always as its file says, the active one too: switching is how the window's layout
+    // is put back. A layout worth keeping is saved as a workspace of its own.
+    return applyDefinition(*found, error);
 }
 
 bool WorkspaceController::resetToShadowed(const QString& id, QString* error) {
     if (!m_library->removeUserCopy(id, error)) return false;
-    {
-        QSettings settings = appSettings();
-        settings.remove(arrangedKey(id));
-    }
     if (id != m_currentId) return true;
     const workspace::Definition* definition = m_library->find(id);
     return definition ? applyDefinition(*definition, error) : true;
@@ -204,10 +139,6 @@ QString WorkspaceController::saveCurrentLayout(const QString& name, bool include
         definition.order = 900;
     }
     if (!m_library->save(definition, error)) return {};
-    {
-        QSettings settings = appSettings();
-        settings.remove(arrangedKey(id));
-    }
     setCurrentId(id);
     return id;
 }
@@ -225,13 +156,6 @@ void WorkspaceController::setCurrentId(const QString& id) {
     settings.setValue(QLatin1String(kCurrentKey), m_currentId);
     updateButton();
     Q_EMIT currentChanged(m_currentId);
-}
-
-void WorkspaceController::rememberArrangement() {
-    if (!m_chosen || !m_context.window || !m_library->find(m_currentId)) return;
-    const workspace::Definition arranged = workspace::capture(m_context.window, m_currentId, currentName(), true);
-    QSettings settings = appSettings();
-    settings.setValue(arrangedKey(m_currentId), QJsonDocument(arranged.toJson()).toJson(QJsonDocument::Compact));
 }
 
 void WorkspaceController::fitAllViews(const QString& what) {
@@ -290,13 +214,6 @@ void WorkspaceController::populateMenu(QMenu* menu) {
     if (m_fitAllViewsAction) menu->addAction(m_fitAllViewsAction);
     menu->addSeparator();
     if (const workspace::Definition* definition = current()) {
-        QAction* resetAction = menu->addAction(tr("Reset \"%1\"").arg(definition->name));
-        resetAction->setObjectName(QStringLiteral("resetWorkspace"));
-        resetAction->setToolTip(tr("Lay it out as its file says, forgetting how it was left"));
-        connect(resetAction, &QAction::triggered, this, [this]() {
-            QString error;
-            if (!reset(&error) && m_context.window) QMessageBox::warning(m_context.window, tr("Workspace"), error);
-        });
         const std::vector<workspace::Definition> hidden = m_library->shadowed(definition->id);
         if (!hidden.empty() && m_library->isUserWorkspace(definition->id)) {
             QAction* back = menu->addAction(tr("Reset to \"%1\"").arg(hidden.front().source));

@@ -55,7 +55,9 @@ What they share, and what usdcc takes from it:
 3. **Five to ten workspaces, named after the task.** More becomes a list nobody reads. → Eight built in
    (§4), plus what studios and plugins add.
 4. **Tweaks are remembered per workspace, with a Reset** (Maya, Blender). Dragging a panel while in Look
-   Dev and coming back to Look Dev later finds it where it was dragged. → Phase 4 (§10).
+   Dev and coming back to Look Dev later finds it where it was dragged. → **Not in usdcc** (§11 #2):
+   choosing a workspace puts the window back as its file says, every time; a layout worth keeping is
+   saved as a workspace of its own.
 5. **Their files hold the docking state in pixels, written by the app.** Nobody writes a `.desk` file by
    hand. → usdcc's format is a split tree in fractions (§3), short enough to write and review by hand,
    and the same on any screen.
@@ -154,7 +156,7 @@ each child getting a part for every viewport it has side by side along the split
 viewports counts once across a horizontal split, a row of two twice). The children holding viewports are
 also the ones that grow and shrink with the window; the others keep their size. A split with no viewports
 gives the room left to its children without a limit, by their shares. The user can still drag a divider
-past a limit; switching back to the workspace or *Reset* applies it again. A limit on a split nested in
+past a limit; choosing the workspace again applies it again. A limit on a split nested in
 one of the same direction is lost when the two are merged (§3.4).
 
 **Panel entry**:
@@ -483,7 +485,6 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
   ─────────────
   Fit All Views                 Shift+F
   ─────────────
-  Reset "Look Dev"                       re-applies the definition (phase 4)
   Reset to "Shipped with usdcc"          only on one that shadows another
   Save Current Layout as Workspace...
   ─────────────
@@ -517,10 +518,10 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 - **At start** the saved dock layout is restored as today, and the button shows `Workspaces/current`. On a
   profile with no saved layout (the first start), **Layout** is applied once the window has settled
   (`MainWindow::layoutSettled()`), instead of today's three tabs.
-- **How each was left** (`Workspaces/arranged/<id>`) holds its layout and its side panels (each one's state,
-  edge and size), captured on leaving it, on quitting, and before choosing it again. Coming back lays out
-  that, with the file's limits (§3.3) on the areas holding the same panels, and the file's `fitOnSwitch`.
-  One kept by the first version, without side panels, gets the file's.
+- **How each was left is not kept.** Choosing a workspace, the active one too, lays it out as its file
+  says: it's how the window's layout is put back after panels were moved, opened or closed. To keep a
+  layout, *Save Current Layout as Workspace...*. The `Workspaces/arranged/<id>` keys an earlier version
+  wrote are removed at start.
 - **Sessions** store the active workspace's id in `layout` (`"workspace": "lookdev"`). Loading one
   restores its exact layout, as now, and sets the button. The session format's `version` doesn't change:
   older apps ignore the key.
@@ -692,7 +693,7 @@ usdcc.app.fit_all_views(selection=True)   # Fit All Views; selection=False fits 
 | 2 | Switching (§7.1, §7.2, §7.3), the title bar button and menu (§6.1, §6.2 without Reset and Save), `Workspaces/current`, the first-start default, Python's `workspaces`/`current_workspace`/`set_workspace`/`reload_workspaces` | Two stages open, switch to Look Dev: Outliner, two viewports tabbed with the current stage's in front, Material Editor below, Attributes and Layers right, every other panel closed; the same panels reused when switching back, cameras kept; a third stage opened afterwards lands in the viewport area. Checked in the app: the button's accent color, its clicks not dragging the window, viewports drawing after a switch |
 | 2b | Viewport views (§3.5): orthographic projection, the view presets, fitting, following the current stage, `camera` in workspace files, Fit All Views and `fitOnSwitch` (§3.5.7), the Four View and Side by Side workspaces | Unit tests: each view's yaw and pitch, orthographic framing of a box. Four View on a Y-up and a Z-up stage: Top looks down at the ground in both; the three axis views follow when another stage's tab is clicked; picking and the move gizmo work in Top. Checked in the app: no tumbling in an orthographic view; the triad switches it |
 | 3 | Open Stage with Options (§8). Independent of 1 and 2 except the Workspace list, which can come with phase 2 | With Load payloads off a payloaded prim is unloaded and Load Payload loads it; Make current off leaves the current stage and the Outliner's stage alone |
-| 4 | Save Current Layout as Workspace (`workspace_capture`), Reset to source, per-workspace tweaks remembered with Reset (§11 #2), a shortcut setting per workspace (`Shortcuts/workspace.<id>`, empty), plugins' `workspaces/` folders, sessions storing the workspace | Saving and applying a layout gives the same tree, sizes within a few pixels |
+| 4 | Save Current Layout as Workspace (`workspace_capture`), Reset to source, a shortcut setting per workspace (`Shortcuts/workspace.<id>`, empty), plugins' `workspaces/` folders, sessions storing the workspace | Saving and applying a layout gives the same tree, sizes within a few pixels |
 
 Phases 1 and 3 can be done at the same time; 2 needs 1; 4 needs 2. Phase 2b's viewport half
 (orthographic, presets, following) needs nothing else and can start with phase 1; reading `camera` from a
@@ -705,7 +706,7 @@ All four phases and 2b, on 2026-11-15.
 - **Code**:
   - `usdcc_ui`: `workspace.h` (the format, its rules, `pruned()`), `WorkspaceLibrary` (folders, precedence,
     groups, save, remove), `workspace_applier.h` (`apply()`, `capture()`, `viewportArea()`) and
-    `WorkspaceController` (the active workspace, how each was left, the title bar button and its menu, a
+    `WorkspaceController` (the active workspace, the title bar button and its menu, a
     shortcut setting per workspace). `ViewPanel` follows the current stage and has the workspace hooks
     (`canClose()`, `applyWorkspaceCamera()`, `workspaceView()`, `workspaceCamera()`, `fitView()`).
     `ViewPanelRegistry::create()`; `TitleBar::addTrailingWidget()`, `MainWindow::addTitleBarWidget()` and
@@ -768,9 +769,9 @@ All four phases and 2b, on 2026-11-15.
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | Duplicate viewports of one stage on switching: close all but one, or keep them as extra tabs? | **Close** (§7.1): "one viewport per stage" stays true, and the area doesn't fill with copies |
-| 2 | Coming back to a workspace: its definition again, or how it was left (Maya, Blender)? | **How it was left**, from phase 4: the arrangement is captured when leaving (into `Workspaces/arranged/<id>`, UI state) and *Reset "<name>"* goes back to the file. Until then, the definition every time |
+| 2 | Coming back to a workspace: its definition again, or how it was left (Maya, Blender)? | **Its definition, every time** (changed 2026-11-16). Phase 4 remembered how each was left, with a *Reset "<name>"*; a panel opened once then came back with the workspace, which no longer matched its file. Choosing a workspace is how the layout is reset; one worth keeping is saved as a workspace |
 | 3 | Do panels the workspace places switch to the current stage? | **Yes** (§7.1 step 4): a switch then always gives a predictable result. A panel on another stage is one dropdown away |
-| 4 | Do workspaces control side panels? | **Yes**, since 2026-11-16: a workspace has the side panels it names (`sidePanels`, with their edge and size) and hides the others; how it was left keeps them. The first version left unnamed ones alone |
+| 4 | Do workspaces control side panels? | **Yes**, since 2026-11-16: a workspace has the side panels it names (`sidePanels`, with their edge and size) and hides the others. The first version left unnamed ones alone |
 | 5 | Does the Open Stage with Options dialog remember its last choices? | **No**, as asked: the defaults each time. Easy to change later |
 | 6 | A four-view's dividers: two rows that split on their own, or one cross that moves all four? | **Two rows** (§3.5.6), as ADS does it. A linked cross would need a splitter of our own inside one dock widget, i.e. one "Four View" panel holding four viewports, which then can't be rearranged by docking |
 | 10 | May orthographic views tumble? | **No** (§3.5.3), as Maya by default; a setting could allow it later, turning the view into a perspective one as it starts to turn |

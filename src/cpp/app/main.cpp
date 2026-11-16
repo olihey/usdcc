@@ -1105,9 +1105,7 @@ int main(int argc, char** argv) {
         if (!positional.isEmpty()) stageManager.openStage(positional.front().toStdString());
     }
     // The Last session, as the window closes and while it's still on screen (§4.5).
-    QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions, &workspaces]() {
-        // How the workspace was left, for coming back to it (docs/WORKSPACES.md §11 #2).
-        workspaces.rememberArrangement();
+    QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions]() {
         QString error;
         if (!sessions.save(QLatin1String(usdcc::ui::session::kLastSessionName), sessions.takePreview(), false, &error)) {
             USDCC_LOG_WARNING("usdcc.session", "Couldn't save the Last session: {}", error.toStdString());

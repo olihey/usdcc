@@ -20,16 +20,16 @@ namespace usdcc::ui {
 class WorkspaceLibrary;
 
 // The active workspace (docs/WORKSPACES.md §6, §7): switches between the
-// library's workspaces, remembers how each was left, saves the window's layout
-// as a new one, and drives the title bar's workspace button and its menu.
+// library's workspaces, always laying one out as its file says, saves the window's
+// layout as a new one, and drives the title bar's workspace button and its menu.
 class USDCC_UI_API WorkspaceController : public QObject {
     Q_OBJECT
 
 public:
-    // UI state in usdcc.ini: the active workspace's id, and how each was left
-    // (Workspaces/arranged/<id>, a workspace's JSON).
+    // UI state in usdcc.ini: the active workspace's id.
     static constexpr const char* kCurrentKey = "Workspaces/current";
-    static constexpr const char* kArrangedGroup = "Workspaces/arranged";
+    // How each workspace was left, which an earlier version kept; removed at start.
+    static constexpr const char* kObsoleteArrangedGroup = "Workspaces/arranged";
     // The workspace the first start gets, and the button shows before any is chosen.
     static constexpr const char* kDefaultId = "layout";
 
@@ -45,12 +45,10 @@ public:
     // The name the button shows.
     QString currentName() const;
 
-    // Switches to `id` (§7.1): how it was left, if it was, else its file. Saves how
-    // the workspace being left looked first. False with `error` if there's no such
+    // Switches to `id` (§7.1), laid out as its file says, the active one too: changes
+    // made to the window since aren't kept. False with `error` if there's no such
     // workspace or a panel refused to close.
     bool switchTo(const QString& id, QString* error = nullptr);
-    // Lays the active workspace out from its file again, forgetting how it was left.
-    bool reset(QString* error = nullptr);
     // Removes your copy of `id` (one shadowing another's), and lays out the one it hid.
     bool resetToShadowed(const QString& id, QString* error = nullptr);
     // Saves the window's layout as a workspace called `name` in your folder, and makes
@@ -59,10 +57,6 @@ public:
     // Marks `id` as the active workspace without laying anything out: a session or
     // a saved layout has put the panels where they are already.
     void setCurrentId(const QString& id);
-    // Remembers how the active workspace looks now (on quitting, and before leaving it).
-    // Not before one was chosen: the layout a first start or an older version left
-    // isn't how any workspace was left.
-    void rememberArrangement();
     // Whether the active workspace was chosen (here or in an earlier run), rather than
     // being kDefaultId for lack of one.
     bool isChosen() const { return m_chosen; }
