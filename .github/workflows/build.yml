@@ -39,6 +39,12 @@ jobs:
         with:
           submodules: recursive
 
+      # actions/checkout clones submodules at depth 1. A manifest's "overrides"
+      # (the Blender mesh backend pins eigen3 3.4.0) make vcpkg read that port's
+      # tree from older history, which a shallow clone lacks (docs/CI.md §4).
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
       - name: Name the OpenUSD asset
         id: asset
         run: python tools/ci/usd_asset.py --github-output
@@ -196,6 +202,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # See the Windows job: vcpkg's overrides need its full history.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
       # Qt's sources and build in vcpkg's buildtrees need the room.
       - name: Free disk space

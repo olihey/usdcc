@@ -147,7 +147,12 @@ the whole job 2 h 3 min, inside the 6-hour job limit. The runner started with 79
 
 Runs on pushes to `master` and on pull requests.
 
-1. Check out usdcc with submodules (`external/vcpkg`, `external/qwindowkit`).
+1. Check out usdcc with submodules (`external/vcpkg`, `external/qwindowkit`), then
+   fetch the vcpkg submodule's full history. `actions/checkout` clones submodules at
+   depth 1, which is enough for ports at the baseline, but a manifest's `overrides`
+   make vcpkg check out the port's tree from an older commit (the Blender mesh
+   backend's `vcpkg.json` pins `eigen3` 3.4.0). With a shallow clone that fails with
+   `read-tree <tree> failed` / `failed to unpack tree object`.
 2. Set up the same Python as `deps-usd.yml`.
 3. Work out the asset name from `deps/usd.json` (the same script as in §3), download it
    with `gh release download`, and unzip it to `C:\deps\usd`. If it's missing, fail with
