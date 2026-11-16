@@ -944,14 +944,14 @@ USDCC_TEST(material_editor_preview_shows_the_material) {
     preview->setPaused(true);
     CHECK(preview->viewport()->isPaused(), "pausing stops the viewport");
     preview->setShapeName("Cube");
-    preview->setHdriName("Sky");
+    preview->setHdriName("venice_sunrise_1k");
     preview->setHdriRotation(45);
     f.panel->setParametersShown(false);
     const QJsonObject state = f.panel->saveSessionState();
     MaterialEditorViewPanel restored(&f.stages, f.stage, f.undo, "Material Editor");
     restored.restoreSessionState(state);
     CHECK(restored.preview()->isPaused() && restored.preview()->viewport()->isPaused(), "paused again");
-    CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "Sky", "the same shape and light");
+    CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "venice_sunrise_1k", "the same shape and light");
     CHECK(restored.preview()->hdriRotation() == 45, "turned the same");
     CHECK(!restored.areParametersShown() && restored.isPreviewShown(), "the same parts shown");
 }
@@ -1027,7 +1027,7 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
         const auto menu = menuOf();
         QAction* node = find(menu.get(), "Selected Node");
         CHECK(find(menu.get(), "Material") && find(menu.get(), "Material")->isChecked() && node, "what's shown");
-        CHECK(find(menu.get(), "Shape: Shader Ball") && find(menu.get(), "Light: Studio"), "the shape and the light, as submenus");
+        CHECK(find(menu.get(), "Shape: Shader Ball") && find(menu.get(), "Light: studio_wizja_02_1k"), "the shape and the light, as submenus");
         CHECK(!menu->findChild<QAction*>("previewResetView"), "no Reset View: the Shader Ball has no camera");
         CHECK(!menu->findChild<QAction*>("previewSceneLights"), "nor Use scene lights: it has no lights");
         node->trigger();
@@ -1053,7 +1053,7 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
         QMouseEvent release(QEvent::MouseButtonRelease, at, preview->viewport()->mapToGlobal(at), Qt::RightButton, Qt::NoButton,
                             Qt::NoModifier);
         QCoreApplication::sendEvent(preview->viewport(), &release);
-        CHECK(seen.contains("Selected Node") && seen.contains("Shape: Shader Ball") && seen.contains("Light: Studio"),
+        CHECK(seen.contains("Selected Node") && seen.contains("Shape: Shader Ball") && seen.contains("Light: studio_wizja_02_1k"),
               "a right-click on the preview opens its menu: %s", qPrintable(seen.join(", ")));
     }
 

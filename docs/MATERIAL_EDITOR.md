@@ -618,10 +618,10 @@ Rejected:
 
 ### 7.4 HDRIs
 
-- **Folders:** `resources/preview/hdri/` ships Studio, Sky and Neutral, 512×256 `.hdr` maps that
-  `tools/gen_preview_assets.py` draws (soft boxes, a sky with a sun, an even grey), so they carry no
-  licence of their own and cost 1.5 MB. A Poly Haven map, or any `.hdr` or `.exr`, can go in a folder of
-  `Materials/previewHdriPaths` (`FolderList`). The script makes the shapes too.
+- **Folders:** `resources/preview/hdri/` ships fourteen 1k (1024×512) `.hdr` maps from Poly Haven (CC0):
+  studios, interiors and outdoor scenes, about 22 MB. A map is named by its file, so a new preview starts
+  with `studio_wizja_02_1k` (`kDefaultPreviewHdri`). Any other `.hdr` or `.exr` can go in a folder of
+  `Materials/previewHdriPaths` (`FolderList`). `tools/gen_preview_assets.py` makes the shapes only.
 - **Lighting:** a `DomeLight` at `/__usdccPreview/Env` with the chosen file, its rotation and its exposure.
   With no HDRI ("None"), a grey dome and a `DistantLight` key from above and in front.
 - **Background:** the HDRI, or the panel's colour: Show as Background, the `domeLightCameraVisibility`

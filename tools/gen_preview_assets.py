@@ -1,15 +1,13 @@
-"""Generates the shapes and HDRIs the Material Editor's preview ships with
-(docs/MATERIAL_EDITOR.md §7.3, §7.4), into resources/preview.
+"""Generates the shapes the Material Editor's preview ships with
+(docs/MATERIAL_EDITOR.md §7.3), into resources/preview/shapes.
 
 Made here rather than downloaded, so they carry no licence of their own and stay
-small. Any .hdr or .exr (Poly Haven's, say) can be added to a folder in
-Settings > Materials > Preview.
+small. The HDRIs aren't made here any more: resources/preview/hdri holds Poly
+Haven maps (§7.4).
 
 A shape is a .usda whose defaultPrim holds its geometry, Y-up, in metres, with
 UVs (primvars:st). When only some of it should show the material, the default
 prim has a collection:preview listing those prims; the rest keep their own.
-
-An HDRI is a latitude-longitude Radiance .hdr: the top row looks straight up.
 
 Standard library only. Run from the repo root:
     python tools/gen_preview_assets.py
@@ -250,90 +248,8 @@ def make_shapes():
                comment="Cloth over a ball, to see how a material folds: the cloth shows it.")
 
 
-# --- HDRIs -------------------------------------------------------------------
-
-def direction(u, v):
-    """The direction a latitude-longitude pixel looks: v = 1 straight up."""
-    phi = 2.0 * math.pi * u
-    theta = math.pi * (1.0 - v)
-    return (math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
-
-
-def soft_spot(d, towards, size, power):
-    """A soft-edged light: brightest towards `towards`, gone `size` radians away."""
-    t = normalize(towards)
-    cos = sum(d[i] * t[i] for i in range(3))
-    angle = math.acos(max(-1.0, min(1.0, cos)))
-    if angle > size:
-        return 0.0
-    edge = angle / size
-    return power * (1.0 - edge * edge * edge * edge)
-
-
-def mix(a, b, t):
-    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
-
-
-def studio(d):
-    up = d[1]
-    base = mix((0.035, 0.035, 0.038), (0.11, 0.11, 0.115), max(0.0, min(1.0, 0.5 + 0.5 * up)))
-    light = (soft_spot(d, (-0.7, 0.55, 0.6), 0.42, 9.0) +       # key, front left
-             soft_spot(d, (0.8, 0.35, 0.35), 0.38, 3.0) +        # fill, right
-             soft_spot(d, (0.2, 0.6, -0.9), 0.3, 5.0) +          # rim, behind
-             soft_spot(d, (0.0, 1.0, 0.0), 0.5, 2.0))            # top
-    return tuple(base[i] + light for i in range(3))
-
-
-def sky(d):
-    up = d[1]
-    sun = normalize((0.45, 0.6, 0.55))
-    if up >= 0:
-        horizon = (0.85, 0.9, 1.0)
-        zenith = (0.22, 0.42, 0.85)
-        colour = mix(horizon, zenith, math.pow(up, 0.45))
-        colour = tuple(c * 1.3 for c in colour)
-    else:
-        colour = mix((0.32, 0.29, 0.25), (0.12, 0.11, 0.1), min(1.0, -up * 3.0))
-    cos = sum(d[i] * sun[i] for i in range(3))
-    glow = 6.0 * math.pow(max(cos, 0.0), 64.0)
-    disc = 3000.0 if cos > math.cos(math.radians(1.2)) else 0.0
-    return tuple(colour[i] + glow * (1.0, 0.92, 0.8)[i] + disc * (1.0, 0.95, 0.85)[i] for i in range(3))
-
-
-def neutral(d):
-    up = d[1]
-    level = 0.42 + 0.28 * up
-    return (level, level, level * 1.02)
-
-
-def write_hdr(name, sample, width=512, height=256):
-    rows = []
-    for y in range(height):
-        v = 1.0 - (y + 0.5) / height  # the first row is the top
-        row = bytearray()
-        for x in range(width):
-            u = (x + 0.5) / width
-            r, g, b = sample(direction(u, v))
-            m = max(r, g, b)
-            if m < 1e-32:
-                row += bytes((0, 0, 0, 0))
-                continue
-            mantissa, exponent = math.frexp(m)
-            scale = mantissa * 256.0 / m
-            row += bytes((int(r * scale), int(g * scale), int(b * scale), exponent + 128))
-        rows.append(bytes(row))
-    header = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\nSOFTWARE=usdcc tools/gen_preview_assets.py\n\n-Y %d +X %d\n" % (height, width)
-    path = OUT_DIR / "hdri" / (name + ".hdr")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(header + b"".join(rows))
-    print("wrote", path.relative_to(OUT_DIR.parent.parent), "%d KB" % (path.stat().st_size // 1024))
-
-
 def main():
     make_shapes()
-    write_hdr("Studio", studio)
-    write_hdr("Sky", sky)
-    write_hdr("Neutral", neutral)
 
 
 if __name__ == "__main__":

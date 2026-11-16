@@ -198,7 +198,7 @@ had nothing to show them), and Embree.
 3. **Per viewport or per stage?** Taken: **per viewport**, so one panel can show proxies and
    another render geometry of the same stage.
 4. **The default dome light's texture.** Taken: **Hydra's packaged one**, as usdview. The
-   Material Editor preview's HDRIs (Neutral, Sky, Studio) would be the next step if it's wanted.
+   Material Editor preview's HDRIs (`resources/preview/hdri`) would be the next step if it's wanted.
 
 ## 7. Renderer settings
 

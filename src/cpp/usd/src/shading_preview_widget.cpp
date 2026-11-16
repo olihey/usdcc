@@ -129,7 +129,7 @@ void defineMaterialPreviewSettings() {
         .label = "HDRI for new previews",
         .description = "The name of the HDRI a new preview starts with; empty for a plain grey dome.",
         .type = SettingType::String,
-        .defaultValue = std::string("Studio"),
+        .defaultValue = std::string(kDefaultPreviewHdri),
     });
 }
 
@@ -156,7 +156,7 @@ QStringList previewHdriFolders() {
 
 ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     m_shapeName = settingText(kPreviewShapeKey, "Shader Ball");
-    m_hdriName = settingText(kPreviewHdriKey, "Studio");
+    m_hdriName = settingText(kPreviewHdriKey, kDefaultPreviewHdri);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
