@@ -17,6 +17,7 @@ public:
     QString error() const override { return view->error(); }
     std::shared_ptr<GpuBridge> bridge() const override { return view->bridge(); }
     void setFrame(std::shared_ptr<GpuFrame> frame) override { view->setFrame(std::move(frame)); }
+    void setLut(const usdcc::usd::DisplayLut& lut) override { view->setLut(lut); }
     std::shared_ptr<GpuFrame> currentFrame() const override { return view->currentFrame(); }
     void clear() override { view->clear(); }
     void releaseResources() override { view->releaseResources(); }

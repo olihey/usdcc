@@ -4,11 +4,15 @@
 
 #include "usdcc/core/settings.h"
 #include "usdcc/usd/color_management.h"
+#include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_render_params.h"
 
 #include <pxr/base/arch/env.h>
 #include <pxr/imaging/hdx/tokens.h>
+#include <pxr/usd/sdf/types.h>
+#include <pxr/usd/usd/colorSpaceAPI.h>
+#include <pxr/usd/usd/stage.h>
 
 #include <algorithm>
 #include <cmath>
@@ -184,4 +188,94 @@ USDCC_TEST(color_management_opaque_clear) {
         CHECK(std::abs(shown[0] * 255.0f - 28.0f) < 0.6f && std::abs(shown[2] * 255.0f - 30.0f) < 0.6f,
               "%s shows the clear color as the background: %f %f", view, shown[0] * 255.0f, shown[2] * 255.0f);
     }
+}
+
+USDCC_TEST(color_management_pickers) {
+    usdcc::core::Settings settings;
+    ColorManagement color;
+    const std::array<float, 3> grey{0.2f, 0.2f, 0.2f};
+    // No config: the sRGB transfer, both ways.
+    CHECK(closeTo(color.toPicker(grey, settings)[0], 0.4845f), "sRGB encode without a config");
+    CHECK(closeTo(color.fromPicker({0.4845f, 0.4845f, 0.4845f}, settings)[1], 0.2f), "and back");
+    if (!color.load(kDefaultColorConfig)) {
+        CHECK(false, "the built-in config loads: %s", color.error().c_str());
+        return;
+    }
+    CHECK(color.pickingSpace() == "sRGB - Texture", "the CG config's color_picking role: %s", color.pickingSpace().c_str());
+    CHECK(closeTo(color.toPicker(grey, settings)[0], 0.4845f), "through the color picking space");
+    const auto back = color.fromPicker(color.toPicker({0.7f, 0.05f, 0.3f}, settings), settings);
+    CHECK(closeTo(back[0], 0.7f) && closeTo(back[1], 0.05f) && closeTo(back[2], 0.3f), "a round trip");
+    // Through the view: ACES rolls 1.0 off, and picking back undoes it.
+    settings.define({.key = kColorPickerSpaceKey, .category = kColorCategory, .type = usdcc::core::SettingType::Choice,
+                     .defaultValue = std::string(kPickerSpaceColorPicking),
+                     .choices = {kPickerSpaceColorPicking, kPickerSpaceView}});
+    settings.define({.key = kColorViewKey, .category = kColorCategory, .type = usdcc::core::SettingType::String,
+                     .defaultValue = std::string("ACES 1.0 - SDR Video")});
+    settings.setValue(kColorPickerSpaceKey, std::string(kPickerSpaceView));
+    const auto viewed = color.toPicker({1.0f, 1.0f, 1.0f}, settings);
+    CHECK(viewed[0] < 0.95f, "through the ACES view white is below 1: %f", viewed[0]);
+    CHECK(closeTo(color.fromPicker(viewed, settings)[0], 1.0f), "and comes back as 1: %f", color.fromPicker(viewed, settings)[0]);
+}
+
+USDCC_TEST(color_management_usd_color_spaces) {
+    const std::array<float, 3> encoded{0.4845f, 0.4845f, 0.4845f};
+    const auto linear = ColorManagement::usdToWorking(encoded, "srgb_rec709_scene");
+    CHECK(closeTo(linear[0], 0.2f), "sRGB-encoded Rec.709 is decoded: %f", linear[0]);
+    CHECK(closeTo(ColorManagement::workingToUsd(linear, "srgb_rec709_scene")[0], 0.4845f), "and encoded again");
+    const auto red = ColorManagement::usdToWorking({1.0f, 0.0f, 0.0f}, "lin_ap1_scene");
+    CHECK(red[0] > 1.6f && red[1] < 0.0f, "ACEScg red is outside Rec.709: %f %f %f", red[0], red[1], red[2]);
+    const auto white = ColorManagement::usdToWorking({1.0f, 1.0f, 1.0f}, "lin_ap1_scene");
+    CHECK(std::abs(white[0] - 1.0f) < 0.01f && std::abs(white[2] - 1.0f) < 0.01f, "white stays white: %f %f", white[0], white[2]);
+    const auto back = ColorManagement::workingToUsd(red, "lin_ap1_scene");
+    CHECK(std::abs(back[0] - 1.0f) < 1e-3f && std::abs(back[1]) < 1e-3f, "a round trip: %f %f", back[0], back[1]);
+    const std::array<float, 3> data{0.3f, 2.0f, -1.0f};
+    for (const char* asIs : {"", "data", "raw", "identity", "unknown", "lin_rec709_scene", "no_such_space"}) {
+        CHECK(ColorManagement::usdToWorking(data, asIs) == data, "%s stays as it is", asIs);
+    }
+
+    // The attribute editor takes the space from UsdColorSpaceAPI, inherited down the namespace.
+    auto stage = PXR_NS::UsdStage::CreateInMemory();
+    auto root = stage->DefinePrim(PXR_NS::SdfPath("/Root"));
+    PXR_NS::UsdColorSpaceAPI::Apply(root).CreateColorSpaceNameAttr().Set(PXR_NS::TfToken("lin_ap1_scene"));
+    auto sphere = stage->DefinePrim(PXR_NS::SdfPath("/Root/Ball"), PXR_NS::TfToken("Sphere"));
+    auto colorAttr = sphere.CreateAttribute(PXR_NS::TfToken("primvars:displayColor"), PXR_NS::SdfValueTypeNames->Color3f);
+    auto other = sphere.CreateAttribute(PXR_NS::TfToken("radius2"), PXR_NS::SdfValueTypeNames->Double);
+    CHECK(usdcc::usd::properties::EditorHints::forAttribute(colorAttr).colorSpace == PXR_NS::TfToken("lin_ap1_scene"),
+          "a color attribute's hint has its prim's color space");
+    CHECK(usdcc::usd::properties::EditorHints::forAttribute(other).colorSpace.IsEmpty(), "a number's has none");
+}
+
+USDCC_TEST(color_management_images) {
+    usdcc::core::Settings settings;
+    ColorManagement color;
+    std::vector<float> pixels{0.2f, 0.2f, 0.2f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f};
+    std::vector<float> image = pixels;
+    color.imageTransform({}, settings)->apply(image.data(), 2);
+    CHECK(closeTo(image[0], 0.4845f) && image[3] == 0.5f, "no config: the sRGB encode, alpha kept: %f", image[0]);
+    image = pixels;
+    color.imageTransform(kRawView, settings)->apply(image.data(), 2);
+    CHECK(image == pixels, "Raw leaves them");
+    if (!color.load(kDefaultColorConfig)) {
+        CHECK(false, "the built-in config loads: %s", color.error().c_str());
+        return;
+    }
+    image = pixels;
+    color.imageTransform({}, settings)->apply(image.data(), 2);
+    CHECK(closeTo(image[0], 0.4845f) && closeTo(image[4], 1.0f) && image[3] == 0.5f && image[7] == 1.0f,
+          "Un-tone-mapped through OCIO: %f %f", image[0], image[4]);
+    image = pixels;
+    color.imageTransform("ACES 1.0 - SDR Video", settings)->apply(image.data(), 2);
+    CHECK(image[4] < 0.95f, "an override's view: ACES rolls red off: %f", image[4]);
+
+    // The LUT: 0.18 sits on a lattice point when the stops divide evenly.
+    const int size = 21;  // a point every stop, from -12 to +8
+    const DisplayLut lut = color.bakeLut(size, {}, settings);
+    CHECK(lut.size == size && lut.rgba.size() == size_t(size) * size * size * 4, "size³ RGBA texels");
+    const size_t grey = (static_cast<size_t>(12) * size * size + 12 * size + 12) * 4;
+    const float expected = color.toDisplay({0.18f, 0.18f, 0.18f}, color.displayView({}, settings))[0];
+    CHECK(closeTo(lut.rgba[grey], expected) && closeTo(lut.rgba[grey + 2], expected) && lut.rgba[grey + 3] == 1.0f,
+          "middle grey's texel is its transform: %f vs %f", lut.rgba[grey], expected);
+    const size_t redCorner = static_cast<size_t>(size - 1) * 4;  // r at the top, g and b at the bottom
+    CHECK(lut.rgba[redCorner] > lut.rgba[redCorner + 1], "red fastest");
+    CHECK(color.bakeLut(1, {}, settings).size == 0, "too small: none");
 }

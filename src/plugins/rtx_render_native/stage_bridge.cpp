@@ -45,7 +45,7 @@ Camera cameraValues(const usdcc::usd::RenderCamera& input) {
     return result;
 }
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
-                                       QSize size, Mode mode, LightMatch light) {
+                                       QSize size, Mode mode, LightMatch light, bool rtxTonemap) {
     using namespace PXR_NS;
     if (!source) throw std::runtime_error("No stage to render");
     auto result = std::make_shared<Snapshot>();
@@ -87,8 +87,11 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     product.CreateAttribute(TfToken("omni:rtx:rendermode"), SdfValueTypeNames->Token, false).Set(TfToken(token));
     if (mode == Mode::PathTracing)
         product.CreateAttribute(TfToken("omni:rtx:pt:samplesPerPixel"), SdfValueTypeNames->UInt, false).Set(1u);
-    auto var = stage->DefinePrim(product.GetPath().AppendChild(TfToken("LdrColor")), TfToken("RenderVar"));
-    var.CreateAttribute(TfToken("sourceName"), SdfValueTypeNames->String, false).Set(std::string("LdrColor"));
+    // HdrColor: linear, for usdcc's view transform. LdrColor: ovrtx's own tonemap.
+    result->colorVar = rtxTonemap ? QStringLiteral("LdrColor") : QStringLiteral("HdrColor");
+    const std::string varName = result->colorVar.toStdString();
+    auto var = stage->DefinePrim(product.GetPath().AppendChild(TfToken(varName)), TfToken("RenderVar"));
+    var.CreateAttribute(TfToken("sourceName"), SdfValueTypeNames->String, false).Set(varName);
     product.CreateRelationship(TfToken("orderedVars"), false).SetTargets({var.GetPath()});
     result->product = QString::fromStdString(product.GetPath().GetString());
     result->camera = QString::fromStdString(privateCamera.GetPath().GetString());

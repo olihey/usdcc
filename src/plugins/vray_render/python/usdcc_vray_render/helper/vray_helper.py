@@ -12,6 +12,7 @@ needs no App SDK or license.
 """
 
 import os
+import struct
 import sys
 import threading
 import time
@@ -41,9 +42,9 @@ class Writer:
     def event(self, name, **fields):
         self._write(protocol.event(name, **fields))
 
-    def image(self, width, height, pixels, change):
+    def image(self, width, height, pixels, change, format="rgba32f"):
         with self._image_ready:
-            self._image = (width, height, pixels, change)
+            self._image = (width, height, pixels, change, format)
             self._image_ready.notify()
 
     def log(self, level, message):
@@ -70,9 +71,9 @@ class Writer:
                     self._image_ready.wait()
                 if self._closed:
                     return
-                width, height, pixels, change = self._image
+                width, height, pixels, change, format = self._image
                 self._image = None
-            self._write(protocol.event("image", pixels, w=width, h=height, change=change))
+            self._write(protocol.event("image", pixels, w=width, h=height, change=change, format=format))
 
 
 class VRayBackend:
@@ -216,7 +217,9 @@ class VRayBackend:
     def _on_image(self, renderer, image, change, render_pass, instant):
         if render_pass != self.vray.RENDER_PASS_FINAL:
             return  # light cache passes are a preview of the lighting, not the image
-        pixels = bytes(image.toBitmapData(True, True, False))  # RGBA, top row first
+        # Linear float RGBA, top row first, with no sRGB or gamma: usdcc applies the
+        # view transform (docs/COLOR_MANAGEMENT.md section 6).
+        pixels = bytes(memoryview(image.toIntList("rgba32")))
         self.writer.image(image.width, image.height, pixels, change)
 
 
@@ -287,7 +290,10 @@ class FakeBackend:
         for sample in range(1, 4):
             if stop.wait(0.03):
                 return
-            rows = [bytes((tint, (y * 255) // max(1, height - 1), (sample * 80) % 256, 255)) * width for y in range(height)]
+            rows = [
+                struct.pack("<4f", tint / 255.0, y / max(1, height - 1), ((sample * 80) % 256) / 255.0, 1.0) * width
+                for y in range(height)
+            ]
             self.writer.image(width, height, b"".join(rows), change)
         self.writer.event("state", state="done")
 

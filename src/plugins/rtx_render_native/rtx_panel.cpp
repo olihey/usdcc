@@ -99,6 +99,9 @@ public:
             m_lastFrame = m_window->currentFrame();
             setProperty("nativeRtxImageSize", size);
         };
+        // The view transform for HdrColor: the panel's view or Settings', as a LUT.
+        connect(this, &RenderViewPanel::colorTransformChanged, this, [this] { sendLut(); });
+        sendLut();
         m_poll.setInterval(30);
         connect(&m_poll, &QTimer::timeout, this, [this] { poll(); });
         setProperty("nativeRtxImageSize", QSize());
@@ -127,6 +130,8 @@ public:
     usdcc::ui::ViewPanel* duplicate(QWidget* parent) const override {
         auto* panel = new RtxRenderPanel(m_host, currentStage(), windowTitle(), parent, m_engineFactory, m_presentationFactory);
         panel->m_mode->setCurrentIndex(m_mode->currentIndex());
+        panel->m_tonemap = m_tonemap;
+        panel->setColorView(colorView());
         if (usesLocalCamera()) { panel->m_navigation = m_navigation; panel->publishNavigation(); }
         else {
             auto* from = findChild<QComboBox*>("renderCamera");
@@ -148,6 +153,18 @@ protected:
             group->addAction(action);
             connect(action, &QAction::triggered, m_mode, [this, i] { m_mode->setCurrentIndex(i); });
         }
+        QAction* tonemap = menu->addAction("RTX Tonemap");
+        tonemap->setObjectName("nativeRtxTonemap");
+        tonemap->setCheckable(true);
+        tonemap->setChecked(m_tonemap);
+        tonemap->setToolTip("Show ovrtx's own tonemapped image (LdrColor), as Omniverse does, instead of the "
+                            "linear one through usdcc's view transform");
+        connect(tonemap, &QAction::toggled, this, [this](bool on) {
+            if (on == m_tonemap) return;
+            m_tonemap = on;
+            notifyOptionsChanged();
+            reload();
+        });
         QAction* fit = menu->addAction("Fit to View", this, [this] { frameScene(); });
         fit->setToolTip("Frame the whole scene in this RTX camera (F over the image)");
         QAction* reset = menu->addAction("Reset Camera", this, [this] { m_navigation.reset(); publishNavigation(); });
@@ -197,7 +214,7 @@ protected:
         if (!m_engine || !currentStage()) return;
         try {
             const auto camera = currentCamera();
-            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch());
+            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch(), m_tonemap);
             m_orthographic = camera.orthographic;
             m_engine->replace(std::move(scene), budget());
             m_engine->setActive(isRendering());
@@ -264,6 +281,7 @@ protected:
     }
     void saveRenderedImage(const QString& path) override {
         if (m_engine && m_lastFrame) {
+            m_lastFrame->saveTransform = usdcc::usd::ColorManagement::instance().imageTransform(colorView());
             m_engine->save(path, m_lastFrame);
             setState("Saving Image…");
             m_poll.start();
@@ -327,6 +345,9 @@ private:
                 .multiplier = std::clamp(settings.get<double>(kLightMultiplierKey, 1.0), kMinLightMultiplier,
                                          kMaxLightMultiplier)};
     }
+    void sendLut() {
+        m_window->setLut(usdcc::usd::ColorManagement::instance().bakeLut(kRtxLutSize, colorView()));
+    }
     void fail(const QString& error) {
         m_dirty = true;
         if (m_engine) m_engine->setActive(false);
@@ -380,6 +401,7 @@ private:
     QElapsedTimer m_elapsed;
     QString m_slowPhase, m_lastStatus;
     bool m_dirty = true, m_orthographic = false;
+    bool m_tonemap = false;  // RTX Tonemap: LdrColor instead of HdrColor
     qulonglong m_frameSerial = 0;
     std::unique_ptr<Engine> m_engine;
     NavigationCamera m_navigation;

@@ -28,6 +28,12 @@ inline constexpr const char* kColorCategory = "Color Management";
 inline constexpr const char* kColorConfigKey = "Color/config";
 inline constexpr const char* kColorDisplayKey = "Color/display";
 inline constexpr const char* kColorViewKey = "Color/view";
+inline constexpr const char* kColorPickerSpaceKey = "Color/pickerSpace";
+
+// What swatches and the color picker show (docs/COLOR_MANAGEMENT.md §7): the config's
+// color picking space, which round-trips, or the view the viewport shows with.
+inline constexpr const char* kPickerSpaceColorPicking = "Color picking";
+inline constexpr const char* kPickerSpaceView = "Through the view";
 
 // OCIO 2.2's built-in CG config: ACES views and the common displays, no file to ship.
 inline constexpr const char* kDefaultColorConfig = "ocio://default";
@@ -47,6 +53,25 @@ struct DisplayView {
     std::string view;
     bool operator==(const DisplayView&) const = default;
 };
+
+// Working-space pixels to display pixels, for images that don't go through Hydra (the
+// render view panels). Made once per display and view; apply() is thread-safe.
+class ImageTransform {
+public:
+    virtual ~ImageTransform() = default;
+    // `pixels` RGBA floats, in place; alpha is left alone.
+    virtual void apply(float* rgba, size_t pixels) const = 0;
+};
+
+// A 3D LUT of the transform, for the GPU (RTX's presentation). Its input is shaped:
+// a working-space value v is looked up at (log2(v / 0.18) - kLutMinStops) /
+// (kLutMaxStops - kLutMinStops), clamped to 0-1, per channel.
+struct DisplayLut {
+    int size = 0;
+    std::vector<float> rgba;  // size³ texels, red fastest, then green, then blue
+};
+inline constexpr float kLutMinStops = -12.0f;  // 0.18 * 2^-12: black, near enough
+inline constexpr float kLutMaxStops = 8.0f;    // 0.18 * 2^8 = 46: highlights to roll off
 
 class ColorManagement {
 public:
@@ -100,6 +125,31 @@ public:
     // The reverse: the working-space color `target` shows as the display color `rgb`.
     // Exact for an un-tone-mapped view; a tone-mapped one inverts within its range.
     std::array<float, 3> fromDisplay(const std::array<float, 3>& rgb, const DisplayView& target) const;
+
+    // Images: Settings' display and view, or `viewOverride` as displayView() takes it.
+    // Raw is an identity; without a config, the sRGB encode.
+    std::shared_ptr<const ImageTransform> imageTransform(std::string_view viewOverride = {},
+                                                         const core::Settings& settings = core::Settings::instance()) const;
+    // The same as a LUT of `size`³ (docs/COLOR_MANAGEMENT.md §5).
+    DisplayLut bakeLut(int size, std::string_view viewOverride = {},
+                       const core::Settings& settings = core::Settings::instance()) const;
+
+    // The config's color_picking role's space; "" when it has none.
+    std::string pickingSpace() const;
+    // Swatches and the picker (§7): a working-space color as the picker shows it, 0-1
+    // for what a swatch can show, and back. The color picking space, else the display's
+    // default view; the view itself when the picker space setting says so. Without a
+    // config, the sRGB encode.
+    std::array<float, 3> toPicker(const std::array<float, 3>& rgb,
+                                  const core::Settings& settings = core::Settings::instance()) const;
+    std::array<float, 3> fromPicker(const std::array<float, 3>& rgb,
+                                    const core::Settings& settings = core::Settings::instance()) const;
+
+    // A color in one of OpenUSD's color spaces (UsdColorSpaceAPI, GfColorSpaceNames: "lin_ap1_scene",
+    // "srgb_rec709_scene", ...) in the working space, and back. "" and the ones that aren't
+    // colors (data, raw, identity, unknown) or aren't known stay as they are.
+    static std::array<float, 3> usdToWorking(const std::array<float, 3>& rgb, const std::string& usdColorSpace);
+    static std::array<float, 3> workingToUsd(const std::array<float, 3>& rgb, const std::string& usdColorSpace);
 
 private:
     struct Impl;

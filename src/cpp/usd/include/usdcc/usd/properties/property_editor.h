@@ -35,6 +35,10 @@ struct EditorHints {
     QString suffix;  // e.g. "°"
     // Text fields: shown while empty (e.g. "defaultPrim").
     QString placeholder;
+    // Colors: the OpenUSD color space the value is in (UsdColorSpaceAPI, e.g.
+    // "lin_ap1_scene"); empty for the working space. The swatch converts from it
+    // (docs/COLOR_MANAGEMENT.md §7).
+    PXR_NS::TfToken colorSpace;
 
     static EditorHints forAttribute(const PXR_NS::UsdAttribute& attribute);
 };

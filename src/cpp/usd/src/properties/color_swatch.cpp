@@ -32,14 +32,10 @@ void ColorSwatch::setReadOnly(bool readOnly) {
 
 QSize ColorSwatch::sizeHint() const { return usdcc::ui::scaled::size(style::kFieldHeight + 8, style::kFieldHeight); }
 
-double ColorSwatch::linearToDisplay(double linear) {
-    const double c = std::clamp(linear, 0.0, 1.0);
-    return c <= 0.0031308 ? 12.92 * c : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055;
-}
-
-double ColorSwatch::displayToLinear(double display) {
-    const double c = std::clamp(display, 0.0, 1.0);
-    return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+void ColorSwatch::setOutOfRange(bool outOfRange) {
+    if (outOfRange == m_outOfRange) return;
+    m_outOfRange = outOfRange;
+    update();
 }
 
 void ColorSwatch::paintEvent(QPaintEvent*) {
@@ -51,6 +47,19 @@ void ColorSwatch::paintEvent(QPaintEvent*) {
     QColor fill = m_color;
     fill.setAlpha(255);  // alpha is edited as a number; the chip shows the color itself
     p.fillPath(shape, m_readOnly ? fill.darker(160) : fill);
+    if (m_outOfRange) {
+        // A corner triangle, light or dark against the color: more than the chip shows.
+        const qreal size = std::min(r.width(), r.height()) * 0.45;
+        QPainterPath corner;
+        corner.moveTo(r.topRight());
+        corner.lineTo(r.topRight() - QPointF(size, 0));
+        corner.lineTo(r.topRight() + QPointF(0, size));
+        corner.closeSubpath();
+        p.save();
+        p.setClipPath(shape);
+        p.fillPath(corner, fill.lightnessF() > 0.6 ? QColor(0, 0, 0, 170) : QColor(255, 255, 255, 200));
+        p.restore();
+    }
     p.setPen(QPen(style::border(), 1.0));
     p.drawPath(shape);
 }

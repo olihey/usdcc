@@ -74,6 +74,13 @@ void bindRenderViewPanelHandle(py::module_& m) {
             },
             py::arg("address"))
         .def(
+            "show_linear_image",
+            [](const RenderViewPanelHandle& self, std::uintptr_t address) {
+                // A float QImage in the working space: the panel applies the view transform.
+                self.get().showLinearImage(*reinterpret_cast<const QImage*>(address));
+            },
+            py::arg("address"))
+        .def(
             "image_size",
             [](const RenderViewPanelHandle& self) -> py::object {
                 const QImage& image = self.get().image();
@@ -186,7 +193,9 @@ void ScriptedRenderViewPanel::rebuild(std::shared_ptr<PythonObject> pythonClass)
 }
 
 usdcc::ui::ViewPanel* ScriptedRenderViewPanel::duplicate(QWidget* parent) const {
-    return new ScriptedRenderViewPanel(stageManager(), currentStage(), windowTitle(), m_class, parent);
+    auto* copy = new ScriptedRenderViewPanel(stageManager(), currentStage(), windowTitle(), m_class, parent);
+    copy->setColorView(colorView());
+    return copy;
 }
 
 void ScriptedRenderViewPanel::populateOptionsMenu(QMenu* menu) { RenderViewPanel::populateOptionsMenu(menu); }
@@ -270,7 +279,8 @@ void ScriptedRenderViewPanel::onStageChanged(const StageRefPtr& stage) {
 }
 
 QJsonObject ScriptedRenderViewPanel::saveSessionState() const {
-    if (!m_instance) return {};
+    QJsonObject state = RenderViewPanel::saveSessionState();  // the view transform
+    if (!m_instance) return state;
     std::string text;
     {
         py::gil_scoped_acquire gil;
@@ -280,14 +290,14 @@ QJsonObject ScriptedRenderViewPanel::saveSessionState() const {
             logPythonError(error);
         }
     }
-    if (text.empty()) return {};
-    QJsonObject state;
+    if (text.empty()) return state;
     // Kept as the JSON value save_state() returned, whatever its kind.
     state.insert(QStringLiteral("python"), QJsonDocument::fromJson("[" + QByteArray::fromStdString(text) + "]").array().at(0));
     return state;
 }
 
 void ScriptedRenderViewPanel::restoreSessionState(const QJsonObject& state) {
+    RenderViewPanel::restoreSessionState(state);
     if (!m_instance || !state.contains(QStringLiteral("python"))) return;
     const QByteArray array = QJsonDocument(QJsonArray{state.value(QStringLiteral("python"))}).toJson(QJsonDocument::Compact);
     const std::string text = array.mid(1, array.size() - 2).toStdString();

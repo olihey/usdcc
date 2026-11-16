@@ -30,8 +30,12 @@ The toolbar holds icons only, each with a tooltip:
 | ▶ Render / ■ Stop | Calls the renderer's `start()` / `stop()`; the icon shows which one a click does. While `setup_problem()` gives a reason, Render shows it and stays off |
 | ⟳ Refresh | `reload()`: send the whole stage again |
 | *(the renderer's own)* | Icon buttons `create_toolbar(layout)` adds; choices belong in the options menu |
-| 💾 Save Image… | PNG, JPEG or TIFF of the image shown |
+| 💾 Save Image… | PNG, JPEG or TIFF of the image shown (display colors, through the view transform) |
 | ⚙ Settings… | The Settings dialog at the renderer's `settings_category`; hidden without one |
+
+**View Transform** in the options menu picks the panel's OCIO view, as a viewport's does:
+Default (Settings'), then the display's views. Sessions keep it (`{"colorView": name}` in the
+panel's state) and Duplicate copies it.
 
 The other controls are in the options menu (☰, which can be pinned beside the panel, where
 Camera, Resolution and a renderer's own choices are drop-downs):
@@ -144,7 +148,8 @@ Each panel makes one instance of the class, without arguments.
 
 | Call | What it does |
 |---|---|
-| `show_image(qimage)`, `image_size()` | Show an image (copied), and the size of the one shown |
+| `show_image(qimage)`, `image_size()` | Show an image (copied) as it is, display colors, and the size of the one shown |
+| `show_linear_image(qimage)` | Show a float image (`Format_RGBA32FPx4` or `RGBA16FPx4`) of working-space linear values. The panel keeps it and shows it through the view transform, its own (options menu, **View Transform**) or Settings > Color Management's, on a worker thread, and again when either changes ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §6). C++: `showLinearImage()`; `colorView()`, `setColorView()` and the `colorTransformChanged()` signal for a renderer that presents on its own (RTX) |
 | `set_state(text)`, `show_message(text)` | The status line's state; a message in place of the image |
 | `report_error(message, fatal=False)` | §1 |
 | `set_rendering(on)`, `is_rendering()` | Check or uncheck Render without calling `start()`/`stop()`, for a renderer that stopped by itself |

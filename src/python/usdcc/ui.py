@@ -223,6 +223,15 @@ class RenderViewPanel:
             raise TypeError("show_image() needs a QImage, not %s" % type(image).__name__)
         self._panel.show_image(_shiboken.getCppPointer(image)[0])
 
+    def show_linear_image(self, image):
+        """Shows a float QImage (Format_RGBA32FPx4 or RGBA16FPx4) of linear values in
+        the working space (docs/COLOR_MANAGEMENT.md §6): the panel shows it through
+        the view transform, Settings' or the panel's own (View Transform in its
+        options), and again when either changes. Copied."""
+        if not isinstance(image, _QtGui.QImage):
+            raise TypeError("show_linear_image() needs a QImage, not %s" % type(image).__name__)
+        self._panel.show_linear_image(_shiboken.getCppPointer(image)[0])
+
     def image_size(self):
         """The (width, height) of the image shown, or None."""
         return self._panel.image_size()

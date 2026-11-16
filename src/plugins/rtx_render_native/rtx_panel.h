@@ -1,6 +1,7 @@
 #pragma once
 #include "rtx_engine.h"
 #include "usdcc/plugin/plugin.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/render_view_panel.h"
 #include <QWindow>
 namespace usdcc::rtx {
@@ -13,6 +14,8 @@ public:
     virtual QString error() const = 0;
     virtual std::shared_ptr<GpuBridge> bridge() const = 0;
     virtual void setFrame(std::shared_ptr<GpuFrame>) = 0;
+    // The view transform for linear frames (docs/COLOR_MANAGEMENT.md §5).
+    virtual void setLut(const usdcc::usd::DisplayLut&) {}
     virtual std::shared_ptr<GpuFrame> currentFrame() const = 0;
     virtual void clear() = 0;
     virtual void releaseResources() = 0;
@@ -26,6 +29,8 @@ usdcc::usd::RenderViewPanel* createRtxPanel(usdcc::plugin::Host&, usdcc::usd::St
     const QString&, QWidget*, EngineFactory, PresentationFactory);
 // Settings > RTX > Lighting (docs/RTX_LIGHT_INTENSITY.md §4).
 inline constexpr const char* kMatchStormLightsKey = "RtxRender/matchStormLights";
+// The LUT the window applies a linear frame's view transform with: size³ texels.
+inline constexpr int kRtxLutSize = 65;
 inline constexpr const char* kLightMultiplierKey = "RtxRender/lightMultiplier";
 // ±10 stops; the dialog shows three decimals.
 inline constexpr double kMinLightMultiplier = 0.001;

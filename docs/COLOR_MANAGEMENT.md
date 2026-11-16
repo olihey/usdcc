@@ -5,7 +5,7 @@ the render view panels (RTX, V-Ray) and the color pickers. This plan puts one Op
 setup behind all three: a config, a working color space, and a display and view that
 every image goes through on its way to the screen.
 
-Status: phase 1 (the service and the Hydra viewport) is built; phases 2–5 are plans.
+Status: all five phases are built (2026-11-16).
 Checked on 2026-11-16 against OpenUSD 0.26.08 (`usd_typhoon`, built with `--opencolorio`),
 ovrtx 0.6.0 and the V-Ray App SDK 7. §1 describes usdcc before phase 1.
 
@@ -79,8 +79,9 @@ Qt-free (it needs the USD install, which brings OCIO):
 - OCIO's messages go to the log under `usdcc.color`.
 - Links `OpenColorIO.lib` found next to OpenUSD (`USDCC_OCIO_LIBRARY`): the same DLL Hydra
   uses. Without it, `USDCC_HAS_OCIO` is off, nothing loads, and viewports show sRGB.
-- Later phases add CPU processors for the render panels and pickers, and the LUT bake for
-  RTX (§5). Changes come through Settings' own `changed` signal; no signal of its own yet.
+- `imageTransform()` (the render panels' CPU processor), `bakeLut()` (RTX, §5),
+  `toPicker()` / `fromPicker()` and `usdToWorking()` / `workingToUsd()` (pickers, §7).
+- Changes come through Settings' own `changed` signal; no signal of its own.
 
 **The config, at startup,** before anything has used OCIO, in the same early step as
 [usd_environment.cpp](../src/cpp/usd/src/usd_environment.cpp):
@@ -106,7 +107,7 @@ A **Color Management** page (docs/SETTINGS.md §4):
 | `Color/config` | String, next start: a path or `ocio://` URI | `ocio://default` | The config, unless `$OCIO` is set. Its description says which config is in use and the working space, or why none is |
 | `Color/display` | Choice from the config | the config's default display | Defined once a config has loaded |
 | `Color/view` | Choice for that display | `Un-tone-mapped` if the display has it, else its default view | Decision 1. Its choices change with the display; a view the new display lacks gives way to its default |
-| `Color/pickerSpace` | Color picking / Through the view | Color picking | Phase 2 (§7) |
+| `Color/pickerSpace` | Choice: Color picking / Through the view | Color picking | "Swatches show": what color swatches and the picker show (§7) |
 
 No look setting (§1), and no working space setting: it stays linear Rec.709 until §8's
 other working spaces.
@@ -121,7 +122,7 @@ Each viewport can override the view from its options menu, **View Transform**: *
 checking numbers; without a config the menu offers only Default (sRGB) and Raw. The override
 is `ViewportDisplayOverrides::colorView`, saved in sessions as `"colorView"` and copied by
 Duplicate; *Use Settings Defaults* drops it. Not in the Display... dialog yet. Render view
-panels get the same menu in phases 3 and 4.
+panels have the same menu (§6), V-Ray's and RTX's alike.
 
 ## 4. The Hydra viewport
 
@@ -158,70 +159,90 @@ linear Rec.709 in phase 1 (§8).
 
 ## 5. RTX Render
 
-RTX isn't a Hydra delegate, so §4 doesn't reach it. The plugin has to apply the transform.
+RTX isn't a Hydra delegate, so §4 doesn't reach it. The plugin applies the transform itself,
+on the GPU.
 
-1. **Ask ovrtx for `HdrColor`** (linear, float16) instead of `LdrColor` in `makeSnapshot()`.
-   ovrtx's filmic tonemap is then out of the picture; RTX_LIGHT_INTENSITY.md measured that
-   its tonemap settings do nothing in 0.6 anyway.
-2. **The shared CUDA–Vulkan buffer** becomes RGBA16F (8 bytes a pixel), and the CUDA copy
-   copies twice the bytes.
-3. **Present with a shader instead of `vkCmdBlitImage`.** A small fullscreen pass (fragment
-   or compute) that samples the frame, goes through a 3D LUT with a log2 shaper, and writes
-   the swapchain image. The shader is fixed and precompiled to SPIR-V at build time (glslc
-   from the Vulkan SDK); only the LUT changes. `ColorManagement` bakes the LUT (65³) from
-   the working → display/view/look processor, and the window uploads it on `changed()`.
-4. **Save Image** reads `HdrColor` back and applies the CPU processor for PNG / JPEG / TIFF.
+1. **ovrtx renders `HdrColor`** (linear) instead of `LdrColor`: `makeSnapshot()` names the
+   RenderVar from `Snapshot::colorVar`, and the engine maps that one. ovrtx's filmic tonemap
+   is then out of the picture; RTX_LIGHT_INTENSITY.md measured that its tonemap settings do
+   nothing in 0.6 anyway.
+2. **The shared CUDA–Vulkan buffer takes what ovrtx gives:** RGBA8 (`LdrColor`), or half or
+   float RGB(A) (`HdrColor`). The CUDA copy packs it tightly; a frame slot is reused only for
+   the same size and pixel layout.
+3. **A compute pass instead of the copy into an image**
+   ([shaders/present.comp](../src/plugins/rtx_render_native/shaders/present.comp)). It
+   reads the shared buffer as a storage buffer, decodes the pixels, looks them up in a 3D
+   LUT (half RGBA, linear filtering) through a log2 shaper (`kLutMinStops`..`kLutMaxStops`
+   around 0.18), and writes an RGBA8 image at the frame's size. The window's blit then
+   scales that onto the swapchain, as before. 8-bit frames skip the LUT: they are display
+   colors already.
+4. **The shader is compiled ahead of time:** `tools/gen_rtx_shaders.py` (glslc from the
+   Vulkan SDK) writes `present_comp_spv.h`, which is checked in, so a build needs no shader
+   compiler.
+5. **The LUT** is `ColorManagement::bakeLut(65, panel's view)`: the same CPU processor as
+   the render panels, through the same shaper. The panel sends it when it's made and on
+   `colorTransformChanged()`; the window keeps it and uploads it with the next presentation,
+   and again after `releaseResources()` (Stop), before which a black placeholder stands in.
+6. **Save Image** reads the clean frame back. A linear one goes through
+   `GpuFrame::saveTransform`, the panel's `imageTransform()`, which the engine hands to the
+   clean frame; an 8-bit one is saved as it is.
+7. **RTX Tonemap** (options menu, per panel, copied by Duplicate) renders `LdrColor` instead,
+   for anyone matching Omniverse output.
 
-| Alternative | Why not first |
+| Alternative | Why not |
 |---|---|
 | OCIO's exact GPU shader | OCIO writes GLSL text; Vulkan needs SPIR-V, so it means compiling at runtime (shaderc / glslang). Exact, but a big dependency. A LUT is within a fraction of a code value for SDR views |
 | A CUDA kernel in the copy | The plugin uses the CUDA driver API without a compiler; a kernel needs PTX or NVRTC |
-| Keep `LdrColor` | RTX would keep its own look and never match the viewport |
+| A fragment pass onto the swapchain | Swapchain images would need a render pass and framebuffers per image; the compute pass keeps the existing blit and its scaling |
 
-A per-panel option, **RTX Tonemap**, keeps `LdrColor` for anyone matching Omniverse output.
 This closes RTX_LIGHT_INTENSITY.md open question 1: with the same transform on both sides,
 matched radiance looks the same.
 
 ## 6. V-Ray Render
 
-Two ways. A is recommended: it puts the transform in the shared panel, where
-RENDER_VIEW_PANEL.md says things two renderers need belong.
+Option A, as recommended: usdcc applies the transform, in the shared panel.
 
-| | A. usdcc transforms (recommended) | B. V-Ray transforms |
-|---|---|---|
-| How | The helper sends linear float16 RGBA. The `image` event gets `format: "rgba16f"`. `RenderViewPanel` applies the `ColorManagement` CPU processor on a worker thread and shows the 8-bit result | Pass V-Ray the config, display and view so `toBitmapData()` is already in display space |
-| Matches the viewport | Exactly: same processor | Only if V-Ray's OCIO reads the config the same way. V-Ray's OCIO may not know OCIO 2.2's `ocio://` built-ins |
-| Cost | Twice the bytes over the pipe (16 MB a 1080p frame). The helper already coalesces images, so a slow reader only skips frames. A CPU transform of 1080p, a few ms | None in usdcc |
-| Save Image | Can write linear EXR too | 8-bit only |
-| Open | How the App SDK gives float pixels (render element data, or `VRayImage` float access): to check | The App SDK's OCIO parameters: to check |
-
-**V-Ray's render color space** (V-Ray 6+ can render in ACEScg) must be the working space:
-Rec.709 primaries in phase 1, which is V-Ray's default. The helper sets it explicitly so a
-user's V-Ray defaults don't change it.
+- **The helper sends linear float RGBA.** `VRayImage.toIntList("rgba32")` gives V-Ray's
+  float pixels with no sRGB or gamma; `memoryview()` of it costs nothing. The `image` event
+  says `format: "rgba32f"` (33 MB a 1080p frame; the helper coalesces images, so a slow
+  reader only skips frames). Its fake backend sends floats too, so the tests take this path.
+- **The client** makes a `Format_RGBA32FPx4` QImage of it and the panel calls
+  `show_linear_image()`; an `"rgba8"` image still goes to `show_image()`.
+- **`RenderViewPanel::showLinearImage()`** keeps the float image and, on a worker
+  (`QThreadPool`, rows in parallel with `WorkParallelForN`), applies
+  `ColorManagement::imageTransform()` and shows the 8-bit result. One transform runs at a
+  time; a newer image or view waits for it and then replaces it. A Color setting or the
+  panel's View Transform runs it again on the kept image. Save Image saves what's shown.
+- **The panel's view** (`colorView()`, View Transform in the options menu) is in sessions
+  (`{"colorView": name}`, which `ScriptedRenderViewPanel` merges with the Python state) and
+  copied by Duplicate.
+- **V-Ray's render color space** stays V-Ray's default, Rec.709 primaries: the working space.
 
 ## 7. Color pickers
 
-**Yes, they are affected.** Today they assume sRGB; with OCIO they follow the config.
+**Yes, they are affected.** They assumed sRGB; now they follow the config.
 
-- **The numbers stay what USD stores:** working-space linear values. Nothing about authored
-  data changes.
-- **The swatch and the picker show the color picking space,** not the full view. A filmic
-  view (ACES) compresses highlights and isn't a clean round trip: white picked through it
-  doesn't come back as 1.0. That is why OCIO configs have a `color_picking` role, and why
-  Blender and Maya pick that way. `Color/pickerSpace` = *Through the view* shows swatches
-  as the viewport would, for matching looks; picking still goes through the picking space.
-- **`ColorSwatch::linearToDisplay()` / `displayToLinear()`** become calls into
-  `ColorManagement` (picking processor and its inverse). Without a config they stay the
-  sRGB formulas they are now.
-- **Values above 1** (emission, light colors × intensity): the swatch shows them clamped
-  with a small marker, and the picker keeps the number fields as the way to type them.
-  `QColorDialog` is 8-bit; an HDR picker (hue / saturation / value plus intensity) is later.
+- **The numbers stay what USD stores:** linear values in the attribute's color space.
+  Nothing about authored data changes.
+- **The swatch and the picker show the color picking space** (`ColorManagement::toPicker()`
+  / `fromPicker()`): the config's `color_picking` role (the CG config's `sRGB - Texture`),
+  else the display's default view. A filmic view (ACES) compresses highlights and isn't a
+  clean round trip: white picked through it doesn't come back as 1.0. That is why OCIO
+  configs have the role, and why Blender and Maya pick that way. **Settings > Color
+  Management > Swatches show** = *Through the view* shows them as the viewport would, and
+  picks back through the view's inverse. Without a config, the sRGB formulas.
+- **The attribute's own color space:** `EditorHints::forAttribute()` reads
+  `UsdColorSpaceAPI::ComputeColorSpaceName()` for color attributes (inherited down the
+  namespace). The editor converts with `GfColor` (`usdToWorking()` / `workingToUsd()`), so
+  an ACEScg color shows as its Rec.709 equivalent and a pick is stored back in ACEScg.
+  `data`, `raw`, `identity`, `unknown` and unknown names stay as they are. The tooltip names
+  the space.
+- **Values the swatch can't show** (above 1, or outside Rec.709): the chip shows them
+  clamped with a corner mark, and the tooltip says to type them in the fields. `QColorDialog`
+  is 8-bit; an HDR picker (hue / saturation / value plus intensity) is later.
+- **Swatches follow the settings** as they change.
 - **UI colors aren't scene colors.** The viewport background, selection and grid colors,
   theme colors and the Settings dialog's color pickers stay plain sRGB, with no OCIO.
-- **Per-prim color spaces:** OpenUSD 0.26 has `UsdColorSpaceAPI` (`colorSpace:name`,
-  inherited down the namespace) and `GfColorSpace`. Phase 1 assumes the working space for
-  every color. Phase 4 reads the prim's color space and converts, so an ACEScg-authored
-  color shows correctly.
 
 ## 8. Not now
 
@@ -247,10 +268,10 @@ user's V-Ray defaults don't change it.
 | Phase | Content | Files | Verification |
 |---|---|---|---|
 | **1. Service and viewport** *(built)* | `ColorManagement` (config, lists, one-color transform), the `OCIO` variable at startup, the Settings page, render params, background composite, per-viewport View Transform menu, the 8-bit-delegate check | `color_management.h/.cpp`, `usd_environment.h/.cpp` (`setUsdEnvironmentVariable()`), `viewport_render_params.h/.cpp`, `hydra_viewport_window.h/.cpp`, `viewport_display.h/.cpp`, `viewport_view_panel.cpp`, `main.cpp`, `settings_dialog.cpp` (page order), `src/cpp/usd/CMakeLists.txt`, docs/SETTINGS.md, docs/USD_RUNTIME.md, docs/VIEWPORT_DISPLAY.md | `color_management_test.cpp` (`usdcc_tests`): the built-in config, working space, Un-tone-mapped first, a 0.2 grey to 0.4845 (124) and Raw to 0.2, a missing config, the settings and view choices per display, the render params with and without a config, the opaque clear color's round trip, the override's JSON. In the app: below |
-| **2. Pickers** | Swatch through the picking processor, inverse on edit, HDR marker | `color_swatch.h/.cpp`, `property_editors.cpp`, docs/ATTRIBUTE_EDITOR.md | Unit: pick → store → show returns the same 8-bit color; existing picker tests updated |
-| **3. Render view panel and V-Ray** | Float image path in `RenderViewPanel` (C++ and Python), the transform on a worker thread, per-panel view override; the helper sends float16 | `render_view_panel.h/.cpp`, `scripted_render_view_panel`, `ui.py`, V-Ray `protocol`, `vray_helper.py`, `client.py`, docs/RENDER_VIEW_PANEL.md, docs/VRAY_RENDER.md | V-Ray and the viewport side by side on a grey-card scene: same 8-bit values within 2 |
-| **4. RTX** | `HdrColor`, RGBA16F buffer, LUT pass in Vulkan, Save Image, RTX Tonemap option | `stage_bridge.cpp`, `rtx_engine.cpp`, `vulkan_window.cpp`, `gpu_frame.h`, `rtx_panel.cpp`, new shader + CMake glslc step, docs/RTX_RENDER.md, docs/RTX_LIGHT_INTENSITY.md §2.4 / §8 | `rtx_gpu_*` probe: centre value of a known `HdrColor` through the LUT vs the CPU processor, within 1 code value |
-| **5. Per-prim color spaces** | `UsdColorSpaceAPI` in the pickers | `property_editors.cpp`, `color_management.cpp` | Unit: an ACEScg-authored color shows as its Rec.709 equivalent |
+| **2. Pickers** *(built)* | Swatch through the picking space, inverse on edit, out-of-range mark, `Color/pickerSpace` | `color_management.h/.cpp`, `color_swatch.h/.cpp`, `property_editors.cpp`, docs/ATTRIBUTE_EDITOR.md | `color_management_pickers` (round trips, ACES through the view and back); `color_swatch_picking` (`usdcc_ui_tests`): 0.2 shows as 124, 4.0 is marked, picking 124 stores 0.2, with and without a config |
+| **3. Render view panel and V-Ray** *(built)* | `showLinearImage()` and `show_linear_image()`, the worker transform, View Transform per panel, sessions and Duplicate; the helper sends float RGBA | `render_view_panel.h/.cpp`, `scripted_render_view_panel.cpp`, `ui.py`, V-Ray `protocol.py`, `vray_helper.py`, `client.py`, `panel.py`, docs/RENDER_VIEW_PANEL.md, docs/VRAY_RENDER.md | `color_management_images` (the image transform, the LUT); `render_view_panel_linear_images` (`usdcc_ui_tests`): 124, then Raw 51, the signal, sessions, `showImage()` as is; `vray_render_plugin` (the fake backend's float images) |
+| **4. RTX** *(built)* | `HdrColor`, float frames in the shared buffer, the compute pass with the LUT, Save Image through the view, RTX Tonemap | `render_types.h`, `stage_bridge.h/.cpp`, `rtx_engine.cpp`, `gpu_frame.h`, `vulkan_window.h/.cpp`, `presentation.cpp`, `rtx_panel.h/.cpp`, `shaders/present.comp`, `shaders/present_comp_spv.h`, `tools/gen_rtx_shaders.py`, docs/RTX_RENDER.md, docs/RTX_LIGHT_INTENSITY.md §8 | `rtx_native_panel` (fake engine); in the app, on the GPU: below |
+| **5. Per-prim color spaces** *(built)* | `UsdColorSpaceAPI` in the pickers | `property_editor.h` (`EditorHints::colorSpace`), `property_editors.cpp`, `color_management.cpp` | `color_management_usd_color_spaces` (sRGB-encoded and ACEScg conversions, the hint inherited from an ancestor); `color_swatch_picking` (an ACEScg red is marked, a picked grey stays grey) |
 
 Phase 1 comes first; 2, 3 and 4 each need only 1 and can go in any order. Phase 5 needs 2.
 

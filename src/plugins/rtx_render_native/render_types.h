@@ -34,6 +34,9 @@ struct Snapshot {
     QSize size;
     Mode mode = Mode::RealTime;
     LightMatch light;
+    // The RenderVar shown: HdrColor (linear, through usdcc's view transform) or, with
+    // RTX Tonemap, LdrColor (ovrtx's own tonemap, docs/COLOR_MANAGEMENT.md §5).
+    QString colorVar = QStringLiteral("HdrColor");
     bool geometryKnown = false;
     std::set<QString> geometry;
 };

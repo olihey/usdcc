@@ -105,7 +105,7 @@ Python*.
 | Direction | Format | Messages |
 |---|---|---|
 | Commands, to the helper's stdin | One JSON line each | `init {sdk, engine, update_ms, license_servers}`, `size {width, height}`, `camera {transform[12], fov, ortho, ortho_width}`, `load {path}`, `engine {engine}`, `start`, `stop`, `quit` |
-| Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, api}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, change}` with RGBA8888 pixels, `log {level, msg}`, `error {msg, fatal}` |
+| Events, on its stdout | A JSON header line, then `size` bytes for an image | `ready {version, api}`, `loaded {path, seconds}`, `state {state}`, `image {w, h, change, format}` with linear float RGBA pixels (`format: "rgba32f"`, from `VRayImage.toIntList("rgba32")`, no sRGB or gamma), which the panel shows through the view transform ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §6); `"rgba8"` would be display colors, `log {level, msg}`, `error {msg, fatal}` |
 
 - **Before importing V-Ray,** the helper moves its event stream to a copy of stdout and
   points stdout at stderr. Whatever V-Ray's native code prints then can't break into the

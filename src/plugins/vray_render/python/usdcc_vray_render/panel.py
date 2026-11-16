@@ -142,8 +142,12 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
 
     # What comes back.
 
-    def _image(self, image, change):
-        if self.is_open():
+    def _image(self, image, change, linear):
+        if not self.is_open():
+            return
+        if linear:
+            self.show_linear_image(image)  # through usdcc's view transform
+        else:
             self.show_image(image)
 
     def _event(self, name, fields):

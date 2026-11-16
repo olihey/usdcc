@@ -4,8 +4,12 @@
 #include "usdcc/usd/usd_environment.h"
 
 #include <pxr/base/arch/env.h>
+#include <pxr/base/gf/color.h>
+#include <pxr/base/gf/colorSpace.h>
+#include <pxr/base/gf/vec3f.h>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 #ifdef USDCC_HAS_OCIO
@@ -50,8 +54,45 @@ void routeOcioLogging() {
 }  // namespace
 
 bool isColorManagementKey(const std::string& key) {
-    return key == kColorConfigKey || key == kColorDisplayKey || key == kColorViewKey;
+    return key == kColorConfigKey || key == kColorDisplayKey || key == kColorViewKey || key == kColorPickerSpaceKey;
 }
+
+namespace {
+
+// The sRGB transfer, for when there's no config: what Hydra's own sRGB mode does.
+float srgbEncode(float c) { return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f; }
+float srgbDecode(float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); }
+
+class IdentityTransform : public ImageTransform {
+public:
+    void apply(float*, size_t) const override {}
+};
+
+class SrgbTransform : public ImageTransform {
+public:
+    void apply(float* rgba, size_t pixels) const override {
+        for (size_t i = 0; i < pixels; ++i) {
+            for (int c = 0; c < 3; ++c) rgba[i * 4 + c] = srgbEncode(rgba[i * 4 + c]);
+        }
+    }
+};
+
+#ifdef USDCC_HAS_OCIO
+class OcioTransform : public ImageTransform {
+public:
+    explicit OcioTransform(OCIO::ConstCPUProcessorRcPtr processor) : m_processor(std::move(processor)) {}
+    void apply(float* rgba, size_t pixels) const override {
+        if (!pixels) return;
+        OCIO::PackedImageDesc image(rgba, static_cast<long>(pixels), 1, 4);
+        m_processor->apply(image);
+    }
+
+private:
+    OCIO::ConstCPUProcessorRcPtr m_processor;
+};
+#endif
+
+}  // namespace
 
 struct ColorManagement::Impl {
     std::string source;
@@ -237,6 +278,147 @@ std::array<float, 3> ColorManagement::fromDisplay(const std::array<float, 3>& rg
 #endif
 }
 
+std::shared_ptr<const ImageTransform> ColorManagement::imageTransform(std::string_view viewOverride,
+                                                                      const core::Settings& settings) const {
+    if (viewOverride == kRawView) return std::make_shared<IdentityTransform>();
+    if (!available()) return std::make_shared<SrgbTransform>();
+    const DisplayView target = displayView(viewOverride, settings);
+    if (target.view == kRawView) return std::make_shared<IdentityTransform>();
+#ifdef USDCC_HAS_OCIO
+    try {
+        OCIO::DisplayViewTransformRcPtr transform = OCIO::DisplayViewTransform::Create();
+        transform->setSrc(workingSpace().c_str());
+        transform->setDisplay(target.display.c_str());
+        transform->setView(target.view.c_str());
+        transform->setLooksBypass(false);
+        return std::make_shared<OcioTransform>(m_impl->config->getProcessor(transform)->getDefaultCPUProcessor());
+    } catch (const std::exception& error) {
+        USDCC_LOG_WARNING(kLog, "No transform to {} / {}, showing sRGB: {}", target.display, target.view, error.what());
+    }
+#endif
+    return std::make_shared<SrgbTransform>();
+}
+
+DisplayLut ColorManagement::bakeLut(int size, std::string_view viewOverride, const core::Settings& settings) const {
+    DisplayLut lut;
+    if (size < 2) return lut;
+    lut.size = size;
+    const size_t texels = static_cast<size_t>(size) * size * size;
+    lut.rgba.resize(texels * 4);
+    std::vector<float> lattice(static_cast<size_t>(size));
+    for (int i = 0; i < size; ++i) {
+        const float stops = kLutMinStops + (kLutMaxStops - kLutMinStops) * static_cast<float>(i) / (size - 1);
+        lattice[static_cast<size_t>(i)] = 0.18f * std::exp2(stops);
+    }
+    size_t texel = 0;
+    for (int b = 0; b < size; ++b) {
+        for (int g = 0; g < size; ++g) {
+            for (int r = 0; r < size; ++r, ++texel) {
+                float* out = &lut.rgba[texel * 4];
+                out[0] = lattice[static_cast<size_t>(r)];
+                out[1] = lattice[static_cast<size_t>(g)];
+                out[2] = lattice[static_cast<size_t>(b)];
+                out[3] = 1.0f;
+            }
+        }
+    }
+    imageTransform(viewOverride, settings)->apply(lut.rgba.data(), texels);
+    return lut;
+}
+
+std::string ColorManagement::pickingSpace() const {
+#ifdef USDCC_HAS_OCIO
+    if (m_impl->config && m_impl->config->hasRole(OCIO::ROLE_COLOR_PICKING)) {
+        if (OCIO::ConstColorSpaceRcPtr space = m_impl->config->getColorSpace(OCIO::ROLE_COLOR_PICKING)) {
+            return space->getName();
+        }
+    }
+#endif
+    return {};
+}
+
+namespace {
+#ifdef USDCC_HAS_OCIO
+std::array<float, 3> applyColorSpaces(const OCIO::ConstConfigRcPtr& config, const std::string& from,
+                                      const std::string& to, const std::array<float, 3>& rgb) {
+    try {
+        std::array<float, 3> result = rgb;
+        config->getProcessor(from.c_str(), to.c_str())->getDefaultCPUProcessor()->applyRGB(result.data());
+        return result;
+    } catch (const std::exception& error) {
+        USDCC_LOG_WARNING(kLog, "No transform from {} to {}: {}", from, to, error.what());
+    }
+    return rgb;
+}
+#endif
+}  // namespace
+
+std::array<float, 3> ColorManagement::toPicker(const std::array<float, 3>& rgb, const core::Settings& settings) const {
+#ifdef USDCC_HAS_OCIO
+    if (available()) {
+        const DisplayView target = displayView({}, settings);
+        if (settings.get<std::string>(kColorPickerSpaceKey) == kPickerSpaceView) return toDisplay(rgb, target);
+        if (const std::string picking = pickingSpace(); !picking.empty()) {
+            return applyColorSpaces(m_impl->config, workingSpace(), picking, rgb);
+        }
+        return toDisplay(rgb, {target.display, defaultView(target.display)});
+    }
+#else
+    (void)settings;
+#endif
+    return {srgbEncode(rgb[0]), srgbEncode(rgb[1]), srgbEncode(rgb[2])};
+}
+
+std::array<float, 3> ColorManagement::fromPicker(const std::array<float, 3>& rgb, const core::Settings& settings) const {
+#ifdef USDCC_HAS_OCIO
+    if (available()) {
+        const DisplayView target = displayView({}, settings);
+        if (settings.get<std::string>(kColorPickerSpaceKey) == kPickerSpaceView) return fromDisplay(rgb, target);
+        if (const std::string picking = pickingSpace(); !picking.empty()) {
+            return applyColorSpaces(m_impl->config, picking, workingSpace(), rgb);
+        }
+        return fromDisplay(rgb, {target.display, defaultView(target.display)});
+    }
+#else
+    (void)settings;
+#endif
+    return {srgbDecode(rgb[0]), srgbDecode(rgb[1]), srgbDecode(rgb[2])};
+}
+
+namespace {
+// The OpenUSD color space a color is converted from, or nothing for one that stays as it is.
+std::optional<PXR_NS::GfColorSpace> gfColorSpace(const std::string& name) {
+    if (name.empty()) return std::nullopt;
+    const PXR_NS::TfToken token(name);
+    for (const PXR_NS::TfToken& asIs : {PXR_NS::GfColorSpaceNames->Data, PXR_NS::GfColorSpaceNames->Raw,
+                                        PXR_NS::GfColorSpaceNames->Identity, PXR_NS::GfColorSpaceNames->Unknown,
+                                        PXR_NS::GfColorSpaceNames->LinearRec709}) {
+        if (token == asIs) return std::nullopt;
+    }
+    if (!PXR_NS::GfColorSpace::IsValid(token)) return std::nullopt;
+    return PXR_NS::GfColorSpace(token);
+}
+
+std::array<float, 3> convert(const std::array<float, 3>& rgb, const PXR_NS::GfColorSpace& from,
+                             const PXR_NS::GfColorSpace& to) {
+    const PXR_NS::GfColor converted(PXR_NS::GfColor(PXR_NS::GfVec3f(rgb[0], rgb[1], rgb[2]), from), to);
+    const PXR_NS::GfVec3f out = converted.GetRGB();
+    return {out[0], out[1], out[2]};
+}
+}  // namespace
+
+std::array<float, 3> ColorManagement::usdToWorking(const std::array<float, 3>& rgb, const std::string& usdColorSpace) {
+    const auto space = gfColorSpace(usdColorSpace);
+    if (!space) return rgb;
+    return convert(rgb, *space, PXR_NS::GfColorSpace(PXR_NS::GfColorSpaceNames->LinearRec709));
+}
+
+std::array<float, 3> ColorManagement::workingToUsd(const std::array<float, 3>& rgb, const std::string& usdColorSpace) {
+    const auto space = gfColorSpace(usdColorSpace);
+    if (!space) return rgb;
+    return convert(rgb, PXR_NS::GfColorSpace(PXR_NS::GfColorSpaceNames->LinearRec709), *space);
+}
+
 namespace {
 
 void defineConfigSetting(core::Settings& settings, const std::string& status) {
@@ -322,6 +504,18 @@ void applyColorManagementSettings(core::Settings& settings) {
         .choices = color.displays(),
     });
     defineViewSetting(settings);
+    settings.define({
+        .key = kColorPickerSpaceKey,
+        .category = kColorCategory,
+        .group = "Pickers",
+        .label = "Swatches show",
+        .description = "What the attribute editor's color swatches and the color picker show a color as. Color "
+                       "picking is the config's space for it, which picks back exactly what was shown. Through "
+                       "the view shows the color as the viewport does, tone mapping included.",
+        .type = core::SettingType::Choice,
+        .defaultValue = std::string(kPickerSpaceColorPicking),
+        .choices = {kPickerSpaceColorPicking, kPickerSpaceView},
+    });
     // Each display has its own views.
     displayConnection() = settings.changed.connect([&settings](const std::string& key) {
         if (key == kColorDisplayKey) defineViewSetting(settings);

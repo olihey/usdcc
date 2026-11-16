@@ -1,8 +1,10 @@
 #include "usdcc/usd/render_view_panel.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/settings_dialog.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
@@ -13,18 +15,22 @@
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
+#include <pxr/base/work/loops.h>
 
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
+#include <QCoreApplication>
 #include <QIcon>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
 #include <QPointer>
 #include <QSignalBlocker>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -251,6 +257,13 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     m_settingsButton = iconButton("renderSettings", "cog", tr("Settings…"), tr("Settings…"));
     m_settingsButton->setVisible(false);  // until setSettingsCategory()
     connect(m_settingsButton, &QToolButton::clicked, this, &RenderViewPanel::openSettings);
+    // Settings > Color Management's display and view: the image again, and the menu's Default (...).
+    usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
+        if (!isColorManagementKey(key) || key == kColorPickerSpaceKey) return;
+        transformLinearImage();
+        notifyOptionsChanged();
+        Q_EMIT colorTransformChanged();
+    });
 
     row->addWidget(m_renderButton);
     row->addWidget(m_refreshButton);
@@ -318,9 +331,64 @@ void RenderViewPanel::closePanel() {
 // --- For the renderer.
 
 void RenderViewPanel::showImage(const QImage& image) {
+    m_linearImage = QImage();  // display colors: nothing to transform again
     m_view->setMessage(QString());
     m_view->setImage(image.copy());
     showProgress();
+}
+
+void RenderViewPanel::showLinearImage(const QImage& image) {
+    if (image.isNull()) return;
+    m_linearImage = image.convertToFormat(QImage::Format_RGBA32FPx4);
+    if (m_linearImage.constBits() == image.constBits()) m_linearImage = image.copy();  // our own, not the caller's
+    transformLinearImage();
+}
+
+void RenderViewPanel::setColorView(const std::string& view) {
+    if (view == m_colorView) return;
+    m_colorView = view;
+    transformLinearImage();
+    notifyOptionsChanged();
+    Q_EMIT colorTransformChanged();
+}
+
+void RenderViewPanel::transformLinearImage() {
+    if (m_linearImage.isNull()) return;
+    if (m_transforming) {
+        m_transformAgain = true;
+        return;
+    }
+    m_transforming = true;
+    const QImage source = m_linearImage;  // shared, never written: the worker writes a copy
+    std::shared_ptr<const ImageTransform> transform = ColorManagement::instance().imageTransform(m_colorView);
+    QPointer<RenderViewPanel> self(this);
+    QThreadPool::globalInstance()->start([self, source, transform]() {
+        QImage image = source.copy();
+        const int width = image.width();
+        // Rows in parallel: OCIO's CPU processor is thread-safe.
+        PXR_NS::WorkParallelForN(static_cast<size_t>(image.height()), [&](size_t begin, size_t end) {
+            for (size_t y = begin; y < end; ++y) {
+                transform->apply(reinterpret_cast<float*>(image.scanLine(static_cast<int>(y))), static_cast<size_t>(width));
+            }
+        });
+        QImage shown = image.convertToFormat(QImage::Format_RGBA8888);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [self, shown]() {
+                if (!self) return;
+                self->m_transforming = false;
+                if (!self->m_linearImage.isNull()) {
+                    self->m_view->setMessage(QString());
+                    self->m_view->setImage(shown);
+                    self->showProgress();
+                }
+                if (self->m_transformAgain) {
+                    self->m_transformAgain = false;
+                    self->transformLinearImage();
+                }
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 const QImage& RenderViewPanel::image() const { return m_view->image(); }
@@ -452,6 +520,27 @@ void RenderViewPanel::populateOptionsMenu(QMenu* menu) {
     };
     choices(tr("Camera"), m_cameraCombo);
     choices(tr("Resolution"), m_resolutionCombo);
+
+    // The view transform (docs/COLOR_MANAGEMENT.md §3.3), as the viewport's options have it.
+    QMenu* viewMenu = menu->addMenu(tr("View Transform"));
+    viewMenu->setObjectName(QStringLiteral("colorViewMenu"));
+    auto* viewGroup = new QActionGroup(viewMenu);
+    const ColorManagement& color = ColorManagement::instance();
+    const DisplayView settingsTarget = color.displayView();
+    const auto addView = [this, viewMenu, viewGroup](const QString& text, const std::string& view) {
+        QAction* action = viewMenu->addAction(text);
+        action->setObjectName(view.empty() ? QStringLiteral("colorView_default")
+                                           : QStringLiteral("colorView_%1").arg(QString::fromStdString(view)));
+        action->setCheckable(true);
+        action->setChecked(m_colorView == view);
+        viewGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, view]() { setColorView(view); });
+    };
+    addView(tr("Default (%1)").arg(color.available() ? QString::fromStdString(settingsTarget.view) : tr("sRGB")), {});
+    viewMenu->addSeparator();
+    const std::vector<std::string> views =
+        color.available() ? color.views(settingsTarget.display) : std::vector<std::string>{kRawView};
+    for (const std::string& view : views) addView(QString::fromStdString(view), view);
     QAction* live = menu->addAction(tr("Update on Edits"));
     live->setCheckable(true);
     live->setChecked(m_liveCheck->isChecked());
@@ -467,6 +556,17 @@ void RenderViewPanel::populateOptionsMenu(QMenu* menu) {
         menu->addSeparator();
         menu->addAction(tr("%1 Settings…").arg(m_settingsCategory), this, &RenderViewPanel::openSettings);
     }
+}
+
+QJsonObject RenderViewPanel::saveSessionState() const {
+    QJsonObject state;
+    if (!m_colorView.empty()) state.insert(QStringLiteral("colorView"), QString::fromStdString(m_colorView));
+    return state;
+}
+
+void RenderViewPanel::restoreSessionState(const QJsonObject& state) {
+    const QJsonValue view = state.value(QStringLiteral("colorView"));
+    setColorView(view.isString() ? view.toString().toStdString() : std::string());
 }
 
 void RenderViewPanel::onStageChanged(const StageRefPtr& stage) {

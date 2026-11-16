@@ -4,7 +4,8 @@ Commands go to the helper's stdin, one JSON object per line: {"cmd": name, ...}.
 
 Events come back on its stdout, each a JSON header line {"ev": name, ...},
 followed by "size" bytes of payload when the header has "size" (an image's
-RGBA8888 pixels). Standard library only: both the app's Python and the helper's
+pixels: "format" says which, "rgba32f" for linear float RGBA, the default
+"rgba8" for 8-bit RGBA already in display colors). Standard library only: both the app's Python and the helper's
 import this.
 """
 

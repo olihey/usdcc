@@ -164,7 +164,7 @@ hard-coded list. A type that a future USD version adds shows up in the gallery a
 | `int2/3/4`, `half2/3/4`, `float2/3/4`, `double2/3/4` | N fields prefixed X Y Z W | Axis prefixes red/green/blue, as in the mockup |
 | `point3*`, `vector3*`, `normal3*` | Same as `float3` | Role shown in the tooltip |
 | `texCoord2*`, `texCoord3*` | N fields prefixed U V W | |
-| `color3*`, `color4*` | `ColorSwatch` plus R G B (A) fields | Values are linear. The swatch shows an sRGB-encoded preview, and `QColorDialog` round-trips through that conversion |
+| `color3*`, `color4*` | `ColorSwatch` plus R G B (A) fields | Values are linear, in the attribute's color space (`UsdColorSpaceAPI`, else the working space). The swatch shows them through Settings > Color Management's picking space, and `QColorDialog` round-trips through it; a value the swatch can't show (above 1) gets a corner mark ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §7) |
 | `quath/f/d` | 4 fields prefixed W X Y Z | Optional read-only Euler hint in the tooltip |
 | `matrix2d/3d/4d`, `frame4d` | `MatrixField`: one-line summary that expands to an N×N grid | For a 4×4 transform, optionally show decomposed T/R/S read-only |
 | `string` | Line edit | Multi-line popup for long text |

@@ -1,0 +1,50 @@
+// RTX's presentation pass (docs/COLOR_MANAGEMENT.md §5): ovrtx's frame, as the CUDA copy
+// left it in the shared buffer, through the view transform's 3D LUT into an 8-bit image
+// at the frame's size, which the window then blits onto the swapchain.
+//
+// Compiled ahead of time into present_comp_spv.h by tools/gen_rtx_shaders.py, so a build
+// needs no shader compiler. Run the tool after changing this file.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Tightly packed pixels, top row first: channels × componentBytes each.
+layout(std430, set = 0, binding = 0) readonly buffer Pixels {
+    uint words[];
+};
+// The working space to display transform, its input shaped by log2 (ColorManagement::bakeLut()).
+layout(set = 0, binding = 1) uniform sampler3D lut;
+layout(set = 0, binding = 2, rgba8) uniform writeonly image2D display;
+
+layout(push_constant) uniform Params {
+    ivec2 size;
+    int channels;        // 3 or 4
+    int componentBytes;  // 1 (display colors already: no LUT), 2 (half) or 4 (float)
+    float lutSize;
+    float minStops;      // the shaper's range, in stops around 0.18
+    float maxStops;
+    int pad;
+} p;
+
+float component(uint index) {
+    if (p.componentBytes == 4) return uintBitsToFloat(words[index]);
+    if (p.componentBytes == 2) {
+        uint word = words[index >> 1];
+        return unpackHalf2x16((index & 1u) != 0u ? (word >> 16) : (word & 0xffffu)).x;
+    }
+    uint word = words[index >> 2];
+    return float((word >> (8u * (index & 3u))) & 0xffu) / 255.0;
+}
+
+void main() {
+    ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
+    if (xy.x >= p.size.x || xy.y >= p.size.y) return;
+    uint base = uint(xy.y * p.size.x + xy.x) * uint(p.channels);
+    vec3 rgb = vec3(component(base), component(base + 1u), component(base + 2u));
+    if (p.componentBytes != 1) {
+        vec3 stops = log2(max(rgb, vec3(1e-10)) / 0.18);
+        vec3 shaped = clamp((stops - p.minStops) / (p.maxStops - p.minStops), 0.0, 1.0);
+        rgb = texture(lut, (shaped * (p.lutSize - 1.0) + 0.5) / p.lutSize).rgb;
+    }
+    imageStore(display, xy, vec4(clamp(rgb, 0.0, 1.0), 1.0));
+}

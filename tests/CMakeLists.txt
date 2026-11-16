@@ -114,6 +114,7 @@ add_executable(usdcc_ui_tests
     view_panel_layout_test.cpp
     view_panel_options_test.cpp
     viewport_display_test.cpp
+    color_ui_test.cpp
     renderer_settings_test.cpp
     viewport_hud_test.cpp
     viewport_delete_test.cpp

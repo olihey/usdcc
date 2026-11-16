@@ -68,6 +68,8 @@ menu (☰), as [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md) §1 describes.
 | Resolution | Options | Fit the panel or use a fixed output size |
 | Update on Edits | Options | Follow edits elsewhere; unsupported incremental edits reload the snapshot |
 | Mode | Options | Real-Time, Path Tracing or Minimal; a change reloads |
+| View Transform | Options | The OCIO view the linear `HdrColor` frame is shown with (the app's; [COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §5) |
+| RTX Tonemap | Options | Show ovrtx's own tonemapped `LdrColor` instead, as Omniverse does; a change reloads. Off by default |
 | Fit to View | Options, or F over the image | Frame the whole scene |
 | Reset Camera | Options, or Home over the image | Restore the default orbit pose |
 | Orbit | Left / Alt+left drag | |

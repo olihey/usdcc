@@ -1,6 +1,8 @@
 #include "usdcc/usd/properties/property_editor.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/properties/array_editor_dialog.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/number_field.h"
@@ -16,6 +18,7 @@
 #include <pxr/usd/sdf/pathExpression.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usd/attributeLimits.h>
+#include <pxr/usd/usd/colorSpaceAPI.h>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -78,6 +81,9 @@ EditorHints EditorHints::forAttribute(const UsdAttribute& attribute) {
         hints.anchorLayer = attribute.GetStage()->GetEditTarget().GetLayer();
     }
     hints.editLayer = attribute.GetStage()->GetEditTarget().GetLayer();
+    if (attribute.GetRoleName() == SdfValueRoleNames->Color) {
+        hints.colorSpace = UsdColorSpaceAPI::ComputeColorSpaceName(attribute);
+    }
     return hints;
 }
 
@@ -172,7 +178,8 @@ private:
 class NumericEditor : public PropertyEditor {
 public:
     NumericEditor(const ValueTypeInfo& info, const EditorHints& hints, QWidget* parent)
-        : PropertyEditor(info, parent), m_numbers(static_cast<size_t>(info.numberCount()), 0.0) {
+        : PropertyEditor(info, parent), m_numbers(static_cast<size_t>(info.numberCount()), 0.0),
+          m_colorSpace(hints.colorSpace.GetString()) {
         auto* layout = rowLayout(this);
         const bool isColor = info.role == SdfValueRoleNames->Color;
         if (isColor) {
@@ -183,15 +190,24 @@ public:
             connect(m_swatch, &ColorSwatch::editFinished, this, &PropertyEditor::editFinished);
             connect(m_swatch, &ColorSwatch::editCanceled, this, &PropertyEditor::editCanceled);
             connect(m_swatch, &ColorSwatch::colorEdited, this, [this](const QColor& c) {
-                m_numbers[0] = ColorSwatch::displayToLinear(c.redF());
-                m_numbers[1] = ColorSwatch::displayToLinear(c.greenF());
-                m_numbers[2] = ColorSwatch::displayToLinear(c.blueF());
+                // Picked in the picking space; stored in the attribute's own (§7).
+                const auto& color = ColorManagement::instance();
+                const std::array<float, 3> working =
+                    color.fromPicker({static_cast<float>(c.redF()), static_cast<float>(c.greenF()),
+                                      static_cast<float>(c.blueF())});
+                const std::array<float, 3> stored = ColorManagement::workingToUsd(working, m_colorSpace);
+                for (size_t i = 0; i < 3; ++i) m_numbers[i] = stored[i];
                 if (m_numbers.size() == 4) {
                     m_numbers[3] = c.alphaF();
                 }
                 syncFields();
                 Q_EMIT valueEdited(makeNumericValue(m_info.scalarTypeName, m_numbers));
             });
+            // Settings > Color Management changes what the swatch shows.
+            usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
+                if (isColorManagementKey(key)) syncSwatch();
+            });
+
         }
 
         const std::vector<std::string> labels = info.componentLabels();
@@ -249,15 +265,27 @@ private:
     }
     void syncSwatch() {
         if (!m_swatch) return;
+        const std::array<float, 3> working = ColorManagement::usdToWorking(
+            {static_cast<float>(m_numbers[0]), static_cast<float>(m_numbers[1]), static_cast<float>(m_numbers[2])},
+            m_colorSpace);
+        const std::array<float, 3> shown = ColorManagement::instance().toPicker(working);
+        // A swatch shows 0-1; more (an emission, a light's color times intensity) is marked.
+        constexpr float kSlack = 0.5f / 255.0f;
+        const bool outOfRange = std::any_of(shown.begin(), shown.end(),
+                                            [](float v) { return v > 1.0f + kSlack || v < -kSlack; });
         QColor c;
-        c.setRgbF(static_cast<float>(ColorSwatch::linearToDisplay(m_numbers[0])),
-                  static_cast<float>(ColorSwatch::linearToDisplay(m_numbers[1])),
-                  static_cast<float>(ColorSwatch::linearToDisplay(m_numbers[2])),
+        c.setRgbF(std::clamp(shown[0], 0.0f, 1.0f), std::clamp(shown[1], 0.0f, 1.0f), std::clamp(shown[2], 0.0f, 1.0f),
                   m_numbers.size() == 4 ? static_cast<float>(std::clamp(m_numbers[3], 0.0, 1.0)) : 1.0f);
         m_swatch->setColor(c);
+        m_swatch->setOutOfRange(outOfRange);
+        QString tip = tr("Click to pick a color.");
+        if (!m_colorSpace.empty()) tip += tr(" The values are in %1.").arg(QString::fromStdString(m_colorSpace));
+        if (outOfRange) tip += tr(" Brighter than the swatch can show: type values above 1 in the fields.");
+        m_swatch->setToolTip(tip);
     }
 
     std::vector<double> m_numbers;
+    std::string m_colorSpace;  // the attribute's OpenUSD color space; "" for the working space
     std::vector<NumberField*> m_fields;
     ColorSwatch* m_swatch = nullptr;
 };

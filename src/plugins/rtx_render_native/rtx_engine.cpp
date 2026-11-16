@@ -396,7 +396,7 @@ struct Session {
             }
             std::this_thread::sleep_for(1ms);
         }
-        const auto varPath = snapshot->product + "/LdrColor";
+        const auto varPath = snapshot->product + "/" + snapshot->colorVar;
         for (size_t p = 0; p < outputs.output_count; ++p)
             for (size_t f = 0; f < outputs.outputs[p].output_frame_count; ++f) {
                 auto& output = outputs.outputs[p].output_frames[f];
@@ -404,7 +404,7 @@ struct Session {
                     if (text(output.output_render_vars[v].render_var_path) == varPath)
                         color = output.output_render_vars[v].output_handle;
             }
-        if (!color) throw std::runtime_error("RTX returned no LdrColor image");
+        if (!color) throw std::runtime_error(("RTX returned no " + snapshot->colorVar + " image").toStdString());
         if (!accepts(state, request)) return {};
         ovrtx_map_output_description_t desc{};
         desc.device_type = OVRTX_MAP_DEVICE_TYPE_CUDA;
@@ -556,6 +556,7 @@ private:
                                 try {
                                     if (!saveFrame) throw std::runtime_error("No displayed frame to save");
                                     auto clean = saveFrame->cleanFrame ? saveFrame->cleanFrame : saveFrame;
+                                    clean->saveTransform = saveFrame->saveTransform;  // the panel's view transform
                                     clean->save(save);
                                     std::lock_guard lock(state->mutex);
                                     state->output.saved = save;

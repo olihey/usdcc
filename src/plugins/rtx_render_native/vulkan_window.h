@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "gpu_bridge.h"
+#include "usdcc/usd/color_management.h"
 namespace usdcc::rtx {
 class VulkanWindow final : public QWindow {
 public:
@@ -12,6 +13,9 @@ public:
     QString error() const;
     std::shared_ptr<GpuBridge> bridge() const;
     void setFrame(std::shared_ptr<GpuFrame> frame);
+    // The view transform a linear frame is shown through (ColorManagement::bakeLut()).
+    // Uploaded with the next presentation, which this asks for.
+    void setLut(const usdcc::usd::DisplayLut& lut);
     std::shared_ptr<GpuFrame> currentFrame() const;
     void clear();
     void releaseResources();

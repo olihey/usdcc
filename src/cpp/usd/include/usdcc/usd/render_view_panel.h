@@ -17,6 +17,7 @@
 #include <QWidget>
 
 #include <optional>
+#include <string>
 #include <vector>
 
 class QCheckBox;
@@ -120,9 +121,25 @@ public:
 
     // --- For the renderer.
 
-    // Shows a rendered image (copied).
+    // Shows a rendered image (copied), as it is: already display colors.
     void showImage(const QImage& image);
+    // Shows a rendered image in the working space's linear values: a float format
+    // (Format_RGBA32FPx4, RGBA16FPx4, ...). The panel keeps it and shows it through
+    // the view transform (docs/COLOR_MANAGEMENT.md §6), on a worker thread; image()
+    // is the result, once it's there. A newer image replaces one still waiting.
+    void showLinearImage(const QImage& image);
     const QImage& image() const;
+    // The last linear image, or a null one when the renderer shows display colors.
+    const QImage& linearImage() const { return m_linearImage; }
+
+    // The OCIO view this panel shows with: "" for Settings > Color Management's
+    // (docs/COLOR_MANAGEMENT.md §3.3). In its options menu, View Transform; kept in
+    // sessions. colorTransformChanged() follows it, and the settings.
+    const std::string& colorView() const { return m_colorView; }
+    void setColorView(const std::string& view);
+    // {"colorView": name} when it has one. A subclass with state of its own adds to it.
+    QJsonObject saveSessionState() const override;
+    void restoreSessionState(const QJsonObject& state) override;
     void setPresentationWidget(QWidget* widget);
     void showPresentedFrame(const QSize& size);
     // What the renderer is doing, for the status line: "Rendering", "Done", ...
@@ -159,6 +176,11 @@ public:
 
     // Whether this renders again after edits (the Update on Edits check box).
     bool updatesOnEdits() const;
+
+Q_SIGNALS:
+    // The view transform changed: the panel's view, or Settings > Color Management. A
+    // renderer that presents on its own (RTX) applies it again.
+    void colorTransformChanged();
 
 protected:
     // --- Hooks, for the subclass; all do nothing here.
@@ -214,6 +236,8 @@ private:
     void setStatus(const QString& text);
     void connectStage();
     QString idleMessage() const;
+    // The linear image through the view transform, on a worker; one at a time.
+    void transformLinearImage();
 
     QToolButton* m_renderButton;
     QToolButton* m_refreshButton;
@@ -241,6 +265,10 @@ private:
     bool m_closed = false;
     bool m_setUp = false;
     QSize m_presentedSize;
+    std::string m_colorView;
+    QImage m_linearImage;          // RGBA32FPx4
+    bool m_transforming = false;   // a worker has the linear image
+    bool m_transformAgain = false; // and a newer one, or another view, came meanwhile
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_viewportConnection;

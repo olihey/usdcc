@@ -207,9 +207,10 @@ changing the multiplier reloads open panels. Distant and normalized sphere light
 
 ## 8. Open questions
 
-1. **Display transform.** With the radiance matched, RTX still looks brighter in the
-   midtones (§2.4). Should RTX present `HdrColor` with the viewport's transform? Or should
-   the viewport get sRGB color correction? Either is its own change.
+1. **Display transform.** *(answered by [COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md))* RTX
+   now presents `HdrColor` through the same OCIO view as the viewport, so matched radiance
+   looks the same; *RTX Tonemap* keeps ovrtx's `LdrColor`. §2.4's Storm row is the viewport
+   before color management (now the Raw view).
 2. **The viewport's camera light and 0.15 ambient** are always on, so Storm in usdcc shows
    more light than the scene's lights alone. Should the viewport drop them when the stage
    has lights, as usdview does?

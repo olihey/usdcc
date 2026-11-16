@@ -73,7 +73,8 @@ usdcc_add_plugin(rtx_render_native
     DESCRIPTION "Native C++ RTX rendering with navigation and selection highlighting"
     SOURCES plugin.cpp rtx_engine.cpp rtx_engine.h stage_bridge.cpp stage_bridge.h
         render_types.h gpu_bridge.h gpu_frame.h cuda_driver.h vulkan_window.cpp vulkan_window.h navigation.cpp navigation.h
-        rtx_panel.cpp rtx_panel.h presentation.cpp runtime_identity.cpp runtime_identity.h)
+        rtx_panel.cpp rtx_panel.h presentation.cpp runtime_identity.cpp runtime_identity.h
+        shaders/present.comp shaders/present_comp_spv.h)
 target_include_directories(rtx_render_native PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}" "${usdcc_vulkan_headers_SOURCE_DIR}/include" "${usdcc_volk_SOURCE_DIR}" "${CUDAToolkit_INCLUDE_DIRS}")
 target_compile_definitions(rtx_render_native PRIVATE VK_USE_PLATFORM_WIN32_KHR NOMINMAX WIN32_LEAN_AND_MEAN)
