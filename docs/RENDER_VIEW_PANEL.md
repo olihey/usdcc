@@ -205,7 +205,8 @@ A C++ plugin can subclass `RenderViewPanel` directly:
 
 ## 8. Limits
 
-- **Time:** cameras and edits are at the default time; usdcc has no timeline yet.
+- **Time:** cameras and edits are at the default time, not the timeline's, until the renderers
+  draw the time it shows ([ANIMATION.md](ANIMATION.md) phase 5).
 - **One image:** the panel shows one RGBA image. AOVs, tiles in progress, and HDR or
   exposure controls are the renderer's for now.
 - **Hiding the tab** stops rendering but keeps the renderer's process. Only deleting the panel

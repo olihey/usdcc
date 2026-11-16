@@ -663,6 +663,9 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
 
 void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_viewport->setStage(stage ? stage->usdStage() : PXR_NS::UsdStageRefPtr());
+    // The stage's time, which every panel on it shares (docs/ANIMATION.md §4.1).
+    m_viewport->setTime(stage ? stage->timeCode() : PXR_NS::UsdTimeCode::Default());
+    m_timeConnection = {};
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
     if (activeViewport() == this) activeViewportChanged()();  // the active camera's stage
     viewportsChanged()();
@@ -698,6 +701,7 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
         }
     });
     m_targetConnection = stage->targetXformOpChanged.connect([this]() { syncTarget(); });
+    m_timeConnection = stage->timeChanged.connect([this](double time) { m_viewport->setTime(PXR_NS::UsdTimeCode(time)); });
     // The HUD names the edit target when it isn't the root layer.
     m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_viewport->refreshHud(); });
     syncTarget();
@@ -782,9 +786,9 @@ bool ViewportViewPanel::fitNow(const QString& what, bool quiet) {
     const std::vector<PXR_NS::SdfPath> selection =
         what == QLatin1String("stage") ? std::vector<PXR_NS::SdfPath>() : stageManager()->selectedPaths(stage);
     const PXR_NS::TfTokenVector purposes = viewportPurposes(displayOptions());
-    std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection, PXR_NS::UsdTimeCode::Default(), purposes);
+    std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(stage->usdStage(), selection, stage->timeCode(), purposes);
     // Quietly, a selection with no bounds fits the stage instead.
-    if (!bounds && quiet && !selection.empty()) bounds = sceneBounds(stage->usdStage(), {}, PXR_NS::UsdTimeCode::Default(), purposes);
+    if (!bounds && quiet && !selection.empty()) bounds = sceneBounds(stage->usdStage(), {}, stage->timeCode(), purposes);
     if (!bounds) {
         if (quiet) return false;
         const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Nothing to fit to view"};

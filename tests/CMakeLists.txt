@@ -40,6 +40,8 @@ add_executable(usdcc_tests
     settings_test.cpp
     shade_connections_test.cpp
     stage_changes_test.cpp
+    stage_time_test.cpp
+    time_imaging_test.cpp
     stage_names_test.cpp
     undo_manager_test.cpp
     usda_syntax_test.cpp
@@ -93,6 +95,7 @@ add_executable(usdcc_ui_tests
     add_shade_input_ui_test.cpp
     session_store_test.cpp
     side_panel_test.cpp
+    timeline_test.cpp
     toast_test.cpp
     usda_view_test.cpp
     variant_editor_test.cpp

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "usdcc/core/signal.h"
+#include "usdcc/usd/time_range.h"
 
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/timeCode.h>
 
 #include <memory>
 #include <optional>
@@ -134,6 +136,27 @@ public:
     // After the mode was entered or left, or moved to another variant.
     usdcc::core::Signal<> variantEditChanged;
 
+    // The time the stage is shown at, in time codes (docs/ANIMATION.md §4.1): what
+    // every panel on the stage reads values at and the viewport draws. It starts at the
+    // stage's startTimeCode (0 without one). View state: not an edit, not undoable, never
+    // written to a layer.
+    double time() const { return m_time; }
+    PXR_NS::UsdTimeCode timeCode() const { return PXR_NS::UsdTimeCode(m_time); }
+    // Does nothing for the time it has, or one that isn't a number.
+    void setTime(double time);
+    // After the time changed, with the new one. Not `changed`: nothing in the stage did.
+    usdcc::core::Signal<double> timeChanged;
+
+    // The range playback runs over and the timeline shows: the stage's own
+    // (stageTimeRange()) until one is set here. Kept with the session, not in a layer.
+    TimeRange playbackRange() const;
+    bool hasPlaybackRange() const { return m_playbackRange.has_value(); }
+    // Its ends are put in order. The time is left where it is.
+    void setPlaybackRange(const TimeRange& range);
+    // Back to the stage's own.
+    void clearPlaybackRange();
+    usdcc::core::Signal<> playbackRangeChanged;
+
     // After the Create menu made a prim: the Outliner shows it, however far down it is.
     usdcc::core::Signal<const PXR_NS::SdfPath&> primCreated;
     // After prims changed path: a rename or a move, and undoing or redoing one. What
@@ -157,6 +180,8 @@ private:
     PXR_NS::SdfLayerHandle m_variantEditLayer;
     std::optional<std::string> m_sessionSelectionBefore;  // the set's, in the session layer
     bool m_changingVariantTarget = false;
+    double m_time = 0.0;
+    std::optional<TimeRange> m_playbackRange;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
 };
 

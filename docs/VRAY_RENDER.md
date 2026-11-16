@@ -183,8 +183,8 @@ them.
 - **Every edit reloads the whole stage.** V-Ray makes real plugins from the file (`Node`,
   `GeomStaticMesh`, lights), so an edited transform could update its `Node` in place
   instead.
-- **Time:** the stage is rendered at frame 0 (V-Ray's `Using frame: 0`); usdcc has no
-  timeline yet.
+- **Time:** the stage is rendered at frame 0 (V-Ray's `Using frame: 0`), not at the time the
+  timeline shows ([ANIMATION.md](ANIMATION.md) phase 5).
 - **Dome lights** are invisible to the camera in V-Ray's import, where `vray.exe` shows
   them. The background is then black, unless the scene has V-Ray's own settings for it.
 - **The stage's own render settings are replaced in the export.**

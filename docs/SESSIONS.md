@@ -47,6 +47,9 @@ Per open stage, in the order they were opened:
   stage whose payloads were unloaded comes back with everything loaded, which can be slow.
 - **The session layer's content**, if it isn't empty. Edits go there when it is the edit target, and they
   are lost on close otherwise. Stored as USDA text in the JSON.
+- **Its time** (`time`, the frame the timeline stood on) and, when it isn't the stage's own, **its
+  playback range** (`playbackRange`, `[start, end]`): [ANIMATION.md](ANIMATION.md) §6.1. A session from
+  before the timeline has neither, and the stage then starts at its start time code.
 
 **Not** stored: the layers' unsaved edits and the undo history. Saving warns about unsaved edits (§4.4).
 

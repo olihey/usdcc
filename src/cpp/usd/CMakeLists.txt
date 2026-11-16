@@ -26,6 +26,10 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/stage_names.h
     include/usdcc/usd/tf_diagnostic_bridge.h
+    include/usdcc/usd/time_range.h
+    src/time_range.cpp
+    include/usdcc/usd/playback.h
+    src/playback.cpp
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
@@ -144,6 +148,16 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/viewport_hud.h
     include/usdcc/usd/viewport_render_params.h
     include/usdcc/usd/undo_manager.h
+    include/usdcc/usd/time_axis.h
+    src/time_axis.cpp
+    include/usdcc/usd/time_ruler.h
+    src/time_ruler.cpp
+    include/usdcc/usd/time_range_slider.h
+    src/time_range_slider.cpp
+    include/usdcc/usd/playback_controller.h
+    src/playback_controller.cpp
+    include/usdcc/usd/timeline_bar.h
+    src/timeline_bar.cpp
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
     src/hydra_viewport_window.cpp

@@ -18,6 +18,7 @@
 #include <QStandardPaths>
 #include <QTabBar>
 #include <QToolBar>
+#include <QVBoxLayout>
 #include <QXmlStreamReader>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -60,6 +61,8 @@ constexpr int kWindowStateVersion = 1;
 // The collapsed side panels (SidePanel::setCollapsed()): objectName -> the
 // size to expand to. The window state above has them at their collapsed size.
 constexpr auto kCollapsedPanelsKey = "MainWindow/collapsedSidePanels";
+// Whether the bottom bar (the timeline) shows.
+constexpr auto kBottomBarKey = "MainWindow/bottomBarVisible";
 
 // See appSettings() for why this is a plain INI file.
 QSettings layoutSettings() { return appSettings(); }
@@ -133,9 +136,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Background tabs show their close button too, so a panel can be closed
     // without bringing it to the front first.
     ads::CDockManager::setConfigFlag(ads::CDockManager::AllTabsHaveCloseButton, true);
-    m_dockManager = new ads::CDockManager(this);
+    // The dock manager shares the centre with the bottom bar (setBottomBar()).
+    m_center = new QWidget(this);
+    auto* centerLayout = new QVBoxLayout(m_center);
+    centerLayout->setContentsMargins(0, 0, 0, 0);
+    centerLayout->setSpacing(0);
+    m_dockManager = new ads::CDockManager(m_center);
     theme::applyToDockManager(m_dockManager);
-    setCentralWidget(m_dockManager);
+    centerLayout->addWidget(m_dockManager, 1);
+    setCentralWidget(m_center);
     m_panelMaximizer = new PanelMaximizer(this, m_dockManager);
 
     // The application log (docs/LOGGING.md). Its objectName stays "Log", the
@@ -210,6 +219,19 @@ void MainWindow::removeSidePanel(SidePanel* panel) {
     if (m_viewMenu) m_viewMenu->removeAction(panel->toggleViewAction());
     removeDockWidget(panel);
     panel->deleteLater();
+}
+
+void MainWindow::setBottomBar(QWidget* bar, const QString& name) {
+    if (!bar || m_bottomBar) return;
+    m_bottomBar = bar;
+    bar->setParent(m_center);
+    m_center->layout()->addWidget(bar);
+    m_bottomBarAction = new QAction(name, this);
+    m_bottomBarAction->setObjectName(QStringLiteral("bottomBarAction"));
+    m_bottomBarAction->setCheckable(true);
+    m_bottomBarAction->setChecked(true);
+    connect(m_bottomBarAction, &QAction::toggled, bar, &QWidget::setVisible);
+    if (m_viewMenu) m_viewMenu->insertAction(m_viewMenuPanelsEnd, m_bottomBarAction);
 }
 
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
@@ -308,6 +330,7 @@ void MainWindow::restoreLayout() {
     }
     applyLayout(settings.value(kWindowStateKey).toByteArray(), settings.value(kCollapsedPanelsKey).toMap(),
                 settings.value(kDockLayoutKey).toByteArray());
+    if (m_bottomBarAction) m_bottomBarAction->setChecked(settings.value(kBottomBarKey, true).toBool());
     keepFloatingPanelsOnScreen();
     USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
 }
@@ -359,6 +382,7 @@ QJsonObject MainWindow::layoutState() const {
     state.insert(QStringLiteral("collapsedSidePanels"), collapsed);
     state.insert(QStringLiteral("windowSize"), QJsonArray{window.width(), window.height()});
     state.insert(QStringLiteral("sidePanelShares"), shares);
+    if (m_bottomBarAction) state.insert(QStringLiteral("bottomBarVisible"), m_bottomBarAction->isChecked());
     // As XML, readable in the session file; ADS compresses it by default.
     const QByteArray dock = m_dockManager->saveState();
     state.insert(QStringLiteral("dockLayout"), QString::fromUtf8(dock.startsWith("<?xml") ? dock : qUncompress(dock)));
@@ -375,6 +399,10 @@ void MainWindow::restoreLayoutState(const QJsonObject& state, bool withGeometry)
     applyLayout(QByteArray::fromBase64(state.value(QStringLiteral("windowState")).toString().toLatin1()),
                 state.value(QStringLiteral("collapsedSidePanels")).toObject().toVariantMap(),
                 state.value(QStringLiteral("dockLayout")).toString().toUtf8());
+    // A session from before there was one says nothing: the bar stays as it is.
+    if (m_bottomBarAction && state.contains(QStringLiteral("bottomBarVisible"))) {
+        m_bottomBarAction->setChecked(state.value(QStringLiteral("bottomBarVisible")).toBool());
+    }
     keepFloatingPanelsOnScreen();
 
     // Side panels keep their size in pixels; in a window much smaller or larger than
@@ -519,6 +547,7 @@ void MainWindow::saveLayout() const {
         if (panel->isCollapsed()) collapsed.insert(panel->objectName(), panel->expandedSize());
     }
     settings.setValue(kCollapsedPanelsKey, collapsed);
+    if (m_bottomBarAction) settings.setValue(kBottomBarKey, m_bottomBarAction->isChecked());
     USDCC_LOG_DEBUG("usdcc.layout", "Saved the window layout to {} (side panels: {})", settings.fileName().toStdString(),
                     panels.join(QStringLiteral(", ")).toStdString());
 }
@@ -532,6 +561,7 @@ void MainWindow::buildViewMenu() {
     for (SidePanel* panel : m_sidePanels) {
         viewMenu->addAction(panel->toggleViewAction());
     }
+    if (m_bottomBarAction) viewMenu->addAction(m_bottomBarAction);
     // Side panels added later (addSidePanel()) go in above this; QMenu hides
     // it if nothing follows.
     m_viewMenuPanelsEnd = viewMenu->addSeparator();

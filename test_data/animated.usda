@@ -1,0 +1,66 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    endTimeCode = 48
+    framesPerSecond = 24
+    startTimeCode = 1
+    timeCodesPerSecond = 24
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def Cube "Hopper"
+    {
+        color3f[] primvars:displayColor = [(0.9, 0.35, 0.25)]
+        double size = 1
+        float xformOp:rotateY.timeSamples = {
+            1: 0,
+            48: 360,
+        }
+        double3 xformOp:translate.timeSamples = {
+            1: (-2.5, 0.5, 0),
+            12: (-2.5, 3, 0),
+            24: (-2.5, 0.5, 0),
+            36: (-2.5, 3, 0),
+            48: (-2.5, 0.5, 0),
+        }
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateY"]
+    }
+
+    def Sphere "Slider"
+    {
+        color3f[] primvars:displayColor = [(0.25, 0.55, 0.95)]
+        double radius = 0.6
+        double xformOp:translateX.spline = {
+            bezier,
+            1: 0; pre (6, 0); post curve (6, 0),
+            24: 4; pre (6, 0); post curve (6, 0),
+            48: 0; pre (6, 0); post curve (6, 0),
+        }
+        double xformOp:translateY = 0.6
+        uniform token[] xformOpOrder = ["xformOp:translateX", "xformOp:translateY"]
+    }
+
+    def Cube "Ground"
+    {
+        color3f[] primvars:displayColor = [(0.35, 0.35, 0.38)]
+        double size = 1
+        float3 xformOp:scale = (10, 0.2, 6)
+        double3 xformOp:translate = (0, -0.1, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+
+    def Sphere "Pulse"
+    {
+        color3f[] primvars:displayColor = [(0.4, 0.8, 0.4)]
+        double radius.timeSamples = {
+            1: 0.3,
+            24: 0.9,
+            48: 0.3,
+        }
+        double3 xformOp:translate = (2.5, 0.8, -1.5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}
+

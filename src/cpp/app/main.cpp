@@ -85,7 +85,9 @@
 #include "usdcc/usd/stage_names.h"
 #include "usdcc/usd/stage_opener.h"
 #include "usdcc/usd/stages_menu.h"
+#include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/tf_diagnostic_bridge.h"
+#include "usdcc/usd/timeline_bar.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -307,6 +309,11 @@ int main(int argc, char** argv) {
     // toolbars are owned by `window`).
     auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
     new usdcc::usd::ViewportToolBars(&window, toolSet, &stageManager);
+    // The timeline (docs/ANIMATION.md §4.2, §4.3): one transport, on the current stage,
+    // in a bar under the dock area. Both are the window's.
+    auto* playback = new usdcc::usd::PlaybackController(&stageManager, &window);
+    playback->addActions(&window);
+    window.setBottomBar(new usdcc::usd::TimelineBar(playback, undoManager, &window), QObject::tr("Timeline"));
     // F: fit the active viewport to the selection, or to the whole stage.
     usdcc::usd::ViewportViewPanel::addFitToViewAction(&window);
     // The active viewport's HUD on or off (no key until one is set).
@@ -358,7 +365,7 @@ int main(int argc, char** argv) {
     usdcc::scripting::SessionController sessions(sessionContext);
 
     const usdcc::scripting::AppContextScope scriptingContext(
-        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins, &sessions, &workspaces});
+        {&stageManager, undoManager.get(), toolSet.get(), &window, &panelTypes, &plugins, &sessions, &workspaces, playback});
     usdcc::scripting::ScriptRunner scriptRunner(python, stageManager, *undoManager);
     // Docked on the right until the user moves it (a saved layout wins).
     auto* scriptEditor = new usdcc::scripting::ScriptEditorSidePanel(python, scriptRunner);

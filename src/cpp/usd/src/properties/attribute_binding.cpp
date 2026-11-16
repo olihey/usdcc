@@ -51,18 +51,20 @@ bool AttributeBinding::ensureAttribute() {
     return exists();
 }
 
-VtValue AttributeBinding::currentValue(const UsdAttribute& attribute) {
+VtValue AttributeBinding::currentValue(const UsdAttribute& attribute, UsdTimeCode time) {
     VtValue value;
-    if (!attribute.Get(&value, UsdTimeCode::Default()) && attribute.GetNumTimeSamples() > 0) {
+    if (!attribute.Get(&value, time) && time.IsDefault() && attribute.GetNumTimeSamples() > 0) {
         attribute.Get(&value, UsdTimeCode::EarliestTime());
     }
     return value;
 }
 
+UsdTimeCode AttributeBinding::time() const { return m_stage ? m_stage->timeCode() : UsdTimeCode::Default(); }
+
 void AttributeBinding::refresh() {
     if (m_editing) return;
     if (exists()) {
-        m_editor->setValue(currentValue(m_attribute));
+        m_editor->setValue(currentValue(m_attribute, time()));
     } else if (m_creates) {
         m_editor->setValue(m_fallback);
     }
@@ -83,7 +85,7 @@ void AttributeBinding::onEditStarted() {
     if (m_editing) return;
     m_editing = true;
     const bool existed = exists();
-    m_startValue = existed ? currentValue(m_attribute) : m_fallback;
+    m_startValue = existed ? currentValue(m_attribute, time()) : m_fallback;
     m_startAuthored = existed && m_attribute.HasAuthoredValue();
     const std::string name = existed ? m_attribute.GetName().GetString() : m_name.GetString();
     if (m_undoManager && m_stage) {

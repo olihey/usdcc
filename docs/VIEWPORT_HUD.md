@@ -103,7 +103,8 @@ Converging 43%
   percentage where the delegate reports one (`GetRenderStats()`, `percentDone`, delegate
   dependent).
 - **GPU memory** (`GetResourceAllocation()`): off by default, behind its own toggle.
-- **Time code / frame**: nothing yet, as there's no timeline. The slot is kept for it.
+- **Time code / frame**: `Frame 24`, the stage's time ([ANIMATION.md](ANIMATION.md) §6.1), the
+  bottom line of this corner. Shown with the HUD itself; no switch of its own.
 
 ### 2.5 Centre and transient
 
@@ -261,7 +262,8 @@ Where it differs from the plan:
   would run into long count lines.
 - **The top and bottom views put X to the right** (yaw 0): any yaw looks the same way
   there, and keeping the current one gave a turned top view.
-- **Values at the earliest time**, as the viewport draws them, since there's no timeline.
+- **The counts are at the earliest time**, whatever the timeline shows: they count what is there,
+  which rarely changes over time.
 - The **Camera menu** has Persp (the only camera so far), Fit to View and Reset Camera.
 - **Plates, not shadows.** Each corner's text (top left, bottom left, bottom right, and the
   view name under the triad) sits on a semi-transparent black plate (`HudLayout::plates`),

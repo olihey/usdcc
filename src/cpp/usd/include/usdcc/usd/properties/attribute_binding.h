@@ -29,8 +29,9 @@ class PropertyEditor;
 // Without an UndoManager (the data-type gallery's scratch stage) edits are
 // written directly and a cancel restores the value the gesture started from.
 //
-// refresh() pulls the attribute's current value into the editor; it is skipped
-// while a gesture is in progress so live notices can't fight the user.
+// refresh() pulls the attribute's value at the stage's time into the editor; it is
+// skipped while a gesture is in progress so live notices can't fight the user.
+// Edits still set the default (docs/ANIMATION.md phase 2 makes them keys).
 class USDCC_USD_UI_API AttributeBinding : public QObject {
     Q_OBJECT
 
@@ -54,9 +55,13 @@ public:
     // Clears the authored value in the edit target (undoable).
     void resetToDefault();
 
-    // The value shown for an attribute: its default, or the first time sample
-    // when it only has samples (there's no timeline to choose a time yet).
-    static PXR_NS::VtValue currentValue(const PXR_NS::UsdAttribute& attribute);
+    // The value shown for an attribute: the one it has at `time`. At the default time
+    // (no stage, so no timeline: the data-type gallery), an attribute that only has
+    // samples shows its first.
+    static PXR_NS::VtValue currentValue(const PXR_NS::UsdAttribute& attribute,
+                                        PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default());
+    // The time values are read at: the stage's (Stage::timeCode()), the default without one.
+    PXR_NS::UsdTimeCode time() const;
 
 Q_SIGNALS:
     void valueWritten(const PXR_NS::VtValue& value);

@@ -179,6 +179,13 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     renderNow();
 }
 
+void HydraViewportWindow::setTime(PXR_NS::UsdTimeCode time) {
+    if (time == m_time) return;
+    m_time = time;
+    // Not renderNow(): scrubbing and playback send these faster than frames draw.
+    requestUpdate();
+}
+
 void HydraViewportWindow::rebuildEngine() {
     const PXR_NS::TfToken rendererPluginId = m_engine->GetCurrentRendererId();
     m_context->makeCurrent(this);
@@ -487,6 +494,9 @@ HudInput HydraViewportWindow::hudInput() const {
         input.metersPerUnit = PXR_NS::UsdGeomGetStageMetersPerUnit(m_stage);
         const PXR_NS::SdfLayerHandle target = m_stage->GetEditTarget().GetLayer();
         if (target && target != m_stage->GetRootLayer()) input.editTarget = QString::fromStdString(target->GetDisplayName());
+
+        // The frame shown: not for a stage drawn at the default time (a preview).
+        if (!m_time.IsDefault()) input.frame = m_time.GetValue();
 
         input.showStats = m_display.hudStats;
         input.stageCounts = m_hudCounts.stage;
@@ -894,6 +904,7 @@ PXR_NS::SdfPath HydraViewportWindow::pickPrim(const PXR_NS::GfVec2d& ndcPos) {
     // refinement). Hidden Line picks its surfaces, which hide what's behind them.
     const ShadingMode shading = effectiveShading(m_display, currentRendererPlugin());
     PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
+    params.frame = m_time;
     if (shading == ShadingMode::HiddenLine) params.drawMode = PXR_NS::UsdImagingGLDrawMode::DRAW_GEOM_ONLY;
 
     PXR_NS::UsdImagingGLEngine::PickParams pickParams;
@@ -928,6 +939,7 @@ usdcc::tools::ToolContext HydraViewportWindow::buildToolContext() {
     ctx.cameraPos = cameraPosition();
     ctx.pickPrim = [this](const PXR_NS::GfVec2d& ndcPos) { return pickPrim(ndcPos); };
     ctx.targetOpName = m_targetOp;
+    ctx.time = m_time;
     return ctx;
 }
 
@@ -969,6 +981,7 @@ void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& 
     frame.targetFramebuffer = m_framebuffer->handle();
     // The same geometry as the frame: purposes, refinement, culling.
     frame.params = viewportRenderParams(m_display, ShadingMode::SmoothShaded);
+    frame.params.frame = m_time;
     m_selectionOverlay->draw(frame);
 }
 
@@ -1182,6 +1195,7 @@ void HydraViewportWindow::renderNow() {
     m_engine->SetLightingState(lights, material, sceneAmbient);
 
     PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
+    params.frame = m_time;
     if (m_previewMode) params.enableSceneLights = true;  // a preview's lights are its stage's
     // SetSelected() only feeds the engine the selection; it is drawn solely
     // when the render params ask for it (the flag defaults to off). Only Solid has

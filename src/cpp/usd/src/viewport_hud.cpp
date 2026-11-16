@@ -1,5 +1,7 @@
 #include "usdcc/usd/viewport_hud.h"
 
+#include "usdcc/usd/time_ruler.h"
+
 #include <QFontMetricsF>
 #include <QLocale>
 #include <QPainter>
@@ -116,6 +118,8 @@ QString formatHudCount(std::uint64_t count) {
     return scaled(std::floor(count / 100000000.0) / 10.0, "B");
 }
 
+QString formatHudFrame(double time) { return QStringLiteral("Frame %1").arg(formatFrame(time)); }
+
 QString formatMetersPerUnit(double metersPerUnit) {
     struct Unit {
         double meters;
@@ -225,8 +229,9 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         addPlate(topLeftText);
     }
 
-    // Bottom right: how fast, bottom up.
+    // Bottom right, bottom up: the frame, then how fast.
     QStringList rightLines;
+    if (input.frame) rightLines << formatHudFrame(*input.frame);
     if (input.showPerformance) {
         if (input.frameMs) {
             QString line = QStringLiteral("%1 ms").arg(QString::number(*input.frameMs, 'f', 1));

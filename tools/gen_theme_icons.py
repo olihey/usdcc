@@ -217,6 +217,24 @@ ICONS["cog"] = (1.2, LIGHT, [_cog(8, 8), _arc(8, 8, 2.1, 0, 360)])
 # drawn as outlines like play and stop.
 ICONS["pause"] = (1.3, LIGHT, [[(4, 3), (6.5, 3), (6.5, 13), (4, 13), (4, 3)], [(9.5, 3), (12, 3), (12, 13), (9.5, 13), (9.5, 3)]])
 
+# The timeline's transport (docs/ANIMATION.md §4.3), outlines like play and stop: to the
+# first and last frame (a triangle against a bar), a frame back and on (a bar behind a
+# triangle), and Loop (two arrows going round).
+ICONS["skip-start"] = (1.3, LIGHT, [[(4, 3.5), (4, 12.5)], [(12.5, 3.5), (6.5, 8), (12.5, 12.5), (12.5, 3.5)]])
+ICONS["skip-end"] = (1.3, LIGHT, [[(12, 3.5), (12, 12.5)], [(3.5, 3.5), (9.5, 8), (3.5, 12.5), (3.5, 3.5)]])
+ICONS["step-back"] = (1.3, LIGHT, [[(12.5, 4.5), (12.5, 11.5)], [(9.5, 3.5), (3.5, 8), (9.5, 12.5), (9.5, 3.5)]])
+ICONS["step-forward"] = (1.3, LIGHT, [[(3.5, 4.5), (3.5, 11.5)], [(6.5, 3.5), (12.5, 8), (6.5, 12.5), (6.5, 3.5)]])
+ICONS["loop"] = (
+    1.3,
+    LIGHT,
+    [
+        [(3, 8), (3, 5), (13, 5)],
+        [(10.8, 2.8), (13, 5), (10.8, 7.2)],
+        [(13, 8), (13, 11), (3, 11)],
+        [(5.2, 8.8), (3, 11), (5.2, 13.2)],
+    ],
+)
+
 # The Layer Editor's toolbar: Save All, two floppy disks, one behind the other.
 ICONS["save-all"] = (
     1.2,

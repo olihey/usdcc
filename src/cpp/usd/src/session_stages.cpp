@@ -75,6 +75,14 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
         state.insert(QStringLiteral("variantEdit"), edit);
     }
 
+    // The timeline (docs/ANIMATION.md §4.1): where it stood, and the range it played
+    // when that isn't the stage's own.
+    state.insert(QStringLiteral("time"), stage->time());
+    if (stage->hasPlaybackRange()) {
+        const TimeRange range = stage->playbackRange();
+        state.insert(QStringLiteral("playbackRange"), QJsonArray{range.start, range.end});
+    }
+
     QJsonArray muted;
     for (const std::string& identifier : usdStage->GetMutedLayers()) muted << qs(identifier);
     if (!muted.isEmpty()) state.insert(QStringLiteral("mutedLayers"), muted);
@@ -172,6 +180,11 @@ void apply(StageManager& stageManager, const StageRefPtr& stage, const QJsonObje
                      .arg(name, variant.value(QStringLiteral("variant")).toString(), qs(prim)));
         }
     }
+
+    // A session from before there was a timeline has neither: the stage keeps its start.
+    const QJsonArray range = state.value(QStringLiteral("playbackRange")).toArray();
+    if (range.size() == 2) stage->setPlaybackRange({range.at(0).toDouble(), range.at(1).toDouble()});
+    if (state.contains(QStringLiteral("time"))) stage->setTime(state.value(QStringLiteral("time")).toDouble(stage->time()));
 
     std::vector<PXR_NS::SdfPath> selection;
     int dropped = 0;

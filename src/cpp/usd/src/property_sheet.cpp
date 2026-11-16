@@ -175,6 +175,10 @@ PropertySheet::PropertySheet(StageManager* stageManager, std::shared_ptr<UndoMan
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     layout->addWidget(m_scroll, 1);
+    m_timeRefreshTimer = new QTimer(this);
+    m_timeRefreshTimer->setSingleShot(true);
+    m_timeRefreshTimer->setInterval(50);
+    connect(m_timeRefreshTimer, &QTimer::timeout, this, &PropertySheet::refreshTimeVaryingValues);
     rebuild();
 }
 
@@ -183,8 +187,15 @@ PropertySheet::~PropertySheet() = default;
 void PropertySheet::setStage(const StageRefPtr& stage) {
     m_stageChangedConnection = {};
     m_editTargetConnection = {};
+    m_timeConnection = {};
+    m_timeRefreshTimer->stop();
     m_stage = stage;
     if (stage) {
+        // Not restarted while it runs: scrubbing and playback then update the rows at a
+        // steady pace instead of waiting for the time to rest.
+        m_timeConnection = stage->timeChanged.connect([this](double) {
+            if (!m_timeRefreshTimer->isActive()) m_timeRefreshTimer->start();
+        });
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
         // Queued: the target can change from inside a menu or another panel's handler.
@@ -722,6 +733,7 @@ void PropertySheet::buildTransformStack(const UsdPrim& prim, CategorySection* se
         row.property = prim.GetAttribute(opRow.attrName);
         row.searchText = (opRow.row->labelText() + QLatin1Char(' ') + qs(opRow.opName.GetString())).toLower();
         row.managedByStack = true;
+        if (const UsdAttribute attr = row.property.As<UsdAttribute>()) row.timeVarying = attr.ValueMightBeTimeVarying();
         if (row.binding) {
             connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
         }
@@ -1377,7 +1389,9 @@ void PropertySheet::updateRowState(Row& row) {
         const bool editable = prim_actions::isEditable(attr.GetPrim());
         row.row->setUnauthored(!authored);
         row.row->setResettable(authored && editable);
-        row.row->setAnimated(attr.GetNumTimeSamples() > 0);
+        // Time samples or a spline: either hides an edit of the default.
+        row.row->setAnimated(attr.GetNumTimeSamples() > 0 || attr.HasSpline());
+        row.timeVarying = attr.ValueMightBeTimeVarying();
         const SdfPath source = connectedSource(attr);
         const QString label = source.IsEmpty() ? QString() : qs(relativeLabel(source, connectionScope(attr.GetPrim())));
         row.row->setConnectedSource(label, qs(source.GetString()));
@@ -1555,6 +1569,14 @@ void PropertySheet::refreshValues() {
     for (Row& row : m_rows) {
         if (row.binding) row.binding->refresh();
         updateRowState(row);
+    }
+}
+
+void PropertySheet::refreshTimeVaryingValues() {
+    // A gesture's end refreshes everything (processPendingChanges()).
+    if (!currentPrim() || anyEditing()) return;
+    for (Row& row : m_rows) {
+        if (row.timeVarying && row.binding) row.binding->refresh();
     }
 }
 

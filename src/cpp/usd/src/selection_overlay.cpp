@@ -287,7 +287,7 @@ void SelectionOverlay::renderMask(const Frame& frame) {
 
     // The viewport's geometry, or the lines don't sit on what it shows.
     PXR_NS::UsdImagingGLRenderParams params;
-    params.frame = PXR_NS::UsdTimeCode::Default();
+    params.frame = frame.params.frame;
     params.complexity = frame.params.complexity;
     params.showGuides = frame.params.showGuides;
     params.showProxy = frame.params.showProxy;

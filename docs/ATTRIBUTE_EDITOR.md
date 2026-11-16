@@ -189,8 +189,9 @@ elements.
   and which layer holds the strongest opinion.
 - **State badges:**
   - authored vs. schema fallback (fallback values in dimmed text)
-  - **time-sampled**: no timeline exists yet, so editing is disabled and the badge
-    explains why (see §10)
+  - **animated** (time samples or a spline): the value is the one at the stage's time and
+    follows the timeline ([ANIMATION.md](ANIMATION.md) §6.1); editing is disabled until keys
+    can be set (its phase 2), and the badge says so (see §10)
   - **connected** (a UsdShade input or attribute connection): read-only, with the source
     as a link under the value, relative to the material (`Tex.outputs:rgb`), which
     selects the source prim. There is no badge for it. See §4.3.
@@ -518,7 +519,8 @@ The headless tool harness becomes a real test target (§8). It covers:
 - **Multi-selection editing:** the editor shows the first selected prim, as today. The
   editor contract already has `setMixed()` for later.
 - **Relationship editing:** since done, in docs/RELATIONSHIPS.md.
-- **Animation:** editing time samples and keyframing. This needs a timeline first.
+- **Animation:** editing time samples and keyframing: [ANIMATION.md](ANIMATION.md) phase 2. The
+  timeline it needs is there, and rows show their value at its time.
 - **Python and plugin-registered custom editors:** the registry is designed for them,
   but the bindings come with M7/M9.
 
@@ -528,7 +530,7 @@ Each of these can be changed before the phase that needs it starts:
 
 | # | Question | Default used by this plan |
 |---|---|---|
-| 1 | Time-sampled attributes, with no timeline yet | Show the value at `Default` (or the first sample if there is no default), editing disabled, with an "animated" badge |
+| 1 | Time-sampled attributes | Show the value at the stage's time ([ANIMATION.md](ANIMATION.md) §6.1; before the timeline: at `Default`, or the first sample), editing disabled, with an "animated" badge |
 | 2 | Units like "5.0 m" in the mockup | No distance units at first. Degrees get `°`. Unit display based on `metersPerUnit` is a later option |
 | 3 | The link button on the asset field | Toggles between a layer-relative path and an absolute path. The resolved path is always shown below. In a `.usdz`, which anchors relative paths inside itself, a file outside it is always written absolute and the toggle is off |
 | 4 | Debug menu visibility | Always shown until a setting exists (M10) |

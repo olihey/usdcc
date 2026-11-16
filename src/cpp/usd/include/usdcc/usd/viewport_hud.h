@@ -52,6 +52,8 @@ QString hudAxisViewName(HudItem item, bool zUp);
 
 // "1,204" up to 99,999, then "312K", "2.1M", "1.3B".
 QString formatHudCount(std::uint64_t count);
+// The frame a viewport shows: "Frame 24", or "Frame 24.5" between two.
+QString formatHudFrame(double time);
 // A stage's metersPerUnit as a unit: "cm" (0.01), "m", "mm", "km", "in", "ft"; otherwise
 // "0.5 m".
 QString formatMetersPerUnit(double metersPerUnit);
@@ -87,6 +89,7 @@ struct HudInput {
     QString selectionType;  // the type of the one selected prim; empty with more
 
     // Bottom right.
+    std::optional<double> frame;  // the time code shown; nothing: not said
     bool showPerformance = false;
     std::optional<double> frameMs;
     std::optional<double> fps;

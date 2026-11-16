@@ -252,6 +252,7 @@ private:
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_targetConnection;
     usdcc::core::Signal<>::Connection m_editTargetConnection;
+    usdcc::core::Signal<double>::Connection m_timeConnection;  // the stage's time, to the viewport
 
     QTimer* m_countTimer = nullptr;
     std::unique_ptr<SceneCountJob> m_stageCountJob;

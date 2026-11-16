@@ -15,6 +15,7 @@
 #include <pxr/imaging/hd/command.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/timeCode.h>
 
 #include <QColor>
 #include <QElapsedTimer>
@@ -92,6 +93,12 @@ public:
     ~HydraViewportWindow() override;
 
     void setStage(const PXR_NS::UsdStageRefPtr& stage);
+
+    // The time the stage is drawn, picked and its gizmos placed at: its panel hands on
+    // Stage::timeCode() (docs/ANIMATION.md §4.1). Default until then, as for a preview,
+    // whose stage has no timeline. Draws a new frame when it changed.
+    void setTime(PXR_NS::UsdTimeCode time);
+    PXR_NS::UsdTimeCode time() const { return m_time; }
 
     // Whether firstFrameRendered() has already fired for the current stage —
     // a viewport that was already on screen draws it inside setStage().
@@ -398,6 +405,7 @@ private:
     // What Storm and the gizmo draw into; copied to the window each frame.
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
     PXR_NS::UsdStageRefPtr m_stage;
+    PXR_NS::UsdTimeCode m_time = PXR_NS::UsdTimeCode::Default();
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};
     double m_distance = kDefaultOrbitDistance;

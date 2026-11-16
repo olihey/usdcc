@@ -12,6 +12,7 @@
 #include <pxr/usd/usdUtils/stageCache.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace usdcc::usd {
 
@@ -111,9 +112,32 @@ private:
 Stage::Stage(PXR_NS::UsdStageRefPtr usdStage)
     : m_usdStage(std::move(usdStage)),
       m_cacheId(PXR_NS::UsdUtilsStageCache::Get().GetId(m_usdStage).ToLongInt()),
+      m_time(m_usdStage->GetStartTimeCode()),  // 0 when it has none
       m_changeListener(std::make_unique<ChangeListener>(*this)) {}
 
 Stage::~Stage() = default;
+
+void Stage::setTime(double time) {
+    if (!std::isfinite(time) || time == m_time) return;
+    m_time = time;
+    timeChanged(time);
+}
+
+TimeRange Stage::playbackRange() const { return m_playbackRange ? *m_playbackRange : stageTimeRange(m_usdStage); }
+
+void Stage::setPlaybackRange(const TimeRange& range) {
+    if (!std::isfinite(range.start) || !std::isfinite(range.end)) return;
+    const TimeRange wanted = ordered(range);
+    if (m_playbackRange && *m_playbackRange == wanted) return;
+    m_playbackRange = wanted;
+    playbackRangeChanged();
+}
+
+void Stage::clearPlaybackRange() {
+    if (!m_playbackRange) return;
+    m_playbackRange.reset();
+    playbackRangeChanged();
+}
 
 PXR_NS::TfToken Stage::targetXformOpFor(const PXR_NS::SdfPath& primPath) const {
     return primPath == m_targetPrim ? m_targetOp : PXR_NS::TfToken();

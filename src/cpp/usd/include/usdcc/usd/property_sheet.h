@@ -14,6 +14,8 @@
 #include <QString>
 #include <QWidget>
 
+class QTimer;
+
 #include <memory>
 #include <set>
 #include <string>
@@ -122,6 +124,8 @@ private:
         // whether this is a shader output, whose editor lists the inputs it feeds.
         QToolButton* connectButton = nullptr;
         bool shaderOutput = false;
+        // Its value changes with time (updateRowState()): read again as the time moves.
+        bool timeVarying = false;
     };
     struct PrimHeader {
         properties::PropertyEditor* name = nullptr;
@@ -226,6 +230,11 @@ private:
     // The shown stage's change notices (re-made whenever the stage changes).
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_editTargetConnection;
+    // The stage's time (docs/ANIMATION.md §5.4): the rows whose values change with it
+    // are read again a moment after it moves, so not once a frame while playing.
+    usdcc::core::Signal<double>::Connection m_timeConnection;
+    QTimer* m_timeRefreshTimer = nullptr;
+    void refreshTimeVaryingValues();
 };
 
 }  // namespace usdcc::usd

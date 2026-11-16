@@ -98,6 +98,15 @@ public:
     // clickable rather than dragging the window.
     void addTitleBarWidget(QWidget* widget);
 
+    // Puts `bar` under the dock area, above the bottom side panels, as wide as the dock
+    // area: the timeline (docs/ANIMATION.md §4.3). The window takes ownership. The View
+    // menu gets an entry named `name` that shows and hides it, which the saved layout
+    // remembers; so call this before buildViewMenu() and restoreLayout(). One bar only.
+    void setBottomBar(QWidget* bar, const QString& name);
+    QWidget* bottomBar() const { return m_bottomBar; }
+    // View > `name`: checked while the bar shows. Null without a bar.
+    QAction* bottomBarAction() const { return m_bottomBarAction; }
+
     // Whether layoutSettled() has been emitted.
     bool isLayoutSettled() const { return m_layoutSettled; }
 
@@ -190,6 +199,10 @@ private:
     void applySidePanelShares(const QVariantMap& shares);
 
     ads::CDockManager* m_dockManager = nullptr;
+    // The central widget: the dock manager, with the bottom bar under it.
+    QWidget* m_center = nullptr;
+    QWidget* m_bottomBar = nullptr;
+    QAction* m_bottomBarAction = nullptr;
     PanelMaximizer* m_panelMaximizer = nullptr;
     QWK::WidgetWindowAgent* m_windowAgent = nullptr;
     TitleBar* m_titleBar = nullptr;

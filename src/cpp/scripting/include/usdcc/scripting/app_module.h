@@ -4,6 +4,7 @@
 #include <vector>
 
 namespace usdcc::usd {
+class PlaybackController;
 class StageManager;
 class UndoManager;
 }  // namespace usdcc::usd
@@ -55,6 +56,9 @@ struct AppContext {
     SessionHost* sessions = nullptr;
     // The workspaces (docs/WORKSPACES.md §9.1); null without, and then those raise.
     usdcc::ui::WorkspaceController* workspaces = nullptr;
+    // The timeline's transport, for usdcc.app.play() and stop(); null without, and
+    // then those raise.
+    usdcc::usd::PlaybackController* playback = nullptr;
 };
 
 // Makes `context` what the embedded module _usdcc_app — and through it

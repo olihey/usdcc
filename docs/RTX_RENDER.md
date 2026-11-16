@@ -99,7 +99,7 @@ obsolete frames.
 The bridge flattens unsaved/session opinions under the resolver context, anchors
 assets, and creates collision-free private camera/product prims only in the
 snapshot. Camera, size and supported transforms update in place; other edits or
-failed writes replace the snapshot. Rendering uses USD default time.
+failed writes replace the snapshot. Rendering uses USD default time, not the timeline's (ANIMATION.md phase 5).
 
 ```text
 ovrtx CUDA output -> shared Vulkan buffer -> Vulkan image/blit -> Qt QWindow
