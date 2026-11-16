@@ -91,9 +91,13 @@ USDCC_TEST(usd_debug_flags) {
 USDCC_TEST(usd_environment_settings) {
     const std::string sep = ARCH_PATH_LIST_SEP;
     CHECK(mergeSearchPaths("", "") == "", "nothing from nothing");
-    CHECK(mergeSearchPaths("", "C:/a;C:/b") == "C:/a" + sep + "C:/b", "the setting's folders");
-    CHECK(mergeSearchPaths("C:/x", "C:/a;C:/x") == "C:/x" + sep + "C:/a",
-          "after the environment's, without the ones already there: %s", mergeSearchPaths("C:/x", "C:/a;C:/x").c_str());
+    // No drive letters: the environment's list is split on the platform's
+    // separator, which is ':' outside Windows.
+    CHECK(mergeSearchPaths("", "/a;/b") == "/a" + sep + "/b", "the setting's folders");
+    const std::string environment = "/x" + sep + "/y";
+    CHECK(mergeSearchPaths(environment, "/a;/x") == environment + sep + "/a",
+          "after the environment's, without the ones already there: %s",
+          mergeSearchPaths(environment, "/a;/x").c_str());
 
     usdcc::core::Settings settings;
     defineUsdEnvironmentSettings(settings);
