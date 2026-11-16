@@ -1,6 +1,7 @@
 """Collects the licences of OpenUSD's dependencies from build_usd.py's folders.
 
-build_usd.py installs OpenUSD's own LICENSE and THIRD-PARTY.md, but not the
+The install root's LICENSE and THIRD-PARTY.md may belong to MaterialX. Preserve
+OpenUSD's actual LICENSE.txt/NOTICE.txt with --openusd-source. Also collect the
 licences of most of the libraries it builds (TBB, OpenImageIO, OpenColorIO,
 MaterialX, OpenSubdiv, Boost, ...). Those are in their source folders, and the
 small libraries OpenColorIO and OpenEXR bundle are in the build folder. This
@@ -22,11 +23,12 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import copy_file  # noqa: E402
+from _common import copy_file
 
 # Licence texts: LICENSE, COPYING.txt, LICENSE-NVIDIA, ..., not code such as
 # Boost's licence_info.cpp.
@@ -102,9 +104,15 @@ def main(argv=None):
     parser.add_argument("--src", required=True, help="build_usd.py's source folder")
     parser.add_argument("--build", help="build_usd.py's build folder")
     parser.add_argument("--destination", required=True, help="where the licences go")
+    parser.add_argument("--openusd-source", help="OpenUSD checkout: preserve its actual LICENSE.txt and NOTICE.txt")
     args = parser.parse_args(argv)
 
     found = collect(args.src, args.build, args.destination)
+    if args.openusd_source:
+        target = Path(args.destination) / "OpenUSD"
+        target.mkdir(parents=True, exist_ok=True)
+        for name in ("LICENSE.txt", "NOTICE.txt"):
+            shutil.copy2(Path(args.openusd_source) / name, target / name)
     print(f"Licences of {len(found)} of OpenUSD's dependencies: {', '.join(found)}")
 
 

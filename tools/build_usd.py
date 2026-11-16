@@ -87,7 +87,7 @@ def main(argv=None):
         fail(f"build_usd.py failed ({result.returncode}); its log: {log}")
 
     run([sys.executable, REPO / "tools" / "ci" / "usd_licenses.py", "--src", work / "src", "--build", work / "build",
-         "--destination", install / "licenses"])
+         "--destination", install / "licenses", "--openusd-source", source])
     print(f"OpenUSD is in {install}. Build usdcc against it with: python tools/build.py --usd-install {install}")
 
 

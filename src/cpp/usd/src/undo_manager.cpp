@@ -442,6 +442,14 @@ bool UndoManager::isEditing(const StageRefPtr& stage) const {
     const Entry* e = findEntry(stage);
     return e && e->session;
 }
+bool UndoManager::tryBeginEdit(const StageRefPtr& stage, const QString& description) {
+    if (isEditing(stage)) return false;
+    beginEdit(stage, description);
+    const Entry* e = findEntry(stage);
+    if (e && e->session && e->session->recorder) return true;
+    cancelEdit(stage);
+    return false;
+}
 
 void UndoManager::beginGlobalEdit(StageManager& stageManager, const QString& description) {
     if (m_globalEdit) return;

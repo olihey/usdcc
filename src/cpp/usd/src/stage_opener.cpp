@@ -54,6 +54,8 @@ StageOpener::~StageOpener() {
     }
 }
 
+void StageOpener::open(const QString& path) { open(path, Options{}); }
+
 void StageOpener::open(const QString& path, const Options& options) {
     if (m_busy) {
         return;

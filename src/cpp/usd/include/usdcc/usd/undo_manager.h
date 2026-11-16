@@ -75,6 +75,10 @@ public:
     bool endEdit(const StageRefPtr& stage);
     void cancelEdit(const StageRefPtr& stage);
     bool isEditing(const StageRefPtr& stage) const;
+    // Starts only when this session can own its layer's recorder. False if an
+    // existing session (including another manager/stage's) would absorb it.
+    // Async commits use this to guarantee independent rollback.
+    bool tryBeginEdit(const StageRefPtr& stage, const QString& description);
 
     // Begins a session, named `description`, on every stage `stageManager` has
     // open, and on every stage it opens until endGlobalEdit(). Doesn't nest:

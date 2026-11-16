@@ -58,6 +58,7 @@ def parser(description=None):
                         help="enable labeled GPU tests; build rtx_gpu_test_bins before running CTest")
     result.add_argument("--clean", action="store_true", help="remove the build directory before configuring")
     result.add_argument("--run", action="store_true", help="launch usdcc after a successful build")
+    result.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 4), help="maximum parallel build jobs (default: up to 4)")
     return result
 
 
@@ -119,6 +120,8 @@ def launch(exe, usd_install, scene):
 
 def main(argv=None, description=None):
     args = parser(description).parse_args(argv)
+    if args.jobs < 1:
+        fail("--jobs must be positive")
     rtx_options = args.with_rtx or args.ovrtx_root or args.ovstage_root or args.rtx_gpu_tests
     if args.without_rtx and rtx_options:
         fail("--without-rtx cannot be combined with native RTX options.")
@@ -147,7 +150,10 @@ def main(argv=None, description=None):
             # The one the build folder already has, so a second run doesn't clash.
             generator = cache_value(BUILD_DIR, "CMAKE_GENERATOR") or ("Ninja" if shutil.which("ninja") else None)
 
-    configure = ["cmake", "-S", REPO, "-B", BUILD_DIR]
+    # Mesh tools are part of every build. Dependency downloads happen here,
+    # never implicitly during a direct CMake configure.
+    run([sys.executable, REPO / "tools/build_blender_mesh.py", "--fetch", "--jobs", str(args.jobs)])
+    configure = ["cmake", "-S", REPO, "-B", BUILD_DIR, "-DUSDCC_BUILD_BLENDER_MESH_TOOLS=ON"]
     if generator:
         configure += ["-G", generator]
     if generator and generator.startswith("Visual Studio"):
@@ -180,7 +186,7 @@ def main(argv=None, description=None):
     print(f"Building ({args.configuration})...")
     # --parallel: several projects at a time (each compiles its files in
     # parallel too, within one shared limit; see the top-level CMakeLists.txt).
-    run(["cmake", "--build", BUILD_DIR, "--config", args.configuration, "--parallel"])
+    run(["cmake", "--build", BUILD_DIR, "--config", args.configuration, "--parallel", str(args.jobs)])
 
     exe = executable(args.configuration)
     print(f"Build succeeded: {exe}")

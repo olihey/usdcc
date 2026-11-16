@@ -1,0 +1,9 @@
+{
+  "version": "5.2.4",
+  "tag": "v5.2.4",
+  "repository": "https://github.com/blender/blender",
+  "commit": "cd5dc428cce1993a4b35986f227c6a24e42a365c",
+  "archive": "https://codeload.github.com/blender/blender/tar.gz/cd5dc428cce1993a4b35986f227c6a24e42a365c",
+  "sha256": "4d6b3c3250d24cf415159abf70e736656ddda653226ece8f360457ceff36b8eb",
+  "patches": []
+}

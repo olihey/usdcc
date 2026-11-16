@@ -239,6 +239,10 @@ add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
 add_subdirectory(src/plugins/cpp_example)
 
+set(USDCC_BUILD_BLENDER_MESH_TOOLS ON CACHE BOOL "Build the GPL-linked Blender mesh tools plugin" FORCE)
+add_subdirectory(src/plugins/blender_mesh_tools)
+add_dependencies(usdcc blender_mesh_tools)
+
 option(USDCC_BUILD_RTX_PLUGIN "Build the optional native RTX Render plugin (Windows)" OFF)
 option(USDCC_RTX_GPU_TESTS "Register explicit RTX/CUDA GPU acceptance tests" OFF)
 if(USDCC_RTX_GPU_TESTS AND NOT USDCC_BUILD_RTX_PLUGIN)

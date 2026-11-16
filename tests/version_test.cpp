@@ -19,7 +19,7 @@ USDCC_TEST(version_names_the_build) {
               version.c_str());
     } else {
         // 0.2.0+5.3b70ef2, 0.0.0+3b70ef2, with .dirty for changed files; +unknown outside git.
-        CHECK(std::regex_match(version, std::regex(R"(\d+\.\d+\.\d+\+((\d+\.)?[0-9a-f]{7,}(\.dirty)?|unknown))")),
+        CHECK(std::regex_match(version, std::regex(R"(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\+((\d+\.)?[0-9a-f]{7,}(\.dirty)?|unknown))")),
               "a development build: %s", version.c_str());
         CHECK(commit.empty() || version.find(commit) != std::string::npos, "naming the commit %s", commit.c_str());
     }

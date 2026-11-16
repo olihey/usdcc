@@ -148,6 +148,38 @@ def _vcpkg_licences(licenses_dir, sources):
                     sources.append("  source:     " + re.sub(r"^git\+", "", location))
 
 
+def _mesh_usd_plugins(source, destination, copier):
+    # Local USD prefixes can contain unrelated, stale third-party renderers.
+    # This list is reviewed against the pinned OpenUSD source, not the install.
+    names = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdShaders")
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        if (source / name).is_dir():
+            copier(source / name, destination / name)
+        for suffix in (".dll", ".so", ".dylib"):
+            if (source / (name + suffix)).is_file():
+                copy_file(source / (name + suffix), destination)
+    if (source / "plugInfo.json").is_file():
+        copy_file(source / "plugInfo.json", destination)
+
+
+def _usd_notices(usd_install, licenses_dir):
+    target = licenses_dir / "OpenUSD"
+    target.mkdir(parents=True, exist_ok=True)
+    home = cache_value(usd_install / "build/OpenUSD", "CMAKE_HOME_DIRECTORY")
+    candidates = [usd_install / "licenses/OpenUSD", usd_install]
+    candidates.append(usd_install.with_name(usd_install.name + "-work") / "OpenUSD")
+    if home:
+        candidates.append(Path(home))
+    for source in candidates:
+        if (source / "LICENSE.txt").is_file() and (source / "NOTICE.txt").is_file():
+            for name in ("LICENSE.txt", "NOTICE.txt"):
+                copy_file(source / name, target)
+            return
+    fail("OpenUSD LICENSE.txt/NOTICE.txt are missing. Rebuild the USD dependency notice bundle; "
+         "the install root's MaterialX LICENSE/THIRD-PARTY.md are not OpenUSD's license.")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("destination", nargs="?", default="deploy",
@@ -166,7 +198,17 @@ def main(argv=None):
     parser.add_argument("--bundle-rtx-runtime", action="store_true",
                         help="copy the pinned native SDK bin trees, metadata and licenses into RTX; otherwise "
                              "configure external runtime roots on the target")
+    parser.add_argument("--with-blender-mesh-tools", action="store_true",
+                        help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
+    parser.add_argument("--blender-source-bundle", metavar="FILE",
+                        help="source candidate from tools/blender_mesh_package.py, copied beside the combined artifact")
     args = parser.parse_args(argv)
+    if args.with_blender_mesh_tools:
+        if args.bundle_rtx_runtime:
+            fail("The Blender configuration cannot bundle the proprietary RTX runtime.")
+        args.omit_rtx = True
+    elif args.blender_source_bundle:
+        fail("--blender-source-bundle requires --with-blender-mesh-tools")
     if MACOS:
         fail("tools/deploy.py doesn't support macOS yet: it knows Windows' and Linux' layouts.")
     if not WINDOWS:
@@ -266,11 +308,15 @@ def main(argv=None):
 
     print(f"  OpenUSD libraries ({usd_install})", flush=True)
     copy_tree(usd_install / "lib", bin_dir, files="*.dll", top_level_only=True)
-    copy_tree(usd_install / "bin", bin_dir, files="*.dll", top_level_only=True)
+    copy_tree(usd_install / "bin", bin_dir, files="*.dll", top_level_only=True,
+              exclude_files=["tbb*_debug.dll", "tbbbind*.dll", "tbb_preview*.dll"] if args.with_blender_mesh_tools else [])
 
     print("  OpenUSD plugins", flush=True)
     copy_tree(usd_install / "lib/usd", bin_dir / "usd", exclude_files=BUILD_ONLY_FILES)
-    copy_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=BUILD_ONLY_FILES)
+    if args.with_blender_mesh_tools:
+        _mesh_usd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", copy_tree)
+    else:
+        copy_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=BUILD_ONLY_FILES)
 
     print("  usdcc", flush=True)
     copy_tree(app_dir, bin_dir, exclude_files=BUILD_ONLY_FILES)
@@ -347,7 +393,7 @@ def main(argv=None):
     # --- plugins --------------------------------------------------------------
 
     print("  Shipped plugins", flush=True)
-    for plugin in SHIPPED_PLUGINS:
+    for plugin in ([] if args.with_blender_mesh_tools else SHIPPED_PLUGINS):
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
     if include_rtx:
         target = deploy_dir / "plugins/rtx_render"
@@ -360,9 +406,12 @@ def main(argv=None):
                 copy_file(root / file, runtime_target)
     print("  Example plugins", flush=True)
     copy_tree(REPO / "src/plugins", deploy_dir / "examples/plugins",
-              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native"] + SHIPPED_PLUGINS)
+              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
     copy_tree(BUILD_DIR / "plugins", deploy_dir / "examples/plugins", exclude_files=BUILD_ONLY_FILES,
-              exclude_dirs=["rtx_render", "rtx_render_native"])
+              exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
+    if args.with_blender_mesh_tools:
+        from blender_mesh_package import include_candidate
+        include_candidate(deploy_dir, BUILD_DIR, args.blender_source_bundle)
 
     # --- Material Editor preview (docs/MATERIAL_EDITOR.md section 7) ----------
 
@@ -400,11 +449,7 @@ def main(argv=None):
     # OpenUSD's own, and its dependencies': deps-usd.yml collects those into the
     # CI asset's licenses folder; a local build_usd.py install still has the
     # source and build folders to collect them from.
-    usd_licenses_dir = licenses_dir / "OpenUSD"
-    usd_licenses_dir.mkdir(parents=True, exist_ok=True)
-    for file in ("LICENSE", "THIRD-PARTY.md"):
-        if (usd_install / file).is_file():
-            copy_file(usd_install / file, usd_licenses_dir)
+    _usd_notices(usd_install, licenses_dir)
     usd_dependencies = licenses_dir / "OpenUSD-dependencies"
     if (usd_install / "licenses").is_dir():
         copy_tree(usd_install / "licenses", usd_dependencies)
@@ -464,10 +509,10 @@ def main(argv=None):
         "plugin/usd/hdStorm.dll", "python/python.exe", "python/Lib/encodings/__init__.py",
         "python/Lib/site-packages/usdcc/__init__.py", "python/Lib/site-packages/pxr/__init__.py",
         "python/Lib/site-packages/usdcc/_vendor/packaging/version.py",
-        "plugins/vray_render/usdcc-plugin.json",
+        *([] if args.with_blender_mesh_tools else ["plugins/vray_render/usdcc-plugin.json"]),
         "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
         "sdk/UsdccPluginConfig.cmake", "sdk/lib/usdcc_ui.lib", "sdk/include/usdcc/plugin/plugin.h",
-        "LICENSE.txt", "licenses/OpenUSD/LICENSE", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
+        "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
     ]
     if include_rtx:
         required += ["plugins/rtx_render/usdcc-plugin.json", "plugins/rtx_render/bin/windows-x64/rtx_render_native.dll"]
@@ -623,7 +668,8 @@ def deploy_linux(args):
         fail(f"{exe} doesn't load a libpython that ldd can find.")
 
     vcpkg_dir = BUILD_DIR / "vcpkg_installed" / vcpkg_triplet(BUILD_DIR)
-    own_libraries = sorted(file for file in (BUILD_DIR / "src/cpp").rglob("libusdcc_*.so") if "CMakeFiles" not in file.parts)
+    own_libraries = sorted(file for file in (BUILD_DIR / "src/cpp").rglob("libusdcc_*.so")
+                           if "CMakeFiles" not in file.parts and "plugins" not in file.parts)
     package_dir = BUILD_DIR / "python/usdcc"
     if not (package_dir / "__init__.py").is_file():
         fail(f"The usdcc Python package is missing from {package_dir}; build first.")
@@ -663,9 +709,13 @@ def deploy_linux(args):
     # As on Windows, the app's libraries win where both have one (libpng16, ...).
 
     print(f"  OpenUSD libraries and plugins ({usd_install})", flush=True)
-    _copy_linux_tree(usd_install / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES, top_level_only=True)
+    mesh_exclusions = ["*_debug.so*", "libtbbbind*.so*", "libtbb_preview*.so*"] if args.with_blender_mesh_tools else []
+    _copy_linux_tree(usd_install / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES + mesh_exclusions, top_level_only=True)
     _copy_linux_tree(usd_install / "lib/usd", lib_dir / "usd", exclude_files=LINUX_BUILD_ONLY_FILES)
-    _copy_linux_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=LINUX_BUILD_ONLY_FILES)
+    if args.with_blender_mesh_tools:
+        _mesh_usd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", _copy_linux_tree)
+    else:
+        _copy_linux_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=LINUX_BUILD_ONLY_FILES)
 
     print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
     replaced = _copy_linux_tree(vcpkg_dir / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES, top_level_only=True)
@@ -711,15 +761,18 @@ def deploy_linux(args):
     print("  Shipped and example plugins", flush=True)
     # V-Ray Render's panel is PySide6, which Linux doesn't deploy yet: shipped, it
     # would fail at every start. It stays out until then.
-    shipped = SHIPPED_PLUGINS if has_pyside else []
+    shipped = SHIPPED_PLUGINS if has_pyside and not args.with_blender_mesh_tools else []
     if not has_pyside:
         warn(f"Without PySide6, {', '.join(SHIPPED_PLUGINS)} isn't shipped: it needs it.")
     for plugin in shipped:
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
     copy_tree(REPO / "src/plugins", deploy_dir / "examples/plugins",
-              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native"] + SHIPPED_PLUGINS)
+              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
     _copy_linux_tree(BUILD_DIR / "plugins", deploy_dir / "examples/plugins", exclude_files=LINUX_BUILD_ONLY_FILES,
-                     exclude_dirs=["rtx_render", "rtx_render_native", "CMakeFiles"])
+                     exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools", "CMakeFiles"] + SHIPPED_PLUGINS)
+    if args.with_blender_mesh_tools:
+        from blender_mesh_package import include_candidate
+        include_candidate(deploy_dir, BUILD_DIR, args.blender_source_bundle)
     print("  Material preview shapes and HDRIs", flush=True)
     copy_tree(REPO / "resources/preview", deploy_dir / "resources/preview")
     # Next to bin\, where WorkspaceLibrary::shippedFolder() looks (docs/WORKSPACES.md section 5).
@@ -758,10 +811,7 @@ def deploy_linux(args):
     licenses_dir = deploy_dir / "licenses"
     licenses_dir.mkdir(parents=True, exist_ok=True)
     copy_file(REPO / "LICENSE", deploy_dir / "LICENSE.txt")
-    (licenses_dir / "OpenUSD").mkdir(parents=True, exist_ok=True)
-    for file in ("LICENSE", "THIRD-PARTY.md"):
-        if (usd_install / file).is_file():
-            copy_file(usd_install / file, licenses_dir / "OpenUSD")
+    _usd_notices(usd_install, licenses_dir)
     if (usd_install / "licenses").is_dir():
         copy_tree(usd_install / "licenses", licenses_dir / "OpenUSD-dependencies")
     else:
@@ -810,7 +860,7 @@ def deploy_linux(args):
         *(f"plugins/{plugin}/usdcc-plugin.json" for plugin in shipped),
         "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
         "sdk/UsdccPluginConfig.cmake", "sdk/lib/libusdcc_ui.so", "sdk/include/usdcc/plugin/plugin.h",
-        "LICENSE.txt", "licenses/OpenUSD/LICENSE", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
+        "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
     ]
     missing = [name for name in required if not (deploy_dir / name).exists()]
     if missing:

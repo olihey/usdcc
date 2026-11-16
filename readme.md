@@ -31,13 +31,19 @@ git submodule update --init --recursive
 external/vcpkg/bootstrap-vcpkg.bat   # bootstrap-vcpkg.sh on Linux/macOS
 ```
 
-Then configure and build (Windows/Visual Studio shown; substitute a generator
-like Ninja on Linux/macOS):
+Mesh tools are built and enabled in every build. Python 3.12+ builds the pinned
+private Blender backend before configuring usdcc. `python tools/build.py` handles
+both builds; for manual builds (Windows/Visual Studio shown; use Ninja on Linux):
 
 ```
+python tools/build_blender_mesh.py --fetch
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config RelWithDebInfo --parallel
+cmake --build build --config RelWithDebInfo --parallel 4
 ```
+
+The **Mesh** menu offers triangulate, merge, dissolve, normals, decimate and bevel.
+See [the mesh tools plan](docs/BLENDER_MESH_TOOLS.md) for supported inputs, build
+results and the separate combined-distribution license/source requirements.
 
 `--parallel` builds several projects at once; each compiles its files in parallel too.
 The main libraries and tests use precompiled headers for OpenUSD and Qt

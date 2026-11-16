@@ -1,6 +1,6 @@
 # usdcc — Project Plan
 
-*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-11-02.*
+*Living document — keep this updated as decisions are made and milestones complete. Last updated: 2026-11-15.*
 
 ## 1. Overview
 
@@ -1128,6 +1128,19 @@ several of them rather than as a discrete phase.
   edit is a single undo step; with two scale ops, the Scale tool edits only the
   targeted one.
 
+### M14 — Blender Mesh Tools
+- **Goal:** native mesh editing through a C++ plugin built with every app, using Blender BMesh,
+  with OpenUSD remaining the authoritative scene and undo representation.
+- Deliverables: [BLENDER_MESH_TOOLS.md](BLENDER_MESH_TOOLS.md), a pinned private Blender
+  backend, USD geometry/attribute conversion, asynchronous jobs, and whole-mesh
+  triangulate, merge by distance, limited dissolve, normals, decimate, and bevel commands.
+- Licensing: our original source remains BSD-3-Clause; the linked Blender configuration
+  has a separate GPL-compliant distribution and complete dependency/source review.
+- Exit criteria: the build feasibility gate passes; supported geometry, UVs, and
+  material assignments survive operations; each invocation is one undo step; stale
+  and failed jobs leave the stage unchanged; Windows and Linux packages satisfy
+  the operation, lifecycle, and licensing checks in the feature plan.
+
 ## 8. Cross-Cutting Workstreams
 
 These run throughout, not as discrete milestones:
@@ -1159,3 +1172,4 @@ These run throughout, not as discrete milestones:
 | M11 Packaging & Deployment | Not started |
 | M12 Hardening & Release Readiness | Not started |
 | M13 Attribute Editor Revamp | Done (all five phases) — undo edit sessions and undoable gizmo drags, `Stage::changed` live refresh, `ValueTypeInfo`, the `usdcc_tests` CTest target, the property widget kit and Debug > USD Data Types (112 types, all with an editor), the categorized `AttributesViewPanel`, the transform-stack editor (add/remove/reorder/rename/pivot/bake/convert), and Move/Rotate/Scale targeting one specific xformOp (all six Euler orders, single-axis rotates, orient, and `transform` matrix ops). See [ATTRIBUTE_EDITOR.md](ATTRIBUTE_EDITOR.md) §12; §9 there lists what's still out of scope |
+| M14 Blender Mesh Tools | Editing/distribution tooling implemented; plugin always built/enabled. Six native commands, conversion, jobs, cancellation/stale checks and undo/rollback. Windows and Ubuntu/WSL builds/tests pass. Artifact-specific [Windows](BLENDER_DISTRIBUTION_REVIEW.md) and [Linux](BLENDER_LINUX_DISTRIBUTION_REVIEW.md) license/source reviews, accompanying sources and file-integrity gates are complete. Linux includes exact Ubuntu Python patches and distro source receipts. No binary publication. See [BLENDER_MESH_TOOLS.md](BLENDER_MESH_TOOLS.md) sections 14–15 |

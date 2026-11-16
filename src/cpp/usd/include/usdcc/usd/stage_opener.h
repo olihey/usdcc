@@ -63,7 +63,8 @@ public:
 
     // Starts opening `path` (a file path or resolvable USD asset path).
     // Failure is reported to the user in a message box.
-    void open(const QString& path, const Options& options = {});
+    void open(const QString& path);
+    void open(const QString& path, const Options& options);
 
     // While a stage it opened is being registered (stageOpened is firing): the
     // options it was opened with. Null otherwise.

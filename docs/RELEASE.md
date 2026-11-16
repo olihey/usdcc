@@ -170,8 +170,9 @@ It uses `build.yml`'s vcpkg cache, read-only.
 
 ## 6. Licences
 
-**usdcc is BSD-3-Clause** (`LICENSE`), which every library the zip ships allows. None of
-them requires usdcc to be under the GPL:
+**The standard usdcc distribution is BSD-3-Clause** (`LICENSE`), which every library
+in that dependency set allows. None of those libraries requires usdcc to be under
+the GPL. The planned optional Blender configuration is covered separately below:
 
 - **Permissive:** OpenUSD (TOST, based on Apache 2.0), TBB, Embree, MaterialX, OpenSSL,
   QWindowKit (Apache 2.0); QtNodes, OpenColorIO, pybind11, zstd, libjpeg-turbo (BSD); and
@@ -187,7 +188,9 @@ What the release has to do, whatever usdcc's own licence:
   own `LICENSE` goes at the top as `LICENSE.txt`:
   - `vcpkg/<port>.txt`: each vcpkg package's `share/<port>/copyright` (not vcpkg's own
     build helpers).
-  - `OpenUSD/`: OpenUSD's `LICENSE` and `THIRD-PARTY.md`, from its install.
+  - `OpenUSD/`: OpenUSD's actual `LICENSE.txt` (TOST) and `NOTICE.txt`. The install
+    root's `LICENSE`/`THIRD-PARTY.md` may belong to MaterialX and do not substitute
+    for OpenUSD's notices. New USD builds preserve these in `licenses/OpenUSD/`.
   - `OpenUSD-dependencies/<library>/`: the licence and NOTICE files of the libraries
     `build_usd.py` builds, which its install leaves out. `tools/ci/usd_licenses.py`
     collects them from its source and build folders (top-level licence files of each
@@ -204,6 +207,40 @@ What the release has to do, whatever usdcc's own licence:
 
 The About dialog's licence tab (M10's Info dialog) can later list the same `licenses/`
 folder.
+
+### Optional Blender mesh tools distribution
+
+The [Blender mesh tools plan](BLENDER_MESH_TOOLS.md) adds an optional native plugin.
+Its six editing commands, jobs and conversion are implemented and built with every
+app (`USDCC_BUILD_BLENDER_MESH_TOOLS=ON` is enforced).
+Standard deploy explicitly excludes its source and any stale built
+plugin from the examples folders on Windows and Linux.
+`--with-blender-mesh-tools` creates a separate combined candidate, excludes RTX/V-Ray
+integrations, and records pending distribution review. `--blender-source-bundle`
+adds the source archive/sidecar from `tools/blender_mesh_package.py`. See the plan's
+section 15 for isolated-runtime smoke checks, CI reports, and the publication gate.
+Our independently written code stays BSD-3-Clause, while Blender source retains its
+upstream licenses. Treat the linked app/plugin configuration as a combined work
+for GPL compliance; a separate plugin download does not establish a license boundary.
+
+Keep Blender code out of the standard artifact. Before publishing the optional
+configuration, audit its complete dependency set, including OpenUSD/TOST, and select
+the applicable GPL terms. Exclude proprietary SDK integrations unless compatibility
+has been confirmed. Ship the required licenses/notices and provide corresponding
+source for the covered combination, including the exact usdcc/Blender revisions,
+patches, and build/install scripts, with clear source access beside the binaries.
+The existing LGPL obligations still apply. The Windows review is recorded in
+[BLENDER_DISTRIBUTION_REVIEW.md](BLENDER_DISTRIBUTION_REVIEW.md), with source and
+library-replacement instructions in [BLENDER_SOURCE_BUILD.md](BLENDER_SOURCE_BUILD.md).
+After deploy and smoke checks, collect sources for the exact package, run
+`tools/blender_distribution.py --finalize` with that source archive, and `--verify`.
+Finalization applies GPL terms, installs full notices/source and binds every delivered
+file to the report. Ship the entire package, including `source/` and `licenses/`.
+Linux has its own [review](BLENDER_LINUX_DISTRIBUTION_REVIEW.md) and
+[source/build instructions](BLENDER_LINUX_SOURCE_BUILD.md). Use
+`tools/blender_linux_distribution.py` to collect evidence/source, finalize and verify
+the Ubuntu 24.04 x86-64 artifact. Its source includes the exact Ubuntu Python patches
+and 31 Ubuntu source packages. The Windows receipt cannot approve Linux.
 
 ## 7. Open questions
 

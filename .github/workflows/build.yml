@@ -9,6 +9,11 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      mesh_distribution_checks:
+        description: Build and smoke-test private Blender distribution candidates (no binary publication)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -108,6 +113,27 @@ jobs:
         run: |
           ctest --test-dir build -C RelWithDebInfo --verbose --timeout 900
           if ($LASTEXITCODE) { throw 'tests failed' }
+
+      - name: Blender distribution candidate checks
+        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        run: |
+          python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
+          if ($LASTEXITCODE) { throw 'candidate deployment failed' }
+          python tools/ci/blender_mesh_smoke_test.py --deploy build/blender-candidate --platform-plugins build/vcpkg_installed/x64-windows/Qt6/plugins/platforms
+          if ($LASTEXITCODE) { throw 'candidate smoke test failed' }
+          python tools/benchmark_blender_mesh.py
+          if ($LASTEXITCODE) { throw 'benchmark failed' }
+
+      - name: Blender verification reports
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-verification-windows
+          path: |
+            build/blender-packaged-smoke/*.json
+            build/blender-packaged-smoke/*.log
+            build/blender-mesh-benchmark.json
+            build/blender-candidate/distribution-readiness.json
 
       # After a successful build, drops the packages it didn't use (an older
       # compiler's, a replaced port's), which would otherwise be carried from
@@ -238,6 +264,24 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: 1
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --test-dir build --verbose --timeout 900
+
+      - name: Blender distribution candidate checks
+        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        run: |
+          python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
+          python tools/ci/blender_mesh_smoke_test.py --deploy build/blender-candidate
+          python tools/benchmark_blender_mesh.py
+
+      - name: Blender verification reports
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-verification-linux
+          path: |
+            build/blender-packaged-smoke/*.json
+            build/blender-packaged-smoke/*.log
+            build/blender-mesh-benchmark.json
+            build/blender-candidate/distribution-readiness.json
 
       # As the windows job's: after a successful build, drops the packages it
       # didn't use; each installed package's vcpkg_abi_info.txt hashes to its zip's name.

@@ -153,6 +153,24 @@ add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
 target_link_libraries(usdcc_python_tests PRIVATE Qt6::Test)
+if(TARGET blender_mesh_tools)
+    add_executable(usdcc_blender_mesh_benchmark blender_mesh_benchmark.cpp)
+    target_link_libraries(usdcc_blender_mesh_benchmark PRIVATE usdcc_blender_mesh_conversion)
+    if(WIN32)
+        target_link_libraries(usdcc_blender_mesh_benchmark PRIVATE psapi)
+    endif()
+    if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+        target_link_libraries(usdcc_blender_mesh_benchmark PRIVATE "${Python3_LIBRARY}")
+    endif()
+    usdcc_deploy_core_library(usdcc_blender_mesh_benchmark usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui)
+    usdcc_deploy_python(usdcc_blender_mesh_benchmark)
+    target_sources(usdcc_python_tests PRIVATE blender_mesh_plugin_test.cpp blender_mesh_conversion_test.cpp blender_mesh_operations_test.cpp)
+    target_link_libraries(usdcc_python_tests PRIVATE usdcc_blender_mesh_conversion)
+    target_compile_definitions(usdcc_python_tests PRIVATE
+        USDCC_BLENDER_MESH_PLUGIN="${CMAKE_BINARY_DIR}/plugins/blender_mesh_tools")
+    add_dependencies(usdcc_python_tests blender_mesh_tools)
+endif()
+
 target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
     rtx_native_navigation_test.cpp
     rtx_native_panel_test.cpp
@@ -227,4 +245,25 @@ else()
         PROPERTIES
             ENVIRONMENT_MODIFICATION
             "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
+endif()
+
+# A focused entry with the same clean Qt/USD runtime environment as the app tests.
+if(TARGET blender_mesh_tools)
+    # Direct C ABI calls in conversion tests need the private backend at startup.
+    add_custom_target(blender_mesh_test_runtime
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${USDCC_BLENDER_MESH_ROOT}/bin" "$<TARGET_FILE_DIR:usdcc_python_tests>"
+        VERBATIM)
+    add_dependencies(usdcc_python_tests blender_mesh_test_runtime)
+    add_dependencies(usdcc_blender_mesh_benchmark blender_mesh_test_runtime)
+    add_test(NAME usdcc_blender_mesh_plugin COMMAND usdcc_python_tests blender_mesh_native_plugin)
+    add_test(NAME usdcc_blender_mesh_conversion COMMAND usdcc_python_tests blender_mesh_conversion)
+    add_test(NAME usdcc_blender_mesh_operations COMMAND usdcc_python_tests blender_mesh_operations)
+    get_test_property(usdcc_python_tests ENVIRONMENT_MODIFICATION _blender_test_environment)
+    set_tests_properties(usdcc_blender_mesh_plugin usdcc_blender_mesh_conversion usdcc_blender_mesh_operations PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT_MODIFICATION "${_blender_test_environment}")
+    add_test(NAME usdcc_blender_mesh_build_tools
+        COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_build_test.py")
+    add_test(NAME usdcc_blender_mesh_package_tools
+        COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_package_test.py")
 endif()

@@ -118,7 +118,7 @@ jobs:
       - name: Collect the licences
         if: steps.published.outputs.found != 'true'
         run: |
-          python tools/ci/usd_licenses.py --src "$env:WORK\src" --build "$env:WORK\build" --destination "$env:USD_INSTALL\licenses"
+          python tools/ci/usd_licenses.py --src "$env:WORK\src" --build "$env:WORK\build" --destination "$env:USD_INSTALL\licenses" --openusd-source "$env:WORK\OpenUSD"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if (@(Get-ChildItem -Directory "$env:USD_INSTALL\licenses").Count -lt 10) { throw 'Fewer licences than expected' }
 
