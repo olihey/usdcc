@@ -5,9 +5,10 @@ the server names and the TEST-over-PROD overlays, and one small resolver plugin 
 of it. WebDAV is the first protocol ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker
 that browses servers is in [ASSET_PICKER.md](ASSET_PICKER.md).
 
-**Status:** planned 2026-11-16. Nothing is built yet. "Checked" below means looked at in this
-repository or the local OpenUSD build; everything else is still an assumption, and §13 phase 0 tests
-the two the design rests on.
+**Status:** planned 2026-11-16. **Phase 0, the spike, is done** (§13.1): the two assumptions the
+design rests on hold, and it changed two details. Nothing else is built. "Checked" below means run
+in the spike, or looked at in this repository or the local OpenUSD build (26.08); everything else
+is still an assumption.
 
 ## 1. Decisions
 
@@ -54,6 +55,8 @@ chars/hero/tex/albedo.png               relative, anchored against the layer tha
   collapsed, slashes deduplicated, percent-encoding made canonical. Two spellings of one asset give
   one identifier, as Sdf's layer registry needs.
 - **Relative paths** never escape above the name's root. A `..` past it is an error.
+- **An identifier is always logical.** USD anchors a relative path against the resolved path of
+  the layer it's in, which carries a stack id (§5). The identifier made from it drops the id.
 - **`_GetExtension`** comes from the path, never from a query string.
 - **`_IsContextDependentPath`** is `true` for a logical path, because the same name can mean
   different servers in different contexts.
@@ -116,12 +119,26 @@ context is made. Two reasons:
 
 - **Relative references go through the whole stack again.** USD anchors a layer's relative
   references against its resolved path. Naming one server there would pin them to it, and TEST
-  could not override a single texture beside a PROD layer.
+  could not override a single texture beside a PROD layer. *Checked:* a `hero.usda` taken from TEST
+  got its sibling `geo.usda` from PROD.
 - **Opening works with no context bound.** Hydra loads textures on worker threads with no context,
-  so the resolved path alone must say where to look.
+  so the resolved path alone must say where to look. *Checked* that a resolved path opens with no
+  context bound; *not checked* in a viewport.
 
-A path with a stack id is not context-dependent. The id appears only in memory, never in a file:
-layers hold the logical URL or a relative path. usdcc strips it when showing a path.
+**The id is only ever in a resolved path.** Identifiers stay logical (§3), so a referenced layer is
+`webdav://studio/chars/hero.usd` to Sdf, resolved through whichever context is bound. *Checked:*
+
+- **A context is bound whenever USD resolves an identifier:** during composition, on its worker
+  threads too, and when an asset-valued attribute is read.
+- **Two stages on the same root in two environments coexist.** Sdf keeps two layers with one
+  identifier and different resolved paths, and each stage composes its own.
+- **Keeping the id in identifiers leaks it into files.** With it, `usdcat --flatten` wrote
+  `@webdav://studio~7c21/chars/tex.png@` for a relative asset path; with logical identifiers it
+  writes `@webdav://studio/chars/tex.png@`.
+
+One place still shows the id: `UsdStage::Flatten()` puts the root layer's resolved path in the
+result's `doc` string. usdcc's Flatten to File rewrites it. usdcc strips the id wherever it shows a
+resolved path.
 
 | Operation | Behaviour |
 |---|---|
@@ -253,7 +270,10 @@ Secrets are never logged, never in a context's hash or debug string, never in a 
 
 - **A context per stage.** `StageManager` opens each stage with a context for its environment
   ([stage_manager.cpp](../src/cpp/usd/src/stage_manager.cpp)). The default environment is a
-  setting; **Open Stage with Options** can pick another, so two open stages can differ.
+  setting; **Open Stage with Options** can pick another, so two open stages can differ. It has to
+  be `UsdStage::Open(path, context)`: *checked,* the `UsdStage::Open(path)` used today resolves and
+  opens the root layer before any context is bound, so the root would always come from the default
+  environment. The overload with a context binds it for the root layer too.
 - **Resolving outside composition.** These call `ArGetResolver().Resolve()` on the UI thread with
   no context bound:
   - [composition_arcs.cpp](../src/cpp/usd/src/composition_arcs.cpp) (resolved paths of arcs)
@@ -303,7 +323,8 @@ webdav/
   `PlugRegistry::RegisterPlugins()`, before the window and before any stage
   ([PLUGINS.md](PLUGINS.md) §3.1). *Checked.*
 - **A resolver needs it before the first `ArGetResolver()` call,** because OpenUSD collects its URI
-  resolvers once. Nothing before `scan()` looks like it calls it. *Not checked; phase 0.*
+  resolvers once. *Checked:* a resolver in a plugin's `usd/` folder, found through `--plugin-path`,
+  had its scheme registered and opened the stage given on the command line.
 - **The library must match the app's OpenUSD exactly,** as any C++ plugin must. The `built_for`
   check only covers a plugin's native library today. A manifest gains an optional `usd_built_for`
   (platform, compiler, OpenUSD version), and `scan()` doesn't register a `usd/` folder that was
@@ -337,7 +358,7 @@ webdav/
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
+| **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | **Done** (§13.1). It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
 | **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
 | **2. WebDAV, read-only** | The transport and plugin ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat webdav://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST |
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | Reopening a large stage makes no downloads, and pulling the network cable falls back to the cache with a warning |
@@ -345,6 +366,27 @@ webdav/
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
+
+### 13.1 What the spike found
+
+A throwaway resolver for `spike://`, 200 lines, with two folders on disk standing in for TEST and
+PROD and a log of every call USD made. Run on 2026-11-16 with `usdcat --flatten` from the local
+OpenUSD build, and in usdcc's Release build (offscreen, a test profile) with the plugin on
+`--plugin-path`, a `spike://` stage on the command line and a script reading the result. The spike
+isn't in the repository; phase 1's tests cover the same ground with the fake transport.
+
+| Question | Result |
+|---|---|
+| Is a resolver in a usdcc plugin's `usd/` folder registered in time? | Yes (§11) |
+| Does USD anchor relative paths against the resolved path? | Yes, with the stack id in it |
+| Does the overlay work per file? | Yes: the shot from PROD, its model from TEST, the model's sublayer from PROD again |
+| Should an anchored identifier keep the stack id? | **No, a change to the plan:** it leaks into flattened files. Identifiers are logical, and the id is only in resolved paths (§3, §5) |
+| Is a context bound when a logical identifier is resolved? | Yes, during composition (worker threads included) and when reading asset attributes. **Not for the root layer** with `UsdStage::Open(path)`: usdcc has to pass the context (§10) |
+| Can two stages use two environments at once? | Yes, on the same root file too |
+| Does `ArGetResolver().Resolve()` with no context bound, as usdcc's UI does today, work? | It answers from the default environment, so those call sites must bind the stage's context (§10) |
+
+**Not checked:** textures loaded by Hydra in a viewport, which needs a real OpenGL window; and
+anything about the network, the cache or credentials, which the spike has none of.
 
 ## 14. Testing
 
