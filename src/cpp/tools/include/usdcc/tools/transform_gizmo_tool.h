@@ -22,8 +22,8 @@ namespace usdcc::tools {
 //
 // These tools are SelectTools too, so objects can be picked while one is
 // active: a press on a gizmo handle starts that tool's drag (beginGizmoDrag());
-// a press anywhere else selects like SelectTool does, including its "Mode"
-// option, which comes after the gizmo's own options.
+// a press anywhere else selects like SelectTool does, Shift/Ctrl modifiers
+// included.
 class TransformGizmoTool : public SelectTool {
 public:
     std::vector<ToolOption> options() const override;

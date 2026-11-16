@@ -1321,7 +1321,9 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         // m_dragging would latch and the view could never be orbited.
         if (!(event->modifiers() & Qt::AltModifier) && !m_previewMode) {
             if (usdcc::tools::Tool* tool = activeToolInstance()) {
-                const usdcc::tools::ToolContext ctx = buildToolContext();
+                usdcc::tools::ToolContext ctx = buildToolContext();
+                ctx.shift = event->modifiers().testFlag(Qt::ShiftModifier);
+                ctx.control = event->modifiers().testFlag(Qt::ControlModifier);
                 const PXR_NS::GfVec2d ndc = ndcFromPixel(event->position());
                 const PXR_NS::GfRay ray = currentFrustum().ComputePickRay(ndc);
                 const usdcc::tools::ToolResult result = tool->mousePress(ctx, ndc, ray);

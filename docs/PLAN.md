@@ -658,7 +658,8 @@ things that will bite later if not addressed early:
     control, checkbox or spin box per option and just reports changes back, so adding a tool
     option never touches UI code. Each tool keeps its own settings when you switch away and back.
     Options implemented — each backed by real behaviour, not placeholders: **Select** "Mode"
-    New / Add / Subtract / Invert (a click on empty space only clears the selection in New mode);
+    New / Add / Subtract / Invert (a click on empty space only clears the selection in New mode;
+    later replaced by Shift/Ctrl-click, item 47);
     **Move** "Space" Local / World (world axes for the gizmo and drag) plus **Snap** +
     **Increment** (scene units); **Rotate** Snap + Increment (degrees); **Scale** Snap + Increment
     (factor steps from the starting scale). Snapping is relative to the drag's start, which
@@ -1000,6 +1001,14 @@ things that will bite later if not addressed early:
       part, the area closing, an area or panel added, a dock layout or side panel change.
     - **Never saved:** `MainWindow::closeEvent()` restores before saving the layout.
     - Tested in `panel_maximizer_test` (usdcc_ui_tests).
+
+47. **Selection modifiers replace the Select "Mode" option.** The Select tool's New / Add /
+    Subtract / Invert choice in the options bar is gone; the modifier keys held at the click
+    pick instead: plain click replaces, **Shift+click** adds, **Ctrl+click** (Cmd on macOS)
+    deselects, **Ctrl+Shift+click** toggles. A modified click on empty space leaves the
+    selection alone. `HydraViewportWindow::mousePressEvent()` fills the new
+    `ToolContext::shift`/`control`; Move/Rotate/Scale select the same way when a press misses
+    the gizmo, and no longer list Mode after their own options. Tested in `move_tool_test` [13].
 
 ## 7. Milestones
 

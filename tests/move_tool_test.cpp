@@ -340,14 +340,28 @@ USDCC_TEST(move_scale_select_tools) {
             CHECK(r.handled && !r.newSelection, "%s: press on a gizmo handle drags, does not select", names[i]);
             st->mouseRelease();
 
-            // Mode option is offered (after the gizmo's own) and honoured.
-            const auto opts = st->options();
-            CHECK(!opts.empty() && opts.back().id == "mode", "%s: Mode is the last option", names[i]);
-            st->setOption("mode", std::string("add"));
+            // No selection-mode option: modifier keys choose instead.
+            for (const auto& opt : st->options()) {
+                CHECK(opt.id != "mode", "%s: no Mode option", names[i]);
+            }
             sel.pickPrim = [](const GfVec2d&) { return SdfPath("/World"); };
+            sel.shift = true;
             r = st->mousePress(sel, farAway, cam.ray(farAway));
-            CHECK(r.newSelection && r.newSelection->size() == 2, "%s: Add mode adds to the selection", names[i]);
+            CHECK(r.newSelection && r.newSelection->size() == 2, "%s: Shift-click adds to the selection", names[i]);
             st->mouseRelease();
+
+            sel.shift = false;
+            sel.control = true;
+            sel.pickPrim = pickCube;
+            r = st->mousePress(sel, farAway, cam.ray(farAway));
+            CHECK(r.newSelection && r.newSelection->empty(), "%s: Ctrl-click removes from the selection", names[i]);
+            st->mouseRelease();
+
+            sel.pickPrim = pickNothing;
+            r = st->mousePress(sel, farAway, cam.ray(farAway));
+            CHECK(r.newSelection && r.newSelection->size() == 1, "%s: Ctrl-click on empty space keeps the selection", names[i]);
+            st->mouseRelease();
+            sel.control = false;
         }
     }
 

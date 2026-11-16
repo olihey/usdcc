@@ -135,6 +135,12 @@ struct ToolContext {
     // The time the stage is shown at (Stage::timeCode()): where a gizmo sits on an
     // animated prim. Default for a context nothing gave one.
     PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default();
+
+    // The modifier keys held when the mouse was pressed. SelectTool (and the
+    // transform tools, which select like it) reads them: Shift adds the picked
+    // prim to the selection, Ctrl removes it, both toggle it. Ctrl is Cmd on macOS.
+    bool shift = false;
+    bool control = false;
 };
 
 // Outcome of a mouse event handled by a Tool.

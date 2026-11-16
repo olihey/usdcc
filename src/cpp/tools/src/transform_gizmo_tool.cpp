@@ -51,9 +51,6 @@ std::vector<ToolOption> TransformGizmoTool::options() const {
         ToolOption::toggle(kSnapId, "Snap", m_snapEnabled),
         ToolOption::number(kSnapIncrementId, "Increment", m_snapIncrement, m_snapSpec.min, m_snapSpec.max,
                            m_snapSpec.step, m_snapSpec.decimals, m_snapSpec.suffix, kSnapId)};
-    for (ToolOption& selectOption : SelectTool::options()) {
-        opts.push_back(std::move(selectOption));
-    }
     return opts;
 }
 
@@ -66,8 +63,6 @@ void TransformGizmoTool::setOption(const std::string& id, const OptionValue& val
         if (const auto* increment = std::get_if<double>(&value)) {
             m_snapIncrement = std::clamp(*increment, m_snapSpec.min, m_snapSpec.max);
         }
-    } else {
-        SelectTool::setOption(id, value);
     }
 }
 
