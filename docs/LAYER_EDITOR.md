@@ -27,7 +27,7 @@ A "Layers" view panel type in the registry, on the Stages menu like the Outliner
 panel's stage:
 
 ```
- ☰  Stage: shot.usda ▾               Editing: anim.usda    [+ ▾] [💾] [💾💾]
+ ☰  Stage: shot.usda ▾                                     [+ ▾] [💾] [💾💾]
  ───────────────────────────────────────────────────────────────────────────
                                                   Target  Mute
  ▸ Session Layer                     (in memory)    ○       
@@ -54,7 +54,8 @@ panel's stage:
 - **Target column:** one radio-style mark, on the current edit target.
 - **Mute column:** a speaker, struck through while muted (a checkbox before phase 4); the root layer
   and the session layer can't be muted.
-- **Toolbar:** "Editing: <layer>" (the edit target, always visible), an Add menu and Save.
+- **Toolbar:** an Add menu and Save. The edit target shows in the tree (its mark, bold blue name)
+  and in the status bar.
 - Follows the stage's change notices (a sublayer added by a script shows up) and dirty
   changes, coalesced like the Dependencies panel.
 
@@ -195,8 +196,8 @@ Phase 1 as built:
   edit target; click to move it) and Mute. Double-click also sets the target. The right-click
   menu has Set as Edit Target, Mute/Unmute, Copy Identifier, Copy Path, Reveal in Explorer and
   Open as Stage.
-- The target's name is bold and accent blue. The toolbar and the status bar say "Editing:
-  <layer>", the status bar for the current stage. The Attribute Editor rebuilds when the target
+- The target's name is bold and accent blue. The status bar says "Editing: <layer>" for
+  the current stage. The Attribute Editor rebuilds when the target
   changes.
 
 Phase 2 as built:
@@ -282,7 +283,8 @@ Phase 4 as built:
   while a value can't be used (a bad prim name, a rate or units not above 0, a scale of 0); an
   end before the start only warns, in amber. One undo step for all of it.
 - **Up Axis and Meters per Unit** (read-only): the layer's own metadata, USD's fallback (shown
-  unauthored) when it has none. A sublayer that authors other values than its stage
+  unauthored) when it has none. Meters per Unit reads as the Edit dialog has it: a common unit
+  with its name ("0.01 (centimeters)"), any other number alone. A sublayer that authors other values than its stage
   (`UsdGeomGetStageUpAxis()`, `UsdGeomGetStageMetersPerUnit()`) gets a warning line under the row,
   "The stage is Y up" or "The stage uses 0.01 (centimeters)", its tooltip saying how its content
   may come in (rotated, or how many times too small or large). Not for the root or session layer,

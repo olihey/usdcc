@@ -697,7 +697,7 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
     };
 
     CHECK(select("zup.usda"), "select zup.usda");
-    CHECK(shown("Up Axis") == "Z" && shown("Meters per Unit") == "1", "its own values: [%s] [%s]",
+    CHECK(shown("Up Axis") == "Z" && shown("Meters per Unit") == "1 (meters)", "its own values: [%s] [%s]",
           qPrintable(shown("Up Axis")), qPrintable(shown("Meters per Unit")));
     CHECK(warning("Up Axis") == "The stage is Y up", "an up axis warning: [%s]", qPrintable(warning("Up Axis")));
     CHECK(warning("Meters per Unit") == "The stage uses 0.01 (centimeters)", "a units warning: [%s]",
@@ -719,7 +719,7 @@ USDCC_TEST(layer_editor_metrics_and_default_prim) {
     CHECK(select("same.usda") && warning("Up Axis").isEmpty() && warning("Meters per Unit").isEmpty(),
           "the same values: no warning");
     CHECK(select("plain.usda") && warning("Up Axis").isEmpty() && warning("Meters per Unit").isEmpty() &&
-              shown("Up Axis") == "Y" && shown("Meters per Unit") == "0.01",
+              shown("Up Axis") == "Y" && shown("Meters per Unit") == "0.01 (centimeters)",
           "unauthored: the fallback, no warning: [%s] [%s]", qPrintable(shown("Up Axis")),
           qPrintable(shown("Meters per Unit")));
     CHECK(select("shot.usda") && warning("Up Axis").isEmpty(), "the root layer: no warning");

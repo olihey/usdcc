@@ -33,6 +33,7 @@
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QLocale>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -85,10 +86,11 @@ QString realPath(const LayerEntry& entry) {
 
 constexpr auto kEditNewLayerKey = "Layers/editNewLayer";
 
-// "0.01 (centimeters)", or the number alone for a unit without a name.
+// "0.01 (centimeters)", or the number alone for a unit without a name: as the
+// Edit dialog's Meters per Unit shows it.
 QString unitsText(double metersPerUnit) {
     using Units = PXR_NS::UsdGeomLinearUnits;
-    const QString number = QString::number(metersPerUnit, 'g', 6);
+    const QString number = QLocale::c().toString(metersPerUnit, 'g', 12);
     for (const auto& [units, name] : {std::pair{Units::millimeters, QObject::tr("millimeters")},
                                       std::pair{Units::centimeters, QObject::tr("centimeters")},
                                       std::pair{Units::decimeters, QObject::tr("decimeters")},
@@ -170,9 +172,6 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     addPanelControls(toolbarLayout);
     toolbarLayout->addStretch(1);
-    m_editing = new QLabel(toolbar);
-    m_editing->setObjectName(QStringLiteral("propertyNote"));
-    toolbarLayout->addWidget(m_editing);
 
     // + : a new or existing layer, under the selected one (§4).
     m_editNewLayer = new QAction(tr("Edit the New Layer"), this);
@@ -416,12 +415,6 @@ void LayerEditorViewPanel::refresh() {
     }
     m_filling = false;
 
-    const LayerEntry* target = findTarget(m_layers);
-    const QString variant = currentStage() ? variantEditText(*currentStage()) : QString();
-    m_editing->setText(!target             ? QString()
-                       : variant.isEmpty() ? tr("Editing: %1").arg(qs(target->displayName))
-                                           : tr("%1, in %2").arg(variant, qs(target->displayName)));
-    m_editing->setToolTip(target ? qs(target->identifier) : QString());
     updateProperties();
     m_saveAll->setEnabled(!layer_actions::unsavedLayers(currentStage()).empty());
     notifyOptionsChanged();  // Save All is there when something's unsaved
@@ -939,7 +932,7 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
         };
     }
     {
-        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->Double);
+        PropertyEditor* editor = createPropertyEditor(PXR_NS::SdfValueTypeNames->String);
         auto unitsOf = [info, hasInfo](const LayerEntry& e) {
             const PXR_NS::VtValue value = info(e, PXR_NS::UsdGeomTokens->metersPerUnit);
             return hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit) && value.IsHolding<double>()
@@ -947,7 +940,8 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
                        : PXR_NS::UsdGeomLinearUnits::centimeters;
         };
         addField(
-            tr("Meters per Unit"), editor, [unitsOf](const LayerEntry& e) { return PXR_NS::VtValue(unitsOf(e)); },
+            tr("Meters per Unit"), editor,
+            [unitsOf](const LayerEntry& e) { return PXR_NS::VtValue(unitsText(unitsOf(e)).toStdString()); },
             [hasInfo](const LayerEntry& e) { return hasInfo(e, PXR_NS::UsdGeomTokens->metersPerUnit); });
         properties::PropertyRow* row = m_fields.back().row;
         m_fields.back().update = [this, row, unitsOf, hasInfo, checkStage](const LayerEntry& e) {

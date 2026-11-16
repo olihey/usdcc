@@ -147,7 +147,6 @@ private:
     };
 
     QTreeWidget* m_tree;
-    QLabel* m_editing;
     QAction* m_editNewLayer;
     QToolButton* m_saveAll;
     QSplitter* m_splitter;
