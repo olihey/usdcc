@@ -5,11 +5,14 @@
 
 #include <QMenu>
 
+#include <vector>
+
 namespace ads {
 class CDockManager;
 }
 
 namespace usdcc::ui {
+class ViewPanel;
 class ViewPanelRegistry;
 class WorkspaceController;
 }
@@ -29,7 +32,9 @@ USDCC_USD_UI_API void makeCurrentEverywhere(StageManager* stageManager, ads::CDo
 // each with "Make Current" first (makeCurrentEverywhere()), "Save Stage" and
 // "Save Stage As..." (saveStageInteractively(), saveStageAsInteractively()), then
 // "Workspace" (with setWorkspaces(): switching to one with that stage current), "Views", a
-// new panel of every registered ViewPanel type showing that stage, then
+// submenu per registered ViewPanel type listing the open panels of that type (picking one
+// brings it to the front, switched to that stage if it showed another) and, below them,
+// "Create New" (a new panel showing that stage), then
 // "Close Stage..." (closeStageInteractively()). Rebuilt each time it opens;
 // shows a disabled "No stages open" entry while there are none.
 //
@@ -52,6 +57,10 @@ public:
 
 private:
     void rebuild();
+    // The panels of type `id` (ViewPanelRegistry::kTypeProperty) that aren't closed.
+    std::vector<usdcc::ui::ViewPanel*> openPanelsOfType(const QString& id) const;
+    // Views > a type > an open panel: shows `stage` in it, then brings it to the front.
+    void bringToFront(usdcc::ui::ViewPanel* panel, const StageRefPtr& stage);
 
     StageManager* m_stageManager;
     const usdcc::ui::ViewPanelRegistry* m_panelTypes;

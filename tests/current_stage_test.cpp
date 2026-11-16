@@ -20,6 +20,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <DockAreaWidget.h>
 #include <DockManager.h>
 #include <DockWidgetTab.h>
 
@@ -190,6 +191,96 @@ USDCC_TEST(stages_menu_make_current) {
     CHECK(left->currentStage() == two && front->currentStage() == two, "the panels on screen show it");
     CHECK(behind->currentStage() == one && closed->currentStage() == one, "a tab behind and a closed panel don't");
     CHECK(stages.currentStage() == two, "and it is the current stage");
+}
+
+// Stages > a stage > Views > a type: the open panels of that type, then Create New. Picking
+// one brings it to the front, showing that stage.
+USDCC_TEST(stages_menu_views_open_panels) {
+    TestMode testMode;
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr one = stages.createStage();
+    const StageRefPtr two = stages.createStage();
+
+    MainWindow window;
+    ads::CDockManager* docks = window.dockManager();
+    auto* front = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Outliner"), &window);
+    auto* behind = new OutlinerViewPanel(&stages, two, undo, QStringLiteral("Outliner"), &window);
+    auto* closed = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Closed"), &window);
+    auto* untyped = new OutlinerViewPanel(&stages, one, undo, QStringLiteral("Untyped"), &window);
+    for (usdcc::ui::ViewPanel* panel : {static_cast<usdcc::ui::ViewPanel*>(front), static_cast<usdcc::ui::ViewPanel*>(behind),
+                                        static_cast<usdcc::ui::ViewPanel*>(closed)}) {
+        panel->setProperty(usdcc::ui::ViewPanelRegistry::kTypeProperty, QStringLiteral("outliner"));
+    }
+    front->setObjectName(QStringLiteral("a"));
+    behind->setObjectName(QStringLiteral("b"));
+    closed->setObjectName(QStringLiteral("c"));
+    untyped->setObjectName(QStringLiteral("d"));
+    ads::CDockAreaWidget* area = docks->addDockWidget(ads::CenterDockWidgetArea, behind);
+    docks->addDockWidgetTabToArea(front, area);
+    docks->addDockWidget(ads::RightDockWidgetArea, closed);
+    docks->addDockWidget(ads::LeftDockWidgetArea, untyped);
+    window.resize(900, 500);
+    window.show();
+    front->setAsCurrentTab();
+    closed->toggleView(false);
+    QApplication::processEvents();
+
+    usdcc::ui::ViewPanelRegistry types;
+    types.add(QStringLiteral("outliner"), QStringLiteral("Outliner"),
+              [&stages, undo](const StageRefPtr& stage, const QString& title, QWidget* parent) -> usdcc::ui::ViewPanel* {
+                  return new OutlinerViewPanel(&stages, stage, undo, title, parent);
+              });
+    usdcc::usd::StagesMenu menu(&stages, &types, docks, &window);
+    Q_EMIT menu.aboutToShow();
+    const QList<QMenu*> stageMenus = menu.findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK(stageMenus.size() == 2, "a submenu per stage");
+    if (stageMenus.size() != 2) return;
+    QMenu* outliners = stageMenus[0]->findChild<QMenu*>(QStringLiteral("views.outliner"));
+    CHECK(outliners != nullptr, "Views has a submenu per type");
+    if (!outliners) return;
+    const QList<QAction*> entries = outliners->actions();
+    QStringList texts;
+    for (QAction* entry : entries) texts << (entry->isSeparator() ? QStringLiteral("|") : entry->text());
+    CHECK(entries.size() == 4 && entries[0]->objectName() == QStringLiteral("openPanel") &&
+              entries[1]->objectName() == QStringLiteral("openPanel") && entries[2]->isSeparator() &&
+              entries[3]->objectName() == QStringLiteral("createNew") && entries[3]->text() == QStringLiteral("Create &New"),
+          "the open panels of the type (not the closed one, nor one without the type), then Create New: %s",
+          qPrintable(texts.join(QLatin1Char(','))));
+    if (entries.size() != 4) return;
+    const std::vector<std::string> names = usdcc::usd::shortStageNames(stages.stages());
+    CHECK(names.size() == 2 &&
+              entries[0]->text() == QStringLiteral("Outliner (%1)").arg(QString::fromStdString(names[0])) &&
+              entries[1]->text() == QStringLiteral("Outliner (%1)").arg(QString::fromStdString(names[1])),
+          "each named with the stage it shows, in brackets: %s", qPrintable(texts.join(QLatin1Char(','))));
+
+    behind->setFollowsCurrentStage(true);
+    stages.setCurrentStage(two);
+    entries[1]->trigger();
+    QApplication::processEvents();
+    CHECK(behind->currentStage() == one && !behind->followsCurrentStage(), "picked: it shows the menu's stage");
+    CHECK(!behind->isClosed() && behind->dockAreaWidget() && behind->dockAreaWidget()->currentDockWidget() == behind,
+          "and is in front");
+    CHECK(front->currentStage() == one, "the other panel is left alone");
+
+    // Now both show the first stage: the second is numbered.
+    Q_EMIT menu.aboutToShow();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);  // the old submenus
+    QMenu* rebuilt = menu.findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly).value(0);
+    QMenu* again = rebuilt ? rebuilt->findChild<QMenu*>(QStringLiteral("views.outliner")) : nullptr;
+    CHECK(again && again->actions().size() == 4 &&
+              again->actions()[1]->text() == QStringLiteral("Outliner 2 (%1)").arg(QString::fromStdString(names[0])),
+          "same title and stage told apart");
+    if (!again || again->actions().size() != 4) return;
+    QAction* createNew = again->actions()[3];
+
+    const int before = int(docks->dockWidgetsMap().size());
+    createNew->trigger();
+    QApplication::processEvents();
+    CHECK(int(docks->dockWidgetsMap().size()) == before + 1, "Create New opens another panel");
 }
 
 // Stages > a stage > Save Stage saves that stage's edited file layers, whichever stage is

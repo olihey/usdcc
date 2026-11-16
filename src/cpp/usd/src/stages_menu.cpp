@@ -15,7 +15,10 @@
 #include <DockWidget.h>
 
 #include <QAction>
+#include <QHash>
+#include <QPointer>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -88,10 +91,37 @@ void StagesMenu::rebuild() {
         QMenu* views = stageMenu->addMenu(tr("&Views"));
         views->setObjectName(QStringLiteral("views"));
         for (const usdcc::ui::ViewPanelRegistry::Entry& type : m_panelTypes->entries()) {
-            QAction* action = views->addAction(type.displayName);
-            action->setStatusTip(tr("Open a new %1 showing %2").arg(type.displayName, name));
+            QMenu* typeMenu = views->addMenu(type.displayName);
+            typeMenu->setObjectName(QStringLiteral("views.%1").arg(type.id));
+
+            // The open panels of the type, each brought to the front showing this stage.
+            // Each as "<title> (<its stage>)"; a second one alike as "<title> 2 (<its stage>)".
+            QHash<QString, int> seen;
+            for (usdcc::ui::ViewPanel* panel : openPanelsOfType(type.id)) {
+                const StageRefPtr& shown = panel->currentStage();
+                const auto it = std::find(stages.begin(), stages.end(), shown);
+                const QString shownName = shown && it != stages.end()
+                                              ? QString::fromStdString(names[it - stages.begin()])
+                                              : tr("no stage");
+                QString title = panel->windowTitle();
+                if (const int count = ++seen[title + QLatin1Char('\n') + shownName]; count > 1) {
+                    title += QStringLiteral(" %1").arg(count);
+                }
+                const QString label = QStringLiteral("%1 (%2)").arg(title, shownName);
+                QAction* action = typeMenu->addAction(label);
+                action->setObjectName(QStringLiteral("openPanel"));
+                action->setStatusTip(shown == stage ? tr("Bring this %1 to the front").arg(type.displayName)
+                                                    : tr("Bring this %1 to the front, showing %2").arg(type.displayName, name));
+                connect(action, &QAction::triggered, this,
+                        [this, guarded = QPointer<usdcc::ui::ViewPanel>(panel), stage]() { bringToFront(guarded, stage); });
+            }
+            if (!typeMenu->isEmpty()) typeMenu->addSeparator();
+
+            QAction* create = typeMenu->addAction(tr("Create &New"));
+            create->setObjectName(QStringLiteral("createNew"));
+            create->setStatusTip(tr("Open a new %1 showing %2").arg(type.displayName, name));
             const QString id = type.id;
-            connect(action, &QAction::triggered, this, [this, id, stage]() {
+            connect(create, &QAction::triggered, this, [this, id, stage]() {
                 m_panelTypes->open(id, stage, m_dockManager, m_window);
             });
         }
@@ -106,6 +136,29 @@ void StagesMenu::rebuild() {
                 Qt::QueuedConnection);
         });
     }
+}
+
+std::vector<usdcc::ui::ViewPanel*> StagesMenu::openPanelsOfType(const QString& id) const {
+    std::vector<usdcc::ui::ViewPanel*> panels;
+    for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
+        auto* panel = qobject_cast<usdcc::ui::ViewPanel*>(dockWidget);
+        if (panel && !panel->isClosed() && panel->property(usdcc::ui::ViewPanelRegistry::kTypeProperty).toString() == id) {
+            panels.push_back(panel);
+        }
+    }
+    return panels;
+}
+
+void StagesMenu::bringToFront(usdcc::ui::ViewPanel* panel, const StageRefPtr& stage) {
+    // Gone or closed since the menu was built: nothing to bring.
+    if (!panel || panel->isClosed()) return;
+    if (panel->currentStage() != stage) {
+        // As picking the stage in its dropdown: it stops following the current stage.
+        panel->setFollowsCurrentStage(false);
+        panel->setStage(stage);
+    }
+    panel->raise();  // its tab current, or its floating window raised
+    m_dockManager->setDockWidgetFocused(panel);
 }
 
 void StagesMenu::makeCurrentEverywhere(const StageRefPtr& stage) {
