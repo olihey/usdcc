@@ -359,7 +359,8 @@ std::optional<Definition> fromJson(const QJsonObject& json, const QString& fallb
     }
 
     Definition definition;
-    definition.id = json.value(QStringLiteral("id")).toString(fallbackId);
+    // A copy of Default made while its id was "layout" is still a copy of it.
+    definition.id = renamedId(json.value(QStringLiteral("id")).toString(fallbackId));
     if (!isValidId(definition.id)) {
         return fail(QStringLiteral("its id \"%1\" may only hold letters, digits, '.', '_' and '-'").arg(definition.id));
     }
@@ -435,6 +436,8 @@ bool isValidId(const QString& id) {
     static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9._-]+$"));
     return pattern.match(id).hasMatch();
 }
+
+QString renamedId(const QString& id) { return id == QLatin1String(kFormerDefaultId) ? QString::fromLatin1(kDefaultId) : id; }
 
 QString idFromName(const QString& name) {
     QString id;

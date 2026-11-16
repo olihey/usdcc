@@ -31,7 +31,7 @@ public:
     // How each workspace was left, which an earlier version kept; removed at start.
     static constexpr const char* kObsoleteArrangedGroup = "Workspaces/arranged";
     // The workspace the first start gets, and the button shows before any is chosen.
-    static constexpr const char* kDefaultId = "layout";
+    static constexpr const char* kDefaultId = workspace::kDefaultId;
 
     WorkspaceController(const workspace::ApplyContext& context, WorkspaceLibrary* library, QObject* parent = nullptr);
 

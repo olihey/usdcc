@@ -48,6 +48,7 @@
 #include <QSplitter>
 #include <QTemporaryDir>
 #include <QToolButton>
+#include <QWidgetAction>
 
 #include <algorithm>
 #include <memory>
@@ -290,20 +291,24 @@ USDCC_TEST(workspace_library_folders) {
     TestSettings settings;
     QTemporaryDir user;
     QTemporaryDir shipped;
-    write(shipped.filePath("layout.json"), workspaceText("layout", "Layout", "Scene", 10));
+    write(shipped.filePath("default.json"), workspaceText("default", "Default", "Scene", 10));
     write(shipped.filePath("lookdev.json"), workspaceText("lookdev", "Look Dev", "Shading", 40));
     write(shipped.filePath("four.json"), workspaceText("four", "Four View", "Scene", 20));
     write(shipped.filePath("loose.json"), workspaceText("loose", "Loose", "", 30));
     write(shipped.filePath("broken.json"), "{ not json");
     write(shipped.filePath("workspace.schema.json"), R"({"$schema": "x", "title": "not a workspace"})");
+    // Your copy of Default from when its id was "layout": still a copy of it.
     write(user.filePath("layout.json"), workspaceText("layout", "My Layout", "Scene", 10));
+    write(user.filePath("mine.json"), workspaceText("mine", "Mine", "", 900));
 
     WorkspaceLibrary library({user.path(), shipped.path(), false});
-    CHECK(library.workspaces().size() == 4, "four, %d", int(library.workspaces().size()));
-    const workspace::Definition* layout = library.find(QStringLiteral("layout"));
+    CHECK(library.workspaces().size() == 5, "five, %d", int(library.workspaces().size()));
+    const workspace::Definition* layout = library.find(QStringLiteral("default"));
     CHECK(layout && layout->name == "My Layout" && layout->source == "Your workspaces", "yours wins over the shipped one");
-    CHECK(library.isUserWorkspace(QStringLiteral("layout")) && !library.isUserWorkspace(QStringLiteral("four")), "and is yours");
-    const std::vector<workspace::Definition> hidden = library.shadowed(QStringLiteral("layout"));
+    CHECK(layout && layout->id == "default" && library.find(QStringLiteral("layout")) == layout,
+          "read as Default's id, and found by the one it had");
+    CHECK(library.isUserWorkspace(QStringLiteral("default")) && !library.isUserWorkspace(QStringLiteral("four")), "and is yours");
+    const std::vector<workspace::Definition> hidden = library.shadowed(QStringLiteral("default"));
     CHECK(hidden.size() == 1 && hidden.front().source == "Shipped with usdcc", "it hides the shipped one");
     CHECK(library.problems().size() == 1 && library.problems().front().contains("broken.json"),
           "the broken file is named, the schema isn't: %s", qPrintable(library.problems().join(';')));
@@ -315,8 +320,20 @@ USDCC_TEST(workspace_library_folders) {
         for (const workspace::Definition* definition : group.workspaces) names << definition->name;
         order << group.name + ":" + names.join('/');
     }
-    CHECK(order.join(' ') == "Scene:My Layout/Four View :Loose Shading:Look Dev",
+    // Yours without a group are under Personal; yours with one (a copy of a shipped one)
+    // and another folder's without one stay where they were.
+    CHECK(order.join(' ') == "Scene:My Layout/Four View :Loose Shading:Look Dev Personal:Mine",
           "groups by their lowest order, workspaces by order: %s", qPrintable(order.join(' ')));
+    CHECK(library.find(QStringLiteral("mine"))->group.isEmpty(), "the heading isn't written into the workspace");
+
+    // Saving over your copy writes the file it is in, not a default.json beside it.
+    workspace::Definition copy = *library.find(QStringLiteral("default"));
+    copy.name = QStringLiteral("My Default");
+    QString saveError;
+    CHECK(library.save(copy, &saveError) && !QFile::exists(user.filePath("default.json")) &&
+              library.find(QStringLiteral("default"))->name == "My Default" &&
+              library.shadowed(QStringLiteral("default")).size() == 1,
+          "saved over layout.json: %s", qPrintable(saveError));
 
     workspace::Definition mine = *library.find(QStringLiteral("lookdev"));
     mine.name = QStringLiteral("My Look Dev");
@@ -330,10 +347,15 @@ USDCC_TEST(workspace_library_folders) {
 
     // The real shipped files read, and each names its viewport.
     WorkspaceLibrary real({user.path(), QString(), false});
-    for (const char* id : {"layout", "side-by-side", "four-view", "viewport", "lookdev", "layering", "inspect", "scripting"}) {
+    for (const char* id : {"default", "side-by-side", "four-view", "viewport", "lookdev", "layering", "inspect", "scripting"}) {
         CHECK(real.find(QLatin1String(id)) != nullptr, "shipped: %s", id);
     }
     CHECK(real.problems().isEmpty(), "the shipped files all read: %s", qPrintable(real.problems().join(';')));
+    // The one a first start gets is named Default. It is behind the user folder's
+    // layout.json here.
+    const std::vector<workspace::Definition> first = real.shadowed(QLatin1String(WorkspaceController::kDefaultId));
+    CHECK(first.size() == 1 && first.front().name == "Default", "the default workspace's name: %s",
+          first.empty() ? "none" : qPrintable(first.front().name));
 }
 
 USDCC_TEST(workspace_switching) {
@@ -549,13 +571,13 @@ USDCC_TEST(workspace_controller_and_button) {
     App app;
     QTemporaryDir user;
     QTemporaryDir shipped;
-    write(shipped.filePath("layout.json"), workspaceText("layout", "Layout", "Scene", 10));
+    write(shipped.filePath("default.json"), workspaceText("default", "Default", "Scene", 10));
     write(shipped.filePath("three.json"), kThreeColumns);
     WorkspaceLibrary library({user.path(), shipped.path(), false});
     WorkspaceController controller(app.context(), &library);
     QToolButton* button = controller.createButton(&app.window);
     app.window.addTitleBarWidget(button);
-    CHECK(controller.currentId() == "layout" && button->text() == "Layout", "Layout before any is chosen: %s",
+    CHECK(controller.currentId() == "default" && button->text() == "Default", "Default before any is chosen: %s",
           qPrintable(button->text()));
     CHECK(button->icon().isNull() && button->toolButtonStyle() == Qt::ToolButtonTextOnly && button->menu(),
           "a push button: its name and the menu's arrow, no icon");
@@ -574,7 +596,7 @@ USDCC_TEST(workspace_controller_and_button) {
     for (QAction* action : menu.actions()) {
         if (!action->text().isEmpty()) texts << action->text();
     }
-    CHECK(texts.contains("Layout") && texts.contains("Three") && texts.contains("Save Current Layout as Workspace..."),
+    CHECK(texts.contains("Default") && texts.contains("Three") && texts.contains("Save Current Layout as Workspace..."),
           "the workspaces and the commands: %s", qPrintable(texts.join('|')));
     QAction* checked = menu.findChild<QAction*>(QStringLiteral("workspace:three"));
     CHECK(checked && checked->isChecked(), "the active one checked");
@@ -594,23 +616,39 @@ USDCC_TEST(workspace_controller_and_button) {
     bool before = false;
     controller.addWorkspaceActions(&stageWorkspaces, [&before] { before = true; }, false);
     QAction* stageThree = stageWorkspaces.findChild<QAction*>(QStringLiteral("workspace:three"));
-    QAction* stageLayout = stageWorkspaces.findChild<QAction*>(QStringLiteral("workspace:layout"));
+    QAction* stageDefault = stageWorkspaces.findChild<QAction*>(QStringLiteral("workspace:default"));
     QStringList stageTexts;
     for (QAction* action : stageWorkspaces.actions()) {
         if (!action->text().isEmpty()) stageTexts << action->text();
     }
     CHECK(stageThree && !stageThree->isChecked() && !stageTexts.contains("Save Current Layout as Workspace..."),
           "a stage's: the workspaces only, unchecked: %s", qPrintable(stageTexts.join('|')));
-    if (stageLayout) stageLayout->trigger();
+    if (stageDefault) stageDefault->trigger();
     QApplication::processEvents();
-    CHECK(before && controller.currentId() == "layout", "choosing one runs what comes first, then lays it out");
+    CHECK(before && controller.currentId() == "default", "choosing one runs what comes first, then lays it out");
     CHECK(controller.switchTo(QStringLiteral("three"), &error), "back to Three: %s", qPrintable(error));
 
     // Saving the layout as a new workspace makes it the active one.
     const QString id = controller.saveCurrentLayout(QStringLiteral("My Three"), false, &error);
     CHECK(id == "my-three" && QFile::exists(user.filePath("my-three.json")) && controller.currentId() == id,
           "saved as yours: %s %s", qPrintable(id), qPrintable(error));
-    CHECK(controller.switchTo(QStringLiteral("layout"), &error), "back to Layout: %s", qPrintable(error));
+    // It is listed under a Personal heading, the last of the workspaces.
+    QMenu withMine;
+    controller.populateMenu(&withMine);
+    QString headingAbove;
+    for (QAction* action : withMine.actions()) {
+        if (auto* widgetAction = qobject_cast<QWidgetAction*>(action)) {
+            if (auto* label = qobject_cast<QLabel*>(widgetAction->defaultWidget())) headingAbove = label->text();
+        }
+        if (action->objectName() == "workspace:my-three") break;
+    }
+    CHECK(headingAbove == "PERSONAL", "yours under Personal: %s", qPrintable(headingAbove));
+    // By the id it had while it was named Layout, as a script or a session may still say.
+    CHECK(controller.switchTo(QStringLiteral("layout"), &error) && controller.currentId() == "default",
+          "back to Default: %s", qPrintable(error));
+    controller.setCurrentId(id);
+    controller.setCurrentId(QStringLiteral("layout"));
+    CHECK(controller.currentId() == "default", "a session's \"layout\" is Default: %s", qPrintable(controller.currentId()));
     CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/my-three")),
           "how My Three was left isn't kept");
     CHECK(usdcc::core::Settings::instance().contains("Shortcuts/workspace.three"), "a shortcut setting per workspace");
@@ -626,15 +664,24 @@ USDCC_TEST(workspace_switching_always_follows_the_file) {
     {
         QSettings settings = usdcc::ui::appSettings();
         settings.setValue(QStringLiteral("Workspaces/arranged/three"), QByteArray(R"({"format": "usdcc-workspace"})"));
+        // A profile from when Default's id was "layout".
+        settings.setValue(QLatin1String(WorkspaceController::kCurrentKey), QStringLiteral("layout"));
+        settings.setValue(QStringLiteral("Shortcuts/workspace.layout"), QStringLiteral("Ctrl+Alt+1"));
     }
     QTemporaryDir user;
     QTemporaryDir shipped;
-    write(shipped.filePath("layout.json"), workspaceText("layout", "Layout", "Scene", 10));
+    write(shipped.filePath("default.json"), workspaceText("default", "Default", "Scene", 10));
     write(shipped.filePath("three.json"), kThreeColumns);
     WorkspaceLibrary library({user.path(), shipped.path(), false});
     WorkspaceController controller(app.context(), &library);
     CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/three")),
           "the arrangements an earlier version kept are gone");
+    CHECK(controller.currentId() == "default" && controller.isChosen() &&
+              usdcc::ui::appSettings().value(WorkspaceController::kCurrentKey).toString() == "default",
+          "the profile's \"layout\" is Default: %s", qPrintable(controller.currentId()));
+    CHECK(usdcc::ui::appSettings().value(QStringLiteral("Shortcuts/workspace.default")).toString() == "Ctrl+Alt+1" &&
+              !usdcc::ui::appSettings().contains(QStringLiteral("Shortcuts/workspace.layout")),
+          "and its shortcut goes with it");
 
     // The Attributes open, and the columns 1 : 3 : 2.
     auto check = [&](const char* when) {
@@ -677,13 +724,13 @@ USDCC_TEST(workspace_switching_always_follows_the_file) {
     QString error;
     CHECK(controller.switchTo(QStringLiteral("three"), &error), "Three: %s", qPrintable(error));
     tweak(check("switched to"));
-    CHECK(controller.switchTo(QStringLiteral("layout"), &error) && controller.switchTo(QStringLiteral("three"), &error),
+    CHECK(controller.switchTo(QStringLiteral("default"), &error) && controller.switchTo(QStringLiteral("three"), &error),
           "away and back: %s", qPrintable(error));
     tweak(check("back again"));
     CHECK(controller.switchTo(QStringLiteral("three"), &error), "chosen again: %s", qPrintable(error));
     check("the active one chosen again");
     CHECK(!usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/three")) &&
-              !usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/layout")),
+              !usdcc::ui::appSettings().contains(QStringLiteral("Workspaces/arranged/default")),
           "nothing remembered");
 }
 
@@ -740,7 +787,7 @@ def Xform "World"
 
     QTemporaryDir user;
     QTemporaryDir shipped;
-    write(shipped.filePath("layout.json"), workspaceText("layout", "Layout", "Scene", 10));
+    write(shipped.filePath("default.json"), workspaceText("default", "Default", "Scene", 10));
     write(shipped.filePath("three.json"), kThreeColumns);
     WorkspaceLibrary library({user.path(), shipped.path(), false});
     usdcc::usd::OpenStageOptionsDialog dialog(files.filePath("main.usda"), &library);

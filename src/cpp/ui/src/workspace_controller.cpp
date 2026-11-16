@@ -54,6 +54,18 @@ WorkspaceController::WorkspaceController(const workspace::ApplyContext& context,
     QSettings settings = appSettings();
     m_chosen = settings.contains(QLatin1String(kCurrentKey));
     m_currentId = settings.value(QLatin1String(kCurrentKey), QLatin1String(kDefaultId)).toString();
+    // Default's id was "layout": a profile that says so, or has a shortcut for it, means
+    // Default. Before the shortcut settings are defined, so the one for it loads the value.
+    if (m_currentId == QLatin1String(workspace::kFormerDefaultId)) {
+        m_currentId = QLatin1String(kDefaultId);
+        settings.setValue(QLatin1String(kCurrentKey), m_currentId);
+    }
+    const QString formerShortcut = QString::fromStdString(shortcutKey(QLatin1String(workspace::kFormerDefaultId)));
+    if (settings.contains(formerShortcut)) {
+        const QString shortcut = QString::fromStdString(shortcutKey(QLatin1String(kDefaultId)));
+        if (!settings.contains(shortcut)) settings.setValue(shortcut, settings.value(formerShortcut));
+        settings.remove(formerShortcut);
+    }
     // How each workspace was left, which an earlier version laid out again instead of
     // its file: gone, so it doesn't sit in usdcc.ini for nothing.
     settings.beginGroup(QLatin1String(kObsoleteArrangedGroup));
@@ -142,8 +154,10 @@ QString WorkspaceController::saveCurrentLayout(const QString& name, bool include
     return id;
 }
 
-void WorkspaceController::setCurrentId(const QString& id) {
-    if (id.isEmpty()) return;
+void WorkspaceController::setCurrentId(const QString& given) {
+    if (given.isEmpty()) return;
+    // A session saved while Default's id was "layout" names that.
+    const QString id = workspace::renamedId(given);
     m_chosen = true;
     if (id == m_currentId) {
         QSettings settings = appSettings();

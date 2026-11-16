@@ -70,6 +70,9 @@ public:
     // group's by order and name.
     const std::vector<workspace::Definition>& workspaces() const { return m_workspaces; }
     std::vector<Group> groups() const;
+    // The heading `definition` is listed under: its group, or "Personal" for one in the
+    // user folder that names none (what Save Current Layout as Workspace writes).
+    QString menuGroup(const workspace::Definition& definition) const;
     const workspace::Definition* find(const QString& id) const;
     // The files with the same id that `id`'s file hides, nearest first: what
     // "Reset to ..." goes back to.

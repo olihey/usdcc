@@ -1,8 +1,8 @@
 {
   "format": "usdcc-workspace",
   "version": 1,
-  "id": "layout",
-  "name": "Layout",
+  "id": "default",
+  "name": "Default",
   "description": "The Outliner, the viewports and the Attributes side by side: for general scene work.",
   "group": "Scene",
   "order": 10,

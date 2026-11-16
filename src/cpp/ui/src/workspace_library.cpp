@@ -28,6 +28,10 @@ bool lessInMenu(const workspace::Definition& a, const workspace::Definition& b) 
     return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
 }
 
+bool inUserFolder(const QString& file, const QString& userFolder) {
+    return QFileInfo(file).absolutePath() == QFileInfo(userFolder).absoluteFilePath();
+}
+
 QStringList settingFolders() {
     auto& settings = core::Settings::instance();
     QStringList folders;
@@ -141,18 +145,21 @@ void WorkspaceLibrary::reload() {
     }
 
     // Groups first by their lowest order, then each group's workspaces by order and name.
+    // By the heading each is listed under, so yours without a group stay together.
     std::map<QString, int> groupOrder;
     for (const workspace::Definition& definition : m_workspaces) {
-        auto [it, added] = groupOrder.emplace(definition.group, definition.order);
+        auto [it, added] = groupOrder.emplace(menuGroup(definition), definition.order);
         if (!added) it->second = std::min(it->second, definition.order);
     }
     std::stable_sort(m_workspaces.begin(), m_workspaces.end(),
-                     [&groupOrder](const workspace::Definition& a, const workspace::Definition& b) {
-                         if (a.group != b.group) {
-                             const int orderA = groupOrder[a.group];
-                             const int orderB = groupOrder[b.group];
+                     [this, &groupOrder](const workspace::Definition& a, const workspace::Definition& b) {
+                         const QString groupA = menuGroup(a);
+                         const QString groupB = menuGroup(b);
+                         if (groupA != groupB) {
+                             const int orderA = groupOrder[groupA];
+                             const int orderB = groupOrder[groupB];
                              if (orderA != orderB) return orderA < orderB;
-                             return QString::compare(a.group, b.group, Qt::CaseInsensitive) < 0;
+                             return QString::compare(groupA, groupB, Qt::CaseInsensitive) < 0;
                          }
                          return lessInMenu(a, b);
                      });
@@ -162,29 +169,37 @@ void WorkspaceLibrary::reload() {
 std::vector<WorkspaceLibrary::Group> WorkspaceLibrary::groups() const {
     std::vector<Group> list;
     for (const workspace::Definition& definition : m_workspaces) {
-        if (list.empty() || list.back().name != definition.group) list.push_back(Group{definition.group, {}});
+        const QString group = menuGroup(definition);
+        if (list.empty() || list.back().name != group) list.push_back(Group{group, {}});
         list.back().workspaces.push_back(&definition);
     }
     return list;
 }
 
+QString WorkspaceLibrary::menuGroup(const workspace::Definition& definition) const {
+    if (definition.group.isEmpty() && inUserFolder(definition.file, m_options.userFolder)) return tr("Personal");
+    return definition.group;
+}
+
 const workspace::Definition* WorkspaceLibrary::find(const QString& id) const {
+    const QString now = workspace::renamedId(id);
     auto it = std::find_if(m_workspaces.begin(), m_workspaces.end(),
-                           [&id](const workspace::Definition& definition) { return definition.id == id; });
+                           [&now](const workspace::Definition& definition) { return definition.id == now; });
     return it != m_workspaces.end() ? &*it : nullptr;
 }
 
 std::vector<workspace::Definition> WorkspaceLibrary::shadowed(const QString& id) const {
+    const QString now = workspace::renamedId(id);
     std::vector<workspace::Definition> list;
     for (const workspace::Definition& definition : m_shadowed) {
-        if (definition.id == id) list.push_back(definition);
+        if (definition.id == now) list.push_back(definition);
     }
     return list;
 }
 
 bool WorkspaceLibrary::isUserWorkspace(const QString& id) const {
     const workspace::Definition* definition = find(id);
-    return definition && QFileInfo(definition->file).absolutePath() == QFileInfo(m_options.userFolder).absoluteFilePath();
+    return definition && inUserFolder(definition->file, m_options.userFolder);
 }
 
 bool WorkspaceLibrary::save(const workspace::Definition& definition, QString* error) {
@@ -196,7 +211,12 @@ bool WorkspaceLibrary::save(const workspace::Definition& definition, QString* er
         if (error) *error = tr("Couldn't make the folder %1.").arg(QDir::toNativeSeparators(m_options.userFolder));
         return false;
     }
-    const QString path = QDir(m_options.userFolder).absoluteFilePath(definition.id + QStringLiteral(".json"));
+    // Over your file for this id when there is one, whatever its name: a copy of Default
+    // from when its id was "layout" is layout.json, and a second file would only hide it.
+    const workspace::Definition* existing = find(definition.id);
+    const QString path = existing && inUserFolder(existing->file, m_options.userFolder)
+                             ? existing->file
+                             : QDir(m_options.userFolder).absoluteFilePath(definition.id + QStringLiteral(".json"));
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error) *error = tr("Couldn't write %1: %2").arg(QDir::toNativeSeparators(path), file.errorString());

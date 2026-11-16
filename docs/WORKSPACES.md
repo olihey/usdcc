@@ -119,7 +119,7 @@ What they share, and what usdcc takes from it:
 | `id` | string `[A-Za-z0-9._-]+` | no | Stable identity: what overrides match on (§5), what `Workspaces/current` and sessions store. Defaults to the file name without `.json`. Plugins should prefix theirs (`org.usdcc.vray-render.lookdev`) |
 | `name` | string | yes | Shown on the button and in the menu |
 | `description` | string | no | The menu entry's tooltip |
-| `group` | string | no | The heading it's listed under in the menu (§6.2), e.g. `"Shading & Rendering"`. Workspaces from any folder that name the same group are listed together, so a studio's or a plugin's workspace can join a built-in group, or start its own. Matched exactly, case included. None: listed without a heading |
+| `group` | string | no | The heading it's listed under in the menu (§6.2), e.g. `"Shading & Rendering"`. Workspaces from any folder that name the same group are listed together, so a studio's or a plugin's workspace can join a built-in group, or start its own. Matched exactly, case included. None: listed without a heading, or under Personal if the file is in your folder (§6.2) |
 | `order` | int | no | Order within the menu, lowest first; ties by name. Default 1000. The built-ins use 10, 20, 30, … Also orders the groups: a group sits where its lowest `order` puts it |
 | `layout` | node (§3.3) | yes | The dock area's arrangement |
 | `sidePanels` | object | no | Side panel objectName (or title) → `"shown"`, `"collapsed"` or `"hidden"`, or an object `{"state": …, "area": "left"/"right"/"top"/"bottom", "size": 0.3}`: the edge it's docked at, and when shown its share of the window's width (left, right) or height (top, bottom). **A side panel not named is hidden**: a workspace has the side panels it names and no others. Missing or `{}`: none. Unknown names are ignored. The names are `Log`, `Script Editor`, `pluginManagerPanel` (Plugins) and those Python panels set |
@@ -345,11 +345,12 @@ fitted however it was left; Four View sets it to `"stage"`.
 
 ## 4. Built-in workspaces (recommended)
 
-Eight, in `resources/workspaces/`. **Layout** is the default.
+Eight, in `resources/workspaces/`. **Default** is the one a first start gets. It was named
+Layout, with the id `layout`: that id still means it (§6.3).
 
 | Group | Order | id | Name | Arrangement | For |
 |---|---|---|---|---|---|
-| Scene | 10 | `layout` | Layout | Outliner (18%) │ **viewports** (57%) │ Attributes (25%) | General scene work; the first start |
+| Scene | 10 | `default` | Default | Outliner (18%) │ **viewports** (57%) │ Attributes (25%) | General scene work; the first start |
 | Scene | 15 | `side-by-side` | Side by Side | Outliner │ **viewports** │ Viewport 2 │ Attributes (below) | Two angles on the current stage at once: placing something while seeing it from behind |
 | Scene | 20 | `four-view` | Four View | Outliner │ Top, **viewports** (persp) over Front, Right (§3.5.6) | Placing and aligning; needs orthographic views (phase 2b) |
 | Scene | 30 | `viewport` | Viewport Only | **viewports**; Log, Script Editor and Plugins `collapsed` | Review, screenshots, a small screen |
@@ -424,7 +425,7 @@ Looked in from the top; **the first file holding an id wins**, as with plugins
    in the manifest.
 5. **Shipped with usdcc**: `<install>/resources/workspaces/`.
 
-So a user can change a shipped workspace by saving one with its id, and a studio can replace Layout for
+So a user can change a shipped workspace by saving one with its id, and a studio can replace Default for
 everyone. The menu then offers *Reset to "<source>"* on a workspace that shadows another (§6.2).
 
 The setting (`Workspaces/folders`):
@@ -469,7 +470,7 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 
 ```
   SCENE ────────────────
-✓ Layout
+✓ Default
   Side by Side
   Four View
   Viewport Only
@@ -484,6 +485,8 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
   Scripting
   ACME PIPELINE ────────        ← a studio's own group (order 500)
   Shot Review
+  PERSONAL ─────────────        ← yours that name no group (order 900 when saved)
+  My Layout
   ─────────────
   Fit All Views                 Shift+F
   ─────────────
@@ -496,9 +499,15 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 ```
 
 - **Grouped** by `group`, each group under a heading. Groups are ordered by their lowest `order`, and the
-  workspaces in a group by `order`, then name. Workspaces with no group form a group without a heading,
+  workspaces in a group by `order`, then name. Workspaces with no group, other than yours (below), form a group without a heading,
   placed by their lowest `order` like any other. With only one group (or none) there are no headings.
   A check on the active one.
+- **Personal:** the workspaces in your folder (§5, item 1) that name no group, which is what *Save
+  Current Layout as Workspace...* writes, are listed under a **Personal** heading
+  (`WorkspaceLibrary::menuGroup()`), placed by their lowest `order` as a group is. The heading isn't
+  written to the file, and `usdcc.app.workspaces()` still gives their `group` as empty. Your copy of a
+  workspace that has a group stays in that group, where the one it replaces was; a file that names the
+  group `Personal` itself joins the heading.
 - Headings are section labels, not submenus: every workspace stays one click away. They're
   `QWidgetAction` labels (`#workspaceMenuHeading` in `dark.qss`, small caps in the dimmed text color),
   since `QMenu::addSection()` draws its text or not depending on the style.
@@ -518,12 +527,21 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 
 - **The active workspace** is UI state: `Workspaces/current` in `usdcc.ini`.
 - **At start** the saved dock layout is restored as today, and the button shows `Workspaces/current`. On a
-  profile with no saved layout (the first start), **Layout** is applied once the window has settled
+  profile with no saved layout (the first start), **Default** is applied once the window has settled
   (`MainWindow::layoutSettled()`), instead of today's three tabs.
 - **How each was left is not kept.** Choosing a workspace, the active one too, lays it out as its file
   says: it's how the window's layout is put back after panels were moved, opened or closed. To keep a
   layout, *Save Current Layout as Workspace...*. The `Workspaces/arranged/<id>` keys an earlier version
   wrote are removed at start.
+- **Default's id was `layout`**, and what says so still means Default (`workspace::renamedId()`):
+  - a workspace file with that id, or named `layout.json` with none, is read as `default`, so your copy
+    or a studio's still replaces the shipped one. Saving over your copy writes the file it is in;
+  - `Workspaces/current` and `Shortcuts/workspace.layout` in `usdcc.ini` are rewritten at start to
+    `default` and `Shortcuts/workspace.default`;
+  - a session's `"workspace": "layout"` and `usdcc.app.set_workspace("layout")` give Default.
+    `current_workspace()` and `workspaces()` say `default`.
+
+  So `layout` can't be the id of another workspace.
 - **Sessions** store the active workspace's id in `layout` (`"workspace": "lookdev"`). Loading one
   restores its exact layout, as now, and sets the button. The session format's `version` doesn't change:
   older apps ignore the key.
@@ -733,17 +751,17 @@ All four phases and 2b, on 2026-11-15.
   - A view label for a perspective camera on an axis view reads "Top (Persp)"; an orthographic one that
     isn't on an axis view, "Ortho".
   - Saving a workspace whose name matches another's keeps that one's id, group and order, so it replaces
-    it (yours shadows it if it came from another folder). A new one gets order 900, ungrouped.
+    it (yours shadows it if it came from another folder). A new one gets order 900 and no group, so it's listed under Personal.
   - How a workspace was left is remembered only once one has been chosen (switched to, loaded with a
-    session, or chosen in an earlier run): before that the button says Layout, but the layout on screen is
-    whatever the profile had, which isn't how Layout was left.
+    session, or chosen in an earlier run): before that the button says Default, but the layout on screen is
+    whatever the profile had, which isn't how Default was left.
   - After laying out, the current stage's viewport is focused again once the event loop has run, and the
     current stage put back: moving the panels moves Qt's focus, ADS follows it, and the current stage
     followed the focus onto another stage's viewport.
   - Panels a switch deletes leave the window at once and are deleted by the event loop; the tests flush
     those deletes at their end, as no event loop runs there.
 - **Checked in the app** (2026-11-15, the worktree's Release build, the user's profile restored after):
-  two stages, Four View, Look Dev, Side by Side and Layout in turn: each laid out as its file says, the
+  two stages, Four View, Look Dev, Side by Side and Default (named Layout then) in turn: each laid out as its file says, the
   button naming it in the accent colour left of the caption buttons, the current stage the same
   throughout. Not checked in the app: the viewports' pictures (the window grab draws them black), the
   menu by mouse, the Open Stage with Options dialog by hand, and a Z-up stage's Four View.

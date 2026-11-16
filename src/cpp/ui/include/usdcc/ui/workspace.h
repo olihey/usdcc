@@ -128,8 +128,16 @@ USDCC_UI_API std::optional<Definition> readFile(const QString& path, QString* er
 USDCC_UI_API Node pruned(const Node& layout, const std::function<bool(const QString& type)>& isKnown,
                          QStringList* missing = nullptr);
 
+// The workspace a first start gets, and the id it had while it was named Layout.
+inline constexpr const char* kDefaultId = "default";
+inline constexpr const char* kFormerDefaultId = "layout";
+
 // Whether `id` is a valid workspace id: [A-Za-z0-9._-]+.
 USDCC_UI_API bool isValidId(const QString& id);
+// The id a workspace has now: kDefaultId for kFormerDefaultId, any other as it is. A
+// file's id is read through it and so is an id asked for, so a profile, a session, a
+// script or your own copy that says "layout" still means that workspace.
+USDCC_UI_API QString renamedId(const QString& id);
 // An id made from a name: lower case, runs of other characters as "-".
 USDCC_UI_API QString idFromName(const QString& name);
 

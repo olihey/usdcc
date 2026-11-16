@@ -274,7 +274,7 @@ USDCC_TEST(scale_controller_panel_round_trip) {
     workspace->setPopupMode(QToolButton::InstantPopup);
     workspace->setMenu(new QMenu(workspace));
     workspace->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    workspace->setText(QStringLiteral("Layout"));
+    workspace->setText(QStringLiteral("Default"));
     windowLayout->addWidget(workspace);
     ads::CDockManager docks(&window);
     windowLayout->addWidget(&docks, 1);
