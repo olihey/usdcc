@@ -1,6 +1,7 @@
 # Physics — Plan
 
-Status: **plan, nothing built.** Written 2026-11-16. The choices are in §4, what has to be checked
+Status: **plan, nothing built.** Written 2026-11-16, revised the same day after a review against
+OpenUSD's parser source. The choices are in §4, what has to be checked
 before building on them in §7, and what was decided and what is still open in §8.
 
 usdcc can already *author* physics: the Create menu makes `PhysicsScene`, collision groups and
@@ -17,7 +18,7 @@ Checked against the build the app links (`USD_INSTALL`, which reports 26.08).
 | Piece | What it is |
 |---|---|
 | **`usdPhysics` schemas** | `PhysicsScene` (gravity), `RigidBodyAPI` (velocities, kinematic, starts asleep), `CollisionAPI`, `MeshCollisionAPI` (approximation: none, convex hull, convex decomposition, simplified mesh, bounding cube, bounding sphere), `MassAPI`, `MaterialAPI` (friction, restitution, density), `CollisionGroup`, `FilteredPairsAPI`, the joints (fixed, revolute, prismatic, spherical, distance, and the generic one with `LimitAPI` and `DriveAPI` per degree of freedom), `ArticulationRootAPI` |
-| **Parsing** (`usdPhysics/parseUtils.h`, `parseDesc.h`) | `UsdPhysicsLoadStageFromPrimRange()` walks a stage and reports plain descriptors: scenes, materials, collision groups, shapes (sphere, cube, capsule, cylinder, cone, plane, mesh, sphere points), rigid bodies, joints with limits and drives, articulations. It resolves the rules a solver would otherwise have to re-implement: which collider belongs to which body, nested bodies, simulation owners, filtering. Its output is deterministic |
+| **Parsing** (`usdPhysics/parseUtils.h`, `parseDesc.h`) | `UsdPhysicsLoadStageFromPrimRange()` walks a stage and reports plain descriptors: scenes, materials, collision groups, shapes (sphere, cube, capsule, cylinder, cone, plane, mesh, sphere points), rigid bodies, joints with limits and drives, articulations. It resolves the rules a solver would otherwise have to re-implement: which collider belongs to which body, nested bodies, simulation owners, filtering. Its output is deterministic. It reads every value at `UsdTimeCode::Default()`, never at a frame (§4.3) |
 | **Mass** | `UsdPhysicsRigidBodyAPI::ComputeMassProperties()`: the precedence rules (explicit mass, then density on the mass API, then the material's density, then 1000 kg/m³) with a callback that supplies each collider's volume and inertia |
 | **Units** | Distance in the stage's `metersPerUnit`, mass in `kilogramsPerUnit` (`metrics.h`), time in seconds, angles in degrees. Gravity defaults to the up axis and Earth's magnitude |
 | **Validators** | `usdPhysicsValidators` is in the build: rules for bodies, colliders and articulations |
@@ -103,7 +104,11 @@ A simulation is tried many times before it is kept. Each try must cost nothing a
 inside them it is ordinary playback.**
 
 - It starts from the stage as authored at the **simulation start frame**: the playback range's
-  first frame.
+  first frame. OpenUSD's parser reads everything at `UsdTimeCode::Default()` (every
+  `ComputeLocalToWorldTransform` and `Get` in `parseUtils.cpp`), so `physics_desc` reads bodies'
+  and shapes' world transforms again at the start frame with a `UsdGeomXformCache`, and mesh
+  points there too. Otherwise an animated body, or one with only time samples, starts from its
+  default value or from identity.
 - Frames are solved in order, never skipped. In Real Time mode playback waits for the solver
   instead of jumping over frames it hasn't made.
 - Going back, or scrubbing inside the cached range, reads the cache. Scrubbing past its end
@@ -116,8 +121,20 @@ the cache and the solver's world belong to the stage, the transport to the app.
 ### 4.4 An edit outside the cache makes it stale
 
 Any `Stage::changed` that isn't the cache layer's own marks the cache stale: the ruler shows it,
-and the next Play from the start frame solves anew. The cache isn't cleared at once, so a look at
-an attribute doesn't cost the run. **Reset** clears it and returns to the start frame.
+and the next Play solves anew. The cache isn't cleared at once, so a look at an attribute doesn't
+cost the run. **Reset** clears it and returns to the start frame.
+
+- **Telling the cache's own writes apart.** `StageChanges` is built from
+  `UsdNotice::ObjectsChanged`, which doesn't say which layer changed. `SimCache` sets a guard on
+  the `PhysicsSession` around each frame's `SdfChangeBlock`, and changes that arrive under it
+  don't mark the cache stale. Muting or unmuting the cache layer is the session's own act too.
+- **Solving anew clears the cache first.** The parser must see the stage as authored: with the
+  cache composed, its `xformOpOrder` points at `:sim` ops that have only time samples, and at
+  `Default()` those read as identity, so every body would start at the origin. The cache is
+  cleared (not muted, which would recompose the stage twice) before `physics_desc` runs.
+- **Play while stale** solves from the start frame, whatever the current time: the timeline
+  jumps there first. A stale cache is never extended, as its frames no longer follow from the
+  stage.
 
 Selection, time and view state don't touch it: they aren't stage changes.
 
@@ -128,6 +145,8 @@ Selection, time and view state don't touch it: they aren't stage changes.
 - What it writes are plain time samples on transform ops, which every reader understands: Storm,
   RTX, V-Ray, other DCCs, usdz. This is the choice [ANIMATION.md](ANIMATION.md) §4.4 made for keys.
 - All bodies or the selected ones, over the cached range.
+- With the cache stale, Bake solves anew from the start frame first (§4.7), and its dialog says
+  so. It never bakes frames that no longer follow from the stage.
 - An option marks baked bodies `physics:kinematicEnabled`, so a later run treats them as moving
   colliders instead of solving them again on top of their own animation.
 - Baking goes through `anim_edit` once [ANIMATION.md](ANIMATION.md) phase 2 exists, so a weaker
@@ -135,17 +154,29 @@ Selection, time and view state don't touch it: they aren't stage changes.
 
 ### 4.6 How a pose is written
 
-A body's pose from the solver is a world transform. In the cache layer the prim gets:
+A body's pose from the solver is a world transform, and **the cache writes it as one**. In the
+cache layer the prim gets:
 
-- `xformOpOrder = [xformOp:translate:sim, xformOp:orient:sim, xformOp:scale:sim]`, with the scale
-  constant and the other two time-sampled. USD interpolates the orientation by slerp, so
-  sub-frame reads (motion blur) stay rigid.
-- `xformOp:transform:sim`, one matrix, when the parent's transform leaves shear in the local one
-  (a rotated parent with non-uniform scale). `XformStack::setLocalTransform()` already makes this
-  choice.
+- `xformOpOrder = [!resetXformStack!, xformOp:translate:sim, xformOp:orient:sim,
+  xformOp:scale:sim]`, with the scale constant (the body's world scale at the start frame) and the
+  other two time-sampled. USD interpolates the orientation by slerp, so sub-frame reads (motion
+  blur) stay rigid.
+- `xformOp:transform:sim`, one matrix, in place of the three when the world scale has shear
+  (a rotated parent with non-uniform scale above the body).
 
-The stronger `xformOpOrder` hides the prim's own stack without changing it. Baking writes the
-same ops; converting them to the prim's own translate/rotate/scale ops is a later refinement.
+Why world space, not the parent's space:
+
+- UsdPhysics simulates a body under another body on its own. A local transform would need the
+  parent's *simulated* pose at every frame, so frames would have to be written parents first.
+- An animated parent would have to be evaluated at every frame, only to be divided out again.
+- The prim's children still inherit from it; `!resetXformStack!` only cuts the body off from its
+  ancestors, which is what the solver already did.
+
+The stronger `xformOpOrder` hides the prim's own stack without changing it. **Baking converts**:
+it writes local `:sim` ops relative to the parent as composed after the bake, ancestors first, so
+the user's layer doesn't gain a `!resetXformStack!` it didn't have.
+`XformStack::setLocalTransform()` already chooses between three ops and one matrix. Converting to
+the prim's own translate/rotate/scale ops is a later refinement.
 
 ### 4.7 The first version solves on the UI thread
 
@@ -161,16 +192,23 @@ triangle-mesh collider, an articulation it solves as plain joints. The reports g
 to **Check Physics**, with the prim's path. This is the mesh tools' rule: reject or report, never
 relax quietly ([BLENDER_MESH_TOOLS.md](BLENDER_MESH_TOOLS.md) §2).
 
+The app reports what it can't write back, too. **A body inside an instance** is parsed (the parser
+walks instance proxies) but its pose can't be written: opinions at an instance proxy's path are
+ignored by composition. Phase 1 leaves such bodies out of the world and reports each instance once.
+Later, the cache layer can set `instanceable = false` on the instance's root, which makes the
+bodies ordinary prims for as long as the cache exists and leaves the user's layers as they were.
+
 ## 5. Design
 
 ### 5.1 New pieces
 
 | Piece | Target | What it does |
 |---|---|---|
-| `physics_desc.h` | `usdcc_usd`, Qt-free | Calls `UsdPhysicsLoadStageFromPrimRange()` and turns its descriptors into owned structs in metres, kilograms and seconds: world poses, shape geometry (mesh points and indices copied), mass properties from `ComputeMassProperties()`, materials, joints in body-local frames, filtering |
+| `physics_desc.h` | `usdcc_usd`, Qt-free | Calls `UsdPhysicsLoadStageFromPrimRange()` and turns its descriptors into owned structs in metres, kilograms and seconds: world poses and mesh points read again at the start frame (§4.3), shape geometry (points and indices copied), mass properties from `ComputeMassProperties()`, materials, joints in body-local frames, filtering. Leaves out and reports bodies inside instances (§4.8) |
+| `physics_mass.h` | `usdcc_usd`, Qt-free | The `MassInformationFn` that `ComputeMassProperties()` calls for each collider: volume, inertia tensor and centre of mass for the primitives in closed form, and for a convex hull or closed mesh by summing signed tetrahedra. No solver is linked here to borrow this from |
 | `physics_backend.h` | `usdcc_usd`, Qt-free | §5.2, and the registry of backends |
-| `SimCache` | `usdcc_usd`, Qt-free | The cache layer: makes and removes it, pre-creates the ops for every body, writes a frame's poses in one `SdfChangeBlock`, knows the cached range, clears |
-| `PhysicsSession` | `usdcc_usd`, Qt-free | One per stage that has simulated: the backend's world, the cache, the start frame, stale or not. `start()`, `stepTo(frame)`, `reset()`. Reads kinematic bodies' animated transforms and hands them to the backend before each step |
+| `SimCache` | `usdcc_usd`, Qt-free | The cache layer: makes and removes it, pre-creates the world-space ops for every body (§4.6), writes a frame's poses in one `SdfChangeBlock` under the session's guard (§4.4), knows the cached range, clears |
+| `PhysicsSession` | `usdcc_usd`, Qt-free | One per stage that has simulated: the backend's world, the cache, the start frame, stale or not. `start()` clears the cache and then parses (§4.4), `stepTo(frame)`, `reset()`. Reads kinematic bodies' animated transforms and hands them to the backend before each step. Ignores the stage changes its own writes cause |
 | `physics_bake.h` | `usdcc_usd`, Qt-free | §4.5. Callers wrap it in an `UndoManager` edit |
 | `Stage::physics()` | `usdcc_usd` | The stage's session, made on first use; `physicsChanged` for the cached range and the stale mark |
 | `PlaybackController` | `usdcc_usd_ui` | With Simulate on, a tick asks the session for the next frame before setting the time (§4.3) |
@@ -218,12 +256,12 @@ is stale; nothing is patched in place.
 | Mesh, `none` | `MeshShape` | Static and kinematic bodies. On a dynamic body: reported, and a convex hull used instead |
 | Mesh, `convexDecomposition`, `meshSimplification` | Phase 5 | Until then: reported, and a convex hull used |
 | Several colliders under one body | `StaticCompoundShape` | |
-| Material | Friction, restitution on the body | The schema's "average" combine rule, set on the contact listener |
-| Mass, centre of mass, inertia | `MassProperties` override | From `ComputeMassProperties()`, not Jolt's own |
+| Material | `Body::SetFriction`, `SetRestitution` | Jolt has one friction per body; UsdPhysics has static and dynamic friction per collider. Dynamic friction is used. A body whose colliders have different materials gets the first collider's, and is reported. The schema's "average" combine rule through `PhysicsSystem::SetCombineFriction` and `SetCombineRestitution` |
+| Mass, centre of mass, inertia | `MassProperties` override | From `ComputeMassProperties()` and `physics_mass`, not Jolt's own |
 | Kinematic body | `EMotionType::Kinematic`, `MoveKinematic()` each step | |
 | Fixed, revolute, prismatic, spherical, distance joints | `FixedConstraint`, `HingeConstraint`, `SliderConstraint`, `SwingTwistConstraint`, `DistanceConstraint` | Break force: phase 4 |
 | Generic joint with limits and drives | `SixDOFConstraint` with limits and motors | |
-| Collision groups, filtered pairs | `GroupFilterTable` plus a pair set | |
+| Collision groups, filtered pairs | A `GroupFilter` of our own | Not `GroupFilterTable`: a collider can be in several UsdPhysics groups, with `mergedGroups` and `invertFilteredGroups`, and Jolt gives a body one group and subgroup. The filter keeps, per body, the set of groups and filtered pairs, and answers each pair from that. Filtering is per body in Jolt, per collider in UsdPhysics: colliders of one body in different groups are reported |
 | Articulation root | Ignored | Reported once per articulation: solved as plain joints |
 | Scene gravity | `PhysicsSystem::SetGravity` | One scene per world; bodies owned by another scene are left out and reported |
 
@@ -255,7 +293,10 @@ Physics
   (`session_stages.cpp`); the cache's sublayer path is left out of it, as an anonymous layer
   can't be found again.
 - **The Layer Editor lists the cache** under the session layer as "Simulation cache": it can be
-  muted to see the scene as authored, and not made the edit target.
+  muted to see the scene as authored, and not made the edit target. Variant edit mode can make
+  the session layer itself the edit target (`session_stages.cpp`); that is a different layer from
+  the cache, and the rule is enforced in `Stage::setEditTargetLayer()`, not only in the Layer
+  Editor's menu, so no path reaches the cache.
 - Simulate, the substep count and the collider overlay are settings in `usdcc.ini`.
 
 ## 6. Phases
@@ -264,10 +305,10 @@ Each phase ships on its own and leaves the app consistent.
 
 | Phase | What | Main files | Tests |
 |---|---|---|---|
-| **0. Spike** | `joltphysics` in `vcpkg.json`; its imported target mapped to Release in every configuration, as Qt is; a headless test that parses a stage and drops a cube on a plane; the measurements of §7 | `vcpkg.json`, `CMakeLists.txt`, a test | The cube comes to rest on the plane; two runs give the same poses |
-| **1. Core** | `physics_desc`, the backend interface and registry, `SimCache`, `PhysicsSession`, `Host::addPhysicsBackend()`, the Jolt plugin: rigid bodies, primitives, convex hulls, static meshes, compounds, materials, mass, gravity, kinematic bodies | the new headers, `plugin.h`, `src/plugins/physics_jolt`, `test_data/physics_*.usda` | Units: a stage in centimetres falls as one in metres does. Mass precedence case by case. Restitution and friction. A kinematic body pushes a dynamic one. The cache: range, clear, the user's layers untouched and not dirty. A fake backend drives the session |
-| **2. Timeline** | Simulate, Reset, the cached band, stale marking, the playback rule of §4.3, the Physics menu's first five entries, settings, session save, the Layer Editor entry, Python | `playback_controller.cpp`, `timeline_bar.cpp`, `time_ruler.cpp`, `session_stages.cpp`, `layer_stack.cpp`, bindings | The controller against a fake clock: frames in order in both modes; an edit makes the cache stale; scrubbing reads the cache; the session file has no cache path |
-| **3. Bake** | Bake Simulation with its dialog and progress; mark kinematic | `physics_bake`, a dialog | Baked, with the cache cleared, the stage shows the same transforms at every frame; one undo step; baking the selection leaves the rest |
+| **0. Spike** | `joltphysics` in `vcpkg.json` (first confirm the version the pinned baseline has); its imported target mapped to Release in every configuration, as Qt is; a headless test that parses a stage and drops a cube on a plane; the measurements of §7 | `vcpkg.json`, `CMakeLists.txt`, a test | The cube comes to rest on the plane; two runs give the same poses |
+| **1. Core** | `physics_desc`, `physics_mass`, the backend interface and registry, `SimCache`, `PhysicsSession`, `Host::addPhysicsBackend()`, the Jolt plugin: rigid bodies, primitives, convex hulls, static meshes, compounds, materials, mass, gravity, kinematic bodies | the new headers, `plugin.h`, `src/plugins/physics_jolt`, `test_data/physics_*.usda` | Units: a stage in centimetres falls as one in metres does. Mass precedence case by case; `physics_mass` against closed-form box and sphere. Restitution and friction. A kinematic body pushes a dynamic one. A body animated only by time samples starts where the start frame puts it. Solving twice gives the same first frame (the cache was cleared before parsing). A body under a rotated, simulated parent lands where it would alone. A body inside an instance is reported, not moved. The cache: range, clear, the user's layers untouched and not dirty, its own writes don't make it stale. A fake backend drives the session |
+| **2. Timeline** | Simulate, Reset, the cached band, stale marking, the playback rule of §4.3, the Physics menu's first five entries, settings, session save, the Layer Editor entry, Python | `playback_controller.cpp`, `timeline_bar.cpp`, `time_ruler.cpp`, `session_stages.cpp`, `layer_stack.cpp`, bindings | The controller against a fake clock: frames in order in both modes; an edit makes the cache stale; Play while stale starts from the start frame; scrubbing reads the cache; the session file has no cache path; the cache can't become the edit target, variant edit mode included |
+| **3. Bake** | Bake Simulation with its dialog and progress; mark kinematic; world poses converted to local ops, ancestors first | `physics_bake`, a dialog | Baked, with the cache cleared, the stage shows the same transforms at every frame, nested bodies included; no `!resetXformStack!` in the user's layer; one undo step; baking the selection leaves the rest; baking a stale cache solves anew first |
 | **4. Constraints** | Joints, limits, drives, break force, collision groups, filtered pairs, the collider overlay, Check Physics | the Jolt plugin, the viewport overlay | A hinge stays within its limits; a drive reaches its target; filtered pairs pass through each other; a broken joint lets go |
 | **5. Later** | Convex decomposition (V-HACD or CoACD: licences to read then), point instancers, grabbing a body with the mouse while it plays, a cache on disk as value clips, baking to the prim's own ops, a second backend | — | — |
 
@@ -285,8 +326,9 @@ Believed, not tested here.
    measurement, at 1,000 bodies. **If they do:** while playing, write each frame as *default*
    values in the cache layer (an info-only change) and keep the samples in a second layer that is
    only composed once playback stops.
-2. A session layer's sublayer may hold a stronger `xformOpOrder` than the root layer's, and
-   clearing the sublayer brings the prim's own stack back.
+2. A session layer's sublayer may hold a stronger `xformOpOrder` than the root layer's, with
+   `!resetXformStack!`, and clearing the sublayer brings the prim's own stack back. Storm, the
+   Outliner's transform display and the gizmos all honour the reset.
 3. Jolt's exported compile definitions reach the plugin through vcpkg's CMake config, and its
    Release library links in a Debug build of usdcc (the release CRT and
    `_ITERATOR_DEBUG_LEVEL=0`, as [CMakeLists.txt](../CMakeLists.txt) sets for everything).
@@ -299,6 +341,10 @@ Believed, not tested here.
    dynamic bodies correctly, with no step of lag at the first frame.
 7. Single precision is enough for stages a few kilometres from the origin, solving relative to
    the bodies' common centre. If not: Jolt's double-precision build.
+8. vcpkg's pinned baseline has `joltphysics` at 5.6.0 (§2): not read from the baseline itself.
+9. A `TaperedCylinderShape` takes a top radius of zero, for a cone. Jolt's capsule and cylinder
+   accept the non-uniform scales a `ScaledShape` would give them, or those are reported as the
+   sphere's are.
 
 ## 8. Open questions
 
