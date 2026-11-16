@@ -2,6 +2,7 @@
 add_library(usdcc_ui SHARED
     include/usdcc/ui/about_dialog.h
     include/usdcc/ui/app_settings.h
+    include/usdcc/ui/category_section.h
     include/usdcc/ui/current_stage_tracker.h
     include/usdcc/ui/flow_layout.h
     include/usdcc/ui/line_view.h
@@ -33,6 +34,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/workspace_library.h
     src/about_dialog.cpp
     src/app_settings.cpp
+    src/category_section.cpp
     src/current_stage_tracker.cpp
     src/flow_layout.cpp
     src/line_view.cpp

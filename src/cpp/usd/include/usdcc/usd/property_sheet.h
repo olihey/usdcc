@@ -27,6 +27,10 @@ class QScrollArea;
 class QToolButton;
 class QVBoxLayout;
 
+namespace usdcc::ui {
+class CategorySection;
+}  // namespace usdcc::ui
+
 namespace usdcc::usd {
 
 class StageManager;
@@ -36,7 +40,7 @@ struct ShaderInputInfo;
 
 namespace properties {
 class AttributeBinding;
-class CategorySection;
+using CategorySection = usdcc::ui::CategorySection;
 class PropertyEditor;
 class PropertyRow;
 class SchemaPillsEditor;

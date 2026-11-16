@@ -195,7 +195,6 @@ add_library(usdcc_usd_ui SHARED
     src/layer_properties_dialog.cpp
     src/properties/array_editor_dialog.cpp
     src/properties/attribute_binding.cpp
-    src/properties/category_section.cpp
     src/properties/color_swatch.cpp
     src/properties/connected_inputs_editor.cpp
     src/properties/data_type_gallery_dialog.cpp

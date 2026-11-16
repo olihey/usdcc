@@ -24,10 +24,14 @@ class UndoManager;
 class XformStack;
 }  // namespace usdcc::usd
 
+namespace usdcc::ui {
+class CategorySection;
+}  // namespace usdcc::ui
+
 namespace usdcc::usd::properties {
 
 class AttributeBinding;
-class CategorySection;
+using CategorySection = usdcc::ui::CategorySection;
 class PropertyRow;
 
 // The attribute editor's Transform section for a UsdGeomXformable prim

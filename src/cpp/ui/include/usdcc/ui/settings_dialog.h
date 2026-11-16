@@ -11,14 +11,15 @@
 #include <string>
 
 class QKeyEvent;
-class QListWidget;
 class QPushButton;
 class QStackedWidget;
+class QTreeWidget;
 
 namespace usdcc::ui {
 
 // Edit > Settings… (docs/SETTINGS.md): one page per category of
-// usdcc::core::Settings, listed down the left. Every page is built from the
+// usdcc::core::Settings, listed down the left as a tree whose branches are the
+// category's groups: picking one scrolls the page to it. Every page is built from the
 // settings' definitions — a section per group, a row per setting with its
 // label, an editor for its type, its description and a button that resets it
 // — so every page looks the same, including pages for settings a Python plugin
@@ -36,8 +37,12 @@ public:
     // The categories listed, in order.
     QStringList categories() const;
     QString currentCategory() const;
-    // Shows the page of `category`; false if there is none.
-    bool showCategory(const QString& category);
+    // The group listed under the current category that is picked; empty when
+    // the category itself is.
+    QString currentGroup() const;
+    // Shows the page of `category`, scrolled to `group` if given; false if
+    // there is no such page.
+    bool showCategory(const QString& category, const QString& group = QString());
 
     // The open dialog (created on first use), shown and brought to the front.
     static SettingsDialog* showDialog(QWidget* parent);
@@ -51,14 +56,22 @@ protected:
 private:
     void rebuild();
     void scheduleRebuild();
-    QWidget* buildPage(const std::string& category);
+    QWidget* buildPage(const std::string& category, QStringList& groups);
+    // Scrolls page `index` to the heading of `group` (the top if empty).
+    void scrollPageTo(int index, const QString& group);
+    // Picks, in the tree, the group whose heading is at the top of page `index`.
+    void followScroll(int index);
 
     core::Settings& m_settings;
-    QListWidget* m_categories = nullptr;
+    QTreeWidget* m_categories = nullptr;
     QStackedWidget* m_pages = nullptr;
     QPushButton* m_resetPage = nullptr;
     core::Signal<const std::string&>::Connection m_definedConnection;
     bool m_rebuildScheduled = false;
+    // Set while the dialog scrolls a page itself, so the tree doesn't follow.
+    bool m_scrolling = false;
+    // Categories whose groups the user folded away, kept across rebuilds.
+    QStringList m_collapsed;
 };
 
 }  // namespace usdcc::ui

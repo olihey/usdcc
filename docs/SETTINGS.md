@@ -170,11 +170,18 @@ while a listed path is offline.
 at a time.
 
 **Layout.**
-- Categories are listed on the left, those the app knows first (Appearance, Viewport,
-  Tools, Shortcuts, Notifications, Python), then the others in definition order.
-- Every page is generated from the definitions: a heading per group and a row per
+- Categories are listed on the left as a tree, those the app knows first (Appearance,
+  Viewport, Tools, Shortcuts, Notifications, Python), then the others in definition order.
+  A category with more than one group lists its groups under it: picking one scrolls the
+  page to that group's heading, and scrolling the page picks the group at the top.
+- The page has no title of its own: the tree already shows which one it is.
+- Every page is generated from the definitions: a section per group and a row per
   setting. A row holds the label, an editor for the type, the description, and a Reset
   button that shows while the value isn't the default.
+- A group's section folds from its title bar, like the attribute editor's sections
+  (`usdcc::ui::CategorySection`), and its bar is a shade lighter than the page. Folded
+  groups are UI state (`SettingsDialog/collapsed/<category>/<group>`), so they stay
+  folded the next time the dialog opens. Picking a folded group in the tree unfolds it.
 - Categories without settings get no page.
 
 **Editors.**

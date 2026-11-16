@@ -1004,15 +1004,15 @@ QLabel#targetHint {
 
 /* ---- Settings dialog (SettingsDialog, docs/SETTINGS.md) ---------------- */
 
-QListWidget#settingsCategories {
+QTreeWidget#settingsCategories {
     background: #161618;
     border: 1px solid rgba(255, 255, 255, 6%);
     border-radius: 4px;
     padding: 4px;
 }
 
-QListWidget#settingsCategories::item {
-    padding: 5px 8px;
+QTreeWidget#settingsCategories::item {
+    padding: 4px 6px;
 }
 
 QScrollArea#settingsPage,
@@ -1020,19 +1020,15 @@ QWidget#settingsPageContent {
     background: #1c1c1e;
 }
 
-QLabel#settingsPageTitle {
-    color: #e8e8ea;
-    font-size: 15px;
-    font-weight: 600;
-    padding-bottom: 2px;
+/* A group is a CategorySection, as in the attribute editor; its title bar is
+   lifted a little off the page, and the bar replaces the separator line. */
+QWidget#settingsPageContent QWidget#sectionHeaderBar {
+    background: rgba(255, 255, 255, 5%);
+    border-radius: 4px;
 }
 
-QLabel#settingsGroupTitle {
-    color: rgba(255, 255, 255, 50%);
-    font-weight: 600;
-    padding-top: 10px;
-    padding-bottom: 3px;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+QWidget#settingsPageContent QFrame#sectionSeparator {
+    background: transparent;
 }
 
 QLabel#settingLabel {

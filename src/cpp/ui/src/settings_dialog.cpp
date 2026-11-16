@@ -1,7 +1,9 @@
 #include "usdcc/ui/settings_dialog.h"
 
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/ui/category_section.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -22,12 +24,15 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
+#include <QSettings>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -75,6 +80,39 @@ QStringList shortcutConflicts(const Settings& settings, const SettingDefinition&
         }
     }
     return labels;
+}
+
+// A group's section on a page, by the group's name.
+const char* const kGroupProperty = "settingsGroup";
+
+// Where a group's folded state is remembered (UI state, docs/SETTINGS.md).
+QString collapsedKey(const QString& category, const QString& group) {
+    return QStringLiteral("SettingsDialog/collapsed/%1/%2").arg(category, group);
+}
+
+void storeCollapsed(const QString& category, const QString& group, bool collapsed) {
+    QSettings settings = appSettings();
+    if (collapsed) {
+        settings.setValue(collapsedKey(category, group), true);
+    } else {
+        settings.remove(collapsedKey(category, group));
+    }
+}
+
+// The group sections of a page, top to bottom.
+QList<CategorySection*> groupSections(const QScrollArea* page) {
+    QList<CategorySection*> sections;
+    if (!page || !page->widget()) return sections;
+    for (CategorySection* section : page->widget()->findChildren<CategorySection*>(Qt::FindDirectChildrenOnly)) {
+        if (section->property(kGroupProperty).isValid()) sections << section;
+    }
+    std::sort(sections.begin(), sections.end(), [](const QWidget* a, const QWidget* b) { return a->y() < b->y(); });
+    return sections;
+}
+
+// The category a tree item belongs to (its own when it is one).
+QTreeWidgetItem* categoryItem(QTreeWidgetItem* item) {
+    return item && item->parent() ? item->parent() : item;
 }
 
 QIcon swatch(const QColor& color) {
@@ -352,11 +390,27 @@ SettingsDialog::SettingsDialog(QWidget* parent, core::Settings& settings) : QDia
     setWindowTitle(tr("Settings"));
     resize(scaled::size(760, 520));
 
-    m_categories = new QListWidget(this);
+    m_categories = new QTreeWidget(this);
     m_categories->setObjectName(QStringLiteral("settingsCategories"));
-    scaled::fixedWidth(m_categories, 170);
+    m_categories->setHeaderHidden(true);
+    m_categories->setColumnCount(1);
+    m_categories->setUniformRowHeights(true);
+    m_categories->setIndentation(scaled::pixels(12));
+    scaled::fixedWidth(m_categories, 190);
     m_pages = new QStackedWidget(this);
-    connect(m_categories, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
+    connect(m_categories, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
+        QTreeWidgetItem* category = categoryItem(item);
+        if (!category) return;
+        const int index = m_categories->indexOfTopLevelItem(category);
+        m_pages->setCurrentIndex(index);
+        scrollPageTo(index, item == category ? QString() : item->text(0));
+    });
+    // Remembered so a rebuild (a plugin defining settings) keeps them folded.
+    connect(m_categories, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* item) {
+        if (!m_collapsed.contains(item->text(0))) m_collapsed << item->text(0);
+    });
+    connect(m_categories, &QTreeWidget::itemExpanded, this,
+            [this](QTreeWidgetItem* item) { m_collapsed.removeAll(item->text(0)); });
 
     auto* body = new QHBoxLayout;
     scaled::spacing(body, 12);
@@ -430,20 +484,89 @@ SettingsDialog* SettingsDialog::showDialog(QWidget* parent) {
 
 QStringList SettingsDialog::categories() const {
     QStringList result;
-    for (int row = 0; row < m_categories->count(); ++row) result << m_categories->item(row)->text();
+    for (int row = 0; row < m_categories->topLevelItemCount(); ++row) result << m_categories->topLevelItem(row)->text(0);
     return result;
 }
 
 QString SettingsDialog::currentCategory() const {
-    const QListWidgetItem* item = m_categories->currentItem();
-    return item ? item->text() : QString();
+    const QTreeWidgetItem* item = categoryItem(m_categories->currentItem());
+    return item ? item->text(0) : QString();
 }
 
-bool SettingsDialog::showCategory(const QString& category) {
-    const QList<QListWidgetItem*> items = m_categories->findItems(category, Qt::MatchExactly);
+QString SettingsDialog::currentGroup() const {
+    const QTreeWidgetItem* item = m_categories->currentItem();
+    return item && item->parent() ? item->text(0) : QString();
+}
+
+bool SettingsDialog::showCategory(const QString& category, const QString& group) {
+    const QList<QTreeWidgetItem*> items = m_categories->findItems(category, Qt::MatchExactly);
     if (items.isEmpty()) return false;
-    m_categories->setCurrentItem(items.front());
+    QTreeWidgetItem* const top = items.front();
+    QTreeWidgetItem* target = top;
+    for (int i = 0; !group.isEmpty() && i < top->childCount(); ++i) {
+        if (top->child(i)->text(0) == group) target = top->child(i);
+    }
+    if (target->parent()) target->parent()->setExpanded(true);
+    if (target == m_categories->currentItem()) {
+        scrollPageTo(m_categories->indexOfTopLevelItem(top), group);
+    } else {
+        m_categories->setCurrentItem(target);
+        // A group with no branch of its own (the page's only one) is still scrolled to.
+        if (target == top && !group.isEmpty()) scrollPageTo(m_categories->indexOfTopLevelItem(target), group);
+    }
     return true;
+}
+
+void SettingsDialog::scrollPageTo(int index, const QString& group) {
+    auto* scroll = qobject_cast<QScrollArea*>(m_pages->widget(index));
+    if (!scroll || !scroll->widget()) return;
+    // Picking a folded group unfolds it: it is what was asked to be seen.
+    for (CategorySection* section : groupSections(scroll)) {
+        if (!group.isEmpty() && section->property(kGroupProperty).toString() == group && section->isCollapsed()) {
+            section->setCollapsed(false);
+            storeCollapsed(m_categories->topLevelItem(index)->text(0), group, false);
+        }
+    }
+    const auto apply = [this, scroll, group]() {
+        int y = 0;
+        if (!group.isEmpty()) {
+            if (QLayout* layout = scroll->widget()->layout()) layout->activate();
+            for (const CategorySection* section : groupSections(scroll)) {
+                if (section->property(kGroupProperty).toString() == group) {
+                    y = section->y();
+                    break;
+                }
+            }
+        }
+        m_scrolling = true;
+        scroll->verticalScrollBar()->setValue(y);
+        m_scrolling = false;
+    };
+    apply();
+    // A page that hasn't been shown yet isn't laid out: scroll again once it is.
+    QTimer::singleShot(0, scroll, [this, index, apply]() {
+        if (m_pages->currentIndex() == index) apply();
+    });
+}
+
+void SettingsDialog::followScroll(int index) {
+    if (m_scrolling || index != m_pages->currentIndex()) return;
+    QTreeWidgetItem* category = m_categories->topLevelItem(index);
+    auto* scroll = qobject_cast<QScrollArea*>(m_pages->widget(index));
+    if (!category || category->childCount() == 0 || !category->isExpanded() || !scroll || !scroll->widget()) return;
+    // The last section starting at or above the top of the view; the category above the first.
+    const int top = scroll->verticalScrollBar()->value() + scaled::pixels(12);
+    QString group;
+    for (const CategorySection* section : groupSections(scroll)) {
+        if (section->y() <= top) group = section->property(kGroupProperty).toString();
+    }
+    QTreeWidgetItem* target = category;
+    for (int i = 0; !group.isEmpty() && i < category->childCount(); ++i) {
+        if (category->child(i)->text(0) == group) target = category->child(i);
+    }
+    if (target == m_categories->currentItem()) return;
+    const QSignalBlocker block(m_categories);
+    m_categories->setCurrentItem(target);
 }
 
 void SettingsDialog::scheduleRebuild() {
@@ -459,6 +582,7 @@ void SettingsDialog::scheduleRebuild() {
 
 void SettingsDialog::rebuild() {
     const QString current = currentCategory();
+    const QString group = currentGroup();
 
     QStringList categories;
     for (const QString& known : knownCategoryOrder()) {
@@ -476,18 +600,30 @@ void SettingsDialog::rebuild() {
         delete page;
     }
     for (const QString& category : categories) {
-        m_categories->addItem(category);
-        m_pages->addWidget(buildPage(category.toStdString()));
+        auto* item = new QTreeWidgetItem(m_categories, {category});
+        QStringList groups;
+        m_pages->addWidget(buildPage(category.toStdString(), groups));
+        // A single group is the whole page: it gets no branch of its own.
+        if (groups.size() > 1) {
+            for (const QString& name : groups) new QTreeWidgetItem(item, {name});
+        }
+        item->setExpanded(!m_collapsed.contains(category));
     }
     const int row = std::max(0, int(categories.indexOf(current)));
-    if (row < m_categories->count()) {
-        m_categories->setCurrentRow(row);
+    if (row < m_categories->topLevelItemCount()) {
+        QTreeWidgetItem* category = m_categories->topLevelItem(row);
+        QTreeWidgetItem* target = category;
+        for (int i = 0; !group.isEmpty() && i < category->childCount(); ++i) {
+            if (category->child(i)->text(0) == group) target = category->child(i);
+        }
+        m_categories->setCurrentItem(target);
         m_pages->setCurrentIndex(row);
+        if (target != category) scrollPageTo(row, group);
     }
-    m_resetPage->setEnabled(m_categories->count() > 0);
+    m_resetPage->setEnabled(m_categories->topLevelItemCount() > 0);
 }
 
-QWidget* SettingsDialog::buildPage(const std::string& category) {
+QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& groupNames) {
     auto* scroll = new QScrollArea;
     scroll->setObjectName(QStringLiteral("settingsPage"));
     scroll->setWidgetResizable(true);
@@ -496,11 +632,7 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
     content->setObjectName(QStringLiteral("settingsPageContent"));
     auto* layout = new QVBoxLayout(content);
     scaled::margins(layout, 4, 0, 8, 0);
-    scaled::spacing(layout, 6);
-
-    auto* title = new QLabel(qs(category), content);
-    title->setObjectName(QStringLiteral("settingsPageTitle"));
-    layout->addWidget(title);
+    scaled::spacing(layout, 4);
 
     // Groups in the order their first setting was defined.
     std::vector<std::string> groups;
@@ -511,13 +643,27 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
         }
     }
 
+    const QSettings uiState = appSettings();
     for (const std::string& group : groups) {
-        if (!group.empty()) {
-            auto* heading = new QLabel(qs(group), content);
-            heading->setObjectName(QStringLiteral("settingsGroupTitle"));
-            layout->addWidget(heading);
+        // A named group is a section that folds, as in the attribute editor;
+        // settings without a group sit above the sections, unfolded.
+        auto* rows = new QWidget(content);
+        if (group.empty()) {
+            layout->addWidget(rows);
+        } else {
+            const QString name = qs(group);
+            const QString categoryName = qs(category);
+            auto* section = new CategorySection(collapsedKey(categoryName, name), name, content);
+            section->setProperty(kGroupProperty, name);
+            section->setCollapsed(uiState.value(collapsedKey(categoryName, name), false).toBool());
+            connect(section, &CategorySection::collapsedChanged, this,
+                    [categoryName, name](bool collapsed) { storeCollapsed(categoryName, name, collapsed); });
+            section->addRow(rows);
+            layout->addWidget(section);
+            groupNames << name;
         }
-        auto* grid = new QGridLayout;
+        auto* grid = new QGridLayout(rows);
+        grid->setContentsMargins(0, 0, 0, 0);
         scaled::spacing(grid, 8);
         grid->setColumnStretch(1, 1);
         int row = 0;
@@ -601,10 +747,11 @@ QWidget* SettingsDialog::buildPage(const std::string& category) {
             }
             refresh();
         }
-        layout->addLayout(grid);
     }
     layout->addStretch(1);
     scroll->setWidget(content);
+    const int index = m_pages->count();  // the page's index once added
+    connect(scroll->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, index]() { followScroll(index); });
     return scroll;
 }
 

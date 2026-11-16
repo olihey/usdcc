@@ -11,6 +11,7 @@
 #include "usdcc/tools/select_tool.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/ui/category_section.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/theme.h"
@@ -34,6 +35,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QToolButton>
+#include <QTreeWidget>
 
 #include <memory>
 #include <string>
@@ -167,6 +169,8 @@ USDCC_TEST(settings_dialog) {
                      .defaultValue = 3, .minimum = 1, .maximum = 10});
     settings.define({.key = "Appearance/accent", .category = "Appearance", .group = "Theme", .label = "Accent",
                      .description = "The accent.", .type = SettingType::Color, .defaultValue = std::string("#3d8bfd")});
+    settings.define({.key = "Appearance/size", .category = "Appearance", .group = "Interface", .label = "Size",
+                     .type = SettingType::Int, .defaultValue = 1});
     settings.define({.key = "Shortcuts/a", .category = "Shortcuts", .group = "Tools", .label = "Tool A",
                      .type = SettingType::Shortcut, .defaultValue = std::string("W")});
     settings.define({.key = "Shortcuts/b", .category = "Shortcuts", .group = "Tools", .label = "Tool B",
@@ -178,6 +182,49 @@ USDCC_TEST(settings_dialog) {
     CHECK(dialog.currentCategory() == QStringLiteral("Appearance"), "opens on the first page");
     CHECK(dialog.showCategory(QStringLiteral("My Plugin")) && !dialog.showCategory(QStringLiteral("Viewport")),
           "pages can be picked by name, and categories without settings have none");
+
+    // The list is a tree: a category's groups under it, when it has more than one.
+    auto* tree = dialog.findChild<QTreeWidget*>(QStringLiteral("settingsCategories"));
+    CHECK(tree && tree->topLevelItemCount() == 3, "the categories are the tree's top level");
+    if (!tree) return;
+    const QTreeWidgetItem* appearance = tree->topLevelItem(0);
+    CHECK(appearance->childCount() == 2 && appearance->child(0)->text(0) == QStringLiteral("Theme") &&
+              appearance->child(1)->text(0) == QStringLiteral("Interface"),
+          "a category's groups are listed under it, in order");
+    CHECK(tree->topLevelItem(1)->childCount() == 0, "a category with a single group has no branches");
+    CHECK(dialog.showCategory(QStringLiteral("Appearance"), QStringLiteral("Interface")) &&
+              dialog.currentCategory() == QStringLiteral("Appearance") &&
+              dialog.currentGroup() == QStringLiteral("Interface"),
+          "a group can be picked: %s / %s", qPrintable(dialog.currentCategory()), qPrintable(dialog.currentGroup()));
+    tree->setCurrentItem(tree->topLevelItem(2));
+    CHECK(dialog.currentCategory() == QStringLiteral("My Plugin") && dialog.currentGroup().isEmpty(),
+          "picking a category in the tree shows its page");
+    CHECK(dialog.findChildren<QLabel*>(QStringLiteral("settingsPageTitle")).isEmpty(),
+          "pages have no title of their own; the tree names them");
+
+    // Each group is a section that folds from its header, as in the attribute
+    // editor, and stays folded when the pages are rebuilt.
+    const auto section = [&dialog](const QString& group) -> usdcc::ui::CategorySection* {
+        for (auto* found : dialog.findChildren<usdcc::ui::CategorySection*>()) {
+            if (found->property("settingsGroup").toString() == group) return found;
+        }
+        return nullptr;
+    };
+    auto* interfaceSection = section(QStringLiteral("Interface"));
+    auto* interfaceHeader =
+        interfaceSection ? interfaceSection->findChild<QToolButton*>(QStringLiteral("sectionHeader")) : nullptr;
+    CHECK(interfaceHeader, "a group is a section with a header");
+    if (!interfaceHeader) return;
+    interfaceHeader->click();
+    CHECK(interfaceSection->isCollapsed(), "which folds it");
+    settings.define({.key = "Appearance/extra", .category = "Appearance", .group = "Theme", .label = "Extra",
+                     .type = SettingType::Bool, .defaultValue = false});
+    settle();
+    interfaceSection = section(QStringLiteral("Interface"));
+    CHECK(interfaceSection && interfaceSection->isCollapsed(), "a folded group stays folded through a rebuild");
+    CHECK(section(QStringLiteral("Theme")) && !section(QStringLiteral("Theme"))->isCollapsed(), "and the others open");
+    dialog.showCategory(QStringLiteral("Appearance"), QStringLiteral("Interface"));
+    CHECK(interfaceSection && !interfaceSection->isCollapsed(), "picking a folded group unfolds it");
 
     auto* level = withKey<QSpinBox>(&dialog, QStringLiteral("Plugin/level"));
     auto* levelReset = withKey<QToolButton>(&dialog, QStringLiteral("Plugin/level"), QStringLiteral("settingReset"));

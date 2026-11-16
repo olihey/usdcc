@@ -1,4 +1,4 @@
-#include "usdcc/usd/properties/category_section.h"
+#include "usdcc/ui/category_section.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 
@@ -7,7 +7,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-namespace usdcc::usd::properties {
+namespace usdcc::ui {
 
 CategorySection::CategorySection(const QString& key, const QString& title, QWidget* parent)
     : QWidget(parent), m_key(key) {
@@ -21,6 +21,9 @@ CategorySection::CategorySection(const QString& key, const QString& title, QWidg
     layout->addWidget(separator);
 
     auto* headerRow = new QWidget(this);
+    // Transparent unless a stylesheet gives the bar a background (the Settings dialog's does).
+    headerRow->setObjectName(QStringLiteral("sectionHeaderBar"));
+    headerRow->setAttribute(Qt::WA_StyledBackground);
     auto* headerLayout = new QHBoxLayout(headerRow);
     m_headerLayout = headerLayout;
     // The same on the right as the body's, so its buttons line up with the rows'.
@@ -69,4 +72,4 @@ void CategorySection::updateBody() {
     m_header->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
 }
 
-}  // namespace usdcc::usd::properties
+}  // namespace usdcc::ui
