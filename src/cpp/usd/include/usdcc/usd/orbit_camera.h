@@ -76,6 +76,10 @@ PXR_NS::GfVec3d cameraViewEyeDirection(CameraView view, bool zUp);
 OrbitAngles orbitAnglesForView(CameraView view, bool zUp);
 // The axis view whose eye direction is `direction` (a HUD axis), if one is.
 std::optional<CameraView> cameraViewLookingFrom(const PXR_NS::GfVec3d& direction, bool zUp);
+// Whether the orbit drag tumbles the view (docs/WORKSPACES.md §3.5.3): an orthographic
+// axis view stays on its axis; a perspective view, or an orthographic one that isn't on
+// an axis ("Ortho"), turns.
+bool cameraViewTumbles(CameraView view, bool orthographic);
 
 // Fit to View for an orthographic camera: the target at the box's centre, and the
 // view's height so that the box, seen along `forward` with `right` and `up` across

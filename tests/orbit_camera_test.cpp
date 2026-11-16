@@ -220,3 +220,11 @@ USDCC_TEST(orbit_camera_orthographic_framing) {
     CHECK(framing.size == 7.0, "a point keeps the size");
     CHECK(closeTo(perspectiveDistanceFor(orthographicSizeFor(8.0, 45.0), 45.0), 8.0, 1e-9), "size and distance, both ways");
 }
+
+USDCC_TEST(orbit_camera_which_views_tumble) {
+    CHECK(cameraViewTumbles(CameraView::Persp, false), "Persp tumbles");
+    CHECK(cameraViewTumbles(CameraView::Persp, true), "so does Persp switched to Orthographic");
+    CHECK(cameraViewTumbles(CameraView::Top, false), "and Top (Persp)");
+    CHECK(!cameraViewTumbles(CameraView::Top, true), "but an orthographic Top stays a Top view");
+    CHECK(!cameraViewTumbles(CameraView::Front, true), "as does an orthographic Front");
+}

@@ -773,7 +773,18 @@ void HydraViewportWindow::setView(CameraView view, std::optional<bool> orthograp
     cameraMoved();
 }
 
-void HydraViewportWindow::setOrthographic(bool orthographic) { setView(m_view, orthographic); }
+void HydraViewportWindow::setOrthographic(bool orthographic) {
+    // Only the projection changes: the view keeps looking the way it did (setView() would
+    // put a turned Persp view back on its default angles).
+    if (orthographic == m_orthographic) return;
+    if (orthographic) {
+        m_orthoSize = std::max(kMinDistance, orthographicSizeFor(m_distance, m_fovY));
+    } else {
+        m_distance = std::max(kMinDistance, perspectiveDistanceFor(m_orthoSize, m_fovY));
+    }
+    m_orthographic = orthographic;
+    cameraMoved();
+}
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
@@ -1356,8 +1367,8 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
-        // An orthographic view doesn't tumble: a Top view stays a Top view (§3.5.3).
-        m_orbiting = !m_orthographic;
+        // An orthographic axis view doesn't tumble: a Top view stays a Top view (§3.5.3).
+        m_orbiting = cameraViewTumbles(m_view, m_orthographic);
         // For the whole drag, so that crossing a pole during it doesn't reverse it.
         m_orbitReversed = orbitIsUpsideDown(m_pitch);
     } else if (event->button() == Qt::MiddleButton) {

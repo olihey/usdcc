@@ -142,6 +142,8 @@ OrthographicFraming frameOrthographic(const PXR_NS::GfRange3d& box, const OrbitC
     return framing;
 }
 
+bool cameraViewTumbles(CameraView view, bool orthographic) { return !orthographic || view == CameraView::Persp; }
+
 double orthographicSizeFor(double distance, double verticalFovDegrees) {
     return 2.0 * distance * std::tan(PXR_NS::GfDegreesToRadians(verticalFovDegrees) / 2.0);
 }

@@ -238,8 +238,10 @@ viewport switches to a stage with the other up axis.
 #### 3.5.3 Navigating an orthographic view
 
 - Pan and zoom as in perspective; zoom changes the view's height (`size`), not a distance.
-- **No tumbling**: the drag that orbits does nothing, so a Top view stays a Top view (Maya's default).
-  Clicking the axis triad still switches it to another axis view.
+- **No tumbling on an axis view**: the drag that orbits does nothing, so a Top view stays a Top view
+  (Maya's default). Clicking the axis triad still switches it to another axis view.
+- The Persp view switched to Orthographic (the HUD's "Ortho") tumbles as in perspective, and turning
+  it keeps it orthographic. Switching Orthographic on or off keeps the view's angles.
 - Fit to View (F) fits the box's extent across the view, not its bounding sphere.
 - The grid, picking and the gizmos work from the frustum, which is orthographic now; the render view
   panels already accept an orthographic frustum (`render_view_panel.cpp`).

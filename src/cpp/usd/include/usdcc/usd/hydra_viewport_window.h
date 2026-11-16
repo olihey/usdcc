@@ -151,7 +151,7 @@ public:
     void setView(CameraView view, std::optional<bool> orthographic = std::nullopt);
     CameraView view() const { return m_view; }
     bool isOrthographic() const { return m_orthographic; }
-    // Switches the projection, keeping the view and what's seen at the target.
+    // Switches the projection, keeping the view, its angles and what's seen at the target.
     void setOrthographic(bool orthographic);
     // Whether the stage shown is Z-up (else Y-up).
     bool stageIsZUp() const;
