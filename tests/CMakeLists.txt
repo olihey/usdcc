@@ -295,3 +295,68 @@ foreach(_physics_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
             VERBATIM)
     endif()
 endforeach()
+
+# usdcc_assets (docs/REMOTE_ASSETS.md §14), in a test program of its own, without Qt:
+# the fake:// protocol it resolves through has to be registered before anything asks
+# OpenUSD for its resolver, which the other programs' tests do. The protocol is a
+# plugin as a real one is: a resolver library and its plugInfo.json.
+set(_usdcc_fake_protocol "${CMAKE_CURRENT_BINARY_DIR}/assets_fake_protocol")
+add_library(usdccFakeProtocol SHARED assets_fake_protocol.cpp)
+target_link_libraries(usdccFakeProtocol PRIVATE usdcc_assets)
+# TF_REGISTRY_FUNCTION names the library it's in through these.
+target_compile_definitions(usdccFakeProtocol PRIVATE MFB_PACKAGE_NAME=usdccFakeProtocol
+                                                     MFB_ALT_PACKAGE_NAME=usdccFakeProtocol)
+set_target_properties(
+    usdccFakeProtocol
+    PROPERTIES PREFIX ""
+               RUNTIME_OUTPUT_DIRECTORY "$<1:${_usdcc_fake_protocol}>"
+               LIBRARY_OUTPUT_DIRECTORY "$<1:${_usdcc_fake_protocol}>")
+# file(GENERATE) evaluates $<TARGET_FILE_NAME>, the bracket argument notwithstanding.
+file(GENERATE OUTPUT "${_usdcc_fake_protocol}/plugInfo.json" CONTENT [[{
+    "Plugins": [{
+        "Type": "library",
+        "Name": "usdccFakeProtocol",
+        "Root": ".",
+        "LibraryPath": "$<TARGET_FILE_NAME:usdccFakeProtocol>",
+        "ResourcePath": ".",
+        "Info": { "Types": { "UsdccFakeResolver": {
+            "bases": ["ArResolver"], "uriSchemes": ["fake"],
+            "implementsContexts": true, "implementsScopedCaches": true,
+            "usdccAssetsProtocol": true
+        } } }
+    }]
+}
+]])
+
+add_executable(usdcc_assets_tests test_harness.h test_harness.cpp assets_test_main.cpp assets_test.cpp)
+target_link_libraries(usdcc_assets_tests PRIVATE usdcc_assets usd sdf)
+target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}")
+add_dependencies(usdcc_assets_tests usdccFakeProtocol)
+foreach(_assets_target usdccFakeProtocol usdcc_assets_tests)
+    # USD's headers ask for the release Python import library in every configuration.
+    if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+        target_link_libraries(${_assets_target} PRIVATE "${Python3_LIBRARY}")
+    endif()
+endforeach()
+if(WIN32)
+    # usdcc_assets.dll beside the test program, on every build, as
+    # usdcc_deploy_core_library() does for the others. Not through it: that chains to
+    # the other programs' copies, and so to the app's libraries, which this needs none of.
+    add_custom_target(usdcc_assets_tests_copy_libraries
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc_assets_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:usdcc_assets>" "$<TARGET_FILE_DIR:usdcc_assets_tests>"
+        VERBATIM)
+    add_dependencies(usdcc_assets_tests_copy_libraries usdcc_assets)
+    add_dependencies(usdcc_assets_tests usdcc_assets_tests_copy_libraries)
+endif()
+usdcc_deploy_python(usdcc_assets_tests)
+add_test(NAME usdcc_assets_tests COMMAND usdcc_assets_tests)
+if(WIN32)
+    set_tests_properties(usdcc_assets_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
+else()
+    set_tests_properties(
+        usdcc_assets_tests
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+            "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
+endif()

@@ -24,7 +24,8 @@ shared library of [REMOTE_ASSETS.md](REMOTE_ASSETS.md).
     "Type": "library", "Name": "httpResolver", "LibraryPath": "httpResolver.dll",
     "Root": ".", "ResourcePath": ".",
     "Info": { "Types": { "HttpResolver": {
-        "bases": ["ArResolver"], "uriSchemes": ["http", "https"], "implementsContexts": true,
+        "bases": ["ArResolver"], "uriSchemes": ["http", "https"],
+        "implementsContexts": true, "implementsScopedCaches": true,
         "usdccAssetsProtocol": true
     } } }
 }] }

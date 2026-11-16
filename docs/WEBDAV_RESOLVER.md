@@ -28,7 +28,8 @@ environments and the usdcc integration moved to a shared library, planned in
     "Type": "library", "Name": "webdavResolver", "LibraryPath": "webdavResolver.dll",
     "Root": ".", "ResourcePath": ".",
     "Info": { "Types": { "WebDavResolver": {
-        "bases": ["ArResolver"], "uriSchemes": ["webdav"], "implementsContexts": true,
+        "bases": ["ArResolver"], "uriSchemes": ["webdav"],
+        "implementsContexts": true, "implementsScopedCaches": true,
         "usdccAssetsProtocol": true
     } } }
 }] }

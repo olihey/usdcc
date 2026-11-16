@@ -247,6 +247,7 @@ function(usdcc_precompile_headers target header)
 endfunction()
 
 add_subdirectory(src/cpp/core)
+add_subdirectory(src/cpp/assets)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)

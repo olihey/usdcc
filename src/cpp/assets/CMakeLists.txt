@@ -1,0 +1,34 @@
+# usdcc.assets — loading USD assets from servers (docs/REMOTE_ASSETS.md): the
+# configuration and environments, stacks, the resolver context, the disk cache,
+# credentials, and CachingResolver, the ArResolver base class a protocol plugin
+# derives from.
+#
+# SHARED: the transport registry, the stack registry and the credential provider
+# must exist once in the process, for the app and for every protocol plugin.
+# No Qt and no usdcc_core, so that usdcat and usdview can load a protocol plugin
+# with only this library beside it.
+add_library(usdcc_assets SHARED
+    include/usdcc/assets/caching_resolver.h
+    include/usdcc/assets/config.h
+    include/usdcc/assets/context.h
+    include/usdcc/assets/credentials.h
+    include/usdcc/assets/disk_cache.h
+    include/usdcc/assets/lookup.h
+    include/usdcc/assets/paths.h
+    include/usdcc/assets/result.h
+    include/usdcc/assets/transport.h
+    include/usdcc/assets/uri.h
+    src/caching_resolver.cpp
+    src/config.cpp
+    src/context.cpp
+    src/credentials.cpp
+    src/disk_cache.cpp
+    src/lookup.cpp
+    src/transport.cpp
+    src/uri.cpp
+)
+target_include_directories(usdcc_assets PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" ${PXR_INCLUDE_DIRS})
+# Only the OpenUSD libraries it uses, not ${PXR_LIBRARIES}: a tool that loads a
+# protocol plugin shouldn't have Hydra pulled in with it.
+target_link_libraries(usdcc_assets PUBLIC ar plug js vt tf arch)
+usdcc_export_library(usdcc_assets)

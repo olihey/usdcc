@@ -6,10 +6,11 @@ of it. The first two protocols are plain HTTP ([HTTP_RESOLVER.md](HTTP_RESOLVER.
 ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker that browses servers is in
 [ASSET_PICKER.md](ASSET_PICKER.md).
 
-**Status:** planned 2026-11-16. **Phase 0, the spike, is done** (§13.1): the two assumptions the
-design rests on hold, and it changed two details. Nothing else is built. "Checked" below means run
-in the spike, or looked at in this repository or the local OpenUSD build (26.08); everything else
-is still an assumption.
+**Status:** planned 2026-11-16. **Phases 0 and 1 are done:** the spike (§13.1), and the shared
+library `usdcc_assets` with its tests, on a fake protocol and no network (§13.2). No real protocol,
+nothing in the app and nothing in a deploy yet. "Checked" below means run in the spike or the tests,
+or looked at in this repository or the local OpenUSD build (26.08); everything else is still an
+assumption.
 
 ## 1. Decisions
 
@@ -254,8 +255,11 @@ The extension is kept, for renderers that are handed the cache file (§10).
 
 - **Revalidation:** before a cached version is used, its ETag is compared with the listing's. Equal
   means no request at all; different means a conditional fetch.
-- **Downloads** go to a temporary file renamed when complete. Two threads or two processes wanting
-  the same version wait on a lock file, so it downloads once.
+- **Downloads** go to a temporary file renamed when complete. However many threads of a process
+  want one version, it downloads once. Two processes may each download it, to a file of their own,
+  and the first to finish is kept; a lock file to make that one download too is phase 3.
+- **A path that can't be a file name** as it is (too long for Windows with the cache's folder in
+  front, or with characters Windows refuses) is stored under a hash of it, in a `_` folder.
 - **Location:** `USDCC_ASSET_CACHE`, or else `asset-cache` in the user's usdcc data folder. Shared
   by every usdcc process and tool.
 - **Size limit:** default 20 GB, least recently used first. A version in use isn't removed.
@@ -354,6 +358,8 @@ webdav/
   [main.cpp](../src/cpp/app/main.cpp) registers every plugin's `usd/` folder with
   `PlugRegistry::RegisterPlugins()`, before the window and before any stage
   ([PLUGINS.md](PLUGINS.md) §3.1). *Checked.*
+- **Its `plugInfo.json` says three things** beyond its scheme: `"implementsContexts": true`,
+  `"implementsScopedCaches": true` (§13.2) and `"usdccAssetsProtocol": true` (§6).
 - **A resolver needs it before the first `ArGetResolver()` call,** because OpenUSD collects its URI
   resolvers once. *Checked:* a resolver in a plugin's `usd/` folder, found through `--plugin-path`,
   had its scheme registered and opened the stage given on the command line.
@@ -391,7 +397,7 @@ webdav/
 | Phase | Builds | Done when |
 |---|---|---|
 | **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | **Done** (§13.1). It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
-| **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
+| **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | **Done** (§13.2). Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
 | **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | Reopening a large stage makes no downloads, and pulling the network cable falls back to the cache with a warning |
 | **4. usdcc** | Everything in §10 but the picker | A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
@@ -420,12 +426,54 @@ isn't in the repository; phase 1's tests cover the same ground with the fake tra
 **Not checked:** textures loaded by Hydra in a viewport, which needs a real OpenGL window; and
 anything about the network, the cache or credentials, which the spike has none of.
 
+### 13.2 Phase 1 as built
+
+[src/cpp/assets](../src/cpp/assets): `usdcc_assets`, a DLL linking only OpenUSD's `ar`, `plug`,
+`js`, `vt`, `tf` and `arch`.
+
+| Header | Holds |
+|---|---|
+| [uri.h](../src/cpp/assets/include/usdcc/assets/uri.h) | Parsing, normalizing and anchoring asset paths (§3) |
+| [config.h](../src/cpp/assets/include/usdcc/assets/config.h) | The configuration file, with every problem in it named (§4) |
+| [context.h](../src/cpp/assets/include/usdcc/assets/context.h) | `Context`, stacks and their ids, the default configuration (§4, §5) |
+| [transport.h](../src/cpp/assets/include/usdcc/assets/transport.h) | `Transport`, `Endpoint`, `Entry`, the registry of transports by scheme (§6) |
+| [lookup.h](../src/cpp/assets/include/usdcc/assets/lookup.h) | Finding a file in a stack, listing a folder as the union of one, and what servers answered (§5, §7) |
+| [disk_cache.h](../src/cpp/assets/include/usdcc/assets/disk_cache.h) | The disk cache, a file per version (§7) |
+| [credentials.h](../src/cpp/assets/include/usdcc/assets/credentials.h) | The host's callback, then environment variables (§8) |
+| [caching_resolver.h](../src/cpp/assets/include/usdcc/assets/caching_resolver.h) | `CachingResolver`, the `ArResolver` a protocol derives from |
+
+**Found while building it:**
+
+- **A protocol's `plugInfo.json` must say `"implementsScopedCaches": true`.** Without it OpenUSD
+  never tells a URI resolver about a cache scope, and every resolve during composition asks the
+  server again. A test caught it: four files of one folder cost six listings, not two.
+- **The timestamp** is the file's time in whole seconds with the winning endpoint and the version
+  in the fraction, so a file that appears on TEST with PROD's time still reads as changed.
+- **A transport is registered for a scheme,** not owned by a resolver. The tests' transport lives in
+  the test program, where its switches are, while the resolver for `fake://` is a plugin of its own.
+
+**Not in phase 1,** all planned for later: the HTTP client and any real protocol (phase 2), direct
+protocols (§5.1, with HTTP), mirrors, offline mode, the size limit, `RefreshContext`, the
+cross-process download lock (phase 3), the OS credential store, and writing. `Progress` and
+`Cancel` are in the transport's calls but nothing passes real ones yet.
+
+**Known gaps:**
+
+- **Two threads asking about one folder at once both ask the server.** Answers are shared once
+  one arrives, but the requests aren't joined, as downloads are.
+- **Only run on Windows.** Nothing in it is Windows-only by intent, but Linux hasn't built it.
+- **The app doesn't link it and the deploy doesn't carry it** until phase 4.
+
 ## 14. Testing
 
-- **`usdcc_assets`** (`tests/assets_test.cpp`): a fake transport over folders on disk, with
-  switches for "unreachable" and "slow". Identifier normalization and anchoring, configuration
-  parsing, context equality and hashing, the overlay rules of §5, the cache's versions and locks,
-  and that no secret reaches a debug string or the log.
+- **`usdcc_assets`** ([assets_test.cpp](../tests/assets_test.cpp), 18 tests, in a program of its
+  own, `usdcc_assets_tests`, with no Qt: the protocol has to be registered before anything asks
+  OpenUSD for its resolver). A fake transport over folders on disk, with switches for
+  "unreachable", "slow" and "can't list", and the resolver for `fake://` as a real plugin
+  ([assets_fake_protocol.cpp](../tests/assets_fake_protocol.cpp)). Identifier normalization and
+  anchoring, configuration parsing, context equality and hashing, the overlay rules of §5 through
+  `UsdStage::Open`, two stages in two environments, the cache's versions, one download for many
+  threads, cache scopes, and that no secret reaches a debug string.
 - **WebDAV:** [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6.
 - **In usdcc:** stages through `UsdStage::Open`, textures opened with no context bound, as Hydra
   does, and the UI call sites with a slow transport, to show the UI doesn't wait.
