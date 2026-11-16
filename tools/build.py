@@ -7,6 +7,7 @@ Mirrors the manual steps documented in readme.md.
     python tools/build.py --configuration Debug --run
     python tools/build.py --usd-install C:\\usd\\install
     python tools/build.py --run --scene test_data/cube_and_sphere.usda
+    python tools/build.py --without-tests
 
 On Windows it builds with Visual Studio. On Linux and macOS it uses Ninja when
 there is one on PATH (else CMake's default generator) and vcpkg's dynamic
@@ -56,6 +57,9 @@ def parser(description=None):
     result.add_argument("--ovstage-root", metavar="DIR")
     result.add_argument("--rtx-gpu-tests", action="store_true",
                         help="enable labeled GPU tests; build rtx_gpu_test_bins before running CTest")
+    result.add_argument("--without-tests", action="store_true",
+                        help="skip the usdcc_tests executable and CTest registration; the next build "
+                             "without this option builds them again")
     result.add_argument("--clean", action="store_true", help="remove the build directory before configuring")
     result.add_argument("--run", action="store_true", help="launch usdcc after a successful build")
     result.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 4), help="maximum parallel build jobs (default: up to 4)")
@@ -125,6 +129,8 @@ def main(argv=None, description=None):
     rtx_options = args.with_rtx or args.ovrtx_root or args.ovstage_root or args.rtx_gpu_tests
     if args.without_rtx and rtx_options:
         fail("--without-rtx cannot be combined with native RTX options.")
+    if args.without_tests and args.rtx_gpu_tests:
+        fail("--without-tests cannot be combined with --rtx-gpu-tests.")
 
     # --- vcpkg submodule ------------------------------------------------------
 
@@ -167,6 +173,9 @@ def main(argv=None, description=None):
     # Always, so a release build's version doesn't stay in the CMake cache for
     # the development builds after it.
     configure.append(f"-DUSDCC_VERSION={args.usdcc_version}")
+    # Every time, not only when skipping them: the CMake cache keeps the value,
+    # and a build without --without-tests should have its tests again.
+    configure.append(f"-DUSDCC_BUILD_TESTS={'OFF' if args.without_tests else 'ON'}")
     if rtx_options:
         configure.append("-DUSDCC_BUILD_RTX_PLUGIN=ON")
     if args.without_rtx:

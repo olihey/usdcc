@@ -121,10 +121,11 @@ steps above (including the one-time vcpkg bootstrap):
 python tools/build.py              # configure + build
 python tools/run.py                # configure + build + launch
 python tools/run.py --scene test_data\cube_and_sphere.usda   # ...and open a stage on launch
+python tools/run.py --without-tests  # ...skipping the usdcc_tests executable
 ```
 
-Both accept `--configuration`, `--generator`, `--arch`, `--usd-install`, `--scene`, and
-`--clean`; `build.py` additionally takes `--run` (which is what `run.py` wraps).
+Both accept `--configuration`, `--generator`, `--arch`, `--usd-install`, `--scene`,
+`--without-tests`, and `--clean`; `build.py` additionally takes `--run` (which is what `run.py` wraps).
 `--usd-install` only needs to be passed once — it's cached by CMake and reused by
 later `--run`/`run.py` invocations automatically. See each script's help
 (`python tools/build.py --help`) for details.

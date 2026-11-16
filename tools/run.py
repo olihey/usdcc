@@ -5,6 +5,7 @@ build.py with --run; it takes build.py's options (python tools/build.py --help).
     python tools/run.py
     python tools/run.py --configuration Debug --clean
     python tools/run.py --scene test_data/cube_and_sphere.usda
+    python tools/run.py --without-tests
 """
 
 from __future__ import annotations
