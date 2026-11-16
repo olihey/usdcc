@@ -19,6 +19,7 @@
 #include <QStandardItemModel>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include <utility>
 #include <vector>
@@ -26,10 +27,22 @@
 namespace usdcc::ui {
 
 namespace {
+constexpr auto kHeadingProperty = "usdccOptionsHeading";
+
 QString plainText(const QAction* action) {
     QString text = action->text();
     text.remove(QLatin1Char('&'));
     return text;
+}
+
+// A group's title, or a heading's.
+QLabel* groupTitle(const QString& text, QWidget* parent) {
+    auto* title = new QLabel(text, parent);
+    title->setObjectName(QStringLiteral("optionsGroupTitle"));
+    QFont font = title->font();
+    font.setBold(true);
+    title->setFont(font);
+    return title;
 }
 }  // namespace
 
@@ -50,6 +63,13 @@ OptionsMenuView::OptionsMenuView(std::function<void(QMenu*)> populate, QWidget* 
 }
 
 OptionsMenuView::~OptionsMenuView() { delete m_menu; }
+
+QAction* OptionsMenuView::addHeading(QMenu* menu, const QString& text) {
+    QAction* heading = menu->addAction(text);
+    heading->setEnabled(false);
+    heading->setProperty(kHeadingProperty, true);
+    return heading;
+}
 
 void OptionsMenuView::scheduleRebuild() {
     if (m_scheduled) return;
@@ -102,15 +122,24 @@ void OptionsMenuView::addEntries(QMenu* menu, QVBoxLayout* layout, int depth) {
             layout->addWidget(gap);
             continue;
         }
+        if (action->property(kHeadingProperty).toBool()) {
+            layout->addWidget(groupTitle(plainText(action), layout->parentWidget()));
+            continue;
+        }
+        if (auto* widgetAction = qobject_cast<QWidgetAction*>(action)) {
+            // The menu took the widget when the action was added, but is never shown: the
+            // widget moves here. It goes with the column's content, or else with the action.
+            if (QWidget* widget = widgetAction->defaultWidget()) {
+                widget->setParent(layout->parentWidget());
+                layout->addWidget(widget);
+                widget->show();
+            }
+            continue;
+        }
         if (QMenu* submenu = action->menu()) {
             if (addChoice(action, layout)) continue;
             // A group under its title, indented.
-            auto* title = new QLabel(plainText(action), layout->parentWidget());
-            title->setObjectName(QStringLiteral("optionsGroupTitle"));
-            QFont font = title->font();
-            font.setBold(true);
-            title->setFont(font);
-            layout->addWidget(title);
+            layout->addWidget(groupTitle(plainText(action), layout->parentWidget()));
             auto* group = new QWidget(layout->parentWidget());
             auto* groupLayout = new QVBoxLayout(group);
             usdcc::ui::scaled::margins(groupLayout, 10, 0, 0, 4);

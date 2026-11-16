@@ -4,16 +4,20 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/log_model.h"
 #include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scale_controller.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPushButton>
 #include <QScrollBar>
 #include <QTableView>
 #include <QTreeWidget>
@@ -393,4 +397,103 @@ USDCC_TEST(log_side_panel) {
     CHECK(reopened.filterModel()->isLevelShown(LogLevel::Debug), "filters persist");
     CHECK(reopened.model()->rowCount() == static_cast<int>(hub.snapshot().size()),
           "a new panel starts with the hub's backlog: %d", reopened.model()->rowCount());
+}
+
+USDCC_TEST(log_side_panel_pinned_filters) {
+    ScratchSettings settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
+    LogHub hub;
+    auto settle = [] { for (int i = 0; i < 5; ++i) QApplication::processEvents(); };
+    // The pinned column's checkbox whose text is `name` or starts with "name (".
+    auto checkBox = [](LogSidePanel& panel, const QString& name) -> QCheckBox* {
+        if (!panel.pinnedFilters()) return nullptr;
+        for (QCheckBox* box : panel.pinnedFilters()->findChildren<QCheckBox*>()) {
+            if (box->isVisible() && (box->text() == name || box->text().startsWith(name + " ("))) return box;
+        }
+        return nullptr;
+    };
+    post(hub, LogLevel::Error, "usd", "TF_DIAGNOSTIC_RUNTIME_ERROR_TYPE", "an error");
+    post(hub, LogLevel::Info, "usdcc", "usdcc.viewport", "a");
+    {
+        LogSidePanel panel(nullptr, hub, settings.path);
+        panel.resize(900, 400);
+        panel.show();
+        settle();
+        auto* button = panel.findChild<usdcc::ui::PanelMenuButton*>();
+        CHECK(!panel.isFiltersPinned() && !panel.pinnedFilters(), "not pinned at first");
+        {
+            QMenu menu;
+            panel.populateFilterMenu(&menu);
+            QAction* levels = findAction(menu, "Levels");
+            CHECK(levels && !levels->isEnabled(), "a heading in the menu is a disabled entry");
+        }
+
+        panel.setFiltersPinned(true);
+        settle();
+        CHECK(panel.isFiltersPinned() && panel.pinnedFilters() && panel.pinnedFilters()->isVisible(),
+              "pinned, the filters show beside the table");
+        CHECK(button && button->isChecked(), "and the filter button stays down");
+        if (!panel.pinnedFilters()) return;
+        CHECK(panel.pinnedFilters()->mapTo(&panel, QPoint(0, 0)).x() < panel.view()->mapTo(&panel, QPoint(0, 0)).x(),
+              "on the table's left");
+
+        QStringList titles;
+        for (QLabel* title : panel.pinnedFilters()->findChildren<QLabel*>(QStringLiteral("optionsGroupTitle"))) {
+            if (title->isVisible()) titles << title->text();
+        }
+        CHECK(titles == QStringList({"Levels", "Sources", "Categories"}), "headings as titles: %s",
+              qPrintable(titles.join(',')));
+        QCheckBox* errors = checkBox(panel, "Errors");
+        CHECK(errors && errors->text() == "Errors (1)" && errors->isChecked(), "a level is a checkbox with its count: %s",
+              errors ? qPrintable(errors->text()) : "missing");
+        CHECK(checkBox(panel, "usd") && checkBox(panel, "usdcc"), "a checkbox per source");
+        QTreeWidget* tree = panel.pinnedFilters()->findChild<QTreeWidget*>();
+        CHECK(tree && tree->isVisible(), "the category tree is in the column");
+        for (QPushButton* entry : panel.pinnedFilters()->findChildren<QPushButton*>()) {
+            CHECK(entry->text() != "Pin to Side", "pinning isn't one of them");
+        }
+
+        // Using them filters, as the menu does.
+        if (QCheckBox* debug = checkBox(panel, "Debug")) debug->click();
+        settle();
+        CHECK(panel.filterModel()->isLevelShown(LogLevel::Debug), "ticking Debug shows debug messages");
+        CHECK(checkBox(panel, "Debug") && checkBox(panel, "Debug")->isChecked(), "and it shows ticked");
+        if (QCheckBox* usd = checkBox(panel, "usd")) usd->click();
+        settle();
+        CHECK(panel.filterModel()->isSourceHidden("usd"), "unticking a source hides it");
+        if (QCheckBox* usd = checkBox(panel, "usd")) usd->click();
+        settle();
+
+        // New messages show in it, a little later.
+        post(hub, LogLevel::Error, "python", "python.script", "another error");
+        CHECK(waitFor([&] { return checkBox(panel, "python") != nullptr; }), "a new source appears");
+        CHECK(checkBox(panel, "Errors") && checkBox(panel, "Errors")->text() == "Errors (2)", "counts follow: %s",
+              checkBox(panel, "Errors") ? qPrintable(checkBox(panel, "Errors")->text()) : "missing");
+
+        // The filter button unpins.
+        if (button) button->click();  // a menu would block here, until closed
+        settle();
+        CHECK(!panel.isFiltersPinned() && !panel.pinnedFilters() && button && !button->isChecked(),
+              "the filter button unpins them");
+        panel.setFiltersPinned(true);
+    }
+    {
+        LogSidePanel panel(nullptr, hub, settings.path);
+        panel.resize(900, 400);
+        panel.show();
+        settle();
+        CHECK(panel.isFiltersPinned() && panel.pinnedFilters() && panel.pinnedFilters()->isVisible(),
+              "pinned again after a restart");
+        auto* unpin = panel.findChild<QToolButton*>(QStringLiteral("unpinFilters"));
+        CHECK(unpin && unpin->isVisible(), "with a way to unpin them in the column");
+        if (unpin) unpin->click();
+        settle();
+        CHECK(!panel.isFiltersPinned(), "which does");
+    }
+    {
+        LogSidePanel panel(nullptr, hub, settings.path);
+        panel.show();
+        settle();
+        CHECK(!panel.isFiltersPinned(), "and they stay unpinned after a restart");
+    }
 }

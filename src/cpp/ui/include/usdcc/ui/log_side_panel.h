@@ -12,6 +12,8 @@
 class QLineEdit;
 class QMenu;
 class QSettings;
+class QSplitter;
+class QTimer;
 class QTableView;
 class QToolButton;
 class QTreeWidget;
@@ -20,6 +22,8 @@ namespace usdcc::ui {
 
 class LogFilterModel;
 class LogModel;
+class OptionsMenuView;
+class PanelMenuButton;
 
 // The application log (docs/LOGGING.md §4): every record the LogHub gets,
 // from usdcc, Qt and OpenUSD (later Python and plugins), in a filterable
@@ -28,7 +32,9 @@ class LogModel;
 // - Levels (with counts), sources and categories to show in a filter menu
 //   behind the same three-lines button ViewPanels have, and search (plain or
 //   regular expression, either case) over message, category, source and
-//   details.
+//   details. The filters can be pinned in a column on the table's left, as a
+//   ViewPanel's options can (the menu's Pin to Side; the button, or the
+//   column's Unpin, puts them back), and stay pinned across a restart.
 // - The table follows new messages while scrolled to the bottom and stays
 //   put once the user scrolls up.
 // - An Error the user can't see (panel hidden or collapsed, or scrolled away
@@ -66,6 +72,16 @@ public:
     // Public for tests.
     void populateFilterMenu(QMenu* menu);
 
+    bool isFiltersPinned() const { return m_pinned; }
+    // The pinned column's filters, for tests: null unless pinned.
+    OptionsMenuView* pinnedFilters() const { return m_pinnedView; }
+
+public Q_SLOTS:
+    void setFiltersPinned(bool pinned);
+
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private:
     // A level entry in the filter menu; Errors includes Fatal, Debug Trace.
     struct LevelGroup {
@@ -77,6 +93,10 @@ private:
     };
     static const std::vector<LevelGroup>& levelGroups();
     void setLevelGroupShown(const LevelGroup& group, bool shown);
+    // The filter menu, or the pinned column's, whose category tree shows every row.
+    void fillFilterMenu(QMenu* menu, bool pinned);
+    // What the pinned column shows changed outside it.
+    void refreshPinnedFilters();
 
     QToolButton* addToggle(const QString& toolTip);
     void onRecordsAdded(int count, int errors);
@@ -86,13 +106,20 @@ private:
     void showContextMenu(const QPoint& position);
     // The filter menu's checkable category tree; one node per '.'-separated
     // level, checking or unchecking a node covers everything under it.
-    QTreeWidget* createCategoryTree(QWidget* parent);
+    QTreeWidget* createCategoryTree(QWidget* parent, bool pinned);
     void copySelection(bool withDetails) const;
     void saveFilters() const;
 
     LogModel* m_model = nullptr;
     LogFilterModel* m_filter = nullptr;
     QTableView* m_view = nullptr;
+    PanelMenuButton* m_filterButton = nullptr;
+    QSplitter* m_split = nullptr;            // the pinned filters, then the toolbar and table
+    QWidget* m_filtersHost = nullptr;        // the pinned column
+    OptionsMenuView* m_pinnedView = nullptr;  // in it, while pinned
+    QTimer* m_pinnedRefresh = nullptr;       // counts change with every batch; the column follows less often
+    bool m_pinned = false;
+    bool m_restoredPin = false;
     QLineEdit* m_search = nullptr;
     QToolButton* m_caseButton = nullptr;
     QToolButton* m_regexButton = nullptr;

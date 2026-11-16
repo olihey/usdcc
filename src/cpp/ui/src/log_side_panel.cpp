@@ -2,6 +2,7 @@
 
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/ui/log_model.h"
+#include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -15,6 +16,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QHeaderView>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
@@ -23,6 +25,8 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QShortcut>
+#include <QShowEvent>
+#include <QSplitter>
 #include <QTableView>
 #include <QTimer>
 #include <QTreeWidget>
@@ -48,6 +52,7 @@ constexpr auto kHiddenCategoriesKey = "LogPanel/hiddenCategories";
 constexpr auto kCaseSensitiveKey = "LogPanel/caseSensitive";
 constexpr auto kRegexKey = "LogPanel/regularExpression";
 constexpr auto kHeaderKey = "LogPanel/header";
+constexpr auto kPinnedKey = "LogPanel/filtersPinned";
 
 // The table follows new rows while within this many pixels of the bottom.
 constexpr int kFollowSlack = 2;
@@ -84,7 +89,44 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     m_filter = new LogFilterModel(this);
     m_filter->setSourceModel(m_model);
 
-    auto* container = new QWidget(this);
+    // The pinned filters' column, hidden until they are, then the toolbar and table. In a
+    // plain widget: collapsing (SidePanel) squeezes the panel's widget to nothing, which a
+    // splitter, holding on to its children's minimum sizes, wouldn't be.
+    auto* outer = new QWidget(this);
+    auto* outerLayout = new QVBoxLayout(outer);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    m_split = new QSplitter(Qt::Horizontal, outer);
+    outerLayout->addWidget(m_split);
+    m_split->setObjectName(QStringLiteral("logPanelSplit"));
+    m_split->setChildrenCollapsible(false);
+    m_filtersHost = new QWidget(m_split);
+    m_filtersHost->setObjectName(QStringLiteral("logPanelFilters"));
+    m_filtersHost->setAttribute(Qt::WA_StyledBackground);
+    {
+        auto* hostLayout = new QVBoxLayout(m_filtersHost);
+        hostLayout->setContentsMargins(0, 0, 0, 0);
+        hostLayout->setSpacing(0);
+        // A header saying what it is, with the way to unpin it (as a ViewPanel's options).
+        auto* header = new QWidget(m_filtersHost);
+        header->setObjectName(QStringLiteral("panelToolbar"));
+        header->setAttribute(Qt::WA_StyledBackground);
+        auto* headerLayout = new QHBoxLayout(header);
+        usdcc::ui::scaled::margins(headerLayout, 8, 4, 4, 4);
+        headerLayout->addWidget(new QLabel(tr("Filters"), header), 1);
+        auto* unpin = new QToolButton(header);
+        unpin->setObjectName(QStringLiteral("unpinFilters"));
+        unpin->setText(tr("Unpin"));
+        unpin->setAutoRaise(true);
+        unpin->setToolTip(tr("Put the filters back behind the filter button"));
+        connect(unpin, &QToolButton::clicked, this, [this]() { setFiltersPinned(false); });
+        headerLayout->addWidget(unpin);
+        hostLayout->addWidget(header);
+    }
+    m_filtersHost->hide();
+    m_split->addWidget(m_filtersHost);
+    m_split->setStretchFactor(0, 0);
+
+    auto* container = new QWidget(m_split);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -98,9 +140,18 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     usdcc::ui::scaled::spacing(toolbarLayout, 4);
 
     // The same three-lines button every ViewPanel starts its toolbar with.
-    auto* filterButton = new PanelMenuButton(tr("Filter: levels, sources and categories"),
-                                             [this](QMenu* menu) { populateFilterMenu(menu); }, toolbar);
-    toolbarLayout->addWidget(filterButton);
+    m_filterButton = new PanelMenuButton(tr("Filter: levels, sources and categories"), [this](QMenu* menu) {
+        menu->addAction(tr("Pin to Side"), this, [this]() { setFiltersPinned(true); });
+        menu->addSeparator();
+        populateFilterMenu(menu);
+    }, toolbar);
+    // Pinned, the button unpins.
+    m_filterButton->setClickHandler([this]() {
+        if (!m_pinned) return false;
+        setFiltersPinned(false);
+        return true;
+    });
+    toolbarLayout->addWidget(m_filterButton);
 
     m_search = new QLineEdit(toolbar);
     m_search->setPlaceholderText(tr("Search log"));
@@ -172,7 +223,9 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
 
     layout->addWidget(toolbar);
     layout->addWidget(m_view, 1);
-    setWidget(container);
+    m_split->addWidget(container);
+    m_split->setStretchFactor(1, 1);
+    setWidget(outer);
 
     // --- Filters ------------------------------------------------------------
     for (const LevelGroup& group : levelGroups()) {
@@ -202,6 +255,22 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_logFile).absolutePath()));
     });
     connect(m_model, &LogModel::recordsAdded, this, &LogSidePanel::onRecordsAdded);
+    // The pinned column's counts, sources and categories; at most twice a second while
+    // messages pour in, and not while a button is down (it may be on an entry).
+    m_pinnedRefresh = new QTimer(this);
+    m_pinnedRefresh->setSingleShot(true);
+    m_pinnedRefresh->setInterval(500);
+    connect(m_pinnedRefresh, &QTimer::timeout, this, [this]() {
+        if (!m_pinnedView) return;
+        if (QApplication::mouseButtons() != Qt::NoButton) {
+            m_pinnedRefresh->start();
+            return;
+        }
+        m_pinnedView->scheduleRebuild();
+    });
+    connect(m_model, &LogModel::countsChanged, this, [this]() {
+        if (m_pinnedView && !m_pinnedRefresh->isActive()) m_pinnedRefresh->start();
+    });
     connect(m_view, &QTableView::customContextMenuRequested, this, &LogSidePanel::showContextMenu);
 
     auto* copy = new QShortcut(QKeySequence::Copy, m_view, nullptr, nullptr, Qt::WidgetShortcut);
@@ -277,11 +346,45 @@ void LogSidePanel::setLevelGroupShown(const LevelGroup& group, bool shown) {
     for (LogLevel level : group.levels) m_filter->setLevelShown(level, shown);
 }
 
-void LogSidePanel::populateFilterMenu(QMenu* menu) {
+void LogSidePanel::setFiltersPinned(bool pinned) {
+    if (pinned == m_pinned) return;
+    m_pinned = pinned;
+    if (pinned) {
+        m_pinnedView = new OptionsMenuView([this](QMenu* menu) { fillFilterMenu(menu, true); }, m_filtersHost);
+        m_filtersHost->layout()->addWidget(m_pinnedView);
+        m_filtersHost->show();
+        const int width = std::max(m_filtersHost->sizeHint().width(), scaled::pixels(220));
+        m_split->setSizes({width, std::max(1, m_split->width() - width)});
+    } else {
+        m_filtersHost->hide();
+        m_pinnedRefresh->stop();
+        m_pinnedView->hide();
+        m_pinnedView->deleteLater();
+        m_pinnedView = nullptr;
+    }
+    m_filterButton->setCheckable(true);
+    m_filterButton->setChecked(pinned);
+    m_filterButton->setToolTip(pinned ? tr("Unpin the filters") : tr("Filter: levels, sources and categories"));
+    m_settings->setValue(kPinnedKey, pinned);
+}
+
+void LogSidePanel::showEvent(QShowEvent* event) {
+    SidePanel::showEvent(event);
+    // Once, when it first shows: the column takes its width from the panel's.
+    if (m_restoredPin) return;
+    m_restoredPin = true;
+    if (m_settings->value(kPinnedKey, false).toBool()) setFiltersPinned(true);
+}
+
+void LogSidePanel::refreshPinnedFilters() {
+    if (m_pinnedView) m_pinnedView->scheduleRebuild();
+}
+
+void LogSidePanel::populateFilterMenu(QMenu* menu) { fillFilterMenu(menu, false); }
+
+void LogSidePanel::fillFilterMenu(QMenu* menu, bool pinned) {
     menu->setToolTipsVisible(true);
-    // Disabled entries as headings: the theme draws QMenu::addSection()'s
-    // titles as bare separators.
-    auto heading = [menu](const QString& text) { menu->addAction(text)->setEnabled(false); };
+    auto heading = [menu](const QString& text) { OptionsMenuView::addHeading(menu, text); };
     heading(tr("Levels"));
     for (const LevelGroup& group : levelGroups()) {
         int count = 0;
@@ -322,7 +425,7 @@ void LogSidePanel::populateFilterMenu(QMenu* menu) {
     } else {
         // In the menu itself, so several can be toggled before it closes.
         auto* tree = new QWidgetAction(menu);
-        tree->setDefaultWidget(createCategoryTree(menu));
+        tree->setDefaultWidget(createCategoryTree(menu, pinned));
         menu->addAction(tree);
     }
 
@@ -364,7 +467,7 @@ void LogSidePanel::markSeen() {
     updateTitle();
 }
 
-QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent) {
+QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent, bool pinned) {
     auto* tree = new QTreeWidget(parent);
     tree->setObjectName(QStringLiteral("logCategoryTree"));
     tree->setHeaderHidden(true);
@@ -413,10 +516,12 @@ QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent) {
     }
     tree->expandAll();
 
-    // As many rows as fit, up to 14; it scrolls beyond that.
-    UiScaleController::instance().bind(tree, "size", [tree, rows = static_cast<int>(nodes.size())]() {
-        tree->setFixedHeight(std::min(rows, 14) * scaled::pixels(22) + 2 * tree->frameWidth() + scaled::pixels(4));
-        tree->setMinimumWidth(scaled::pixels(260));
+    // As many rows as fit, up to 14 in the menu; it scrolls beyond that. Pinned, every row:
+    // the column scrolls, and it can be made wider.
+    UiScaleController::instance().bind(tree, "size", [tree, pinned, rows = static_cast<int>(nodes.size())]() {
+        tree->setFixedHeight((pinned ? rows : std::min(rows, 14)) * scaled::pixels(22) + 2 * tree->frameWidth() +
+                             scaled::pixels(4));
+        tree->setMinimumWidth(scaled::pixels(pinned ? 180 : 260));
     });
 
     // One click can change many items (a parent and all it covers); apply
@@ -425,7 +530,7 @@ QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent) {
     apply->setSingleShot(true);
     apply->setInterval(0);
     connect(tree, &QTreeWidget::itemChanged, apply, qOverload<>(&QTimer::start));
-    connect(apply, &QTimer::timeout, this, [this, tree]() {
+    connect(apply, &QTimer::timeout, this, [this, tree, pinned]() {
         // The fewest nodes that hide exactly what is unchecked: an unchecked
         // node hides itself and everything under it, so nothing below it is
         // needed; a partly checked one passes the question to its children.
@@ -442,6 +547,8 @@ QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent) {
         for (int i = 0; i < tree->topLevelItemCount(); ++i) collect(tree->topLevelItem(i));
         m_filter->setHiddenCategories(hidden);
         saveFilters();
+        // Show All Categories says how many are hidden.
+        if (pinned) refreshPinnedFilters();
     });
     return tree;
 }
@@ -459,14 +566,17 @@ void LogSidePanel::showContextMenu(const QPoint& position) {
         menu.addSeparator();
         menu.addAction(tr("Show Only \"%1\"").arg(category), this, [this, category]() {
             m_filter->setOnlyCategory(category);
+            refreshPinnedFilters();
         });
         menu.addAction(tr("Hide \"%1\"").arg(category), this, [this, category]() {
             m_filter->setCategoryHidden(category, true);
             saveFilters();
+            refreshPinnedFilters();
         });
         menu.addAction(tr("Hide Source \"%1\"").arg(source), this, [this, source]() {
             m_filter->setSourceHidden(source, true);
             saveFilters();
+            refreshPinnedFilters();
         });
     }
     if (!m_filter->hiddenCategories().isEmpty() || !m_filter->onlyCategory().isEmpty()) {
@@ -474,6 +584,7 @@ void LogSidePanel::showContextMenu(const QPoint& position) {
         menu.addAction(tr("Show All Categories"), this, [this]() {
             m_filter->showAllCategories();
             saveFilters();
+            refreshPinnedFilters();
         });
     }
     menu.exec(m_view->viewport()->mapToGlobal(position));

@@ -290,7 +290,11 @@ layouts still find it.
   it, a parent shows partly checked when only some of its children are hidden, and the tree
   stays open in the menu so several can be toggled at once. Hiding is stored as the fewest
   levels that cover what is unchecked, so a category first seen later under a hidden level is
-  hidden too. Next to it a search field (plain text, case and regex toggles) matching message,
+  hidden too. The menu's Pin to Side keeps the filters in a column on the table's left, as a
+  ViewPanel's options pin (`OptionsMenuView`: checkboxes under the headings, the tree showing
+  every row); the button, or the column's Unpin, puts them back, and pinning is remembered
+  across a restart. The column follows new sources, categories and counts at most twice a
+  second. Next to it a search field (plain text, case and regex toggles) matching message,
   category and details. Filters are a
   `QSortFilterProxyModel`; settings persist with the panel.
 - **Follow mode**: the view sticks to the bottom until the user scrolls up, and resumes at the
