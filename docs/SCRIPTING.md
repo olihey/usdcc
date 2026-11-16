@@ -410,6 +410,7 @@ Phases 1 → 2 → 3 in order; 4 needs 2; 5 only needs 1, plus a PySide build.
   clicked while one runs. Options for later: an interrupt hotkey checked from a Python trace
   hook, or running on a worker with marshalled calls (which USD's threading makes hard).
 - Debugging (breakpoints), code completion, a REPL prompt (Run Selection covers most of it).
+  [VSCODE.md](VSCODE.md) plans the first two through VS Code rather than in the panel.
 - Undoing a stage open/close (the UI can't either).
 - Sandboxing scripts (PLAN.md §6 item 9 only asks that errors don't crash the app).
 

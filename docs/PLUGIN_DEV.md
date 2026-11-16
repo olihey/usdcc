@@ -82,7 +82,7 @@ From a script, `usdcc.app.reload_plugin(id)` reloads once what's running has fin
 
 ## 4. Left out
 
-- **Completion and go-to-definition.** External editors already do this, and **Open Folder** gets you there.
+- **Completion and go-to-definition.** External editors already do this, and **Open Folder** gets you there. [VSCODE.md](VSCODE.md) plans the rest of that route: Reload, Reload on Save and breakpoints from VS Code.
 - **Clicking a traceback line to go to it, and Reload on Save.** Both were offered, and neither is built.
 - **Keeping a panel's state across a reload.**
 

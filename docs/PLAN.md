@@ -1081,6 +1081,8 @@ several of them rather than as a discrete phase.
 - Planned in [SCRIPTING.md](SCRIPTING.md): one embedded Python (the one OpenUSD was built
   with), the app's live objects as embedded modules, one undo step per Run, the Scripting
   panel, startup scripts, and Python-made UI once PySide is built.
+- Follow-up, planned in [VSCODE.md](VSCODE.md): running, completing and debugging scripts and
+  plugins from VS Code, through a local pipe into the app, type stubs, `debugpy` and an extension.
 
 ### M8 — Layer Editing & Logging
 - **Goal:** low-level layer inspection/editing and centralized diagnostics.
