@@ -87,7 +87,7 @@ GizmoGeometry RotateTool::buildGizmo(const ToolContext& ctx) const {
         return geo;
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index, ctx.time) : gizmoFrame(xformable, ctx.time);
     const int onlyAxis = target.targeted ? usdcc::usd::singleRotationAxis(target.op.GetOpType()) : -1;
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
 
@@ -152,7 +152,7 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
         return {};
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index, ctx.time) : gizmoFrame(xformable, ctx.time);
     const int onlyAxis = target.targeted ? usdcc::usd::singleRotationAxis(target.op.GetOpType()) : -1;
     m_activeHandle = pickRing(ctx, ndcPos, frame, onlyAxis);
     if (m_activeHandle == Handle::None) {

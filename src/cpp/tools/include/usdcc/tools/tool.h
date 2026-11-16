@@ -8,6 +8,7 @@
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/timeCode.h>
 
 #include <functional>
 #include <optional>
@@ -130,6 +131,10 @@ struct ToolContext {
     // "xformOp:scale:second"), or empty for Auto: each transform tool then acts
     // on the first op of its own type. See docs/ATTRIBUTE_EDITOR.md §7.
     PXR_NS::TfToken targetOpName;
+
+    // The time the stage is shown at (Stage::timeCode()): where a gizmo sits on an
+    // animated prim. Default for a context nothing gave one.
+    PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default();
 };
 
 // Outcome of a mouse event handled by a Tool.

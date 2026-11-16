@@ -34,7 +34,7 @@ GizmoGeometry ScaleTool::buildGizmo(const ToolContext& ctx) const {
         return geo;
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index, ctx.time) : gizmoFrame(xformable, ctx.time);
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
     auto paint = [&](const PXR_NS::GfVec4f& color) { return target.mismatch ? dimmed(color) : color; };
 
@@ -137,7 +137,7 @@ ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec
         return {};
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index) : gizmoFrame(xformable);
+    const GizmoFrame frame = target.targeted ? opFrame(xformable, target.index, ctx.time) : gizmoFrame(xformable, ctx.time);
     m_activeHandle = pickHandle(ctx, ndcPos, frame);
     if (m_activeHandle == Handle::None) {
         return {};

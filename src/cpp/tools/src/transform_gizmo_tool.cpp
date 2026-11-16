@@ -100,7 +100,8 @@ PXR_NS::UsdGeomXformable TransformGizmoTool::resolveXformable(const ToolContext&
     return usdcc::usd::editTargetReaches(prim) ? PXR_NS::UsdGeomXformable(prim) : PXR_NS::UsdGeomXformable();
 }
 
-TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdGeomXformable& xformable) const {
+TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdGeomXformable& xformable,
+                                                               PXR_NS::UsdTimeCode time) const {
     GizmoFrame frame;
     if (!xformable) {
         frame.origin = PXR_NS::GfVec3d(0.0);
@@ -109,7 +110,7 @@ TransformGizmoTool::GizmoFrame TransformGizmoTool::gizmoFrame(const PXR_NS::UsdG
         frame.axisZ = PXR_NS::GfVec3d(0.0, 0.0, 1.0);
         return frame;
     }
-    const PXR_NS::GfMatrix4d worldXform = xformable.ComputeLocalToWorldTransform(PXR_NS::UsdTimeCode::Default());
+    const PXR_NS::GfMatrix4d worldXform = xformable.ComputeLocalToWorldTransform(time);
     frame.origin = worldXform.ExtractTranslation();
     // TransformDir() on a unit basis vector picks out that row of the
     // matrix — i.e. the world-space direction of the prim's own local axis
@@ -149,23 +150,24 @@ TransformGizmoTool::Target TransformGizmoTool::resolveTarget(const ToolContext& 
     return target;
 }
 
-PXR_NS::GfMatrix4d TransformGizmoTool::opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex) {
+PXR_NS::GfMatrix4d TransformGizmoTool::opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex,
+                                                    PXR_NS::UsdTimeCode time) {
     bool resets = false;
     const std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
     const PXR_NS::GfMatrix4d parent =
-        resets ? PXR_NS::GfMatrix4d(1.0) : xformable.ComputeParentToWorldTransform(PXR_NS::UsdTimeCode::Default());
-    return usdcc::usd::composeOps(ops, 0, static_cast<size_t>(std::max(opIndex, 0))) * parent;
+        resets ? PXR_NS::GfMatrix4d(1.0) : xformable.ComputeParentToWorldTransform(time);
+    return usdcc::usd::composeOps(ops, 0, static_cast<size_t>(std::max(opIndex, 0)), time) * parent;
 }
 
-TransformGizmoTool::GizmoFrame TransformGizmoTool::opFrame(const PXR_NS::UsdGeomXformable& xformable,
-                                                            int opIndex) const {
+TransformGizmoTool::GizmoFrame TransformGizmoTool::opFrame(const PXR_NS::UsdGeomXformable& xformable, int opIndex,
+                                                            PXR_NS::UsdTimeCode time) const {
     bool resets = false;
     const std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
     if (opIndex < 0 || opIndex >= static_cast<int>(ops.size())) {
-        return gizmoFrame(xformable);
+        return gizmoFrame(xformable, time);
     }
     const PXR_NS::GfMatrix4d m =
-        ops[static_cast<size_t>(opIndex)].GetOpTransform(PXR_NS::UsdTimeCode::Default()) * opValueSpace(xformable, opIndex);
+        ops[static_cast<size_t>(opIndex)].GetOpTransform(time) * opValueSpace(xformable, opIndex, time);
     GizmoFrame frame;
     frame.origin = m.ExtractTranslation();
     frame.axisX = m.TransformDir(PXR_NS::GfVec3d(1.0, 0.0, 0.0)).GetNormalized();

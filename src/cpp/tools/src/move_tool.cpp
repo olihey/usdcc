@@ -82,11 +82,12 @@ bool MoveTool::canDrive(PXR_NS::UsdGeomXformOp::Type type) const {
     return type == PXR_NS::UsdGeomXformOp::TypeTranslate || type == PXR_NS::UsdGeomXformOp::TypeTransform;
 }
 
-MoveTool::GizmoFrame MoveTool::frameFor(const Target& target, const PXR_NS::UsdGeomXformable& xformable) const {
+MoveTool::GizmoFrame MoveTool::frameFor(const Target& target, const PXR_NS::UsdGeomXformable& xformable,
+                                        PXR_NS::UsdTimeCode time) const {
     if (!target.targeted) {
-        return gizmoFrame(xformable);
+        return gizmoFrame(xformable, time);
     }
-    GizmoFrame frame = opFrame(xformable, target.index);
+    GizmoFrame frame = opFrame(xformable, target.index, time);
     if (m_space == Space::World) {
         frame.axisX = PXR_NS::GfVec3d(1.0, 0.0, 0.0);
         frame.axisY = PXR_NS::GfVec3d(0.0, 1.0, 0.0);
@@ -102,7 +103,7 @@ GizmoGeometry MoveTool::buildGizmo(const ToolContext& ctx) const {
         return geo;
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = frameFor(target, xformable);
+    const GizmoFrame frame = frameFor(target, xformable, ctx.time);
     const double scale = gizmoScale(frame.origin, ctx.cameraPos);
     auto paint = [&](const PXR_NS::GfVec4f& color) { return target.mismatch ? dimmed(color) : color; };
 
@@ -196,7 +197,7 @@ ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2
         return {};
     }
     const Target target = resolveTarget(ctx, xformable);
-    const GizmoFrame frame = frameFor(target, xformable);
+    const GizmoFrame frame = frameFor(target, xformable, ctx.time);
     m_activeHandle = pickHandle(ctx, ndcPos, frame);
     if (m_activeHandle == Handle::None) {
         return {};

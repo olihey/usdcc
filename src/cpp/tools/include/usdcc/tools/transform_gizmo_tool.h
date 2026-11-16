@@ -89,7 +89,9 @@ protected:
     };
 
     PXR_NS::UsdGeomXformable resolveXformable(const ToolContext& ctx) const;
-    GizmoFrame gizmoFrame(const PXR_NS::UsdGeomXformable& xformable) const;
+    // At `time`, here and below: where the prim is at the time shown (ToolContext::time).
+    GizmoFrame gizmoFrame(const PXR_NS::UsdGeomXformable& xformable,
+                          PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default()) const;
 
     // Targeting one specific op (ToolContext::targetOpName, see
     // docs/ATTRIBUTE_EDITOR.md §7). With no target — or one naming an op that
@@ -110,10 +112,12 @@ protected:
     // Op_k · Outer · ParentToWorld — its origin is where the op acts (a pivot
     // in Outer moves it to the pivot) and its axes follow the op's own
     // rotation. Scale is stripped from the axes, as in gizmoFrame().
-    GizmoFrame opFrame(const PXR_NS::UsdGeomXformable& xformable, int opIndex) const;
+    GizmoFrame opFrame(const PXR_NS::UsdGeomXformable& xformable, int opIndex,
+                       PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default()) const;
     // Outer · ParentToWorld: the space an op's own value is expressed in
     // (a translate op's value moves the prim along these axes).
-    static PXR_NS::GfMatrix4d opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex);
+    static PXR_NS::GfMatrix4d opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex,
+                                           PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default());
 
     // An op's value as plain numbers / written back from them, whatever its
     // precision (half, float or double).
