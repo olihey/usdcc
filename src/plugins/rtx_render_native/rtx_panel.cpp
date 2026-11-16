@@ -215,6 +215,13 @@ protected:
         try {
             const auto camera = currentCamera();
             auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch(), m_tonemap);
+            if (!scene->emission.skipped.empty())
+                m_host.log(usdcc::core::LogLevel::Warning,
+                           QStringLiteral("Matching Storm's lights: %1 emissive input(s) not scaled, as they feed "
+                                          "something else too or come from a node it doesn't know, e.g. %2")
+                               .arg(scene->emission.skipped.size())
+                               .arg(QString::fromStdString(scene->emission.skipped.front().GetString()))
+                               .toStdString());
             m_orthographic = camera.orthographic;
             m_engine->replace(std::move(scene), budget());
             m_engine->setActive(isRendering());

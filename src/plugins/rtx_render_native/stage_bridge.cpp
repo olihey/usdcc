@@ -1,6 +1,12 @@
 #include "stage_bridge.h"
 
 #include <pxr/usd/ar/resolverContextBinder.h>
+#include <pxr/usd/sdf/attributeSpec.h>
+#include <pxr/usd/sdf/primSpec.h>
+#include <pxr/base/gf/vec3d.h>
+#include <pxr/base/gf/vec3f.h>
+#include <pxr/base/gf/vec4f.h>
+#include <map>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/scope.h>
@@ -44,6 +50,124 @@ Camera cameraValues(const usdcc::usd::RenderCamera& input) {
     result.farClip = float(input.farClip);
     return result;
 }
+namespace {
+using namespace PXR_NS;
+
+TfToken shaderId(const SdfPrimSpecHandle& prim) {
+    if (!prim) return {};
+    const SdfAttributeSpecHandle id = prim->GetAttributeAtPath(prim->GetPath().AppendProperty(TfToken("info:id")));
+    if (!id || !id->HasDefaultValue()) return {};
+    const VtValue value = id->GetDefaultValue();
+    return value.IsHolding<TfToken>() ? value.UncheckedGet<TfToken>() : TfToken();
+}
+
+// A color or weight times `factor`; a float4's alpha is left. Nothing for another type.
+std::optional<VtValue> scaled(const VtValue& value, double factor) {
+    const float f = float(factor);
+    if (value.IsHolding<GfVec3f>()) return VtValue(value.UncheckedGet<GfVec3f>() * f);
+    if (value.IsHolding<GfVec3d>()) return VtValue(value.UncheckedGet<GfVec3d>() * factor);
+    if (value.IsHolding<GfVec4f>()) {
+        GfVec4f v = value.UncheckedGet<GfVec4f>();
+        v[0] *= f, v[1] *= f, v[2] *= f;
+        return VtValue(v);
+    }
+    if (value.IsHolding<float>()) return VtValue(value.UncheckedGet<float>() * f);
+    if (value.IsHolding<double>()) return VtValue(value.UncheckedGet<double>() * factor);
+    return std::nullopt;
+}
+
+// The attribute's default and time samples times `factor`; false if it has a value it can't scale.
+bool scaleValues(const SdfAttributeSpecHandle& attribute, double factor) {
+    if (attribute->HasDefaultValue()) {
+        const auto value = scaled(attribute->GetDefaultValue(), factor);
+        if (!value) return false;
+        attribute->SetDefaultValue(*value);
+    }
+    const SdfLayerHandle layer = attribute->GetLayer();
+    for (const double time : layer->ListTimeSamplesForPath(attribute->GetPath())) {
+        VtValue sample;
+        layer->QueryTimeSample(attribute->GetPath(), time, &sample);
+        const auto value = scaled(sample, factor);
+        if (!value) return false;
+        layer->SetTimeSample(attribute->GetPath(), time, *value);
+    }
+    return true;
+}
+
+struct EmissionScaler {
+    SdfLayerHandle layer;
+    double factor;
+    EmissionScaling result;
+    std::map<SdfPath, int> consumers;  // connection targets: attributes, and their prims
+    std::set<SdfPath> done;
+
+    void countConnections() {
+        layer->Traverse(SdfPath::AbsoluteRootPath(), [this](const SdfPath& path) {
+            if (!path.IsPropertyPath()) return;
+            const SdfAttributeSpecHandle attribute = layer->GetAttributeAtPath(path);
+            if (!attribute) return;
+            for (const SdfPath& target : attribute->GetConnectionPathList().GetAppliedItems()) {
+                ++consumers[target];
+                ++consumers[target.GetPrimPath()];
+            }
+        });
+    }
+    // An emissive input: its values, then where it's connected from.
+    void scaleInput(const SdfAttributeSpecHandle& attribute, int depth) {
+        if (!attribute || !done.insert(attribute->GetPath()).second) return;
+        if (!scaleValues(attribute, factor)) {
+            result.skipped.push_back(attribute->GetPath());
+            return;
+        }
+        if (attribute->HasDefaultValue() || !layer->ListTimeSamplesForPath(attribute->GetPath()).empty())
+            result.scaled.push_back(attribute->GetPath());
+        for (const SdfPath& target : attribute->GetConnectionPathList().GetAppliedItems()) scaleSource(target, depth);
+    }
+    void scaleSource(const SdfPath& target, int depth) {
+        const SdfPrimSpecHandle owner = layer->GetPrimAtPath(target.GetPrimPath());
+        const TfToken id = shaderId(owner);
+        if (depth < 8 && id == TfToken("UsdUVTexture") && consumers[target.GetPrimPath()] == 1) {
+            // The texture's scale (and bias): what it outputs, times the factor.
+            const SdfPath scalePath = owner->GetPath().AppendProperty(TfToken("inputs:scale"));
+            SdfAttributeSpecHandle scale = layer->GetAttributeAtPath(scalePath);
+            if (!scale) {
+                scale = SdfAttributeSpec::New(owner, "inputs:scale", SdfValueTypeNames->Float4);
+                scale->SetDefaultValue(VtValue(GfVec4f(1.0f)));
+            }
+            scaleInput(scale, depth + 1);
+            if (auto bias = layer->GetAttributeAtPath(owner->GetPath().AppendProperty(TfToken("inputs:bias"))))
+                scaleInput(bias, depth + 1);
+            return;
+        }
+        // A material's or node graph's interface input, used here only: scale it in turn.
+        if (depth < 8 && id.IsEmpty() && target.GetName().starts_with("inputs:") && consumers[target] == 1) {
+            scaleInput(layer->GetAttributeAtPath(target), depth + 1);
+            return;
+        }
+        result.skipped.push_back(target);
+    }
+    void run() {
+        countConnections();
+        std::vector<SdfPath> inputs;
+        layer->Traverse(SdfPath::AbsoluteRootPath(), [&](const SdfPath& path) {
+            if (!path.IsPrimPath()) return;
+            const SdfPrimSpecHandle prim = layer->GetPrimAtPath(path);
+            const TfToken id = shaderId(prim);
+            // Only UsdPreviewSurface's: ovrtx gives MaterialX emission (standard_surface)
+            // in Storm's units, which the matching camera then gets right (measured).
+            if (id == TfToken("UsdPreviewSurface")) inputs.push_back(path.AppendProperty(TfToken("inputs:emissiveColor")));
+        });
+        for (const SdfPath& input : inputs) scaleInput(layer->GetAttributeAtPath(input), 0);
+    }
+};
+}  // namespace
+
+EmissionScaling scaleEmission(const PXR_NS::SdfLayerHandle& layer, double factor) {
+    EmissionScaler scaler{layer, factor, {}, {}, {}};
+    scaler.run();
+    return scaler.result;
+}
+
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
                                        QSize size, Mode mode, LightMatch light, bool rtxTonemap) {
     using namespace PXR_NS;
@@ -55,6 +179,8 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     // under the stage's resolver context before moving to the temporary folder.
     ArResolverContextBinder context(source->usdStage()->GetPathResolverContext());
     auto layer = source->usdStage()->Flatten();
+    // Light matching lifts everything by 1/k, and ovrtx's emission has that already.
+    if (light.on) result->emission = scaleEmission(layer, kRtxDefaultExposure);
     auto stage = UsdStage::Open(layer);
     if (!stage) throw std::runtime_error("Could not flatten stage for RTX");
     SdfPath root("/__usdccRtxNative");

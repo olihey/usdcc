@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/cube.h>
@@ -134,4 +136,98 @@ USDCC_TEST(rtx_native_snapshot_and_edits) {
     undo.stack(wrapped)->redo();
     auto redone = makeSnapshot(wrapped, camera, QSize(320, 160), Mode::RealTime);
     CHECK(UsdStage::Open(redone->file.toStdString())->GetPrimAtPath(SdfPath("/UndoCube")), "snapshot reflects redo");
+}
+
+// Light matching scales the materials' emission by k (docs/RTX_LIGHT_INTENSITY.md §2.6): only
+// in the snapshot, values, time samples and what feeds them alone, and nothing else.
+USDCC_TEST(rtx_native_emission_scaling) {
+    using namespace PXR_NS;
+    using namespace usdcc::rtx;
+    auto source = UsdStage::CreateInMemory();
+    source->GetRootLayer()->ImportFromString(R"(#usda 1.0
+def Material "A" {
+    def Shader "Surface" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:emissiveColor = (0.2, 0.2, 0.2)
+        color3f inputs:emissiveColor.timeSamples = { 1: (1, 1, 1) }
+        color3f inputs:diffuseColor = (0.5, 0.5, 0.5)
+    }
+}
+def Material "B" {
+    def Shader "Surface" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:emissiveColor.connect = </B/Glow.outputs:rgb>
+    }
+    def Shader "Glow" {
+        uniform token info:id = "UsdUVTexture"
+        float4 inputs:bias = (0.1, 0.1, 0.1, 0.5)
+        float3 outputs:rgb
+    }
+}
+def Material "C" {
+    def Shader "Surface" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:diffuseColor.connect = </C/Shared.outputs:rgb>
+        color3f inputs:emissiveColor.connect = </C/Shared.outputs:rgb>
+    }
+    def Shader "Shared" {
+        uniform token info:id = "UsdUVTexture"
+        float3 outputs:rgb
+    }
+}
+def Material "D" {
+    color3f inputs:glow = (0.5, 0.5, 0.5)
+    def Shader "Surface" {
+        uniform token info:id = "UsdPreviewSurface"
+        color3f inputs:emissiveColor.connect = </D.inputs:glow>
+    }
+}
+def Material "E" {
+    def Shader "Surface" {
+        uniform token info:id = "ND_standard_surface_surfaceshader"
+        float inputs:emission = 1
+    }
+}
+)");
+    auto wrapped = std::make_shared<usdcc::usd::Stage>(source);
+    usdcc::usd::RenderCamera camera;
+    const double k = kRtxDefaultExposure;
+    CHECK(std::abs(1.0 / k - 1133.8) < 0.5, "k is ovrtx's default exposure, about 1/1134: %f", 1.0 / k);
+
+    const auto read = [](const UsdStageRefPtr& stage, const char* path, UsdTimeCode time = UsdTimeCode::Default()) {
+        VtValue value;
+        stage->GetAttributeAtPath(SdfPath(path)).Get(&value, time);
+        return value;
+    };
+    const auto close = [](double a, double b) { return std::abs(a - b) <= 1e-6 * std::max(1.0, std::abs(b)); };
+
+    auto plain = makeSnapshot(wrapped, camera, QSize(64, 32), Mode::RealTime);
+    auto unmatched = UsdStage::Open(plain->file.toStdString());
+    CHECK(plain->emission.scaled.empty() && close(read(unmatched, "/A/Surface.inputs:emissiveColor").Get<GfVec3f>()[0], 0.2),
+          "without light matching emission stays");
+
+    auto matched = makeSnapshot(wrapped, camera, QSize(64, 32), Mode::RealTime, LightMatch{.on = true, .multiplier = 1.0});
+    auto stage = UsdStage::Open(matched->file.toStdString());
+    CHECK(close(read(stage, "/A/Surface.inputs:emissiveColor").Get<GfVec3f>()[0], 0.2 * k), "a value is scaled by k");
+    CHECK(close(read(stage, "/A/Surface.inputs:emissiveColor", 1.0).Get<GfVec3f>()[1], k), "and its time samples");
+    CHECK(close(read(stage, "/A/Surface.inputs:diffuseColor").Get<GfVec3f>()[0], 0.5), "other inputs stay");
+    const GfVec4f scale = read(stage, "/B/Glow.inputs:scale").Get<GfVec4f>();
+    const GfVec4f bias = read(stage, "/B/Glow.inputs:bias").Get<GfVec4f>();
+    CHECK(close(scale[0], k) && close(scale[3], 1.0), "a texture only emission uses gets its scale: %g %g", scale[0], scale[3]);
+    CHECK(close(bias[1], 0.1 * k) && close(bias[3], 0.5), "and its bias, alpha left");
+    const auto authored = [](const UsdStageRefPtr& on, const char* path) {
+        const UsdAttribute attribute = on->GetAttributeAtPath(SdfPath(path));
+        return attribute && attribute.HasAuthoredValue();
+    };
+    CHECK(!authored(stage, "/C/Shared.inputs:scale"),
+          "a texture that feeds the diffuse too is left");
+    CHECK(std::find(matched->emission.skipped.begin(), matched->emission.skipped.end(),
+                    SdfPath("/C/Shared.outputs:rgb")) != matched->emission.skipped.end(),
+          "and reported");
+    CHECK(close(read(stage, "/D.inputs:glow").Get<GfVec3f>()[2], 0.5 * k), "a material's interface input is followed");
+    CHECK(close(read(stage, "/E/Surface.inputs:emission").Get<float>(), 1.0),
+          "MaterialX emission stays: ovrtx gives it in Storm's units");
+    CHECK(close(read(source, "/A/Surface.inputs:emissiveColor").Get<GfVec3f>()[0], 0.2) &&
+              !authored(source, "/B/Glow.inputs:scale"),
+          "the app's stage is untouched");
 }

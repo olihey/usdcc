@@ -286,3 +286,23 @@ reflection, read from session previews, which come from the viewport's framebuff
 The grid behind the card stays hidden (depth still composites with the color AOV on). Not
 checked in the app: the View Transform menu's clicks (the tests cover the override), a
 config from `$OCIO` or a file, an 8-bit delegate, the material preview.
+
+**Phases 3 and 4 in the app** (2026-11-16, the same card, fresh test profiles, an RTX 4090):
+
+| Renderer | Un-tone-mapped | Raw | ACES 1.0 - SDR Video | Read from |
+|---|---|---|---|---|
+| V-Ray (App SDK 7, CPU) | 124 | 51 | 98 | the panel's image, in a session preview |
+| RTX, light multiplier 0.001 | 131 | 58 | 106 | the screen over the Vulkan window |
+
+- **V-Ray matches the viewport exactly.**
+- **RTX's GPU pass matches the CPU transform:** its Raw 58 is linear 0.227, and 0.227 gives
+  131 through the sRGB encode and 106 through ACES. At multiplier 1 the card was white in
+  every view: RTX's `HdrColor` for it was 227, not 0.2, because light matching lifted
+  UsdPreviewSurface emission that ovrtx had lifted already. Fixed in the RTX snapshot
+  (RTX_LIGHT_INTENSITY.md §2.6): at multiplier 1 the card now reads Raw 51, Un-tone-mapped
+  124, ACES 98, as in Storm, and a MaterialX standard_surface card the same.
+- **Not checked in the app:** RTX Save Image, RTX Tonemap, the swatches in the attribute
+  editor (the UI tests cover them).
+- **A note for checks:** a test profile whose last session restored an RTX panel left a new
+  one stuck at "Attaching the scene to RTX" (the engine idle, waiting for an active, visible
+  request). Fresh profiles render at once.
