@@ -121,7 +121,9 @@ Each viewport can override the view from its options menu, **View Transform**: *
 (the settings' view)*, then the display's views. **Raw** shows linear values as before, for
 checking numbers; without a config the menu offers only Default (sRGB) and Raw. The override
 is `ViewportDisplayOverrides::colorView`, saved in sessions as `"colorView"` and copied by
-Duplicate; *Use Settings Defaults* drops it. Not in the Display... dialog yet. Render view
+Duplicate; *Use Settings Defaults* drops it. The Display... dialog has it too: a View transform
+row after Complexity, the display's views (sRGB and Raw without a config), with a Default
+button while the viewport has its own; it follows Settings > Color Management. Render view
 panels have the same menu (§6), V-Ray's and RTX's alike.
 
 ## 4. The Hydra viewport
@@ -185,7 +187,8 @@ on the GPU.
    and again after `releaseResources()` (Stop), before which a black placeholder stands in.
 6. **Save Image** reads the clean frame back. A linear one goes through
    `GpuFrame::saveTransform`, the panel's `imageTransform()`, which the engine hands to the
-   clean frame; an 8-bit one is saved as it is.
+   clean frame; an 8-bit one is saved as it is. `.exr` writes the linear frame without the
+   transform (§6); with RTX Tonemap on there is none, and the save fails saying so.
 7. **RTX Tonemap** (options menu, per panel, copied by Duplicate) renders `LdrColor` instead,
    for anyone matching Omniverse output.
 
@@ -212,7 +215,13 @@ Option A, as recommended: usdcc applies the transform, in the shared panel.
   (`QThreadPool`, rows in parallel with `WorkParallelForN`), applies
   `ColorManagement::imageTransform()` and shows the 8-bit result. One transform runs at a
   time; a newer image or view waits for it and then replaces it. A Color setting or the
-  panel's View Transform runs it again on the kept image. Save Image saves what's shown.
+  panel's View Transform runs it again on the kept image. Save Image saves what's shown, or,
+  as **OpenEXR, linear** (`.exr`), the kept image's values without the view transform:
+  float R, G, B, A, ZIP, Rec.709 chromaticities in the header (`writeLinearExr()`,
+  [linear_exr.h](../src/cpp/usd/include/usdcc/usd/linear_exr.h)). OpenEXR comes from the
+  OpenUSD install, as OpenColorIO does (`USDCC_OPENEXR_LIBRARY`); without it the choice isn't
+  offered. A renderer that only shows display colors (`showImage()`) has no linear image, and
+  an EXR save fails saying so.
 - **The panel's view** (`colorView()`, View Transform in the options menu) is in sessions
   (`{"colorView": name}`, which `ScriptedRenderViewPanel` merges with the Python state) and
   copied by Duplicate.
@@ -251,7 +260,7 @@ Option A, as recommended: usdcc applies the transform, in the shared panel.
 - **Exposure and gamma controls in the viewport.** Hydra's task has neither; they would be a
   scale before the transform. Useful for RTX-lit scenes (RTX_LIGHT_INTENSITY.md §8.6).
 - **HDR monitors** (scRGB or HDR10 swapchains).
-- **Linear EXR export** from the viewport.
+- **Linear EXR export from the viewport** (the render panels have it, §6).
 
 ## 9. Decisions to make
 
@@ -286,3 +295,26 @@ reflection, read from session previews, which come from the viewport's framebuff
 The grid behind the card stays hidden (depth still composites with the color AOV on). Not
 checked in the app: the View Transform menu's clicks (the tests cover the override), a
 config from `$OCIO` or a file, an 8-bit delegate, the material preview.
+
+**Phases 3 and 4 in the app** (2026-11-16, the same card, fresh test profiles, an RTX 4090):
+
+| Renderer | Un-tone-mapped | Raw | ACES 1.0 - SDR Video | Read from |
+|---|---|---|---|---|
+| V-Ray (App SDK 7, CPU) | 124 | 51 | 98 | the panel's image, in a session preview |
+| RTX, light multiplier 0.001 | 131 | 58 | 106 | the screen over the Vulkan window |
+
+- **V-Ray matches the viewport exactly.**
+- **RTX's GPU pass matches the CPU transform:** its Raw 58 is linear 0.227, and 0.227 gives
+  131 through the sRGB encode and 106 through ACES. At multiplier 1 the card was white in
+  every view: RTX's `HdrColor` for it was 227, not 0.2, because light matching lifted
+  UsdPreviewSurface emission that ovrtx had lifted already. Fixed in the RTX snapshot
+  (RTX_LIGHT_INTENSITY.md §2.6): at multiplier 1 the card now reads Raw 51, Un-tone-mapped
+  124, ACES 98, as in Storm, and a MaterialX standard_surface card the same.
+- **Linear EXR** (`color_management_linear_exr`, `render_view_panel_linear_images`): written,
+  and read back unchanged through OpenUSD's own image reader, values above 1 and below 0
+  included. Not saved from the app's dialogs.
+- **Not checked in the app:** RTX Save Image (PNG or EXR), RTX Tonemap, the swatches in the attribute
+  editor (the UI tests cover them).
+- **A note for checks:** a test profile whose last session restored an RTX panel left a new
+  one stuck at "Attaching the scene to RTX" (the engine idle, waiting for an active, visible
+  request). Fresh profiles render at once.

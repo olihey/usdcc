@@ -170,7 +170,8 @@ blank `UsdImagingGLRenderParams`, and Fit to View's bounds hard-coded default + 
   ```
 
 - **The Display... dialog** has the same rows below the selection's, each with its Default
-  button.
+  button. View transform comes after Complexity ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §3.3);
+  its Default goes back to Settings > Color Management's view.
 - **Python** has no access to a viewport's display options yet (nor to the grid's).
 - **Off screen** — its dock tab behind another, its panel closed, or the main window minimized
   (`HydraViewportWindow::isOnScreen()`) — a viewport renders nothing, and a progressive renderer's

@@ -207,6 +207,8 @@ protected:
     // The renderer's own entries in the options menu (a render mode, Fit to View),
     // after the shared Camera, Resolution and Update on Edits, before Settings….
     virtual void populateRendererOptions(QMenu* menu) { (void)menu; }
+    // Save Image: PNG, JPEG or TIFF of the image shown; ".exr" writes the linear image
+    // (showLinearImage()) without the view transform, and fails without one.
     virtual void saveRenderedImage(const QString& path);
 
     // Ends a subclass's constructor: the setup message, the camera list, the stage.

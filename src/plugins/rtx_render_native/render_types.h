@@ -10,6 +10,8 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <vector>
+#include <pxr/usd/sdf/path.h>
 
 namespace usdcc::rtx {
 enum class Mode { RealTime, PathTracing, Minimal };
@@ -27,6 +29,13 @@ struct LightMatch {
     double multiplier = 1.0;
     bool operator==(const LightMatch&) const = default;
 };
+// What light matching did to the materials' emission (stage_bridge.h, scaleEmission()): the
+// emissive values it scaled, and those it couldn't (a texture or an interface input that
+// feeds something else too, or a connection it doesn't know).
+struct EmissionScaling {
+    std::vector<PXR_NS::SdfPath> scaled;
+    std::vector<PXR_NS::SdfPath> skipped;
+};
 struct Snapshot {
     QString file, product, camera;
     std::shared_ptr<QTemporaryDir> folder;
@@ -39,6 +48,8 @@ struct Snapshot {
     QString colorVar = QStringLiteral("HdrColor");
     bool geometryKnown = false;
     std::set<QString> geometry;
+    // With light matching, docs/RTX_LIGHT_INTENSITY.md §2.6.
+    EmissionScaling emission;
 };
 struct Request {
     uint64_t generation = 0;

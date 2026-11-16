@@ -6,6 +6,7 @@
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/color_management.h"
+#include "usdcc/usd/linear_exr.h"
 #include "usdcc/usd/properties/color_swatch.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/render_view_panel.h"
@@ -16,6 +17,7 @@
 
 #include <QApplication>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QJsonObject>
 #include <QTemporaryDir>
 
@@ -43,6 +45,7 @@ public:
         finishSetup();
     }
     ~LinearPanel() override { closePanel(); }
+    using RenderViewPanel::saveRenderedImage;  // Save Image without its file dialog
     ViewPanel* duplicate(QWidget* = nullptr) const override { return nullptr; }
 };
 
@@ -142,9 +145,22 @@ USDCC_TEST(render_view_panel_linear_images) {
     restored.restoreSessionState({});
     CHECK(restored.colorView().empty(), "a session without one: the default");
 
+    // Save Image as linear EXR: the kept image's values, not the view's.
+    if (usdcc::usd::linearExrAvailable()) {
+        const QString exr = dir.filePath(QStringLiteral("render.exr"));
+        panel.saveRenderedImage(exr);
+        CHECK(QFileInfo(exr).size() > 0, "a linear EXR is written");
+    }
+    const QString png = dir.filePath(QStringLiteral("render.png"));
+    panel.saveRenderedImage(png);
+    CHECK(within(QImage(png).pixelColor(0, 0).red(), 51), "a PNG is what's shown (Raw here)");
+
     // Display colors as they are: nothing kept to transform again.
     QImage shown(2, 2, QImage::Format_RGBA8888);
     shown.fill(QColor(10, 20, 30));
     panel.showImage(shown);
     CHECK(panel.linearImage().isNull() && panel.image().pixelColor(0, 0).red() == 10, "showImage() shows as is");
+    const QString none = dir.filePath(QStringLiteral("none.exr"));
+    panel.saveRenderedImage(none);
+    CHECK(!QFileInfo::exists(none), "no linear image, no EXR");
 }

@@ -119,7 +119,8 @@ To make an RTX render show what Storm shows, at RTX's default camera:
 
 | Light | Multiply RTX intensity by |
 |---|---|
-| Sphere, rect, disk (either normalize), dome, emission | 1/k ≈ **1134** (2^10.15) |
+| Sphere, rect, disk (either normalize), dome, MaterialX emission | 1/k ≈ **1134** (2^10.15) |
+| UsdPreviewSurface emission | 1: it is at Storm's brightness already (§2.6) |
 | Sphere, normalize on | 1134 × 4 = 4536 |
 | Distant, normalize on | 1134 / π ≈ 361 |
 | Distant, normalize off | 1134 × 2(1 − cos(angle/2)): **0.0243** at 0.53°, 2.16 at 5° |
@@ -131,6 +132,33 @@ distant light at its default angle needs the opposite correction to everything e
 41× too bright in RTX today, while a sphere light is 1134× too dark. Example: UsdLux's
 default distant light (intensity 50000) shows a grey of 0.53 in Storm. In RTX today the
 same light gives 22, which is clipped white.
+
+### 2.6 Emission
+
+Measured 2026-11-16 with the app's RTX panel and the Raw view
+([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §10): a card whose material emits linear 0.2 and
+reflects nothing, no lights.
+
+| Material | Matching off (ovrtx's camera) | Matching on (unit exposure) |
+|---|---|---|
+| UsdPreviewSurface, `emissiveColor` 0.2 | about 0.2 | 227 = 0.2 / k |
+| MaterialX `standard_surface`, `emission` 1, `emission_color` 0.2 | about 0.2 × k (reads 1 of 255 through the sRGB encode) | 0.2 |
+
+**ovrtx gives UsdPreviewSurface emission 1/k up front,** so that it shows at its value under
+ovrtx's own camera. MaterialX emission it gives in Storm's units, like the lights. So light
+matching, which lifts everything by 1/k, makes UsdPreviewSurface emission 1134× too bright
+and MaterialX emission right.
+
+**The fix, in the snapshot only:** with matching on, `scaleEmission()`
+([stage_bridge.cpp](../src/plugins/rtx_render_native/stage_bridge.cpp)) scales every
+UsdPreviewSurface's `emissiveColor` by k (`kRtxDefaultExposure` = 0.02 / 25 × 1.1025 =
+8.82e-4): its value and time samples and, through its connections, a material's interface
+input or a `UsdUVTexture`'s `scale` and `bias`, when nothing else uses them. It works on the
+flattened layer's specs, so instance prototypes are included. A texture or input that feeds
+something else too is left, and the panel logs a warning naming it. MaterialX and the other
+inputs aren't touched. After it, both cards read 0.2 (Raw 51, Un-tone-mapped 124) at
+multiplier 1, as in Storm. k is hard-coded here, where option B (§3) avoided it for lights:
+it is ovrtx 0.6.0's default camera, see §8 item 5.
 
 ## 3. Options
 
@@ -152,6 +180,7 @@ same light gives 22, which is clipped white.
   - **Lights:** every `UsdLuxDistantLight` and normalized `UsdLuxSphereLight` gets its
     `inputs:intensity` default and time samples scaled by the §2.5 rule. Lights inside
     instance prototypes are included.
+  - **Emission** *(built)*: UsdPreviewSurface emission scaled by k (§2.6).
 - **Which panels:** only the RTX Render panel. The Hydra viewport (Storm, or any delegate
   picked in it) is the reference and doesn't change. V-Ray keeps its own units.
 - **Settings** (Settings > RTX, group "Lighting"), defined in `defineRtxSettings()`:
@@ -218,10 +247,11 @@ changing the multiplier reloads open panels. Distant and normalized sphere light
    should its `ComputeLinearExposureScale()` (EV folded into responsivity) multiply in, even
    though the viewport ignores it?
 4. **Not measured:** cylinder lights (Storm uses length×radius, the spec 2πrL), MeshLightAPI,
-   portal lights, IES and shaping, Minimal mode, emissive materials (expected to follow the
-   camera scale), and other GPUs and drivers.
+   portal lights, IES and shaping, Minimal mode, OpenPBR and MDL emission, and other GPUs
+   and drivers. Emission is §2.6 now.
 5. **SDK upgrades.** k, and the responsivity of 1.1025 behind it, are ovrtx 0.6.0 defaults.
-   With option B nothing depends on them while matching is on, but §2 should be measured
+   With option B the lights don't depend on them while matching is on, but UsdPreviewSurface
+   emission does (`kRtxDefaultExposure`, §2.6), and §2 should be measured
    again when the pin changes. Phase 4 covers the matched case.
 6. **The reverse direction:** showing an RTX-lit stage correctly in Storm would need a
    viewport exposure. It is out of scope here.

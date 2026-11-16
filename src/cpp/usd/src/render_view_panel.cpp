@@ -6,6 +6,7 @@
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/linear_exr.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/base/gf/camera.h>
@@ -691,12 +692,31 @@ void RenderViewPanel::fillCameras() {
 
 void RenderViewPanel::saveImage() {
     if (m_view->image().isNull() && !m_presentedSize.isValid()) return;
-    const QString path = QFileDialog::getSaveFileName(this, tr("Save Image"), QStringLiteral("render.png"),
-                                                      tr("PNG (*.png);;JPEG (*.jpg);;TIFF (*.tif)"));
+    QString filters = tr("PNG (*.png);;JPEG (*.jpg);;TIFF (*.tif)");
+    // The renderer's linear values, without the view transform (docs/COLOR_MANAGEMENT.md §6).
+    if (linearExrAvailable()) filters += tr(";;OpenEXR, linear (*.exr)");
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save Image"), QStringLiteral("render.png"), filters);
     if (!path.isEmpty()) saveRenderedImage(path);
 }
 
+static bool isExrPath(const QString& path) { return path.endsWith(QStringLiteral(".exr"), Qt::CaseInsensitive); }
+
 void RenderViewPanel::saveRenderedImage(const QString& path) {
+    if (isExrPath(path)) {
+        std::string error;
+        if (m_linearImage.isNull()) {
+            error = "there's no linear image: the renderer shows display colors";
+        } else {
+            writeLinearExr(path.toStdString(), reinterpret_cast<const float*>(m_linearImage.constBits()),
+                           m_linearImage.width(), m_linearImage.height(), &error,
+                           size_t(m_linearImage.bytesPerLine()) / sizeof(float));
+        }
+        if (!error.empty()) {
+            USDCC_LOG_TOAST(usdcc::core::LogLevel::Error, "usdcc.render", "Could not save {}: {}.", path.toStdString(),
+                            error);
+        }
+        return;
+    }
     if (!m_view->image().save(path)) {
         USDCC_LOG_TOAST(usdcc::core::LogLevel::Error, "usdcc.render", "Could not save {}.", path.toStdString());
     }

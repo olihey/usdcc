@@ -30,7 +30,7 @@ The toolbar holds icons only, each with a tooltip:
 | ▶ Render / ■ Stop | Calls the renderer's `start()` / `stop()`; the icon shows which one a click does. While `setup_problem()` gives a reason, Render shows it and stays off |
 | ⟳ Refresh | `reload()`: send the whole stage again |
 | *(the renderer's own)* | Icon buttons `create_toolbar(layout)` adds; choices belong in the options menu |
-| 💾 Save Image… | PNG, JPEG or TIFF of the image shown (display colors, through the view transform) |
+| 💾 Save Image… | PNG, JPEG or TIFF of the image shown (display colors, through the view transform), or OpenEXR, linear: the renderer's linear image without it ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §6) |
 | ⚙ Settings… | The Settings dialog at the renderer's `settings_category`; hidden without one |
 
 **View Transform** in the options menu picks the panel's OCIO view, as a viewport's does:

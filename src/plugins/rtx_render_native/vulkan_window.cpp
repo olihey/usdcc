@@ -24,6 +24,7 @@
 
 #include "cuda_driver.h"
 #include "shaders/present_comp_spv.h"
+#include "usdcc/usd/linear_exr.h"
 
 namespace usdcc::rtx {
 namespace {
@@ -181,6 +182,9 @@ struct Frame final : GpuFrame {
         copy.dstHost = pixels.data();
         copy.Height = dimensions.height();
         cudaCheck(owner->cuda.cuMemcpy2D(&copy), "read displayed frame for saving");
+        const bool exr = file.endsWith(QStringLiteral(".exr"), Qt::CaseInsensitive);
+        if (exr && componentBytes == 1)
+            throw std::runtime_error("No linear image to save as EXR: turn RTX Tonemap off");
         QImage image;
         if (componentBytes == 1) {
             // Display colors already (RTX's tonemap): as they are.
@@ -210,7 +214,19 @@ struct Frame final : GpuFrame {
                         out[x * 4 + c] = value;
                     }
                 }
-                if (saveTransform) saveTransform->apply(out, size_t(dimensions.width()));
+            }
+            if (exr) {
+                // The linear values themselves, no view transform (docs/COLOR_MANAGEMENT.md §5).
+                std::string error;
+                if (!usdcc::usd::writeLinearExr(file.toStdString(), reinterpret_cast<const float*>(image.constBits()),
+                                                image.width(), image.height(), &error,
+                                                size_t(image.bytesPerLine()) / sizeof(float)))
+                    throw std::runtime_error("Could not save " + file.toStdString() + ": " + error);
+                return;
+            }
+            for (int y = 0; y < dimensions.height(); ++y) {
+                if (saveTransform)
+                    saveTransform->apply(reinterpret_cast<float*>(image.scanLine(y)), size_t(dimensions.width()));
             }
             image = image.convertToFormat(QImage::Format_RGBA8888);
         }
