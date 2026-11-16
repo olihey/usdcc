@@ -145,6 +145,7 @@ blank `UsdImagingGLRenderParams`, and Fit to View's bounds hard-coded default + 
 
   `shading` is `smooth`, `flat`, `wireframeOnShaded`, `wireframe` or `hiddenLine`;
   `complexity` is `low`, `medium`, `high` or `veryHigh`; the switches are bools.
+  `colorView` is an OCIO view's name ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §3.3).
 - **The options menu**, below the renderer:
 
   ```
@@ -152,6 +153,7 @@ blank `UsdImagingGLRenderParams`, and Fit to View's bounds hard-coded default + 
   ─────────────────────────
   Shading               ▸  Smooth Shaded / Flat Shaded / Wireframe on Shaded / Wireframe / Hidden Line
   Complexity            ▸  Low / Medium / High / Very High
+  View Transform        ▸  Default (Un-tone-mapped) / Raw / ACES 1.0 - SDR Video / Un-tone-mapped
   Purposes              ▸  ☐ Guide  ☑ Proxy  ☐ Render
   Lights                ▸  ☑ Scene Lights  ☑ Camera Light  ☐ Dome Light
   ☑ Scene Materials

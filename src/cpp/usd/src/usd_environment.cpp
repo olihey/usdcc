@@ -149,6 +149,11 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
     }
 }
 
+void setUsdEnvironmentVariable(const std::string& variable, const std::string& value, std::string source) {
+    setVariable(variable, value);
+    sources()[variable] = std::move(source);
+}
+
 std::string usdEnvironmentSource(std::string_view variable) {
     const auto found = sources().find(variable);
     return found == sources().end() ? std::string() : found->second;

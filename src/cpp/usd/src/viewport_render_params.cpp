@@ -1,6 +1,12 @@
 #include "usdcc/usd/viewport_render_params.h"
 
+#include "usdcc/usd/color_management.h"
+
 #include <pxr/base/gf/vec4f.h>
+
+#include <array>
+#include <cmath>
+#include <pxr/imaging/hdx/tokens.h>
 #include <pxr/usd/usd/timeCode.h>
 #include <pxr/usd/usdGeom/tokens.h>
 
@@ -50,10 +56,39 @@ PXR_NS::UsdImagingGLRenderParams viewportRenderParams(const HydraViewportWindow:
     params.enableLighting = true;
     params.enableSceneMaterials = display.sceneMaterials;
     params.enableSceneLights = display.sceneLights;
-    params.clearColor = PXR_NS::GfVec4f(static_cast<float>(display.background.redF()),
-                                        static_cast<float>(display.background.greenF()),
-                                        static_cast<float>(display.background.blueF()), 1.0f);
+    // Clear to nothing: Hydra's composite lays the render over the viewport's own
+    // background (its glClear), which is a display color and mustn't go through the view.
+    params.clearColor = PXR_NS::GfVec4f(0.0f, 0.0f, 0.0f, 0.0f);
+    applyColorView(params, display.colorView);
     return params;
+}
+
+PXR_NS::GfVec4f opaqueClearColor(const QColor& background, const PXR_NS::UsdImagingGLRenderParams& params) {
+    std::array<float, 3> rgb{static_cast<float>(background.redF()), static_cast<float>(background.greenF()),
+                             static_cast<float>(background.blueF())};
+    const PXR_NS::TfToken& mode = params.colorCorrectionMode;
+    if (mode == PXR_NS::HdxColorCorrectionTokens->openColorIO) {
+        rgb = ColorManagement::instance().fromDisplay(rgb, {params.ocioDisplay.GetString(), params.ocioView.GetString()});
+    } else if (mode == PXR_NS::HdxColorCorrectionTokens->sRGB) {
+        for (float& c : rgb) c = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    }
+    return PXR_NS::GfVec4f(rgb[0], rgb[1], rgb[2], 1.0f);
+}
+
+void applyColorView(PXR_NS::UsdImagingGLRenderParams& params, const std::string& viewOverride) {
+    const ColorManagement& color = ColorManagement::instance();
+    const DisplayView target = color.displayView(viewOverride);
+    if (viewOverride == kRawView || (color.available() && target.view == kRawView)) {
+        params.colorCorrectionMode = PXR_NS::HdxColorCorrectionTokens->disabled;
+    } else if (color.available()) {
+        params.colorCorrectionMode = PXR_NS::HdxColorCorrectionTokens->openColorIO;
+        params.ocioDisplay = PXR_NS::TfToken(target.display);
+        params.ocioView = PXR_NS::TfToken(target.view);
+        params.ocioColorSpace = PXR_NS::TfToken(color.workingSpace());
+    } else {
+        // No config: Hydra's own sRGB encode, what an un-tone-mapped sRGB view does.
+        params.colorCorrectionMode = PXR_NS::HdxColorCorrectionTokens->sRGB;
+    }
 }
 
 PXR_NS::TfTokenVector viewportPurposes(const HydraViewportWindow::DisplayOptions& display) {

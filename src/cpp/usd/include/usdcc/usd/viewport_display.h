@@ -100,6 +100,7 @@ struct ViewportDisplayOverrides {
     std::optional<bool> sceneMaterials;
     std::optional<bool> cullBackfaces;
     std::optional<bool> domeLightTextures;
+    std::optional<std::string> colorView;  // never "": that is no override
     std::optional<bool> sceneLights;
     std::optional<bool> cameraLight;
     std::optional<bool> domeLight;
@@ -123,11 +124,13 @@ struct ViewportDisplayOverrides {
     //  "shading": "hiddenLine", "complexity": "high", and the switches as bools:
     //  "showGuides", "showProxy", "showRender", "sceneMaterials", "cullBackfaces",
     //  "domeLightTextures", "sceneLights", "cameraLight", "domeLight", "hud", "hudCamera",
-    //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover"}.
+    //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover",
+    //  "colorView": the OCIO view's name}.
     QJsonObject toJson() const;
     // Ignores what doesn't fit: a size or step that isn't positive, a color that isn't one,
     // a style, shading or complexity that isn't one, a width outside 1-8, a switch that
-    // isn't a bool.
+    // isn't a bool, a color view that isn't a non-empty string. A view the config doesn't
+    // have is kept: the viewport shows Settings' view until a config has it.
     static ViewportDisplayOverrides fromJson(const QJsonObject& json);
 };
 

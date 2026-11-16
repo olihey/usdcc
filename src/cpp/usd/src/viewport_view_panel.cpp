@@ -3,6 +3,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/layer_stack.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -582,6 +583,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
         if (isViewportDisplayKey(key)) applyDisplay();
         if (isRendererSettingKey(key)) applyRendererSettings();
+        if (isColorManagementKey(key)) notifyOptionsChanged();  // View Transform's Default (...)
     });
     QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
 
@@ -1328,6 +1330,33 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
         connect(action, &QAction::triggered, this,
                 [edit, complexity]() { edit([complexity](ViewportDisplayOverrides& o) { o.complexity = complexity; }); });
     }
+
+    // The OCIO view the stage is shown with (docs/COLOR_MANAGEMENT.md §3.3): Settings' own,
+    // or one of the display's views. Without a config, Hydra's sRGB encode or Raw.
+    QMenu* viewMenu = menu->addMenu(tr("View Transform"));
+    viewMenu->setObjectName(QStringLiteral("colorViewMenu"));
+    auto* viewGroup = new QActionGroup(viewMenu);
+    const ColorManagement& color = ColorManagement::instance();
+    const DisplayView settingsTarget = color.displayView();
+    auto addView = [this, edit, &shown, viewMenu, viewGroup](const QString& text, const std::string& view) {
+        QAction* action = viewMenu->addAction(text);
+        action->setObjectName(view.empty() ? QStringLiteral("colorView_default")
+                                           : QStringLiteral("colorView_%1").arg(QString::fromStdString(view)));
+        action->setCheckable(true);
+        action->setChecked(shown.colorView == view);
+        viewGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [edit, view]() {
+            edit([view](ViewportDisplayOverrides& o) {
+                if (view.empty()) o.colorView.reset();
+                else o.colorView = view;
+            });
+        });
+    };
+    addView(tr("Default (%1)").arg(color.available() ? QString::fromStdString(settingsTarget.view) : tr("sRGB")), {});
+    viewMenu->addSeparator();
+    const std::vector<std::string> views =
+        color.available() ? color.views(settingsTarget.display) : std::vector<std::string>{kRawView};
+    for (const std::string& view : views) addView(QString::fromStdString(view), view);
 
     // A checkable entry for one on/off option.
     auto addSwitch = [this, edit, &shown](QMenu* to, const QString& text, const char* name,

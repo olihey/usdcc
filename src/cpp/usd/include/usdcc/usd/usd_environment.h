@@ -33,6 +33,12 @@ void applyUsdEnvironmentSettings(const core::Settings& settings = core::Settings
 // leaving out folders already there. Empty when both are.
 std::string mergeSearchPaths(std::string_view environment, std::string_view setting);
 
+// Sets `variable` for this process and the processes it starts (the C runtime's
+// copy of the environment too), and records `source` for usdEnvironmentSource().
+// For the variables other features set from their settings, such as OCIO
+// (color_management.h).
+void setUsdEnvironmentVariable(const std::string& variable, const std::string& value, std::string source);
+
 // Where applyUsdEnvironmentSettings() got `variable`'s value from: "Settings",
 // "environment and Settings", or "" when it didn't set it. For the thread
 // limit, ask for PXR_WORK_THREAD_LIMIT.

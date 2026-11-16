@@ -28,6 +28,7 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 class QOpenGLContext;
@@ -198,6 +199,9 @@ public:
         bool sceneMaterials = true;
         bool cullBackfaces = false;
         bool domeLightTextures = true;
+        // The OCIO view the stage is shown with (docs/COLOR_MANAGEMENT.md §3.3): "" for
+        // Settings > Color Management's, else one of the display's views, or "Raw".
+        std::string colorView;
         // The lights: the stage's own, a light at the camera, and Hydra's default dome.
         // The default ones only in the shaded modes.
         bool sceneLights = true;
@@ -339,6 +343,12 @@ private:
     void releaseEngine();
     // A new engine for the same renderer, which fills itself from the stage again.
     void rebuildEngine();
+    // Asks the engine for the color AOV, which Hydra's color correction works on.
+    void requestColorAov();
+    // After a frame: whether the renderer's color AOV is 8-bit, so already display colors
+    // that a view transform would apply to twice (docs/COLOR_MANAGEMENT.md §4). Checked
+    // once per renderer; redraws when it changes the answer.
+    void checkColorBuffer();
     // After the engine threw while drawing or picking: logs it and starts the engine afresh,
     // dropping whatever it had cached. OpenUSD's material cache can hand Storm a shader prim
     // that no longer exists, a C++ exception nothing in Hydra catches (see recoverFromEngineError()).
@@ -436,6 +446,8 @@ private:
     bool m_paused = false;
     enum class RendererHalt { None, Paused, Stopped };
     RendererHalt m_rendererHalt = RendererHalt::None;  // what updateRendererActivity() did
+    PXR_NS::TfToken m_colorCheckedRenderer;  // the renderer checkColorBuffer() looked at
+    bool m_displayReferredColor = false;      // its color AOV is 8-bit: no view transform
     QPointer<QWindow> m_topLevel;  // the one watchTopLevel() follows
     QMetaObject::Connection m_topLevelConnection;
 

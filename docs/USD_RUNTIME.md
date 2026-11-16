@@ -30,7 +30,7 @@ front and collects everything again. It has six tabs:
 | Plugins | Every USD plugin: its name, its type (library, python, resource), whether it's loaded, its path. Filterable | `PlugRegistry::GetAllPlugins` |
 | File Formats | Each format's ID, extensions, target, whether it reads and writes, and its plugin. Filterable | the plugins' `plugInfo.json` metadata for `SdfFileFormat`'s subclasses |
 | Render Delegates | Each one's name, ID, priority and plugin | `HdRendererPluginRegistry::GetPluginDescs` |
-| Environment | The process's variables that start with `PXR_`, `TF_`, `HD`, `HGI`, `USD`, `SDF_`, `MATERIALX`, `OCIO` and so on (`isUsdEnvironmentVariable()`), and where each came from: the environment or Settings > USD. A button opens Settings > USD. Filterable | the process environment (on Windows, `GetEnvironmentStringsW`) |
+| Environment | The process's variables that start with `PXR_`, `TF_`, `HD`, `HGI`, `USD`, `SDF_`, `MATERIALX`, `OCIO` and so on (`isUsdEnvironmentVariable()`), and where each came from: the environment, Settings > USD, or `Settings` for `OCIO`, which Settings > Color Management sets ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §3.1). A button opens Settings > USD. Filterable | the process environment (on Windows, `GetEnvironmentStringsW`) |
 | Debug Flags | Every `TfDebug` flag, with its description and a checkbox. A change applies at once, and the output goes to the log (docs/LOGGING.md §6). Changes aren't saved. Filterable | `TfDebug` |
 
 Collecting loads no library. File formats and render delegates come from the plugins'
@@ -76,7 +76,6 @@ another reason it's applied so early. If it didn't take, the log says so with a 
 
 **Left out on purpose:**
 - `TF_DEBUG`: it's read while the libraries load. The Debug Flags tab replaces it.
-- `OCIO`: usdcc doesn't turn on Hydra's OCIO colour correction, so it would change nothing.
 - `PXR_MTLX_STDLIB_SEARCH_PATHS`: it moves MaterialX's own libraries, which only a broken
   install needs.
 - The roughly 90 tuning switches (`HDST_*`, `HGIGL_*`, `USDIMAGING_*`, ...): they belong in

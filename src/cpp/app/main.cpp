@@ -79,6 +79,7 @@
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/material_editor_view_panel.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/usd_environment.h"
 #include "usdcc/usd/usd_runtime_dialog.h"
 #include "usdcc/usd/shading_preview_widget.h"
@@ -248,6 +249,10 @@ int main(int argc, char** argv) {
     // anything below uses its plugin registry or asset resolver (docs/USD_RUNTIME.md §3).
     usdcc::usd::defineUsdEnvironmentSettings();
     usdcc::usd::applyUsdEnvironmentSettings();
+    // The OCIO config, and OCIO for Hydra's color correction, before any viewport draws
+    // (docs/COLOR_MANAGEMENT.md).
+    usdcc::usd::defineColorManagementSettings();
+    usdcc::usd::applyColorManagementSettings();
     usdcc::ui::theme::apply(app);
     // Read by the plugin manager and Python, just below.
     usdcc::scripting::definePythonSettings();

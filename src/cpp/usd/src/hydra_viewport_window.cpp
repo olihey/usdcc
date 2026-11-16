@@ -1,7 +1,9 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 
 #include "selection_overlay.h"
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_grid.h"
@@ -27,7 +29,9 @@
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/glf/simpleMaterial.h>
+#include <pxr/imaging/hd/renderBuffer.h>
 #include <pxr/imaging/hd/tokens.h>
+#include <pxr/imaging/hdx/tokens.h>
 #include <pxr/imaging/hdx/pickTask.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -138,6 +142,10 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
     if (usdcc::ui::UiScaleController* controller = uiScaleController()) {
         connect(controller, &usdcc::ui::UiScaleController::scaleChanged, this, &HydraViewportWindow::refreshHud);
     }
+    // Settings > Color Management's display and view apply at once (docs/COLOR_MANAGEMENT.md).
+    usdcc::ui::onSettingsChanged(this, [this](const std::string& key) {
+        if (isColorManagementKey(key)) requestUpdate();
+    });
 }
 
 HydraViewportWindow::~HydraViewportWindow() {
@@ -208,6 +216,31 @@ void HydraViewportWindow::rebuildEngine() {
     forgetRendererHalt();
     m_engine->SetRendererPlugin(rendererPluginId);
     configureEngine();
+}
+
+void HydraViewportWindow::requestColorAov() {
+    // Storm draws straight to the framebuffer unless asked for an AOV (as usdview asks),
+    // and Hydra's color correction only works on the color AOV: without it no view
+    // transform applies (docs/COLOR_MANAGEMENT.md §4). Other delegates have it already.
+    m_engine->SetRendererAov(PXR_NS::HdAovTokens->color);
+}
+
+void HydraViewportWindow::checkColorBuffer() {
+    const PXR_NS::TfToken renderer = m_engine->GetCurrentRendererId();
+    if (renderer == m_colorCheckedRenderer) return;
+    const PXR_NS::HdRenderBuffer* buffer = m_engine->GetAovRenderBuffer(PXR_NS::HdAovTokens->color);
+    if (!buffer || buffer->GetFormat() == PXR_NS::HdFormatInvalid) return;  // not there yet: next frame
+    m_colorCheckedRenderer = renderer;
+    const PXR_NS::HdFormat component = PXR_NS::HdGetComponentFormat(buffer->GetFormat());
+    const bool displayReferred = component == PXR_NS::HdFormatUNorm8 || component == PXR_NS::HdFormatSNorm8;
+    if (displayReferred == m_displayReferredColor) return;
+    m_displayReferredColor = displayReferred;
+    if (displayReferred) {
+        USDCC_LOG_INFO("usdcc.color", "{} hands over display colors (8-bit): the viewport shows them without a view "
+                                      "transform",
+                       m_engine->GetRendererDisplayName(renderer));
+    }
+    requestUpdate();
 }
 
 // OpenUSD's material cache (HdsiLocatorCachingSceneIndex, which UsdImaging puts after its
@@ -338,6 +371,7 @@ void HydraViewportWindow::startGlDebugLog() {
 }
 
 void HydraViewportWindow::configureEngine() {
+    requestColorAov();
     const QColor& selection = m_display.selectionColor;
     m_engine->SetSelectionColor(PXR_NS::GfVec4f(static_cast<float>(selection.redF()), static_cast<float>(selection.greenF()),
                                                 static_cast<float>(selection.blueF()), 1.0f));
@@ -728,6 +762,7 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
     const PXR_NS::TfToken previous = m_engine->GetCurrentRendererId();
     if (m_engine->SetRendererPlugin(pluginId)) {
         if (m_engine->GetCurrentRendererId() != previous) forgetRendererHalt();  // a new one, running
+        requestColorAov();        // a new delegate's task controller starts without it
         applyRendererSettings();  // a new delegate starts from its defaults
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}", m_engine->GetRendererDisplayName(pluginId));
         Q_EMIT rendererChanged();
@@ -1225,6 +1260,13 @@ void HydraViewportWindow::renderNow() {
     PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
     params.frame = m_time;
     if (m_previewMode) params.enableSceneLights = true;  // a preview's lights are its stage's
+    // A renderer that hands over display colors already gets no view transform.
+    if (m_displayReferredColor) params.colorCorrectionMode = PXR_NS::HdxColorCorrectionTokens->disabled;
+    // Storm leaves what it misses transparent, for the composite over the background.
+    // Others (Embree) fill it with the clear color, opaque, which then goes through the view.
+    if (!rendererDrawsShadingModes(m_engine->GetCurrentRendererId())) {
+        params.clearColor = opaqueClearColor(m_display.background, params);
+    }
     // SetSelected() only feeds the engine the selection; it is drawn solely
     // when the render params ask for it (the flag defaults to off). Only Solid has
     // Hydra fill it: the line styles leave the prims' shading as it is.
@@ -1257,6 +1299,7 @@ void HydraViewportWindow::renderNow() {
         }
         m_engine->Render(m_stage->GetPseudoRoot(), params);
         m_engineFailures = 0;
+        checkColorBuffer();
     } catch (const std::exception& error) {
         QOpenGLFramebufferObject::bindDefault();
         recoverFromEngineError("drawing", error);  // the last frame stays on screen

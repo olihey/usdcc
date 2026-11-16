@@ -390,6 +390,7 @@ HydraViewportWindow::DisplayOptions ViewportDisplayOverrides::applyTo(HydraViewp
     if (selectionWidth) defaults.selectionWidth = *selectionWidth;
     if (shading) defaults.shading = *shading;
     if (complexity) defaults.complexity = *complexity;
+    if (colorView) defaults.colorView = *colorView;
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) defaults.*toggle.option = *value;
     }
@@ -407,6 +408,7 @@ QJsonObject ViewportDisplayOverrides::toJson() const {
     if (selectionWidth) json.insert(QStringLiteral("selectionWidth"), *selectionWidth);
     if (shading) json.insert(QStringLiteral("shading"), QLatin1String(shadingModeName(*shading)));
     if (complexity) json.insert(QStringLiteral("complexity"), QLatin1String(complexityName(*complexity)));
+    if (colorView) json.insert(QStringLiteral("colorView"), QString::fromStdString(*colorView));
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) json.insert(QLatin1String(toggle.name), *value);
     }
@@ -444,6 +446,9 @@ ViewportDisplayOverrides ViewportDisplayOverrides::fromJson(const QJsonObject& j
     }
     if (const QJsonValue v = json.value(QStringLiteral("complexity")); v.isString()) {
         overrides.complexity = complexityFromName(v.toString());
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("colorView")); v.isString() && !v.toString().isEmpty()) {
+        overrides.colorView = v.toString().toStdString();
     }
     for (const Switch& toggle : kSwitches) {
         if (const QJsonValue v = json.value(QLatin1String(toggle.name)); v.isBool()) overrides.*toggle.override = v.toBool();

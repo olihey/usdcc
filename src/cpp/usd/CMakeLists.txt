@@ -33,6 +33,8 @@ add_library(usdcc_usd SHARED
     src/playback.cpp
     include/usdcc/usd/usd_environment.h
     src/usd_environment.cpp
+    include/usdcc/usd/color_management.h
+    src/color_management.cpp
     include/usdcc/usd/usd_runtime_info.h
     src/usd_runtime_info.cpp
     include/usdcc/usd/value_type_info.h
@@ -64,6 +66,20 @@ target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 # where Qt enters this directory's build.
 target_link_libraries(usdcc_usd PUBLIC usdcc_core ${PXR_LIBRARIES})
 usdcc_export_library(usdcc_usd)
+# OpenColorIO, from the OpenUSD install, which built it for Hydra's color correction
+# (docs/COLOR_MANAGEMENT.md): the same library, so the config usdcc makes current is
+# the one Hydra uses. Without it, color management is off and viewports show sRGB.
+find_library(USDCC_OCIO_LIBRARY NAMES OpenColorIO HINTS "${USD_INSTALL}/lib" "${pxr_DIR}/lib" NO_DEFAULT_PATH)
+find_path(USDCC_OCIO_INCLUDE_DIR OpenColorIO/OpenColorIO.h HINTS "${USD_INSTALL}/include" "${pxr_DIR}/include"
+          NO_DEFAULT_PATH)
+if(USDCC_OCIO_LIBRARY AND USDCC_OCIO_INCLUDE_DIR)
+    message(STATUS "OpenColorIO for color management: ${USDCC_OCIO_LIBRARY}")
+    target_link_libraries(usdcc_usd PRIVATE "${USDCC_OCIO_LIBRARY}")
+    target_include_directories(usdcc_usd PRIVATE "${USDCC_OCIO_INCLUDE_DIR}")
+    target_compile_definitions(usdcc_usd PRIVATE USDCC_HAS_OCIO)
+else()
+    message(STATUS "OpenColorIO for color management: none in the OpenUSD install; viewports show sRGB")
+endif()
 usdcc_precompile_headers(usdcc_usd usd_pch.h)
 
 add_subdirectory(python)
