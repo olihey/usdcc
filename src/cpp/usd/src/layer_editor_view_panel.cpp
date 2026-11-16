@@ -433,9 +433,11 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_tree);
     item->setData(Name, kIdentifierRole, qs(entry.identifier));
 
-    QString name = entry.session ? tr("Session Layer") : qs(entry.displayName);
-    if (entry.dirty) name += QStringLiteral(" *");
-    if (entry.anonymous && !entry.session) name += QStringLiteral("  ") + tr("(in memory)");
+    QString name = entry.session            ? tr("Session Layer")
+                   : entry.simulationCache ? tr("Simulation cache")
+                                           : qs(entry.displayName);
+    if (entry.dirty && !entry.simulationCache) name += QStringLiteral(" *");
+    if (entry.anonymous && !entry.session && !entry.simulationCache) name += QStringLiteral("  ") + tr("(in memory)");
     if (entry.missing) name += QStringLiteral("  ") + tr("(not found)");
     if (entry.muted) name += QStringLiteral("  ") + tr("(muted)");
     item->setText(Name, name);
@@ -447,7 +449,12 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     if (!entry.offset.IsIdentity()) {
         tip << tr("Time offset %1, scale %2").arg(entry.offset.GetOffset()).arg(entry.offset.GetScale());
     }
-    if (entry.dirty) tip << tr("Has unsaved changes");
+    if (entry.simulationCache) {
+        tip << tr("The simulation's frames (Timeline > Simulate): mute it to see the stage as authored. "
+                  "It is never saved; Reset Simulation clears it.");
+    } else if (entry.dirty) {
+        tip << tr("Has unsaved changes");
+    }
     item->setToolTip(Name, tip.join(QLatin1Char('\n')));
 
     QFont font = item->font(Name);

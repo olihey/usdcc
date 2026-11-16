@@ -14,6 +14,8 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
+#include "jolt_backend.h"
+#include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
@@ -26,6 +28,10 @@
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/cube.h>
+#include <pxr/usd/usdGeom/plane.h>
+#include <pxr/usd/usdPhysics/collisionAPI.h>
+#include <pxr/usd/usdPhysics/rigidBodyAPI.h>
 
 #include <QCoreApplication>
 #include <QUndoStack>
@@ -567,5 +573,53 @@ USDCC_TEST(python_time) {
     CHECK(stage->time() == 3.0 && !stage->hasPlaybackRange(), "and moved the app's stage (%g)", stage->time());
     CHECK(app.runner.lastUndoSteps() == 0 && undoCount(stage) == 0, "time isn't an edit: no undo step (%d)", undoCount(stage));
     CHECK(evaluate("__import__('usdcc.usd').usd.current_time()") == "3.0", "readable as an expression");
+    app.stages.closeStage(stage);
+}
+
+// usdcc.physics (docs/PHYSICS.md §5.4): solving without the timeline, the cache's range,
+// reports, Reset, the "physics_changed" event and the timeline's Simulate.
+USDCC_TEST(python_physics) {
+    auto& app = pythonTestApp();
+    TestSettings settings;
+    usdcc::usd::physics::PhysicsBackends::instance().add(usdcc::physics_jolt::makeJoltBackend());
+    const StageRefPtr stage = app.stages.createStage();
+    const PXR_NS::UsdStageRefPtr& usd = stage->usdStage();
+    PXR_NS::UsdGeomPlane ground = PXR_NS::UsdGeomPlane::Define(usd, PXR_NS::SdfPath("/Ground"));
+    ground.CreateAxisAttr().Set(PXR_NS::TfToken("Y"));
+    PXR_NS::UsdPhysicsCollisionAPI::Apply(ground.GetPrim());
+    PXR_NS::UsdGeomCube cube = PXR_NS::UsdGeomCube::Define(usd, PXR_NS::SdfPath("/Cube"));
+    cube.AddTranslateOp().Set(PXR_NS::GfVec3d(0, 5, 0));
+    PXR_NS::UsdPhysicsRigidBodyAPI::Apply(cube.GetPrim());
+    PXR_NS::UsdPhysicsCollisionAPI::Apply(cube.GetPrim());
+    app.stages.setCurrentStage(stage);
+    usdcc::usd::PlaybackController playback(&app.stages);
+    usdcc::scripting::AppContext withTimeline;
+    withTimeline.stageManager = &app.stages;
+    withTimeline.undoManager = &app.undo;
+    withTimeline.toolSet = &app.tools;
+    withTimeline.playback = &playback;
+    const usdcc::scripting::AppContextScope context(withTimeline);
+
+    const bool ok = app.runner.run(
+        "import usdcc.app, usdcc.physics, usdcc.usd\n"
+        "seen = []\n"
+        "connection = usdcc.app.connect('physics_changed', lambda s: seen.append(s))\n"
+        "assert usdcc.physics.cached_range() is None\n"
+        "assert usdcc.physics.simulate(0, 24)\n"
+        "assert usdcc.physics.cached_range() == (0.0, 24.0), usdcc.physics.cached_range()\n"
+        "assert not usdcc.physics.is_stale()\n"
+        "assert any('PhysicsScene' in message for path, message in usdcc.physics.reports()), usdcc.physics.reports()\n"
+        "assert seen and seen[-1] == usdcc.usd.current_stage()\n"
+        "usdcc.physics.reset()\n"
+        "assert usdcc.physics.cached_range() is None\n"
+        "assert not usdcc.app.is_simulating()\n"
+        "usdcc.app.set_simulating(True)\n"
+        "assert usdcc.app.is_simulating()\n"
+        "connection.disconnect()\n",
+        "physics.py");
+    CHECK(ok, "the script ran");
+    CHECK(playback.simulates(), "and turned the timeline's Simulate on");
+    CHECK(undoCount(stage) == 0, "simulating isn't an edit: no undo step (%d)", undoCount(stage));
+    usdcc::usd::physics::PhysicsBackends::instance().remove("org.usdcc.physics-jolt");
     app.stages.closeStage(stage);
 }

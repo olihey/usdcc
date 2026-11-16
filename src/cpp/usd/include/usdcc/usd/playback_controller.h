@@ -24,6 +24,12 @@ class StageManager;
 //
 // The clock is a timer on the UI thread at the stage's frame rate. Whether playback
 // loops and its mode are the user's, kept in usdcc.ini.
+//
+// With Simulate on (docs/PHYSICS.md §4.3), playing forward past the frames the stage's
+// simulation has cached solves the next ones first, in order, never skipping one: in Real
+// Time, playback waits for the solver. Inside the cache it is ordinary playback. Play with
+// no simulation, or a stale one, solves anew from the playback range's first frame, and
+// the timeline jumps there first. Simulate is app-wide and off at every start.
 class USDCC_USD_UI_API PlaybackController : public QObject {
     Q_OBJECT
 
@@ -54,6 +60,11 @@ public:
     PlaybackMode mode() const { return m_mode; }
     void setMode(PlaybackMode mode);
 
+    bool simulates() const { return m_simulates; }
+    void setSimulates(bool simulates);
+    // Clears the current stage's simulation and goes to the range's first frame.
+    void resetSimulation();
+
     // Advances playback as the timer does, as if `elapsedSeconds` had passed since
     // play(): for tests, which have no time to wait. Does nothing when stopped.
     void advance(double elapsedSeconds);
@@ -66,12 +77,14 @@ Q_SIGNALS:
     // The current stage changed; `stage()` is the new one.
     void stageChanged();
     void playingChanged(bool playing);
-    // loops() or mode() changed.
+    // loops(), mode() or simulates() changed.
     void optionsChanged();
 
 private:
     void onCurrentStageChanged(const StageRefPtr& stage);
     void tick();
+    // Before playing: a simulation from the range's first frame, unless one is going.
+    void startSimulation();
 
     StageManager* m_stageManager;
     StageRefPtr m_stage;
@@ -82,6 +95,7 @@ private:
     bool m_playing = false;
     bool m_loops = true;
     PlaybackMode m_mode = PlaybackMode::EveryFrame;
+    bool m_simulates = false;
 };
 
 }  // namespace usdcc::usd

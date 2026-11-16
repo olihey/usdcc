@@ -17,6 +17,7 @@
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/main_menu_actions.h"
+#include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
 
 #include <exception>
@@ -102,6 +103,15 @@ struct Host {
         entry.applies = std::move(applies);
         usdcc::usd::PrimMenuEntries::instance().add(std::move(entry));
         noted("Prim menu action", label.toStdString());
+    }
+
+    // A physics solver (docs/PHYSICS.md §5.2). The first one added is the one simulations
+    // use. Remove it in usdcc_plugin_deactivate().
+    void addPhysicsBackend(std::shared_ptr<usdcc::usd::physics::PhysicsBackend> backend) {
+        if (!backend) throw std::invalid_argument("no physics backend");
+        const std::string added = backend->name();
+        usdcc::usd::physics::PhysicsBackends::instance().add(std::move(backend));
+        noted("Physics backend", added);
     }
 
     // A key of the plugin's own in usdcc::ui::appSettings().

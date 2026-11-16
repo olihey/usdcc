@@ -56,6 +56,13 @@ void TimeRuler::setPlaybackRange(const TimeRange& range) {
     update();
 }
 
+void TimeRuler::setCachedRange(const std::optional<TimeRange>& range, bool stale) {
+    if (range == m_cachedRange && stale == m_cacheStale) return;
+    m_cachedRange = range;
+    m_cacheStale = stale;
+    update();
+}
+
 void TimeRuler::setTime(double time) {
     if (time == m_time) return;
     m_time = time;
@@ -119,6 +126,16 @@ void TimeRuler::paintEvent(QPaintEvent*) {
         const double playTo = std::clamp(shown.pixelAt(m_playbackRange.end), r.left(), r.right());
         if (range.start < m_playbackRange.start) p.fillRect(QRectF(r.left(), r.top(), playFrom - r.left(), r.height()), veil);
         if (range.end > m_playbackRange.end) p.fillRect(QRectF(playTo, r.top(), r.right() - playTo, r.height()), veil);
+    }
+
+    // The simulation's cache: a band along the bottom, from its first frame to its last.
+    if (m_cachedRange) {
+        const double from = std::clamp(shown.pixelAt(m_cachedRange->start), r.left(), r.right());
+        const double to = std::clamp(shown.pixelAt(m_cachedRange->end), r.left(), r.right());
+        QColor band = m_cacheStale ? style::textMuted() : style::accent();
+        band.setAlpha(m_cacheStale ? 140 : 200);
+        const double height = pixels(3);
+        p.fillRect(QRectF(from, bottom - height, std::max(to - from, 2.0), height), band);
     }
 
     // The playhead: a line the ruler's height, with its frame on a plate at the top.

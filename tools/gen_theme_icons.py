@@ -241,6 +241,18 @@ ICONS["loop"] = (
     ],
 )
 
+# The timeline's Simulate toggle (docs/PHYSICS.md §5.4): a ball dropping onto the ground.
+ICONS["simulate"] = (
+    1.3,
+    LIGHT,
+    [
+        _arc(8, 8, 3.2, 0, 360, 28),
+        [(2.5, 13.5), (13.5, 13.5)],
+        [(6.2, 1.5), (6.2, 3.2)],
+        [(9.8, 1.5), (9.8, 3.2)],
+    ],
+)
+
 # The Layer Editor's toolbar: Save All, two floppy disks, one behind the other.
 ICONS["save-all"] = (
     1.2,

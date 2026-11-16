@@ -31,6 +31,16 @@ add_library(usdcc_usd SHARED
     src/time_range.cpp
     include/usdcc/usd/playback.h
     src/playback.cpp
+    include/usdcc/usd/physics_backend.h
+    src/physics_backend.cpp
+    include/usdcc/usd/physics_desc.h
+    src/physics_desc.cpp
+    include/usdcc/usd/physics_mass.h
+    src/physics_mass.cpp
+    include/usdcc/usd/physics_session.h
+    src/physics_session.cpp
+    include/usdcc/usd/sim_cache.h
+    src/sim_cache.cpp
     include/usdcc/usd/usd_environment.h
     src/usd_environment.cpp
     include/usdcc/usd/color_management.h
@@ -150,6 +160,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/close_stage_dialog.h
     include/usdcc/usd/save_stage_as.h
     include/usdcc/usd/create_menu.h
+    include/usdcc/usd/physics_menu.h
     include/usdcc/usd/select_by_name_dialog.h
     include/usdcc/usd/selection_menu.h
     include/usdcc/usd/current_stage_ui.h
@@ -223,6 +234,7 @@ add_library(usdcc_usd_ui SHARED
     src/close_stage_dialog.cpp
     src/save_stage_as.cpp
     src/create_menu.cpp
+    src/physics_menu.cpp
     src/select_by_name_dialog.cpp
     src/selection_menu.cpp
     src/current_stage_ui.cpp

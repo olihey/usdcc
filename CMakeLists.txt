@@ -93,16 +93,31 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 find_package(QtNodes CONFIG REQUIRED)
+# Jolt Physics, the first physics backend (docs/PHYSICS.md). Its Debug build
+# has the debug CRT, as vcpkg's Qt does, so it is mapped to Release below too.
+find_package(Jolt CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)
-    # Only Qt, ADS and QtNodes: other imported targets (e.g. USD's TBB) don't have a
-    # Release/Debug pair to choose between.
+    # Only Qt, ADS, QtNodes and Jolt: other imported targets (e.g. USD's TBB) don't
+    # have a Release/Debug pair to choose between.
     get_directory_property(_usdcc_imported IMPORTED_TARGETS)
     foreach(_target IN LISTS _usdcc_imported)
-        if(_target MATCHES "^(Qt6::|ads::|QtNodes::)")
+        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::)")
             set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
         endif()
     endforeach()
+    # Jolt in a Debug build (docs/PHYSICS.md §7 item 3), two fixes:
+    # - Its target adds NDEBUG for $<CONFIG:Release,...>, and with Debug mapped
+    #   to Release that matches our Debug build too: assert() would be off in
+    #   everything that links Jolt. So that definition is dropped.
+    # - Without NDEBUG, Jolt's headers turn its asserts on (JPH_DEBUG, then
+    #   JPH_ENABLE_ASSERTS), which changes its classes' layout (Mutex 80 -> 88
+    #   bytes, PhysicsSystem 1344 -> 1440) from the Release DLL's, and
+    #   VerifyJoltVersionID() doesn't notice: it is computed before the asserts
+    #   are switched on. JPH_NO_DEBUG keeps the headers as the DLL was built.
+    get_target_property(_usdcc_jolt_definitions Jolt::Jolt INTERFACE_COMPILE_DEFINITIONS)
+    list(FILTER _usdcc_jolt_definitions EXCLUDE REGEX "NDEBUG")
+    set_property(TARGET Jolt::Jolt PROPERTY INTERFACE_COMPILE_DEFINITIONS ${_usdcc_jolt_definitions} JPH_NO_DEBUG)
 endif()
 
 # QWindowKit: frameless window + custom title bar (usdcc::ui::MainWindow's
@@ -239,6 +254,8 @@ add_subdirectory(src/cpp/plugin_sdk)
 add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
 add_subdirectory(src/plugins/cpp_example)
+# Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
+add_subdirectory(src/plugins/physics_jolt)
 
 set(USDCC_BUILD_BLENDER_MESH_TOOLS ON CACHE BOOL "Build the GPL-linked Blender mesh tools plugin" FORCE)
 add_subdirectory(src/plugins/blender_mesh_tools)

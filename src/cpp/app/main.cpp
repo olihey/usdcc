@@ -64,6 +64,7 @@
 #include "usdcc/usd/open_stage_options_dialog.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
+#include "usdcc/usd/physics_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
@@ -892,6 +893,8 @@ int main(int argc, char** argv) {
 
     // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
     window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
+    // Physics > rigid bodies, colliders, a ground and a scene; Simulate (docs/PHYSICS.md §5.4).
+    window.mainMenuBar()->addMenu(new usdcc::usd::PhysicsMenu(&stageManager, undoManager, playback, &window));
 
     // Built after the File menu above so "File" stays the first menu-bar
     // entry (QMenuBar orders entries by insertion order).

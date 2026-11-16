@@ -6,6 +6,8 @@
 
 #include <QWidget>
 
+#include <optional>
+
 namespace usdcc::usd {
 
 // The timeline's ruler (docs/ANIMATION.md §5.5): ticks and frame numbers over a range of
@@ -25,6 +27,11 @@ public:
     // reaches all of the range.
     void setPlaybackRange(const TimeRange& range);
     TimeRange playbackRange() const { return m_playbackRange; }
+    // The frames a simulation has cached (docs/PHYSICS.md §5.1): a band along the bottom,
+    // dimmed when the cache is stale. Nothing: no band.
+    void setCachedRange(const std::optional<TimeRange>& range, bool stale);
+    std::optional<TimeRange> cachedRange() const { return m_cachedRange; }
+    bool cacheStale() const { return m_cacheStale; }
     // Where the playhead is. Outside the range, it isn't drawn.
     void setTime(double time);
     double time() const { return m_time; }
@@ -56,6 +63,8 @@ private:
 
     mutable TimeAxis m_axis;  // its extent follows the width, set when asked for
     TimeRange m_playbackRange{0.0, 1.0};
+    std::optional<TimeRange> m_cachedRange;
+    bool m_cacheStale = false;
     double m_time = 0.0;
     bool m_scrubbing = false;
     double m_lastScrubbed = 0.0;

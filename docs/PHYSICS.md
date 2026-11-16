@@ -1,8 +1,13 @@
 # Physics — Plan
 
-Status: **plan, nothing built.** Written 2026-11-16, revised the same day after a review against
-OpenUSD's parser source. The choices are in §4, what has to be checked
-before building on them in §7, and what was decided and what is still open in §8.
+Status: **phases 0 to 2 built** (2026-11-16): rigid bodies simulate with Jolt, from the
+timeline's Simulate, the Physics menu or `usdcc.physics`, into a cache that is never saved.
+Baking (phase 3) and joints (phase 4) are next. Written 2026-11-16, revised the same day after a
+review against OpenUSD's parser source; phase 0's findings are in §7. §2 describes the app as it
+was before phase 0. The choices are in §4, what was decided and what is still open in §8.
+
+To try it: open `test_data/physics_drop.usda`, turn on Simulate (the ball-and-ground button in
+the timeline, or Physics > Simulate) and play.
 
 usdcc can already *author* physics: the Create menu makes `PhysicsScene`, collision groups and
 every joint type ([CREATE_MENU.md](CREATE_MENU.md)), Applied Schemas applies the physics APIs
@@ -41,7 +46,7 @@ Two things the schema does **not** say, which §4 has to decide:
 | Session layer | Used by variant edit mode, saved as text with the app session (`session_stages.cpp`), listed by the Layer Editor |
 | Undo | Records the edit target's layer only ([undo_manager.h](../src/cpp/usd/include/usdcc/usd/undo_manager.h)). Edits to other layers are not steps |
 | Plugins | The C++ SDK loads libraries that share the app's classes ([PLUGIN_SDK.md](PLUGIN_SDK.md)). `Host` has no notion of a solver |
-| Dependencies | No physics library. vcpkg's pinned baseline has ports for Jolt 5.6.0, PhysX 5.5.0, Bullet 3.25 and MuJoCo 3.10.0 |
+| Dependencies | Jolt 5.6.0 from vcpkg since phase 0, linked only by the headless tests so far. vcpkg's pinned baseline also has PhysX 5.5.0, Bullet 3.25 and MuJoCo 3.10.0 |
 
 ## 3. Engines
 
@@ -209,16 +214,18 @@ bodies ordinary prims for as long as the cache exists and leaves the user's laye
 | `physics_backend.h` | `usdcc_usd`, Qt-free | §5.2, and the registry of backends |
 | `SimCache` | `usdcc_usd`, Qt-free | The cache layer: makes and removes it, pre-creates the world-space ops for every body (§4.6), writes a frame's poses in one `SdfChangeBlock` under the session's guard (§4.4), knows the cached range, clears |
 | `PhysicsSession` | `usdcc_usd`, Qt-free | One per stage that has simulated: the backend's world, the cache, the start frame, stale or not. `start()` clears the cache and then parses (§4.4), `stepTo(frame)`, `reset()`. Reads kinematic bodies' animated transforms and hands them to the backend before each step. Ignores the stage changes its own writes cause |
-| `physics_bake.h` | `usdcc_usd`, Qt-free | §4.5. Callers wrap it in an `UndoManager` edit |
-| `Stage::physics()` | `usdcc_usd` | The stage's session, made on first use; `physicsChanged` for the cached range and the stale mark |
+| `physics_bake.h` (phase 3) | `usdcc_usd`, Qt-free | §4.5. Callers wrap it in an `UndoManager` edit |
+| `Stage::physics()` | `usdcc_usd` | The stage's session, made on first use; `PhysicsSession::changed` for the cached range, the stale mark and the reports. `Stage::setEditTargetLayer()` refuses the cache |
 | `PlaybackController` | `usdcc_usd_ui` | With Simulate on, a tick asks the session for the next frame before setting the time (§4.3) |
 | `TimelineBar`, `TimeRuler` | `usdcc_usd_ui` | The Simulate toggle and Reset; the cached range as a band on the ruler, dimmed when stale |
-| Physics menu | `usdcc_usd_ui` | §5.4 |
-| Collider overlay | `usdcc_usd_ui` | Wireframes of the parsed shapes and joint frames, from `physics_desc`, drawn as the gizmos' `GizmoGeometry` lines. A Display menu entry ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)) |
+| `PhysicsMenu`, `physics_actions` (`physics_menu.h`) | `usdcc_usd_ui` | §5.4 |
+| Collider overlay (phase 4) | `usdcc_usd_ui` | Wireframes of the parsed shapes and joint frames, from `physics_desc`, drawn as the gizmos' `GizmoGeometry` lines. A Display menu entry ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)) |
 | `Host::addPhysicsBackend()` | `usdcc_plugin_sdk` | Registers a backend and tells the Plugin Manager |
-| `physics_jolt` | `src/plugins` | The Jolt backend |
+| `physics_jolt` | `src/plugins` | The Jolt backend: `usdcc_physics_jolt_backend`, a static library the tests link too, and the plugin that registers it. Jolt's library and licence go in the plugin's folder; `tools/deploy.py` ships it in `plugins/` |
 
 ### 5.2 The backend interface
+
+As built ([physics_backend.h](../src/cpp/usd/include/usdcc/usd/physics_backend.h)):
 
 ```cpp
 struct PhysicsReport { PXR_NS::SdfPath prim; std::string message; };   // §4.8
@@ -226,10 +233,10 @@ struct PhysicsReport { PXR_NS::SdfPath prim; std::string message; };   // §4.8
 class PhysicsWorld {                      // one simulation of one stage
 public:
     virtual ~PhysicsWorld() = default;
-    virtual void setKinematicPose(BodyId, const Pose&) = 0;      // before a step
+    // Where a kinematic body has to be at the end of the next step.
+    virtual void setKinematicTarget(BodyId, const Pose&, double seconds) = 0;
     virtual void step(double seconds, int substeps) = 0;
-    virtual void readPoses(std::vector<Pose>& out) const = 0;    // dynamic bodies, in BodyId order
-    virtual void readVelocities(std::vector<Velocity>& out) const = 0;
+    virtual void readPoses(std::vector<Pose>& out) const = 0;    // every body, in BodyId order
 };
 
 class PhysicsBackend {
@@ -242,22 +249,25 @@ public:
 ```
 
 Plain structs in, plain arrays out. A world is rebuilt from the start frame whenever the cache
-is stale; nothing is patched in place.
+is stale; nothing is patched in place. `PhysicsBackends` holds the backends the app has; the first
+one added is used. Velocities aren't read back yet: nothing needs them before baking.
 
 ### 5.3 The Jolt mapping
 
 | UsdPhysics | Jolt | Notes |
 |---|---|---|
-| Sphere, cube, capsule, cylinder | `SphereShape`, `BoxShape`, `CapsuleShape`, `CylinderShape`, in a `ScaledShape` or `RotatedTranslatedShape` as needed | A sphere under non-uniform scale is reported |
-| Cone | `TaperedCylinderShape` | |
+| Sphere, cube, capsule, cylinder | `SphereShape`, `BoxShape`, `CapsuleShape`, `CylinderShape` | Sizes come from the parser with the world scale in them. A collider off its body's origin, or turned to its axis, goes in a `StaticCompoundShape` |
+| Cone | `TaperedCylinderShape` with a top radius of zero | Its apex up its axis, as `UsdGeomCone` has it |
+| Capsule or cylinder with two radii | The larger one | Reported |
 | Plane | `PlaneShape` | Static or kinematic only, as the schema says |
 | Mesh, `convexHull` | `ConvexHullShape` | |
 | Mesh, `boundingCube` / `boundingSphere` | `BoxShape` / `SphereShape` from the points' bounds | |
 | Mesh, `none` | `MeshShape` | Static and kinematic bodies. On a dynamic body: reported, and a convex hull used instead |
 | Mesh, `convexDecomposition`, `meshSimplification` | Phase 5 | Until then: reported, and a convex hull used |
 | Several colliders under one body | `StaticCompoundShape` | |
+| A body without a collider | `EmptyShape` | Reported: it falls, and hits nothing |
 | Material | `Body::SetFriction`, `SetRestitution` | Jolt has one friction per body; UsdPhysics has static and dynamic friction per collider. Dynamic friction is used. A body whose colliders have different materials gets the first collider's, and is reported. The schema's "average" combine rule through `PhysicsSystem::SetCombineFriction` and `SetCombineRestitution` |
-| Mass, centre of mass, inertia | `MassProperties` override | From `ComputeMassProperties()` and `physics_mass`, not Jolt's own |
+| Mass, centre of mass, inertia | `MassProperties` override, and an `OffsetCenterOfMassShape` where UsdPhysics' centre of mass isn't the shapes' | From `ComputeMassProperties()` and `physics_mass`, not Jolt's own |
 | Kinematic body | `EMotionType::Kinematic`, `MoveKinematic()` each step | |
 | Fixed, revolute, prismatic, spherical, distance joints | `FixedConstraint`, `HingeConstraint`, `SliderConstraint`, `SwingTwistConstraint`, `DistanceConstraint` | Break force: phase 4 |
 | Generic joint with limits and drives | `SixDOFConstraint` with limits and motors | |
@@ -272,20 +282,29 @@ Physics
   Make Rigid Body            RigidBodyAPI on the selection, CollisionAPI on its geometry,
                              MeshCollisionAPI = convexHull on meshes
   Make Static Collider       CollisionAPI on the selection's geometry
-  Add Ground Plane           a Plane with CollisionAPI at the up axis' zero
+  Add Ground Plane           a Plane with CollisionAPI at the up axis' zero, 20 m across
   Add Physics Scene
   ──────────────
-  Check Physics…             the USD validators and the backend's reports
-  Bake Simulation…
+  Simulate                   the timeline's toggle
   Reset Simulation
+  ──────────────             later:
+  Check Physics…             the USD validators and the backend's reports (phase 4)
+  Bake Simulation…           (phase 3)
 ```
 
-- Each of the first four is one undo step, and uses the Applied Schemas code that exists.
-- Without a `PhysicsScene`, simulation runs with the schema's default gravity and the Log says so.
-  Nothing is authored for the user.
-- The timeline's Simulate toggle is app-wide and off at start, like auto-key.
-- Python: `usdcc.physics.simulate(start, end)`, `reset()`, `bake()`, `cached_range()`,
-  `is_stale()`, `reports()`, and a `physics_changed` event.
+- Each of the first four is one undo step: UsdPhysics' own `Apply()` inside one `UndoManager`
+  edit, as `prim_actions::applySchema()` would make one step per schema. Prims inside instances
+  are left alone.
+- Without a `PhysicsScene`, simulation runs with Earth's gravity down the up axis and the Log says
+  so. Nothing is authored for the user.
+- The timeline has a Simulate button beside Loop, and Simulate and Reset Simulation in its menu.
+  The ruler shows the cached frames as a band along its bottom, dimmed when stale; the button's
+  tooltip says which frames.
+- Simulate is app-wide and off at every start, like auto-key. Turning it on while playing starts
+  a simulation at once.
+- Python: `usdcc.physics.simulate(start, end)`, `reset()`, `cached_range()`, `is_stale()`,
+  `reports()`; `usdcc.app.is_simulating()`, `set_simulating()`; and a `physics_changed` event.
+  `bake()` comes with phase 3.
 
 ### 5.5 What gets saved
 
@@ -297,7 +316,9 @@ Physics
   the session layer itself the edit target (`session_stages.cpp`); that is a different layer from
   the cache, and the rule is enforced in `Stage::setEditTargetLayer()`, not only in the Layer
   Editor's menu, so no path reaches the cache.
-- Simulate, the substep count and the collider overlay are settings in `usdcc.ini`.
+- **Settings:** the substep count (Settings > Physics, `Physics/substeps`, 4) is in
+  `usdcc.ini`. Simulate isn't saved: it is off at every start. The collider overlay comes with
+  phase 4.
 
 ## 6. Phases
 
@@ -305,46 +326,91 @@ Each phase ships on its own and leaves the app consistent.
 
 | Phase | What | Main files | Tests |
 |---|---|---|---|
-| **0. Spike** | `joltphysics` in `vcpkg.json` (first confirm the version the pinned baseline has); its imported target mapped to Release in every configuration, as Qt is; a headless test that parses a stage and drops a cube on a plane; the measurements of §7 | `vcpkg.json`, `CMakeLists.txt`, a test | The cube comes to rest on the plane; two runs give the same poses |
-| **1. Core** | `physics_desc`, `physics_mass`, the backend interface and registry, `SimCache`, `PhysicsSession`, `Host::addPhysicsBackend()`, the Jolt plugin: rigid bodies, primitives, convex hulls, static meshes, compounds, materials, mass, gravity, kinematic bodies | the new headers, `plugin.h`, `src/plugins/physics_jolt`, `test_data/physics_*.usda` | Units: a stage in centimetres falls as one in metres does. Mass precedence case by case; `physics_mass` against closed-form box and sphere. Restitution and friction. A kinematic body pushes a dynamic one. A body animated only by time samples starts where the start frame puts it. Solving twice gives the same first frame (the cache was cleared before parsing). A body under a rotated, simulated parent lands where it would alone. A body inside an instance is reported, not moved. The cache: range, clear, the user's layers untouched and not dirty, its own writes don't make it stale. A fake backend drives the session |
-| **2. Timeline** | Simulate, Reset, the cached band, stale marking, the playback rule of §4.3, the Physics menu's first five entries, settings, session save, the Layer Editor entry, Python | `playback_controller.cpp`, `timeline_bar.cpp`, `time_ruler.cpp`, `session_stages.cpp`, `layer_stack.cpp`, bindings | The controller against a fake clock: frames in order in both modes; an edit makes the cache stale; Play while stale starts from the start frame; scrubbing reads the cache; the session file has no cache path; the cache can't become the edit target, variant edit mode included |
+| **0. Spike** (done) | `joltphysics` in `vcpkg.json`; its imported target mapped to Release in every configuration, as Qt is, with the two Debug fixes of §7 item 3; a headless test that parses a stage and drops a cube on a plane; the measurements of §7 | `vcpkg.json`, `CMakeLists.txt`, `tests/physics_spike_test.cpp` | The cube comes to rest on the plane; two runs give the same poses. Both pass, and so do the §7 checks |
+| **1. Core** (done) | `physics_desc`, `physics_mass`, the backend interface and registry, `SimCache`, `PhysicsSession`, `Host::addPhysicsBackend()`, the Jolt plugin: rigid bodies, primitives, convex hulls, static meshes, compounds, materials, mass, gravity, kinematic bodies | the new headers, `plugin.h`, `src/plugins/physics_jolt`, `test_data/physics_drop.usda`, `tests/physics_test.cpp` | Units: a stage in centimetres falls as one in metres does. Mass precedence case by case; `physics_mass` against closed-form box and sphere. Restitution and friction. A kinematic body pushes a dynamic one. A body animated only by time samples starts where the start frame puts it. Solving twice gives the same first frame (the cache was cleared before parsing). A body under a rotated, simulated parent lands where it would alone. A body inside an instance is reported, not moved. The cache: range, clear, the user's layers untouched and not dirty, its own writes don't make it stale. A fake backend drives the session |
+| **2. Timeline** (done) | Simulate, Reset, the cached band, stale marking, the playback rule of §4.3, the Physics menu's first four entries with Simulate and Reset, settings, session save, the Layer Editor entry, Python | `playback_controller.cpp`, `timeline_bar.cpp`, `time_ruler.cpp`, `physics_menu.cpp`, `session_stages.cpp`, `layer_stack.cpp`, bindings, `tests/physics_timeline_test.cpp` | The controller against a fake clock: frames in order in both modes; an edit makes the cache stale; Play while stale starts from the start frame; scrubbing reads the cache; the session file has no cache path; the cache can't become the edit target, variant edit mode included |
 | **3. Bake** | Bake Simulation with its dialog and progress; mark kinematic; world poses converted to local ops, ancestors first | `physics_bake`, a dialog | Baked, with the cache cleared, the stage shows the same transforms at every frame, nested bodies included; no `!resetXformStack!` in the user's layer; one undo step; baking the selection leaves the rest; baking a stale cache solves anew first |
 | **4. Constraints** | Joints, limits, drives, break force, collision groups, filtered pairs, the collider overlay, Check Physics | the Jolt plugin, the viewport overlay | A hinge stays within its limits; a drive reaches its target; filtered pairs pass through each other; a broken joint lets go |
 | **5. Later** | Convex decomposition (V-HACD or CoACD: licences to read then), point instancers, grabbing a body with the mouse while it plays, a cache on disk as value clips, baking to the prim's own ops, a second backend | — | — |
 
-Phase 0 goes first because §4.2 rests on something not yet measured. Phase 3 depends only on
-phase 1, and can move before phase 2 if results in a file matter more than playing them.
+Phase 0 went first because §4.2 rested on something not yet measured (§7 item 1: it holds).
+Phase 3 depends only on phase 1, and can move before phase 2 if results in a file matter more
+than playing them.
 
-## 7. To verify while building
+`tests/physics_spike_test.cpp` drives Jolt directly, with just enough of a UsdPhysics mapping for
+cubes, spheres and planes; it stays, for §7's measurements. `tests/physics_test.cpp` checks
+phase 1 (with a fake backend and with Jolt), `tests/physics_timeline_test.cpp` phase 2, and
+`python_physics` in `tests/python_app_test.cpp` the Python API.
 
-Believed, not tested here.
+Phases 1 and 2 as built, where they differ from the plan above:
 
-1. **What Hydra does when a frame's samples arrive.** Adding a time sample to an attribute that
-   had one or none may make UsdImaging resync the prim instead of only dirtying its transform,
-   which for a mesh is expensive. `SimCache` pre-creates the ops so their *existence* never
-   changes while playing; whether the samples themselves cost a resync is phase 0's main
-   measurement, at 1,000 bodies. **If they do:** while playing, write each frame as *default*
-   values in the cache layer (an info-only change) and keep the samples in a second layer that is
-   only composed once playback stops.
-2. A session layer's sublayer may hold a stronger `xformOpOrder` than the root layer's, with
-   `!resetXformStack!`, and clearing the sublayer brings the prim's own stack back. Storm, the
-   Outliner's transform display and the gizmos all honour the reset.
-3. Jolt's exported compile definitions reach the plugin through vcpkg's CMake config, and its
-   Release library links in a Debug build of usdcc (the release CRT and
-   `_ITERATOR_DEBUG_LEVEL=0`, as [CMakeLists.txt](../CMakeLists.txt) sets for everything).
-4. The same build on the same machine gives the same poses on every run. Jolt promises
-   cross-platform determinism only with a build option; whether to turn it on is a question once
-   there are two platforms to compare.
-5. `ComputeMassProperties()` with our volume callback matches Jolt's own mass for a box and a
-   sphere of uniform density.
-6. `MoveKinematic()` from sampled transforms gives a kinematic body the velocity that pushes
-   dynamic bodies correctly, with no step of lag at the first frame.
-7. Single precision is enough for stages a few kilometres from the origin, solving relative to
-   the bodies' common centre. If not: Jolt's double-precision build.
-8. vcpkg's pinned baseline has `joltphysics` at 5.6.0 (§2): not read from the baseline itself.
-9. A `TaperedCylinderShape` takes a top radius of zero, for a cone. Jolt's capsule and cylinder
-   accept the non-uniform scales a `ScaledShape` would give them, or those are reported as the
-   sphere's are.
+- The cache is the session layer's *first* sublayer, so the session layer itself (where variant
+  edit mode writes) stays stronger than it.
+- In Real Time, playback that has run ahead of the solver shows the next solved frame and counts
+  on from there, so no frame is skipped (§4.3).
+- Muting or unmuting the cache doesn't make it stale: the session tells a mute from an edit by
+  the layer's muted state.
+- Static colliders inside an instance stay: they never move, so nothing has to be written for
+  them. Only moving bodies inside instances are left out (§4.8).
+
+## 7. Checked in phase 0
+
+What the plan believed, and what `tests/physics_spike_test.cpp` found (2026-11-16, Release build,
+Windows, one machine). Items still open are marked.
+
+1. **Hydra and a frame's samples: no resync.** For 1,000 mesh bodies whose cache ops exist,
+   writing one more sample per body (in one `SdfChangeBlock`) gives UsdImaging's scene index 1,000
+   dirtied prims with only the transform locator, and none removed or added. Creating the ops and
+   the `xformOpOrder` in the first place doesn't resync either. Writing defaults instead gives the
+   same notices, so §7's fallback (defaults while playing, samples in a second layer) isn't
+   needed. Measured on the scene indices the viewport's engine uses by default in 26.08
+   (`USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX`). A frame cost about 1.6 ms to write and 6 ms to sync
+   and pull every transform. **Open:** Storm's own cost per dirtied transform, in the app.
+2. **The cache layer composes as planned.** An anonymous sublayer of the session layer holding
+   `[!resetXformStack!, translate:sim, orient:sim, scale:sim]` puts a body exactly at the solver's
+   world pose under a rotated, non-uniformly scaled parent, at every sampled frame. The user's own
+   `xformOpOrder` is untouched, and `SdfLayer::Clear()` on the cache brings the prim's own stack
+   back. Parsing through the cache puts the body at the origin, as §4.4 said. **Open:** the
+   Outliner's transform display and the gizmos with `!resetXformStack!` (Storm gets it through the
+   scene index, which honours it).
+3. **Jolt in a Debug build needs two fixes**, now in [CMakeLists.txt](../CMakeLists.txt):
+   - Jolt's target adds `NDEBUG` for `$<CONFIG:Release,...>`. With Debug mapped to Release that
+     matches a Debug build too, so `assert()` would be off in everything that links Jolt. The
+     definition is dropped.
+   - Without `NDEBUG`, Jolt's headers switch its asserts on, which changes its classes' layout
+     (`Mutex` 80 to 88 bytes, `PhysicsSystem` 1,344 to 1,440) from the Release DLL's. Jolt's own
+     check, `VerifyJoltVersionID()`, still returns true: it is computed before the asserts are
+     switched on. `JPH_NO_DEBUG` keeps the headers as the DLL was built.
+
+   Found with a separate two-file CMake project set up as usdcc is (release CRT,
+   `_ITERATOR_DEBUG_LEVEL=0`, Debug mapped to Release). The spike checks that the asserts are off.
+   **Open:** a Debug build of usdcc itself.
+4. **Deterministic on one machine.** 200 cubes falling onto each other, with Jolt's worker
+   threads, give bit-identical poses at every frame of two runs. Cross-platform determinism needs
+   Jolt's `CROSS_PLATFORM_DETERMINISTIC`, which vcpkg's port turns off: a question once there are
+   two platforms to compare.
+5. **Mass matches.** `ComputeMassProperties()` with the spike's volume callback gives Jolt's own
+   mass and inertia for a non-uniformly scaled box with an explicit density and for a sphere at the
+   schema's default density, to 1e-4. The callback returns inertia at unit density;
+   `ComputeMassProperties()` scales it.
+6. **Kinematic bodies have no lag.** After one `MoveKinematic()` and one step, a kinematic body is
+   at its animated position and moved at the animation's speed during that first frame. It pushes
+   a dynamic box ahead of it.
+7. **Far from the origin: recentre.** At 5 km, a cube at rest lands 0.02 mm from where it lands at
+   the origin. A falling stack of 30 ends up to 16 cm apart, because a stack falling over is
+   chaotic and half a millimetre of rounding sends it down another way. Solved relative to a centre
+   near the bodies, both land exactly as at the origin. So `PhysicsSession` solves relative to the
+   bodies' centre at the start frame, and Jolt's double-precision build isn't needed. The parser's
+   own float positions are off by up to 0.2 mm at 5 km, one more reason `physics_desc` reads world
+   transforms itself, in double (§4.3).
+8. **Jolt 5.6.0** (port version 1) is what the pinned baseline has.
+9. **Shapes.** A `TaperedCylinderShape` with a top radius of zero is a cone, with or without a
+   convex radius. A capsule takes only uniform scale; a cylinder takes scales whose two radial
+   components are equal. Other scales are reported, as a sphere's are (§5.3).
+
+Also measured, for §8 question 1: columns of ten 1 m cubes falling onto a plane cost Jolt about
+1.1 ms per frame on average for 1,000 bodies and 2.1 ms for 3,000, at four substeps (worst frame
+3 ms). Writing the cache and syncing it (item 1) cost more than solving at those counts.
 
 ## 8. Open questions
 
@@ -360,9 +426,9 @@ Still open:
 
 | # | Question | Recommended |
 |---|---|---|
-| 1 | How many bodies should play at frame rate? | A few thousand; it decides how much §7 item 1 matters |
-| 2 | Without a `PhysicsScene`: simulate with defaults, or refuse? | Defaults, and say so in the Log (§5.4) |
-| 3 | Should Simulate be per stage or app-wide? | App-wide, off at start, as auto-key |
+| 1 | How many bodies should play at frame rate? | A few thousand. Phase 0 (§7) found the solver and the cache cheap at 3,000; Storm's share is still to measure |
+| 2 | Without a `PhysicsScene`: simulate with defaults, or refuse? | Built as recommended: Earth's gravity, said in the Log (§5.4) |
+| 3 | Should Simulate be per stage or app-wide? | Built as recommended: app-wide, off at every start |
 
 ## 9. Out of scope
 

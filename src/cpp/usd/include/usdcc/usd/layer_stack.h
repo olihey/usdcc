@@ -30,6 +30,8 @@ struct LayerEntry {
     bool muted = false;
     bool missing = false;  // a sublayer that can't be opened
     bool editTarget = false;
+    // The simulation cache (docs/PHYSICS.md §5.5): it can be muted, nothing else.
+    bool simulationCache = false;
 
     // Its sublayers, strongest first; a muted or missing layer has none.
     std::vector<LayerEntry> children;

@@ -28,7 +28,8 @@ class NumberField;
 // The timeline (docs/ANIMATION.md §4.3): one thin bar for the app, under the dock area,
 // on the current stage. The frame shown and the transport buttons, then the ruler with
 // the range slider under it, between the playback range's start and end, then the frame
-// rate, Loop and a menu.
+// rate, Loop, Simulate and a menu. The ruler shows the frames a simulation has cached
+// (docs/PHYSICS.md §5.1).
 //
 // The ruler and the slider show the same times, edge to edge (shownRange()), so the
 // slider's bar lies under exactly the frames that play, which the ruler lights. That
@@ -53,11 +54,13 @@ public:
     properties::NumberField* endField() const { return m_end; }
     QToolButton* playButton() const { return m_play; }
     QToolButton* loopButton() const { return m_loop; }
+    QToolButton* simulateButton() const { return m_simulate; }
     QLabel* rateLabel() const { return m_rate; }
     // The times the ruler and the slider both show.
     TimeRange shownRange() const { return m_shown; }
 
-    // The menu behind the last button: Loop, Every Frame or Real Time, and the range.
+    // The menu behind the last button: Loop, Every Frame or Real Time, Simulate and Reset
+    // Simulation, and the range.
     void populateMenu(QMenu* menu);
 
     // Writes the playback range to the stage's root layer as its start and end time
@@ -73,6 +76,7 @@ private:
     TimeRange fittedRange() const;
     void refreshPlaying();
     void refreshOptions();
+    void refreshSimulation();
 
     PlaybackController* m_playback;
     std::shared_ptr<UndoManager> m_undoManager;
@@ -80,6 +84,7 @@ private:
     usdcc::core::Signal<double>::Connection m_timeConnection;
     usdcc::core::Signal<>::Connection m_rangeConnection;
     usdcc::core::Signal<const StageChanges&>::Connection m_changedConnection;
+    usdcc::core::Signal<>::Connection m_physicsConnection;
 
     properties::NumberField* m_frame;
     properties::NumberField* m_start;
@@ -88,6 +93,7 @@ private:
     TimeRangeSlider* m_slider;
     QToolButton* m_play;
     QToolButton* m_loop;
+    QToolButton* m_simulate;
     QLabel* m_rate;
     TimeRange m_shown = kDefaultTimeRange;
     // The stage's own range as last seen (nothing: it has none), to tell when it changes.

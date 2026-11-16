@@ -1,5 +1,7 @@
 #include "usdcc/usd/session_stages.h"
 
+#include "usdcc/usd/sim_cache.h"
+
 #include "usdcc/usd/stage_manager.h"
 
 #include "usdcc/core/log.h"
@@ -12,6 +14,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 
+#include <algorithm>
 #include <optional>
 
 namespace usdcc::usd::session_stages {
@@ -83,8 +86,12 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
         state.insert(QStringLiteral("playbackRange"), QJsonArray{range.start, range.end});
     }
 
+    // The simulation cache is never saved (docs/PHYSICS.md §5.5): an anonymous layer can't
+    // be found again, so neither its mute nor its place among the sublayers is kept.
     QJsonArray muted;
-    for (const std::string& identifier : usdStage->GetMutedLayers()) muted << qs(identifier);
+    for (const std::string& identifier : usdStage->GetMutedLayers()) {
+        if (!physics::SimCache::isCacheLayerIdentifier(identifier)) muted << qs(identifier);
+    }
     if (!muted.isEmpty()) state.insert(QStringLiteral("mutedLayers"), muted);
 
     const PXR_NS::UsdStageLoadRules& rules = usdStage->GetLoadRules();
@@ -96,8 +103,16 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
 
     const PXR_NS::SdfLayerHandle session = usdStage->GetSessionLayer();
     if (session && !session->IsEmpty()) {
+        PXR_NS::SdfLayerRefPtr saved = PXR_NS::SdfLayer::CreateAnonymous();
+        saved->TransferContent(session);
+        std::vector<std::string> sublayers = saved->GetSubLayerPaths();
+        const auto cache = std::remove_if(sublayers.begin(), sublayers.end(), physics::SimCache::isCacheLayerIdentifier);
+        if (cache != sublayers.end()) {
+            sublayers.erase(cache, sublayers.end());
+            saved->SetSubLayerPaths(sublayers);
+        }
         std::string text;
-        if (session->ExportToString(&text)) state.insert(QStringLiteral("sessionLayer"), qs(text));
+        if (!saved->IsEmpty() && saved->ExportToString(&text)) state.insert(QStringLiteral("sessionLayer"), qs(text));
     }
     return state;
 }

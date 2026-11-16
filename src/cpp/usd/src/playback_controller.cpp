@@ -3,6 +3,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <QAction>
@@ -20,6 +21,25 @@ constexpr auto kEveryFrameKey = "Timeline/everyFrame";
 constexpr auto kPlayShortcutKey = "Shortcuts/timeline.play";
 constexpr auto kNextFrameShortcutKey = "Shortcuts/timeline.nextFrame";
 constexpr auto kPreviousFrameShortcutKey = "Shortcuts/timeline.previousFrame";
+constexpr auto kSubstepsKey = "Physics/substeps";
+
+void defineSimulationSettings() {
+    static const bool defined = [] {
+        usdcc::core::Settings::instance().define({
+            .key = kSubstepsKey,
+            .category = "Physics",
+            .group = "Simulation",
+            .label = "Substeps per frame",
+            .description = "How many steps the solver takes for each frame: more is steadier and slower.",
+            .type = usdcc::core::SettingType::Int,
+            .defaultValue = 4,
+            .minimum = 1,
+            .maximum = 64,
+        });
+        return true;
+    }();
+    (void)defined;
+}
 }  // namespace
 
 PlaybackController::PlaybackController(StageManager* stageManager, QObject* parent)
@@ -29,6 +49,7 @@ PlaybackController::PlaybackController(StageManager* stageManager, QObject* pare
         m_loops = settings.value(kLoopKey, true).toBool();
         m_mode = settings.value(kEveryFrameKey, true).toBool() ? PlaybackMode::EveryFrame : PlaybackMode::RealTime;
     }
+    defineSimulationSettings();
     m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, &PlaybackController::tick);
     m_currentStageConnection =
@@ -49,6 +70,7 @@ void PlaybackController::play() {
     const TimeRange frames = playbackFrames(m_stage->playbackRange());
     // On the last frame, or anywhere outside the range: from the top.
     if (m_stage->time() >= frames.end || m_stage->time() < frames.start) m_stage->setTime(frames.start);
+    if (m_simulates) startSimulation();
     m_startTime = m_stage->time();
     m_clock.start();
     m_playing = true;
@@ -77,12 +99,50 @@ void PlaybackController::tick() { advance(static_cast<double>(m_clock.nsecsElaps
 void PlaybackController::advance(double elapsedSeconds) {
     if (!m_playing || !m_stage) return;
     const TimeRange range = m_stage->playbackRange();
-    const PlaybackStep step =
+    PlaybackStep step =
         m_mode == PlaybackMode::EveryFrame
             ? nextFrame(m_stage->time(), range, m_loops)
             : frameAfter(m_startTime, elapsedSeconds, timeCodesPerSecond(m_stage->usdStage()), range, m_loops);
+    if (m_simulates) {
+        physics::PhysicsSession& session = m_stage->physics();
+        const std::optional<TimeRange> cached = session.cachedRange();
+        if (session.hasWorld() && cached && step.time > cached->end) {
+            // Never past a frame the solver hasn't made: one more, and Real Time counts on
+            // from there, as if it had waited.
+            const double next = std::min(step.time, cached->end + 1.0);
+            session.stepTo(next);
+            if (next < step.time) {
+                step = {next, false};
+                m_startTime = next;
+                m_clock.start();
+            }
+        }
+    }
     m_stage->setTime(step.time);
     if (step.finished) stop();
+}
+
+void PlaybackController::startSimulation() {
+    physics::PhysicsSession& session = m_stage->physics();
+    if (session.hasWorld()) return;  // going on from where it is
+    const double start = playbackFrames(m_stage->playbackRange()).start;
+    m_stage->setTime(start);
+    session.setSubsteps(usdcc::core::Settings::instance().get<int>(kSubstepsKey, 4));
+    session.start(start);
+}
+
+void PlaybackController::setSimulates(bool simulates) {
+    if (simulates == m_simulates) return;
+    m_simulates = simulates;
+    if (simulates && m_playing && m_stage) startSimulation();
+    Q_EMIT optionsChanged();
+}
+
+void PlaybackController::resetSimulation() {
+    if (!m_stage) return;
+    stop();
+    m_stage->physics().reset();
+    m_stage->setTime(playbackFrames(m_stage->playbackRange()).start);
 }
 
 void PlaybackController::setTime(double time) {

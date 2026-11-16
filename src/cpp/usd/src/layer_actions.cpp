@@ -281,7 +281,7 @@ std::string insert(UndoManager& undo, const StageRefPtr& stage, const std::strin
 
 }  // namespace
 
-bool canAddTo(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing; }
+bool canAddTo(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing && !entry.simulationCache; }
 
 std::string addInMemoryLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& parent, QString* error) {
     if (!stage) return {};
@@ -331,7 +331,7 @@ std::string addExistingLayer(UndoManager& undo, const StageRefPtr& stage, const 
     return insert(undo, stage, parent, layer, tr("Add %1").arg(QFileInfo(file).fileName()), error);
 }
 
-bool canRemove(const LayerEntry& entry) { return !entry.root && !entry.session; }
+bool canRemove(const LayerEntry& entry) { return !entry.root && !entry.session && !entry.simulationCache; }
 
 bool removeLayer(UndoManager& undo, const StageRefPtr& stage, const std::string& identifier) {
     if (!stage) return false;
@@ -404,7 +404,9 @@ bool reloadLayer(UndoManager& undo, const StageRefPtr& stage, const std::string&
     return ok;
 }
 
-bool canFlatten(const LayerEntry& entry) { return canFlattenToFile(entry) && !entry.children.empty(); }
+bool canFlatten(const LayerEntry& entry) {
+    return canFlattenToFile(entry) && !entry.children.empty() && !entry.simulationCache;
+}
 
 bool canFlattenToFile(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing; }
 
@@ -724,7 +726,7 @@ bool sublayerPosition(const StageRefPtr& stage, const std::string& identifier, i
     return true;
 }
 
-bool canTarget(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing; }
+bool canTarget(const LayerEntry& entry) { return entry.layer && !entry.muted && !entry.missing && !entry.simulationCache; }
 
 bool setEditTarget(const StageRefPtr& stage, const LayerEntry& entry) {
     return stage && canTarget(entry) && stage->setEditTargetLayer(entry.layer);

@@ -16,6 +16,10 @@
     "qtsvg",
     "qt-advanced-docking-system",
     "qtnodes",
-    "pybind11"
+    "pybind11",
+    {
+      "name": "joltphysics",
+      "$comment": "Jolt Physics, the first physics backend (docs/PHYSICS.md)"
+    }
   ]
 }

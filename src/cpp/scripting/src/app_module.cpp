@@ -28,6 +28,7 @@
 #include "usdcc/ui/workspace_library.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/main_menu_actions.h"
+#include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
@@ -207,6 +208,31 @@ private:
 
     Callback m_callback;
     std::map<const usdcc::usd::Stage*, usdcc::core::Signal<double>::Connection> m_stages;
+    usdcc::core::Signal<StageRefPtr>::Connection m_opened;
+    usdcc::core::Signal<StageRefPtr>::Connection m_closed;
+};
+
+// "physics_changed": every open stage's simulation (docs/PHYSICS.md): its cached range,
+// its stale mark or its reports changed.
+struct AllStagesPhysics {
+    using Callback = std::function<void(const StageRefPtr&)>;
+
+    AllStagesPhysics(usdcc::usd::StageManager& stages, Callback callback) : m_callback(std::move(callback)) {
+        for (const StageRefPtr& stage : stages.stages()) add(stage);
+        m_opened = stages.stageOpened.connect([this](const StageRefPtr& stage) { add(stage); });
+        m_closed = stages.stageClosed.connect([this](const StageRefPtr& stage) { m_stages.erase(stage.get()); });
+    }
+
+private:
+    void add(const StageRefPtr& stage) {
+        std::weak_ptr<usdcc::usd::Stage> weak = stage;
+        m_stages[stage.get()] = stage->physics().changed.connect([this, weak]() {
+            if (const StageRefPtr locked = weak.lock()) m_callback(locked);
+        });
+    }
+
+    Callback m_callback;
+    std::map<const usdcc::usd::Stage*, usdcc::core::Signal<>::Connection> m_stages;
     usdcc::core::Signal<StageRefPtr>::Connection m_opened;
     usdcc::core::Signal<StageRefPtr>::Connection m_closed;
 };
@@ -864,6 +890,12 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                     stages, [held](const StageRefPtr& stage, double time) { callLogged(held, cacheIdOf(stage), time); });
                 return id;
             }
+            if (event == "physics_changed") {
+                const int id = s_nextEventConnection++;
+                s_eventConnections[id] = std::make_shared<AllStagesPhysics>(
+                    stages, [held](const StageRefPtr& stage) { callLogged(held, cacheIdOf(stage)); });
+                return id;
+            }
             if (event == "viewport_camera_changed") {
                 // usdcc/app.py reads the camera with active_viewport_camera().
                 return keepConnection(usdcc::usd::ViewportViewPanel::activeViewportChanged(),
@@ -884,6 +916,8 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def("play", []() { playback().play(); });
     m.def("stop_playing", []() { playback().stop(); });
     m.def("is_playing", []() { return playback().isPlaying(); });
+    m.def("is_simulating", []() { return playback().simulates(); });
+    m.def("set_simulating", [](bool on) { playback().setSimulates(on); }, py::arg("on"));
 
     // A plugin's own settings and what it adds (src/python/usdcc/_plugins.py).
     m.def(

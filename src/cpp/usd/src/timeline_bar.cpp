@@ -4,6 +4,7 @@
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/properties/number_field.h"
 #include "usdcc/usd/time_range_slider.h"
@@ -97,6 +98,10 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
     m_loop = transportButton("loop", tr("Loop: start again after the last frame"), this);
     m_loop->setCheckable(true);
     layout->addWidget(m_loop);
+    m_simulate = transportButton("simulate", tr("Simulate: playing solves the stage's physics, frame by frame"), this);
+    m_simulate->setObjectName(QStringLiteral("timelineSimulateButton"));
+    m_simulate->setCheckable(true);
+    layout->addWidget(m_simulate);
     auto* menuButton = new usdcc::ui::PanelMenuButton(tr("Timeline options"), [this](QMenu* menu) { populateMenu(menu); }, this);
     menuButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/more.png")));
     usdcc::ui::scaled::fixedHeight(menuButton, kButtonHeight);
@@ -109,6 +114,7 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
     connect(forward, &QToolButton::clicked, m_playback, &PlaybackController::stepForward);
     connect(toEnd, &QToolButton::clicked, m_playback, &PlaybackController::goToEnd);
     connect(m_loop, &QToolButton::clicked, m_playback, &PlaybackController::setLoops);
+    connect(m_simulate, &QToolButton::clicked, m_playback, &PlaybackController::setSimulates);
 
     // Scrubbing, in the ruler and in the frame field: whole frames, and playing stops.
     connect(m_ruler, &TimeRuler::timeScrubbed, m_playback, &PlaybackController::setTime);
@@ -170,7 +176,9 @@ void TimelineBar::bindStage() {
     m_timeConnection = {};
     m_rangeConnection = {};
     m_changedConnection = {};
+    m_physicsConnection = {};
     if (m_stage) {
+        m_physicsConnection = m_stage->physics().changed.connect([this]() { refreshSimulation(); });
         m_timeConnection = m_stage->timeChanged.connect([this](double) { refreshTime(); });
         m_rangeConnection = m_stage->playbackRangeChanged.connect([this]() { refreshRange(!m_sliderEditing); });
         // The stage's own range and frame rate are metadata, which any edit may change:
@@ -184,6 +192,21 @@ void TimelineBar::bindStage() {
     for (QWidget* child : findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) child->setEnabled(m_stage != nullptr);
     refreshRange(true);
     refreshTime();
+    refreshSimulation();
+}
+
+void TimelineBar::refreshSimulation() {
+    physics::PhysicsSession* session = m_stage ? m_stage->physicsIfStarted() : nullptr;
+    m_ruler->setCachedRange(session ? session->cachedRange() : std::nullopt, session && session->isStale());
+    QString tip = tr("Simulate: playing solves the stage's physics, frame by frame");
+    if (session && session->cachedRange()) {
+        const TimeRange cached = *session->cachedRange();
+        const QString cachedText = session->isStale()
+                                       ? tr("Frames %1 to %2 cached; the stage has changed since: Play solves anew")
+                                       : tr("Frames %1 to %2 cached");
+        tip += QStringLiteral("\n") + cachedText.arg(formatFrame(cached.start), formatFrame(cached.end));
+    }
+    m_simulate->setToolTip(tip);
 }
 
 void TimelineBar::refreshTime() {
@@ -227,7 +250,10 @@ void TimelineBar::refreshPlaying() {
     m_play->setToolTip(playing ? tr("Stop") : tr("Play"));
 }
 
-void TimelineBar::refreshOptions() { m_loop->setChecked(m_playback->loops()); }
+void TimelineBar::refreshOptions() {
+    m_loop->setChecked(m_playback->loops());
+    m_simulate->setChecked(m_playback->simulates());
+}
 
 void TimelineBar::populateMenu(QMenu* menu) {
     QAction* loop = menu->addAction(tr("Loop"));
@@ -253,6 +279,20 @@ void TimelineBar::populateMenu(QMenu* menu) {
         modes->addAction(action);
         connect(action, &QAction::triggered, m_playback, [this, mode = entry.mode]() { m_playback->setMode(mode); });
     }
+
+    menu->addSeparator();
+    QAction* simulate = menu->addAction(tr("Simulate"));
+    simulate->setObjectName(QStringLiteral("timelineSimulate"));
+    simulate->setCheckable(true);
+    simulate->setChecked(m_playback->simulates());
+    simulate->setStatusTip(tr("Playing solves the stage's physics, frame by frame (docs/PHYSICS.md)"));
+    connect(simulate, &QAction::triggered, m_playback, &PlaybackController::setSimulates);
+    QAction* resetSimulation = menu->addAction(tr("Reset Simulation"));
+    resetSimulation->setObjectName(QStringLiteral("timelineResetSimulation"));
+    resetSimulation->setStatusTip(tr("Clear the cached frames and go to the first frame"));
+    physics::PhysicsSession* session = m_stage ? m_stage->physicsIfStarted() : nullptr;
+    resetSimulation->setEnabled(session && session->cachedRange());
+    connect(resetSimulation, &QAction::triggered, m_playback, &PlaybackController::resetSimulation);
 
     menu->addSeparator();
     QAction* reset = menu->addAction(tr("Reset Playback Range"));

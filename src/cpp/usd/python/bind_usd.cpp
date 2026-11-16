@@ -2,6 +2,8 @@
 
 #include <pybind11/stl.h>
 
+#include "usdcc/core/settings.h"
+#include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/shader_node_catalog.h"
@@ -124,7 +126,41 @@ void bindStageManager(py::module_& m) {
         .def(
             "clear_playback_range",
             [](StageManager& self, long cacheId) { openStageWithId(self, cacheId)->clearPlaybackRange(); },
-            py::arg("cache_id"), "Back to the stage's own range.");
+            py::arg("cache_id"), "Back to the stage's own range.")
+        // The stage's simulation (docs/PHYSICS.md §5.4).
+        .def(
+            "physics_simulate",
+            [](StageManager& self, long cacheId, double start, double end) {
+                usdcc::usd::physics::PhysicsSession& session = openStageWithId(self, cacheId)->physics();
+                session.setSubsteps(usdcc::core::Settings::instance().get<int>("Physics/substeps", 4));
+                return session.start(start) && session.stepTo(end);
+            },
+            py::arg("cache_id"), py::arg("start"), py::arg("end"),
+            "Solves from `start` (anew) to `end`, into the cache. False if it couldn't start.")
+        .def(
+            "physics_reset", [](StageManager& self, long cacheId) { openStageWithId(self, cacheId)->physics().reset(); },
+            py::arg("cache_id"))
+        .def(
+            "physics_cached_range",
+            [](StageManager& self, long cacheId) -> py::object {
+                const std::optional<TimeRange> range = openStageWithId(self, cacheId)->physics().cachedRange();
+                if (!range) return py::none();
+                return py::make_tuple(range->start, range->end);
+            },
+            py::arg("cache_id"))
+        .def(
+            "physics_is_stale", [](StageManager& self, long cacheId) { return openStageWithId(self, cacheId)->physics().isStale(); },
+            py::arg("cache_id"))
+        .def(
+            "physics_reports",
+            [](StageManager& self, long cacheId) {
+                std::vector<std::pair<std::string, std::string>> reports;
+                for (const auto& report : openStageWithId(self, cacheId)->physics().reports()) {
+                    reports.emplace_back(report.prim.GetString(), report.message);
+                }
+                return reports;
+            },
+            py::arg("cache_id"));
 
     // What relationships expect to target (docs/RELATIONSHIPS.md).
     m.def(

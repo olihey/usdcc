@@ -1,5 +1,7 @@
 #include "usdcc/usd/layer_stack.h"
 
+#include "usdcc/usd/sim_cache.h"
+
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/stage.h>
@@ -23,6 +25,7 @@ struct Builder {
     void describe(LayerEntry& entry) {
         const PXR_NS::SdfLayerHandle& layer = entry.layer;
         entry.muted = stage->IsLayerMuted(entry.identifier);
+        entry.simulationCache = physics::SimCache::isCacheLayerIdentifier(entry.identifier);
         if (layer) {
             entry.displayName = layer->GetDisplayName();
             entry.anonymous = layer->IsAnonymous();

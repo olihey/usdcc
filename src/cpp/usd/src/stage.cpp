@@ -1,5 +1,8 @@
 #include "usdcc/usd/stage.h"
 
+#include "usdcc/usd/physics_session.h"
+#include "usdcc/usd/sim_cache.h"
+
 #include <pxr/base/tf/notice.h>
 #include <pxr/base/tf/weakBase.h>
 #include <pxr/usd/sdf/primSpec.h>
@@ -117,6 +120,11 @@ Stage::Stage(PXR_NS::UsdStageRefPtr usdStage)
 
 Stage::~Stage() = default;
 
+physics::PhysicsSession& Stage::physics() {
+    if (!m_physics) m_physics = std::make_unique<physics::PhysicsSession>(*this);
+    return *m_physics;
+}
+
 void Stage::setTime(double time) {
     if (!std::isfinite(time) || time == m_time) return;
     m_time = time;
@@ -156,6 +164,8 @@ PXR_NS::SdfLayerHandle Stage::editTargetLayer() const { return m_usdStage->GetEd
 bool Stage::setEditTargetLayer(const PXR_NS::SdfLayerHandle& layer) {
     if (!layer || m_usdStage->IsLayerMuted(layer->GetIdentifier())) return false;
     if (!m_usdStage->HasLocalLayer(layer)) return false;  // not in the layer stack
+    // The solver's output, rewritten on every run (docs/PHYSICS.md §5.5).
+    if (physics::SimCache::isCacheLayer(layer)) return false;
     // The same layer with a variant target is still a change: it leaves the variant.
     const PXR_NS::UsdEditTarget target = m_usdStage->GetEditTarget();
     if (layer == target.GetLayer() && target.GetMapFunction().IsIdentity()) return true;

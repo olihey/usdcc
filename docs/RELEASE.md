@@ -176,8 +176,10 @@ in that dependency set allows. None of those libraries requires usdcc to be unde
 the GPL. The planned optional Blender configuration is covered separately below:
 
 - **Permissive:** OpenUSD (TOST, based on Apache 2.0), TBB, Embree, MaterialX, OpenSSL,
-  QWindowKit (Apache 2.0); QtNodes, OpenColorIO, pybind11, zstd, libjpeg-turbo (BSD); and
-  MIT, zlib, ICU, PostgreSQL, Python (PSF) and public-domain licences for the rest.
+  QWindowKit (Apache 2.0); QtNodes, OpenColorIO, pybind11, zstd, libjpeg-turbo (BSD); Jolt
+  Physics (MIT), in `plugins/physics_jolt` with its licence in that folder's `licenses/`
+  (docs/PHYSICS.md); and MIT, zlib, ICU, PostgreSQL, Python (PSF) and public-domain licences
+  for the rest.
 - **LGPL:** Qt and PySide6 (LGPL v3), Qt Advanced Docking System (LGPL v2.1). Allowed
   because they stay separate DLLs the user can replace, as they already are.
 - **Dual-licensed, used under the permissive option:** freetype (FTL), zstd (BSD), Qt (LGPL).

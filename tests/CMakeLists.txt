@@ -30,6 +30,8 @@ add_executable(usdcc_tests
     log_test.cpp
     move_tool_test.cpp
     orbit_camera_test.cpp
+    physics_spike_test.cpp
+    physics_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
@@ -57,6 +59,9 @@ add_executable(usdcc_tests
     xform_target_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
+# docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
+# plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
+target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
 target_compile_definitions(usdcc_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 usdcc_precompile_headers(usdcc_tests ui_pch.h)
 
@@ -100,6 +105,7 @@ add_executable(usdcc_ui_tests
     add_shade_input_ui_test.cpp
     session_store_test.cpp
     side_panel_test.cpp
+    physics_timeline_test.cpp
     timeline_test.cpp
     toast_test.cpp
     usda_view_test.cpp
@@ -116,6 +122,7 @@ add_executable(usdcc_ui_tests
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
+target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend)
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
@@ -160,6 +167,7 @@ target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
 add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_physics_jolt_backend)
 target_link_libraries(usdcc_python_tests PRIVATE Qt6::Test)
 if(TARGET blender_mesh_tools)
     add_executable(usdcc_blender_mesh_benchmark blender_mesh_benchmark.cpp)
@@ -275,3 +283,13 @@ if(TARGET blender_mesh_tools)
     add_test(NAME usdcc_blender_mesh_package_tools
         COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_package_test.py")
 endif()
+
+# Jolt's DLL beside every test program that links the physics backend, wherever Jolt was
+# found (docs/PHYSICS.md).
+foreach(_physics_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
+    if(TARGET ${_physics_test})
+        add_custom_command(TARGET ${_physics_test} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Jolt::Jolt>" "$<TARGET_FILE_DIR:${_physics_test}>"
+            VERBATIM)
+    endif()
+endforeach()

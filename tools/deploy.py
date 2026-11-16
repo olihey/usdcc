@@ -89,6 +89,9 @@ BUILD_ONLY_FILES = ["*.pdb", "*.lib", "*.exp", "*.ilk"]
 # The examples sit apart, so they don't load unless asked: usdcc.cmd --plugin-path
 # examples\plugins, or Settings > Plugins.
 SHIPPED_PLUGINS = ["vray_render"]
+# Built ones, from build/plugins: Jolt Physics, with Jolt's library and licence in its
+# folder (docs/PHYSICS.md section 4.1). MIT, so in every artifact.
+SHIPPED_NATIVE_PLUGINS = ["physics_jolt"]
 
 
 def _full(path):
@@ -395,6 +398,10 @@ def main(argv=None):
     print("  Shipped plugins", flush=True)
     for plugin in ([] if args.with_blender_mesh_tools else SHIPPED_PLUGINS):
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
+    for plugin in SHIPPED_NATIVE_PLUGINS:
+        if not (BUILD_DIR / "plugins" / plugin / "usdcc-plugin.json").is_file():
+            fail(f"The {plugin} plugin isn't built; build the usdcc target first.")
+        copy_tree(BUILD_DIR / "plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_files=BUILD_ONLY_FILES)
     if include_rtx:
         target = deploy_dir / "plugins/rtx_render"
         copy_tree(native_rtx, target, exclude_files=BUILD_ONLY_FILES + ["runtime.json"], exclude_dirs=["runtime"])
@@ -406,9 +413,10 @@ def main(argv=None):
                 copy_file(root / file, runtime_target)
     print("  Example plugins", flush=True)
     copy_tree(REPO / "src/plugins", deploy_dir / "examples/plugins",
-              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
+              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"]
+              + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS)
     copy_tree(BUILD_DIR / "plugins", deploy_dir / "examples/plugins", exclude_files=BUILD_ONLY_FILES,
-              exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
+              exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS)
     if args.with_blender_mesh_tools:
         from blender_mesh_package import include_candidate
         include_candidate(deploy_dir, BUILD_DIR, args.blender_source_bundle)
@@ -766,10 +774,17 @@ def deploy_linux(args):
         warn(f"Without PySide6, {', '.join(SHIPPED_PLUGINS)} isn't shipped: it needs it.")
     for plugin in shipped:
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
+    for plugin in SHIPPED_NATIVE_PLUGINS:
+        if not (BUILD_DIR / "plugins" / plugin / "usdcc-plugin.json").is_file():
+            fail(f"The {plugin} plugin isn't built; build the usdcc target first.")
+        _copy_linux_tree(BUILD_DIR / "plugins" / plugin, deploy_dir / "plugins" / plugin,
+                         exclude_files=LINUX_BUILD_ONLY_FILES, exclude_dirs=["CMakeFiles"])
     copy_tree(REPO / "src/plugins", deploy_dir / "examples/plugins",
-              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"] + SHIPPED_PLUGINS)
+              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"]
+              + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS)
     _copy_linux_tree(BUILD_DIR / "plugins", deploy_dir / "examples/plugins", exclude_files=LINUX_BUILD_ONLY_FILES,
-                     exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools", "CMakeFiles"] + SHIPPED_PLUGINS)
+                     exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools", "CMakeFiles"]
+                     + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS)
     if args.with_blender_mesh_tools:
         from blender_mesh_package import include_candidate
         include_candidate(deploy_dir, BUILD_DIR, args.blender_source_bundle)

@@ -421,6 +421,8 @@ def connect(event, callback):
       script), with the Sdf.Paths USD's change notice reports. It is called inside
       that notice: note what changed and act later (e.g. from a QTimer), don't edit
       or save the stage from it
+    - "physics_changed": ``callback(stage)`` when a stage's simulation changed: frames
+      were cached or cleared, or an edit made the cache stale (``usdcc.physics``)
     - "time_changed": ``callback(stage, time)`` when the time a stage is shown at
       changes: scrubbing, playing, or ``usdcc.usd.set_current_time()``. Many times a
       second while playing, so keep it short
@@ -438,7 +440,7 @@ def connect(event, callback):
 
     if event == "selection_changed":
         plain = lambda cache_id, paths: callback(usd._stage(cache_id), [Sdf.Path(path) for path in paths])
-    elif event in ("current_stage_changed", "stage_opened"):
+    elif event in ("current_stage_changed", "stage_opened", "physics_changed"):
         plain = lambda cache_id: callback(usd._stage(cache_id))
     elif event == "stage_edited":
         plain = lambda cache_id, resynced, changed: callback(
@@ -471,6 +473,18 @@ def stop():
 
 def is_playing():
     return _app().is_playing()
+
+
+def is_simulating():
+    """Whether playing solves the stage's physics (the timeline's Simulate)."""
+    return _app().is_simulating()
+
+
+def set_simulating(on):
+    """Turns the timeline's Simulate on or off (docs/PHYSICS.md): with it on, playing
+    past the cached frames solves the next ones first. ``usdcc.physics`` solves
+    without playing."""
+    _app().set_simulating(bool(on))
 
 
 def reload_plugin(id):

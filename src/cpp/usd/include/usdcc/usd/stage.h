@@ -18,6 +18,10 @@
 
 namespace usdcc::usd {
 
+namespace physics {
+class PhysicsSession;
+}
+
 // What one UsdNotice::ObjectsChanged reported, in plain data (see Stage::changed).
 struct StageChanges {
     // Prims/properties whose composition or existence may have changed —
@@ -115,8 +119,8 @@ public:
     // the root layer until something changes it.
     PXR_NS::SdfLayerHandle editTargetLayer() const;
     // Makes `layer` the edit target. False, and nothing changed, for a layer
-    // that isn't in the stage's layer stack (session layers included) or is
-    // muted.
+    // that isn't in the stage's layer stack (session layers included), is
+    // muted, or is the simulation cache (docs/PHYSICS.md §5.5).
     bool setEditTargetLayer(const PXR_NS::SdfLayerHandle& layer);
     // After the edit target changed, however it was changed (this, or
     // UsdStage::SetEditTarget() from a script).
@@ -166,6 +170,11 @@ public:
     // their unsaved-changes marks change without a change notice.
     usdcc::core::Signal<> layersSaved;
 
+    // The stage's simulation (docs/PHYSICS.md §5.1), made on first use.
+    physics::PhysicsSession& physics();
+    // Null until physics() was asked for.
+    physics::PhysicsSession* physicsIfStarted() const { return m_physics.get(); }
+
 private:
     class ChangeListener;
     void validateTarget();
@@ -183,6 +192,8 @@ private:
     double m_time = 0.0;
     std::optional<TimeRange> m_playbackRange;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
+    // Last: it listens to `changed`, so it goes first.
+    std::unique_ptr<physics::PhysicsSession> m_physics;
 };
 
 using StageRefPtr = std::shared_ptr<Stage>;
