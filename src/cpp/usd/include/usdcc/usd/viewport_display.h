@@ -28,6 +28,7 @@ inline constexpr const char* kViewportShowGuidesKey = "Viewport/showGuides";
 inline constexpr const char* kViewportShowProxyKey = "Viewport/showProxy";
 inline constexpr const char* kViewportShowRenderKey = "Viewport/showRender";
 inline constexpr const char* kViewportCullBackfacesKey = "Viewport/cullBackfaces";
+inline constexpr const char* kViewportShowCollidersKey = "Viewport/showColliders";
 inline constexpr const char* kViewportSceneLightsKey = "Viewport/sceneLights";
 inline constexpr const char* kViewportCameraLightKey = "Viewport/cameraLight";
 inline constexpr const char* kViewportDomeLightKey = "Viewport/domeLight";
@@ -111,6 +112,7 @@ struct ViewportDisplayOverrides {
     std::optional<bool> hudPerformance;
     std::optional<bool> hudToolReadout;
     std::optional<bool> hudRollover;
+    std::optional<bool> showColliders;
 
     bool isEmpty() const { return *this == ViewportDisplayOverrides{}; }
     bool operator==(const ViewportDisplayOverrides&) const = default;
@@ -124,7 +126,7 @@ struct ViewportDisplayOverrides {
     //  "shading": "hiddenLine", "complexity": "high", and the switches as bools:
     //  "showGuides", "showProxy", "showRender", "sceneMaterials", "cullBackfaces",
     //  "domeLightTextures", "sceneLights", "cameraLight", "domeLight", "hud", "hudCamera",
-    //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover",
+    //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover", "showColliders",
     //  "colorView": the OCIO view's name}.
     QJsonObject toJson() const;
     // Ignores what doesn't fit: a size or step that isn't positive, a color that isn't one,

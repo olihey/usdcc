@@ -620,6 +620,16 @@ USDCC_TEST(python_physics) {
     CHECK(ok, "the script ran");
     CHECK(playback.simulates(), "and turned the timeline's Simulate on");
     CHECK(undoCount(stage) == 0, "simulating isn't an edit: no undo step (%d)", undoCount(stage));
+
+    // Baking is: one undo step, as the script run it is in.
+    const bool baked = app.runner.run(
+        "import usdcc.physics\n"
+        "assert any(source == 'simulation' for path, message, source in usdcc.physics.check())\n"
+        "assert usdcc.physics.bake(['/Cube'], mark_kinematic=True) == ['/Cube']\n"
+        "assert usdcc.physics.cached_range() is None\n",
+        "bake.py");
+    CHECK(baked, "the bake script ran");
+    CHECK(undoCount(stage) == 1, "and made one undo step (%d)", undoCount(stage));
     usdcc::usd::physics::PhysicsBackends::instance().remove("org.usdcc.physics-jolt");
     app.stages.closeStage(stage);
 }

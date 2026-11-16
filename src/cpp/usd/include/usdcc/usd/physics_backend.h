@@ -27,6 +27,9 @@ public:
     virtual void step(double seconds, int substeps) = 0;
     // Every body's pose, in BodyId order (kinematic ones too).
     virtual void readPoses(std::vector<Pose>& out) const = 0;
+    // What happened in the steps since the last call that's worth saying: a joint that
+    // broke (§5.3). Appended to `out`.
+    virtual void takeEvents(std::vector<PhysicsReport>& out) { (void)out; }
 };
 
 class PhysicsBackend {

@@ -293,6 +293,8 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
               &Overrides::sceneMaterials, false);
     addSwitch(QObject::tr("Cull backfaces"), "displayCullBackfaces", "resetCullBackfaces", &Options::cullBackfaces,
               &Overrides::cullBackfaces, true);
+    addSwitch(QObject::tr("Show colliders"), "displayShowColliders", "resetShowColliders", &Options::showColliders,
+              &Overrides::showColliders, true);
     addSwitch(QObject::tr("Dome light textures"), "displayDomeLightTextures", "resetDomeLightTextures",
               &Options::domeLightTextures, &Overrides::domeLightTextures, false);
     addSwitch(QObject::tr("Scene lights"), "displaySceneLights", "resetSceneLights", &Options::sceneLights,
@@ -1386,6 +1388,7 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     addSwitch(lights, tr("Dome Light"), "domeLightAction", &Options::domeLight, &Overrides::domeLight);
     addSwitch(menu, tr("Scene Materials"), "sceneMaterialsAction", &Options::sceneMaterials, &Overrides::sceneMaterials);
     addSwitch(menu, tr("Cull Backfaces"), "cullBackfacesAction", &Options::cullBackfaces, &Overrides::cullBackfaces);
+    addSwitch(menu, tr("Show Colliders"), "showCollidersAction", &Options::showColliders, &Overrides::showColliders);
     addSwitch(menu, tr("Dome Light Textures"), "domeLightTexturesAction", &Options::domeLightTextures,
               &Overrides::domeLightTextures);
 

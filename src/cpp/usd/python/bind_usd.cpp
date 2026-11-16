@@ -3,7 +3,10 @@
 #include <pybind11/stl.h>
 
 #include "usdcc/core/settings.h"
+#include "usdcc/usd/physics_bake.h"
+#include "usdcc/usd/physics_check.h"
 #include "usdcc/usd/physics_session.h"
+#include "usdcc/usd/playback.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/shader_node_catalog.h"
@@ -13,6 +16,7 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -150,6 +154,37 @@ void bindStageManager(py::module_& m) {
             py::arg("cache_id"))
         .def(
             "physics_is_stale", [](StageManager& self, long cacheId) { return openStageWithId(self, cacheId)->physics().isStale(); },
+            py::arg("cache_id"))
+        .def(
+            "physics_bake",
+            [](StageManager& self, long cacheId, const std::vector<std::string>& prims, bool markKinematic) {
+                const StageRefPtr stage = openStageWithId(self, cacheId);
+                usdcc::usd::physics::PhysicsSession& session = stage->physics();
+                session.setSubsteps(usdcc::core::Settings::instance().get<int>("Physics/substeps", 4));
+                usdcc::usd::physics::BakeOptions options;
+                for (const std::string& prim : prims) options.prims.emplace_back(prim);
+                options.markKinematic = markKinematic;
+                std::vector<std::string> baked;
+                if (!usdcc::usd::physics::cacheRange(session, playbackFrames(stage->playbackRange()))) return baked;
+                const usdcc::usd::physics::BakeResult result =
+                    usdcc::usd::physics::bakeFromCache(stage->usdStage(), session, options);
+                for (const PXR_NS::SdfPath& path : result.baked) baked.push_back(path.GetString());
+                if (!baked.empty()) session.reset();
+                return baked;
+            },
+            py::arg("cache_id"), py::arg("prims"), py::arg("mark_kinematic"))
+        .def(
+            "physics_check",
+            [](StageManager& self, long cacheId) {
+                const StageRefPtr stage = openStageWithId(self, cacheId);
+                std::vector<std::tuple<std::string, std::string, std::string>> findings;
+                for (const auto& finding : usdcc::usd::physics::checkPhysics(stage->usdStage(), stage->time())) {
+                    const bool validator = finding.source == usdcc::usd::physics::CheckFinding::Source::Validator;
+                    findings.emplace_back(finding.prim.GetString(), finding.message,
+                                          validator ? (finding.error ? "validator error" : "validator") : "simulation");
+                }
+                return findings;
+            },
             py::arg("cache_id"))
         .def(
             "physics_reports",

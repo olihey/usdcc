@@ -104,6 +104,13 @@ bool PhysicsSession::stepTo(double frame) {
             if (prim) m_world->setKinematicTarget(id, poseFromWorld(m_scene, xforms.GetLocalToWorldTransform(prim)), seconds);
         }
         m_world->step(seconds, m_substeps);
+        std::vector<PhysicsReport> events;
+        m_world->takeEvents(events);
+        for (PhysicsReport& event : events) {
+            event.message += " at frame " + std::to_string(static_cast<long long>(std::llround(next)));
+            USDCC_LOG_INFO("usdcc.physics", "{}: {}", event.prim.GetString(), event.message);
+            m_reports.push_back(std::move(event));
+        }
         m_world->readPoses(m_poses);
         {
             Writing writing(m_writing);

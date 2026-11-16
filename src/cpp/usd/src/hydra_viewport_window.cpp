@@ -5,6 +5,7 @@
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/physics_overlay.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_grid.h"
 #include "usdcc/usd/viewport_render_params.h"
@@ -1309,6 +1310,10 @@ void HydraViewportWindow::renderNow() {
     if (!m_previewMode) {
         drawGrid(toolCtx.viewMatrix, toolCtx.projMatrix);
         drawSelectionOverlay(toolCtx, w, h);
+        if (m_display.showColliders) {
+            if (!m_physicsOverlay) m_physicsOverlay = std::make_unique<PhysicsOverlay>();
+            drawGizmo(m_physicsOverlay->geometry(m_stage, toolCtx.time), toolCtx.viewMatrix, toolCtx.projMatrix);
+        }
         if (usdcc::tools::Tool* tool = activeToolInstance()) {
             drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
         }

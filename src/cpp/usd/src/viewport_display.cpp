@@ -50,6 +50,7 @@ constexpr Switch kSwitches[] = {
     {"hudPerformance", &Overrides::hudPerformance, &Options::hudPerformance, kViewportHudPerformanceKey},
     {"hudToolReadout", &Overrides::hudToolReadout, &Options::hudToolReadout, kViewportHudToolReadoutKey},
     {"hudRollover", &Overrides::hudRollover, &Options::hudRollover, kViewportHudRolloverKey},
+    {"showColliders", &Overrides::showColliders, &Options::showColliders, kViewportShowCollidersKey},
 };
 
 // A name or label back to its value, ignoring case.
@@ -282,6 +283,16 @@ void defineViewportDisplaySettings() {
         .description = "Leave out the back of faces, except on double-sided geometry. Shows flipped normals.",
         .type = SettingType::Bool,
         .defaultValue = builtIn.cullBackfaces,
+    });
+    settings.define({
+        .key = kViewportShowCollidersKey,
+        .category = "Viewport",
+        .group = "Display",
+        .label = "Show colliders",
+        .description = "Draw the stage's physics colliders and joint frames as wireframes, where the simulation "
+                       "has them (docs/PHYSICS.md).",
+        .type = SettingType::Bool,
+        .defaultValue = builtIn.showColliders,
     });
     settings.define({
         .key = kViewportSceneLightsKey,

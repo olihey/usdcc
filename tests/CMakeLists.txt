@@ -32,6 +32,7 @@ add_executable(usdcc_tests
     orbit_camera_test.cpp
     physics_spike_test.cpp
     physics_test.cpp
+    physics_bake_joints_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp

@@ -12,6 +12,10 @@ are never touched::
     for path, message in usdcc.physics.reports():
         print(path, message)                  # what wasn't simulated as authored
 
+To keep a result, ``bake()`` writes its frames into the edit target as time samples
+on the bodies' transforms; ``check()`` lists what OpenUSD's physics validators and a
+simulation would say about the stage.
+
 The timeline's Simulate does the same while it plays. Any edit to the stage makes
 the cache stale (``is_stale()``): it stays, but is never extended; ``simulate()``
 solves anew. The "physics_changed" event (``usdcc.app.connect()``) follows every
@@ -59,3 +63,24 @@ def reports(stage=None):
     with the prim it's about."""
     manager, cache_id = _manager_and_id(stage)
     return manager.physics_reports(cache_id)
+
+
+def bake(prims=None, mark_kinematic=False, stage=None):
+    """Keeps the simulation of `stage` (default: the current stage): solves its playback
+    range where the cache lacks frames, writes the frames of the rigid bodies at or under
+    `prims` (default: all) into the edit target as time samples on their transforms, and
+    clears the cache. With `mark_kinematic`, the baked bodies get
+    physics:kinematicEnabled, so a later simulation moves them as baked. Returns the
+    baked bodies' paths. A script run is one undo step already; elsewhere wrap it in
+    ``usdcc.usd.edit()``."""
+    manager, cache_id = _manager_and_id(stage)
+    paths = [str(prim.GetPath()) if hasattr(prim, "GetPath") else str(prim) for prim in (prims or [])]
+    return manager.physics_bake(cache_id, paths, bool(mark_kinematic))
+
+
+def check(stage=None):
+    """``[(path, message, source), ...]``: what OpenUSD's physics validators say about
+    `stage` (default: the current stage), source "validator" or "validator error", and
+    what a simulation of it would leave out or change, source "simulation"."""
+    manager, cache_id = _manager_and_id(stage)
+    return manager.physics_check(cache_id)

@@ -17,13 +17,28 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/TaperedCylinderShape.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SixDOFConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
+#include <pxr/base/gf/rotation.h>
+
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <optional>
 #include <thread>
+#include <tuple>
+#include <unordered_set>
 
 namespace usdcc::physics_jolt {
 
@@ -31,6 +46,7 @@ namespace {
 
 using namespace usdcc::usd::physics;
 namespace pxr = PXR_NS;
+using PXR_NS::SdfPath;
 
 void initJolt() {
     static const bool done = [] {
@@ -106,13 +122,19 @@ public:
             return 0.5f * (a.GetRestitution() + b.GetRestitution());
         });
         JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        if (!scene.filter.empty()) m_filter = new OwnerFilter(scene.filter);
+        auto filtered = [this](JPH::BodyCreationSettings& settings, std::size_t owner) {
+            if (m_filter) settings.mCollisionGroup = JPH::CollisionGroup(m_filter, JPH::CollisionGroup::GroupID(owner), 0);
+        };
 
-        for (const ShapeDesc& shape : scene.statics) {
+        for (std::size_t s = 0; s < scene.statics.size(); ++s) {
+            const ShapeDesc& shape = scene.statics[s];
             const JPH::ShapeRefC made = makeShape(shape, reports);
             if (!made) continue;
             JPH::BodyCreationSettings settings(made, toJoltR(shape.local.position), toJolt(shape.local.rotation) * axisTurn(shape),
                                                JPH::EMotionType::Static, kStaticLayer);
             setMaterial(settings, shape.material);
+            filtered(settings, scene.bodies.size() + s);
             bodies.CreateAndAddBody(settings, JPH::EActivation::DontActivate);
         }
 
@@ -148,13 +170,20 @@ public:
             }
             settings.mLinearVelocity = toJolt(body.linearVelocity);
             settings.mAngularVelocity = toJolt(body.angularVelocity);
+            filtered(settings, i);
             const JPH::EActivation activation =
                 body.startsAsleep && !body.kinematic ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
             m_ids[i] = bodies.CreateAndAddBody(settings, activation);
             if (m_ids[i].IsInvalid()) reports.push_back({body.prim, "Jolt couldn't add the body: too many bodies"});
         }
+        for (const JointDesc& joint : scene.joints) addJoint(scene, joint, reports);
         m_system.OptimizeBroadPhase();
         return true;
+    }
+
+    void takeEvents(std::vector<PhysicsReport>& out) override {
+        out.insert(out.end(), m_events.begin(), m_events.end());
+        m_events.clear();
     }
 
     void setKinematicTarget(BodyId body, const Pose& pose, double seconds) override {
@@ -163,7 +192,9 @@ public:
     }
 
     void step(double seconds, int substeps) override {
-        m_system.Update(float(seconds), std::max(1, substeps), &m_temp, &m_jobs);
+        substeps = std::max(1, substeps);
+        m_system.Update(float(seconds), substeps, &m_temp, &m_jobs);
+        breakJoints(seconds / substeps);
     }
 
     void readPoses(std::vector<Pose>& out) const override {
@@ -182,6 +213,316 @@ public:
     }
 
 private:
+    // A joint's frame on one side, in the world (relative to the scene's origin).
+    struct Frame {
+        JPH::RVec3 position;
+        JPH::Quat rotation;
+        JPH::Vec3 along(Axis axis) const { return rotation * unit(axis); }
+    };
+
+    static JPH::Vec3 unit(Axis axis) {
+        switch (axis) {
+            case Axis::X: return JPH::Vec3::sAxisX();
+            case Axis::Y: return JPH::Vec3::sAxisY();
+            default: return JPH::Vec3::sAxisZ();
+        }
+    }
+    static Axis perpendicular(Axis axis) {
+        switch (axis) {
+            case Axis::X: return Axis::Y;
+            case Axis::Y: return Axis::Z;
+            default: return Axis::X;
+        }
+    }
+
+    static Frame worldFrame(const PhysicsSceneDesc& scene, const std::optional<BodyId>& body, const Pose& frame) {
+        if (!body) return {toJoltR(frame.position), toJolt(frame.rotation)};
+        const Pose& pose = scene.bodies[*body].pose;
+        const pxr::GfVec3d position = pose.position + pxr::GfRotation(pose.rotation).TransformDir(frame.position);
+        return {toJoltR(position), toJolt((pose.rotation * frame.rotation).GetNormalized())};
+    }
+
+    // A UsdPhysics drive as a Jolt motor: a spring to a position when it has stiffness, else a
+    // velocity motor; an acceleration drive as a frequency, which doesn't depend on mass.
+    static JPH::MotorSettings motorFor(const JointDriveDesc& drive, bool angular) {
+        JPH::MotorSettings motor;
+        const float stiffness = float(std::max(0.0, drive.stiffness));
+        const float damping = float(std::max(0.0, drive.damping));
+        if (drive.acceleration) {
+            const float frequency = std::sqrt(stiffness) / (2.0f * JPH::JPH_PI);
+            const float ratio = stiffness > 0.0f ? damping / (2.0f * std::sqrt(stiffness)) : 0.0f;
+            motor.mSpringSettings = JPH::SpringSettings(JPH::ESpringMode::FrequencyAndDamping, frequency, ratio);
+        } else {
+            motor.mSpringSettings = JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, stiffness, damping);
+        }
+        const float limit = drive.forceLimit > 0.0 ? float(drive.forceLimit) : FLT_MAX;
+        if (angular) {
+            motor.SetTorqueLimit(limit);
+        } else {
+            motor.SetForceLimit(limit);
+        }
+        return motor;
+    }
+    static JPH::EMotorState motorState(const JointDriveDesc& drive) {
+        if (!drive.enabled) return JPH::EMotorState::Off;
+        if (drive.stiffness > 0.0) return JPH::EMotorState::Position;
+        if (drive.damping > 0.0 || drive.targetVelocity != 0.0) return JPH::EMotorState::Velocity;
+        return JPH::EMotorState::Off;
+    }
+
+    // A limit Jolt takes as lower <= 0 <= upper; lower > upper locks the axis.
+    static std::pair<float, float> centredLimit(const JointLimitDesc& limit, float freeRange, const SdfPath& prim,
+                                                std::vector<PhysicsReport>& reports) {
+        if (!limit.enabled) return {-freeRange, freeRange};
+        if (limit.lower > limit.upper) return {0.0f, 0.0f};
+        const float lower = float(limit.lower), upper = float(limit.upper);
+        if (lower > 0.0f || upper < 0.0f) {
+            reports.push_back({prim, "a limit that excludes where the joint starts: widened to include it, as Jolt needs"});
+        }
+        return {std::clamp(std::min(lower, 0.0f), -freeRange, 0.0f), std::clamp(std::max(upper, 0.0f), 0.0f, freeRange)};
+    }
+
+    void addJoint(const PhysicsSceneDesc& scene, const JointDesc& joint, std::vector<PhysicsReport>& reports) {
+        const JPH::BodyID id0 = joint.body0 ? m_ids[*joint.body0] : JPH::BodyID();
+        const JPH::BodyID id1 = joint.body1 ? m_ids[*joint.body1] : JPH::BodyID();
+        if ((joint.body0 && id0.IsInvalid()) || (joint.body1 && id1.IsInvalid())) {
+            reports.push_back({joint.prim, "joins a body Jolt couldn't add: left out"});
+            return;
+        }
+        const Frame f0 = worldFrame(scene, joint.body0, joint.frame0);
+        const Frame f1 = worldFrame(scene, joint.body1, joint.frame1);
+        JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+        JPH::TwoBodyConstraint* constraint = nullptr;
+        auto create = [&](const JPH::TwoBodyConstraintSettings& settings) {
+            constraint = bodies.CreateConstraint(&settings, id0, id1);
+        };
+        switch (joint.kind) {
+            case JointKind::Fixed: {
+                JPH::FixedConstraintSettings settings;
+                settings.mAutoDetectPoint = false;
+                settings.mPoint1 = f0.position;
+                settings.mAxisX1 = f0.along(Axis::X);
+                settings.mAxisY1 = f0.along(Axis::Y);
+                settings.mPoint2 = f1.position;
+                settings.mAxisX2 = f1.along(Axis::X);
+                settings.mAxisY2 = f1.along(Axis::Y);
+                create(settings);
+                break;
+            }
+            case JointKind::Revolute: {
+                JPH::HingeConstraintSettings settings;
+                settings.mPoint1 = f0.position;
+                settings.mHingeAxis1 = f0.along(joint.axis);
+                settings.mNormalAxis1 = f0.along(perpendicular(joint.axis));
+                settings.mPoint2 = f1.position;
+                settings.mHingeAxis2 = f1.along(joint.axis);
+                settings.mNormalAxis2 = f1.along(perpendicular(joint.axis));
+                std::tie(settings.mLimitsMin, settings.mLimitsMax) = centredLimit(joint.limit, JPH::JPH_PI, joint.prim, reports);
+                settings.mMotorSettings = motorFor(joint.drive, true);
+                create(settings);
+                if (auto* hinge = static_cast<JPH::HingeConstraint*>(constraint); hinge && motorState(joint.drive) != JPH::EMotorState::Off) {
+                    hinge->SetTargetAngle(float(joint.drive.targetPosition));
+                    hinge->SetTargetAngularVelocity(float(joint.drive.targetVelocity));
+                    hinge->SetMotorState(motorState(joint.drive));
+                }
+                break;
+            }
+            case JointKind::Prismatic: {
+                JPH::SliderConstraintSettings settings;
+                settings.mAutoDetectPoint = false;
+                settings.mPoint1 = f0.position;
+                settings.mSliderAxis1 = f0.along(joint.axis);
+                settings.mNormalAxis1 = f0.along(perpendicular(joint.axis));
+                settings.mPoint2 = f1.position;
+                settings.mSliderAxis2 = f1.along(joint.axis);
+                settings.mNormalAxis2 = f1.along(perpendicular(joint.axis));
+                std::tie(settings.mLimitsMin, settings.mLimitsMax) = centredLimit(joint.limit, FLT_MAX, joint.prim, reports);
+                settings.mMotorSettings = motorFor(joint.drive, false);
+                create(settings);
+                if (auto* slider = static_cast<JPH::SliderConstraint*>(constraint); slider && motorState(joint.drive) != JPH::EMotorState::Off) {
+                    slider->SetTargetPosition(float(joint.drive.targetPosition));
+                    slider->SetTargetVelocity(float(joint.drive.targetVelocity));
+                    slider->SetMotorState(motorState(joint.drive));
+                }
+                break;
+            }
+            case JointKind::Spherical: {
+                JPH::SwingTwistConstraintSettings settings;
+                settings.mPosition1 = f0.position;
+                settings.mTwistAxis1 = f0.along(joint.axis);
+                settings.mPlaneAxis1 = f0.along(perpendicular(joint.axis));
+                settings.mPosition2 = f1.position;
+                settings.mTwistAxis2 = f1.along(joint.axis);
+                settings.mPlaneAxis2 = f1.along(perpendicular(joint.axis));
+                const bool limited = joint.limit.enabled && joint.limit.lower >= 0.0 && joint.limit.upper >= 0.0;
+                settings.mNormalHalfConeAngle = limited ? std::min(float(joint.limit.lower), JPH::JPH_PI) : JPH::JPH_PI;
+                settings.mPlaneHalfConeAngle = limited ? std::min(float(joint.limit.upper), JPH::JPH_PI) : JPH::JPH_PI;
+                settings.mTwistMinAngle = -JPH::JPH_PI;
+                settings.mTwistMaxAngle = JPH::JPH_PI;
+                create(settings);
+                break;
+            }
+            case JointKind::Distance: {
+                JPH::DistanceConstraintSettings settings;
+                settings.mPoint1 = f0.position;
+                settings.mPoint2 = f1.position;
+                settings.mMinDistance = joint.minEnabled ? float(std::max(0.0, joint.limit.lower)) : 0.0f;
+                settings.mMaxDistance = joint.maxEnabled ? float(std::max(joint.limit.upper, double(settings.mMinDistance))) : 1.0e6f;
+                create(settings);
+                break;
+            }
+            case JointKind::Generic: {
+                using EAxis = JPH::SixDOFConstraintSettings::EAxis;
+                auto axisOf = [](Dof dof) {
+                    switch (dof) {
+                        case Dof::TransX: return EAxis::TranslationX;
+                        case Dof::TransY: return EAxis::TranslationY;
+                        case Dof::TransZ: return EAxis::TranslationZ;
+                        case Dof::RotX: return EAxis::RotationX;
+                        case Dof::RotY: return EAxis::RotationY;
+                        default: return EAxis::RotationZ;
+                    }
+                };
+                auto angular = [](Dof dof) { return dof == Dof::RotX || dof == Dof::RotY || dof == Dof::RotZ; };
+                JPH::SixDOFConstraintSettings settings;
+                settings.mPosition1 = f0.position;
+                settings.mAxisX1 = f0.along(Axis::X);
+                settings.mAxisY1 = f0.along(Axis::Y);
+                settings.mPosition2 = f1.position;
+                settings.mAxisX2 = f1.along(Axis::X);
+                settings.mAxisY2 = f1.along(Axis::Y);
+                settings.mSwingType = JPH::ESwingType::Pyramid;
+                for (int axis = 0; axis < EAxis::Num; ++axis) settings.MakeFreeAxis(EAxis(axis));
+                for (const auto& [dof, limit] : joint.limits) {
+                    if (!limit.enabled) continue;
+                    if (limit.lower > limit.upper) {
+                        settings.MakeFixedAxis(axisOf(dof));
+                    } else {
+                        settings.SetLimitedAxis(axisOf(dof), float(limit.lower), float(limit.upper));
+                    }
+                }
+                for (const auto& [dof, drive] : joint.drives) settings.mMotorSettings[axisOf(dof)] = motorFor(drive, angular(dof));
+                create(settings);
+                auto* sixDof = static_cast<JPH::SixDOFConstraint*>(constraint);
+                if (!sixDof) break;
+                JPH::Vec3 position = JPH::Vec3::sZero(), velocity = JPH::Vec3::sZero(), angle = JPH::Vec3::sZero(),
+                          spin = JPH::Vec3::sZero();
+                for (const auto& [dof, drive] : joint.drives) {
+                    const int index = int(axisOf(dof)) % 3;
+                    (angular(dof) ? angle : position).SetComponent(index, float(drive.targetPosition));
+                    (angular(dof) ? spin : velocity).SetComponent(index, float(drive.targetVelocity));
+                }
+                sixDof->SetTargetPositionCS(position);
+                sixDof->SetTargetVelocityCS(velocity);
+                sixDof->SetTargetAngularVelocityCS(spin);
+                sixDof->SetTargetOrientationCS(JPH::Quat::sEulerAngles(angle));
+                for (const auto& [dof, drive] : joint.drives) sixDof->SetMotorState(axisOf(dof), motorState(drive));
+                break;
+            }
+        }
+        if (!constraint) {
+            reports.push_back({joint.prim, "Jolt couldn't make this joint"});
+            return;
+        }
+        m_system.AddConstraint(constraint);
+        m_joints.push_back({constraint, joint.kind, joint.breakForce, joint.breakTorque, joint.prim, id0, id1});
+    }
+
+    // The force and torque a joint held through the last substep, from the impulses Jolt
+    // applied in it.
+    struct Joint {
+        JPH::Ref<JPH::TwoBodyConstraint> constraint;
+        JointKind kind;
+        double breakForce;
+        double breakTorque;
+        SdfPath prim;
+        JPH::BodyID body0, body1;
+        bool broken = false;
+    };
+
+    static std::pair<double, double> impulses(const Joint& joint) {
+        JPH::Constraint* c = joint.constraint.GetPtr();
+        auto length2 = [](const JPH::Vector<2>& v) { return std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1]); };
+        switch (joint.kind) {
+            case JointKind::Fixed: {
+                auto* f = static_cast<JPH::FixedConstraint*>(c);
+                return {f->GetTotalLambdaPosition().Length(), f->GetTotalLambdaRotation().Length()};
+            }
+            case JointKind::Revolute: {
+                auto* h = static_cast<JPH::HingeConstraint*>(c);
+                return {h->GetTotalLambdaPosition().Length(), length2(h->GetTotalLambdaRotation())};
+            }
+            case JointKind::Prismatic: {
+                auto* s = static_cast<JPH::SliderConstraint*>(c);
+                return {length2(s->GetTotalLambdaPosition()), s->GetTotalLambdaRotation().Length()};
+            }
+            case JointKind::Spherical: {
+                auto* s = static_cast<JPH::SwingTwistConstraint*>(c);
+                const JPH::Vec3 rotation(s->GetTotalLambdaTwist(), s->GetTotalLambdaSwingY(), s->GetTotalLambdaSwingZ());
+                return {s->GetTotalLambdaPosition().Length(), rotation.Length()};
+            }
+            case JointKind::Distance:
+                return {std::abs(static_cast<JPH::DistanceConstraint*>(c)->GetTotalLambdaPosition()), 0.0};
+            case JointKind::Generic: {
+                auto* s = static_cast<JPH::SixDOFConstraint*>(c);
+                return {s->GetTotalLambdaPosition().Length(), s->GetTotalLambdaRotation().Length()};
+            }
+        }
+        return {0.0, 0.0};
+    }
+
+    void breakJoints(double substepSeconds) {
+        if (substepSeconds <= 0.0) return;
+        for (Joint& joint : m_joints) {
+            if (joint.broken || (joint.breakForce <= 0.0 && joint.breakTorque <= 0.0)) continue;
+            const auto [impulse, angularImpulse] = impulses(joint);
+            const double force = impulse / substepSeconds, torque = angularImpulse / substepSeconds;
+            const bool overForce = joint.breakForce > 0.0 && force > joint.breakForce;
+            const bool overTorque = joint.breakTorque > 0.0 && torque > joint.breakTorque;
+            if (!overForce && !overTorque) continue;
+            joint.broken = true;
+            joint.constraint->SetEnabled(false);
+            JPH::BodyInterface& bodies = m_system.GetBodyInterface();
+            if (!joint.body0.IsInvalid()) bodies.ActivateBody(joint.body0);
+            if (!joint.body1.IsInvalid()) bodies.ActivateBody(joint.body1);
+            char message[160];
+            std::snprintf(message, sizeof message, overForce ? "broke under %.0f N" : "broke under %.0f N m",
+                          overForce ? force : torque);
+            m_events.push_back({joint.prim, message});
+        }
+    }
+
+    // Which owners (bodies, then static colliders) may touch, from UsdPhysics' collision
+    // groups and filtered pairs (§5.3): a GroupFilter of our own, as a collider can be in
+    // several groups and Jolt gives a body one.
+    class OwnerFilter final : public JPH::GroupFilter {
+    public:
+        explicit OwnerFilter(CollisionFilterDesc filter) : m_filter(std::move(filter)) {
+            for (const auto& [a, b] : m_filter.pairs) m_pairs.insert(key(a, b));
+        }
+        bool CanCollide(const JPH::CollisionGroup& a, const JPH::CollisionGroup& b) const override {
+            const std::size_t x = a.GetGroupID(), y = b.GetGroupID();
+            if (m_pairs.count(key(x, y))) return false;
+            if (m_filter.groupsCollide.empty() || x >= m_filter.ownerGroups.size() || y >= m_filter.ownerGroups.size()) {
+                return true;
+            }
+            for (const int g : m_filter.ownerGroups[x]) {
+                for (const int h : m_filter.ownerGroups[y]) {
+                    if (!m_filter.groupsCollide[g][h]) return false;
+                }
+            }
+            return true;
+        }
+
+    private:
+        static std::uint64_t key(std::size_t a, std::size_t b) {
+            if (a > b) std::swap(a, b);
+            return (std::uint64_t(a) << 32) | std::uint64_t(b);
+        }
+        CollisionFilterDesc m_filter;
+        std::unordered_set<std::uint64_t> m_pairs;
+    };
+
     static JPH::Quat axisTurn(const ShapeDesc& shape) {
         switch (shape.kind) {
             case ShapeKind::Capsule:
@@ -294,6 +635,9 @@ private:
     JPH::PhysicsSystem m_system;
     std::vector<JPH::BodyID> m_ids;  // per BodyId; invalid for one Jolt couldn't take
     std::vector<Pose> m_start;
+    JPH::Ref<OwnerFilter> m_filter;
+    std::vector<Joint> m_joints;
+    std::vector<PhysicsReport> m_events;
 };
 
 class JoltBackend final : public PhysicsBackend {

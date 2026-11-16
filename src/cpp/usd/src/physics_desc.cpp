@@ -22,7 +22,9 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
+#include <string>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -48,7 +50,14 @@ struct Parsed {
     std::vector<UsdPhysicsMeshShapeDesc> meshes;
     std::vector<UsdPhysicsPlaneShapeDesc> planes;
     std::vector<SdfPath> unsupportedShapes;  // sphere points, custom shapes
-    std::vector<SdfPath> joints;
+    std::vector<UsdPhysicsFixedJointDesc> fixedJoints;
+    std::vector<UsdPhysicsRevoluteJointDesc> revoluteJoints;
+    std::vector<UsdPhysicsPrismaticJointDesc> prismaticJoints;
+    std::vector<UsdPhysicsSphericalJointDesc> sphericalJoints;
+    std::vector<UsdPhysicsDistanceJointDesc> distanceJoints;
+    std::vector<UsdPhysicsD6JointDesc> genericJoints;
+    std::vector<SdfPath> customJoints;
+    std::vector<UsdPhysicsCollisionGroupDesc> collisionGroups;
     std::vector<SdfPath> articulations;
 };
 
@@ -81,15 +90,16 @@ Parsed parse(const UsdStageRefPtr& stage) {
                 case UsdPhysicsObjectType::CustomShape:
                     parsed.unsupportedShapes.insert(parsed.unsupportedShapes.end(), paths.begin(), paths.end());
                     break;
-                case UsdPhysicsObjectType::FixedJoint:
-                case UsdPhysicsObjectType::RevoluteJoint:
-                case UsdPhysicsObjectType::PrismaticJoint:
-                case UsdPhysicsObjectType::SphericalJoint:
-                case UsdPhysicsObjectType::DistanceJoint:
-                case UsdPhysicsObjectType::D6Joint:
+                case UsdPhysicsObjectType::FixedJoint: append(parsed.fixedJoints, descs); break;
+                case UsdPhysicsObjectType::RevoluteJoint: append(parsed.revoluteJoints, descs); break;
+                case UsdPhysicsObjectType::PrismaticJoint: append(parsed.prismaticJoints, descs); break;
+                case UsdPhysicsObjectType::SphericalJoint: append(parsed.sphericalJoints, descs); break;
+                case UsdPhysicsObjectType::DistanceJoint: append(parsed.distanceJoints, descs); break;
+                case UsdPhysicsObjectType::D6Joint: append(parsed.genericJoints, descs); break;
                 case UsdPhysicsObjectType::CustomJoint:
-                    parsed.joints.insert(parsed.joints.end(), paths.begin(), paths.end());
+                    parsed.customJoints.insert(parsed.customJoints.end(), paths.begin(), paths.end());
                     break;
+                case UsdPhysicsObjectType::CollisionGroup: append(parsed.collisionGroups, descs); break;
                 case UsdPhysicsObjectType::Articulation:
                     parsed.articulations.insert(parsed.articulations.end(), paths.begin(), paths.end());
                     break;
@@ -163,15 +173,15 @@ public:
             place(d, std::move(shape));
         }
         for (const SdfPath& path : parsed.unsupportedShapes) report(path, "a collider of a kind not simulated yet: left out");
-        if (!parsed.joints.empty()) {
-            report(parsed.joints.front(), TfStringPrintf("%zu joint(s) not simulated yet (docs/PHYSICS.md phase 4)",
-                                                         parsed.joints.size()));
+        for (const SdfPath& path : parsed.articulations) {
+            report(path, "an articulation: its joints are simulated as plain joints, not reduced coordinates");
         }
-        for (const SdfPath& path : parsed.articulations) report(path, "an articulation: not simulated yet");
 
         // A body with nothing to collide with still falls, with the mass it says.
         for (BodyDesc& body : m_scene.bodies) computeMass(body);
         recentre();
+        addJoints(parsed);
+        buildFilter(parsed);
         return std::move(m_scene);
     }
 
@@ -247,6 +257,7 @@ private:
             body.startsAsleep = desc.startsAsleep;
             body.linearVelocity = GfVec3d(desc.linearVelocity) * m_scene.metersPerUnit;
             body.angularVelocity = GfVec3d(desc.angularVelocity) * kDegrees;
+            for (const SdfPath& other : desc.filteredCollisions) m_filtered.emplace_back(m_scene.bodies.size(), other);
             m_bodyIndex[desc.primPath] = m_scene.bodies.size();
             m_bodyWorld[desc.primPath] = world;
             m_scene.bodies.push_back(std::move(body));
@@ -363,11 +374,248 @@ private:
         }
         if (!desc.rigidBody.IsEmpty() && m_leftOut.count(desc.rigidBody)) return;
         // A static collider inside an instance never moves, so it can stay.
+        std::size_t owner = 0;
         if (const auto it = m_bodyIndex.find(desc.rigidBody); it != m_bodyIndex.end()) {
+            owner = it->second;
             m_scene.bodies[it->second].shapes.push_back(std::move(shape));
         } else {
+            owner = m_scene.bodies.size() + m_scene.statics.size();
             m_scene.statics.push_back(std::move(shape));
         }
+        m_colliderOwner[desc.primPath] = owner;
+        // Its collision groups go to its owner, which Jolt and PhysX filter by.
+        const std::set<SdfPath> groups(desc.collisionGroups.begin(), desc.collisionGroups.end());
+        if (const auto known = m_ownerGroups.find(owner); known != m_ownerGroups.end()) {
+            if (known->second != groups && m_mixedGroups.insert(owner).second) {
+                report(desc.primPath, "a body's colliders in different collision groups: filtered as if all were in all");
+            }
+            known->second.insert(groups.begin(), groups.end());
+        } else {
+            m_ownerGroups[owner] = groups;
+        }
+        for (const SdfPath& other : desc.filteredCollisions) m_filtered.emplace_back(owner, other);
+    }
+
+    // The owner (a body, or a static collider) a path names: a body, or a collider.
+    std::optional<std::size_t> ownerOf(const SdfPath& path) const {
+        if (const auto body = m_bodyIndex.find(path); body != m_bodyIndex.end()) return body->second;
+        if (const auto collider = m_colliderOwner.find(path); collider != m_colliderOwner.end()) return collider->second;
+        return std::nullopt;
+    }
+
+    // Collision groups and filtered pairs (§5.3), between owners.
+    void buildFilter(const Parsed& parsed) {
+        CollisionFilterDesc& filter = m_scene.filter;
+        for (const auto& [owner, other] : m_filtered) {
+            if (const std::optional<std::size_t> second = ownerOf(other); second && *second != owner) {
+                filter.pairs.emplace_back(std::min(owner, *second), std::max(owner, *second));
+            }
+        }
+        const std::size_t groupCount = parsed.collisionGroups.size();
+        if (groupCount == 0) return;
+        std::map<SdfPath, int> groupIndex;
+        for (std::size_t g = 0; g < groupCount; ++g) groupIndex[parsed.collisionGroups[g].primPath] = int(g);
+        // Groups merged under one name filter as one.
+        std::map<std::string, std::set<int>> merged;
+        for (std::size_t g = 0; g < groupCount; ++g) {
+            const std::string& name = parsed.collisionGroups[g].mergeGroupName;
+            if (!name.empty()) merged[name].insert(int(g));
+        }
+        auto withMerged = [&](int g) {
+            const std::string& name = parsed.collisionGroups[g].mergeGroupName;
+            return name.empty() ? std::set<int>{g} : merged[name];
+        };
+        std::vector<std::set<int>> filtered(groupCount);
+        for (std::size_t g = 0; g < groupCount; ++g) {
+            for (const int same : withMerged(int(g))) {
+                for (const SdfPath& path : parsed.collisionGroups[same].filteredGroups) {
+                    if (const auto it = groupIndex.find(path); it != groupIndex.end()) {
+                        for (const int h : withMerged(it->second)) filtered[g].insert(h);
+                    }
+                }
+            }
+        }
+        filter.groupsCollide.assign(groupCount, std::vector<bool>(groupCount, true));
+        bool anyFiltered = false;
+        for (std::size_t g = 0; g < groupCount; ++g) {
+            const bool invert = parsed.collisionGroups[g].invertFilteredGroups;
+            for (std::size_t h = 0; h < groupCount; ++h) {
+                const bool listed = filtered[g].count(int(h)) > 0;
+                if (invert ? listed : !listed) continue;
+                filter.groupsCollide[g][h] = filter.groupsCollide[h][g] = false;
+                anyFiltered = true;
+            }
+        }
+        if (!anyFiltered) {
+            filter.groupsCollide.clear();
+            return;
+        }
+        filter.ownerGroups.assign(m_scene.bodies.size() + m_scene.statics.size(), {});
+        for (const auto& [owner, groups] : m_ownerGroups) {
+            for (const SdfPath& group : groups) {
+                if (const auto it = groupIndex.find(group); it != groupIndex.end()) filter.ownerGroups[owner].push_back(it->second);
+            }
+        }
+    }
+
+    // A joint's frame on one side: in its body's frame, or in the scene's.
+    struct Side {
+        std::optional<BodyId> body;
+        Pose frame;
+        bool valid = true;
+    };
+
+    Side jointSide(const UsdPhysicsJointDesc& joint, const SdfPath& bodyPath, const GfVec3f& position,
+                   const GfQuatf& rotation) {
+        const double m = m_scene.metersPerUnit;
+        Side side;
+        const Pose local{GfVec3d(position) * m, GfQuatd(rotation).GetNormalized()};
+        if (bodyPath.IsEmpty()) {
+            side.frame = {local.position - m_scene.origin, local.rotation};
+            return side;
+        }
+        if (const auto it = m_bodyIndex.find(bodyPath); it != m_bodyIndex.end()) {
+            side.body = it->second;
+            side.frame = local;
+            return side;
+        }
+        if (m_leftOut.count(bodyPath)) {
+            report(joint.primPath, "joins " + bodyPath.GetString() + ", which isn't simulated: left out");
+            side.valid = false;
+            return side;
+        }
+        // A body that isn't simulated as one (its RigidBodyAPI disabled): where it stands.
+        const Pose world = worldPose(m_xforms.GetLocalToWorldTransform(m_stage->GetPrimAtPath(bodyPath)));
+        side.frame.rotation = (world.rotation * local.rotation).GetNormalized();
+        side.frame.position = world.position + GfRotation(world.rotation).TransformDir(local.position) - m_scene.origin;
+        return side;
+    }
+
+    // Degrees to radians for angles, the stage's units to metres for distances.
+    JointLimitDesc limitFrom(const UsdPhysicsJointLimit& limit, bool angular) const {
+        const double scale = angular ? kDegrees : m_scene.metersPerUnit;
+        return {limit.enabled, limit.lower * scale, limit.upper * scale};
+    }
+
+    JointDriveDesc driveFrom(const UsdPhysicsJointDrive& drive, bool angular) const {
+        const double m = m_scene.metersPerUnit;
+        const double kg = UsdPhysicsGetStageKilogramsPerUnit(m_stage);
+        JointDriveDesc result;
+        result.enabled = drive.enabled;
+        result.acceleration = drive.acceleration;
+        const double perUnit = angular ? kDegrees : m;  // a position or velocity
+        result.targetPosition = drive.targetPosition * perUnit;
+        result.targetVelocity = drive.targetVelocity * perUnit;
+        // A force (kg u/s²) or a torque (kg u²/s²), per unit or per degree.
+        const double force = angular ? kg * m * m : kg * m;
+        result.forceLimit = finite(drive.forceLimit) ? drive.forceLimit * force : 0.0;
+        if (drive.acceleration) {
+            result.stiffness = drive.stiffness;
+            result.damping = drive.damping;
+        } else {
+            result.stiffness = drive.stiffness * force / perUnit;
+            result.damping = drive.damping * force / perUnit;
+        }
+        return result;
+    }
+
+    static bool finite(float value) { return std::isfinite(value) && value < 1e30f && value > 0.0f; }
+
+    // Whether it can be simulated, and its common part filled in.
+    bool commonJoint(const UsdPhysicsJointDesc& d, JointKind kind, JointDesc& joint) {
+        if (!d.jointEnabled) return false;
+        const Side side0 = jointSide(d, d.body0, d.localPose0Position, d.localPose0Orientation);
+        const Side side1 = jointSide(d, d.body1, d.localPose1Position, d.localPose1Orientation);
+        if (!side0.valid || !side1.valid) return false;
+        if (!side0.body && !side1.body) {
+            report(d.primPath, "joins nothing that moves: left out");
+            return false;
+        }
+        joint.prim = d.primPath;
+        joint.kind = kind;
+        joint.body0 = side0.body;
+        joint.body1 = side1.body;
+        joint.frame0 = side0.frame;
+        joint.frame1 = side1.frame;
+        joint.collisionEnabled = d.collisionEnabled;
+        const double m = m_scene.metersPerUnit;
+        const double kg = UsdPhysicsGetStageKilogramsPerUnit(m_stage);
+        joint.breakForce = finite(d.breakForce) ? d.breakForce * kg * m : 0.0;
+        joint.breakTorque = finite(d.breakTorque) ? d.breakTorque * kg * m * m : 0.0;
+        return true;
+    }
+
+    void addJoint(JointDesc joint) {
+        if (!joint.collisionEnabled && joint.body0 && joint.body1) {
+            m_scene.filter.pairs.emplace_back(std::min(*joint.body0, *joint.body1), std::max(*joint.body0, *joint.body1));
+        }
+        m_scene.joints.push_back(std::move(joint));
+    }
+
+    void addJoints(const Parsed& parsed) {
+        for (const auto& d : parsed.fixedJoints) {
+            JointDesc joint;
+            if (commonJoint(d, JointKind::Fixed, joint)) addJoint(std::move(joint));
+        }
+        for (const auto& d : parsed.revoluteJoints) {
+            JointDesc joint;
+            if (!commonJoint(d, JointKind::Revolute, joint)) continue;
+            joint.axis = axisOf(d.axis);
+            joint.limit = limitFrom(d.limit, true);
+            joint.drive = driveFrom(d.drive, true);
+            addJoint(std::move(joint));
+        }
+        for (const auto& d : parsed.prismaticJoints) {
+            JointDesc joint;
+            if (!commonJoint(d, JointKind::Prismatic, joint)) continue;
+            joint.axis = axisOf(d.axis);
+            joint.limit = limitFrom(d.limit, false);
+            joint.drive = driveFrom(d.drive, false);
+            addJoint(std::move(joint));
+        }
+        for (const auto& d : parsed.sphericalJoints) {
+            JointDesc joint;
+            if (!commonJoint(d, JointKind::Spherical, joint)) continue;
+            joint.axis = axisOf(d.axis);
+            joint.limit = limitFrom(d.limit, true);
+            addJoint(std::move(joint));
+        }
+        for (const auto& d : parsed.distanceJoints) {
+            JointDesc joint;
+            if (!commonJoint(d, JointKind::Distance, joint)) continue;
+            joint.minEnabled = d.minEnabled;
+            joint.maxEnabled = d.maxEnabled;
+            joint.limit = limitFrom(d.limit, false);
+            addJoint(std::move(joint));
+        }
+        for (const auto& d : parsed.genericJoints) {
+            JointDesc joint;
+            if (!commonJoint(d, JointKind::Generic, joint)) continue;
+            auto dofOf = [](UsdPhysicsJointDOF dof) -> std::optional<Dof> {
+                switch (dof) {
+                    case UsdPhysicsJointDOF::TransX: return Dof::TransX;
+                    case UsdPhysicsJointDOF::TransY: return Dof::TransY;
+                    case UsdPhysicsJointDOF::TransZ: return Dof::TransZ;
+                    case UsdPhysicsJointDOF::RotX: return Dof::RotX;
+                    case UsdPhysicsJointDOF::RotY: return Dof::RotY;
+                    case UsdPhysicsJointDOF::RotZ: return Dof::RotZ;
+                    default: return std::nullopt;
+                }
+            };
+            auto angular = [](Dof dof) { return dof == Dof::RotX || dof == Dof::RotY || dof == Dof::RotZ; };
+            for (const auto& [dof, limit] : d.jointLimits) {
+                if (const std::optional<Dof> which = dofOf(dof)) {
+                    joint.limits.emplace_back(*which, limitFrom(limit, angular(*which)));
+                } else {
+                    report(d.primPath, "a distance limit on a generic joint isn't simulated yet");
+                }
+            }
+            for (const auto& [dof, drive] : d.jointDrives) {
+                if (const std::optional<Dof> which = dofOf(dof)) joint.drives.emplace_back(*which, driveFrom(drive, angular(*which)));
+            }
+            addJoint(std::move(joint));
+        }
+        for (const SdfPath& path : parsed.customJoints) report(path, "a custom joint: left out");
     }
 
     void computeMass(BodyDesc& body) {
@@ -430,6 +678,10 @@ private:
     std::map<SdfPath, BodyId> m_bodyIndex;
     std::map<SdfPath, GfMatrix4d> m_bodyWorld;
     std::set<SdfPath> m_leftOut;  // bodies not simulated, whose colliders go with them
+    std::map<SdfPath, std::size_t> m_colliderOwner;
+    std::map<std::size_t, std::set<SdfPath>> m_ownerGroups;
+    std::set<std::size_t> m_mixedGroups;  // reported already
+    std::vector<std::pair<std::size_t, SdfPath>> m_filtered;  // an owner, and what it doesn't touch
 };
 
 }  // namespace

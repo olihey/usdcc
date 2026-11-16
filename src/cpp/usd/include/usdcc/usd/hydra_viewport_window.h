@@ -49,6 +49,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 namespace usdcc::usd {
 
 class SelectionOverlay;
+class PhysicsOverlay;
 
 // How the viewport draws what's selected (docs/VIEWPORT_SELECTION.md).
 enum class SelectionStyle {
@@ -216,6 +217,8 @@ public:
         bool hudPerformance = false; // bottom right: frame time, convergence
         bool hudToolReadout = true;  // what a gizmo drag is doing
         bool hudRollover = false;    // the prim under the cursor
+        // Wireframes of the stage's physics colliders and joint frames (docs/PHYSICS.md §5.1).
+        bool showColliders = false;
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -409,6 +412,7 @@ private:
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
+    std::unique_ptr<PhysicsOverlay> m_physicsOverlay;  // made when Show Colliders is first on
     PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
     PXR_NS::TfToken m_rendererSettingsPlugin;  // whose m_rendererSettings are
     RendererSettingValues m_rendererSettings;

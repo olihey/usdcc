@@ -1,13 +1,14 @@
 # Physics — Plan
 
-Status: **phases 0 to 2 built** (2026-11-16): rigid bodies simulate with Jolt, from the
-timeline's Simulate, the Physics menu or `usdcc.physics`, into a cache that is never saved.
-Baking (phase 3) and joints (phase 4) are next. Written 2026-11-16, revised the same day after a
+Status: **phases 0 to 4 built** (2026-11-16): rigid bodies and joints simulate with Jolt, from
+the timeline's Simulate, the Physics menu or `usdcc.physics`, into a cache that is never saved;
+Bake Simulation keeps a result as time samples; Check Physics and the viewport's Show Colliders
+say what the simulation sees. Phase 5's items are what's left. Written 2026-11-16, revised the same day after a
 review against OpenUSD's parser source; phase 0's findings are in §7. §2 describes the app as it
 was before phase 0. The choices are in §4, what was decided and what is still open in §8.
 
-To try it: open `test_data/physics_drop.usda`, turn on Simulate (the ball-and-ground button in
-the timeline, or Physics > Simulate) and play.
+To try it: open `test_data/physics_drop.usda` or `test_data/physics_playground.usda`, turn on
+Simulate (the ball-and-ground button in the timeline, or Physics > Simulate) and play.
 
 usdcc can already *author* physics: the Create menu makes `PhysicsScene`, collision groups and
 every joint type ([CREATE_MENU.md](CREATE_MENU.md)), Applied Schemas applies the physics APIs
@@ -214,12 +215,13 @@ bodies ordinary prims for as long as the cache exists and leaves the user's laye
 | `physics_backend.h` | `usdcc_usd`, Qt-free | §5.2, and the registry of backends |
 | `SimCache` | `usdcc_usd`, Qt-free | The cache layer: makes and removes it, pre-creates the world-space ops for every body (§4.6), writes a frame's poses in one `SdfChangeBlock` under the session's guard (§4.4), knows the cached range, clears |
 | `PhysicsSession` | `usdcc_usd`, Qt-free | One per stage that has simulated: the backend's world, the cache, the start frame, stale or not. `start()` clears the cache and then parses (§4.4), `stepTo(frame)`, `reset()`. Reads kinematic bodies' animated transforms and hands them to the backend before each step. Ignores the stage changes its own writes cause |
-| `physics_bake.h` (phase 3) | `usdcc_usd`, Qt-free | §4.5. Callers wrap it in an `UndoManager` edit |
+| `physics_bake.h` | `usdcc_usd`, Qt-free | §4.5: `cacheRange()` fills the cache over a range, `bakeFromCache()` writes it. Callers wrap it in an `UndoManager` edit and clear the cache |
+| `physics_check.h` | `usdcc_usd`, Qt-free | Check Physics: OpenUSD's `usdPhysicsValidators` through a `UsdValidationContext`, then the parsing's and the backend's reports for a world built and never stepped |
 | `Stage::physics()` | `usdcc_usd` | The stage's session, made on first use; `PhysicsSession::changed` for the cached range, the stale mark and the reports. `Stage::setEditTargetLayer()` refuses the cache |
 | `PlaybackController` | `usdcc_usd_ui` | With Simulate on, a tick asks the session for the next frame before setting the time (§4.3) |
 | `TimelineBar`, `TimeRuler` | `usdcc_usd_ui` | The Simulate toggle and Reset; the cached range as a band on the ruler, dimmed when stale |
 | `PhysicsMenu`, `physics_actions` (`physics_menu.h`) | `usdcc_usd_ui` | §5.4 |
-| Collider overlay (phase 4) | `usdcc_usd_ui` | Wireframes of the parsed shapes and joint frames, from `physics_desc`, drawn as the gizmos' `GizmoGeometry` lines. A Display menu entry ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)) |
+| Collider overlay (`physics_overlay.h`) | `usdcc_usd_ui` | Wireframes of the parsed shapes and joint frames, from `physics_desc`, drawn as the gizmos' `GizmoGeometry` lines; rebuilt when the stage or the time changes. Show Colliders in a viewport's options menu and Display dialog, with a Settings default (`Viewport/showColliders`, off) ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)) |
 | `Host::addPhysicsBackend()` | `usdcc_plugin_sdk` | Registers a backend and tells the Plugin Manager |
 | `physics_jolt` | `src/plugins` | The Jolt backend: `usdcc_physics_jolt_backend`, a static library the tests link too, and the plugin that registers it. Jolt's library and licence go in the plugin's folder; `tools/deploy.py` ships it in `plugins/` |
 
@@ -237,6 +239,8 @@ public:
     virtual void setKinematicTarget(BodyId, const Pose&, double seconds) = 0;
     virtual void step(double seconds, int substeps) = 0;
     virtual void readPoses(std::vector<Pose>& out) const = 0;    // every body, in BodyId order
+    // A joint that broke in the steps since the last call, and the like (§4.8).
+    virtual void takeEvents(std::vector<PhysicsReport>& out) {}
 };
 
 class PhysicsBackend {
@@ -269,9 +273,12 @@ one added is used. Velocities aren't read back yet: nothing needs them before ba
 | Material | `Body::SetFriction`, `SetRestitution` | Jolt has one friction per body; UsdPhysics has static and dynamic friction per collider. Dynamic friction is used. A body whose colliders have different materials gets the first collider's, and is reported. The schema's "average" combine rule through `PhysicsSystem::SetCombineFriction` and `SetCombineRestitution` |
 | Mass, centre of mass, inertia | `MassProperties` override, and an `OffsetCenterOfMassShape` where UsdPhysics' centre of mass isn't the shapes' | From `ComputeMassProperties()` and `physics_mass`, not Jolt's own |
 | Kinematic body | `EMotionType::Kinematic`, `MoveKinematic()` each step | |
-| Fixed, revolute, prismatic, spherical, distance joints | `FixedConstraint`, `HingeConstraint`, `SliderConstraint`, `SwingTwistConstraint`, `DistanceConstraint` | Break force: phase 4 |
-| Generic joint with limits and drives | `SixDOFConstraint` with limits and motors | |
-| Collision groups, filtered pairs | A `GroupFilter` of our own | Not `GroupFilterTable`: a collider can be in several UsdPhysics groups, with `mergedGroups` and `invertFilteredGroups`, and Jolt gives a body one group and subgroup. The filter keeps, per body, the set of groups and filtered pairs, and answers each pair from that. Filtering is per body in Jolt, per collider in UsdPhysics: colliders of one body in different groups are reported |
+| Fixed, revolute, prismatic, spherical, distance joints | `FixedConstraint`, `HingeConstraint`, `SliderConstraint`, `SwingTwistConstraint`, `DistanceConstraint`, in world space from the start frame's poses | A joint to nothing, or to a static collider, is to the world. A revolute or prismatic limit that excludes where the joint starts is widened to include it (Jolt's limits keep 0 inside), and reported. A spherical joint's two cone angles go to the swing-twist cone; its twist is free |
+| Drives | The constraint's motor: a position spring with the drive's stiffness and damping (as a frequency and damping ratio for an acceleration drive), or a velocity motor without stiffness; the force limit as the motor's | Angular stiffness and damping per degree in UsdPhysics, per radian in Jolt; forces and torques in the stage's units, converted |
+| Break force and torque | Checked after each step from the impulses the constraint applied in the last substep; over either, the constraint is disabled and its bodies woken | Reported, with the frame |
+| Generic joint with limits and drives | `SixDOFConstraint` with limits and motors; a DOF without a limit is free, lower > upper locks it | Swing limits as a pyramid. A distance limit on a generic joint is reported, not simulated |
+| A joint's collisions | `collisionEnabled` false (the default) filters the two bodies' pair | |
+| Collision groups, filtered pairs | A `GroupFilter` of our own | Not `GroupFilterTable`: a collider can be in several UsdPhysics groups, with `mergedGroups` and `invertFilteredGroups`, and Jolt gives a body one group and subgroup. `physics_desc` works out, solver-neutrally, each owner's groups (a body, or a static collider), a group-by-group table, and the filtered pairs; the filter answers each pair from that. Two owners don't touch when any group of one filters any group of the other. Filtering is per body in Jolt, per collider in UsdPhysics: colliders of one body in different groups are reported |
 | Articulation root | Ignored | Reported once per articulation: solved as plain joints |
 | Scene gravity | `PhysicsSystem::SetGravity` | One scene per world; bodies owned by another scene are left out and reported |
 
@@ -285,11 +292,11 @@ Physics
   Add Ground Plane           a Plane with CollisionAPI at the up axis' zero, 20 m across
   Add Physics Scene
   ──────────────
+  Check Physics…             the USD validators and the simulation's reports
+  ──────────────
   Simulate                   the timeline's toggle
   Reset Simulation
-  ──────────────             later:
-  Check Physics…             the USD validators and the backend's reports (phase 4)
-  Bake Simulation…           (phase 3)
+  Bake Simulation…           all bodies or the selection's; mark them kinematic
 ```
 
 - Each of the first four is one undo step: UsdPhysics' own `Apply()` inside one `UndoManager`
@@ -302,9 +309,18 @@ Physics
   tooltip says which frames.
 - Simulate is app-wide and off at every start, like auto-key. Turning it on while playing starts
   a simulation at once.
+- **Check Physics…** lists, in a dialog whose rows select their prim on a double-click, what
+  OpenUSD's physics validators say (a negative mass, a joint to a prim that isn't xformable) and
+  what a simulation would leave out or change, from a world built at the current time.
+- **Bake Simulation…** asks for all bodies or those at or under the selection, and whether to
+  mark them kinematic; solves the playback range where the cache lacks frames (anew if it's
+  stale) behind a progress dialog that cancels with nothing written; writes the frames as one
+  undo step and clears the cache, so the stage then shows the bake. A body whose
+  `xformOpOrder` a stronger layer than the edit target sets is reported: the bake wouldn't show.
 - Python: `usdcc.physics.simulate(start, end)`, `reset()`, `cached_range()`, `is_stale()`,
-  `reports()`; `usdcc.app.is_simulating()`, `set_simulating()`; and a `physics_changed` event.
-  `bake()` comes with phase 3.
+  `reports()`, `bake(prims, mark_kinematic)`, `check()`; `usdcc.app.is_simulating()`,
+  `set_simulating()`; and a `physics_changed` event. A bake from a script is part of the
+  script run's undo step.
 
 ### 5.5 What gets saved
 
@@ -317,8 +333,8 @@ Physics
   the cache, and the rule is enforced in `Stage::setEditTargetLayer()`, not only in the Layer
   Editor's menu, so no path reaches the cache.
 - **Settings:** the substep count (Settings > Physics, `Physics/substeps`, 4) is in
-  `usdcc.ini`. Simulate isn't saved: it is off at every start. The collider overlay comes with
-  phase 4.
+  `usdcc.ini`. Simulate isn't saved: it is off at every start. Show Colliders is a viewport
+  display switch: a Settings default, and each viewport's own choice saved with the session.
 
 ## 6. Phases
 
@@ -329,8 +345,8 @@ Each phase ships on its own and leaves the app consistent.
 | **0. Spike** (done) | `joltphysics` in `vcpkg.json`; its imported target mapped to Release in every configuration, as Qt is, with the two Debug fixes of §7 item 3; a headless test that parses a stage and drops a cube on a plane; the measurements of §7 | `vcpkg.json`, `CMakeLists.txt`, `tests/physics_spike_test.cpp` | The cube comes to rest on the plane; two runs give the same poses. Both pass, and so do the §7 checks |
 | **1. Core** (done) | `physics_desc`, `physics_mass`, the backend interface and registry, `SimCache`, `PhysicsSession`, `Host::addPhysicsBackend()`, the Jolt plugin: rigid bodies, primitives, convex hulls, static meshes, compounds, materials, mass, gravity, kinematic bodies | the new headers, `plugin.h`, `src/plugins/physics_jolt`, `test_data/physics_drop.usda`, `tests/physics_test.cpp` | Units: a stage in centimetres falls as one in metres does. Mass precedence case by case; `physics_mass` against closed-form box and sphere. Restitution and friction. A kinematic body pushes a dynamic one. A body animated only by time samples starts where the start frame puts it. Solving twice gives the same first frame (the cache was cleared before parsing). A body under a rotated, simulated parent lands where it would alone. A body inside an instance is reported, not moved. The cache: range, clear, the user's layers untouched and not dirty, its own writes don't make it stale. A fake backend drives the session |
 | **2. Timeline** (done) | Simulate, Reset, the cached band, stale marking, the playback rule of §4.3, the Physics menu's first four entries with Simulate and Reset, settings, session save, the Layer Editor entry, Python | `playback_controller.cpp`, `timeline_bar.cpp`, `time_ruler.cpp`, `physics_menu.cpp`, `session_stages.cpp`, `layer_stack.cpp`, bindings, `tests/physics_timeline_test.cpp` | The controller against a fake clock: frames in order in both modes; an edit makes the cache stale; Play while stale starts from the start frame; scrubbing reads the cache; the session file has no cache path; the cache can't become the edit target, variant edit mode included |
-| **3. Bake** | Bake Simulation with its dialog and progress; mark kinematic; world poses converted to local ops, ancestors first | `physics_bake`, a dialog | Baked, with the cache cleared, the stage shows the same transforms at every frame, nested bodies included; no `!resetXformStack!` in the user's layer; one undo step; baking the selection leaves the rest; baking a stale cache solves anew first |
-| **4. Constraints** | Joints, limits, drives, break force, collision groups, filtered pairs, the collider overlay, Check Physics | the Jolt plugin, the viewport overlay | A hinge stays within its limits; a drive reaches its target; filtered pairs pass through each other; a broken joint lets go |
+| **3. Bake** (done) | Bake Simulation with its dialog and progress; mark kinematic; world poses converted to local ops, ancestors first | `physics_bake`, `physics_menu.cpp`, `tests/physics_bake_joints_test.cpp` | Baked, with the cache cleared, the stage shows the same transforms at every frame, nested bodies included; no `!resetXformStack!` in the user's layer; one undo step; baking the selection leaves the rest; baking a stale cache solves anew first |
+| **4. Constraints** (done) | Joints, limits, drives, break force, collision groups, filtered pairs, the collider overlay, Check Physics | `physics_desc`, the Jolt plugin, `physics_check`, `physics_overlay`, `tests/physics_bake_joints_test.cpp` | A hinge stays within its limits; a drive reaches its target; filtered pairs pass through each other; a broken joint lets go |
 | **5. Later** | Convex decomposition (V-HACD or CoACD: licences to read then), point instancers, grabbing a body with the mouse while it plays, a cache on disk as value clips, baking to the prim's own ops, a second backend | — | — |
 
 Phase 0 went first because §4.2 rested on something not yet measured (§7 item 1: it holds).
@@ -342,7 +358,12 @@ cubes, spheres and planes; it stays, for §7's measurements. `tests/physics_test
 phase 1 (with a fake backend and with Jolt), `tests/physics_timeline_test.cpp` phase 2, and
 `python_physics` in `tests/python_app_test.cpp` the Python API.
 
-Phases 1 and 2 as built, where they differ from the plan above:
+`tests/physics_bake_joints_test.cpp` checks phases 3 and 4. `test_data/physics_playground.usda`
+has a group for each case (bounce, a knocked-over stack, every shape, friction on a ramp, a
+kinematic pusher, a static triangle mesh, mass, a pendulum on a hinge); simulated in the app, each
+behaves as its description says.
+
+Phases 1 to 4 as built, where they differ from the plan above:
 
 - The cache is the session layer's *first* sublayer, so the session layer itself (where variant
   edit mode writes) stays stronger than it.
@@ -352,6 +373,15 @@ Phases 1 and 2 as built, where they differ from the plan above:
   the layer's muted state.
 - Static colliders inside an instance stay: they never move, so nothing has to be written for
   them. Only moving bodies inside instances are left out (§4.8).
+- Baking reads every frame's local transforms with the cache still composed, then writes: a
+  parent that is itself a body is where the cache has it, which is where it is once baked too,
+  so no ancestors-first order is needed. Each body gets `[translate:sim, orient:sim, scale:sim]`
+  in the edit target, or one `transform:sim` matrix where its local transform has shear; its
+  own ops stay, unused.
+- `anim_edit` ([ANIMATION.md](ANIMATION.md) phase 2) doesn't exist yet, so a bake writes to the
+  edit target directly and reports when a stronger layer hides it, rather than following
+  `anim_edit`'s rule for a weaker layer's animation.
+- Articulations are simulated as plain joints between their bodies, and each is reported once.
 
 ## 7. Checked in phase 0
 

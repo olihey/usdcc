@@ -17,7 +17,9 @@
 #include <pxr/usd/usd/timeCode.h>
 
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace usdcc::usd::physics {
@@ -86,6 +88,61 @@ struct BodyDesc {
     std::vector<ShapeDesc> shapes;
 };
 
+// Joints (docs/PHYSICS.md §5.3). Angles in radians, distances in metres, forces in N,
+// torques in N m: converted from the stage's units.
+enum class JointKind { Fixed, Revolute, Prismatic, Spherical, Distance, Generic };
+
+// The six degrees of freedom of a generic joint, in its frame.
+enum class Dof { TransX, TransY, TransZ, RotX, RotY, RotZ };
+
+struct JointLimitDesc {
+    bool enabled = false;
+    // Revolute, prismatic, a generic joint's axis: lower and upper, and lower > upper
+    // locks the axis. Spherical: the cone's two half angles. Distance: min and max.
+    double lower = 0.0;
+    double upper = 0.0;
+};
+
+struct JointDriveDesc {
+    bool enabled = false;
+    double targetPosition = 0.0;
+    double targetVelocity = 0.0;
+    double forceLimit = 0.0;  // 0: none
+    double stiffness = 0.0;   // N/m or N m/rad; with `acceleration`, 1/s²
+    double damping = 0.0;     // N s/m or N m s/rad; with `acceleration`, 1/s
+    bool acceleration = false;
+};
+
+struct JointDesc {
+    PXR_NS::SdfPath prim;
+    JointKind kind = JointKind::Fixed;
+    // The bodies it joins; none for the world (or a static collider, which doesn't move).
+    std::optional<BodyId> body0;
+    std::optional<BodyId> body1;
+    // Its frame on each side, in that body's frame, or in the scene's for the world.
+    Pose frame0;
+    Pose frame1;
+    Axis axis = Axis::X;     // revolute, prismatic, spherical
+    JointLimitDesc limit;    // revolute, prismatic, spherical; distance: lower = min, upper = max
+    bool minEnabled = false;  // distance
+    bool maxEnabled = false;
+    JointDriveDesc drive;  // revolute, prismatic
+    std::vector<std::pair<Dof, JointLimitDesc>> limits;  // generic; a DOF not here is free
+    std::vector<std::pair<Dof, JointDriveDesc>> drives;
+    double breakForce = 0.0;   // 0: unbreakable
+    double breakTorque = 0.0;
+    bool collisionEnabled = false;  // between the two bodies
+};
+
+// Which colliders may touch (docs/PHYSICS.md §5.3). An "owner" is a body (0 to bodies - 1)
+// or a static collider (bodies + its index in statics): what a solver filters by.
+struct CollisionFilterDesc {
+    std::vector<std::vector<int>> ownerGroups;    // per owner, its collision groups
+    std::vector<std::vector<bool>> groupsCollide;  // per pair of groups
+    std::vector<std::pair<std::size_t, std::size_t>> pairs;  // owners that never touch
+    bool empty() const { return pairs.empty() && groupsCollide.empty(); }
+};
+
 struct PhysicsSceneDesc {
     PXR_NS::SdfPath scene;  // the PhysicsScene used; empty when the stage has none
     PXR_NS::GfVec3d gravity{0.0, -9.81, 0.0};  // m/s²
@@ -96,6 +153,8 @@ struct PhysicsSceneDesc {
     PXR_NS::GfVec3d origin{0.0};
     std::vector<BodyDesc> bodies;     // dynamic and kinematic, in a stable order
     std::vector<ShapeDesc> statics;   // colliders without a body
+    std::vector<JointDesc> joints;
+    CollisionFilterDesc filter;
 };
 
 // Parses `stage` at `startTime`. Reports what it leaves out or changes. The stage must be

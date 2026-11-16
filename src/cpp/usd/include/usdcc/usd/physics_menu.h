@@ -2,12 +2,14 @@
 
 #include "usdcc/core/export.h"
 
+#include "usdcc/usd/physics_bake.h"
 #include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/path.h>
 
 #include <QMenu>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -32,6 +34,13 @@ PXR_NS::SdfPath addGroundPlane(UndoManager& undo, const StageRefPtr& stage);
 // A PhysicsScene: Earth's gravity down the up axis. Its path; empty if refused.
 PXR_NS::SdfPath addPhysicsScene(UndoManager& undo, const StageRefPtr& stage);
 
+// Bake Simulation (docs/PHYSICS.md §4.5), over the stage's playback range: solves what the
+// cache lacks first (anew if it's stale), with `progress(done, total)` after each frame,
+// which cancels by returning false; then writes the chosen bodies' frames into the edit
+// target as one undo step, and clears the cache. Nothing is written when cancelled.
+physics::BakeResult bakeSimulation(UndoManager& undo, const StageRefPtr& stage, const physics::BakeOptions& options,
+                                   const std::function<bool(int, int)>& progress = {});
+
 }  // namespace physics_actions
 
 // The menu bar's Physics menu (docs/PHYSICS.md §5.4): making bodies and colliders, a
@@ -46,6 +55,13 @@ public:
 
     // Fills the menu now, as opening it does.
     void rebuild();
+
+    // Bake Simulation...: asks which bodies and whether to mark them kinematic, then bakes
+    // behind a progress dialog that can cancel.
+    void bakeInteractively();
+    // Check Physics...: the validators' findings and the simulation's reports, in a list
+    // whose rows select their prim.
+    void checkInteractively();
 
 private:
     StageManager* m_stageManager;
