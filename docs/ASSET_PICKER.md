@@ -48,7 +48,7 @@ Who registers one:
 
 | Source | Registered by |
 |---|---|
-| **Every protocol built on `usdcc_assets`** | The app, once: one source that lists each name of the stage's environment through the transports ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §6). A listing is the union of the stack, each entry with its origin |
+| **Every protocol built on `usdcc_assets` that can list** | The app, once: one source that lists each name of the stage's environment through the transports ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §6). A listing is the union of the stack, each entry with its origin. Plain HTTP can't list, so it has no place in the dialog: its URLs are typed or pasted (§3) |
 | **Another resolver's plugin** | `Host::addAssetSource()` in C++ ([PLUGIN_SDK.md](PLUGIN_SDK.md)), `usdcc.usd.register_asset_source()` in Python |
 | **Local files** | Built into the dialog, not a source |
 
@@ -76,7 +76,9 @@ Who registers one:
   the error in its place when it fails. Leaving a folder cancels its listing. Listings share the
   resolver's cache, so a folder a stage just composed from appears at once.
 - **The path bar** takes a typed or pasted path or URI. One no source can list is accepted if
-  `ArGetResolver().Resolve()` finds it, which is how a resolver without a source is still usable.
+  `ArGetResolver().Resolve()` finds it, which is how a resolver without a source is still usable,
+  and how an `https://` URL is opened ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)). Recent keeps the
+  URLs used.
 - **From** shows which endpoint delivered an entry, when a name has more than one.
 - **Filters** by extension, as today's dialogs have.
 - **Relative or Absolute** is shown when the result goes into a layer (§4).

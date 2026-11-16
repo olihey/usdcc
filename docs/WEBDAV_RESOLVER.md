@@ -16,6 +16,9 @@ environments and the usdcc integration moved to a shared library, planned in
 - **A URI resolver, not the primary one.** It is registered for the scheme `webdav`, beside
   `ArDefaultResolver`. Local paths behave exactly as today, and a studio's own primary resolver can
   be used alongside it.
+- **Not the same as an `https://` URL to the same server.** That goes through the HTTP resolver
+  ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it reads the file, but with the real hostname in the
+  layer, and without names, environments, browsing or saving.
 - **`WebDavResolver` derives from `usdcc::assets::CachingResolver`** and adds nothing but its scheme
   and its transport (§3). Resolving, stacks, the cache, contexts and credentials are the base
   class's.

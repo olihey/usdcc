@@ -2,8 +2,9 @@
 
 Loading USD assets from servers instead of the local disk: a shared library that does the caching,
 the server names and the TEST-over-PROD overlays, and one small resolver plugin per protocol on top
-of it. WebDAV is the first protocol ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker
-that browses servers is in [ASSET_PICKER.md](ASSET_PICKER.md).
+of it. The first two protocols are plain HTTP ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)) and WebDAV
+([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker that browses servers is in
+[ASSET_PICKER.md](ASSET_PICKER.md).
 
 **Status:** planned 2026-11-16. **Phase 0, the spike, is done** (§13.1): the two assumptions the
 design rests on hold, and it changed two details. Nothing else is built. "Checked" below means run
@@ -15,11 +16,12 @@ is still an assumption.
 - **A shared library, `usdcc_assets`, holds everything that isn't a protocol.** The cache, the server
   names, environments, credentials, the HTTP client and the resolver base class. A protocol adds a
   *transport*: four calls (§6). A later S3 plugin reuses all of it.
-- **One resolver per protocol, each with its own scheme.** `webdav://` for WebDAV, `s3://` for a
-  later S3 plugin. A neutral scheme (`asset://`) was considered and rejected (§16).
+- **One resolver per protocol, each with its own scheme.** `http://` and `https://` for plain HTTP,
+  `webdav://` for WebDAV, `s3://` for a later S3 plugin. A neutral scheme (`asset://`) was
+  considered and rejected (§16).
 - **The name in the URL is logical.** `webdav://studio/chars/hero.usd`: `studio` is a name, never a
   hostname. A configuration maps it to real servers (§4). No hostnames or secrets are written into
-  layers.
+  layers. Plain HTTP is the exception: its URLs are real addresses (§5.1).
 - **A name maps to a stack of servers.** The first one that has a file wins, per file. This is how
   a TEST server overrides single assets of PROD (§5).
 - **The resolved path stays a URI, and names the stack.** Never the cache file, and never one
@@ -33,7 +35,7 @@ is still an assumption.
 | Part | Where | Holds |
 |---|---|---|
 | `usdcc_assets` (DLL, no Qt) | `src/cpp/assets/`, in the app's `bin/` and in the SDK | Config and environments, stacks, the context, the cache, credentials, the HTTP client, `CachingResolver`, the transport registry |
-| A protocol plugin | `src/plugins/webdav/` | An `ArResolver` subclass of `CachingResolver`, its transport and its `plugInfo.json` |
+| A protocol plugin | `src/plugins/http/`, `src/plugins/webdav/` | An `ArResolver` subclass of `CachingResolver`, its transport and its `plugInfo.json` |
 | usdcc | `usdcc_usd`, `usdcc_usd_ui` | Binding a context to each stage, the Assets settings page, the login dialog, download progress, the asset picker |
 
 `usdcc_assets` is a DLL and not a static library, because the credential provider, the stack
@@ -95,6 +97,10 @@ page writes that file, so tools outside usdcc see the same servers.
 
 **Which environment is used:** `USDCC_ASSET_ENV`, or else the file's `"environment"`. usdcc can
 also pick one per stage (§10).
+
+A direct protocol (§5.1) has no endpoints or environments here. Plain HTTP keeps its hosts'
+credentials and its allow list in an `"http"` section of the same file
+([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4).
 
 **The context.** One context type for every protocol, `usdcc::assets::Context`
 (`AR_DECLARE_RESOLVER_CONTEXT`): the environment's name and its stacks. It is made three ways,
@@ -161,6 +167,24 @@ it (§10).
 **Limits of the first version:** an upper endpoint can add and replace files but not hide a lower
 one's; and changing the environment of an open stage means reopening it.
 
+### 5.1 Direct protocols
+
+A protocol can skip names and stacks, and take the URL as the real address. Plain HTTP does
+([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): `https://assets.example.com/chars/hero.usd` means that
+host. `CachingResolver` asks its subclass for the stack of a path; a named protocol answers from
+the context, a direct one with a single endpoint made from the URL.
+
+| | Named (`webdav://`) | Direct (`https://`) |
+|---|---|---|
+| The authority is | A logical name | The real host |
+| Environments and overlays | Yes | No |
+| Resolved path | The identifier with a stack id | The identifier |
+| Context-dependent | Yes | No |
+| Credentials | Per endpoint | Per host, in the configuration; anonymous by default |
+| Which hosts may be contacted | The configured endpoints | An allow list ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4) |
+
+The cache, offline mode, progress and cancel are the same for both.
+
 ## 6. The transport
 
 What a protocol implements. Every call gets the endpoint (URL, credential) and a cancel token, may
@@ -181,7 +205,8 @@ class Transport {
 public:
     virtual ~Transport();
     virtual Result<Entry> stat(const Endpoint&, const std::string& path, Cancel&) = 0;
-    virtual Result<std::vector<Entry>> list(const Endpoint&, const std::string& folder, Cancel&) = 0;
+    // "Not supported" unless overridden: plain HTTP can't list.
+    virtual Result<std::vector<Entry>> list(const Endpoint&, const std::string& folder, Cancel&);
     // Writes to `file`. With `knownEtag`, "not modified" is a result and nothing is written.
     virtual Result<Entry> fetch(const Endpoint&, const std::string& path, const std::filesystem::path& file,
                                 const std::string& knownEtag, Progress&, Cancel&) = 0;
@@ -194,7 +219,9 @@ public:
 ```
 
 `CachingResolver` implements every `ArResolver` method from these four. A protocol's resolver
-subclass only says which scheme and which transport.
+subclass only says which scheme and which transport. Only `stat` and `fetch` are required: without
+`list`, resolve asks `stat` per file and the protocol can't be browsed; without `put`, it is
+read-only.
 
 A transport registers itself with `usdcc_assets` when its library loads. USD loads a resolver's
 library lazily, so to browse a server before anything was resolved, `usdcc_assets` loads the plugin
@@ -207,7 +234,8 @@ of every resolver type whose `plugInfo.json` entry says `"usdccAssetsProtocol": 
 file in it, with its ETag, time and size. Composition asks about many siblings and UDIM asks about
 tiles that don't exist, so a listing per folder is far fewer round trips than a request per file.
 The asset picker uses the same call. A folder over a size limit (to be measured) falls back to
-`stat` per file.
+`stat` per file, which is also all a protocol without `list` has. Those answers, missing ones too,
+are remembered the same way.
 
 - **In a scope** (`_BeginCacheScope`/`_EndCacheScope`, which a stage open or recomposition makes),
   listings and winners are fixed, so one composition sees one consistent state.
@@ -239,7 +267,8 @@ The extension is kept, for renderers that are handed the cache file (§10).
 **libcurl with OpenSSL**, the same on every platform, linked statically into `usdcc_assets` (§12).
 On Windows `CURLSSLOPT_NATIVE_CA` trusts the Windows certificate store, including company CAs.
 One easy handle per thread and host, a share handle for connections, DNS and TLS sessions.
-Timeouts: 5 s to connect, 60 s with no data, both configurable. Redirects only on the same host.
+Timeouts: 5 s to connect, 60 s with no data, both configurable. Redirects only on the same host,
+unless the protocol says otherwise, as plain HTTP does; credentials never follow one to another host.
 Proxies come from the system or the usual environment variables. No Qt Network: resolver calls come
 from any thread and from tools without an event loop.
 
@@ -295,10 +324,13 @@ Secrets are never logged, never in a context's hash or debug string, never in a 
   webdav://studio/chars/hero/tex/albedo.png`.
 - **Settings > Assets** ([SETTINGS.md](SETTINGS.md)): endpoints (name, protocol, URL, mirrors,
   credential id, read-only), environments and their stacks, the default environment, a **Test**
-  button per endpoint, the cache's size with **Clear cache**, and offline mode. It writes the
-  configuration file of §4. With no protocol plugin installed it says so.
+  button per endpoint, the HTTP hosts that may be contacted and their credentials, the cache's size
+  with **Clear cache**, and offline mode. It writes the configuration file of §4. With no protocol
+  plugin installed it says so.
 - **Login dialog.** usdcc registers the credential callback. On a 401 it asks for user and password
   or a token on the UI thread, and offers to save them to the OS credential store.
+- **Host question.** A second callback asks before a stage contacts an HTTP host that isn't on the
+  allow list ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4).
 - **Sessions** ([SESSIONS.md](SESSIONS.md)) save each stage's root as its logical URL and its
   environment's name. No secrets.
 - **Opening and choosing files:** [ASSET_PICKER.md](ASSET_PICKER.md).
@@ -351,8 +383,8 @@ webdav/
 - **CMake:** `usdcc_add_asset_protocol()` builds a resolver library into a plugin folder with its
   manifest and `plugInfo.json`, beside `usdcc_add_plugin()`
   ([UsdccPlugin.cmake](../cmake/modules/UsdccPlugin.cmake)).
-- **Deploy:** `bin/usdcc_assets.dll`, `plugins/webdav/`, and the headers and import library in
-  `sdk`.
+- **Deploy:** `bin/usdcc_assets.dll`, `plugins/http/`, `plugins/webdav/`, and the headers and
+  import library in `sdk`.
 
 ## 13. Phases
 
@@ -360,7 +392,7 @@ webdav/
 |---|---|---|
 | **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | **Done** (§13.1). It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
 | **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
-| **2. WebDAV, read-only** | The transport and plugin ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat webdav://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST |
+| **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | Reopening a large stage makes no downloads, and pulling the network cable falls back to the cache with a warning |
 | **4. usdcc** | Everything in §10 but the picker | A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
@@ -409,6 +441,7 @@ anything about the network, the cache or credentials, which the spike has none o
 | 4 | How big may a folder be before resolve stops listing it? | Measure in phase 2 against a folder of 10,000 files |
 | 5 | Range requests, to read part of a large `.usdc` without downloading all of it? | Later. Whole files first: the usdc reader maps a local file |
 | 6 | Which authentication? | Per protocol; see [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §7 |
+| 7 | May a stage contact any HTTP host? | No: an allow list, with a question in usdcc for a new host ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4, §8) |
 
 ## 16. Not planned
 
