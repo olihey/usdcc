@@ -10,6 +10,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/usd/color_management.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_display.h"
@@ -493,6 +494,37 @@ USDCC_TEST(viewport_draw_panel) {
         CHECK(!domeLight->isChecked(), "Default: the setting's off");
         panel->setDisplayOverrides({});
         CHECK(!render->isChecked() && resetRender->isHidden(), "the dialog follows a change made elsewhere");
+    }
+
+    // The view transform row (docs/COLOR_MANAGEMENT.md §3.3).
+    auto* views = dialog->findChild<QComboBox*>("displayColorView");
+    auto* resetView = dialog->findChild<QToolButton*>("resetColorView");
+    CHECK(views && resetView, "the view transform row");
+    if (views && resetView) {
+        usdcc::usd::ColorManagement& color = usdcc::usd::ColorManagement::instance();
+        color.unload();
+        panel->setDisplayOverrides({});
+        CHECK(views->count() == 2 && views->currentText() == "sRGB" && resetView->isHidden(),
+              "no config: sRGB, the default, or Raw: %d %s", views->count(), qPrintable(views->currentText()));
+        views->setCurrentIndex(views->findText("Raw"));
+        CHECK(panel->displayOverrides().colorView == std::string("Raw") && !resetView->isHidden(), "picking Raw overrides");
+        resetView->click();
+        CHECK(!panel->displayOverrides().colorView && views->currentText() == "sRGB", "Default drops it");
+        if (color.load(usdcc::usd::kDefaultColorConfig)) {
+            ViewportDisplayOverrides aces;
+            aces.colorView = "ACES 1.0 - SDR Video";
+            panel->setDisplayOverrides(aces);
+            CHECK(views->findText("Un-tone-mapped") >= 0 && views->findText("Raw") >= 0,
+                  "with a config: the display's views");
+            CHECK(views->currentText() == "ACES 1.0 - SDR Video" && !resetView->isHidden(),
+                  "the viewport's own, overridden: %s", qPrintable(views->currentText()));
+            resetView->click();
+            CHECK(views->currentText() == "Un-tone-mapped" && resetView->isHidden(), "Default: the settings' view: %s",
+                  qPrintable(views->currentText()));
+            color.unload();
+        } else {
+            CHECK(false, "the built-in config loads: %s", color.error().c_str());
+        }
     }
     dialog->close();
 }

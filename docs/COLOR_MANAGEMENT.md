@@ -121,7 +121,9 @@ Each viewport can override the view from its options menu, **View Transform**: *
 (the settings' view)*, then the display's views. **Raw** shows linear values as before, for
 checking numbers; without a config the menu offers only Default (sRGB) and Raw. The override
 is `ViewportDisplayOverrides::colorView`, saved in sessions as `"colorView"` and copied by
-Duplicate; *Use Settings Defaults* drops it. Not in the Display... dialog yet. Render view
+Duplicate; *Use Settings Defaults* drops it. The Display... dialog has it too: a View transform
+row after Complexity, the display's views (sRGB and Raw without a config), with a Default
+button while the viewport has its own; it follows Settings > Color Management. Render view
 panels have the same menu (§6), V-Ray's and RTX's alike.
 
 ## 4. The Hydra viewport

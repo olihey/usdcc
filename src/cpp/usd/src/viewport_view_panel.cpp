@@ -263,6 +263,51 @@ QDialog* makeDisplayDialog(ViewportViewPanel* panel) {
     addChoice(QObject::tr("Complexity"), "displayComplexity", "resetComplexity", kComplexities, &complexityLabel,
               &HydraViewportWindow::DisplayOptions::complexity, &ViewportDisplayOverrides::complexity, true);
 
+    // The OCIO view (docs/COLOR_MANAGEMENT.md §3.3): the display's views, the one shown selected.
+    // The list follows Settings > Color Management, whose display has its own views.
+    {
+        auto* views = new QComboBox(dialog);
+        views->setObjectName(QStringLiteral("displayColorView"));
+        QToolButton* reset = addRow(row++, QObject::tr("View transform"), views, "resetColorView");
+        reset->setToolTip(QObject::tr("Use the Settings > Color Management view"));
+        auto update = [panel, views, reset]() {
+            const ColorManagement& color = ColorManagement::instance();
+            const std::string overridden = panel->displayOverrides().colorView.value_or(std::string());
+            const QSignalBlocker block(views);
+            views->clear();
+            std::string shown;
+            if (color.available()) {
+                const DisplayView settingsTarget = color.displayView();
+                for (const std::string& view : color.views(settingsTarget.display)) {
+                    views->addItem(QString::fromStdString(view), QString::fromStdString(view));
+                }
+                shown = color.displayView(overridden).view;
+                if (overridden == kRawView) shown = kRawView;
+            } else {
+                // No config: Hydra's sRGB encode, or nothing.
+                views->addItem(QObject::tr("sRGB"), QString());
+                views->addItem(QString::fromLatin1(kRawView), QString::fromLatin1(kRawView));
+                shown = overridden == kRawView ? kRawView : std::string();
+            }
+            views->setCurrentIndex(std::max(0, views->findData(QString::fromStdString(shown))));
+            reset->setVisible(!overridden.empty());
+        };
+        updates->push_back(update);
+        // Settings > Color Management: another display lists other views, or the Default changed.
+        usdcc::ui::onSettingsChanged(dialog, [update](const std::string& key) {
+            if (isColorManagementKey(key)) update();
+        });
+        QObject::connect(views, &QComboBox::currentIndexChanged, dialog, [edit, views](int) {
+            const std::string view = views->currentData().toString().toStdString();
+            edit([view](ViewportDisplayOverrides& o) {
+                if (view.empty()) o.colorView.reset();
+                else o.colorView = view;
+            });
+        });
+        QObject::connect(reset, &QToolButton::clicked, dialog,
+                         [edit]() { edit([](ViewportDisplayOverrides& o) { o.colorView.reset(); }); });
+    }
+
     // An on/off option: a checkbox.
     auto addSwitch = [&](const QString& text, const char* editorName, const char* resetName,
                          bool HydraViewportWindow::DisplayOptions::*option,
