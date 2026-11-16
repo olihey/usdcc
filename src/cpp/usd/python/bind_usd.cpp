@@ -11,11 +11,21 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace py = pybind11;
 
 namespace usdcc::usd::python {
+
+namespace {
+// The open stage with that cache id, or a ValueError.
+StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
+    StageRefPtr stage = manager.findByCacheId(cacheId);
+    if (!stage) throw py::value_error("no open stage with cache id " + std::to_string(cacheId));
+    return stage;
+}
+}  // namespace
 
 void bindStageManager(py::module_& m) {
     py::class_<StageManager>(m, "StageManager")
@@ -83,7 +93,38 @@ void bindStageManager(py::module_& m) {
                 }
                 self.setSelectedPaths(stage, std::move(sdfPaths));
             },
-            py::arg("cache_id"), py::arg("paths"), "Selects these prims (absolute paths) on the stage.");
+            py::arg("cache_id"), py::arg("paths"), "Selects these prims (absolute paths) on the stage.")
+        // The time a stage is shown at and the range it plays (docs/ANIMATION.md §4.1).
+        .def(
+            "time", [](const StageManager& self, long cacheId) { return openStageWithId(self, cacheId)->time(); },
+            py::arg("cache_id"), "The time code the stage is shown at.")
+        .def(
+            "set_time", [](StageManager& self, long cacheId, double time) { openStageWithId(self, cacheId)->setTime(time); },
+            py::arg("cache_id"), py::arg("time"))
+        .def(
+            "time_range",
+            [](const StageManager& self, long cacheId) {
+                const TimeRange range = stageTimeRange(openStageWithId(self, cacheId)->usdStage());
+                return std::make_pair(range.start, range.end);
+            },
+            py::arg("cache_id"), "The stage's start and end time codes; (0, 100) when it doesn't have both.")
+        .def(
+            "playback_range",
+            [](const StageManager& self, long cacheId) {
+                const TimeRange range = openStageWithId(self, cacheId)->playbackRange();
+                return std::make_pair(range.start, range.end);
+            },
+            py::arg("cache_id"), "The range the timeline shows and plays.")
+        .def(
+            "set_playback_range",
+            [](StageManager& self, long cacheId, double start, double end) {
+                openStageWithId(self, cacheId)->setPlaybackRange({start, end});
+            },
+            py::arg("cache_id"), py::arg("start"), py::arg("end"))
+        .def(
+            "clear_playback_range",
+            [](StageManager& self, long cacheId) { openStageWithId(self, cacheId)->clearPlaybackRange(); },
+            py::arg("cache_id"), "Back to the stage's own range.");
 
     // What relationships expect to target (docs/RELATIONSHIPS.md).
     m.def(

@@ -139,6 +139,42 @@ def select(items, stage=None):
     stage_manager().set_selected_paths(stage_id(stage), [_path_string(item) for item in items])
 
 
+def current_time(stage=None):
+    """The time code `stage` (default: the current stage) is shown at: where the
+    timeline's playhead is, and what the viewport and the panels read values at.
+    Use it as ``attribute.Get(usdcc.usd.current_time())``."""
+    return stage_manager().time(stage_id(_resolve(stage)))
+
+
+def set_current_time(time, stage=None):
+    """Shows `stage` (default: the current stage) at the time code `time`, as
+    scrubbing the timeline does. Not an undo step: nothing in the stage changes."""
+    stage_manager().set_time(stage_id(_resolve(stage)), float(time))
+
+
+def time_range(stage=None):
+    """``(start, end)``: the start and end time codes of `stage` (default: the
+    current stage), or ``(0.0, 100.0)`` when it doesn't have both."""
+    return stage_manager().time_range(stage_id(_resolve(stage)))
+
+
+def playback_range(stage=None):
+    """``(start, end)``: the range the timeline shows and plays for `stage`
+    (default: the current stage). The stage's own, until one is set."""
+    return stage_manager().playback_range(stage_id(_resolve(stage)))
+
+
+def set_playback_range(start, end, stage=None):
+    """Makes the timeline show and play ``start`` to ``end`` for `stage` (default:
+    the current stage). Kept with the session, not written to the stage. With both
+    None, goes back to the stage's own range."""
+    cache_id = stage_id(_resolve(stage))
+    if start is None and end is None:
+        stage_manager().clear_playback_range(cache_id)
+    else:
+        stage_manager().set_playback_range(cache_id, float(start), float(end))
+
+
 def edit_target(stage=None):
     """The layer (Sdf.Layer) edits to `stage` (default: the current stage) go to:
     its edit target, which the Layers panel shows and sets."""

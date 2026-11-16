@@ -421,6 +421,9 @@ def connect(event, callback):
       script), with the Sdf.Paths USD's change notice reports. It is called inside
       that notice: note what changed and act later (e.g. from a QTimer), don't edit
       or save the stage from it
+    - "time_changed": ``callback(stage, time)`` when the time a stage is shown at
+      changes: scrubbing, playing, or ``usdcc.usd.set_current_time()``. Many times a
+      second while playing, so keep it short
     - "viewport_camera_changed": ``callback(camera)``, a ``ViewportCamera`` or None,
       when the active viewport's camera moves, it shows another stage, or another
       viewport becomes the active one (see ``active_viewport_camera()``)
@@ -441,6 +444,8 @@ def connect(event, callback):
         plain = lambda cache_id, resynced, changed: callback(
             usd._stage(cache_id), [Sdf.Path(path) for path in resynced], [Sdf.Path(path) for path in changed]
         )
+    elif event == "time_changed":
+        plain = lambda cache_id, time: callback(usd._stage(cache_id), time)
     elif event == "viewport_camera_changed":
         plain = lambda: callback(active_viewport_camera())
     elif event == "viewport_renderer_settings_changed":
@@ -450,6 +455,22 @@ def connect(event, callback):
     connection = Connection(_app().connect_event(event, plain))
     _plugins.track(connection.disconnect, callback)
     return connection
+
+
+def play():
+    """Starts playing the current stage, as the timeline's Play button does: from the
+    time shown, over its playback range (``usdcc.usd.playback_range()``). Returns at
+    once; the "time_changed" event (``connect()``) follows it."""
+    _app().play()
+
+
+def stop():
+    """Stops playing."""
+    _app().stop_playing()
+
+
+def is_playing():
+    return _app().is_playing()
 
 
 def reload_plugin(id):

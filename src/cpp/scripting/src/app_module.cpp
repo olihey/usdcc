@@ -28,6 +28,7 @@
 #include "usdcc/ui/workspace_library.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/main_menu_actions.h"
+#include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/renderer_settings.h"
@@ -185,6 +186,36 @@ private:
     usdcc::core::Signal<StageRefPtr>::Connection m_opened;
     usdcc::core::Signal<StageRefPtr>::Connection m_closed;
 };
+
+// "time_changed": every open stage's time, as AllStagesEdited does its edits.
+struct AllStagesTime {
+    using Callback = std::function<void(const StageRefPtr&, double)>;
+
+    AllStagesTime(usdcc::usd::StageManager& stages, Callback callback) : m_callback(std::move(callback)) {
+        for (const StageRefPtr& stage : stages.stages()) add(stage);
+        m_opened = stages.stageOpened.connect([this](const StageRefPtr& stage) { add(stage); });
+        m_closed = stages.stageClosed.connect([this](const StageRefPtr& stage) { m_stages.erase(stage.get()); });
+    }
+
+private:
+    void add(const StageRefPtr& stage) {
+        std::weak_ptr<usdcc::usd::Stage> weak = stage;
+        m_stages[stage.get()] = stage->timeChanged.connect([this, weak](double time) {
+            if (const StageRefPtr locked = weak.lock()) m_callback(locked, time);
+        });
+    }
+
+    Callback m_callback;
+    std::map<const usdcc::usd::Stage*, usdcc::core::Signal<double>::Connection> m_stages;
+    usdcc::core::Signal<StageRefPtr>::Connection m_opened;
+    usdcc::core::Signal<StageRefPtr>::Connection m_closed;
+};
+
+// usdcc.app.play() and the rest: the timeline's transport, or a RuntimeError.
+usdcc::usd::PlaybackController& playback() {
+    if (!context().playback) throw std::runtime_error("this app has no timeline");
+    return *context().playback;
+}
 
 // usdcc.app.Viewport's: the open viewport with that id, or a ValueError.
 usdcc::usd::ViewportViewPanel& viewportWithId(int id) {
@@ -827,6 +858,12 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
                     });
                 return id;
             }
+            if (event == "time_changed") {
+                const int id = s_nextEventConnection++;
+                s_eventConnections[id] = std::make_shared<AllStagesTime>(
+                    stages, [held](const StageRefPtr& stage, double time) { callLogged(held, cacheIdOf(stage), time); });
+                return id;
+            }
             if (event == "viewport_camera_changed") {
                 // usdcc/app.py reads the camera with active_viewport_camera().
                 return keepConnection(usdcc::usd::ViewportViewPanel::activeViewportChanged(),
@@ -842,6 +879,11 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         py::arg("event"), py::arg("callback"));
     m.def(
         "disconnect_event", [](int id) { s_eventConnections.erase(id); }, py::arg("id"));
+
+    // The timeline's transport (docs/ANIMATION.md §4.2), on the current stage.
+    m.def("play", []() { playback().play(); });
+    m.def("stop_playing", []() { playback().stop(); });
+    m.def("is_playing", []() { return playback().isPlaying(); });
 
     // A plugin's own settings and what it adds (src/python/usdcc/_plugins.py).
     m.def(

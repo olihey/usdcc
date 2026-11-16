@@ -14,6 +14,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
@@ -523,4 +524,48 @@ USDCC_TEST(python_toasts) {
     CHECK(arrived, "and the window shows them");
     toasts.dismissAll();
     window.close();
+}
+
+// The timeline from Python (docs/ANIMATION.md phase 1): the time a stage is shown at, its
+// ranges, the transport, and the "time_changed" event.
+USDCC_TEST(python_time) {
+    auto& app = pythonTestApp();
+    TestSettings settings;
+    const StageRefPtr stage = app.stages.createStage();
+    app.stages.setCurrentStage(stage);
+    usdcc::usd::PlaybackController playback(&app.stages);
+    usdcc::scripting::AppContext withTimeline;
+    withTimeline.stageManager = &app.stages;
+    withTimeline.undoManager = &app.undo;
+    withTimeline.toolSet = &app.tools;
+    withTimeline.playback = &playback;
+    const usdcc::scripting::AppContextScope context(withTimeline);
+
+    const bool ok = app.runner.run(
+        "import usdcc.app, usdcc.usd\n"
+        "stage = usdcc.usd.current_stage()\n"
+        "assert usdcc.usd.current_time() == 0.0, usdcc.usd.current_time()\n"
+        "assert usdcc.usd.time_range() == (0.0, 100.0), usdcc.usd.time_range()\n"
+        "seen = []\n"
+        "connection = usdcc.app.connect('time_changed', lambda s, t: seen.append((s == stage, t)))\n"
+        "usdcc.usd.set_current_time(12)\n"
+        "assert usdcc.usd.current_time(stage) == 12.0 and seen == [(True, 12.0)], seen\n"
+        "usdcc.usd.set_playback_range(40, 5)\n"
+        "assert usdcc.usd.playback_range() == (5.0, 40.0), usdcc.usd.playback_range()\n"
+        "usdcc.usd.set_playback_range(None, None)\n"
+        "assert usdcc.usd.playback_range() == (0.0, 100.0), usdcc.usd.playback_range()\n"
+        "assert not usdcc.app.is_playing()\n"
+        "usdcc.app.play()\n"
+        "assert usdcc.app.is_playing()\n"
+        "usdcc.app.stop()\n"
+        "assert not usdcc.app.is_playing()\n"
+        "connection.disconnect()\n"
+        "usdcc.usd.set_current_time(3)\n"
+        "assert len(seen) == 1, seen\n",
+        "time.py");
+    CHECK(ok, "the script ran");
+    CHECK(stage->time() == 3.0 && !stage->hasPlaybackRange(), "and moved the app's stage (%g)", stage->time());
+    CHECK(app.runner.lastUndoSteps() == 0 && undoCount(stage) == 0, "time isn't an edit: no undo step (%d)", undoCount(stage));
+    CHECK(evaluate("__import__('usdcc.usd').usd.current_time()") == "3.0", "readable as an expression");
+    app.stages.closeStage(stage);
 }
