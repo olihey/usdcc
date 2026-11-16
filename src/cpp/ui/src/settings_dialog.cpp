@@ -51,7 +51,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 const QStringList& knownCategoryOrder() {
     static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"), QStringLiteral("Renderers"),
                                       QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Notifications"),
-                                      QStringLiteral("Python")};
+                                      QStringLiteral("Python"), QStringLiteral("USD")};
     return order;
 }
 

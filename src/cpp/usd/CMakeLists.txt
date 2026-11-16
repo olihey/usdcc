@@ -31,6 +31,10 @@ add_library(usdcc_usd SHARED
     src/time_range.cpp
     include/usdcc/usd/playback.h
     src/playback.cpp
+    include/usdcc/usd/usd_environment.h
+    src/usd_environment.cpp
+    include/usdcc/usd/usd_runtime_info.h
+    src/usd_runtime_info.cpp
     include/usdcc/usd/value_type_info.h
     include/usdcc/usd/xform_math.h
     include/usdcc/usd/xform_stack.h
@@ -90,6 +94,8 @@ add_library(usdcc_usd_ui SHARED
     src/material_editor_view_panel.cpp
     include/usdcc/usd/shader_nodes_dialog.h
     src/shader_nodes_dialog.cpp
+    include/usdcc/usd/usd_runtime_dialog.h
+    src/usd_runtime_dialog.cpp
     include/usdcc/usd/recent_files.h
     src/recent_files.cpp
     include/usdcc/usd/dependencies_view_panel.h

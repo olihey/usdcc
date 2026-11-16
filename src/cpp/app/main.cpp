@@ -24,6 +24,7 @@
 #include <DockManager.h>
 
 #include <QAction>
+#include <QDesktopServices>
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFileDialog>
@@ -37,6 +38,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QToolButton>
+#include <QUrl>
 #include <QSurfaceFormat>
 
 #include <pxr/usd/sdf/layer.h>
@@ -77,6 +79,8 @@
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/material_editor_view_panel.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
+#include "usdcc/usd/usd_environment.h"
+#include "usdcc/usd/usd_runtime_dialog.h"
 #include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/outliner_view_panel.h"
 #include "usdcc/usd/prim_context_menu.h"
@@ -240,6 +244,10 @@ int main(int argc, char** argv) {
     // Preferences (docs/SETTINGS.md) load from usdcc.ini from here on; every
     // setting defined later (the theme's first) starts from its saved value.
     usdcc::ui::installAppSettings();
+    // Settings > USD: environment variables OpenUSD reads once, so set before
+    // anything below uses its plugin registry or asset resolver (docs/USD_RUNTIME.md §3).
+    usdcc::usd::defineUsdEnvironmentSettings();
+    usdcc::usd::applyUsdEnvironmentSettings();
     usdcc::ui::theme::apply(app);
     // Read by the plugin manager and Python, just below.
     usdcc::scripting::definePythonSettings();
@@ -968,6 +976,18 @@ int main(int argc, char** argv) {
 
     // Last in the menu bar: menus plugins add go in before Debug.
     QMenu* helpMenu = window.mainMenuBar()->addMenu(QObject::tr("&Help"));
+    // docs/USD_RUNTIME.md §1.
+    QAction* usdRuntimeAction = helpMenu->addAction(QObject::tr("&USD Runtime..."));
+    usdRuntimeAction->setStatusTip(QObject::tr("The OpenUSD usdcc runs with: its plugins, file formats, render delegates, "
+                                               "environment and debug flags"));
+    QObject::connect(usdRuntimeAction, &QAction::triggered, &window,
+                     [&window]() { usdcc::usd::UsdRuntimeDialog::showDialog(&window); });
+    helpMenu->addSeparator();
+    QAction* projectHomeAction = helpMenu->addAction(QObject::tr("&Project Home"));
+    projectHomeAction->setStatusTip(QObject::tr("Open usdcc's GitHub page in your browser"));
+    QObject::connect(projectHomeAction, &QAction::triggered, &window, []() {
+        QDesktopServices::openUrl(QUrl(QString::fromLatin1(usdcc::ui::AboutDialog::kRepositoryUrl)));
+    });
     QAction* aboutAction = helpMenu->addAction(QObject::tr("&About usdcc"));
     aboutAction->setMenuRole(QAction::AboutRole);
     QObject::connect(aboutAction, &QAction::triggered, &window, [&window, &python]() {

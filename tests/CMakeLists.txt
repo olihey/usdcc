@@ -39,6 +39,7 @@ add_executable(usdcc_tests
     scene_bounds_test.cpp
     scene_counts_test.cpp
     settings_test.cpp
+    usd_runtime_info_test.cpp
     shade_connections_test.cpp
     stage_changes_test.cpp
     stage_time_test.cpp
@@ -64,6 +65,7 @@ add_executable(usdcc_ui_tests
     test_harness.cpp
     ui_test_main.cpp
     about_dialog_test.cpp
+    usd_runtime_dialog_test.cpp
     attributes_primvar_groups_test.cpp
     attributes_rename_test.cpp
     attributes_tab_test.cpp

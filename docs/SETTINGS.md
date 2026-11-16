@@ -29,7 +29,7 @@ and lives in its shared library, so the exe and the Python modules see one insta
 | Field | Meaning |
 |---|---|
 | `key` | `"Group/name"`: also where it is saved (`Appearance/accentColor`, `Shortcuts/tools.move`) |
-| `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Python`, or a plugin's own |
+| `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Python`, `USD` (docs/USD_RUNTIME.md §3), or a plugin's own |
 | `group` | A heading on that page (`Theme`, `Interface`, `Tools`) |
 | `label`, `description` | What the dialog shows |
 | `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none), `FolderList` (paths separated by `;`, in order; `""` for none) |
