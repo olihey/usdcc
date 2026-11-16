@@ -255,6 +255,33 @@ USDCC_TEST(settings_dialog) {
     CHECK(dialog.isVisible(), "nor does the keypad's Enter");
     settings.reset("Plugin/level");
 
+    // A group's rows sit as far below its title bar as the bar sits below the group above.
+    {
+        dialog.showCategory(QStringLiteral("Appearance"), QStringLiteral("Theme"));
+        settle();
+        auto* theme = section(QStringLiteral("Theme"));
+        auto* interface = section(QStringLiteral("Interface"));
+        const auto bar = [](QWidget* found) { return found ? found->findChild<QWidget*>(QStringLiteral("sectionHeaderBar")) : nullptr; };
+        const auto rows = [](usdcc::ui::CategorySection* found) -> QWidget* {
+            QWidget* bar = found ? found->findChild<QWidget*>(QStringLiteral("sectionHeaderBar")) : nullptr;
+            for (QWidget* child : found ? found->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly) : QList<QWidget*>()) {
+                if (child != bar && child->objectName() != QStringLiteral("sectionSeparator")) return child;  // the body
+            }
+            return nullptr;
+        };
+        QWidget* themeBar = bar(theme);
+        QWidget* themeBody = rows(theme);
+        QWidget* themeRows = themeBody ? themeBody->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly).value(0) : nullptr;
+        QWidget* interfaceBar = bar(interface);
+        CHECK(themeBar && themeRows && interfaceBar, "the sections' bars and rows");
+        if (themeBar && themeRows && interfaceBar) {
+            const int below = themeRows->mapTo(&dialog, QPoint(0, 0)).y() - themeBar->mapTo(&dialog, QPoint(0, themeBar->height())).y();
+            const int above = interfaceBar->mapTo(&dialog, QPoint(0, 0)).y() -
+                              themeRows->mapTo(&dialog, QPoint(0, themeRows->height())).y();
+            CHECK(below >= above - 1 && below <= above + 1, "room under a title bar (%d) as above it (%d)", below, above);
+        }
+    }
+
     auto* accent = withKey<QToolButton>(&dialog, QStringLiteral("Appearance/accent"), QStringLiteral("settingColorButton"));
     CHECK(accent && accent->text() == QStringLiteral("#3d8bfd"), "a color gets a swatch button with its value");
     settings.setValue("Appearance/accent", std::string("#00ff00"));

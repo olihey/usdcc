@@ -56,6 +56,10 @@ void CategorySection::addRow(QWidget* row) { m_bodyLayout->addWidget(row); }
 
 void CategorySection::addHeaderWidget(QWidget* widget) { m_headerLayout->addWidget(widget); }
 
+void CategorySection::setBodyMargins(int left, int top, int right, int bottom) {
+    usdcc::ui::scaled::margins(m_bodyLayout, left, top, right, bottom);
+}
+
 void CategorySection::setCollapsed(bool collapsed) {
     m_collapsed = collapsed;
     updateBody();

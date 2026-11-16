@@ -655,6 +655,9 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
             const QString categoryName = qs(category);
             auto* section = new CategorySection(collapsedKey(categoryName, name), name, content);
             section->setProperty(kGroupProperty, name);
+            // As much room under the title bar as above it (the last section's 10 below
+            // its rows, and the page's 4 between sections), so the rows don't touch it.
+            section->setBodyMargins(14, 14, 0, 10);
             section->setCollapsed(uiState.value(collapsedKey(categoryName, name), false).toBool());
             connect(section, &CategorySection::collapsedChanged, this,
                     [categoryName, name](bool collapsed) { storeCollapsed(categoryName, name, collapsed); });

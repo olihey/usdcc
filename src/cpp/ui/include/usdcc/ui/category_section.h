@@ -27,6 +27,8 @@ public:
     void addRow(QWidget* row);
     // A control in the header, before the row count (e.g. the transform stack's "+ Add").
     void addHeaderWidget(QWidget* widget);
+    // Around the rows, in unscaled pixels (scaled with the UI); 14, 2, 0, 10 by default.
+    void setBodyMargins(int left, int top, int right, int bottom);
 
     bool isCollapsed() const { return m_collapsed; }
     void setCollapsed(bool collapsed);
