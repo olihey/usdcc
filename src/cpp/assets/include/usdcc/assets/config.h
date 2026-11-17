@@ -25,9 +25,22 @@
 
 namespace usdcc::assets {
 
+// A host of the plain HTTP protocol (docs/HTTP_RESOLVER.md §4).
+struct HttpHost {
+    std::string credential;  // a credential id; empty for anonymous
+    bool insecure = false;   // its credential may be sent over plain http://
+};
+
 struct Config {
     // The environment used when nothing else names one.
     std::string environment;
+    // "http": { "hosts": { "<host>": { "credential": "...", "insecure": false } }, "allow": ["*.studio.local"] }
+    std::map<std::string, HttpHost> httpHosts;
+    std::vector<std::string> httpAllow;
+    // Resolve and open from the disk cache only (§7).
+    bool offline = false;
+    // The disk cache's size limit; "cacheLimitGB" in the file.
+    double cacheLimitGB = 20;
     std::map<std::string, Endpoint> endpoints;
     // environment -> scheme -> name -> endpoint ids, top of the stack first.
     std::map<std::string, std::map<std::string, std::map<std::string, std::vector<std::string>>>> environments;

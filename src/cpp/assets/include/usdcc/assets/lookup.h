@@ -10,7 +10,9 @@
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
+#include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <map>
 #include <mutex>
 #include <string>
@@ -54,12 +56,42 @@ void setLookupLifetime(std::chrono::milliseconds lifetime);
 // Drops every remembered answer of the process.
 void forgetLookups();
 
+// ---- Mirrors (§4) ----------------------------------------------------------------------
+
+// A URL that didn't answer is tried after an endpoint's other URLs for half a minute,
+// so that not every request waits for its timeout before going to a mirror.
+bool isMarkedDown(const std::string& url);
+void markDown(const std::string& url);
+void forgetDownMarks();
+
+// `call` with the endpoint as it is, then with each mirror's URL in its place, until
+// one is reachable. URLs marked down are tried last. The result is the first that
+// isn't Unreachable, or the last one's.
+template <class Call>
+auto withMirrors(const Endpoint& endpoint, Call&& call) -> decltype(call(endpoint)) {
+    std::vector<std::string> urls;
+    urls.push_back(endpoint.url);
+    urls.insert(urls.end(), endpoint.mirrors.begin(), endpoint.mirrors.end());
+    std::stable_partition(urls.begin(), urls.end(), [](const std::string& url) { return !isMarkedDown(url); });
+    decltype(call(endpoint)) result;
+    for (const std::string& url : urls) {
+        Endpoint at = endpoint;
+        at.url = url;
+        result = call(at);
+        if (result.status != Status::Unreachable) return result;
+        markDown(url);
+    }
+    return result;
+}
+
 // Where a path was found.
 struct Found {
     Status status = Status::Missing;  // Ok, Missing, or why the search stopped
     std::string message;
     Endpoint endpoint;  // the winner; when the search stopped, the endpoint that stopped it
     Entry entry;
+    // Offline: the cached version it resolved to.
+    std::filesystem::path cachedFile;
 };
 
 // The first endpoint of `stack` that has `path` wins. A missing file moves on to the

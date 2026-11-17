@@ -44,6 +44,30 @@ USDCC_TEST(rtx_native_navigation_camera) {
     source.orthographic = true; source.orthoWidth = 8;
     camera.seed(source, std::nullopt); camera.zoom(1);
     CHECK(std::abs(camera.camera(2).orthoWidth - 7.2) < 1e-8, "orthographic zoom changes the viewing width");
+
+    // A Z-up stage: the orbit is about Z, so an upright camera turns level.
+    usdcc::usd::RenderCamera upright;
+    const auto viewport = usdcc::usd::orbitCameraAxes(GfVec3d(0), 10, 30, 20, /*zUp=*/true);
+    for (int i = 0; i < 3; ++i) {
+        upright.cameraToWorld[0][i] = viewport.right[i];
+        upright.cameraToWorld[1][i] = viewport.up[i];
+        upright.cameraToWorld[2][i] = -viewport.forward[i];
+        upright.cameraToWorld[3][i] = viewport.eye[i];
+    }
+    upright = upright.atAspect(2);
+    NavigationCamera zUp;
+    zUp.setZUp(true);
+    zUp.seed(upright, GfRange3d(GfVec3d(-2), GfVec3d(2)));
+    error = 0;
+    for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c)
+        error += std::abs(zUp.camera(2).cameraToWorld[r][c] - upright.cameraToWorld[r][c]);
+    CHECK(error < 1e-8, "a Z-up viewport's camera is taken over as it is");
+    zUp.beginOrbit(); zUp.orbit(QPointF(.25, 0));
+    const auto turned = zUp.camera(2).cameraToWorld;
+    CHECK(std::abs(turned[3][2] - viewport.eye[2]) < 1e-8 && std::abs(turned[0][2]) < 1e-8 && turned[1][2] > 0,
+          "and orbits about Z: the eye keeps its height, the horizon stays level");
+    zUp.reset(); zUp.setZUp(true);
+    CHECK(zUp.camera(1).cameraToWorld[3][2] > 0 && zUp.camera(1).cameraToWorld[1][2] > 0, "Reset Camera is above the XY ground");
 }
 
 USDCC_TEST(rtx_native_navigation_input_letterboxing) {

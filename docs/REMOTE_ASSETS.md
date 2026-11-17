@@ -6,9 +6,10 @@ of it. The first two protocols are plain HTTP ([HTTP_RESOLVER.md](HTTP_RESOLVER.
 ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker that browses servers is in
 [ASSET_PICKER.md](ASSET_PICKER.md).
 
-**Status:** planned 2026-11-16. **Phases 0 and 1 are done:** the spike (§13.1), and the shared
-library `usdcc_assets` with its tests, on a fake protocol and no network (§13.2). No real protocol,
-nothing in the app and nothing in a deploy yet. "Checked" below means run in the spike or the tests,
+**Status:** planned 2026-11-16. **Phases 0 to 3 are done:** the spike (§13.1), the shared library
+`usdcc_assets` (§13.2), and the HTTP and WebDAV protocols with mirrors, offline mode, the cache's
+limit, `RefreshContext`, progress and cancel (§13.3). `usdcat` opens stages through both. Nothing
+is in the app or in a deploy yet: that is phase 4. "Checked" below means run in the spike or the tests,
 or looked at in this repository or the local OpenUSD build (26.08); everything else is still an
 assumption.
 
@@ -256,21 +257,27 @@ The extension is kept, for renderers that are handed the cache file (§10).
 - **Revalidation:** before a cached version is used, its ETag is compared with the listing's. Equal
   means no request at all; different means a conditional fetch.
 - **Downloads** go to a temporary file renamed when complete. However many threads of a process
-  want one version, it downloads once. Two processes may each download it, to a file of their own,
-  and the first to finish is kept; a lock file to make that one download too is phase 3.
+  want one version, it downloads once. Another process wanting it waits: a lock folder beside the
+  file, which its holder touches every few seconds, and which is taken over when nobody has for
+  half a minute (a crash).
 - **A path that can't be a file name** as it is (too long for Windows with the cache's folder in
   front, or with characters Windows refuses) is stored under a hash of it, in a `_` folder.
 - **Location:** `USDCC_ASSET_CACHE`, or else `asset-cache` in the user's usdcc data folder. Shared
   by every usdcc process and tool.
-- **Size limit:** default 20 GB, least recently used first. A version in use isn't removed.
-- **Offline mode** (configuration, or the settings page): resolve and open from the cache only,
-  with a warning in the Log. What isn't cached is missing.
+- **Size limit:** default 20 GB (`"cacheLimitGB"`), least recently used first, checked after
+  every 64 MB downloaded. A version handed out in the last minute stays, as its path may not be
+  opened yet; an open one is safe anyway (Windows refuses to remove it, and elsewhere its bytes stay
+  until it's closed).
+- **Offline mode** (`"offline": true`, or the settings page): resolve and open from the cache
+  only, each path as the version of it used last. What isn't cached is missing, and nothing can be
+  browsed.
 
 ## 8. HTTP and credentials
 
-**libcurl with OpenSSL**, the same on every platform, linked statically into `usdcc_assets` (§12).
-On Windows `CURLSSLOPT_NATIVE_CA` trusts the Windows certificate store, including company CAs.
-One easy handle per thread and host, a share handle for connections, DNS and TLS sessions.
+**libcurl,** with Windows' own TLS (Schannel) there and OpenSSL elsewhere. Schannel trusts the
+Windows certificate store, company CAs included, with nothing to configure, and brings no second
+OpenSSL into a process that already has PySide6's (§12). One handle per thread, which keeps its
+connections between requests.
 Timeouts: 5 s to connect, 60 s with no data, both configurable. Redirects only on the same host,
 unless the protocol says otherwise, as plain HTTP does; credentials never follow one to another host.
 Proxies come from the system or the usual environment variables. No Qt Network: resolver calls come
@@ -284,8 +291,11 @@ password or a token. Providers are tried in order:
 
 1. **A callback the host registers.** usdcc uses it to show a login dialog after a 401 (§10).
 2. **The OS credential store:** Windows Credential Manager (target `usdcc-assets:<id>`), Keychain
-   and libsecret later.
+   and libsecret. *Not built yet; with the login dialog, phase 4.*
 3. **Environment variables:** `USDCC_ASSETS_<ID>_USER`, `_PASSWORD`, `_TOKEN`, for CI and tools.
+
+A user and password go as Basic authentication with the first request, a token as a bearer token.
+Digest and the Windows schemes aren't built.
 
 Secrets are never logged, never in a context's hash or debug string, never in a session. A 401 or
 403 names the credential id that failed.
@@ -378,12 +388,13 @@ webdav/
 
 ## 12. Build and deploy
 
-- **vcpkg:** `curl` (default features off, `openssl` on) and `pugixml`, for the XML that WebDAV
-  and S3 listings come in. OpenSSL is already there through Qt. New licences: curl and pugixml,
-  both MIT-style; `tools/deploy.py` collects them.
-- **Static curl and OpenSSL** inside `usdcc_assets.dll`. PySide6 ships its own
-  `libcrypto-3-x64.dll`, the same file name as vcpkg's, and Windows reuses a DLL already loaded by
-  that name.
+- **vcpkg:** `curl` (default features off, `ssl` on: Schannel on Windows, OpenSSL elsewhere) and
+  `pugixml`, for the XML that WebDAV listings come in. New licences: curl and pugixml, both
+  MIT-style; `tools/deploy.py` collects them.
+- **No static linking, which the plan had.** It was to keep a second `libcrypto-3-x64.dll` out of a
+  process with PySide6's. With Schannel there is no OpenSSL in libcurl on Windows at all, and making
+  OpenSSL static in vcpkg would have rebuilt Qt. `libcurl.dll` and `z.dll` go beside
+  `usdcc_assets.dll`, and `pugixml.dll` where the WebDAV plugin finds it (phase 4, with the deploy).
 - **Worktrees:** a new vcpkg port needs a private install root until it is on master, as the
   shared install tree is reset by other checkouts.
 - **CMake:** `usdcc_add_asset_protocol()` builds a resolver library into a plugin folder with its
@@ -398,8 +409,8 @@ webdav/
 |---|---|---|
 | **0. Spike** | A dummy URI resolver in a plugin's `usd/` folder | **Done** (§13.1). It resolves a path given on the command line, and a relative reference inside a layer it delivered is anchored against the resolved path with its stack id |
 | **1. `usdcc_assets`** | Configuration, environments, stacks, the context, the cache, `CachingResolver`, credentials from the environment | **Done** (§13.2). Its tests pass with a fake transport and no network: overlay order, unreachable against missing, versions side by side, one download for two threads |
-| **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
-| **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | Reopening a large stage makes no downloads, and pulling the network cable falls back to the cache with a warning |
+| **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | **Done** (§13.3). `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
+| **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | **Done** (§13.3), but for one thing: offline is a switch, and a network that goes away does not turn it on. Reopening a stage makes no downloads |
 | **4. usdcc** | Everything in §10 but the picker | A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
@@ -461,8 +472,62 @@ cross-process download lock (phase 3), the OS credential store, and writing. `Pr
 
 - **Two threads asking about one folder at once both ask the server.** Answers are shared once
   one arrives, but the requests aren't joined, as downloads are.
-- **Only run on Windows.** Nothing in it is Windows-only by intent, but Linux hasn't built it.
+- **Only run on Windows.** On Linux it builds (CI, GCC 13), but its tests haven't run there (§13.3).
 - **The app doesn't link it and the deploy doesn't carry it** until phase 4.
+
+### 13.3 Phases 2 and 3 as built
+
+| Part | Where |
+|---|---|
+| The HTTP client, over libcurl | [http_client.h](../src/cpp/assets/include/usdcc/assets/http_client.h) |
+| Downloads as the host sees them, cancelling, offline mode, the HTTP host list | [activity.h](../src/cpp/assets/include/usdcc/assets/activity.h) |
+| Mirrors, in `withMirrors()` | [lookup.h](../src/cpp/assets/include/usdcc/assets/lookup.h) |
+| The cache's limit, lock and "any version" lookup | [disk_cache.h](../src/cpp/assets/include/usdcc/assets/disk_cache.h) |
+| Direct protocols, through `CachingResolver::_Locate()` | [caching_resolver.h](../src/cpp/assets/include/usdcc/assets/caching_resolver.h) |
+| The HTTP protocol | [src/plugins/http](../src/plugins/http) |
+| The WebDAV protocol | [src/plugins/webdav](../src/plugins/webdav) |
+| `usdcc_add_asset_protocol()` | [UsdccPlugin.cmake](../cmake/modules/UsdccPlugin.cmake) |
+
+Both protocols build into `build/plugins/http` and `build/plugins/webdav`, each a usdcc plugin
+with only a `usd/` folder.
+
+**Checked by hand, with `usdcat --flatten` and no usdcc** (2026-11-17):
+
+- **`http://`** against Python's own `http.server`: a shot, its reference and a file with a space
+  in its name. The second run sent three `HEAD`s and no `GET`. With `USDCC_HTTP_ALLOW` unset the
+  host was refused, by name.
+- **`webdav://`** against two `rclone serve webdav` servers (rclone 1.72), PROD behind a password
+  and TEST without: in the test environment the model came from TEST and its sublayer from PROD,
+  in prod everything from PROD; a second run downloaded nothing; a wrong password gave "the server
+  'prod' is not allowed: HTTP 401".
+
+**Differs from the plan:**
+
+- **TLS and linking,** as §8 and §12 now say.
+- **`RefreshContext` reloads the configuration** and forgets what servers answered, then sends
+  `ArNotice::ResolverChanged`. A context a stage was opened with keeps the stacks it was made
+  with, so a changed environment still means reopening the stage (§5).
+- **A mirror is tried when the endpoint's own URL doesn't answer,** and a URL that didn't is tried
+  after the others for half a minute. An endpoint with no mirror is asked again each time.
+- **The tests' servers are inside the test program** (§14), not WsgiDAV and `http.server` started
+  beside it: no Python, no install, and switches for what real servers do wrong.
+
+**Not checked, or not built:**
+
+- **`https://`.** Every test and both checks by hand used `http://` on this machine. The TLS path
+  (Schannel, certificates, a company CA) has never run.
+- **Other WebDAV servers:** Apache `mod_dav`, nginx, Nextcloud, WsgiDAV. Their replies differ in
+  ways the parser is written for but hasn't met.
+- **Linux.** Phase 1 compiles and links there, in CI. Nothing of it has run: CI's Linux build
+  stops at a link error in the physics tests (`typeinfo for JPH::GroupFilter`), which is not this
+  work's and has failed every build since 2026-11-16. Phases 2 and 3, where the HTTP client uses
+  OpenSSL instead of Schannel, haven't been built there yet.
+- **A folder too big to list** still gets listed: the fallback to `stat` per file (§7) is only
+  taken for a protocol that can't list.
+- **Two threads asking about one folder at once** both ask the server, as in phase 1.
+- **`usd_built_for`** (§11): a protocol built for another OpenUSD is registered and then fails to
+  load, with OpenUSD's message.
+- **Redirects on a WebDAV server** aren't followed, not even on the same host (§8).
 
 ## 14. Testing
 
@@ -474,7 +539,14 @@ cross-process download lock (phase 3), the OS credential store, and writing. `Pr
   anchoring, configuration parsing, context equality and hashing, the overlay rules of §5 through
   `UsdStage::Open`, two stages in two environments, the cache's versions, one download for many
   threads, cache scopes, and that no secret reaches a debug string.
-- **WebDAV:** [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6.
+- **The protocols and phase 3** ([assets_net_test.cpp](../tests/assets_net_test.cpp), 13 tests in
+  the same program): a small HTTP server inside the test program
+  ([assets_test_server.h](../tests/assets_test_server.h)), on 127.0.0.1 at a free port, serving a
+  folder as a web server and as a WebDAV server, with switches: no ETags, no `HEAD`, a 503, a
+  delay, a password, redirects. Stages through `UsdStage::Open` over both protocols, the host
+  list, credentials and where they aren't sent, mirrors, offline mode, the cache's limit and lock,
+  `RefreshContext`, progress and cancel. See [HTTP_RESOLVER.md](HTTP_RESOLVER.md) §7 and
+  [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6.
 - **In usdcc:** stages through `UsdStage::Open`, textures opened with no context bound, as Hydra
   does, and the UI call sites with a slow transport, to show the UI doesn't wait.
 - **CI** ([CI.md](CI.md)): no external network.

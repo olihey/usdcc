@@ -734,6 +734,8 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // burst of notices into one frame.
     m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
         m_viewport->requestUpdate();
+        // The camera orbits about the stage's up axis, which Layer Properties can change.
+        m_viewport->stageUpAxisMayHaveChanged();
         // The HUD's counts change with what's there, and with what decides whether it's
         // drawn or how big it is; not with a transform or a color.
         static const PXR_NS::TfToken counted[] = {
@@ -754,8 +756,6 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // The HUD names the edit target when it isn't the root layer.
     m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_viewport->refreshHud(); });
     syncTarget();
-    // An axis view looks the same way on a stage with the other up axis: Top stays above.
-    if (m_viewport->view() != CameraView::Persp) m_viewport->setView(m_viewport->view(), m_viewport->isOrthographic());
     // A view following the current stage frames each stage it's given (§3.5.4).
     if (followsCurrentStage() && !m_cameraSpec.isEmpty()) {
         const QString fit = m_cameraSpec.value(QStringLiteral("fit")).toString(QStringLiteral("stage"));

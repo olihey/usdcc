@@ -45,7 +45,7 @@ These duplicate the options menu on purpose: the menu hides them, the HUD shows 
 ### 2.2 Top right: orientation — *v1, clickable*
 
 An **axis triad** in the gizmo's colours (X red, Y green, Z blue), turning with the camera,
-on the stage's up axis (Y or Z, `UsdGeomGetStageUpAxis`, as the grid).
+on the stage's up axis (Y or Z, `UsdGeomGetStageUpAxis`, as the grid and the camera's orbit).
 
 - Click an axis end: the camera looks down that axis (front, side, top and their opposites),
   keeping its target and distance. Only yaw and pitch change, via `setCameraState()`.

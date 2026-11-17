@@ -891,13 +891,9 @@ int main(int argc, char** argv) {
     settingsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     settingsAction->setMenuRole(QAction::PreferencesRole);
 
-    // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
-    window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
-    // Physics > rigid bodies, colliders, a ground and a scene; Simulate (docs/PHYSICS.md §5.4).
-    window.mainMenuBar()->addMenu(new usdcc::usd::PhysicsMenu(&stageManager, undoManager, playback, &window));
-
-    // Built after the File menu above so "File" stays the first menu-bar
-    // entry (QMenuBar orders entries by insertion order).
+    // The menu bar runs File, Edit, View, Create, (plugin menus such as Mesh),
+    // Physics, Stages, Help, Debug: QMenuBar orders entries by insertion, and
+    // addMainMenuAction puts a plugin's new menu in after Create.
     window.buildViewMenu();
     // View > Workspace, first: the title bar button's menu (docs/WORKSPACES.md §6.2).
     if (QMenu* viewMenu = window.viewMenu()) {
@@ -907,12 +903,20 @@ int main(int argc, char** argv) {
         viewMenu->insertSeparator(first);
     }
 
+    // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
+    window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
+    // Physics > rigid bodies, colliders, a ground and a scene; Simulate (docs/PHYSICS.md §5.4).
+    window.mainMenuBar()->addMenu(new usdcc::usd::PhysicsMenu(&stageManager, undoManager, playback, &window));
+
     // Stages > <stage> > Workspace, a new panel of each type, or Close Stage.
     auto* stagesMenu = new usdcc::usd::StagesMenu(&stageManager, &panelTypes, window.dockManager(), &window);
     stagesMenu->setWorkspaces(&workspaces);
     window.mainMenuBar()->addMenu(stagesMenu);
 
-    // Developer tools; always shown until a setting can hide it (M10).
+    // Help before Debug; filled below.
+    QMenu* helpMenu = window.mainMenuBar()->addMenu(QObject::tr("&Help"));
+
+    // Developer tools, last; always shown until a setting can hide it (M10).
     QMenu* debugMenu = window.mainMenuBar()->addMenu(QObject::tr("&Debug"));
     QAction* dataTypesAction = debugMenu->addAction(QObject::tr("USD &Data Types..."));
     QObject::connect(dataTypesAction, &QAction::triggered, &window, [&window]() {
@@ -982,9 +986,7 @@ int main(int argc, char** argv) {
         }
     });
 
-    // Last in the menu bar: menus plugins add go in before Debug.
-    QMenu* helpMenu = window.mainMenuBar()->addMenu(QObject::tr("&Help"));
-    // docs/USD_RUNTIME.md §1.
+    // Help > docs/USD_RUNTIME.md §1.
     QAction* usdRuntimeAction = helpMenu->addAction(QObject::tr("&USD Runtime..."));
     usdRuntimeAction->setStatusTip(QObject::tr("The OpenUSD usdcc runs with: its plugins, file formats, render delegates, "
                                                "environment and debug flags"));

@@ -133,6 +133,35 @@ bool anchorPath(const Uri& anchor, const std::string& relative, Uri* result) {
     return true;
 }
 
+std::string percentDecode(const std::string& text) {
+    std::string out;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '%' && i + 2 < text.size() && hexValue(text[i + 1]) >= 0 && hexValue(text[i + 2]) >= 0) {
+            out += static_cast<char>(hexValue(text[i + 1]) * 16 + hexValue(text[i + 2]));
+            i += 2;
+        } else {
+            out += text[i];
+        }
+    }
+    return out;
+}
+
+std::string percentEncodePath(const std::string& path) {
+    static const char* kHex = "0123456789ABCDEF";
+    static const std::string kKept = "/%-._~!$&'()*+,;=:@";
+    std::string out;
+    for (const unsigned char c : path) {
+        if (std::isalnum(c) || kKept.find(static_cast<char>(c)) != std::string::npos) {
+            out += static_cast<char>(c);
+        } else {
+            out += '%';
+            out += kHex[c >> 4];
+            out += kHex[c & 15];
+        }
+    }
+    return out;
+}
+
 std::string stableHash(const std::string& text, int hexDigits) {
     // FNV-1a, 64 bits: std::hash may differ between builds, and these name folders on disk.
     uint64_t hash = 14695981039346656037ull;

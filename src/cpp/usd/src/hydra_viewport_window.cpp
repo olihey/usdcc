@@ -201,6 +201,11 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     if (m_engine) rebuildEngine();
 
     renderNow();
+    // A stage with the other up axis turns the camera: frustum() is another one.
+    if (const bool zUp = cameraZUp(); zUp != m_cameraWasZUp) {
+        m_cameraWasZUp = zUp;
+        Q_EMIT cameraChanged();
+    }
 }
 
 void HydraViewportWindow::setTime(PXR_NS::UsdTimeCode time) {
@@ -703,8 +708,8 @@ void HydraViewportWindow::snapToAxis(HudItem item) {
         setView(*view, m_orthographic);
         return;
     }
-    // Straight down or up the camera's Y, any yaw looks that way: 0 puts X to the right.
-    const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0);
+    // Straight down or up the up axis, any yaw looks that way: 0 puts X to the right.
+    const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0, cameraZUp());
     m_yaw = angles.yaw;
     m_pitch = angles.pitch;
     cameraMoved();
@@ -792,6 +797,13 @@ bool HydraViewportWindow::stageIsZUp() const {
     return m_stage && PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
 }
 
+void HydraViewportWindow::stageUpAxisMayHaveChanged() {
+    const bool zUp = cameraZUp();
+    if (zUp == m_cameraWasZUp) return;
+    m_cameraWasZUp = zUp;
+    cameraMoved();
+}
+
 void HydraViewportWindow::setView(CameraView view, std::optional<bool> orthographic) {
     const bool ortho = orthographic.value_or(view != CameraView::Persp);
     if (ortho != m_orthographic) {
@@ -826,7 +838,7 @@ void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
     if (m_orthographic) {
         const OrthographicFraming framing =
-            frameOrthographic(box, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch), aspect, m_orthoSize);
+            frameOrthographic(box, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp()), aspect, m_orthoSize);
         m_target = framing.target;
         m_orthoSize = std::max(kMinDistance, framing.size);
         cameraMoved();
@@ -903,7 +915,7 @@ PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
     // Orthographic, where a perspective camera would see the same at the target: what
     // sizes the gizmo (its eye is much further back).
     const double distance = m_orthographic ? perspectiveDistanceFor(m_orthoSize, m_fovY) : m_distance;
-    return orbitCameraAxes(m_target, distance, m_yaw, m_pitch).eye;
+    return orbitCameraAxes(m_target, distance, m_yaw, m_pitch, cameraZUp()).eye;
 }
 
 double HydraViewportWindow::orthographicDepth() const { return std::max(1000.0, 50.0 * m_orthoSize); }
@@ -918,7 +930,7 @@ OrbitClipping HydraViewportWindow::clipping() const {
 
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     const double distance = m_orthographic ? orthographicDepth() : m_distance;
-    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, distance, m_yaw, m_pitch);
+    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, distance, m_yaw, m_pitch, cameraZUp());
 
     PXR_NS::GfMatrix4d cameraToWorld(1.0);
     cameraToWorld.SetRow(0, PXR_NS::GfVec4d(right[0], right[1], right[2], 0.0));
@@ -1052,7 +1064,7 @@ void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& 
 void HydraViewportWindow::drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix) {
     // No stage, no ground: an empty viewport shows only its background.
     if (!m_legacyGl || !m_display.showGrid || !m_stage) return;
-    // On the stage's ground: XY for a Z-up stage. The camera itself stays Y-up.
+    // On the stage's ground: XY for a Z-up stage, as the camera's orbit is about its up axis.
     const bool zUp = PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
     const std::vector<GridLine> lines = buildViewportGrid(m_display.gridSize, m_display.gridStep, zUp);
     if (lines.empty()) return;
@@ -1473,7 +1485,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         }
         cameraMoved();
     } else if (m_panning) {
-        const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch);
+        const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp());
         // Orthographic, the scene follows the cursor exactly.
         const double panScale = m_orthographic ? m_orthoSize / std::max(1, height()) : m_distance * 0.0015;
         m_target += right * (-delta.x() * panScale) + up * (delta.y() * panScale);

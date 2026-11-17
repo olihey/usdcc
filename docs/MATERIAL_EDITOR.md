@@ -603,8 +603,8 @@ Rejected:
   The preview session layer binds the material to that collection (a collection binding).
 - **Placing it:** referenced at `/__usdccPreview/Shape/Asset`, scaled by the shape's `metersPerUnit`
   over the scene's, so textures keep their real-world size. The camera frames its bounds. The preview is
-  always Y-up, as the viewport's orbit camera is, so it doesn't turn for the scene's `upAxis`: only a shape
-  file authored Z-up is turned.
+  always Y-up, and so is its camera, unlike the viewport's, which turns about the stage's up axis. So it
+  doesn't turn for the scene's `upAxis`: only a shape file authored Z-up is turned.
 - **A camera in the shape file:** the first perspective `Camera` under the default prim is looked through
   instead of framing the bounds: its position, direction and vertical field of view
   (`ShadingPreviewStage::shapeCamera()`). The orbit turns about the point on its line of sight nearest the

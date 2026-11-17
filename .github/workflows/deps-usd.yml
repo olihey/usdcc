@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  openusd:
+  windows:
     # Pinned, never windows-latest: windows-2025 has moved to Visual Studio 2026,
     # and the build has to use the same toolset as usdcc (Visual Studio 2022).
     runs-on: windows-2022

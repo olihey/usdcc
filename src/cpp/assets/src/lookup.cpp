@@ -1,5 +1,8 @@
 #include "usdcc/assets/lookup.h"
 
+#include "usdcc/assets/activity.h"
+#include "usdcc/assets/disk_cache.h"
+
 #include <pxr/base/tf/diagnostic.h>
 
 #include <algorithm>
@@ -16,24 +19,40 @@ std::atomic<int64_t>& lifetimeMs() {
 
 std::string keyOf(const Endpoint& endpoint, const std::string& path) { return endpoint.cacheId() + "|" + path; }
 
+struct DownMarks {
+    std::mutex mutex;
+    std::map<std::string, std::chrono::steady_clock::time_point> until;
+};
+
+DownMarks& downMarks() {
+    static DownMarks instance;
+    return instance;
+}
+
+Lookups::Listing listingOf(Transport& transport, const Endpoint& endpoint, const std::string& folder, Lookups& lookups) {
+    const std::string key = keyOf(endpoint, folder);
+    Lookups::Listing listing;
+    if (lookups.listing(key, &listing)) return listing;
+    const Result<std::vector<Entry>> listed = withMirrors(endpoint, [&transport, &folder](const Endpoint& at) {
+        Cancel cancel;
+        return transport.list(at, folder, cancel);
+    });
+    listing.status = listed.status;
+    listing.message = listed.message;
+    for (const Entry& entry : listed.value) listing.value[entry.name] = entry;
+    lookups.setListing(key, listing);
+    return listing;
+}
+
 // What `endpoint` says about the file at `path`: from its folder's listing, or, for a
 // protocol that can't list, from a stat of the file itself.
 Result<Entry> lookUp(Transport& transport, const Endpoint& endpoint, const Uri& uri, Lookups* scope) {
     Lookups& lookups = scope ? *scope : sharedLookups();
-    Cancel cancel;
 
-    const std::string folder = uri.folder();
-    const std::string listingKey = keyOf(endpoint, folder);
-    Lookups::Listing listing;
-    if (!lookups.listing(listingKey, &listing)) {
-        const Result<std::vector<Entry>> listed = transport.list(endpoint, folder, cancel);
-        listing.status = listed.status;
-        listing.message = listed.message;
-        for (const Entry& entry : listed.value) listing.value[entry.name] = entry;
-        lookups.setListing(listingKey, listing);
-    }
+    const Lookups::Listing listing = listingOf(transport, endpoint, uri.folder(), lookups);
     if (listing.ok()) {
-        const auto found = listing.value.find(uri.fileName());
+        // A listing has real names; the path may spell one with escapes.
+        const auto found = listing.value.find(percentDecode(uri.fileName()));
         if (found == listing.value.end()) return Result<Entry>::failure(Status::Missing);
         return Result<Entry>::success(found->second);
     }
@@ -42,7 +61,10 @@ Result<Entry> lookUp(Transport& transport, const Endpoint& endpoint, const Uri& 
     const std::string entryKey = keyOf(endpoint, uri.path);
     Result<Entry> entry;
     if (!lookups.entry(entryKey, &entry)) {
-        entry = transport.stat(endpoint, uri.path, cancel);
+        entry = withMirrors(endpoint, [&transport, &uri](const Endpoint& at) {
+            Cancel cancel;
+            return transport.stat(at, uri.path, cancel);
+        });
         lookups.setEntry(entryKey, entry);
     }
     return entry;
@@ -97,8 +119,42 @@ void setLookupLifetime(std::chrono::milliseconds lifetime) { lifetimeMs().store(
 
 void forgetLookups() { sharedLookups().clear(); }
 
+bool isMarkedDown(const std::string& url) {
+    DownMarks& marks = downMarks();
+    std::lock_guard<std::mutex> lock(marks.mutex);
+    const auto found = marks.until.find(url);
+    return found != marks.until.end() && std::chrono::steady_clock::now() < found->second;
+}
+
+void markDown(const std::string& url) {
+    DownMarks& marks = downMarks();
+    std::lock_guard<std::mutex> lock(marks.mutex);
+    marks.until[url] = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+}
+
+void forgetDownMarks() {
+    DownMarks& marks = downMarks();
+    std::lock_guard<std::mutex> lock(marks.mutex);
+    marks.until.clear();
+}
+
 Found findInStack(const Stack& stack, const std::string& path, Lookups* scope) {
     Found found;
+    if (isOffline()) {
+        // No server is asked: whichever endpoint's version is in the cache, top first.
+        for (const Endpoint& endpoint : stack.endpoints) {
+            if (std::optional<std::pair<std::filesystem::path, Entry>> cached = DiskCache::shared().findAny(endpoint, path)) {
+                found.status = Status::Ok;
+                found.endpoint = endpoint;
+                found.entry = cached->second;
+                found.cachedFile = cached->first;
+                return found;
+            }
+        }
+        found.status = Status::Missing;
+        found.message = "offline, and not in the cache";
+        return found;
+    }
     const std::shared_ptr<Transport> transport = transportFor(stack.scheme);
     if (!transport) {
         found.status = Status::Error;
@@ -135,21 +191,13 @@ Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::strin
     using Listed = Result<std::vector<ListedEntry>>;
     const std::shared_ptr<Transport> transport = transportFor(stack.scheme);
     if (!transport) return Listed::failure(Status::Error, "no protocol plugin is loaded for " + stack.scheme + "://");
+    if (isOffline()) return Listed::failure(Status::Unreachable, "offline");
     Lookups& lookups = scope ? *scope : sharedLookups();
-    Cancel cancel;
 
     std::map<std::string, ListedEntry> merged;
     bool anywhere = false;
     for (const Endpoint& endpoint : stack.endpoints) {
-        const std::string key = keyOf(endpoint, folder);
-        Lookups::Listing listing;
-        if (!lookups.listing(key, &listing)) {
-            const Result<std::vector<Entry>> listed = transport->list(endpoint, folder, cancel);
-            listing.status = listed.status;
-            listing.message = listed.message;
-            for (const Entry& entry : listed.value) listing.value[entry.name] = entry;
-            lookups.setListing(key, listing);
-        }
+        const Lookups::Listing listing = listingOf(*transport, endpoint, folder, lookups);
         if (listing.status == Status::Missing) continue;
         if (!listing.ok()) {
             if (endpoint.optional) continue;

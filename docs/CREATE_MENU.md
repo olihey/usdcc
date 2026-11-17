@@ -1,6 +1,6 @@
 # Create Menu
 
-A **Create** menu in the main menu bar, after Edit. It offers every prim type USD knows about, grouped into
+A **Create** menu in the main menu bar, after View. It offers every prim type USD knows about, grouped into
 categories, each with its Outliner icon. Choosing one adds that prim to the current stage with default values, as one
 undo step, and selects it.
 

@@ -9,15 +9,23 @@ namespace usdcc::usd {
 
 using PXR_NS::GfVec3d;
 
-OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double yawDegrees, double pitchDegrees) {
+namespace {
+// The orbit's own frame is Y-up: yaw about Y, pitch above XZ. A Z-up stage's is that
+// frame turned a quarter about X, Y onto Z, which puts the front (+Z) on -Y as Maya has it.
+GfVec3d fromYUp(const GfVec3d& v, bool zUp) { return zUp ? GfVec3d(v[0], -v[2], v[1]) : v; }
+GfVec3d toYUp(const GfVec3d& v, bool zUp) { return zUp ? GfVec3d(v[0], v[2], -v[1]) : v; }
+}  // namespace
+
+OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double yawDegrees, double pitchDegrees, bool zUp) {
     const double yaw = PXR_NS::GfDegreesToRadians(yawDegrees);
     const double pitch = PXR_NS::GfDegreesToRadians(pitchDegrees);
-    const GfVec3d fromTarget(std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw));
+    const GfVec3d fromTarget =
+        fromYUp(GfVec3d(std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw)), zUp);
     OrbitCameraAxes axes;
     axes.eye = target + fromTarget * distance;
     axes.forward = -fromTarget;
     // Depends on yaw alone, so it stays put going over a pole and up turns smoothly.
-    axes.right = GfVec3d(std::cos(yaw), 0.0, -std::sin(yaw));
+    axes.right = fromYUp(GfVec3d(std::cos(yaw), 0.0, -std::sin(yaw)), zUp);
     axes.up = PXR_NS::GfCross(axes.right, axes.forward);
     return axes;
 }
@@ -43,10 +51,10 @@ OrbitClipping orbitClipping(double distance) {
     return {atDefault.nearClip * scale, atDefault.farClip * std::max(1.0, scale)};
 }
 
-OrbitAngles orbitAnglesLookingFrom(const GfVec3d& direction, double currentYaw) {
+OrbitAngles orbitAnglesLookingFrom(const GfVec3d& direction, double currentYaw, bool zUp) {
     const double length = direction.GetLength();
     if (length <= 0.0) return {currentYaw, 0.0};
-    const GfVec3d d = direction / length;
+    const GfVec3d d = toYUp(direction / length, zUp);
     OrbitAngles angles;
     angles.pitch = PXR_NS::GfRadiansToDegrees(std::asin(std::clamp(d[1], -1.0, 1.0)));
     const double horizontal = std::hypot(d[0], d[2]);
@@ -103,8 +111,9 @@ GfVec3d cameraViewEyeDirection(CameraView view, bool zUp) {
 
 OrbitAngles orbitAnglesForView(CameraView view, bool zUp) {
     if (view == CameraView::Persp) return {};
-    // Straight down or up the orbit's Y, yaw 0 puts X to the right.
-    return orbitAnglesLookingFrom(cameraViewEyeDirection(view, zUp), 0.0);
+    // Straight down or up the up axis, yaw 0 puts X to the right. The angles come out the
+    // same for either up axis: the table is the Y-up one, turned as the camera is.
+    return orbitAnglesLookingFrom(cameraViewEyeDirection(view, zUp), 0.0, zUp);
 }
 
 std::optional<CameraView> cameraViewLookingFrom(const GfVec3d& direction, bool zUp) {

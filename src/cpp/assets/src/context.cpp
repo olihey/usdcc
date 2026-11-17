@@ -1,5 +1,8 @@
 #include "usdcc/assets/context.h"
 
+#include "usdcc/assets/activity.h"
+#include "usdcc/assets/disk_cache.h"
+#include "usdcc/assets/lookup.h"
 #include "usdcc/assets/uri.h"
 
 #include <pxr/base/tf/diagnostic.h>
@@ -55,6 +58,7 @@ std::string registerStack(Stack stack) {
 struct Defaults {
     std::mutex mutex;
     bool loaded = false;
+    bool fromFile = true;
     Config config;
     std::shared_ptr<const Context> context;
 };
@@ -67,8 +71,14 @@ Defaults& defaults() {
 // With the lock held.
 void loadDefaults(Defaults& all, const Config* replacement) {
     all.config = replacement ? *replacement : Config::loadDefault();
+    all.fromFile = replacement == nullptr;
     all.context = std::make_shared<const Context>(all.config, all.config.chosenEnvironment());
     all.loaded = true;
+    // Its switches, and nothing remembered from the configuration before it.
+    setOffline(all.config.offline);
+    DiskCache::shared().setLimit(static_cast<uint64_t>(all.config.cacheLimitGB * 1024.0 * 1024.0 * 1024.0));
+    forgetLookups();
+    forgetDownMarks();
 }
 
 }  // namespace
@@ -163,10 +173,22 @@ void setDefaultConfig(const Config& config) {
     loadDefaults(all, &config);
 }
 
-void reloadDefaultConfig() {
+void useDefaultConfigFile() {
     Defaults& all = defaults();
     std::lock_guard<std::mutex> lock(all.mutex);
     loadDefaults(all, nullptr);
+}
+
+void reloadDefaultConfig() {
+    Defaults& all = defaults();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    // One the host set itself stays: there may be no file behind it.
+    if (all.loaded && !all.fromFile) {
+        const Config kept = all.config;
+        loadDefaults(all, &kept);
+    } else {
+        loadDefaults(all, nullptr);
+    }
 }
 
 }  // namespace usdcc::assets

@@ -18,8 +18,21 @@
     "qtnodes",
     "pybind11",
     {
+      "name": "curl",
+      "$comment": "HTTP for remote assets (docs/REMOTE_ASSETS.md §8). Without the default features: no FTP, SMTP and the rest. ssl is Windows' own TLS (Schannel) there, so no second OpenSSL beside PySide6's, and OpenSSL elsewhere",
+      "default-features": false,
+      "features": [
+        "ssl"
+      ]
+    },
+    {
+      "name": "pugixml",
+      "$comment": "The XML that WebDAV listings come in (docs/WEBDAV_RESOLVER.md §3)"
+    },
+    {
       "name": "joltphysics",
-      "$comment": "Jolt Physics, the first physics backend (docs/PHYSICS.md)"
+      "$comment": "Jolt Physics, the first physics backend (docs/PHYSICS.md). rtti: the backend subclasses JPH::GroupFilter, and GCC only emits a class's typeinfo with its key function, inside a Jolt built without RTTI by default",
+      "features": ["rtti"]
     }
   ]
 }

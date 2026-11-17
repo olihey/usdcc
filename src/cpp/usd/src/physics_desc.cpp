@@ -13,6 +13,7 @@
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xformCache.h>
+#include <pxr/usd/usdPhysics/collisionGroup.h>
 #include <pxr/usd/usdPhysics/metrics.h>
 #include <pxr/usd/usdPhysics/parseDesc.h>
 #include <pxr/usd/usdPhysics/parseUtils.h>
@@ -107,6 +108,16 @@ Parsed parse(const UsdStageRefPtr& stage) {
             }
         },
         VtValue());
+    // UsdPhysicsCollisionGroupDesc leaves invertFilteredGroups uninitialized, and the
+    // parser's Get() of it changes nothing when it isn't authored (the schema has no
+    // fallback), so an ordinary group could come out inverted. On Linux it did.
+    for (UsdPhysicsCollisionGroupDesc& group : parsed.collisionGroups) {
+        bool invert = false;
+        if (const UsdPhysicsCollisionGroup prim{stage->GetPrimAtPath(group.primPath)}) {
+            prim.GetInvertFilteredGroupsAttr().Get(&invert);
+        }
+        group.invertFilteredGroups = invert;
+    }
     return parsed;
 }
 

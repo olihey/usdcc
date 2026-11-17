@@ -1,8 +1,8 @@
-# Builds a GitHub release's Windows zip and Linux tarball and attaches them
+# Builds a GitHub release's Windows 7z and Linux tar.xz and attaches them
 # (docs/RELEASE.md §4): publish a release (or prerelease) with a tag such as
 # v0.2.0, and this builds that tag on each platform, runs the tests, deploys,
 # starts the deploy as a user would, and attaches
-# usdcc-<version>-windows-x64.zip and usdcc-<version>-linux-x64.tar.gz, each
+# usdcc-<version>-windows-x64.7z and usdcc-<version>-linux-x64.tar.xz, each
 # with its symbols. Run it by hand with the tag to rebuild a release whose run
 # failed.
 name: Release
@@ -18,7 +18,7 @@ on:
         type: string
 
 permissions:
-  contents: write  # attaching the zips and tarballs
+  contents: write  # attaching the archives
 
 concurrency:
   group: release-${{ github.event.release.tag_name || inputs.tag }}
@@ -48,18 +48,23 @@ jobs:
           $version = $Matches[1]
           gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
           if ($LASTEXITCODE) {
-            Write-Host "::error::There's no release with the tag $env:TAG to attach the zips to."
+            Write-Host "::error::There's no release with the tag $env:TAG to attach the archives to."
             exit 1
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=usdcc-$version" >> $env:GITHUB_OUTPUT
-          "zip=usdcc-$version-windows-x64.zip" >> $env:GITHUB_OUTPUT
-          "symbols=usdcc-$version-windows-x64-symbols.zip" >> $env:GITHUB_OUTPUT
+          "archive=usdcc-$version-windows-x64.7z" >> $env:GITHUB_OUTPUT
+          "symbols=usdcc-$version-windows-x64-symbols.7z" >> $env:GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ env.TAG }}
           submodules: recursive
+
+      # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
+      # read older port history than the depth-1 submodule clone has.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
       - name: Name the OpenUSD asset
         id: asset
@@ -143,12 +148,16 @@ jobs:
 
       # The deploy, in a folder of its own; and the PDBs of usdcc's own
       # programs and libraries, laid out as they are in the deploy, for reading
-      # a crash dump from that release.
-      - name: Zip it
+      # a crash dump from that release. 7z at its strongest: LZMA2 with a
+      # 256 MB dictionary, one solid block with the files sorted by type, so
+      # the DLLs compress against each other (7-Zip adds its x86 filter for
+      # them). Unpacking takes about 256 MB of memory.
+      - name: Pack it
         run: |
+          $pack = @('a', '-t7z', '-mx=9', '-md=256m', '-mfb=273', '-ms=on', '-mqs=on', '-mmt=on')
           $deploy = "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}"
           Push-Location $env:RUNNER_TEMP
-          7z a -tzip -mx=7 '${{ steps.tag.outputs.zip }}' '${{ steps.tag.outputs.name }}' | Select-Object -Last 3
+          7z @pack '${{ steps.tag.outputs.archive }}' '${{ steps.tag.outputs.name }}' | Select-Object -Last 3
           if ($LASTEXITCODE) { throw '7z failed' }
           Pop-Location
 
@@ -169,22 +178,22 @@ jobs:
           Write-Host "$count PDB(s)"
           if ($count -lt 5) { throw 'Fewer PDBs than expected' }
           Push-Location "$env:RUNNER_TEMP\symbols"
-          7z a -tzip -mx=7 "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" * | Select-Object -Last 3
+          7z @pack "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" * | Select-Object -Last 3
           if ($LASTEXITCODE) { throw '7z failed' }
           Pop-Location
-          foreach ($zip in '${{ steps.tag.outputs.zip }}', '${{ steps.tag.outputs.symbols }}') {
-            $size = (Get-Item "$env:RUNNER_TEMP\$zip").Length
-            Write-Host ("{0}: {1:N0} MB" -f $zip, ($size / 1MB))
-            if ($size -ge 2GB) { throw "$zip is over GitHub's 2 GiB per-asset limit" }
+          foreach ($file in '${{ steps.tag.outputs.archive }}', '${{ steps.tag.outputs.symbols }}') {
+            $size = (Get-Item "$env:RUNNER_TEMP\$file").Length
+            Write-Host ("{0}: {1:N0} MB" -f $file, ($size / 1MB))
+            if ($size -ge 2GB) { throw "$file is over GitHub's 2 GiB per-asset limit" }
           }
 
       - name: Attach to the release
         run: |
-          gh release upload $env:TAG "$env:RUNNER_TEMP\${{ steps.tag.outputs.zip }}" `
+          gh release upload $env:TAG "$env:RUNNER_TEMP\${{ steps.tag.outputs.archive }}" `
             "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" --clobber --repo $env:GITHUB_REPOSITORY
-          if ($LASTEXITCODE) { throw 'attaching the zips failed' }
+          if ($LASTEXITCODE) { throw 'attaching the archives failed' }
 
-  # The same on Ubuntu 24.04 (docs/LINUX_WSL.md): a tarball, which keeps the
+  # The same on Ubuntu 24.04 (docs/LINUX_WSL.md): a tar.xz, which keeps the
   # libraries' links and the programs' modes, of a folder that runs from
   # wherever it is unpacked. No PySide6 yet, so no V-Ray Render and no
   # Python-made panels on Linux.
@@ -208,18 +217,23 @@ jobs:
           fi
           version="${BASH_REMATCH[1]}"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null; then
-            echo "::error::There's no release with the tag $TAG to attach the tarballs to."
+            echo "::error::There's no release with the tag $TAG to attach the archives to."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "name=usdcc-$version" >> "$GITHUB_OUTPUT"
-          echo "tarball=usdcc-$version-linux-x64.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "symbols=usdcc-$version-linux-x64-symbols.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "tarball=usdcc-$version-linux-x64.tar.xz" >> "$GITHUB_OUTPUT"
+          echo "symbols=usdcc-$version-linux-x64-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ env.TAG }}
           submodules: recursive
+
+      # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
+      # read older port history than the depth-1 submodule clone has.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
       - name: Free disk space
         run: |
@@ -299,11 +313,13 @@ jobs:
             --expect-version ${{ steps.tag.outputs.version }}
 
       # The symbols' top folder is the deploy's name: unpacked where the release
-      # was, each .debug file lands next to its binary, where gdb looks.
+      # was, each .debug file lands next to its binary, where gdb looks. xz at
+      # its strongest (-9e, a 64 MB dictionary); -T0 uses every core, in 192 MB
+      # blocks, which costs about 1% in size. `tar -xf` unpacks it as it is.
       - name: Pack it
         run: |
-          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}" '${{ steps.tag.outputs.name }}'
-          tar -C "$RUNNER_TEMP/symbols" -czf "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" '${{ steps.tag.outputs.name }}'
+          tar -C "$RUNNER_TEMP" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}"
+          tar -C "$RUNNER_TEMP/symbols" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}"
           for file in '${{ steps.tag.outputs.tarball }}' '${{ steps.tag.outputs.symbols }}'; do
             size=$(stat -c %s "$RUNNER_TEMP/$file")
             echo "$file: $((size / 1048576)) MB"

@@ -329,10 +329,20 @@ file(GENERATE OUTPUT "${_usdcc_fake_protocol}/plugInfo.json" CONTENT [[{
 }
 ]])
 
-add_executable(usdcc_assets_tests test_harness.h test_harness.cpp assets_test_main.cpp assets_test.cpp)
+add_executable(usdcc_assets_tests test_harness.h test_harness.cpp assets_test_main.cpp assets_test.cpp
+                                  assets_net_test.cpp assets_test_server.h assets_test_server.cpp)
 target_link_libraries(usdcc_assets_tests PRIVATE usdcc_assets usd sdf)
-target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}")
-add_dependencies(usdcc_assets_tests usdccFakeProtocol)
+if(WIN32)
+    # The test server's sockets.
+    target_link_libraries(usdcc_assets_tests PRIVATE ws2_32)
+endif()
+# The http:// and webdav:// protocols, tested against a server inside the test program.
+target_compile_definitions(
+    usdcc_assets_tests
+    PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}"
+            USDCC_ASSETS_HTTP_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/http/usd"
+            USDCC_ASSETS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
+add_dependencies(usdcc_assets_tests usdccFakeProtocol usdccHttpProtocol usdccWebDavProtocol)
 foreach(_assets_target usdccFakeProtocol usdcc_assets_tests)
     # USD's headers ask for the release Python import library in every configuration.
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")

@@ -47,17 +47,23 @@ OrbitClipping orbitClipping(double distance);
 // The camera at `distance` from `target`, by yaw and pitch in degrees. Its axes come
 // from the angles rather than from a world up vector, so they carry on smoothly over
 // the poles and it ends up upside down, rather than flipping or breaking there.
-OrbitCameraAxes orbitCameraAxes(const PXR_NS::GfVec3d& target, double distance, double yawDegrees, double pitchDegrees);
+//
+// The angles are about the stage's up axis: yaw turns around it, pitch is the height
+// above the ground. `zUp`: that axis is Z and the ground XY, else Y and XZ. The same
+// angles look at the ground the same way on either, so a Z-up stage stands upright.
+OrbitCameraAxes orbitCameraAxes(const PXR_NS::GfVec3d& target, double distance, double yawDegrees, double pitchDegrees,
+                                bool zUp = false);
 
 // The yaw and pitch, in degrees, that put the eye on the side `direction` points to from
 // the target (any length but zero), looking back at it: (1, 0, 0) looks along -X from +X.
 // Straight up or down (a pole) keeps `currentYaw`, as any yaw looks the same way there.
+// For the camera orbitCameraAxes() makes with the same `zUp`.
 // The viewport HUD's axis triad snaps the camera with it (docs/VIEWPORT_HUD.md §2.2).
 struct OrbitAngles {
     double yaw = kDefaultOrbitYaw;
     double pitch = kDefaultOrbitPitch;
 };
-OrbitAngles orbitAnglesLookingFrom(const PXR_NS::GfVec3d& direction, double currentYaw);
+OrbitAngles orbitAnglesLookingFrom(const PXR_NS::GfVec3d& direction, double currentYaw, bool zUp = false);
 
 // The named views a viewport can look from (docs/WORKSPACES.md §3.5.2), as in Maya
 // by where the eye is. Persp is the free orbit camera.
@@ -72,7 +78,8 @@ std::optional<CameraView> cameraViewFromName(std::string_view name);
 // The side of the target the eye is on for an axis view, following the stage's up
 // axis: Top is always above the ground. Zero for Persp.
 PXR_NS::GfVec3d cameraViewEyeDirection(CameraView view, bool zUp);
-// The orbit angles of a view: the default ones for Persp.
+// The orbit angles of a view: the default ones for Persp. The same on either up axis,
+// as the angles are about it.
 OrbitAngles orbitAnglesForView(CameraView view, bool zUp);
 // The axis view whose eye direction is `direction` (a HUD axis), if one is.
 std::optional<CameraView> cameraViewLookingFrom(const PXR_NS::GfVec3d& direction, bool zUp);

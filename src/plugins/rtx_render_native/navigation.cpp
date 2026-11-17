@@ -27,9 +27,11 @@ void NavigationCamera::seed(const RenderCamera& camera, const std::optional<GfRa
     distance = bounds ? GfDot(bounds->GetMidpoint() - eye, -back) : kDefaultOrbitDistance;
     if (!std::isfinite(distance) || distance <= 1e-4) distance = kDefaultOrbitDistance;
     target = eye - back * distance;
-    yaw = std::atan2(back[0], back[2]) * degrees;
-    pitch = std::asin(std::clamp(back[1], -1.0, 1.0)) * degrees;
-    auto axes = orbitCameraAxes(target, distance, yaw, pitch);
+    // About the stage's up axis, so an upright camera seeds without roll and orbits level.
+    const auto angles = orbitAnglesLookingFrom(back, 0.0, zUp);
+    yaw = angles.yaw;
+    pitch = angles.pitch;
+    auto axes = orbitCameraAxes(target, distance, yaw, pitch, zUp);
     roll = std::atan2(GfDot(right, axes.up), GfDot(right, axes.right));
 }
 void NavigationCamera::orbit(QPointF delta) {
@@ -64,7 +66,7 @@ void NavigationCamera::reset() {
 }
 RenderCamera NavigationCamera::camera(double aspect) const {
     auto result = view.atAspect(aspect);
-    const auto axes = orbitCameraAxes(target, distance, yaw, pitch);
+    const auto axes = orbitCameraAxes(target, distance, yaw, pitch, zUp);
     const auto right = axes.right * std::cos(roll) + axes.up * std::sin(roll);
     const auto up = axes.up * std::cos(roll) - axes.right * std::sin(roll);
     result.cameraToWorld = GfMatrix4d(1);

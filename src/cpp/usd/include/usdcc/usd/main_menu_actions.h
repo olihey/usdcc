@@ -22,7 +22,7 @@ void runAsOneUndoStep(UndoManager* undo, StageManager* stages, const std::string
                       const std::function<bool()>& run);
 
 // Adds an entry to the main menu. `path` is "Menu/Action" or "Menu/Submenu/Action";
-// menus that don't exist yet are made, new top-level ones before Debug. Adding a
+// menus that don't exist yet are made, new top-level ones after Create. Adding a
 // path again replaces its callback. False, with nothing added, for a path with no menu.
 bool addMainMenuAction(usdcc::ui::MainWindow& window, const QString& path, std::function<void()> callback,
                        const QString& shortcut = {}, const QString& tip = {});

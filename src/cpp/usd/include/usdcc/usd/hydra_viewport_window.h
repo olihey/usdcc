@@ -155,8 +155,12 @@ public:
     bool isOrthographic() const { return m_orthographic; }
     // Switches the projection, keeping the view, its angles and what's seen at the target.
     void setOrthographic(bool orthographic);
-    // Whether the stage shown is Z-up (else Y-up).
+    // Whether the stage shown is Z-up (else Y-up). The camera orbits about that axis, so
+    // the stage stands upright and its ground lies flat (orbitCameraAxes()).
     bool stageIsZUp() const;
+    // The stage was edited, perhaps its up axis: if so the camera turns with it, and
+    // cameraChanged() says so. Its panel calls this on the stage's change notices.
+    void stageUpAxisMayHaveChanged();
 
     // Fit to View: moves the camera, keeping the way it looks, so that `box` (world
     // space) fills the view. See frameOrbitCamera().
@@ -376,6 +380,9 @@ private:
     // After the camera changed: redraw and tell cameraChanged()'s listeners.
     void cameraMoved();
     PXR_NS::GfVec3d cameraPosition() const;
+    // The up axis the camera orbits about: the stage's. A preview's stays Y, as its
+    // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3).
+    bool cameraZUp() const { return !m_previewMode && stageIsZUp(); }
     PXR_NS::GfFrustum currentFrustum() const;
     // The near and far planes in use: from the distance, or for an orthographic view,
     // around its target.
@@ -429,6 +436,7 @@ private:
     bool m_orthographic = false;
     double m_orthoSize = kDefaultOrbitDistance;
     CameraView m_view = CameraView::Persp;
+    bool m_cameraWasZUp = false;  // cameraZUp() as cameraChanged() last told of it
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;

@@ -6,7 +6,7 @@ deployment/clean-package checks in [RTX_RENDER.md](RTX_RENDER.md). Runtime DLLs
 are external by default; `--bundle-rtx-runtime` is explicit and includes the SDK's
 licenses. The retired Python RTX plugin is never copied into a release.
 
-How a usdcc release is made: you create a release on GitHub, and CI builds the Windows zip
+How a usdcc release is made: you create a release on GitHub, and CI builds the Windows 7z
 and attaches it. The app shows its version in a new **Help > About usdcc** dialog. Windows
 only for now, like the rest of CI ([CI.md](CI.md)). This is part of M11 (packaging), and
 the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
@@ -15,7 +15,7 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 **To make a release:** on GitHub, Releases > Draft a new release, a new tag that is the
 version (`0.2.0` or `v0.2.0`, or `0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes,
-then Publish. About 25 minutes later the release has `usdcc-<version>-windows-x64.zip` and
+then Publish. About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
 its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
 same tag (Actions > Release > Run workflow).
 
@@ -28,12 +28,16 @@ same tag (Actions > Release > Run workflow).
 - **Every other build is a development build**, named after the last release before it:
   `0.2.0+5.3b70ef2` is 5 commits after `v0.2.0`, at commit `3b70ef2`. The About dialog
   says "Development build" for these. With no release tag yet, it's `0.0.0+<commit>`.
-- **CI builds the zip from the tag, not from `master`:** exactly the commit you released.
-- **The zip is `tools/deploy.py`'s folder**, as it is today, so a release is what you
+- **CI builds the archive from the tag, not from `master`:** exactly the commit you released.
+- **The archive is `tools/deploy.py`'s folder**, as it is today, so a release is what you
   already run locally.
 - **Tests gate the release.** If they fail, nothing is attached, and the run says why.
+- **Compressed as small as it goes:** 7z (LZMA2, solid) on Windows and `tar.xz` on
+  Linux, both at their strongest settings (§4, step 8). Windows 11 (23H2 and later) opens
+  a `.7z` in Explorer; Windows 10 needs 7-Zip. Releases up to `0.0.1` were zips and
+  `tar.gz`.
 - **Symbols ship separately.** The build is `RelWithDebInfo`, like local builds; the PDBs go
-  in a second zip on the same release, so a crash dump from a user can be read.
+  in a second archive on the same release, so a crash dump from a user can be read.
 
 ## 2. The version in the build
 
@@ -75,7 +79,7 @@ tags, so they're `0.0.0+<commit>`.
 
 ## 3. The About dialog
 
-**Help > About usdcc**, in a new Help menu at the end of the menu bar. The same menu has
+**Help > About usdcc**, in a Help menu just before Debug at the end of the menu bar. The same menu has
 USD Runtime and Project Home (docs/USD_RUNTIME.md).
 
 - The app icon, "usdcc", the version in large type, and "Development build" under it when
@@ -100,8 +104,8 @@ later as a second tab.
 ## 4. Workflow `release.yml`
 
 The `windows` job is described here; the `linux` job does the same on `ubuntu-24.04` and
-attaches `usdcc-<version>-linux-x64.tar.gz`, whose folder runs from wherever it is
-unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.gz`, the `.debug` files of
+attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it is
+unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
 finds it ([CI.md](CI.md) §8). No PySide6 on Linux yet.
 
@@ -134,16 +138,22 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
    outside the deploy. That catches a missing DLL or Python file that the build's own
    folders were hiding; it prints the app's log when it fails. The deploy only has Qt's
    `windows` platform plugin, so the offscreen one comes from vcpkg's folder.
-8. **Zip:**
-   - `usdcc-<version>-windows-x64.zip`: the deploy folder, `usdcc-<version>/`.
-   - `usdcc-<version>-windows-x64-symbols.zip`: the PDBs of usdcc's own programs and
+8. **Pack** with `7z a -t7z -mx=9 -md=256m -mfb=273 -ms=on -mqs=on -mmt=on`: LZMA2 with a
+   256 MB dictionary in one solid block, the files sorted by type so the DLLs compress
+   against each other, and 7-Zip's x86 filter on the executables. Unpacking needs about
+   256 MB of memory. Linux uses `xz -9e -T0` (a 64 MB dictionary; all cores, in 192 MB
+   blocks, about 1% larger than one thread would make it). On a 620 MB Windows deploy
+   (2,337 files): 130 MB as 7z in 84 s, against 253 MB as the old zip (`-mx=7`) in 17 s;
+   153 MB as `tar.xz` against 261 MB as `tar.gz`.
+   - `usdcc-<version>-windows-x64.7z`: the deploy folder, `usdcc-<version>/`.
+   - `usdcc-<version>-windows-x64-symbols.7z`: the PDBs of usdcc's own programs and
      libraries (the exe, its DLLs, the `usdcc` Python modules, the example C++ plugin),
      laid out as they are in the deploy.
 9. **Attach** both to the release with `gh release upload`.
 
 It uses `build.yml`'s vcpkg cache, read-only.
 
-**What you see:** the release appears as soon as you publish it, and the zips appear about
+**What you see:** the release appears as soon as you publish it, and the archives appear about
 15 minutes later. If the run fails, the release stays without them. Fix the cause, then run
 `release.yml` by hand with the same tag.
 

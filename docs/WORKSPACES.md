@@ -201,7 +201,7 @@ camera is applied.
 | `view` | `persp`, `top`, `bottom`, `front`, `back`, `right`, `left` | `persp` | Which way it looks (§3.5.2) |
 | `projection` | `perspective` or `orthographic` | `orthographic` for the six axis views, `perspective` for `persp` | `"top"` with `"perspective"` looks down from above in perspective |
 | `fit` | `stage`, `selection` or `none`; `true` is `stage`, `false` is `none` | `stage` | Fit to View once the viewport has its stage: the whole stage's bounds, the selection (else the whole stage, as F does), or leave the camera where the rest puts it |
-| `yaw`, `pitch` | degrees | the view's | Turn the view; mostly for `persp` (`{"view": "persp", "yaw": 135, "pitch": 30}` looks from behind) |
+| `yaw`, `pitch` | degrees | the view's | Turn the view, about the stage's up axis (§3.5.2); mostly for `persp` (`{"view": "persp", "yaw": 135, "pitch": 30}` looks from behind) |
 | `fov` | degrees | the app's | A perspective camera's vertical field of view (`setFieldOfView()`) |
 | `target`, `distance` / `size` | `[x, y, z]`, number | | Exact placement in scene units: the orbit target, and the perspective distance or the orthographic view's height. Giving either means `fit` `none` unless set. For workspaces made for one show's scale |
 | `path` | prim path, or `"first"` | | **Later** (§3.5.5): look through a `UsdGeomCamera` of the stage, `"first"` being the first one found. Where there's none, the rest of the object applies |
@@ -229,11 +229,20 @@ ground:
 | `top` | +Y | +Z |
 | `bottom` | −Y | −Z |
 
-The orbit camera itself is Y-up whatever the stage, so a view is the eye direction from this table turned
-into its yaw and pitch (`orbitAnglesForView()`, through `orbitAnglesLookingFrom()`, as the axis triad
-does), the same names the triad's tooltips give (`hudAxisViewName()`). Top on a Y-up stage has X to the
-right and −Z up the screen; Front on a Z-up stage has Z up the screen. A view stays the same view when the
-viewport switches to a stage with the other up axis.
+The orbit camera turns about the stage's up axis: `yaw` goes around it and `pitch` is the height above
+the ground, XZ on a Y-up stage and XY on a Z-up one (`orbitCameraAxes()`). A Z-up stage's camera is the
+Y-up one turned a quarter about X, Y onto Z, which is where the Z-up column of the table comes from. So:
+
+- A stage stands upright on its grid whichever its up axis, in the default view and while orbiting.
+- The same `yaw` and `pitch` look at the ground the same way on either. A view has the same angles on
+  both (`orbitAnglesForView()`): Top is pitch 90, yaw 0.
+- The side views have the up axis up the screen. Top has X to the right, and −Z up the screen on a Y-up
+  stage, +Y on a Z-up one.
+- A view stays the same view when the viewport switches to a stage with the other up axis, or when the
+  stage's up axis is changed (Layer Properties).
+
+The names are the ones the triad's tooltips give (`hudAxisViewName()`). The Material Editor's preview is
+the exception: its camera is always Y-up ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3).
 
 #### 3.5.3 Navigating an orthographic view
 

@@ -3,9 +3,10 @@
 A USD asset resolver plugin that loads assets from WebDAV servers through `webdav://` asset paths,
 such as `webdav://studio/chars/hero/hero.usd`.
 
-**Status:** planned. Nothing is built yet. Revised 2026-11-16: the caching, the server names, the
-environments and the usdcc integration moved to a shared library, planned in
-[REMOTE_ASSETS.md](REMOTE_ASSETS.md). This document is only what is WebDAV's own.
+**Status:** reading is built (2026-11-17), in [src/plugins/webdav](../src/plugins/webdav), and
+tested ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3); writing is phase 6. Not in the app or a deploy
+yet. The caching, the server names, the environments and the usdcc integration are the shared
+library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This document is only what is WebDAV's own.
 
 ## 1. What it is
 
@@ -25,9 +26,9 @@ environments and the usdcc integration moved to a shared library, planned in
 
 ```json
 { "Plugins": [{
-    "Type": "library", "Name": "webdavResolver", "LibraryPath": "webdavResolver.dll",
+    "Type": "library", "Name": "usdccWebDavProtocol", "LibraryPath": "usdccWebDavProtocol.dll",
     "Root": ".", "ResourcePath": ".",
-    "Info": { "Types": { "WebDavResolver": {
+    "Info": { "Types": { "UsdccWebDavResolver": {
         "bases": ["ArResolver"], "uriSchemes": ["webdav"],
         "implementsContexts": true, "implementsScopedCaches": true,
         "usdccAssetsProtocol": true
@@ -58,7 +59,7 @@ segment. Query strings and fragments in an asset path are refused.
 |---|---|---|
 | `list(folder)` | `PROPFIND`, `Depth: 1` | Asks for `resourcetype`, `getetag`, `getlastmodified`, `getcontentlength` only. A 207 reply is parsed with pugixml. 404 means the folder is missing |
 | `stat(path)` | `PROPFIND`, `Depth: 0` | For folders too big to list |
-| `fetch(path, file, knownEtag)` | `GET`, with `If-None-Match` when there is an ETag | 304 is "not modified" |
+| `fetch(path, file, knownEtag)` | `GET`, with `If-None-Match` when given an ETag | 304 is "not modified". The resolver gives none: the listing told it which version it wants |
 | `put(path, file, knownEtag)` (phase 6) | `MKCOL` for missing folders, then `PUT` with `If-Match`, or `If-None-Match: *` for a new file | 412 is "someone changed it", reported as such |
 
 A timeout, a refused connection, a TLS failure and any 5xx are "unreachable". 401 and 403 are
@@ -68,39 +69,45 @@ with its status.
 ## 4. Server differences to handle
 
 - **No ETag.** Some servers send none. The version is then made from the modified time and the
-  size, and a conditional `GET` uses `If-Modified-Since`.
+  size.
 - **Weak ETags** (`W/"…"`) are compared as they are; they aren't valid in `If-Match`, so a save
   against one checks with a `PROPFIND` first.
 - **`Depth: infinity` is never used.** Many servers refuse it.
 - **Hrefs in a reply** come absolute or relative, encoded differently from the request, and with
   or without a trailing slash on folders. They are normalized before comparing.
 - **Case.** Paths are compared exactly. A server that ignores case is the server's business.
-- **Redirects** are followed only on the same host, and a `PUT` is never redirected.
+- **Redirects** aren't followed: a 3xx is an error naming its code. Following them on the same
+  host only, as planned, isn't built.
 
 ## 5. Build
 
-- **Source:** `src/plugins/webdav/`: `webdav_resolver.cpp`, `webdav_transport.cpp`, `plugInfo.json`,
-  built with `usdcc_add_asset_protocol()` ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
-- **Links:** `usdcc_assets` and OpenUSD's `ar`. libcurl and pugixml come through `usdcc_assets`, which
-  wraps both, so the plugin has no third-party code of its own.
+- **Source:** [src/plugins/webdav](../src/plugins/webdav): `webdav_protocol.cpp`, the resolver and
+  its transport, built with `usdcc_add_asset_protocol()` ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12),
+  which writes the `plugInfo.json` and the plugin's manifest.
+- **Links:** `usdcc_assets`, whose HTTP client it uses, and pugixml for the replies to `PROPFIND`.
 
 ## 6. Testing
 
-- **Test server:** [WsgiDAV](https://github.com/mar10/wsgidav) (MIT, Python), installed with `uv`
-  like the other test tools. The fixture starts instances on free ports: two with Basic auth, as
-  TEST and PROD, and one answering 503.
-- **Unit tests** (`tests/webdav_transport_test.cpp`): parsing recorded 207 replies from several
-  servers (WsgiDAV, Apache `mod_dav`, nginx, Nextcloud), href normalization, the no-ETag and
-  weak-ETag cases.
-- **Against the server:** list, stat and fetch; a stage opened through `UsdStage::Open` whose model
-  comes from PROD and one texture from TEST; a 304 on the second open; the 503 instance as an
-  unreachable endpoint; anonymous, Basic and Digest auth.
+- **Test server:** inside the test program ([assets_test_server.h](../tests/assets_test_server.h)):
+  it answers `PROPFIND` with a multistatus made from a folder, with a second `propstat` under a 404
+  as Apache sends, and switches for no ETags, a 503 and a password. Not WsgiDAV, as planned: no
+  Python and no install in the tests.
+- **Tests** ([assets_net_test.cpp](../tests/assets_net_test.cpp), the three named
+  `assets_webdav_…`, and the mirror, offline and refresh ones, which run over it): list, stat and
+  fetch, with a name with a space, a missing folder, a file asked for as a folder, a 304, and a
+  server without ETags; a stage through `UsdStage::Open` whose model comes from TEST and its
+  sublayer from PROD, with a listing per folder and no download on the second open; a password,
+  and a server answering 503 not being skipped.
+- **By hand:** `usdcat` through two `rclone serve webdav` servers
+  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3).
+- **Not done:** recorded replies from Apache `mod_dav`, nginx, Nextcloud and WsgiDAV; weak ETags;
+  Digest.
 - **Phase 6:** saving, saving into TEST a layer read from PROD, and a 412.
 
 ## 7. Open questions
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | Which authentication do the servers need? | Basic and bearer tokens over HTTPS first, then Digest. NTLM and Kerberos only if a server needs them (libcurl has them through SSPI and GSSAPI) |
+| 1 | Which authentication do the servers need? | Basic and bearer tokens are built. Digest next. NTLM and Kerberos only if a server needs them (libcurl has them through SSPI and GSSAPI) |
 | 2 | Plain `http://` endpoints? | Allowed, with a warning in the Log when credentials are sent over one |
 | 3 | Which servers must it work with? | WsgiDAV in CI. Apache, nginx and Nextcloud by their recorded replies, and by hand before a release |
