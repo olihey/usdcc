@@ -19,7 +19,8 @@
     "pybind11",
     {
       "name": "joltphysics",
-      "$comment": "Jolt Physics, the first physics backend (docs/PHYSICS.md)"
+      "$comment": "Jolt Physics, the first physics backend (docs/PHYSICS.md). rtti: the backend subclasses JPH::GroupFilter, and GCC only emits a class's typeinfo with its key function, inside a Jolt built without RTTI by default",
+      "features": ["rtti"]
     }
   ]
 }

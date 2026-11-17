@@ -47,7 +47,7 @@ Two things the schema does **not** say, which §4 has to decide:
 | Session layer | Used by variant edit mode, saved as text with the app session (`session_stages.cpp`), listed by the Layer Editor |
 | Undo | Records the edit target's layer only ([undo_manager.h](../src/cpp/usd/include/usdcc/usd/undo_manager.h)). Edits to other layers are not steps |
 | Plugins | The C++ SDK loads libraries that share the app's classes ([PLUGIN_SDK.md](PLUGIN_SDK.md)). `Host` has no notion of a solver |
-| Dependencies | Jolt 5.6.0 from vcpkg since phase 0, linked only by the headless tests so far. vcpkg's pinned baseline also has PhysX 5.5.0, Bullet 3.25 and MuJoCo 3.10.0 |
+| Dependencies | Jolt 5.6.0 from vcpkg since phase 0, linked only by the headless tests so far. With the port's `rtti` feature: the backend subclasses `JPH::GroupFilter`, and on Linux GCC finds that class's typeinfo only in a Jolt built with RTTI. vcpkg's pinned baseline also has PhysX 5.5.0, Bullet 3.25 and MuJoCo 3.10.0 |
 
 ## 3. Engines
 

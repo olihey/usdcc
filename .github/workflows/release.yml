@@ -61,6 +61,11 @@ jobs:
           ref: refs/tags/${{ env.TAG }}
           submodules: recursive
 
+      # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
+      # read older port history than the depth-1 submodule clone has.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
       - name: Name the OpenUSD asset
         id: asset
         run: python tools/ci/usd_asset.py --github-output
@@ -217,6 +222,11 @@ jobs:
         with:
           ref: refs/tags/${{ env.TAG }}
           submodules: recursive
+
+      # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
+      # read older port history than the depth-1 submodule clone has.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
       - name: Free disk space
         run: |
