@@ -79,7 +79,7 @@ tags, so they're `0.0.0+<commit>`.
 
 ## 3. The About dialog
 
-**Help > About usdcc**, in a new Help menu at the end of the menu bar. The same menu has
+**Help > About usdcc**, in a Help menu just before Debug at the end of the menu bar. The same menu has
 USD Runtime and Project Home (docs/USD_RUNTIME.md).
 
 - The app icon, "usdcc", the version in large type, and "Development build" under it when

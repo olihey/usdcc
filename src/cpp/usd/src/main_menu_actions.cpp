@@ -18,16 +18,37 @@ QString withoutMnemonic(QString text) { return text.remove(QLatin1Char('&')); }
 // Marks a menu made for an entry, which goes when its last entry does.
 constexpr auto kMadeForEntries = "usdccMadeForEntries";
 
+// The menu-bar entry a new top-level menu goes in before: the one after Create
+// and the menus made for entries that follow it, so plugin menus sit after
+// Create in the order they came. With no Create, before Help or else Debug;
+// null (the end) with neither.
+QAction* newMenuSlot(const QList<QAction*>& bar) {
+    const auto named = [&bar](QLatin1String name) -> qsizetype {
+        for (qsizetype i = 0; i < bar.size(); ++i) {
+            if (withoutMnemonic(bar[i]->text()) == name) return i;
+        }
+        return -1;
+    };
+    qsizetype create = named(QLatin1String("Create"));
+    if (create >= 0) {
+        qsizetype i = create + 1;
+        while (i < bar.size() && bar[i]->menu() && bar[i]->menu()->property(kMadeForEntries).toBool()) ++i;
+        return bar.value(i);
+    }
+    for (QLatin1String name : {QLatin1String("Help"), QLatin1String("Debug")}) {
+        if (const qsizetype i = named(name); i >= 0) return bar[i];
+    }
+    return nullptr;
+}
+
 QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts, bool create = true) {
     QMenuBar* bar = window.mainMenuBar();
     QMenu* current = nullptr;
     for (const QString& part : parts) {
         const QList<QAction*> actions = current ? current->actions() : bar->actions();
         QMenu* found = nullptr;
-        QAction* debug = nullptr;
         for (QAction* action : actions) {
             if (action->menu() && withoutMnemonic(action->text()) == withoutMnemonic(part)) found = action->menu();
-            if (!current && withoutMnemonic(action->text()) == QLatin1String("Debug")) debug = action;
         }
         if (!found) {
             if (!create) return nullptr;
@@ -35,7 +56,7 @@ QMenu* menuAt(usdcc::ui::MainWindow& window, const QStringList& parts, bool crea
                 found = current->addMenu(part);
             } else {
                 found = new QMenu(part, bar);
-                bar->insertMenu(debug, found);
+                bar->insertMenu(newMenuSlot(actions), found);
             }
             found->setProperty(kMadeForEntries, true);
         }

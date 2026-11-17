@@ -129,8 +129,9 @@ USDCC_TEST(plugin_menu_action_is_one_undo_step) {
     auto& app = pythonTestApp();
     OpenStage open("menu");
     MainWindow window;
-    window.mainMenuBar()->addMenu(QStringLiteral("&File"));
-    window.mainMenuBar()->addMenu(QStringLiteral("&Debug"));
+    for (const char* name : {"&File", "&Create", "&Physics", "&Help", "&Debug"}) {
+        window.mainMenuBar()->addMenu(QString::fromLatin1(name));
+    }
     const AppContextScope scope({&app.stages, &app.undo, &app.tools, &window});
 
     CHECK(run(R"(
@@ -145,12 +146,16 @@ def fails():
     usdcc.usd.current_stage().DefinePrim("/BeforeFailing", "Xform")
     raise RuntimeError("the action failed")
 usdcc.app.add_menu_action("Tools/Fails", fails)
+usdcc.app.add_menu_action("Later/Entry", lambda: None)
 )"), "the actions are added");
 
     const QList<QAction*> bar = window.mainMenuBar()->actions();
     QMenu* tools = findMenu(bar, "Tools");
     CHECK(tools, "a new menu is made");
-    CHECK(bar.indexOf(tools->menuAction()) == bar.indexOf(findAction(bar, "Debug")) - 1, "just before Debug");
+    CHECK(bar.indexOf(tools->menuAction()) == bar.indexOf(findAction(bar, "Create")) + 1, "just after Create");
+    QMenu* later = findMenu(bar, "Later");
+    CHECK(later && bar.indexOf(later->menuAction()) == bar.indexOf(tools->menuAction()) + 1,
+          "a later one after it, before Physics");
     CHECK(findAction(findMenu(bar, "File")->actions(), "Plugin Save"), "an existing menu is added to, ignoring its mnemonic");
     QMenu* nested = findMenu(tools->actions(), "Nested");
     QAction* twoEdits = nested ? findAction(nested->actions(), "Two Edits") : nullptr;

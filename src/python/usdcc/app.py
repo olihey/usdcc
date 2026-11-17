@@ -160,7 +160,7 @@ def current_plugin():
 
 def add_menu_action(path, callback, shortcut="", tip=""):
     """Adds an entry to the main menu. ``path`` is "Menu/Action", or
-    "Menu/Submenu/Action"; menus that don't exist yet are made, before Debug.
+    "Menu/Submenu/Action"; menus that don't exist yet are made, after Create.
 
     ``callback()`` runs as one undo step, however many stages it edits, named after
     the action. An exception is logged, and the step is kept, marked as failed.
