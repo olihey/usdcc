@@ -377,7 +377,7 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   from PROD in prod (§13.4). *Not checked:* the RTX and V-Ray plugins, and Alembic, which don't
   read through `ArAsset`. `usdcc::assets::localFile()` is there for them.
 - **Python** *(not built):* the context for `Usd.Stage.Open` (`ArWrapResolverContextForPython`),
-  and `usdcc.assets` to list and stat.
+  and `usdcc.assets` to list and stat. A protocol written in Python is §11.1.
 
 ## 11. A protocol as a plugin
 
@@ -411,6 +411,63 @@ webdav/
   folder. It gets no settings page, and browsing only if its plugin registers an asset source
   itself ([ASSET_PICKER.md](ASSET_PICKER.md) §2).
 
+### 11.1 A protocol in Python
+
+*Planned 2026-11-17, nothing built.* A studio's own asset system (a database, a tracking tool's
+API) is easiest to reach from Python. Such a protocol is a transport (§6) written in Python. It
+is not an `ArResolver` written in Python.
+
+- **Python sits behind `CachingResolver`.** A C++ `PythonTransport` in `usdcc_scripting`
+  implements `stat`, `fetch`, `list` and `put` by taking the GIL and calling a Python object. A
+  Python plugin registers one for its scheme: `usdcc.assets.register_transport("tracker",
+  TrackerTransport())`, through `registerTransport()`, which already replaces a scheme's transport.
+  The resolver for the scheme is still a small C++ library in the plugin's `usd/` folder (§11), as
+  OpenUSD needs a registered type for every scheme.
+- **What runs most often stays in C++.** `_CreateIdentifier` and `_IsContextDependentPath` are
+  string work, called for every path. Answers are remembered in cache scopes and for a few seconds
+  outside them (§7). `_OpenAsset` hands out the file `fetch` wrote to the cache, so `ArAsset::Read`,
+  called most often and from many threads at once, never runs Python. Python runs only when the
+  cache doesn't know the answer: where a file is, and fetching it.
+- **The GIL makes Python calls take turns.** USD resolves from TBB workers during composition and
+  from Hydra's texture threads. Only one of them runs Python at a time. Waiting on the network
+  (`urllib`, `requests`, sockets) releases the GIL, so downloads still overlap; parsing a large
+  answer in Python doesn't. A long script in the console holds the GIL and stalls stage loading and
+  texture loading until it ends.
+- **The danger is a deadlock.** A thread that holds the GIL and waits for a USD worker hangs when
+  that worker needs the GIL. Example: a script calls `Usd.Stage.Open()`, `layer.Reload()` or
+  `prim.Load()` while holding the GIL. Composition hands work to TBB workers and waits for them. A
+  worker misses the cache, enters `PythonTransport` and waits for the GIL forever. TBB lets the
+  waiting thread run queued tasks itself, which can take the GIL again on that thread, but that
+  doesn't help: tasks a worker has already started never finish. *Not checked:* whether OpenUSD's
+  Python wrappers release the GIL around these calls; the plan assumes they don't. Stages opened from
+  C++ are safe, because the main thread holds the GIL only while it runs Python
+  ([python_runtime.cpp](../src/cpp/scripting/src/python_runtime.cpp)). Scripts, scripted panels
+  and scripted tools that load USD content are the exposed paths.
+- **How the deadlock is avoided,** cheapest first:
+  1. usdcc's own bindings (`usdcc.assets`, `usdcc.app`, any helper that opens or reloads a stage)
+     release the GIL around calls that can resolve.
+  2. A Python transport never calls Sdf or Usd. Opening a layer inside a resolve goes back into the
+     resolver and starts parallel work while the GIL is held.
+  3. `PythonTransport` gives up waiting for the GIL after a timeout (configurable, default 30 s) and
+     reports the endpoint as unreachable ("the Python transport is busy"). A hang becomes a failed
+     resolve, which says so in the Log.
+  4. If one is needed, the transport runs in a separate Python process that C++ talks to over a pipe.
+     Nothing waits on the GIL, calls really run in parallel, and a crashing script can't end usdcc.
+     It costs a process per scheme and a small protocol over the pipe. This is the choice for a
+     transport a studio uses in production; 1 to 3 are enough to try one out.
+- **Before Python, and after it.** OpenUSD can make the resolver, and `loadProtocolPlugins()` can
+  load it, before Python is up. Until a transport is registered the scheme answers "no transport",
+  not missing. Stages can be destroyed while Python finalizes or after it, so `PythonTransport`
+  checks that the interpreter is still alive before taking the GIL, and fails the call if it isn't.
+- **Errors.** Every Python exception is caught in `PythonTransport`, logged with its traceback
+  through `usdcc.log`, and turned into a `Result` error. Nothing may escape into a TBB task, as that
+  ends the process. Returning `None` from `stat` means missing; raising means unreachable (§5).
+- **Cancel and progress** are passed to Python as objects with `cancelled()` and
+  `advanced(done, total)`. A transport that never checks `cancelled()` still works, but cancelling
+  a stage open then waits for its fetch to finish.
+- **Not a way around the GIL:** Python 3.13's free-threaded build. OpenUSD's Python modules and
+  pybind11 extensions aren't ready for it.
+
 ## 12. Build and deploy
 
 - **vcpkg:** `curl` (default features off, `ssl` on: Schannel on Windows, OpenSSL elsewhere) and
@@ -441,6 +498,7 @@ webdav/
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
+| **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
 
 ### 13.1 What the spike found
 
@@ -629,6 +687,7 @@ Linux; and a 401 in the app.
 | 5 | Range requests, to read part of a large `.usdc` without downloading all of it? | Later. Whole files first: the usdc reader maps a local file |
 | 6 | Which authentication? | Per protocol; see [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §7 |
 | 7 | May a stage contact any HTTP host? | No: an allow list, with a question in usdcc for a new host ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4, §8) |
+| 8 | A Python transport in usdcc's interpreter, or in a process of its own? | In usdcc's to try one out, with the GIL timeout; its own process for production (§11.1) |
 
 ## 16. Not planned
 
