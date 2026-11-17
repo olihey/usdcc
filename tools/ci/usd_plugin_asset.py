@@ -11,11 +11,9 @@ built against it.
 Prints the result as JSON, and with --github-output also appends it to
 $GITHUB_OUTPUT for later workflow steps:
   pack      the pack's name, as in deps/usd-plugins/<pack>.json
-  name      usdplugin-<pack>-<short commit>-<hash>-<platform>-py312
+  name      usdplugin-<pack>-<short commit>-<hash>-<platform>-py313
   zip       <name>.zip
-  pattern   usdplugin-<pack>-*-<platform>-*.zip, every build of this pack for
-            this platform, to find the older ones
-  tag       the OpenUSD asset's release
+  tag      the OpenUSD asset's release
   usd_zip   the OpenUSD asset the pack is built against
   commit, repository, python, license, set
 
@@ -86,7 +84,6 @@ def describe(pack):
         "pack": pack,
         "name": name,
         "zip": f"{name}.zip",
-        "pattern": f"usdplugin-{pack}-*-{ASSET_PLATFORM}-*.zip",
         "tag": usd["tag"],
         "usd_zip": usd["zip"],
         "commit": spec["commit"],

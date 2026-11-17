@@ -4,8 +4,8 @@ How usdcc's CI builds OpenUSD's third-party plugins (render delegates, file form
 way it already builds OpenUSD itself, and which of them a release ships. This is the
 "USD plugins" item of [CI.md](CI.md) §7.
 
-**Status:** phase 1 is built and checked locally; its pack isn't published yet, which
-needs the workflow on `master` (§7). The rest is a plan.
+**Status:** phases 1 and 2 are built and checked locally. The pack isn't published yet,
+which needs the workflows on `master` (§7). The rest is a plan.
 
 ## 1. Where we are
 
@@ -37,7 +37,7 @@ needs the workflow on `master` (§7). The rest is a plan.
   --usd-install <folder>`, as `tools/build_usd.py` does for OpenUSD. It replaces `build.ps1`.
 - **A pack's name carries a hash** of its pin, its patches, the build script and the
   OpenUSD asset's name, so a new OpenUSD rebuilds every pack and a stale one is never used:
-  `usdplugin-<name>-<short commit>-<hash>-<platform>-py312.zip`. Packs are attached to
+  `usdplugin-<name>-<short commit>-<hash>-<platform>-py313.zip`. Packs are attached to
   the OpenUSD asset's own release (`deps/usd-<commit>-<hash>`), so one release holds an
   OpenUSD and everything built against it.
 - **A pack never brings a DLL the OpenUSD asset already has.** Two DLLs with one name can't
@@ -64,9 +64,10 @@ Notes:
   `deps/usd.json`. `usdfbx` links the FBX SDK statically, so Autodesk's code ends up in the DLL.
   The plugins' names in OpenUSD are `usdGltf_plugin`, `usdObj_plugin` and so on, and they
   share three DLLs that go in `bin/` (`fileformatUtils`, `usdIpc`, `usdSerialization`).
-  `usdGltf` also registers a package resolver for `.gltf` and `.glb`. The first glTF read
-  in a process prints a warning that `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE` is
-  deprecated; usdcc will have to set it (phase 2).
+  `usdGltf` also registers a package resolver for `.gltf` and `.glb`. By default the
+  plugins write each material twice, as a UsdPreviewSurface network and as an OpenPBR
+  MaterialX one, and the first read in a process warns that
+  `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE` is deprecated. usdcc leaves the default (§8).
 - **Gatling.** Its Sdr plugins also give the Material Editor MDL nodes
   ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §3.5).
 - **Cycles.** With `PXR_ROOT` set, Cycles takes OpenImageIO, OpenEXR, OpenColorIO,
@@ -150,25 +151,45 @@ and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new nam
    - Still to come: no DLL name shared with another pack (with the second pack), and a
      render delegate listed by `HdRendererPluginRegistry` without creating it, which
      needs the GPU (phase 3).
-5. Attach the zip to the OpenUSD asset's release, and delete the pack's older zips from it.
+5. Attach the zip to the OpenUSD asset's release. The pack's earlier zips stay there: an
+   older usdcc tag's pins name them, and `release.yml` can be run again for that tag.
 
 A pack marked `local` (§5) is built only when its SDK is there (a secret URL, or the
 self-hosted runner) and is kept as a workflow artifact, never published.
 
 ### `build.yml`, `release.yml`, `tools/deploy.py`
 
-- After unzipping OpenUSD, download the `standard` packs and unzip them over it. A missing
-  pack is a warning in `build.yml` (it may still be building) and an error in `release.yml`.
-- `deploy.py` copies only the plugins of the packs it was told to, by name, not all of
-  `plugin/usd`. Its Blender configuration already works from such a list
-  (`_mesh_usd_plugins`).
-- `tools/ci/smoke_test.py` also checks that the deploy lists the expected renderers and
-  opens a `.gltf`.
-- `usdcc_tests` gets a test that opens one sample file per file format, skipped when the
-  plugin isn't installed.
-- New: `tools/fetch_usd.py <folder>` downloads the OpenUSD asset and the packs for the
-  current pins. A new machine then needs no OpenUSD build, and a local build uses exactly
-  what CI does.
+- **`tools/fetch_usd.py <folder>`** downloads the OpenUSD asset and the `standard` packs
+  for the current pins, and unzips the packs over it. A new machine then needs no OpenUSD
+  build, and a local build uses exactly what CI does.
+  - They are release assets of a public repository, so it needs no login and no `gh`.
+  - Run again after a pin changed, it replaces a pack that is out of date, deleting the
+    old one's files by its list. An OpenUSD that is out of date is refused: nothing lists
+    its files, so it wants a new folder.
+  - `--zips <folder>` takes the zips from a folder first, for a pack built locally.
+- **`build.yml` and `release.yml`** run it with `--packs-only` after unzipping OpenUSD.
+  A pack that isn't published is a warning in `build.yml` (it may still be building, and
+  usdcc builds without it) and an error in `release.yml` (`--require-packs`). Windows
+  only, as the packs are.
+- **`tools/deploy.py`** no longer copies all of `plugin/usd`:
+  - OpenUSD's own plugins come from a list of names (`OPENUSD_PLUGINS`), reviewed against
+    the pinned OpenUSD and its flags. The Blender configuration already worked that way.
+    So a renderer installed by hand into a local OpenUSD isn't deployed any more.
+  - A `standard` pack's files are copied one by one from its list: `bin/` and
+    `plugin/usd/` as they are, its licences to `licenses/OpenUSD-plugins/<pack>/`.
+    `licenses/SOURCES.txt` gets the pack's version, licence, repository and commit.
+  - The deploy gets `usd-plugins/<pack>.json`, listing the pack's files as they are there.
+  - A pack of another set stays behind, with a line saying so. The Blender configuration
+    takes no packs: its review covers OpenUSD's own plugins only.
+  - On Linux only the list of OpenUSD's own plugins applies; packs come with phase 8.
+- **`tools/ci/smoke_test.py`**, inside the started deploy: OpenUSD finds Storm and Embree
+  and loads them from the deploy, and for each pack the deploy says it has, the pin's
+  `check` holds (the plugins load from the deploy, the extensions have file formats, the
+  samples open). `--expect-standard-usd-packs`, which `release.yml` passes, fails a deploy
+  without a pack of the standard set.
+- **`usdcc_tests`** has `usd_plugin_pack_file_formats`: each sample in `test_data/formats`
+  opens with one mesh of one triangle. A format this OpenUSD has no plugin for is skipped
+  with a line saying so, so the tests pass against a plain OpenUSD.
 
 ## 5. What ships
 
@@ -225,6 +246,20 @@ Three sets, decided by licence:
 2. **usdcc uses packs.** `build.yml`, `release.yml`, `deploy.py` by pack name, the smoke
    test, the file format test, `tools/fetch_usd.py`. Done when a `master` build opens a
    `.gltf` in its tests and a deploy has the plugins and their licences.
+   *Built, and checked locally on Windows; no workflow has run with it. `fetch_usd.py`
+   put the asset and the pack into a new folder from local zips, replaced an older build
+   of the pack on a second run, and warned, or failed with `--require-packs`, for the
+   pack that isn't published; the asset's download address was tried on its first bytes
+   only. usdcc built against that folder: all nine test programs pass, `usdcc_tests` with
+   223 tests and the four samples read, and against the asset without the pack the same
+   test skips all four. A deploy has the five plugins, their three DLLs, the licences in
+   `licenses/OpenUSD-plugins/adobe-fileformats/` and its entry in `SOURCES.txt`; started by
+   the smoke test, it loads Storm, Embree and the five plugins from its own folder and
+   reads the samples, and the smoke test fails it once its pack record is taken away.
+   Not tried: Linux, where `deploy.py` now also takes OpenUSD's plugins from the list.*
+   *The published Windows OpenUSD asset (built 2026-11-06) has no `licenses/OpenUSD/`,
+   which `deploy.py` has needed since; the local deploy got the two files from an OpenUSD
+   checkout. `release.yml`'s Windows deploy needs `deps-usd.yml` run with `replace`.*
 3. **Gatling**, as the `optional` set's first pack, from the commit and MDL SDK that work
    locally. Done when the pack is published and a deploy with it unzipped over lists
    Gatling and renders on the RTX runner.
@@ -248,6 +283,7 @@ Three sets, decided by licence:
 | 4 | Does hdAurora build against a stock OpenUSD? | Unknown; phase 6 answers it |
 | 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
+| 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |
 
 ## 9. Later
 

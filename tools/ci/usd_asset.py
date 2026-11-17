@@ -11,7 +11,7 @@ platform's zip sits in the same release, under the same tag. deps/usd.json's own
 
 Prints the result as JSON, and with --github-output also appends it to
 $GITHUB_OUTPUT for later workflow steps:
-  name    usd-<short commit>-<hash>-<platform>-py312
+  name    usd-<short commit>-<hash>-<platform>-py313
   base    usd-<short commit>-<hash>, what every platform's asset shares
   tag     deps/<base>
   zip     <name>.zip

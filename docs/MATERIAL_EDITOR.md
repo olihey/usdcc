@@ -283,7 +283,7 @@ edit reloads the native RTX snapshot, with heavy scenes potentially taking minut
 | | Text parser in `usdcc_usd` (**recommended**) | MDL SDK in a helper |
 |---|---|---|
 | Size | Nothing added | 113 MB `libmdl_sdk.dll` on a 388 MB deploy, or 109 MB `libmdl_core.dll` |
-| Build | A few hundred lines of C++ | The BSD package's prebuilt DLL plus a small C++ tool. vcpkg has a `mdl-sdk` port, but it builds LLVM. Its Python binding is for 3.10, and ours is 3.12 |
+| Build | A few hundred lines of C++ | The BSD package's prebuilt DLL plus a small C++ tool. vcpkg has a `mdl-sdk` port, but it builds LLVM. Its Python binding is for 3.10, and ours is 3.13 |
 | Speed | Reads text, in-process | Starts a process, then compiles the module |
 | Correct on | Signatures, annotations and enums, as far as tested below | Everything, including a module that doesn't compile, and `.mdle` |
 

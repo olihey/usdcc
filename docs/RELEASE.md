@@ -116,7 +116,10 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
 2. **Check out the tag**, with submodules.
 3. **The same steps as `build.yml`:** OpenUSD and PySide6 from their release assets, Qt
    from the vcpkg cache. PySide6 is required here, not optional: a release without
-   scripting panels would be broken.
+   scripting panels would be broken. So are the USD plugin packs of the standard set
+   (`tools/fetch_usd.py --packs-only --require-packs`, [USD_PLUGINS.md](USD_PLUGINS.md) §5);
+   the smoke test in step 7 checks the deploy has them and that their file formats read
+   a sample each (`--expect-standard-usd-packs`).
 4. **Build** with `tools/build.py --usdcc-version <version>` (a new parameter that passes
    `-DUSDCC_VERSION`).
 5. **Run the tests.**
@@ -200,6 +203,10 @@ What the release has to do, whatever usdcc's own licence:
     source, and the libraries OpenColorIO and OpenEXR build in themselves).
     `deps-usd.yml` runs it before deleting those folders, into the asset's `licenses/`;
     `deploy.py` runs it for a local install that still has them.
+  - `OpenUSD-plugins/<pack>/<library>/`: for each USD plugin pack in the deploy, the
+    licences of the plugins and of the libraries built into them, which
+    `tools/build_usd_plugin.py` collects into the pack ([USD_PLUGINS.md](USD_PLUGINS.md)).
+    `SOURCES.txt` names each pack's version, repository and commit.
   - `PySide6/`: pyside-setup's `LICENSES`, which `tools/build_pyside.py` copies into its
     install.
   - `Python/`, `QWindowKit/`, `ruff/`, `uv/`.

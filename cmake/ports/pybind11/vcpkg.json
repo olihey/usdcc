@@ -1,17 +1,12 @@
 {
   "name": "pybind11",
   "version": "3.1.0",
-  "$comment": "vcpkg's own pybind11, but with its python3 on Windows only: on Linux that python3's libpython3.12.so.1.0 sits in vcpkg_installed/<triplet>/lib, ahead of the system one on the binaries' RUNPATH, so the app embedded vcpkg's Python instead of OpenUSD's (docs/LINUX_WSL.md). usdcc only uses pybind11::headers.",
+  "$comment": "vcpkg's own pybind11 without its python3: usdcc only uses pybind11::headers, with OpenUSD's Python. vcpkg's python3 forces its own version (3.12 is its newest) on every find_package(Python3) through its CMake wrapper, so an OpenUSD built with another Python isn't found; and on Linux its libpython sits in vcpkg_installed/<triplet>/lib, ahead of the system one on the binaries' RUNPATH, so the app embedded vcpkg's Python instead of OpenUSD's (docs/LINUX_WSL.md).",
   "description": "pybind11 is a lightweight header-only library that exposes C++ types in Python and vice versa, mainly to create Python bindings of existing C++ code",
   "homepage": "https://github.com/pybind/pybind11",
   "documentation": "https://pybind11.readthedocs.io/",
   "license": "BSD-3-Clause",
   "dependencies": [
-    {
-      "name": "python3",
-      "default-features": false,
-      "platform": "windows"
-    },
     {
       "name": "vcpkg-cmake",
       "host": true

@@ -80,6 +80,13 @@ jobs:
           7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$env:USD_INSTALL" | Select-Object -Last 2
           if ($LASTEXITCODE) { throw 'unzipping failed' }
 
+      # Required here, unlike in build.yml: a release has every USD plugin pack
+      # of the standard set (docs/USD_PLUGINS.md section 5).
+      - name: Download the USD plugin packs
+        run: |
+          python tools/fetch_usd.py $env:USD_INSTALL --packs-only --require-packs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       # Required here, unlike in build.yml: a release without it couldn't make
       # panels from Python.
       - name: Download PySide6
@@ -131,7 +138,7 @@ jobs:
       - name: Start the deploy
         run: |
           python tools/ci/smoke_test.py --deploy "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" `
-            --expect-version ${{ steps.tag.outputs.version }} `
+            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs `
             --platform-plugins build\vcpkg_installed\x64-windows\Qt6\plugins\platforms
 
       # The deploy, in a folder of its own; and the PDBs of usdcc's own

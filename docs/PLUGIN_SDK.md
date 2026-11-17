@@ -78,7 +78,7 @@ The SDK holds usdcc's headers and import libraries. **Qt, Qt Advanced Docking Sy
 [deps/usd.json](../deps/usd.json) has pinned, made by CI ([CI.md](CI.md)). Take the one whose name `tools/ci/usd_asset.py` prints for the usdcc
 version you build against, unzip it anywhere, and pass that folder as `-DUSD_INSTALL`. It has OpenUSD's headers, import libraries, DLLs, plugins and
 CMake files, plus those of its dependencies (TBB, MaterialX, OpenImageIO, OpenColorIO, Embree, ...). It's a Release build, so a plugin uses the release
-CRT (`/MD`) with `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc does; `find_package(UsdccPlugin)` sets that up. It also needs Python 3.12 x64
+CRT (`/MD`) with `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc does; `find_package(UsdccPlugin)` sets that up. It also needs Python 3.13 x64
 installed, which CMake finds by itself. A plain OpenUSD plugin, without usdcc, builds against it the same way: see `tools/ci/usd-sdk-check`, which CI
 builds against every new OpenUSD asset.
 

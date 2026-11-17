@@ -54,7 +54,7 @@ jobs:
           exit 0
 
       # OpenUSD's Python, which usdcc embeds. PySide is built for its limited
-      # API, so any 3.12 runs it.
+      # API, so any patch release of that version runs it.
       - name: Set up Python
         if: steps.published.outputs.found != 'true'
         uses: actions/setup-python@v5

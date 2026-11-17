@@ -7,6 +7,13 @@ get there, if the version isn't --expect-version, or if anything came from
 outside the deploy: a DLL or Python file the build's own folders were hiding
 (docs/RELEASE.md section 4).
 
+The same script asks OpenUSD for its own render delegates (Storm, Embree) and
+for the plugins of each USD plugin pack the deploy has (its usd-plugins/*.json),
+and does what the pack's pin asks under "check": the plugins load from the
+deploy, the extensions have file formats, the sample files open
+(docs/USD_PLUGINS.md). --expect-standard-usd-packs fails a deploy that lacks a
+pack of the standard set, which a release has to have.
+
 On Windows the deploy only has Qt's windows platform plugin; the offscreen one
 comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux deploy
 has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
@@ -30,7 +37,12 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import WINDOWS, fail, remove_tree  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import ASSET_PLATFORM, REPO, WINDOWS, fail, remove_tree  # noqa: E402
+import usd_plugin_asset  # noqa: E402
+
+# OpenUSD's own render delegates, which every deploy has (tools/deploy.py).
+OPENUSD_PLUGINS = ["hdStorm", "hdEmbree"]
 
 CHECK = """\
 import json
@@ -58,6 +70,36 @@ result = {
 }
 if PySide6:
     result["files"]["PySide6"] = PySide6.__file__
+
+# OpenUSD's plugins: its own render delegates, and what each USD plugin pack in
+# the deploy is checked for (its pin's "check", docs/USD_PLUGINS.md).
+from pxr import Plug, Sdf
+
+def plugin(name):
+    found = Plug.Registry().GetPluginWithName(name)
+    if not found:
+        return None
+    try:
+        loaded = bool(found.Load())
+    except Exception:
+        loaded = False
+    return {"path": found.path, "loaded": loaded}
+
+def prim_counts(file):
+    try:
+        stage = Usd.Stage.Open(file)
+    except Exception:
+        stage = None
+    if not stage:
+        return None
+    counts = {}
+    for prim in stage.Traverse():
+        counts[prim.GetTypeName()] = counts.get(prim.GetTypeName(), 0) + 1
+    return counts
+
+result["plugins"] = {name: plugin(name) for name in PLUGINS}
+result["extensions"] = {extension: Sdf.FileFormat.FindByExtension(extension) is not None for extension in EXTENSIONS}
+result["opened"] = {file: prim_counts(file) for file in FILES}
 with open(RESULT, "w") as f:
     json.dump(result, f)
 if PySide6:
@@ -92,6 +134,9 @@ def main(argv=None):
     parser.add_argument("--expect-version", help="the version the app has to report")
     parser.add_argument("--platform-plugins", required=WINDOWS,
                         help="a folder holding Qt's qoffscreen.dll (Windows; a Linux deploy has its own)")
+    parser.add_argument("--expect-standard-usd-packs", action="store_true",
+                        help="the deploy has to have every USD plugin pack of the standard set for this platform "
+                             "(deps/usd-plugins); without it, only the packs it has are checked")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     args = parser.parse_args(argv)
 
@@ -105,11 +150,30 @@ def main(argv=None):
         if not os.path.isfile(os.path.join(platform_plugins, "qoffscreen.dll")):
             fail(f"No qoffscreen.dll in {args.platform_plugins}")
 
+    # The USD plugin packs the deploy says it has (tools/deploy.py writes a file
+    # each), and what each one's pin wants checked.
+    problems = []
+    packs_dir = Path(deploy_dir) / "usd-plugins"
+    packs = sorted(file.stem for file in packs_dir.glob("*.json")) if packs_dir.is_dir() else []
+    if args.expect_standard_usd_packs:
+        for pack in sorted(file.stem for file in usd_plugin_asset.PINS.glob("*.json")):
+            spec = usd_plugin_asset.load(pack)
+            if spec["set"] == "standard" and ASSET_PLATFORM in spec["platforms"] and pack not in packs:
+                problems.append(f"the deploy doesn't have the {pack} USD plugin pack")
+    pack_plugins, extensions, files = {}, [], {}
+    for pack in packs:
+        check = usd_plugin_asset.load(pack).get("check", {})
+        pack_plugins.update({name: pack for name in check.get("plugins", [])})
+        extensions += check.get("extensions", [])
+        files.update({str(REPO / entry["file"]): entry.get("prims", {}) for entry in check.get("open", [])})
+
     work = Path(tempfile.gettempdir()) / f"usdcc-smoke-{os.getpid()}"
     work.mkdir(parents=True, exist_ok=True)
     result = work / "result.json"
     script = work / "check.py"
-    script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {WINDOWS!r}\n" + CHECK, encoding="utf-8")
+    script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {WINDOWS!r}\n"
+                      f"PLUGINS = {OPENUSD_PLUGINS + sorted(pack_plugins)!r}\nEXTENSIONS = {extensions!r}\n"
+                      f"FILES = {sorted(files)!r}\n" + CHECK, encoding="utf-8")
 
     # Only what a user's machine has: the system, and the deploy itself.
     if WINDOWS:
@@ -123,7 +187,6 @@ def main(argv=None):
         environment = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}
     environment["QT_QPA_PLATFORM"] = "offscreen"
 
-    problems = []
     started = time.time()
     process = subprocess.Popen([exe, "--no-startup-scripts", "--script", str(script)], env=environment)
     try:
@@ -145,6 +208,29 @@ def main(argv=None):
             print(f"  {module}: {file}")
             if not os.path.normcase(file).startswith(os.path.normcase(deploy_dir)):
                 problems.append(f"{module} came from outside the deploy: {file}")
+
+        for name, found in checked["plugins"].items():
+            what = f"the {pack_plugins[name]} pack's {name}" if name in pack_plugins else f"OpenUSD's {name}"
+            if not found:
+                problems.append(f"OpenUSD doesn't find {what}")
+            elif not os.path.normcase(os.path.abspath(found["path"])).startswith(os.path.normcase(deploy_dir)):
+                problems.append(f"{what} came from outside the deploy: {found['path']}")
+            elif not found["loaded"]:
+                problems.append(f"{what} doesn't load")
+        for extension, known in checked["extensions"].items():
+            if not known:
+                problems.append(f".{extension} has no file format")
+        for file, counts in checked["opened"].items():
+            if counts is None:
+                problems.append(f"{os.path.basename(file)} doesn't open")
+                continue
+            for type_name, wanted in files[file].items():
+                if counts.get(type_name, 0) != wanted:
+                    problems.append(f"{os.path.basename(file)} has {counts.get(type_name, 0)} {type_name}, not {wanted}")
+        print(f"  OpenUSD plugins: {', '.join(sorted(checked['plugins']))}")
+        if packs:
+            print(f"  USD plugin packs: {', '.join(packs)}; file formats: {', '.join(extensions)}; "
+                  f"opened: {', '.join(os.path.basename(file) for file in sorted(files))}")
     else:
         problems.append("the check script wrote nothing")
     try:

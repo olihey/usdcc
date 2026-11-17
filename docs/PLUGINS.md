@@ -236,7 +236,7 @@ tool's own work on each event is its own cost.
 - **One interpreter:** a virtual environment per plugin can't work in-process, and one process can only load one numpy.
 - **Renaming doesn't work:** nesting a package inside the plugin's own breaks packages that import themselves by absolute name, and it can't
   give compiled packages a second copy.
-- **Compiled packages must match USD's Python,** currently 3.12 on Windows x64.
+- **Compiled packages must match USD's Python,** currently 3.13 on Windows x64.
 - **Some packages can take the app down:** `PySide6` from pip brings its own Qt (PLAN.md §6 item 11), and `usd-core` competes with `pxr`.
   Others may carry their own Qt or copies of libraries USD uses. `opencv-python`'s Windows wheel doesn't carry Qt (*checked,* and it runs in the app).
 

@@ -9,6 +9,11 @@ on the RTX 4090 (Storm, picking, the gizmos), and passes all three test programs
 both on WSLg with the GPU and headless under Xvfb with llvmpipe. Not done yet: PySide6 for
 Linux, a Linux CI job, a Linux deploy, and checks on a native Linux desktop (§6).
 
+**Since 2026-11-17 `deps/usd.json` pins Python 3.13** ([CI.md](CI.md) §2.1), and nothing
+below has been run again with it. `tools/build_usd.py` refuses to run on another minor
+version, so the build in §2 needs a Python 3.13 with its headers, which Ubuntu 24.04 doesn't
+package; the 3.12 named below is what was used and found then.
+
 ## 1. The machine
 
 | | |

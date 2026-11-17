@@ -153,7 +153,10 @@ if(EXISTS "${_qwk_config_saved}/qwkconfig.h" AND EXISTS "${_qwk_config}")
     endif()
 endif()
 
-set(PYBIND11_FINDPYTHON ON)
+# pybind11's headers only (pybind11::headers), built with OpenUSD's Python
+# (UsdccPython.cmake). Its own Python search stays off: it would take whichever
+# Python CMake finds first, the newest on the machine, and define targets for it.
+set(PYBIND11_NOPYTHON ON)
 find_package(pybind11 REQUIRED)
 
 # OpenUSD is provided externally (see docs/PLAN.md, "Technical Requirements"):
@@ -171,7 +174,8 @@ find_package(USD REQUIRED)
 # Where it was actually found, which is what the build compiles and links against.
 message(STATUS "OpenUSD ${PXR_VERSION} found at ${pxr_DIR}")
 if(USDCC_LINK_RELEASE_QT)
-    # USD's targets link Python3::Python, which in Debug is vcpkg's python312_d.lib.
+    # USD's targets link Python3::Python, which in Debug is a python3XY_d.lib when
+    # the Python has one (an install with its debug binaries).
     # The interpreter is OpenUSD's release Python, so anything resolved from the
     # debug one (whatever a library later on the link line alone needs, such as
     # pybind11's list conversion) would run in a second Python that never started:
@@ -183,6 +187,14 @@ if(USDCC_LINK_RELEASE_QT)
     endforeach()
 endif()
 include(UsdccPython)
+# Whatever calls find_package(Python) from here on, as Shiboken6's and PySide6's
+# CMake files do (src/cpp/ui/python), gets OpenUSD's Python. Left to itself it
+# takes the newest Python on the machine, and its headers with it.
+if(USDCC_PYTHON_FOUND)
+    # With forward slashes: pxrConfig.cmake's path has Windows' own, which
+    # FindPython doesn't take.
+    file(TO_CMAKE_PATH "${USDCC_PYTHON_EXECUTABLE}" Python_EXECUTABLE)
+endif()
 # PySide6 and shiboken6 as tools/build_pyside.py builds them, against vcpkg's
 # Qt for OpenUSD's Python (docs/SCRIPTING.md §8). Without them the usdcc.ui
 # module isn't built and scripts can't make panels; everything else works.

@@ -131,13 +131,7 @@ jobs:
       - name: Publish
         if: steps.published.outputs.found != 'true'
         run: |
+          # Next to this pack's earlier builds, which stay: an older usdcc tag's
+          # pins name them, and release.yml can be run again for that tag.
           gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
           if ($LASTEXITCODE) { throw 'publishing failed' }
-          # This pack's earlier builds for this OpenUSD: no pin names them any more.
-          $names = @(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name')
-          foreach ($name in $names) {
-            if ($name -like '${{ steps.asset.outputs.pattern }}' -and $name -ne '${{ steps.asset.outputs.zip }}') {
-              Write-Host "Deleting the superseded $name"
-              gh release delete-asset '${{ steps.asset.outputs.tag }}' $name --yes
-            }
-          }

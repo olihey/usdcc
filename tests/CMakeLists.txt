@@ -43,6 +43,7 @@ add_executable(usdcc_tests
     scene_counts_test.cpp
     settings_test.cpp
     usd_runtime_info_test.cpp
+    usd_file_formats_test.cpp
     color_management_test.cpp
     shade_connections_test.cpp
     stage_changes_test.cpp

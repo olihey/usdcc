@@ -5,6 +5,6 @@
   "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
             "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
             "--generator=Visual Studio 17 2022"],
-  "python": "3.12.10",
+  "python": "3.13.12",
   "platform": "win64"
 }

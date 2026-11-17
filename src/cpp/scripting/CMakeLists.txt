@@ -75,8 +75,8 @@ endif()
 if(USDCC_PYTHON_FOUND)
     find_package(pybind11 REQUIRED)
     target_include_directories(usdcc_scripting PRIVATE "${USDCC_PYTHON_INCLUDE_DIR}")
-    # pybind11::headers only: pybind11::embed would link the Python
-    # find_package(pybind11) found, which is vcpkg's (see UsdccPython.cmake).
+    # pybind11::headers only, with OpenUSD's Python: pybind11 itself looks for
+    # none (PYBIND11_NOPYTHON, the top-level CMakeLists.txt).
     target_link_libraries(usdcc_scripting PRIVATE pybind11::headers PUBLIC "${USDCC_PYTHON_LIBRARY}")
     # Build-time defaults for PythonSettings::defaults(), used unless the app
     # finds a Python bundled next to it (tools/deploy.py).

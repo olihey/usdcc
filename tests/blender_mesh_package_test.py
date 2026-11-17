@@ -160,7 +160,7 @@ class PackageTests(unittest.TestCase):
                 folder.mkdir(parents=True)
                 (folder / "plugInfo.json").write_text("{}")
                 (source / (name + ".dll")).write_bytes(b"binary")
-            deploy._mesh_usd_plugins(source, target, deploy.copy_tree)
+            deploy._openusd_plugins(source, target, deploy.copy_tree)
             self.assertEqual(
                 sorted(p.name for p in target.iterdir()), ["hdStorm", "hdStorm.dll"]
             )

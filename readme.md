@@ -59,6 +59,12 @@ OpenUSD separately with Python support (e.g. Pixar's `build_usd.py`) and pass
 `-DUSD_INSTALL=<path-to-usd-install>` (the directory containing `pxrConfig.cmake`)
 to enable USD-dependent targets. Until then the app shell builds without it.
 
+On Windows there is no need to build it: `python tools/fetch_usd.py C:\deps\usd`
+downloads the OpenUSD CI builds usdcc against, with the USD plugins a release
+ships (glTF, OBJ, PLY, STL and SPZ file formats) unzipped over it
+([docs/USD_PLUGINS.md](docs/USD_PLUGINS.md)). Then
+`python tools/build.py --usd-install C:\deps\usd`.
+
 ### Python bindings (`usdcc.ui`)
 
 `SidePanel` is exposed to Python via Shiboken6, so scripts can add their own side
@@ -140,10 +146,11 @@ triplet on Linux and macOS (macOS hasn't been built yet); `deploy.py` and
 usdcc builds, runs and passes its tests on Ubuntu 24.04, so far in WSL 2 on Windows
 ([docs/LINUX_WSL.md](docs/LINUX_WSL.md) has the packages to install and what was found).
 OpenUSD comes from [tools/build_usd.py](tools/build_usd.py), which builds the commit
-`deps/usd.json` pins with the system's Python 3.12:
+`deps/usd.json` pins. Run it with a Python 3.13, the version the pin names; Ubuntu 24.04's
+own is 3.12, and Linux hasn't been built again since the pin moved to 3.13:
 
 ```
-python3 tools/build_usd.py ~/deps/usd           # about 40 minutes
+python3.13 tools/build_usd.py ~/deps/usd        # about 40 minutes
 python3 tools/build.py --usd-install ~/deps/usd
 ctest --test-dir build --output-on-failure
 ```

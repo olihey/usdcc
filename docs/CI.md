@@ -18,7 +18,8 @@ self-hosted runners come later (§7).
   publishes the install as a GitHub Release asset. The everyday workflow downloads that
   asset instead of building USD.
 - **Pure OpenUSD only.** No file format plugins or extra render delegates yet, and no
-  PySide6 until phase 4.
+  PySide6 until phase 4. *Since then: PySide6 (§4.1), and file format plugins as packs
+  over the asset ([USD_PLUGINS.md](USD_PLUGINS.md)).*
 
 ## 2. The OpenUSD build
 
@@ -30,7 +31,7 @@ one difference: `--no-usdview`.
 | Source | `https://github.com/NVIDIA-Omniverse/OpenUSD`, commit `70c45e83b08a7b45588cd6cdbd2ae67f5147befb` (branch `typhoon/main`; reports itself as 26.08) |
 | Patch | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change |
 | Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release --generator="Visual Studio 17 2022"` |
-| Python | 3.12.10 x64 from `actions/setup-python` (the same patch version as the local build) |
+| Python | 3.13.12 x64 from `actions/setup-python`. 3.13 is the VFX Reference Platform's Python for CY2026 and CY2027; it was 3.12.10 until 2026-11-17 (§2.1) |
 | Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.py` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
 | Install path | `C:\deps\usd` on CI. The asset itself works from any folder |
 
@@ -46,12 +47,12 @@ package files and OpenImageIO's. `tools/ci/relocate_usd.py` rewrites them before
 - The install folder becomes `${_usdcc_usd_prefix}`, which a line added at the top of each
   changed file works out from `${CMAKE_CURRENT_LIST_DIR}`.
 - `pxrConfig.cmake` uses its stored Python paths only if they exist on the machine;
-  otherwise CMake finds Python 3.12 itself. So CI, with the same Python as the build,
-  needs no `-DPython3_EXECUTABLE`, and a plugin author's own Python 3.12 install works.
-  Under vcpkg's toolchain, as in usdcc's own build, "finds it itself" would mean vcpkg's
-  python3, which can't be embedded (vcpkg's `find_package` wrapper insists on it), so
-  usdcc's `FindUSD.cmake` first looks for the machine's Python of the same version (in the
-  registry, then on PATH) and sets the paths as `pxrConfig.cmake` would.
+  otherwise CMake finds a Python of that version itself. So CI, with the same Python as
+  the build, needs no `-DPython3_EXECUTABLE`, and a plugin author's own Python 3.13
+  install works. That lookup only asks for Python's libraries, and usdcc also needs the
+  interpreter to embed, so usdcc's `FindUSD.cmake` first looks for the machine's Python
+  of the same version (in the registry, then on PATH) and sets the paths as
+  `pxrConfig.cmake` would.
 - The Python include folder in `pxrTargets.cmake` becomes `${Python3_INCLUDE_DIRS}`, which
   `pxrConfig.cmake` has found by then.
 
@@ -85,13 +86,48 @@ Neither is used when compiling against the install.
 Plugins must match how OpenUSD was built: **Release only**, so a plugin uses the release
 CRT (`/MD`) and `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc itself does (top-level
 `CMakeLists.txt`), or the STL objects it passes to OpenUSD have the wrong layout. Plus the
-same MSVC toolset generation and Python 3.12.
+same MSVC toolset generation and Python 3.13.
 
 **Debug symbols.** `--build-variant=release` produces no `.pdb` files for OpenUSD itself;
 the only ones in the install are TBB's (12 small files), which stay in the zip. Stepping
 into OpenUSD would need a separate symbols build (`--build-variant=relwithdebuginfo`,
 same CRT and ABI) as its own asset. Not planned yet. The sources are public at the
 pinned commit.
+
+### 2.1 Python 3.13
+
+`deps/usd.json` pinned Python 3.12.10 until 2026-11-17. It is 3.13 now, the VFX Reference
+Platform's Python for CY2026 and CY2027. The pin is the one place the version is written:
+the assets' names, the embedded interpreter and the per-version package environments
+follow from it.
+
+- **vcpkg no longer installs a Python.** Its `python3` port, which the pybind11 port
+  depended on, has no version after 3.12, and its CMake wrapper forces that version on
+  every `find_package(Python3)`, so an OpenUSD built with 3.13 wasn't found at all. usdcc
+  only uses pybind11's headers, so the overlay port in `cmake/ports/pybind11` has no
+  `python3` any more (it already had none on Linux), and pybind11's own Python search is
+  off (`PYBIND11_NOPYTHON`).
+- **Every other Python lookup is pointed at OpenUSD's.** Shiboken6's and PySide6's CMake
+  files call `find_package(Python)` themselves. vcpkg's wrapper used to answer that with
+  its 3.12; without it CMake takes the newest Python on the machine (3.14 here), headers
+  included. The top-level `CMakeLists.txt` now sets `Python_EXECUTABLE` to OpenUSD's
+  interpreter before they run.
+- **Tried on Windows before the pin changed,** with a locally built OpenUSD and PySide6
+  for 3.13.12 and a vcpkg tree without the Python: OpenUSD at the pinned commit builds
+  with the pin's flags, `tools/build_pyside.py` builds PySide6 6.11.1, the Adobe file
+  format pack builds, and usdcc builds and passes all nine test programs. The same
+  sources still build and pass against the 3.12 OpenUSD, so a local build with an older
+  OpenUSD keeps working. The V-Ray App SDK installed here has a module for 3.13, which
+  imports.
+- **Not tried:** Linux. `tools/build_usd.py` now needs a Python 3.13 to run on, and
+  Ubuntu 24.04's own is 3.12 ([LINUX_WSL.md](LINUX_WSL.md)). The Blender Linux
+  distribution's tooling and review name Ubuntu's Python 3.12
+  (`tools/blender_linux_distribution.py`) and have to be redone for another Python.
+  Also not tried: a Debug build, a deploy with its smoke test, and the Python
+  `actions/setup-python` installs, as the trial used a uv-managed one.
+- **Every asset has a new name** (`...-py313`), so `deps-usd.yml` has to publish the new
+  OpenUSD (about two hours a platform) before `build.yml` can pass again, and
+  `deps-pyside.yml` and `deps-usd-plugins.yml` follow it.
 
 ### `deps/usd.json`
 
@@ -105,12 +141,12 @@ One file pins the build:
   "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
             "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
             "--generator=Visual Studio 17 2022"],
-  "python": "3.12.10",
+  "python": "3.13.12",
   "platform": "win64"
 }
 ```
 
-The asset's name comes from it: `usd-<short commit>-<hash>-win64-py312.zip`, where
+The asset's name comes from it: `usd-<short commit>-<hash>-win64-py313.zip`, where
 `<hash>` is the first 8 hex characters of a SHA-256 over `usd.json` and the patch files
 (line endings normalised). `tools/ci/usd_asset.py` prints it, with the tag. Any
 change to the pin, the flags or a patch gives a new name, so a stale asset is never used.
@@ -157,6 +193,10 @@ Runs on pushes to `master` and on pull requests.
 3. Work out the asset name from `deps/usd.json` (the same script as in §3), download it
    with `gh release download`, and unzip it to `C:\deps\usd`. If it's missing, fail with
    a message saying to run `deps-usd.yml`.
+   Then `tools/fetch_usd.py --packs-only` unzips the USD plugin packs of the standard set
+   over it ([USD_PLUGINS.md](USD_PLUGINS.md) §4). One that isn't published is a warning,
+   and the build goes on without it: `deps-usd-plugins.yml` may still be building it.
+   Windows only, as the packs are.
 4. The same for PySide6 (§4.1), unzipped into `external/`, where the CMake configure
    looks for it. If it's missing, the build carries on without `usdcc.ui` and the Python
    panel tests, with a warning: after a Qt update, `deps-pyside.yml` needs a few minutes
@@ -193,7 +233,7 @@ two Qts in one process fail at random (`src/cpp/ui/python/CMakeLists.txt`). So t
 built from source against vcpkg's Qt, as `tools/build_pyside.py` does locally, and
 published like OpenUSD.
 
-- **Name.** `tools/ci/pyside_asset.py`: `pyside-<tag>-qt<version>-<hash>-win64-py312`,
+- **Name.** `tools/ci/pyside_asset.py`: `pyside-<tag>-qt<version>-<hash>-win64-py313`,
   tag `deps/pyside-<tag>-qt<version>-<hash>`. The hash covers the PySide tag, qtbase's
   vcpkg version and port version (an overlay port in `cmake/ports` wins), the Python
   version from `deps/usd.json`, `build_pyside.py` and the naming script itself. Other

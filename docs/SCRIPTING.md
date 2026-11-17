@@ -572,7 +572,7 @@ running app. The app does start cleanly with it (no warnings or errors in the lo
 ### Phase 5
 
 - **PySide6 for OpenUSD's Python.** `tools/build_pyside.py` now:
-  - builds for the `Python3_EXECUTABLE` in usdcc's CMake cache (OpenUSD's 3.12), or `--python`;
+  - builds for the `Python3_EXECUTABLE` in usdcc's CMake cache (OpenUSD's), or `--python`;
   - enters the Visual Studio developer environment itself when `cl.exe` isn't on PATH;
   - finds pip's `ninja.exe` (`ninja.BIN_DIR`; the old path guess was wrong for `--user`
     installs);

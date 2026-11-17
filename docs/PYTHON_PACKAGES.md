@@ -91,7 +91,7 @@ removal means "leave this folder". Two apps installing at once are kept apart wi
 
 **uv, bundled and pinned, like ruff** (`cmake/modules/UsdccUv.cmake`, deploy `tools\uv\`). It adds 31 MB. pip would also need pip in the deploy, and has no equivalent of `sync --target` to remove what's no longer listed.
 
-**uv needs a Python, so the deploy has one.** Even resolving fails without an interpreter (*tested*). `python\python.exe` is 105 KB and reuses the deploy's `Lib` and `DLLs`. It finds `python312.dll` in `bin\`,
+**uv needs a Python, so the deploy has one.** Even resolving fails without an interpreter (*tested*). `python\python.exe` is 105 KB and reuses the deploy's `Lib` and `DLLs`. It finds `python313.dll` in `bin\`,
 which the app puts on `PATH` when it runs uv. `tools/deploy.py` checks that the two work together.
 
 **Only requirements reach uv.** `python.requires` is the one place, with no separate `requirements.txt`. Only names, versions and markers are allowed: **a URL refuses the plugin,** and `_plugins.py` validates

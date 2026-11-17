@@ -14,7 +14,8 @@ against the OpenUSD install (Release, the release CRT, the pin's Python), builds
 and installs. Then it drops what only a build needs (headers, import libraries,
 CMake files), collects the licences of the plugin and of what CMake fetched into
 it under licenses/usd-plugins/<pack>/, and writes usd-plugins/<pack>.json, which
-lists the pack's files.
+names the build and lists the pack's files (tools/fetch_usd.py and tools/deploy.py
+go by it).
 
 --install copies the pack over the OpenUSD install afterwards. Check a pack with
 tools/ci/check_usd_plugin.py.
@@ -151,6 +152,8 @@ def main(argv=None):
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps({
         "pack": pack,
+        # What tools/fetch_usd.py compares, to tell whether an install has this build.
+        "asset": usd_plugin_asset.describe(pack)["name"],
         "repository": spec["repository"],
         "commit": spec["commit"],
         "version": spec.get("version", ""),

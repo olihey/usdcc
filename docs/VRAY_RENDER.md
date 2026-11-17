@@ -8,8 +8,8 @@ camera, or a camera in the stage, and renders again after edits. It is a Python 
 
 ## 1. Setup
 
-1. **Install the V-Ray App SDK.** Version 7.x has a Python 3.12 module, the Python usdcc
-   runs. The installer puts it in `C:\Program Files\Chaos\V-Ray\AppSDK`, which the plugin
+1. **Install the V-Ray App SDK.** Version 7.x has a module for each Python from 3.6 to
+   3.14, so also for 3.13, the Python usdcc runs. The installer puts it in `C:\Program Files\Chaos\V-Ray\AppSDK`, which the plugin
    finds on its own. V-Ray Standalone or V-Ray for a DCC is not enough: neither ships the
    SDK library (`VRaySDKLibrary.dll`) or a current Python module.
 2. **Set up a license.** The App SDK takes an App SDK license and a render license from

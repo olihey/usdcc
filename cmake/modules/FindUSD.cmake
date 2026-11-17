@@ -32,11 +32,12 @@ endif()
 
 # pxrConfig.cmake names the Python OpenUSD was built with. In the prebuilt
 # OpenUSD from CI (docs/CI.md) it only uses that one if it exists, which on
-# another machine it doesn't, and then its find_package(Python3) would get
-# vcpkg's python3: vcpkg's find_package wrapper insists on it whenever
-# Development is asked for, and it can't be embedded, so scripting would be
-# off. So find this machine's own Python of the same version first, where
-# Python's installer registers it or on PATH, and set it as pxrConfig would.
+# another machine it doesn't, and then its find_package(Python3) only asks for
+# the libraries: there would be no interpreter to embed (Python3_EXECUTABLE),
+# so scripting would be off. So find this machine's own Python of the same
+# version first, where Python's installer registers it or on PATH, and set it
+# as pxrConfig would. (Never a vcpkg python3: usdcc's manifest installs none,
+# cmake/ports/pybind11, but another one's tree may have it.)
 if(WIN32 AND NOT DEFINED Python3_EXECUTABLE AND EXISTS "${USD_INSTALL}/pxrConfig.cmake")
     file(READ "${USD_INSTALL}/pxrConfig.cmake" _usd_config)
     set(_usd_python_built "")

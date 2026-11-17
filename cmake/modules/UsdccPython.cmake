@@ -3,15 +3,16 @@
 # from pxrConfig.cmake). The app embeds it, usdcc's Python modules are built
 # for it, and OpenUSD's own pxr modules need it — see docs/SCRIPTING.md §3.1.
 #
-# Not vcpkg's python3: that one only exists as a build-time tool for pybind11,
-# and vcpkg's deploy step would otherwise put its python3XY.dll next to the
-# executables, pairing OpenUSD's Python with a different Python runtime.
+# vcpkg installs no python3 for usdcc (cmake/ports/pybind11): its CMake wrapper
+# would force its own version on OpenUSD's Python lookup, and vcpkg's deploy
+# step would put its python3XY.dll next to the executables, pairing OpenUSD's
+# Python with a different Python runtime.
 #
 # Include after find_package(USD). Sets:
 #   USDCC_PYTHON_FOUND        TRUE if everything below was found
 #   USDCC_PYTHON_EXECUTABLE   python.exe
 #   USDCC_PYTHON_HOME         its prefix (holds Lib/, DLLs/, python3XY.dll)
-#   USDCC_PYTHON_VERSION      "3.12"
+#   USDCC_PYTHON_VERSION      "3.13"
 #   USDCC_PYTHON_INCLUDE_DIR  Python.h
 #   USDCC_PYTHON_LIBRARY      the import library to link
 #   USDCC_PYTHON_RUNTIME_DLLS python3XY.dll and python3.dll (Windows)

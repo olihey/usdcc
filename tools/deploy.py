@@ -13,7 +13,9 @@ into a self-contained folder that runs on a machine without the dev environment:
                     libraries OpenUSD uses), Qt's platform plugin
       bin\\usd\\      OpenUSD's built-in plugins (schemas, Hydra, MaterialX
                     standard library, ...)
-      plugin\\usd\\   OpenUSD's other plugins (Storm, Embree, image readers)
+      plugin\\usd\\   OpenUSD's other plugins (Storm, Embree, image readers),
+                    and those of the USD plugin packs (file formats)
+      usd-plugins\\ a file per USD plugin pack: what it is and which files are its
       python\\       the Python OpenUSD was built with (Lib, DLLs, and python.exe,
                     which uv needs to install packages), and in
                     python\\Lib\\site-packages: usdcc, pxr, PySide6, shiboken6
@@ -151,12 +153,19 @@ def _vcpkg_licences(licenses_dir, sources):
                     sources.append("  source:     " + re.sub(r"^git\+", "", location))
 
 
-def _mesh_usd_plugins(source, destination, copier):
-    # Local USD prefixes can contain unrelated, stale third-party renderers.
-    # This list is reviewed against the pinned OpenUSD source, not the install.
-    names = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdShaders")
+# OpenUSD's own plugins in plugin/usd, with deps/usd.json's build_usd.py flags.
+# Reviewed against the pinned OpenUSD source, not read off the install: a local
+# one can hold a third-party renderer someone installed into it by hand.
+OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdShaders")
+
+# Where the USD plugin packs' own files are, in an OpenUSD install and in a deploy.
+USD_PACKS_DIR = "usd-plugins"
+
+
+def _openusd_plugins(source, destination, copier):
+    """Copies OpenUSD's own plugins from its plugin/usd, and nothing else in it."""
     destination.mkdir(parents=True, exist_ok=True)
-    for name in names:
+    for name in OPENUSD_PLUGINS:
         if (source / name).is_dir():
             copier(source / name, destination / name)
         for suffix in (".dll", ".so", ".dylib"):
@@ -164,6 +173,49 @@ def _mesh_usd_plugins(source, destination, copier):
                 copy_file(source / (name + suffix), destination)
     if (source / "plugInfo.json").is_file():
         copy_file(source / "plugInfo.json", destination)
+
+
+def _usd_packs(usd_install):
+    """The USD plugin packs unzipped over the OpenUSD install (docs/USD_PLUGINS.md),
+    by name: each one's usd-plugins/<pack>.json, which tools/build_usd_plugin.py writes."""
+    folder = usd_install / USD_PACKS_DIR
+    if not folder.is_dir():
+        return {}
+    return {file.stem: json.loads(file.read_text(encoding="utf-8")) for file in sorted(folder.glob("*.json"))}
+
+
+def _pack_dlls(packs):
+    """The names of the packs' DLLs among OpenUSD's own, in its bin and lib."""
+    return [Path(file).name for manifest in packs.values() for file in manifest["files"]
+            if file.count("/") == 1 and file.split("/")[0] in ("bin", "lib")]
+
+
+def _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources):
+    """Copies a pack's files to where a Windows deploy has such files, and writes
+    the deploy's usd-plugins/<pack>.json, which lists them there."""
+    licences = f"licenses/{USD_PACKS_DIR}/{pack}/"
+    deployed = []
+    for file in manifest["files"]:
+        folder = file.split("/")[0]
+        if folder in ("bin", "lib") and file.count("/") == 1:
+            target = f"bin/{Path(file).name}"  # with OpenUSD's own DLLs
+        elif folder == "plugin":
+            target = file
+        elif file.startswith(licences):
+            target = f"licenses/OpenUSD-plugins/{pack}/{file[len(licences):]}"
+        else:
+            fail(f"The {pack} pack has a file tools/deploy.py has no place for: {file}")
+        (deploy_dir / target).parent.mkdir(parents=True, exist_ok=True)
+        copy_file(usd_install / file, deploy_dir / target)
+        deployed.append(target)
+    record = {key: manifest.get(key, "") for key in ("pack", "asset", "repository", "commit", "version", "license")}
+    record["files"] = sorted(deployed)
+    (deploy_dir / USD_PACKS_DIR).mkdir(parents=True, exist_ok=True)
+    (deploy_dir / USD_PACKS_DIR / f"{pack}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8",
+                                                           newline="\n")
+    sources.append(f"{pack} {record['version']} ({record['license']}), a USD plugin pack built by "
+                   "tools/build_usd_plugin.py (https://github.com/olihey/usdcc)")
+    sources.append(f"  source:     {record['repository']} at {record['commit']}")
 
 
 def _usd_notices(usd_install, licenses_dir):
@@ -309,17 +361,23 @@ def main(argv=None):
     # The app's DLLs win where both have one (z.dll, libpng16.dll, ...), as they
     # do when the build runs: its folder comes before OpenUSD's on the DLL path.
 
+    # The USD plugin packs in the install (docs/USD_PLUGINS.md). The standard set is
+    # shipped, file by file from each pack's list; the others' files stay behind.
+    # The Blender configuration's review covers OpenUSD's own plugins only.
+    usd_packs = _usd_packs(usd_install)
+    shipped_packs = {} if args.with_blender_mesh_tools else {
+        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
+    pack_dlls = _pack_dlls(usd_packs)
+
     print(f"  OpenUSD libraries ({usd_install})", flush=True)
-    copy_tree(usd_install / "lib", bin_dir, files="*.dll", top_level_only=True)
+    copy_tree(usd_install / "lib", bin_dir, files="*.dll", top_level_only=True, exclude_files=pack_dlls)
     copy_tree(usd_install / "bin", bin_dir, files="*.dll", top_level_only=True,
-              exclude_files=["tbb*_debug.dll", "tbbbind*.dll", "tbb_preview*.dll"] if args.with_blender_mesh_tools else [])
+              exclude_files=pack_dlls + (["tbb*_debug.dll", "tbbbind*.dll", "tbb_preview*.dll"]
+                                         if args.with_blender_mesh_tools else []))
 
     print("  OpenUSD plugins", flush=True)
     copy_tree(usd_install / "lib/usd", bin_dir / "usd", exclude_files=BUILD_ONLY_FILES)
-    if args.with_blender_mesh_tools:
-        _mesh_usd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", copy_tree)
-    else:
-        copy_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=BUILD_ONLY_FILES)
+    _openusd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", copy_tree)
 
     print("  usdcc", flush=True)
     copy_tree(app_dir, bin_dir, exclude_files=BUILD_ONLY_FILES)
@@ -460,7 +518,7 @@ def main(argv=None):
     _usd_notices(usd_install, licenses_dir)
     usd_dependencies = licenses_dir / "OpenUSD-dependencies"
     if (usd_install / "licenses").is_dir():
-        copy_tree(usd_install / "licenses", usd_dependencies)
+        copy_tree(usd_install / "licenses", usd_dependencies, exclude_dirs=[USD_PACKS_DIR])  # the packs' are apart
     elif (usd_install / "src").is_dir():
         found = usd_licenses.collect(usd_install / "src", usd_install / "build", usd_dependencies)
         print(f"Licences of {len(found)} of OpenUSD's dependencies: {', '.join(found)}", flush=True)
@@ -475,6 +533,13 @@ def main(argv=None):
         "",
     ]
     _vcpkg_licences(licenses_dir, sources)
+
+    # Here, not with OpenUSD's plugins above: `sources` gets a line per pack.
+    for pack, manifest in shipped_packs.items():
+        print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources)
+    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+        print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
     if (python_home / "LICENSE.txt").is_file():
         (licenses_dir / "Python").mkdir(parents=True, exist_ok=True)
@@ -720,10 +785,8 @@ def deploy_linux(args):
     mesh_exclusions = ["*_debug.so*", "libtbbbind*.so*", "libtbb_preview*.so*"] if args.with_blender_mesh_tools else []
     _copy_linux_tree(usd_install / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES + mesh_exclusions, top_level_only=True)
     _copy_linux_tree(usd_install / "lib/usd", lib_dir / "usd", exclude_files=LINUX_BUILD_ONLY_FILES)
-    if args.with_blender_mesh_tools:
-        _mesh_usd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", _copy_linux_tree)
-    else:
-        _copy_linux_tree(usd_install / "plugin/usd", deploy_dir / "plugin/usd", exclude_files=LINUX_BUILD_ONLY_FILES)
+    # No USD plugin packs on Linux yet (docs/USD_PLUGINS.md section 7, phase 8).
+    _openusd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", _copy_linux_tree)
 
     print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
     replaced = _copy_linux_tree(vcpkg_dir / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES, top_level_only=True)
@@ -828,7 +891,7 @@ def deploy_linux(args):
     copy_file(REPO / "LICENSE", deploy_dir / "LICENSE.txt")
     _usd_notices(usd_install, licenses_dir)
     if (usd_install / "licenses").is_dir():
-        copy_tree(usd_install / "licenses", licenses_dir / "OpenUSD-dependencies")
+        copy_tree(usd_install / "licenses", licenses_dir / "OpenUSD-dependencies", exclude_dirs=[USD_PACKS_DIR])
     else:
         warn(f"No licences of OpenUSD's dependencies in '{usd_install}/licenses' (tools/build_usd.py collects "
              "them): the deploy works, but can't be distributed as it is.")

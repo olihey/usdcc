@@ -6,9 +6,9 @@
 # usdcc/usd.py (src/python) picks whichever of the two is there
 # (docs/SCRIPTING.md §4.1).
 #
-# Deliberately does NOT use the top-level pybind11_add_module()/pybind11
-# target: those are tied to whichever Python find_package(pybind11) resolved
-# at the top level, which is vcpkg's bundled python3 — this module must load
+# Deliberately does NOT use pybind11_add_module()/the pybind11 target: those
+# are tied to whichever Python pybind11 finds by itself, which is why its search
+# is off (PYBIND11_NOPYTHON, the top-level CMakeLists.txt) — this module must load
 # into the SAME Python that OpenUSD's own pxr_boost::python bindings were
 # built against: USDCC_PYTHON_* (cmake/modules/UsdccPython.cmake). An earlier
 # version found "the first python on PATH" instead, and so could end up built
