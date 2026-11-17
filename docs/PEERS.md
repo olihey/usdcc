@@ -5,6 +5,8 @@ sending things to each other (prims, files, sessions), then editing one stage to
 
 **Status:** planned 2026-11-16. Nothing is built yet. "Checked" below means looked at in this
 repository or its pinned vcpkg; everything else is an assumption until the spike (§14).
+2026-11-17: rooms and channels (phase 1a) are built first, for
+[VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md), which also brought browser guests (§6.1).
 
 ## 1. Can it work without a server?
 
@@ -38,7 +40,10 @@ rows.
   room or looks for one.
 - **Messages go over named channels.** Chat, presence, transfers and stage edits are channels.
   A plugin adds its own from Python or C++ (§7).
-- **Always encrypted, end to end** (§6). The relay and the network see sizes and timing only.
+- **Always encrypted, end to end, between peers** (§6). The relay and the network see sizes and
+  timing only.
+- **A member can be a web page.** A *guest* watches and chats from a browser, with nothing
+  installed. It is not a peer, and reaches only what a room opens to guests (§6.1).
 - **Editing together goes through a live layer** (§10): one in-memory layer on top of the stage
   that all edits go to and that is kept equal on every peer. Files on disk don't change until
   someone merges it.
@@ -49,7 +54,7 @@ rows.
 
 | Part | Where | Holds |
 |---|---|---|
-| `usdcc_peers` (DLL; Qt Core, Network, WebSockets; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, channels, transfers |
+| `usdcc_peers` (DLL; Qt Core, Network, WebSockets, HttpServer; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, channels, transfers, the page for guests |
 | Stage sync | `usdcc_usd_ui`, beside `UndoManager` | The live layer, sending and applying edits, the snapshot for a joiner |
 | UI | `usdcc_ui`, `usdcc_usd_ui` | The Peers side panel (rooms, people, chat), toasts, presence in the Outliner and viewport, Settings > Peers |
 | Python | `usdcc.peers` (pybind11, like `usdcc.usd`) | Rooms, peers, channels |
@@ -135,6 +140,30 @@ framing code). It listens on one port, behind any HTTPS reverse proxy for `wss:/
     password.
 - **Roles.** The host can set a member to view-only, remove a member, and close the room.
 - **The room ends when its host leaves,** in the first version (§16).
+
+### 6.1 Guests
+
+A guest is a member that is a web page, not a usdcc instance. The first use is watching a
+viewport ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)).
+
+- **Only if the room allows them.** A room takes guests when something in it asks for them, such
+  as a broadcast. A room for a shared stage takes none unless the host says so.
+- **The room serves the page** on its own port, beside the WebSocket, so a guest's link is a web
+  link: `http://<address>:<port>/#s=<secret>`. The secret is the invitation, as in §5.3, and is
+  given in the guest's first message, not in the request.
+- **A name and nothing else.** A guest has no key pair, so it is known only while it is connected.
+  The host gives it its id.
+- **Only the channels opened to guests.** `chat`, `presence`, and what the feature that invited
+  them adds (`view` and `nav` for a broadcast). Never `transfer` or `stage/<id>`: the host refuses
+  those from a guest, and sends a guest nothing on them.
+- **The same frames** (§7), so the host treats a guest as any member: ordered, latest only,
+  direct, limits, removal.
+- **Encryption.** Through a relay, the page does the key exchange of §6 itself (libsodium has a
+  build for browsers), with the host's fingerprint from the link, so the relay still sees sizes
+  only. That holds as long as the relay serves the real page, which the relay's operator controls.
+  On a plain `http://` link on a LAN a guest is **not** encrypted in the first version: the page
+  itself arrives unprotected there, so encrypting after it would only stop someone listening,
+  not someone interfering (§16 question 11).
 
 ## 7. Messages and channels
 
@@ -362,7 +391,7 @@ announced; the port; relay URLs; ask before a join by link; toast on chat; the i
 ## 13. Build and deploy
 
 - **vcpkg:** `qtwebsockets`, `mdns` and `libsodium` (*checked:* all three are ports in the pinned
-  vcpkg). Qt Network and its OpenSSL backend are already built: *checked,* `network` and `openssl`
+  vcpkg), and `qthttpserver` for the guests' page. Phase 1a needs only the two Qt ones. Qt Network and its OpenSSL backend are already built: *checked,* `network` and `openssl`
   are default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
 - **CMake:** `Network` and `WebSockets` join `find_package(Qt6 … Widgets OpenGL Svg Test)`.
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
@@ -378,7 +407,8 @@ announced; the port; relay URLs; ask before a join by link; toast on chat; the i
 | Phase | Builds | Done when |
 |---|---|---|
 | **0. Spike** | Two throwaway programs: a WebSocket host and joiner with mDNS, and a recorder that replays one layer's ops onto another | It answers: what Windows Firewall does for the host and for a peer that only looks; whether `mdns` works beside Windows' own mDNS, with two instances on one machine and across two machines; how to serialize an op's value, timed on a mesh of a million points; whether replaying the recorded ops gives an identical layer |
-| **1. `usdcc_peers`** | Identity, hosting and joining by address, the handshake and encryption, channels, `usdcc.peers` | Its tests pass on loopback: ordered messages arrive in one order on three peers, a reconnect catches up, a slow peer is dropped, a wrong secret is refused |
+| **1a. Rooms and channels** | `usdcc_peers` with hosting and joining by address, the frame, channels and their three kinds of delivery, roles, limits, and guests with their page (§6.1). Built for [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) phase 1, its first user; until 1b only guests join | Its tests pass on loopback: ordered messages arrive in one order on three members, a latest-only message replaces one still waiting, a slow member is dropped, a wrong secret is refused, a guest is refused a channel not opened to it |
+| **1b. Identity and encryption** | Identity, the handshake and encryption, reconnecting, `usdcc.peers` | Two peers join by address and nothing readable is on the wire; a reconnect catches up; a wrong key is refused |
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
 | **3. Sending things** | Transfers, the inbox, **Send to…** for prims, files, sessions, scripts and cameras | A session sent from one instance loads on the other |
 | **4. Links and the relay** | Invite links, `usdcc-relay`, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes |
@@ -389,6 +419,10 @@ announced; the port; relay URLs; ask before a join by link; toast on chat; the i
 
 Phases 1 to 3 need no server and no decision about one. Phase 5 is the large one, and doesn't
 depend on phase 4.
+
+The broadcast's own spike ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11) answers the hosting
+half of phase 0: what Windows Firewall does for the host. The mDNS and layer-replay halves stay
+here, and aren't needed before phase 2 and phase 5.
 
 ## 15. Testing
 
@@ -418,6 +452,7 @@ depend on phase 4.
 | 8 | Is chat history saved? | No |
 | 9 | Our own encryption (libsodium), or TLS between peers? | libsodium: it is the same directly and through a relay, with no certificates to trust by hand |
 | 10 | Is the protocol open to other apps? | It is WebSocket and JSON headers, so a script could join. Nothing is promised until it has settled |
+| 11 | Is a guest on a plain `http://` LAN link encrypted? | Not in the first version (§6.1). The panel says so beside the link. Add the page's key exchange there too if people broadcast on networks they don't trust |
 
 ## 17. Not planned
 
