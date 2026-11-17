@@ -145,7 +145,7 @@ A member who leaves, or whose host left, can keep a copy of the live layer as a 
 
 ## 10. Phases
 
-They need [PEERS.md](PEERS.md) phase 1 and nothing after it.
+They need [PEERS.md](PEERS.md) phases 1a and 1b, and nothing after them.
 
 | Phase | Builds | Done when |
 |---|---|---|

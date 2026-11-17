@@ -8,6 +8,8 @@ a studio's services, sending things to a colleague and editing one stage togethe
 **Status:** planned 2026-11-16, reworked 2026-11-17 as a framework first, with stage sharing moved
 to its own page. Nothing is built yet. "Checked" below means looked at in this repository or its
 pinned vcpkg; everything else is an assumption until the spike (§14).
+Also 2026-11-17: rooms and channels (phase 1a) are built first, for
+[VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md), which also brought browser guests (§6.1).
 
 ## 1. Can it work without a server?
 
@@ -49,7 +51,10 @@ rows.
   [MCP.md](MCP.md) and [VSCODE.md](VSCODE.md) link Qt Network for their endpoints as well.
 - **Off until asked.** usdcc opens no port and sends nothing to the network until the user hosts a
   room, looks for one, or lists one to join at start.
-- **Always encrypted, end to end** (§6). The relay and the network see sizes and timing only.
+- **Always encrypted, end to end, between peers** (§6). The relay and the network see sizes and
+  timing only.
+- **A member can be a web page.** A *guest* watches and chats from a browser, with nothing
+  installed. It is not a peer, and reaches only what a room opens to guests (§6.1).
 - **Nothing received acts by itself.** No script runs, no stage opens and no file leaves the inbox
   without a click.
 
@@ -57,7 +62,7 @@ rows.
 
 | Part | Where | Holds |
 |---|---|---|
-| `usdcc_peers` (DLL; Qt Core, Network, WebSockets; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, messages, shared state, transfers |
+| `usdcc_peers` (DLL; Qt Core, Network, WebSockets, HttpServer; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, messages, shared state, transfers, the page for guests |
 | `usdcc.peers` (pybind11, like `usdcc.usd`) | Inside the app | The same for scripts and plugins (§8.2) |
 | `usdcc_peers` (pure Python: `websockets`, `PyNaCl`) | `src/python/usdcc_peers/`, installable with pip | The protocol for other programs, the hub (§9) and the relay (§5.4) |
 | UI | `usdcc_ui` | The Peers side panel (rooms, people, chat, notifications), toasts, Settings > Peers |
@@ -128,7 +133,8 @@ an example:
 python -m usdcc_peers.relay --port 8443 --token-file relay.token
 ```
 
-It listens on one port, behind any HTTPS reverse proxy for `wss://`. A Dockerfile comes with it.
+It listens on one port, behind any HTTPS reverse proxy for `wss://`. Installing the package also
+gives it as the command `usdcc-relay`, and a Dockerfile comes with it.
 
 - **Python, not C++.** A studio's server gets `pip install` or a container instead of Qt's
   libraries. The relay forwards bytes it can't read, so it shares no code with the app's protocol,
@@ -139,6 +145,7 @@ It listens on one port, behind any HTTPS reverse proxy for `wss://`. A Dockerfil
 - A room on it is a random id. It forwards each frame to the room's other members and keeps nothing.
 - A frame for everyone is sent to it once and copied to each member (the room key of §6 makes the
   bytes the same for all), so a host on a home connection doesn't upload it once per member.
+- It serves the guests' page (§6.1) for a room that takes guests.
 - It can't read anything (§6). It logs connections and byte counts.
 - Limits per room: members, frame size, bytes per second. An optional shared token keeps strangers
   off.
@@ -171,10 +178,34 @@ It listens on one port, behind any HTTPS reverse proxy for `wss://`. A Dockerfil
   member and close the room.
 - **The room ends when its host leaves,** in the first version (§16).
 
+### 6.1 Guests
+
+A guest is a member that is a web page, not a usdcc instance. The first use is watching a
+viewport ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)).
+
+- **Only if the room allows them.** A room takes guests when something in it asks for them, such
+  as a broadcast. A room for a shared stage takes none unless the host says so.
+- **The room serves the page** on its own port, beside the WebSocket, so a guest's link is a web
+  link: `http://<address>:<port>/#s=<secret>`. The secret is the invitation, as in §5.3, and is
+  given in the guest's first message, not in the request.
+- **A name and nothing else.** A guest has no key pair, so it is known only while it is connected.
+  The host gives it its id.
+- **Only the channels opened to guests.** `chat`, `presence`, and what the feature that invited
+  them adds (`view` and `nav` for a broadcast). Never `transfer` or `stage/<id>`: the host refuses
+  those from a guest, and sends a guest nothing on them.
+- **The same frames** (§7), so the host treats a guest as any member: ordered, latest only,
+  direct, limits, removal.
+- **Encryption.** Through a relay, the page does the key exchange of §6 itself (libsodium has a
+  build for browsers), with the host's fingerprint from the link, so the relay still sees sizes
+  only. That holds as long as the relay serves the real page, which the relay's operator controls.
+  On a plain `http://` link on a LAN a guest is **not** encrypted in the first version: the page
+  itself arrives unprotected there, so encrypting after it would only stop someone listening,
+  not someone interfering (§16 question 11).
+
 ## 7. The building blocks
 
 Everything is addressed by a **channel name**. Names without a dot are usdcc's own (`chat`,
-`notify`, `transfer`, `stage/<id>`). A plugin's start with its id (`com.example.notes.pins`), a program's with a
+`notify`, `presence`, `transfer`, `stage/<id>`). A plugin's start with its id (`com.example.notes.pins`), a program's with a
 name of its own. A peer that doesn't know a channel ignores it.
 
 ### 7.1 Messages
@@ -216,8 +247,9 @@ at once by itself. Shared state solves them once.
 - **It lives as long as the room.** A plugin that wants it to last saves it itself (§16).
 
 **Per-peer state** is a map with one value per peer, which only that peer sets and which goes
-away when it leaves. Delivered latest-only. This is what presence is made of: a name and color,
-the stage a peer has open, a selection. It is for small rooms only (§7.5).
+away when it leaves. Delivered latest-only. usdcc's own is `presence`: a name and color, and the
+stage a peer has open. A feature adds its own, such as a selection. It is for small rooms only
+(§7.5).
 
 **When a map isn't enough,** a channel can supply its own snapshot: a callback on the host that
 writes the current state for a joiner, and one on the joiner that reads it, with ordered messages
@@ -354,7 +386,7 @@ def add_note(room, plugin, prim_path, text):
 ## 9. Other programs
 
 A render farm, an asset tracker, a CI job or a studio's own tool is a peer like any other. The
-protocol is written down (`docs/PEERS_PROTOCOL.md`, with phase 1) and has a version.
+protocol is written down (`docs/PEERS_PROTOCOL.md`, with phase 1b) and has a version.
 
 **`usdcc_peers`,** a pure-Python package, speaks it with no usdcc and no Qt, with the same calls as
 §8.2 where they make sense:
@@ -487,7 +519,8 @@ limit. ([SETTINGS.md](SETTINGS.md))
 ## 13. Build and deploy
 
 - **vcpkg:** `qtwebsockets`, `mdns` and `libsodium` (*checked:* all three are ports in the pinned
-  vcpkg). Qt Network and its OpenSSL backend are already built: *checked,* `network` and `openssl`
+  vcpkg), and `qthttpserver` for the guests' page. Phase 1a needs only the two Qt ones. Qt Network
+  and its OpenSSL backend are already built: *checked,* `network` and `openssl`
   are default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
 - **CMake:** `Network` and `WebSockets` join `find_package(Qt6 … Widgets OpenGL Svg Test)`.
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
@@ -495,7 +528,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 - **Deploy:** `Qt6Network.dll`, `Qt6WebSockets.dll` and `usdcc_peers.dll` in `bin/`, and the
   `usdcc_peers` Python package (hub and relay included) in the package. TLS is only needed for `wss://` to a relay,
   which also needs Qt's TLS plugin and OpenSSL. PySide6 ships a `libcrypto` of the same file name
-  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12), so that is checked in phase 5.
+  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12), so that is checked in phase 4.
 - **PySide6** needs no QtWebSockets binding: `usdcc.peers` is pybind11.
 - **The Python package** needs `websockets` and `PyNaCl` where it runs. The app doesn't use it.
 
@@ -504,16 +537,23 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | Phase | Builds | Done when |
 |---|---|---|
 | **0. Spike** | Throwaway programs: a Qt WebSocket host and joiner with mDNS, and a Python joiner | It answers: what Windows Firewall does for the host and for a peer that only looks; whether `mdns` works beside Windows' own mDNS, with two instances on one machine and across two machines; whether a Python peer (`websockets`, `PyNaCl`) completes the handshake with the C++ host; a first number for how many small messages a second one Python process forwards with 2,000 connections open |
-| **1. The framework** | `usdcc_peers`: identity, hosting and joining by address, the handshake, messages, shared state, several rooms. `usdcc.peers`. The protocol written down | Its tests pass on loopback: ordered messages arrive in one order on three peers; a map ends equal after both sides set the same key; a late joiner has the map; a reconnect catches up; a wrong secret is refused. A test plugin shares a map from Python |
+| **1a. Rooms and channels** | `usdcc_peers` with hosting and joining by address, the frame, channels and their three kinds of delivery, who may send, limits, and guests with their page (§6.1). Built for [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) phase 1, its first user; until 1b only guests join | Its tests pass on loopback: ordered messages arrive in one order on three members, a latest-only message replaces one still waiting, a slow member is dropped, a wrong secret is refused, a guest is refused a channel not opened to it |
+| **1b. The rest of the framework** | Identity, the handshake and encryption with the room key, reconnecting, shared state, several rooms, `usdcc.peers`. The protocol written down | Two peers join by address and nothing readable is on the wire; a reconnect catches up; a wrong key is refused; a map ends equal after both sides set the same key; a late joiner has the map. A test plugin shares a map from Python |
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
-| **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, who may send, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
-| **4. Transfers** | Transfers, the inbox, **Send to…** | A session sent from one instance loads on the other; a plugin sends a file from Python |
-| **5. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
+| **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
+| **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
+| **5. Transfers** | Transfers, the inbox, **Send to…** | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | See there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
 
-Phases 1 to 4 need no relay and no decision about one: a hub on a machine the artists reach is
-joined by its address. The shared stage needs only phase 1, and can start whenever it is wanted.
+Only phase 4 needs a relay or a decision about one: a hub on a machine the artists reach is
+joined by its address. The shared stage needs only phases 1a and 1b, and can start whenever it is
+wanted.
+
+The broadcast's own spike ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11) answers the hosting
+half of phase 0: what Windows Firewall does for the host. The mDNS half stays here and isn't
+needed before phase 2. Replaying a layer's edits is now [SHARED_STAGE.md](SHARED_STAGE.md)'s own
+spike.
 
 ## 15. Testing
 
@@ -558,7 +598,8 @@ joined by its address. The shared stage needs only phase 1, and can start whenev
 | 8 | A second implementation in Python, or only bindings to the C++ one? | A second one. A service shouldn't need Qt or a usdcc build to send a notification. The cost is keeping two in step, which the tests of §15 do |
 | 9 | Should the hub and the relay be one program? | No: one package, two commands. The relay can't read what it forwards; the hub is a member that can. One process doing both would blur which one a studio trusts with what |
 | 10 | Which actions may a notification carry? | The four of §10.2. More only when a use needs one, and never one that runs code |
-| 11 | How large a room and how many rooms are promised? | None until measured. The targets of §15 are the aim, and §7.5 says what to do beyond them |
+| 11 | Is a guest on a plain `http://` LAN link encrypted? | Not in the first version (§6.1). The panel says so beside the link. Add the page's key exchange there too if people broadcast on networks they don't trust |
+| 12 | How large a room and how many rooms are promised? | None until measured. The targets of §15 are the aim, and §7.5 says what to do beyond them |
 
 ## 17. Not planned
 
