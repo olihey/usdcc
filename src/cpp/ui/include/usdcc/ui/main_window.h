@@ -163,6 +163,11 @@ public:
     QAction* fullScreenAction() const { return m_fullScreenAction; }
     // The View menu, once buildViewMenu() has made it.
     QMenu* viewMenu() const { return m_viewMenu; }
+    // The menu a right-click on a side panel's title bar or a toolbar shows:
+    // the View menu's side panels, bottom bar and toolbars, in its order, so
+    // the two list the same things. Qt's own lists dock widgets and toolbars
+    // only, without the bottom bar (the timeline). The caller owns it.
+    QMenu* createPopupMenu() override;
     // Whether the window is full screen, from the native window's state.
     bool isFullScreenNow() const;
 

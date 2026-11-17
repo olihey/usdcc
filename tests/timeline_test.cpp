@@ -8,6 +8,7 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/playback_controller.h"
@@ -474,6 +475,17 @@ USDCC_TEST(main_window_bottom_bar) {
     bool listed = false;
     for (QMenu* menu : window.findChildren<QMenu*>()) listed = listed || menu->actions().contains(action);
     CHECK(listed, "in the View menu");
+    {
+        // A side panel's title bar menu lists what the View menu does: the bar
+        // too, which Qt's own (dock widgets and toolbars only) left out.
+        auto* panel = new usdcc::ui::SidePanel(QStringLiteral("Notes"));
+        window.addSidePanel(panel, Qt::RightDockWidgetArea);
+        std::unique_ptr<QMenu> popup(window.createPopupMenu());
+        const QList<QAction*> entries = popup ? popup->actions() : QList<QAction*>();
+        CHECK(entries.contains(action), "the title bar menu has the bar");
+        CHECK(entries.contains(panel->toggleViewAction()), "and the side panel added after the View menu");
+        CHECK(!entries.contains(window.fullScreenAction()), "but not the View menu's other entries");
+    }
 
     if (!action) return;
     action->setChecked(false);

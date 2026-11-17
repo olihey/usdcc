@@ -234,6 +234,26 @@ void MainWindow::setBottomBar(QWidget* bar, const QString& name) {
     if (m_viewMenu) m_viewMenu->insertAction(m_viewMenuPanelsEnd, m_bottomBarAction);
 }
 
+QMenu* MainWindow::createPopupMenu() {
+    if (!m_viewMenu) return QMainWindow::createPopupMenu();
+    // The View menu's panel section (side panels and the bottom bar, above
+    // m_viewMenuPanelsEnd), then its toolbar entries right below it.
+    QList<QAction*> toolBarActions;
+    for (QToolBar* toolBar : findChildren<QToolBar*>(QString(), Qt::FindDirectChildrenOnly))
+        toolBarActions.append(toolBar->toggleViewAction());
+    auto* menu = new QMenu(this);
+    bool panels = true;
+    for (QAction* action : m_viewMenu->actions()) {
+        if (action == m_viewMenuPanelsEnd) {
+            panels = false;
+            menu->addSeparator();
+        } else if (panels || toolBarActions.contains(action)) {
+            menu->addAction(action);
+        }
+    }
+    return menu;
+}
+
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
 void MainWindow::addTitleBarWidget(QWidget* widget) {
