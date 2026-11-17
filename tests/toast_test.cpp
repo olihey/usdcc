@@ -133,6 +133,24 @@ USDCC_TEST(toast_stacking_and_corners) {
     CHECK(dismissAll && !dismissAll->isVisible(), "and hides itself");
 }
 
+// The row of actions counts towards a toast's width: wider than the text, it isn't squeezed.
+USDCC_TEST(toast_fits_its_actions) {
+    Window w;
+    ToastManager& toasts = w.toasts();
+    const int id = toasts.show(request(ToastKind::Info, "Anna wants to join", "Key abcd-efgh"),
+                               {{"Allow", {}}, {"Always Allow Anna Longname", {}}, {"Deny", {}}});
+    ToastWidget* toast = toasts.toast(id);
+    CHECK(toast, "the toast didn't show");
+    if (!toast) {
+        return;
+    }
+    for (QPushButton* button : toast->findChildren<QPushButton*>(QStringLiteral("toastAction"))) {
+        CHECK(button->width() >= button->sizeHint().width(), "'%s' is %d wide, but needs %d",
+              qPrintable(button->text()), button->width(), button->sizeHint().width());
+    }
+    CHECK(toast->width() <= usdcc::ui::scaled::pixels(ToastWidget::maximumWidth), "the toast is wider than its limit");
+}
+
 USDCC_TEST(toast_timing) {
     Window w;
     ToastManager& toasts = w.toasts();

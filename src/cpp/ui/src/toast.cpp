@@ -1,5 +1,6 @@
 #include "usdcc/ui/toast.h"
 
+#include "usdcc/ui/flow_layout.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/theme.h"
 
@@ -143,7 +144,8 @@ ToastWidget::ToastWidget(int id, core::ToastKind kind, const QString& title, con
     }
 
     if (!actions.isEmpty()) {
-        auto* row = new QHBoxLayout;
+        // Wrapping: a row wider than a toast may be goes on to a second line.
+        auto* row = new FlowLayout;
         row->setContentsMargins(0, 0, 0, 0);
         scaled::spacing(row, 6);
         for (const ToastAction& action : actions) {
@@ -158,7 +160,6 @@ ToastWidget::ToastWidget(int id, core::ToastKind kind, const QString& title, con
             });
             row->addWidget(button);
         }
-        row->addStretch(1);
         layout->addLayout(row);
     }
 
@@ -173,12 +174,20 @@ void ToastWidget::layOut(int maximumHeight) {
     ensurePolished();
     for (QWidget* child : findChildren<QWidget*>()) child->ensurePolished();
 
-    // As wide as its longest line needs, within the limits; then as tall as
-    // the wrapped text.
+    // As wide as its longest line or its row of actions needs, within the limits;
+    // then as tall as the wrapped text. Without the actions, a row wider than the
+    // text squeezes their labels.
     const int chrome = scaled::pixels(kLeft) + scaled::pixels(kRight);
     int natural = 0;
+    const QList<QPushButton*> actions = findChildren<QPushButton*>(QStringLiteral("toastAction"));
+    for (QPushButton* action : actions) {
+        natural += action->sizeHint().width();
+    }
+    if (!actions.isEmpty()) {
+        natural += scaled::pixels(6) * int(actions.size() - 1);
+    }
     if (auto* title = findChild<QLabel*>(QStringLiteral("toastTitle"))) {
-        natural = title->fontMetrics().horizontalAdvance(m_title) + scaled::pixels(18 + 6 + 30);
+        natural = std::max(natural, title->fontMetrics().horizontalAdvance(m_title) + scaled::pixels(18 + 6 + 30));
     }
     if (auto* body = findChild<QLabel*>(QStringLiteral("toastBody"))) {
         for (const QString& line : m_body.split(QLatin1Char('\n'))) {

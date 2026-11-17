@@ -347,7 +347,9 @@ void PeersController::askHost(JoinRequest* request, Room* room) {
                          guard->allow();
                      }
                  }},
-                {tr("Always Allow %1").arg(peer.name), [this, guard, peer] {
+                // The name in full is in the title; the button stays within a toast's width.
+                {tr("Always Allow %1").arg(peer.name.size() > 20 ? peer.name.left(19) + u'…' : peer.name),
+                 [this, guard, peer] {
                      trust(peer);
                      if (guard) {
                          guard->allow();
