@@ -153,22 +153,27 @@ jobs:
       # After a successful build, drops the packages it didn't use (an older
       # compiler's, a replaced port's), which would otherwise be carried from
       # cache to cache for ever: each installed package's vcpkg_abi_info.txt
-      # hashes to its zip's name. After a failed one, vcpkg may not have got to
-      # every package, so nothing is dropped.
+      # hashes to its zip's name. Every install tree counts, every triplet in
+      # it: usdcc's and the Blender mesh backend's (its own manifest, with
+      # eigen3 3.4.0). After a failed build, vcpkg may not have got to every
+      # package, so nothing is dropped.
       - name: Prune the vcpkg cache
         id: vcpkg-prune
         if: always() && steps.vcpkg.outputs.key != ''
         run: |
           $dir = '${{ steps.vcpkg.outputs.dir }}'
-          $zips = @(Get-ChildItem -Recurse -File -Filter *.zip $dir)
-          $installed = 'build\vcpkg_installed\x64-windows\share'
-          if ('${{ steps.build.outcome }}' -eq 'success' -and (Test-Path $installed)) {
+          $installed = @('build\vcpkg_installed', 'external\blender-work\build\vcpkg_installed' |
+            Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem $_ -Directory } |
+            ForEach-Object { Join-Path $_.FullName share } | Where-Object { Test-Path $_ })
+          if ('${{ steps.build.outcome }}' -eq 'success' -and $installed.Count -gt 0) {
             $used = @(Get-ChildItem $installed -Recurse -Filter vcpkg_abi_info.txt |
-              ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower() + '.zip' })
-            $unused = @($zips | Where-Object { $used -notcontains $_.Name })
+              ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower() + '.zip' } |
+              Sort-Object -Unique)
+            $unused = @(Get-ChildItem -Recurse -File -Filter *.zip $dir | Where-Object { $used -notcontains $_.Name })
             $unused | Remove-Item
             Write-Host "$($used.Count) package(s) used, $($unused.Count) unused one(s) dropped"
           }
+          $zips = @(Get-ChildItem -Recurse -File -Filter *.zip $dir)
           $before = @(Get-Content "$env:RUNNER_TEMP\vcpkg-cache-before.txt" -ErrorAction SilentlyContinue)
           $added = @($zips | Where-Object { $before -notcontains $_.Name })
           Write-Host "$($added.Count) package(s) built and added"
@@ -304,14 +309,16 @@ jobs:
 
       # As the windows job's: after a successful build, drops the packages it
       # didn't use; each installed package's vcpkg_abi_info.txt hashes to its zip's name.
+      # Every triplet counts: Qt's host tools are built for x64-linux, beside
+      # x64-linux-dynamic, and the Blender mesh backend has an install tree of its own.
       - name: Prune the vcpkg cache
         id: vcpkg-prune
         if: always() && steps.vcpkg.outputs.key != ''
         run: |
           dir='${{ steps.vcpkg.outputs.dir }}'
-          installed=build/vcpkg_installed/x64-linux-dynamic/share
-          if [ '${{ steps.build.outcome }}' = success ] && [ -d "$installed" ]; then
-            find "$installed" -name vcpkg_abi_info.txt -exec sha256sum {} + | awk '{print $1 ".zip"}' | sort -u > "$RUNNER_TEMP/used.txt"
+          installed=$(ls -d build/vcpkg_installed/*/share external/blender-work/build/vcpkg_installed/*/share 2>/dev/null || true)
+          if [ '${{ steps.build.outcome }}' = success ] && [ -n "$installed" ]; then
+            find $installed -name vcpkg_abi_info.txt -exec sha256sum {} + | awk '{print $1 ".zip"}' | sort -u > "$RUNNER_TEMP/used.txt"
             unused=0
             while IFS= read -r zip; do
               if ! grep -qxF "$(basename "$zip")" "$RUNNER_TEMP/used.txt"; then rm "$zip"; unused=$((unused + 1)); fi

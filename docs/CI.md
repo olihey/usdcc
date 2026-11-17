@@ -219,6 +219,11 @@ Runs on pushes to `master` and on pull requests.
    - Pruned after a successful build: each installed package's `vcpkg_abi_info.txt`
      hashes to its zip's name, and the zips no package used are dropped. Otherwise an
      old compiler's or a replaced port's packages would be carried from cache to cache.
+     Every install tree and triplet counts: `build/vcpkg_installed/*` (on Linux Qt's
+     host tools are built for `x64-linux`, beside `x64-linux-dynamic`) and the Blender
+     mesh backend's `external/blender-work/build/vcpkg_installed/*`. Counting only the
+     main triplet dropped Linux's host qtbase after every build, so each run rebuilt it
+     (about 35 minutes), and Windows rebuilt the backend's eigen3, fmt and pthreads.
    - Only from pushes, not pull requests: a pull request's caches would crowd `master`'s
      out of the repository's 10 GB, and pull requests can restore `master`'s.
 6. Configure and build with `tools/build.py --usd-install C:\deps\usd`, in
