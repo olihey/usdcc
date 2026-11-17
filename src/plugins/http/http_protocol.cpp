@@ -12,6 +12,7 @@
 #include <pxr/usd/ar/defineResolver.h>
 #include <pxr/usd/ar/resolvedPath.h>
 
+#include <algorithm>
 #include <cctype>
 #include <memory>
 #include <string>

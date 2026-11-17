@@ -472,7 +472,7 @@ cross-process download lock (phase 3), the OS credential store, and writing. `Pr
 
 - **Two threads asking about one folder at once both ask the server.** Answers are shared once
   one arrives, but the requests aren't joined, as downloads are.
-- **Only run on Windows.** Nothing in it is Windows-only by intent, but Linux hasn't built it.
+- **Only run on Windows.** On Linux it builds (CI, GCC 13), but its tests haven't run there (§13.3).
 - **The app doesn't link it and the deploy doesn't carry it** until phase 4.
 
 ### 13.3 Phases 2 and 3 as built
@@ -518,7 +518,10 @@ with only a `usd/` folder.
   (Schannel, certificates, a company CA) has never run.
 - **Other WebDAV servers:** Apache `mod_dav`, nginx, Nextcloud, WsgiDAV. Their replies differ in
   ways the parser is written for but hasn't met.
-- **Linux.** Only built and run on Windows, where the HTTP client would use OpenSSL instead.
+- **Linux.** Phase 1 compiles and links there, in CI. Nothing of it has run: CI's Linux build
+  stops at a link error in the physics tests (`typeinfo for JPH::GroupFilter`), which is not this
+  work's and has failed every build since 2026-11-16. Phases 2 and 3, where the HTTP client uses
+  OpenSSL instead of Schannel, haven't been built there yet.
 - **A folder too big to list** still gets listed: the fallback to `stat` per file (§7) is only
   taken for a protocol that can't list.
 - **Two threads asking about one folder at once** both ask the server, as in phase 1.

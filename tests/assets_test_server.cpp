@@ -67,7 +67,13 @@ SocketHandle listenOnFreePort(int* port) {
 void sendAll(SocketHandle connection, const std::string& data) {
     size_t sent = 0;
     while (sent < data.size()) {
-        const int count = send(connection, data.data() + sent, static_cast<int>(data.size() - sent), 0);
+#if defined(_WIN32)
+        const int flags = 0;
+#else
+        // Not a SIGPIPE when the client has gone: that would end the whole test program.
+        const int flags = MSG_NOSIGNAL;
+#endif
+        const int count = static_cast<int>(send(connection, data.data() + sent, static_cast<int>(data.size() - sent), flags));
         if (count <= 0) return;
         sent += static_cast<size_t>(count);
     }
@@ -206,7 +212,7 @@ void TestServer::serve(std::intptr_t handle) {
     char buffer[8192];
     size_t headerEnd = std::string::npos;
     while ((headerEnd = data.find("\r\n\r\n")) == std::string::npos) {
-        const int count = recv(connection, buffer, sizeof(buffer), 0);
+        const int count = static_cast<int>(recv(connection, buffer, sizeof(buffer), 0));
         if (count <= 0) {
             closeSocket(connection);
             return;
@@ -234,7 +240,7 @@ void TestServer::serve(std::intptr_t handle) {
     if (contentLength != request.headers.end()) length = static_cast<size_t>(std::stoul(contentLength->second));
     request.body = data.substr(headerEnd + 4);
     while (request.body.size() < length) {
-        const int count = recv(connection, buffer, sizeof(buffer), 0);
+        const int count = static_cast<int>(recv(connection, buffer, sizeof(buffer), 0));
         if (count <= 0) break;
         request.body.append(buffer, static_cast<size_t>(count));
     }

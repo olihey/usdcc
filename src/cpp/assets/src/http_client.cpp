@@ -6,6 +6,7 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cstdio>
