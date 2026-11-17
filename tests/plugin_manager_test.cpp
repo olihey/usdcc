@@ -484,8 +484,15 @@ USDCC_TEST(plugin_usd_folder) {
     Plugins plugins("usd");
     plugins.write("schemas/usdcc-plugin.json",
                   R"({"id": "usd.schemas", "name": "Schemas", "version": "1", "api": 1, "usd": ["usd", "nothing_here"]})");
+    // A file format and a metadata field, for what the Plugins panel lists (PluginInfo::usd),
+    // and a second USD plugin that declares nothing.
     plugins.write("schemas/usd/plugInfo.json", R"({"Plugins": [{"Name": "usdccTestPluginSchemas", "Type": "resource",
-        "Root": ".", "ResourcePath": ".", "Info": {}}]})");
+        "Root": ".", "ResourcePath": ".", "Info": {
+            "Types": {"UsdccTestPluginFormat": {"bases": ["SdfFileFormat"], "formatId": "usdcctestfmt",
+                                                "extensions": ["usdcctestfmt", "usdcctestfmt2"], "target": "usd"}},
+            "SdfMetadata": {"usdccTestPluginField": {"type": "string", "appliesTo": "layers"}}}},
+        {"Name": "usdccTestPluginShaders", "Type": "resource", "Root": "shaders", "ResourcePath": ".", "Info": {}}]})");
+    plugins.write("schemas/usd/shaders/readme.txt", "");
     plugins.write("off/usdcc-plugin.json", R"({"id": "usd.off", "name": "Off", "version": "1", "api": 1, "usd": ["usd"]})");
     plugins.write("off/usd/plugInfo.json", R"({"Plugins": [{"Name": "usdccTestPluginOff", "Type": "resource",
         "Root": ".", "ResourcePath": ".", "Info": {}}]})");
@@ -495,6 +502,15 @@ USDCC_TEST(plugin_usd_folder) {
     first.scan();
     CHECK(PXR_NS::PlugRegistry::GetInstance().GetPluginWithName("usdccTestPluginSchemas"), "a USD folder registers during scan()");
     CHECK(!PXR_NS::PlugRegistry::GetInstance().GetPluginWithName("usdccTestPluginOff"), "not a disabled plugin's");
+    std::vector<std::string> parts;
+    for (const usdcc::scripting::PluginContribution& part : first.find("usd.schemas")->usd) parts.push_back(part.kind + ": " + part.name);
+    std::sort(parts.begin(), parts.end());
+    const std::vector<std::string> expected{"File format: usdcctestfmt: .usdcctestfmt, .usdcctestfmt2",
+                                            "Metadata field: usdccTestPluginField", "USD plugin: usdccTestPluginShaders"};
+    std::string shown;
+    for (const std::string& part : parts) shown += part + "; ";
+    CHECK(parts == expected, "what its plugInfo.json adds, by kind: %s", shown.c_str());
+    CHECK(first.find("usd.off")->usd.empty(), "nothing for one that's off");
     first.activate(python());
     CHECK(stateOf(first, "usd.schemas") == PluginState::Active, "and it needs no Python");
 }

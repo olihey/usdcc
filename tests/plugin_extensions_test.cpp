@@ -35,10 +35,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
-#include <QScrollArea>
-#include <QSplitter>
 #include <QStandardPaths>
-#include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
 
@@ -485,11 +482,15 @@ def activate(plugin):
     usdcc.app.add_menu_action("Tools/Good Action", print)
 )");
     write("bad/usdcc-plugin.json", R"({"id": "panel.bad", "name": "Bad One", "version": "1", "api": 7})");
+    write("off/usdcc-plugin.json", R"({"id": "panel.off", "name": "Off One", "version": "1", "api": 1,
+        "python": {"module": "usdcc_test_panel_off"}})");
+    write("off/python/usdcc_test_panel_off/__init__.py", "def activate(plugin):\n    pass\n");
 
     PluginManager::Options options;
     options.folders = {root};
     options.crashMarker = root / "marker.txt";
     PluginManager manager(options);
+    manager.setEnabled("panel.off", false);  // read by scan()
     manager.scan();
 
     MainWindow window;
@@ -498,24 +499,61 @@ def activate(plugin):
     manager.activate(app.python);
 
     PluginManagerSidePanel panel(manager);
+    panel.resize(360, 500);
+    panel.show();
+    QCoreApplication::processEvents();
     auto* tree = panel.findChild<QTreeWidget*>();
-    CHECK(tree && tree->topLevelItemCount() == 2, "a row each");
-    QTreeWidgetItem* good = nullptr;
-    QTreeWidgetItem* bad = nullptr;
-    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem* item = tree->topLevelItem(i);
-        (item->text(0) == "Good One" ? good : bad) = item;
-    }
-    CHECK(good && good->text(1) == "2.5" && good->text(2) == "Running", "version and state");
-    CHECK(bad && bad->text(2) == "Not loaded", "and one that didn't load");
+    CHECK(tree && tree->topLevelItemCount() == 3, "a row each");
+    if (!tree) return;
+    std::map<QString, QTreeWidgetItem*> rows;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) rows[tree->topLevelItem(i)->text(0)] = tree->topLevelItem(i);
+    QTreeWidgetItem* good = rows["Good One"];
+    QTreeWidgetItem* bad = rows["Bad One"];
+    QTreeWidgetItem* off = rows["Off One"];
+    CHECK(good && bad && off, "found by name");
+    if (!good || !bad || !off) return;
+    CHECK(good->text(1) == "2.5" && good->text(2) == "Running", "version and state");
+    CHECK(bad->text(2) == "Not loaded", "and one that didn't load");
+    CHECK(off->text(2) == "Off", "and one that's off");
+    CHECK(panel.findChildren<QLabel*>("pluginDetails").isEmpty(), "no info pane under the list");
 
-    const auto details = [&panel]() { return panel.findChild<QLabel*>("pluginDetails"); };
-    tree->setCurrentItem(good);
-    CHECK(details()->text().contains("It does good.") && details()->text().contains("View panel: Good Panel") &&
-              details()->text().contains("Menu action: Tools/Good Action"),
-          "details list what it added: %s", qPrintable(details()->text()));
-    tree->setCurrentItem(bad);
-    CHECK(details()->text().contains("API 7") || details()->text().contains("API"), "and why one isn't running");
+    // The rows under a row, as "text" or "group: child, child".
+    const auto children = [](const QTreeWidgetItem* item) {
+        QStringList texts;
+        for (int i = 0; i < item->childCount(); ++i) {
+            const QTreeWidgetItem* child = item->child(i);
+            QStringList grand;
+            for (int j = 0; j < child->childCount(); ++j) grand << child->child(j)->text(0);
+            texts << (grand.isEmpty() ? child->text(0) : child->text(0) + ": " + grand.join(", "));
+        }
+        return texts;
+    };
+    const QStringList added = children(good);
+    CHECK((added == QStringList{"It does good.", "View panels (1): Good Panel", "Menu actions (1): Tools/Good Action"}),
+          "a running one expands to its description and what it added, by kind: %s", qPrintable(added.join(" | ")));
+    CHECK(good->childIndicatorPolicy() != QTreeWidgetItem::DontShowIndicator && good->childCount() > 0, "so it has an arrow");
+    CHECK(good->child(1)->font(0).bold() && !good->child(1)->child(0)->font(0).bold(), "the kinds in bold");
+    CHECK(!(good->child(1)->flags() & Qt::ItemIsUserCheckable) && good->child(1)->data(0, Qt::CheckStateRole).isNull(),
+          "with no checkbox");
+    const QStringList why = children(bad);
+    CHECK(why.size() == 1 && why[0].startsWith("Problem: ") && why[0].contains("API"), "one that didn't load, to why: %s",
+          qPrintable(why.join(" | ")));
+    CHECK(off->childCount() == 0, "one that's off has no arrow");
+    CHECK(tree->rootIsDecorated() && tree->visualItemRect(off).x() == tree->visualItemRect(good).x(),
+          "but lines up with those that do: %d, %d", tree->visualItemRect(off).x(), tree->visualItemRect(good).x());
+
+    // A plugin opens with its groups open.
+    CHECK(!good->isExpanded() && !good->child(1)->isExpanded(), "closed at first");
+    good->setExpanded(true);
+    CHECK(good->child(1)->isExpanded() && good->child(2)->isExpanded(), "opening a plugin opens its groups");
+    // Expanded rows stay so through a refresh, and a group closed by hand stays closed.
+    good->child(1)->setExpanded(false);
+    panel.refresh();
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) rows[tree->topLevelItem(i)->text(0)] = tree->topLevelItem(i);
+    good = rows["Good One"];
+    bad = rows["Bad One"];
+    CHECK(good->isExpanded() && good->child(2)->isExpanded() && !good->child(1)->isExpanded() && !bad->isExpanded(),
+          "a refresh keeps what was expanded, and only that");
 
     QLabel* pending = panel.findChild<QLabel*>("propertyNote");
     CHECK(pending && pending->isHidden(), "nothing pending at first");
@@ -581,64 +619,15 @@ USDCC_TEST(plugin_manager_panel_shows_types) {
     CHECK(image(rows["t.nothing"]).size() == image(rows["t.all"]).size(), "even with nothing to show");
     CHECK(tree->iconSize().width() > tree->iconSize().height(), "wide enough for several");
 
-    const auto details = [&panel]() {
-        const QLabel* label = panel.findChild<QLabel*>("pluginDetails");
-        return label ? label->text() : QString();
-    };
-    tree->setCurrentItem(rows["t.mixed"]);
-    CHECK(details().contains("Type: Python + USD"), "the details spell it out: %s", qPrintable(details()));
-    CHECK(rows["t.mixed"]->toolTip(0).contains("Python + USD") && rows["t.mixed"]->toolTip(0).contains("t.mixed"), "and the tooltip");
-    tree->setCurrentItem(rows["t.nothing"]);
-    CHECK(!details().contains("Type:"), "no line with nothing to say");
-    CHECK(rows["t.nothing"]->toolTip(0) == "t.nothing", "nor in the tooltip");
+    const QString mixed = rows["t.mixed"]->toolTip(0);
+    CHECK(mixed.contains("Type: Python + USD") && mixed.contains("t.mixed"), "the tooltip spells it out: %s", qPrintable(mixed));
+    CHECK(!rows["t.nothing"]->toolTip(0).contains("Type:") && rows["t.nothing"]->toolTip(0).startsWith("t.nothing"),
+          "no type line with nothing to say");
 
     std::filesystem::remove_all(root, error);
 }
 
 #ifdef USDCC_EXAMPLE_PLUGINS
-USDCC_TEST(plugin_manager_panel_info_folds) {
-    TestSettings settings;
-    PluginManager::Options options;
-    PluginManager manager(options);
-
-    {
-        PluginManagerSidePanel panel(manager);
-        panel.resize(300, 500);
-        panel.show();
-        QCoreApplication::processEvents();
-        QToolButton* header = nullptr;
-        for (QToolButton* button : panel.findChildren<QToolButton*>()) {
-            if (button->text() == "Plugin Info") header = button;
-        }
-        CHECK(header, "a Plugin Info header");
-        auto* scroll = panel.findChild<QScrollArea*>();
-        auto* splitter = panel.findChild<QSplitter*>();
-        CHECK(scroll && splitter && scroll->isAncestorOf(panel.findChild<QLabel*>("pluginDetails")), "the info scrolls, under a splitter");
-        if (!header || !scroll || !splitter) return;
-        CHECK(!panel.isInfoCollapsed() && scroll->isVisible(), "unfolded at first");
-        const int infoHeight = splitter->sizes().value(1);
-
-        header->click();
-        QCoreApplication::processEvents();
-        CHECK(panel.isInfoCollapsed() && !scroll->isVisible(), "a click folds it");
-        CHECK(header->arrowType() == Qt::RightArrow, "its arrow turns");
-        CHECK(splitter->sizes().value(1) < infoHeight, "to its header, the list taking the room: %d < %d",
-              splitter->sizes().value(1), infoHeight);
-
-        header->click();
-        QCoreApplication::processEvents();
-        CHECK(!panel.isInfoCollapsed() && scroll->isVisible() && header->arrowType() == Qt::DownArrow, "another unfolds it");
-        CHECK(splitter->sizes().value(1) == infoHeight, "to the size it had: %d", splitter->sizes().value(1));
-
-        panel.setInfoCollapsed(true);
-    }
-    PluginManagerSidePanel again(manager);
-    CHECK(again.isInfoCollapsed(), "a new panel comes back folded");
-    again.setInfoCollapsed(false);
-    PluginManagerSidePanel unfolded(manager);
-    CHECK(!unfolded.isInfoCollapsed(), "and unfolded");
-}
-
 USDCC_TEST(plugin_example) {
     TestSettings settings;
     auto& app = pythonTestApp();

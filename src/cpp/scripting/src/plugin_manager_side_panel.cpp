@@ -10,12 +10,13 @@
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
-#include "usdcc/ui/settings.h"
 #include "usdcc/ui/settings_dialog.h"
 
 #include <QColor>
 #include <QDesktopServices>
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QFont>
@@ -25,27 +26,27 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
+#include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
-#include <QScrollArea>
-#include <QSettings>
 #include <QShowEvent>
 #include <QSizePolicy>
-#include <QSplitter>
 #include <QStringList>
-#include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <iterator>
+#include <map>
+#include <set>
+#include <utility>
+#include <vector>
 
 namespace usdcc::scripting {
 
 namespace {
-const QString kInfoCollapsedKey = QStringLiteral("PluginManagerPanel/infoCollapsed");
-const QString kInfoSizesKey = QStringLiteral("PluginManagerPanel/infoSizes");
-
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
 QString stateText(const PluginInfo& plugin) {
@@ -72,6 +73,115 @@ QString typesText(const std::vector<std::string>& types) {
     for (const std::string& type : types) names << QString::fromStdString(type);
     return names.join(QStringLiteral(" + "));
 }
+
+// What a plugin added, by kind, in this order; any other kind follows, in
+// alphabetical order, under its own name.
+struct KindGroup {
+    const char* kind;
+    const char* group;
+};
+constexpr KindGroup kKindGroups[] = {
+    {"View panel", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "View panels")},
+    {"Side panel", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Side panels")},
+    {"Tool", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Tools")},
+    {"Menu action", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Menu actions")},
+    {"Prim menu action", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Prim menu actions")},
+    {"Create menu entry", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Create menu entries")},
+    {"Renderer profile", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Renderer profiles")},
+    {"Relationship rule", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Relationship rules")},
+    {"Physics backend", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Physics backends")},
+    // What its USD folders added (PluginInfo::usd).
+    {"Prim type", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Prim types")},
+    {"API schema", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "API schemas")},
+    {"File format", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "File formats")},
+    {"Asset resolver", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Asset resolvers")},
+    {"Package resolver", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Package resolvers")},
+    {"Render delegate", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Render delegates")},
+    {"Imaging adapter", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Imaging adapters")},
+    {"Scene index plugin", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Scene index plugins")},
+    {"Shader plugin", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Shader plugins")},
+    {"Image format", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Image formats")},
+    {"Metadata field", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Metadata fields")},
+    {"USD type", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "Other USD types")},
+    {"USD plugin", QT_TRANSLATE_NOOP("PluginManagerSidePanel", "USD plugins")},
+};
+
+// Where a kind sorts, and the group's title.
+std::pair<int, QString> kindGroup(const std::string& kind) {
+    for (std::size_t i = 0; i < std::size(kKindGroups); ++i) {
+        if (kind == kKindGroups[i].kind) {
+            return {static_cast<int>(i), PluginManagerSidePanel::tr(kKindGroups[i].group)};
+        }
+    }
+    return {static_cast<int>(std::size(kKindGroups)), QString::fromStdString(kind)};
+}
+
+// Which rows were expanded, to expand them again after a refresh.
+constexpr int kExpandKeyRole = Qt::UserRole + 1;
+
+QTreeWidgetItem* addRow(QTreeWidgetItem* parent, const QString& text, const QString& key = {}) {
+    auto* row = new QTreeWidgetItem(parent, {text});
+    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+    row->setToolTip(0, text);
+    if (!key.isEmpty()) row->setData(0, kExpandKeyRole, key);
+    row->setFirstColumnSpanned(true);
+    return row;
+}
+
+QTreeWidgetItem* addGroup(QTreeWidgetItem* parent, const QString& title, const QString& key) {
+    QTreeWidgetItem* group = addRow(parent, title, key);
+    QFont font = group->font(0);
+    font.setBold(true);
+    group->setFont(0, font);
+    return group;
+}
+
+void dim(QTreeWidgetItem* row, const QTreeWidget* tree) {
+    row->setForeground(0, tree->palette().color(QPalette::PlaceholderText));
+}
+
+// A running plugin's rows: its description, then what it added, grouped by kind.
+// One that isn't running: why. One that's off or waiting has none, so no arrow.
+void addPluginChildren(QTreeWidgetItem* item, const PluginInfo& plugin, const QTreeWidget* tree) {
+    const QString id = QString::fromStdString(plugin.manifest.id);
+    switch (plugin.state) {
+        case PluginState::Active:
+            break;
+        case PluginState::Failed:
+        case PluginState::Refused:
+        case PluginState::NeedsPackages:
+            if (!plugin.reason.empty()) {
+                QTreeWidgetItem* problem = addGroup(item, PluginManagerSidePanel::tr("Problem"), id + QStringLiteral("/problem"));
+                addRow(problem, QString::fromStdString(plugin.reason));
+            }
+            return;
+        case PluginState::Disabled:
+        case PluginState::Ready:
+            return;
+    }
+    if (!plugin.manifest.description.empty()) dim(addRow(item, QString::fromStdString(plugin.manifest.description)), tree);
+
+    // In the order they were added, within each kind.
+    std::map<std::pair<int, QString>, std::vector<QString>> groups;
+    for (const auto* list : {&plugin.contributions, &plugin.usd}) {
+        for (const PluginContribution& added : *list) groups[kindGroup(added.kind)].push_back(QString::fromStdString(added.name));
+    }
+    for (const auto& [group, names] : groups) {
+        QTreeWidgetItem* row =
+            addGroup(item, QStringLiteral("%1 (%2)").arg(group.second).arg(names.size()), id + QLatin1Char('/') + group.second);
+        for (const QString& name : names) addRow(row, name);
+    }
+    // USD folders that registered nothing new (USD had them already, from
+    // PXR_PLUGINPATH_NAME say): the folders, as there's nothing better to show.
+    if (plugin.usd.empty() && !plugin.manifest.usdFolders.empty()) {
+        QTreeWidgetItem* usd = addGroup(
+            item, PluginManagerSidePanel::tr("USD folders (%1)").arg(plugin.manifest.usdFolders.size()), id + QStringLiteral("/usd"));
+        for (const std::string& folder : plugin.manifest.usdFolders) addRow(usd, QString::fromStdString(folder));
+    }
+    if (groups.empty() && plugin.manifest.usdFolders.empty()) {
+        dim(addRow(item, PluginManagerSidePanel::tr("Adds nothing to the app's menus or panels")), tree);
+    }
+}
 }  // namespace
 
 PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* parent)
@@ -86,7 +196,17 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_tree = new QTreeWidget(content);
     m_tree->setColumnCount(3);
     m_tree->setHeaderLabels({tr("Plugin"), tr("Version"), tr("State")});
-    m_tree->setRootIsDecorated(false);
+    // Every row gets the room for an arrow, so those without one line up with the others.
+    m_tree->setRootIsDecorated(true);
+    m_tree->setWordWrap(true);  // a long reason why a plugin isn't running
+    m_tree->setExpandsOnDoubleClick(true);
+    // A plugin opens with its groups open; one closed by hand stays so through a refresh.
+    connect(m_tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* item) {
+        if (m_refreshing || item->parent()) return;
+        for (int i = 0; i < item->childCount(); ++i) {
+            if (item->child(i)->childCount() > 0) item->child(i)->setExpanded(true);
+        }
+    });
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -96,52 +216,17 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
         const QTreeWidgetItem* item = m_tree->itemAt(position);
         if (!item) return;
         QMenu menu(this);
-        populatePluginMenu(&menu, item->data(0, Qt::UserRole).toString());
+        // A row under a plugin can be copied: a reason, a menu path.
+        if (item->parent()) {
+            const QString text = item->text(0);
+            menu.addAction(tr("Copy"), this, [text]() { QGuiApplication::clipboard()->setText(text); });
+            menu.addSeparator();
+        }
+        populatePluginMenu(&menu, pluginIdOf(item));
         menu.exec(m_tree->viewport()->mapToGlobal(position));
     });
 
-    // The selected plugin's info, under the list, under a header that folds
-    // it away (as the Layer Editor's Layer Properties).
-    m_infoPane = new QWidget(content);
-    auto* paneLayout = new QVBoxLayout(m_infoPane);
-    paneLayout->setContentsMargins(0, 0, 0, 0);
-    paneLayout->setSpacing(0);
-    auto* headerRow = new QWidget(m_infoPane);
-    auto* headerLayout = new QHBoxLayout(headerRow);
-    usdcc::ui::scaled::margins(headerLayout, 0, 4, 0, 4);
-    m_infoHeader = new QToolButton(headerRow);
-    m_infoHeader->setObjectName(QStringLiteral("sectionHeader"));  // as CategorySection's
-    m_infoHeader->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_infoHeader->setArrowType(Qt::DownArrow);
-    m_infoHeader->setText(tr("Plugin Info"));
-    m_infoHeader->setCursor(Qt::PointingHandCursor);
-    connect(m_infoHeader, &QToolButton::clicked, this, [this]() { setInfoCollapsed(!m_infoCollapsed); });
-    headerLayout->addWidget(m_infoHeader);
-    headerLayout->addStretch(1);
-    paneLayout->addWidget(headerRow);
-    m_infoScroll = new QScrollArea(m_infoPane);
-    m_infoScroll->setWidgetResizable(true);
-    m_infoScroll->setFrameShape(QFrame::NoFrame);
-    m_infoScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_details = new QLabel(m_infoScroll);
-    m_details->setObjectName(QStringLiteral("pluginDetails"));
-    m_details->setWordWrap(true);
-    m_details->setTextFormat(Qt::PlainText);
-    m_details->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_details->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    // A long folder path can't wrap, and would otherwise set the panel's width.
-    m_details->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    m_details->setMinimumWidth(1);
-    m_infoScroll->setWidget(m_details);
-    paneLayout->addWidget(m_infoScroll, 1);
-
-    m_splitter = new QSplitter(Qt::Vertical, content);
-    m_splitter->addWidget(m_tree);
-    m_splitter->addWidget(m_infoPane);
-    m_splitter->setStretchFactor(0, 3);
-    m_splitter->setStretchFactor(1, 2);
-    m_splitter->setChildrenCollapsible(false);
-    layout->addWidget(m_splitter, 1);
+    layout->addWidget(m_tree, 1);
 
     m_pendingNote = new QLabel(tr("Changes take effect at the next start."), content);
     m_pendingNote->setObjectName(QStringLiteral("propertyNote"));
@@ -155,6 +240,15 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     m_packageFolders->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_packageFolders->setMinimumWidth(1);
     layout->addWidget(m_packageFolders);
+
+    // Under the list, while it's empty.
+    m_emptyNote = new QLabel(
+        tr("No plugins found. Put one in your plugins folder, or add a folder in Edit > Settings > Plugins, and restart."), content);
+    m_emptyNote->setObjectName(QStringLiteral("propertyNote"));
+    m_emptyNote->setWordWrap(true);
+    m_emptyNote->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_emptyNote->setMinimumWidth(1);
+    layout->insertWidget(layout->indexOf(m_tree) + 1, m_emptyNote);
 
     auto* buttons = new QHBoxLayout;
     auto* newPlugin = new QPushButton(tr("New Plugin..."), content);
@@ -200,53 +294,25 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
         QDir().mkpath(folder);
         QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
     });
-    connect(m_tree, &QTreeWidget::currentItemChanged, this, [this]() { updateDetails(); });
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
-        if (m_refreshing || column != 0) return;
+        if (m_refreshing || column != 0 || item->parent()) return;
         m_plugins.setEnabled(item->data(0, Qt::UserRole).toString().toStdString(), item->checkState(0) == Qt::Checked);
         updatePendingNote();
-        updateDetails();
     });
     // The type icons are drawn for the UI scale.
     connect(&usdcc::ui::UiScaleController::instance(), &usdcc::ui::UiScaleController::scaleChanged, this, [this]() { refresh(); });
 
-    // The fold and the sizes, as they were left.
-    const QSettings settings = usdcc::ui::appSettings();
-    QList<int> sizes;
-    for (const QVariant& size : settings.value(kInfoSizesKey).toList()) sizes.append(size.toInt());
-    if (sizes.size() == 2 && sizes[0] > 0 && sizes[1] > 0) m_splitter->setSizes(sizes);
-    setInfoCollapsed(settings.value(kInfoCollapsedKey, false).toBool());
-    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
-        if (m_infoCollapsed) return;
-        QVariantList sizes;
-        for (int size : m_splitter->sizes()) sizes.append(size);
-        QSettings settings = usdcc::ui::appSettings();
-        settings.setValue(kInfoSizesKey, sizes);
-    });
     refresh();
-}
-
-void PluginManagerSidePanel::setInfoCollapsed(bool collapsed) {
-    if (collapsed == m_infoCollapsed) return;
-    m_infoCollapsed = collapsed;
-    m_infoHeader->setArrowType(collapsed ? Qt::RightArrow : Qt::DownArrow);
-    if (collapsed) {
-        m_expandedSizes = m_splitter->sizes();
-        m_infoScroll->hide();
-        // Just the header: the list takes the rest.
-        m_infoPane->setMaximumHeight(m_infoHeader->parentWidget()->sizeHint().height());
-    } else {
-        m_infoPane->setMaximumHeight(QWIDGETSIZE_MAX);
-        m_infoScroll->show();
-        if (m_expandedSizes.size() == 2 && m_expandedSizes[1] > 0) m_splitter->setSizes(m_expandedSizes);
-    }
-    QSettings settings = usdcc::ui::appSettings();
-    settings.setValue(kInfoCollapsedKey, collapsed);
 }
 
 void PluginManagerSidePanel::refresh() {
     m_refreshing = true;
-    const QString current = m_tree->currentItem() ? m_tree->currentItem()->data(0, Qt::UserRole).toString() : QString();
+    const QString current = m_tree->currentItem() ? pluginIdOf(m_tree->currentItem()) : QString();
+    // What was expanded stays so.
+    std::set<QString> expanded;
+    for (QTreeWidgetItemIterator it(m_tree); *it; ++it) {
+        if ((*it)->isExpanded()) expanded.insert((*it)->data(0, kExpandKeyRole).toString());
+    }
     m_tree->clear();
     int iconWidth = 0;
     for (const PluginInfo& plugin : m_plugins.plugins()) iconWidth = std::max(iconWidth, pluginChipsWidth(pluginTypes(plugin.manifest)));
@@ -255,16 +321,27 @@ void PluginManagerSidePanel::refresh() {
         auto* item = new QTreeWidgetItem(m_tree, {qs(plugin.manifest.name), qs(plugin.manifest.version), stateText(plugin)});
         const QString id = qs(plugin.manifest.id);
         item->setData(0, Qt::UserRole, id);
+        item->setData(0, kExpandKeyRole, id);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(0, m_plugins.isEnabled(plugin.manifest.id) ? Qt::Checked : Qt::Unchecked);
         const std::vector<std::string> types = pluginTypes(plugin.manifest);
         if (iconWidth > 0) item->setIcon(0, pluginTypesIcon(types, iconWidth, m_tree->font()));
-        item->setToolTip(0, types.empty() ? id : QStringLiteral("%1\n%2").arg(id, typesText(types)));
+        // What the info under the list used to say, besides what the rows show.
+        QStringList tip;
+        if (!plugin.manifest.description.empty()) tip << qs(plugin.manifest.description);
+        if (!types.empty()) tip << tr("Type: %1").arg(typesText(types));
+        tip << id << QDir::toNativeSeparators(QString::fromStdU16String(plugin.manifest.folder.u16string()));
+        item->setToolTip(0, tip.join(QLatin1Char('\n')));
+        if (!plugin.reason.empty()) item->setToolTip(2, qs(plugin.reason));
+        addPluginChildren(item, plugin, m_tree);
         if (id == current) m_tree->setCurrentItem(item);
+    }
+    for (QTreeWidgetItemIterator it(m_tree); *it; ++it) {
+        if ((*it)->childCount() > 0 && expanded.count((*it)->data(0, kExpandKeyRole).toString())) (*it)->setExpanded(true);
     }
     if (!m_tree->currentItem() && m_tree->topLevelItemCount() > 0) m_tree->setCurrentItem(m_tree->topLevelItem(0));
     m_refreshing = false;
-    updateDetails();
+    m_emptyNote->setVisible(m_plugins.plugins().empty());
     updatePendingNote();
     updatePackages();
 }
@@ -342,25 +419,9 @@ void PluginManagerSidePanel::installPackages(bool upgrade) {
     m_dialog->start();
 }
 
-void PluginManagerSidePanel::updateDetails() {
-    const QTreeWidgetItem* item = m_tree->currentItem();
-    const PluginInfo* plugin = item ? m_plugins.find(item->data(0, Qt::UserRole).toString().toStdString()) : nullptr;
-    if (!plugin) {
-        m_details->setText(m_plugins.plugins().empty() ? tr("No plugins found. Put one in your plugins folder, or add a folder in Edit > Settings > Plugins, and restart.")
-                                                       : QString());
-        return;
-    }
-    QStringList lines;
-    if (!plugin->manifest.description.empty()) lines << qs(plugin->manifest.description);
-    if (const QString types = typesText(pluginTypes(plugin->manifest)); !types.isEmpty()) lines << tr("Type: %1").arg(types);
-    if (!plugin->reason.empty()) lines << qs(plugin->reason);
-    for (const PluginContribution& added : plugin->contributions) {
-        lines << tr("%1: %2").arg(qs(added.kind), qs(added.name));
-    }
-    const QString folder = QDir::toNativeSeparators(QString::fromStdU16String(plugin->manifest.folder.u16string()));
-    lines << folder;
-    m_details->setText(lines.join(QLatin1Char('\n')));
-    m_details->setToolTip(folder);
+QString PluginManagerSidePanel::pluginIdOf(const QTreeWidgetItem* item) const {
+    while (item && item->parent()) item = item->parent();
+    return item ? item->data(0, Qt::UserRole).toString() : QString();
 }
 
 void PluginManagerSidePanel::showEvent(QShowEvent* event) {

@@ -276,7 +276,7 @@ author, and no helper is planned.
 | **1. Python plugins** | `PluginManager`, manifests, order, USD folders, new startup order, `savePanels()` keeping unknown types, `--no-plugins`, `--plugin-path`, log source, third-party modules, example plugin | **Done** |
 | **2. Extension points** | `add_menu_action()` with undo, prim menu entries, `plugin.settings`, events, side panel ids | **Done** |
 | **3. Tools** | Tool ids and list, a rail built from it, Python `Tool`, example tool | **Done** |
-| **4. Plugin Manager** | View > Plugins, enable and disable, Open Plugins Folder, crash marker; the selected plugin's Plugin Info under the list folds to its header, as the Layer Editor's Layer Properties, and stays so across starts | **Done** |
+| **4. Plugin Manager** | View > Plugins, enable and disable, Open Plugins Folder, crash marker; each running plugin expands, with its groups open, to what it added by kind (Menu actions, Tools, ...), its USD folders included as USD's `PlugRegistry` read their plugInfo.json (asset resolvers with their URI schemes, file formats with their extensions, prim types, API schemas, render delegates, metadata fields, ...); one that isn't running to why; one that's off not at all | **Done** |
 | **5. Libraries become DLLs** | `usdcc_usd`, `usdcc_tools`, `usdcc_ui`, `usdcc_usd_ui` shared, exported as in §3.2; `_ui.pyd`, `_usd.pyd`, tests and deploy updated | **Done** |
 | **6. C++ plugins** | Loading, the `built_for` check, `usdcc::plugin::Host`, `usdcc_add_plugin()`, SDK in the deploy, example with a panel and tool, [PLUGIN_SDK.md](PLUGIN_SDK.md) | **Done** |
 

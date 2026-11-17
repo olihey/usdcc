@@ -2,15 +2,11 @@
 
 #include "usdcc/ui/side_panel.h"
 
-#include <QList>
 #include <QPointer>
 
 class QLabel;
 class QMenu;
 class QAbstractButton;
-class QScrollArea;
-class QSplitter;
-class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -19,9 +15,10 @@ namespace usdcc::scripting {
 class PackageInstallDialog;
 class PluginManager;
 
-// Lists the plugins: each one's version and state, why it isn't running, what it
-// added, and a checkbox to turn it on or off at the next start
-// (docs/PLUGINS.md phase 4). Starts hidden; it's in the View menu.
+// Lists the plugins: each one's version and state, and a checkbox to turn it on
+// or off at the next start (docs/PLUGINS.md phase 4). A running plugin expands
+// to what it added, grouped by kind (Menu actions, Tools, ...); one that isn't
+// running, to why. Starts hidden; it's in the View menu.
 class PluginManagerSidePanel : public usdcc::ui::SidePanel {
     Q_OBJECT
 
@@ -37,12 +34,6 @@ public:
     // Makes a new plugin in the user's folder and opens it. False, logged, if it can't.
     bool createPlugin(const QString& name);
 
-    // The selected plugin's info under the list folds to its header (click
-    // it), as the Layer Editor's Layer Properties do; folded, the list takes
-    // the room. Remembered in usdcc.ini with the sizes to unfold to.
-    bool isInfoCollapsed() const { return m_infoCollapsed; }
-    void setInfoCollapsed(bool collapsed);
-
 Q_SIGNALS:
     // The app connects these to the Script Editor (docs/PLUGIN_DEV.md).
     void editPluginRequested(const QString& id, const QString& name, const QString& folder, const QString& mainFile);
@@ -52,19 +43,14 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
-    void updateDetails();
+    // The plugin a row is about: its own, or its ancestor plugin row's.
+    QString pluginIdOf(const QTreeWidgetItem* item) const;
     void updatePendingNote();
     void updatePackages();
 
     PluginManager& m_plugins;
     QTreeWidget* m_tree = nullptr;
-    QSplitter* m_splitter = nullptr;
-    QWidget* m_infoPane = nullptr;  // the header and the scroll area
-    QToolButton* m_infoHeader = nullptr;
-    QScrollArea* m_infoScroll = nullptr;
-    bool m_infoCollapsed = false;
-    QList<int> m_expandedSizes;  // the splitter's, from before it folded
-    QLabel* m_details = nullptr;
+    QLabel* m_emptyNote = nullptr;
     QLabel* m_pendingNote = nullptr;
     QLabel* m_packageFolders = nullptr;
     QAbstractButton* m_install = nullptr;

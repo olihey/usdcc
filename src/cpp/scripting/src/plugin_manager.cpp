@@ -16,6 +16,8 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/settings.h"
 
+#include <pxr/base/js/value.h>
+#include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
 
 #include <QCoreApplication>
@@ -37,12 +39,14 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace usdcc::scripting {
 
@@ -50,6 +54,112 @@ namespace {
 constexpr const char* kManifestName = "usdcc-plugin.json";
 constexpr auto kDisabledKey = "Plugins/disabled";
 constexpr auto kCrashedKey = "Plugins/crashed";
+
+// A list from plugInfo.json: an array of strings, or one string.
+std::vector<std::string> jsStrings(const PXR_NS::JsObject& object, const std::string& key) {
+    std::vector<std::string> strings;
+    const auto found = object.find(key);
+    if (found == object.end()) return strings;
+    if (found->second.IsString()) {
+        strings.push_back(found->second.GetString());
+    } else if (found->second.IsArray()) {
+        for (const PXR_NS::JsValue& value : found->second.GetJsArray()) {
+            if (value.IsString()) strings.push_back(value.GetString());
+        }
+    }
+    return strings;
+}
+
+std::string jsString(const PXR_NS::JsObject& object, const std::string& key) {
+    const auto found = object.find(key);
+    return found != object.end() && found->second.IsString() ? found->second.GetString() : std::string();
+}
+
+// "name: a, b, c", or just the name with nothing to list.
+std::string listed(const std::string& name, const std::vector<std::string>& items, const std::string& before = {},
+                   const std::string& after = {}) {
+    if (items.empty()) return name;
+    std::string text = name + ": ";
+    for (std::size_t i = 0; i < items.size(); ++i) text += (i ? ", " : "") + before + items[i] + after;
+    return text;
+}
+
+bool endsWith(const std::string& text, std::string_view suffix) {
+    return text.size() >= suffix.size() && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// What one USD plugin adds, read from its Info: each type it declares, by what
+// it derives from, and its metadata fields.
+std::vector<PluginContribution> describeUsdPlugin(const PXR_NS::PlugPluginPtr& plug) {
+    std::vector<PluginContribution> parts;
+    const PXR_NS::JsObject info = plug->GetMetadata();
+    if (const auto types = info.find("Types"); types != info.end() && types->second.IsObject()) {
+        for (const auto& [typeName, value] : types->second.GetJsObject()) {
+            const PXR_NS::JsObject type = value.IsObject() ? value.GetJsObject() : PXR_NS::JsObject();
+            const std::vector<std::string> bases = jsStrings(type, "bases");
+            const auto anyBase = [&bases](const std::function<bool(const std::string&)>& test) {
+                return std::any_of(bases.begin(), bases.end(), test);
+            };
+            const auto hasBase = [&anyBase](std::string_view name) {
+                return anyBase([name](const std::string& base) { return base == name; });
+            };
+            if (const std::string schemaKind = jsString(type, "schemaKind"); !schemaKind.empty()) {
+                // The name it's used by in USD files: its alias, as for UsdGeomSphere's "Sphere".
+                std::string name = typeName;
+                if (const auto alias = type.find("alias"); alias != type.end() && alias->second.IsObject()) {
+                    const std::string aliasName = jsString(alias->second.GetJsObject(), "UsdSchemaBase");
+                    if (!aliasName.empty()) name = aliasName;
+                }
+                parts.push_back({schemaKind.find("API") != std::string::npos ? "API schema" : "Prim type", name});
+            } else if (hasBase("ArResolver")) {
+                parts.push_back({"Asset resolver", listed(typeName, jsStrings(type, "uriSchemes"), "", "://")});
+            } else if (hasBase("ArPackageResolver")) {
+                parts.push_back({"Package resolver", listed(typeName, jsStrings(type, "extensions"), ".")});
+            } else if (anyBase([](const std::string& base) { return endsWith(base, "FileFormat"); })) {
+                const std::string id = jsString(type, "formatId");
+                parts.push_back({"File format", listed(id.empty() ? typeName : id, jsStrings(type, "extensions"), ".")});
+            } else if (hasBase("HdRendererPlugin")) {
+                const std::string shown = jsString(type, "displayName");
+                parts.push_back({"Render delegate", shown.empty() ? typeName : shown});
+            } else if (anyBase([](const std::string& base) { return base.rfind("UsdImaging", 0) == 0 && endsWith(base, "Adapter"); })) {
+                std::string forType = jsString(type, "primTypeName");
+                if (forType.empty()) forType = jsString(type, "apiSchemaName");
+                parts.push_back({"Imaging adapter", forType.empty() ? typeName : typeName + " for " + forType});
+            } else if (hasBase("HioImage")) {
+                parts.push_back({"Image format", listed(typeName, jsStrings(type, "imageTypes"), ".")});
+            } else if (hasBase("HdSceneIndexPlugin")) {
+                parts.push_back({"Scene index plugin", typeName});
+            } else if (anyBase([](const std::string& base) {
+                           return endsWith(base, "ParserPlugin") || endsWith(base, "DiscoveryPlugin");
+                       })) {
+                parts.push_back({"Shader plugin", typeName});
+            } else {
+                parts.push_back({"USD type", bases.empty() ? typeName : typeName + " (" + bases.front() + ")"});
+            }
+        }
+    }
+    if (const auto fields = info.find("SdfMetadata"); fields != info.end() && fields->second.IsObject()) {
+        for (const auto& field : fields->second.GetJsObject()) parts.push_back({"Metadata field", field.first});
+    }
+    // Shaders, textures, a generatedSchema.usda: something, though no type says what.
+    if (parts.empty()) parts.push_back({"USD plugin", plug->GetName()});
+    return parts;
+}
+
+// For comparing paths: absolute, normalised, '/' between parts and at the end,
+// and in lower case on Windows.
+std::string comparablePath(const std::filesystem::path& path) {
+    std::error_code error;
+    std::filesystem::path full = std::filesystem::weakly_canonical(std::filesystem::absolute(path, error), error);
+    if (full.empty()) full = path.lexically_normal();
+    const std::u8string text = full.generic_u8string();
+    std::string result(text.begin(), text.end());
+#ifdef _WIN32
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+    if (result.empty() || result.back() != '/') result += '/';
+    return result;
+}
 
 std::string toUtf8(const std::filesystem::path& path) {
     const std::u8string text = path.generic_u8string();
@@ -491,6 +601,22 @@ void PluginManager::registerUsdFolders() {
     if (folders.empty()) return;
     const PXR_NS::PlugPluginPtrVector registered = PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(folders);
     USDCC_LOG_INFO("usdcc.plugins", "Registered {} USD plugins from {} folders", registered.size(), folders.size());
+
+    // Each USD plugin to the plugin whose folder it's in, for the Plugins panel.
+    for (const PXR_NS::PlugPluginPtr& plug : registered) {
+        if (!plug) continue;
+        const std::string library = comparablePath(std::filesystem::u8path(plug->GetPath()));
+        const std::string resources = comparablePath(std::filesystem::u8path(plug->GetResourcePath()));
+        for (PluginInfo& plugin : m_plugins) {
+            if (plugin.state != PluginState::Ready || plugin.manifest.usdFolders.empty()) continue;
+            const std::string folder = comparablePath(plugin.manifest.folder);
+            if (library.rfind(folder, 0) == 0 || resources.rfind(folder, 0) == 0) {
+                const std::vector<PluginContribution> parts = describeUsdPlugin(plug);
+                plugin.usd.insert(plugin.usd.end(), parts.begin(), parts.end());
+                break;
+            }
+        }
+    }
 }
 
 void PluginManager::scan() {

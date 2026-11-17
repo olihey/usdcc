@@ -72,6 +72,11 @@ struct PluginInfo {
     PluginState state = PluginState::Ready;
     std::string reason;
     std::vector<PluginContribution> contributions;
+    // What its USD folders added, from their plugInfo.json as USD read it: kinds
+    // such as "Asset resolver", "File format", "Prim type", "Render delegate"
+    // (describeUsdPlugin() in the .cpp). Filled by scan(); a reload keeps it, as
+    // USD can't take a plugin back.
+    std::vector<PluginContribution> usd;
 };
 
 // Finds and runs the plugins (docs/PLUGINS.md). Startup has two steps: scan()
