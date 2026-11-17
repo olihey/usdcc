@@ -273,6 +273,36 @@ else()
             "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
 endif()
 
+# Qt's plugins beside the test programs, as the app has them (src/cpp/app/CMakeLists.txt):
+# ctest points Qt at vcpkg's folder, but a test program started by hand, or from Visual
+# Studio, has only its own folder, and stops at "no Qt platform plugin could be
+# initialized". The windows and offscreen platforms; the JPEG plugin and libjpeg (the
+# viewport broadcast writes JPEG); the Schannel TLS plugin. One step for the folder the
+# programs share, so no two copy the same file at once.
+if(WIN32)
+    set(_usdcc_qt_bin "$<TARGET_FILE_DIR:Qt6::Core>")
+    set(_usdcc_qt_plugins "${_usdcc_qt_bin}/../Qt6/plugins")
+    set(_usdcc_tests_dir "$<TARGET_FILE_DIR:usdcc_ui_tests>")
+    add_custom_target(usdcc_tests_qt_plugins
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_usdcc_tests_dir}/platforms"
+                "${_usdcc_tests_dir}/imageformats" "${_usdcc_tests_dir}/tls"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_usdcc_qt_plugins}/platforms/qwindows.dll" "${_usdcc_qt_plugins}/platforms/qoffscreen.dll"
+            "${_usdcc_tests_dir}/platforms/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_usdcc_qt_plugins}/imageformats/qjpeg.dll" "${_usdcc_tests_dir}/imageformats/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_usdcc_qt_bin}/jpeg62.dll" "${_usdcc_tests_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_usdcc_qt_plugins}/tls/qschannelbackend.dll" "${_usdcc_tests_dir}/tls/"
+        COMMENT "Deploying Qt's plugins beside the test programs"
+        VERBATIM)
+    foreach(_qt_test usdcc_tests usdcc_ui_tests usdcc_python_tests usdcc_blender_mesh_benchmark)
+        if(TARGET ${_qt_test})
+            add_dependencies(${_qt_test} usdcc_tests_qt_plugins)
+        endif()
+    endforeach()
+endif()
+
 # A focused entry with the same clean Qt/USD runtime environment as the app tests.
 if(TARGET blender_mesh_tools)
     # Direct C ABI calls in conversion tests need the private backend at startup.
