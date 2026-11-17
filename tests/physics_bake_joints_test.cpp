@@ -295,6 +295,14 @@ USDCC_TEST(physics_filtering) {
     groupA.CreateFilteredGroupsRel().AddTarget(groupB.GetPath());
     groupA.GetCollidersCollectionAPI().CreateIncludesRel().AddTarget(SdfPath("/Ghost"));
     groupB.GetCollidersCollectionAPI().CreateIncludesRel().AddTarget(SdfPath("/Floor"));
+    // Group C is inverted and lists only itself: it collides with no other group, so its
+    // box falls through B's floor too. (Group A and B don't author invertFilteredGroups,
+    // which OpenUSD's parser left uninitialized: on Linux, A came out inverted.)
+    box(usd, "/Inverted", GfVec3d(-9, 12, 0));
+    UsdPhysicsCollisionGroup groupC = UsdPhysicsCollisionGroup::Define(usd, SdfPath("/GroupC"));
+    groupC.CreateInvertFilteredGroupsAttr(VtValue(true));
+    groupC.CreateFilteredGroupsRel().AddTarget(groupC.GetPath());
+    groupC.GetCollidersCollectionAPI().CreateIncludesRel().AddTarget(SdfPath("/Inverted"));
     Stage stage(usd);
     CHECK(stage.physics().start(0.0) && stage.physics().stepTo(72.0), "three seconds simulated");
     const double upperY = world(usd, "/Upper", 72).ExtractTranslation()[1];
@@ -305,6 +313,8 @@ USDCC_TEST(physics_filtering) {
           world(usd, "/Ghost", 72).ExtractTranslation()[1]);
     CHECK(std::abs(world(usd, "/Solid", 72).ExtractTranslation()[1] - 10.6) < 0.05, "a box in no group rests on it (%.3f)",
           world(usd, "/Solid", 72).ExtractTranslation()[1]);
+    CHECK(world(usd, "/Inverted", 72).ExtractTranslation()[1] < 5.0, "an inverted group falls through it too (%.2f)",
+          world(usd, "/Inverted", 72).ExtractTranslation()[1]);
 }
 
 // §4.8, §5.4: Check Physics has the validators' findings and the simulation's reports.
