@@ -382,6 +382,25 @@ USDCC_TEST(viewport_hud_settings_and_panel) {
     CHECK(input.editTarget.isEmpty(), "the root layer is the edit target: not named");
     CHECK(!input.showStats && !input.stageCounts, "no counts while they're off");
 
+    // The camera orbits about the stage's up axis: Z up the screen, the eye above the XY ground.
+    PXR_NS::GfFrustum frustum = window->frustum();
+    CHECK(frustum.ComputeUpVector()[2] > 0.5 && frustum.GetPosition()[2] > 0.0, "a Z-up stage stands upright: up z %f, eye z %f",
+          frustum.ComputeUpVector()[2], frustum.GetPosition()[2]);
+    {
+        int moved = 0;
+        const QMetaObject::Connection counting =
+            QObject::connect(window, &HydraViewportWindow::cameraChanged, window, [&moved]() { ++moved; });
+        PXR_NS::UsdGeomSetStageUpAxis(usdStage, PXR_NS::UsdGeomTokens->y);
+        frustum = window->frustum();
+        CHECK(moved == 1 && frustum.ComputeUpVector()[1] > 0.5 && frustum.GetPosition()[1] > 0.0,
+              "turned Y up, the camera follows and says so: %d", moved);
+        usdStage->GetPrimAtPath(PXR_NS::SdfPath("/World")).SetDocumentation("the world");
+        CHECK(moved == 1, "another edit doesn't move it");
+        PXR_NS::UsdGeomSetStageUpAxis(usdStage, PXR_NS::UsdGeomTokens->z);
+        CHECK(moved == 2 && window->frustum().ComputeUpVector()[2] > 0.5, "and back");
+        QObject::disconnect(counting);
+    }
+
     // The options menu's HUD submenu.
     struct Opener : ViewportViewPanel {
         static void populate(ViewportViewPanel* p, QMenu* m) { (p->*(&Opener::populateOptionsMenu))(m); }
@@ -473,11 +492,21 @@ USDCC_TEST(viewport_hud_settings_and_panel) {
         CHECK(panel->displayOptions().hud, "and on");
     }
 
-    // Snapping the camera from the triad.
+    // Snapping the camera from the triad. The stage is Z-up: the angles are about Z, so +Y is the back
+    // and +Z is above.
     window->snapToAxis(HudItem::AxisPosX);
     CHECK(std::abs(window->cameraState().yaw - 90.0) < 1e-9 && std::abs(window->cameraState().pitch) < 1e-9, "looking along -X");
+    CHECK(window->frustum().GetPosition()[0] > 0.0 && window->frustum().ComputeUpVector()[2] > 0.999, "from +X, Z up the screen");
     window->snapToAxis(HudItem::AxisPosY);
-    CHECK(window->cameraState().yaw == 0.0 && std::abs(window->cameraState().pitch - 90.0) < 1e-9, "from above, X to the right");
+    CHECK(std::abs(std::abs(window->cameraState().yaw) - 180.0) < 1e-9 && std::abs(window->cameraState().pitch) < 1e-9 &&
+              window->view() == CameraView::Back,
+          "from the back, +Y");
+    CHECK(window->frustum().GetPosition()[1] > 0.0 && window->frustum().ComputeUpVector()[2] > 0.999, "Z up the screen there too");
+    window->snapToAxis(HudItem::AxisPosZ);
+    CHECK(window->cameraState().yaw == 0.0 && std::abs(window->cameraState().pitch - 90.0) < 1e-9 && window->view() == CameraView::Top,
+          "from above, X to the right");
+    CHECK(window->frustum().GetPosition()[2] > 0.0 && std::abs(window->frustum().ComputeViewDirection()[2] + 1.0) < 1e-9,
+          "looking down Z at the ground");
     window->snapToAxis(HudItem::AxisCenter);
     CHECK(window->cameraState().yaw == kDefaultOrbitYaw && window->cameraState().pitch == kDefaultOrbitPitch, "the default view");
 }

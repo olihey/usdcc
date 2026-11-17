@@ -9,7 +9,9 @@ Viewport holds the app-wide defaults. Each viewport panel can override any of th
 - It shows only while the viewport has a stage. An empty viewport shows just its
   background.
 - It lies on the stage's ground plane: XZ for a Y-up stage, XY for a Z-up one
-  (`UsdGeomGetStageUpAxis`). The orbit camera itself is always Y-up.
+  (`UsdGeomGetStageUpAxis`). The orbit camera turns about the same axis, so the stage stands
+  upright on it and the grid lies flat ([WORKSPACES.md](WORKSPACES.md) §3.5.2). Changing the
+  stage's up axis (Layer Properties) turns both at once.
 - The lines through the origin are the axes, in the gizmo's colours: X red, Z blue (Y
   green on a Z-up stage). Every tenth line is brighter.
 - Lines sit on whole multiples of the step. The grid ends at the last whole step inside

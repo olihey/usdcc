@@ -17,6 +17,8 @@ public:
     void frame(const PXR_NS::GfRange3d& bounds);
     void reset();
     void setAspect(double aspect) { view = view.atAspect(aspect); }
+    // The stage's up axis, which the orbit is about (usdcc::usd::orbitCameraAxes()).
+    void setZUp(bool value) { zUp = value; }
     usdcc::usd::RenderCamera camera(double aspect) const;
     void beginOrbit() { reversed = usdcc::usd::orbitIsUpsideDown(pitch); }
 private:
@@ -24,6 +26,7 @@ private:
     PXR_NS::GfVec3d target{0};
     double distance = 10, yaw = 45, pitch = 20, roll = 0;
     bool reversed = false;
+    bool zUp = false;
 };
 
 // Input in logical coordinates normalized by the displayed image's height.

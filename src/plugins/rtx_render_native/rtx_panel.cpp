@@ -27,6 +27,7 @@
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/metrics.h>
 
 
 namespace usdcc::rtx {
@@ -306,13 +307,19 @@ protected:
 
 private:
     double cameraAspect() const { const auto size = renderSize(); return double(size.width()) / std::max(1, size.height()); }
+    // The local camera orbits about the stage's up axis, as the viewport's does.
+    bool stageIsZUp() const {
+        return currentStage() && PXR_NS::UsdGeomGetStageUpAxis(currentStage()->usdStage()) == PXR_NS::UsdGeomTokens->z;
+    }
     void prepareNavigation() {
+        m_navigation.setZUp(stageIsZUp());
         if (!usesLocalCamera())
             m_navigation.seed(currentCamera(), currentStage() ? usdcc::usd::sceneBounds(currentStage()->usdStage(), {})
                                                               : std::nullopt);
         m_navigation.setAspect(cameraAspect());
     }
     void publishNavigation() {
+        m_navigation.setZUp(stageIsZUp());
         setLocalCamera(m_navigation.camera(cameraAspect()));
     }
     void frameScene() {
