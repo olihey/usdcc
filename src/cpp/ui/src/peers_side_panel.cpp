@@ -183,7 +183,6 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     m_emoji->setToolTip(tr("Emoji"));
     m_emoji->setAutoRaise(true);
     m_emoji->setPopupMode(QToolButton::InstantPopup);
-    m_emoji->setStyleSheet(QStringLiteral("QToolButton::menu-indicator { image: none; width: 0px; }"));
     auto* emojiMenu = new QMenu(m_emoji);
     emojiMenu->setObjectName(QStringLiteral("peersEmojiMenu"));
     connect(emojiMenu, &QMenu::aboutToShow, this, [this, emojiMenu] { fillEmojiMenu(emojiMenu); });
@@ -541,8 +540,6 @@ void PeersSidePanel::fillEmojiMenu(QMenu* menu) {
     scaled::margins(layout, 6, 6, 6, 6);
     scaled::spacing(layout, 4);
     constexpr int kColumns = 8;
-    QFont font = grid->font();
-    font.setPointSizeF(font.pointSizeF() * 1.4);
     const auto addRow = [&](const QString& title, const QStringList& emoji) {
         auto* label = new QLabel(title, grid);
         label->setObjectName(QStringLiteral("propertyNote"));
@@ -552,9 +549,10 @@ void PeersSidePanel::fillEmojiMenu(QMenu* menu) {
         for (qsizetype i = 0; i < emoji.size(); ++i) {
             auto* button = new QToolButton(grid);
             button->setText(emoji[i]);
-            button->setFont(font);
+            // Styled by the theme (dark.qss): no padding, a larger font.
+            button->setObjectName(QStringLiteral("peersEmojiCell"));
             button->setAutoRaise(true);
-            scaled::fixedSize(button, 30, 30);
+            scaled::fixedSize(button, 32, 32);
             const QString chosen = emoji[i];
             connect(button, &QToolButton::clicked, this, [this, menu, chosen] {
                 insertEmoji(chosen);

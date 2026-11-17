@@ -405,6 +405,34 @@ QTabBar#scriptTabs[focused="true"]::tab:selected:hover {
     background: @accent-hover;
 }
 
+/* The Peers panel's emoji button and its grid (docs/PEERS.md §14.3): square cells with
+   nothing but the emoji, which a button's usual padding would leave no room for. */
+QToolButton#peersEmoji {
+    padding: 0 6px;
+}
+
+QToolButton#peersEmoji::menu-indicator {
+    image: none;
+    width: 0;
+}
+
+QToolButton#peersEmojiCell {
+    min-height: 0;
+    padding: 0;
+    font-size: 18px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+}
+
+QToolButton#peersEmojiCell:hover {
+    background: rgba(255, 255, 255, 10%);
+}
+
+QToolButton#peersEmojiCell:pressed {
+    background: @accent;
+}
+
 QToolButton#scriptTabClose {
     background: transparent;
     border: none;

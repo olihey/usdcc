@@ -9,7 +9,10 @@
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/peers_side_panel.h"
+#include "usdcc/ui/scale_controller.h"
+#include "usdcc/ui/theme.h"
 
+#include <QApplication>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -178,13 +181,41 @@ USDCC_TEST(peers_panel_emoji) {
     if (!menu) {
         return;
     }
+    // Each opening fills the menu afresh, so its cells are looked up after.
+    const auto cellsOf = [menu] { return menu->findChildren<QToolButton*>(); };
     Q_EMIT menu->aboutToShow();
-    QList<QToolButton*> cells;
-    for (QToolButton* cell : menu->findChildren<QToolButton*>()) {
-        cells.append(cell);
-    }
+    QList<QToolButton*> cells = cellsOf();
     CHECK(cells.size() == PeersSidePanel::kRecentEmoji + PeersSidePanel::emojiChoices().size(), "the menu has %lld cells",
           qlonglong(cells.size()));
+    // With the app's theme, whose buttons have padding a cell has no room for: each
+    // emoji fits, rather than showing as "…".
+    {
+        auto& app = *static_cast<QApplication*>(QCoreApplication::instance());
+        usdcc::ui::UiScaleController scale(app, folder.filePath(QStringLiteral("ui.ini")));
+        const QString before = app.styleSheet();
+        usdcc::ui::theme::apply(app);
+        // Open, as the user sees it: a hidden menu's cells don't take the new theme yet.
+        menu->popup(QPoint(0, 0));
+        CHECK(QTest::qWaitFor([menu] { return menu->isVisible(); }), "the emoji menu didn't open");
+        cells = cellsOf();
+        // A tool button's size hint is its text, two spaces Qt adds around it, and the
+        // theme's padding and border: without the two spaces, the room the emoji needs.
+        int squeezed = 0;
+        QString which;
+        int needed = 0;
+        for (QToolButton* cell : cells) {
+            const int room = cell->sizeHint().width() - 2 * cell->fontMetrics().horizontalAdvance(QLatin1Char(' '));
+            if (room > cell->width()) {
+                ++squeezed;
+                which = cell->text();
+                needed = room;
+            }
+        }
+        CHECK(squeezed == 0, "%d emoji don't fit their cell, %s among them (%d of %d wide needed)", squeezed,
+              qPrintable(which), needed, cells.value(0)->width());
+        menu->hide();
+        app.setStyleSheet(before);
+    }
     say->clear();
     for (QToolButton* cell : cells) {
         if (cell->text() == QStringLiteral("🚀")) {
