@@ -61,6 +61,10 @@ private:
     bool m_addedVerticalTitleBar = false;
     // From a title bar double-click until the button is released (see event()).
     bool m_ignoreDrag = false;
+    // Floating, from a press on the window's own title bar until it's let go: where
+    // it was pressed, in the panel's coordinates (see event()).
+    bool m_titleDrag = false;
+    QPoint m_titlePress;
     // The content's own limits, put back on expanding.
     QSize m_contentMinimum;
     QSize m_contentMaximum;

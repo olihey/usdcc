@@ -1,6 +1,7 @@
 #include "usdcc/ui/side_panel.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QList>
 #include <QMainWindow>
 #include <QMouseEvent>
@@ -158,7 +159,42 @@ bool SidePanel::event(QEvent* event) {
         if (event->type() == QEvent::MouseMove) return true;
         if (event->type() == QEvent::MouseButtonRelease) m_ignoreDrag = false;
     }
-    return QDockWidget::event(event);
+
+    // A floating panel dragged by its window's title bar: Qt docks it where its
+    // position plus the point pressed puts the cursor. But with screens scaled, Qt
+    // gives each screen coordinates of its own, and once most of the panel is over
+    // the next screen its position is in that screen's, hundreds of pixels off: the
+    // main window's edge beside that screen never takes it (a wide panel, grabbed
+    // far from the edge it's dragged to). The point pressed stays under the cursor,
+    // so Qt is told the position that puts it there.
+    switch (event->type()) {
+        case QEvent::NonClientAreaMouseButtonPress:
+            m_titleDrag = isFloating();
+            m_titlePress = static_cast<QMouseEvent*>(event)->position().toPoint();
+            break;
+        case QEvent::Resize:
+            // As Qt keeps its point pressed in a panel resized on the way.
+            if (const auto* resize = static_cast<QResizeEvent*>(event);
+                m_titleDrag && resize->oldSize().width() > 0 && resize->size().width() > 0) {
+                m_titlePress.setX(m_titlePress.x() * resize->size().width() / resize->oldSize().width());
+            }
+            break;
+        case QEvent::Move:
+            if (m_titleDrag && isFloating()) {
+                QMoveEvent underCursor(QCursor::pos() - m_titlePress, static_cast<QMoveEvent*>(event)->oldPos());
+                return QDockWidget::event(&underCursor);
+            }
+            break;
+        default:
+            break;
+    }
+    // Qt ends the drag on the mouse moving after the release, or the release.
+    const bool dragEnds = event->type() == QEvent::NonClientAreaMouseButtonRelease ||
+                          event->type() == QEvent::NonClientAreaMouseMove ||
+                          event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::Hide;
+    const bool handled = QDockWidget::event(event);
+    if (dragEnds) m_titleDrag = false;
+    return handled;
 }
 
 }  // namespace usdcc::ui

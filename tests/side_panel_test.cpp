@@ -13,6 +13,7 @@
 #include "usdcc/ui/side_panel.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
@@ -154,6 +155,70 @@ USDCC_TEST(side_panel_collapse) {
         log->setCollapsed(true);
         CHECK(!log->isCollapsed(), "a floating panel doesn't collapse");
     }
+}
+
+namespace {
+// Keeps the positions its moves are seen with.
+class MovesKept : public SidePanel {
+public:
+    using SidePanel::SidePanel;
+    QList<QPoint> moves;
+
+protected:
+    void moveEvent(QMoveEvent* event) override {
+        moves.append(event->pos());
+        SidePanel::moveEvent(event);
+    }
+};
+}  // namespace
+
+// A floating panel dragged by its window's title bar: Qt docks it where its position
+// puts the point pressed, and is told the position that puts that point under the
+// cursor. With screens scaled, the one Qt has jumps by hundreds of pixels once most of
+// the panel is over the next screen, and the main window's edge beside it never took
+// the panel. (Qt starts no drag on the offscreen platform, whose windows have no title
+// bar: this checks what Qt is told, not the docking.)
+USDCC_TEST(side_panel_title_drag_follows_cursor) {
+    // The offscreen platform's cursor is make-believe; any other's is the user's.
+    if (QGuiApplication::platformName() != QLatin1String("offscreen")) return;
+    TestSettings settings;
+    MainWindow window;
+    auto* panel = new MovesKept(QStringLiteral("Wide"));
+    panel->setWidget(new QLabel(QStringLiteral("wide")));
+    window.addSidePanel(panel, Qt::RightDockWidgetArea);
+    window.resize(1200, 800);
+    window.show();
+    settle(window);
+    const QPoint pressed(300, -12);  // on the title bar, above the panel's inside
+    const auto titleBar = [panel, pressed](QEvent::Type type, Qt::MouseButtons held) {
+        QMouseEvent event(type, QPointF(pressed), QPointF(panel->mapToGlobal(pressed)), Qt::LeftButton, held,
+                          Qt::NoModifier);
+        QApplication::sendEvent(panel, &event);
+    };
+    const auto moveTo = [panel](QPoint position) {
+        QMoveEvent event(position, panel->pos());
+        QApplication::sendEvent(panel, &event);
+    };
+
+    // Docked, its title bar is the panel's own: nothing to do.
+    panel->moves.clear();
+    titleBar(QEvent::NonClientAreaMouseButtonPress, Qt::LeftButton);
+    QCursor::setPos(QPoint(900, 400));
+    moveTo(QPoint(1668, 412));
+    CHECK(panel->moves.value(0) == QPoint(1668, 412), "a docked panel's move was changed");
+    titleBar(QEvent::NonClientAreaMouseButtonRelease, Qt::NoButton);
+
+    panel->setFloating(true);
+    QApplication::processEvents();
+    panel->moves.clear();
+    titleBar(QEvent::NonClientAreaMouseButtonPress, Qt::LeftButton);
+    moveTo(QPoint(1668, 412));  // as on the next screen
+    CHECK(panel->moves.value(0) == QPoint(900, 400) - pressed, "dragged, Qt is told (%d, %d), not where the cursor puts it",
+          panel->moves.value(0).x(), panel->moves.value(0).y());
+    // Let go: Qt sees moves as they are again.
+    titleBar(QEvent::NonClientAreaMouseButtonRelease, Qt::NoButton);
+    moveTo(QPoint(1668, 412));
+    CHECK(panel->moves.value(1) == QPoint(1668, 412), "after the drag, a move was changed");
 }
 
 // View > Full Screen, under UI Scale: toggles the window and follows its state.
