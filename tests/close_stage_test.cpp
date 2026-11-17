@@ -62,6 +62,12 @@ void answerNextDialog(std::function<void(CloseStageDialog*)> answer) {
 }  // namespace
 
 USDCC_TEST(close_stage_dialog_offers_stages_staying_open) {
+    // The dialog's scaled minimum width needs a controller: without one,
+    // UiScaleController::instance() makes a lasting one on the application,
+    // which later tests' controllers would then sit behind.
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
     StageManager stages;
     const StageRefPtr one = stages.createStage();
     const StageRefPtr two = stages.createStage();
