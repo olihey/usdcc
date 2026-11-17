@@ -1,10 +1,13 @@
-# Asset Picker (plan)
+# Asset Picker
 
 One dialog for choosing an asset: a local file, or a file on any server that can be browsed. It
 replaces the system file dialog wherever usdcc asks for a USD file or an asset path.
 
-**Status:** planned 2026-11-16, favourites (§3.1) and the scheme dropdown (§3.2) added 2026-11-17. Nothing is built yet. It is
-phase 5 of [REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.
+**Status:** built 2026-11-17, phase 5 of [REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13, but for what §9
+lists. Planned 2026-11-16; favourites (§3.1) and the scheme dropdown (§3.2) were added on the 17th.
+The code: [asset_sources.h](../src/cpp/usd/include/usdcc/usd/asset_sources.h) (the sources, Qt-free)
+and [asset_picker.h](../src/cpp/usd/include/usdcc/usd/asset_picker.h) (the dialog, favourites,
+`pickAsset()`).
 
 ## 1. Why it needs its own interface
 
@@ -18,20 +21,20 @@ one can only be given typed paths.
 ```cpp
 namespace usdcc::usd {
 
-struct AssetRoot  { std::string label; std::string uri; };            // "studio", "webdav://studio/"
-struct AssetEntry { std::string name; bool isFolder = false; uint64_t size = 0; double modified = 0;
-                    std::string origin; };                             // "test"; empty when there is one
+struct AssetRoot      { std::string label; std::string uri; };       // "studio", "webdav://studio/"
+struct AssetListEntry { std::string name; bool isFolder = false; uint64_t size = 0; double modified = 0;
+                        std::string origin; };                         // "test"; empty when there is one
 
 class AssetSource {
 public:
     virtual ~AssetSource();
     virtual std::string id() const = 0;
-    virtual std::string label() const = 0;                             // "WebDAV"
-    virtual std::vector<AssetRoot> roots(const PXR_NS::ArResolverContext&) const = 0;
-    // On a worker thread. Throws with a message for the dialog.
-    virtual std::vector<AssetEntry> list(const std::string& uri, const PXR_NS::ArResolverContext&,
-                                         const CancelToken&) = 0;
-    virtual bool canWrite(const std::string& uri, const PXR_NS::ArResolverContext&) const { return false; }
+    virtual std::string label() const = 0;
+    virtual std::vector<std::string> schemes() const = 0;              // what it lists: "webdav", "webdavs"
+    virtual std::vector<AssetRoot> roots(const std::string& scheme, const PXR_NS::ArResolverContext&) const = 0;
+    // On a worker thread. Throws std::runtime_error with a message for the dialog.
+    virtual std::vector<AssetListEntry> list(const std::string& uri, const PXR_NS::ArResolverContext&,
+                                             usdcc::assets::Cancel& cancel) = 0;
 };
 
 class AssetSourceRegistry {    // a singleton in usdcc_usd, which has no Qt
@@ -39,6 +42,8 @@ public:
     static AssetSourceRegistry& instance();
     void add(std::shared_ptr<AssetSource>);
     void remove(const std::string& id);
+    std::shared_ptr<AssetSource> forScheme(const std::string& scheme) const;
+    std::vector<std::string> browsableSchemes() const;
 };
 
 }  // namespace usdcc::usd
@@ -48,8 +53,8 @@ Who registers one:
 
 | Source | Registered by |
 |---|---|
-| **Every protocol built on `usdcc_assets` that can list** | The app, once: one source that lists each name of the stage's environment through the transports ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §6). A listing is the union of the stack, each entry with its origin. Plain HTTP can't list, so it has no place in the dialog: its URLs are typed or pasted (§3) |
-| **Another resolver's plugin** | `Host::addAssetSource()` in C++ ([PLUGIN_SDK.md](PLUGIN_SDK.md)), `usdcc.usd.register_asset_source()` in Python |
+| **Every protocol built on `usdcc_assets` that can list** | `AssetSourceRegistry` itself, on first use: one source for every scheme whose transport says `canList()` (WebDAV's do), listing through `usdcc::assets::listUri()`. Its roots are the names of the stage's environment; a server by address (`webdav://192.168.1.5:5000/`) is listed through the address parser its protocol registers. A listing is the union of the stack, each entry with its origin. Plain HTTP can't list, so its URLs are typed (§3) |
+| **Another resolver's plugin** | `AssetSourceRegistry::instance().add()` in C++. *Not built:* `Host::addAssetSource()`, which would also note it in the Plugins panel, and Python's `usdcc.usd.register_asset_source()` |
 | **Local files** | Built into the dialog, not a source |
 
 ## 3. The dialog
@@ -265,3 +270,44 @@ Favourites: `usdcc.usd.asset_favorites()` lists the user's as `(label, path)`, a
 | 7 | Favourites in the system file dialog's sidebar too? | No. Windows' own dialog takes no sidebar from the app, and it can't open a server's paths anyway |
 | 8 | Should the scheme dropdown hide schemes that can't be browsed (`http`, `https`)? | No. They can't be browsed because plain HTTP has no request for listing a folder (a server's HTML index page isn't part of the protocol), whereas WebDAV has `PROPFIND`. Browsing never comes from OpenUSD's `ArResolver`, which can't list for any scheme, but from a source's `list()` (§2). A URL can still be typed for them, and seeing the scheme says the protocol is installed |
 | 9 | Label schemes by their protocol's name ("WebDAV") rather than `webdav://`? | Show the scheme as written, since that is what the path will hold; the protocol's name goes in the tooltip |
+
+## 9. As built
+
+Built 2026-11-17 with what §2 to §5 describe, and checked in usdcc_ui_tests
+([asset_picker_test.cpp](../tests/asset_picker_test.cpp), on a source registered by the test):
+browsing a scheme's roots and its folders, filters, where entries came from, a failing listing's
+message, a slow listing left behind not landing, a scheme with no resolver refused, the star, a
+favourite on a name the environment lacks greyed with no request made, favourites added, named,
+renamed, moved and removed, recent folders, a `file:///` start, a missing file not chosen, This PC,
+and relative paths on disk and on a server.
+
+**Where it's used,** in place of the system dialog: File > Open Stage, Open Stage with Options,
+Preview > Show USDA and Show Prims, the Layer Editor's Add Existing Layer, the asset field's "…"
+(the Attribute Editor, the Material Editor's node inputs and Add Input, a composition arc's file),
+and Add Reference and Add Payload. A sublayer or reference on a server is written relative to its
+layer when both are on one server (`relativeAssetPath()`), else by its logical path.
+
+**How it behaves where the plan left it open:**
+
+- **Listings are on a detached thread,** so an offline share or a slow server holds up neither the
+  dialog nor its closing. Leaving a folder cancels its listing, and a late answer is dropped.
+- **A file picked from a listing is taken as it is;** one typed or pasted is first resolved through
+  the stage's environment (on the UI thread, once, for that file).
+- **Going to a server's folder allows its host for the session,** as opening a stage does.
+- **The scheme dropdown** holds `file://`, the schemes a source lists, then the rest OpenUSD
+  registered; each one's tooltip says whether it can be browsed and through which resolver.
+- **Places' server headings** are the schemes with roots (`webdav://` and its names); a scheme with
+  none, such as `webdavs://`, is only in the dropdown.
+- **The star** only updates itself and Places; the folder isn't listed again.
+
+**Not built:**
+
+- **Dragging** a folder onto Favourites, and reordering them by dragging: Move Up and Move Down do it.
+- **Completion** of the path from the folder's listing.
+- **Python** (§6), and `Host::addAssetSource()` for C++ plugins.
+- **The save mode** (§5): writing is phase 6. New Layer File, Save As and the rest keep the system
+  dialog.
+- **The session's "Where is …?"** keeps the system dialog: a stage on a server is never reported
+  missing, so it only ever asks for a file on disk.
+
+**Not checked:** the dialog clicked through by hand, and drawn: the tests drive it offscreen.

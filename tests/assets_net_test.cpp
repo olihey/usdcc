@@ -26,6 +26,7 @@
 #include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/zipFile.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -449,6 +450,44 @@ USDCC_TEST(assets_webdav_credentials_and_a_server_that_is_down) {
     }
     TfUnsetenv("USDCC_ASSETS_STUDIO_USER");
     TfUnsetenv("USDCC_ASSETS_STUDIO_PASSWORD");
+}
+
+// A .usdz on a server: Sdf anchors the relative paths inside a package against the
+// layer's repository path, so that path has to resolve through WebDAV again, by name and
+// by address. It once was the server's http:// URL, and a .usdz's textures went to the
+// plain HTTP resolver, unresolved.
+USDCC_TEST(assets_webdav_usdz_contents_resolve) {
+    Net net;
+    TwoServers servers(net);
+    const fs::path source = net.root / "package";
+    writeFile(source / "scene.usda",
+              "#usda 1.0\n(\n    defaultPrim = \"Model\"\n)\n\n"
+              "def Xform \"Model\"\n{\n    custom asset tex = @textures/wood.txt@\n}\n");
+    writeFile(source / "textures/wood.txt", "zipped texture");
+    fs::create_directories(servers.prodFolder.root / "pkg");
+    {
+        SdfZipFileWriter zip = SdfZipFileWriter::CreateNew(toUtf8(servers.prodFolder.root / "pkg/model.usdz"));
+        zip.AddFile(toUtf8(source / "scene.usda"), "scene.usda");
+        zip.AddFile(toUtf8(source / "textures/wood.txt"), "textures/wood.txt");
+        CHECK(zip.Save(), "a .usdz is made");
+    }
+
+    const auto check = [](const UsdStageRefPtr& stage, const std::string& expectedRepo, const char* how) {
+        CHECK(stage, "%s: the .usdz opens", how);
+        if (!stage) return;
+        CHECK(stage->GetRootLayer()->GetRepositoryPath() == expectedRepo, "%s: its repository path names it: %s", how,
+              stage->GetRootLayer()->GetRepositoryPath().c_str());
+        const std::string tex = assetAttribute(stage, "/Model", "tex");
+        CHECK(tex.rfind("webdav://", 0) == 0 && tex.find("model.usdz[textures/wood.txt]") != std::string::npos,
+              "%s: a texture inside it resolves inside the package, through WebDAV: %s", how, tex.c_str());
+        CHECK(openedContent(tex) == "zipped texture", "%s: and opens with no context bound", how);
+    };
+
+    check(UsdStage::Open("webdav://studio/pkg/model.usdz", servers.context("prod")), "webdav://studio/pkg/model.usdz", "by name");
+
+    const std::string address = "webdav://127.0.0.1:" + std::to_string(servers.prod.port()) + "/pkg/model.usdz";
+    allowHostOfUrl(address);
+    check(UsdStage::Open(address), address, "by address");
 }
 
 USDCC_TEST(assets_webdav_by_address) {

@@ -39,7 +39,9 @@ OpenStageOptionsDialog::OpenStageOptionsDialog(const QString& path, const usdcc:
 
     auto* name = new QLabel(QStringLiteral("<b>%1</b>").arg(QFileInfo(path).fileName().toHtmlEscaped()), this);
     layout->addWidget(name);
-    auto* where = new QLabel(QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()), this);
+    auto* where = new QLabel(isLocalAssetPath(path.toStdString()) ? QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath())
+                                                                     : path,
+                             this);
     where->setTextInteractionFlags(Qt::TextSelectableByMouse);
     where->setEnabled(false);
     layout->addWidget(where);

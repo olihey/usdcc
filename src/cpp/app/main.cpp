@@ -65,6 +65,8 @@
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/open_stage_options_dialog.h"
 #include "usdcc/usd/asset_settings.h"
+#include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/assets/activity.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
@@ -564,9 +566,16 @@ int main(int argc, char** argv) {
                      [openStageAction](bool busy) { openStageAction->setEnabled(!busy); });
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::showLogRequested, window.logPanel(),
                      &usdcc::ui::LogSidePanel::showLatest);
-    QObject::connect(openStageAction, &QAction::triggered, &window, [stageOpener, &window]() {
-        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
-                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+    // The asset picker (docs/ASSET_PICKER.md): a stage on disk or on a server.
+    const auto pickStage = [&window](const QString& title) {
+        usdcc::usd::AssetPickerOptions options;
+        options.title = title;
+        options.filters = {QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)")};
+        options.context = usdcc::usd::stageResolverContext(std::string());
+        return usdcc::usd::pickAsset(&window, options);
+    };
+    QObject::connect(openStageAction, &QAction::triggered, &window, [stageOpener, pickStage]() {
+        const QString path = pickStage(QObject::tr("Open USD Stage"));
         if (!path.isEmpty()) {
             stageOpener->open(path);
         }
@@ -578,9 +587,8 @@ int main(int argc, char** argv) {
         QObject::tr("Open a stage, choosing whether it becomes current, a workspace, and whether its payloads load"));
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openWithOptionsAction,
                      [openWithOptionsAction](bool busy) { openWithOptionsAction->setEnabled(!busy); });
-    QObject::connect(openWithOptionsAction, &QAction::triggered, &window, [stageOpener, &window, &workspaceLibrary]() {
-        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Open USD Stage"), QString(),
-                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+    QObject::connect(openWithOptionsAction, &QAction::triggered, &window, [stageOpener, &window, &workspaceLibrary, pickStage]() {
+        const QString path = pickStage(QObject::tr("Open USD Stage"));
         if (path.isEmpty()) return;
         usdcc::usd::OpenStageOptionsDialog dialog(path, &workspaceLibrary, &window);
         if (dialog.exec() == QDialog::Accepted) stageOpener->open(path, dialog.options());
@@ -736,16 +744,14 @@ int main(int argc, char** argv) {
 
     // File > Preview > Show USDA...: as text (docs/USDA_VIEW.md §10).
     QAction* showUsdaAction = previewMenu->addAction(QObject::tr("Show &USDA..."));
-    QObject::connect(showUsdaAction, &QAction::triggered, &window, [&window]() {
-        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show USDA"), QString(),
-                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+    QObject::connect(showUsdaAction, &QAction::triggered, &window, [&window, pickStage]() {
+        const QString path = pickStage(QObject::tr("Show USDA"));
         if (!path.isEmpty()) usdcc::usd::showUsdaPreview(path, &window);
     });
     // File > Preview > Show Prims...: as a tree of its prims (docs/SHOW_PRIMS.md).
     QAction* showPrimsAction = previewMenu->addAction(QObject::tr("Show &Prims..."));
-    QObject::connect(showPrimsAction, &QAction::triggered, &window, [&window]() {
-        const QString path = QFileDialog::getOpenFileName(&window, QObject::tr("Show Prims"), QString(),
-                                                            QObject::tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+    QObject::connect(showPrimsAction, &QAction::triggered, &window, [&window, pickStage]() {
+        const QString path = pickStage(QObject::tr("Show Prims"));
         if (!path.isEmpty()) usdcc::usd::showPrimTree(path, &window);
     });
 

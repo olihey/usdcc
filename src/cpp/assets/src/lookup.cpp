@@ -187,6 +187,35 @@ Found findInStack(const Stack& stack, const std::string& path, Lookups* scope) {
     return found;
 }
 
+Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context) {
+    using Listed = Result<std::vector<ListedEntry>>;
+    Uri named;
+    if (parseUri(uri, &named) && named.stackId.empty()) {
+        if (const std::shared_ptr<const Stack> stack = context.stack(named.scheme, named.name)) {
+            return listFolder(*stack, named.path);
+        }
+    }
+    const size_t colon = uri.find("://");
+    const AddressParser parser = colon == std::string::npos ? AddressParser() : addressParserFor(uri.substr(0, colon));
+    Endpoint endpoint;
+    std::string path;
+    std::string normalized;
+    if (!parser || !parser(uri, &endpoint, &path, &normalized)) {
+        return Listed::failure(Status::Missing, named.name.empty() ? "it isn't a server's path"
+                                                                   : "the environment '" + context.environment() +
+                                                                         "' has no server named '" + named.name + "'");
+    }
+    const size_t start = normalized.find("://") + 3;
+    std::string host = normalized.substr(start, normalized.find('/', start) - start);
+    if (host.rfind(':') != std::string::npos && host.find(']', host.rfind(':')) == std::string::npos) host.erase(host.rfind(':'));
+    if (!hostAllowed(host)) return Listed::failure(Status::NotAllowed, "the host '" + host + "' isn't allowed");
+    Stack stack;
+    stack.scheme = endpoint.scheme;
+    stack.name = endpoint.id;
+    stack.endpoints.push_back(endpoint);
+    return listFolder(stack, path);
+}
+
 Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::string& folder, Lookups* scope) {
     using Listed = Result<std::vector<ListedEntry>>;
     const std::shared_ptr<Transport> transport = transportFor(stack.scheme);

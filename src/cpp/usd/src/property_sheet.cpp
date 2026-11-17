@@ -27,6 +27,8 @@
 #include "usdcc/usd/properties/category_section.h"
 #include "usdcc/usd/properties/number_field.h"
 #include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/properties/transform_stack_editor.h"
 #include "usdcc/usd/property_categorizer.h"
@@ -1143,12 +1145,19 @@ void PropertySheet::addArcInteractively(int typeValue) {
         // Relative to the layer being edited, when it's a file, as an asset
         // field makes it.
         const SdfLayerHandle layer = m_stage->usdStage()->GetEditTarget().GetLayer();
-        const QString file =
-            QFileDialog::getOpenFileName(this, tr("Add %1").arg(typeName), properties::layerFileFolder(layer),
-                                         tr("USD Files (*.usd *.usda *.usdc *.usdz);;All Files (*)"));
-        if (file.isEmpty()) return;
-        // Absolute in a .usdz, where a relative path is anchored inside it.
-        const QString assetPath = properties::assetPathForFile(file, properties::layerFolder(layer));
+        // The asset picker (docs/ASSET_PICKER.md): a file on disk or on a server, written
+        // relative to the layer when asked (absolute in a .usdz, where a relative path is
+        // anchored inside it).
+        AssetPickerOptions options;
+        options.title = tr("Add %1").arg(typeName);
+        options.filters = {tr("USD Files (*.usd *.usda *.usdc *.usdz)")};
+        const std::string identifier = layer && !layer->IsAnonymous() ? layer->GetIdentifier() : std::string();
+        options.start = isLocalAssetPath(identifier) ? properties::layerFileFolder(layer)
+                                                     : QString::fromStdString(identifier);
+        options.context = m_stage->usdStage()->GetPathResolverContext();
+        options.anchorLayer = layer;
+        const QString assetPath = pickAsset(this, options);
+        if (assetPath.isEmpty()) return;
         prim_actions::addArc(*m_undoManager, m_stage, prim.GetPath(), type, assetPath.toStdString(), SdfPath());
         return;
     }

@@ -158,7 +158,7 @@ resolved path.
 | Open | Downloads from the winner into the cache (§7) and returns an `ArFilesystemAsset` on that file |
 | Save (phase 6) | Goes to the first endpoint not marked `readOnly`. Saving a layer that came from PROD writes a copy to TEST |
 | Timestamp | Changes whenever the winner or its ETag changes, so `SdfLayer::Reload` notices a file that appears in TEST |
-| Asset info | The version is the ETag; the repository path is the real URL on the winning endpoint |
+| Asset info | The version is the ETag; the repository path is the logical path (`webdav://studio/a.usdz`), and which endpoint delivered it is the resolver info. *Changed 2026-11-17:* the plan had the server's real URL as the repository path, but Sdf anchors the relative paths inside a package (a `.usdz`'s textures) against it, so they went to the plain HTTP resolver |
 
 **Unreachable is not missing.** A 404 moves on to the next endpoint. A network error does not: it
 tries the endpoint's mirrors, and if none answers the resolve fails with a warning naming the
@@ -586,7 +586,7 @@ is not an `ArResolver` written in Python.
 | **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | **Done** (§13.3). `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | **Done** (§13.3), but for one thing: offline is a switch, and a network that goes away does not turn it on. Reopening a stage makes no downloads |
 | **4. usdcc** | Everything in §10 but the picker | **Done** (§13.4), with gaps marked in §10. A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
-| **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | A reference to a file on the server is added by browsing to it |
+| **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | **Done** (ASSET_PICKER.md §9), but for dragging, completion and Python. A reference to a file on the server is added by browsing to it |
 | **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |

@@ -96,6 +96,7 @@ add_executable(usdcc_ui_tests
     prim_tree_dialog_test.cpp
     property_row_test.cpp
     asset_path_test.cpp
+    asset_picker_test.cpp
     prim_tree_filter_test.cpp
     recent_files_test.cpp
     relationship_editor_test.cpp

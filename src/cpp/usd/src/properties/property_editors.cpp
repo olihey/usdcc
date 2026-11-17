@@ -3,6 +3,7 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/properties/array_editor_dialog.h"
 #include "usdcc/usd/properties/color_swatch.h"
@@ -623,14 +624,18 @@ private:
         const QString resolved = resolvedPath();
         // A file inside a .usdz resolves to "bike.usdz[tex.png]", which isn't a folder,
         // and one on a server has none on disk.
-        const QString start = !resolved.isEmpty() && !resolved.contains(QLatin1Char('[')) &&
-                                      isLocalAssetPath(resolved.toStdString())
-                                  ? QFileInfo(resolved).absolutePath()
-                                  : layerFileFolder(m_editLayer);
-        const QString file = QFileDialog::getOpenFileName(this, tr("Choose Asset"), start);
-        if (file.isEmpty()) return;
-        const QString dir = layerDir();
-        commit(assetPathForFile(file, dir));
+        const bool local = isLocalAssetPath(resolved.toStdString());
+        AssetPickerOptions options;
+        options.title = tr("Choose Asset");
+        // The file's own, where it resolves; else the layer's folder.
+        options.start = resolved.isEmpty() || resolved.contains(QLatin1Char('[')) ? layerFileFolder(m_editLayer)
+                        : local                                                   ? QFileInfo(resolved).absoluteFilePath()
+                                                                                  : resolved;
+        options.context = m_context;
+        // Written into the edit target, relative to it when asked.
+        options.anchorLayer = m_editLayer;
+        const QString path = pickAsset(this, options);
+        if (!path.isEmpty()) commit(path);
     }
     void toggleRelative() {
         const QString dir = layerDir();

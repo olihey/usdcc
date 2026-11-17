@@ -1,4 +1,7 @@
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/asset_servers.h"
+
+#include <pxr/usd/ar/resolverContextBinder.h>
 
 #include "usdcc/usd/undo_manager.h"
 
@@ -241,6 +244,12 @@ bool locate(const std::vector<LayerEntry>& entries, const std::string& identifie
 // How `layer` is written in `parent`'s sublayer list.
 std::string authoredPath(const PXR_NS::SdfLayerHandle& parent, const PXR_NS::SdfLayerHandle& layer) {
     if (layer->IsAnonymous() || layer->GetRealPath().empty()) return layer->GetIdentifier();
+    // On a server (docs/REMOTE_ASSETS.md §10): relative on one server, else the path that
+    // names it, never the resolved one with its stack id.
+    if (!isLocalAssetPath(layer->GetRealPath()) || (!parent->GetRealPath().empty() && !isLocalAssetPath(parent->GetRealPath()))) {
+        const std::string relative = relativeAssetPath(layer->GetIdentifier(), parent->GetIdentifier());
+        return relative.empty() ? layer->GetIdentifier() : relative;
+    }
     const QString file = QString::fromStdString(layer->GetRealPath());
     if (parent->IsAnonymous() || parent->GetRealPath().empty()) return QDir::fromNativeSeparators(file).toStdString();
     QString relative =
@@ -323,6 +332,8 @@ std::string addExistingLayer(UndoManager& undo, const StageRefPtr& stage, const 
                              const std::string& path, QString* error) {
     if (!stage) return {};
     const QString file = QString::fromStdString(path);
+    // One on a server is the one the stage's environment means.
+    const PXR_NS::ArResolverContextBinder binder(stage->usdStage()->GetPathResolverContext());
     const PXR_NS::SdfLayerRefPtr layer = PXR_NS::SdfLayer::FindOrOpen(path);
     if (!layer) {
         if (error) *error = tr("Can't open %1 as a layer.").arg(QDir::toNativeSeparators(file));

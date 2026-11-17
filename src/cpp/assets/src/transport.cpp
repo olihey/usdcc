@@ -20,6 +20,7 @@ namespace {
 struct Registry {
     std::mutex mutex;
     std::map<std::string, std::shared_ptr<Transport>> transports;
+    std::map<std::string, AddressParser> addressParsers;
 };
 
 Registry& registry() {
@@ -79,6 +80,31 @@ std::shared_ptr<Transport> transportFor(const std::string& scheme) {
     std::lock_guard<std::mutex> lock(all.mutex);
     const auto found = all.transports.find(scheme);
     return found == all.transports.end() ? nullptr : found->second;
+}
+
+std::vector<std::string> transportSchemes() {
+    Registry& all = registry();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    std::vector<std::string> schemes;
+    for (const auto& [scheme, transport] : all.transports) schemes.push_back(scheme);
+    return schemes;
+}
+
+void registerAddressParser(const std::string& scheme, AddressParser parser) {
+    Registry& all = registry();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    if (parser) {
+        all.addressParsers[scheme] = std::move(parser);
+    } else {
+        all.addressParsers.erase(scheme);
+    }
+}
+
+AddressParser addressParserFor(const std::string& scheme) {
+    Registry& all = registry();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    const auto found = all.addressParsers.find(scheme);
+    return found == all.addressParsers.end() ? AddressParser() : found->second;
 }
 
 void loadProtocolPlugins() {

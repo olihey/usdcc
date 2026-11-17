@@ -39,6 +39,12 @@ bool isLocalAssetPath(const std::string& path);
 // (webdav://studio~7c21/a.usd -> webdav://studio/a.usd), anything else as it is.
 std::string displayAssetPath(const std::string& resolvedPath);
 
+// `target` (a server's file) written relative to the layer at `anchor` (that layer's
+// path or resolved path): "../chars/hero.usd" from webdav://studio/shots/s.usd to
+// webdav://studio/chars/hero.usd. Empty when there is none: different schemes or servers,
+// or either isn't on a server (docs/ASSET_PICKER.md §4).
+std::string relativeAssetPath(const std::string& target, const std::string& anchor);
+
 // The server that delivered a resolved asset: an endpoint's id ("test", "prod") for a
 // named protocol, the host for plain HTTP. Empty for a local file.
 std::string assetOrigin(const std::string& assetPath, const std::string& resolvedPath);

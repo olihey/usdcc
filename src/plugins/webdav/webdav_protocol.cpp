@@ -107,6 +107,8 @@ public:
         return Result<Entry>::success(responses.front().entry);
     }
 
+    bool canList() const override { return true; }
+
     Result<std::vector<Entry>> list(const Endpoint& endpoint, const std::string& folder, Cancel& cancel) override {
         using Listed = Result<std::vector<Entry>>;
         std::vector<Response> responses;
@@ -181,14 +183,6 @@ private:
     }
 };
 
-// When the library loads.
-const struct RegisterTransport {
-    RegisterTransport() {
-        const std::shared_ptr<WebDavTransport> transport = std::make_shared<WebDavTransport>();
-        registerTransport("webdav", transport);
-        registerTransport("webdavs", transport);
-    }
-} kRegisterTransport;
 
 // A server by its address (docs/WEBDAV_RESOLVER.md §2.1): webdav://192.168.1.5:5000/a.usd is
 // http://192.168.1.5:5000/a.usd, webdavs:// the same over https.
@@ -237,6 +231,38 @@ bool looksLikeAddress(const DirectUrl& url) {
            (!url.host.empty() && url.host.front() == '[');
 }
 
+// What an address means (docs/WEBDAV_RESOLVER.md §2.1): one endpoint, its credential
+// named after the address unless the configuration names one. False for anything else.
+bool addressEndpoint(const std::string& uri, Endpoint* endpoint, std::string* path, std::string* normalized) {
+    DirectUrl url;
+    if (!parseDirect(uri, &url) || !looksLikeAddress(url)) return false;
+    Endpoint made;
+    made.id = url.authority();
+    made.scheme = "webdav";
+    made.url = url.httpUrl();
+    made.readOnly = true;
+    const Config config = defaultConfig();
+    const auto host = config.httpHosts.find(url.host);
+    if (host != config.httpHosts.end()) made.credential = host->second.credential;
+    // Else the address is the credential's name: what Edit > Asset Server Login is given.
+    if (made.credential.empty()) made.credential = credentialIdForAddress(url.host, url.port);
+    *endpoint = std::move(made);
+    *path = url.path;
+    *normalized = url.text();
+    return true;
+}
+
+// When the library loads: the transport of both schemes, and what an address means in them.
+const struct RegisterTransport {
+    RegisterTransport() {
+        const std::shared_ptr<WebDavTransport> transport = std::make_shared<WebDavTransport>();
+        registerTransport("webdav", transport);
+        registerTransport("webdavs", transport);
+        registerAddressParser("webdav", addressEndpoint);
+        registerAddressParser("webdavs", addressEndpoint);
+    }
+} kRegisterTransport;
+
 }  // namespace
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -250,33 +276,28 @@ protected:
     // that server directly, with no stack and no context.
     bool _Locate(const std::string& assetPath, Location* location, std::string* why) const override {
         if (CachingResolver::_Locate(assetPath, location, why)) return true;
+        usdcc::assets::Endpoint endpoint;
+        std::string path;
+        std::string normalized;
+        if (!addressEndpoint(assetPath, &endpoint, &path, &normalized)) return false;
         DirectUrl url;
-        if (!parseDirect(assetPath, &url) || !looksLikeAddress(url)) return false;
+        parseDirect(normalized, &url);
+        const std::string& hostOnly = url.host;
         // A stage can name any address, as with plain HTTP (docs/HTTP_RESOLVER.md §4).
-        if (!usdcc::assets::hostAllowed(url.host)) {
-            *why = "the host '" + url.host +
+        if (!usdcc::assets::hostAllowed(hostOnly)) {
+            *why = "the host '" + hostOnly +
                    "' isn't one this stage may contact (Settings > Assets > Allowed hosts, the configuration's \"http\" "
                    "\"allow\" list, or USDCC_HTTP_ALLOW)";
             return false;
         }
-        usdcc::assets::Endpoint endpoint;
-        endpoint.id = url.authority();
-        endpoint.scheme = "webdav";
-        endpoint.url = url.httpUrl();
-        endpoint.readOnly = true;
-        const usdcc::assets::Config config = usdcc::assets::defaultConfig();
-        const auto host = config.httpHosts.find(url.host);
-        if (host != config.httpHosts.end()) endpoint.credential = host->second.credential;
-        // Else the address is the credential's name: what Edit > Asset Server Login is given.
-        if (endpoint.credential.empty()) endpoint.credential = usdcc::assets::credentialIdForAddress(url.host, url.port);
         usdcc::assets::Stack stack;
         stack.scheme = "webdav";
-        stack.name = url.authority();
+        stack.name = endpoint.id;
         stack.endpoints.push_back(std::move(endpoint));
+        location->path = path;
+        location->resolved = normalized;
+        location->display = normalized;
         location->stack = std::make_shared<const usdcc::assets::Stack>(std::move(stack));
-        location->path = url.path;
-        location->resolved = url.text();
-        location->display = location->resolved;
         return true;
     }
 

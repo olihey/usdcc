@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -66,6 +67,8 @@ public:
 
     // The files and folders directly in `folder`. "Not supported" unless overridden.
     virtual Result<std::vector<Entry>> list(const Endpoint& endpoint, const std::string& folder, Cancel& cancel);
+    // Whether list() does: what makes a protocol's folders browsable in the asset picker.
+    virtual bool canList() const { return false; }
 
     // Writes the file to `into`. With `knownEtag`, NotModified is a result and nothing is written.
     virtual Result<Entry> fetch(const Endpoint& endpoint, const std::string& path, const std::filesystem::path& into,
@@ -80,6 +83,17 @@ public:
 // own when it loads; registering a scheme again replaces the transport.
 void registerTransport(const std::string& scheme, std::shared_ptr<Transport> transport);
 std::shared_ptr<Transport> transportFor(const std::string& scheme);
+// The schemes a transport is registered for, sorted.
+std::vector<std::string> transportSchemes();
+
+// For a protocol that takes a server's address in place of a name
+// (webdav://192.168.1.5:5000/a.usd, docs/WEBDAV_RESOLVER.md §2.1): the single
+// endpoint an address means, the path on it, and the URI normalized. False when
+// `uri` isn't an address of this protocol. Registered with the transport.
+using AddressParser =
+    std::function<bool(const std::string& uri, Endpoint* endpoint, std::string* path, std::string* normalized)>;
+void registerAddressParser(const std::string& scheme, AddressParser parser);
+AddressParser addressParserFor(const std::string& scheme);
 
 // Loads the plugin of every resolver whose plugInfo.json entry says
 // "usdccAssetsProtocol": true, so that its transport is registered before anything

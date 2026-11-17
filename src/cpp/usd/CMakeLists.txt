@@ -26,6 +26,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/shade_connections.h
     include/usdcc/usd/stage_manager.h
     include/usdcc/usd/asset_servers.h
+    include/usdcc/usd/asset_sources.h
     include/usdcc/usd/stage_names.h
     include/usdcc/usd/tf_diagnostic_bridge.h
     include/usdcc/usd/time_range.h
@@ -71,6 +72,7 @@ add_library(usdcc_usd SHARED
     src/stage.cpp
     src/stage_manager.cpp
     src/asset_servers.cpp
+    src/asset_sources.cpp
     src/stage_names.cpp
     src/tf_diagnostic_bridge.cpp
     src/value_type_info.cpp
@@ -129,6 +131,8 @@ add_subdirectory(python)
 # dependency it doesn't otherwise need — usdcc.usd's Python bindings only
 # expose StageManager's plain data surface.
 add_library(usdcc_usd_ui SHARED
+    include/usdcc/usd/asset_picker.h
+    src/asset_picker.cpp
     include/usdcc/usd/asset_settings.h
     src/asset_settings.cpp
     include/usdcc/usd/attributes_view_panel.h

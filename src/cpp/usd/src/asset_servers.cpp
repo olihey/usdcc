@@ -7,6 +7,7 @@
 #include <pxr/usd/ar/resolver.h>
 
 #include <algorithm>
+#include <cctype>
 #include <mutex>
 
 namespace usdcc::usd {
@@ -78,6 +79,47 @@ std::string displayAssetPath(const std::string& resolvedPath) {
     const size_t tilde = resolvedPath.find('~', authority);
     if (tilde == std::string::npos || (slash != std::string::npos && tilde > slash)) return resolvedPath;
     return resolvedPath.substr(0, tilde) + (slash == std::string::npos ? std::string() : resolvedPath.substr(slash));
+}
+
+std::string relativeAssetPath(const std::string& target, const std::string& anchor) {
+    if (isLocalAssetPath(target) || isLocalAssetPath(anchor)) return {};
+    const std::string to = displayAssetPath(target);
+    const std::string from = displayAssetPath(anchor);
+    const auto split = [](const std::string& uri, std::string* server, std::vector<std::string>* parts) {
+        const size_t start = uri.find("://") + 3;
+        const size_t slash = uri.find('/', start);
+        *server = uri.substr(0, slash);
+        std::string lowered = *server;
+        for (char& c : lowered) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        *server = lowered;
+        parts->clear();
+        if (slash == std::string::npos) return;
+        std::string part;
+        for (const char c : uri.substr(slash + 1)) {
+            if (c == '/') {
+                parts->push_back(part);
+                part.clear();
+            } else {
+                part += c;
+            }
+        }
+        parts->push_back(part);  // the file, or "" after a trailing slash
+    };
+    std::string toServer;
+    std::string fromServer;
+    std::vector<std::string> toParts;
+    std::vector<std::string> fromParts;
+    split(to, &toServer, &toParts);
+    split(from, &fromServer, &fromParts);
+    if (toServer != fromServer || toParts.empty() || fromParts.empty()) return {};
+    fromParts.pop_back();  // the anchor's folder
+    size_t common = 0;
+    while (common < fromParts.size() && common + 1 < toParts.size() && fromParts[common] == toParts[common]) ++common;
+    std::string relative;
+    for (size_t i = common; i < fromParts.size(); ++i) relative += "../";
+    if (relative.empty()) relative = "./";
+    for (size_t i = common; i < toParts.size(); ++i) relative += toParts[i] + (i + 1 < toParts.size() ? "/" : "");
+    return relative;
 }
 
 std::string assetOrigin(const std::string& assetPath, const std::string& resolvedPath) {

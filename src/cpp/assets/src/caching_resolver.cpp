@@ -242,7 +242,11 @@ ArAssetInfo CachingResolver::_GetAssetInfo(const std::string&, const ArResolvedP
     const Found found = _Find(resolvedPath.GetPathString(), &location, false);
     if (found.status != Status::Ok) return info;
     info.version = found.entry.etag;
-    info.repoPath = found.endpoint.url + location.path;
+    // The path that names it (webdav://studio/a.usdz), not the server's own URL: Sdf anchors
+    // the relative paths inside a package (a .usdz's textures) against a layer's repository
+    // path, so it has to be one this resolver resolves again. The server's URL would have
+    // sent them to plain HTTP.
+    info.repoPath = location.display;
     // Which endpoint delivered it, for usdcc to show (§5).
     info.resolverInfo = VtValue(found.endpoint.id);
     return info;

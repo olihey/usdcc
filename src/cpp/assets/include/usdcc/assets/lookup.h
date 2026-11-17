@@ -108,4 +108,9 @@ struct ListedEntry {
 // Missing when no endpoint has the folder.
 Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::string& folder, Lookups* scope = nullptr);
 
+// The folder `uri` names (webdav://studio/chars/, webdav://192.168.1.5:5000/single/), listed
+// as listFolder() lists one: a name `context`'s environment has, else a server by address
+// whose host is allowed (activity.h). What the asset picker browses with.
+Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context);
+
 }  // namespace usdcc::assets

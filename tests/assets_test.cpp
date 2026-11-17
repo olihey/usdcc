@@ -613,9 +613,11 @@ USDCC_TEST(assets_stage_composes_through_the_overlay) {
         const ArResolvedPath resolved = ArGetResolver().Resolve("fake://studio/chars/geo.usda");
         info = ArGetResolver().GetAssetInfo("fake://studio/chars/geo.usda", resolved);
     }
-    CHECK(info.resolverInfo.IsHolding<std::string>() && info.resolverInfo.UncheckedGet<std::string>() == "prod" &&
-              info.repoPath == fixture.config.endpoints.at("prod").url + "/chars/geo.usda",
-          "the asset info says which endpoint delivered a file: %s", info.repoPath.c_str());
+    CHECK(info.resolverInfo.IsHolding<std::string>() && info.resolverInfo.UncheckedGet<std::string>() == "prod",
+          "the asset info says which endpoint delivered a file");
+    CHECK(info.repoPath == "fake://studio/chars/geo.usda",
+          "and its repository path is the path that names it, which Sdf anchors a package's contents to: %s",
+          info.repoPath.c_str());
 }
 
 USDCC_TEST(assets_two_stages_use_two_environments) {

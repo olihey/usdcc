@@ -11,6 +11,8 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -636,8 +638,20 @@ std::string LayerEditorViewPanel::addLayer(AddKind kind, const std::string& pare
         // Start in the parent's folder, where a relative path is shortest.
         const QString dir = entry ? QFileInfo(realPath(*entry)).absolutePath() : QString();
         const QString filter = tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)");
-        path = kind == AddKind::NewFile ? QFileDialog::getSaveFileName(this, tr("New Layer File"), dir, filter)
-                                        : QFileDialog::getOpenFileName(this, tr("Add Existing Layer"), dir, filter);
+        if (kind == AddKind::NewFile) {
+            path = QFileDialog::getSaveFileName(this, tr("New Layer File"), dir, filter);
+        } else {
+            // The asset picker (docs/ASSET_PICKER.md): a layer on disk or on a server, in the
+            // parent's folder, where a relative path is shortest.
+            AssetPickerOptions options;
+            options.title = tr("Add Existing Layer");
+            options.filters = {tr("USD Layers (*.usda *.usd *.usdc)")};
+            const QString parentPath = entry ? QString::fromStdString(entry->layer ? entry->layer->GetIdentifier() : std::string())
+                                             : QString();
+            options.start = isLocalAssetPath(parentPath.toStdString()) ? dir : parentPath;
+            options.context = currentStage()->usdStage()->GetPathResolverContext();
+            path = pickAsset(this, options);
+        }
         if (path.isEmpty()) return {};
         if (kind == AddKind::NewFile && QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
     }
