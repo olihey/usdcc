@@ -1,0 +1,143 @@
+# Builds the USD plugins that deps/usd-plugins/*.json pin, each into a pack: a zip
+# built against the prebuilt OpenUSD asset and unzipped over it
+# (docs/USD_PLUGINS.md). A pack is attached to that OpenUSD asset's release, and
+# a job skips the build when its pack for the current pins is already there.
+name: USD plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      replace:
+        description: Build again and replace the packs that are already published
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths:
+      - deps/usd-plugins/**
+      - tools/build_usd_plugin.py
+      - tools/ci/usd_plugin_asset.py
+      - tools/ci/check_usd_plugin.py
+      - .github/workflows/deps-usd-plugins.yml
+  # A new OpenUSD asset gives every pack a new name: build them against it.
+  workflow_run:
+    workflows: [OpenUSD]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write  # attaching the packs to the release
+
+jobs:
+  packs:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      win64: ${{ steps.packs.outputs.win64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: List the packs
+        id: packs
+        run: python3 tools/ci/usd_plugin_asset.py --matrix --github-output
+
+  windows:
+    needs: packs
+    if: needs.packs.outputs.win64 != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pack: ${{ fromJSON(needs.packs.outputs.win64) }}
+    name: ${{ matrix.pack }} (windows)
+    # Pinned, as in deps-usd.yml: the toolset OpenUSD was built with.
+    runs-on: windows-2022
+    timeout-minutes: 360
+    concurrency:
+      group: deps-usd-plugins-${{ matrix.pack }}-win64
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      USD_INSTALL: C:\deps\usd
+      WORK: C:\b
+      PACK: C:\pack
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the pack
+        id: asset
+        run: python tools/ci/usd_plugin_asset.py '${{ matrix.pack }}' --github-output
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          $names = @(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>$null)
+          if ($LASTEXITCODE -or $names -notcontains '${{ steps.asset.outputs.usd_zip }}') {
+            Write-Host "::error::No ${{ steps.asset.outputs.usd_zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json first."
+            exit 1
+          }
+          $found = $names -contains '${{ steps.asset.outputs.zip }}'
+          if ($found -and '${{ inputs.replace }}' -eq 'true') {
+            Write-Host "::notice::${{ steps.asset.outputs.zip }} is published; building it again to replace it."
+            $found = $false
+          }
+          "found=$($found.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($found) { Write-Host "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build." }
+          exit 0
+
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      - name: Fetch OpenUSD
+        if: steps.published.outputs.found != 'true'
+        run: |
+          gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.usd_zip }}' --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) { throw 'downloading OpenUSD failed' }
+          7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.usd_zip }}" "-o$env:USD_INSTALL" | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+
+      - name: Build the pack
+        if: steps.published.outputs.found != 'true'
+        run: |
+          python tools/build_usd_plugin.py '${{ matrix.pack }}' --usd-install $env:USD_INSTALL --work $env:WORK --pack-dir $env:PACK
+          if ($LASTEXITCODE) { throw "build_usd_plugin.py failed ($LASTEXITCODE)" }
+
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          $zip = "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}"
+          7z a -tzip -mx=5 $zip "$env:PACK\*" | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw '7z failed' }
+          $size = (Get-Item $zip).Length
+          Write-Host ("{0:N0} MB" -f ($size / 1MB))
+          if ($size -ge 2GB) { throw 'Over GitHub''s 2 GiB per-asset limit' }
+
+      # The zip, unzipped somewhere else, over the OpenUSD asset, with the build
+      # gone, so a file the pack is missing can't quietly come from there.
+      - name: Check it over OpenUSD
+        if: steps.published.outputs.found != 'true'
+        run: |
+          Remove-Item -Recurse -Force $env:WORK, $env:PACK
+          $unzipped = "$env:RUNNER_TEMP\pack"
+          7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$unzipped" | Select-Object -Last 2
+          if ($LASTEXITCODE) { throw 'unzipping failed' }
+          python tools/ci/check_usd_plugin.py '${{ matrix.pack }}' --usd $env:USD_INSTALL --pack-dir $unzipped --forbid $env:WORK --forbid $env:PACK
+          if ($LASTEXITCODE) { throw 'check failed' }
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true'
+        run: |
+          gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
+          if ($LASTEXITCODE) { throw 'publishing failed' }
+          # This pack's earlier builds for this OpenUSD: no pin names them any more.
+          $names = @(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name')
+          foreach ($name in $names) {
+            if ($name -like '${{ steps.asset.outputs.pattern }}' -and $name -ne '${{ steps.asset.outputs.zip }}') {
+              Write-Host "Deleting the superseded $name"
+              gh release delete-asset '${{ steps.asset.outputs.tag }}' $name --yes
+            }
+          }

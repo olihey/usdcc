@@ -76,7 +76,7 @@ it:
 | `lib/*.lib` | Import libraries to link against |
 | `pxrConfig.cmake`, `cmake/`, `lib/cmake/*` | CMake package files for OpenUSD and its dependencies |
 | `bin/`, `lib/*.dll`, `lib/usd/`, `plugin/usd/` | Running and testing a plugin |
-| `lib/python/`, `bin/usdGenSchema` | Python bindings and schema generation for schema plugins (`usdGenSchema` also needs `jinja2` in the Python that runs it) |
+| `lib/site-packages/`, `bin/usdGenSchema` | Python bindings and schema generation for schema plugins (`usdGenSchema` also needs `jinja2` in the Python that runs it) |
 
 Only `src/` (the dependencies' downloaded archives and unpacked sources, and
 `build_usd.py`'s log) and `build/` (their intermediate CMake build trees) are dropped.
@@ -276,6 +276,7 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
+  Planned in [USD_PLUGINS.md](USD_PLUGINS.md).
 - **Deploy artifact.** Upload `tools/deploy.py`'s output once M11 lands. Releases are
   planned in [RELEASE.md](RELEASE.md): a GitHub release gets its Windows zip from
   `release.yml`.
