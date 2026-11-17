@@ -294,9 +294,12 @@ def main(argv=None):
     usd_install = Path(usd_install)
 
     # The Python OpenUSD was built with, as cmake/modules/UsdccPython.cmake finds it.
-    python_exe = cache_value(BUILD_DIR, "Python3_EXECUTABLE")
+    # pxrConfig.cmake may set Python3_EXECUTABLE as a plain variable, so it isn't
+    # always cached; UsdccPython.cmake caches it as USDCC_PYTHON_EXECUTABLE_PATH.
+    python_exe = cache_value(BUILD_DIR, "USDCC_PYTHON_EXECUTABLE_PATH") or cache_value(BUILD_DIR, "Python3_EXECUTABLE")
     if not python_exe or not os.path.isfile(python_exe):
-        fail(f"OpenUSD's Python not found (Python3_EXECUTABLE in build/CMakeCache.txt: '{python_exe}').")
+        fail(f"OpenUSD's Python not found (USDCC_PYTHON_EXECUTABLE_PATH in build/CMakeCache.txt: '{python_exe}'); "
+             "configure again.")
     python_home = Path(subprocess.run([python_exe, "-c", "import sys; print(sys.base_prefix)"],
                                       capture_output=True, text=True).stdout.strip())
     if not (python_home / "Lib/encodings/__init__.py").is_file():
