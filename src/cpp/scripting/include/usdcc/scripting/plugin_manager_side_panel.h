@@ -2,11 +2,15 @@
 
 #include "usdcc/ui/side_panel.h"
 
+#include <QList>
 #include <QPointer>
 
 class QLabel;
 class QMenu;
 class QAbstractButton;
+class QScrollArea;
+class QSplitter;
+class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -33,6 +37,12 @@ public:
     // Makes a new plugin in the user's folder and opens it. False, logged, if it can't.
     bool createPlugin(const QString& name);
 
+    // The selected plugin's info under the list folds to its header (click
+    // it), as the Layer Editor's Layer Properties do; folded, the list takes
+    // the room. Remembered in usdcc.ini with the sizes to unfold to.
+    bool isInfoCollapsed() const { return m_infoCollapsed; }
+    void setInfoCollapsed(bool collapsed);
+
 Q_SIGNALS:
     // The app connects these to the Script Editor (docs/PLUGIN_DEV.md).
     void editPluginRequested(const QString& id, const QString& name, const QString& folder, const QString& mainFile);
@@ -48,6 +58,12 @@ private:
 
     PluginManager& m_plugins;
     QTreeWidget* m_tree = nullptr;
+    QSplitter* m_splitter = nullptr;
+    QWidget* m_infoPane = nullptr;  // the header and the scroll area
+    QToolButton* m_infoHeader = nullptr;
+    QScrollArea* m_infoScroll = nullptr;
+    bool m_infoCollapsed = false;
+    QList<int> m_expandedSizes;  // the splitter's, from before it folded
     QLabel* m_details = nullptr;
     QLabel* m_pendingNote = nullptr;
     QLabel* m_packageFolders = nullptr;

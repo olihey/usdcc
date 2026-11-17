@@ -35,7 +35,10 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QScrollArea>
+#include <QSplitter>
 #include <QStandardPaths>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QUndoStack>
 
@@ -506,12 +509,7 @@ def activate(plugin):
     CHECK(good && good->text(1) == "2.5" && good->text(2) == "Running", "version and state");
     CHECK(bad && bad->text(2) == "Not loaded", "and one that didn't load");
 
-    const auto details = [&panel]() {
-        for (QLabel* label : panel.findChildren<QLabel*>()) {
-            if (label->objectName() != "propertyNote") return label;
-        }
-        return static_cast<QLabel*>(nullptr);
-    };
+    const auto details = [&panel]() { return panel.findChild<QLabel*>("pluginDetails"); };
     tree->setCurrentItem(good);
     CHECK(details()->text().contains("It does good.") && details()->text().contains("View panel: Good Panel") &&
               details()->text().contains("Menu action: Tools/Good Action"),
@@ -584,10 +582,8 @@ USDCC_TEST(plugin_manager_panel_shows_types) {
     CHECK(tree->iconSize().width() > tree->iconSize().height(), "wide enough for several");
 
     const auto details = [&panel]() {
-        for (QLabel* label : panel.findChildren<QLabel*>()) {
-            if (label->objectName() != "propertyNote") return label->text();
-        }
-        return QString();
+        const QLabel* label = panel.findChild<QLabel*>("pluginDetails");
+        return label ? label->text() : QString();
     };
     tree->setCurrentItem(rows["t.mixed"]);
     CHECK(details().contains("Type: Python + USD"), "the details spell it out: %s", qPrintable(details()));
@@ -600,6 +596,49 @@ USDCC_TEST(plugin_manager_panel_shows_types) {
 }
 
 #ifdef USDCC_EXAMPLE_PLUGINS
+USDCC_TEST(plugin_manager_panel_info_folds) {
+    TestSettings settings;
+    PluginManager::Options options;
+    PluginManager manager(options);
+
+    {
+        PluginManagerSidePanel panel(manager);
+        panel.resize(300, 500);
+        panel.show();
+        QCoreApplication::processEvents();
+        QToolButton* header = nullptr;
+        for (QToolButton* button : panel.findChildren<QToolButton*>()) {
+            if (button->text() == "Plugin Info") header = button;
+        }
+        CHECK(header, "a Plugin Info header");
+        auto* scroll = panel.findChild<QScrollArea*>();
+        auto* splitter = panel.findChild<QSplitter*>();
+        CHECK(scroll && splitter && scroll->isAncestorOf(panel.findChild<QLabel*>("pluginDetails")), "the info scrolls, under a splitter");
+        if (!header || !scroll || !splitter) return;
+        CHECK(!panel.isInfoCollapsed() && scroll->isVisible(), "unfolded at first");
+        const int infoHeight = splitter->sizes().value(1);
+
+        header->click();
+        QCoreApplication::processEvents();
+        CHECK(panel.isInfoCollapsed() && !scroll->isVisible(), "a click folds it");
+        CHECK(header->arrowType() == Qt::RightArrow, "its arrow turns");
+        CHECK(splitter->sizes().value(1) < infoHeight, "to its header, the list taking the room: %d < %d",
+              splitter->sizes().value(1), infoHeight);
+
+        header->click();
+        QCoreApplication::processEvents();
+        CHECK(!panel.isInfoCollapsed() && scroll->isVisible() && header->arrowType() == Qt::DownArrow, "another unfolds it");
+        CHECK(splitter->sizes().value(1) == infoHeight, "to the size it had: %d", splitter->sizes().value(1));
+
+        panel.setInfoCollapsed(true);
+    }
+    PluginManagerSidePanel again(manager);
+    CHECK(again.isInfoCollapsed(), "a new panel comes back folded");
+    again.setInfoCollapsed(false);
+    PluginManagerSidePanel unfolded(manager);
+    CHECK(!unfolded.isInfoCollapsed(), "and unfolded");
+}
+
 USDCC_TEST(plugin_example) {
     TestSettings settings;
     auto& app = pythonTestApp();

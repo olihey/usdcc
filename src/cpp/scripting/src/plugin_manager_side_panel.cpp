@@ -10,6 +10,7 @@
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/settings_dialog.h"
 
 #include <QColor>
@@ -26,9 +27,13 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSettings>
 #include <QShowEvent>
 #include <QSizePolicy>
+#include <QSplitter>
 #include <QStringList>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -38,6 +43,9 @@
 namespace usdcc::scripting {
 
 namespace {
+const QString kInfoCollapsedKey = QStringLiteral("PluginManagerPanel/infoCollapsed");
+const QString kInfoSizesKey = QStringLiteral("PluginManagerPanel/infoSizes");
+
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
 QString stateText(const PluginInfo& plugin) {
@@ -91,9 +99,32 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
         populatePluginMenu(&menu, item->data(0, Qt::UserRole).toString());
         menu.exec(m_tree->viewport()->mapToGlobal(position));
     });
-    layout->addWidget(m_tree, 1);
 
-    m_details = new QLabel(content);
+    // The selected plugin's info, under the list, under a header that folds
+    // it away (as the Layer Editor's Layer Properties).
+    m_infoPane = new QWidget(content);
+    auto* paneLayout = new QVBoxLayout(m_infoPane);
+    paneLayout->setContentsMargins(0, 0, 0, 0);
+    paneLayout->setSpacing(0);
+    auto* headerRow = new QWidget(m_infoPane);
+    auto* headerLayout = new QHBoxLayout(headerRow);
+    usdcc::ui::scaled::margins(headerLayout, 0, 4, 0, 4);
+    m_infoHeader = new QToolButton(headerRow);
+    m_infoHeader->setObjectName(QStringLiteral("sectionHeader"));  // as CategorySection's
+    m_infoHeader->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_infoHeader->setArrowType(Qt::DownArrow);
+    m_infoHeader->setText(tr("Plugin Info"));
+    m_infoHeader->setCursor(Qt::PointingHandCursor);
+    connect(m_infoHeader, &QToolButton::clicked, this, [this]() { setInfoCollapsed(!m_infoCollapsed); });
+    headerLayout->addWidget(m_infoHeader);
+    headerLayout->addStretch(1);
+    paneLayout->addWidget(headerRow);
+    m_infoScroll = new QScrollArea(m_infoPane);
+    m_infoScroll->setWidgetResizable(true);
+    m_infoScroll->setFrameShape(QFrame::NoFrame);
+    m_infoScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_details = new QLabel(m_infoScroll);
+    m_details->setObjectName(QStringLiteral("pluginDetails"));
     m_details->setWordWrap(true);
     m_details->setTextFormat(Qt::PlainText);
     m_details->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -101,7 +132,16 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     // A long folder path can't wrap, and would otherwise set the panel's width.
     m_details->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_details->setMinimumWidth(1);
-    layout->addWidget(m_details);
+    m_infoScroll->setWidget(m_details);
+    paneLayout->addWidget(m_infoScroll, 1);
+
+    m_splitter = new QSplitter(Qt::Vertical, content);
+    m_splitter->addWidget(m_tree);
+    m_splitter->addWidget(m_infoPane);
+    m_splitter->setStretchFactor(0, 3);
+    m_splitter->setStretchFactor(1, 2);
+    m_splitter->setChildrenCollapsible(false);
+    layout->addWidget(m_splitter, 1);
 
     m_pendingNote = new QLabel(tr("Changes take effect at the next start."), content);
     m_pendingNote->setObjectName(QStringLiteral("propertyNote"));
@@ -169,7 +209,39 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     });
     // The type icons are drawn for the UI scale.
     connect(&usdcc::ui::UiScaleController::instance(), &usdcc::ui::UiScaleController::scaleChanged, this, [this]() { refresh(); });
+
+    // The fold and the sizes, as they were left.
+    const QSettings settings = usdcc::ui::appSettings();
+    QList<int> sizes;
+    for (const QVariant& size : settings.value(kInfoSizesKey).toList()) sizes.append(size.toInt());
+    if (sizes.size() == 2 && sizes[0] > 0 && sizes[1] > 0) m_splitter->setSizes(sizes);
+    setInfoCollapsed(settings.value(kInfoCollapsedKey, false).toBool());
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        if (m_infoCollapsed) return;
+        QVariantList sizes;
+        for (int size : m_splitter->sizes()) sizes.append(size);
+        QSettings settings = usdcc::ui::appSettings();
+        settings.setValue(kInfoSizesKey, sizes);
+    });
     refresh();
+}
+
+void PluginManagerSidePanel::setInfoCollapsed(bool collapsed) {
+    if (collapsed == m_infoCollapsed) return;
+    m_infoCollapsed = collapsed;
+    m_infoHeader->setArrowType(collapsed ? Qt::RightArrow : Qt::DownArrow);
+    if (collapsed) {
+        m_expandedSizes = m_splitter->sizes();
+        m_infoScroll->hide();
+        // Just the header: the list takes the rest.
+        m_infoPane->setMaximumHeight(m_infoHeader->parentWidget()->sizeHint().height());
+    } else {
+        m_infoPane->setMaximumHeight(QWIDGETSIZE_MAX);
+        m_infoScroll->show();
+        if (m_expandedSizes.size() == 2 && m_expandedSizes[1] > 0) m_splitter->setSizes(m_expandedSizes);
+    }
+    QSettings settings = usdcc::ui::appSettings();
+    settings.setValue(kInfoCollapsedKey, collapsed);
 }
 
 void PluginManagerSidePanel::refresh() {
