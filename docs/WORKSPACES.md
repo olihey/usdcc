@@ -526,7 +526,8 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 - Each entry's tooltip: the description, then where its file is.
 - A workspace that needs a missing panel type is listed, its tooltip saying what's missing.
 - **The same menu is View > Workspace**, the View menu's first entry, for a window whose title bar is out of
-  reach (full screen) or for the keyboard.
+  reach (full screen) or for the keyboard. And a view panel's tab menu has it as **Workspace**, right
+  under Close (and Close Others) (`ViewPanel::setTabWorkspaceMenu()`, set in main.cpp).
 - **Stages > a stage > Workspace**, above Views: the workspaces alone (no commands below them), each laid
   out with that stage made current first, so its viewport is in front and the other panels show it. The
   check is on the active workspace only in the current stage's submenu. Choosing the active workspace lays

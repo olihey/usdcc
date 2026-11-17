@@ -162,6 +162,11 @@ public:
     // empty one adds nothing.
     using TabMenuExtension = std::function<void(ViewPanel* panel, QMenu* menu)>;
     static void setTabMenuExtension(TabMenuExtension extension);
+    // The submenu a panel's tab menu has right after ADS's Close (and Close Others):
+    // main.cpp's View > Workspace (WorkspaceController::createMenu()), made with the
+    // tab menu as its parent. Empty or returning null, there is none.
+    using TabWorkspaceMenu = std::function<QMenu*(QWidget* parent)>;
+    static void setTabWorkspaceMenu(TabWorkspaceMenu factory);
 
 protected:
 

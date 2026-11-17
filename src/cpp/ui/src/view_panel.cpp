@@ -347,14 +347,27 @@ ViewPanel::TabMenuExtension& tabMenuExtension() {
     static ViewPanel::TabMenuExtension extension;
     return extension;
 }
+ViewPanel::TabWorkspaceMenu& tabWorkspaceMenu() {
+    static ViewPanel::TabWorkspaceMenu factory;
+    return factory;
+}
 }  // namespace
 
 void ViewPanel::setTabMenuExtension(TabMenuExtension extension) { tabMenuExtension() = std::move(extension); }
+void ViewPanel::setTabWorkspaceMenu(TabWorkspaceMenu factory) { tabWorkspaceMenu() = std::move(factory); }
 
 bool ViewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == tabWidget() && event->type() == QEvent::ContextMenu) {
         auto* menuEvent = static_cast<QContextMenuEvent*>(event);
         QMenu* menu = tabWidget()->buildContextMenu(nullptr);
+        // ADS's Detach (and Pin) and Close in one group, without its divider;
+        // then the workspaces.
+        for (QAction* action : menu->actions()) {
+            if (action->isSeparator()) menu->removeAction(action);
+        }
+        if (tabWorkspaceMenu()) {
+            if (QMenu* workspaces = tabWorkspaceMenu()(menu)) menu->addMenu(workspaces);
+        }
         populateContextMenu(menu);
         if (tabMenuExtension()) tabMenuExtension()(this, menu);
         menu->exec(menuEvent->globalPos());

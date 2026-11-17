@@ -334,18 +334,37 @@ USDCC_TEST(stages_menu_save_stage) {
         extendedFor = shown;
         tabMenu->addAction(QStringLiteral("Extended"))->setObjectName(QStringLiteral("extended"));
     });
+    usdcc::ui::ViewPanel::setTabWorkspaceMenu([](QWidget* parent) {
+        auto* workspaces = new QMenu(QStringLiteral("Workspace"), parent);
+        workspaces->setObjectName(QStringLiteral("tabWorkspaces"));
+        return workspaces;
+    });
     QStringList shownActions;
-    QTimer::singleShot(0, [&shownActions]() {
+    QStringList shownEntries;  // text, "|" for a separator, "menu:<name>" for a submenu
+    QTimer::singleShot(0, [&shownActions, &shownEntries]() {
         if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
-            for (QAction* action : popup->actions()) shownActions << action->objectName();
+            for (QAction* action : popup->actions()) {
+                shownActions << action->objectName();
+                shownEntries << (action->isSeparator() ? QStringLiteral("|")
+                                 : action->menu()     ? QStringLiteral("menu:") + action->menu()->objectName()
+                                                      : action->text());
+            }
             popup->close();
         }
     });
     QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(4, 4), panel->tabWidget()->mapToGlobal(QPoint(4, 4)));
     QApplication::sendEvent(panel->tabWidget(), &event);
     usdcc::ui::ViewPanel::setTabMenuExtension({});
+    usdcc::ui::ViewPanel::setTabWorkspaceMenu({});
     CHECK(extendedFor == panel && !shownActions.isEmpty() && shownActions.last() == QStringLiteral("extended"),
           "the tab menu ends with the app's entries: %s", qPrintable(shownActions.join(QLatin1Char(','))));
+    // ADS's entries without its divider, then the workspaces, then the panel's own.
+    const qsizetype close = shownEntries.indexOf(QStringLiteral("Close"));
+    CHECK(shownEntries.value(0) == QStringLiteral("Detach") && close > 0 &&
+              !shownEntries.mid(0, close).contains(QStringLiteral("|")) &&
+              shownEntries.value(close + 1) == QStringLiteral("menu:tabWorkspaces") &&
+              shownEntries.value(close + 2) == QStringLiteral("|"),
+          "Detach and Close together, Workspace under Close: %s", qPrintable(shownEntries.join(QLatin1Char(','))));
 }
 
 // Save Stage As goes on in the new file: it takes the old stage's place in its

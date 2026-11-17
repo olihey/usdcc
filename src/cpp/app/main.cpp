@@ -902,6 +902,9 @@ int main(int argc, char** argv) {
         viewMenu->insertMenu(first, workspaceMenu);
         viewMenu->insertSeparator(first);
     }
+    // And in a panel tab's menu, under Close.
+    usdcc::ui::ViewPanel::setTabWorkspaceMenu(
+        [&workspaces](QWidget* parent) { return workspaces.createMenu(QObject::tr("&Workspace"), parent); });
 
     // Create > a prim of any type, in the current stage (docs/CREATE_MENU.md).
     window.mainMenuBar()->addMenu(new usdcc::usd::PrimCreateMenu(&stageManager, undoManager, &window));
