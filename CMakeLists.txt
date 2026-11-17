@@ -106,7 +106,7 @@ if(USDCC_LINK_RELEASE_QT)
     # have a Release/Debug pair to choose between.
     get_directory_property(_usdcc_imported IMPORTED_TARGETS)
     foreach(_target IN LISTS _usdcc_imported)
-        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::|CURL::|pugixml::|pugixml$)")
+        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::|CURL::|ZLIB::|pugixml::|pugixml$)")
             set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
         endif()
     endforeach()
@@ -264,10 +264,6 @@ endfunction()
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/assets)
-# The protocols of remote assets (docs/REMOTE_ASSETS.md §11): usdcc plugins with only
-# a usd/ part, each a resolver library on usdcc_assets.
-add_subdirectory(src/plugins/http)
-add_subdirectory(src/plugins/webdav)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)
@@ -275,6 +271,11 @@ add_subdirectory(src/cpp/plugin_sdk)
 add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
 add_subdirectory(src/plugins/cpp_example)
+# The protocols of remote assets (docs/REMOTE_ASSETS.md §11): usdcc plugins with only
+# a usd/ part, each a resolver library on usdcc_assets. After the app, which they are
+# copied beside, as shipped plugins are.
+add_subdirectory(src/plugins/http)
+add_subdirectory(src/plugins/webdav)
 # Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
 add_subdirectory(src/plugins/physics_jolt)
 

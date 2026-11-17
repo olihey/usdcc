@@ -20,6 +20,7 @@
 
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,8 +40,8 @@ struct Config {
     std::vector<std::string> httpAllow;
     // Resolve and open from the disk cache only (§7).
     bool offline = false;
-    // The disk cache's size limit; "cacheLimitGB" in the file.
-    double cacheLimitGB = 20;
+    // The disk cache's size limit; "cacheLimitGB" in the file. Unset leaves it as it is.
+    std::optional<double> cacheLimitGB;
     std::map<std::string, Endpoint> endpoints;
     // environment -> scheme -> name -> endpoint ids, top of the stack first.
     std::map<std::string, std::map<std::string, std::map<std::string, std::vector<std::string>>>> environments;

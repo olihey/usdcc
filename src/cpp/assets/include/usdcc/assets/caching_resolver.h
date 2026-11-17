@@ -22,10 +22,17 @@
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/ar/threadLocalScopedCache.h>
 
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace usdcc::assets {
+
+// The file on disk a resolved path on a server was downloaded to, downloading it first
+// when it isn't: for what needs a real file (an app opening a texture, a renderer
+// reading one itself). Nothing for a path that doesn't open (docs/REMOTE_ASSETS.md §10).
+std::optional<std::filesystem::path> localFile(const std::string& resolvedPath);
 
 class CachingResolver : public PXR_NS::ArResolver {
 public:

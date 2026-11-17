@@ -31,11 +31,15 @@ public:
     QCheckBox* makeCurrentBox() const { return m_makeCurrent; }
     QComboBox* workspaceBox() const { return m_workspace; }
     QCheckBox* loadPayloadsBox() const { return m_loadPayloads; }
+    // The asset environment (docs/REMOTE_ASSETS.md §4): only there when the asset
+    // configuration has more than one. Null otherwise.
+    QComboBox* assetEnvironmentBox() const { return m_assetEnvironment; }
 
 private:
     QCheckBox* m_makeCurrent = nullptr;
     QComboBox* m_workspace = nullptr;
     QCheckBox* m_loadPayloads = nullptr;
+    QComboBox* m_assetEnvironment = nullptr;
 };
 
 }  // namespace usdcc::usd

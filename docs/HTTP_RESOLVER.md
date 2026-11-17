@@ -4,8 +4,8 @@ A USD asset resolver plugin for plain `http://` and `https://` URLs, such as
 `https://assets.example.com/chars/hero/hero.usd`. Read-only, and the simplest protocol built on the
 shared library of [REMOTE_ASSETS.md](REMOTE_ASSETS.md).
 
-**Status:** built 2026-11-17, in [src/plugins/http](../src/plugins/http), and tested
-([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3). Not in the app or a deploy yet, and **`https://` has
+**Status:** built 2026-11-17, in [src/plugins/http](../src/plugins/http), tested
+([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and shipped with the app (§13.4). **`https://` has
 never run:** every test and check used `http://` on one machine.
 
 ## 1. What it is, and isn't
@@ -75,8 +75,9 @@ knows a file by the URL that was asked for, not the one it ended at.
 
 ## 4. Credentials and hosts
 
-Most HTTP assets are public, so the default is anonymous. A host can be given a credential id in
-the configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4, §8):
+Most HTTP assets are public, so the default is anonymous. A host's login is looked for under its
+address, `host:port` and then `host`, and a host can be given another credential id in the
+configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4, §8):
 
 ```json
 {
@@ -93,10 +94,13 @@ the configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4, §8):
 `http://anything/…`, and opening it sends a request there: to a tracker, or to a machine inside the
 company network. So hosts are checked against `allow`:
 
-- **In usdcc,** a host not on the list asks once, "This stage loads from `example.com`. Allow?",
-  with **Always**, **This time** and **No**. Always adds it to the list. *The library asks through
-  a callback and remembers the answer for the session; the question itself and writing Always into
-  the configuration are usdcc's, in phase 4.*
+- **A host the user opens a stage on** (File > Open, Open Stage from URL, Open Recent, the command
+  line, a session's stage) is allowed for the rest of the session. What that stage names is
+  checked as usual.
+- **In usdcc,** a host not on the list is refused, and a toast says to add it in **Settings >
+  Assets > Allowed hosts** and reload the stage. *Changed from the plan,* which asked "Allow?":
+  the library asks on whichever thread resolves, which may be one the UI thread waits for, so a
+  question there could hang the app.
 - **Outside usdcc,** with no one to ask, a host not on the list is refused with a message naming
   it. `"allow": ["*"]` or `USDCC_HTTP_ALLOW=*` turns the check off.
 

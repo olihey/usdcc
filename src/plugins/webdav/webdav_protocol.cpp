@@ -2,13 +2,19 @@
 // protocol: webdav://<name>/<path>, with the name's stack of servers coming from the
 // context, so the resolver adds nothing to CachingResolver but its scheme. The
 // transport is PROPFIND for listings and GET for files.
+#include "usdcc/assets/activity.h"
 #include "usdcc/assets/caching_resolver.h"
+#include "usdcc/assets/config.h"
+#include "usdcc/assets/context.h"
+#include "usdcc/assets/credentials.h"
 #include "usdcc/assets/http_client.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
 #include <pxr/pxr.h>
+#include <pxr/base/tf/pathUtils.h>
 #include <pxr/usd/ar/defineResolver.h>
+#include <pxr/usd/ar/resolvedPath.h>
 
 #include <pugixml.hpp>
 
@@ -177,8 +183,59 @@ private:
 
 // When the library loads.
 const struct RegisterTransport {
-    RegisterTransport() { registerTransport("webdav", std::make_shared<WebDavTransport>()); }
+    RegisterTransport() {
+        const std::shared_ptr<WebDavTransport> transport = std::make_shared<WebDavTransport>();
+        registerTransport("webdav", transport);
+        registerTransport("webdavs", transport);
+    }
 } kRegisterTransport;
+
+// A server by its address (docs/WEBDAV_RESOLVER.md §2.1): webdav://192.168.1.5:5000/a.usd is
+// http://192.168.1.5:5000/a.usd, webdavs:// the same over https.
+struct DirectUrl {
+    std::string scheme;  // "webdav" or "webdavs"
+    std::string host;    // lowercase, without the port
+    std::string port;    // empty for the scheme's own
+    std::string path;    // normalized
+
+    std::string authority() const { return port.empty() ? host : host + ":" + port; }
+    std::string text() const { return scheme + "://" + authority() + path; }
+    std::string httpUrl() const { return (scheme == "webdavs" ? "https://" : "http://") + authority(); }
+};
+
+bool parseDirect(const std::string& text, DirectUrl* url) {
+    const size_t colon = text.find("://");
+    if (colon == std::string::npos) return false;
+    DirectUrl parsed;
+    for (const char c : text.substr(0, colon)) parsed.scheme += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (parsed.scheme != "webdav" && parsed.scheme != "webdavs") return false;
+    if (text.find_first_of("?#") != std::string::npos) return false;
+    const size_t start = colon + 3;
+    const size_t slash = std::min(text.find('/', start), text.size());
+    std::string authority = text.substr(start, slash - start);
+    if (authority.empty() || authority.find_first_of("@~") != std::string::npos) return false;
+    const size_t portColon = authority.rfind(':');
+    if (portColon != std::string::npos && authority.find(']', portColon) == std::string::npos) {
+        parsed.port = authority.substr(portColon + 1);
+        authority.erase(portColon);
+        if (parsed.port.empty() || parsed.port.find_first_not_of("0123456789") != std::string::npos) return false;
+    }
+    for (const char c : authority) parsed.host += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (parsed.host.empty()) return false;
+    if ((parsed.scheme == "webdav" && parsed.port == "80") || (parsed.scheme == "webdavs" && parsed.port == "443")) {
+        parsed.port.clear();
+    }
+    if (!normalizePath(text.substr(slash), &parsed.path)) return false;
+    *url = std::move(parsed);
+    return true;
+}
+
+// A name in the configuration is a word ("studio"); an address has a port, a dot, is
+// localhost, or is an IPv6 address in brackets.
+bool looksLikeAddress(const DirectUrl& url) {
+    return !url.port.empty() || url.host.find('.') != std::string::npos || url.host == "localhost" ||
+           (!url.host.empty() && url.host.front() == '[');
+}
 
 }  // namespace
 
@@ -187,6 +244,58 @@ PXR_NAMESPACE_OPEN_SCOPE
 class UsdccWebDavResolver final : public usdcc::assets::CachingResolver {
 public:
     UsdccWebDavResolver() : CachingResolver("webdav") {}
+
+protected:
+    // A name the environment knows, as every named protocol; else, when it's an address,
+    // that server directly, with no stack and no context.
+    bool _Locate(const std::string& assetPath, Location* location, std::string* why) const override {
+        if (CachingResolver::_Locate(assetPath, location, why)) return true;
+        DirectUrl url;
+        if (!parseDirect(assetPath, &url) || !looksLikeAddress(url)) return false;
+        // A stage can name any address, as with plain HTTP (docs/HTTP_RESOLVER.md §4).
+        if (!usdcc::assets::hostAllowed(url.host)) {
+            *why = "the host '" + url.host +
+                   "' isn't one this stage may contact (Settings > Assets > Allowed hosts, the configuration's \"http\" "
+                   "\"allow\" list, or USDCC_HTTP_ALLOW)";
+            return false;
+        }
+        usdcc::assets::Endpoint endpoint;
+        endpoint.id = url.authority();
+        endpoint.scheme = "webdav";
+        endpoint.url = url.httpUrl();
+        endpoint.readOnly = true;
+        const usdcc::assets::Config config = usdcc::assets::defaultConfig();
+        const auto host = config.httpHosts.find(url.host);
+        if (host != config.httpHosts.end()) endpoint.credential = host->second.credential;
+        // Else the address is the credential's name: what Edit > Asset Server Login is given.
+        if (endpoint.credential.empty()) endpoint.credential = usdcc::assets::credentialIdForAddress(url.host, url.port);
+        usdcc::assets::Stack stack;
+        stack.scheme = "webdav";
+        stack.name = url.authority();
+        stack.endpoints.push_back(std::move(endpoint));
+        location->stack = std::make_shared<const usdcc::assets::Stack>(std::move(stack));
+        location->path = url.path;
+        location->resolved = url.text();
+        location->display = location->resolved;
+        return true;
+    }
+
+    std::string _CreateIdentifier(const std::string& assetPath, const ArResolvedPath& anchorAssetPath) const override {
+        usdcc::assets::Uri named;
+        DirectUrl url;
+        if (assetPath.find("://") != std::string::npos) {
+            if (usdcc::assets::parseUri(assetPath, &named)) return CachingResolver::_CreateIdentifier(assetPath, anchorAssetPath);
+            return parseDirect(assetPath, &url) ? url.text() : assetPath;
+        }
+        if (assetPath.empty() || !TfIsRelativePath(assetPath)) return assetPath;
+        const std::string anchor = anchorAssetPath.GetPathString();
+        if (usdcc::assets::parseUri(anchor, &named)) return CachingResolver::_CreateIdentifier(assetPath, anchorAssetPath);
+        // Against an address: its folder, on the same server.
+        if (!parseDirect(anchor, &url)) return assetPath;
+        const std::string folder = url.path.substr(0, url.path.rfind('/') + 1);
+        if (!normalizePath(folder + assetPath, &url.path)) return assetPath;
+        return url.text();
+    }
 };
 
 AR_DEFINE_RESOLVER(UsdccWebDavResolver, ArResolver);

@@ -1,4 +1,9 @@
 #include "usdcc/usd/session_stages.h"
+#include "usdcc/assets/activity.h"
+
+#include "usdcc/usd/asset_servers.h"
+
+#include <algorithm>
 
 #include "usdcc/usd/sim_cache.h"
 
@@ -50,9 +55,14 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
     QJsonObject state;
     const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
     if (hasFile(stage)) {
-        state.insert(QStringLiteral("file"), qs(usdStage->GetRootLayer()->GetRealPath().empty()
+        // A root on a server by the path that names it, not the resolved one: that holds
+        // a stack id only this process knows (docs/REMOTE_ASSETS.md §5).
+        const std::string real = usdStage->GetRootLayer()->GetRealPath();
+        state.insert(QStringLiteral("file"), qs(real.empty() || !isLocalAssetPath(real)
                                                     ? usdStage->GetRootLayer()->GetIdentifier()
-                                                    : usdStage->GetRootLayer()->GetRealPath()));
+                                                    : real));
+        const std::string environment = stageAssetEnvironment(usdStage);
+        if (!environment.empty()) state.insert(QStringLiteral("assetEnvironment"), qs(environment));
     } else {
         // In memory only: what's in it is all there is of it.
         std::string text;
@@ -134,8 +144,14 @@ PXR_NS::UsdStageRefPtr open(const QJsonObject& state, std::vector<std::string>* 
     const QString sessionText = state.value(QStringLiteral("sessionLayer")).toString();
     // Only when something has to go in before loading; otherwise the usual way.
     const bool deferLoad = hasRules || !muted.isEmpty() || !sessionText.isEmpty();
-    PXR_NS::UsdStageRefPtr stage =
-        StageManager::loadUsdStage(file, errors, deferLoad ? PXR_NS::UsdStage::LoadNone : PXR_NS::UsdStage::LoadAll);
+    // In the environment it was in. One the configuration no longer has opens in the default.
+    std::string environment = state.value(QStringLiteral("assetEnvironment")).toString().toStdString();
+    const std::vector<std::string> known = assetEnvironments();
+    if (std::find(known.begin(), known.end(), environment) == known.end()) environment.clear();
+    // A stage of the user's own session: as when they opened it, its server may be contacted.
+    usdcc::assets::allowHostOfUrl(file);
+    PXR_NS::UsdStageRefPtr stage = StageManager::loadUsdStage(
+        file, errors, deferLoad ? PXR_NS::UsdStage::LoadNone : PXR_NS::UsdStage::LoadAll, environment);
     if (!stage || !deferLoad) return stage;
 
     PXR_NS::TfErrorMark mark;

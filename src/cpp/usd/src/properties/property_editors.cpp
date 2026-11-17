@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/properties/array_editor_dialog.h"
 #include "usdcc/usd/properties/color_swatch.h"
@@ -12,6 +13,7 @@
 #include <pxr/base/tf/errorMark.h>
 #include <pxr/usd/ar/packageUtils.h>
 #include <pxr/usd/ar/resolver.h>
+#include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layerUtils.h>
@@ -81,6 +83,7 @@ EditorHints EditorHints::forAttribute(const UsdAttribute& attribute) {
         hints.anchorLayer = attribute.GetStage()->GetEditTarget().GetLayer();
     }
     hints.editLayer = attribute.GetStage()->GetEditTarget().GetLayer();
+    hints.resolverContext = attribute.GetStage()->GetPathResolverContext();
     if (attribute.GetRoleName() == SdfValueRoleNames->Color) {
         hints.colorSpace = UsdColorSpaceAPI::ComputeColorSpaceName(attribute);
     }
@@ -500,7 +503,10 @@ private:
 class AssetEditor : public PropertyEditor {
 public:
     AssetEditor(const ValueTypeInfo& info, const EditorHints& hints, QWidget* parent)
-        : PropertyEditor(info, parent), m_anchor(hints.anchorLayer), m_editLayer(hints.editLayer ? hints.editLayer : hints.anchorLayer) {
+        : PropertyEditor(info, parent),
+          m_anchor(hints.anchorLayer),
+          m_editLayer(hints.editLayer ? hints.editLayer : hints.anchorLayer),
+          m_context(hints.resolverContext) {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         usdcc::ui::scaled::spacing(layout, 2);
@@ -551,12 +557,28 @@ public:
 private:
     // Where a new path goes, which is what it has to be relative to.
     QString layerDir() const { return layerFolder(m_editLayer); }
-    QString resolvedPath() const {
-        if (m_path.isEmpty()) return {};
-        const std::string anchored = m_anchor ? SdfComputeAssetPathRelativeToLayer(m_anchor, m_path.toStdString())
-                                              : m_path.toStdString();
-        return QString::fromStdString(ArGetResolver().Resolve(anchored).GetPathString());
+    std::string anchoredPath() const {
+        return m_anchor ? SdfComputeAssetPathRelativeToLayer(m_anchor, m_path.toStdString()) : m_path.toStdString();
     }
+    // As the resolver gives it: a server's path carries a stack id. With the stage's
+    // context, so a server's path means its environment's servers. A server's answer
+    // is kept for as long as the path stays the same, as this is asked on every refresh
+    // and on the UI thread (docs/REMOTE_ASSETS.md §10).
+    std::string resolvedRaw() const {
+        if (m_path.isEmpty()) return {};
+        const std::string anchored = anchoredPath();
+        if (anchored == m_lastAnchored) return m_lastResolved;
+        const PXR_NS::ArResolverContextBinder binder(m_context);
+        const std::string resolved = ArGetResolver().Resolve(anchored).GetPathString();
+        if (!isLocalAssetPath(anchored)) {
+            m_lastAnchored = anchored;
+            m_lastResolved = resolved;
+            m_lastOrigin = assetOrigin(anchored, resolved);
+        }
+        return resolved;
+    }
+    // As the UI shows it: a server's path without the stack id.
+    QString resolvedPath() const { return QString::fromStdString(displayAssetPath(resolvedRaw())); }
     static bool isRelative(const QString& path) { return path.startsWith(QStringLiteral("./")) || path.startsWith(QStringLiteral("../")); }
 
     void updateDisplay() {
@@ -574,8 +596,18 @@ private:
         }
         m_resolved->setVisible(true);
         m_resolved->setProperty("unresolved", resolved.isEmpty());
-        m_resolved->setText(resolved.isEmpty() ? tr("Unresolved") : tr("Resolved \xC2\xB7 %1").arg(resolved));
-        m_resolved->setToolTip(resolved);
+        // A server's file says which server delivered it ("test", "prod"): with an
+        // overlay, that's what tells two of the same path apart (docs/REMOTE_ASSETS.md §5).
+        const QString origin = !resolved.isEmpty() && anchoredPath() == m_lastAnchored ? QString::fromStdString(m_lastOrigin)
+                                                                                     : QString();
+        if (resolved.isEmpty()) {
+            m_resolved->setText(tr("Unresolved"));
+        } else if (origin.isEmpty()) {
+            m_resolved->setText(tr("Resolved \xC2\xB7 %1").arg(resolved));
+        } else {
+            m_resolved->setText(tr("Resolved \xC2\xB7 %1 \xC2\xB7 %2").arg(origin, resolved));
+        }
+        m_resolved->setToolTip(origin.isEmpty() ? resolved : tr("%1\nfrom the server '%2'").arg(resolved, origin));
         m_resolved->style()->unpolish(m_resolved);
         m_resolved->style()->polish(m_resolved);
     }
@@ -589,8 +621,10 @@ private:
     }
     void browse() {
         const QString resolved = resolvedPath();
-        // A file inside a .usdz resolves to "bike.usdz[tex.png]", which isn't a folder.
-        const QString start = !resolved.isEmpty() && !resolved.contains(QLatin1Char('['))
+        // A file inside a .usdz resolves to "bike.usdz[tex.png]", which isn't a folder,
+        // and one on a server has none on disk.
+        const QString start = !resolved.isEmpty() && !resolved.contains(QLatin1Char('[')) &&
+                                      isLocalAssetPath(resolved.toStdString())
                                   ? QFileInfo(resolved).absolutePath()
                                   : layerFileFolder(m_editLayer);
         const QString file = QFileDialog::getOpenFileName(this, tr("Choose Asset"), start);
@@ -602,6 +636,11 @@ private:
         const QString dir = layerDir();
         const QString resolved = resolvedPath();
         if (dir.isEmpty() || resolved.isEmpty()) return;
+        // A server's file has no path relative to a folder on disk.
+        if (!isLocalAssetPath(resolved.toStdString())) {
+            if (isRelative(m_path)) commit(resolved);
+            return;
+        }
         if (isRelative(m_path)) {
             commit(QDir::cleanPath(resolved));
         } else {
@@ -611,6 +650,10 @@ private:
 
     SdfLayerHandle m_anchor;
     SdfLayerHandle m_editLayer;
+    PXR_NS::ArResolverContext m_context;
+    mutable std::string m_lastAnchored;
+    mutable std::string m_lastResolved;
+    mutable std::string m_lastOrigin;
     QString m_path;
     QLineEdit* m_edit;
     QToolButton* m_relative;

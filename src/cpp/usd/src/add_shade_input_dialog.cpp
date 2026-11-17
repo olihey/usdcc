@@ -247,6 +247,7 @@ void AddShadeInputDialog::rebuildValueEditor() {
     if (const UsdStageRefPtr stage = m_prim.GetStage()) {
         hints.editLayer = stage->GetEditTarget().GetLayer();
         hints.anchorLayer = hints.editLayer;
+        hints.resolverContext = stage->GetPathResolverContext();
     }
     m_value = properties::createPropertyEditor(type, hints, m_valueHolder);
     m_value->setObjectName(QStringLiteral("addInputValue"));

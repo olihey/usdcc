@@ -1,4 +1,5 @@
 #include "usdcc/usd/close_stage_dialog.h"
+#include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/view_panel.h"
@@ -115,7 +116,7 @@ bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRef
     box.setInformativeText(names.join(QLatin1Char('\n')));
     QStringList paths;
     for (const auto& [stage, layer] : unsaved) {
-        paths << QDir::toNativeSeparators(QString::fromStdString(layer->GetRealPath()));
+        paths << usdcc::usd::displayPath(QString::fromStdString(layer->GetRealPath()));
     }
     box.setDetailedText(paths.join(QLatin1Char('\n')));
     QPushButton* save = box.addButton(QObject::tr("Save All"), QMessageBox::AcceptRole);

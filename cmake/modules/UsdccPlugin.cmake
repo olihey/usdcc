@@ -52,7 +52,12 @@ function(usdcc_add_asset_protocol target)
     endif()
 
     add_library(${target} SHARED ${ARG_SOURCES})
-    target_link_libraries(${target} PRIVATE usdcc_assets)
+    # In the app's build its target; against a deployed app's SDK, which has its import library.
+    if(TARGET usdcc_assets)
+        target_link_libraries(${target} PRIVATE usdcc_assets)
+    else()
+        target_link_libraries(${target} PRIVATE usdcc::plugin_sdk)
+    endif()
     # TF_REGISTRY_FUNCTION names the library it's in through these.
     target_compile_definitions(${target} PRIVATE MFB_PACKAGE_NAME=${target} MFB_ALT_PACKAGE_NAME=${target})
     # USD's headers ask for the release Python import library in every configuration.
@@ -91,6 +96,16 @@ function(usdcc_add_asset_protocol target)
     endif()
     string(APPEND _json "  \"api\": 1,\n  \"usd\": [\"usd\"]\n}\n")
     file(WRITE "${ARG_OUTPUT_DIR}/usdcc-plugin.json" "${_json}")
+
+    if(TARGET usdcc)
+        # Where PluginManager::shippedFolder() looks, so a build loads it as a deployed
+        # app does. The folder's name is the output folder's.
+        get_filename_component(_name "${ARG_OUTPUT_DIR}" NAME)
+        add_custom_target(${target}_app_plugin
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ARG_OUTPUT_DIR}" "$<TARGET_FILE_DIR:usdcc>/../plugins/${_name}"
+            DEPENDS ${target} VERBATIM)
+        add_dependencies(usdcc ${target}_app_plugin)
+    endif()
 endfunction()
 
 function(usdcc_add_plugin target)

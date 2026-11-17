@@ -1,4 +1,5 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/panel_icon_button.h"
@@ -443,7 +444,7 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     item->setText(Name, name);
 
     QStringList tip{qs(entry.identifier)};
-    if (const QString path = realPath(entry); !path.isEmpty() && path != tip.front()) tip << QDir::toNativeSeparators(path);
+    if (const QString path = realPath(entry); !path.isEmpty() && path != tip.front()) tip << usdcc::usd::displayPath(path);
     if (!entry.authoredPath.empty()) tip << tr("As authored: %1").arg(qs(entry.authoredPath));
     if (entry.layer) tip << tr("Format: %1").arg(qs(entry.layer->GetFileFormat()->GetFormatId().GetString()));
     if (!entry.offset.IsIdentity()) {
@@ -586,7 +587,7 @@ void LayerEditorViewPanel::populateLayerMenu(QMenu* menu, const std::string& ide
     const QString id = qs(entry->identifier);
     menu->addAction(tr("Copy Identifier"), this, [id]() { QApplication::clipboard()->setText(id); });
     QAction* copy = menu->addAction(tr("Copy Path"), this,
-                                    [path]() { QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); });
+                                    [path]() { QApplication::clipboard()->setText(usdcc::usd::displayPath(path)); });
     copy->setEnabled(!path.isEmpty());
     QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [path]() { revealFile(path); });
     reveal->setEnabled(!path.isEmpty() && QFileInfo::exists(path));
@@ -858,7 +859,7 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     }
     if (!entry->layer) {
         note(entry->muted ? tr("Muted, and not open: unmute it to see its properties.")
-                          : tr("Not found: %1").arg(QDir::toNativeSeparators(qs(entry->identifier))));
+                          : tr("Not found: %1").arg(usdcc::usd::displayPath(qs(entry->identifier))));
         m_propertiesLayout->addStretch(1);
         return;
     }
@@ -882,7 +883,7 @@ void LayerEditorViewPanel::rebuildProperties(const LayerEntry* entry, bool subla
     readOnly(tr("Identifier"), [text](const LayerEntry& e) { return text(e.identifier); });
     readOnly(tr("File"), [text](const LayerEntry& e) {
         const QString path = realPath(e);
-        return text(path.isEmpty() ? tr("(in memory)").toStdString() : QDir::toNativeSeparators(path).toStdString());
+        return text(path.isEmpty() ? tr("(in memory)").toStdString() : usdcc::usd::displayPath(path).toStdString());
     });
     readOnly(tr("Format"), [text](const LayerEntry& e) { return text(e.layer->GetFileFormat()->GetFormatId().GetString()); });
 

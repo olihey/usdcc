@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace usdcc::assets {
 
@@ -32,10 +33,12 @@ void cancelDownloads();
 // Changes with each cancelDownloads(): a download stops when it's no longer the one it started with.
 uint64_t downloadGeneration();
 
-// Resolve and open from the disk cache only; what isn't cached is missing (§7).
-// The default configuration's "offline" sets it when it's loaded.
+// Resolve and open from the disk cache only; what isn't cached is missing (§7). On
+// when the host says so, or the default configuration's "offline" does.
 void setOffline(bool offline);
 bool isOffline();
+// The configuration's half, set when it's loaded.
+void setConfigOffline(bool offline);
 
 // ---- HTTP hosts ------------------------------------------------------------------------
 
@@ -53,7 +56,13 @@ bool hostMatches(const std::string& pattern, const std::string& host);
 // semicolons), or answered yes to this session. With no callback, a host on neither is
 // refused.
 bool hostAllowed(const std::string& host);
-// Forgets what was answered, for tests.
+// Forgets what was answered: for tests, and when the host's list changes.
 void forgetHostAnswers();
+// Allows the host of `url` (any scheme://host[:port]/...) until the process ends, as
+// though it had been answered yes: for a URL the user opened themselves.
+void allowHostOfUrl(const std::string& url);
+// Patterns the host allows too, besides the configuration's and USDCC_HTTP_ALLOW:
+// usdcc's own setting.
+void setExtraAllowedHosts(std::vector<std::string> patterns);
 
 }  // namespace usdcc::assets

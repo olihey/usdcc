@@ -62,6 +62,8 @@
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/open_stage_options_dialog.h"
+#include "usdcc/usd/asset_settings.h"
+#include "usdcc/assets/activity.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
 #include "usdcc/usd/physics_menu.h"
@@ -275,6 +277,9 @@ int main(int argc, char** argv) {
     usdcc::scripting::PluginManager plugins(
         usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
     plugins.scan();
+    // Settings > Assets (docs/REMOTE_ASSETS.md §10): which servers a webdav:// path
+    // means, before a stage can open one. After the scan, which registers the protocols.
+    usdcc::usd::defineAssetSettings();
     // Settings > Renderers: each render delegate's own settings, all of them listed only
     // when the dialog opens, as some take a while (a viewport defines its renderer's itself).
     usdcc::ui::SettingsDialog::setBeforeShow([]() {
@@ -441,6 +446,8 @@ int main(int argc, char** argv) {
     }
     usdcc::usd::StageRefPtr initialStage;
     if (!positional.isEmpty() && startSession.isEmpty()) {
+        // A URL given on the command line: its host may be contacted, for this session.
+        usdcc::assets::allowHostOfUrl(positional.front().toStdString());
         initialStage = stageManager.openStage(positional.front().toStdString());
     }
     if (positional.size() > 1) {
@@ -575,6 +582,16 @@ int main(int argc, char** argv) {
         if (path.isEmpty()) return;
         usdcc::usd::OpenStageOptionsDialog dialog(path, &workspaceLibrary, &window);
         if (dialog.exec() == QDialog::Accepted) stageOpener->open(path, dialog.options());
+    });
+    // File > Open Stage from URL...: a stage on a server (docs/REMOTE_ASSETS.md §10).
+    QAction* openUrlAction = fileMenu->addAction(QObject::tr("Open Stage from &URL..."));
+    openUrlAction->setObjectName(QStringLiteral("openStageFromUrl"));
+    openUrlAction->setStatusTip(QObject::tr("Open a stage on a server: a webdav://, http:// or https:// path"));
+    QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openUrlAction,
+                     [openUrlAction](bool busy) { openUrlAction->setEnabled(!busy); });
+    QObject::connect(openUrlAction, &QAction::triggered, &window, [stageOpener, &window]() {
+        const QString url = usdcc::usd::askForAssetUrl(&window);
+        if (!url.isEmpty()) stageOpener->open(url);
     });
     // Both keys are settings (Shortcuts > File).
     for (const auto& [key, label, fallback, action] :
@@ -886,6 +903,9 @@ int main(int argc, char** argv) {
     // Edit > Selection: None, All, Invert, By Type, By Schema, By Name (docs/SELECTION_MENU.md).
     editMenu->addMenu(new usdcc::usd::SelectionMenu(&stageManager, &window));
     editMenu->addSeparator();
+    // A login for an asset server, kept in the system's credential store (docs/REMOTE_ASSETS.md §8).
+    editMenu->addAction(QObject::tr("Asset Server &Login..."), &window,
+                        [&window]() { usdcc::usd::showAssetLoginDialog(&window); });
     QAction* settingsAction = editMenu->addAction(QObject::tr("&Settings..."), &window,
                                                   [&window]() { usdcc::ui::SettingsDialog::showDialog(&window); });
     settingsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
@@ -1115,7 +1135,10 @@ int main(int argc, char** argv) {
             USDCC_LOG_WARNING("usdcc.session", "Couldn't start with the session {}: {}", startSession.toStdString(),
                               error.toStdString());
         }
-        if (!positional.isEmpty()) stageManager.openStage(positional.front().toStdString());
+        if (!positional.isEmpty()) {
+            usdcc::assets::allowHostOfUrl(positional.front().toStdString());
+            stageManager.openStage(positional.front().toStdString());
+        }
     }
     // The Last session, as the window closes and while it's still on screen (§4.5).
     QObject::connect(&window, &usdcc::ui::MainWindow::closing, &window, [&sessions]() {
@@ -1162,6 +1185,8 @@ int main(int argc, char** argv) {
         });
     updateEditing();
 
+    // Downloads in the status bar, and a note when a stage asks for a host that isn't allowed.
+    usdcc::usd::installAssetActivity(&window);
     window.show();
 
     // Once the window is up and its layout settled (so panels the scripts add

@@ -356,6 +356,9 @@ if(WIN32)
     add_custom_target(usdcc_assets_tests_copy_libraries
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc_assets_tests>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:usdcc_assets>" "$<TARGET_FILE_DIR:usdcc_assets_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CURL::libcurl>" "$<TARGET_FILE_DIR:usdcc_assets_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:ZLIB::ZLIB>" "$<TARGET_FILE_DIR:usdcc_assets_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:pugixml::shared>" "$<TARGET_FILE_DIR:usdcc_assets_tests>"
         VERBATIM)
     add_dependencies(usdcc_assets_tests_copy_libraries usdcc_assets)
     add_dependencies(usdcc_assets_tests usdcc_assets_tests_copy_libraries)

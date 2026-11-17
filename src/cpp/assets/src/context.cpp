@@ -75,8 +75,10 @@ void loadDefaults(Defaults& all, const Config* replacement) {
     all.context = std::make_shared<const Context>(all.config, all.config.chosenEnvironment());
     all.loaded = true;
     // Its switches, and nothing remembered from the configuration before it.
-    setOffline(all.config.offline);
-    DiskCache::shared().setLimit(static_cast<uint64_t>(all.config.cacheLimitGB * 1024.0 * 1024.0 * 1024.0));
+    setConfigOffline(all.config.offline);
+    if (all.config.cacheLimitGB) {
+        DiskCache::shared().setLimit(static_cast<uint64_t>(*all.config.cacheLimitGB * 1024.0 * 1024.0 * 1024.0));
+    }
     forgetLookups();
     forgetDownMarks();
 }

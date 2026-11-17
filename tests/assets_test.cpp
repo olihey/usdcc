@@ -388,6 +388,34 @@ USDCC_TEST(assets_credentials_come_from_the_callback_then_the_environment) {
     PXR_NS::TfUnsetenv("USDCC_ASSETS_OTHER_TOKEN");
 }
 
+USDCC_TEST(assets_credentials_in_the_system_store) {
+#if defined(_WIN32)
+    // A name no one else uses, gone again at the end: this is the user's own Credential Manager.
+    const std::string id = "usdcc-test-" + stableHash(std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()), 8);
+    CHECK(!storedCredential(id) && !credentialFor(id), "an id nothing has stored gives nothing");
+
+    Credential login;
+    login.user = "ada";
+    login.password = "sÃ©cret";  // not ASCII
+    std::string error;
+    CHECK(storeCredential(id, login, &error), "a user and password are stored: %s", error.c_str());
+    std::optional<Credential> stored = storedCredential(id);
+    CHECK(stored && stored->user == "ada" && stored->password == login.password && stored->token.empty(), "and read back as they were");
+    stored = credentialFor(id);
+    CHECK(stored && stored->user == "ada", "which is where credentialFor() finds them, without a callback");
+
+    Credential token;
+    token.token = "t0ken";
+    CHECK(storeCredential(id, token, &error), "a token replaces them: %s", error.c_str());
+    stored = storedCredential(id);
+    CHECK(stored && stored->token == "t0ken" && stored->user.empty() && stored->password.empty(), "and is read back as a token");
+
+    CHECK(forgetStoredCredential(id) && !storedCredential(id), "forgotten, it's gone");
+#else
+    CHECK(!storedCredential("anything"), "no system store on this platform yet");
+#endif
+}
+
 // ---- Stacks ---------------------------------------------------------------------------
 
 USDCC_TEST(assets_stack_first_endpoint_with_the_file_wins) {

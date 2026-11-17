@@ -25,6 +25,7 @@ add_library(usdcc_usd SHARED
     src/shading_preview.cpp
     include/usdcc/usd/shade_connections.h
     include/usdcc/usd/stage_manager.h
+    include/usdcc/usd/asset_servers.h
     include/usdcc/usd/stage_names.h
     include/usdcc/usd/tf_diagnostic_bridge.h
     include/usdcc/usd/time_range.h
@@ -69,6 +70,7 @@ add_library(usdcc_usd SHARED
     src/shade_connections.cpp
     src/stage.cpp
     src/stage_manager.cpp
+    src/asset_servers.cpp
     src/stage_names.cpp
     src/tf_diagnostic_bridge.cpp
     src/value_type_info.cpp
@@ -81,6 +83,9 @@ target_include_directories(usdcc_usd PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 # classes" rule and stage_manager.h's own comment. usdcc_usd_ui below is
 # where Qt enters this directory's build.
 target_link_libraries(usdcc_usd PUBLIC usdcc_core ${PXR_LIBRARIES})
+# Remote assets (docs/REMOTE_ASSETS.md §10): each stage's resolver context, and
+# what the UI shows of a path on a server.
+target_link_libraries(usdcc_usd PUBLIC usdcc_assets)
 usdcc_export_library(usdcc_usd)
 # OpenColorIO, from the OpenUSD install, which built it for Hydra's color correction
 # (docs/COLOR_MANAGEMENT.md): the same library, so the config usdcc makes current is
@@ -124,6 +129,8 @@ add_subdirectory(python)
 # dependency it doesn't otherwise need — usdcc.usd's Python bindings only
 # expose StageManager's plain data surface.
 add_library(usdcc_usd_ui SHARED
+    include/usdcc/usd/asset_settings.h
+    src/asset_settings.cpp
     include/usdcc/usd/attributes_view_panel.h
     include/usdcc/usd/property_sheet.h
     src/property_sheet.cpp

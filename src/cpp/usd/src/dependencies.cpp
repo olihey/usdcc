@@ -1,5 +1,9 @@
 #include "usdcc/usd/dependencies.h"
 
+#include "usdcc/usd/asset_servers.h"
+
+#include <pxr/usd/ar/resolverContextBinder.h>
+
 #include "usdcc/usd/composition_arcs.h"
 
 #include <pxr/usd/ar/resolver.h>
@@ -28,9 +32,10 @@ std::string locate(const PXR_NS::SdfLayerHandle& anchor, const std::string& asse
     const std::string anchored = anchor ? PXR_NS::SdfComputeAssetPathRelativeToLayer(anchor, assetPath) : assetPath;
     if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
         *found = true;
-        return open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath();
+        return displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
     }
-    const std::string resolved = PXR_NS::ArGetResolver().Resolve(anchored).GetPathString();
+    // A server's path as it's written, without the stack id only this process knows.
+    const std::string resolved = displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
     *found = !resolved.empty();
     return *found ? resolved : anchored;
 }
@@ -118,6 +123,8 @@ struct Collector {
 
 std::vector<Dependency> stageDependencies(const PXR_NS::UsdStageRefPtr& stage, bool assetAttributes) {
     if (!stage) return {};
+    // Resolved as the stage resolves them (docs/REMOTE_ASSETS.md §10).
+    const PXR_NS::ArResolverContextBinder binder(stage->GetPathResolverContext());
     Collector collector;
 
     for (const PXR_NS::SdfLayerHandle& layer : stage->GetUsedLayers()) {

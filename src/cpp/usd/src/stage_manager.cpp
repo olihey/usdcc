@@ -1,6 +1,7 @@
 #include "usdcc/usd/stage_manager.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/usd/asset_servers.h"
 
 #include <pxr/base/tf/errorMark.h>
 #include <pxr/usd/sdf/layer.h>
@@ -17,14 +18,18 @@ StageRefPtr StageManager::openStage(const std::string& identifier) {
 }
 
 PXR_NS::UsdStageRefPtr StageManager::loadUsdStage(const std::string& identifier, std::vector<std::string>* errors,
-                                                  PXR_NS::UsdStage::InitialLoadSet load) {
+                                                  PXR_NS::UsdStage::InitialLoadSet load,
+                                                  const std::string& assetEnvironment) {
     PXR_NS::UsdStageRefPtr stage;
     std::string firstError;
     {
         // Only to read the errors: the mark isn't cleared, so they still
         // reach the log (TfDiagnosticBridge) when it goes out of scope.
         PXR_NS::TfErrorMark mark;
-        stage = PXR_NS::UsdStage::Open(identifier, load);
+        // With the context, not after: Open(identifier) resolves the root layer before
+        // any context is bound, so a root on a server would always come from the default
+        // environment (docs/REMOTE_ASSETS.md §10).
+        stage = PXR_NS::UsdStage::Open(identifier, stageResolverContext(identifier, assetEnvironment), load);
         for (auto it = mark.GetBegin(); it != PXR_NS::TfDiagnosticMgr::GetInstance().GetErrorEnd(); ++it) {
             if (firstError.empty()) firstError = it->GetCommentary();
             if (errors) errors->push_back(it->GetCommentary());

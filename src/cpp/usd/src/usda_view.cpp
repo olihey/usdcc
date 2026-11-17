@@ -1,4 +1,11 @@
 #include "usdcc/usd/usda_view.h"
+#include "usdcc/usd/asset_settings.h"
+
+#include "usdcc/usd/asset_servers.h"
+
+#include "usdcc/assets/caching_resolver.h"
+
+#include <pxr/usd/ar/resolverContextBinder.h>
 
 #include "usdcc/ui/line_view.h"
 #include "usdcc/ui/panel_icon_button.h"
@@ -495,7 +502,7 @@ void UsdaView::refreshShowMenu() {
         if (m_stage) m_show->insertSeparator(m_show->count());
         const QString file = QFileInfo(qs(m_source.identifier)).fileName();
         addEntry(m_stage ? tr("%1  (linked)").arg(file) : file, Source::Kind::File, qs(m_source.identifier));
-        m_show->setItemData(m_show->count() - 1, QDir::toNativeSeparators(qs(m_source.identifier)), Qt::ToolTipRole);
+        m_show->setItemData(m_show->count() - 1, usdcc::usd::displayPath(qs(m_source.identifier)), Qt::ToolTipRole);
     }
     if (m_stageLoading) {
         // Says what's coming; not a pick.
@@ -591,6 +598,10 @@ void UsdaView::refresh() {
     if (m_stage) m_anchor = m_stage->usdStage()->GetRootLayer();  // for the flattened views
     if (m_source.kind == Source::Kind::File) {
         const std::string& identifier = m_source.identifier;
+        // A file on a server is the one the stage's environment means.
+        const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage()
+                                                         ? m_stage->usdStage()->GetPathResolverContext()
+                                                         : PXR_NS::ArResolverContext());
         // Held while it's shown; a text file no layer has open needn't be parsed.
         if (m_fileLayer && m_fileLayer->GetIdentifier() != identifier) m_fileLayer.Reset();
         if (!m_fileLayer) m_fileLayer = PXR_NS::SdfLayer::Find(identifier);
@@ -606,7 +617,7 @@ void UsdaView::refresh() {
                 m_name = qs(m_fileLayer->GetDisplayName());
                 m_anchor = m_fileLayer;
             } else {
-                m_name = tr("Can't open %1").arg(QDir::toNativeSeparators(qs(identifier)));
+                m_name = tr("Can't open %1").arg(usdcc::usd::displayPath(qs(identifier)));
             }
         }
     } else if (m_stage) {
@@ -771,6 +782,9 @@ void UsdaView::goToLine() {
 }
 
 QString UsdaView::resolveAsset(const QString& assetPath, bool* found) const {
+    // As the stage resolves it: a path on a server means its environment's servers.
+    const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage() ? m_stage->usdStage()->GetPathResolverContext()
+                                                                              : PXR_NS::ArResolverContext());
     const std::string path = assetPath.toStdString();
     std::string anchored = path;
     if (m_anchor && !m_anchor->IsAnonymous()) {
@@ -786,9 +800,10 @@ QString UsdaView::resolveAsset(const QString& assetPath, bool* found) const {
     // A layer that's open already counts as found, as in compositionArcs().
     if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
         if (found) *found = true;
-        return qs(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
+        return qs(usdcc::usd::displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath()));
     }
-    const std::string resolved = PXR_NS::ArGetResolver().Resolve(anchored).GetPathString();
+    // A server's path without the stack id: opened with the context bound, it's found again.
+    const std::string resolved = usdcc::usd::displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
     if (found) *found = !resolved.empty();
     return qs(resolved.empty() ? anchored : resolved);
 }
@@ -797,15 +812,31 @@ bool UsdaView::openLink(const QString& assetPath, bool newPanel) {
     bool found = false;
     const QString resolved = resolveAsset(assetPath, &found);
     if (!found) {
-        m_status->setText(tr("Not found: %1").arg(QDir::toNativeSeparators(resolved)));
+        m_status->setText(tr("Not found: %1").arg(usdcc::usd::displayPath(resolved)));
         return false;
     }
     if (!canPreviewUsda(resolved)) {
-        // A texture, a document: the system's app.
+        // A texture, a document: the system's app. One on a server, its copy in the cache.
+        if (!usdcc::usd::isLocalAssetPath(resolved.toStdString())) {
+            const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage()
+                                                             ? m_stage->usdStage()->GetPathResolverContext()
+                                                             : PXR_NS::ArResolverContext());
+            const std::optional<std::filesystem::path> file =
+                usdcc::assets::localFile(PXR_NS::ArGetResolver().Resolve(resolved.toStdString()).GetPathString());
+            if (!file) {
+                m_status->setText(tr("Can't download %1").arg(resolved));
+                return false;
+            }
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdU16String(file->u16string())));
+            return true;
+        }
         QDesktopServices::openUrl(QUrl::fromLocalFile(resolved));
         return true;
     }
     const std::string path = resolved.toStdString();
+    // A server's path is found with the stage's context, as resolveAsset() resolved it.
+    const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage() ? m_stage->usdStage()->GetPathResolverContext()
+                                                                              : PXR_NS::ArResolverContext());
     const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(path);
     // A layer of the stack is shown as one, so Show names it; anything else as a linked file.
     Source source;
@@ -905,7 +936,7 @@ QString UsdaView::linkToolTip(const usdcc::ui::LineView::Link& link) {
     const QString target = linkTarget(link);
     if (link.kind == AssetLink) {
         bool found = false;
-        const QString resolved = QDir::toNativeSeparators(resolveAsset(target, &found));
+        const QString resolved = usdcc::usd::displayPath(resolveAsset(target, &found));
         return found ? tr("%1\nClick to open, Ctrl+click to open in a new window").arg(resolved)
                      : tr("Not found: %1").arg(resolved);
     }
@@ -951,7 +982,7 @@ void UsdaView::populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& li
     menu->addSeparator();
     menu->addAction(tr("Copy Path"), this, [target]() { QApplication::clipboard()->setText(target); });
     menu->addAction(tr("Copy Resolved Path"), this, [resolved]() {
-        QApplication::clipboard()->setText(QDir::toNativeSeparators(resolved));
+        QApplication::clipboard()->setText(usdcc::usd::displayPath(resolved));
     })->setEnabled(found);
 }
 

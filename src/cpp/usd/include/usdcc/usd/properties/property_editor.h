@@ -14,6 +14,7 @@
 #include <QWidget>
 
 #include <optional>
+#include <pxr/usd/ar/resolverContext.h>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,9 @@ struct EditorHints {
     // And a new one is written to this layer, the edit target, so it's made relative to it.
     // Without it, the anchor layer.
     PXR_NS::SdfLayerHandle editLayer;
+    // And resolved with this: the stage's, so a path on a server means the servers of
+    // the stage's environment (docs/REMOTE_ASSETS.md §10). Empty: whatever is bound.
+    PXR_NS::ArResolverContext resolverContext;
     QString suffix;  // e.g. "°"
     // Text fields: shown while empty (e.g. "defaultPrim").
     QString placeholder;

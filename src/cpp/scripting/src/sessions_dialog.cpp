@@ -295,7 +295,8 @@ void SessionsDialog::updateDetails() {
             continue;
         }
         stages << QFileInfo(file).fileName().toHtmlEscaped();
-        if (!QFileInfo::exists(file)) {
+        // One on a server (webdav://, https://) can't be checked from here.
+        if (!file.contains(QStringLiteral("://")) && !QFileInfo::exists(file)) {
             warnings << tr("%1 isn't there: %2").arg(QFileInfo(file).fileName(), QDir::toNativeSeparators(file)).toHtmlEscaped();
         }
     }

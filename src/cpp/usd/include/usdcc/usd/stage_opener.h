@@ -59,6 +59,8 @@ public:
         MakeCurrent makeCurrent = MakeCurrent::Default;
         // A workspace to switch to once it's open; empty to keep the layout.
         QString workspace;
+        // The asset environment it opens in (docs/REMOTE_ASSETS.md §4); empty for the default.
+        std::string assetEnvironment;
     };
 
     // Starts opening `path` (a file path or resolvable USD asset path).

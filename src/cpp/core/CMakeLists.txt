@@ -37,12 +37,28 @@ function(usdcc_deploy_core_library target)
         # On every build, not after linking `target`: changing a DLL often doesn't
         # relink what uses it, which would leave a stale copy beside it.
         set(_commands COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>")
-        foreach(_library usdcc_core ${ARGN})
+        set(_libraries usdcc_core ${ARGN})
+        # usdcc_usd loads usdcc_assets (docs/REMOTE_ASSETS.md), and it libcurl and zlib.
+        # vcpkg's own copy step only follows the program's direct dependencies. pugixml
+        # is the WebDAV protocol's: OpenUSD loads a plugin's library with plain
+        # LoadLibraryW, which doesn't look beside it, so what it needs goes here too.
+        if("usdcc_usd" IN_LIST _libraries AND NOT "usdcc_assets" IN_LIST _libraries)
+            list(APPEND _libraries usdcc_assets)
+        endif()
+        if("usdcc_assets" IN_LIST _libraries)
+            foreach(_imported CURL::libcurl ZLIB::ZLIB pugixml::shared)
+                if(TARGET ${_imported})
+                    list(APPEND _commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${_imported}>"
+                         "$<TARGET_FILE_DIR:${target}>")
+                endif()
+            endforeach()
+        endif()
+        foreach(_library ${_libraries})
             list(APPEND _commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${_library}>"
                  "$<TARGET_FILE_DIR:${target}>")
         endforeach()
         add_custom_target(${target}_copy_libraries ${_commands} VERBATIM)
-        add_dependencies(${target}_copy_libraries usdcc_core ${ARGN})
+        add_dependencies(${target}_copy_libraries ${_libraries})
         add_dependencies(${target} ${target}_copy_libraries)
         # One copy step after another: several targets share an output folder
         # (the test programs, the Python modules), and in a parallel build two

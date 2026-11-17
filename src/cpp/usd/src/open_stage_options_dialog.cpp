@@ -1,5 +1,7 @@
 #include "usdcc/usd/open_stage_options_dialog.h"
 
+#include "usdcc/usd/asset_servers.h"
+
 #include "usdcc/ui/workspace_library.h"
 
 #include <QCheckBox>
@@ -80,6 +82,26 @@ OpenStageOptionsDialog::OpenStageOptionsDialog(const QString& path, const usdcc:
     layout->addWidget(hint(tr("Use existing keeps the layout; the stage gets a viewport beside the others."), this));
     layout->addSpacing(6);
 
+    // Which servers a webdav:// path means (docs/REMOTE_ASSETS.md §4); only asked when
+    // there is a choice.
+    const std::vector<std::string> environments = assetEnvironments();
+    if (environments.size() > 1) {
+        auto* assetForm = new QFormLayout();
+        m_assetEnvironment = new QComboBox(this);
+        m_assetEnvironment->setObjectName(QStringLiteral("assetEnvironment"));
+        const std::string fallback = defaultAssetEnvironment();
+        for (const std::string& environment : environments) {
+            m_assetEnvironment->addItem(QString::fromStdString(environment), QString::fromStdString(environment));
+            if (environment == fallback) m_assetEnvironment->setCurrentIndex(m_assetEnvironment->count() - 1);
+        }
+        assetForm->addRow(tr("Asset servers:"), m_assetEnvironment);
+        layout->addLayout(assetForm);
+        layout->addWidget(hint(tr("The environment its server paths are looked up in: which servers, in which order. "
+                                  "Its default is in Settings > Assets."),
+                               this));
+        layout->addSpacing(6);
+    }
+
     m_loadPayloads = new QCheckBox(tr("Load payloads"), this);
     m_loadPayloads->setObjectName(QStringLiteral("loadPayloads"));
     m_loadPayloads->setChecked(true);
@@ -102,6 +124,7 @@ StageOpener::Options OpenStageOptionsDialog::options() const {
     options.makeCurrent =
         m_makeCurrent->isChecked() ? StageOpener::Options::MakeCurrent::Everywhere : StageOpener::Options::MakeCurrent::No;
     options.workspace = m_workspace->currentData().toString();
+    if (m_assetEnvironment) options.assetEnvironment = m_assetEnvironment->currentData().toString().toStdString();
     return options;
 }
 

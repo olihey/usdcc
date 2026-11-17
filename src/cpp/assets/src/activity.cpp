@@ -19,6 +19,7 @@ struct State {
     std::shared_ptr<ActivityListener> listener;
     HostCallback hostCallback;
     std::map<std::string, bool> answered;  // host -> allowed
+    std::vector<std::string> extraAllowed;
 };
 
 State& state() {
@@ -32,6 +33,11 @@ std::atomic<uint64_t>& generation() {
 }
 
 std::atomic<bool>& offline() {
+    static std::atomic<bool> value{false};
+    return value;
+}
+
+std::atomic<bool>& configOffline() {
     static std::atomic<bool> value{false};
     return value;
 }
@@ -61,7 +67,9 @@ uint64_t downloadGeneration() { return generation().load(); }
 
 void setOffline(bool value) { offline().store(value); }
 
-bool isOffline() { return offline().load(); }
+void setConfigOffline(bool value) { configOffline().store(value); }
+
+bool isOffline() { return offline().load() || configOffline().load(); }
 
 void setHostCallback(HostCallback callback) {
     State& all = state();
@@ -91,6 +99,9 @@ bool hostAllowed(const std::string& host) {
     HostCallback callback;
     {
         std::lock_guard<std::mutex> lock(all.mutex);
+        for (const std::string& pattern : all.extraAllowed) {
+            if (hostMatches(pattern, host)) return true;
+        }
         const auto found = all.answered.find(lowered(host));
         if (found != all.answered.end()) return found->second;
         callback = all.hostCallback;
@@ -103,6 +114,27 @@ bool hostAllowed(const std::string& host) {
     std::lock_guard<std::mutex> lock(all.mutex);
     all.answered[lowered(host)] = allowed;
     return allowed;
+}
+
+void setExtraAllowedHosts(std::vector<std::string> patterns) {
+    State& all = state();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    all.extraAllowed = std::move(patterns);
+}
+
+void allowHostOfUrl(const std::string& url) {
+    const size_t scheme = url.find("://");
+    if (scheme == std::string::npos) return;
+    const size_t start = scheme + 3;
+    std::string host = url.substr(start, std::min(url.find_first_of("/?#", start), url.size()) - start);
+    const size_t at = host.rfind('@');
+    if (at != std::string::npos) host.erase(0, at + 1);
+    const size_t colon = host.rfind(':');
+    if (colon != std::string::npos && host.find(']', colon) == std::string::npos) host.erase(colon);
+    if (host.empty()) return;
+    State& all = state();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    all.answered[lowered(host)] = true;
 }
 
 void forgetHostAnswers() {

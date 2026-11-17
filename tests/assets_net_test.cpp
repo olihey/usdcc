@@ -451,6 +451,76 @@ USDCC_TEST(assets_webdav_credentials_and_a_server_that_is_down) {
     TfUnsetenv("USDCC_ASSETS_STUDIO_PASSWORD");
 }
 
+USDCC_TEST(assets_webdav_by_address) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "nas";
+    writeScene(folder.root, "nas", true);
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    ArResolver& resolver = ArGetResolver();
+    const std::string url = "webdav://127.0.0.1:" + std::to_string(server.port()) + "/shots/shot.usda";
+
+    CHECK(resolver.Resolve(url).empty() && server.requests().empty(),
+          "a server by its address is a host like any other: not contacted until it's allowed");
+    allowHostOfUrl(url);
+    const UsdStageRefPtr stage = UsdStage::Open(url);
+    CHECK(stage, "allowed, a stage opens from webdav://<address>:<port>/...");
+    if (!stage) return;
+    CHECK(stringAttribute(stage, "/Shot/Hero", "origin") == "nas" && stringAttribute(stage, "/Shot/Hero/Geo", "geoOrigin") == "nas",
+          "its reference and that layer's sublayer come from the same server, relative to their layers");
+    CHECK(stage->GetRootLayer()->GetIdentifier() == url && stage->GetRootLayer()->GetResolvedPath().GetPathString() == url,
+          "the identifier and resolved path are the address, with no stack id: %s",
+          stage->GetRootLayer()->GetResolvedPath().GetPathString().c_str());
+    const std::string grain = assetAttribute(stage, "/Shot/Hero", "grain");
+    CHECK(openedContent(grain) == "nas grain", "an asset attribute opens with no context bound: %s", grain.c_str());
+    CHECK(server.count("PROPFIND") > 0, "asked about with PROPFIND, as a named server is");
+    CHECK(!resolver.IsContextDependentPath(url), "an address means the same server in every context");
+
+    CHECK(resolver.CreateIdentifier("WEBDAVS://NAS.Example.com:443/a/../b.usd") == "webdavs://nas.example.com/b.usd",
+          "webdavs:// is normalized as a URL, its default port dropped: %s",
+          resolver.CreateIdentifier("WEBDAVS://NAS.Example.com:443/a/../b.usd").c_str());
+    CHECK(resolver.CreateIdentifier("../tex/a.png", ArResolvedPath("webdav://192.168.1.5:5000/shots/s.usd")) ==
+              "webdav://192.168.1.5:5000/tex/a.png",
+          "a relative path against an address stays on that server");
+    CHECK(resolver.Resolve("webdav://studio/shots/shot.usda").empty(),
+          "a plain name that isn't configured is still a name, and not looked up as a host");
+}
+
+USDCC_TEST(assets_webdav_by_address_logs_in_under_the_address) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "nas";
+    writeScene(folder.root, "nas", true);
+    folder.basicAuth = "ada:secret";
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    ArResolver& resolver = ArGetResolver();
+    const std::string port = std::to_string(server.port());
+    const std::string url = "webdav://127.0.0.1:" + port + "/chars/tex.txt";
+    allowHostOfUrl(url);
+
+    CHECK(resolver.Resolve(url).empty() && !sentCredential(server), "with no login saved, nothing is sent and the server refuses");
+
+    // Saved under the host: 127.0.0.1, as USDCC_ASSETS_127_0_0_1_* here.
+    TfSetenv("USDCC_ASSETS_127_0_0_1_USER", "ada");
+    TfSetenv("USDCC_ASSETS_127_0_0_1_PASSWORD", "secret");
+    forgetLookups();
+    CHECK(!resolver.Resolve(url).empty() && sentCredential(server), "a login saved under the host is used");
+    CHECK(openedContent(resolver.Resolve(url).GetPathString()) == "nas texture", "and the file opens");
+
+    // One saved under host and port wins over the host's.
+    TfSetenv("USDCC_ASSETS_127_0_0_1_PASSWORD", "wrong");
+    TfSetenv("USDCC_ASSETS_127_0_0_1_" + port + "_USER", "ada");
+    TfSetenv("USDCC_ASSETS_127_0_0_1_" + port + "_PASSWORD", "secret");
+    forgetLookups();
+    CHECK(!resolver.Resolve("webdav://127.0.0.1:" + port + "/chars/geo.usda").empty(),
+          "a login saved under host:port is used before the host's");
+
+    TfUnsetenv("USDCC_ASSETS_127_0_0_1_USER");
+    TfUnsetenv("USDCC_ASSETS_127_0_0_1_PASSWORD");
+    TfUnsetenv("USDCC_ASSETS_127_0_0_1_" + port + "_USER");
+    TfUnsetenv("USDCC_ASSETS_127_0_0_1_" + port + "_PASSWORD");
+}
+
 // ---- Phase 3 ---------------------------------------------------------------------------
 
 USDCC_TEST(assets_mirror_takes_over_from_a_dead_url) {

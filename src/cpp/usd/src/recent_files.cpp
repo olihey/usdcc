@@ -1,4 +1,5 @@
 #include "usdcc/usd/recent_files.h"
+#include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
@@ -95,7 +96,7 @@ void populateRecentFilesMenu(QMenu* menu, const std::function<void(const QString
     const QStringList paths = recentFiles();
     int number = 0;
     for (const QString& path : paths) {
-        const QString nativePath = QDir::toNativeSeparators(path);
+        const QString nativePath = usdcc::usd::displayPath(path);
         QString label = nativePath;
         label.replace(QLatin1Char('&'), QLatin1String("&&"));  // not a mnemonic
         ++number;

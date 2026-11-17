@@ -1,4 +1,5 @@
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/prim_actions.h"
@@ -147,7 +148,7 @@ void DependenciesViewPanel::refresh() {
     int missing = 0;
     for (int index = 0; index < int(m_dependencies.size()); ++index) {
         const Dependency& file = m_dependencies[index];
-        const QString path = QDir::toNativeSeparators(qs(file.resolvedPath));
+        const QString path = usdcc::usd::displayPath(qs(file.resolvedPath));
         auto* item = new QTreeWidgetItem(m_tree);
         item->setData(File, kIndexRole, index);
         item->setText(File, QFileInfo(qs(file.resolvedPath)).fileName());
@@ -243,7 +244,7 @@ void DependenciesViewPanel::populateFileMenu(QMenu* menu, int index) {
 
     menu->addSeparator();
     menu->addAction(tr("Copy Path"), this,
-                    [path]() { QApplication::clipboard()->setText(QDir::toNativeSeparators(path)); });
+                    [path]() { QApplication::clipboard()->setText(usdcc::usd::displayPath(path)); });
     const QString assetPath = qs(file.assetPath);
     menu->addAction(tr("Copy Asset Path"), this, [assetPath]() { QApplication::clipboard()->setText(assetPath); });
 

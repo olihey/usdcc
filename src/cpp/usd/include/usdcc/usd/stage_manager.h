@@ -48,10 +48,13 @@ public:
     // pass it to adoptStage() on the manager's own thread. The errors OpenUSD
     // raised while opening go to the log; with `errors`, their messages are
     // also copied there, so a caller can tell the user why it failed. `load`
-    // says whether payloads load (a preview's stage starts without them).
+    // says whether payloads load (a preview's stage starts without them). It opens
+    // with the resolver context of `assetEnvironment` (asset_servers.h); empty is the
+    // default environment.
     static PXR_NS::UsdStageRefPtr loadUsdStage(const std::string& identifier,
                                                std::vector<std::string>* errors = nullptr,
-                                               PXR_NS::UsdStage::InitialLoadSet load = PXR_NS::UsdStage::LoadAll);
+                                               PXR_NS::UsdStage::InitialLoadSet load = PXR_NS::UsdStage::LoadAll,
+                                               const std::string& assetEnvironment = {});
 
     // The other half of openStage(): registers a stage that loadUsdStage()
     // opened (or returns the existing Stage already wrapping it), fires

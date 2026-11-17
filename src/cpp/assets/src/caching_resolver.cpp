@@ -1,6 +1,7 @@
 #include "usdcc/assets/caching_resolver.h"
 
 #include "usdcc/assets/activity.h"
+#include "usdcc/assets/credentials.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/paths.h"
 
@@ -16,6 +17,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <mutex>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -58,7 +61,36 @@ private:
     uint64_t m_generation;
 };
 
+// Which file each resolved path last opened as, for localFile().
+struct OpenedFiles {
+    std::mutex mutex;
+    std::map<std::string, std::filesystem::path> files;
+};
+
+OpenedFiles& openedFiles() {
+    static OpenedFiles instance;
+    return instance;
+}
+
+std::shared_ptr<ArAsset> openRemembered(const std::string& resolved, const std::filesystem::path& file) {
+    {
+        OpenedFiles& all = openedFiles();
+        std::lock_guard<std::mutex> lock(all.mutex);
+        all.files[resolved] = file;
+    }
+    return ArFilesystemAsset::Open(ArResolvedPath(toUtf8(file)));
+}
+
 }  // namespace
+
+std::optional<std::filesystem::path> localFile(const std::string& resolvedPath) {
+    if (!ArGetResolver().OpenAsset(ArResolvedPath(resolvedPath))) return std::nullopt;
+    OpenedFiles& all = openedFiles();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    const auto found = all.files.find(resolvedPath);
+    if (found == all.files.end()) return std::nullopt;
+    return found->second;
+}
 
 CachingResolver::CachingResolver(std::string scheme) : m_scheme(std::move(scheme)) {}
 
@@ -103,7 +135,20 @@ Found CachingResolver::_Find(const std::string& assetPath, Location* location, b
         return found;
     }
     found = findInStack(*location->stack, location->path, _Scope());
-    if (found.status != Status::Ok && found.status != Status::Missing) {
+    if (found.status == Status::NotAllowed) {
+        const std::string& credential = found.endpoint.credential;
+        std::string why;
+        if (credential.empty()) {
+            why = "refused to answer without a login, and its endpoint names no credential";
+        } else if (!credentialFor(credential)) {
+            why = "wants a login, and none is saved under the credential '" + credential +
+                  "' (Edit > Asset Server Login in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
+        } else {
+            why = "refused the login saved under the credential '" + credential + "'";
+        }
+        TF_WARN("%s isn't resolved: the server '%s' %s (%s)", location->display.c_str(), found.endpoint.id.c_str(),
+                why.c_str(), found.message.c_str());
+    } else if (found.status != Status::Ok && found.status != Status::Missing) {
         TF_WARN("%s isn't resolved: the server '%s' is %s%s%s", location->display.c_str(), found.endpoint.id.c_str(),
                 statusName(found.status), found.message.empty() ? "" : ": ", found.message.c_str());
     }
@@ -152,7 +197,7 @@ std::shared_ptr<ArAsset> CachingResolver::_OpenAsset(const ArResolvedPath& resol
     const Found found = _Find(resolvedPath.GetPathString(), &location, true);
     if (found.status != Status::Ok) return nullptr;
     // Offline, it resolved to a version in the cache, and that is the one to open.
-    if (!found.cachedFile.empty()) return ArFilesystemAsset::Open(ArResolvedPath(toUtf8(found.cachedFile)));
+    if (!found.cachedFile.empty()) return openRemembered(resolvedPath.GetPathString(), found.cachedFile);
     const std::shared_ptr<Transport> transport = transportFor(location.stack->scheme);
     if (!transport) return nullptr;
 
@@ -172,7 +217,7 @@ std::shared_ptr<ArAsset> CachingResolver::_OpenAsset(const ArResolvedPath& resol
                 statusName(file.status), file.message.empty() ? "" : ": ", file.message.c_str());
         return nullptr;
     }
-    return ArFilesystemAsset::Open(ArResolvedPath(toUtf8(file.value)));
+    return openRemembered(resolvedPath.GetPathString(), file.value);
 }
 
 std::shared_ptr<ArWritableAsset> CachingResolver::_OpenAssetForWrite(const ArResolvedPath&, WriteMode) const {

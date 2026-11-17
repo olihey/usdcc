@@ -92,8 +92,11 @@ BUILD_ONLY_FILES = ["*.pdb", "*.lib", "*.exp", "*.ilk"]
 # examples\plugins, or Settings > Plugins.
 SHIPPED_PLUGINS = ["vray_render"]
 # Built ones, from build/plugins: Jolt Physics, with Jolt's library and licence in its
-# folder (docs/PHYSICS.md section 4.1). MIT, so in every artifact.
-SHIPPED_NATIVE_PLUGINS = ["physics_jolt"]
+# folder (docs/PHYSICS.md section 4.1). MIT, so in every artifact. And the protocols of
+# remote assets, http and webdav (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
+# on bin's usdcc_assets, libcurl, zlib and pugixml. Not beside the plugin: OpenUSD loads
+# a plugin's library with plain LoadLibraryW, which doesn't look there.
+SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav"]
 
 
 def _full(path):
@@ -496,11 +499,12 @@ def main(argv=None):
 
     print("  Plugin SDK", flush=True)
     sdk_dir = deploy_dir / "sdk"
-    for library in ("core", "tools", "ui", "usd", "plugin_sdk"):
+    for library in ("core", "assets", "tools", "ui", "usd", "plugin_sdk"):
         copy_tree(REPO / "src/cpp" / library / "include", sdk_dir / "include")
     (sdk_dir / "lib").mkdir(parents=True, exist_ok=True)
     (sdk_dir / "cmake").mkdir(parents=True, exist_ok=True)
-    for library in ("core/usdcc_core", "usd/usdcc_usd", "tools/usdcc_tools", "ui/usdcc_ui", "usd/usdcc_usd_ui"):
+    for library in ("core/usdcc_core", "assets/usdcc_assets", "usd/usdcc_usd", "tools/usdcc_tools", "ui/usdcc_ui",
+                    "usd/usdcc_usd_ui"):
         folder, name = library.split("/")
         copy_file(BUILD_DIR / "src/cpp" / folder / configuration / f"{name}.lib", sdk_dir / "lib")
     copy_file(BUILD_DIR / "sdk/UsdccPluginConfig.cmake", sdk_dir)
@@ -589,6 +593,8 @@ def main(argv=None):
         "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
         "sdk/UsdccPluginConfig.cmake", "sdk/lib/usdcc_ui.lib", "sdk/include/usdcc/plugin/plugin.h",
         "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
+        "bin/usdcc_assets.dll", "bin/libcurl.dll", "licenses/vcpkg/curl.txt", "licenses/vcpkg/pugixml.txt",
+        "bin/pugixml.dll", "plugins/http/usd/plugInfo.json", "plugins/webdav/usd/plugInfo.json",
     ]
     if include_rtx:
         required += ["plugins/rtx_render/usdcc-plugin.json", "plugins/rtx_render/bin/windows-x64/rtx_render_native.dll"]

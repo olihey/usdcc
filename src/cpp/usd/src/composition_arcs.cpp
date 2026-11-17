@@ -1,5 +1,9 @@
 #include "usdcc/usd/composition_arcs.h"
 
+#include "usdcc/usd/asset_servers.h"
+
+#include <pxr/usd/ar/resolverContextBinder.h>
+
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/layerUtils.h>
@@ -50,9 +54,10 @@ std::string resolve(const PXR_NS::SdfLayerHandle& anchor, const std::string& ass
     // A layer that's open already (an anonymous one, say) counts as found,
     // though the resolver knows no file for it.
     if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
-        return open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath();
+        return displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
     }
-    return PXR_NS::ArGetResolver().Resolve(anchored).GetPathString();
+    // A server's path as it's written, without the stack id only this process knows.
+    return displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
 }
 
 template <typename Item>
@@ -81,6 +86,9 @@ std::vector<ArcInfo> compositionArcs(const PXR_NS::UsdPrim& prim) {
     std::vector<ArcInfo> arcs;
     if (!prim) return arcs;
     const PXR_NS::UsdStageRefPtr stage = prim.GetStage();
+    // Resolved as the stage resolves them: a path on a server means its environment's
+    // servers (docs/REMOTE_ASSETS.md §10).
+    const PXR_NS::ArResolverContextBinder binder(stage->GetPathResolverContext());
     const PXR_NS::SdfLayerHandleVector stageLayers = stage->GetLayerStack(true);
     const PXR_NS::UsdEditTarget editTarget = stage->GetEditTarget();
     const bool loaded = prim.IsLoaded();

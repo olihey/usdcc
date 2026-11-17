@@ -183,6 +183,8 @@ QStringList session::missingFiles(const QJsonObject& session) {
     const QJsonArray stages = session.value(QStringLiteral("stages")).toArray();
     for (const QJsonValue& value : stages) {
         const QString file = value.toObject().value(QStringLiteral("file")).toString();
+        // A server's (webdav://, https://) can't be checked from here; opening it says.
+        if (file.contains(QStringLiteral("://"))) continue;
         if (!file.isEmpty() && !QFileInfo::exists(file) && !missing.contains(file)) missing << file;
     }
     const QJsonArray tabs = session.value(QStringLiteral("scriptEditor")).toObject().value(QStringLiteral("tabs")).toArray();

@@ -3,6 +3,7 @@
 // or stacks, and the resolved path is the identifier. Read-only, and it can't list.
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/caching_resolver.h"
+#include "usdcc/assets/credentials.h"
 #include "usdcc/assets/http_client.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
@@ -164,6 +165,8 @@ protected:
         endpoint.url = url.origin();
         endpoint.readOnly = true;
         if (host != config.httpHosts.end()) endpoint.credential = host->second.credential;
+        // Else the address is the credential's name, as for WebDAV by address.
+        if (endpoint.credential.empty()) endpoint.credential = credentialIdForAddress(url.host, url.port);
         Stack stack;
         stack.scheme = url.scheme;
         stack.name = url.host;

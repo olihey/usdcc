@@ -669,6 +669,7 @@ PropertySheet::Row PropertySheet::buildShaderInputRow(const UsdPrim& prim, const
     if (!exists && m_stage) {
         hints.anchorLayer = m_stage->usdStage()->GetEditTarget().GetLayer();
         hints.editLayer = hints.anchorLayer;
+        hints.resolverContext = m_stage->usdStage()->GetPathResolverContext();
     }
     if (!input.options.empty() && hints.allowedTokens.empty()) hints.allowedTokens = input.options;
     if (!hints.softRange) hints.softRange = input.softRange;
@@ -998,6 +999,7 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
             beginFrame();
             EditorHints hints;
             hints.anchorLayer = editTarget;
+            if (m_stage) hints.resolverContext = m_stage->usdStage()->GetPathResolverContext();
             PropertyEditor* file = properties::createPropertyEditor(SdfValueTypeNames->Asset, hints);
             file->setValue(VtValue(SdfAssetPath(arc.assetPath)));
             connect(file, &PropertyEditor::valueEdited, this, [change, arc](const VtValue& v) {

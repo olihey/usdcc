@@ -3,9 +3,9 @@
 A USD asset resolver plugin that loads assets from WebDAV servers through `webdav://` asset paths,
 such as `webdav://studio/chars/hero/hero.usd`.
 
-**Status:** reading is built (2026-11-17), in [src/plugins/webdav](../src/plugins/webdav), and
-tested ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3); writing is phase 6. Not in the app or a deploy
-yet. The caching, the server names, the environments and the usdcc integration are the shared
+**Status:** reading is built (2026-11-17), in [src/plugins/webdav](../src/plugins/webdav), tested
+([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and in the app and the deploy (§13.4); writing is
+phase 6. The caching, the server names, the environments and the usdcc integration are the shared
 library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This document is only what is WebDAV's own.
 
 ## 1. What it is
@@ -52,6 +52,33 @@ https://dav.studio.local/assets/chars/hero/           (endpoint "prod")
 
 The endpoint's URL is a prefix: the asset's path is appended to it, percent-encoded segment by
 segment. Query strings and fragments in an asset path are refused.
+
+### 2.1 By address
+
+A server can also be named by its address, with no configuration:
+
+```
+webdav://192.168.178.53:5000/oli.usda       http://192.168.178.53:5000/oli.usda
+webdavs://dav.example.com/shots/s010.usda   https://dav.example.com/shots/s010.usda
+```
+
+- **When it's an address:** the part after `//` isn't a name the environment has, and has a port,
+  a dot, is `localhost`, or is an IPv6 address in brackets. A plain word that isn't configured
+  (`webdav://studio/...`) is still a name, and still an error.
+- **`webdav://` is HTTP, `webdavs://` HTTPS,** as in other WebDAV clients.
+- **A single server:** no environment, no stack, no stack id. The resolved path is the identifier,
+  and relative paths in a layer stay on its server.
+- **A host like plain HTTP's** ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4): it has to be allowed,
+  as a stage can name any address. One the user opens (File > Open, Open Stage from URL, Open
+  Recent, the command line, a session's stage) is allowed for the rest of the session.
+- **Its login** is saved under the address: `192.168.178.53:5000` when one is saved for that port,
+  else `192.168.178.53` (Edit > Asset Server Login, or `USDCC_ASSETS_192_168_178_53_USER` and
+  `_PASSWORD`). A `"hosts"` entry in the configuration's `"http"` section can name another
+  credential instead. It is sent over plain `webdav://` too, with a warning in the Log once.
+- **It writes the address into what is saved,** which names avoid. Fine for a file of your own;
+  for a studio's library, a name in the configuration keeps it portable.
+
+Added 2026-11-17, after the first try in the app named a server this way.
 
 ## 3. The transport
 

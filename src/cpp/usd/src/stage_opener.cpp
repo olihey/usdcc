@@ -1,4 +1,5 @@
 #include "usdcc/usd/stage_opener.h"
+#include "usdcc/assets/activity.h"
 
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
@@ -60,6 +61,9 @@ void StageOpener::open(const QString& path, const Options& options) {
     if (m_busy) {
         return;
     }
+    // A stage the user opens: a server it names by address may be contacted, for this
+    // session (docs/HTTP_RESOLVER.md §4). What the stage itself names still has to be allowed.
+    usdcc::assets::allowHostOfUrl(path.toStdString());
     setBusy(true);
     m_path = path;
     m_options = options;
@@ -89,10 +93,11 @@ void StageOpener::open(const QString& path, const Options& options) {
     auto result = std::make_shared<Result>();
     const std::string identifier = path.toStdString();
     const PXR_NS::UsdStage::InitialLoadSet load = options.loadPayloads ? PXR_NS::UsdStage::LoadAll : PXR_NS::UsdStage::LoadNone;
-    m_thread = QThread::create([result, identifier, load]() {
+    const std::string environment = options.assetEnvironment;
+    m_thread = QThread::create([result, identifier, load, environment]() {
         usdcc::core::setThreadName("stage-loader");
         try {
-            result->stage = StageManager::loadUsdStage(identifier, &result->errors, load);
+            result->stage = StageManager::loadUsdStage(identifier, &result->errors, load, environment);
         } catch (const std::exception& e) {
             USDCC_LOG_ERROR("usdcc.stage", "Opening {} threw an exception: {}", identifier, e.what());
             result->errors.push_back(e.what());
