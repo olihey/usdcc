@@ -779,14 +779,25 @@ void Room::Impl::onAuth(Member* member, const Message& message) {
         return;
     }
 
+    // The host's user decides; unanswered, it's a no.
+    const auto ask = [this, member] {
+        member->phase = Member::Phase::Asking;
+        auto* request = new JoinRequest(q, member->peer);
+        member->request = request;
+        qCInfo(lcPeers).noquote() << member->peer.name << "asks to join room" << name;
+        QPointer<JoinRequest> guard = request;
+        QTimer::singleShot(options.limits.joinRequestTimeoutMs, q, [guard] {
+            if (guard) {
+                guard->deny(QStringLiteral("The host didn't answer"));
+            }
+        });
+        Q_EMIT q->joinRequested(request);
+    };
     const QString given = body.value(QLatin1String("secret")).toString();
     if (!given.isEmpty()) {
         if (!member->browser && sameSecret(given, secret)) {
             if (options.askBeforeLinkJoin && !admitted.contains(fingerprint)) {
-                member->phase = Member::Phase::Asking;
-                auto* request = new JoinRequest(q, member->peer);
-                member->request = request;
-                Q_EMIT q->joinRequested(request);
+                ask();
                 return;
             }
             admit(member, Peer::Kind::Peer);
@@ -811,20 +822,7 @@ void Room::Impl::onAuth(Member* member, const Message& message) {
         admit(member, Peer::Kind::Peer);
         return;
     }
-    member->phase = Member::Phase::Asking;
-    auto* request = new JoinRequest(q, member->peer);
-    member->request = request;
-    qCInfo(lcPeers).noquote() << member->peer.name << "asks to join room" << name;
-    Q_EMIT q->joinRequested(request);
-    if (member->phase == Member::Phase::Asking && !member->gone) {
-        // Unanswered, it's a no.
-        QPointer<JoinRequest> guard = request;
-        QTimer::singleShot(options.limits.joinRequestTimeoutMs, q, [guard] {
-            if (guard) {
-                guard->deny(QStringLiteral("The host didn't answer"));
-            }
-        });
-    }
+    ask();
 }
 
 void Room::Impl::settle(JoinRequest* request, bool allow, const QString& reason) {

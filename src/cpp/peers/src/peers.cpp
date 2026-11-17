@@ -9,11 +9,9 @@ namespace usdcc::peers {
 Peers::Peers(Options options, QObject* parent)
     : QObject(parent),
       m_profile(std::move(options.profile)),
+      m_identity(std::move(options.identity)),
       m_network(std::move(options.network)),
       m_announceLoopback(options.announceLoopback) {
-    if (!m_profile.identity.isValid()) {
-        m_profile.identity = Identity::generate();
-    }
     if (m_profile.instance.isEmpty()) {
         m_profile.instance = randomId(6);
     }
@@ -60,7 +58,17 @@ void Peers::setProfile(const QString& name, const QString& color) {
     m_profile.color = color;
 }
 
+void Peers::ensureIdentity() {
+    if (!m_profile.identity.isValid() && m_identity) {
+        m_profile.identity = m_identity();
+    }
+    if (!m_profile.identity.isValid()) {
+        m_profile.identity = Identity::generate();
+    }
+}
+
 Room* Peers::host(HostOptions options, QString* error) {
+    ensureIdentity();
     options.profile = m_profile;
     QString firstError;
     Room* room = Room::host(options, this, &firstError);
@@ -113,6 +121,7 @@ void Peers::announce(Room* room, const HostOptions& options) {
 }
 
 Room* Peers::join(const QString& address, JoinOptions options) {
+    ensureIdentity();
     options.profile = m_profile;
     return adopt(Room::join(address, options, this));
 }

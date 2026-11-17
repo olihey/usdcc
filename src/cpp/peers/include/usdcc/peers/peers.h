@@ -12,6 +12,7 @@
 #include <QObject>
 #include <QPointer>
 
+#include <functional>
 #include <memory>
 
 namespace usdcc::peers {
@@ -21,7 +22,10 @@ class USDCC_PEERS_API Peers : public QObject {
 
 public:
     struct Options {
-        Profile profile;
+        Profile profile;                            // Its identity may be left out: see `identity`
+        // Gives the profile's key the first time a room is hosted or joined, so that none
+        // is made or read before Peers is used (PEERS.md §12); null: one for this run.
+        std::function<Identity()> identity;
         QString roomsFolder;                        // This machine's rooms (§5.1); empty: none
         std::unique_ptr<NetworkDiscovery> network;  // This network's (§5.2); null: none
         // Announce rooms on the loopback on the network too: for tests, whose rooms
@@ -62,9 +66,11 @@ Q_SIGNALS:
 
 private:
     Room* adopt(Room* room);
+    void ensureIdentity();
     void announce(Room* room, const HostOptions& options);
 
     Profile m_profile;
+    std::function<Identity()> m_identity;
     std::unique_ptr<RoomDirectory> m_directory;
     std::unique_ptr<NetworkDiscovery> m_network;
     QList<QPointer<Room>> m_rooms;

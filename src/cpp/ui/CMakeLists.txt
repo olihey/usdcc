@@ -12,6 +12,8 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/panel_icon_button.h
     include/usdcc/ui/options_menu_view.h
     include/usdcc/ui/panel_menu_button.h
+    include/usdcc/ui/peers_controller.h
+    include/usdcc/ui/peers_side_panel.h
     include/usdcc/ui/qt_message_bridge.h
     include/usdcc/ui/scale_controller.h
     include/usdcc/ui/scaled_metrics.h
@@ -44,6 +46,8 @@ add_library(usdcc_ui SHARED
     src/panel_icon_button.cpp
     src/options_menu_view.cpp
     src/panel_menu_button.cpp
+    src/peers_controller.cpp
+    src/peers_side_panel.cpp
     src/qt_message_bridge.cpp
     src/scale_controller.cpp
     src/session_store.cpp
@@ -72,7 +76,8 @@ target_include_directories(usdcc_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 # unconditionally — see docs/PLAN.md §6 "ViewPanel: mandatory Stage
 # association" for why usdcc_ui is no longer USD-agnostic.
 # QWindowKit is static, and private so that this DLL holds the only copy.
-target_link_libraries(usdcc_ui PUBLIC usdcc_core usdcc_usd Qt6::Widgets ads::qtadvanceddocking-qt6
+# usdcc_peers: the Peers panel and its rooms (docs/PEERS.md §10.1).
+target_link_libraries(usdcc_ui PUBLIC usdcc_core usdcc_usd usdcc_peers Qt6::Widgets ads::qtadvanceddocking-qt6
                                PRIVATE QWindowKit::Widgets usdcc_ui_resources)
 target_compile_definitions(usdcc_ui PRIVATE USDCC_UI_BUILD
     # The shipped workspaces, for a build that isn't deployed (deployed, they're in

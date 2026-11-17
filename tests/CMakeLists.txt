@@ -121,6 +121,7 @@ add_executable(usdcc_ui_tests
     viewport_hud_test.cpp
     viewport_delete_test.cpp
     panel_maximizer_test.cpp
+    peers_panel_test.cpp
     workspace_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)

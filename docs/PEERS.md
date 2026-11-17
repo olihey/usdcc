@@ -1,4 +1,4 @@
-# Peers (plan)
+# Peers
 
 A general way for running usdcc instances, their plugins and other programs to find each other
 and share data: messages, state that is kept equal everywhere, and files. Chat, notifications from
@@ -10,10 +10,13 @@ to its own page. "Checked" below means looked at in this repository or its pinne
 else is an assumption until the spike (§14).
 Also 2026-11-17: rooms and channels (phase 1a) are built first, for
 [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md), which also brought browser guests (§6.1).
-**Phase 1a is built** (2026-11-17): `usdcc_peers` in `src/cpp/peers/`, tested by
-`tests/peers_test.cpp` on loopback, with the vcpkg ports and the deploy it needs. Nothing in the
-app uses it yet; the broadcast plugin will be first. Where it differs from this plan is §14.1.
-Phases 1b and later aren't started.
+**Built** (2026-11-17), all in C++: phase 1a (rooms and channels, §14.1), phase 1b without
+the Python module (keys, encryption, reconnecting, shared state, several rooms, §14.2), and
+phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Until the
+hub of phase 3, a *public room* (anyone on the network may join, §6) stands in for the studio's
+room. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md). `usdcc.peers` for
+Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two machines haven't
+been tried; everything so far ran on one.
 
 ## 1. Can it work without a server?
 
@@ -177,6 +180,10 @@ gives it as the command `usdcc-relay`, and a Dockerfile comes with it.
   - *By discovery:* the host gets a toast ([NOTIFICATIONS.md](NOTIFICATIONS.md)), "Anna wants to
     join Shot 12", with **Allow**, **Always allow Anna** and **Deny**. A room can also have a
     password.
+  - *A public room:* anyone who finds it on this machine or network is in, without asking (a
+    password still applies). It is how a team has one room for everyone before there is a hub
+    (§9). Added 2026-11-17.
+  - *Invited only:* not announced, and refuses anyone without the link.
 - **Who may send.** The host says, per channel: everyone (the default), named peers, or only the
   host. It refuses the rest itself, so a member can't get around it. The host can also remove a
   member and close the room.
@@ -528,6 +535,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
   ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §4.1). Phase 1a needs only the two Qt ones. Qt
   Network and its OpenSSL backend are already built: *checked,* `network` and `openssl` are
   default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
+  All four are in `vcpkg.json` since phases 1a to 2.
 - **CMake:** `Network`, `WebSockets` and `HttpServer` join `find_package(Qt6 … Widgets OpenGL Svg Test)`
   (done in phase 1a, §14.1).
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
@@ -629,8 +637,100 @@ which makes it depend on `qtwebsockets`; `Network`, `WebSockets` and `HttpServer
 `Qt6WebSockets.dll`, `Qt6HttpServer.dll`, `Qt6Concurrent.dll`, `libcrypto-3-x64.dll`, `jpeg62.dll`
 and `imageformats/qjpeg.dll`, which `tools/deploy.py` checks for.
 
-**Not tried yet:** a member on another machine, and with it Windows Firewall; the host listening
-on `127.0.0.1` beside a network address (§5.1), which it doesn't do yet.
+**Not tried yet:** a member on another machine, and with it Windows Firewall.
+
+Superseded by phase 1b (§14.2): members now join with a key and the encrypted handshake, not the
+secret alone, and the protocol is [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
+
+### 14.2 Phase 1b as built
+
+**Its tests** (`tests/peers_rooms_test.cpp`, in `usdcc_peers_tests` with 1a's): the criteria of
+row 1b, Python's aside. A small TCP proxy in the test sits between a member and the host, keeps
+every byte and can cut the connection:
+
+| Criterion | Test |
+|---|---|
+| Two peers join by address and nothing readable is on the wire | `peers_nothing_readable_on_the_wire`: chat, a map value, a latest-only picture, names and the secret don't appear in what passed the proxy |
+| A reconnect catches up | `peers_reconnect_catches_up`: the proxy cuts a member, three messages go out, it comes back with all of them once, in order |
+| A wrong key is refused | `peers_wrong_key_is_refused` |
+| A map ends equal after both sides set the same key; a late joiner has the map | `peers_shared_state`, also with 300 random sets and removes from three sides |
+| A test plugin shares a map from Python | Not built: no `usdcc.peers` |
+
+Also tested: identities and links, a member away too long, per-peer state and channel snapshots,
+the room key changing, and every kind of admission.
+
+**What it is:**
+
+- **Identity** (§4): an Ed25519 key pair from libsodium. On Windows it is kept in the credential
+  store as "usdcc peers identity (<application name>)", so a test profile has its own. **On
+  Linux and macOS it is a file** (`<AppLocalData>/peers/identity.key`, readable by its owner
+  only): no credential store there yet. The key is made the first time a room is hosted or
+  joined, not at start. A peer's id is `<fingerprint>-<instance>`. The fingerprint is 32 base32
+  characters of a BLAKE2b hash, shown as `abcd-efgh`.
+- **The handshake and encryption** (§6): exactly [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §2–3.
+  The room key changes whenever a peer's connection ends, also for a short break, not only when
+  it leaves. A program that joins with the guests' secret is encrypted too; only a page on a plain
+  link isn't (as planned).
+- **Reconnecting** (§7.4): the host keeps a peer whose connection broke for 30 s without telling
+  the others, and the last 2,000 ordered messages (or 8 MB). Back in time, the peer gets what it
+  missed; later, everything afresh. A member that was dropped as too slow rejoins the same way,
+  as §7.4 says. One told it was removed doesn't.
+- **Shared state** (§7.2): `Room::state()` gives a `StateMap`, `Room::peerState()` a `PeerState`,
+  and `Channel::setSnapshotProvider()` is the snapshot "when a map isn't enough". Added: the host
+  may say who writes a map (`setSenders`), as for channels. Guests don't see maps; a per-peer map
+  can be opened to them.
+- **Several rooms** (§2): `Peers` holds every room of a program, hosted and joined, and finds rooms
+  (§14.3).
+- **Who may join** (§6): `Admission::Invited`, `Ask` and `Open`, a password, "always allow"
+  (`HostOptions::trustedFingerprints`, `Room::trust()`), "ask before a join by link", and
+  `Room::joinRequested` with a `JoinRequest` to allow or deny; unanswered, a no after 120 s.
+- **Not built:** `usdcc.peers` and its plugin test (set aside); the pipe of §15 that delays and
+  reorders (the random test runs over real sockets); a clock the test moves.
+
+### 14.3 Phase 2 as built
+
+**Its tests:** `tests/peers_discovery_test.cpp` (this machine's folder, a fake network, public
+rooms, several rooms at once, a stale file), `peers_mdns` in the same file against the real network
+(only with `USDCC_PEERS_MDNS_TEST=1`), and `tests/peers_panel_test.cpp` in `usdcc_ui_tests`. That
+last one runs two instances' managers in one process: one finds the other's room in its panel and
+joins it with a double-click, the people list shows their stages, chat goes both ways with a prim
+path as a link, and a late joiner gets the chat so far.
+
+**What it is:**
+
+- **This machine** (§5.1): as planned, a file per room in `<AppLocalData>/peers/rooms/`, watched,
+  and stale ones removed. An invited room isn't listed. Two instances of one test profile share
+  the folder; two profiles don't.
+- **This network** (§5.2): the `mdns` library. **Measured, one machine:** a room announced on
+  port 5353 beside Windows' own mDNS was found at the machine's LAN address within a few seconds.
+  A host announces only rooms on a network address that don't need an invitation. A member asks
+  only while the Peers panel shows and "Look for rooms on this network" is on. Not tried:
+  another machine, subnets and VPNs. Multicast goes out on the default interface only.
+- **Public rooms:** **Host Room…** offers "Only those with the invite link", "Anyone on this
+  network, once I allow them" (the default) and "Anyone on this network (a public room)".
+- **Hosting** listens on every address, on the port of Settings > Peers or any free one, so
+  Windows asks about its firewall the first time. Not tried yet; it is the user's to answer.
+  Its invite link is copied when the room starts.
+- **The Peers panel** (§10.1): your name, **Host Room…** and **Join…** (an invite link, or an
+  address that asks the host); your rooms, this machine's and this network's; the selected
+  room's people with their color and stage (`presence`), and its chat. A room's menu: **Copy
+  Invite Link**, **Mute**, **Leave Room** / **Close Room**. A person's: **Mute**, and on the
+  host **Always Allow** and **Remove**.
+- **Chat** (§10.1): channel `chat`, ordered; history in memory, the last 1,000 lines a room; a
+  joiner gets the last 200 as the channel's snapshot. A prim path in a message is a link that
+  selects the prim in the current stage, if it has it (the message doesn't say which stage).
+  Text is never HTML.
+- **Toasts:** a chat message while the panel is closed (a setting; muted rooms and people
+  excepted), "Anna wants to join" with **Allow**, **Always Allow Anna** and **Deny**, and a room
+  that ends or refuses.
+- **The status bar** says the rooms and how many are in them, and opens the panel.
+- **Settings > Peers** (§11): name, color, looking on the network, port, asking before a join by
+  link, chat toasts. Muted rooms and people and the trusted keys are kept in `usdcc.ini`. Not yet:
+  rooms joined at start (phase 3), relay URLs (phase 4), the inbox's limit (phase 5).
+- **Deploy:** also `libsodium.dll` beside `usdcc.exe`, which `tools/deploy.py` checks for.
+
+**Not tried yet:** two machines (the row's "done when"), the firewall's question, a LAN with
+several interfaces.
 
 ## 15. Testing
 

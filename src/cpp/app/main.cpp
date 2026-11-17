@@ -10,6 +10,8 @@
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_side_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/peers_controller.h"
+#include "usdcc/ui/peers_side_panel.h"
 #include "usdcc/ui/qt_message_bridge.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/settings_dialog.h"
@@ -1069,6 +1071,45 @@ int main(int argc, char** argv) {
     auto* pluginPanel = new usdcc::scripting::PluginManagerSidePanel(plugins);
     window.addSidePanel(pluginPanel, Qt::RightDockWidgetArea);
     pluginPanel->hide();
+
+    // Peers (docs/PEERS.md): rooms with other usdcc instances, found on this machine and
+    // network, with the people in them and their chat. Nothing opens a port or goes on
+    // the network until a room is hosted or joined, or the panel looks for rooms (§12).
+    usdcc::ui::PeersController::defineSettings();
+    usdcc::peers::Peers::Options peersOptions;
+    peersOptions.profile = usdcc::ui::peersProfile();
+    peersOptions.identity = &usdcc::ui::peersIdentity;
+    peersOptions.roomsFolder = usdcc::ui::peersRoomsFolder();
+    peersOptions.network = usdcc::peers::createMdnsDiscovery();
+    usdcc::ui::PeersController::Hooks peersHooks;
+    // A prim path in a chat message selects that prim, if the current stage has it.
+    peersHooks.selectPrim = [&stageManager, &window](const QString& path) {
+        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
+        const std::string text = path.toStdString();
+        if (stage && PXR_NS::SdfPath::IsValidPathString(text) &&
+            stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath(text))) {
+            stageManager.setSelectedPaths(stage, {PXR_NS::SdfPath(text)});
+        } else {
+            window.statusBar()->showMessage(QObject::tr("The current stage has no prim %1").arg(path), 5000);
+        }
+    };
+    peersHooks.currentStage = [&stageManager]() {
+        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
+        return stage ? QString::fromStdString(stage->usdStage()->GetRootLayer()->GetDisplayName()) : QString();
+    };
+    auto* peersController = new usdcc::ui::PeersController(
+        std::make_unique<usdcc::peers::Peers>(std::move(peersOptions)), &window, std::move(peersHooks), &window);
+    auto* peersPanel = new usdcc::ui::PeersSidePanel(peersController);
+    window.addSidePanel(peersPanel, Qt::RightDockWidgetArea);
+    peersPanel->hide();
+    peersController->showPanel = [peersPanel]() {
+        peersPanel->show();
+        peersPanel->setCollapsed(false);
+        peersPanel->raise();
+    };
+    // `presence` says which stage each peer has open.
+    auto presenceOnCurrentStage = stageManager.currentStageChanged.connect(
+        [peersController](const usdcc::usd::StageRefPtr&) { peersController->updatePresence(); });
 
     // Developing a plugin from inside the app (docs/PLUGIN_DEV.md).
     scriptEditor->setPluginHooks({[&plugins](const std::string& id) { return plugins.whyNotReloadable(id); },
