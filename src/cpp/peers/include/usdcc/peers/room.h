@@ -39,6 +39,7 @@ namespace usdcc::peers {
 
 class Channel;
 class PeerState;
+class Room;
 class StateMap;
 
 // Who this member is: the profile's key and how it shows (PEERS.md §4). Without a

@@ -162,10 +162,15 @@ USDCC_TEST(peers_latest_only_replaces_one_still_waiting) {
     b.block();
     const QByteArray picture(64 * 1024, 'x');
     int sent = 0;
-    // Until a frame waits for B: the operating system's buffers are full.
-    while (host->queuedBytes(bId) == 0 && sent < 5000) {
+    // Until a frame still waits for B once the socket has had its chance to write: the
+    // operating system's buffers are full. One can wait for a moment only because Qt
+    // hasn't written the ones before it yet, with the system's buffers far from full (on
+    // Linux, loopback's hold megabytes).
+    while (sent < 5000) {
         view->send("frame", {{"n", sent++}}, picture);
-        QCoreApplication::processEvents();
+        if (!waitUntil([&] { return host->queuedBytes(bId) == 0; }, 200)) {
+            break;
+        }
     }
     CHECK(host->queuedBytes(bId) > 0, "nothing waited for B after %d frames", sent);
     const int firstWaiting = sent - 1;
