@@ -519,16 +519,21 @@ limit. ([SETTINGS.md](SETTINGS.md))
 ## 13. Build and deploy
 
 - **vcpkg:** `qtwebsockets`, `mdns` and `libsodium` (*checked:* all three are ports in the pinned
-  vcpkg), and `qthttpserver` for the guests' page. Phase 1a needs only the two Qt ones. Qt Network
-  and its OpenSSL backend are already built: *checked,* `network` and `openssl`
-  are default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
+  vcpkg), and `qthttpserver` for the guests' page, from an overlay port that makes it depend on
+  `qtwebsockets`: upstream's doesn't, and is then built without its WebSocket upgrade
+  ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §4.1). Phase 1a needs only the two Qt ones. Qt
+  Network and its OpenSSL backend are already built: *checked,* `network` and `openssl` are
+  default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
 - **CMake:** `Network` and `WebSockets` join `find_package(Qt6 … Widgets OpenGL Svg Test)`.
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
 - **Deploy:** `Qt6Network.dll`, `Qt6WebSockets.dll` and `usdcc_peers.dll` in `bin/`, and the
   `usdcc_peers` Python package (hub and relay included) in the package. TLS is only needed for `wss://` to a relay,
-  which also needs Qt's TLS plugin and OpenSSL. PySide6 ships a `libcrypto` of the same file name
-  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12), so that is checked in phase 4.
+  which also needs Qt's TLS plugin. **OpenSSL's `libcrypto-3-x64.dll` is needed from phase 1a,
+  TLS or not:** Qt Network as built here links it at load time, and without it `Qt6Network.dll`
+  doesn't load (*measured* in the broadcast spike, [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)
+  §8). PySide6 ships a `libcrypto` of the same file name ([REMOTE_ASSETS.md](REMOTE_ASSETS.md)
+  §12); both are OpenSSL 3.6.3 today (*checked*), so they don't clash yet.
 - **PySide6** needs no QtWebSockets binding: `usdcc.peers` is pybind11.
 - **The Python package** needs `websockets` and `PyNaCl` where it runs. The app doesn't use it.
 
@@ -550,8 +555,10 @@ Only phase 4 needs a relay or a decision about one: a hub on a machine the artis
 joined by its address. The shared stage needs only phases 1a and 1b, and can start whenever it is
 wanted.
 
-The broadcast's own spike ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11) answers the hosting
-half of phase 0: what Windows Firewall does for the host. The mDNS half stays here and isn't
+The broadcast's own spike ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11.1) answers the
+hosting half of phase 0. On one machine it showed that a room's page and WebSocket share one port
+through Qt HttpServer. What Windows Firewall does for the host is still to be tried, from a second
+machine. The mDNS half stays here and isn't
 needed before phase 2. Replaying a layer's edits is now [SHARED_STAGE.md](SHARED_STAGE.md)'s own
 spike.
 

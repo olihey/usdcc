@@ -4,8 +4,10 @@
 live, with nothing to install. One watcher at a time may be allowed to navigate, and everyone can
 chat.
 
-**Status:** planned 2026-11-17. Nothing is built yet. "Checked" below means read in this checkout
-or in the vcpkg checkout beside it; everything else is an assumption until the spike (§11).
+**Status:** planned 2026-11-17. The phase 0 spike ran the same day on this machine; its numbers are
+in §11.1. The LAN, a second machine and a tunnel weren't tried yet. "Checked" below means read in
+this checkout or in the vcpkg checkout beside it, "measured" means run in the spike; everything
+else is an assumption.
 
 ## 1. Decisions
 
@@ -73,12 +75,24 @@ the app.
 | Part | Choice | Why |
 |---|---|---|
 | Page and stream | Qt HttpServer and Qt WebSockets, one port | Both in vcpkg (*checked:* ports `qthttpserver` and `qtwebsockets` 6.10.1 in the checkout beside this one). Qt Network is already built (*checked:* `Qt6Network.dll` is in `vcpkg_installed`); nothing links it yet. [PEERS.md](PEERS.md) and [MCP.md](MCP.md) plan the same modules |
-| Messages | The frame of [PEERS.md](PEERS.md) §7: a JSON header, then raw bytes | A picture is the raw part. The browser reads it with `DataView` and `createImageBitmap` |
+| Messages | The frame of [PEERS.md](PEERS.md) §7.1: a JSON header, then raw bytes | A picture is the raw part. The browser reads it with `DataView` and `createImageBitmap` |
 | The page | One HTML file with its script, no framework and no build step, read from the plugin's folder | Editable without rebuilding |
 
-*Not tried:* that Qt HttpServer hands a WebSocket upgrade on its own port to Qt WebSockets in this
-Qt (the API arrived in Qt 6.8). If it doesn't, a `QTcpServer` that serves the one page and passes
-upgrades to `QWebSocketServer::handleConnection()` does the same with one module fewer.
+**Measured: both ways work** (Qt 6.11.1), with one catch:
+
+- **Qt HttpServer as vcpkg ships it has no WebSocket upgrade.** Its WebSocket API
+  (`newWebSocketConnection()`, `addWebSocketUpgradeVerifier()`) is compiled in only when Qt
+  WebSockets is installed first, and the port doesn't depend on it, so it was built without
+  (*checked:* vcpkg installed `qthttpserver` before `qtwebsockets`, and the library lacked the
+  symbols). An overlay port that adds the dependency fixes it: the spike used one, and phase 1
+  adds it as `cmake/ports/qthttpserver`. With it, the page and the WebSocket share one port, and
+  `/ws` is accepted by a verifier.
+- **The fallback works too:** a `QTcpServer` that peeks at the request, serves the page itself, and
+  hands an upgrade to a `QWebSocketServer` that isn't listening. `handleConnection()` re-emits
+  `readyRead` for a request already received (*checked* in its source), so peeking is enough. It
+  needs one module fewer.
+
+Qt HttpServer is the choice: it parses HTTP properly, which serving more than one page will need.
 
 ### 4.2 Pictures
 
@@ -87,7 +101,7 @@ upgrades to `QWebSocketServer::handleConnection()` does the same with one module
 | New dependencies | None: Qt writes JPEG | An encoder (below) |
 | Browser | Any | Chrome, Edge, Safari, Firefox of the last two years |
 | Works on a plain `http://` LAN link | Yes | **No.** WebCodecs exists only on `https://` pages and `localhost` (per its specification; *not tried*) |
-| Data, 1280×720 while moving | Roughly 15 to 30 Mbit/s at 30 frames a second (*estimate*) | Roughly 2 to 5 Mbit/s (*estimate*) |
+| Data while orbiting | *Measured:* 13 to 21 Mbit/s at 1920×1415, 30 frames a second (§11.1); about a third of that at 1280×720 | Roughly 2 to 5 Mbit/s (*estimate*) |
 | A still viewport | Nothing sent | Nothing sent |
 | Good for | A LAN; the internet at a reduced size and rate | The internet |
 
@@ -141,9 +155,10 @@ pipe the pictures take.
   delivery, and it makes each watcher's rate follow their own connection.
 - **Encoding is off the UI thread.** Reading the buffer needs the viewport's GL context, so it
   stays on the UI thread; compressing goes to a worker. One encode serves every watcher.
-- **Reading back costs a frame's worth of time** (`grabFrame()` is a synchronous read and a
-  copy). *Not measured.* If it shows while orbiting, the read moves to a pixel buffer object,
-  which returns a frame later without waiting.
+- **Reading back is the cost that matters** (*measured*, §11.1). `grabFrame()` takes 3 ms for a
+  3-megapixel viewport that is still, and 13 ms while the camera moves: it waits for the GPU to
+  finish the frame, on the UI thread. So the read moves to a pixel buffer object, which hands over
+  the frame a little later without waiting. Compressing, on a worker, is 3 to 7 ms.
 
 ## 5. The link, and who it reaches
 
@@ -160,7 +175,7 @@ its first WebSocket message, so it stays out of proxy and server logs.
 | On this machine | `http://localhost:…` | Nothing |
 | On this network | `http://<this machine's address>:…` | Windows Firewall's permission, once, as an administrator ([PEERS.md](PEERS.md) §5.2). Denied, the panel says so |
 | Anywhere, phase 4a | The user's own tunnel (cloudflared, Tailscale Funnel, ngrok, a reverse proxy) pointed at the port, and its address in **Public address** in the settings | The tunnel. It works because everything is HTTP on one port. The tunnel's operator can see the stream |
-| Anywhere, phase 4b | `usdcc-relay` ([PEERS.md](PEERS.md) §5.4), which also serves the page | The relay. Pictures and chat are encrypted between host and page with a key from the link's `#` part, so the relay sees sizes only |
+| Anywhere, phase 4b | The Peers relay, `usdcc_peers.relay` ([PEERS.md](PEERS.md) §5.4), which also serves the page | The relay. Pictures and chat are encrypted between host and page with a key from the link's `#` part, so the relay sees sizes only |
 
 A plain `http://` link on a LAN is not encrypted. The secret keeps strangers out; it doesn't hide
 the stream from someone listening on that network. Phase 4b's encryption could be turned on for
@@ -188,7 +203,7 @@ LAN links too (a script library instead of the browser's own, which `http://` pa
 |---|---|
 | A room, hosted by one instance, which orders the messages | A broadcast |
 | A peer | A *guest*: a browser. It has a name, no key and no USD |
-| Channels and the frame of §7 | `view` (pictures, latest only), `nav` (direct, to the host), `chat` and `presence` unchanged |
+| Channels and the frame of §7.1 | `view` (pictures, latest only), `nav` (direct, to the host), `chat` and `presence` unchanged |
 | The secret in an invite link | The secret in the web link |
 | "Anna wants to join": Allow, Deny | "Anna asks to navigate": Allow, Deny |
 | Roles: view-only, remove a member | Watching, navigating, **Remove** |
@@ -226,16 +241,28 @@ no gain here. Building this entirely alone would mean writing the server twice.
 Small and general, so other plugins gain from them too:
 
 1. **`HydraViewportWindow::frameRendered()`.** *Checked:* today there is `firstFrameRendered()`
-   and `cameraChanged()`, nothing per frame.
+   and `cameraChanged()`, nothing per frame, and `renderNow()` is called directly from many
+   places, so a plugin can't watch for it either. The spike polled instead (*measured*): a still
+   viewport then costs 60 reads a second only to find nothing new, and the wait for the next poll
+   was most of the delay between a move and its picture (§11.1).
 2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6).
 3. **Entries in a viewport's menus from a plugin:** `Host::addViewportMenuAction()` and
    `usdcc.app.add_viewport_menu_action()`, like the Outliner's prim menu
    ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point.
 4. **A mark on a viewport from a plugin** (the live mark), if question 4 says the HUD.
-5. **Build:** `qtwebsockets` and `qthttpserver` in `vcpkg.json`; `Network`, `WebSockets` and
-   `HttpServer` in `find_package(Qt6 …)`; their DLLs deployed to `bin/`, where the plugin, Peers
-   and MCP all find them. New ports need a private vcpkg root in a worktree
-   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
+5. **Build:** `qtwebsockets` and `qthttpserver` in `vcpkg.json`, the latter from the overlay port
+   (§4.1); `Network`, `WebSockets` and `HttpServer` in `find_package(Qt6 …)`. New ports need a
+   private vcpkg root in a worktree ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
+6. **Deploy,** beside `usdcc.exe`, where the plugin, Peers and MCP all find them. *Measured:*
+   each of these was missing at first and stopped the spike:
+   - `Qt6Network.dll`, `Qt6WebSockets.dll`, `Qt6HttpServer.dll`, `Qt6Concurrent.dll`. Not beside
+     the plugin: the app loads plugins with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, which doesn't
+     search the plugin's folder for what it links, nor `PATH`.
+   - `libcrypto-3-x64.dll`. Qt Network as built here links OpenSSL at load time, even with no
+     TLS in use. PySide6 ships a file of the same name; both are OpenSSL 3.6.3 today
+     (*checked*), so they don't clash yet ([PEERS.md](PEERS.md) §13).
+   - `imageformats/qjpeg.dll` and `jpeg62.dll`. Without them `QImageWriter` writes nothing and
+     says so only by returning false. Only `platforms/qwindows.dll` is deployed today.
 
 The plugin (`usdcc_add_plugin(viewport_broadcast …)`): a room from `usdcc_peers` (§7) with the
 page served beside it, the frame source, the side panel, the page in `web/`, and its settings
@@ -275,8 +302,8 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks |
-| **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3 and 5; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port |
+| **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks. **On this machine: done** (§11.1); the LAN, the tunnel and the firewall remain |
+| **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port |
 | **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat |
 | **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click |
 | **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
@@ -284,6 +311,53 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 | **Later** | A watcher's pointer shown to all; drawing on the picture; several broadcasts at once | |
 
 Phases 0 to 3 need no server and no new codec.
+
+### 11.1 The spike's results
+
+Run 2026-11-17 with a throwaway C++ plugin, not kept in the repository, that polls the active viewport's `grabFrame()`, skips a frame equal to the last by its hash, compresses
+on a worker thread with Qt's JPEG writer (libjpeg-turbo), sends each watcher the newest frame once
+the last is acknowledged, and moves the camera with `setCameraState()` for a page's drag. The
+watcher was the desktop app's built-in browser on the same machine, so the network is loopback.
+Release build, GeForce RTX 4090, a 3072×1728 screen at 125 %.
+
+| Question | Answer |
+|---|---|
+| Qt HttpServer passes upgrades to Qt WebSockets? | Yes, once built with it: an overlay port (§4.1) |
+| Read back, 2033×1498 | 3 ms when still; **13 ms while the camera moves**, waiting for the GPU (§4.4) |
+| Compress, 1920×1080 | 2.6 to 2.8 ms at quality 50 to 90 (1280×720: 1.2 ms; 960×540: 0.7 ms) |
+| Compress, 1920×1415 as sent | 5.6 to 7 ms on a worker |
+| Bytes a frame, 1920×1080 | `cube_and_sphere.usda`: 55 KB at q50, 71 KB at q75, 107 KB at q90. `physics_playground.usda`: 43, 53, 81 KB |
+| Orbit, sustained (camera turned 60 times a second) | **30 frames a second** at 1920×1415, q60, 55 KB a frame, **13.5 Mbit/s** |
+| Orbit by dragging in the page | Frames follow the drag's ~22 moves a second; 105 KB a frame at q80, 18 to 21 Mbit/s |
+| A move in the page to its picture on screen | **64 ms** median polling every 33 ms (Windows' coarse timer fires every ~46 ms); **25 ms** polling every 16 ms with a precise timer, the stand-in for `frameRendered()` |
+| Decoding in the page | 4 to 5 ms a frame (`createImageBitmap`) |
+| A still viewport | Nothing sent after the first frame, but polling read it back 60 times a second to know |
+| Chat, presence, a wrong secret | Chat goes both ways; the watcher list updates; a wrong secret closes with "Wrong link" |
+| The fallback server | Same numbers |
+
+**What it changes:**
+
+- **Polling is out:** `frameRendered()` (§8 item 1) is needed for both the cost when still and the
+  delay when moving.
+- **The read back is the one cost on the UI thread worth fixing,** with a pixel buffer object
+  (§4.4). Compressing is cheap enough on a worker.
+- **JPEG is good enough on a LAN,** as planned: 30 frames a second of 1920×1415 is 13 to 21 Mbit/s.
+  Over the internet that wants the half size the plan already sends while moving (about a third of
+  the bytes), or video.
+- **Deploying** needs seven more files (§8 item 6).
+
+**Not tried yet:**
+
+- **The LAN and a second machine,** and with them **what Windows Firewall asks:** binding to the
+  network raises its prompt for this `usdcc.exe` (*checked:* it has no rule yet), which is the
+  user's to answer.
+- **A tunnel** (cloudflared, Tailscale Funnel), and how an orbit feels through one.
+- **Another browser, a phone,** a large stage, a progressive renderer.
+
+**Found on the way, not this plan's:** a fresh Windows configure fails to find OpenUSD built with
+Python 3.13. The pybind11 overlay port brings vcpkg's Python 3.12, whose CMake wrapper takes over
+OpenUSD's `find_dependency(Python3 3.13 EXACT)`. The spike set the wrapper aside in its own
+install tree.
 
 ## 12. Open questions
 
@@ -305,7 +379,7 @@ Phases 0 to 3 need no server and no new codec.
   and the assets would leave the machine.
 - **WebRTC,** for now (§4.3).
 - **A watcher editing.** That is what a shared stage between peers is for
-  ([PEERS.md](PEERS.md) §10).
+  ([SHARED_STAGE.md](SHARED_STAGE.md)).
 - **Voice and video,** as in Peers.
 - **A public relay run by the project** ([PEERS.md](PEERS.md) §16 question 3).
 - **Recording** a broadcast.
