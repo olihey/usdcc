@@ -7,9 +7,11 @@
 #include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/asset_sources.h"
+#include "usdcc/ui/scale_controller.h"
 
 #include <pxr/usd/sdf/layer.h>
 
+#include <QApplication>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
@@ -70,6 +72,15 @@ std::shared_ptr<FakeSource> fakeSource() {
     }();
     return source;
 }
+
+// The dialog sizes itself through UiScaleController::instance(): without a controller of
+// the test's own, that makes a lasting one on the application, which later tests'
+// controllers would then sit behind (scale_controller's checks fail after these).
+struct ScopedScale {
+    QTemporaryDir dir;
+    usdcc::ui::UiScaleController scale{*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       dir.filePath(QStringLiteral("ui.ini"))};
+};
 
 bool waitForListing(const AssetPickerDialog& dialog) {
     QElapsedTimer timer;
@@ -162,6 +173,7 @@ USDCC_TEST(asset_picker_schemes) {
 
 USDCC_TEST(asset_picker_browses_a_source) {
     TestSettings settings;
+    ScopedScale scale;
     fakeSource();
     AssetPickerOptions options;
     options.filters = {"USD Files (*.usd *.usda *.usdc *.usdz)"};
@@ -198,6 +210,7 @@ USDCC_TEST(asset_picker_browses_a_source) {
 
 USDCC_TEST(asset_picker_errors_and_refusals) {
     TestSettings settings;
+    ScopedScale scale;
     fakeSource();
     AssetPickerDialog dialog(AssetPickerOptions{});
     dialog.navigate("pickertest://broken/");
@@ -229,6 +242,7 @@ USDCC_TEST(asset_picker_errors_and_refusals) {
 
 USDCC_TEST(asset_picker_disk_and_relative_paths) {
     TestSettings settings;
+    ScopedScale scale;
     QTemporaryDir dir;
     touch(dir.filePath("assets/chair.usda"));
     touch(dir.filePath("assets/notes.txt"));
