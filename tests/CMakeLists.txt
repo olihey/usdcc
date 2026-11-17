@@ -377,8 +377,10 @@ else()
 endif()
 
 # usdcc_peers (docs/PEERS.md §15), in a test program of its own: rooms over 127.0.0.1,
-# with no USD and no widgets, as the library has none.
-add_executable(usdcc_peers_tests test_harness.h test_harness.cpp test_main.cpp peers_test.cpp)
+# with no USD and no widgets, as the library has none. libsodium's DLL is copied beside
+# it by vcpkg's step, as a dependency of usdcc_peers.dll.
+add_executable(usdcc_peers_tests test_harness.h test_harness.cpp test_main.cpp peers_test_support.h peers_test.cpp
+                                 peers_rooms_test.cpp peers_discovery_test.cpp)
 target_link_libraries(usdcc_peers_tests PRIVATE usdcc_peers Qt6::Network Qt6::Test)
 if(WIN32)
     # usdcc_peers.dll beside the test program on every build, as for usdcc_assets_tests.

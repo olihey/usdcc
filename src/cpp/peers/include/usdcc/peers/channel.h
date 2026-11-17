@@ -8,6 +8,8 @@
 #include <QObject>
 #include <QString>
 
+#include <functional>
+
 namespace usdcc::peers {
 
 class Room;
@@ -44,6 +46,16 @@ public:
     // Whether the host lets `peer` send here.
     bool maySend(const Peer& peer) const;
 
+    // The host's: when a map isn't enough (PEERS.md §7.2), what a joiner gets first on
+    // this channel, as a message of type "snapshot" to it alone, before the messages
+    // that follow. Also for a peer that reconnected too late to catch up.
+    struct Snapshot {
+        QJsonObject body;
+        QByteArray bytes;
+    };
+    void setSnapshotProvider(std::function<Snapshot()> provider) { m_snapshot = std::move(provider); }
+    bool hasSnapshotProvider() const { return bool(m_snapshot); }
+
 Q_SIGNALS:
     void received(const usdcc::peers::Message& message);
     // The host refused something this member sent here: not allowed, not open to
@@ -60,6 +72,7 @@ private:
     Senders m_senders = Senders::Everyone;
     QList<PeerId> m_namedSenders;
     bool m_openToGuests = false;
+    std::function<Snapshot()> m_snapshot;
 };
 
 }  // namespace usdcc::peers

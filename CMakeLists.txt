@@ -102,13 +102,15 @@ find_package(Jolt CONFIG REQUIRED)
 # below too: pugixml passes std::string across its DLL's boundary.
 find_package(CURL REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
+# Peers' keys and encryption (docs/PEERS.md §6).
+find_package(unofficial-sodium CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)
-    # Only Qt, ADS, QtNodes, Jolt, curl and pugixml: other imported targets (e.g. USD's TBB) don't
+    # Only Qt, ADS, QtNodes, Jolt, curl, pugixml and libsodium: other imported targets (e.g. USD's TBB) don't
     # have a Release/Debug pair to choose between.
     get_directory_property(_usdcc_imported IMPORTED_TARGETS)
     foreach(_target IN LISTS _usdcc_imported)
-        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::|CURL::|ZLIB::|pugixml::|pugixml$)")
+        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::|CURL::|ZLIB::|pugixml::|pugixml$|unofficial-sodium::)")
             set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
         endif()
     endforeach()

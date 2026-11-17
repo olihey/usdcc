@@ -3,14 +3,18 @@
 #include "usdcc/peers/frame.h"
 #include "usdcc/peers/room.h"
 
+#include "crypto.h"
 #include "send_queue.h"
 
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMap>
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
 
+#include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -22,19 +26,31 @@ namespace usdcc::peers {
 
 class PageServer;
 
-// One connection to the host: a member once welcomed, before that only a socket that
-// has to say hello.
+// One connection to the host: a member once welcomed, before that one going through
+// the handshake.
 struct Member {
+    enum class Phase { Hello, Auth, Asking, Welcomed };
+
     Peer peer;
     QWebSocket* socket = nullptr;
     std::unique_ptr<SendQueue> queue;
-    bool browser = false;  // Came with an Origin: a page, so at most a guest
-    bool welcomed = false;
+    Phase phase = Phase::Hello;
+    bool browser = false;    // Came with an Origin: a page, so at most a guest
+    bool encrypted = false;  // Did the handshake: everything after it is sealed
+    bool roomKey = false;    // Has the room key: messages to everyone come under it
+    Sealer tx;
+    Sealer rx;
+    QByteArray memberEph;
+    QByteArray hostEph;
     bool gone = false;
+    bool away = false;       // Lost its connection; kept for Limits::reconnectGraceMs
+    QElapsedTimer awaySince;
     QString leaveReason;
     double tokens = 0;
     QElapsedTimer refill;
     QElapsedTimer heard;
+    QPointer<JoinRequest> request;
+    QJsonObject auth;        // What it said in `auth`, until it is let in
 };
 
 struct Room::Impl {
@@ -44,9 +60,12 @@ struct Room::Impl {
     bool isHost = false;
     State state = State::Connecting;
     QString name;
+    Profile profile;
     Peer me;
     Peer host;
     QMap<QString, Channel*> channels;
+    QMap<QString, StateMap*> maps;
+    QMap<QString, PeerState*> peerStates;
     QTimer* pingTimer = nullptr;
 
     // --- The host ---
@@ -61,41 +80,86 @@ struct Room::Impl {
     std::vector<Member*> slow;
     qint64 seq = 0;
     bool closing = false;
+    quint32 roomEpoch = 0;
+    QByteArray roomKey;
+    struct HistoryEntry {
+        qint64 seq;
+        QByteArray frame;
+    };
+    std::deque<HistoryEntry> history;
+    qint64 historyBytes = 0;
+    QSet<QString> admitted;  // Fingerprints let in once, for the room's life
+    QHash<QString, qint64> mapBytes;
 
     bool listen(QString* error);
     void accept(QWebSocket* socket);
-    void onMemberFrame(QWebSocket* socket, std::optional<Frame> frame, const QString& error);
+    void onMemberData(QWebSocket* socket, const QByteArray& data, bool text);
     void onMemberDisconnected(QWebSocket* socket);
-    void hello(Member* member, const Message& message);
+    void onHello(Member* member, const Message& message);
+    void onAuth(Member* member, const Message& message);
+    void admit(Member* member, Peer::Kind kind);
+    void welcome(Member* member, bool resumed, qint64 lastSeq);
+    void sendSnapshots(Member* member);
     void deny(Member* member, const QString& reason);
+    void onMemberControl(Member* member, const Message& message);
     void route(Message message, bool latest, Member* sender);
-    void enqueue(Member* member, const QByteArray& frame, const QString& latestKey = {});
+    void broadcast(Message message, bool ordered, const QString& latestKey, const Member* except,
+                   const std::function<bool(const Member*)>& reaches);
+    void sendTo(Member* member, const Message& message, const QString& latestKey = {});
+    void enqueue(Member* member, const QByteArray& data, const QString& latestKey, bool seal);
     void dropSlowMembers();
-    void broadcastControl(const QString& type, const QJsonObject& body, const Member* except);
     enum class Drop { Close, Abort };
     void dropMember(Member* member, const QString& reason, Drop how, const QString& tellType);
+    void goAway(Member* member);
+    void leave(Member* member, const QString& reason);
+    void rotateRoomKey();
+    void setState(StateMap* map, const QString& key, const QJsonValue& value, const Peer& by, Member* sender);
+    void setPeerState(PeerState* state, const Peer& peer, const QJsonValue& value, const Member* sender);
+    void forgetPeerState(const PeerId& id);
     Member* welcomedMember(const PeerId& id) const;
-    QList<Member*> welcomedMembers() const;
-    QString newId() const;
+    QList<Member*> welcomedMembers(bool withAway = false) const;
+    QString guestId() const;
     void hostTick();
+    void settle(JoinRequest* request, bool allow, const QString& reason);
 
     // --- A member that joined ---
     QWebSocket* socket = nullptr;
     std::unique_ptr<SendQueue> queue;
-    QString joinSecret;
     JoinOptions joinOptions;
+    QString hostAddress;
     QList<Peer> joinedPeers;
     QElapsedTimer heard;
     QString endReason;
+    bool challenged = false;
+    bool ended = false;  // Denied, removed or closed: no reconnecting
+    KxKeys kx;
+    Sealer tx;
+    Sealer rx;
+    QByteArray hostKey;
+    QHash<quint32, QByteArray> roomKeys;
+    qint64 lastSeq = 0;
+    bool everOpen = false;
+    QElapsedTimer lostSince;
+    int retries = 0;
+    bool retryScheduled = false;
 
-    void onHostFrame(std::optional<Frame> frame, const QString& error);
+    void connectToHost();
+    void onHostData(const QByteArray& data, bool text);
+    void onChallenge(const Message& message);
+    void onHostFrame(const Message& message);
+    void onWelcome(const QJsonObject& body);
+    void onDisconnected();
     void joinerTick();
 
     // --- Both ---
     void send(Channel* channel, const QString& type, const QJsonObject& body, const QByteArray& bytes,
               const PeerId& to);
+    void sendState(StateMap* map, const QString& key, const QJsonValue& value);
+    void sendPeerState(PeerState* state, const QJsonValue& value);
+    void setRoomState(State next);
     void finish(const QString& reason);
     void shutdown();
+    void removePeerLocally(const PeerId& id, const QString& reason);
 };
 
 QJsonObject peerJson(const Peer& peer);

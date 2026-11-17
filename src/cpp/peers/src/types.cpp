@@ -39,4 +39,26 @@ QString kindName(Peer::Kind kind) {
     return {};
 }
 
+QString admissionName(Admission admission) {
+    switch (admission) {
+    case Admission::Invited:
+        return QStringLiteral("invited");
+    case Admission::Ask:
+        return QStringLiteral("ask");
+    case Admission::Open:
+        return QStringLiteral("open");
+    }
+    return {};
+}
+
+Admission admissionFromName(const QString& name) {
+    if (name == u"open") {
+        return Admission::Open;
+    }
+    if (name == u"ask") {
+        return Admission::Ask;
+    }
+    return Admission::Invited;
+}
+
 }  // namespace usdcc::peers

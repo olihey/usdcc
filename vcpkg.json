@@ -22,6 +22,14 @@
       "name": "qthttpserver",
       "$comment": "The page a room serves to guests, on the WebSocket's port (docs/PEERS.md §6.1). From the overlay in cmake/ports, which builds it with qtwebsockets"
     },
+    {
+      "name": "libsodium",
+      "$comment": "Peers' identities, handshake and encryption (docs/PEERS.md §6). ISC"
+    },
+    {
+      "name": "mdns",
+      "$comment": "Finding rooms on this network (docs/PEERS.md §5.2). One header, Unlicense"
+    },
     "qt-advanced-docking-system",
     "qtnodes",
     "pybind11",

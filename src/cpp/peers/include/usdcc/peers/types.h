@@ -1,6 +1,6 @@
 #pragma once
 
-// The words of docs/PEERS.md: a peer, a message, and how a channel delivers.
+// The words of docs/PEERS.md: a peer, a message, how a channel delivers, who may join.
 
 #include "usdcc/peers/export.h"
 
@@ -15,22 +15,26 @@ namespace usdcc::peers {
 // speaks another is refused with a message naming both (PEERS.md §6).
 inline constexpr int kProtocolVersion = 1;
 
-// The host's own channel: joining, leaving, refusals. Nobody else may open it.
+// The host's own channel: joining, leaving, keys, shared state. Nobody else may open it.
 inline constexpr char kRoomChannel[] = "room";
 
-// Who a member is, as the host gave it. Phase 1a has no identity (PEERS.md §4): the
-// id is the host's for as long as the member is connected.
+// Who a member is. A peer's is its key's fingerprint and its instance, so it stays the
+// same when it reconnects (PEERS.md §4); a guest's is the host's, while it is connected.
 using PeerId = QString;
 
 struct USDCC_PEERS_API Peer {
     enum class Kind {
         Host,   // The one that hosts the room and orders its messages
-        Peer,   // A program or usdcc instance, invited with the room's secret
-        Guest,  // A web page, invited with the guests' secret (PEERS.md §6.1)
+        Peer,   // A program or usdcc instance with a key pair
+        Guest,  // A web page, or a program invited with the guests' secret (PEERS.md §6.1)
     };
     PeerId id;
     QString name;
     Kind kind = Kind::Peer;
+    QString fingerprint;  // Of its public key; empty for a page
+    QString instance;     // Which running instance of that key
+    QString color;        // "#rrggbb"; empty for none
+    QString app;          // What it is: "usdcc 0.3.0", a program's own name
 
     bool isValid() const { return !id.isEmpty(); }
     bool operator==(const Peer&) const = default;
@@ -43,11 +47,19 @@ enum class Delivery {
     Direct,      // To one member; with no one named, to the host
 };
 
-// Who may send on a channel the host has opened (PEERS.md §6). The host may always.
+// Who may send on a channel the host has opened, or write a map (PEERS.md §6). The
+// host may always.
 enum class Senders {
     Everyone,  // Every member the channel reaches (the default)
     Host,      // Only the host
     Named,     // The members the host named
+};
+
+// Who may join without the room's secret (PEERS.md §6). With it, anyone invited may.
+enum class Admission {
+    Invited,  // Only with the secret from a link. Not announced on the network
+    Ask,      // Found on this machine or network: the host is asked (joinRequested())
+    Open,     // Found on this machine or network: in at once. A public room, until there's a hub
 };
 
 // One message: the frame of PEERS.md §7.1.
@@ -63,11 +75,14 @@ struct USDCC_PEERS_API Message {
 
 // A channel's name (PEERS.md §7): letters, digits and `.`, `_`, `-`, `/`, at most
 // 128 characters, starting with a letter or digit, not `room`. Names without a dot are
-// usdcc's own (`chat`, `presence`, `stage/<id>`); a plugin's start with its id.
+// usdcc's own (`chat`, `presence`, `stage/<id>`); a plugin's start with its id. Maps
+// (StateMap, PeerState) are named the same way.
 USDCC_PEERS_API bool isValidChannelName(const QString& name);
 USDCC_PEERS_API bool isUsdccChannel(const QString& name);
 
 USDCC_PEERS_API QString kindName(Peer::Kind kind);
+USDCC_PEERS_API QString admissionName(Admission admission);  // "invited", "ask", "open"
+USDCC_PEERS_API Admission admissionFromName(const QString& name);
 
 }  // namespace usdcc::peers
 
