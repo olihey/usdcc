@@ -277,7 +277,7 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
 - **Deploy artifact.** Upload `tools/deploy.py`'s output once M11 lands. Releases are
-  planned in [RELEASE.md](RELEASE.md): a GitHub release gets its Windows zip from
+  planned in [RELEASE.md](RELEASE.md): a GitHub release gets its Windows 7z from
   `release.yml`.
 - **Self-hosted runners** (the Windows PC, the Mac) for faster incremental builds, only
   on `push` and `workflow_dispatch`, never on pull requests from forks.
@@ -301,7 +301,7 @@ has how Linux was brought up, in WSL 2):
 - **`release.yml`** deploys with `tools/deploy.py`'s Linux layout (a prefix of its own,
   RUNPATHs relative to `$ORIGIN`, the CPython bundled), moves usdcc's debug info out with
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
-  `usdcc-<version>-linux-x64.tar.gz` and `...-symbols.tar.gz`.
+  `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.
