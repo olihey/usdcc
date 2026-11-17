@@ -3,3 +3,5 @@ deps/patches/*.patch -text
 # The Material Editor preview's HDRIs (resources/preview/hdri) are images, never text.
 *.hdr binary
 *.exr binary
+# The file format samples are read as they are: a checkout must not change their line endings.
+test_data/formats/* -text
