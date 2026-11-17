@@ -322,6 +322,12 @@ QTableView::item:selected {
     color: #ffffff;
 }
 
+/* Otherwise Fusion also fills a selected row's indent (the branch area) with
+   the selection colour; the rest of the indent is theme.cpp's Style. */
+QTreeView {
+    show-decoration-selected: 0;
+}
+
 QHeaderView::section {
     background: #161618;
     color: rgba(255, 255, 255, 40%);
@@ -1104,9 +1110,4 @@ QToolButton#toastDismissAll {
 QToolButton#toastDismissAll:hover {
     color: #e8e8ea;
     background: #2c2c30;
-}
-
-/* A selected row in a plugin's file tree is one colour, arrow area included. */
-QTreeView#pluginTree {
-    show-decoration-selected: 0;
 }

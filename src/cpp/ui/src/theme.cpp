@@ -15,6 +15,7 @@
 #include <QPixmap>
 #include <QProxyStyle>
 #include <QStyleFactory>
+#include <QStyleOptionViewItem>
 #include <QVariant>
 
 // Q_INIT_RESOURCE must be used outside any namespace, and is required here
@@ -146,6 +147,21 @@ public:
     QIcon standardIcon(StandardPixmap icon, const QStyleOption* option, const QWidget* widget) const override {
         if (icon == SP_LineEditClearButton) return QIcon(new ClearIconEngine);
         return QProxyStyle::standardIcon(icon, option, widget);
+    }
+
+    void drawPrimitive(PrimitiveElement element, const QStyleOption* option, QPainter* painter,
+                       const QWidget* widget) const override {
+        // A tree row's indent: the stylesheet paints it with the row's
+        // ::item:hover or ::item:selected background, a rounded block of its
+        // own in front of the item's. QTreeView draws the branches over all of
+        // the indent afterwards, so the view's background, laid here first,
+        // leaves the item's highlight alone in the row (and the arrows on top).
+        if (element == PE_IndicatorBranch) {
+            const auto* item = qstyleoption_cast<const QStyleOptionViewItem*>(option);
+            const bool alternate = item && item->features.testFlag(QStyleOptionViewItem::Alternate);
+            painter->fillRect(option->rect, option->palette.brush(alternate ? QPalette::AlternateBase : QPalette::Base));
+        }
+        QProxyStyle::drawPrimitive(element, option, painter, widget);
     }
 };
 
