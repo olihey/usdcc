@@ -89,8 +89,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # already requires (see docs/PLAN.md milestone M5/M3). Svg: the Outliner's
 # prim icons, rendered with QSvgRenderer (docs/PRIM_ICONS.md); no SVG
 # plugins are needed for that. Test: only for the tests (key presses that go
-# through the shortcut map, QTest::keyClick).
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test)
+# through the shortcut map, QTest::keyClick). Network, WebSockets and
+# HttpServer: rooms of usdcc_peers and the page they serve to guests
+# (docs/PEERS.md §13; HttpServer from the overlay port in cmake/ports).
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test Network WebSockets HttpServer)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 find_package(QtNodes CONFIG REQUIRED)
 # Jolt Physics, the first physics backend (docs/PHYSICS.md). Its Debug build
@@ -264,6 +266,8 @@ endfunction()
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/assets)
+# Rooms and channels between usdcc instances, programs and browsers (docs/PEERS.md).
+add_subdirectory(src/cpp/peers)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)

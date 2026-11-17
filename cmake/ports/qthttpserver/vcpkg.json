@@ -1,0 +1,20 @@
+{
+  "name": "qthttpserver",
+  "version": "6.11.1",
+  "port-version": 1,
+  "description": "Qt HTTP Server supports building HTTP server functionality into an application.",
+  "homepage": "https://www.qt.io/",
+  "license": null,
+  "$comment": "Overlay: upstream's port doesn't depend on qtwebsockets, so whether Qt HttpServer gets its WebSocket upgrade API (QAbstractHttpServer::newWebSocketConnection) depends on install order. usdcc needs it (docs/VIEWPORT_BROADCAST.md §4.1).",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "concurrent",
+        "network"
+      ]
+    },
+    "qtwebsockets"
+  ]
+}

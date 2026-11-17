@@ -7,7 +7,8 @@ chat.
 **Status:** planned 2026-11-17. The phase 0 spike ran the same day on this machine; its numbers are
 in §11.1. The LAN, a second machine and a tunnel weren't tried yet. "Checked" below means read in
 this checkout or in the vcpkg checkout beside it, "measured" means run in the spike; everything
-else is an assumption.
+else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is built, and with it
+§8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
 
 ## 1. Decisions
 

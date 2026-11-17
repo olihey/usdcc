@@ -375,3 +375,23 @@ else()
             ENVIRONMENT_MODIFICATION
             "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
 endif()
+
+# usdcc_peers (docs/PEERS.md §15), in a test program of its own: rooms over 127.0.0.1,
+# with no USD and no widgets, as the library has none.
+add_executable(usdcc_peers_tests test_harness.h test_harness.cpp test_main.cpp peers_test.cpp)
+target_link_libraries(usdcc_peers_tests PRIVATE usdcc_peers Qt6::Network Qt6::Test)
+if(WIN32)
+    # usdcc_peers.dll beside the test program on every build, as for usdcc_assets_tests.
+    add_custom_target(usdcc_peers_tests_copy_libraries
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc_peers_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:usdcc_peers>" "$<TARGET_FILE_DIR:usdcc_peers_tests>"
+        VERBATIM)
+    add_dependencies(usdcc_peers_tests_copy_libraries usdcc_peers)
+    add_dependencies(usdcc_peers_tests usdcc_peers_tests_copy_libraries)
+endif()
+add_test(NAME usdcc_peers_tests COMMAND usdcc_peers_tests)
+if(WIN32 AND _VCPKG_INSTALLED_DIR)
+    # Debug links the release Qt, which isn't beside a Debug build's programs.
+    set_tests_properties(usdcc_peers_tests PROPERTIES ENVIRONMENT_MODIFICATION
+                         "PATH=path_list_prepend:${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+endif()

@@ -6,10 +6,14 @@ a studio's services, sending things to a colleague and editing one stage togethe
 ([SHARED_STAGE.md](SHARED_STAGE.md)) are all uses of it, and a plugin can add its own from Python.
 
 **Status:** planned 2026-11-16, reworked 2026-11-17 as a framework first, with stage sharing moved
-to its own page. Nothing is built yet. "Checked" below means looked at in this repository or its
-pinned vcpkg; everything else is an assumption until the spike (§14).
+to its own page. "Checked" below means looked at in this repository or its pinned vcpkg; everything
+else is an assumption until the spike (§14).
 Also 2026-11-17: rooms and channels (phase 1a) are built first, for
 [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md), which also brought browser guests (§6.1).
+**Phase 1a is built** (2026-11-17): `usdcc_peers` in `src/cpp/peers/`, tested by
+`tests/peers_test.cpp` on loopback, with the vcpkg ports and the deploy it needs. Nothing in the
+app uses it yet; the broadcast plugin will be first. Where it differs from this plan is §14.1.
+Phases 1b and later aren't started.
 
 ## 1. Can it work without a server?
 
@@ -524,7 +528,8 @@ limit. ([SETTINGS.md](SETTINGS.md))
   ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §4.1). Phase 1a needs only the two Qt ones. Qt
   Network and its OpenSSL backend are already built: *checked,* `network` and `openssl` are
   default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
-- **CMake:** `Network` and `WebSockets` join `find_package(Qt6 … Widgets OpenGL Svg Test)`.
+- **CMake:** `Network`, `WebSockets` and `HttpServer` join `find_package(Qt6 … Widgets OpenGL Svg Test)`
+  (done in phase 1a, §14.1).
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
 - **Deploy:** `Qt6Network.dll`, `Qt6WebSockets.dll` and `usdcc_peers.dll` in `bin/`, and the
@@ -561,6 +566,71 @@ through Qt HttpServer. What Windows Firewall does for the host is still to be tr
 machine. The mDNS half stays here and isn't
 needed before phase 2. Replaying a layer's edits is now [SHARED_STAGE.md](SHARED_STAGE.md)'s own
 spike.
+
+### 14.1 Phase 1a as built
+
+`usdcc_peers.dll`: `Room` and `Channel` (`room.h`, `channel.h`), the frame (`frame.h`), and the
+types of §7.1 (`types.h`). Qt Core, Network, WebSockets and HttpServer; no USD, no widgets, no
+`usdcc_core`. Log category `usdcc.peers`; no secret is logged.
+
+**Its test** (`usdcc_peers_tests`, a program of its own, 13 tests, about 12 s): the five criteria of
+row 1a, and also the frame and channel names, guests and `Origin`, the page, who may send, direct
+messages, every limit, removing, leaving and closing. A member that has to fall behind runs on a
+thread of its own whose event loop the test stops. Its socket then reads nothing, the operating
+system's buffers fill, and the host's queue for it grows: a real slow member, not a fake one.
+
+**Where it differs from the plan:**
+
+- **Members that aren't guests join too,** by address (`Room::join("host:port", secret)`), with
+  the room's secret and no identity. The plan had only guests join until 1b. The criteria need
+  three members, and the broadcast's test needs a C++ member as well. Phase 1b replaces the
+  secret with the handshake of §6; links (§5.3) are phase 4.
+- **Two secrets:** one for peers and one for guests. A guest's link can't make a peer.
+- **The frame, exactly:** a 4-byte big-endian length, the JSON header (`channel`, `type`, `from`,
+  `to`, `seq`, and `body`, the JSON body), then the raw bytes. A WebSocket *text* message is a
+  header with no bytes, which is easier from a page; the host always sends binary. A header may
+  say `latest: true`, which matters only on a channel the host hasn't opened (below).
+- **The host's channel `room`** carries the protocol itself: `hello` (the version, the secret, a
+  name), `welcome` (the member's id, the people, the channels it reaches, the current `seq`),
+  `denied`, `joined`, `left`, `leave`, `removed`, `closed`, and `refused` for a message the host
+  turned down. Nobody else may open `room`. `joined` and `left` are ordered like any message.
+- **Ordered messages come back to their sender,** with their `seq`, so every member, the host
+  included, sees one order with its own messages in it.
+- **Latest only** replaces a waiting message of the same channel, type, sender and recipient.
+  "Waiting" is the host's queue for each member: frames go to a socket only while it holds less
+  than 128 KB unwritten, so the queue, not the socket, is where they wait and can be replaced.
+  A latest-only channel can't make a member too slow.
+- **Direct:** naming a recipient makes any message direct (no `seq`, no echo). On a channel opened
+  as `Delivery::Direct`, naming nobody means the host.
+- **The host's channels rule.** Who may send (`setSenders`, `setNamedSenders`) and whether guests
+  reach a channel (`setOpenToGuests`, off by default) are set on the host's `Channel`. On a channel
+  the host hasn't opened, any peer may send, delivered as the sender's header says, and no guest
+  reaches it.
+- **Guests and `Origin`:** an upgrade with an `Origin` (a page) is let through only from the room's
+  own address (the request's `Host`) or an origin the host lists (`HostOptions::allowedOrigins`,
+  for a tunnel), and only if the room takes guests. A page can only be a guest, even with the
+  peers' secret. The page is the host's (`HostOptions::page` or `pageDirectory`) or a plain built-in
+  one with the people and `chat`.
+- **Limits** (`Limits`, per room): members 50, guests 8, a message 4 MB, 200 messages a second
+  with bursts of 400, 16 MB waiting for one member, 10 s to say hello, a ping every 10 s and 30 s
+  of silence. A member over a limit is disconnected with the reason, which the others get in
+  `left` and the host in `peerLeft`. Bytes per second aren't limited yet.
+- **The API** has what §8.1 has without shared state and transfers, and also:
+  `Room::host()` and `Room::join()` to make one, `state()`, `me()`, `hostPeer()`, `close()`
+  (leave, or on the host end the room), `remove()`, `guestLink()`, `queuedBytes()`, a reason with
+  `peerLeft`, and `Channel::refused`.
+- **Ids** are random, given by the host for as long as a member is connected, the host's included.
+- **No clock the test moves** (§15): the limits test runs with short real intervals instead.
+
+**Built with it** ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §8 items 5 and 6):
+`qtwebsockets` and `qthttpserver` in `vcpkg.json`, the latter from `cmake/ports/qthttpserver`,
+which makes it depend on `qtwebsockets`; `Network`, `WebSockets` and `HttpServer` in
+`find_package(Qt6 …)`. Beside `usdcc.exe`: `usdcc_peers.dll`, `Qt6Network.dll`,
+`Qt6WebSockets.dll`, `Qt6HttpServer.dll`, `Qt6Concurrent.dll`, `libcrypto-3-x64.dll`, `jpeg62.dll`
+and `imageformats/qjpeg.dll`, which `tools/deploy.py` checks for.
+
+**Not tried yet:** a member on another machine, and with it Windows Firewall; the host listening
+on `127.0.0.1` beside a network address (§5.1), which it doesn't do yet.
 
 ## 15. Testing
 
