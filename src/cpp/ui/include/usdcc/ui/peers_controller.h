@@ -60,6 +60,8 @@ public:
         QString name;
         usdcc::peers::Admission admission = usdcc::peers::Admission::Ask;
         QString password;
+        // On every network address; off, on 127.0.0.1 only (tests: no firewall question).
+        bool onNetwork = true;
     };
     // On every network address (Windows asks whether to let it through, the first
     // time), on the port of Settings > Peers or any free one.

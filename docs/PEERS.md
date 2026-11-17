@@ -719,7 +719,8 @@ path as a link, and a late joiner gets the chat so far.
 - **Chat** (§10.1): channel `chat`, ordered; history in memory, the last 1,000 lines a room; a
   joiner gets the last 200 as the channel's snapshot. A prim path in a message is a link that
   selects the prim in the current stage, if it has it (the message doesn't say which stage).
-  Text is never HTML.
+  Text is never HTML. A 🙂 button beside the message offers 40 emoji, the last 8 used first
+  (kept in `usdcc.ini`); Windows' own picker (Win + .) works in the message too.
 - **Toasts:** a chat message while the panel is closed (a setting; muted rooms and people
   excepted), "Anna wants to join" with **Allow**, **Always Allow Anna** and **Deny**, and a room
   that ends or refuses.

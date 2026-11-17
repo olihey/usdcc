@@ -12,6 +12,8 @@
 
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
+#include <QToolButton>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextBrowser>
@@ -74,7 +76,7 @@ USDCC_TEST(peers_panel_rooms_people_and_chat) {
     ben->setPanelShown(true);  // Ben looks on the network
 
     QString error;
-    Room* room = anna->host({"Dailies", Admission::Open, {}}, &error);
+    Room* room = anna->host({"Dailies", Admission::Open, {}, false}, &error);
     CHECK(room, "Anna couldn't host: %s", qPrintable(error));
     if (!room) {
         return;
@@ -136,4 +138,60 @@ USDCC_TEST(peers_panel_rooms_people_and_chat) {
     // Leaving: the room goes from Ben's list.
     benRoom->close();
     CHECK(QTest::qWaitFor([&] { return ben->peers()->rooms().isEmpty(); }), "Ben still has the room");
+}
+
+// The emoji button (docs/PEERS.md §10.1): it puts one where the cursor is, and remembers
+// the last ones first.
+USDCC_TEST(peers_panel_emoji) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir folder;
+    auto anna = makeController("Anna", folder.path());
+    PeersSidePanel panel(anna.get());
+    // Without a room, there's nothing to write in.
+    CHECK(!panel.findChild<QToolButton*>("peersEmoji")->isEnabled(), "the emoji button works without a room");
+    QString error;
+    CHECK(anna->host({"Emoji", Admission::Invited, {}, false}, &error), "couldn't host: %s", qPrintable(error));
+    CHECK(panel.findChild<QToolButton*>("peersEmoji")->isEnabled(), "the emoji button is off in a room");
+    CHECK(PeersSidePanel::recentEmoji().isEmpty(), "a fresh profile has recent emoji");
+    CHECK(PeersSidePanel::emojiChoices().size() >= 32 && PeersSidePanel::emojiChoices().contains(QStringLiteral("👍")),
+          "the emoji on offer are missing");
+
+    QLineEdit* say = panel.findChild<QLineEdit*>("peersSay");
+    say->setText("great work ");
+    panel.insertEmoji(QStringLiteral("👍"));
+    say->setCursorPosition(0);
+    panel.insertEmoji(QStringLiteral("🎉"));
+    CHECK(say->text() == QStringLiteral("🎉great work 👍"), "the message is '%s'", qPrintable(say->text()));
+    panel.insertEmoji(QStringLiteral("👍"));
+    CHECK(PeersSidePanel::recentEmoji() == QStringList({QStringLiteral("👍"), QStringLiteral("🎉")}),
+          "the recent emoji are %s", qPrintable(PeersSidePanel::recentEmoji().join(" ")));
+    for (int i = 0; i < 12; ++i) {
+        panel.insertEmoji(PeersSidePanel::emojiChoices().at(i));
+    }
+    CHECK(PeersSidePanel::recentEmoji().size() == PeersSidePanel::kRecentEmoji, "more recent emoji are kept than shown");
+
+    // The menu: the recent ones, then all; a click puts one in and closes it.
+    auto* button = panel.findChild<QToolButton*>("peersEmoji");
+    QMenu* menu = button ? button->menu() : nullptr;
+    CHECK(menu, "there's no emoji button with a menu");
+    if (!menu) {
+        return;
+    }
+    Q_EMIT menu->aboutToShow();
+    QList<QToolButton*> cells;
+    for (QToolButton* cell : menu->findChildren<QToolButton*>()) {
+        cells.append(cell);
+    }
+    CHECK(cells.size() == PeersSidePanel::kRecentEmoji + PeersSidePanel::emojiChoices().size(), "the menu has %lld cells",
+          qlonglong(cells.size()));
+    say->clear();
+    for (QToolButton* cell : cells) {
+        if (cell->text() == QStringLiteral("🚀")) {
+            cell->click();
+            break;
+        }
+    }
+    CHECK(say->text() == QStringLiteral("🚀") && PeersSidePanel::recentEmoji().value(0) == QStringLiteral("🚀"),
+          "clicking an emoji in the menu put in '%s'", qPrintable(say->text()));
 }

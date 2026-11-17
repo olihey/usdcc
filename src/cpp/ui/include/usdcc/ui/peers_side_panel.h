@@ -9,11 +9,14 @@
 #include "usdcc/ui/side_panel.h"
 
 #include <QPointer>
+#include <QStringList>
 
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QMenu;
 class QPushButton;
+class QToolButton;
 class QTextBrowser;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -34,6 +37,14 @@ public:
     void hostRoom();
     void joinRoom();
 
+    // The emoji button beside the message: puts `emoji` where the cursor is, and
+    // first among the recent ones.
+    void insertEmoji(const QString& emoji);
+    // The emoji it offers, and the ones used last (kept in usdcc.ini), newest first.
+    static QStringList emojiChoices();
+    static QStringList recentEmoji();
+    static constexpr int kRecentEmoji = 8;
+
 private:
     void rebuildRooms();
     void rebuildPeople();
@@ -43,6 +54,7 @@ private:
     void roomMenu(const QPoint& position);
     void personMenu(const QPoint& position);
     void updateShown();
+    void fillEmojiMenu(QMenu* menu);
 
     PeersController* m_controller;
     QPointer<usdcc::peers::Room> m_room;
@@ -53,6 +65,7 @@ private:
     QTextBrowser* m_chat = nullptr;
     QLineEdit* m_say = nullptr;
     QPushButton* m_send = nullptr;
+    QToolButton* m_emoji = nullptr;
     QWidget* m_roomView = nullptr;
 };
 

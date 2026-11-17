@@ -163,7 +163,7 @@ PeersController::~PeersController() = default;
 Room* PeersController::host(const HostRequest& request, QString* error) {
     HostOptions options;
     options.name = request.name.trimmed().isEmpty() ? tr("%1's room").arg(m_peers->profile().name) : request.name.trimmed();
-    options.address = QHostAddress::Any;
+    options.address = request.onNetwork ? QHostAddress(QHostAddress::Any) : QHostAddress(QHostAddress::LocalHost);
     options.port = quint16(core::Settings::instance().get<int>(portKey, 47800));
     options.admission = request.admission;
     options.password = request.password;

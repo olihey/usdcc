@@ -3,6 +3,7 @@
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -10,6 +11,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -23,7 +25,9 @@
 #include <QRegularExpression>
 #include <QSplitter>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <QTreeWidget>
+#include <QWidgetAction>
 #include <QVBoxLayout>
 
 namespace usdcc::ui {
@@ -172,7 +176,20 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     m_say->setObjectName(QStringLiteral("peersSay"));
     m_say->setPlaceholderText(tr("Message; a prim path like /World/Cube becomes a link"));
     m_send = new QPushButton(tr("Send"), m_roomView);
+    // Emoji, without the system's picker (Win + . works too): the recent ones first.
+    m_emoji = new QToolButton(m_roomView);
+    m_emoji->setObjectName(QStringLiteral("peersEmoji"));
+    m_emoji->setText(QStringLiteral("🙂"));
+    m_emoji->setToolTip(tr("Emoji"));
+    m_emoji->setAutoRaise(true);
+    m_emoji->setPopupMode(QToolButton::InstantPopup);
+    m_emoji->setStyleSheet(QStringLiteral("QToolButton::menu-indicator { image: none; width: 0px; }"));
+    auto* emojiMenu = new QMenu(m_emoji);
+    emojiMenu->setObjectName(QStringLiteral("peersEmojiMenu"));
+    connect(emojiMenu, &QMenu::aboutToShow, this, [this, emojiMenu] { fillEmojiMenu(emojiMenu); });
+    m_emoji->setMenu(emojiMenu);
     sayRow->addWidget(m_say, 1);
+    sayRow->addWidget(m_emoji);
     sayRow->addWidget(m_send);
     roomLayout->addLayout(sayRow);
     const auto send = [this] {
@@ -476,6 +493,85 @@ void PeersSidePanel::roomMenu(const QPoint& position) {
         return;
     }
     menu.exec(m_rooms->viewport()->mapToGlobal(position));
+}
+
+namespace {
+
+const QString kRecentEmojiKey = QStringLiteral("Peers/recentEmoji");
+
+}  // namespace
+
+QStringList PeersSidePanel::emojiChoices() {
+    return {
+        // Reactions
+        QStringLiteral("👍"), QStringLiteral("👎"), QStringLiteral("👏"), QStringLiteral("🙌"),
+        QStringLiteral("🙏"), QStringLiteral("👋"), QStringLiteral("👀"), QStringLiteral("💪"),
+        // Faces
+        QStringLiteral("😀"), QStringLiteral("😂"), QStringLiteral("🙂"), QStringLiteral("😉"),
+        QStringLiteral("😍"), QStringLiteral("🤔"), QStringLiteral("😅"), QStringLiteral("😬"),
+        QStringLiteral("😮"), QStringLiteral("🤯"), QStringLiteral("😢"), QStringLiteral("😴"),
+        // Signs
+        QStringLiteral("✅"), QStringLiteral("❌"), QStringLiteral("⚠️"), QStringLiteral("❓"),
+        QStringLiteral("❗"), QStringLiteral("💡"), QStringLiteral("🔥"), QStringLiteral("🎉"),
+        QStringLiteral("❤️"), QStringLiteral("⭐"), QStringLiteral("🚀"), QStringLiteral("⏱️"),
+        // Work
+        QStringLiteral("🎬"), QStringLiteral("🎨"), QStringLiteral("🎥"), QStringLiteral("📷"),
+        QStringLiteral("🧊"), QStringLiteral("💾"), QStringLiteral("🐛"), QStringLiteral("☕"),
+    };
+}
+
+QStringList PeersSidePanel::recentEmoji() {
+    return appSettings().value(kRecentEmojiKey).toStringList().mid(0, kRecentEmoji);
+}
+
+void PeersSidePanel::insertEmoji(const QString& emoji) {
+    m_say->insert(emoji);
+    m_say->setFocus();
+    QStringList recent = recentEmoji();
+    recent.removeAll(emoji);
+    recent.prepend(emoji);
+    QSettings settings = appSettings();
+    settings.setValue(kRecentEmojiKey, recent.mid(0, kRecentEmoji));
+}
+
+void PeersSidePanel::fillEmojiMenu(QMenu* menu) {
+    menu->clear();
+    auto* grid = new QWidget(menu);
+    auto* layout = new QVBoxLayout(grid);
+    scaled::margins(layout, 6, 6, 6, 6);
+    scaled::spacing(layout, 4);
+    constexpr int kColumns = 8;
+    QFont font = grid->font();
+    font.setPointSizeF(font.pointSizeF() * 1.4);
+    const auto addRow = [&](const QString& title, const QStringList& emoji) {
+        auto* label = new QLabel(title, grid);
+        label->setObjectName(QStringLiteral("propertyNote"));
+        layout->addWidget(label);
+        auto* cells = new QGridLayout;
+        cells->setSpacing(0);
+        for (qsizetype i = 0; i < emoji.size(); ++i) {
+            auto* button = new QToolButton(grid);
+            button->setText(emoji[i]);
+            button->setFont(font);
+            button->setAutoRaise(true);
+            scaled::fixedSize(button, 30, 30);
+            const QString chosen = emoji[i];
+            connect(button, &QToolButton::clicked, this, [this, menu, chosen] {
+                insertEmoji(chosen);
+                menu->close();
+            });
+            cells->addWidget(button, int(i / kColumns), int(i % kColumns));
+        }
+        layout->addLayout(cells);
+    };
+    const QStringList recent = recentEmoji();
+    if (!recent.isEmpty()) {
+        addRow(tr("Recent"), recent);
+    }
+    addRow(tr("Emoji"), emojiChoices());
+    auto* action = new QWidgetAction(menu);
+    action->setDefaultWidget(grid);
+    menu->addAction(action);
 }
 
 void PeersSidePanel::personMenu(const QPoint& position) {
