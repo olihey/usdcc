@@ -30,11 +30,13 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host& host) {}
 |---|---|
 | `id`, `name`, `version`, `folder` | From the manifest |
 | `stageManager`, `undoManager`, `toolSet`, `mainWindow`, `viewPanels` | The app's own objects |
+| `peers` | The app's `usdcc::ui::PeersController`: host or join rooms through its `peers()` ([PEERS.md](PEERS.md)), and they show in the Peers panel with their people and chat. Null in a program without one |
 | `addViewPanel(id, name, factory)` | A view panel type, in the Stages menu, which comes back after a restart |
 | `addSidePanel(panel, area)` | Set a stable object name on it: that's its identity in the saved layout |
 | `addTool(id, label, icon, tool)` | `icon` is an image's path; empty, the rail shows the label's first letter |
 | `addMenuAction(path, run, shortcut, tip)` | "Menu/Action". `run` is one undo step, and an exception is logged |
 | `addPrimMenuAction(label, run, applies)` | At the end of the Outliner's prim menu, one undo step |
+| `addViewportMenuAction(label, run, checked, applies)` | At the end of every viewport's options menu and tab menu; `run(viewport)` is one undo step, `checked` makes it checkable |
 | `settingKey(key)` | A key of the plugin's own, for `usdcc::ui::appSettings()` |
 | `log(level, message)` | A record with the source `plugin:<id>` in the Log panel |
 

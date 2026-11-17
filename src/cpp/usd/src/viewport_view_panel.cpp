@@ -542,6 +542,58 @@ QDialog* makeRendererSettingsDialog(ViewportViewPanel* panel) {
 }
 }  // namespace
 
+ViewportMenuEntries& ViewportMenuEntries::instance() {
+    static ViewportMenuEntries entries;
+    return entries;
+}
+
+void ViewportMenuEntries::add(ViewportMenuEntry entry) {
+    for (ViewportMenuEntry& existing : m_entries) {
+        if (existing.id == entry.id) {
+            existing = std::move(entry);
+            return;
+        }
+    }
+    m_entries.push_back(std::move(entry));
+}
+
+void ViewportMenuEntries::remove(const std::string& id) {
+    std::erase_if(m_entries, [&id](const ViewportMenuEntry& entry) { return entry.id == id; });
+}
+
+void ViewportMenuEntries::populate(QMenu* menu, ViewportViewPanel* viewport) const {
+    bool separated = false;
+    for (const ViewportMenuEntry& entry : m_entries) {
+        if (!entry.run || (entry.applies && !entry.applies(viewport))) continue;
+        // "Group/Action": the submenus are found by their title, or made.
+        QStringList parts = entry.label.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        if (parts.isEmpty()) continue;
+        if (!separated) {
+            menu->addSeparator();
+            separated = true;
+        }
+        const QString label = parts.takeLast();
+        QMenu* parent = menu;
+        for (const QString& part : parts) {
+            QMenu* found = nullptr;
+            for (QAction* action : parent->actions()) {
+                if (action->menu() && action->text() == part) found = action->menu();
+            }
+            parent = found ? found : parent->addMenu(part);
+        }
+        QAction* action = parent->addAction(label);
+        action->setObjectName(QStringLiteral("viewportMenuEntry_%1").arg(QString::fromStdString(entry.id)));
+        if (entry.checked) {
+            action->setCheckable(true);
+            action->setChecked(entry.checked(viewport));
+        }
+        QPointer<ViewportViewPanel> target(viewport);
+        QObject::connect(action, &QAction::triggered, viewport, [run = entry.run, target]() {
+            if (target) run(target);
+        });
+    }
+}
+
 ViewportViewPanel* ViewportViewPanel::activeViewport() {
     if (s_clickedViewport) return s_clickedViewport;
     return viewportList().empty() ? nullptr : viewportList().front();
@@ -1217,6 +1269,7 @@ void ViewportViewPanel::populateContextMenu(QMenu* menu) {
                                           : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
     menu->addAction(fitText, this, [this]() { fitToView(); });
     menu->addAction(tr("Reset Camera"), this, [this]() { resetCamera(); });
+    ViewportMenuEntries::instance().populate(menu, this);
 }
 
 void ViewportViewPanel::addRendererEntries(QMenu* menu) {
@@ -1491,6 +1544,8 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     defaults->setObjectName(QStringLiteral("displayDefaultsAction"));
     defaults->setToolTip(tr("Drop all of this viewport's own display values"));
     defaults->setEnabled(!m_displayOverrides.isEmpty());
+
+    ViewportMenuEntries::instance().populate(menu, this);
 }
 
 }  // namespace usdcc::usd

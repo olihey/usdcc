@@ -83,6 +83,7 @@ AppContextScope::~AppContextScope() {
     s_context = m_outer;
     s_eventConnections.clear();
     usdcc::usd::PrimMenuEntries::instance().clear();
+    usdcc::usd::ViewportMenuEntries::instance().clear();
 }
 
 const AppContext* currentAppContext() { return s_context; }
@@ -698,6 +699,40 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "remove_prim_menu_action", [](const std::string& id) { usdcc::usd::PrimMenuEntries::instance().remove(id); },
         py::arg("id"));
+    // A viewport's menus (docs/PLUGINS.md): callbacks get the viewport's id, which
+    // usdcc/app.py makes a Viewport.
+    m.def(
+        "add_viewport_menu_action",
+        [](const std::string& id, const std::string& label, py::object callback, py::object checked, py::object applies) {
+            usdcc::usd::ViewportMenuEntry entry;
+            entry.id = id;
+            entry.label = QString::fromStdString(label);
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            const std::string description = label.substr(label.rfind('/') + 1);
+            entry.run = [held, description](usdcc::usd::ViewportViewPanel* viewport) {
+                runAsOneStep(description, [&]() { held->object(viewport->id()); });
+            };
+            const auto predicate = [](py::object function) -> std::function<bool(usdcc::usd::ViewportViewPanel*)> {
+                if (function.is_none()) return {};
+                auto heldFunction = std::make_shared<PythonObject>(std::move(function));
+                return [heldFunction](usdcc::usd::ViewportViewPanel* viewport) {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        return heldFunction->object(viewport->id()).cast<bool>();
+                    } catch (py::error_already_set& error) {
+                        logPythonError(error);
+                        return false;
+                    }
+                };
+            };
+            entry.checked = predicate(std::move(checked));
+            entry.applies = predicate(std::move(applies));
+            usdcc::usd::ViewportMenuEntries::instance().add(std::move(entry));
+        },
+        py::arg("id"), py::arg("label"), py::arg("callback"), py::arg("checked"), py::arg("applies"));
+    m.def(
+        "remove_viewport_menu_action",
+        [](const std::string& id) { usdcc::usd::ViewportMenuEntries::instance().remove(id); }, py::arg("id"));
 
     // The camera of the viewport the user last worked in, as plain values that
     // usdcc/app.py turns into a ViewportCamera: (stage cache id or -1,

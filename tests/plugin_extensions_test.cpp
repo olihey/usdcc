@@ -19,6 +19,7 @@
 #include "usdcc/usd/tool_rail.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_tool_bars.h"
+#include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/base/gf/ray.h>
 #include <pxr/usd/usd/prim.h>
@@ -234,6 +235,45 @@ usdcc.app.add_prim_menu_action("Never", mark, applies=broken_applies)
         CHECK(!findAction(other.actions(), "Only On A"), "applies() false leaves it out");
     }
     CHECK(usdcc::usd::PrimMenuEntries::instance().entries().empty(), "entries end with the app context, while Python is there");
+}
+
+USDCC_TEST(plugin_viewport_menu_entries) {
+    auto& app = pythonTestApp();
+    OpenStage open("viewport_menu");
+    auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
+    auto viewportUndo = std::make_shared<usdcc::usd::UndoManager>();
+    {
+        const AppContextScope scope({&app.stages, &app.undo, &app.tools});
+        usdcc::usd::ViewportViewPanel viewport(&app.stages, open.stage, toolSet, viewportUndo);
+        CHECK(run(R"(
+import usdcc.app
+import sys
+usdcc_viewport_menu = sys.usdcc_viewport_menu = {"ran": [], "live": False}
+def toggle(viewport):
+    usdcc_viewport_menu["ran"].append(viewport.id)
+    usdcc_viewport_menu["live"] = not usdcc_viewport_menu["live"]
+usdcc.app.add_viewport_menu_action("Share/Broadcast", toggle, checked=lambda viewport: usdcc_viewport_menu["live"])
+usdcc.app.add_viewport_menu_action("Never", toggle, applies=lambda viewport: False)
+)"), "entries are added");
+
+        QMenu menu;
+        usdcc::usd::ViewportMenuEntries::instance().populate(&menu, &viewport);
+        QMenu* share = findMenu(menu.actions(), "Share");
+        QAction* broadcast = share ? findAction(share->actions(), "Broadcast") : nullptr;
+        CHECK(broadcast && broadcast->isCheckable() && !broadcast->isChecked(), "in a submenu, checkable and unchecked");
+        CHECK(!findAction(menu.actions(), "Never"), "applies() false leaves it out");
+        if (broadcast) broadcast->trigger();
+        const std::string ran = "[" + std::to_string(viewport.id()) + "]";
+        CHECK(evaluated("str(__import__('sys').usdcc_viewport_menu['ran'])") == ran, "it gets the viewport: %s, not %s",
+              evaluated("str(__import__('sys').usdcc_viewport_menu['ran'])").c_str(), ran.c_str());
+
+        QMenu again;
+        usdcc::usd::ViewportMenuEntries::instance().populate(&again, &viewport);
+        QMenu* shareAgain = findMenu(again.actions(), "Share");
+        QAction* checked = shareAgain ? findAction(shareAgain->actions(), "Broadcast") : nullptr;
+        CHECK(checked && checked->isChecked(), "checked() says it's on now");
+    }
+    CHECK(usdcc::usd::ViewportMenuEntries::instance().entries().empty(), "entries end with the app context, while Python is there");
 }
 
 USDCC_TEST(plugin_events) {

@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+namespace usdcc::ui {
+class PeersController;
+}  // namespace usdcc::ui
+
 namespace usdcc::scripting {
 
 class PythonRuntime;
@@ -136,6 +140,9 @@ public:
 
     void addContribution(const std::string& id, const std::string& kind, const std::string& name);
 
+    // What C++ plugins get as Host::peers; set before activate(). May stay null.
+    void setPeers(usdcc::ui::PeersController* peers) { m_peers = peers; }
+
     // Why reload() wouldn't do anything for it; empty if it would.
     std::string whyNotReloadable(const std::string& id) const;
     struct ReloadResult {
@@ -202,6 +209,7 @@ private:
     std::string m_sharedFolder;
     bool m_packagesInstalled = false;
     bool m_reloading = false;
+    usdcc::ui::PeersController* m_peers = nullptr;
 };
 
 }  // namespace usdcc::scripting

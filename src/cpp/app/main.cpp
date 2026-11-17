@@ -1135,6 +1135,7 @@ int main(int argc, char** argv) {
     // The plugins' code, with the menus and registries they add to in place,
     // and before the layout is restored, so their panels come back like the
     // built-in ones (docs/PLUGINS.md §3.3).
+    plugins.setPeers(peersController);
     plugins.activate(python);
     pluginPanel->refresh();
     // A plugin's workspaces/ folder, looked in after the settings' (docs/WORKSPACES.md §5).

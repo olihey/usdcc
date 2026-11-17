@@ -71,6 +71,7 @@ A plugin in your own folder wins over a shipped one with the same id; the other 
 | Side panels | `usdcc.app.add_side_panel(panel, area, id=...)`. Give an `id`: otherwise the title is its identity in the saved layout |
 | Main menu | `usdcc.app.add_menu_action("Menu/Action", callback, shortcut, tip)`, one undo step per run |
 | Outliner's prim menu | `usdcc.app.add_prim_menu_action(label, callback, applies=None, id=None)`, one undo step per run |
+| A viewport's menus | `usdcc.app.add_viewport_menu_action(label, callback, checked=None, applies=None, id=None)`: at the end of every viewport's options menu and tab menu, `callback(viewport)` one undo step per run; `checked` makes it a checkable entry |
 | Viewport tools | `usdcc.tools.register_tool(id, label, cls, icon="")` |
 | App events | `usdcc.app.connect(event, callback)`: `selection_changed`, `current_stage_changed`, `stage_opened`, `stage_closed`, `stage_edited`, `viewport_camera_changed` |
 | The viewport's camera | `usdcc.app.active_viewport_camera()`: camera-to-world, field of view, aspect ratio, clipping |
@@ -207,7 +208,7 @@ Plugins run with the user's full rights, and PLAN.md only asks that errors don't
 Scripts run from the panel get an undo step automatically, but startup scripts don't (SCRIPTING.md §4.2). A menu action from a plugin should
 behave like a built-in one, and authors will forget `usdcc.usd.edit()`.
 
-**So:** actions from `add_menu_action()` and `add_prim_menu_action()` run in one global edit, as `ScriptRunner` does, so each is one undo step, named after
+**So:** actions from `add_menu_action()`, `add_prim_menu_action()` and `add_viewport_menu_action()` run in one global edit, as `ScriptRunner` does, so each is one undo step, named after
 it. A failing one's step is marked as failed. Panels make their own edits with `usdcc.usd.edit()`, like the built-in ones. A tool's drag is one step
 if its `mouse_press()` says `starts_edit`. `activate()` gets none: it shouldn't be editing stages.
 

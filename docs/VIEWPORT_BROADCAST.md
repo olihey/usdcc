@@ -9,6 +9,8 @@ in §11.1. The LAN, a second machine and a tunnel weren't tried yet. "Checked" b
 this checkout or in the vcpkg checkout beside it, "measured" means run in the spike; everything
 else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is built, and with it
 §8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
+**Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
+Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
 
 ## 1. Decisions
 
@@ -245,11 +247,14 @@ Small and general, so other plugins gain from them too:
    and `cameraChanged()`, nothing per frame, and `renderNow()` is called directly from many
    places, so a plugin can't watch for it either. The spike polled instead (*measured*): a still
    viewport then costs 60 reads a second only to find nothing new, and the wait for the next poll
-   was most of the delay between a move and its picture (§11.1).
+   was most of the delay between a move and its picture (§11.1). **Built** (phase 1): after every
+   frame that reached the screen.
 2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6).
 3. **Entries in a viewport's menus from a plugin:** `Host::addViewportMenuAction()` and
    `usdcc.app.add_viewport_menu_action()`, like the Outliner's prim menu
-   ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point.
+   ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point. **Built** (phase 1):
+   `usdcc::usd::ViewportMenuEntries`, at the end of the options menu and the tab's menu (the 3D
+   view has no right-click menu of its own), optionally checkable.
 4. **A mark on a viewport from a plugin** (the live mark), if question 4 says the HUD.
 5. **Build:** `qtwebsockets` and `qthttpserver` in `vcpkg.json`, the latter from the overlay port
    (§4.1); `Network`, `WebSockets` and `HttpServer` in `find_package(Qt6 …)`. New ports need a
@@ -266,9 +271,7 @@ Small and general, so other plugins gain from them too:
      says so only by returning false. Only `platforms/qwindows.dll` is deployed today.
 
 The plugin (`usdcc_add_plugin(viewport_broadcast …)`): a room from `usdcc_peers` (§7) with the
-page served beside it, the frame source, the side panel, the page in `web/`, and its settings
-(size limit, quality, public address, ask before a watcher joins). The port is the room's, in
-Settings > Peers.
+page served beside it, the frame source, the page in `web/`, and its settings. As built, §11.2.
 
 **Sources other than the Storm viewport.** The frame source is an interface: "a new picture",
 "read it", "move the camera". The viewport is the first. A Render View panel (V-Ray, RTX) already
@@ -304,7 +307,7 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 | Phase | Builds | Done when |
 |---|---|---|
 | **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks. **On this machine: done** (§11.1); the LAN, the tunnel and the firewall remain |
-| **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port |
+| **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port. **Built** (§11.2); all of it checked on this machine, not yet from a second one |
 | **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat |
 | **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click |
 | **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
@@ -359,6 +362,83 @@ Release build, GeForce RTX 4090, a 3072×1728 screen at 125 %.
 Python 3.13. The pybind11 overlay port brings vcpkg's Python 3.12, whose CMake wrapper takes over
 OpenUSD's `find_dependency(Python3 3.13 EXACT)`. The spike set the wrapper aside in its own
 install tree.
+
+### 11.2 Phase 1 as built
+
+[src/plugins/viewport_broadcast](../src/plugins/viewport_broadcast), bundled and enabled like Jolt
+Physics, and shipped (`tools/deploy.py`):
+
+- **`usdcc_viewport_broadcast_core`** (`broadcast.h`, `.cpp`; Qt and `usdcc_peers` only), a static
+  library the plugin and the tests share. `FrameSource` is "a new picture", "grab it", "its
+  title", "gone"; `Broadcast` hosts the room and sends the pictures.
+- **The plugin** (`plugin.cpp`): the Broadcast entry, the viewport as a `FrameSource`, toasts.
+- **The page** (`web/index.html`): one file, no build step, served by the room at `/`.
+
+**In the app:**
+
+- **`HydraViewportWindow::frameRendered()`** (§8 item 1).
+- **`ViewportMenuEntries`** (§8 item 3), with `Host::addViewportMenuAction(label, run, checked,
+  applies)` for C++ and `usdcc.app.add_viewport_menu_action(label, callback, checked=None,
+  applies=None, id=None)` for Python, whose callback gets a `usdcc.app.Viewport`.
+- **`Host::peers`:** a C++ plugin gets the app's `PeersController`, through
+  `PluginManager::setPeers()`.
+
+**Where it differs from the plan:**
+
+- **Its own room,** hosted through the app's `Peers`: it shows in the Peers panel with its watchers
+  and chat, and in the status bar. Not a room this instance already hosts (§7): whether a room takes
+  guests is fixed when it is hosted.
+- **Its own port,** 47810, not Settings > Peers' (a room of the user's may have that); taken, any
+  free one. On the network by default, so Windows asks once. Settings, with no page in Settings yet:
+  `PluginSettings/org.usdcc.viewport-broadcast/onNetwork`, `port`, and `allowedOrigins` (a tunnel's
+  address). `USDCC_BROADCAST_LOOPBACK` keeps it on 127.0.0.1, for checks.
+- **The channel** is `org.usdcc.viewport-broadcast/view` (a plugin's channels start with its id):
+  latest only, only the host sends, open to guests. A newcomer gets the last picture first, as the
+  channel's `snapshot`, so it doesn't wait for the next change.
+- **No acknowledgements.** The room's latest-only queue (a frame goes to a socket only while less
+  than 128 KB waits unwritten, [PEERS.md](PEERS.md) §14.1) does what the spike's acks did: a slow
+  watcher gets fewer pictures, never older ones. One compression serves every watcher.
+- **Pacing:** a frame is grabbed after `frameRendered()`, at most one compression at a time, and the
+  newest picture when it's done. Quality 60 while the picture changes; 250 ms after the last change,
+  the same picture at 85, scaled smoothly. Wider than 1920 is scaled down. A picture equal to the
+  last one sent (by its hash) isn't sent. Nothing is grabbed while nobody watches.
+- **Reading back is still `grabFrame()`,** synchronous on the UI thread: the pixel buffer object of
+  §4.4 isn't built.
+- **Chat comes with it,** part of phase 2: the room's `chat` is opened to guests, the page shows and
+  sends it, and the host has it in the Peers panel. Lines nobody said (the host's "You host …") are
+  left out of the page.
+- **The watcher list** is the Peers panel's, and a toast when someone starts watching. No side panel
+  of its own, no live mark in the viewport (§8 item 4), no "ask before a watcher joins".
+- **It ends** when Broadcast is unticked, from the toast's Stop, when the viewport or its stage
+  closes, and at quit. One at a time: broadcasting another viewport ends the first.
+
+**Tests:** in `usdcc_ui_tests` (`viewport_broadcast_test.cpp`): a watcher gets the picture, as a
+JPEG of the source's size and colour; a still picture sends nothing more after its sharp one, and a
+change does; a newcomer gets the picture at once without a grab; the page is served, a wrong secret
+is refused, and a watcher may not send pictures; Stop tells the watcher why and closes the port; the
+broadcast ends with its source; the viewport menu's entries (options menu and tab menu, checked,
+left out when they don't apply, removed). In `usdcc_python_tests`: `add_viewport_menu_action()`.
+The UI tests now get Qt's plugin folder (`QT_PLUGIN_PATH`), for the JPEG writer.
+
+**Checked in the app** (Release, a test profile, `USDCC_BROADCAST_LOOPBACK`, the desktop app's
+browser on this machine; a script opened the viewport tab's menu and pressed Broadcast): the entry
+is in the menu, unchecked, then checked while live; the link is copied; the page shows the stage's
+title, the picture, LIVE and the watchers. A box moved 16 times a second sent 96 pictures in six
+seconds at about 29 KB (an 883×741 viewport), then one sharp one of 48 KB, then nothing while still.
+Fit All Views sent two. Chat went from the page through the host and back. A second watcher got the
+picture and the chat at once, and both listed both. Pressing Broadcast again closed the room, the
+page said "The broadcast ended", and port 47810 refused connections. Quitting while live closed the
+room cleanly.
+
+**Not tried yet:** a browser on another machine, and with it Windows Firewall's question; a tunnel;
+another browser or a phone; a progressive renderer; closing the viewport or its stage in the app
+(the tests cover the source going away). The plugin built outside this tree against the SDK: its
+`UsdccPluginConfig.cmake` doesn't yet find Qt Network and WebSockets, which `usdcc_peers`' headers
+need.
+
+**Found on the way, for Peers:** the host's chat snapshot sends a newcomer the lines of the host's
+own panel ("You host …", "Anna joined"), worded for the host. The page filters them; a peer joining
+a room sees them in its Peers panel.
 
 ## 12. Open questions
 

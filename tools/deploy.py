@@ -96,7 +96,7 @@ SHIPPED_PLUGINS = ["vray_render"]
 # remote assets, http and webdav (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
 # on bin's usdcc_assets, libcurl, zlib and pugixml. Not beside the plugin: OpenUSD loads
 # a plugin's library with plain LoadLibraryW, which doesn't look there.
-SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav"]
+SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "viewport_broadcast"]
 
 
 def _full(path):

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usdcc broadcast</title>
+<style>
+  /* The page a viewport broadcast serves (docs/VIEWPORT_BROADCAST.md §2.2). It speaks
+     the guests' side of docs/PEERS_PROTOCOL.md. What others send is shown as text only. */
+  :root { color-scheme: dark; --bg: #1e1f22; --bar: #2b2d30; --line: #3c3f45; --fg: #dfe1e5; --dim: #9da0a8; --live: #e5534b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); color: var(--fg);
+         font: 14px system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 16px; background: var(--bar); }
+  #title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+  #live { color: var(--live); font-weight: 600; font-size: 12px; letter-spacing: .06em; }
+  #live[hidden] { display: none; }
+  #status, #watchers { color: var(--dim); }
+  main { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
+  canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
+  canvas[hidden] { display: none; }
+  #note { position: absolute; color: var(--dim); padding: 16px; text-align: center; }
+  footer { border-top: 1px solid var(--line); padding: 8px 16px; display: grid; gap: 6px; }
+  footer[hidden] { display: none; }
+  #log { max-height: 7.5em; overflow: auto; color: var(--dim); overflow-wrap: anywhere; }
+  #log b { color: var(--fg); font-weight: 600; }
+  input { width: 100%; padding: 6px 8px; background: var(--bar); color: inherit; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <span id="live" hidden>LIVE</span>
+  <span id="title">usdcc broadcast</span>
+  <span id="status">Connecting…</span>
+  <span id="watchers"></span>
+</header>
+<main>
+  <canvas id="view" hidden></canvas>
+  <div id="note">Connecting…</div>
+</main>
+<footer id="chat" hidden>
+  <div id="log"></div>
+  <input id="say" placeholder="Message the host and the other watchers" maxlength="2000">
+</footer>
+<script>
+"use strict";
+const VIEW = "org.usdcc.viewport-broadcast/view";
+const params = new URLSearchParams(location.hash.slice(1));
+const secret = params.get("s") || "";
+let name = (params.get("n") || "").trim();
+if (!name) {
+  try { name = localStorage.getItem("usdcc.room.name") || ""; } catch (e) {}
+}
+if (!name) {
+  name = (window.prompt("Your name, for the host and the other watchers") || "").trim();
+  try { if (name) localStorage.setItem("usdcc.room.name", name); } catch (e) {}
+}
+name = (name || "Watcher").slice(0, 64);
+
+const $ = id => document.getElementById(id);
+const canvas = $("view"), context = canvas.getContext("2d");
+const people = new Map();
+let me = "";
+let ended = false;
+let drawing = Promise.resolve();
+
+function setNote(text) {
+  $("note").textContent = text;
+  $("note").hidden = !text;
+}
+function showPeople() {
+  const watchers = [...people.values()].filter(p => p.kind === "guest");
+  $("watchers").textContent = watchers.length ? "Watching: " + watchers.map(p => p.id === me ? p.name + " (you)" : p.name).join(", ") : "";
+}
+function chatLine(who, text) {
+  const div = document.createElement("div");
+  if (who) {
+    const b = document.createElement("b");
+    b.textContent = who + ": ";
+    div.appendChild(b);
+  }
+  div.appendChild(document.createTextNode(text));
+  $("log").appendChild(div);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function end(reason) {
+  ended = true;
+  $("live").hidden = true;
+  $("status").textContent = reason || "The broadcast ended";
+  $("say").disabled = true;
+  if (canvas.hidden) setNote(reason || "The broadcast ended");
+}
+
+// A frame (docs/PEERS_PROTOCOL.md §2): a big-endian u32 header length, the JSON header,
+// then the raw bytes. Text messages are a header alone.
+function decode(data) {
+  if (typeof data === "string") return JSON.parse(data);
+  const length = new DataView(data).getUint32(0);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4, length)));
+  header.bytes = new Uint8Array(data, 4 + length);
+  return header;
+}
+
+// Pictures are drawn one after another; one that arrives while another is decoding
+// waits for it, and only the newest waiting is drawn.
+let waiting = null;
+function showPicture(message) {
+  if (!message.bytes || !message.bytes.length) return;
+  const first = waiting === null;
+  waiting = message;
+  if (!first) return;
+  drawing = drawing.then(async () => {
+    const next = waiting;
+    waiting = null;
+    try {
+      const bitmap = await createImageBitmap(new Blob([next.bytes], { type: "image/jpeg" }));
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+      }
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      canvas.hidden = false;
+      setNote("");
+    } catch (e) {
+      console.warn("A picture didn't decode", e);
+    }
+    const body = next.body || {};
+    if (body.title) {
+      $("title").textContent = body.title;
+      document.title = body.title + " · usdcc broadcast";
+    }
+  });
+}
+
+const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+socket.binaryType = "arraybuffer";
+socket.onopen = () => socket.send(JSON.stringify({ channel: "room", type: "hello", body: { protocol: 1, secret, name } }));
+socket.onclose = () => { if (!ended) end("The connection was lost"); };
+socket.onmessage = event => {
+  const message = decode(event.data);
+  const body = message.body || {};
+  if (message.channel === "room") {
+    if (message.type === "welcome") {
+      me = body.id || "";
+      for (const peer of body.peers || []) people.set(peer.id, peer);
+      showPeople();
+      $("live").hidden = false;
+      $("status").textContent = "";
+      if (canvas.hidden) setNote("Waiting for the picture…");
+      $("chat").hidden = !(body.channels || []).some(c => c.name === "chat");
+    } else if (message.type === "joined") {
+      people.set(body.id, body);
+      showPeople();
+    } else if (message.type === "left") {
+      people.delete(body.id);
+      showPeople();
+    } else if (["denied", "removed", "closed"].includes(message.type)) {
+      end(body.reason || (message.type === "denied" ? "This link doesn't open the broadcast" : "The broadcast ended"));
+    }
+  } else if (message.channel === VIEW && (message.type === "frame" || message.type === "snapshot")) {
+    showPicture(message);
+  } else if (message.channel === "chat") {
+    if (message.type === "snapshot") {
+      // Lines nobody said ("You host …") are the host's own panel's: not for watchers.
+      for (const line of body.lines || []) {
+        if (line.from) chatLine(line.name, String(line.text || ""));
+      }
+    } else if (message.type === "say") {
+      const peer = people.get(message.from);
+      chatLine(peer ? peer.name : "Someone", String(body.text || ""));
+    }
+  }
+};
+
+$("say").addEventListener("keydown", event => {
+  const text = $("say").value.trim();
+  if (event.key !== "Enter" || !text || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ channel: "chat", type: "say", body: { text } }));
+  $("say").value = "";
+});
+</script>
+</body>
+</html>

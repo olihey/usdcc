@@ -426,6 +426,7 @@ std::string PluginManager::activateNative(PluginInfo& plugin) {
         host.mainWindow = context->mainWindow;
         host.viewPanels = context->viewPanels;
     }
+    host.peers = m_peers;
     host.note = [this, id = plugin.manifest.id](const std::string& kind, const std::string& name) {
         addContribution(id, kind, name);
     };

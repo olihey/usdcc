@@ -1355,6 +1355,7 @@ void HydraViewportWindow::renderNow() {
         m_firstFrameRendered = true;
         Q_EMIT firstFrameRendered();
     }
+    if (m_firstFrameRendered) Q_EMIT frameRendered();
 
     if (!m_engine->IsConverged()) {
         requestUpdate();

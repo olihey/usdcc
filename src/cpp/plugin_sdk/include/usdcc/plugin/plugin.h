@@ -19,6 +19,7 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/viewport_view_panel.h"
 
 #include <exception>
 #include <filesystem>
@@ -37,6 +38,9 @@ namespace usdcc::usd {
 class StageManager;
 class UndoManager;
 }  // namespace usdcc::usd
+namespace usdcc::ui {
+class PeersController;
+}  // namespace usdcc::ui
 
 namespace usdcc::plugin {
 
@@ -54,6 +58,9 @@ struct Host {
     usdcc::tools::ToolSet* toolSet = nullptr;
     usdcc::ui::MainWindow* mainWindow = nullptr;
     usdcc::ui::ViewPanelRegistry* viewPanels = nullptr;
+    // Rooms with other instances and web pages (docs/PEERS.md): host or join through it,
+    // and a hosted room shows in the Peers panel with its people and chat.
+    usdcc::ui::PeersController* peers = nullptr;
 
     // Tells the Plugin Manager the plugin added something.
     std::function<void(const std::string& kind, const std::string& name)> note;
@@ -103,6 +110,25 @@ struct Host {
         entry.applies = std::move(applies);
         usdcc::usd::PrimMenuEntries::instance().add(std::move(entry));
         noted("Prim menu action", label.toStdString());
+    }
+
+    // An entry at the end of every viewport's options menu and tab menu ("Group/Action"
+    // makes a submenu). `run` is one undo step. `checked` makes it checkable, checked when
+    // it says so; `applies` leaves it out when false. Both may be empty.
+    void addViewportMenuAction(const QString& label, std::function<void(usdcc::usd::ViewportViewPanel*)> run,
+                               std::function<bool(usdcc::usd::ViewportViewPanel*)> checked = {},
+                               std::function<bool(usdcc::usd::ViewportViewPanel*)> applies = {}) {
+        usdcc::usd::ViewportMenuEntry entry;
+        entry.id = id + "." + label.toStdString();
+        entry.label = label;
+        const std::string step = label.section(QLatin1Char('/'), -1).toStdString();
+        entry.run = [this, step, run = std::move(run)](usdcc::usd::ViewportViewPanel* viewport) {
+            asOneStep(step, [&run, viewport]() { run(viewport); });
+        };
+        entry.checked = std::move(checked);
+        entry.applies = std::move(applies);
+        usdcc::usd::ViewportMenuEntries::instance().add(std::move(entry));
+        noted("Viewport menu action", label.toStdString());
     }
 
     // A physics solver (docs/PHYSICS.md §5.2). The first one added is the one simulations

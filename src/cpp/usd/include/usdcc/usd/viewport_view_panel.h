@@ -29,6 +29,33 @@ namespace usdcc::usd {
 
 class StageManager;
 class HydraViewportWindow;
+class ViewportViewPanel;
+
+// An entry added to every viewport's menus, by a plugin say (docs/PLUGINS.md): at the end
+// of its options menu and of its tab's menu, in the order added.
+struct ViewportMenuEntry {
+    std::string id;  // adding one again replaces it
+    QString label;   // "Group/Action" makes a submenu
+    std::function<void(ViewportViewPanel*)> run;
+    // Checkable, and checked when this says so; null: a plain entry.
+    std::function<bool(ViewportViewPanel*)> checked;
+    // Left out of the menu when false; may be null.
+    std::function<bool(ViewportViewPanel*)> applies;
+};
+
+class USDCC_USD_UI_API ViewportMenuEntries {
+public:
+    static ViewportMenuEntries& instance();
+    void add(ViewportMenuEntry entry);
+    void remove(const std::string& id);
+    void clear() { m_entries.clear(); }
+    const std::vector<ViewportMenuEntry>& entries() const { return m_entries; }
+    // Adds the entries that apply to `viewport` to the end of `menu`, after a separator.
+    void populate(QMenu* menu, ViewportViewPanel* viewport) const;
+
+private:
+    std::vector<ViewportMenuEntry> m_entries;
+};
 
 // The Shortcut setting for Fit to View (F by default).
 inline constexpr const char* kFitToViewShortcutKey = "Shortcuts/viewport.fitToView";

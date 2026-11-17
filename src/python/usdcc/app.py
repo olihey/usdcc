@@ -5,7 +5,7 @@
 scripts use the friendlier usdcc.usd functions instead. With PySide6,
 ``main_window()`` is the window, ``add_side_panel()`` docks a side panel made
 in Python, and ``register_view_panel()`` adds a view panel type
-(docs/SCRIPTING.md section 8). ``add_menu_action()``, ``add_prim_menu_action()``
+(docs/SCRIPTING.md section 8). ``add_menu_action()``, ``add_prim_menu_action()``, ``add_viewport_menu_action()``
 and ``connect()`` are how plugins add to the app (docs/PLUGINS.md).
 ``active_viewport_camera()`` is what the viewport looks through;
 ``viewports()`` and ``active_viewport()`` give ``Viewport``s, whose renderer and
@@ -205,6 +205,31 @@ def add_prim_menu_action(label, callback, applies=None, id=None):
 def remove_prim_menu_action(id):
     """Removes an entry added with ``add_prim_menu_action()``, by its id or label."""
     _app().remove_prim_menu_action(id)
+
+
+def add_viewport_menu_action(label, callback, checked=None, applies=None, id=None):
+    """Adds an entry to the end of every viewport's options menu and tab menu.
+    "Group/Action" in ``label`` makes a submenu. ``id`` says what to replace or remove
+    later (by default, the label).
+
+    ``callback(viewport)`` gets the ``Viewport`` whose menu it was, and runs as one undo
+    step. ``checked(viewport)`` makes the entry checkable, checked when it returns True.
+    ``applies(viewport)`` returns whether the entry is in the menu this time.
+    """
+    _app().add_viewport_menu_action(
+        id or label,
+        label,
+        lambda viewport_id: callback(Viewport(viewport_id)),
+        None if checked is None else lambda viewport_id: bool(checked(Viewport(viewport_id))),
+        None if applies is None else lambda viewport_id: bool(applies(Viewport(viewport_id))),
+    )
+    _plugins.note("Viewport menu action", label)
+    _plugins.track(lambda: remove_viewport_menu_action(id or label))
+
+
+def remove_viewport_menu_action(id):
+    """Removes an entry added with ``add_viewport_menu_action()``, by its id or label."""
+    _app().remove_viewport_menu_action(id)
 
 
 class ViewportCamera:

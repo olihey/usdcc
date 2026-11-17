@@ -313,6 +313,12 @@ Q_SIGNALS:
     // where a big stage's viewport actually stalls the UI.
     void firstFrameRendered();
 
+    // A new frame was drawn and grabFrame() now returns it: after every frame that
+    // reached the screen, a progressive renderer's passes included. Not for a frame the
+    // engine failed to draw. For watching the picture without polling it, as a viewport
+    // broadcast does (docs/VIEWPORT_BROADCAST.md §8).
+    void frameRendered();
+
     // Emitted when a tool (currently just SelectTool) changes the selection
     // itself, so ViewportViewPanel can push it into StageManager and keep
     // every other panel showing this stage in sync.

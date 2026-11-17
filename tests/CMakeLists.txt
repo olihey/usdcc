@@ -123,12 +123,13 @@ add_executable(usdcc_ui_tests
     viewport_delete_test.cpp
     panel_maximizer_test.cpp
     peers_panel_test.cpp
+    viewport_broadcast_test.cpp
     workspace_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
-target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend)
+target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend usdcc_viewport_broadcast_core)
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
@@ -245,7 +246,10 @@ if(WIN32)
         set(_usdcc_vcpkg_dir "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
         list(APPEND _usdcc_test_env "PATH=path_list_prepend:${_usdcc_vcpkg_dir}/bin")
         list(APPEND _usdcc_ui_test_env "PATH=path_list_prepend:${_usdcc_vcpkg_dir}/bin"
-             "QT_QPA_PLATFORM_PLUGIN_PATH=set:${_usdcc_vcpkg_dir}/Qt6/plugins/platforms")
+             "QT_QPA_PLATFORM_PLUGIN_PATH=set:${_usdcc_vcpkg_dir}/Qt6/plugins/platforms"
+             # Qt's image plugins: the viewport broadcast writes JPEG (qjpeg.dll), which the
+             # app has beside it and the tests don't.
+             "QT_PLUGIN_PATH=set:${_usdcc_vcpkg_dir}/Qt6/plugins")
     endif()
     set_tests_properties(usdcc_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
     set_tests_properties(usdcc_ui_tests usdcc_python_tests PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_ui_test_env}")
