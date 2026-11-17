@@ -106,9 +106,6 @@ A direct protocol (§5.1) has no endpoints or environments here. Plain HTTP keep
 credentials and its allow list in an `"http"` section of the same file
 ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4).
 
-The studio's favourite folders and files for the asset picker are a `"favorites"` list in it too:
-`[{ "label": "Library", "path": "webdav://lib/" }]` ([ASSET_PICKER.md](ASSET_PICKER.md) §3.1).
-
 **The context.** One context type for every protocol, `usdcc::assets::Context`
 (`AR_DECLARE_RESOLVER_CONTEXT`): the environment's name and its stacks. It is made three ways,
 all giving the same context:
@@ -386,9 +383,9 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
 ### 10.1 The Asset Servers editor
 
 *Planned 2026-11-17, not built.* A dialog for what the configuration file (§4) holds, so nobody
-has to edit its JSON by hand: the servers, the environments and their stacks, the hosts of plain
-HTTP, and the studio's favourites for the picker ([ASSET_PICKER.md](ASSET_PICKER.md) §3.1). In the
-picker, the roots a protocol lists are the names an environment has; this is where they're made.
+has to edit its JSON by hand: the servers, the environments and their stacks, and the hosts of
+plain HTTP. In the picker ([ASSET_PICKER.md](ASSET_PICKER.md)), the roots a protocol lists are the
+names an environment has; this is where they're made.
 
 **Opened from** **Edit > Asset Servers...**, a server's context menu in the picker's Places
 (**Edit Servers...**), and the description on Settings > Assets. A dialog of its own: the settings
@@ -398,7 +395,7 @@ dialog builds its pages from typed values, and has no tables or buttons.
 +--------------------------------------------------------------------------+
 | Asset Servers                     C:/Users/.../usdcc/assets.json        |
 +--------------------------------------------------------------------------+
-| [Servers] [Environments] [Web hosts] [Favourites]                        |
+| [Servers] [Environments] [Web hosts]                                     |
 |                                                                          |
 | Id      Protocol  URL                               Credential  Flags    |
 | prod    webdav    https://dav.studio.local/assets   studio-dav  read-only|
@@ -440,9 +437,6 @@ on the right, each with its stack of servers in order, top first.
 **Web hosts** (`"http"`): the hosts of plain HTTP, each with its credential id and **insecure**,
 and the allow list. The user's own Allowed hosts stay in Settings > Assets; this is the
 configuration's, which tools outside usdcc read too.
-
-**Favourites** (`"favorites"`): the studio's list for the picker, label and path, reordered by
-dragging. A path can be picked with the asset picker itself.
 
 **Saving:**
 
@@ -787,7 +781,7 @@ Linux; and a 401 in the app.
 | 7 | May a stage contact any HTTP host? | No: an allow list. A host the user opens a stage on is allowed for the session; any other refused, with a toast saying how to allow it ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4) |
 | 8 | A Python transport in usdcc's interpreter, or in a process of its own? | In usdcc's to try one out, with the GIL timeout; its own process for production (§11.1) |
 | 9 | Should the Asset Servers editor write the studio's file when the user can? | Only when it's the file in use and writable. A studio that wants it locked makes it read-only; the dialog then offers a copy of the user's own (§10.1) |
-| 10 | Should Test run when the dialog opens, for every server? | No: on request. A server that's down would slow the dialog's opening, as with favourites in the picker |
+| 10 | Should Test run when the dialog opens, for every server? | No: on request. A server that's down would slow the dialog's opening, as an unchecked favourite in the picker doesn't |
 
 ## 16. Not planned
 

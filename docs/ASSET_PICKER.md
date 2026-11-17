@@ -60,7 +60,7 @@ Who registers one:
 | [webdav:// v][ studio/chars/hero/                       ] [*] [Up]  |
 +----------------+---------------------------------------------------+
 | Favourites     | Name            Size      Modified          From  |
-|   Library  (s) | tex/                                              |
+|   Library      | tex/                                              |
 |   Hero         | hero.usd        12 KB     2026-11-12 09:14  prod  |
 |   Textures     | hero_geo.usdc   48 MB     2026-11-15 17:02  test  |
 | This PC        |                                                   |
@@ -76,11 +76,10 @@ Who registers one:
 
 - **Places:** Favourites (§3.1), This PC (a `QFileSystemModel`), Recent folders, then each source
   with its roots. **[\*]** in the path bar makes the folder shown a favourite, or stops it being one.
-  **(s)** marks a favourite from the studio's configuration.
 - **The path bar** is a scheme dropdown and the rest of the path (§3.2).
 - **A protocol's roots** in Places are the names its environment has. **Edit Servers...** in their
   context menu opens the Asset Servers editor, where they're made
-  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1). The studio's favourites are edited there too.
+  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1).
 - **The list** loads a folder when it's opened, on a worker thread, with a busy row meanwhile and
   the error in its place when it fails. Leaving a folder cancels its listing. Listings share the
   resolver's cache, so a folder a stage just composed from appears at once.
@@ -97,15 +96,13 @@ Who registers one:
 
 ### 3.1 Favourites
 
-Folders and files someone goes back to, on disk or on a server, one click away in Places. Recent
-lists what was used last; favourites are what the user chose to keep, in the order they chose.
+Folders someone goes back to, on disk or on a server, one click away in Places. Recent lists what
+was used last; favourites are what the user chose to keep, in the order they chose.
 
-**Two lists, shown together under Favourites:**
-
-| List | Comes from | The user can |
-|---|---|---|
-| **The studio's** | The asset configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4): `"favorites": [{ "label": "Library", "path": "webdav://lib/" }]` | Use them. Listed first, marked as the configuration's, and not renamed, moved or removed here, as Settings > Plugins shows its fixed folders |
-| **The user's own** | usdcc.ini, `AssetPicker/favorites`: a JSON list of `{label, path}`, per user | Add, rename, reorder and remove them |
+- **Folders only.** A favourite opens its folder in the list; a file is picked from there.
+- **The user's own, and only theirs.** Kept in usdcc.ini (`AssetPicker/favorites`, a JSON list of
+  `{label, path}`), per user. There is no shared list: not in the asset configuration, not from a
+  studio, not exported.
 
 **What a favourite holds:** a label and a path as written, never what it resolved to:
 
@@ -117,20 +114,18 @@ lists what was used last; favourites are what the user chose to keep, in the ord
   ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §2.1). Opening it allows that host for the session, as
   opening a stage does: the user chose it.
 
-A folder opens in the list. A file opens its folder with the file selected, and double-clicking it
-picks it.
-
 **Adding:**
 
 - **[\*]** in the path bar, for the folder shown.
-- **Add to Favourites** in an entry's context menu, for a folder or a file in the list.
-- **Dragging** a folder or file from the list, or a path from outside the app, onto Favourites.
+- **Add to Favourites** in a folder's context menu in the list. A file's menu has no such entry.
+- **Dragging** a folder from the list, or a folder's path from outside the app, onto Favourites. A
+  file dropped there is refused.
 
-A new favourite's label is the folder's or file's name; a second one of the same name gets its
-parent's too (`Hero (chars)`). Adding a path that is a favourite already selects the one there.
+A new favourite's label is the folder's name; a second one of the same name gets its parent's too
+(`Hero (chars)`). Adding a folder that is a favourite already selects the one there.
 
 **Managing,** in a favourite's context menu: **Rename**, **Move Up** and **Move Down** (and
-dragging, within the user's list), **Remove**, and **Copy Path**. There is no separate dialog: the
+dragging), **Remove**, and **Copy Path**. There is no separate dialog: the
 list is short, and is edited where it's used.
 
 **Not checked when the dialog opens.** As Open Recent does, nothing asks a disk or a server about a
@@ -235,9 +230,8 @@ files.
 `None`, and `usdcc.usd.register_asset_source(source)` takes an object with `id`, `label`, `roots()`
 and `list()` ([SCRIPTING.md](SCRIPTING.md)).
 
-Favourites: `usdcc.usd.asset_favorites()` lists both lists as `(label, path, studio)`, and
-`add_asset_favorite(path, label=None)` and `remove_asset_favorite(path)` change the user's, for a
-startup script that sets up a team's without a configuration file.
+Favourites: `usdcc.usd.asset_favorites()` lists the user's as `(label, path)`, and
+`add_asset_favorite(folder, label=None)` and `remove_asset_favorite(folder)` change them.
 
 ## 7. Testing
 
@@ -248,12 +242,12 @@ startup script that sets up a team's without a configuration file.
 - **The scheme dropdown:** file:// first, the fake protocol's scheme and the real ones as
   registered, browsable ones before the others; a pasted URI moving its scheme there, one with no
   resolver refused, `file:///C:/a.usd` taken as a path; navigating setting the scheme.
-- **Favourites** (`tests/asset_favorites_test.cpp`): adding from the path bar, the context menu
-  and a drop; a second of the same name labelled with its parent; adding one that's there already;
-  renaming, reordering and removing, kept in usdcc.ini across a restart of the model; the studio's
-  from the configuration, listed first and not removable; a server's favourite stored as its logical
-  path even when added from a resolved one; one whose server name the environment lacks greyed with
-  no request made; one on a dead server opening to an error without holding the dialog up.
+- **Favourites** (`tests/asset_favorites_test.cpp`): adding from the path bar, a folder's context
+  menu and a drop; a file refused in each; a second of the same name labelled with its parent; adding
+  one that's there already; renaming, reordering and removing, kept in usdcc.ini across a restart of
+  the model; a server's favourite stored as its logical path even when added from a resolved one;
+  one whose server name the environment lacks greyed with no request made; one on a dead server
+  opening to an error without holding the dialog up.
 - **In the app, looked at:** browsing an `rclone serve webdav` server and the tests' own
   ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6), adding a reference from it, a favourite on it
   across environments and a restart, and that nothing changes with no source registered.
@@ -266,9 +260,8 @@ startup script that sets up a team's without a configuration file.
 | 2 | Thumbnails or a preview of the chosen file? | Later. The USDA preview dialog could be reused for a selected `.usd` |
 | 3 | Bookmarks of the user's own in Places? | Planned: favourites, §3.1 |
 | 4 | Search within a server? | No. WebDAV has no usable search; a source could offer one later |
-| 5 | Favourites of files, or only folders? | Both. A file is often the thing gone back to (a library's main asset); it opens its folder with the file selected |
-| 6 | Studio favourites per environment ("TEST's sandbox" only in test)? | Not at first. A logical path already means the right servers in each environment; per-environment lists can come if a studio asks |
+| 5 | Favourites of files, or only folders? | **Decided: folders only** (2026-11-17) |
+| 6 | Shared favourites: a studio's list, per environment, or exported to colleagues? | **Decided: none** (2026-11-17). Favourites are the user's own |
 | 7 | Favourites in the system file dialog's sidebar too? | No. Windows' own dialog takes no sidebar from the app, and it can't open a server's paths anyway |
-| 8 | Share the user's favourites with colleagues without a configuration file? | Not as a feature. The studio's list is for sharing; the Python calls let a startup script set up a team's |
-| 9 | Should the scheme dropdown hide schemes that can't be browsed (`http`, `https`)? | No. They can't be browsed, but a URL can be typed for them, and seeing the scheme there says the protocol is installed |
-| 10 | Label schemes by their protocol's name ("WebDAV") rather than `webdav://`? | Show the scheme as written, since that is what the path will hold; the protocol's name goes in the tooltip |
+| 8 | Should the scheme dropdown hide schemes that can't be browsed (`http`, `https`)? | No. They can't be browsed because plain HTTP has no request for listing a folder (a server's HTML index page isn't part of the protocol), whereas WebDAV has `PROPFIND`. Browsing never comes from OpenUSD's `ArResolver`, which can't list for any scheme, but from a source's `list()` (§2). A URL can still be typed for them, and seeing the scheme says the protocol is installed |
+| 9 | Label schemes by their protocol's name ("WebDAV") rather than `webdav://`? | Show the scheme as written, since that is what the path will hold; the protocol's name goes in the tooltip |
