@@ -90,6 +90,19 @@ USDCC_TEST(recent_files_setting_and_list) {
     addRecentFile(path(1));
     clearRecentFiles();
     CHECK(recentFiles().isEmpty(), "clearing");
+
+    // A stage on a server (docs/REMOTE_ASSETS.md §10): not a file, so not made absolute.
+    const QString url = QStringLiteral("webdav://192.168.178.53:5000/single/girl/scene.usdc");
+    addRecentFile(url);
+    CHECK(recentFiles().size() == 1 && recentFiles().first() == url, "a server's path is kept as written: %s",
+          recentFiles().value(0).toStdString().c_str());
+    addRecentFile(url);
+    CHECK(recentFiles().size() == 1, "and once");
+    QMenu menu;
+    populateRecentFilesMenu(&menu, [](const QString&) {});
+    CHECK(!menu.actions().isEmpty() && menu.actions().first()->text().contains(url), "and listed as written: %s",
+          menu.actions().isEmpty() ? "" : menu.actions().first()->text().toStdString().c_str());
+    clearRecentFiles();
 }
 
 USDCC_TEST(recent_files_menu) {

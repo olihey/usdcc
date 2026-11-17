@@ -4,6 +4,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -32,7 +33,12 @@ constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
 constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;
 #endif
 
-QString normalized(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
+// A file's path absolute and clean; a server's (webdav://, https://) as written, as it
+// isn't a path on disk (docs/REMOTE_ASSETS.md §10).
+QString normalized(const QString& path) {
+    if (!isLocalAssetPath(path.toStdString())) return path.trimmed();
+    return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
 
 QStringList storedList() { return usdcc::ui::appSettings().value(kListKey).toStringList(); }
 
@@ -117,7 +123,13 @@ void populateRecentFilesMenu(QMenu* menu, const std::function<void(const QString
 
 usdcc::core::Signal<StageRefPtr>::Connection rememberOpenedStages(StageManager& stages) {
     return stages.stageOpened.connect([](const StageRefPtr& stage) {
-        addRecentFile(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetRealPath()));
+        const PXR_NS::SdfLayerHandle root = stage->usdStage()->GetRootLayer();
+        // A root on a server by the path that names it: its resolved path holds a stack id
+        // only this process knows.
+        const std::string real = root->GetRealPath();
+        // One in memory has no path at all, and isn't added.
+        if (real.empty()) return;
+        addRecentFile(QString::fromStdString(isLocalAssetPath(real) ? real : root->GetIdentifier()));
     });
 }
 
