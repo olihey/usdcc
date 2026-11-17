@@ -233,7 +233,9 @@ Phase 3 as built:
   - **File > Save Stage** and **File > Save Stage As**, above Close Stage: with one stage open,
     plain actions for that stage; with more, a submenu of the open stages each (as Close
     Stage's), Save Stage's entries greyed for stages with nothing unsaved. Greyed with none open.
-    File > Close Stage works the same way.
+    File > Close Stage works the same way. Its submenu ends, past a separator, with **Close All**:
+    one question about unsaved layers for all of them, and one about the panels still showing
+    any, whose only stage to switch them to is "No stage" (`closeStagesInteractively()`).
   - **Stages > a stage > Save Stage** saves every unsaved file layer of that stage
     (`saveStageInteractively()`), greyed while it has none. So does **Save Stage** on a view
     panel's tab menu, for the stage the panel shows (`ViewPanel::setTabMenuExtension()`, set in

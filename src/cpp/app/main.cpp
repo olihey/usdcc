@@ -876,8 +876,26 @@ int main(int argc, char** argv) {
         closeStageAction->setEnabled(count == 1);
         closeStageMenu->menuAction()->setVisible(count > 1);
     });
+    // With more than one stage, Close All under the stages, past a separator: one
+    // question about unsaved layers and one about the panels, whose only stage to
+    // switch them to is "No stage".
     QObject::connect(closeStageMenu, &QMenu::aboutToShow, &window,
-                     [fillStageMenu, closeStageMenu, closeStage]() { fillStageMenu(closeStageMenu, false, closeStage); });
+                     [&stageManager, &window, fillStageMenu, closeStageMenu, closeStage]() {
+        fillStageMenu(closeStageMenu, false, closeStage);
+        if (stageManager.stages().size() < 2) return;
+        closeStageMenu->addSeparator();
+        QAction* closeAll = closeStageMenu->addAction(QObject::tr("Close &All"));
+        closeAll->setObjectName(QStringLiteral("fileCloseAllStages"));
+        closeAll->setToolTip(QObject::tr("Close every open stage, with every panel showing them"));
+        QObject::connect(closeAll, &QAction::triggered, closeStageMenu, [&stageManager, &window]() {
+            QMetaObject::invokeMethod(
+                &window,
+                [&stageManager, &window]() {
+                    usdcc::usd::closeStagesInteractively(&stageManager, stageManager.stages(), &window);
+                },
+                Qt::QueuedConnection);
+        });
+    });
     // File > Exit, last: closing the window, which asks about unsaved layers.
     fileMenu->addSeparator();
     QAction* exitAction = fileMenu->addAction(QObject::tr("E&xit"), &window, &QWidget::close);

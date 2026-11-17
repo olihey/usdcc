@@ -522,7 +522,8 @@ things that will bite later if not addressed early:
     Attributes) switch to the opened stage themselves; viewports opt out of that through
     `ViewPanel::adoptsOpenedStage()`. File > Close Stage lists every open stage. Closing one that visible panels still show
     opens a `CloseStageDialog` (`close_stage_dialog.h`). It offers "Close the panels" or "Switch
-    them to:", with a dropdown of the other open stages plus "No stage". Hidden panels follow the
+    them to:", with a dropdown of the other open stages plus "No stage" (only "No stage" for File > Close
+    Stage > Close All, shown with more than one stage open). Hidden panels follow the
     choice. A stage closed some other way (e.g. from Python) leaves its panels empty instead of
     closing them. `UndoManager::removeStage()` drops the closed stage's undo stack, which used
     to keep the stage alive.

@@ -56,10 +56,24 @@ bool closeStageInteractively(StageManager* stageManager, const StageRefPtr& stag
     if (!stage) {
         return false;
     }
-    if (!confirmUnsavedLayers(stageManager, {stage}, dialogParent)) {
+    return closeStagesInteractively(stageManager, {stage}, dialogParent);
+}
+
+bool closeStagesInteractively(StageManager* stageManager, const std::vector<StageRefPtr>& stages, QWidget* dialogParent) {
+    std::vector<StageRefPtr> closing;
+    for (const StageRefPtr& stage : stages) {
+        if (stage && std::find(closing.begin(), closing.end(), stage) == closing.end()) closing.push_back(stage);
+    }
+    if (closing.empty()) {
         return false;
     }
-    const std::vector<usdcc::ui::ViewPanel*> panels = panelsShowing(stage);
+    if (!confirmUnsavedLayers(stageManager, closing, dialogParent)) {
+        return false;
+    }
+    std::vector<usdcc::ui::ViewPanel*> panels;
+    for (const StageRefPtr& stage : closing) {
+        for (usdcc::ui::ViewPanel* panel : panelsShowing(stage)) panels.push_back(panel);
+    }
     // Only panels the user can see are worth asking about; hidden ones just
     // follow the answer (or, with no question asked, are left empty).
     QStringList visibleTitles;
@@ -70,7 +84,7 @@ bool closeStageInteractively(StageManager* stageManager, const StageRefPtr& stag
     }
 
     if (!visibleTitles.isEmpty()) {
-        CloseStageDialog dialog(stageManager, stage, visibleTitles, dialogParent);
+        CloseStageDialog dialog(stageManager, closing, visibleTitles, dialogParent);
         if (dialog.exec() != QDialog::Accepted) {
             return false;
         }
@@ -86,7 +100,7 @@ bool closeStageInteractively(StageManager* stageManager, const StageRefPtr& stag
 
     // Panels not handled above (hidden ones, when nothing was asked) are left
     // with no stage by ViewPanel's own stageClosed handler.
-    stageManager->closeStage(stage);
+    for (const StageRefPtr& stage : closing) stageManager->closeStage(stage);
     return true;
 }
 
@@ -137,14 +151,25 @@ bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRef
 
 CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr& stage,
                                    const QStringList& panelTitles, QWidget* parent)
+    : CloseStageDialog(stageManager, std::vector<StageRefPtr>{stage}, panelTitles, parent) {}
+
+CloseStageDialog::CloseStageDialog(StageManager* stageManager, const std::vector<StageRefPtr>& closing,
+                                   const QStringList& panelTitles, QWidget* parent)
     : QDialog(parent), m_stageManager(stageManager) {
-    setWindowTitle(tr("Close Stage"));
+    const bool several = closing.size() > 1;
+    setWindowTitle(several ? tr("Close Stages") : tr("Close Stage"));
     usdcc::ui::scaled::minimumWidth(this, 420);  // room for the panel list before it wraps
 
     auto* layout = new QVBoxLayout(this);
+    QStringList names;
+    for (const StageRefPtr& stage : closing) {
+        names << QStringLiteral("<b>%1</b>").arg(displayName(stageManager, stage).toHtmlEscaped());
+    }
+    const QString shown = panelTitles.join(QStringLiteral(", ")).toHtmlEscaped();
     auto* message = new QLabel(
-        tr("<b>%1</b> is still shown in: %2.<br>What should happen to these panels?")
-            .arg(displayName(stageManager, stage).toHtmlEscaped(), panelTitles.join(QStringLiteral(", ")).toHtmlEscaped()),
+        (several ? tr("%1 are still shown in: %2.<br>What should happen to these panels?")
+                 : tr("%1 is still shown in: %2.<br>What should happen to these panels?"))
+            .arg(names.join(QStringLiteral(", ")), shown),
         this);
     message->setWordWrap(true);
     layout->addWidget(message);
@@ -153,8 +178,10 @@ CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr
     m_closeButton = new QRadioButton(tr("&Close the panels"), this);
     m_switchButton = new QRadioButton(tr("&Switch them to:"), this);
     m_replacementCombo = new QComboBox(this);
+    m_replacementCombo->setObjectName(QStringLiteral("closeStageReplacement"));
+    // Only stages staying open: with every stage closing, just "No stage".
     for (const StageRefPtr& other : stageManager->stages()) {
-        if (other != stage) {
+        if (std::find(closing.begin(), closing.end(), other) == closing.end()) {
             m_replacementCombo->addItem(displayName(stageManager, other), static_cast<qlonglong>(other->cacheId()));
             m_replacementCombo->setItemData(m_replacementCombo->count() - 1,
                                             QString::fromStdString(other->usdStage()->GetRootLayer()->GetIdentifier()),
@@ -173,7 +200,7 @@ CloseStageDialog::CloseStageDialog(StageManager* stageManager, const StageRefPtr
     connect(m_switchButton, &QRadioButton::toggled, m_replacementCombo, &QWidget::setEnabled);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-    buttons->addButton(tr("Close Stage"), QDialogButtonBox::AcceptRole)->setDefault(true);
+    buttons->addButton(several ? tr("Close Stages") : tr("Close Stage"), QDialogButtonBox::AcceptRole)->setDefault(true);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);

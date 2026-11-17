@@ -79,6 +79,7 @@ add_executable(usdcc_ui_tests
     attributes_tab_test.cpp
     attributes_right_edge_test.cpp
     attributes_transform_section_test.cpp
+    close_stage_test.cpp
     composition_edit_test.cpp
     create_menu_test.cpp
     selection_menu_test.cpp
