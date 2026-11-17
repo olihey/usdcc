@@ -589,7 +589,7 @@ def main(argv=None):
         # What plugins on usdcc_peers load (docs/PEERS.md section 13).
         "bin/usdcc_peers.dll", "bin/Qt6Network.dll", "bin/Qt6WebSockets.dll", "bin/Qt6HttpServer.dll",
         "bin/Qt6Concurrent.dll", "bin/libcrypto-3-x64.dll", "bin/imageformats/qjpeg.dll", "bin/jpeg62.dll",
-        "bin/libsodium.dll",
+        "bin/libsodium.dll", "bin/tls/qschannelbackend.dll",
         "plugin/usd/hdStorm.dll", "python/python.exe", "python/Lib/encodings/__init__.py",
         "python/Lib/site-packages/usdcc/__init__.py", "python/Lib/site-packages/pxr/__init__.py",
         "python/Lib/site-packages/usdcc/_vendor/packaging/version.py",

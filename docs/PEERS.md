@@ -727,7 +727,9 @@ path as a link, and a late joiner gets the chat so far.
 - **Settings > Peers** (§11): name, color, looking on the network, port, asking before a join by
   link, chat toasts. Muted rooms and people and the trusted keys are kept in `usdcc.ini`. Not yet:
   rooms joined at start (phase 3), relay URLs (phase 4), the inbox's limit (phase 5).
-- **Deploy:** also `libsodium.dll` beside `usdcc.exe`, which `tools/deploy.py` checks for.
+- **Deploy:** also `libsodium.dll` beside `usdcc.exe`, and Qt's TLS plugin `tls/qschannelbackend.dll`
+  (Windows' own TLS: without a TLS plugin Qt Network warns "No functional TLS backend was found",
+  and `wss://` to a relay can't work), which `tools/deploy.py` checks for.
 
 **Not tried yet:** two machines (the row's "done when"), the firewall's question, a LAN with
 several interfaces.

@@ -123,7 +123,10 @@ if(WIN32)
     # doesn't search there for what they link, nor PATH (docs/VIEWPORT_BROADCAST.md §8):
     # - Qt Network, WebSockets, HttpServer and Concurrent (HttpServer's);
     # - OpenSSL's libcrypto, which Qt Network as built here links at load time;
-    # - Qt's JPEG plugin and libjpeg, without which QImageWriter writes no JPEG.
+    # - Qt's JPEG plugin and libjpeg, without which QImageWriter writes no JPEG;
+    # - Qt's TLS plugin, Schannel (Windows' own, so no second OpenSSL beside PySide6's):
+    #   without one Qt Network warns "No functional TLS backend was found", and wss://
+    #   to a relay (docs/PEERS.md §13) can't work.
     set(_usdcc_qt_bin "$<TARGET_FILE_DIR:Qt6::Core>")
     add_custom_command(
         TARGET usdcc
@@ -135,7 +138,10 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/imageformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_usdcc_qt_bin}/../Qt6/plugins/imageformats/qjpeg.dll" "$<TARGET_FILE_DIR:usdcc>/imageformats/"
-        COMMENT "Deploying Qt Network, WebSockets, HttpServer and the JPEG plugin"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/tls"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_usdcc_qt_bin}/../Qt6/plugins/tls/qschannelbackend.dll" "$<TARGET_FILE_DIR:usdcc>/tls/"
+        COMMENT "Deploying Qt Network, WebSockets, HttpServer, the JPEG plugin and the TLS plugin"
         VERBATIM)
 endif()
 
