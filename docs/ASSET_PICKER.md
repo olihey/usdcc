@@ -3,8 +3,8 @@
 One dialog for choosing an asset: a local file, or a file on any server that can be browsed. It
 replaces the system file dialog wherever usdcc asks for a USD file or an asset path.
 
-**Status:** planned 2026-11-16. Nothing is built yet. It is phase 5 of
-[REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.
+**Status:** planned 2026-11-16, favourites (§3.1) and the scheme dropdown (§3.2) added 2026-11-17. Nothing is built yet. It is
+phase 5 of [REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.
 
 ## 1. Why it needs its own interface
 
@@ -57,12 +57,15 @@ Who registers one:
 ```
 +--------------------------------------------------------------------+
 | Choose Asset                                                       |
-| [ webdav://studio/chars/hero/                               ] [Up] |
+| [webdav:// v][ studio/chars/hero/                       ] [*] [Up]  |
 +----------------+---------------------------------------------------+
-| This PC        | Name            Size      Modified          From  |
-| Recent         | tex/                                              |
-|                | hero.usd        12 KB     2026-11-12 09:14  prod  |
-| WebDAV         | hero_geo.usdc   48 MB     2026-11-15 17:02  test  |
+| Favourites     | Name            Size      Modified          From  |
+|   Library  (s) | tex/                                              |
+|   Hero         | hero.usd        12 KB     2026-11-12 09:14  prod  |
+|   Textures     | hero_geo.usdc   48 MB     2026-11-15 17:02  test  |
+| This PC        |                                                   |
+| Recent         |                                                   |
+| WebDAV         |                                                   |
 |   studio       |                                                   |
 |   lib          |                                                   |
 +----------------+---------------------------------------------------+
@@ -71,14 +74,19 @@ Who registers one:
 +--------------------------------------------------------------------+
 ```
 
-- **Places:** This PC (a `QFileSystemModel`), Recent folders, then each source with its roots.
+- **Places:** Favourites (§3.1), This PC (a `QFileSystemModel`), Recent folders, then each source
+  with its roots. **[\*]** in the path bar makes the folder shown a favourite, or stops it being one.
+  **(s)** marks a favourite from the studio's configuration.
+- **The path bar** is a scheme dropdown and the rest of the path (§3.2).
+- **A protocol's roots** in Places are the names its environment has. **Edit Servers...** in their
+  context menu opens the Asset Servers editor, where they're made
+  ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1). The studio's favourites are edited there too.
 - **The list** loads a folder when it's opened, on a worker thread, with a busy row meanwhile and
   the error in its place when it fails. Leaving a folder cancels its listing. Listings share the
   resolver's cache, so a folder a stage just composed from appears at once.
-- **The path bar** takes a typed or pasted path or URI. One no source can list is accepted if
-  `ArGetResolver().Resolve()` finds it, which is how a resolver without a source is still usable,
-  and how an `https://` URL is opened ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)). Recent keeps the
-  URLs used.
+- **A typed or pasted path** that no source can list is accepted if `ArGetResolver().Resolve()`
+  finds it, which is how a resolver without a source is still usable, and how an `https://` URL is
+  opened ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)). Recent keeps the URLs used.
 - **From** shows which endpoint delivered an entry, when a name has more than one.
 - **Filters** by extension, as today's dialogs have.
 - **Relative or Absolute** is shown when the result goes into a layer (§4).
@@ -86,6 +94,90 @@ Who registers one:
   choice comes back through the picker.
 - **With no source registered,** usdcc opens the system dialog directly, exactly as today. The
   picker only appears once there is something to browse besides the disk.
+
+### 3.1 Favourites
+
+Folders and files someone goes back to, on disk or on a server, one click away in Places. Recent
+lists what was used last; favourites are what the user chose to keep, in the order they chose.
+
+**Two lists, shown together under Favourites:**
+
+| List | Comes from | The user can |
+|---|---|---|
+| **The studio's** | The asset configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4): `"favorites": [{ "label": "Library", "path": "webdav://lib/" }]` | Use them. Listed first, marked as the configuration's, and not renamed, moved or removed here, as Settings > Plugins shows its fixed folders |
+| **The user's own** | usdcc.ini, `AssetPicker/favorites`: a JSON list of `{label, path}`, per user | Add, rename, reorder and remove them |
+
+**What a favourite holds:** a label and a path as written, never what it resolved to:
+
+- **On disk:** the absolute path, with forward slashes.
+- **On a named server:** the logical path, `webdav://studio/chars/hero/`. Never an endpoint's URL
+  or a stack id, so one favourite means TEST's servers in the test environment and PROD's in prod,
+  and still works after a server moves ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §5).
+- **On a server by address:** as written, `webdav://192.168.178.53:5000/single/`
+  ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §2.1). Opening it allows that host for the session, as
+  opening a stage does: the user chose it.
+
+A folder opens in the list. A file opens its folder with the file selected, and double-clicking it
+picks it.
+
+**Adding:**
+
+- **[\*]** in the path bar, for the folder shown.
+- **Add to Favourites** in an entry's context menu, for a folder or a file in the list.
+- **Dragging** a folder or file from the list, or a path from outside the app, onto Favourites.
+
+A new favourite's label is the folder's or file's name; a second one of the same name gets its
+parent's too (`Hero (chars)`). Adding a path that is a favourite already selects the one there.
+
+**Managing,** in a favourite's context menu: **Rename**, **Move Up** and **Move Down** (and
+dragging, within the user's list), **Remove**, and **Copy Path**. There is no separate dialog: the
+list is short, and is edited where it's used.
+
+**Not checked when the dialog opens.** As Open Recent does, nothing asks a disk or a server about a
+favourite until it's clicked: an offline share or a server that's down would otherwise hold the
+dialog up. When clicked, a missing folder or an unreachable server shows its error in the list, as
+any listing does, and the favourite stays. A favourite on a server name the stage's environment
+doesn't have is greyed, with the reason in its tooltip: that is known without asking anyone.
+
+**Not in sessions or workspaces.** Favourites belong to the user, not to what's open.
+
+### 3.2 The scheme dropdown
+
+The path bar's first part says where the path is: a dropdown of every URI scheme OpenUSD has a
+resolver for, and **file://** for the disk. The field beside it holds the rest.
+
+```
+[ file://    v ]  C:/projects/show/assets/
+[ webdav://  v ]  studio/chars/hero/
+[ webdavs:// v ]  dav.example.com/shots/
+[ https://   v ]  example.com/scene.usdz
+```
+
+**What's in it:**
+
+| Entry | Comes from | Choosing it |
+|---|---|---|
+| **file://** | Always there, first | The list shows the disk; the field takes a local path |
+| A scheme with a source that lists (§2) | `ArGetRegisteredURISchemes()`, and the source's registry | The list shows its roots: for `webdav://`, the names of the stage's environment as folders (`studio/`, `lib/`) |
+| Any other registered scheme | `ArGetRegisteredURISchemes()` | Nothing to browse: the field is for typing or pasting the rest, checked with `Resolve()` |
+
+- **Registered ones only.** The list is read from OpenUSD when the dialog opens, so it holds what
+  the loaded resolver plugins registered: usdcc's `webdav`, `webdavs`, `http` and `https`, and any
+  a studio's own plugin adds. A protocol plugin that is turned off, or failed to load, isn't in it.
+- **Order:** file://, then the schemes that can be browsed, then the others, each group by name.
+  An entry's tooltip names the resolver behind it (the type in its `plugInfo.json`).
+- **file:// is the dropdown's own.** OpenUSD's default resolver has no `file` scheme: a local
+  asset is a plain path. So the picker never writes `file://` into a layer; choosing a local file
+  gives a path, as today (§4). A pasted `file:///C:/a/b.usd` is taken as the path `C:/a/b.usd`.
+- **Typing or pasting a whole URI** in the field (`webdav://studio/...`, `https://...`) moves its
+  scheme into the dropdown. One no resolver is registered for is refused, naming the scheme, and
+  the dropdown stays as it was.
+- **Switching scheme** clears the field and shows that scheme's roots, or an empty list to type
+  into. What was shown before is one click back (**Back**, or Recent).
+- **The scheme of what's shown follows navigation:** clicking a WebDAV root in Places or a
+  favourite on a server sets the dropdown to `webdav://`, This PC sets it to `file://`.
+- **The rest of the path** is completed from the folder's listing, where there is one, as the
+  system dialog completes a local path.
 
 ```cpp
 // Empty when cancelled. An asset path as it should be written: relative to `anchor` when asked for.
@@ -120,7 +212,11 @@ Read sites, in phase 5:
 | File > Open Stage, Open Stage with Options | [main.cpp](../src/cpp/app/main.cpp), two `getOpenFileName` |
 | File > Show USDA, Show Prims | [main.cpp](../src/cpp/app/main.cpp) |
 | Layer Editor > Add Existing Layer | [layer_editor_view_panel.cpp](../src/cpp/usd/src/layer_editor_view_panel.cpp) |
-| The asset field's browse button | [property_editors.cpp](../src/cpp/usd/src/properties/property_editors.cpp) |
+| The asset field's browse button, everywhere it's used: | [property_editors.cpp](../src/cpp/usd/src/properties/property_editors.cpp), one place for all of these |
+| &nbsp;&nbsp;an asset attribute in the Attribute Editor | [property_sheet.cpp](../src/cpp/usd/src/property_sheet.cpp) |
+| &nbsp;&nbsp;an asset input of a shading node in the Material Editor (a `UsdUVTexture`'s `inputs:file`) | [material_editor_view_panel.cpp](../src/cpp/usd/src/material_editor_view_panel.cpp), through the same `PropertySheet` in its shading mode |
+| &nbsp;&nbsp;a new asset input's value in the Material Editor's Add Input | [add_shade_input_dialog.cpp](../src/cpp/usd/src/add_shade_input_dialog.cpp) |
+| &nbsp;&nbsp;a reference's or payload's file in the composition arcs | [property_sheet.cpp](../src/cpp/usd/src/property_sheet.cpp) |
 | Add Reference, Add Payload | [property_sheet.cpp](../src/cpp/usd/src/property_sheet.cpp) |
 | Prim picker's file | [prim_picker_dialog.cpp](../src/cpp/usd/src/prim_picker_dialog.cpp) |
 | A session's "Where is …?" | [session_controller.cpp](../src/cpp/scripting/src/session_controller.cpp) |
@@ -139,14 +235,28 @@ files.
 `None`, and `usdcc.usd.register_asset_source(source)` takes an object with `id`, `label`, `roots()`
 and `list()` ([SCRIPTING.md](SCRIPTING.md)).
 
+Favourites: `usdcc.usd.asset_favorites()` lists both lists as `(label, path, studio)`, and
+`add_asset_favorite(path, label=None)` and `remove_asset_favorite(path)` change the user's, for a
+startup script that sets up a team's without a configuration file.
+
 ## 7. Testing
 
 - **The model** (`tests/asset_picker_test.cpp`) with a fake source: lazy loading, a slow listing
   cancelled by leaving the folder, a failing listing's message, the union of a stack with its
   origins, and filters.
 - **What it returns:** the cases of §4, including a relative path across two names being refused.
-- **In the app, looked at:** browsing the WsgiDAV test server ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)
-  §6), adding a reference from it, and that nothing changes with no source registered.
+- **The scheme dropdown:** file:// first, the fake protocol's scheme and the real ones as
+  registered, browsable ones before the others; a pasted URI moving its scheme there, one with no
+  resolver refused, `file:///C:/a.usd` taken as a path; navigating setting the scheme.
+- **Favourites** (`tests/asset_favorites_test.cpp`): adding from the path bar, the context menu
+  and a drop; a second of the same name labelled with its parent; adding one that's there already;
+  renaming, reordering and removing, kept in usdcc.ini across a restart of the model; the studio's
+  from the configuration, listed first and not removable; a server's favourite stored as its logical
+  path even when added from a resolved one; one whose server name the environment lacks greyed with
+  no request made; one on a dead server opening to an error without holding the dialog up.
+- **In the app, looked at:** browsing an `rclone serve webdav` server and the tests' own
+  ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §6), adding a reference from it, a favourite on it
+  across environments and a restart, and that nothing changes with no source registered.
 
 ## 8. Open questions
 
@@ -154,5 +264,11 @@ and `list()` ([SCRIPTING.md](SCRIPTING.md)).
 |---|---|---|
 | 1 | Should local files use the picker too, once a source exists, or keep the system dialog with the picker only for servers? | The picker, with **System dialog…** in it: one place to choose from, and choosing local or remote isn't a decision before the dialog opens |
 | 2 | Thumbnails or a preview of the chosen file? | Later. The USDA preview dialog could be reused for a selected `.usd` |
-| 3 | Bookmarks of the user's own in Places? | Later; Recent covers most of it |
+| 3 | Bookmarks of the user's own in Places? | Planned: favourites, §3.1 |
 | 4 | Search within a server? | No. WebDAV has no usable search; a source could offer one later |
+| 5 | Favourites of files, or only folders? | Both. A file is often the thing gone back to (a library's main asset); it opens its folder with the file selected |
+| 6 | Studio favourites per environment ("TEST's sandbox" only in test)? | Not at first. A logical path already means the right servers in each environment; per-environment lists can come if a studio asks |
+| 7 | Favourites in the system file dialog's sidebar too? | No. Windows' own dialog takes no sidebar from the app, and it can't open a server's paths anyway |
+| 8 | Share the user's favourites with colleagues without a configuration file? | Not as a feature. The studio's list is for sharing; the Python calls let a startup script set up a team's |
+| 9 | Should the scheme dropdown hide schemes that can't be browsed (`http`, `https`)? | No. They can't be browsed, but a URL can be typed for them, and seeing the scheme there says the protocol is installed |
+| 10 | Label schemes by their protocol's name ("WebDAV") rather than `webdav://`? | Show the scheme as written, since that is what the path will hold; the protocol's name goes in the tooltip |

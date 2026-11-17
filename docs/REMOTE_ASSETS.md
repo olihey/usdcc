@@ -106,6 +106,9 @@ A direct protocol (§5.1) has no endpoints or environments here. Plain HTTP keep
 credentials and its allow list in an `"http"` section of the same file
 ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4).
 
+The studio's favourite folders and files for the asset picker are a `"favorites"` list in it too:
+`[{ "label": "Library", "path": "webdav://lib/" }]` ([ASSET_PICKER.md](ASSET_PICKER.md) §3.1).
+
 **The context.** One context type for every protocol, `usdcc::assets::Context`
 (`AR_DECLARE_RESOLVER_CONTEXT`): the environment's name and its stacks. It is made three ways,
 all giving the same context:
@@ -358,7 +361,8 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   default environment, Work offline, Allowed hosts for plain HTTP, and the cache's size. The
   settings dialog builds its pages from typed settings and has no tables or buttons, so **the
   servers and environments stay in the configuration file** (§4), whose path the page names.
-  *Not built:* an editor for them, a Test button, Clear cache.
+  *Planned:* the Asset Servers editor for them, with a Test button (§10.1). *Not built:* Clear
+  cache.
 - **Login.** **Edit > Asset Server Login...** saves a credential id's user and password, or a token,
   in Windows Credential Manager (`usdcc-assets:<id>`), which the library reads (§8). A 401 says
   in the Log which credential the server refused. *Changed from the plan:* no dialog pops up on a
@@ -378,6 +382,99 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   read through `ArAsset`. `usdcc::assets::localFile()` is there for them.
 - **Python** *(not built):* the context for `Usd.Stage.Open` (`ArWrapResolverContextForPython`),
   and `usdcc.assets` to list and stat. A protocol written in Python is §11.1.
+
+### 10.1 The Asset Servers editor
+
+*Planned 2026-11-17, not built.* A dialog for what the configuration file (§4) holds, so nobody
+has to edit its JSON by hand: the servers, the environments and their stacks, the hosts of plain
+HTTP, and the studio's favourites for the picker ([ASSET_PICKER.md](ASSET_PICKER.md) §3.1). In the
+picker, the roots a protocol lists are the names an environment has; this is where they're made.
+
+**Opened from** **Edit > Asset Servers...**, a server's context menu in the picker's Places
+(**Edit Servers...**), and the description on Settings > Assets. A dialog of its own: the settings
+dialog builds its pages from typed values, and has no tables or buttons.
+
+```
++--------------------------------------------------------------------------+
+| Asset Servers                     C:/Users/.../usdcc/assets.json        |
++--------------------------------------------------------------------------+
+| [Servers] [Environments] [Web hosts] [Favourites]                        |
+|                                                                          |
+| Id      Protocol  URL                               Credential  Flags    |
+| prod    webdav    https://dav.studio.local/assets   studio-dav  read-only|
+| test    webdav    https://dav-test.studio.local/... studio-dav           |
+|                                                                          |
+| [+] [-]  Mirrors: [ https://dav2.studio.local/assets  ] [+] [-]          |
+|          [Test] [Login...]   prod: answered in 84 ms, 12 entries         |
++--------------------------------------------------------------------------+
+| Default environment: [ prod v ]                    [Save] [Cancel]       |
++--------------------------------------------------------------------------+
+```
+
+**Servers** (the configuration's `"endpoints"`): a table of id, protocol, URL, credential id,
+**read-only** and **optional**, with the selected one's mirrors below it.
+
+- **Protocol** is a dropdown of the protocols `usdcc_assets` has a transport for: the named ones
+  (`webdav` today, `s3` later), not plain HTTP, which has no servers (§5.1).
+- **Test** asks the server for its root folder's listing, on a worker thread, through the same
+  transport and credentials a stage would use, and says what came back: answered (with the time
+  and how many entries), not allowed (naming the credential, with **Login...** beside it), missing,
+  or unreachable (and which of its URLs, mirrors included). Nothing is saved first: it tests what
+  the table says.
+- **Login...** opens Edit > Asset Server Login on the row's credential id.
+- **An id that's in use** by an environment can't be removed without saying where; renaming one
+  renames it in the stacks too.
+
+**Environments** (`"environments"`): the environments on the left, and the selected one's names
+on the right, each with its stack of servers in order, top first.
+
+- **Adding a name** asks for the name and its first server. Names follow §3's rule (lowercase
+  letters, digits, `-`, `_`, `.`), checked as they're typed.
+- **A stack is reordered by dragging** its servers: TEST over PROD is TEST dragged above PROD.
+  Only servers of the name's protocol can be added, as a stack holds one protocol (§4).
+- **Duplicate** makes a new environment from the selected one, which is how a test environment
+  usually starts: the production one, with a test server dragged on top.
+- **The default environment** (`"environment"`) is the dropdown at the bottom; Settings > Assets
+  can still override it for this user.
+
+**Web hosts** (`"http"`): the hosts of plain HTTP, each with its credential id and **insecure**,
+and the allow list. The user's own Allowed hosts stay in Settings > Assets; this is the
+configuration's, which tools outside usdcc read too.
+
+**Favourites** (`"favorites"`): the studio's list for the picker, label and path, reordered by
+dragging. A path can be picked with the asset picker itself.
+
+**Saving:**
+
+- **Checked first,** with `Config::parse()` on what would be written: every problem it names is
+  shown at its row, and **Save** stays off until there are none.
+- **Written as JSON the way the file has it,** keys in a fixed order, with any key the editor
+  doesn't know kept as it was, so a newer usdcc's settings survive an older one's save.
+- **Changed on disk meanwhile?** If the file changed since the dialog read it (someone else, or a
+  text editor), saving asks first, offering to reload it instead.
+- **Applies at once,** as `RefreshContext` does: the configuration is read again and what servers
+  answered is forgotten. **Open stages keep the servers they were opened with** (their context
+  holds the stacks); the dialog says how many are open in an environment that changed, and
+  reopening them uses the new servers.
+- **No secrets** are ever in the file or the dialog's tables: a credential is an id, and its
+  password lives in the system's store (§8).
+
+**A studio's file is read-only here.** When the configuration comes from `USDCC_ASSETS_CONFIG` and
+can't be written, or the user can't write it, the dialog shows it, with Test and Login working, and
+says where it comes from. **Save a copy as mine** writes it to the user's own `assets.json` and
+uses that from then on (the studio's variable still wins when set, so the dialog says that too).
+Layering a user's file over a studio's is open question 1.
+
+**Not in it:** the user's own Settings > Assets (environment override, offline, allowed hosts, cache
+size), which stay settings; and anything about one stage, which is Open Stage with Options.
+
+**Testing** (`tests/asset_servers_editor_test.cpp`): the model round-trips a configuration file
+unchanged, unknown keys included; adding, renaming and removing a server updates the stacks or is
+refused; a stack reordered by dragging is written in that order; Duplicate; each problem
+`Config::parse()` names shown at its row with Save off; a file changed on disk is noticed; a
+read-only one opens read-only; Test against the tests' own WebDAV server answering, refusing a
+missing login (naming the credential) and unreachable; and saving reloads the library's
+configuration, an open stage keeping its servers.
 
 ## 11. A protocol as a plugin
 
@@ -495,7 +592,8 @@ is not an `ArResolver` written in Python.
 | **2. HTTP, then WebDAV, read-only** | Both transports and plugins. HTTP first ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)): it is the least code that puts `usdcc_assets` on a real network. Then WebDAV ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)) | **Done** (§13.3). `usdcat http://localhost:<port>/shot.usda` prints a shot with a relative reference, from the test server; `usdcat webdav://studio/shot.usda` prints one whose model comes from PROD and one texture from TEST |
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | **Done** (§13.3), but for one thing: offline is a switch, and a network that goes away does not turn it on. Reopening a stage makes no downloads |
 | **4. usdcc** | Everything in §10 but the picker | **Done** (§13.4), with gaps marked in §10. A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
-| **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md) | A reference to a file on the server is added by browsing to it |
+| **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | A reference to a file on the server is added by browsing to it |
+| **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
 | **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
@@ -686,8 +784,10 @@ Linux; and a 401 in the app.
 | 4 | How big may a folder be before resolve stops listing it? | Measure in phase 2 against a folder of 10,000 files |
 | 5 | Range requests, to read part of a large `.usdc` without downloading all of it? | Later. Whole files first: the usdc reader maps a local file |
 | 6 | Which authentication? | Per protocol; see [WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §7 |
-| 7 | May a stage contact any HTTP host? | No: an allow list, with a question in usdcc for a new host ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4, §8) |
+| 7 | May a stage contact any HTTP host? | No: an allow list. A host the user opens a stage on is allowed for the session; any other refused, with a toast saying how to allow it ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4) |
 | 8 | A Python transport in usdcc's interpreter, or in a process of its own? | In usdcc's to try one out, with the GIL timeout; its own process for production (§11.1) |
+| 9 | Should the Asset Servers editor write the studio's file when the user can? | Only when it's the file in use and writable. A studio that wants it locked makes it read-only; the dialog then offers a copy of the user's own (§10.1) |
+| 10 | Should Test run when the dialog opens, for every server? | No: on request. A server that's down would slow the dialog's opening, as with favourites in the picker |
 
 ## 16. Not planned
 
