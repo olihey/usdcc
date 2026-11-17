@@ -96,13 +96,17 @@ find_package(QtNodes CONFIG REQUIRED)
 # Jolt Physics, the first physics backend (docs/PHYSICS.md). Its Debug build
 # has the debug CRT, as vcpkg's Qt does, so it is mapped to Release below too.
 find_package(Jolt CONFIG REQUIRED)
+# HTTP and XML for remote assets (docs/REMOTE_ASSETS.md §12). Mapped to Release
+# below too: pugixml passes std::string across its DLL's boundary.
+find_package(CURL REQUIRED)
+find_package(pugixml CONFIG REQUIRED)
 
 if(USDCC_LINK_RELEASE_QT)
-    # Only Qt, ADS, QtNodes and Jolt: other imported targets (e.g. USD's TBB) don't
+    # Only Qt, ADS, QtNodes, Jolt, curl and pugixml: other imported targets (e.g. USD's TBB) don't
     # have a Release/Debug pair to choose between.
     get_directory_property(_usdcc_imported IMPORTED_TARGETS)
     foreach(_target IN LISTS _usdcc_imported)
-        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::)")
+        if(_target MATCHES "^(Qt6::|ads::|QtNodes::|Jolt::|CURL::|pugixml::|pugixml$)")
             set_property(TARGET ${_target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG "RELEASE;RELWITHDEBINFO;MINSIZEREL")
         endif()
     endforeach()
@@ -248,6 +252,10 @@ endfunction()
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/assets)
+# The protocols of remote assets (docs/REMOTE_ASSETS.md §11): usdcc plugins with only
+# a usd/ part, each a resolver library on usdcc_assets.
+add_subdirectory(src/plugins/http)
+add_subdirectory(src/plugins/webdav)
 add_subdirectory(src/cpp/tools)
 add_subdirectory(src/cpp/usd)
 add_subdirectory(src/cpp/ui)

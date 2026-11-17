@@ -22,6 +22,77 @@ target usdcc::plugin_sdk: the app's build sets them, and so does
 find_package(UsdccPlugin) outside it.
 ]]
 
+#[[
+usdcc_add_asset_protocol() builds a protocol of remote assets
+(docs/REMOTE_ASSETS.md section 11): a usdcc plugin with only a usd/ part, holding
+an OpenUSD resolver library built on usdcc_assets and its plugInfo.json.
+
+  usdcc_add_asset_protocol(my_target
+      ID org.usdcc.webdav
+      NAME "WebDAV Assets"
+      VERSION 1.0.0
+      RESOLVER UsdccWebDavResolver   # the ArResolver class, as AR_DEFINE_RESOLVER names it
+      SCHEMES webdav
+      SOURCES webdav_protocol.cpp
+      [DESCRIPTION "..."]
+      [OUTPUT_DIR folder])           # default: <build>/plugins/<target>
+
+Outside usdcc, PXR_PLUGINPATH_NAME=<folder>/usd makes the protocol known to any
+OpenUSD program that finds usdcc_assets on its library path.
+]]
+function(usdcc_add_asset_protocol target)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "ID;NAME;VERSION;DESCRIPTION;RESOLVER;OUTPUT_DIR" "SOURCES;SCHEMES")
+    foreach(_required ID NAME VERSION RESOLVER SCHEMES SOURCES)
+        if(NOT ARG_${_required})
+            message(FATAL_ERROR "usdcc_add_asset_protocol(${target}) needs ${_required}")
+        endif()
+    endforeach()
+    if(NOT ARG_OUTPUT_DIR)
+        set(ARG_OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins/${target}")
+    endif()
+
+    add_library(${target} SHARED ${ARG_SOURCES})
+    target_link_libraries(${target} PRIVATE usdcc_assets)
+    # TF_REGISTRY_FUNCTION names the library it's in through these.
+    target_compile_definitions(${target} PRIVATE MFB_PACKAGE_NAME=${target} MFB_ALT_PACKAGE_NAME=${target})
+    # USD's headers ask for the release Python import library in every configuration.
+    if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+        target_link_libraries(${target} PRIVATE "${Python3_LIBRARY}")
+    endif()
+    # A generator expression, so that multi-config generators don't add a folder.
+    set_target_properties(
+        ${target}
+        PROPERTIES PREFIX ""
+                   RUNTIME_OUTPUT_DIRECTORY "$<1:${ARG_OUTPUT_DIR}/usd>"
+                   LIBRARY_OUTPUT_DIRECTORY "$<1:${ARG_OUTPUT_DIR}/usd>")
+
+    list(JOIN ARG_SCHEMES "\", \"" _schemes)
+    # implementsScopedCaches: without it OpenUSD never tells a URI resolver about a cache
+    # scope, and every resolve of a composition asks the server again.
+    file(GENERATE OUTPUT "${ARG_OUTPUT_DIR}/usd/plugInfo.json" CONTENT
+"{
+    \"Plugins\": [{
+        \"Type\": \"library\",
+        \"Name\": \"${target}\",
+        \"Root\": \".\",
+        \"LibraryPath\": \"$<TARGET_FILE_NAME:${target}>\",
+        \"ResourcePath\": \".\",
+        \"Info\": { \"Types\": { \"${ARG_RESOLVER}\": {
+            \"bases\": [\"ArResolver\"], \"uriSchemes\": [\"${_schemes}\"],
+            \"implementsContexts\": true, \"implementsScopedCaches\": true,
+            \"usdccAssetsProtocol\": true
+        } } }
+    }]
+}
+")
+    set(_json "{\n  \"id\": \"${ARG_ID}\",\n  \"name\": \"${ARG_NAME}\",\n  \"version\": \"${ARG_VERSION}\",\n")
+    if(ARG_DESCRIPTION)
+        string(APPEND _json "  \"description\": \"${ARG_DESCRIPTION}\",\n")
+    endif()
+    string(APPEND _json "  \"api\": 1,\n  \"usd\": [\"usd\"]\n}\n")
+    file(WRITE "${ARG_OUTPUT_DIR}/usdcc-plugin.json" "${_json}")
+endfunction()
+
 function(usdcc_add_plugin target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "ID;NAME;VERSION;DESCRIPTION;OUTPUT_DIR;PYTHON_MODULE"
                           "SOURCES;USD_FOLDERS;REQUIRES")

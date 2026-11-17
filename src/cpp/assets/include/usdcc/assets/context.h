@@ -67,7 +67,10 @@ std::shared_ptr<const Context> defaultContext();
 Config defaultConfig();
 // Replaces it, for the app's settings page and for tests.
 void setDefaultConfig(const Config& config);
-// Reads the file again.
+// Goes back to the file at Config::defaultPath(), after setDefaultConfig().
+void useDefaultConfigFile();
+// Reads the file again, and forgets what servers answered. A configuration the host
+// set with setDefaultConfig() is kept, as there may be no file behind it.
 void reloadDefaultConfig();
 
 }  // namespace usdcc::assets

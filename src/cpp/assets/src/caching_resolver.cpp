@@ -1,5 +1,6 @@
 #include "usdcc/assets/caching_resolver.h"
 
+#include "usdcc/assets/activity.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/paths.h"
 
@@ -8,6 +9,7 @@
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/usd/ar/assetInfo.h>
 #include <pxr/usd/ar/filesystemAsset.h>
+#include <pxr/usd/ar/notice.h>
 #include <pxr/usd/ar/resolvedPath.h>
 #include <pxr/usd/ar/resolverContext.h>
 #include <pxr/usd/ar/timestamp.h>
@@ -32,6 +34,30 @@ double timestampOf(const Found& found) {
     return std::floor(found.entry.modified) + fraction;
 }
 
+// One download, as the host's listener sees it, stopped by the listener or by
+// cancelDownloads().
+class Download : public Progress {
+public:
+    explicit Download(std::string url)
+        : m_url(std::move(url)), m_listener(activityListener()), m_generation(downloadGeneration()) {
+        if (m_listener) m_listener->started(m_url);
+    }
+    void finish(Status status) {
+        if (m_listener) m_listener->finished(m_url, status);
+    }
+    void advanced(uint64_t done, uint64_t total) override {
+        if (m_listener && !m_listener->advanced(m_url, done, total)) cancel.cancel();
+        if (downloadGeneration() != m_generation) cancel.cancel();
+    }
+
+    Cancel cancel;
+
+private:
+    std::string m_url;
+    std::shared_ptr<ActivityListener> m_listener;
+    uint64_t m_generation;
+};
+
 }  // namespace
 
 CachingResolver::CachingResolver(std::string scheme) : m_scheme(std::move(scheme)) {}
@@ -44,33 +70,41 @@ Lookups* CachingResolver::_Scope() const {
     return cache.get();
 }
 
-std::shared_ptr<const Stack> CachingResolver::_StackFor(const Uri& uri) const {
+bool CachingResolver::_Locate(const std::string& assetPath, Location* location, std::string* why) const {
+    Uri uri;
+    if (!parseUri(assetPath, &uri, why)) return false;
+    location->path = uri.path;
+    location->display = uri.logical();
     if (!uri.stackId.empty()) {
-        const std::shared_ptr<const Stack> stack = findStack(uri.stackId);
-        if (!stack) {
-            TF_WARN("%s names a server stack this process doesn't know", uri.withStack(uri.stackId).c_str());
+        location->stack = findStack(uri.stackId);
+        if (!location->stack) {
+            *why = "it names a server stack this process doesn't know";
+            return false;
         }
-        return stack;
+    } else {
+        const Context* bound = _GetCurrentContextObject<Context>();
+        const std::shared_ptr<const Context> fallback = bound ? nullptr : defaultContext();
+        const Context& context = bound ? *bound : *fallback;
+        location->stack = context.stack(uri.scheme, uri.name);
+        if (!location->stack) {
+            *why = "the environment '" + context.environment() + "' has no server named '" + uri.name + "'";
+            return false;
+        }
     }
-    const Context* bound = _GetCurrentContextObject<Context>();
-    const std::shared_ptr<const Context> fallback = bound ? nullptr : defaultContext();
-    const Context& context = bound ? *bound : *fallback;
-    const std::shared_ptr<const Stack> stack = context.stack(uri.scheme, uri.name);
-    if (!stack) {
-        TF_WARN("%s: the environment '%s' has no server named '%s'", uri.logical().c_str(),
-                context.environment().c_str(), uri.name.c_str());
-    }
-    return stack;
+    location->resolved = uri.withStack(location->stack->id);
+    return true;
 }
 
-Found CachingResolver::_Find(const Uri& uri, std::shared_ptr<const Stack>* stackOut) const {
+Found CachingResolver::_Find(const std::string& assetPath, Location* location, bool warnIfUnlocated) const {
     Found found;
-    const std::shared_ptr<const Stack> stack = _StackFor(uri);
-    if (stackOut) *stackOut = stack;
-    if (!stack) return found;
-    found = findInStack(*stack, uri.path, _Scope());
+    std::string why;
+    if (!_Locate(assetPath, location, &why)) {
+        if (warnIfUnlocated) TF_WARN("%s isn't resolved: %s", assetPath.c_str(), why.c_str());
+        return found;
+    }
+    found = findInStack(*location->stack, location->path, _Scope());
     if (found.status != Status::Ok && found.status != Status::Missing) {
-        TF_WARN("%s isn't resolved: the server '%s' is %s%s%s", uri.logical().c_str(), found.endpoint.id.c_str(),
+        TF_WARN("%s isn't resolved: the server '%s' is %s%s%s", location->display.c_str(), found.endpoint.id.c_str(),
                 statusName(found.status), found.message.empty() ? "" : ": ", found.message.c_str());
     }
     return found;
@@ -102,16 +136,10 @@ std::string CachingResolver::_CreateIdentifierForNewAsset(const std::string& ass
 }
 
 ArResolvedPath CachingResolver::_Resolve(const std::string& assetPath) const {
-    Uri uri;
-    std::string why;
-    if (!parseUri(assetPath, &uri, &why)) {
-        TF_WARN("%s isn't resolved: %s", assetPath.c_str(), why.c_str());
-        return ArResolvedPath();
-    }
-    std::shared_ptr<const Stack> stack;
-    const Found found = _Find(uri, &stack);
+    Location location;
+    const Found found = _Find(assetPath, &location, true);
     if (found.status != Status::Ok) return ArResolvedPath();
-    return ArResolvedPath(uri.withStack(stack->id));
+    return ArResolvedPath(location.resolved);
 }
 
 ArResolvedPath CachingResolver::_ResolveForNewAsset(const std::string&) const {
@@ -120,23 +148,27 @@ ArResolvedPath CachingResolver::_ResolveForNewAsset(const std::string&) const {
 }
 
 std::shared_ptr<ArAsset> CachingResolver::_OpenAsset(const ArResolvedPath& resolvedPath) const {
-    Uri uri;
-    if (!parseUri(resolvedPath.GetPathString(), &uri)) return nullptr;
-    const Found found = _Find(uri);
+    Location location;
+    const Found found = _Find(resolvedPath.GetPathString(), &location, true);
     if (found.status != Status::Ok) return nullptr;
-    const std::shared_ptr<Transport> transport = transportFor(uri.scheme);
+    // Offline, it resolved to a version in the cache, and that is the one to open.
+    if (!found.cachedFile.empty()) return ArFilesystemAsset::Open(ArResolvedPath(toUtf8(found.cachedFile)));
+    const std::shared_ptr<Transport> transport = transportFor(location.stack->scheme);
     if (!transport) return nullptr;
 
-    const Endpoint endpoint = found.endpoint;
-    const std::string path = uri.path;
+    const Endpoint& endpoint = found.endpoint;
+    const std::string& path = location.path;
     const Result<std::filesystem::path> file = DiskCache::shared().ensure(
         endpoint, path, found.entry, [&transport, &endpoint, &path](const std::filesystem::path& into) {
-            Progress progress;
-            Cancel cancel;
-            return transport->fetch(endpoint, path, into, std::string(), progress, cancel);
+            Download download(endpoint.url + path);
+            const Result<Entry> fetched = withMirrors(endpoint, [&](const Endpoint& at) {
+                return transport->fetch(at, path, into, std::string(), download, download.cancel);
+            });
+            download.finish(fetched.status);
+            return fetched;
         });
     if (!file.ok()) {
-        TF_WARN("%s can't be opened: the server '%s' is %s%s%s", uri.logical().c_str(), endpoint.id.c_str(),
+        TF_WARN("%s can't be opened: the server '%s' is %s%s%s", location.display.c_str(), endpoint.id.c_str(),
                 statusName(file.status), file.message.empty() ? "" : ": ", file.message.c_str());
         return nullptr;
     }
@@ -153,21 +185,19 @@ bool CachingResolver::_CanWriteAssetToPath(const ArResolvedPath&, std::string* w
 }
 
 ArTimestamp CachingResolver::_GetModificationTimestamp(const std::string&, const ArResolvedPath& resolvedPath) const {
-    Uri uri;
-    if (!parseUri(resolvedPath.GetPathString(), &uri)) return ArTimestamp();
-    const Found found = _Find(uri);
+    Location location;
+    const Found found = _Find(resolvedPath.GetPathString(), &location, false);
     if (found.status != Status::Ok) return ArTimestamp();
     return ArTimestamp(timestampOf(found));
 }
 
 ArAssetInfo CachingResolver::_GetAssetInfo(const std::string&, const ArResolvedPath& resolvedPath) const {
     ArAssetInfo info;
-    Uri uri;
-    if (!parseUri(resolvedPath.GetPathString(), &uri)) return info;
-    const Found found = _Find(uri);
+    Location location;
+    const Found found = _Find(resolvedPath.GetPathString(), &location, false);
     if (found.status != Status::Ok) return info;
     info.version = found.entry.etag;
-    info.repoPath = found.endpoint.url + uri.path;
+    info.repoPath = found.endpoint.url + location.path;
     // Which endpoint delivered it, for usdcc to show (§5).
     info.resolverInfo = VtValue(found.endpoint.id);
     return info;
@@ -189,6 +219,15 @@ ArResolverContext CachingResolver::_CreateContextFromString(const std::string& c
     if (TfStringStartsWith(environment, "env=")) environment = environment.substr(4);
     if (environment.empty()) return _CreateDefaultContext();
     return ArResolverContext(Context(defaultConfig(), environment));
+}
+
+void CachingResolver::_RefreshContext(const ArResolverContext& context) {
+    const Context* refreshed = context.Get<Context>();
+    if (!refreshed) return;
+    // Also forgets what servers answered and which were down.
+    reloadDefaultConfig();
+    // Every context holding this one: their stages recompose what resolves differently.
+    ArNotice::ResolverChanged(*refreshed).Send();
 }
 
 void CachingResolver::_BeginCacheScope(VtValue* cacheScopeData) { m_scopes.BeginCacheScope(cacheScopeData); }

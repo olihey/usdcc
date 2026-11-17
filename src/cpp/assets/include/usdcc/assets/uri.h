@@ -36,6 +36,14 @@ bool parseUri(const std::string& text, Uri* uri, std::string* why = nullptr);
 // identifiers never carry a stack id (§3). False when it escapes the name's root.
 bool anchorPath(const Uri& anchor, const std::string& relative, Uri* result);
 
+// "%20" and the like as the characters they stand for. An entry of a listing has its
+// real name, so this is what a path's file name is compared with.
+std::string percentDecode(const std::string& text);
+
+// A path as it goes into a request: what a URL can't hold as it is (a space, anything
+// outside ASCII) becomes an escape, and escapes already there stay.
+std::string percentEncodePath(const std::string& path);
+
 // A short, stable hash as lowercase hex: the same in every process and build, as it
 // names stacks and cache folders.
 std::string stableHash(const std::string& text, int hexDigits);

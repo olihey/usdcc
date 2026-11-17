@@ -4,7 +4,9 @@ A USD asset resolver plugin for plain `http://` and `https://` URLs, such as
 `https://assets.example.com/chars/hero/hero.usd`. Read-only, and the simplest protocol built on the
 shared library of [REMOTE_ASSETS.md](REMOTE_ASSETS.md).
 
-**Status:** planned 2026-11-16. Nothing is built yet.
+**Status:** built 2026-11-17, in [src/plugins/http](../src/plugins/http), and tested
+([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3). Not in the app or a deploy yet, and **`https://` has
+never run:** every test and check used `http://` on one machine.
 
 ## 1. What it is, and isn't
 
@@ -21,9 +23,9 @@ shared library of [REMOTE_ASSETS.md](REMOTE_ASSETS.md).
 
 ```json
 { "Plugins": [{
-    "Type": "library", "Name": "httpResolver", "LibraryPath": "httpResolver.dll",
+    "Type": "library", "Name": "usdccHttpProtocol", "LibraryPath": "usdccHttpProtocol.dll",
     "Root": ".", "ResourcePath": ".",
-    "Info": { "Types": { "HttpResolver": {
+    "Info": { "Types": { "UsdccHttpResolver": {
         "bases": ["ArResolver"], "uriSchemes": ["http", "https"],
         "implementsContexts": true, "implementsScopedCaches": true,
         "usdccAssetsProtocol": true
@@ -55,7 +57,7 @@ tex/albedo.png                                            relative, anchored aga
 | Call | Request | Notes |
 |---|---|---|
 | `stat(path)` | `HEAD` | `ETag`, `Last-Modified`, `Content-Length`. A server that refuses `HEAD` (405, 501) gets a `GET` with `Range: bytes=0-0` |
-| `fetch(path, file, knownEtag)` | `GET`, with `If-None-Match`, or `If-Modified-Since` when there is no ETag | 304 is "not modified" |
+| `fetch(path, file, knownEtag)` | `GET`, with `If-None-Match` when given an ETag | 304 is "not modified". The resolver gives none: it knows from `stat` which version it wants, and only downloads one the cache doesn't have |
 | `list(folder)` | Not supported | Resolve asks `stat` per file ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §7) |
 | `put` | Not supported | |
 
@@ -92,7 +94,9 @@ the configuration ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4, §8):
 company network. So hosts are checked against `allow`:
 
 - **In usdcc,** a host not on the list asks once, "This stage loads from `example.com`. Allow?",
-  with **Always**, **This time** and **No**. Always adds it to the list.
+  with **Always**, **This time** and **No**. Always adds it to the list. *The library asks through
+  a callback and remembers the answer for the session; the question itself and writing Always into
+  the configuration are usdcc's, in phase 4.*
 - **Outside usdcc,** with no one to ask, a host not on the list is refused with a message naming
   it. `"allow": ["*"]` or `USDCC_HTTP_ALLOW=*` turns the check off.
 
@@ -104,24 +108,27 @@ host's entry says `"insecure": true`.
 - **Signed URLs** (a signature and expiry in the query string) work, but each new signature is a
   new URL, so the cache downloads the file again, and a relative reference loses the signature.
 - **No change notice between requests.** A file is revalidated when it's resolved again, on Reload.
-- **Servers without `ETag` or `Last-Modified`** give nothing to compare: the file is downloaded
-  again on every open or Reload.
+- **Servers without `ETag`** have a file's version told by its `Last-Modified` and size. With
+  neither, every file is one version for ever: a change on the server isn't seen until the cache is
+  cleared.
 
 ## 6. Build
 
-`src/plugins/http/`: `http_resolver.cpp`, `http_transport.cpp`, `plugInfo.json`, built with
-`usdcc_add_asset_protocol()`. It links `usdcc_assets` and OpenUSD's `ar`, and needs no XML parser.
+[src/plugins/http](../src/plugins/http): `http_protocol.cpp`, the resolver and its transport,
+built with `usdcc_add_asset_protocol()`, which writes the `plugInfo.json` and the plugin's manifest.
+It links `usdcc_assets` only, and needs no XML parser.
 
 ## 7. Testing
 
-- **Test server:** Python's own `http.server`, started by the fixture on a free port. It sends
-  `Last-Modified` and no `ETag`, which covers the no-ETag path. A second, small handler in the
-  fixture adds ETags, redirects, a 405 on `HEAD`, a slow reply and a 503.
-- **Unit tests** (`tests/http_transport_test.cpp`): URL normalization, relative paths, query
-  strings, extensions.
-- **Against the server:** stat and fetch; a stage through `UsdStage::Open` with a relative
-  reference; a 304 on the second open; a redirect to another port without the credential; a host
-  not on the allow list refused.
+- **Test server:** inside the test program ([assets_test_server.h](../tests/assets_test_server.h)),
+  with switches for no ETags, a 405 on `HEAD`, a slow reply, a 503 and redirects.
+- **Tests** ([assets_net_test.cpp](../tests/assets_net_test.cpp), the four named `assets_http_…`
+  and the progress one): a stage through `UsdStage::Open` with a reference, a sublayer and a file
+  with a space in its name, and no download on the second open; a host not on the list refused
+  without a request, the callback asked once per host, `USDCC_HTTP_ALLOW`; a server without `HEAD`
+  or ETags, a query string, a redirect to another server without the credential; a 404, a 503 and
+  a port nothing listens on; URL normalization and relative paths.
+- **By hand:** `usdcat` against Python's `http.server` ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3).
 
 ## 8. Open questions
 

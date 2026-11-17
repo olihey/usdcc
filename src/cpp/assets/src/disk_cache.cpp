@@ -8,24 +8,34 @@
 #include <pxr/base/js/value.h>
 #include <pxr/base/tf/getenv.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <thread>
+#include <vector>
 
 namespace usdcc::assets {
 
 namespace {
 
+namespace fs = std::filesystem;
+
 // Longer than this and the cache file gets a hashed name: Windows' limit is 260
 // characters for the whole path, and the cache's own folder comes first.
 constexpr size_t kLongestKeptPath = 120;
+// Another process's lock that nothing has touched for this long was left by a crash.
+constexpr auto kStaleLock = std::chrono::seconds(30);
+constexpr auto kLockHeartbeat = std::chrono::seconds(5);
+constexpr uint64_t kTrimEvery = 64ull * 1024 * 1024;
 
 bool keepable(const std::string& path) {
     if (path.size() > kLongestKeptPath) return false;
     for (const unsigned char c : path) {
-        // Not valid in a Windows file name, or with a meaning of its own there.
+        // Not valid in a Windows file name, or with a meaning of its own there or here.
         if (c < 32 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || c == '\\' ||
             c == '%' || c == '@') {
             return false;
@@ -34,13 +44,124 @@ bool keepable(const std::string& path) {
     return true;
 }
 
+// Of the path, not of a query string after it.
 std::string extensionOf(const std::string& path) {
-    const size_t slash = path.rfind('/');
-    const size_t dot = path.rfind('.');
-    if (dot == std::string::npos || (slash != std::string::npos && dot < slash) || dot + 1 == path.size()) return {};
-    const std::string extension = path.substr(dot);
+    const std::string plain = path.substr(0, path.find('?'));
+    const size_t slash = plain.rfind('/');
+    const size_t dot = plain.rfind('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash) || dot + 1 == plain.size()) return {};
+    const std::string extension = plain.substr(dot);
     return keepable(extension) && extension.size() <= 16 ? extension : std::string();
 }
+
+fs::path recordOf(const fs::path& file) {
+    fs::path record = file;
+    record += ".meta";
+    return record;
+}
+
+bool isVersionFile(const fs::path& file) {
+    const std::string name = toUtf8(file.filename());
+    if (name.find('@') == std::string::npos) return false;
+    for (const char* other : {".meta", ".part", ".lock"}) {
+        const std::string suffix = other;
+        if (name.size() >= suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) return false;
+    }
+    return true;
+}
+
+void writeRecord(const fs::path& file, const Endpoint& endpoint, const std::string& path, const Entry& entry) {
+    PXR_NAMESPACE_USING_DIRECTIVE
+    JsObject record;
+    record["url"] = JsValue(endpoint.url + path);
+    record["endpoint"] = JsValue(endpoint.id);
+    record["etag"] = JsValue(entry.etag);
+    record["modified"] = JsValue(entry.modified);
+    record["size"] = JsValue(static_cast<uint64_t>(entry.size));
+    std::ofstream output(recordOf(file), std::ios::binary | std::ios::trunc);
+    output << JsWriteToString(JsValue(record));
+}
+
+std::optional<Entry> readRecord(const fs::path& file) {
+    PXR_NAMESPACE_USING_DIRECTIVE
+    std::ifstream input(recordOf(file), std::ios::binary);
+    if (!input) return std::nullopt;
+    std::ostringstream text;
+    text << input.rdbuf();
+    const JsValue parsed = JsParseString(text.str());
+    if (!parsed.IsObject()) return std::nullopt;
+    const JsObject& object = parsed.GetJsObject();
+    Entry entry;
+    const auto etag = object.find("etag");
+    if (etag != object.end() && etag->second.IsString()) entry.etag = etag->second.GetString();
+    const auto modified = object.find("modified");
+    if (modified != object.end() && (modified->second.IsReal() || modified->second.IsInt())) entry.modified = modified->second.GetReal();
+    const auto size = object.find("size");
+    if (size != object.end() && size->second.IsInt()) entry.size = size->second.GetUInt64();
+    return entry;
+}
+
+// The record's time is the version's last use, which is what trim() goes by.
+void touch(const fs::path& file) {
+    std::error_code error;
+    fs::last_write_time(file, fs::file_time_type::clock::now(), error);
+}
+
+fs::file_time_type lastUse(const fs::path& file) {
+    std::error_code error;
+    fs::file_time_type time = fs::last_write_time(recordOf(file), error);
+    if (error) time = fs::last_write_time(file, error);
+    return time;
+}
+
+// A folder beside the file a download goes to, held by the process downloading it:
+// making a folder either works or says it's there, in one step, on every platform.
+class DownloadLock {
+public:
+    explicit DownloadLock(const fs::path& file) : m_lock(file) { m_lock += ".lock"; }
+    ~DownloadLock() { release(); }
+
+    // False when the file appeared while waiting: someone else downloaded it.
+    bool acquire(const fs::path& file) {
+        std::error_code error;
+        for (;;) {
+            if (fs::create_directory(m_lock, error)) break;
+            if (fs::is_regular_file(file, error)) return false;
+            const fs::file_time_type touched = fs::last_write_time(m_lock, error);
+            if (error) continue;  // gone meanwhile: try for it
+            if (fs::file_time_type::clock::now() - touched > kStaleLock) {
+                fs::remove(m_lock, error);
+                continue;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        m_held = true;
+        m_heartbeat = std::thread([this]() {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            while (!m_condition.wait_for(lock, kLockHeartbeat, [this]() { return !m_held; })) touch(m_lock);
+        });
+        return true;
+    }
+
+    void release() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (!m_held) return;
+            m_held = false;
+        }
+        m_condition.notify_all();
+        if (m_heartbeat.joinable()) m_heartbeat.join();
+        std::error_code error;
+        fs::remove(m_lock, error);
+    }
+
+private:
+    fs::path m_lock;
+    std::mutex m_mutex;
+    std::condition_variable m_condition;
+    bool m_held = false;
+    std::thread m_heartbeat;
+};
 
 std::unique_ptr<DiskCache>& sharedCache() {
     static std::unique_ptr<DiskCache> instance;
@@ -52,37 +173,15 @@ std::mutex& sharedMutex() {
     return mutex;
 }
 
-std::filesystem::path defaultRoot() {
+fs::path defaultRoot() {
     const std::string named = PXR_NS::TfGetenv("USDCC_ASSET_CACHE");
     if (!named.empty()) return fromUtf8(named);
     return userDataFolder() / "asset-cache";
 }
 
-void writeRecord(const std::filesystem::path& file, const Endpoint& endpoint, const std::string& path, const Entry& entry) {
-    PXR_NAMESPACE_USING_DIRECTIVE
-    JsObject record;
-    record["url"] = JsValue(endpoint.url + path);
-    record["endpoint"] = JsValue(endpoint.id);
-    record["etag"] = JsValue(entry.etag);
-    record["modified"] = JsValue(entry.modified);
-    record["size"] = JsValue(static_cast<uint64_t>(entry.size));
-    std::filesystem::path recordFile = file;
-    recordFile += ".meta";
-    std::ofstream output(recordFile, std::ios::binary | std::ios::trunc);
-    output << JsWriteToString(JsValue(record));
-}
-
-// The record's time is the version's last use, which is what eviction will go by.
-void touchRecord(const std::filesystem::path& file) {
-    std::error_code error;
-    std::filesystem::path record = file;
-    record += ".meta";
-    std::filesystem::last_write_time(record, std::filesystem::file_time_type::clock::now(), error);
-}
-
 }  // namespace
 
-DiskCache::DiskCache(std::filesystem::path root) : m_root(std::move(root)) {}
+DiskCache::DiskCache(fs::path root) : m_root(std::move(root)) {}
 
 DiskCache& DiskCache::shared() {
     std::lock_guard<std::mutex> lock(sharedMutex());
@@ -90,17 +189,20 @@ DiskCache& DiskCache::shared() {
     return *sharedCache();
 }
 
-void DiskCache::setSharedRoot(const std::filesystem::path& root) {
+void DiskCache::setSharedRoot(const fs::path& root) {
     std::lock_guard<std::mutex> lock(sharedMutex());
+    uint64_t limit = 0;
+    if (sharedCache()) limit = sharedCache()->limit();
     // Leaked on purpose when replaced: a thread may be in the old one's ensure().
     sharedCache().release();
     sharedCache() = std::make_unique<DiskCache>(root);
+    if (limit) sharedCache()->setLimit(limit);
 }
 
-std::filesystem::path DiskCache::fileFor(const Endpoint& endpoint, const std::string& path, const Entry& version) const {
+fs::path DiskCache::fileFor(const Endpoint& endpoint, const std::string& path, const Entry& version) const {
     const std::string extension = extensionOf(path);
     const std::string suffix = "@" + version.versionKey() + extension;
-    std::filesystem::path file = m_root / endpoint.cacheId();
+    fs::path file = m_root / endpoint.cacheId();
     if (keepable(path)) {
         // "/chars/hero.usd" -> chars/hero@3f9a1c2e.usd
         const std::string stem = path.substr(1, path.size() - 1 - extension.size());
@@ -112,22 +214,54 @@ std::filesystem::path DiskCache::fileFor(const Endpoint& endpoint, const std::st
     return file;
 }
 
-std::optional<std::filesystem::path> DiskCache::find(const Endpoint& endpoint, const std::string& path,
-                                                     const Entry& version) const {
-    const std::filesystem::path file = fileFor(endpoint, path, version);
+void DiskCache::handedOut(const fs::path& file) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_handedOut[toUtf8(file)] = std::chrono::steady_clock::now();
+}
+
+std::optional<fs::path> DiskCache::find(const Endpoint& endpoint, const std::string& path, const Entry& version) {
+    const fs::path file = fileFor(endpoint, path, version);
     std::error_code error;
-    if (!std::filesystem::is_regular_file(file, error)) return std::nullopt;
-    touchRecord(file);
+    if (!fs::is_regular_file(file, error)) return std::nullopt;
+    touch(recordOf(file));
+    handedOut(file);
     return file;
 }
 
-Result<std::filesystem::path> DiskCache::ensure(const Endpoint& endpoint, const std::string& path, const Entry& version,
-                                                const Download& download) {
-    using FileResult = Result<std::filesystem::path>;
-    if (const std::optional<std::filesystem::path> cached = find(endpoint, path, version)) {
-        return FileResult::success(*cached);
+std::optional<std::pair<fs::path, Entry>> DiskCache::findAny(const Endpoint& endpoint, const std::string& path) {
+    // Every version's name starts and ends the same; only the key between differs.
+    const fs::path pattern = fileFor(endpoint, path, Entry());
+    const std::string name = toUtf8(pattern.filename());
+    const std::string prefix = name.substr(0, name.find('@') + 1);
+    const std::string extension = extensionOf(path);
+
+    std::optional<std::pair<fs::path, Entry>> newest;
+    fs::file_time_type newestUse{};
+    std::error_code error;
+    for (const fs::directory_entry& each : fs::directory_iterator(pattern.parent_path(), error)) {
+        const std::string other = toUtf8(each.path().filename());
+        if (other.rfind(prefix, 0) != 0 || !isVersionFile(each.path())) continue;
+        if (other.size() != prefix.size() + 8 + extension.size()) continue;
+        const std::optional<Entry> entry = readRecord(each.path());
+        if (!entry) continue;
+        const fs::file_time_type used = lastUse(each.path());
+        if (!newest || used > newestUse) {
+            newest = std::make_pair(each.path(), *entry);
+            newestUse = used;
+        }
     }
-    const std::filesystem::path file = fileFor(endpoint, path, version);
+    if (newest) {
+        touch(recordOf(newest->first));
+        handedOut(newest->first);
+    }
+    return newest;
+}
+
+Result<fs::path> DiskCache::ensure(const Endpoint& endpoint, const std::string& path, const Entry& version,
+                                   const Download& download) {
+    using FileResult = Result<fs::path>;
+    if (const std::optional<fs::path> cached = find(endpoint, path, version)) return FileResult::success(*cached);
+    const fs::path file = fileFor(endpoint, path, version);
     const std::string key = toUtf8(file);
 
     std::promise<FileResult> promise;
@@ -147,29 +281,30 @@ Result<std::filesystem::path> DiskCache::ensure(const Endpoint& endpoint, const 
     if (!mine) return running.get();
 
     FileResult result;
+    uint64_t added = 0;
     try {
-        // Another thread may have finished it between find() and taking the slot.
         std::error_code error;
-        if (std::filesystem::is_regular_file(file, error)) {
+        fs::create_directories(file.parent_path(), error);
+        DownloadLock lock(file);
+        // Not acquired means the file is there: another process, or another thread
+        // between find() and taking the slot, finished it.
+        if (!lock.acquire(file) || fs::is_regular_file(file, error)) {
             result = FileResult::success(file);
         } else {
-            std::filesystem::create_directories(file.parent_path(), error);
             static std::atomic<uint64_t> counter{0};
-            std::filesystem::path part = file;
-            part += "." + std::to_string(std::hash<std::thread::id>()(std::this_thread::get_id()) % 100000) + "-" +
-                    std::to_string(counter.fetch_add(1)) + "-" +
-                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count() % 1000000) + ".part";
+            fs::path part = file;
+            part += "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count() % 100000000) + "-" +
+                    std::to_string(counter.fetch_add(1)) + ".part";
             const Result<Entry> downloaded = download(part);
             if (!downloaded.ok()) {
-                std::filesystem::remove(part, error);
+                fs::remove(part, error);
                 result = FileResult::failure(downloaded.status, downloaded.message);
             } else {
-                // Not over a file that's there: another process finished first, and its
-                // file may already be mapped by a reader.
-                std::filesystem::rename(part, file, error);
-                if (error) std::filesystem::remove(part, error);
-                if (std::filesystem::is_regular_file(file, error)) {
+                fs::rename(part, file, error);
+                if (error) fs::remove(part, error);
+                if (fs::is_regular_file(file, error)) {
                     writeRecord(file, endpoint, path, version);
+                    added = fs::file_size(file, error);
                     result = FileResult::success(file);
                 } else {
                     result = FileResult::failure(Status::Error, "can't write " + toUtf8(file));
@@ -179,12 +314,84 @@ Result<std::filesystem::path> DiskCache::ensure(const Endpoint& endpoint, const 
     } catch (const std::exception& failure) {
         result = FileResult::failure(Status::Error, failure.what());
     }
+    bool trimNow = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (result.ok()) m_handedOut[key] = std::chrono::steady_clock::now();
+        m_addedSinceTrim += added;
+        if (m_addedSinceTrim >= std::min(kTrimEvery, m_limit / 8 + 1)) {
+            m_addedSinceTrim = 0;
+            trimNow = true;
+        }
+    }
     promise.set_value(result);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_inFlight.erase(key);
     }
+    if (trimNow) trim();
     return result;
+}
+
+void DiskCache::setLimit(uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_limit = bytes;
+}
+
+uint64_t DiskCache::limit() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_limit;
+}
+
+uint64_t DiskCache::size() const {
+    uint64_t total = 0;
+    std::error_code error;
+    for (const fs::directory_entry& each : fs::recursive_directory_iterator(m_root, error)) {
+        if (each.is_regular_file(error) && isVersionFile(each.path())) total += each.file_size(error);
+    }
+    return total;
+}
+
+void DiskCache::trim(std::chrono::seconds grace) {
+    struct Version {
+        fs::path file;
+        uint64_t size;
+        fs::file_time_type used;
+    };
+    std::vector<Version> versions;
+    uint64_t total = 0;
+    std::error_code error;
+    for (const fs::directory_entry& each : fs::recursive_directory_iterator(m_root, error)) {
+        if (!each.is_regular_file(error) || !isVersionFile(each.path())) continue;
+        const uint64_t size = each.file_size(error);
+        versions.push_back({each.path(), size, lastUse(each.path())});
+        total += size;
+    }
+    uint64_t limit = 0;
+    std::set<std::string> kept;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        limit = m_limit;
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = m_handedOut.begin(); it != m_handedOut.end();) {
+            if (now - it->second < grace) {
+                kept.insert(it->first);
+                ++it;
+            } else {
+                it = m_handedOut.erase(it);
+            }
+        }
+    }
+    if (total <= limit) return;
+    std::sort(versions.begin(), versions.end(), [](const Version& a, const Version& b) { return a.used < b.used; });
+    for (const Version& version : versions) {
+        if (total <= limit) break;
+        if (kept.count(toUtf8(version.file))) continue;
+        // Another process may have it open: on Windows that refuses, and it stays.
+        if (!fs::remove(version.file, error) || error) continue;
+        fs::remove(recordOf(version.file), error);
+        total -= std::min(total, version.size);
+    }
 }
 
 }  // namespace usdcc::assets

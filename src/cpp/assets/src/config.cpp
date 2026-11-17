@@ -47,6 +47,27 @@ Result<Config> Config::parse(const std::string& json) {
     Config config;
     config.environment = textOf(top, "environment");
 
+    config.offline = flagOf(top, "offline");
+    const auto limit = top.find("cacheLimitGB");
+    if (limit != top.end() && (limit->second.IsReal() || limit->second.IsInt())) config.cacheLimitGB = limit->second.GetReal();
+    if (const JsObject* http = objectOf(top, "http")) {
+        if (const JsObject* hosts = objectOf(*http, "hosts")) {
+            for (const auto& [host, value] : *hosts) {
+                if (!value.IsObject()) continue;
+                HttpHost entry;
+                entry.credential = textOf(value.GetJsObject(), "credential");
+                entry.insecure = flagOf(value.GetJsObject(), "insecure");
+                config.httpHosts[host] = entry;
+            }
+        }
+        const auto allow = http->find("allow");
+        if (allow != http->end() && allow->second.IsArray()) {
+            for (const JsValue& pattern : allow->second.GetJsArray()) {
+                if (pattern.IsString()) config.httpAllow.push_back(pattern.GetString());
+            }
+        }
+    }
+
     if (const JsObject* endpoints = objectOf(top, "endpoints")) {
         for (const auto& [id, value] : *endpoints) {
             if (!value.IsObject()) {
