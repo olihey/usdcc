@@ -5,3 +5,5 @@ deps/patches/*.patch -text
 *.exr binary
 # The file format samples are read as they are: a checkout must not change their line endings.
 test_data/formats/* -text
+# As deps/patches: these apply to upstream sources byte for byte.
+deps/usd-plugins/patches/*.patch -text

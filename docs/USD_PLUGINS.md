@@ -4,8 +4,10 @@ How usdcc's CI builds OpenUSD's third-party plugins (render delegates, file form
 way it already builds OpenUSD itself, and which of them a release ships. This is the
 "USD plugins" item of [CI.md](CI.md) §7.
 
-**Status:** phases 1 and 2 are built and checked locally. The pack isn't published yet,
-which needs the workflows on `master` (§7). The rest is a plan.
+**Status:** phases 1 and 2 are on `master`, and CI has published the OpenUSD asset for
+Python 3.13 with the Adobe pack. Phase 3, Gatling, is built and checked locally on Windows
+and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5). The
+rest is a plan.
 
 ## 1. Where we are
 
@@ -45,14 +47,16 @@ which needs the workflows on `master` (§7). The rest is a plan.
   built with. A pack builds against the asset's copy or links its own statically. The pack
   check fails on a duplicate name (§4).
 - **Hosted runners have no GPU,** so a pack's check there is "it loads and registers".
-  Rendering is checked on the self-hosted RTX runner, by hand, as `rtx-gpu.yml` does.
+  A render delegate is a Hydra plugin like Storm or Embree, and is tried the way they are:
+  in usdcc's viewport, on a machine with a GPU (§7 phase 3 has how). It has nothing to do
+  with the RTX Render plugin or its runner.
 
 ## 3. The plugins
 
 | Pack | Source and licence | Needs | Against our OpenUSD (26.08, `typhoon/main`) |
 |---|---|---|---|
 | `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check (§7 phase 1), though its README only names USD 23.08–25.11 |
-| `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven locally:** commit `945f47d` with MDL SDK 2026.0.2. 110 MB installed, 109 of them `libmdl_sdk.dll` |
+| `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | Not proven. The last commit is from August 2025; an earlier local attempt needed `/WX` turned off |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK (7.0 or newer), which is proprietary. Its docs name USD 20.08–25.11 and the dev branch | Not proven |
@@ -69,7 +73,16 @@ Notes:
   MaterialX one, and the first read in a process warns that
   `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE` is deprecated. usdcc leaves the default (§8).
 - **Gatling.** Its Sdr plugins also give the Material Editor MDL nodes
-  ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §3.5).
+  ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §3.5). The pack carries two patches
+  (`deps/usd-plugins/patches/`), neither of them upstream:
+  - `gatling-implicit-surfaces.patch`. Gatling only draws meshes, and brings nothing that
+    turns USD's implicit shapes (Sphere, Cube, Cone, Cylinder, Capsule, Plane) into meshes
+    when a host feeds it through scene indices, as usdcc's viewport does. Unpatched, such
+    prims are simply missing from the picture. The patch adds the small scene index plugin
+    that Storm and Embree each have, adapted from Embree's.
+  - `gatling-linux-assembly.patch`. On Linux, CMake stops with "CMAKE_ASM_COMPILE_OBJECT"
+    not set, because a bundled library enables assembly in its own folder only. The patch
+    enables it at the top.
 - **Cycles.** With `PXR_ROOT` set, Cycles takes OpenImageIO, OpenEXR, OpenColorIO,
   OpenSubdiv, MaterialX, TBB and Python from the USD install (`USD_OVERRIDE_*` in
   `src/cmake/external_libs.cmake`), but **not Embree**, and Blender's libraries have an
@@ -108,27 +121,47 @@ Notes:
 - `{usd}` and `{pack}` in `cmake` become the OpenUSD install and the pack folder.
 - `patches` are relative to `deps/usd-plugins/`.
 - An unknown key is an error, so a misspelt one isn't ignored.
-- Still to come, with the packs that need them: `submodules` and `downloads` (an SDK's URL
-  and SHA-256) for Gatling, `renderers` in `check`, and a small Python hook next to the
-  JSON for a build that isn't plain CMake (Cycles' `make update`, Aurora's externals script).
+- What Gatling's pin adds (`deps/usd-plugins/gatling.json`):
+  - `submodules`: the checkout's submodules too, at the commits it names.
+  - `downloads`: an archive per name and platform, with its URL and SHA-256. It is
+    downloaded once, checked and unpacked, and `{<name>}` in `cmake` is its folder
+    (`-DMDL_ROOT={mdl-sdk}`).
+  - `targets`, `install_components` and `install_prefix`: what to build, which install
+    components to take, and where in the pack they go (`plugin/usd`).
+  - `licenses`: more licence files to ship, such as the downloaded SDK's.
+  - `publish`: `false` keeps the pack off the release (§5).
+  - `renderers` in `check`: render delegates OpenUSD has to list.
+- Still to come: a small Python hook next to the JSON for a build that isn't plain CMake
+  (Cycles' `make update`, Aurora's externals script).
 
 ### `tools/build_usd_plugin.py`
 
 `python tools/build_usd_plugin.py <pack> --usd-install <folder>`, with the pin's Python:
 
-1. Fetch the pinned commit (shallow) and apply the patches.
-2. Configure with the OpenUSD install on `CMAKE_PREFIX_PATH`, Release, `/MD`, Visual
+1. Fetch the pinned commit (shallow), with its submodules if the pin says so, and apply
+   the patches.
+2. Download the pin's archives, check their SHA-256 and unpack them.
+3. Configure with the OpenUSD install on `CMAKE_PREFIX_PATH`, Release, `/MD`, Visual
    Studio 2022, the Python it runs on: the same rules as usdcc plugins (CI.md §2).
-3. Build and install into an empty **pack folder** laid out like the OpenUSD install
-   (`plugin/usd/...`, `bin/` for DLLs the plugins need).
-4. Drop what only a build needs: `include/`, CMake and pkg-config files, import libraries.
-5. Collect licences into `licenses/usd-plugins/<pack>/<library>/`: the plugin's own and
-   those of what CMake fetched into it (`tools/ci/usd_licenses.py`).
-6. Write `usd-plugins/<pack>.json`: the pin, the OpenUSD it was built against, and the
+4. Build (the pin's targets, or everything) and install (its components, or everything)
+   into an empty **pack folder** laid out like the OpenUSD install (`plugin/usd/...`,
+   `bin/` for DLLs the plugins need).
+5. Drop what only a build needs: `include/`, CMake and pkg-config files, import libraries.
+6. Collect licences into `licenses/usd-plugins/<pack>/<library>/`: the plugin's own, those
+   of what CMake fetched into it (`tools/ci/usd_licenses.py`), each submodule's, and the
+   files the pin names. `SOURCES.txt` beside them says what the binaries were built from:
+   the repository and commit, the patches, each download's URL and SHA-256.
+7. Write `usd-plugins/<pack>.json`: the pin, the OpenUSD it was built against, and the
    list of the pack's files, which `deploy.py` and the check go by.
 
 `--install` copies the pack over the OpenUSD install, which is what `build.ps1` did.
 Linux, with RUNPATHs relative to `$ORIGIN`, is phase 8.
+
+**Folders are used as given, not resolved.** A plugin with many submodules, like OpenUSD
+itself, doesn't fit under Windows' 260-character path limit in a deep folder. CI builds in
+`C:\b`. Locally a drive letter mapped onto the folder does it (`subst W: <folder>`, then
+`--work W:\gatling`), and the script lets git write long paths, since git resolves the
+drive letter back.
 
 ### Workflow `deps-usd-plugins.yml`
 
@@ -148,10 +181,11 @@ and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new nam
    - then, copied over the OpenUSD asset, in a fresh Python with only the asset on `PATH`:
      OpenUSD finds each plugin and loads it, so every dependent DLL is there; each
      extension has a file format; each sample file opens with the prims it should have.
-   - Still to come: no DLL name shared with another pack (with the second pack), and a
-     render delegate listed by `HdRendererPluginRegistry` without creating it, which
-     needs the GPU (phase 3).
-5. Attach the zip to the OpenUSD asset's release. The pack's earlier zips stay there: an
+   - a render delegate has to be among those OpenUSD lists. It isn't created: a path
+     tracer's needs a GPU, which a hosted runner doesn't have.
+   - Still to come: no DLL name shared with another pack.
+5. Attach the zip to the OpenUSD asset's release, or, for a pin with `"publish": false`,
+   keep it with the workflow run for two weeks (§5). The pack's earlier zips stay there: an
    older usdcc tag's pins name them, and `release.yml` can be run again for that tag.
 
 A pack marked `local` (§5) is built only when its SDK is there (a secret URL, or the
@@ -205,7 +239,11 @@ Three sets, decided by licence:
   the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
   stays out of the standard zip, which remains BSD-3-Clause. Whether usdcc may publish even
   a separate pack needs the same review as the Blender configuration, with OpenUSD's TOST
-  licence in it. Until then it is built and checked in CI and used locally.
+  licence in it. Until then it is built and checked in CI and used locally: its pin says
+  `"publish": false`, so `deps-usd-plugins.yml` keeps the zip with the workflow run for
+  two weeks and attaches nothing to the release. The pack already carries what a GPL
+  binary has to: the licence texts of Gatling, its 24 submodules and the MDL SDK
+  (BSD-3-Clause), and `SOURCES.txt` naming the commit and the SDK it was built from.
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
@@ -260,9 +298,38 @@ Three sets, decided by licence:
    *The published Windows OpenUSD asset (built 2026-11-06) has no `licenses/OpenUSD/`,
    which `deploy.py` has needed since; the local deploy got the two files from an OpenUSD
    checkout. `release.yml`'s Windows deploy needs `deps-usd.yml` run with `replace`.*
+   *Since then: both are on `master`. The Python 3.13 pin (CI.md §2.1) rebuilt the asset,
+   which has `licenses/OpenUSD/` now, and CI published the Adobe pack beside it. A deploy
+   built from that asset needed no workaround (phase 3).*
 3. **Gatling**, as the `optional` set's first pack, from the commit and MDL SDK that work
    locally. Done when the pack is published and a deploy with it unzipped over lists
-   Gatling and renders on the RTX runner.
+   Gatling and renders in usdcc's viewport.
+   *Built, and checked locally on Windows and Linux; not published, by decision (§5, §8
+   item 2), and no workflow has run with it.*
+   - *Windows. Against the published OpenUSD asset for Python 3.13, downloaded with
+     `tools/fetch_usd.py`, Gatling builds in 7 minutes: 76 files, 58 MB zipped. Its zip,
+     unzipped over a second copy of the asset, passes the check: the plugin loads and
+     `HdGatlingRendererPlugin` is among three render delegates. usdcc built against the
+     asset passes all ten test programs; its deploy lists Storm and Embree, and with the
+     pack unzipped over the deploy it lists Gatling too and loads it from its own folder
+     (`tools/ci/smoke_test.py`, which now reads a pin's `renderers`).*
+   - *In usdcc's viewport. That deploy, started with a window on the RTX 4090 here,
+     opened a scene of a Sphere, a ground mesh and a dome light; a script switched the
+     viewport from Storm to Gatling (`Viewport.set_renderer()`) and saved the viewport
+     window's own picture after each. Gatling drew the dome and the ground but not the
+     sphere, which is what `gatling-implicit-surfaces.patch` (§3) is for; with it the
+     sphere is there, path traced, with its shadow.*
+   - *Linux. In WSL (Ubuntu 24.04, GCC 13), with a Python 3.13 from uv in a folder of its
+     own, against the published Linux asset: it took the assembly patch (§3) and one more
+     thing, since OpenUSD's `retainedDataSource.h` doesn't compile as C++20 with GCC, so
+     the new file is compiled as C++17 there. The pack is 76 files, 71 MB zipped;
+     `hdGatling.so` gets the RUNPATH `$ORIGIN:$ORIGIN/../../lib`, and the pack passes the
+     same check over a second copy of the asset. `deps-usd-plugins.yml` has a `linux` job
+     for the packs whose pins list `linux-x64`.*
+   - *Not done: a render on Linux (WSL has no Vulkan ray tracing), the Linux deploy taking
+     packs (phase 8), and any workflow run. Each edit to `tools/build_usd_plugin.py` or
+     `tools/ci/usd_plugin_asset.py` renames every pack, so the Adobe pack is rebuilt by CI
+     after this one too, and `build.yml` warns that it is missing until then.*
 4. **The OpenUSD flags** of §6, tried locally first, then one `deps-usd.yml` run. Done when
    the new asset and every pack are published and `build.yml` is green.
 5. **Cycles, CPU only.** Settle the Embree clash, then the pack. Done when it renders a
@@ -271,14 +338,16 @@ Three sets, decided by licence:
    and drop it.
 7. **Arnold**, as a `local` pack on the self-hosted runner.
 8. **Linux** for each pack that supports it (all but Aurora's DirectX backend), as
-   `linux` jobs in the same matrix.
+   `linux` jobs in the same matrix. *The job and the build script's RUNPATH step are
+   there since phase 3, with Gatling's pack. Left: the Adobe pack's pin, and
+   `tools/deploy.py` and `tools/fetch_usd.py` taking packs on Linux.*
 
 ## 8. Open questions
 
 | # | Question | Assumption until decided |
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
-| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review |
+| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Read the FBX SDK and Arnold SDK licence texts before changing that |
 | 4 | Does hdAurora build against a stock OpenUSD? | Unknown; phase 6 answers it |
 | 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it |

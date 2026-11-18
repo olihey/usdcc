@@ -16,6 +16,8 @@ $GITHUB_OUTPUT for later workflow steps:
   tag      the OpenUSD asset's release
   usd_zip   the OpenUSD asset the pack is built against
   commit, repository, python, license, set
+  publish   false when the pin says "publish": false: CI then builds and checks the
+            pack but doesn't attach it to the release
 
     python tools/ci/usd_plugin_asset.py adobe-fileformats
 
@@ -38,7 +40,8 @@ import usd_asset  # noqa: E402
 
 PINS = REPO / "deps/usd-plugins"
 SETS = ("standard", "optional", "local")
-_KEYS = {"repository", "commit", "version", "patches", "cmake", "platforms", "license", "set", "check"}
+_KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "cmake", "targets",
+         "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check"}
 _REQUIRED = {"repository", "commit", "cmake", "platforms", "license", "set"}
 
 
@@ -91,6 +94,8 @@ def describe(pack):
         "python": usd["python"],
         "license": spec["license"],
         "set": spec["set"],
+        # false: CI builds and checks the pack, and keeps it as a workflow artifact.
+        "publish": str(bool(spec.get("publish", True))).lower(),
     }
 
 

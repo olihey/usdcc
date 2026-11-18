@@ -1,0 +1,161 @@
+diff --git a/src/hdGatling/CMakeLists.txt b/src/hdGatling/CMakeLists.txt
+index 3dd50e8..29b8dba 100644
+--- a/src/hdGatling/CMakeLists.txt
++++ b/src/hdGatling/CMakeLists.txt
+@@ -1,5 +1,7 @@
+ add_library(
+   hdGatling SHARED
++  implicitSurfaceSceneIndexPlugin.cpp
++  implicitSurfaceSceneIndexPlugin.h
+   instancer.cpp
+   instancer.h
+   light.cpp
+@@ -32,6 +34,13 @@ add_library(
+   utils.h
+ )
+ 
++# OpenUSD's retainedDataSource.h spells a constructor with its template
++# arguments, which C++20 no longer allows and GCC and Clang reject; MSVC takes
++# it. This file needs nothing of C++20.
++if(NOT MSVC)
++  set_source_files_properties(implicitSurfaceSceneIndexPlugin.cpp PROPERTIES COMPILE_OPTIONS "-std=c++17")
++endif()
++
+ set_target_properties(
+   hdGatling
+   PROPERTIES
+@@ -81,7 +90,7 @@ elseif(TARGET usd_m)
+   set(USD_LIBS_PUBLIC usd_m)  # equal and after v25.11
+ else()
+   set(USD_LIBS_PUBLIC hd)
+-  set(USD_LIBS_PRIVATE usdImaging usdMtlx hdMtlx glf)
++  set(USD_LIBS_PRIVATE usdImaging usdMtlx hdMtlx hdsi glf)
+ endif()
+ 
+ target_link_libraries(
+diff --git a/src/hdGatling/implicitSurfaceSceneIndexPlugin.cpp b/src/hdGatling/implicitSurfaceSceneIndexPlugin.cpp
+new file mode 100644
+index 0000000..b95148f
+--- /dev/null
++++ b/src/hdGatling/implicitSurfaceSceneIndexPlugin.cpp
+@@ -0,0 +1,65 @@
++//
++// Copyright 2022 Pixar
++//
++// Licensed under the terms set forth in the LICENSE.txt file available at
++// https://openusd.org/license.
++//
++// Adapted for hdGatling from OpenUSD's hdEmbree
++// (pxr/imaging/plugin/hdEmbree/delegate/implicitSurfaceSceneIndexPlugin.cpp).
++//
++
++#include "implicitSurfaceSceneIndexPlugin.h"
++
++#include <pxr/imaging/hd/retainedDataSource.h>
++#include <pxr/imaging/hd/sceneIndexPluginRegistry.h>
++#include <pxr/imaging/hd/tokens.h>
++#include <pxr/imaging/hdsi/implicitSurfaceSceneIndex.h>
++
++PXR_NAMESPACE_OPEN_SCOPE
++
++TF_DEFINE_PRIVATE_TOKENS(
++  _tokens,
++  ((sceneIndexPluginName, "HdGatling_ImplicitSurfaceSceneIndexPlugin"))
++);
++
++// The renderer plugin's displayName in plugInfo.json.
++static const char* const _pluginDisplayName = "Gatling";
++
++TF_REGISTRY_FUNCTION(TfType)
++{
++  HdSceneIndexPluginRegistry::Define<HdGatling_ImplicitSurfaceSceneIndexPlugin>();
++}
++
++TF_REGISTRY_FUNCTION(HdSceneIndexPlugin)
++{
++  const HdSceneIndexPluginRegistry::InsertionPhase insertionPhase = 0;
++
++  HdSceneIndexPluginRegistry::GetInstance().RegisterSceneIndexForRenderer(
++    _pluginDisplayName,
++    _tokens->sceneIndexPluginName,
++    /* inputArgs = */ nullptr,
++    insertionPhase,
++    HdSceneIndexPluginRegistry::InsertionOrderAtStart);
++}
++
++HdGatling_ImplicitSurfaceSceneIndexPlugin::HdGatling_ImplicitSurfaceSceneIndexPlugin() = default;
++
++HdSceneIndexBaseRefPtr HdGatling_ImplicitSurfaceSceneIndexPlugin::_AppendSceneIndex(
++  const HdSceneIndexBaseRefPtr& inputScene,
++  const HdContainerDataSourceHandle& inputArgs)
++{
++  HdDataSourceBaseHandle const toMeshSrc =
++    HdRetainedTypedSampledDataSource<TfToken>::New(HdsiImplicitSurfaceSceneIndexTokens->toMesh);
++
++  HdContainerDataSourceHandle const localInputArgs = HdRetainedContainerDataSource::New(
++    HdPrimTypeTokens->sphere, toMeshSrc,
++    HdPrimTypeTokens->cube, toMeshSrc,
++    HdPrimTypeTokens->cone, toMeshSrc,
++    HdPrimTypeTokens->cylinder, toMeshSrc,
++    HdPrimTypeTokens->capsule, toMeshSrc,
++    HdPrimTypeTokens->plane, toMeshSrc);
++
++  return HdsiImplicitSurfaceSceneIndex::New(inputScene, localInputArgs);
++}
++
++PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/src/hdGatling/implicitSurfaceSceneIndexPlugin.h b/src/hdGatling/implicitSurfaceSceneIndexPlugin.h
+new file mode 100644
+index 0000000..0303468
+--- /dev/null
++++ b/src/hdGatling/implicitSurfaceSceneIndexPlugin.h
+@@ -0,0 +1,32 @@
++//
++// Copyright 2022 Pixar
++//
++// Licensed under the terms set forth in the LICENSE.txt file available at
++// https://openusd.org/license.
++//
++// Adapted for hdGatling from OpenUSD's hdEmbree
++// (pxr/imaging/plugin/hdEmbree/delegate/implicitSurfaceSceneIndexPlugin.h).
++//
++
++#pragma once
++
++#include <pxr/imaging/hd/sceneIndexPlugin.h>
++#include <pxr/pxr.h>
++
++PXR_NAMESPACE_OPEN_SCOPE
++
++// Turns USD's implicit shapes (sphere, cube, cone, cylinder, capsule, plane) into
++// meshes for Gatling, which only draws meshes. A Hydra host that feeds the
++// renderer through scene indices, as UsdImagingGLEngine does, hands them over
++// as they are; without this they are not drawn at all.
++class HdGatling_ImplicitSurfaceSceneIndexPlugin : public HdSceneIndexPlugin
++{
++public:
++  HdGatling_ImplicitSurfaceSceneIndexPlugin();
++
++protected:
++  HdSceneIndexBaseRefPtr _AppendSceneIndex(const HdSceneIndexBaseRefPtr& inputScene,
++                                           const HdContainerDataSourceHandle& inputArgs) override;
++};
++
++PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/src/hdGatling/plugInfo.json.in b/src/hdGatling/plugInfo.json.in
+index 7b230b5..6a7dcb2 100644
+--- a/src/hdGatling/plugInfo.json.in
++++ b/src/hdGatling/plugInfo.json.in
+@@ -15,6 +15,12 @@
+                     "HdGatlingMdlParserPlugin": {
+                         "bases": ["@USD_NODE_LIB@ParserPlugin"],
+                         "displayName": "MDL Node Parser"
++                    },
++                    "HdGatling_ImplicitSurfaceSceneIndexPlugin": {
++                        "bases": ["HdSceneIndexPlugin"],
++                        "displayName": "Scene Index to turn implicit surfaces into prims suitable for HdGatling",
++                        "loadWithRenderer": "Gatling",
++                        "priority": 0
+                     }
+                 }
+             },

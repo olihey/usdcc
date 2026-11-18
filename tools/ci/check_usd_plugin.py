@@ -15,6 +15,8 @@ this machine's environment, does what the pin's "check" asks:
   - "plugins": OpenUSD finds each one, inside the install, and loads it, so
     every DLL it depends on is there;
   - "extensions": each has a file format;
+  - "renderers": OpenUSD lists each as a render delegate. It isn't created: a
+    path tracer's needs a GPU, which a hosted runner doesn't have;
   - "open": each file opens as a stage with that many prims of each type.
 
 --usd is changed by this (the pack is copied into it), so pass a throwaway copy
@@ -30,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 
@@ -44,7 +47,7 @@ MANIFEST_DIR = "usd-plugins"
 _RUNNER = r"""
 import json, os, sys
 install, spec = sys.argv[1], json.loads(sys.argv[2])
-from pxr import Plug, Sdf, Usd
+from pxr import Plug, Sdf, Tf, Usd
 failed = []
 def check(ok, what):
     print(("  ok    " if ok else "  FAIL  ") + what, flush=True)
@@ -65,6 +68,11 @@ for name in spec.get("plugins", []):
     check(loaded, f"{name} loads")
 for extension in spec.get("extensions", []):
     check(Sdf.FileFormat.FindByExtension(extension) is not None, f".{extension} has a file format")
+if spec.get("renderers"):
+    # From the plugins' own descriptions, which is where Hydra lists them from too.
+    listed = {found.typeName for found in Plug.Registry.GetAllDerivedTypes(Tf.Type.FindByName("HdRendererPlugin"))}
+    for renderer in spec["renderers"]:
+        check(renderer in listed, f"{renderer} is among the render delegates ({len(listed)} listed)")
 for entry in spec.get("open", []):
     try:
         stage = Usd.Stage.Open(entry["file"])
@@ -160,6 +168,11 @@ def clean_environment(usd):
     else:
         environment["PATH"] = os.pathsep.join([python_dir, "/usr/bin", "/bin"])
         environment["HOME"] = os.environ.get("HOME", "/tmp")
+        # OpenUSD's libraries link this Python's libpython, which only a Python
+        # that is itself linked against it has loaded already.
+        library_dir = sysconfig.get_config_var("LIBDIR")
+        if library_dir:
+            environment["LD_LIBRARY_PATH"] = library_dir
     return environment
 
 

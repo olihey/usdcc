@@ -10,7 +10,8 @@ outside the deploy: a DLL or Python file the build's own folders were hiding
 The same script asks OpenUSD for its own render delegates (Storm, Embree) and
 for the plugins of each USD plugin pack the deploy has (its usd-plugins/*.json),
 and does what the pack's pin asks under "check": the plugins load from the
-deploy, the extensions have file formats, the sample files open
+deploy, the extensions have file formats, the render delegates are listed, the
+sample files open
 (docs/USD_PLUGINS.md). --expect-standard-usd-packs fails a deploy that lacks a
 pack of the standard set, which a release has to have.
 
@@ -73,7 +74,7 @@ if PySide6:
 
 # OpenUSD's plugins: its own render delegates, and what each USD plugin pack in
 # the deploy is checked for (its pin's "check", docs/USD_PLUGINS.md).
-from pxr import Plug, Sdf
+from pxr import Plug, Sdf, Tf
 
 def plugin(name):
     found = Plug.Registry().GetPluginWithName(name)
@@ -99,6 +100,9 @@ def prim_counts(file):
 
 result["plugins"] = {name: plugin(name) for name in PLUGINS}
 result["extensions"] = {extension: Sdf.FileFormat.FindByExtension(extension) is not None for extension in EXTENSIONS}
+# The render delegates OpenUSD lists, from the plugins' own descriptions.
+result["renderers"] = sorted(
+    found.typeName for found in Plug.Registry.GetAllDerivedTypes(Tf.Type.FindByName("HdRendererPlugin")))
 result["opened"] = {file: prim_counts(file) for file in FILES}
 with open(RESULT, "w") as f:
     json.dump(result, f)
@@ -160,11 +164,12 @@ def main(argv=None):
             spec = usd_plugin_asset.load(pack)
             if spec["set"] == "standard" and ASSET_PLATFORM in spec["platforms"] and pack not in packs:
                 problems.append(f"the deploy doesn't have the {pack} USD plugin pack")
-    pack_plugins, extensions, files = {}, [], {}
+    pack_plugins, extensions, files, renderers = {}, [], {}, {}
     for pack in packs:
         check = usd_plugin_asset.load(pack).get("check", {})
         pack_plugins.update({name: pack for name in check.get("plugins", [])})
         extensions += check.get("extensions", [])
+        renderers.update({name: pack for name in check.get("renderers", [])})
         files.update({str(REPO / entry["file"]): entry.get("prims", {}) for entry in check.get("open", [])})
 
     work = Path(tempfile.gettempdir()) / f"usdcc-smoke-{os.getpid()}"
@@ -217,6 +222,9 @@ def main(argv=None):
                 problems.append(f"{what} came from outside the deploy: {found['path']}")
             elif not found["loaded"]:
                 problems.append(f"{what} doesn't load")
+        for name, pack in renderers.items():
+            if name not in checked["renderers"]:
+                problems.append(f"the {pack} pack's {name} isn't among the render delegates")
         for extension, known in checked["extensions"].items():
             if not known:
                 problems.append(f".{extension} has no file format")
@@ -228,9 +236,14 @@ def main(argv=None):
                 if counts.get(type_name, 0) != wanted:
                     problems.append(f"{os.path.basename(file)} has {counts.get(type_name, 0)} {type_name}, not {wanted}")
         print(f"  OpenUSD plugins: {', '.join(sorted(checked['plugins']))}")
+        print(f"  Render delegates: {', '.join(checked['renderers'])}")
         if packs:
-            print(f"  USD plugin packs: {', '.join(packs)}; file formats: {', '.join(extensions)}; "
-                  f"opened: {', '.join(os.path.basename(file) for file in sorted(files))}")
+            parts = [f"USD plugin packs: {', '.join(packs)}"]
+            if extensions:
+                parts.append(f"file formats: {', '.join(extensions)}")
+            if files:
+                parts.append(f"opened: {', '.join(os.path.basename(file) for file in sorted(files))}")
+            print("  " + "; ".join(parts))
     else:
         problems.append("the check script wrote nothing")
     try:
