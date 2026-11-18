@@ -586,11 +586,11 @@ things that will bite later if not addressed early:
     now frameless; its `menuWidget` is a `TitleBar` (`title_bar.h`/`.cpp`: logo, the window's
     `QMenuBar`, centered title, minimize/maximize/close buttons — plain Qt, no QWindowKit types),
     and a `QWK::WidgetWindowAgent` supplies the native behaviour. QWindowKit is vendored as a git
-    submodule at `external/qwindowkit` (vcpkg has no port; pinned by the gitlink to
-    `5626b3a`, 45 commits past the 1.5.0 tag — chosen for Qt 6.11 compatibility, not yet checked
-    against 1.5.0) and built static, Widgets-only, without its system-theme "style agent" via
-    `add_subdirectory` in the top-level `CMakeLists.txt`; its configure step also builds a small
-    host tool (qmsetup) into the build tree. `MainWindow` registers the title bar as the agent's
+    submodule at `external/qwindowkit` (vcpkg has no port; the submodule tracks the fork
+    `olihey/qwindowkit`, pinned by the gitlink to `69a647a`: upstream `main` plus the fix for
+    maximizing through Windows, stdware/qwindowkit#256, until that is merged) and built static,
+    Widgets-only, without its system-theme "style agent" via `add_subdirectory` in the top-level
+    `CMakeLists.txt`. `MainWindow` registers the title bar as the agent's
     drag area, the menu bar as hit-test-visible, and the logo/buttons as system buttons (which is
     what lets Windows 11 show snap layouts on the maximize button). **API change:** use
     `MainWindow::mainMenuBar()`, never `QMainWindow::menuBar()` — the latter sees the title bar

@@ -129,10 +129,11 @@ if(USDCC_LINK_RELEASE_QT)
 endif()
 
 # QWindowKit: frameless window + custom title bar (usdcc::ui::MainWindow's
-# title bar). Vendored as a git submodule because vcpkg has no port for it.
+# title bar). Vendored as a git submodule because vcpkg has no port for it;
+# it tracks olihey/qwindowkit, a fork carrying the fix for maximizing through
+# Windows (stdware/qwindowkit#256) until that is merged upstream.
 # Static and Widgets-only (no Quick, examples, tests or install), and without
-# its system-theme "style agent" — usdcc has one fixed dark theme. Its own
-# configure step also builds a small host tool (qmsetup); that is expected.
+# its system-theme "style agent" — usdcc has one fixed dark theme.
 set(QWINDOWKIT_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(QWINDOWKIT_BUILD_WIDGETS ON CACHE BOOL "" FORCE)
 set(QWINDOWKIT_BUILD_QUICK OFF CACHE BOOL "" FORCE)
@@ -140,26 +141,7 @@ set(QWINDOWKIT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_INSTALL OFF CACHE BOOL "" FORCE)
 set(QWINDOWKIT_ENABLE_STYLE_AGENT OFF CACHE BOOL "" FORCE)
-# Every configure deletes and recreates QWindowKit's generated include folder
-# (its CMakeLists pass FORCE to qm_sync_include), which gives qwkconfig.h a
-# new timestamp even when its content is the same, and every QWindowKit
-# source, and so everything linking it, would be rebuilt. The file is put
-# back as it was (file(COPY) keeps the timestamp) when nothing in it changed.
-set(_qwk_config "${CMAKE_BINARY_DIR}/external/qwindowkit/out/include/QWKCore/qwkconfig.h")
-set(_qwk_config_saved "${CMAKE_BINARY_DIR}/CMakeFiles/usdcc_qwkconfig")
-file(REMOVE_RECURSE "${_qwk_config_saved}")
-if(EXISTS "${_qwk_config}")
-    file(COPY "${_qwk_config}" DESTINATION "${_qwk_config_saved}")
-endif()
 add_subdirectory(external/qwindowkit EXCLUDE_FROM_ALL)
-if(EXISTS "${_qwk_config_saved}/qwkconfig.h" AND EXISTS "${_qwk_config}")
-    file(SHA256 "${_qwk_config_saved}/qwkconfig.h" _qwk_config_before)
-    file(SHA256 "${_qwk_config}" _qwk_config_after)
-    if(_qwk_config_before STREQUAL _qwk_config_after)
-        get_filename_component(_qwk_config_dir "${_qwk_config}" DIRECTORY)
-        file(COPY "${_qwk_config_saved}/qwkconfig.h" DESTINATION "${_qwk_config_dir}")
-    endif()
-endif()
 
 # pybind11's headers only (pybind11::headers), built with OpenUSD's Python
 # (UsdccPython.cmake). Its own Python search stays off: it would take whichever
