@@ -1,0 +1,35 @@
+// The launcher's icon and version, the app's own (src/cpp/app/resources/usdcc.rc),
+// as it is what the installer's shortcuts and Explorer show (docs/UPDATES.md §3).
+#include <winver.h>
+#include "usdcc_version.h"
+
+1 ICON "../app/resources/usdcc.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION USDCC_RC_VERSION
+PRODUCTVERSION USDCC_RC_VERSION
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS USDCC_RC_FLAGS
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "usdcc"
+            VALUE "FileDescription", "usdcc, a USD editor"
+            VALUE "FileVersion", USDCC_RC_VERSION_STRING
+            VALUE "InternalName", "usdcc"
+            VALUE "LegalCopyright", "Copyright (c) 2026, Oliver Heyme. BSD-3-Clause."
+            VALUE "OriginalFilename", "usdcc.exe"
+            VALUE "ProductName", "usdcc"
+            VALUE "ProductVersion", USDCC_RC_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

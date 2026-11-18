@@ -150,6 +150,9 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
      libraries (the exe, its DLLs, the `usdcc` Python modules, the example C++ plugin),
      laid out as they are in the deploy.
 9. **Attach** both to the release with `gh release upload`.
+10. **The installer and the update packages**, made from the same deploy with Velopack's
+    `vpk` and attached with it: `usdcc-app-win-Setup.exe`, the packages and the feed
+    installs update from ([UPDATES.md](UPDATES.md) §5).
 
 It uses `build.yml`'s vcpkg cache, read-only.
 
@@ -268,4 +271,4 @@ and 31 Ubuntu source packages. The Windows receipt cannot approve Linux.
 |---|---|---|
 | 1 | Should `build.yml` keep the deploy zip of every `master` build as a workflow artifact too (CI.md §7, "Deploy artifact")? | Yes, once phase 2 works: the same steps 6–8, kept for a few days, for testing a build before releasing it |
 | 2 | The repository's Releases page also lists the `deps/…` prereleases (OpenUSD, PySide6) | Fine for now: they're prereleases, so they never become "Latest". Move them to a separate repository if they crowd the page |
-| 3 | An installer (MSI or similar) rather than a zip? | Not yet. The deploy runs from any folder, and a zip is all that needs |
+| 3 | An installer (MSI or similar) rather than a zip? | Done, beside the 7z: Velopack's, which also updates an install ([UPDATES.md](UPDATES.md)). A browser's download mark on the 7z made Defender scan each of its unsigned DLLs at the first start |

@@ -200,6 +200,8 @@ else()
 endif()
 include(UsdccRuff)
 include(UsdccUv)
+# The installer and updates on Windows (docs/UPDATES.md).
+include(UsdccVelopack)
 
 # The usdcc Python package lives in build/python/usdcc: the compiled modules
 # (usd.pyd, ...) are built there, and this copies the pure-Python files from
@@ -258,6 +260,11 @@ add_subdirectory(src/cpp/ui)
 add_subdirectory(src/cpp/plugin_sdk)
 add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
+# usdcc.exe at the top of a deploy, which starts bin\usdcc.exe; what the installer's
+# shortcuts start and Velopack runs (docs/UPDATES.md §3).
+if(USDCC_VELOPACK_FOUND)
+    add_subdirectory(src/cpp/launcher)
+endif()
 add_subdirectory(src/plugins/cpp_example)
 # The protocols of remote assets (docs/REMOTE_ASSETS.md §11): usdcc plugins with only
 # a usd/ part, each a resolver library on usdcc_assets. After the app, which they are

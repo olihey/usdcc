@@ -201,7 +201,9 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\usdc
 [tools/deploy.py](tools/deploy.py) copies a build and everything it needs to run
 (OpenUSD's DLLs and plugins, Qt, the Python OpenUSD was built with, and the usdcc, pxr
 and PySide6 packages) into one folder that runs on a machine without the dev
-environment. Zip it to distribute; start it with `usdcc.cmd` or `bin\usdcc.exe`.
+environment. Zip it to distribute; start it with `usdcc.exe` (`usdcc.cmd` in a build
+without Velopack) or `bin\usdcc.exe`. Releases also come with an installer, made from the
+same folder, that updates itself ([docs/UPDATES.md](docs/UPDATES.md)).
 
 ```
 python tools/deploy.py                       # into .\deploy

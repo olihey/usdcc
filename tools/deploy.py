@@ -4,13 +4,16 @@ Collects a built usdcc (run tools/build.py first) with its runtime dependencies
 into a self-contained folder that runs on a machine without the dev environment:
 
     <destination>\\
+      usdcc.exe     starts bin\\usdcc.exe; what the installer's shortcuts start
+                    and Velopack runs for its hooks (docs/UPDATES.md section 3),
+                    when the build has Velopack
       usdcc.cmd     starts bin\\usdcc.exe
       LICENSE.txt   usdcc's licence (BSD-3-Clause)
       licenses\\     the licences of everything else in the folder, and in
                     SOURCES.txt where each library's source is
                     (docs/RELEASE.md section 6)
       bin\\          usdcc.exe, its DLLs (app, Qt, vcpkg, OpenUSD and the
-                    libraries OpenUSD uses), Qt's platform plugin
+                    libraries OpenUSD uses, Velopack's), Qt's platform plugin
       bin\\usd\\      OpenUSD's built-in plugins (schemas, Hydra, MaterialX
                     standard library, ...)
       plugin\\usd\\   OpenUSD's other plugins (Storm, Embree, image readers),
@@ -129,11 +132,17 @@ def _rtx_runtime_roots():
     return roots
 
 
+def _vcpkg_installed():
+    """vcpkg's install tree: the build's own, or the one it was configured with, as a
+    worktree's build shares the main checkout's (VCPKG_INSTALLED_DIR)."""
+    return Path(cache_value(BUILD_DIR, "VCPKG_INSTALLED_DIR") or BUILD_DIR / "vcpkg_installed")
+
+
 def _vcpkg_licences(licenses_dir, sources):
     """vcpkg's packages: a copyright file each, and in `sources` where its source
     is, from the SPDX file vcpkg writes (the LGPL ones, Qt and Qt Advanced Docking
     System, have to say so). vcpkg's own build helpers aren't shipped."""
-    share = BUILD_DIR / "vcpkg_installed" / vcpkg_triplet(BUILD_DIR) / "share"
+    share = _vcpkg_installed() / vcpkg_triplet(BUILD_DIR) / "share"
     destination = licenses_dir / "vcpkg"
     destination.mkdir(parents=True, exist_ok=True)
     for port in sorted((entry for entry in share.iterdir() if entry.is_dir()), key=lambda entry: entry.name):
@@ -319,6 +328,16 @@ def main(argv=None):
     uv_exe = cache_value(BUILD_DIR, "USDCC_UV_EXE_PATH")
     has_uv = bool(uv_exe) and os.path.isfile(uv_exe)
 
+    # The launcher at the top, built with Velopack (cmake/modules/UsdccVelopack.cmake),
+    # and Velopack's licence, which that module downloaded beside its library.
+    launcher_exe = BUILD_DIR / "src/cpp/launcher" / configuration / "usdcc.exe"
+    has_launcher = launcher_exe.is_file()
+    velopack_license = cache_value(BUILD_DIR, "USDCC_VELOPACK_LICENSE_PATH")
+    has_velopack = has_launcher and bool(velopack_license) and os.path.isfile(velopack_license)
+    if has_launcher and not has_velopack:
+        fail(f"The build has the launcher ({launcher_exe}) but not Velopack's licence ('{velopack_license}'); "
+             "configure again.")
+
     package_dir = BUILD_DIR / "python/usdcc"
     if not (package_dir / "__init__.py").is_file():
         fail(f"The usdcc Python package is missing from {package_dir}; build first.")
@@ -387,6 +406,10 @@ def main(argv=None):
 
     print("  usdcc", flush=True)
     copy_tree(app_dir, bin_dir, exclude_files=BUILD_ONLY_FILES)
+    if has_launcher:
+        copy_file(launcher_exe, deploy_dir)
+    elif (deploy_dir / "usdcc.exe").is_file():
+        (deploy_dir / "usdcc.exe").unlink()  # an earlier deploy's, from a build that had it
     for dll in ("vcruntime140.dll", "vcruntime140_1.dll"):
         if not (bin_dir / dll).exists() and (python_home / dll).is_file():
             copy_file(python_home / dll, bin_dir)
@@ -572,6 +595,16 @@ def main(argv=None):
     if qwindowkit.is_file():
         (licenses_dir / "QWindowKit").mkdir(parents=True, exist_ok=True)
         copy_file(qwindowkit, licenses_dir / "QWindowKit")
+    if has_velopack:
+        # Its MIT licence; the Rust crates built into its library and Update.exe are
+        # under permissive licences (and MPL-2.0), pinned by its Cargo.lock at the tag.
+        (licenses_dir / "Velopack").mkdir(parents=True, exist_ok=True)
+        copy_file(velopack_license, licenses_dir / "Velopack")
+        version_file = Path(velopack_license).parent / "VERSION"
+        velopack_version = version_file.read_text(encoding="utf-8").strip() if version_file.is_file() else ""
+        sources.append(f"Velopack {velopack_version} (bin/velopack_libc.dll, the launcher usdcc.exe, "
+                       "and an install's Update.exe)")
+        sources.append(f"  source:     https://github.com/velopack/velopack/tree/{velopack_version}")
     for tool in ("ruff", "uv"):
         tool_dir = deploy_dir / "tools" / tool
         if tool_dir.is_dir():
@@ -600,6 +633,8 @@ def main(argv=None):
         "bin/usdcc_assets.dll", "bin/libcurl.dll", "licenses/vcpkg/curl.txt", "licenses/vcpkg/pugixml.txt",
         "bin/pugixml.dll", "plugins/http/usd/plugInfo.json", "plugins/webdav/usd/plugInfo.json",
     ]
+    if has_velopack:
+        required += ["usdcc.exe", "bin/velopack_libc.dll", "licenses/Velopack/LICENSE"]
     if include_rtx:
         required += ["plugins/rtx_render/usdcc-plugin.json", "plugins/rtx_render/bin/windows-x64/rtx_render_native.dll"]
     missing = [name for name in required if not (deploy_dir / name).exists()]
@@ -618,7 +653,8 @@ def main(argv=None):
             fail(f"uv can't use the deploy's python.exe: {(found.stdout + found.stderr).strip()}")
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file())
-    print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with usdcc.cmd or bin\\usdcc.exe.")
+    print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with "
+          f"{'usdcc.exe' if has_launcher else 'usdcc.cmd'} or bin\\usdcc.exe.")
 
 
 # --- Linux --------------------------------------------------------------------
@@ -753,7 +789,7 @@ def deploy_linux(args):
     if not libpython:
         fail(f"{exe} doesn't load a libpython that ldd can find.")
 
-    vcpkg_dir = BUILD_DIR / "vcpkg_installed" / vcpkg_triplet(BUILD_DIR)
+    vcpkg_dir = _vcpkg_installed() / vcpkg_triplet(BUILD_DIR)
     own_libraries = sorted(file for file in (BUILD_DIR / "src/cpp").rglob("libusdcc_*.so")
                            if "CMakeFiles" not in file.parts and "plugins" not in file.parts)
     package_dir = BUILD_DIR / "python/usdcc"

@@ -3,8 +3,9 @@
 # v0.2.0, and this builds that tag on each platform, runs the tests, deploys,
 # starts the deploy as a user would, and attaches
 # usdcc-<version>-windows-x64.7z and usdcc-<version>-linux-x64.tar.xz, each
-# with its symbols. Run it by hand with the tag to rebuild a release whose run
-# failed.
+# with its symbols, and on Windows the installer (usdcc-app-win-Setup.exe) and the
+# packages installs update from (docs/UPDATES.md). Run it by hand with the tag
+# to rebuild a release whose run failed.
 name: Release
 
 on:
@@ -168,7 +169,9 @@ jobs:
           foreach ($binary in Get-ChildItem $deploy -Recurse -Include *.exe, *.dll, *.pyd) {
             # OpenUSD's pxr has an _usd.pyd too; of the Python packages, only usdcc's are ours.
             if ($binary.FullName -match '\\site-packages\\' -and $binary.FullName -notmatch '\\site-packages\\usdcc\\') { continue }
-            $pdb = $pdbs | Where-Object { $_.BaseName -eq $binary.BaseName } | Select-Object -First 1
+            # The launcher at the top has the app's name and a PDB of its own (docs/UPDATES.md §3).
+            $name = if ($binary.DirectoryName -eq $deploy -and $binary.Name -eq 'usdcc.exe') { 'usdcc_launcher' } else { $binary.BaseName }
+            $pdb = $pdbs | Where-Object { $_.BaseName -eq $name } | Select-Object -First 1
             if (-not $pdb) { continue }
             $to = Join-Path $symbols ([IO.Path]::GetDirectoryName($binary.FullName.Substring($deploy.Length + 1)))
             New-Item -ItemType Directory -Force $to | Out-Null
@@ -192,6 +195,38 @@ jobs:
           gh release upload $env:TAG "$env:RUNNER_TEMP\${{ steps.tag.outputs.archive }}" `
             "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" --clobber --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE) { throw 'attaching the archives failed' }
+
+      # The installer and the update packages (docs/UPDATES.md §5), from the same
+      # deploy, with Velopack's vpk at the version cmake/modules/UsdccVelopack.cmake
+      # pins (the runner's .NET SDK installs it). The latest earlier release's full
+      # package comes down first, so vpk can make a delta from it: what an install of
+      # that version downloads to update. The first release with packages has none.
+      # vpk then attaches usdcc-app-win-Setup.exe, the full and delta packages and the
+      # feed (releases.win.json) to this release, which installs look for. The
+      # package id is usdcc-app, not usdcc: Velopack installs into
+      # %LOCALAPPDATA%\<id> and deletes that folder on uninstall, and
+      # %LOCALAPPDATA%\usdcc holds the user's settings, logs and sessions.
+      - name: Make the installer and the update packages
+        run: |
+          $vpkVersion = (Select-String -Path cmake/modules/UsdccVelopack.cmake `
+            -Pattern 'set\(USDCC_VELOPACK_VERSION "([^"]+)"\)').Matches[0].Groups[1].Value
+          dotnet tool install vpk --version $vpkVersion --tool-path "$env:RUNNER_TEMP\vpk"
+          if ($LASTEXITCODE) { throw 'installing vpk failed' }
+          Set-Alias vpk "$env:RUNNER_TEMP\vpk\vpk.exe"
+          $repo = "https://github.com/$env:GITHUB_REPOSITORY"
+          $releases = "$env:RUNNER_TEMP\velopack"
+          New-Item -ItemType Directory -Force $releases | Out-Null
+          # A prerelease (0.2.0-beta.1) updates from, and is offered to, prereleases too.
+          $pre = if ('${{ steps.tag.outputs.version }}' -match '-') { @('--pre') } else { @() }
+          vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases @pre
+          if ($LASTEXITCODE) { Write-Host "::notice::No earlier release with update packages, so no delta this time." }
+          vpk pack --packId usdcc-app --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc `
+            --packDir "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" --mainExe usdcc.exe `
+            --runtime win-x64 --icon src/cpp/app/resources/usdcc.ico --noPortable --outputDir $releases
+          if ($LASTEXITCODE) { throw 'vpk pack failed' }
+          Get-ChildItem $releases | ForEach-Object { Write-Host ("{0}: {1:N0} MB" -f $_.Name, ($_.Length / 1MB)) }
+          vpk upload github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases --tag $env:TAG --merge @pre
+          if ($LASTEXITCODE) { throw 'attaching the installer and update packages failed' }
 
   # The same on Ubuntu 24.04 (docs/LINUX_WSL.md): a tar.xz, which keeps the
   # libraries' links and the programs' modes, of a folder that runs from
