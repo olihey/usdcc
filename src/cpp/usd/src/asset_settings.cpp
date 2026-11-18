@@ -8,8 +8,10 @@
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
 #include "usdcc/core/log.h"
+#include "usdcc/core/toast.h"
 #include "usdcc/usd/asset_servers.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDir>
 #include <QDialog>
@@ -26,12 +28,15 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QStatusBar>
+#include <QThreadPool>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -56,14 +61,77 @@ std::vector<std::string> splitHosts(const std::string& text) {
     return hosts;
 }
 
+std::string sizeText(uint64_t bytes) {
+    const double megabytes = double(bytes) / (1024.0 * 1024.0);
+    if (megabytes >= 1024.0) return QString::number(megabytes / 1024.0, 'f', 1).toStdString() + " GB";
+    return QString::number(megabytes, 'f', megabytes < 10.0 ? 1 : 0).toStdString() + " MB";
+}
+
+// Trims the cache to its limit soon, away from the UI: once at start, and after the
+// limit changes (not on every step of the spin box).
+void trimCacheSoon() {
+    QCoreApplication* app = QCoreApplication::instance();
+    if (!app) return;
+    static QPointer<QTimer> timer;
+    if (!timer) {
+        timer = new QTimer(app);
+        timer->setSingleShot(true);
+        timer->setInterval(1500);
+        QObject::connect(timer, &QTimer::timeout, app, []() {
+            QThreadPool::globalInstance()->start([]() {
+                // The configuration's limit with it, when the app sets none.
+                usdcc::assets::defaultContext();
+                usdcc::assets::DiskCache::shared().trim();
+            });
+        });
+    }
+    timer->start();
+}
+
+// Settings > Assets > Clear Cache: asks, then removes the downloaded copies away from the UI.
+void clearCache() {
+    QWidget* parent = QApplication::activeWindow();
+    usdcc::assets::DiskCache& cache = usdcc::assets::DiskCache::shared();
+    const QString question =
+        QObject::tr("Remove every downloaded copy (%1) from %2?\n\nStages already open keep what they loaded; "
+                    "files are downloaded again when they are next needed.")
+            .arg(QString::fromStdString(sizeText(cache.size())), QDir::toNativeSeparators(QString::fromStdString(
+                                                                      usdcc::assets::toUtf8(cache.root()))));
+    if (QMessageBox::question(parent, QObject::tr("Clear Cache"), question, QMessageBox::Yes | QMessageBox::Cancel,
+                              QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
+    QThreadPool::globalInstance()->start([]() {
+        const usdcc::assets::DiskCache::Cleared cleared = usdcc::assets::DiskCache::shared().clear();
+        QMetaObject::invokeMethod(
+            qApp,
+            [cleared]() {
+                const core::ToastRequest toast{.kind = core::ToastKind::Success, .title = "Cache cleared"};
+                std::string message = "Removed " + std::to_string(cleared.files) +
+                                      (cleared.files == 1 ? " file (" : " files (") + sizeText(cleared.bytes) + ").";
+                if (cleared.kept) {
+                    message += " " + std::to_string(cleared.kept) +
+                               (cleared.kept == 1 ? " is in use and stays." : " are in use and stay.");
+                }
+                USDCC_LOG_TOAST_AS(core::LogLevel::Info, "usdcc.assets", toast, "{}", message);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
 void apply(core::Settings& settings, const std::string& key) {
     if (key.empty() || key == kAssetEnvironmentKey) {
         setPreferredAssetEnvironment(settings.get<std::string>(kAssetEnvironmentKey));
     }
     if (key.empty() || key == kAssetOfflineKey) usdcc::assets::setOffline(settings.get<bool>(kAssetOfflineKey));
     if (key.empty() || key == kAssetCacheLimitKey) {
-        const double gigabytes = settings.get<double>(kAssetCacheLimitKey);
-        usdcc::assets::DiskCache::shared().setLimit(static_cast<uint64_t>(gigabytes * 1024.0 * 1024.0 * 1024.0));
+        // Left at its default, the configuration's "cacheLimitGB" decides, if it has one.
+        std::optional<uint64_t> limit;
+        if (!settings.isDefault(kAssetCacheLimitKey)) {
+            limit = static_cast<uint64_t>(settings.get<double>(kAssetCacheLimitKey) * 1024.0 * 1024.0 * 1024.0);
+        }
+        usdcc::assets::DiskCache::shared().setLimit(limit);
+        trimCacheSoon();
     }
     if (key.empty() || key == kAssetHttpHostsKey) {
         usdcc::assets::setExtraAllowedHosts(splitHosts(settings.get<std::string>(kAssetHttpHostsKey)));
@@ -184,12 +252,21 @@ void defineAssetSettings(core::Settings& settings) {
                      .group = "Cache",
                      .label = "Cache size (GB)",
                      .description = "How much the downloaded copies may take on disk. Those used longest ago go first. "
+                                    "Left at 20, the configuration's \"cacheLimitGB\" decides when it has one. "
                                     "They are in " +
                                     usdcc::assets::toUtf8(usdcc::assets::DiskCache::shared().root()) + ".",
                      .type = SettingType::Float,
                      .defaultValue = 20.0,
                      .minimum = 0.5,
                      .maximum = 10000.0});
+    settings.define({.key = kAssetClearCacheKey,
+                     .category = kCategory,
+                     .group = "Cache",
+                     .label = "Downloaded copies",
+                     .description = "Removes them all, but none a stage has open right now.",
+                     .type = SettingType::Action,
+                     .defaultValue = std::string("Clear Cache"),
+                     .action = clearCache});
     apply(settings, {});
     settingsConnection() = settings.changed.connect([&settings](const std::string& key) {
         if (key.rfind("Assets/", 0) == 0) apply(settings, key);

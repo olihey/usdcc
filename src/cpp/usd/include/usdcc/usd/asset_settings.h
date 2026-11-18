@@ -17,6 +17,7 @@ inline constexpr const char* kAssetEnvironmentKey = "Assets/environment";
 inline constexpr const char* kAssetOfflineKey = "Assets/offline";
 inline constexpr const char* kAssetCacheLimitKey = "Assets/cacheLimitGB";
 inline constexpr const char* kAssetHttpHostsKey = "Assets/httpHosts";
+inline constexpr const char* kAssetClearCacheKey = "Assets/clearCache";  // a button
 
 // Defines Settings > Assets and applies it to the asset library, now and whenever one
 // changes. Before the first stage opens.

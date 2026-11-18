@@ -144,6 +144,24 @@ USDCC_TEST(settings_folder_list) {
     CHECK(!settings.setValue("A/folders", 1), "and only text");
 }
 
+USDCC_TEST(settings_action) {
+    Settings settings;
+    int runs = 0;
+    CHECK(settings.define({.key = "A/clear", .category = "A", .type = SettingType::Action,
+                           .defaultValue = std::string("Clear Cache"), .action = [&runs]() { ++runs; }}),
+          "an action: a button");
+    CHECK(settings.get<std::string>("A/clear") == "Clear Cache", "its value is the button's text");
+    CHECK(!settings.setValue("A/clear", std::string("Other")) && settings.get<std::string>("A/clear") == "Clear Cache",
+          "which can't be set");
+    CHECK(settings.isDefault("A/clear"), "so there's nothing to reset");
+    settings.definition("A/clear")->action();
+    CHECK(runs == 1, "it runs what it was given");
+    SettingType type{};
+    CHECK(usdcc::core::parseSettingType("action", &type) && type == SettingType::Action &&
+              usdcc::core::settingTypeName(SettingType::Action) == "action",
+          "its type name");
+}
+
 USDCC_TEST(settings_folder_and_next_start) {
     Settings settings;
     CHECK(settings.define({.key = "A/folder", .category = "A", .type = SettingType::Folder, .defaultValue = std::string("C:/x")}),

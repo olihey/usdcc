@@ -32,12 +32,13 @@ and lives in its shared library, so the exe and the Python modules see one insta
 | `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Python`, `USD` (docs/USD_RUNTIME.md §3), or a plugin's own |
 | `group` | A heading on that page (`Theme`, `Interface`, `Tools`) |
 | `label`, `description` | What the dialog shows |
-| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none), `FolderList` (paths separated by `;`, in order; `""` for none) |
+| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none), `FolderList` (paths separated by `;`, in order; `""` for none), `Action` (a button; the default value is its text, nothing is stored, and the definition's `action` runs on a click: Settings > Assets > Clear Cache) |
 | `defaultValue` | A `SettingValue`: `std::variant<bool, int, double, std::string>` |
 | `minimum`, `maximum` | An Int or Float range, used when `maximum > minimum` |
 | `choices` | A Choice setting's values |
 | `fixedFolders` | A FolderList's folders that are always used: listed greyed before the value's (or after, with `after`), with a label, not part of the value and not removable (Settings > Plugins > Plugin folders) |
 | `appliesAtNextStart` | A change is saved at once but used from the next start. The dialog says so while the value differs from the one the session started with |
+| `action` | An Action's `std::function<void()>`, run on the UI thread |
 
 **Values.**
 - `define()` loads the saved value. If none is saved, or the saved value no longer fits
@@ -199,6 +200,7 @@ at a time.
 | Folder | line edit with a Browse button |
 | Color | swatch button that opens Qt's color dialog |
 | Shortcut | one-chord key sequence editor with a clear button |
+| Action | push button, with no Reset |
 
 - The color follows the picker while it is open, at most every 100 ms. Cancel restores
   the old color.
@@ -230,7 +232,7 @@ settings.define("MyPlugin/autoSave", "bool", True, label="Save automatically",
 - `set()` raises `ValueError` for a value that doesn't fit, and `KeyError` for an unknown
   key.
 - `define()` takes the type as a string: `bool`, `int`, `float`, `string`, `choice`,
-  `color`, `shortcut`, `folder` or `folders`. It also takes `minimum`/`maximum` (give both), `choices`
+  `color`, `shortcut`, `folder` or `folders` (not `action`, which only C++ defines). It also takes `minimum`/`maximum` (give both), `choices`
   and `applies_at_next_start`.
 - A defined setting gets a row in the dialog, on a page of its own category.
 - `show(category="")` opens the dialog, on that category's page if given (the V-Ray

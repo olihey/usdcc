@@ -118,7 +118,7 @@ QTreeWidgetItem* findPlace(const QTreeWidget* places, const QString& group, cons
 void touch(const QString& file) {
     QDir().mkpath(QFileInfo(file).absolutePath());
     QFile out(file);
-    out.open(QIODevice::WriteOnly);
+    if (!out.open(QIODevice::WriteOnly)) return;
     out.write("#usda 1.0\n");
 }
 

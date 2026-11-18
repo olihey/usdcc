@@ -15,6 +15,7 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -191,12 +192,18 @@ DiskCache& DiskCache::shared() {
 
 void DiskCache::setSharedRoot(const fs::path& root) {
     std::lock_guard<std::mutex> lock(sharedMutex());
-    uint64_t limit = 0;
-    if (sharedCache()) limit = sharedCache()->limit();
+    std::optional<uint64_t> limit;
+    std::optional<uint64_t> configLimit;
+    if (sharedCache()) {
+        std::lock_guard<std::mutex> old(sharedCache()->m_mutex);
+        limit = sharedCache()->m_limit;
+        configLimit = sharedCache()->m_configLimit;
+    }
     // Leaked on purpose when replaced: a thread may be in the old one's ensure().
     sharedCache().release();
     sharedCache() = std::make_unique<DiskCache>(root);
-    if (limit) sharedCache()->setLimit(limit);
+    sharedCache()->m_limit = limit;
+    sharedCache()->m_configLimit = configLimit;
 }
 
 fs::path DiskCache::fileFor(const Endpoint& endpoint, const std::string& path, const Entry& version) const {
@@ -319,7 +326,7 @@ Result<fs::path> DiskCache::ensure(const Endpoint& endpoint, const std::string& 
         std::lock_guard<std::mutex> lock(m_mutex);
         if (result.ok()) m_handedOut[key] = std::chrono::steady_clock::now();
         m_addedSinceTrim += added;
-        if (m_addedSinceTrim >= std::min(kTrimEvery, m_limit / 8 + 1)) {
+        if (m_addedSinceTrim >= std::min(kTrimEvery, effectiveLimit() / 8 + 1)) {
             m_addedSinceTrim = 0;
             trimNow = true;
         }
@@ -333,14 +340,34 @@ Result<fs::path> DiskCache::ensure(const Endpoint& endpoint, const std::string& 
     return result;
 }
 
-void DiskCache::setLimit(uint64_t bytes) {
+uint64_t DiskCache::effectiveLimit() const {
+    if (m_limit) return *m_limit;
+    if (m_configLimit) return *m_configLimit;
+    return kDefaultLimit;
+}
+
+void DiskCache::limitChanged(uint64_t before) {
+    // A smaller cache: the next download trims, whatever it adds.
+    if (effectiveLimit() < before) m_addedSinceTrim = kTrimEvery;
+}
+
+void DiskCache::setLimit(std::optional<uint64_t> bytes) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    const uint64_t before = effectiveLimit();
     m_limit = bytes;
+    limitChanged(before);
+}
+
+void DiskCache::setConfigLimit(std::optional<uint64_t> bytes) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const uint64_t before = effectiveLimit();
+    m_configLimit = bytes;
+    limitChanged(before);
 }
 
 uint64_t DiskCache::limit() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_limit;
+    return effectiveLimit();
 }
 
 uint64_t DiskCache::size() const {
@@ -350,6 +377,67 @@ uint64_t DiskCache::size() const {
         if (each.is_regular_file(error) && isVersionFile(each.path())) total += each.file_size(error);
     }
     return total;
+}
+
+DiskCache::Cleared DiskCache::clear(std::chrono::seconds grace) {
+    std::set<std::string> kept;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto now = std::chrono::steady_clock::now();
+        for (const auto& [file, when] : m_handedOut) {
+            if (now - when < grace) kept.insert(file);
+        }
+        m_addedSinceTrim = 0;
+    }
+    Cleared cleared;
+    std::vector<fs::path> versions;
+    std::vector<fs::path> records;
+    std::vector<fs::path> parts;
+    std::error_code error;
+    for (auto it = fs::recursive_directory_iterator(m_root, error); !error && it != fs::recursive_directory_iterator();
+         it.increment(error)) {
+        const fs::path& file = it->path();
+        const std::string name = toUtf8(file.filename());
+        const auto endsWith = [&name](std::string_view suffix) {
+            return name.size() >= suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
+        if (it->is_directory(error)) {
+            // A download's lock: its owner removes it.
+            if (endsWith(".lock")) it.disable_recursion_pending();
+            continue;
+        }
+        if (!it->is_regular_file(error)) continue;
+        if (isVersionFile(file)) {
+            versions.push_back(file);
+        } else if (endsWith(".meta")) {
+            records.push_back(file);
+        } else if (endsWith(".part")) {
+            parts.push_back(file);
+        }
+    }
+    for (const fs::path& version : versions) {
+        const uint64_t size = fs::file_size(version, error);
+        // Open in some process: Windows refuses, and it stays with its record.
+        if (kept.count(toUtf8(version)) || !fs::remove(version, error) || error) {
+            ++cleared.kept;
+            continue;
+        }
+        ++cleared.files;
+        cleared.bytes += size;
+    }
+    // Records whose version is gone, now or before.
+    for (const fs::path& record : records) {
+        fs::path version = record;
+        version.replace_extension();
+        if (!fs::exists(version, error)) fs::remove(record, error);
+    }
+    // A download still running writes to its part; one untouched for a while was cut off.
+    const auto stale = fs::file_time_type::clock::now() - kStaleLock;
+    for (const fs::path& part : parts) {
+        const fs::file_time_type written = fs::last_write_time(part, error);
+        if (!error && written < stale) fs::remove(part, error);
+    }
+    return cleared;
 }
 
 void DiskCache::trim(std::chrono::seconds grace) {
@@ -371,7 +459,8 @@ void DiskCache::trim(std::chrono::seconds grace) {
     std::set<std::string> kept;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        limit = m_limit;
+        limit = effectiveLimit();
+        m_addedSinceTrim = 0;
         const auto now = std::chrono::steady_clock::now();
         for (auto it = m_handedOut.begin(); it != m_handedOut.end();) {
             if (now - it->second < grace) {

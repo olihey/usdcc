@@ -66,6 +66,7 @@ std::optional<SettingValue> QSettingsBackend::read(const core::SettingDefinition
     case SettingType::Shortcut:
     case SettingType::Folder:
     case SettingType::FolderList:
+    case SettingType::Action:
         // QSettings reads an unquoted "a, b" back as a list.
         if (stored.typeId() == QMetaType::QStringList) {
             return stored.toStringList().join(QLatin1Char(',')).toStdString();

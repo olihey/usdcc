@@ -380,6 +380,16 @@ Editor makeEditor(Settings& settings, const SettingDefinition& definition, QWidg
                     edit->setKeySequence(settingShortcut(key, settings));
                 }};
     }
+    case SettingType::Action: {
+        auto* button = new QPushButton(parent);
+        button->setObjectName(QStringLiteral("settingAction"));
+        QObject::connect(button, &QPushButton::clicked, button, [&settings, key]() {
+            // The definition as it is now: a plugin may have defined it again.
+            const SettingDefinition* current = settings.definition(key);
+            if (current && current->action) current->action();
+        });
+        return {button, [&settings, key, button]() { button->setText(QString::fromStdString(settings.get<std::string>(key))); }};
+    }
     }
     return {new QWidget(parent), []() {}};
 }

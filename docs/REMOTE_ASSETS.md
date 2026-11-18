@@ -269,10 +269,19 @@ The extension is kept, for renderers that are handed the cache file (§10).
   front, or with characters Windows refuses) is stored under a hash of it, in a `_` folder.
 - **Location:** `USDCC_ASSET_CACHE`, or else `asset-cache` in the user's usdcc data folder. Shared
   by every usdcc process and tool.
-- **Size limit:** default 20 GB (`"cacheLimitGB"`), least recently used first, checked after
-  every 64 MB downloaded. A version handed out in the last minute stays, as its path may not be
-  opened yet; an open one is safe anyway (Windows refuses to remove it, and elsewhere its bytes stay
-  until it's closed).
+- **Size limit:** least recently used first, checked after every 64 MB downloaded. A version
+  handed out in the last minute stays, as its path may not be opened yet; an open one is safe
+  anyway (Windows refuses to remove it, and elsewhere its bytes stay until it's closed).
+  - **Which limit:** Settings > Assets > Cache size when it's changed from its default of 20 GB;
+    else the configuration's `"cacheLimitGB"`; else 20 GB. Reading the configuration again
+    doesn't take back the setting's value (`DiskCache::setLimit` and `setConfigLimit`).
+  - **A lower limit** makes the next download trim, however little it adds. The app also trims in
+    the background once at start and a moment after the setting changes, so a smaller cache
+    doesn't wait for downloads.
+- **Clear Cache** (Settings > Assets, `DiskCache::clear()`): removes every version and its record,
+  and parts of downloads cut off over half a minute ago. It asks first and says what it removed.
+  Versions open in some process stay, as do ones handed out in the last minute; a loaded layer
+  keeps its bytes, and the next resolve downloads again. Folders and download locks stay.
 - **Offline mode** (`"offline": true`, or the settings page): resolve and open from the cache
   only, each path as the version of it used last. What isn't cached is missing, and nothing can be
   browsed.
@@ -355,11 +364,10 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   file: `Resolved · test · webdav://studio/chars/hero/tex/albedo.png`, and in its tooltip.
   *Not built:* the same in the Dependencies panel and the Layer Editor.
 - **Settings > Assets** ([asset_settings.cpp](../src/cpp/usd/src/asset_settings.cpp)): the
-  default environment, Work offline, Allowed hosts for plain HTTP, and the cache's size. The
-  settings dialog builds its pages from typed settings and has no tables or buttons, so **the
-  servers and environments stay in the configuration file** (§4), whose path the page names.
-  *Planned:* the Asset Servers editor for them, with a Test button (§10.1). *Not built:* Clear
-  cache.
+  default environment, Work offline, Allowed hosts for plain HTTP, the cache's size, and a
+  Clear Cache button (§7). The settings dialog builds its pages from typed settings and has no
+  tables, so **the servers and environments stay in the configuration file** (§4), whose path
+  the page names. *Planned:* the Asset Servers editor for them, with a Test button (§10.1).
 - **Login.** **Edit > Asset Server Login...** saves a credential id's user and password, or a token,
   in Windows Credential Manager (`usdcc-assets:<id>`), which the library reads (§8). A 401 says
   in the Log which credential the server refused. *Changed from the plan:* no dialog pops up on a

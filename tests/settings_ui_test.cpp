@@ -391,6 +391,25 @@ USDCC_TEST(settings_folder_list_editor) {
     CHECK(settings.get<std::string>("Plugins/folders").empty() && list->count() == 2, "Reset leaves only the fixed folders");
 }
 
+// An action (SettingType::Action): a button that runs it, with no Reset.
+USDCC_TEST(settings_action_button) {
+    TestSettings testSettings;
+    QTemporaryDir temp;
+    usdcc::ui::UiScaleController scale(application(), temp.filePath(QStringLiteral("ui.ini")));
+    Settings settings;
+    int runs = 0;
+    settings.define({.key = "Assets/clear", .category = "Assets", .label = "Downloaded copies", .type = SettingType::Action,
+                     .defaultValue = std::string("Clear Cache"), .action = [&runs]() { ++runs; }});
+    usdcc::ui::SettingsDialog dialog(nullptr, settings);
+    auto* button = withKey<QPushButton>(&dialog, QStringLiteral("Assets/clear"), QStringLiteral("settingAction"));
+    CHECK(button && button->text() == QStringLiteral("Clear Cache"), "a button with the action's text");
+    if (!button) return;
+    button->click();
+    CHECK(runs == 1, "that runs it");
+    auto* reset = withKey<QToolButton>(&dialog, QStringLiteral("Assets/clear"), QStringLiteral("settingReset"));
+    CHECK(reset && reset->isHidden(), "and nothing to reset");
+}
+
 USDCC_TEST(settings_tool_shortcuts) {
     TestSettings testSettings;
     QTemporaryDir temp;

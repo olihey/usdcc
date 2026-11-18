@@ -57,9 +57,14 @@ public:
     Result<std::filesystem::path> ensure(const Endpoint& endpoint, const std::string& path, const Entry& version,
                                          const Download& download);
 
-    // Twenty gigabytes unless set. Checked after downloads, not on every one.
-    void setLimit(uint64_t bytes);
+    // How much the versions may take: the app's choice, else the configuration's
+    // ("cacheLimitGB"), else twenty gigabytes. Checked after downloads, not on every
+    // one; a lower limit than before makes the next download trim. Nothing (nullopt)
+    // forgets that source's choice.
+    void setLimit(std::optional<uint64_t> bytes);
+    void setConfigLimit(std::optional<uint64_t> bytes);
     uint64_t limit() const;
+    static constexpr uint64_t kDefaultLimit = 20ull * 1024 * 1024 * 1024;
     // Removes the versions used longest ago until the cache is within its limit. One
     // this process was handed within `grace` stays: its path may not be opened yet. An
     // open one is safe either way: Windows refuses to remove it, and elsewhere its
@@ -68,6 +73,16 @@ public:
     // The bytes of every version in the cache.
     uint64_t size() const;
 
+    struct Cleared {
+        uint64_t files = 0;   // versions removed
+        uint64_t bytes = 0;   // what they took
+        uint64_t kept = 0;    // versions left: open in some process, or just handed out
+    };
+    // Removes every version, and what's left of downloads that were cut off, but none
+    // this process was handed within `grace` and none that's open (as trim()). A layer
+    // already loaded keeps its bytes; the next resolve downloads again.
+    Cleared clear(std::chrono::seconds grace = std::chrono::seconds(60));
+
 private:
     void handedOut(const std::filesystem::path& file);
 
@@ -75,7 +90,11 @@ private:
     mutable std::mutex m_mutex;
     std::map<std::string, std::shared_future<Result<std::filesystem::path>>> m_inFlight;
     std::map<std::string, std::chrono::steady_clock::time_point> m_handedOut;
-    uint64_t m_limit = 20ull * 1024 * 1024 * 1024;
+    uint64_t effectiveLimit() const;  // with m_mutex held
+    void limitChanged(uint64_t before);  // with m_mutex held
+
+    std::optional<uint64_t> m_limit;
+    std::optional<uint64_t> m_configLimit;
     uint64_t m_addedSinceTrim = 0;
 };
 

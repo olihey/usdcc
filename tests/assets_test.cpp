@@ -560,6 +560,95 @@ USDCC_TEST(assets_cache_downloads_once_for_many_threads) {
     CHECK(succeeded == 8, "and all eight get the file: %d", succeeded.load());
 }
 
+USDCC_TEST(assets_cache_limit_the_app_sets_wins) {
+    Fixture fixture;
+    DiskCache cache(fixture.root / "own-cache");
+    CHECK(cache.limit() == DiskCache::kDefaultLimit, "twenty gigabytes unless set");
+    cache.setConfigLimit(5000);
+    CHECK(cache.limit() == 5000, "the configuration's, when the app sets none");
+    cache.setLimit(7000);
+    CHECK(cache.limit() == 7000, "the app's over it");
+    cache.setConfigLimit(3000);
+    CHECK(cache.limit() == 7000, "a configuration read again doesn't take it back");
+    cache.setLimit(std::nullopt);
+    CHECK(cache.limit() == 3000, "the app's choice forgotten (its setting at the default): the configuration's");
+    cache.setConfigLimit(std::nullopt);
+    CHECK(cache.limit() == DiskCache::kDefaultLimit, "neither: the default");
+}
+
+USDCC_TEST(assets_cache_lower_limit_trims_at_the_next_download) {
+    Fixture fixture;
+    const Endpoint& prod = fixture.config.endpoints.at("prod");
+    const auto downloadOf = [](const Entry& entry) {
+        return [entry](const fs::path& into) {
+            writeFile(into, std::string(1000, 'x'));
+            return Result<Entry>::success(entry);
+        };
+    };
+    {
+        // Another process's, which handed these out long ago.
+        DiskCache before(fixture.root / "own-cache");
+        for (const char* name : {"/a.usda", "/b.usda", "/c.usda"}) {
+            Entry version;
+            version.etag = name;
+            CHECK(before.ensure(prod, name, version, downloadOf(version)).ok(), "%s downloaded", name);
+        }
+    }
+    DiskCache cache(fixture.root / "own-cache");
+    cache.setLimit(10000);
+    Entry d;
+    d.etag = "d";
+    CHECK(cache.ensure(prod, "/d.usda", d, downloadOf(d)).ok() && cache.size() == 4000,
+          "within the limit, nothing goes: %d bytes", int(cache.size()));
+    cache.setLimit(1500);
+    CHECK(cache.size() == 4000, "a lower limit alone removes nothing yet");
+    Entry e;
+    e.etag = "e";
+    const Result<fs::path> latest = cache.ensure(prod, "/e.usda", e, downloadOf(e));
+    CHECK(latest.ok() && fs::exists(latest.value), "the next download is kept");
+    CHECK(cache.size() <= 2000, "and trims to the new limit, though it added little: %d bytes", int(cache.size()));
+}
+
+USDCC_TEST(assets_cache_clears_all_but_what_is_in_use) {
+    Fixture fixture;
+    const Endpoint& prod = fixture.config.endpoints.at("prod");
+    const fs::path root = fixture.root / "own-cache";
+    DiskCache other(root);
+    std::vector<fs::path> files;
+    for (const char* name : {"/a.usda", "/sub/b.usda"}) {
+        Entry version;
+        version.etag = name;
+        const Result<fs::path> file = other.ensure(prod, name, version, [&version](const fs::path& into) {
+            writeFile(into, std::string(100, 'x'));
+            return Result<Entry>::success(version);
+        });
+        CHECK(file.ok(), "%s downloaded", name);
+        files.push_back(file.value);
+    }
+    const fs::path folder = files.front().parent_path();
+    const fs::path stalePart = folder / "z@1.usda.1-0.part";
+    const fs::path freshPart = folder / "y@1.usda.2-0.part";
+    writeFile(stalePart, "cut off");
+    writeFile(freshPart, "still coming");
+    fs::last_write_time(stalePart, fs::file_time_type::clock::now() - std::chrono::minutes(5));
+    fs::create_directories(folder / "y@1.usda.lock");
+
+    const DiskCache::Cleared none = other.clear();
+    CHECK(none.files == 0 && none.kept == 2 && fs::exists(files[0]) && fs::exists(files[1]),
+          "versions this process just handed out stay: %d removed, %d kept", int(none.files), int(none.kept));
+
+    DiskCache cache(root);
+    const DiskCache::Cleared cleared = cache.clear();
+    CHECK(cleared.files == 2 && cleared.bytes == 200 && cleared.kept == 0, "the rest go: %d files, %d bytes",
+          int(cleared.files), int(cleared.bytes));
+    CHECK(cache.size() == 0 && !fs::exists(files[0]) && !fs::exists(files[1]), "nothing left in the cache");
+    fs::path record = files[0];
+    record += ".meta";
+    CHECK(!fs::exists(record), "nor their records");
+    CHECK(!fs::exists(stalePart) && fs::exists(freshPart), "a download cut off goes, one still written to stays");
+    CHECK(fs::is_directory(folder / "y@1.usda.lock"), "a download's lock is its owner's to remove");
+}
+
 // ---- Through OpenUSD ------------------------------------------------------------------
 
 USDCC_TEST(assets_resolver_is_registered_for_its_scheme) {

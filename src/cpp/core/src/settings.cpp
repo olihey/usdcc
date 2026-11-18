@@ -11,7 +11,7 @@ namespace usdcc::core {
 
 namespace {
 
-constexpr std::array<std::pair<SettingType, std::string_view>, 9> kTypeNames = {{
+constexpr std::array<std::pair<SettingType, std::string_view>, 10> kTypeNames = {{
     {SettingType::Bool, "bool"},
     {SettingType::Int, "int"},
     {SettingType::Float, "float"},
@@ -21,6 +21,7 @@ constexpr std::array<std::pair<SettingType, std::string_view>, 9> kTypeNames = {
     {SettingType::Shortcut, "shortcut"},
     {SettingType::Folder, "folder"},
     {SettingType::FolderList, "folders"},
+    {SettingType::Action, "action"},
 }};
 
 bool hasRange(const SettingDefinition& definition) { return definition.maximum > definition.minimum; }
@@ -135,6 +136,7 @@ std::optional<SettingValue> Settings::normalized(const SettingDefinition& defini
     case SettingType::Shortcut:
     case SettingType::Folder:
     case SettingType::FolderList:
+    case SettingType::Action:
         if (const std::string* s = std::get_if<std::string>(&value)) {
             return *s;
         }
@@ -171,6 +173,7 @@ const Settings::Entry* Settings::find(std::string_view key) const {
 }
 
 SettingValue Settings::load(const SettingDefinition& definition) {
+    if (definition.type == SettingType::Action) return definition.defaultValue;
     if (auto stored = m_backend->read(definition)) {
         if (auto value = normalized(definition, *stored)) {
             return std::move(*value);
@@ -271,6 +274,9 @@ bool Settings::isPendingNextStart(std::string_view key) const {
 bool Settings::setValue(std::string_view key, const SettingValue& value) {
     Entry* entry = find(key);
     if (!entry) {
+        return false;
+    }
+    if (entry->definition.type == SettingType::Action) {
         return false;
     }
     auto checked = normalized(entry->definition, value);

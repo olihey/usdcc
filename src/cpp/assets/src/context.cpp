@@ -76,9 +76,12 @@ void loadDefaults(Defaults& all, const Config* replacement) {
     all.loaded = true;
     // Its switches, and nothing remembered from the configuration before it.
     setConfigOffline(all.config.offline);
-    if (all.config.cacheLimitGB) {
-        DiskCache::shared().setLimit(static_cast<uint64_t>(*all.config.cacheLimitGB * 1024.0 * 1024.0 * 1024.0));
+    // Under the app's limit, when it sets one (DiskCache::setLimit).
+    std::optional<uint64_t> limit;
+    if (all.config.cacheLimitGB && *all.config.cacheLimitGB > 0) {
+        limit = static_cast<uint64_t>(*all.config.cacheLimitGB * 1024.0 * 1024.0 * 1024.0);
     }
+    DiskCache::shared().setConfigLimit(limit);
     forgetLookups();
     forgetDownMarks();
 }

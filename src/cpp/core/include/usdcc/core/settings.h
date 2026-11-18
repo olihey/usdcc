@@ -20,6 +20,7 @@
 #include "usdcc/core/export.h"
 #include "usdcc/core/signal.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -42,9 +43,13 @@ enum class SettingType {
     // std::string, folders' paths separated by ';' ("" = none), in order; the
     // definition's fixedFolders are listed with them but aren't part of the value
     FolderList,
+    // A button that runs the definition's `action`, such as Clear Cache. The default
+    // value (std::string) is its text. Nothing is stored and there is nothing to reset.
+    Action,
 };
 
-// "bool", "int", "float", "string", "choice", "color", "shortcut", "folder", "folders".
+// "bool", "int", "float", "string", "choice", "color", "shortcut", "folder", "folders",
+// "action".
 USDCC_CORE_API std::string_view settingTypeName(SettingType type);
 // The names above; false if `text` is none of them.
 USDCC_CORE_API bool parseSettingType(std::string_view text, SettingType* type);
@@ -75,6 +80,8 @@ struct SettingDefinition {
     // A change is saved at once but only used from the next start. The dialog
     // says so while the value differs from the one this session started with.
     bool appliesAtNextStart = false;
+    // Action: what the button does, on the thread the dialog runs on.
+    std::function<void()> action;
 };
 
 // Where setting values are stored. read() returns nothing for a value that

@@ -606,7 +606,10 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             definition.key = key;
             if (!usdcc::core::parseSettingType(type, &definition.type)) {
                 throw py::value_error("unknown setting type '" + type +
-                                      "' (bool, int, float, string, choice, color, shortcut or folder)");
+                                      "' (bool, int, float, string, choice, color, shortcut, folder or folders)");
+            }
+            if (definition.type == usdcc::core::SettingType::Action) {
+                throw py::value_error("an action setting can't be defined from Python");
             }
             definition.defaultValue = defaultValue;
             definition.label = label;
