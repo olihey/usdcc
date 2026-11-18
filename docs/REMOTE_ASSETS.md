@@ -590,6 +590,7 @@ is not an `ArResolver` written in Python.
 | **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
+| **Later** | More storage backends through Apache OpenDAL (§13.5): one plugin, one transport per scheme | A stage opens from a second backend (Azure Blob or SFTP, say) through the same plugin, and the deploy ships the full notice list for its Rust dependencies |
 | **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
 
 ### 13.1 What the spike found
@@ -745,6 +746,47 @@ What §10 describes, in [asset_servers.h](../src/cpp/usd/include/usdcc/usd/asset
 Storm check above was outside it); the login dialog, Open Stage from URL, Open Stage with Options'
 environment choice, the status bar and the host toast, which were built but not clicked; `https://`;
 Linux; and a 401 in the app.
+
+### 13.5 Later: more storage backends through OpenDAL
+
+*Not tried; written down 2026-11-18 so it isn't lost.* There are far more network and cloud stores
+than we want to write transports for. **Apache OpenDAL** puts about 50 behind one API: S3 and the
+S3-compatible stores (MinIO, Ceph, R2, Wasabi), GCS, Azure Blob/Data Lake/Files, HDFS, SFTP, FTP,
+WebDAV, HTTP, Swift, Aliyun OSS, Tencent COS, Huawei OBS, B2, Dropbox, Google Drive, OneDrive.
+
+- **It fits the transport (§6) almost call for call.** `stat` gives size, modified time and ETag
+  (an `Entry`); `list`; `read` with `if_none_match` for `fetch`'s `knownEtag`; `write` with
+  `if_match` / `if_not_exists` for `put`. Not every backend has ETags or conditional writes;
+  `versionKey()` already falls back to time and size.
+- **One plugin, many schemes.** It registers a transport for each scheme it is built with
+  (`s3://`, `gcs://`, `azblob://`, `sftp://` …) and turns an `Endpoint` and its credential into
+  OpenDAL's key/value options for that service. Names, stacks, the cache, offline mode and the
+  picker work unchanged. HTTP and WebDAV stay ours: they have mirrors and addresses (§5.1).
+- **S3 first may not need it.** libcurl's SigV4 (§8) covers S3 and every S3-compatible store with
+  no new dependency. OpenDAL is for when Azure, SFTP or consumer clouds are wanted too.
+- **Build.** The core is Rust: the build needs a Rust toolchain, and OpenDAL needs its own overlay
+  port (it isn't in vcpkg as far as we know). We'd use its C binding or the newer C++ one, both less
+  mature than the Rust API: check first that they build on Windows and expose the ETag and
+  conditional options. Build only the services wanted (Cargo features); that also keeps the
+  dependency tree small. TLS: no second OpenSSL in the process (§12).
+- **Licence.** OpenDAL is Apache-2.0: fine to ship with usdcc's BSD-3 code, closed or open. We must
+  ship its licence text and the contents of its `NOTICE`, mark any files we patch, and not use
+  its trademarks to suggest endorsement.
+- **Its Rust dependencies are the real work.** Every crate is linked into the one DLL, so we
+  distribute dozens to a few hundred of them, depending on the services. Most are MIT, Apache-2.0,
+  BSD, ISC, Zlib or Unicode and only want their notices shipped. A few have unusual licences: the TLS
+  stack's (CDLA-Permissive-2.0 root certificates, `ring`'s ISC/OpenSSL-style terms), and possibly
+  an MPL-2.0 crate, whose source we must point to (the upstream crate, if unchanged).
+  `cargo about generate` writes the notice file for the exact build; `cargo deny check licenses`
+  with an allow list fails the build when a GPL, LGPL or AGPL crate comes in. The deploy puts
+  `LICENSE`, `NOTICE` and that output in `licenses/opendal/`, and inside the plugin's own package
+  if it is ever shipped alone.
+- **The services' own terms.** The licence covers the code, not the services. Google Drive, Dropbox
+  and OneDrive need an OAuth app registered with them under their developer terms; S3, Azure, GCS
+  and SFTP take the user's own keys.
+- **Not chosen instead:** rclone (about 70 providers, but a Go runtime in the process and its own
+  credential system; better as a mount the default resolver reads); Arrow's `arrow::fs` (only S3,
+  GCS, Azure and HDFS, and all of Arrow); one vendor SDK per provider (what this is meant to avoid).
 
 ## 14. Testing
 
