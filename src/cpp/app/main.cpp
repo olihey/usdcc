@@ -539,6 +539,25 @@ int main(int argc, char** argv) {
                 return;
             }
 
+            // Every viewport follows the current stage (Appearance > Follow Current Stage):
+            // one on screen shows the stage once it's current, and a new one would only
+            // show the same. Made current behind the others, it waits in the Stages menu.
+            if (usdcc::ui::ViewPanelRegistry::followsCurrentStageByDefault(QStringLiteral("viewport"))) {
+                usdcc::ui::ViewPanel* following = nullptr;
+                for (ads::CDockWidget* dockWidget : window.dockManager()->dockWidgetsMap()) {
+                    auto* existing = qobject_cast<usdcc::usd::ViewportViewPanel*>(dockWidget);
+                    if (existing && !existing->isClosed() && existing->followsCurrentStage()) {
+                        following = existing;
+                        break;
+                    }
+                }
+                if (following) {
+                    if (!behind) following->setAsCurrentTab();
+                    focus(following);
+                    return;
+                }
+            }
+
             // A new viewport, as a tab of the workspace's viewport area (§7.3); without
             // one, beside any viewport.
             ads::CDockManager* docks = window.dockManager();

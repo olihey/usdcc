@@ -742,21 +742,76 @@ USDCC_TEST(workspace_view_panel_follows_the_current_stage) {
     app.stages.setCurrentStage(one);
     auto* panel = new usdcc::usd::OutlinerViewPanel(&app.stages, two, app.undo, QStringLiteral("F"), &app.window);
     app.window.dockManager()->addDockWidget(ads::RightDockWidgetArea, panel);
-    panel->setFollowsCurrentStage(true);
-    CHECK(panel->currentStage() == one, "turning it on shows the current stage");
-    app.stages.setCurrentStage(two);
-    CHECK(panel->currentStage() == two, "and it switches with it");
-    // Its stage dropdown: the combo box listing the stages.
-    for (QComboBox* combo : panel->findChildren<QComboBox*>()) {
-        const int index = combo->findData(static_cast<qlonglong>(one->cacheId()));
-        if (index >= 0 && combo->count() == 2) {
-            combo->setCurrentIndex(index);
-            break;
-        }
+    // Its stage dropdown: Follow Current Stage, a separator, then the stages.
+    QComboBox* combo = nullptr;
+    for (QComboBox* candidate : panel->findChildren<QComboBox*>()) {
+        if (candidate->findData(static_cast<qlonglong>(one->cacheId())) >= 0) combo = candidate;
     }
-    CHECK(panel->currentStage() == one && !panel->followsCurrentStage(), "picking a stage stops it");
+    CHECK(combo && combo->count() == 4 && combo->itemText(0).startsWith(QStringLiteral("Follow Current Stage")) &&
+              combo->findData(static_cast<qlonglong>(one->cacheId())) == 2 &&
+              combo->findData(static_cast<qlonglong>(two->cacheId())) == 3,
+          "the dropdown: Follow Current Stage, then the stages");
+    if (!combo) return;
+    CHECK(combo->currentIndex() == 3, "it shows its own stage");
+
+    combo->setCurrentIndex(0);
+    CHECK(panel->followsCurrentStage() && panel->currentStage() == one, "picking Follow Current Stage shows the current one");
+    CHECK(combo->currentText() == QStringLiteral("Follow Current Stage (%1)").arg(combo->itemText(2)),
+          "and the entry names it: %s", qPrintable(combo->currentText()));
+    app.stages.setCurrentStage(two);
+    CHECK(panel->currentStage() == two && combo->currentIndex() == 0, "it switches with it, still following");
+    CHECK(combo->currentText() == QStringLiteral("Follow Current Stage (%1)").arg(combo->itemText(3)),
+          "the entry names the new one: %s", qPrintable(combo->currentText()));
+
+    combo->setCurrentIndex(2);
+    CHECK(panel->currentStage() == one && !panel->followsCurrentStage() && combo->currentIndex() == 2,
+          "picking a stage stops it");
+    app.stages.setCurrentStage(one);
     app.stages.setCurrentStage(two);
     CHECK(panel->currentStage() == one, "and it stays");
+
+    panel->setFollowsCurrentStage(true);
+    CHECK(combo->currentIndex() == 0 && panel->currentStage() == two, "turned on in code, the dropdown says so");
+}
+
+USDCC_TEST(workspace_follow_current_stage_setting) {
+    App app;
+    auto& settings = usdcc::core::Settings::instance();
+    const std::string outlinerKey = ViewPanelRegistry::followSettingKey(QStringLiteral("outliner"));
+    for (const char* type : {"viewport", "outliner", "attributes"}) {
+        const usdcc::core::SettingDefinition* definition =
+            settings.definition(ViewPanelRegistry::followSettingKey(QString::fromLatin1(type)));
+        CHECK(definition && definition->category == "Appearance" && definition->group == "Follow Current Stage" &&
+                  definition->type == usdcc::core::SettingType::Bool && !settings.get<bool>(definition->key),
+              "a check box per registered type, off: %s", type);
+    }
+    const StageRefPtr one = app.stages.createStage();
+    const StageRefPtr two = app.stages.createStage();
+    app.stages.setCurrentStage(one);
+
+    ViewPanel* first = app.registry.open(QStringLiteral("outliner"), two, app.window.dockManager(), &app.window);
+    ViewPanel* attributes = app.registry.open(QStringLiteral("attributes"), two, app.window.dockManager(), &app.window);
+    CHECK(first && attributes && !first->followsCurrentStage() && first->currentStage() == two, "off: as before");
+    if (!first || !attributes) return;
+
+    settings.setValue(outlinerKey, true);
+    CHECK(first->followsCurrentStage() && first->currentStage() == one, "on: every open one of the type follows");
+    CHECK(!attributes->followsCurrentStage() && attributes->currentStage() == two, "the other types don't");
+    ViewPanel* second = app.registry.open(QStringLiteral("outliner"), two, app.window.dockManager(), &app.window);
+    CHECK(second && second->followsCurrentStage() && second->currentStage() == one, "and a new one does");
+    ViewPanel* copy = attributes->duplicateBeside();
+    CHECK(copy && !copy->followsCurrentStage(), "a copy of another type doesn't");
+    app.stages.setCurrentStage(two);
+    CHECK(first->currentStage() == two && second && second->currentStage() == two, "they switch with it");
+
+    settings.setValue(outlinerKey, false);
+    CHECK(!first->followsCurrentStage() && second && !second->followsCurrentStage() && first->currentStage() == two,
+          "off again: they stop, on the stage they show");
+
+    settings.setValue(ViewPanelRegistry::followSettingKey(QStringLiteral("viewport")), true);
+    ViewPanel* viewport = app.registry.create(QStringLiteral("viewport"), one, app.window.dockManager(), &app.window);
+    CHECK(viewport && viewport->followsCurrentStage() && viewport->currentStage() == two, "a new viewport follows");
+    delete viewport;
 }
 
 USDCC_TEST(workspace_open_stage_with_options) {

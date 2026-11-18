@@ -375,6 +375,12 @@ ApplyResult apply(const Definition& definition, const ApplyContext& context) {
                 return docks->findDockWidget(name) != nullptr || madeNames.contains(name);
             }));
             madeNames.insert(panel->objectName());
+            // A stage's own viewport shows that stage, even when Appearance > Follow
+            // Current Stage has every new viewport follow.
+            if (entry.isPerStageViewport() && panel->followsCurrentStage()) {
+                panel->setFollowsCurrentStage(false);
+                panel->setStage(stage);
+            }
             placements.push_back({&entry, panel, true});
         }
         return panel;

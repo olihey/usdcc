@@ -262,10 +262,14 @@ per stage. So the extra views are `"stage": "current"` viewports:
 
 - They show the current stage, and **switch with it**: clicking another stage's tab in the viewport area
   makes it current (as now), and every following view goes with it, refitted if its `fit` isn't `none`.
-- Picking a stage in the Stage dropdown stops the following. **Follow Current Stage**, a checkable entry
-  in every view panel's tab menu, starts and stops it (`ViewPanel::setFollowsCurrentStage()`); any view
-  panel can follow, not only viewports. (The plan had a *Current stage* entry in the dropdown; the tab menu
-  keeps the dropdown a plain list of stages.)
+- **Follow Current Stage**, the first entry of every view panel's Stage dropdown, starts it; picking a
+  stage there stops it (`ViewPanel::setFollowsCurrentStage()`). Any view panel can follow, not only
+  viewports. While following, the entry names the stage it shows: *Follow Current Stage (shot.usda)*.
+- Settings > Appearance > **Follow Current Stage** has a check box per panel type
+  (`Appearance/followCurrentStage.<id>`, defined by `ViewPanelRegistry::add()`). On, every panel of the
+  type follows: each one made from then on, and all open ones at once; off stops them all. A stage's own
+  viewport in a workspace (`"stage": "each"`) still shows its stage, and with viewports following, a stage
+  opened shows in a following viewport instead of getting a new one.
 - With no stage open they're empty, like any viewport.
 - Sessions store the following (`"follows": true` on the panel's entry).
 
@@ -755,7 +759,7 @@ All four phases and 2b, on 2026-11-15.
     plugins' `workspaces/` folders, the first-start default, and how the workspace was left on quitting.
   - `resources/workspaces/`: the eight workspaces and the schema; `tools/deploy.py` copies them.
 - **Differs from the plan**:
-  - Follow Current Stage is in the tab menu, not the Stage dropdown (§3.5.4).
+  - Follow Current Stage is the Stage dropdown's first entry, as planned, and a setting per panel type (§3.5.4).
   - Fit All Views isn't in the View menu or the options menu: it's in the workspace menu and the HUD's
     Camera menu, and on Shift+F.
   - A switch reuses the panel on screen before a fixed one behind it: with an Outliner from the Stages menu

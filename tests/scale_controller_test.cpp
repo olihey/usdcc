@@ -301,7 +301,8 @@ USDCC_TEST(scale_controller_panel_round_trip) {
     }
     CHECK(stages.openStage(path.toStdString()) != nullptr, "the stage opens");
     QApplication::processEvents();
-    CHECK(combo->count() == 1 && combo->sizeHint() == emptyHint, "the combo's size hint doesn't follow its stage name (%dx%d, was %dx%d)",
+    // Follow Current Stage, a separator, the stage.
+    CHECK(combo->count() == 3 && combo->sizeHint() == emptyHint, "the combo's size hint doesn't follow its stage name (%dx%d, was %dx%d)",
           combo->sizeHint().width(), combo->sizeHint().height(), emptyHint.width(), emptyHint.height());
     const QSize comboSize = combo->size();
     const auto toolbarState = [combo]() {

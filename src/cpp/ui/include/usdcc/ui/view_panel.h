@@ -36,8 +36,8 @@ class PanelMenuButton;
 //
 // The stage may be null: the app starts with no stage open, and a panel can
 // be left without one when its stage is closed. A panel with no stage shows
-// empty content, adopts the next stage that is opened, and keeps its dropdown
-// disabled while no stage is open at all.
+// empty content and adopts the next stage that is opened; with no stage open at
+// all its dropdown offers only Follow Current Stage.
 //
 // Left of the dropdown sits an options button (three horizontal lines) whose
 // menu each panel type fills with its own view options — populateOptionsMenu(),
@@ -117,9 +117,12 @@ public:
     virtual void restoreSessionState(const QJsonObject& state) { Q_UNUSED(state); }
 
     // Following the current stage (docs/WORKSPACES.md §3.5.4): the panel shows
-    // whatever stage is current, and switches when it changes. Picking a stage in
-    // its dropdown stops it; the tab's menu has Follow Current Stage. Turning it on
-    // switches to the current stage now.
+    // whatever stage is current, and switches when it changes. The Stage dropdown's
+    // first entry, Follow Current Stage, starts it; picking a stage there stops it.
+    // Turning it on switches to the current stage now. Appearance > Follow Current
+    // Stage in the settings turns it on for every panel of a type
+    // (ViewPanelRegistry::followSettingKey()): when the panel gets its type, and for
+    // all of them whenever that setting changes (off stops them all).
     bool followsCurrentStage() const { return m_followsCurrentStage; }
     void setFollowsCurrentStage(bool follows);
 
@@ -178,6 +181,9 @@ protected:
     virtual QWidget* createOptionsPanel() { return nullptr; }
 
     void showEvent(QShowEvent* event) override;
+    // Its type set (ViewPanelRegistry::kTypeProperty): it follows the current stage
+    // if that type's setting says so.
+    bool event(QEvent* event) override;
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -204,9 +210,9 @@ protected:
 
     QComboBox* stageCombo() const { return m_stageCombo; }
 
-    // Repopulates stageCombo() from stageManager()->stages(), restores its
-    // selection to match currentStage() (none when that is null) and
-    // disables it while no stage is open. Subclasses call this once, as
+    // Repopulates stageCombo(): Follow Current Stage, then stageManager()->stages(),
+    // and restores its selection to match (Follow Current Stage while following, else
+    // currentStage(), none when that is null). Subclasses call this once, as
     // the last line of their own constructor, to apply their initial stage
     // (see onStageChanged()'s comment for why the base constructor can't do
     // this itself).
@@ -216,6 +222,11 @@ private Q_SLOTS:
     void onStageComboChanged(int index);
 
 private:
+    // The dropdown's selection, and its Follow Current Stage entry naming the current stage.
+    void syncStageCombo();
+    // The setting for this panel's type, if it has one: on starts following, off stops it.
+    void applyFollowSetting(bool stopIfOff);
+
     usdcc::usd::StageManager* m_stageManager;
     usdcc::usd::StageRefPtr m_stage;
     PanelMenuButton* m_optionsButton;

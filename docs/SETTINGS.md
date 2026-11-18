@@ -89,6 +89,7 @@ take them for a `bool`.
 |---|---|---|---|
 | `Appearance/accentColor` | Color | `#3d8bfd` | `theme.cpp` |
 | `Appearance/uiScale` | Int 80–200 | 100 | `UiScaleController` (also View > UI Scale, Ctrl+Numpad+/-) |
+| `Appearance/followCurrentStage.<id>` | Bool | off | `ViewPanelRegistry::add()`, one per panel type (group *Follow Current Stage*): every panel of that type follows the current stage ([WORKSPACES.md](WORKSPACES.md) §3.5.4) |
 | `Shortcuts/tools.select` | Shortcut | `Q` | `ViewportToolBars` |
 | `Shortcuts/tools.move` | Shortcut | `W` | `ViewportToolBars` |
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |

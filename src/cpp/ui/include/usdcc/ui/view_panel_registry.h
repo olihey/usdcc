@@ -5,6 +5,7 @@
 #include <QString>
 
 #include <functional>
+#include <string>
 #include <vector>
 
 class QWidget;
@@ -39,10 +40,20 @@ public:
     // app); copied by Duplicate.
     static constexpr const char* kTypeProperty = "usdccPanelType";
 
-    // Registers a type; registering an id again replaces it in place.
+    // Registers a type; registering an id again replaces it in place. Defines the
+    // type's Follow Current Stage setting (followSettingKey()), a check box under
+    // Appearance > Follow Current Stage in the Settings dialog, labelled `displayName`.
     void add(const QString& id, const QString& displayName, Factory create);
-    // False if it isn't registered. Panels of it that are open aren't touched.
+    // False if it isn't registered. Panels of it that are open aren't touched, and
+    // its setting stays defined (a plugin turned on again finds it as it was).
     bool remove(const QString& id);
+
+    // "Appearance/followCurrentStage.<id>": on, every panel of type `id` follows the
+    // current stage (ViewPanel::setFollowsCurrentStage()), new ones as they get their
+    // type; turning it on or off starts or stops it in all open ones.
+    static std::string followSettingKey(const QString& id);
+    // That setting's value: false for a type never registered.
+    static bool followsCurrentStageByDefault(const QString& id);
 
     // In registration order.
     const std::vector<Entry>& entries() const { return m_entries; }

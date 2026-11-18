@@ -1,5 +1,6 @@
 #include "usdcc/ui/view_panel.h"
 
+#include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/panel_maximizer.h"
@@ -20,6 +21,7 @@
 #include <QBoxLayout>
 #include <QComboBox>
 #include <QContextMenuEvent>
+#include <QEvent>
 #include <QFrame>
 #include <QLabel>
 #include <QMenu>
@@ -105,6 +107,12 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
     m_currentStageConnection = m_stageManager->currentStageChanged.connect([this](usdcc::usd::StageRefPtr current) {
         // With none current (the last stage closed), stageClosed above has emptied it.
         if (m_followsCurrentStage && current) setStage(std::move(current));
+        syncStageCombo();  // its Follow Current Stage entry names the current stage
+    });
+    // Appearance > Follow Current Stage, for this panel's type.
+    onSettingsChanged(this, [this](const std::string& key) {
+        const QString type = property(ViewPanelRegistry::kTypeProperty).toString();
+        if (!type.isEmpty() && key == ViewPanelRegistry::followSettingKey(type)) applyFollowSetting(true);
     });
 }
 
@@ -114,6 +122,22 @@ void ViewPanel::setFollowsCurrentStage(bool follows) {
     if (follows) {
         if (usdcc::usd::StageRefPtr current = m_stageManager->currentStage()) setStage(std::move(current));
     }
+    syncStageCombo();
+}
+
+void ViewPanel::applyFollowSetting(bool stopIfOff) {
+    const QString type = property(ViewPanelRegistry::kTypeProperty).toString();
+    if (type.isEmpty()) return;
+    const bool on = ViewPanelRegistry::followsCurrentStageByDefault(type);
+    if (on || stopIfOff) setFollowsCurrentStage(on);
+}
+
+bool ViewPanel::event(QEvent* event) {
+    if (event->type() == QEvent::DynamicPropertyChange &&
+        static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == ViewPanelRegistry::kTypeProperty) {
+        applyFollowSetting(false);
+    }
+    return ads::CDockWidget::event(event);
 }
 
 void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
@@ -121,12 +145,7 @@ void ViewPanel::setStage(usdcc::usd::StageRefPtr stage) {
         return;
     }
     m_stage = std::move(stage);
-
-    const int index = m_stage ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())) : -1;
-    if (index != m_stageCombo->currentIndex()) {
-        const QSignalBlocker blocker(m_stageCombo);
-        m_stageCombo->setCurrentIndex(index);
-    }
+    syncStageCombo();
 
     onStageChanged(m_stage);
     notifyOptionsChanged();  // what they offer may depend on the stage
@@ -141,12 +160,21 @@ void ViewPanel::addPanelControls(QBoxLayout* toolbarLayout) {
     toolbarLayout->addWidget(m_stageCombo, 1);
 }
 
+namespace {
+// The Stage dropdown's first entry; the stages follow a separator.
+constexpr int kFollowIndex = 0;
+}  // namespace
+
 void ViewPanel::refreshStageCombo() {
     const QSignalBlocker blocker(m_stageCombo);
     m_stageCombo->clear();
+    // No data: only the stages' entries carry a cache id.
+    m_stageCombo->addItem(tr("Follow Current Stage"));
+    m_stageCombo->setItemData(kFollowIndex, tr("Show whichever stage is current, and switch with it"), Qt::ToolTipRole);
     // File names, with just enough folders to tell same-named files apart;
     // the full identifier is the tooltip.
     const auto& stages = m_stageManager->stages();
+    if (!stages.empty()) m_stageCombo->insertSeparator(m_stageCombo->count());
     const std::vector<std::string> names = usdcc::usd::shortStageNames(stages);
     for (std::size_t i = 0; i < stages.size(); ++i) {
         m_stageCombo->addItem(QString::fromStdString(names[i]), static_cast<qlonglong>(stages[i]->cacheId()));
@@ -154,12 +182,30 @@ void ViewPanel::refreshStageCombo() {
                                   QString::fromStdString(stages[i]->usdStage()->GetRootLayer()->GetIdentifier()),
                                   Qt::ToolTipRole);
     }
-    m_stageCombo->setCurrentIndex(m_stage ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId())) : -1);
-    m_stageCombo->setEnabled(m_stageCombo->count() > 0);
+    syncStageCombo();
+}
+
+void ViewPanel::syncStageCombo() {
+    if (m_stageCombo->count() == 0) return;  // not filled yet (refreshStageCombo())
+    const QSignalBlocker blocker(m_stageCombo);
+    // While following it says which stage that is now.
+    const usdcc::usd::StageRefPtr current = m_stageManager->currentStage();
+    const int currentIndex = current ? m_stageCombo->findData(static_cast<qlonglong>(current->cacheId())) : -1;
+    m_stageCombo->setItemText(kFollowIndex, currentIndex > kFollowIndex
+                                                ? tr("Follow Current Stage (%1)").arg(m_stageCombo->itemText(currentIndex))
+                                                : tr("Follow Current Stage"));
+    const int index = m_followsCurrentStage ? kFollowIndex
+                      : m_stage             ? m_stageCombo->findData(static_cast<qlonglong>(m_stage->cacheId()))
+                                            : -1;
+    if (index != m_stageCombo->currentIndex()) m_stageCombo->setCurrentIndex(index);
 }
 
 void ViewPanel::onStageComboChanged(int index) {
     if (index < 0) {
+        return;
+    }
+    if (index == kFollowIndex) {
+        setFollowsCurrentStage(true);
         return;
     }
     const auto cacheId = static_cast<long>(m_stageCombo->itemData(index).toLongLong());
@@ -167,6 +213,7 @@ void ViewPanel::onStageComboChanged(int index) {
         // A stage picked by hand: this panel shows that one from now on.
         m_followsCurrentStage = false;
         setStage(stage);
+        syncStageCombo();  // setStage() does nothing for the stage it already shows
     }
 }
 
@@ -315,12 +362,6 @@ void ViewPanel::populateContextMenu(QMenu* menu) {
                         [this, maximizer]() { maximizer->toggle(this); });
     }
     menu->addAction(tr("Duplicate"), this, [this]() { duplicateBeside(); });
-    QAction* follow = menu->addAction(tr("Follow Current Stage"));
-    follow->setObjectName(QStringLiteral("followCurrentStage"));
-    follow->setCheckable(true);
-    follow->setChecked(m_followsCurrentStage);
-    follow->setStatusTip(tr("Show whichever stage is current, and switch with it"));
-    connect(follow, &QAction::toggled, this, [this](bool on) { setFollowsCurrentStage(on); });
 }
 
 ViewPanel* ViewPanel::duplicateBeside() {
@@ -335,6 +376,8 @@ ViewPanel* ViewPanel::duplicateBeside() {
     }));
     // So it is made again after a restart (ViewPanelRegistry::savePanels()).
     copy->setProperty(ViewPanelRegistry::kTypeProperty, property(ViewPanelRegistry::kTypeProperty));
+    // A copy of a following panel follows too.
+    if (m_followsCurrentStage) copy->setFollowsCurrentStage(true);
 
     if (auto* area = dockAreaWidget()) {
         dockManager()->addDockWidgetTabToArea(copy, area);

@@ -1,5 +1,6 @@
 #include "usdcc/ui/view_panel_registry.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/view_panel.h"
 
@@ -20,7 +21,22 @@ namespace {
 constexpr auto kOpenedPanelsKey = "ViewPanels/opened";
 }  // namespace
 
+std::string ViewPanelRegistry::followSettingKey(const QString& id) {
+    return "Appearance/followCurrentStage." + id.toStdString();
+}
+
+bool ViewPanelRegistry::followsCurrentStageByDefault(const QString& id) {
+    return core::Settings::instance().get<bool>(followSettingKey(id), false);
+}
+
 void ViewPanelRegistry::add(const QString& id, const QString& displayName, Factory create) {
+    // Defining it again (the type registered again) keeps its value.
+    core::Settings::instance().define({.key = followSettingKey(id),
+                                       .category = "Appearance",
+                                       .group = "Follow Current Stage",
+                                       .label = displayName.toStdString(),
+                                       .type = core::SettingType::Bool,
+                                       .defaultValue = false});
     Entry entry{id, displayName, std::move(create)};
     auto it = std::find_if(m_entries.begin(), m_entries.end(), [&id](const Entry& e) { return e.id == id; });
     if (it != m_entries.end()) {

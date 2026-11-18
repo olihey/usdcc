@@ -517,7 +517,10 @@ SessionController::LoadResult SessionController::load(QJsonObject session, const
     for (auto& [panel, entry] : made) {
         const bool pinned = entry.value(QStringLiteral("optionsPinned")).toBool();
         if (panel->isOptionsPinned() != pinned) panel->setOptionsPinned(pinned);
-        panel->setFollowsCurrentStage(entry.value(QStringLiteral("follows")).toBool());
+        // Appearance > Follow Current Stage, on for its type, wins over a session saved without it.
+        panel->setFollowsCurrentStage(entry.value(QStringLiteral("follows")).toBool() ||
+                                      usdcc::ui::ViewPanelRegistry::followsCurrentStageByDefault(
+                                          panel->property(usdcc::ui::ViewPanelRegistry::kTypeProperty).toString()));
         if (entry.contains(QStringLiteral("state"))) panel->restoreSessionState(entry.value(QStringLiteral("state")).toObject());
     }
     if (m_context.scriptEditor && session.contains(QStringLiteral("scriptEditor"))) {
