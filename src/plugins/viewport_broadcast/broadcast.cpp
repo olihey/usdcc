@@ -161,7 +161,9 @@ void Broadcast::sendNext() {
     if (watchers().isEmpty()) return;  // Grabbing costs the UI thread: only for someone
     if (m_dirty) {
         m_dirty = false;
-        m_sharpPending = false;
+        // Once the picture has been still for a while (the timer ran out before anyone
+        // watched), the sharp one follows this one at once; else when the timer runs out.
+        m_sharpPending = !m_still.isActive();
         const QImage image = m_source->grab();
         if (image.isNull()) return;
         m_lastImage = image;

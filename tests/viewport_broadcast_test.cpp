@@ -175,6 +175,22 @@ USDCC_TEST(broadcast_still_picture_sends_nothing) {
     CHECK(waitUntil([&] { return int(pictures(watcher).size()) > before; }), "a changed picture isn't sent");
 }
 
+USDCC_TEST(broadcast_first_watcher_of_a_still_picture_gets_it_sharp) {
+    Fixture fixture(/*stillAfterMs=*/80);
+    if (!fixture.broadcast) return;
+    // The picture has been still for a while when the first watcher comes.
+    QTest::qWait(300);
+    RawMember watcher;
+    watcher.hello(*fixture.broadcast->room(), fixture.secret(), QStringLiteral("Anna"));
+    CHECK(waitUntil([&] { return pictures(watcher).size() >= 2; }), "no sharp picture follows the first one (%d)",
+          int(pictures(watcher).size()));
+    const QList<Message> got = pictures(watcher);
+    if (got.size() >= 2) {
+        CHECK(got[1].bytes.size() > got[0].bytes.size(), "the second picture isn't the sharper one (%d, %d bytes)",
+              int(got[0].bytes.size()), int(got[1].bytes.size()));
+    }
+}
+
 USDCC_TEST(broadcast_newcomer_sees_the_picture_at_once) {
     Fixture fixture;
     if (!fixture.broadcast) return;
