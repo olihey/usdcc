@@ -19,6 +19,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPointer>
 #include <QToolButton>
 #include <QTemporaryDir>
 #include <QTest>
@@ -266,8 +267,11 @@ USDCC_TEST(peers_host_closing_its_room_has_no_toast) {
     benWindow.toasts()->dismissAll();
     QTest::qWait(50);
 
+    // Peers deletes a room once it has closed (deleteLater), and waiting runs that: watch
+    // Ben's through a QPointer, which a plain pointer would read after it was freed.
+    QPointer<Room> benRoom = joined;
     room->close(QStringLiteral("The broadcast ended"));
-    QTest::qWaitFor([&] { return joined->state() == Room::State::Closed; }, 5000);
+    QTest::qWaitFor([&] { return !benRoom || benRoom->state() == Room::State::Closed; }, 5000);
     QTest::qWait(100);
     auto titles = [](usdcc::ui::MainWindow& window) {
         QStringList list;
