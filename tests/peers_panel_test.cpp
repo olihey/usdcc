@@ -7,10 +7,13 @@
 
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
+#include "usdcc/ui/main_window.h"
 #include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/peers_side_panel.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/ui/toast.h"
+#include "usdcc/ui/toast_manager.h"
 
 #include <QApplication>
 #include <QLineEdit>
@@ -225,4 +228,53 @@ USDCC_TEST(peers_panel_emoji) {
     }
     CHECK(say->text() == QStringLiteral("🚀") && PeersSidePanel::recentEmoji().value(0) == QStringLiteral("🚀"),
           "clicking an emoji in the menu put in '%s'", qPrintable(say->text()));
+}
+
+// The host closing its own room (a broadcast's Stop) says so where it closed it, so the
+// Peers controller adds no "Left …" toast of its own; a member that was in it gets one.
+USDCC_TEST(peers_host_closing_its_room_has_no_toast) {
+    TestSettings settings;
+    // A window each, as two instances would have: the toasts would merge in one.
+    usdcc::ui::MainWindow annaWindow;
+    usdcc::ui::MainWindow benWindow;
+    for (usdcc::ui::MainWindow* window : {&annaWindow, &benWindow}) {
+        window->resize(1000, 700);
+        window->show();
+    }
+    QTest::qWait(50);
+    QTemporaryDir folder;
+    auto controllerFor = [&](const QString& name, usdcc::ui::MainWindow* window) {
+        Peers::Options options;
+        options.profile.name = name;
+        options.roomsFolder = folder.path();
+        options.network = std::make_unique<FakeNetworkDiscovery>(QStringLiteral("toast test"));
+        return std::make_unique<PeersController>(std::make_unique<Peers>(std::move(options)), window,
+                                                 PeersController::Hooks{});
+    };
+    auto anna = controllerFor(QStringLiteral("Anna"), &annaWindow);
+    auto ben = controllerFor(QStringLiteral("Ben"), &benWindow);
+    HostOptions host;
+    host.name = QStringLiteral("Broadcast: test");
+    QString error;
+    Room* room = anna->peers()->host(host, &error);
+    CHECK(room, "couldn't host: %s", qPrintable(error));
+    if (!room) return;
+    Room* joined = ben->joinLinkOrAddress(room->link(), {}, &error);
+    CHECK(joined && QTest::qWaitFor([&] { return joined->state() == Room::State::Open; }, 5000), "Ben doesn't get in: %s",
+          qPrintable(error));
+    annaWindow.toasts()->dismissAll();
+    benWindow.toasts()->dismissAll();
+    QTest::qWait(50);
+
+    room->close(QStringLiteral("The broadcast ended"));
+    QTest::qWaitFor([&] { return joined->state() == Room::State::Closed; }, 5000);
+    QTest::qWait(100);
+    auto titles = [](usdcc::ui::MainWindow& window) {
+        QStringList list;
+        for (usdcc::ui::ToastWidget* toast : window.toasts()->visibleToasts()) list << toast->title();
+        return list;
+    };
+    CHECK(titles(annaWindow).isEmpty(), "the host is told it closed its own room: %s", qPrintable(titles(annaWindow).join(" | ")));
+    CHECK(titles(benWindow).size() == 1 && titles(benWindow).front().startsWith(QStringLiteral("Left ")),
+          "the member isn't told the room ended: %s", qPrintable(titles(benWindow).join(" | ")));
 }

@@ -703,7 +703,8 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     // usdcc/app.py makes a Viewport.
     m.def(
         "add_viewport_menu_action",
-        [](const std::string& id, const std::string& label, py::object callback, py::object checked, py::object applies) {
+        [](const std::string& id, const std::string& label, py::object callback, py::object checked, py::object applies,
+           py::object enabled) {
             usdcc::usd::ViewportMenuEntry entry;
             entry.id = id;
             entry.label = QString::fromStdString(label);
@@ -727,9 +728,11 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             };
             entry.checked = predicate(std::move(checked));
             entry.applies = predicate(std::move(applies));
+            entry.enabled = predicate(std::move(enabled));
             usdcc::usd::ViewportMenuEntries::instance().add(std::move(entry));
         },
-        py::arg("id"), py::arg("label"), py::arg("callback"), py::arg("checked"), py::arg("applies"));
+        py::arg("id"), py::arg("label"), py::arg("callback"), py::arg("checked"), py::arg("applies"),
+        py::arg("enabled"));
     m.def(
         "remove_viewport_menu_action",
         [](const std::string& id) { usdcc::usd::ViewportMenuEntries::instance().remove(id); }, py::arg("id"));

@@ -302,12 +302,21 @@ USDCC_TEST(viewport_menu_entries_from_a_plugin) {
     hidden.run = [](usdcc::usd::ViewportViewPanel*) {};
     hidden.applies = [](usdcc::usd::ViewportViewPanel*) { return false; };
     ViewportMenuEntries::instance().add(hidden);
+    ViewportMenuEntry greyed;
+    greyed.id = "test.stop";
+    greyed.label = "Broadcast/Stop Broadcast";
+    greyed.run = [](usdcc::usd::ViewportViewPanel*) {};
+    greyed.enabled = [&](usdcc::usd::ViewportViewPanel*) { return live; };
+    ViewportMenuEntries::instance().add(greyed);
 
     QMenu options;
     viewport.fillOptions(&options);
     QAction* action = findAction(&options, "viewportMenuEntry_test.broadcast");
     CHECK(action && action->isCheckable() && !action->isChecked(), "the entry isn't in the options menu, unchecked");
     CHECK(!findAction(&options, "viewportMenuEntry_test.hidden"), "an entry that doesn't apply is shown");
+    QAction* stop = findAction(&options, "viewportMenuEntry_test.stop");
+    CHECK(stop && !stop->isEnabled(), "an entry that isn't enabled isn't shown greyed out");
+    CHECK(stop && stop->parent() != &options, "\"Broadcast/Stop Broadcast\" isn't in a submenu");
     if (action) action->trigger();
     CHECK(ran == &viewport && live, "triggering it doesn't run it for this viewport");
 
@@ -315,10 +324,67 @@ USDCC_TEST(viewport_menu_entries_from_a_plugin) {
     viewport.fillTab(&tab);
     QAction* again = findAction(&tab, "viewportMenuEntry_test.broadcast");
     CHECK(again && again->isChecked(), "the tab menu doesn't have it, checked now");
+    QAction* stopNow = findAction(&tab, "viewportMenuEntry_test.stop");
+    CHECK(stopNow && stopNow->isEnabled(), "enabled() true doesn't enable it");
 
     ViewportMenuEntries::instance().remove("test.broadcast");
     ViewportMenuEntries::instance().remove("test.hidden");
+    ViewportMenuEntries::instance().remove("test.stop");
     QMenu after;
     viewport.fillOptions(&after);
     CHECK(!findAction(&after, "viewportMenuEntry_test.broadcast"), "a removed entry stays");
+}
+
+USDCC_TEST(viewport_border) {
+    usdcc::usd::StageManager stages;
+    auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
+    auto undo = std::make_shared<usdcc::usd::UndoManager>();
+    usdcc::usd::ViewportViewPanel viewport(&stages, stages.createStage(), toolSet, undo);
+    // The 3D view's container, and the frame around it whose margin is the border.
+    QWidget* container = nullptr;
+    for (QWidget* child : viewport.findChildren<QWidget*>()) {
+        if (qstrcmp(child->metaObject()->className(), "QWindowContainer") == 0) container = child;
+    }
+    QWidget* frame = container ? container->parentWidget() : nullptr;
+    CHECK(frame && frame->layout(), "no frame around the 3D view");
+    if (!frame || !frame->layout()) return;
+    CHECK(!viewport.borderColor().isValid() && frame->layout()->contentsMargins() == QMargins(),
+          "a viewport starts with a border");
+
+    viewport.setBorderColor(QColor(229, 83, 75));
+    CHECK(viewport.borderColor() == QColor(229, 83, 75), "the border colour isn't kept");
+    CHECK(frame->layout()->contentsMargins() == QMargins(3, 3, 3, 3), "the view doesn't make room for a 3-pixel border");
+
+    viewport.setBorderColor({});
+    CHECK(!viewport.borderColor().isValid() && frame->layout()->contentsMargins() == QMargins(),
+          "the view doesn't get its room back without the border");
+}
+
+USDCC_TEST(viewport_close_guards) {
+    using usdcc::usd::ViewportViewPanel;
+    usdcc::usd::StageManager stages;
+    auto toolSet = std::make_shared<usdcc::tools::ToolSet>();
+    auto undo = std::make_shared<usdcc::usd::UndoManager>();
+    ViewportViewPanel viewport(&stages, stages.createStage(), toolSet, undo);
+    CHECK(viewport.features().testFlag(ads::CDockWidget::CustomCloseHandling),
+          "closing a viewport doesn't come to it first (CustomCloseHandling)");
+    CHECK(viewport.canClose(), "a viewport with no guards can't close");
+
+    ViewportViewPanel* asked = nullptr;
+    bool allow = false;
+    const int guard = ViewportViewPanel::addCloseGuard([&](ViewportViewPanel* panel) {
+        asked = panel;
+        return allow;
+    });
+    CHECK(!viewport.canClose() && asked == &viewport, "a guard saying no doesn't keep it open, or isn't asked about it");
+    asked = nullptr;
+    viewport.requestCloseDockWidget();  // The tab's close button
+    CHECK(asked == &viewport && !viewport.isClosed(), "the close button doesn't ask, or closes anyway");
+    allow = true;
+    CHECK(viewport.canClose(), "a guard saying yes keeps it open");
+
+    ViewportViewPanel::removeCloseGuard(guard);
+    allow = false;
+    asked = nullptr;
+    CHECK(viewport.canClose() && !asked, "a removed guard is still asked");
 }

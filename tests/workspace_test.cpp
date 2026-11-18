@@ -30,6 +30,7 @@
 
 #include <DockAreaWidget.h>
 #include <DockManager.h>
+#include <DockWidgetTab.h>
 
 #include <QAction>
 #include <QApplication>
@@ -832,4 +833,32 @@ def Xform "World"
         CHECK(thing && thing.HasAuthoredPayloads() && !thing.IsLoaded(), "its payload isn't loaded");
         CHECK(!opened->usdStage()->GetPrimAtPath(PXR_NS::SdfPath("/World/Thing/Ball")), "so what's in it isn't there");
     }
+}
+
+// A viewport closed before a switch back to a workspace comes back with its tab: ADS 4.5
+// moved it into place with the tab hidden and then called it open.
+USDCC_TEST(workspace_brings_a_closed_viewport_back_with_its_tab) {
+    App app;
+    ads::CDockManager* docks = app.window.dockManager();
+    const StageRefPtr stage = app.stages.createStage();
+    QString error;
+    const std::optional<workspace::Definition> three = workspace::fromJson(parse(kThreeColumns), QStringLiteral("file"), &error);
+    CHECK(three && workspace::apply(*three, app.context()).applied, "applied");
+    QApplication::processEvents();
+
+    ViewPanel* viewport = nullptr;
+    for (ViewPanel* panel : openPanels(docks)) {
+        if (typeOf(panel) == "viewport" && panel->currentStage() == stage && !panel->followsCurrentStage()) viewport = panel;
+    }
+    CHECK(viewport, "the stage's viewport is open");
+    if (!viewport) return;
+    viewport->toggleView(false);  // Its tab's close button
+    QApplication::processEvents();
+    CHECK(viewport->isClosed() && viewport->tabWidget()->isHidden(), "closed, with its tab hidden");
+
+    CHECK(workspace::apply(*three, app.context()).applied, "applied again");
+    QApplication::processEvents();
+    CHECK(!viewport->isClosed(), "the closed viewport isn't used and opened again");
+    CHECK(!viewport->tabWidget()->isHidden(), "the viewport is back without its tab");
+    CHECK(viewport->toggleViewAction()->isChecked(), "its View menu entry still says it's closed");
 }

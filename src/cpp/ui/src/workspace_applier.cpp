@@ -497,6 +497,15 @@ ApplyResult apply(const Definition& definition, const ApplyContext& context) {
     }
 
     // 5. The tree (§7.2).
+    // Closed panels open where they are first, so that only open ones are moved. ADS
+    // 4.5 inserts a closed dock widget with its tab hidden and then marks it open
+    // (CDockAreaWidget::insertDockWidget): a viewport closed before the switch came back
+    // without its tab, and toggleView(true) below then saw nothing to open.
+    for (const auto& [entry, list] : panelsOf) {
+        for (ViewPanel* panel : list) {
+            if (panel->isClosed() && panel->dockAreaWidget()) panel->toggleView(true);
+        }
+    }
     Builder builder(docks, panelsOf);
     ads::CDockAreaWidget* rootArea = nullptr;
     if (ViewPanel* seed = builder.seedOf(layout)) rootArea = docks->addDockWidget(ads::LeftDockWidgetArea, seed);

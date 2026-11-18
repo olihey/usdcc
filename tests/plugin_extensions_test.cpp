@@ -254,6 +254,7 @@ def toggle(viewport):
     usdcc_viewport_menu["live"] = not usdcc_viewport_menu["live"]
 usdcc.app.add_viewport_menu_action("Share/Broadcast", toggle, checked=lambda viewport: usdcc_viewport_menu["live"])
 usdcc.app.add_viewport_menu_action("Never", toggle, applies=lambda viewport: False)
+usdcc.app.add_viewport_menu_action("Share/Copy Link", toggle, enabled=lambda viewport: usdcc_viewport_menu["live"])
 )"), "entries are added");
 
         QMenu menu;
@@ -262,6 +263,8 @@ usdcc.app.add_viewport_menu_action("Never", toggle, applies=lambda viewport: Fal
         QAction* broadcast = share ? findAction(share->actions(), "Broadcast") : nullptr;
         CHECK(broadcast && broadcast->isCheckable() && !broadcast->isChecked(), "in a submenu, checkable and unchecked");
         CHECK(!findAction(menu.actions(), "Never"), "applies() false leaves it out");
+        QAction* copy = share ? findAction(share->actions(), "Copy Link") : nullptr;
+        CHECK(copy && !copy->isEnabled(), "enabled() false greys it out");
         if (broadcast) broadcast->trigger();
         const std::string ran = "[" + std::to_string(viewport.id()) + "]";
         CHECK(evaluated("str(__import__('sys').usdcc_viewport_menu['ran'])") == ran, "it gets the viewport: %s, not %s",
@@ -272,6 +275,8 @@ usdcc.app.add_viewport_menu_action("Never", toggle, applies=lambda viewport: Fal
         QMenu* shareAgain = findMenu(again.actions(), "Share");
         QAction* checked = shareAgain ? findAction(shareAgain->actions(), "Broadcast") : nullptr;
         CHECK(checked && checked->isChecked(), "checked() says it's on now");
+        QAction* copyNow = shareAgain ? findAction(shareAgain->actions(), "Copy Link") : nullptr;
+        CHECK(copyNow && copyNow->isEnabled(), "enabled() true enables it");
     }
     CHECK(usdcc::usd::ViewportMenuEntries::instance().entries().empty(), "entries end with the app context, while Python is there");
 }

@@ -71,7 +71,7 @@ A plugin in your own folder wins over a shipped one with the same id; the other 
 | Side panels | `usdcc.app.add_side_panel(panel, area, id=...)`. Give an `id`: otherwise the title is its identity in the saved layout |
 | Main menu | `usdcc.app.add_menu_action("Menu/Action", callback, shortcut, tip)`, one undo step per run |
 | Outliner's prim menu | `usdcc.app.add_prim_menu_action(label, callback, applies=None, id=None)`, one undo step per run |
-| A viewport's menus | `usdcc.app.add_viewport_menu_action(label, callback, checked=None, applies=None, id=None)`: at the end of every viewport's options menu and tab menu, `callback(viewport)` one undo step per run; `checked` makes it a checkable entry |
+| A viewport's menus | `usdcc.app.add_viewport_menu_action(label, callback, checked=None, applies=None, id=None, enabled=None)`: at the end of every viewport's options menu and tab menu, `callback(viewport)` one undo step per run; `checked` makes it a checkable entry, `enabled` greys it out when false |
 | Viewport tools | `usdcc.tools.register_tool(id, label, cls, icon="")` |
 | App events | `usdcc.app.connect(event, callback)`: `selection_changed`, `current_stage_changed`, `stage_opened`, `stage_closed`, `stage_edited`, `viewport_camera_changed` |
 | The viewport's camera | `usdcc.app.active_viewport_camera()`: camera-to-world, field of view, aspect ratio, clipping |

@@ -37,18 +37,22 @@ Stop, and the room's chat. Checked on this machine; a browser on a second machin
 
 ### 2.1 The host
 
-- **Broadcast** in the viewport's options menu and its right-click menu. It starts the broadcast,
-  copies the link, and shows a toast: "Broadcasting Viewport 1. Link copied", with **Copy Link**
+- **A Broadcast submenu** in the viewport tab's right-click menu and its options menu: **Start
+  Broadcast**, **Stop Broadcast** and **Copy Link**, the ones that don't apply greyed out. Start
+  copies the link and shows a toast: "Broadcasting Viewport 1. Link copied", with **Copy Link**
   and **Stop**.
-- **The viewport shows it is live:** a red mark with the number of watchers. *Where exactly (the
-  HUD, the panel's title) is §12 question 4.*
+- **The viewport shows it is live:** a red border around it while it is sent (built, §11.2). The
+  number of watchers is in the Peers panel and the status bar; whether it also belongs on the
+  viewport is §12 question 4.
 - **The Broadcast side panel:** the link, the watchers by name, who is navigating, the chat, and
   **Stop**. Per watcher: **Allow navigating**, **Take back**, **Remove**.
 - **A watcher asks to navigate:** a toast, "Anna asks to navigate Viewport 1", with **Allow** and
   **Deny** ([NOTIFICATIONS.md](NOTIFICATIONS.md); *checked:* `ToastManager::show()` takes actions).
 - **The host always wins.** Pressing a mouse button in the viewport while a watcher navigates
   pauses the watcher's input until release. **Take back** ends it.
-- **Closing the viewport, the stage or the app ends the broadcast.** The page says so.
+- **Closing the viewport asks first:** "Viewport 1 is being broadcast. Closing it ends the broadcast
+  for 2 watchers", with **Close and Stop Broadcast** and **Cancel**. Closing its stage or the app
+  ends the broadcast without asking. The page says so.
 
 ### 2.2 The watcher
 
@@ -254,8 +258,12 @@ Small and general, so other plugins gain from them too:
    `usdcc.app.add_viewport_menu_action()`, like the Outliner's prim menu
    ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point. **Built** (phase 1):
    `usdcc::usd::ViewportMenuEntries`, at the end of the options menu and the tab's menu (the 3D
-   view has no right-click menu of its own), optionally checkable.
-4. **A mark on a viewport from a plugin** (the live mark), if question 4 says the HUD.
+   view has no right-click menu of its own), optionally checkable, and greyed out when they don't
+   apply (`enabled`).
+4. **A mark on a viewport from a plugin** (the live mark). **Built** as a border:
+   `ViewportViewPanel::setBorderColor()`. Nothing draws over the 3D view's native window, so the
+   border is a 3-pixel margin of the frame around it, painted in the colour; the view, and with it
+   the picture sent, is 6 pixels smaller each way while it shows.
 5. **Build:** `qtwebsockets` and `qthttpserver` in `vcpkg.json`, the latter from the overlay port
    (§4.1); `Network`, `WebSockets` and `HttpServer` in `find_package(Qt6 …)`. New ports need a
    private vcpkg root in a worktree ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
@@ -408,9 +416,20 @@ Physics, and shipped (`tools/deploy.py`):
   sends it, and the host has it in the Peers panel. Lines nobody said (the host's "You host …") are
   left out of the page.
 - **The watcher list** is the Peers panel's, and a toast when someone starts watching. No side panel
-  of its own, no live mark in the viewport (§8 item 4), no "ask before a watcher joins".
-- **It ends** when Broadcast is unticked, from the toast's Stop, when the viewport or its stage
-  closes, and at quit. One at a time: broadcasting another viewport ends the first.
+  of its own, no "ask before a watcher joins".
+- **The menu** is a Broadcast submenu: Start Broadcast, Stop Broadcast, Copy Link, greyed out
+  when they don't apply to that viewport (2026-11-18; at first a single checkable Broadcast).
+- **The live viewport has a red border** (`#e5534b`, the page's LIVE red), from Start until the
+  broadcast ends (2026-11-18).
+- **Closing a broadcast viewport asks** (2026-11-18): Close and Stop Broadcast, or Cancel. It is a
+  close guard, `ViewportViewPanel::addCloseGuard()`, asked by the tab's close button, the tab
+  menu's Close, closing its dock area or floating window, and a workspace switch: a viewport now
+  has ADS's `CustomCloseHandling` and hides itself once every guard agrees. A viewport hidden
+  some other way ends its broadcast, rather than leave its watchers on the last picture.
+- **It ends** with Stop Broadcast, the toast's Stop, the viewport or its stage closing, and quit.
+  One at a time: Start in another viewport ends the first. The host gets one toast, "The broadcast
+  ended": the Peers controller no longer adds "Left …" for a room this instance hosts and closed
+  itself (2026-11-18); a peer that was in the room still gets it.
 
 **Tests:** in `usdcc_ui_tests` (`viewport_broadcast_test.cpp`): a watcher gets the picture, as a
 JPEG of the source's size and colour; a still picture sends nothing more after its sharp one, and a
@@ -430,6 +449,15 @@ picture and the chat at once, and both listed both. Pressing Broadcast again clo
 page said "The broadcast ended", and port 47810 refused connections. Quitting while live closed the
 room cleanly.
 
+**The submenu and the border, checked in the app** (2026-11-18, the same way): before Start, the
+tab menu's Broadcast submenu has Start Broadcast enabled and Stop Broadcast and Copy Link greyed
+out; while live, the other way round. Start, Copy Link and Stop Broadcast each did their part. A
+grab of the window showed the red ring around the viewport while live, and none after Stop (a
+widget grab can't show the 3D view inside it, so the view's own pixels weren't seen in it).
+Closing the broadcast viewport from its tab's menu showed the warning; Cancel kept the viewport
+and the broadcast, and Close and Stop Broadcast closed the viewport, ended the broadcast ("The
+viewport closed") and closed the port.
+
 **Not tried yet:** a browser on another machine, and with it Windows Firewall's question; a tunnel;
 another browser or a phone; a progressive renderer; closing the viewport or its stage in the app
 (the tests cover the source going away). The plugin built outside this tree against the SDK: its
@@ -447,7 +475,7 @@ a room sees them in its Peers panel.
 | 1 | Build it alone, after Peers, or with it? | **Decided:** with it. The room and channels are built once, as the first piece of `usdcc_peers`, and this is their first user. The rest of Peers follows in its own time (§7) |
 | 2 | Links beyond the LAN in the first version? | Phase 4a only: the user's own tunnel. The relay comes with Peers's |
 | 3 | Must the host approve each watcher? | No, the link is the invitation, as in Peers. A setting to ask |
-| 4 | Where is the live mark: the HUD, or the panel's title? | The HUD, top left, in red: it is where the eye is, and it must not be missed |
+| 4 | Where is the live mark: the HUD, or the panel's title? | **Decided:** a red border around the viewport (built, §8 item 4). The number of watchers in the HUD as well is still open |
 | 5 | Is the HUD in the picture? | No. The scene, the selection and gizmos only, which is what the buffer holds |
 | 6 | Several broadcasts at once (two viewports)? | One per instance at first. The link's path leaves room |
 | 7 | Shipped and on by default? | Shipped and enabled, like the render plugins. It does nothing until Broadcast |

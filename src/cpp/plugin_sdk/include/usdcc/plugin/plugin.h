@@ -114,10 +114,12 @@ struct Host {
 
     // An entry at the end of every viewport's options menu and tab menu ("Group/Action"
     // makes a submenu). `run` is one undo step. `checked` makes it checkable, checked when
-    // it says so; `applies` leaves it out when false. Both may be empty.
+    // it says so; `applies` leaves it out when false; `enabled` greys it out when false.
+    // All three may be empty.
     void addViewportMenuAction(const QString& label, std::function<void(usdcc::usd::ViewportViewPanel*)> run,
                                std::function<bool(usdcc::usd::ViewportViewPanel*)> checked = {},
-                               std::function<bool(usdcc::usd::ViewportViewPanel*)> applies = {}) {
+                               std::function<bool(usdcc::usd::ViewportViewPanel*)> applies = {},
+                               std::function<bool(usdcc::usd::ViewportViewPanel*)> enabled = {}) {
         usdcc::usd::ViewportMenuEntry entry;
         entry.id = id + "." + label.toStdString();
         entry.label = label;
@@ -127,6 +129,7 @@ struct Host {
         };
         entry.checked = std::move(checked);
         entry.applies = std::move(applies);
+        entry.enabled = std::move(enabled);
         usdcc::usd::ViewportMenuEntries::instance().add(std::move(entry));
         noted("Viewport menu action", label.toStdString());
     }

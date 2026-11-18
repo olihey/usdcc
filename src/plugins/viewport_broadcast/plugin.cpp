@@ -22,6 +22,8 @@
 
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QPointer>
 
 namespace {
@@ -44,6 +46,9 @@ public:
             Q_EMIT frameChanged();
         });
         connect(panel, &QObject::destroyed, this, [this] { Q_EMIT gone(tr("The viewport closed")); });
+        // Closing asks first (the close guard); hidden some other way, a viewport stops
+        // drawing, and its watchers would see the last picture for ever.
+        connect(panel, &ads::CDockWidget::closed, this, [this] { Q_EMIT gone(tr("The viewport closed")); });
     }
 
     ViewportViewPanel* panel() const { return m_panel; }
@@ -63,9 +68,13 @@ private:
     QPointer<ViewportViewPanel> m_panel;
 };
 
+// The border around a viewport while it's broadcast, the page's LIVE red.
+const QColor kLiveRed(229, 83, 75);
+
 // What the plugin keeps: one broadcast at a time, in the first version (§12 question 6).
 struct State {
     usdcc::plugin::Host* host = nullptr;
+    int closeGuard = 0;
     QPointer<Broadcast> broadcast;
     QPointer<ViewportSource> source;
 };
@@ -98,6 +107,25 @@ void stopBroadcast(const QString& reason = {}) {
     if (g_state && g_state->broadcast) g_state->broadcast->stop(reason);
 }
 
+// Before a viewport that's broadcast closes: close it and end the broadcast, or keep both.
+bool mayClose(ViewportViewPanel* panel) {
+    if (!isBroadcasting(panel)) return true;
+    const int watchers = static_cast<int>(g_state->broadcast->watchers().size());
+    QMessageBox box(QMessageBox::Warning, QObject::tr("Broadcasting"),
+                    QObject::tr("%1 is being broadcast.").arg(g_state->source->title()), QMessageBox::NoButton,
+                    panel->window());
+    box.setInformativeText(watchers == 0 ? QObject::tr("Closing it ends the broadcast.")
+                                         : QObject::tr("Closing it ends the broadcast for %n watcher(s).", nullptr, watchers));
+    QPushButton* close = box.addButton(QObject::tr("Close and Stop Broadcast"), QMessageBox::DestructiveRole);
+    QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.setEscapeButton(cancel);
+    box.exec();
+    if (box.clickedButton() != close) return false;
+    stopBroadcast(QObject::tr("The viewport closed"));
+    return true;
+}
+
 void startBroadcast(ViewportViewPanel* panel) {
     stopBroadcast();  // One at a time: another viewport's ends
     usdcc::plugin::Host& host = *g_state->host;
@@ -128,14 +156,20 @@ void startBroadcast(ViewportViewPanel* panel) {
     source->setParent(broadcast);
     g_state->broadcast = broadcast;
     g_state->source = source;
+    // Which viewport is sent, at a glance.
+    panel->setBorderColor(kLiveRed);
     host.log(usdcc::core::LogLevel::Info, "Broadcasting " + source->title().toStdString() + " on port " +
                                               std::to_string(broadcast->room()->port()));
 
     QObject::connect(broadcast, &Broadcast::watcherJoined, broadcast, [](const usdcc::peers::Peer& watcher) {
         toast(QObject::tr("%1 is watching").arg(watcher.name), {});
     });
-    QObject::connect(broadcast, &Broadcast::stopped, broadcast, [broadcast](const QString& reason) {
-        toast(QObject::tr("The broadcast ended"), reason);
+    QPointer<ViewportViewPanel> broadcastPanel(panel);
+    QObject::connect(broadcast, &Broadcast::stopped, broadcast, [broadcast, broadcastPanel](const QString& reason) {
+        if (broadcastPanel) broadcastPanel->setBorderColor({});
+        // The reason as the body, unless it only says the same again.
+        const QString title = QObject::tr("The broadcast ended");
+        toast(title, reason == title || reason == QLatin1String("The broadcast ended") ? QString() : reason);
         broadcast->deleteLater();
     });
 
@@ -159,17 +193,23 @@ void startBroadcast(ViewportViewPanel* panel) {
 USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
     g_state = new State;
     g_state->host = &host;
-    host.addViewportMenuAction(
-        QStringLiteral("Broadcast"),
-        [](ViewportViewPanel* panel) {
-            if (isBroadcasting(panel)) stopBroadcast();
-            else startBroadcast(panel);
-        },
-        [](ViewportViewPanel* panel) { return isBroadcasting(panel); });
+    g_state->closeGuard = ViewportViewPanel::addCloseGuard(&mayClose);
+    // A Broadcast submenu in every viewport's tab menu and options menu: what doesn't
+    // apply to this viewport is greyed out. Start on another viewport ends this one's.
+    const auto live = [](ViewportViewPanel* panel) { return isBroadcasting(panel); };
+    const auto notLive = [](ViewportViewPanel* panel) { return !isBroadcasting(panel); };
+    host.addViewportMenuAction(QStringLiteral("Broadcast/Start Broadcast"),
+                               [](ViewportViewPanel* panel) { startBroadcast(panel); }, {}, {}, notLive);
+    host.addViewportMenuAction(QStringLiteral("Broadcast/Stop Broadcast"),
+                               [](ViewportViewPanel*) { stopBroadcast(); }, {}, {}, live);
+    host.addViewportMenuAction(QStringLiteral("Broadcast/Copy Link"),
+                               [](ViewportViewPanel*) { copyLink(); }, {}, {}, live);
 }
 
 USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host&) {
+    ViewportViewPanel::removeCloseGuard(g_state->closeGuard);
     if (g_state->broadcast) {
+        if (g_state->source && g_state->source->panel()) g_state->source->panel()->setBorderColor({});
         QObject::disconnect(g_state->broadcast, nullptr, nullptr, nullptr);
         delete g_state->broadcast.data();  // Closes the room
     }

@@ -36,7 +36,7 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host& host) {}
 | `addTool(id, label, icon, tool)` | `icon` is an image's path; empty, the rail shows the label's first letter |
 | `addMenuAction(path, run, shortcut, tip)` | "Menu/Action". `run` is one undo step, and an exception is logged |
 | `addPrimMenuAction(label, run, applies)` | At the end of the Outliner's prim menu, one undo step |
-| `addViewportMenuAction(label, run, checked, applies)` | At the end of every viewport's options menu and tab menu; `run(viewport)` is one undo step, `checked` makes it checkable |
+| `addViewportMenuAction(label, run, checked, applies, enabled)` | At the end of every viewport's options menu and tab menu; `run(viewport)` is one undo step, `checked` makes it checkable, `enabled` greys it out when false. `ViewportViewPanel::setBorderColor()` marks a viewport, and `ViewportViewPanel::addCloseGuard()` is asked before one closes |
 | `settingKey(key)` | A key of the plugin's own, for `usdcc::ui::appSettings()` |
 | `log(level, message)` | A record with the source `plugin:<id>` in the Log panel |
 

@@ -287,7 +287,9 @@ void PeersController::adopt(Room* room) {
         updatePresence();
     });
     connect(room, &Room::closed, this, [this, room](const QString& reason) {
-        if (!m_window || reason == u"Left the room" || reason == u"The host closed the room" ||
+        // A room this instance hosts closes only because something here closed it (the
+        // panel, a broadcast's Stop), which says so itself if it wants to.
+        if (!m_window || room->isHost() || reason == u"Left the room" || reason == u"The host closed the room" ||
             reason == u"usdcc is closing") {
             return;
         }

@@ -596,7 +596,10 @@ exactly one per stage.
 
 Through ADS's public API, not by writing its XML state:
 
-1. Take every picked panel out of its place (`removeDockWidget()`).
+1. Take every picked panel out of its place (`removeDockWidget()`). A closed one is opened where it is
+   first: ADS 4.5 inserts a closed dock widget with its tab hidden and then marks it open
+   (`CDockAreaWidget::insertDockWidget()`), so a viewport closed before switching back came back
+   without its tab, and still unticked in the View menu (fixed 2026-11-18).
 2. Walk the tree breadth first. The root's first area goes in the centre
    (`addDockWidget(CenterDockWidgetArea, …)`); each later child of a split goes beside the previous
    child's first area (`RightDockWidgetArea` for horizontal, `BottomDockWidgetArea` for vertical). ADS

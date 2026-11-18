@@ -542,6 +542,27 @@ QDialog* makeRendererSettingsDialog(ViewportViewPanel* panel) {
 }
 }  // namespace
 
+namespace {
+// The border setBorderColor() shows, in logical pixels.
+constexpr int kViewportBorderWidth = 3;
+
+// What holds the 3D view: its margin, when there is one, is the border.
+class ViewportFrame : public QWidget {
+public:
+    using QWidget::QWidget;
+    QColor color;
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        if (!color.isValid() || !layout()) return;
+        // The ring only: behind the 3D view, red would flash while it resizes.
+        const QRegion ring = QRegion(rect()).subtracted(QRegion(rect().marginsRemoved(layout()->contentsMargins())));
+        QPainter painter(this);
+        for (const QRect& part : ring) painter.fillRect(part, color);
+    }
+};
+}  // namespace
+
 ViewportMenuEntries& ViewportMenuEntries::instance() {
     static ViewportMenuEntries entries;
     return entries;
@@ -587,11 +608,47 @@ void ViewportMenuEntries::populate(QMenu* menu, ViewportViewPanel* viewport) con
             action->setCheckable(true);
             action->setChecked(entry.checked(viewport));
         }
+        if (entry.enabled) action->setEnabled(entry.enabled(viewport));
         QPointer<ViewportViewPanel> target(viewport);
         QObject::connect(action, &QAction::triggered, viewport, [run = entry.run, target]() {
             if (target) run(target);
         });
     }
+}
+
+void ViewportViewPanel::setBorderColor(const QColor& color) {
+    auto* frame = static_cast<ViewportFrame*>(m_viewportFrame);
+    if (frame->color == color) return;
+    frame->color = color;
+    const int width = color.isValid() ? kViewportBorderWidth : 0;
+    frame->layout()->setContentsMargins(width, width, width, width);
+    frame->update();
+}
+
+QColor ViewportViewPanel::borderColor() const { return static_cast<ViewportFrame*>(m_viewportFrame)->color; }
+
+namespace {
+std::map<int, ViewportViewPanel::CloseGuard>& closeGuards() {
+    static std::map<int, ViewportViewPanel::CloseGuard> guards;
+    return guards;
+}
+}  // namespace
+
+int ViewportViewPanel::addCloseGuard(CloseGuard guard) {
+    static int lastId = 0;
+    closeGuards().emplace(++lastId, std::move(guard));
+    return lastId;
+}
+
+void ViewportViewPanel::removeCloseGuard(int id) { closeGuards().erase(id); }
+
+bool ViewportViewPanel::canClose() {
+    // A copy: a guard may remove itself, or another, while it asks.
+    const auto guards = closeGuards();
+    for (const auto& [id, guard] : guards) {
+        if (guard && !guard(this)) return false;
+    }
+    return true;
 }
 
 ViewportViewPanel* ViewportViewPanel::activeViewport() {
@@ -684,12 +741,25 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
         if (isRendererSettingKey(key)) applyRendererSettings();
         if (isColorManagementKey(key)) notifyOptionsChanged();  // View Transform's Default (...)
     });
-    QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, container);
+    // Nothing draws over a native window, so a border is a margin of this frame,
+    // painted in its colour (setBorderColor()).
+    m_viewportFrame = new ViewportFrame(container);
+    auto* frameLayout = new QVBoxLayout(m_viewportFrame);
+    frameLayout->setContentsMargins(0, 0, 0, 0);
+    QWidget* viewportContainer = QWidget::createWindowContainer(m_viewport, m_viewportFrame);
+    frameLayout->addWidget(viewportContainer);
 
     layout->addWidget(toolbar);
-    layout->addWidget(viewportContainer, 1);
+    layout->addWidget(m_viewportFrame, 1);
 
     setContentWidget(container);
+
+    // Closing asks the close guards first (canClose()); allowed, it hides the panel, as
+    // ADS would have.
+    setFeature(ads::CDockWidget::CustomCloseHandling, true);
+    connect(this, &ads::CDockWidget::closeRequested, this, [this]() {
+        if (canClose()) toggleView(false);
+    });
 
     connect(m_viewport, &HydraViewportWindow::selectionRequested, this, &ViewportViewPanel::onSelectionRequested);
     // The options list the renderers, and tick the one in use, which a script can switch.

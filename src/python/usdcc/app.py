@@ -207,14 +207,15 @@ def remove_prim_menu_action(id):
     _app().remove_prim_menu_action(id)
 
 
-def add_viewport_menu_action(label, callback, checked=None, applies=None, id=None):
+def add_viewport_menu_action(label, callback, checked=None, applies=None, id=None, enabled=None):
     """Adds an entry to the end of every viewport's options menu and tab menu.
     "Group/Action" in ``label`` makes a submenu. ``id`` says what to replace or remove
     later (by default, the label).
 
     ``callback(viewport)`` gets the ``Viewport`` whose menu it was, and runs as one undo
     step. ``checked(viewport)`` makes the entry checkable, checked when it returns True.
-    ``applies(viewport)`` returns whether the entry is in the menu this time.
+    ``applies(viewport)`` returns whether the entry is in the menu this time, and
+    ``enabled(viewport)`` whether it is, or greyed out.
     """
     _app().add_viewport_menu_action(
         id or label,
@@ -222,6 +223,7 @@ def add_viewport_menu_action(label, callback, checked=None, applies=None, id=Non
         lambda viewport_id: callback(Viewport(viewport_id)),
         None if checked is None else lambda viewport_id: bool(checked(Viewport(viewport_id))),
         None if applies is None else lambda viewport_id: bool(applies(Viewport(viewport_id))),
+        None if enabled is None else lambda viewport_id: bool(enabled(Viewport(viewport_id))),
     )
     _plugins.note("Viewport menu action", label)
     _plugins.track(lambda: remove_viewport_menu_action(id or label))

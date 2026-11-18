@@ -13,6 +13,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
+#include <QColor>
 #include <QPointer>
 
 #include <functional>
@@ -41,6 +42,8 @@ struct ViewportMenuEntry {
     std::function<bool(ViewportViewPanel*)> checked;
     // Left out of the menu when false; may be null.
     std::function<bool(ViewportViewPanel*)> applies;
+    // Shown but greyed out when false; may be null.
+    std::function<bool(ViewportViewPanel*)> enabled;
 };
 
 class USDCC_USD_UI_API ViewportMenuEntries {
@@ -94,6 +97,12 @@ public:
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
 
+    // A border in `color` around the 3D view, to set this viewport apart: a broadcast
+    // marks the one it sends (docs/VIEWPORT_BROADCAST.md §2.1). The view shrinks by the
+    // border while it's shown. An invalid colour (the default) is none.
+    void setBorderColor(const QColor& color);
+    QColor borderColor() const;
+
     // Fit to View: moves the camera so the selected prims fill the view, or the whole
     // stage when nothing is selected (sceneBounds()). Selected prims without bounds are
     // left out; when none of them has any (or the stage is empty), a warning toast says
@@ -119,6 +128,17 @@ public:
     QString workspaceView() const override;
     QJsonObject workspaceCamera() const override;
     bool fitView(const QString& what) override;
+
+    // Whether this viewport may close: every close guard agrees (addCloseGuard()). Asked
+    // by its tab's close button, the tab menu's Close, closing its dock area or floating
+    // window, and a workspace switch. Deleting the panel (closing its stage) doesn't ask.
+    bool canClose() override;
+    // Something a plugin keeps going in a viewport, which closing would end: the guard
+    // says whether `viewport` may close, and may ask the user (a broadcast does,
+    // docs/VIEWPORT_BROADCAST.md §2.1). An id for removeCloseGuard(). Main thread only.
+    using CloseGuard = std::function<bool(ViewportViewPanel* viewport)>;
+    static int addCloseGuard(CloseGuard guard);
+    static void removeCloseGuard(int id);
 
     // The application-wide Fit to View action, for the active viewport: added to
     // `window`, which owns it, with its key from kFitToViewShortcutKey (defined here).
@@ -252,6 +272,7 @@ private:
     void publishCounts();
 
     HydraViewportWindow* m_viewport;
+    QWidget* m_viewportFrame = nullptr;  // Around the 3D view's container: its border
     int m_id;
     // The workspace camera it was made with (§3.5.1): a following view refits by it.
     QJsonObject m_cameraSpec;
