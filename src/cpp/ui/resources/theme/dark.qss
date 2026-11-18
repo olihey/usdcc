@@ -1078,6 +1078,15 @@ QToolButton#settingReset:hover {
     color: @accent;
 }
 
+/* A folder list sits on the page in the category tree's well, so it reads as
+   a list and not as more of the page. */
+QListWidget#settingFolderList {
+    background: #161618;
+    alternate-background-color: #161618;
+    border: 1px solid rgba(255, 255, 255, 6%);
+    border-radius: 4px;
+}
+
 QToolButton#settingColorButton {
     padding: 0 8px 0 4px;
 }
