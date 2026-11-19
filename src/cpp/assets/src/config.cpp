@@ -182,7 +182,8 @@ std::string Config::chosenEnvironment() const {
 std::filesystem::path userDataFolder() {
 #if defined(_WIN32)
     const std::string local = TfGetenv("LOCALAPPDATA");
-    return fromUtf8(local.empty() ? std::string(".") : local) / "usdcc";
+    // Not %LOCALAPPDATA%\usdcc: the installer puts the app there (docs/UPDATES.md).
+    return fromUtf8(local.empty() ? std::string(".") : local) / "usdcc_config";
 #elif defined(__APPLE__)
     return fromUtf8(TfGetenv("HOME", ".")) / "Library" / "Application Support" / "usdcc";
 #else

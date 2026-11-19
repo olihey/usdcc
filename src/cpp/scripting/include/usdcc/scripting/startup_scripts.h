@@ -6,8 +6,8 @@ namespace usdcc::scripting {
 
 class PythonRuntime;
 
-// The user's scripts folder, %LOCALAPPDATA%/usdcc/scripts
-// (AppLocalDataLocation; docs/SCRIPTING.md §6). Its startup/ subfolder holds
+// The user's scripts folder, scripts in ui::userDataFolder()
+// (%LOCALAPPDATA%/usdcc_config/scripts on Windows; docs/SCRIPTING.md §6). Its startup/ subfolder holds
 // the startup scripts. Needs the Qt application object.
 std::filesystem::path userScriptsFolder();
 

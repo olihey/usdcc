@@ -148,7 +148,7 @@ They go into the workspace's `.vscode/settings.json` as `python.defaultInterpret
   `usdcc_python_tests` generates it again and fails when the two differ.
 - **`pxr` has no stubs in this OpenUSD build** (*checked*: no `.pyi` under `lib/site-packages`).
   The third-party `types-usd` package provides them. It's installed with the bundled uv into
-  `%LOCALAPPDATA%\usdcc\stubs`, when asked for, and that folder goes on `extraPaths` only: never on
+  `%LOCALAPPDATA%\usdcc_config\stubs`, when asked for, and that folder goes on `extraPaths` only: never on
   the app's `sys.path`. Whether a release matches OpenUSD 26.11 is §9 #5.
 - **PySide6** normally carries its own `.pyi` files. Whether the from-source build's do is §9 #6.
 

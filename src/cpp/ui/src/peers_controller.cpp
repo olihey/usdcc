@@ -12,7 +12,6 @@
 
 #include <QCoreApplication>
 #include <QJsonArray>
-#include <QStandardPaths>
 #include <QStatusBar>
 #include <QToolButton>
 
@@ -103,7 +102,7 @@ void PeersController::defineSettings() {
 Identity peersIdentity() {
     static Identity identity;
     if (!identity.isValid()) {
-        const QString folder = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/peers";
+        const QString folder = usdcc::ui::userDataFolder() + "/peers";
         QString error;
         identity = Identity::loadOrCreate(QCoreApplication::applicationName(), folder, &error);
         if (!identity.isValid()) {
@@ -124,7 +123,7 @@ Profile peersProfile() {
 }
 
 QString peersRoomsFolder() {
-    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/peers/rooms";
+    return usdcc::ui::userDataFolder() + "/peers/rooms";
 }
 
 PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* window, Hooks hooks, QObject* parent)

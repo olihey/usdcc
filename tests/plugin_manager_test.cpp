@@ -9,6 +9,7 @@
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/ui/settings.h"
 
 #include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
@@ -71,7 +72,7 @@ struct Plugins {
         std::filesystem::remove_all(root, error);
     }
     static void removeSettings() {
-        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini");
+        QFile::remove(usdcc::ui::userConfigFolder() + "/usdcc.ini");
     }
     void write(const std::filesystem::path& name, const std::string& text) const {
         std::filesystem::create_directories((root / name).parent_path());

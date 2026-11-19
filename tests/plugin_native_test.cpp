@@ -74,7 +74,7 @@ struct Settings {
         QStandardPaths::setTestModeEnabled(false);
     }
     static void remove() {
-        QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini");
+        QFile::remove(usdcc::ui::userConfigFolder() + "/usdcc.ini");
     }
 };
 

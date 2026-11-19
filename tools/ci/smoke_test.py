@@ -120,7 +120,7 @@ else:
 def _print_latest_log(started):
     """The end of the log the app wrote, to say why it failed."""
     if WINDOWS:
-        folder = Path(os.environ.get("LOCALAPPDATA", "")) / "usdcc/logs"
+        folder = Path(os.environ.get("LOCALAPPDATA", "")) / "usdcc_config/logs"
     else:
         folder = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "usdcc/logs"
     if not folder.is_dir():

@@ -114,7 +114,7 @@ scale and the tool shortcuts (Q select, W move, E rotate, R scale). They are sav
 ### Plugins
 
 A plugin is a folder with a `usdcc-plugin.json`, holding Python, USD files or a C++ library, that
-the app finds in `%LOCALAPPDATA%/usdcc/plugins`. It can add panels, tools, menu entries and USD
+the app finds in `%LOCALAPPDATA%/usdcc_config/plugins`. It can add panels, tools, menu entries and USD
 schemas. See [docs/PLUGINS.md](docs/PLUGINS.md), and [docs/PLUGIN_SDK.md](docs/PLUGIN_SDK.md) for C++.
 Try the examples with `usdcc --plugin-path src/plugins --plugin-path build/plugins`.
 

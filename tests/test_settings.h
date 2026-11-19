@@ -8,6 +8,7 @@
 // Both are cleared again at the end.
 
 #include "usdcc/core/settings.h"
+#include "usdcc/ui/settings.h"
 
 #include <QFile>
 #include <QStandardPaths>
@@ -29,6 +30,6 @@ struct TestSettings {
     TestSettings(const TestSettings&) = delete;
     TestSettings& operator=(const TestSettings&) = delete;
 
-    static QString path() { return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini"; }
+    static QString path() { return usdcc::ui::userConfigFolder() + "/usdcc.ini"; }
     static void remove() { QFile::remove(path()); }
 };

@@ -211,7 +211,7 @@ Lands with the runtime, since every later step needs it to see what went wrong:
 
 ## 6. Startup scripts and the command line
 
-- Every `*.py` in `%LOCALAPPDATA%/usdcc/scripts/startup/` (`AppLocalDataLocation`) runs once
+- Every `*.py` in `%LOCALAPPDATA%/usdcc_config/scripts/startup/` (the user's data folder; `~/.local/share/usdcc` on Linux) runs once
   the window is up and its layout has settled (`MainWindow::layoutSettled()`, §12 phase 5),
   in name order (ignoring case), each in its own namespace. A failing one is
   logged and the rest still run. They get no undo step of their own (§4.2). That folder's
@@ -311,7 +311,7 @@ Only once `tools/build_pyside.py` has run, and CMake then finds it in `USDCC_PYS
   usdcc's CMake cache) and against vcpkg's Qt. Its folder is on the embedded `sys.path`.
 
 ```python
-# A startup script: %LOCALAPPDATA%/usdcc/scripts/startup/notes_panel.py
+# A startup script: %LOCALAPPDATA%/usdcc_config/scripts/startup/notes_panel.py
 from PySide6 import QtWidgets
 import usdcc.app, usdcc.ui
 

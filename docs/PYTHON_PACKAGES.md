@@ -25,7 +25,7 @@ All of these are on the Python page of Edit > Settings, and work from `usdcc.set
 | Group | Label | Key | Type | Default | Meaning |
 |---|---|---|---|---|---|
 | Interpreter | Use my Python user packages | `Python/userSite` | Bool | off | `config.user_site_directory`: whether `%APPDATA%\Python\Python312\site-packages` is on `sys.path` |
-| Packages | Shared packages folder | `Python/packagesFolder` | Folder | `%LOCALAPPDATA%\usdcc\python-env` | Where environments and uv's cache live |
+| Packages | Shared packages folder | `Python/packagesFolder` | Folder | `%LOCALAPPDATA%\usdcc_config\python-env` | Where environments and uv's cache live |
 | Packages | Additional package folders | `Python/extraPackageFolders` | String | empty | Ready-made folders, separated by `;`, ahead of the shared folder. The settings form of `USDCC_PYTHON_PATH` |
 | Packages | My packages | `Python/userPackages` | String | empty | For your own scripts, separated by spaces: `numpy>=2 pyyaml` |
 | Sources | Package index | `Python/packageIndex` | String | empty (PyPI) | uv's `--default-index` |
@@ -63,7 +63,7 @@ A studio can also point **Package index** at its own index, or set **Wheels fold
 ## 3. The folder
 
 ```text
-%LOCALAPPDATA%\usdcc\python-env\
+%LOCALAPPDATA%\usdcc_config\python-env\
   current-cp312.txt       names the environment this Python uses
   cp312-1a2b3c4d5e6f\     an environment: packages, requirements.lock, environment.json, .in-use
   cp312-9f8e7d6c5b4a\     the next one, until nothing uses the old

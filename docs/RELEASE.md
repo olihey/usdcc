@@ -151,7 +151,7 @@ Drafts don't trigger it, so you can prepare one first. It also runs by hand
      laid out as they are in the deploy.
 9. **Attach** both to the release with `gh release upload`.
 10. **The installer and the update packages**, made from the same deploy with Velopack's
-    `vpk` and attached with it: `usdcc-app-win-Setup.exe`, the packages and the feed
+    `vpk` and attached with it: `usdcc-win-Setup.exe`, the packages and the feed
     installs update from ([UPDATES.md](UPDATES.md) §5).
 
 It uses `build.yml`'s vcpkg cache, read-only.

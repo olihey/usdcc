@@ -29,9 +29,10 @@ stage = usdcc.usd.current_stage()
 source = stage.Flatten().ExportToString()
 result = {"passed": False, "mode": mode}
 result["profile"] = QtCore.QCoreApplication.applicationName()
+# usdcc::ui::userDataFolder(): Qt's folder, with _config on Windows.
 result["profile_data"] = QtCore.QStandardPaths.writableLocation(
     QtCore.QStandardPaths.AppLocalDataLocation
-)
+) + "_config"
 
 
 def module_path(name):

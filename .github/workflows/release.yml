@@ -3,7 +3,7 @@
 # v0.2.0, and this builds that tag on each platform, runs the tests, deploys,
 # starts the deploy as a user would, and attaches
 # usdcc-<version>-windows-x64.7z and usdcc-<version>-linux-x64.tar.xz, each
-# with its symbols, and on Windows the installer (usdcc-app-win-Setup.exe) and the
+# with its symbols, and on Windows the installer (usdcc-win-Setup.exe) and the
 # packages installs update from (docs/UPDATES.md). Run it by hand with the tag
 # to rebuild a release whose run failed.
 name: Release
@@ -201,11 +201,10 @@ jobs:
       # pins (the runner's .NET SDK installs it). The latest earlier release's full
       # package comes down first, so vpk can make a delta from it: what an install of
       # that version downloads to update. The first release with packages has none.
-      # vpk then attaches usdcc-app-win-Setup.exe, the full and delta packages and the
+      # vpk then attaches usdcc-win-Setup.exe, the full and delta packages and the
       # feed (releases.win.json) to this release, which installs look for. The
-      # package id is usdcc-app, not usdcc: Velopack installs into
-      # %LOCALAPPDATA%\<id> and deletes that folder on uninstall, and
-      # %LOCALAPPDATA%\usdcc holds the user's settings, logs and sessions.
+      # package id usdcc installs into %LOCALAPPDATA%\usdcc, which Velopack owns
+      # and empties on uninstall; the user's files are in %LOCALAPPDATA%\usdcc_config.
       - name: Make the installer and the update packages
         run: |
           $vpkVersion = (Select-String -Path cmake/modules/UsdccVelopack.cmake `
@@ -220,7 +219,7 @@ jobs:
           $pre = if ('${{ steps.tag.outputs.version }}' -match '-') { @('--pre') } else { @() }
           vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases @pre
           if ($LASTEXITCODE) { Write-Host "::notice::No earlier release with update packages, so no delta this time." }
-          vpk pack --packId usdcc-app --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc `
+          vpk pack --packId usdcc --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc `
             --packDir "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" --mainExe usdcc.exe `
             --runtime win-x64 --icon src/cpp/app/resources/usdcc.ico --noPortable --outputDir $releases
           if ($LASTEXITCODE) { throw 'vpk pack failed' }

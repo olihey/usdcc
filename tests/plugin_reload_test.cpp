@@ -81,7 +81,7 @@ struct Bench {
         std::error_code error;
         std::filesystem::remove_all(root, error);
     }
-    static void removeSettings() { QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/usdcc.ini"); }
+    static void removeSettings() { QFile::remove(usdcc::ui::userConfigFolder() + "/usdcc.ini"); }
     void write(const std::string& name, const std::string& text) const {
         const std::filesystem::path file = root / "plugins" / name;
         std::filesystem::create_directories(file.parent_path());

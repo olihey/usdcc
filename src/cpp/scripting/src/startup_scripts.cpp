@@ -2,8 +2,8 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/ui/settings.h"
 
-#include <QStandardPaths>
 #include <QString>
 
 #include <algorithm>
@@ -23,7 +23,7 @@ QString fileName(const std::filesystem::path& path) {
 }  // namespace
 
 std::filesystem::path userScriptsFolder() {
-    const QString folder = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/scripts";
+    const QString folder = usdcc::ui::userDataFolder() + "/scripts";
     return std::filesystem::path(folder.toStdU16String());
 }
 

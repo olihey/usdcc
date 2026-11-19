@@ -84,7 +84,7 @@ CRT (`/MD`) with `_ITERATOR_DEBUG_LEVEL=0` in every configuration, as usdcc does
 installed, which CMake finds by itself. A plain OpenUSD plugin, without usdcc, builds against it the same way: see `tools/ci/usd-sdk-check`, which CI
 builds against every new OpenUSD asset.
 
-The plugin lands in `build/plugins/notes`, with its manifest. Copy that folder to `%LOCALAPPDATA%/usdcc/plugins`, or try it with `usdcc --plugin-path build/plugins`.
+The plugin lands in `build/plugins/notes`, with its manifest. Copy that folder to `%LOCALAPPDATA%/usdcc_config/plugins`, or try it with `usdcc --plugin-path build/plugins`.
 
 `usdcc_add_plugin()` also takes `OUTPUT_DIR`, `PYTHON_MODULE`, `USD_FOLDERS` and `REQUIRES`. A plugin can have Python and USD parts too: the library is activated first,
 and you copy `python/` and `usd/` into the plugin's folder yourself.

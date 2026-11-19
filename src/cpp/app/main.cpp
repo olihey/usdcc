@@ -235,8 +235,8 @@ int main(int argc, char** argv) {
     // Shows a message box and exits for --help and unknown options.
     commandLine.process(app);
 
-    // Needs the application object for its folder (AppLocalDataLocation).
-    const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/logs";
+    // Needs the application object for its folder (ui/settings.h).
+    const QString logDir = usdcc::ui::userDataFolder() + "/logs";
     ScopedLogSink fileLog{usdcc::core::FileLogSink::openInDirectory(logDir.toStdU16String())};
     QString logFilePath;
     if (fileLog.sink) {

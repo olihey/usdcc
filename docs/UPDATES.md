@@ -26,14 +26,18 @@ updates usdcc downloads itself, carry no mark.
   which the Linux deploy isn't.
 - **The GitHub releases are the update server.** The release workflow attaches the
   installer, the packages and the feed Velopack reads (§5); nothing else to host.
-- **Package id `usdcc-app`.** Velopack installs into `%LOCALAPPDATA%\<id>` and deletes that
-  folder when usdcc is uninstalled. `%LOCALAPPDATA%\usdcc` holds the user's settings, logs
-  and sessions, so the install can't be there. The name in Windows' list of apps and on the
-  shortcuts is still "usdcc".
+- **Package id `usdcc`, the user's files in `usdcc_config`.** Velopack installs into
+  `%LOCALAPPDATA%\<id>`, so into `%LOCALAPPDATA%\usdcc`, and owns that folder: it empties
+  it when usdcc is uninstalled, and Setup moves aside and deletes whatever is there before
+  it installs. So on Windows usdcc keeps the user's settings, logs, sessions, plugins and
+  the rest beside it, in `%LOCALAPPDATA%\usdcc_config` (`usdcc::ui::userDataFolder()`,
+  `ui/settings.h`), which an uninstall leaves. Earlier builds kept them in
+  `%LOCALAPPDATA%\usdcc`; they aren't moved, and the installer deletes them. Linux is
+  unchanged (`~/.config/usdcc` and `~/.local/share/usdcc`).
 - **Not signed yet.** SmartScreen warns once about the unknown publisher of the installer
   (More info > Run anyway). Velopack can sign everything it packs (`vpk pack
   --signParams` or `--azureTrustedSignFile`) once there is a certificate (§8).
-- **The installer's file is Velopack's name, `usdcc-app-win-Setup.exe`.** `vpk upload`
+- **The installer's file is Velopack's name, `usdcc-win-Setup.exe`.** `vpk upload`
   attaches the files by the names in its own list, so they aren't renamed.
 
 ## 3. The launcher
@@ -101,7 +105,7 @@ to end, installs the update with a progress window, and starts usdcc again, whic
 
 usdcc logs each step under `usdcc.updates`, and what Velopack's library reports in the app
 goes there too. Velopack's updater (`Update.exe`, which also rebuilds the full package
-from a delta) writes its own log, `%LOCALAPPDATA%\velopack\velopack_usdcc-app.log`.
+from a delta) writes its own log, `%LOCALAPPDATA%\velopack\velopack_usdcc.log`.
 
 ## 5. Release workflow
 
@@ -111,9 +115,9 @@ After the 7z is attached, `release.yml`'s Windows job:
 2. `vpk download github`: the latest earlier release's full package (a prerelease's when
    this one is a prerelease), to make a delta from. The first release with packages has
    none, which is fine.
-3. `vpk pack --packId usdcc-app --mainExe usdcc.exe --runtime win-x64 --noPortable` on the deploy folder.
+3. `vpk pack --packId usdcc --mainExe usdcc.exe --runtime win-x64 --noPortable` on the deploy folder.
 4. `vpk upload github --tag <tag> --merge`, which attaches to the release:
-   `usdcc-app-win-Setup.exe`, `usdcc-app-<version>-full.nupkg`, the delta when there is
+   `usdcc-win-Setup.exe`, `usdcc-<version>-full.nupkg`, the delta when there is
    one, and `releases.win.json`, the feed an install reads.
 
 An install asks GitHub for the releases (prereleases only with the setting) and reads the
@@ -126,9 +130,9 @@ With `vpk` (it needs .NET 8 or later; `dotnet tool install -g vpk --version <pin
 
 ```powershell
 python tools/deploy.py C:\tmp\usdcc-deploy
-vpk pack --packId usdcc-app --packVersion 0.0.90 --packDir C:\tmp\usdcc-deploy --mainExe usdcc.exe --runtime win-x64 --noPortable --shortcuts None -o C:\tmp\feed
-C:\tmp\feed\usdcc-app-win-Setup.exe --silent --installto C:\tmp\usdcc-install
-vpk pack --packId usdcc-app --packVersion 0.0.91 --packDir C:\tmp\usdcc-deploy --mainExe usdcc.exe --runtime win-x64 --noPortable --shortcuts None -o C:\tmp\feed
+vpk pack --packId usdcc --packVersion 0.0.90 --packDir C:\tmp\usdcc-deploy --mainExe usdcc.exe --runtime win-x64 --noPortable --shortcuts None -o C:\tmp\feed
+C:\tmp\feed\usdcc-win-Setup.exe --silent --installto C:\tmp\usdcc-install
+vpk pack --packId usdcc --packVersion 0.0.91 --packDir C:\tmp\usdcc-deploy --mainExe usdcc.exe --runtime win-x64 --noPortable --shortcuts None -o C:\tmp\feed
 ```
 
 `--shortcuts None` keeps the test install off the desktop and Start menu; `--installto`

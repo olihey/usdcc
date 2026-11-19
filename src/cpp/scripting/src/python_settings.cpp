@@ -2,9 +2,9 @@
 
 #include "usdcc/core/settings.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/ui/settings.h"
 
 #include <QDir>
-#include <QStandardPaths>
 #include <QString>
 
 namespace usdcc::scripting {
@@ -16,7 +16,7 @@ using usdcc::core::SettingType;
 constexpr auto kCategory = "Python";
 
 QString defaultPackagesFolder() {
-    return QDir::toNativeSeparators(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/python-env");
+    return QDir::toNativeSeparators(usdcc::ui::userDataFolder() + "/python-env");
 }
 }  // namespace
 

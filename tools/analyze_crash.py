@@ -42,7 +42,7 @@ from symbol_store import MICROSOFT_CACHE, STORE
 
 LOCAL = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
 DUMPS = LOCAL / "CrashDumps"
-LOGS = LOCAL / "usdcc/logs"
+LOGS = LOCAL / "usdcc_config/logs"
 
 
 def find_cdb() -> str:

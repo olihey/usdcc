@@ -29,7 +29,6 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QStandardPaths>
 #include <QUrl>
 #include <QLibrary>
 #include <QStringList>
@@ -348,7 +347,7 @@ struct PluginManager::NativePlugin {
 };
 
 std::filesystem::path PluginManager::userFolder() {
-    return toPath(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/plugins");
+    return toPath(usdcc::ui::userDataFolder() + "/plugins");
 }
 
 std::filesystem::path PluginManager::shippedFolder() {
@@ -394,7 +393,7 @@ PluginManager::Options PluginManager::defaultOptions(const std::vector<std::file
     options.pythonPackageFolders = environmentFolders("USDCC_PYTHON_PATH");
     for (const auto& folder : extraPackageFoldersSetting()) options.pythonPackageFolders.push_back(folder);
     if (usdcc::core::Settings::instance().contains(kPackagesFolderKey)) options.packagesRoot = packagesFolderSetting();
-    const QString local = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString local = usdcc::ui::userDataFolder();
     options.crashMarker = toPath(local + "/plugin-activating.txt");
     return options;
 }

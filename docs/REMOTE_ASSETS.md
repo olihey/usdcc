@@ -96,7 +96,7 @@ endpoints make up its stack, top first.
 - **`optional`** (default `false`) lets a stack carry on when that endpoint is unreachable.
 
 **Where the configuration comes from:** the file named by `USDCC_ASSETS_CONFIG`, or else
-`assets.json` in the user's usdcc data folder (`%LOCALAPPDATA%/usdcc` on Windows). usdcc's settings
+`assets.json` in the user's usdcc data folder (`%LOCALAPPDATA%/usdcc_config` on Windows). usdcc's settings
 page writes that file, so tools outside usdcc see the same servers.
 
 **Which environment is used:** `USDCC_ASSET_ENV`, or else the file's `"environment"`. usdcc can

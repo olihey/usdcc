@@ -1,5 +1,7 @@
 #include "usdcc/ui/session_store.h"
 
+#include "usdcc/ui/settings.h"
+
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
@@ -8,7 +10,6 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSaveFile>
-#include <QStandardPaths>
 
 #include <algorithm>
 #include <functional>
@@ -205,7 +206,7 @@ QStringList session::missingFiles(const QJsonObject& session) {
 SessionStore::SessionStore(const QString& folder) : m_folder(folder.isEmpty() ? defaultFolder() : folder) {}
 
 QString SessionStore::defaultFolder() {
-    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/sessions");
+    return usdcc::ui::userDataFolder() + QStringLiteral("/sessions");
 }
 
 QString SessionStore::fileNameFor(const QString& name) {

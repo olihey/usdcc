@@ -3,6 +3,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/ui/settings.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -11,7 +12,6 @@
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QSet>
-#include <QStandardPaths>
 
 #include <algorithm>
 #include <map>
@@ -60,7 +60,7 @@ void WorkspaceLibrary::defineSettings() {
 }
 
 QString WorkspaceLibrary::defaultUserFolder() {
-    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/workspaces");
+    return usdcc::ui::userDataFolder() + QStringLiteral("/workspaces");
 }
 
 QString WorkspaceLibrary::shippedFolder() {

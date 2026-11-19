@@ -54,7 +54,7 @@ with V-Ray in a helper process, following the viewport camera and edits ([VRAY_R
 **Found in, the first with an id winning (logged):**
 1. `--plugin-path` folders;
 2. `USDCC_PLUGIN_PATH` (a studio's);
-3. `%LOCALAPPDATA%/usdcc/plugins` (the user's);
+3. `%LOCALAPPDATA%/usdcc_config/plugins` (the user's);
 4. the folders added in **Edit > Settings > Plugins > Plugin folders**, in their order;
 5. `plugins/` next to `bin/`, the plugins shipped with usdcc: V-Ray Render and RTX Render.
 

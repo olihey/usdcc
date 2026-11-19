@@ -59,7 +59,7 @@ struct Config {
     std::string chosenEnvironment() const;
 };
 
-// %LOCALAPPDATA%/usdcc on Windows, ~/.local/share/usdcc (or XDG_DATA_HOME) on Linux,
+// %LOCALAPPDATA%/usdcc_config on Windows (as ui::userDataFolder()), ~/.local/share/usdcc (or XDG_DATA_HOME) on Linux,
 // ~/Library/Application Support/usdcc on macOS: where usdcc keeps its own files.
 std::filesystem::path userDataFolder();
 

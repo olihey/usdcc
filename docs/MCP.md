@@ -170,7 +170,7 @@ after changing something, ask `python_api` before guessing a function.
 
 - **`http://127.0.0.1:47811/mcp`** (the port is a setting). A second usdcc finds it taken and uses
   the next free one.
-- **Each running app writes** `%LOCALAPPDATA%/usdcc/mcp/<pid>.json`: port, pid, version, started.
+- **Each running app writes** `%LOCALAPPDATA%/usdcc_config/mcp/<pid>.json`: port, pid, version, started.
   A test profile has its own folder, so test runs and the real app don't find each other.
 - **Both eras.** The 2026-07-28 form, and the older `initialize` opening without a session, which
   is a few more replies. Which form today's clients send is to be checked (§11 #3).

@@ -6,7 +6,7 @@ Part of M10 (docs/PLAN.md §7).
 
 ## 1. Preferences and UI state
 
-`usdcc.ini` (in the app config folder, `%LOCALAPPDATA%\usdcc` on Windows) holds two kinds
+`usdcc.ini` (in the app config folder, `%LOCALAPPDATA%\usdcc_config` on Windows) holds two kinds
 of values:
 
 - **Preferences** are choices the user makes on purpose: the accent color, the UI
@@ -128,7 +128,7 @@ take them for a `bool`.
 | `RtxRender/matchStormLights` | Bool | on | RTX plugin, `rtx_panel.cpp`: render RTX at Storm's brightness by giving its camera unit exposure, and UsdPreviewSurface emission k of its value in the snapshot ([RTX_LIGHT_INTENSITY.md](RTX_LIGHT_INTENSITY.md) §4, §2.6). A change reloads open RTX panels |
 | `RtxRender/lightMultiplier` | Float 0.001–1000 | 1 | RTX plugin: the exposure multiplier while matching Storm, 1 being Storm's brightness |
 | `Python/userSite` | Bool, next start | off | `PythonRuntime` ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md) §1) |
-| `Python/packagesFolder` | Folder, next start | `%LOCALAPPDATA%\usdcc\python-env` | `PluginManager` |
+| `Python/packagesFolder` | Folder, next start | `%LOCALAPPDATA%\usdcc_config\python-env` | `PluginManager` |
 | `Python/extraPackageFolders` | String, next start | none | `PluginManager` |
 | `Python/userPackages` | String | none | `PluginManager` |
 | `Python/packageIndex` | String | none (PyPI) | `PluginManager` |
