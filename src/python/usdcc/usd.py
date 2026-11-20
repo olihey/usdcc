@@ -255,6 +255,21 @@ def create_entries():
     return _native.create_entries()
 
 
+def schemas():
+    """Every schema USD has registered (dicts, by name), as the Schemas panel shows
+    them (docs/SCHEMAS.md §4): its kind ("Prim type", "API", ...), plugin, whether
+    it's codeless, what it inherits, its built-in and auto-applied APIs, and its
+    properties, each with type, fallback, allowed tokens, documentation and the
+    schema that declares it."""
+    return _native.schemas()
+
+
+def schema(name):
+    """One schema as schemas() describes it ("Mesh", or "CollectionAPI:ferns" for
+    CollectionAPI), or None if USD doesn't know it."""
+    return _native.schema(name)
+
+
 @contextmanager
 def edit(description, stage=None):
     """Makes everything done to `stage` (default: the current stage) inside the

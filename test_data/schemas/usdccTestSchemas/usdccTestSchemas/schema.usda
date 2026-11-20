@@ -1,0 +1,83 @@
+#usda 1.0
+(
+    "A codeless schema library for usdcc's tests (docs/SCHEMAS.md). Regenerate with"
+    "usdGenSchema usdccTestSchemas/schema.usda . in the folder above this one, then"
+    "fill in plugInfo.json's three @PLUG_INFO_...@ placeholders."
+    subLayers = [
+        @usd/schema.usda@,
+        @usdGeom/schema.usda@
+    ]
+)
+
+over "GLOBAL" (
+    customData = {
+        string libraryName = "usdccTestSchemas"
+        string libraryPath = "."
+        bool skipCodeGeneration = true
+    }
+)
+{
+}
+
+class "UsdccTestBase" (
+    inherits = </Xformable>
+    doc = "An abstract base for usdcc's test types."
+)
+{
+    string usdccTest:assetId = "" (
+        doc = "Where the asset is tracked."
+        displayName = "Asset ID"
+        displayGroup = "Tracking"
+    )
+}
+
+class UsdccTestAsset "UsdccTestAsset" (
+    inherits = </UsdccTestBase>
+    prepend apiSchemas = ["UsdccTestShotAPI"]
+    doc = "A test asset, with a shot built in."
+)
+{
+    uniform token usdccTest:status = "wip" (
+        allowedTokens = ["wip", "review", "final"]
+        doc = "How far along it is."
+    )
+}
+
+class "UsdccTestShotAPI" (
+    inherits = </APISchemaBase>
+    customData = {
+        token apiSchemaType = "singleApply"
+    }
+    doc = "Shot data."
+)
+{
+    int usdccTest:shot:frameStart = 1001
+    rel usdccTest:shot:camera (
+        doc = "The shot's camera."
+    )
+}
+
+class "UsdccTestTagAPI" (
+    inherits = </APISchemaBase>
+    customData = {
+        token apiSchemaType = "multipleApply"
+        token propertyNamespacePrefix = "usdccTestTag"
+    }
+    doc = "A named tag."
+)
+{
+    string value = ""
+}
+
+class "UsdccTestMarkAPI" (
+    inherits = </APISchemaBase>
+    customData = {
+        token apiSchemaType = "singleApply"
+        token[] apiSchemaAutoApplyTo = ["UsdccTestAsset"]
+        token[] apiSchemaCanOnlyApplyTo = ["UsdccTestAsset"]
+    }
+    doc = "Marks test assets."
+)
+{
+    bool usdccTest:marked = false
+}

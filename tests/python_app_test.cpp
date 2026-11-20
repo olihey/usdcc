@@ -282,6 +282,19 @@ USDCC_TEST(python_app_api) {
     CHECK(!app.python.runString("import usdcc.usd\nusdcc.usd.set_create_entry('')\n"), "no type name raises ValueError");
     usdcc::usd::PrimCreationCatalog::instance().reset();
 
+    // The Schema Explorer's data (docs/SCHEMAS.md §4).
+    CHECK(evaluate("(lambda s: (s['kind'], s['base'], s['plugin'], s['codeless']))(__import__('usdcc.usd').usd.schema('Mesh'))") ==
+              "('Prim type', 'PointBased', 'usdGeom', False)",
+          "schema()");
+    CHECK(evaluate("[p['declared_by'] for p in __import__('usdcc.usd').usd.schema('RectLight')['properties'] "
+                   "if p['name'] in ('visibility', 'inputs:intensity', 'inputs:width')]") ==
+              "['LightAPI', 'RectLight', 'Imageable']",
+          "each property says which schema declares it");
+    CHECK(evaluate("__import__('usdcc.usd').usd.schema('NotASchema') is None") == "True", "None for an unknown one");
+    CHECK(evaluate("any(s['name'] == 'CollectionAPI' and s['kind'] == 'Multiple-apply API' "
+                   "for s in __import__('usdcc.usd').usd.schemas())") == "True",
+          "schemas() lists them all");
+
     // What relationships target (docs/RELATIONSHIPS.md): a plugin's rule reaches
     // the same registry the app's dialogs ask.
     CHECK(app.python.runString("import usdcc.usd\nusdcc.usd.set_relationship_targets('myStudio:look', types=['Material'], "

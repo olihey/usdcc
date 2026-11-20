@@ -9,6 +9,7 @@
 #include "usdcc/usd/playback.h"
 #include "usdcc/usd/prim_creation_catalog.h"
 #include "usdcc/usd/relationship_targets.h"
+#include "usdcc/usd/schema_info.h"
 #include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -301,6 +302,57 @@ void bindStageManager(py::module_& m) {
         }
         return entries;
     });
+
+    // The Schema Explorer's data (docs/SCHEMAS.md §4).
+    auto schemaDict = [](const SchemaInfo& info) {
+        py::dict d;
+        d["name"] = info.name;
+        d["type_name"] = info.typeName;
+        d["kind"] = schemaKindName(info.kind);
+        d["family"] = info.family;
+        d["version"] = info.version;
+        d["plugin"] = info.plugin;
+        d["category"] = info.category;
+        d["codeless"] = info.codeless;
+        d["base"] = info.base;
+        d["documentation"] = info.documentation;
+        d["built_in_apis"] = info.builtInAPIs;
+        d["auto_applied_apis"] = info.autoAppliedAPIs;
+        d["auto_apply_to"] = info.autoApplyTo;
+        d["can_only_apply_to"] = info.canOnlyApplyTo;
+        d["property_namespace_prefix"] = info.propertyNamespacePrefix;
+        d["source_path"] = info.sourcePath;
+        d["generated_path"] = info.generatedPath;
+        py::list properties;
+        for (const SchemaProperty& property : info.properties) {
+            py::dict p;
+            p["name"] = property.name;
+            p["relationship"] = property.relationship;
+            p["type"] = property.typeName;
+            p["uniform"] = property.uniform;
+            p["fallback"] = property.hasFallback ? py::object(py::str(property.fallback)) : py::object(py::none());
+            p["allowed_tokens"] = property.allowedTokens;
+            p["documentation"] = property.documentation;
+            p["display_name"] = property.displayName;
+            p["display_group"] = property.displayGroup;
+            p["declared_by"] = property.declaredBy;
+            properties.append(p);
+        }
+        d["properties"] = properties;
+        return d;
+    };
+    m.def("schemas", [schemaDict]() {
+        py::list schemas;
+        for (const SchemaInfo& info : allSchemas()) schemas.append(schemaDict(info));
+        return schemas;
+    });
+    m.def(
+        "schema",
+        [schemaDict](const std::string& name) -> py::object {
+            const SchemaInfo info = schemaInfo(name);
+            return info.name.empty() ? py::object(py::none()) : py::object(schemaDict(info));
+        },
+        py::arg("name"));
 }
 
 }  // namespace usdcc::usd::python

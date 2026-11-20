@@ -1,4 +1,5 @@
 #include "usdcc/usd/applied_schemas.h"
+#include "usdcc/usd/schema_info.h"
 
 #include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
@@ -29,29 +30,6 @@ const PXR_NS::UsdPrimDefinition* definitionOf(const std::string& schema) {
 
 bool contains(const PXR_NS::TfTokenVector& tokens, const std::string& name) {
     return std::find(tokens.begin(), tokens.end(), PXR_NS::TfToken(name)) != tokens.end();
-}
-
-// A plugin's friendly name; one this doesn't know keeps its own.
-std::string categoryOf(const std::string& plugin) {
-    static const std::map<std::string, std::string> names{
-        {"usd", "Collections & Color"},
-        {"usdGeom", "Geometry"},
-        {"usdHydra", "Hydra"},
-        {"usdLod", "Level of Detail"},
-        {"usdLux", "Lighting"},
-        {"usdMedia", "Media"},
-        {"usdMtlx", "Shading"},
-        {"usdPhysics", "Physics"},
-        {"UsdProfiles", "Profiles"},
-        {"usdRi", "Shading"},
-        {"usdSemantics", "Semantics"},
-        {"usdShade", "Shading"},
-        {"usdSkel", "Skeleton"},
-        {"usdUI", "UI"},
-        {"usdVol", "Volumes & Particles"},
-    };
-    const auto it = names.find(plugin);
-    return it == names.end() ? plugin : it->second;
 }
 
 }  // namespace
@@ -122,7 +100,7 @@ std::vector<SchemaCategory> schemaCatalog(const PXR_NS::UsdPrim& prim) {
             }
         }
         const PXR_NS::PlugPluginPtr plugin = PXR_NS::PlugRegistry::GetInstance().GetPluginForType(type);
-        categories[categoryOf(plugin ? plugin->GetName() : "Other")].push_back(std::move(entry));
+        categories[schemaCategoryName(plugin ? plugin->GetName() : "Other")].push_back(std::move(entry));
     }
     std::vector<SchemaCategory> result;
     for (auto& [name, entries] : categories) {

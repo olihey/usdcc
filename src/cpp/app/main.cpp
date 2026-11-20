@@ -75,6 +75,7 @@
 #include "usdcc/usd/physics_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/schema_explorer_view_panel.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/prim_tree_dialog.h"
@@ -439,6 +440,12 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::DependenciesViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    // The schemas USD has registered (docs/SCHEMAS.md §4).
+    panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
+                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                   QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::SchemaExplorerViewPanel(&stageManager, stage, title, parent);
                    });
 
     // The stage passed on the command line, if any. Without one (or if it

@@ -12,6 +12,7 @@ add_executable(usdcc_tests
     test_harness.cpp
     test_main.cpp
     applied_schemas_test.cpp
+    schema_info_test.cpp
     prim_selection_test.cpp
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
@@ -103,6 +104,7 @@ add_executable(usdcc_ui_tests
     render_view_panel_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
+    schema_explorer_test.cpp
     material_editor_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
@@ -272,6 +274,14 @@ else()
             ENVIRONMENT_MODIFICATION
             "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
 endif()
+
+# The schema tests again, with a codeless schema library registered at startup
+# (docs/SCHEMAS.md). Not for every test: its prim type would land in the Create
+# menu's Plugins, which the Create menu tests say USD's own types never do.
+add_test(NAME usdcc_schema_info COMMAND usdcc_tests schema_info)
+get_test_property(usdcc_tests ENVIRONMENT_MODIFICATION _usdcc_schema_info_env)
+set_tests_properties(usdcc_schema_info PROPERTIES ENVIRONMENT_MODIFICATION
+    "${_usdcc_schema_info_env};PXR_PLUGINPATH_NAME=path_list_append:${CMAKE_SOURCE_DIR}/test_data/schemas/usdccTestSchemas")
 
 # Qt's plugins beside the test programs, as the app has them (src/cpp/app/CMakeLists.txt):
 # ctest points Qt at vcpkg's folder, but a test program started by hand, or from Visual

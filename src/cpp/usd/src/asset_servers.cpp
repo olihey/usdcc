@@ -1,8 +1,10 @@
 #include "usdcc/usd/asset_servers.h"
 
 #include "usdcc/assets/context.h"
+#include "usdcc/usd/schema_info.h"
 
 #include <pxr/usd/ar/assetInfo.h>
+#include <pxr/usd/ar/defaultResolverContext.h>
 #include <pxr/usd/ar/resolvedPath.h>
 #include <pxr/usd/ar/resolver.h>
 
@@ -51,6 +53,11 @@ PXR_NS::ArResolverContext stageResolverContext(const std::string& identifier, co
     // default one each remote protocol adds.
     std::vector<PXR_NS::ArResolverContext> contexts;
     contexts.emplace_back(usdcc::assets::Context(usdcc::assets::defaultConfig(), chosen));
+    // A plugin's schema.usda sublayers others by plugin (@usdGeom/schema.usda@),
+    // which usdGenSchema finds in the plugins' resources (docs/SCHEMAS.md §4).
+    if (const std::vector<std::string> schemaPaths = schemaSourceSearchPaths(identifier); !schemaPaths.empty()) {
+        contexts.emplace_back(PXR_NS::ArDefaultResolverContext(schemaPaths));
+    }
     contexts.push_back(PXR_NS::ArGetResolver().CreateDefaultContextForAsset(identifier));
     return PXR_NS::ArResolverContext(contexts);
 }
