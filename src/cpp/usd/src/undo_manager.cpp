@@ -7,12 +7,15 @@
 #include <QUndoCommand>
 #include <QUndoStack>
 
+#include <pxr/usd/sdf/path.h>
+
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/layerStateDelegate.h>
 #include <pxr/usd/usd/stage.h>
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <utility>
@@ -188,20 +191,22 @@ private:
     bool m_dirty = false;
 };
 
-class LayerEditCommand : public QUndoCommand {
+class LayerEditCommand : public UndoStep {
 public:
     LayerEditCommand(const PXR_NS::SdfLayerHandle& layer, PXR_NS::TfRefPtr<EditRecorder> recorder,
                      InverseEdits edits, const QString& description, std::vector<PXR_NS::SdfLayerRefPtr> keep = {})
-        : QUndoCommand(description),
+        : UndoStep(description),
           m_layer(layer),
           m_recorder(std::move(recorder)),
           m_edits(std::move(edits)),
           m_keep(std::move(keep)) {}
-    void undo() override {
+
+protected:
+    void undoStep() override {
         USDCC_LOG_INFO("usdcc.undo", "Undo: {}", text().toStdString());
         play();
     }
-    void redo() override {
+    void redoStep() override {
         if (m_first) {  // pushed after the edit already happened
             m_first = false;
             return;
@@ -232,7 +237,7 @@ private:
 
 // One step that changed several layers. Holds them, so that undo still works if
 // the stage that needed them (a dependent one) has since closed.
-class MultiLayerEditCommand : public QUndoCommand {
+class MultiLayerEditCommand : public UndoStep {
 public:
     struct Recording {
         PXR_NS::SdfLayerRefPtr layer;
@@ -242,14 +247,15 @@ public:
 
     MultiLayerEditCommand(std::vector<Recording> recordings, const QString& description,
                           std::function<void(bool)> replayed)
-        : QUndoCommand(description), m_recordings(std::move(recordings)), m_replayed(std::move(replayed)) {}
+        : UndoStep(description), m_recordings(std::move(recordings)), m_replayed(std::move(replayed)) {}
 
-    void undo() override {
+protected:
+    void undoStep() override {
         USDCC_LOG_INFO("usdcc.undo", "Undo: {}", text().toStdString());
         play();
         if (m_replayed) m_replayed(true);
     }
-    void redo() override {
+    void redoStep() override {
         if (m_first) {  // pushed after the edit already happened
             m_first = false;
             return;
@@ -277,7 +283,99 @@ private:
     bool m_first = true;
 };
 
+// Steps undoing or redoing right now, and the SelectionPauses alive.
+int s_replaying = 0;
+int s_selectionPaused = 0;
+
+struct Replaying {
+    Replaying() { ++s_replaying; }
+    ~Replaying() { --s_replaying; }
+};
+
+using Clock = std::chrono::steady_clock;
+
+QString selectionText(const std::vector<PXR_NS::SdfPath>& paths) {
+    if (paths.empty()) return UndoManager::tr("Deselect All");
+    if (paths.size() == 1) return UndoManager::tr("Select %1").arg(QString::fromStdString(paths.front().GetName()));
+    return UndoManager::tr("Select %1 Prims").arg(paths.size());
+}
+
+// A selection change, which UndoStep itself undoes and redoes. Pushed after the
+// change was made, either as a step of its own or, with `fold`, to become part of
+// the edit step under it (UndoStep::mergeWith()).
+class SelectionCommand : public UndoStep {
+public:
+    SelectionCommand(SelectionChange change, bool fold, int mergeInterval)
+        : UndoStep(selectionText(change.after)), m_fold(fold), m_mergeInterval(mergeInterval), m_time(Clock::now()) {
+        m_selection = std::move(change);
+    }
+
+    bool fold() const { return m_fold; }
+    const SelectionChange& change() const { return *m_selection; }
+
+    // The changes of one gesture are one step: a drag over rows, a held arrow key.
+    bool mergeWith(const QUndoCommand* other) override {
+        const auto* next = dynamic_cast<const SelectionCommand*>(other);
+        if (!next) return false;
+        // The interval as it is now, which the newer one has.
+        const bool soon =
+            next->m_mergeInterval > 0 && next->m_time - m_time <= std::chrono::milliseconds(next->m_mergeInterval);
+        if (!next->m_fold && !soon) return false;
+        m_selection->after = next->m_selection->after;
+        m_time = next->m_time;
+        setText(next->text());
+        // Back where it began: QUndoStack drops the step.
+        if (m_selection->before == m_selection->after) setObsolete(true);
+        return true;
+    }
+
+protected:
+    void undoStep() override {}
+    void redoStep() override {}
+
+private:
+    bool m_fold;
+    int m_mergeInterval;
+    Clock::time_point m_time;
+};
+
 }  // namespace
+
+UndoStep::UndoStep(const QString& text) : QUndoCommand(text) {}
+
+UndoStep::~UndoStep() = default;
+
+int UndoStep::id() const { return 0x75636373; }  // anything but -1, which never merges
+
+bool UndoStep::replaying() { return s_replaying > 0; }
+
+bool UndoStep::mergeWith(const QUndoCommand* other) {
+    const auto* selection = dynamic_cast<const SelectionCommand*>(other);
+    if (!selection || !selection->fold()) return false;
+    if (m_selection) {
+        m_selection->after = selection->change().after;
+    } else {
+        m_selection = selection->change();
+    }
+    if (m_selection->before == m_selection->after) m_selection.reset();
+    return true;
+}
+
+void UndoStep::undo() {
+    const Replaying replaying;
+    undoStep();
+    if (!m_selection || !m_selection->manager) return;
+    if (const StageRefPtr stage = m_selection->stage.lock()) m_selection->manager->restoreSelection(stage, m_selection->before);
+}
+
+void UndoStep::redo() {
+    const Replaying replaying;
+    const bool pushing = !std::exchange(m_pushed, true);
+    redoStep();
+    // Pushed after the change was made: the selection is already the one to have.
+    if (pushing || !m_selection || !m_selection->manager) return;
+    if (const StageRefPtr stage = m_selection->stage.lock()) m_selection->manager->restoreSelection(stage, m_selection->after);
+}
 
 struct UndoManager::Session {
     PXR_NS::SdfLayerHandle layer;
@@ -298,6 +396,7 @@ UndoManager::Entry* UndoManager::entry(const StageRefPtr& stage) {
     auto newEntry = std::make_unique<Entry>();
     newEntry->stage = stage;
     newEntry->stack = std::make_unique<QUndoStack>(this);
+    newEntry->selection = stage->selectedPaths();
     Entry* result = newEntry.get();
     m_storage.push_back(std::move(newEntry));
     m_entries.insert(key, result);
@@ -326,6 +425,72 @@ QUndoStack* UndoManager::stack(const StageRefPtr& stage) {
     return e ? e->stack.get() : nullptr;
 }
 
+void UndoManager::trackSelection(StageManager& stageManager) {
+    m_stageManager = &stageManager;
+    for (const StageRefPtr& stage : stageManager.stages()) entry(stage)->selection = stage->selectedPaths();
+    // An entry from the start, so that the first change has a selection to come from.
+    m_selectionStageOpened = stageManager.stageOpened.connect([this](const StageRefPtr& stage) { entry(stage); });
+    m_selectionChanged = stageManager.selectionChanged.connect(
+        [this](const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>&) { onSelectionChanged(stage); });
+}
+
+void UndoManager::onSelectionChanged(const StageRefPtr& stage) {
+    Entry* e = const_cast<Entry*>(findEntry(stage));
+    if (!e) return;
+    // What the stage has, not what the signal carries: a listener called before
+    // this one may have changed the selection again.
+    if (stage->selectedPaths() == e->selection) return;
+    std::vector<PXR_NS::SdfPath> before = std::exchange(e->selection, stage->selectedPaths());
+    if (UndoStep::replaying() || s_selectionPaused > 0 || e->selectionScopes > 0) return;
+    e->stack->push(new SelectionCommand({this, stage, std::move(before), e->selection}, false, m_selectionMergeInterval));
+}
+
+void UndoManager::beginSelectionScope(Entry& e) {
+    if (e.selectionScopes++ > 0) return;
+    e.scopeSelection = e.selection;
+    e.scopeIndex = e.stack->index();
+    e.scopeTop = e.scopeIndex > 0 ? e.stack->command(e.scopeIndex - 1) : nullptr;
+}
+
+void UndoManager::endSelectionScope(Entry& e, bool restore) {
+    if (--e.selectionScopes > 0) return;
+    if (e.selection == e.scopeSelection) return;
+    if (restore) {
+        restoreSelection(e.stage, e.scopeSelection);
+        return;
+    }
+    if (UndoStep::replaying() || s_selectionPaused > 0) return;
+    // With a step pushed meanwhile, the change is that step's.
+    const int index = e.stack->index();
+    const bool pushed = index > e.scopeIndex && e.stack->command(index - 1) != e.scopeTop;
+    e.stack->push(new SelectionCommand({this, e.stage, e.scopeSelection, e.selection}, pushed, m_selectionMergeInterval));
+}
+
+void UndoManager::restoreSelection(const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths) {
+    if (!m_stageManager || !stage) return;
+    std::vector<PXR_NS::SdfPath> present;
+    for (const PXR_NS::SdfPath& path : paths) {
+        if (stage->usdStage()->GetObjectAtPath(path)) present.push_back(path);
+    }
+    if (present == stage->selectedPaths()) return;
+    const SelectionPause pause;
+    m_stageManager->setSelectedPaths(stage, std::move(present));
+}
+
+UndoManager::SelectionScope::SelectionScope(UndoManager& undo, const StageRefPtr& stage) : m_undo(undo), m_stage(stage) {
+    if (Entry* e = m_undo.entry(m_stage)) m_undo.beginSelectionScope(*e);
+}
+
+UndoManager::SelectionScope::~SelectionScope() {
+    // Looked up again: closing the stage meanwhile took its entry.
+    Entry* e = const_cast<Entry*>(m_undo.findEntry(m_stage));
+    if (e && e->selectionScopes > 0) m_undo.endSelectionScope(*e);
+}
+
+UndoManager::SelectionPause::SelectionPause() { ++s_selectionPaused; }
+
+UndoManager::SelectionPause::~SelectionPause() { --s_selectionPaused; }
+
 bool UndoManager::apply(const StageRefPtr& stage, const QString& description, const std::function<bool()>& edit) {
     if (!stage || !edit) return false;
     beginEdit(stage, description);
@@ -341,6 +506,7 @@ bool UndoManager::apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& 
                         const std::function<bool()>& edit, std::vector<PXR_NS::SdfLayerRefPtr> keep) {
     Entry* e = entry(stage);
     if (!e || !layer || !edit) return false;
+    const SelectionScope selection(*this, stage);
     PXR_NS::TfRefPtr<EditRecorder> recorder = EditRecorder::forLayer(layer);
     if (recorder->isRecording()) {  // an open session on that layer records it
         e->keep.insert(e->keep.end(), keep.begin(), keep.end());
@@ -364,6 +530,7 @@ bool UndoManager::applyAcrossLayers(const StageRefPtr& stage, const std::vector<
                                     std::function<void(bool undone)> replayed) {
     Entry* e = entry(stage);
     if (!e || !edit) return false;
+    const SelectionScope selection(*this, stage);
     // A deque's elements stay put, and each recorder holds a pointer to its list.
     std::deque<MultiLayerEditCommand::Recording> recordings;
     for (const PXR_NS::SdfLayerHandle& layer : layers) {
@@ -409,6 +576,7 @@ void UndoManager::beginEdit(const StageRefPtr& stage, const QString& description
         }
     }
     e->session = std::move(session);
+    beginSelectionScope(*e);  // the selection changes made during the edit are its step's
 }
 
 bool UndoManager::endEdit(const StageRefPtr& stage) {
@@ -416,14 +584,19 @@ bool UndoManager::endEdit(const StageRefPtr& stage) {
     if (!e || !e->session) return false;
     if (--e->session->depth > 0) return false;
     std::unique_ptr<Session> session = std::move(e->session);
-    if (!session->recorder) return false;
-    session->recorder->setRecording(nullptr);
-    if (session->edits.empty()) return false;
-    USDCC_LOG_DEBUG("usdcc.undo", "Recorded: {} ({} change(s))", session->description.toStdString(),
-                    session->edits.size());
-    e->stack->push(new LayerEditCommand(session->layer, std::move(session->recorder), std::move(session->edits),
-                                        session->description));
-    return true;
+    bool recorded = false;
+    if (session->recorder) {
+        session->recorder->setRecording(nullptr);
+        if (!session->edits.empty()) {
+            USDCC_LOG_DEBUG("usdcc.undo", "Recorded: {} ({} change(s))", session->description.toStdString(),
+                            session->edits.size());
+            e->stack->push(new LayerEditCommand(session->layer, std::move(session->recorder), std::move(session->edits),
+                                                session->description));
+            recorded = true;
+        }
+    }
+    if (e->selectionScopes > 0) endSelectionScope(*e);
+    return recorded;
 }
 
 void UndoManager::cancelEdit(const StageRefPtr& stage) {
@@ -436,6 +609,7 @@ void UndoManager::cancelEdit(const StageRefPtr& stage) {
         session->recorder->setRecording(nullptr);
         session->recorder->play(session->edits);
     }
+    if (e->selectionScopes > 0) endSelectionScope(*e, true);  // and the selection it had
 }
 
 bool UndoManager::isEditing(const StageRefPtr& stage) const {

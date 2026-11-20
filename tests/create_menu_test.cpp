@@ -399,3 +399,35 @@ USDCC_TEST(create_menu_outliner_shows_the_new_prim) {
         CHECK(tree->visualRect(selected.front()).isValid() && tree->viewport()->rect().intersects(tree->visualRect(selected.front())), "in view");
     }
 }
+
+// With the selection in the history (UndoManager::trackSelection()): creating a prim and
+// selecting it is one step.
+USDCC_TEST(create_menu_create_and_select_is_one_step) {
+    Scene s;
+    s.undo->trackSelection(s.manager);
+    s.undo->setSelectionMergeInterval(0);
+    const StageRefPtr stage = s.manager.createStage();
+    s.manager.setCurrentStage(stage);
+    const SdfPath world("/World");
+    stage->usdStage()->DefinePrim(world, TfToken("Xform"));
+    s.manager.setSelectedPaths(stage, {world});
+    QUndoStack* stack = s.undo->stack(stage);
+    CHECK(stack->count() == 1, "selecting is a step (count=%d)", stack->count());
+
+    PrimCreateMenu menu(&s.manager, s.undo, &s.window);
+    menu.rebuild();
+    QAction* cube = entry(&menu, QStringLiteral("Geometry"), QStringLiteral("Cube"));
+    CHECK(cube, "Cube is there");
+    if (!cube) return;
+    cube->trigger();
+    const std::vector<SdfPath> made = s.manager.selectedPaths(stage);
+    CHECK(made.size() == 1 && made.front() != world && stage->usdStage()->GetPrimAtPath(made.front()), "made and selected");
+    if (made.size() != 1) return;
+    CHECK(stack->count() == 2 && stack->undoText() == QStringLiteral("Create Cube"), "as one step: [%s] (count=%d)",
+          qPrintable(stack->undoText()), stack->count());
+    stack->undo();
+    CHECK(!stage->usdStage()->GetPrimAtPath(made.front()), "undo: the prim is gone");
+    CHECK(s.manager.selectedPaths(stage) == std::vector<SdfPath>{world}, "and what was selected before is again");
+    stack->redo();
+    CHECK(stage->usdStage()->GetPrimAtPath(made.front()) && s.manager.selectedPaths(stage) == made, "redo: made and selected");
+}

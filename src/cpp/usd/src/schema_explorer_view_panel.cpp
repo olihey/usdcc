@@ -373,6 +373,7 @@ PXR_NS::SdfPath SchemaExplorerViewPanel::createPrim(const QString& type, QString
     if (!currentStage() || !m_undoManager) return refuse(tr("No stage"));
     const prim_actions::CreateTarget target = prim_actions::createTarget(currentStage(), selection());
     if (!target.problem.isEmpty()) return refuse(target.problem);
+    const UndoManager::SelectionScope selected(*m_undoManager, currentStage());  // selecting it is part of the step
     const PXR_NS::SdfPath path = prim_actions::createPrim(*m_undoManager, currentStage(), target.parent, info->name);
     if (path.IsEmpty()) return refuse(tr("It couldn't be created there"));
     stageManager()->setSelectedPaths(currentStage(), {path});

@@ -344,3 +344,22 @@ def Cube "Split"
     usdcc::usd::populatePrimMenu(&menu, contextFor(test, "/inst/geo"));
     CHECK(!findAction(&menu, "Delete")->isEnabled(), "not on an instance proxy");
 }
+
+// With the selection in the history (UndoManager::trackSelection()): undoing a delete
+// brings the selection back with the prims.
+USDCC_TEST(prim_context_menu_delete_undo_selects_again) {
+    TestStage test;
+    test.undo.trackSelection(test.manager);
+    test.undo.setSelectionMergeInterval(0);
+    const std::vector<SdfPath> both{SdfPath("/World/A"), SdfPath("/World/B")};
+    test.manager.setSelectedPaths(test.stage, both);
+    CHECK(test.stack()->count() == 1, "selecting is a step (count=%d)", test.stack()->count());
+    CHECK(usdcc::usd::deletePrimsAsking(test.undo, &test.manager, test.stage, {SdfPath("/World/A")}, nullptr), "deletes");
+    CHECK(!test.prim("/World/A") && test.manager.selectedPaths(test.stage) == std::vector{SdfPath("/World/B")},
+          "gone, and dropped from the selection");
+    CHECK(test.stack()->count() == 2, "in one step: [%s] (count=%d)", qPrintable(test.stack()->undoText()), test.stack()->count());
+    test.stack()->undo();
+    CHECK(test.prim("/World/A") && test.manager.selectedPaths(test.stage) == both, "undo: back, and selected again");
+    test.stack()->redo();
+    CHECK(!test.prim("/World/A") && test.manager.selectedPaths(test.stage) == std::vector{SdfPath("/World/B")}, "redo");
+}

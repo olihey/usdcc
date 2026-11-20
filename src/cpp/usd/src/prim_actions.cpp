@@ -70,16 +70,17 @@ std::vector<PXR_NS::UsdPrim> editablePrims(const StageRefPtr& stage, const std::
 
 // Load and unload change the stage's load rules, not a layer: this undo step
 // puts the rules back as they were.
-class LoadRulesCommand : public QUndoCommand {
+class LoadRulesCommand : public UndoStep {
 public:
     LoadRulesCommand(PXR_NS::UsdStageRefPtr stage, const QString& description,
                      std::function<void(const PXR_NS::UsdStageRefPtr&)> change)
-        : QUndoCommand(description),
+        : UndoStep(description),
           m_stage(std::move(stage)),
           m_change(std::move(change)),
           m_before(m_stage->GetLoadRules()) {}
 
-    void redo() override {
+protected:
+    void redoStep() override {
         if (m_change) {
             m_change(m_stage);  // the first time: the load or unload itself
             m_change = nullptr;
@@ -89,7 +90,7 @@ public:
         }
     }
 
-    void undo() override { m_stage->SetLoadRules(m_before); }
+    void undoStep() override { m_stage->SetLoadRules(m_before); }
 
 private:
     PXR_NS::UsdStageRefPtr m_stage;
@@ -260,6 +261,8 @@ bool applyMoves(UndoManager& undo, const StageRefPtr& stage, const PrimMoves& mo
         alive->primsMoved(undone ? inverse : moves);
         if (!targetOp.IsEmpty()) alive->setTargetXformOp(undone ? targetPrim : pathAfterMoves(targetPrim, moves), targetOp);
     };
+    // The selection follows the prims once they've moved: in the same step.
+    const UndoManager::SelectionScope selection(undo, stage);
     const bool done = undo.applyAcrossLayers(
         stage, layersToRecord(stage, openStages), description,
         [&]() {
@@ -348,6 +351,7 @@ bool pushLoadRules(UndoManager& undo, const StageRefPtr& stage, const QString& d
                    std::function<void(const PXR_NS::UsdStageRefPtr&)> change) {
     QUndoStack* stack = undo.stack(stage);
     if (!stack) return false;
+    const UndoManager::SelectionScope selection(undo, stage);  // a selection the change drops is its step's
     stack->push(new LoadRulesCommand(stage->usdStage(), description, std::move(change)));
     return true;
 }

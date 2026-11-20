@@ -7,13 +7,17 @@
 
 #include <pxr/usd/sdf/layer.h>
 
+#include <pxr/usd/sdf/path.h>
+
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <QUndoCommand>
 #include <QUndoStack>
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QUndoStack;
@@ -21,6 +25,47 @@ class QUndoStack;
 namespace usdcc::usd {
 
 class StageManager;
+class UndoManager;
+
+// A step on a stage's undo stack: what every command pushed there derives from,
+// implementing undoStep() and redoStep() rather than undo() and redo(). It adds
+// what the selection needs (see UndoManager::trackSelection()):
+//   - While a step undoes or redoes, replaying() is true, and a selection change
+//     made meanwhile (the selection following a renamed prim back, say) isn't
+//     recorded as a step of its own. Pushing onto a stack that's in the middle of
+//     an undo would break it.
+//   - A step can carry the selection change that was made with it: undo then puts
+//     back the selection from before the step, redo the one from after it.
+class USDCC_USD_UI_API UndoStep : public QUndoCommand {
+public:
+    explicit UndoStep(const QString& text = QString());
+    ~UndoStep() override;
+
+    // One id for every step, so that QUndoStack::push() offers a step the
+    // selection change that came with it (mergeWith()).
+    int id() const final;
+    bool mergeWith(const QUndoCommand* other) override;
+    void undo() final;
+    void redo() final;
+
+    static bool replaying();
+
+protected:
+    virtual void undoStep() = 0;
+    // Also called by QUndoStack::push(), for the first time.
+    virtual void redoStep() = 0;
+
+    struct SelectionChange {
+        UndoManager* manager = nullptr;
+        std::weak_ptr<Stage> stage;
+        std::vector<PXR_NS::SdfPath> before;
+        std::vector<PXR_NS::SdfPath> after;
+    };
+    std::optional<SelectionChange> m_selection;
+
+private:
+    bool m_pushed = false;
+};
 
 // One QUndoStack per stage. An undo step is the list of spec-level changes an
 // edit made to the stage's edit-target layer, each stored as its inverse (the
@@ -45,12 +90,53 @@ class StageManager;
 // A global edit spans every stage: one session on each stage open when it
 // begins and on each stage opened before it ends. A script run is one, so it
 // becomes one undo step on every stage it changed (docs/SCRIPTING.md §4.2).
+//
+// The selection is part of the history once trackSelection() is called:
+//   - A selection change is a step of its own ("Select Chair"). Changes that
+//     follow each other quickly (a drag over rows, a held arrow key) are one step.
+//   - A change made with an edit belongs to that edit's step, and is undone and
+//     redone with it: one made during apply(), applyAcrossLayers() or an edit
+//     session, or anywhere inside a SelectionScope, for an edit that sets the
+//     selection once it's done (create a prim, then select it).
+//   - Nothing is recorded while a step undoes or redoes, or under a
+//     SelectionPause (restoring a session).
 class USDCC_USD_UI_API UndoManager final : public QObject {
     Q_OBJECT
 public:
     explicit UndoManager(QObject* parent = nullptr);
     ~UndoManager() override;
     QUndoStack* stack(const StageRefPtr& stage);
+
+    // From now on the selections of `stageManager`'s stages are part of their
+    // histories. `stageManager` must outlive this.
+    void trackSelection(StageManager& stageManager);
+    // Two selection changes at most this far apart become one step; 0 keeps
+    // every change apart. 300 ms unless set.
+    void setSelectionMergeInterval(int milliseconds) { m_selectionMergeInterval = milliseconds; }
+
+    // Makes the selection changes of `stage` during its lifetime part of the step
+    // pushed on the stage's stack meanwhile, or one step of their own if there's
+    // none. Nests: the outermost one records.
+    class USDCC_USD_UI_API SelectionScope {
+    public:
+        SelectionScope(UndoManager& undo, const StageRefPtr& stage);
+        ~SelectionScope();
+        SelectionScope(const SelectionScope&) = delete;
+        SelectionScope& operator=(const SelectionScope&) = delete;
+
+    private:
+        UndoManager& m_undo;
+        StageRefPtr m_stage;
+    };
+
+    // While one is alive, no manager records selection changes.
+    class USDCC_USD_UI_API SelectionPause {
+    public:
+        SelectionPause();
+        ~SelectionPause();
+        SelectionPause(const SelectionPause&) = delete;
+        SelectionPause& operator=(const SelectionPause&) = delete;
+    };
 
     bool apply(const StageRefPtr& stage, const QString& description, const std::function<bool()>& edit);
     // The same, recording the edits to `layer` rather than the edit target:
@@ -103,9 +189,31 @@ private:
         // Layers apply(stage, layer, ...) was asked to keep while a session
         // recorded the edit: kept until the stage closes.
         std::vector<PXR_NS::SdfLayerRefPtr> keep;
+        // The selection as last seen: StageManager only says what it is now.
+        std::vector<PXR_NS::SdfPath> selection;
+        // The open selection scopes, and for the outermost one the selection and
+        // the top of the stack when it began.
+        int selectionScopes = 0;
+        std::vector<PXR_NS::SdfPath> scopeSelection;
+        int scopeIndex = 0;
+        const QUndoCommand* scopeTop = nullptr;
     };
     Entry* entry(const StageRefPtr& stage);
     const Entry* findEntry(const StageRefPtr& stage) const;
+
+    friend class UndoStep;
+    void onSelectionChanged(const StageRefPtr& stage);
+    void beginSelectionScope(Entry& e);
+    // `restore` puts the selection back as it was when the scope began,
+    // instead of recording the change.
+    void endSelectionScope(Entry& e, bool restore = false);
+    // Selects those of `paths` the stage still has. Records nothing.
+    void restoreSelection(const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths);
+
+    StageManager* m_stageManager = nullptr;
+    int m_selectionMergeInterval = 300;
+    usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChanged;
+    usdcc::core::Signal<StageRefPtr>::Connection m_selectionStageOpened;
 
     QHash<qulonglong, Entry*> m_entries;
     std::vector<std::unique_ptr<Entry>> m_storage;

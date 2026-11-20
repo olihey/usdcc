@@ -6,6 +6,7 @@
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/variant_editor_dialog.h"
 
@@ -204,12 +205,15 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     if (payloads) {
         menu->addSeparator();
         const auto loadChanged = context.loadChanged;
+        // What `loadChanged` does to the selection is part of the step.
         QAction* load = menu->addAction(tr("Load Payload"), menu, [&undo, stage, paths, loadChanged]() {
+            const UndoManager::SelectionScope selection(undo, stage);
             if (prim_actions::load(undo, stage, paths) && loadChanged) loadChanged();
         });
         load->setEnabled(std::any_of(paths.begin(), paths.end(),
                                      [&](const PXR_NS::SdfPath& path) { return prim_actions::canLoad(stage, path); }));
         QAction* unload = menu->addAction(tr("Unload Payload"), menu, [&undo, stage, paths, loadChanged]() {
+            const UndoManager::SelectionScope selection(undo, stage);
             if (prim_actions::unload(undo, stage, paths) && loadChanged) loadChanged();
         });
         unload->setEnabled(std::any_of(paths.begin(), paths.end(),
@@ -454,6 +458,7 @@ bool deletePrimsAsking(UndoManager& undo, StageManager* stageManager, const Stag
             return false;
         }
     }
+    const UndoManager::SelectionScope selection(undo, stage);  // undo brings the selection back with the prims
     const QString why = prim_actions::deletePrims(undo, stage, paths, mode);
     if (!why.isEmpty()) USDCC_LOG_WARNING("usdcc.stage", "{}", why.toStdString());
     if (stageManager) {

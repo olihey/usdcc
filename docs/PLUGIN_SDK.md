@@ -43,6 +43,12 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host& host) {}
 These also tell the Plugin Manager what the plugin added. Anything else in the app's headers can be used directly, such as
 `usdcc::usd::PrimCreationCatalog::instance()` or `stageManager->selectionChanged`: there's one copy of each, shared with the app.
 
+The selection is part of each stage's undo history: `stageManager->setSelectedPaths()` is a step of its own, or part of the
+action's step when called from one of the `run` callbacks above. A plugin that pushes a command of its own on
+`undoManager->stack(stage)` derives it from `usdcc::usd::UndoStep` (`undo_manager.h`), not from `QUndoCommand`, so that a selection
+change its undo causes isn't recorded as a new step. `UndoManager::SelectionScope` makes an edit and the selection set after it
+one step.
+
 An exception from `usdcc_plugin_activate()` marks the plugin failed. What it registered by then stays until the next start, and its library is never unloaded, so
 keep `Host` references and callbacks as long as you like.
 

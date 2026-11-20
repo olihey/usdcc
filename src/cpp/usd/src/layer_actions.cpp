@@ -101,11 +101,11 @@ bool containsTarget(const LayerEntry& entry) {
 }
 
 // Mutes some layers and unmutes others, at once; undo the other way round.
-class MuteCommand : public QUndoCommand {
+class MuteCommand : public UndoStep {
 public:
     MuteCommand(StageRefPtr stage, std::vector<std::string> mute, std::vector<std::string> unmute, bool moveTarget,
                 const QString& text)
-        : QUndoCommand(text),
+        : UndoStep(text),
           m_stage(std::move(stage)),
           m_mute(std::move(mute)),
           m_unmute(std::move(unmute)),
@@ -118,13 +118,14 @@ public:
         }
     }
 
-    void redo() override {
+protected:
+    void redoStep() override {
         const PXR_NS::UsdStageRefPtr& stage = m_stage->usdStage();
         if (m_moveTarget) stage->SetEditTarget(PXR_NS::UsdEditTarget(stage->GetRootLayer()));
         stage->MuteAndUnmuteLayers(m_mute, m_unmute);
     }
 
-    void undo() override {
+    void undoStep() override {
         const PXR_NS::UsdStageRefPtr& stage = m_stage->usdStage();
         stage->MuteAndUnmuteLayers(m_unmute, m_mute);
         // A mute that moved the target: back to where it was.
@@ -186,6 +187,7 @@ bool setMuted(UndoManager& undo, const StageRefPtr& stage, const std::string& id
     if (!stack) return false;
     const QString name = QString::fromStdString(entry->displayName);
     const std::vector<std::string> one{identifier};
+    const UndoManager::SelectionScope selection(undo, stage);  // a selection the mute changes is its step's
     stack->push(new MuteCommand(stage, muted ? one : std::vector<std::string>(), muted ? std::vector<std::string>() : one,
                                 muted && containsTarget(*entry),
                                 muted ? tr("Mute %1").arg(name) : tr("Unmute %1").arg(name)));
@@ -218,6 +220,7 @@ bool muteOthers(UndoManager& undo, const StageRefPtr& stage, const std::string& 
         muteIds.push_back(other->identifier);
         moveTarget = moveTarget || containsTarget(*other);
     }
+    const UndoManager::SelectionScope selection(undo, stage);  // a selection the mute changes is its step's
     stack->push(new MuteCommand(stage, std::move(muteIds), std::move(unmute), moveTarget,
                                 tr("Mute All but %1").arg(QString::fromStdString(entry->displayName))));
     return true;
