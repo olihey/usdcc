@@ -1,5 +1,7 @@
 #include "usdcc/usd/arnold_runtime.h"
 
+#include "usdcc/usd/shader_node_catalog.h"
+
 #include <pxr/base/arch/defines.h>
 #include <pxr/base/arch/env.h>
 #include <pxr/base/arch/symbols.h>
@@ -148,6 +150,8 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
         status.arnoldVersion.clear();
         return status;
     }
+    // How the Material Editor's palette lists its shaders (docs/MATERIAL_EDITOR.md §3.3).
+    ShaderNodeCatalog::instance().setProfile(arnoldRendererProfile());
     status.enabled = true;
     status.message = "Arnold " + status.arnoldVersion + " from " + utf8(core) + ", with " +
                      std::to_string(registered.size()) + " plugins from " + status.pluginFolder + " (Settings > Renderers)";

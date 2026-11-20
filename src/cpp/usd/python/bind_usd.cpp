@@ -273,12 +273,17 @@ void bindStageManager(py::module_& m) {
     m.def(
         "set_renderer_profile",
         [](const std::string& system, const std::string& name, const std::string& icon, const std::string& prefix, const std::string& surface,
-           const std::vector<std::string>& terminals, const std::vector<std::string>& hidden) {
+           const std::vector<std::string>& terminals, const std::vector<std::string>& hidden, const std::string& groupMetadata,
+           const std::vector<std::string>& hiddenGroups, const std::vector<std::string>& hiddenNodes,
+           const std::map<std::string, std::string>& nodeGroups) {
             if (system.empty()) throw py::value_error("no shading system");
-            usdcc::usd::ShaderNodeCatalog::instance().setProfile({system, name, icon, prefix, surface, terminals, hidden});
+            usdcc::usd::ShaderNodeCatalog::instance().setProfile(
+                {system, name, icon, prefix, surface, terminals, hidden, groupMetadata, hiddenGroups, hiddenNodes, nodeGroups});
         },
         py::arg("shading_system"), py::arg("display_name"), py::arg("icon"), py::arg("terminal_prefix"), py::arg("default_surface_node"),
-        py::arg("terminals"), py::arg("hidden_contexts"));
+        py::arg("terminals"), py::arg("hidden_contexts"), py::arg("group_metadata") = std::string(),
+        py::arg("hidden_groups") = std::vector<std::string>(), py::arg("hidden_nodes") = std::vector<std::string>(),
+        py::arg("node_groups") = std::map<std::string, std::string>());
     m.def(
         "remove_renderer_profile",
         [](const std::string& system) { return usdcc::usd::ShaderNodeCatalog::instance().removeProfile(system); }, py::arg("shading_system"));
