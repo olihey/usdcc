@@ -22,11 +22,14 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
   submodules          true: the checkout's submodules too, and their licences
   patches             applied to the checkout, relative to deps/usd-plugins
   downloads           {name: {platform: {url, sha256}}}: an archive each, unpacked
-  cmake               arguments; {usd}, {pack} and {<download name>} are folders
+  sdks                {name: {description, files}}: an SDK that can't be downloaded
+                      (it needs a login, as the Arnold SDK does), passed as
+                      --sdk <name>=<folder>, which must have the files listed
+  cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders
   targets             what to build (default: everything)
   install_prefix      where in the pack the install goes (default: its root)
   install_components  the install components to take (default: all of it)
-  licenses            {name: [files]}: more licence files, {<download name>} allowed
+  licenses            {name: [files]}: more licence files, {<download name>} and {<sdk name>} allowed
 
 --install copies the pack over the OpenUSD install afterwards. Check a pack with
 tools/ci/check_usd_plugin.py.
@@ -194,6 +197,28 @@ def _download(name, entry, folder):
     return entries[0] if len(entries) == 1 and entries[0].is_dir() else target
 
 
+def _sdks(spec, pack, given):
+    """The folders of the SDKs the pin names, from --sdk <name>=<folder>, checked."""
+    folders = {}
+    for entry in given:
+        name, separator, folder = entry.partition("=")
+        if not separator or not name or not folder:
+            fail(f"--sdk {entry}: give it as <name>=<folder>")
+        folders[name] = _folder(folder)
+    wanted = spec.get("sdks", {})
+    for name in sorted(set(folders) - set(wanted)):
+        fail(f"--sdk {name}: the {pack} pack needs no SDK of that name"
+             + (f" (it needs {', '.join(sorted(wanted))})" if wanted else ""))
+    for name, sdk in wanted.items():
+        if name not in folders:
+            fail(f"The {pack} pack needs the {sdk['description']}, which can't be downloaded: "
+                 f"pass --sdk {name}=<its folder>")
+        for file in sdk.get("files", []):
+            if not (folders[name] / file).is_file():
+                fail(f"{folders[name]} isn't the {sdk['description']}: it has no {file}")
+    return folders
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("pack", help="the pack to build, as in deps/usd-plugins/<pack>.json")
@@ -203,6 +228,8 @@ def main(argv=None):
     parser.add_argument("--pack-dir", type=Path, help="where the pack goes (default: <work>/pack)")
     parser.add_argument("--install", action="store_true", help="also copy the pack over the OpenUSD install")
     parser.add_argument("--jobs", type=int, help="parallel jobs (default: the build tool's)")
+    parser.add_argument("--sdk", action="append", default=[], metavar="NAME=FOLDER",
+                        help="an SDK the pin's \"sdks\" names, which can't be downloaded; repeatable")
     args = parser.parse_args(argv)
 
     pack = args.pack
@@ -219,6 +246,7 @@ def main(argv=None):
     usd = _folder(args.usd_install)
     if not (usd / "pxrConfig.cmake").is_file():
         fail(f"No OpenUSD install at {usd} (no pxrConfig.cmake)")
+    sdks = _sdks(spec, pack, args.sdk)
     work = _folder(args.work) if args.work else REPO / "build" / "usd-plugins" / pack
     pack_dir = _folder(args.pack_dir) if args.pack_dir else work / "pack"
     source = work / "src" / pack  # alone in src/, which is how usd_licenses.collect() names it
@@ -230,7 +258,7 @@ def main(argv=None):
     submodules = _submodules(source) if spec.get("submodules") else []
     _empty_pack_dir(pack_dir, pack)
 
-    places = {"usd": usd.as_posix(), "pack": pack_dir.as_posix()}
+    places = {"usd": usd.as_posix(), "pack": pack_dir.as_posix(), **{name: folder.as_posix() for name, folder in sdks.items()}}
     downloads = {}
     for name, platforms in spec.get("downloads", {}).items():
         if ASSET_PLATFORM not in platforms:
@@ -295,6 +323,9 @@ def main(argv=None):
                "", f"source:  {spec['repository']} at {spec['commit']}" + (", with its submodules" if submodules else "")]
     sources += [f"patch:   deps/usd-plugins/{patch}" for patch in spec.get("patches", [])]
     sources += [f"{name}: {entry['url']} (SHA-256 {entry['sha256']})" for name, entry in downloads.items()]
+    # Not the folder: it's this machine's, and the SDK isn't in the pack.
+    sources += [f"{name}: the {sdk['description']}, given to the build; not in the pack"
+                for name, sdk in spec.get("sdks", {}).items()]
     (licences / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8", newline="\n")
 
     files = pack_files(pack_dir)

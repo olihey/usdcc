@@ -4,16 +4,21 @@
 #include "test_harness.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/usd/arnold_runtime.h"
 #include "usdcc/usd/usd_environment.h"
 #include "usdcc/usd/usd_runtime_info.h"
 
 #include <pxr/base/arch/env.h>
 #include <pxr/base/arch/fileSystem.h>
+#include <pxr/base/plug/plugin.h>
+#include <pxr/base/plug/registry.h>
 #include <pxr/base/work/threadLimits.h>
 #include <pxr/pxr.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 using namespace usdcc::usd;
@@ -101,7 +106,11 @@ USDCC_TEST(usd_environment_settings) {
 
     usdcc::core::Settings settings;
     defineUsdEnvironmentSettings(settings);
-    CHECK(settings.categories() == std::vector<std::string>{"USD"}, "on the USD page");
+    std::vector<std::string> pages = settings.categories();
+    std::sort(pages.begin(), pages.end());
+    CHECK((pages == std::vector<std::string>{"Renderers", "USD"}), "on the USD page, and the Arnold folder on Renderers");
+    CHECK(settings.definition(kUsdArnoldFolderKey) && settings.definition(kUsdArnoldFolderKey)->group == "Arnold",
+          "in the Arnold group, where Arnold's own settings go");
     for (const auto* definition : settings.definitions()) {
         CHECK(definition->appliesAtNextStart, "%s applies at the next start", definition->key.c_str());
     }
@@ -141,4 +150,79 @@ USDCC_TEST(usd_environment_settings) {
     CHECK(usdEnvironmentSource("PXR_WORK_THREAD_LIMIT") == "Settings" && usdEnvironmentSource(variable).empty(),
           "the thread limit, from Settings");
     PXR_NS::WorkSetConcurrencyLimit(threads);
+}
+
+// Settings > USD's plugin folders reach OpenUSD's plugin registry, not only the
+// variable: OpenUSD reads PXR_PLUGINPATH_NAME when its libraries load, which in
+// this program, as in the app, is long before the setting is applied.
+USDCC_TEST(usd_plugin_folders_setting) {
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "usdcc_plugin_folder_setting_test";
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "plugInfo.json")
+        << R"({"Plugins": [{"Type": "resource", "Name": "usdccPluginFolderSettingTest", "Root": ".", "ResourcePath": ".", "Info": {}}]})";
+    CHECK(!PXR_NS::PlugRegistry::GetInstance().GetPluginWithName("usdccPluginFolderSettingTest"), "not there before");
+
+    const char* variable = "PXR_PLUGINPATH_NAME";
+    const bool had = PXR_NS::ArchHasEnv(variable);
+    const std::string before = PXR_NS::ArchGetEnv(variable);
+    usdcc::core::Settings settings;
+    defineUsdEnvironmentSettings(settings);
+    settings.setValue(kUsdPluginFoldersKey, folder.generic_string());
+    applyUsdEnvironmentSettings(settings);
+    CHECK(PXR_NS::ArchGetEnv(variable).find(folder.generic_string()) != std::string::npos, "the variable has it");
+    CHECK(PXR_NS::PlugRegistry::GetInstance().GetPluginWithName("usdccPluginFolderSettingTest"),
+          "and OpenUSD's plugin registry has its plugin");
+    applyUsdEnvironmentSettings(settings);  // again: nothing registered twice, no error
+
+#if defined(_WIN32)
+    _putenv_s(variable, had ? before.c_str() : "");
+#else
+    if (had) {
+        setenv(variable, before.c_str(), 1);
+    } else {
+        unsetenv(variable);
+    }
+#endif
+    std::filesystem::remove_all(folder);
+}
+
+// Settings > Renderers > Arnold's folder (docs/USD_PLUGINS.md §3), without an Arnold:
+// the version rule, where the pack is looked for, and what stops it early.
+USDCC_TEST(arnold_runtime) {
+    CHECK(arnoldVersionFits("7.5.4.0", "7.5.4.0"), "the Arnold it was built for");
+    CHECK(arnoldVersionFits("7.5.4.1", "7.5.4.0") && arnoldVersionFits("7.5.10.0", "7.5.4.0"),
+          "a later 7.5, compared as numbers");
+    CHECK(!arnoldVersionFits("7.5.2.0", "7.5.4.0"), "not an earlier one: its core lacks what the plugins call");
+    CHECK(!arnoldVersionFits("7.6.0.0", "7.5.4.0") && !arnoldVersionFits("8.0.0.0", "7.5.4.0"), "not another 7.x");
+    CHECK(!arnoldVersionFits("", "7.5.4.0") && !arnoldVersionFits("7.5.4.0", ""), "not an unknown version");
+
+    const std::filesystem::path root = std::filesystem::u8path(usdRootFolder());
+    CHECK(std::filesystem::is_regular_file(root / "plugin" / "usd" / "plugInfo.json"),
+          "OpenUSD's root, with its plugin/usd: %s", root.generic_string().c_str());
+
+    const std::string before = PXR_NS::ArchGetEnv("PXR_PLUGINPATH_NAME");
+    const ArnoldStatus off = enableArnold("");
+    CHECK(!off.enabled && off.message.empty(), "no folder, nothing done and nothing said");
+
+    const std::filesystem::path fake = std::filesystem::temp_directory_path() / "usdcc_arnold_runtime_test";
+    std::filesystem::remove_all(fake);
+    std::filesystem::create_directories(fake / "arnold");
+    const std::string fakeRoot = (fake / "usd").generic_string();
+    const ArnoldStatus noPack = enableArnold((fake / "arnold").generic_string(), fakeRoot);
+#if defined(_WIN32)
+    CHECK(!noPack.enabled && noPack.message.find("no Arnold plugins") != std::string::npos,
+          "no pack: %s", noPack.message.c_str());
+    std::filesystem::create_directories(fake / "usd" / "plugin" / "arnold");
+    std::filesystem::create_directories(fake / "usd" / "usd-plugins");
+    std::ofstream(fake / "usd" / "plugin" / "arnold" / "plugInfo.json") << R"({"Includes": ["*/resources/"]})";
+    std::ofstream(fake / "usd" / "usd-plugins" / "arnold.json") << R"({"pack": "arnold", "version": "7.5.4.0"})";
+    const ArnoldStatus noCore = enableArnold((fake / "arnold").generic_string(), fakeRoot);
+    CHECK(!noCore.enabled && noCore.packVersion == "7.5.4.0" && noCore.message.find("bin/ai.dll") != std::string::npos,
+          "the pack's version read, and no Arnold core: %s", noCore.message.c_str());
+#else
+    CHECK(!noPack.enabled && noPack.message.find("Windows-only") != std::string::npos, "%s", noPack.message.c_str());
+#endif
+    CHECK(PXR_NS::ArchGetEnv("PXR_PLUGINPATH_NAME") == before, "the plugin path left alone when Arnold stays off");
+    std::filesystem::remove_all(fake);
 }

@@ -1,0 +1,40 @@
+diff --git a/libs/render_delegate/render_delegate.cpp b/libs/render_delegate/render_delegate.cpp
+index 4845a58..c8978c7 100644
+--- a/libs/render_delegate/render_delegate.cpp
++++ b/libs/render_delegate/render_delegate.cpp
+@@ -146,6 +146,17 @@ TF_DEFINE_ENV_SETTING(
+ 
+ namespace {
+ 
++// HdRenderIndex::IsSceneIndexEmulationEnabled() is gone since HD_API_VERSION 99
++// (OpenUSD 26.08): the render index is always fed through scene indices.
++inline bool _IsSceneIndexEmulationEnabled()
++{
++#if HD_API_VERSION >= 99
++    return true;
++#else
++    return HdRenderIndex::IsSceneIndexEmulationEnabled();
++#endif
++}
++
+ const HdFormat _GetHdFormatFromToken(const TfToken& token)
+ {
+     if (token == _tokens->uint8) {
+@@ -1846,7 +1857,7 @@ bool HdArnoldRenderDelegate::HasPendingChanges(HdRenderIndex* renderIndex, const
+ #ifdef ENABLE_SCENE_INDEX
+         // Unfortunately the MarkAllRprimsDirty doesn't work as we would expect in USD 25.05 with hydra 2, it marks dirty the prims of the legacy scene index which doesn't contain rprims, so all
+         // the dirty notifications get discarded. We have to use a workaround to get the same behaviour as before by propagating the dirtyness to a dedicated scene index filter.
+-        if (HdRenderIndex::IsSceneIndexEmulationEnabled()) {
++        if (_IsSceneIndexEmulationEnabled()) {
+             if (HdSceneIndexBaseRefPtr sceneIndex = renderIndex->GetTerminalSceneIndex()) {
+                 // Regarding the used of TfHashMap to carry the dirtyness, we unfortunately can't pass
+                 // directly HdSceneIndexObserver::DirtiedPrimEntries due to template functions implementation
+@@ -1894,7 +1905,7 @@ bool HdArnoldRenderDelegate::HasPendingChanges(HdRenderIndex* renderIndex, const
+     // is dropped. We instead push the dirtiness through the terminal scene index, the same way the
+     // bulk Rprim dirtying above does. Resolve the terminal scene index once for the lambda to use.
+     HdSceneIndexBaseRefPtr terminalSceneIndex =
+-        HdRenderIndex::IsSceneIndexEmulationEnabled() ? renderIndex->GetTerminalSceneIndex() : nullptr;
++        _IsSceneIndexEmulationEnabled() ? renderIndex->GetTerminalSceneIndex() : nullptr;
+ #endif
+     auto markPrimDirty = [&](const SdfPath& source, HdDirtyBits bits) {
+         // Marking a primitive as being dirty. The conversion to data source locators and the

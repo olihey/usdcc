@@ -58,6 +58,7 @@ these settings is `appliesAtNextStart`.
 | Asset search paths | `USD/assetSearchPaths` | `PXR_AR_DEFAULT_SEARCH_PATH` |
 | MaterialX node folders | `USD/materialXFolders` | `PXR_MTLX_PLUGIN_SEARCH_PATHS` |
 | Thread limit | `USD/threadLimit` | `WorkSetConcurrencyLimitArgument()` |
+| Arnold folder (on the Renderers page, in its Arnold group) | `USD/arnoldFolder` | `enableArnold()`: loads that Arnold and registers the Arnold plugins ([USD_PLUGINS.md](USD_PLUGINS.md) §3) |
 
 **The environment usdcc starts with stays in control**, so a studio's launcher can still
 decide:
@@ -68,6 +69,14 @@ decide:
 Variables are set with `_putenv_s` (`setenv` elsewhere), so the embedded Python's
 `os.environ` and child processes see them too. Each one set is logged, and the
 Environment tab says it came from Settings.
+
+**Plugin folders are registered too, not only put in the variable.** OpenUSD reads
+`PXR_PLUGINPATH_NAME` in a static constructor of its plug library (`Plug_InitConfig`), which
+runs when the library loads, before `main()`. Until 2026-11-20 the setting only reached
+child processes and `os.environ`: a plugin in one of its folders was never found by usdcc
+itself. Now the setting's folders the variable didn't have at start are also passed to
+`PlugRegistry::RegisterPlugins()`, after the thread limit (the registry reads `plugInfo.json`
+files on TBB's threads). `usd_plugin_folders_setting` in `usdcc_tests` checks it.
 
 **The thread limit is a call, not the variable.** OpenUSD reads `PXR_WORK_THREAD_LIMIT`
 while its libraries load, which is before `main()`. The TBB this OpenUSD build uses (from

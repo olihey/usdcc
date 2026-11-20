@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/Autodesk/arnold-usd",
+  "commit": "1f022c168ba742df01aad7de57d0c4f2125d080e",
+  "version": "7.5.4.0",
+  "patches": ["patches/arnold-usd-26.08.patch"],
+  "sdks": {
+    "arnold": {
+      "description": "Arnold SDK 7.5.4.0 for Windows, from Autodesk Account",
+      "files": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "EULA.txt"]
+    }
+  },
+  "cmake": ["-Wno-dev", "-DARNOLD_LOCATION={arnold}", "-DUSD_LOCATION={usd}",
+            "-DBUILD_RENDER_DELEGATE=ON", "-DBUILD_NDR_PLUGIN=ON", "-DBUILD_USD_IMAGING_PLUGIN=ON",
+            "-DBUILD_SCENE_INDEX_PLUGIN=ON", "-DBUILD_PROCEDURAL=OFF", "-DBUILD_SCHEMAS=OFF",
+            "-DBUILD_TESTSUITE=OFF", "-DBUILD_DOCS=OFF", "-DPREFIX_PLUGINS=."],
+  "install_prefix": "plugin/arnold",
+  "licenses": {
+    "arnold-sdk": ["{arnold}/EULA.txt"]
+  },
+  "platforms": ["win64"],
+  "license": "Apache-2.0",
+  "set": "local",
+  "publish": false,
+  "check": {
+    "preload": ["{arnold}/bin/ai.dll"],
+    "plugin_folders": ["plugin/arnold"],
+    "plugins": ["hdArnold", "nodeRegistryArnold", "sceneIndexArnold", "usdImagingArnold"],
+    "renderers": ["HdArnoldRendererPlugin"]
+  }
+}

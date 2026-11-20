@@ -40,7 +40,7 @@ import usd_asset  # noqa: E402
 
 PINS = REPO / "deps/usd-plugins"
 SETS = ("standard", "optional", "local")
-_KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "cmake", "targets",
+_KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "sdks", "cmake", "targets",
          "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check"}
 _REQUIRED = {"repository", "commit", "cmake", "platforms", "license", "set"}
 

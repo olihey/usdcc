@@ -55,6 +55,8 @@ add_library(usdcc_usd SHARED
     src/sim_cache.cpp
     include/usdcc/usd/usd_environment.h
     src/usd_environment.cpp
+    include/usdcc/usd/arnold_runtime.h
+    src/arnold_runtime.cpp
     include/usdcc/usd/color_management.h
     src/color_management.cpp
     include/usdcc/usd/linear_exr.h

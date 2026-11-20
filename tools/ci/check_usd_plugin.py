@@ -19,6 +19,12 @@ this machine's environment, does what the pin's "check" asks:
     path tracer's needs a GPU, which a hosted runner doesn't have;
   - "open": each file opens as a stage with that many prims of each type.
 
+A pack that is off unless the user turns it on (Arnold's, in plugin/arnold)
+names its folder in "plugin_folders", which the check puts on
+PXR_PLUGINPATH_NAME, and a library it needs that isn't in the pack in
+"preload", which is loaded by its full path first, as usdcc does: "{arnold}"
+there is the folder given with --sdk arnold=<folder>.
+
 --usd is changed by this (the pack is copied into it), so pass a throwaway copy
 of the OpenUSD asset.
 
@@ -45,14 +51,21 @@ MANIFEST_DIR = "usd-plugins"
 
 # Runs in the fresh Python. Prints a line per check and exits 1 if one failed.
 _RUNNER = r"""
-import json, os, sys
+import ctypes, json, os, sys
 install, spec = sys.argv[1], json.loads(sys.argv[2])
-from pxr import Plug, Sdf, Tf, Usd
 failed = []
 def check(ok, what):
     print(("  ok    " if ok else "  FAIL  ") + what, flush=True)
     if not ok:
         failed.append(what)
+for library in spec.get("preload", []):
+    try:
+        # LOAD_WITH_ALTERED_SEARCH_PATH: its own DLLs from its own folder.
+        ctypes.WinDLL(library, winmode=0x8) if os.name == "nt" else ctypes.CDLL(library, mode=ctypes.RTLD_GLOBAL)
+        check(True, f"{library} loads")
+    except OSError as error:
+        check(False, f"{library} loads ({error})")
+from pxr import Plug, Sdf, Tf, Usd
 inside = os.path.normcase(os.path.realpath(install)) + os.sep
 for name in spec.get("plugins", []):
     plugin = Plug.Registry().GetPluginWithName(name)
@@ -184,7 +197,15 @@ def main(argv=None):
     parser.add_argument("--pack-dir", "--pack", type=Path, required=True, dest="pack_dir", help="the pack's folder")
     parser.add_argument("--forbid", type=Path, action="append", default=[],
                         help="a folder no text file of the pack may name (the build's); repeatable")
+    parser.add_argument("--sdk", action="append", default=[], metavar="NAME=FOLDER",
+                        help="an SDK the pin's \"sdks\" names, for the check's \"preload\"; repeatable")
     args = parser.parse_args(argv)
+    sdks = {}
+    for entry in args.sdk:
+        name, separator, folder = entry.partition("=")
+        if not separator or not name or not folder:
+            fail(f"--sdk {entry}: give it as <name>=<folder>")
+        sdks[name] = str(Path(folder).resolve())
 
     pack = args.pack
     spec = usd_plugin_asset.load(pack)
@@ -207,10 +228,17 @@ def main(argv=None):
     for entry in check["open"]:
         if not Path(entry["file"]).is_file():
             fail(f"deps/usd-plugins/{pack}.json: no such file {entry['file']}")
+    for name in spec.get("sdks", {}):
+        if name not in sdks and any(f"{{{name}}}" in library for library in check.get("preload", [])):
+            fail(f"The {pack} pack's check needs the {spec['sdks'][name]['description']}: pass --sdk {name}=<its folder>")
+    check["preload"] = [str(Path(library.format(**sdks))) for library in check.get("preload", [])]
+    environment = clean_environment(usd)
+    if check.get("plugin_folders"):
+        environment["PXR_PLUGINPATH_NAME"] = os.pathsep.join(str(usd / folder) for folder in check["plugin_folders"])
     with tempfile.TemporaryDirectory() as empty:
         # -P: not the current folder on sys.path. An empty folder as that, too.
         result = subprocess.run([sys.executable, "-P", "-c", _RUNNER, str(usd), json.dumps(check)],
-                                env=clean_environment(usd), cwd=empty)
+                                env=environment, cwd=empty)
     if result.returncode != 0:
         fail(f"The {pack} pack failed its check ({result.returncode})")
     print(f"The {pack} pack works over {usd}.")

@@ -6,7 +6,9 @@ way it already builds OpenUSD itself, and which of them a release ships. This is
 
 **Status:** phases 1 and 2 are on `master`, and CI has published the OpenUSD asset for
 Python 3.13 with the Adobe pack. Phase 3, Gatling, is built and checked locally on Windows
-and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5). The
+and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
+Phase 7, Arnold, is built locally on Windows and renders in usdcc's viewport when
+Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds. The
 rest is a plan.
 
 ## 1. Where we are
@@ -59,7 +61,7 @@ rest is a plan.
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | Not proven. The last commit is from August 2025; an earlier local attempt needed `/WX` turned off |
-| `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK (7.0 or newer), which is proprietary. Its docs name USD 20.08–25.11 and the dev branch | Not proven |
+| `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
 
 Notes:
 
@@ -93,8 +95,43 @@ Notes:
   could build.
 - **Aurora.** Whether hdAurora's DirectX backend builds against a stock OpenUSD, rather
   than Autodesk's fork, is not known. It decides whether this pack exists at all (§8).
-- **Arnold.** Its Sdr plugin starts the Arnold core at discovery (`AiBegin`), which slows
-  every start, so this pack must never be on the plugin path unless the user turned it on.
+- **Arnold.** Its Sdr plugin starts the Arnold core at discovery (`AiBegin`), so the pack
+  is off unless the user turns it on. (Here that took under half a second, for 160 Arnold
+  shader nodes, but it also loads Arnold's own plugins, its USD procedural among them.)
+  - **Where it is.** The pack installs into `plugin/arnold` (`install_prefix`, with
+    `-DPREFIX_PLUGINS=.`), beside OpenUSD's `plugin/usd`, whose `plugInfo.json` only
+    includes its own subfolders. Built with `--install`, or copied over the OpenUSD
+    install, it is in `<OpenUSD>/plugin/arnold`; a deploy would have it in
+    `<deploy>/plugin/arnold`, but `tools/deploy.py` leaves `local` packs out (§5).
+  - **Turning it on.** Settings > Renderers > Arnold > Arnold folder (`USD/arnoldFolder`),
+    from the next start: an Arnold SDK or install, the folder with `bin/ai.dll`. Once
+    Arnold is on, its 54 render settings join it in that group.
+    `usdcc::usd::enableArnold()` (`arnold_runtime.h`), from
+    `applyUsdEnvironmentSettings()`, then:
+    1. finds the pack in `plugin/arnold` next to the folder OpenUSD's libraries were
+       loaded from, and reads which Arnold it was built for from
+       `usd-plugins/arnold.json` (the pin's `version`);
+    2. loads `bin/ai.dll` by its full path (`LOAD_WITH_ALTERED_SEARCH_PATH`), so its own
+       DLLs come from its own folder and nothing goes on `PATH`. That folder has Qt 6
+       DLLs of its own (3ds Max's copy and the SDK both do);
+    3. asks the core its version (`AiGetVersion`). The plugins need the Arnold they were
+       built for or a later one of the same 7.x: built against 7.5.4, they don't load
+       with 3ds Max 2027's 7.5.2 ("The specified procedure could not be found"). Any
+       other version unloads the core again, and a warning in the log says why;
+    4. registers the pack's plugins (`PlugRegistry::RegisterPlugins()`). Not through
+       `PXR_PLUGINPATH_NAME`: OpenUSD reads that in a static constructor of `usd_plug.dll`,
+       before `main()`, so setting it there is too late. Child processes don't get them
+       either, which they couldn't use without the core.
+  - **The patch.** `arnold-usd-26.08.patch`: OpenUSD 26.08 (`HD_API_VERSION` 99) removed
+    `HdRenderIndex::IsSceneIndexEmulationEnabled()`, which the render delegate calls in
+    two places. With 26.08 the render index always takes scene indices, so the patch
+    answers `true` from that version on. The other three plugins build unpatched.
+  - **Not right yet.** Usdcc's grid and axis lines draw over Arnold's picture, as if the
+    depth Arnold gives is not what the overlay compares against. Built with
+    `-DHYDRA_NORMALIZE_DEPTH=ON` they no longer do, but the grid is then gone everywhere;
+    neither is right. At exit Arnold logs "AiEnd() was not called".
+  - **Licence.** Without an Arnold licence every render has an "arnold" watermark. The
+    3ds Max and Maya entitlement only covers rendering inside those programs.
 
 ## 4. The build
 
@@ -131,6 +168,15 @@ Notes:
   - `licenses`: more licence files to ship, such as the downloaded SDK's.
   - `publish`: `false` keeps the pack off the release (§5).
   - `renderers` in `check`: render delegates OpenUSD has to list.
+- What Arnold's adds (`deps/usd-plugins/arnold.json`):
+  - `sdks`: an SDK that can't be downloaded, as the Arnold SDK needs a login. The pin
+    gives a description and the files the folder must have; the build takes the folder
+    as `--sdk arnold=<folder>` and stops with a line saying what it needs without it.
+    `{arnold}` in `cmake` and `licenses` is that folder. `SOURCES.txt` names the SDK by
+    its description, not the folder, which is the machine's.
+  - `preload` and `plugin_folders` in `check`: a library the check loads by its full
+    path first (`{arnold}/bin/ai.dll`; `tools/ci/check_usd_plugin.py` takes `--sdk` too),
+    and the pack's folders it registers, as usdcc does for a pack that is off by default.
 - Still to come: a small Python hook next to the JSON for a build that isn't plain CMake
   (Cycles' `make update`, Aurora's externals script).
 
@@ -247,6 +293,15 @@ Three sets, decided by licence:
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
+- **Arnold's SDK licence** (`EULA.txt` in the SDK, which the pack carries in
+  `licenses/usd-plugins/arnold/arnold-sdk/`) is more open than that: it lets the SDK be
+  distributed "as an integrated part of" an application, only embedded in it, only to
+  those the application is licensed to, under terms "no less protective" of Autodesk
+  than its Terms of Use, and renders from it have the watermark. It refers to Autodesk's
+  general Terms of Use, which haven't been read here (the page refuses automated
+  fetches). usdcc's BSD-3-Clause doesn't meet the "no less protective" condition by
+  itself, so shipping Arnold would need terms of its own for that part. Until that is
+  decided the pack stays `local`.
 - **Standard packs are Apache-2.0**, but each brings libraries of its own (Cycles: OpenVDB,
   Open Image Denoise; Aurora: Slang, the DirectX shader compiler's `dxil.dll`). Step 5 of
   the build collects their licences, and a pack isn't `standard` until that list is read.
@@ -337,6 +392,30 @@ Three sets, decided by licence:
 6. **Aurora.** First a local build against our OpenUSD. If it needs Autodesk's fork, stop
    and drop it.
 7. **Arnold**, as a `local` pack on the self-hosted runner.
+   *Built, and checked locally on Windows; never built by CI (`local`).*
+   - *The SDK. 3ds Max 2027's Arnold (MAXtoA) has the core, 7.5.2, but no headers and no
+     `ai.lib`, and its own `hdArnold.dll` is built against 3ds Max's OpenUSD
+     (`3dsmax_usd.dll`, oneTBB's `tbb12.dll`), so none of it can be used here. The SDK
+     comes from Autodesk Account only with an Arnold, Maya or Collection subscription;
+     the 30-day Arnold trial gave it.*
+   - *The pack. `python tools/build_usd_plugin.py arnold --usd-install <OpenUSD> --sdk
+     arnold=<Arnold SDK>` built it in a minute, against a local build of the OpenUSD the
+     pin names; without `--sdk` it stops and says what it needs. `check_usd_plugin.py`
+     with `--sdk` passed over a second copy of that OpenUSD: the core loads, the four
+     plugins load from the install, and `HdArnoldRendererPlugin` is among three render
+     delegates. OpenUSD's shader registry then has 160 Arnold nodes.*
+   - *In usdcc's viewport. With the pack copied over that OpenUSD and usdcc (Release) built
+     against it, under a test profile: with no Arnold folder, Storm and Embree only and no
+     `ai.dll` in the process. With the SDK as the Arnold folder, after a restart, Arnold
+     is among the renderers, with neither its folder on `PATH` nor anything added to
+     `PXR_PLUGINPATH_NAME`; a script switched a scene of a Sphere, a Cube, a ground mesh,
+     a dome and a distant light from Storm to Arnold and saved the viewport window's
+     picture: all five there, path traced, with shadows and the watermark, and 54 Arnold
+     settings in the viewport's renderer settings. With 3ds Max's 7.5.2 as the folder, a
+     warning in the log and no Arnold. `usdcc_tests`' `arnold_runtime` checks the version
+     rule and what stops it early, without an Arnold.*
+   - *Not done: the overlay's depth (§3), materials and the Material Editor's Arnold
+     nodes, GPU rendering, Linux, and the self-hosted runner.*
 8. **Linux** for each pack that supports it (all but Aurora's DirectX backend), as
    `linux` jobs in the same matrix. *The job and the build script's RUNPATH step are
    there since phase 3, with Gatling's pack. Left: the Adobe pack's pin, and
@@ -348,7 +427,7 @@ Three sets, decided by licence:
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
-| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Read the FBX SDK and Arnold SDK licence texts before changing that |
+| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Arnold's `EULA.txt` allows shipping even the core inside an application, on conditions (§5); Autodesk's general Terms of Use and the FBX SDK's licence are still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | Unknown; phase 6 answers it |
 | 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |

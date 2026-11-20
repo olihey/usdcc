@@ -21,11 +21,14 @@ inline constexpr const char* kUsdPluginFoldersKey = "USD/pluginFolders";        
 inline constexpr const char* kUsdAssetSearchPathsKey = "USD/assetSearchPaths";  // PXR_AR_DEFAULT_SEARCH_PATH
 inline constexpr const char* kUsdMaterialXFoldersKey = "USD/materialXFolders";  // PXR_MTLX_PLUGIN_SEARCH_PATHS
 inline constexpr const char* kUsdThreadLimitKey = "USD/threadLimit";            // WorkSetConcurrencyLimitArgument()
+inline constexpr const char* kUsdArnoldFolderKey = "USD/arnoldFolder";          // enableArnold() (arnold_runtime.h)
 
 void defineUsdEnvironmentSettings(core::Settings& settings = core::Settings::instance());
 
 // Sets the variables and the thread limit from the settings, logging what it
-// changes. Once, at start-up, after defineUsdEnvironmentSettings().
+// changes. Registers the plugin folders' plugins too, as OpenUSD read
+// PXR_PLUGINPATH_NAME before main(), and turns Arnold on (arnold_runtime.h).
+// Once, at start-up, after defineUsdEnvironmentSettings().
 void applyUsdEnvironmentSettings(const core::Settings& settings = core::Settings::instance());
 
 // A path list variable's value with the setting's folders (separated by ';')
