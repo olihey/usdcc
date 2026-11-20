@@ -25,6 +25,7 @@
 #include <QUndoStack>
 
 #include <cstdio>
+#include <functional>
 #include <QElapsedTimer>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -76,6 +77,14 @@ void settle() {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < 400) QApplication::processEvents();
+}
+
+// Until `done`, for up to five seconds: on a busy machine the refresh can take longer.
+bool settleUntil(const std::function<bool()>& done) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!done() && timer.elapsed() < 5000) QApplication::processEvents();
+    return done();
 }
 
 // Clicks the button with this text (without its &) on the message box that opens
@@ -269,11 +278,11 @@ USDCC_TEST(schema_explorer_stage) {
           created.GetText());
     CHECK(stack->undoText() == "Create Cube", "one undo step, as the Create menu's: [%s]", qPrintable(stack->undoText()));
     CHECK(stages.selectedPaths(stage) == std::vector<SdfPath>{created}, "and selected");
-    settle();
+    settleUntil([&]() { return panel.stageUse().count("Cube") == 2; });
     CHECK(panel.stageUse().count("Cube") == 2 && stageRow(tree, "Cube")->text(1) == "2 prims", "the count follows");
     CHECK(panel.currentSchema() && panel.currentSchema()->name == "Cube", "still on Cube");
     stack->undo();
-    settle();
+    settleUntil([&]() { return panel.stageUse().count("Cube") == 1; });
     CHECK(panel.stageUse().count("Cube") == 1, "and its undo");
     QString why;
     CHECK(panel.createPrim(QStringLiteral("Gprim"), &why).IsEmpty() && why.contains("isn't a prim type"),
@@ -292,7 +301,7 @@ USDCC_TEST(schema_explorer_stage) {
     CHECK(s->GetPrimAtPath(SdfPath("/World/Cube")).HasAPI(TfToken("MotionAPI")) &&
               s->GetPrimAtPath(SdfPath("/World/Mesh")).HasAPI(TfToken("MotionAPI")),
           "both have it");
-    settle();
+    settleUntil([&]() { return panel.stageUse().count("MotionAPI") == 2; });
     CHECK(stageRow(tree, "MotionAPI") && stageRow(tree, "MotionAPI")->text(1) == "2 prims", "This stage has it now");
 
     // Again: neither can take it, so nothing is asked, and it says why.
@@ -334,7 +343,7 @@ USDCC_TEST(schema_explorer_stage) {
               stages.selectedPaths(stage) == std::vector<SdfPath>{SdfPath("/Tagged")},
           "Select works for an unregistered API");
     s->RemovePrim(SdfPath("/Thing"));
-    settle();
+    settleUntil([&]() { return !panel.stageUse().unregistered.count("StudioThing"); });
     CHECK(!stageRow(tree, "StudioThing") && panel.currentUnregistered().isEmpty(), "gone once its prims are");
     CHECK(panel.details()->toPlainText().contains("Choose a schema"), "and its details with it");
 }

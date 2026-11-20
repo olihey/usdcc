@@ -369,7 +369,7 @@ Layout, with the id `layout`: that id still means it (§6.3).
 | Scene | 30 | `viewport` | Viewport Only | **viewports**; Log, Script Editor and Plugins `collapsed` | Review, screenshots, a small screen |
 | Shading & Rendering | 40 | `lookdev` | Look Dev | Outliner │ **viewports** over Material Editor (60/40) │ Attributes, Layers as a tab | Materials and lights (§3.1) |
 | USD | 50 | `layering` | Layering | Outliner │ **viewports** │ Layers over Dependencies, USDA as a tab beside Dependencies | Composition: edit targets, sublayers, references, the text of a layer |
-| USD | 60 | `inspect` | Inspect | Outliner over Attributes (55/45) │ **viewports** over USDA (65/35) | Reading a stage someone else built: structure, values and text at once |
+| USD | 60 | `inspect` | Inspect | Outliner over Attributes (55/45) │ **viewports** over USDA (65/35) │ Schemas ([SCHEMAS.md](SCHEMAS.md) §4) | Reading a stage someone else built: structure, values, text and the schemas it uses at once |
 | Development | 70 | `scripting` | Scripting | Outliner │ **viewports** │ Attributes; Script Editor and Log `shown` | Like Blender's Scripting: the editor beside the scene |
 
 **Side by Side**:

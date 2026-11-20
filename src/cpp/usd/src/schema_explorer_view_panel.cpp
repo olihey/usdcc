@@ -20,6 +20,7 @@
 #include <QColor>
 #include <QComboBox>
 #include <QEvent>
+#include <QResizeEvent>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -132,6 +133,7 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_filter->setObjectName(QStringLiteral("schemaFilter"));
     m_filter->setPlaceholderText(tr("Filter schemas"));
     m_filter->setClearButtonEnabled(true);
+    m_filter->setMinimumWidth(fontMetrics().averageCharWidth() * 8);
     m_filter->setToolTip(tr("Show the schemas whose name has this in it"));
     toolbarLayout->addWidget(m_filter, 1);
     m_show = new QComboBox(toolbar);
@@ -197,12 +199,25 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_stack->addWidget(right);
     m_editor = new SchemaLibraryEditor(m_stack);
     m_stack->addWidget(m_editor);
+    // Only the page showing counts towards the panel's size: the editor is wider than the
+    // details, and a narrow panel (a workspace's side column) would scroll sideways for it.
+    auto sizeToCurrent = [this](int current) {
+        for (int i = 0; i < m_stack->count(); ++i) {
+            const QSizePolicy::Policy policy = i == current ? QSizePolicy::Preferred : QSizePolicy::Ignored;
+            m_stack->widget(i)->setSizePolicy(policy, policy);
+        }
+        m_stack->adjustSize();
+    };
+    connect(m_stack, &QStackedWidget::currentChanged, this, sizeToCurrent);
+    sizeToCurrent(0);
     connect(m_editor, &SchemaLibraryEditor::closeRequested, this, [this]() {
         m_stack->setCurrentIndex(0);
         rebuildLibraryGroup();
     });
     connect(m_editor, &SchemaLibraryEditor::libraryChanged, this, [this]() { rebuildLibraryGroup(); });
     auto* split = new QSplitter(Qt::Horizontal, container);
+    m_split = split;
+    split->setChildrenCollapsible(false);
     split->addWidget(m_tree);
     split->addWidget(m_stack);
     split->setStretchFactor(0, 2);
@@ -242,6 +257,24 @@ void SchemaExplorerViewPanel::onStageChanged(const StageRefPtr& stage) {
         });
     }
     refresh();
+}
+
+void SchemaExplorerViewPanel::resizeEvent(QResizeEvent* event) {
+    usdcc::ui::ViewPanel::resizeEvent(event);
+    updateOrientation();
+}
+
+void SchemaExplorerViewPanel::updateOrientation() {
+    // About 80 characters: below that, side by side leaves the tree too narrow to read
+    // (a panel in a workspace's side column, say).
+    const bool narrow = width() < fontMetrics().averageCharWidth() * 80;
+    // The count goes first, so the toolbar fits too.
+    m_summary->setVisible(!narrow);
+    const Qt::Orientation orientation = narrow ? Qt::Vertical : Qt::Horizontal;
+    if (m_split->orientation() == orientation) return;
+    m_split->setOrientation(orientation);
+    const int total = narrow ? m_split->height() : m_split->width();
+    if (total > 0) m_split->setSizes({total * 2 / 5, total - total * 2 / 5});
 }
 
 bool SchemaExplorerViewPanel::eventFilter(QObject* watched, QEvent* event) {

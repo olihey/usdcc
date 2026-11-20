@@ -3,7 +3,7 @@
   "version": 1,
   "id": "inspect",
   "name": "Inspect",
-  "description": "Reading a stage someone else built: structure, values and text at once.",
+  "description": "Reading a stage someone else built: structure, values, text and the schemas it uses at once.",
   "group": "USD",
   "order": 60,
   "sidePanels": {
@@ -12,8 +12,9 @@
   "layout": {
     "split": "horizontal",
     "sizes": [
-      0.3,
-      0.7
+      0.24,
+      0.48,
+      0.28
     ],
     "items": [
       {
@@ -62,6 +63,14 @@
             ]
           }
         ]
+      },
+      {
+        "tabs": [
+          {
+            "panel": "schemas"
+          }
+        ],
+        "maxWidth": 560
       }
     ]
   }

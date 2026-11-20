@@ -426,6 +426,9 @@ Phases 1 and 2.
     Refresh, Expand All, Collapse All.
   - Going to a schema the filter hides clears the filter.
   - A session keeps the chosen schema, the filter and Show.
+  - Narrower than about 80 characters (the Inspect workspace's right column), the tree goes above
+    the details instead of beside them, and the toolbar drops the count.
+  - The Inspect workspace has it to the right of the viewport ([WORKSPACES.md](WORKSPACES.md) §5).
 - **A plugin's `schema.usda` now opens with its sublayers.** It sublayers others by plugin
   (`@usd/schema.usda@`), which `usdGenSchema` finds in the plugins' resource folders, and a stage
   opened from it didn't, with a warning. `stageResolverContext()` gives such a file (and only such a

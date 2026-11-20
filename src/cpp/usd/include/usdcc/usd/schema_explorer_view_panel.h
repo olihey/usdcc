@@ -14,6 +14,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QSplitter;
 class QStackedWidget;
 class QTextBrowser;
 class QTimer;
@@ -135,11 +136,14 @@ protected:
     void populateOptionsMenu(QMenu* menu) override;
     void onStageChanged(const StageRefPtr& stage) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void rebuildTree();
     void rebuildStageGroup();
     void rebuildLibraryGroup();
+    // The tree beside the details when there's room, above them when narrow.
+    void updateOrientation();
     void applyFilter();
     void showDetails();
     void updateDetailsText();
@@ -165,6 +169,7 @@ private:
     QTreeWidgetItem* m_stageGroup = nullptr;
     QTreeWidgetItem* m_libraryGroup = nullptr;
     QStackedWidget* m_stack;
+    QSplitter* m_split;
     SchemaLibraryEditor* m_editor;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
