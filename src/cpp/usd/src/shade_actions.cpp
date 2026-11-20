@@ -621,9 +621,9 @@ bool promote(UndoManager& undo, const StageRefPtr& stage, const PortRef& port, c
     });
 }
 
-bool setPositions(UndoManager& undo, const StageRefPtr& stage, const std::vector<std::pair<SdfPath, GfVec2f>>& positions) {
+bool setPositions(UndoManager& undo, const StageRefPtr& stage, const std::vector<std::pair<SdfPath, GfVec2f>>& positions, const char* description) {
     if (positions.empty()) return false;
-    return undo.apply(stage, tr("Auto Layout"), [&]() {
+    return undo.apply(stage, tr(description), [&]() {
         for (const auto& [path, position] : positions) {
             const UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
             if (prim && prim_actions::isEditable(prim)) UsdUINodeGraphNodeAPI::Apply(prim).CreatePosAttr().Set(position);

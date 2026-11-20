@@ -80,6 +80,8 @@ public:
     void groupSelected();
     void ungroupSelected();
     void autoLayout();
+    // Only the selected nodes, near where they are, with what they're connected to staying put.
+    void layoutSelected();
     PXR_NS::SdfPath addBackdrop(QPointF scenePosition);
     // An edit over the node's caption: Return renames it, Escape doesn't.
     void startRename();

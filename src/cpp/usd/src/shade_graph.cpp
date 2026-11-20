@@ -534,9 +534,7 @@ std::vector<LayeredEdge> layeredEdges(const ShadeGraph& graph) {
     return edges;
 }
 
-}  // namespace
-
-std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes) {
+std::vector<LayeredNode> layeredNodes(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes) {
     std::vector<LayeredNode> nodes;
     for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
         LayeredNode node;
@@ -552,8 +550,23 @@ std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector
         if (graph.nodes[n].kind == ShadeNodeKind::Outputs) node.side = LayeredNode::Side::Last;
         nodes.push_back(std::move(node));
     }
+    return nodes;
+}
+
+}  // namespace
+
+std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes) {
     std::vector<GfVec2f> positions;
-    for (const LayeredPoint& at : layeredLayout(nodes, layeredEdges(graph))) positions.emplace_back(at.x, at.y);
+    for (const LayeredPoint& at : layeredLayout(layeredNodes(graph, boxes), layeredEdges(graph))) positions.emplace_back(at.x, at.y);
+    return positions;
+}
+
+std::vector<GfVec2f> layoutShadeNodes(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes, const std::vector<GfVec2f>& current,
+                                      const std::vector<bool>& chosen) {
+    std::vector<LayeredPoint> now;
+    for (const GfVec2f& position : current) now.push_back(LayeredPoint{position[0], position[1]});
+    std::vector<GfVec2f> positions;
+    for (const LayeredPoint& at : layeredLayoutOf(layeredNodes(graph, boxes), layeredEdges(graph), now, chosen)) positions.emplace_back(at.x, at.y);
     return positions;
 }
 

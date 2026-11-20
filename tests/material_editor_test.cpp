@@ -834,6 +834,37 @@ USDCC_TEST(material_editor_group_ungroup_and_layout) {
     CHECK(qAbs(read.x() - placed.x()) < 0.01 && qAbs(read.y() - placed.y()) < 0.01, "a new panel reads the same layout");
 }
 
+USDCC_TEST(material_editor_layout_selected) {
+    Fixture f;
+    f.panel->view()->setFocus();
+    QUndoStack* history = f.undo->stack(f.stage);
+    QTest::keyClick(f.panel->view(), Qt::Key_L);
+    settle();
+    const QPointF laidOut = f.item(kNormal)->pos();
+    const QPointF surface = f.item(kSurface)->pos();
+
+    // Moved far off, then only it laid out again: back by what it feeds, which stays.
+    usdcc::usd::shade_actions::setPositions(*f.undo, f.stage, {{kNormal, GfVec2f(-20.0f, 15.0f)}}, "Move");
+    settle();
+    CHECK((f.item(kNormal)->pos() - laidOut).manhattanLength() > 1000.0, "it's far off");
+    f.stages.setSelectedPaths(f.stage, {kNormal});
+    settle();
+    const int steps = history->index();
+    QTest::keyClick(f.panel->view(), Qt::Key_L, Qt::ShiftModifier);
+    settle();
+    CHECK(history->index() == steps + 1 && history->text(history->index() - 1) == "Layout Selected", "Shift+L, one undo step: %s",
+          qPrintable(history->text(history->index() - 1)));
+    // Without the rest of its column it needn't land exactly where the whole layout put it.
+    const QRectF back = f.item(kNormal)->sceneBoundingRect();
+    const QRectF fed = f.item(kSurface)->sceneBoundingRect();
+    CHECK(back.right() < fed.left() && fed.left() - back.right() < 250.0, "just left of what it feeds again: %g to %g", back.right(), fed.left());
+    CHECK(back.top() < fed.bottom() + 200.0 && back.bottom() > fed.top() - 200.0, "and near its height: %g, %g", back.top(), fed.top());
+    CHECK(f.item(kSurface)->pos() == surface, "which didn't move");
+    history->undo();
+    settle();
+    CHECK((f.item(kNormal)->pos() - laidOut).manhattanLength() > 1000.0, "undone, it's where it was");
+}
+
 USDCC_TEST(material_editor_backdrops_carry_nodes) {
     Fixture f;
     showAll(f);

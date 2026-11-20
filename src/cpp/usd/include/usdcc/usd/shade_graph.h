@@ -173,6 +173,10 @@ std::vector<PXR_NS::GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std
 // its rows' order.
 std::vector<ShadeNodeBox> shadeNodeBoxes(const ShadeGraph& graph, const std::vector<float>& heights);
 std::vector<PXR_NS::GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights);
+// Only the nodes `chosen` says, near where they are, `current` (layeredLayoutOf). Every node's
+// position, the others' as they are.
+std::vector<PXR_NS::GfVec2f> layoutShadeNodes(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes,
+                                              const std::vector<PXR_NS::GfVec2f>& current, const std::vector<bool>& chosen);
 // How good a layout is: crossings, lines through nodes, overlaps.
 LayeredLayoutQuality shadeLayoutQuality(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes,
                                         const std::vector<PXR_NS::GfVec2f>& positions);

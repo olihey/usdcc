@@ -812,6 +812,87 @@ std::vector<LayeredPoint> layeredLayout(const std::vector<LayeredNode>& nodes, c
     return result;
 }
 
+std::vector<LayeredPoint> layeredLayoutOf(const std::vector<LayeredNode>& nodes, const std::vector<LayeredEdge>& edges,
+                                          const std::vector<LayeredPoint>& current, const std::vector<bool>& chosen,
+                                          const LayeredLayoutOptions& options) {
+    std::vector<LayeredPoint> result = current;
+    result.resize(nodes.size());
+    const auto isChosen = [&chosen](std::size_t n) { return n < chosen.size() && chosen[n]; };
+
+    // The chosen, and what they're connected to: the nodes laid out, in this order.
+    std::vector<int> local(nodes.size(), -1);
+    std::vector<std::size_t> laid;
+    const auto take = [&](std::size_t n) {
+        if (local[n] >= 0) return;
+        local[n] = static_cast<int>(laid.size());
+        laid.push_back(n);
+    };
+    for (std::size_t n = 0; n < nodes.size(); ++n) {
+        if (isChosen(n)) take(n);
+    }
+    if (laid.empty()) return result;
+    // What's fed by the chosen: it decides how far right they go.
+    std::vector<char> fed(nodes.size(), 0);
+    std::vector<LayeredEdge> lines;
+    for (const LayeredEdge& edge : edges) {
+        if (edge.from >= nodes.size() || edge.to >= nodes.size()) continue;
+        const bool from = isChosen(edge.from);
+        const bool to = isChosen(edge.to);
+        if (!from && !to) continue;
+        take(edge.from);
+        take(edge.to);
+        if (from && !to) fed[edge.to] = 1;
+        lines.push_back(edge);
+    }
+    std::vector<LayeredNode> laidNodes;
+    for (std::size_t n : laid) laidNodes.push_back(nodes[n]);
+    for (LayeredEdge& line : lines) {
+        line.from = static_cast<std::size_t>(local[line.from]);
+        line.to = static_cast<std::size_t>(local[line.to]);
+    }
+    const std::vector<LayeredPoint> at = layeredLayout(laidNodes, lines, options);
+
+    // Where that puts them: so the nodes not chosen would be where they are.
+    double across = 0.0;
+    double level = 0.0;
+    int feeding = 0;
+    int others = 0;
+    double acrossAll = 0.0;
+    for (std::size_t i = 0; i < laid.size(); ++i) {
+        const std::size_t n = laid[i];
+        if (isChosen(n) || n >= current.size()) continue;
+        const double dx = current[n].x - at[i].x;
+        level += current[n].y - at[i].y;
+        acrossAll += dx;
+        ++others;
+        if (fed[n]) {
+            across += dx;
+            ++feeding;
+        }
+    }
+    double dx = 0.0;
+    double dy = 0.0;
+    if (others > 0) {
+        dx = feeding > 0 ? across / feeding : acrossAll / others;
+        dy = level / others;
+    } else {
+        // Nothing around them: the one furthest right stays.
+        std::size_t anchor = 0;
+        for (std::size_t i = 1; i < laid.size(); ++i) {
+            if (at[i].x > at[anchor].x) anchor = i;
+        }
+        if (laid[anchor] < current.size()) {
+            dx = current[laid[anchor]].x - at[anchor].x;
+            dy = current[laid[anchor]].y - at[anchor].y;
+        }
+    }
+    for (std::size_t i = 0; i < laid.size(); ++i) {
+        if (!isChosen(laid[i])) continue;
+        result[laid[i]] = LayeredPoint{static_cast<float>(at[i].x + dx), static_cast<float>(at[i].y + dy)};
+    }
+    return result;
+}
+
 namespace {
 
 struct Line {

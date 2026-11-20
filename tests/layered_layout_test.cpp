@@ -357,4 +357,47 @@ def Material "M"
               where["Xform"][0] > where["ST"][0],
           "the Material on the right, what feeds it to its left");
     CHECK(where["Rough"][0] == where["Diffuse"][0], "a texture read straight from the UVs is next to the surface too: %g, %g", where["Rough"][0], where["Diffuse"][0]);
+
+    // The textures scattered, then only they laid out: back where the whole layout puts them,
+    // as what they're connected to is where it put that.
+    std::vector<GfVec2f> scattered = at;
+    std::vector<bool> chosen(graph.nodes.size(), false);
+    float offset = 0.0f;
+    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
+        if (graph.nodes[n].subtitle != "UsdUVTexture") continue;
+        chosen[n] = true;
+        scattered[n] = GfVec2f(-900.0f + offset, 700.0f - offset);
+        offset += 170.0f;
+    }
+    CHECK(std::count(chosen.begin(), chosen.end(), true) == 6, "six textures");
+    const std::vector<GfVec2f> again = layoutShadeNodes(graph, boxes, scattered, chosen);
+    float furthest = 0.0f;
+    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
+        if (!chosen[n]) {
+            CHECK(again[n] == scattered[n], "%s isn't moved", graph.nodes[n].caption.c_str());
+            continue;
+        }
+        furthest = std::max(furthest, (again[n] - at[n]).GetLength());
+    }
+    std::printf("  laid out again, the furthest from the whole layout: %.1f px\n", furthest);
+    CHECK(furthest < 40.0f, "they're back where the whole layout has them: %g px off", furthest);
+    CHECK(shadeLayoutQuality(graph, boxes, again).overlaps == 0, "on nothing");
+}
+
+USDCC_TEST(layered_layout_of_some_nodes) {
+    // a -> b -> c, d alone; b and c chosen, a not.
+    std::vector<LayeredNode> nodes(4);
+    const std::vector<LayeredEdge> edges{{0, 0, 1, 0}, {1, 0, 2, 0}};
+    const std::vector<LayeredPoint> current{{0.0f, 0.0f}, {50.0f, 900.0f}, {-400.0f, -300.0f}, {1000.0f, 1000.0f}};
+    const std::vector<LayeredPoint> at = layeredLayoutOf(nodes, edges, current, {false, true, true, false});
+    CHECK(at[0].x == 0.0f && at[0].y == 0.0f && at[3].x == 1000.0f, "what isn't chosen stays");
+    CHECK(at[1].x > at[0].x + nodes[0].width && at[2].x > at[1].x + nodes[1].width, "the chosen to the right of what feeds them, in order");
+    CHECK(at[1].y == at[0].y && at[2].y == at[0].y, "level with it: %g, %g", at[1].y, at[2].y);
+
+    // Nothing connected to them: the one furthest right stays.
+    const std::vector<LayeredPoint> alone = layeredLayoutOf(nodes, edges, current, {true, true, true, false});
+    CHECK(alone[2].x == current[2].x && alone[2].y == current[2].y, "c stays: (%g, %g)", alone[2].x, alone[2].y);
+    CHECK(alone[0].x < alone[1].x && alone[1].x < alone[2].x, "the rest to its left");
+    const std::vector<LayeredPoint> none = layeredLayoutOf(nodes, edges, current, {});
+    CHECK(none.size() == 4 && none[1].y == 900.0f, "none chosen, none moved");
 }
