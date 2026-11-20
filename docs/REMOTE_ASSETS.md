@@ -18,9 +18,9 @@ assumption.
 
 - **A shared library, `usdcc_assets`, holds everything that isn't a protocol.** The cache, the server
   names, environments, credentials, the HTTP client and the resolver base class. A protocol adds a
-  *transport*: four calls (§6). A later S3 plugin reuses all of it.
+  *transport*: four calls (§6). The S3 plugin ([S3_RESOLVER.md](S3_RESOLVER.md)) reuses all of it.
 - **One resolver per protocol, each with its own scheme.** `http://` and `https://` for plain HTTP,
-  `webdav://` for WebDAV, `s3://` for a later S3 plugin. A neutral scheme (`asset://`) was
+  `webdav://` for WebDAV, `s3://` for S3 ([S3_RESOLVER.md](S3_RESOLVER.md), planned). A neutral scheme (`asset://`) was
   considered and rejected (§16).
 - **The name in the URL is logical.** `webdav://studio/chars/hero.usd`: `studio` is a name, never a
   hostname. A configuration maps it to real servers (§4). No hostnames or secrets are written into
@@ -321,8 +321,9 @@ unless the protocol says otherwise, as plain HTTP does; credentials never follow
 Proxies come from the system or the usual environment variables. No Qt Network: resolver calls come
 from any thread and from tools without an event loop.
 
-libcurl signs S3 requests itself (`CURLOPT_AWS_SIGV4`), which is most of what an S3 transport would
-need. *Not tried.*
+libcurl signs S3 requests itself (`CURLOPT_AWS_SIGV4`), which is most of what an S3 transport
+needs: the S3 plugin is planned on it, not on an AWS SDK ([S3_RESOLVER.md](S3_RESOLVER.md) §2).
+*Not tried yet;* the plan's spike does.
 
 **Credentials.** The configuration names a credential id. A provider turns it into a user and
 password or a token. Providers are tried in order:
@@ -621,7 +622,7 @@ is not an `ArResolver` written in Python.
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | **Done** (ASSET_PICKER.md §9), but for dragging, completion and Python. A reference to a file on the server is added by browsing to it |
 | **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
-| **Later** | An S3 plugin | It needs no change to `usdcc_assets` beyond what S3 itself forces |
+| **Later** | An S3 plugin, planned in [S3_RESOLVER.md](S3_RESOLVER.md) §8 (phases S3.0 to S3.4) | It needs no change to `usdcc_assets` beyond what S3 itself forces (S3_RESOLVER.md §6) |
 | **Later** | More storage backends through Apache OpenDAL (§13.5): one plugin, one transport per scheme | A stage opens from a second backend (Azure Blob or SFTP, say) through the same plugin, and the deploy ships the full notice list for its Rust dependencies |
 | **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
 
@@ -794,8 +795,8 @@ WebDAV, HTTP, Swift, Aliyun OSS, Tencent COS, Huawei OBS, B2, Dropbox, Google Dr
   (`s3://`, `gcs://`, `azblob://`, `sftp://` …) and turns an `Endpoint` and its credential into
   OpenDAL's key/value options for that service. Names, stacks, the cache, offline mode and the
   picker work unchanged. HTTP and WebDAV stay ours: they have mirrors and addresses (§5.1).
-- **S3 first may not need it.** libcurl's SigV4 (§8) covers S3 and every S3-compatible store with
-  no new dependency. OpenDAL is for when Azure, SFTP or consumer clouds are wanted too.
+- **S3 doesn't need it.** libcurl's SigV4 (§8) covers S3 and every S3-compatible store with
+  no new dependency ([S3_RESOLVER.md](S3_RESOLVER.md)). OpenDAL is for when Azure, SFTP or consumer clouds are wanted too.
 - **Build.** The core is Rust: the build needs a Rust toolchain, and OpenDAL needs its own overlay
   port (it isn't in vcpkg as far as we know). We'd use its C binding or the newer C++ one, both less
   mature than the Rust API: check first that they build on Windows and expose the ETag and
