@@ -34,18 +34,22 @@ protected:
     }
 };
 
-void addGroup(QTreeWidgetItem* parent, const ShaderNodeGroup& group) {
-    auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(group.name)});
-    item->setFlags(Qt::ItemIsEnabled);
-    for (const ShaderNodeGroup& child : group.groups) addGroup(item, child);
-    for (const ShaderNodeInfo& node : group.nodes) {
-        const QString label = QString::fromStdString(node.variant.empty() ? node.label : node.variant);
-        auto* leaf = new QTreeWidgetItem(item, {label});
+void addNodes(QTreeWidgetItem* parent, const std::vector<ShaderNodeInfo>& nodes) {
+    for (const ShaderNodeInfo& node : nodes) {
+        auto* leaf = new QTreeWidgetItem(parent, {QString::fromStdString(node.leafName)});
         leaf->setData(0, kIdentifierRole, QString::fromStdString(node.identifier));
+        // By what it reads as, and by the name it has in its renderer's documentation.
         leaf->setData(0, kSearchTextRole, QString::fromStdString(node.label + " " + node.function + " " + node.identifier).toLower());
         leaf->setToolTip(0, QString::fromStdString(node.identifier + (node.help.empty() ? std::string() : "\n" + node.help)));
         leaf->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
     }
+}
+
+void addGroup(QTreeWidgetItem* parent, const ShaderNodeGroup& group) {
+    auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(group.name)});
+    item->setFlags(Qt::ItemIsEnabled);
+    for (const ShaderNodeGroup& child : group.groups) addGroup(item, child);
+    addNodes(item, group.nodes);
 }
 
 void forEachLeaf(QTreeWidgetItem* item, const std::function<void(QTreeWidgetItem*)>& visit) {
@@ -129,6 +133,7 @@ void ShaderNodePalette::refresh() {
         auto* item = new QTreeWidgetItem(m_tree, {QString::fromStdString(root.name)});
         item->setFlags(Qt::ItemIsEnabled);
         for (const ShaderNodeGroup& group : root.groups) addGroup(item, group);
+        addNodes(item, root.nodes);
         const bool preferred = std::find(preferredNames.begin(), preferredNames.end(), root.name) != preferredNames.end();
         item->setExpanded(preferred);
     }

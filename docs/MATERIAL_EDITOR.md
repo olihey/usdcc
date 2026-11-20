@@ -142,22 +142,49 @@ Ndr was removed in 25.08, so everything below is Sdr.
 ### 3.2 Categories in the palette
 
 There are three levels: **shading system → context → role**. Leaves show the node's label, and the
-identifier appears in the tooltip.
+identifier appears in the tooltip. Groups and labels are shown under names made to read (see **Names**
+below).
 
 | Level | Source | Example |
 |---|---|---|
 | 1. Renderer | `GetShadingSystem()`, mapped to a display name and icon by a renderer profile (§3.3) | MaterialX |
 | 2. Context | `GetContext()`. Usda-defined nodes say "usda" there and in their metadata, so their outputs decide: `surface`, then `displacement`, then `volume`, else pattern (UsdPreviewSurface has both of the first two) | Surface / Pattern / Displacement |
-| 3. Group | The `role` metadata, because `GetRole()` falls back to the node's name. For MaterialX this is the nodedef's `nodegroup` (pbr, math, procedural2d, adjustment, compositing, ...). For Arnold it is the node's `classification` | pbr |
+| 3. Group | The `role` metadata, because `GetRole()` falls back to the node's name. For MaterialX this is the nodedef's `nodegroup` (pbr, math, procedural2d, adjustment, compositing, ...). A renderer profile can name other metadata: Arnold's nodes have no role, and group by their `category` (§3.3) | PBR |
 
 - **Fallbacks:**
   - A node without a role goes to "Other".
   - A group holding a single node collapses into its parent.
+  - A system whose nodes all have one context has no context level: Arnold's all say `arnold`.
   - MaterialX defines one nodedef per signature (`ND_add_float`, `ND_add_color3`, ...). Its leaves group
-    by function ("add"), and the type is picked in a submenu or by the first connection.
+    by function ("Add"), and the type is picked in a submenu or by the first connection.
+- **Names.** Sdr's label is the bare node name again for MaterialX (no nodedef has a `uiname`), and
+  empty for Arnold and USD's own nodes, so `shaderDisplayName()` makes the names:
+  - Words split at `_` and get a capital letter: `standard_surface` is "Standard Surface". `2d` and `3d`
+    at a word's end read "2D" and "3D".
+  - A table in `shader_node_catalog.cpp` holds what a capital letter doesn't do: abbreviations (PBR,
+    glTF, BSDF, IOR), color spaces (`lin_rec709` is "Linear Rec.709"), and about fifty of MaterialX's
+    names that are several words written as one (`heighttonormal` is "Height to Normal"). A word that
+    isn't in it still reads as itself, capitalized.
+  - A word with a capital letter in it is taken as somebody's name for the thing and stays:
+    `UsdPreviewSurface`, `LamaConductor`, `OmniPBR`.
+  - A label that says more than the name is kept (Arnold's `ui.name`, "OpenPBR Surface").
+  - `function` keeps the name as the renderer writes it, and the search matches it and the identifier
+    as well as the label, so `open_pbr_surface` still finds "Open PBR Surface".
+- **A leaf's name** is its label when it's its function's only node, so `ND_open_pbr_surface_surfaceshader`
+  reads "Open PBR Surface". Beside other versions of its function it's the variant, the part of the
+  identifier after the function (`color3` for `ND_add_color3`), without a version at its end
+  (`ND_gltf_image_color3_color3_1_0` is `color3_color3`). Where identifiers don't hold the function, as
+  `ND_lama_add_bsdf` and `ND_lama_add_edf` don't `LamaAdd`, it's where they differ: `bsdf`, `edf`. No two
+  names beside each other are the same (`shader_catalog_no_two_read_the_same`).
+- **Old versions.** Sdr's default-version filter leaves out a nodedef that isn't its node's default
+  version, but usdMtlx reads a version of two parts only. `standard_surface`'s "1.0.0" and "1.0.1" both
+  arrive with no version, and both as the one to use. Such nodes share a name in Sdr;
+  `isSupersededShaderNode()` then reads `isdefaultversion` from the `.mtlx` that defines them, and the
+  catalog leaves the old one out.
 - **Hidden:** contexts `light`, `lightFilter`, `displayFilter`, `sampleFilter`, `integrator` and
-  `displaydriver`, plus nodes that the renderer marks hidden (Arnold `hide`, `usd.hide`), and usdHydra's
-  old `Hw*` glslfx nodes, some of which have no outputs.
+  `displaydriver`, plus nodes that the renderer marks hidden (Arnold `hide`, `usd.hide`) or `deprecated`
+  (Arnold's `standard`, `hair`, `skin` and five more, kept for old files), what a profile hides
+  (§3.3), and usdHydra's old `Hw*` glslfx nodes, some of which have no outputs.
 - **Tab search** matches label, function and identifier across every visible system. The current
   renderer's systems rank first.
 
@@ -167,7 +194,7 @@ identifier appears in the tooltip.
 |---|---|---|---|---|---|
 | USD preview | `UsdShadersDiscoveryPlugin` (built in) | `glslfx` | `UsdPreviewSurface`, `UsdUVTexture`, `UsdPrimvarReader_float` | `role` in `sdrMetadata` | yes |
 | MaterialX | usdMtlx (built in, `--materialx`) | `mtlx` | `ND_standard_surface_surfaceshader` | `nodegroup` → role; context from the output type | yes |
-| Arnold | arnold-usd `nodeRegistryArnold` | `arnold` | `arnold:standard_surface` | `classification` → role; `ui.groups` → pages | only once arnold-usd is built against our USD and the Arnold core DLL loads (its discovery calls `AiBegin`) |
+| Arnold | arnold-usd `nodeRegistryArnold` | `arnold` | `arnold:standard_surface` | `category` (Shading, Math, Utility, Texture, ...), through its profile; `ui.groups` → pages | once Settings names an Arnold folder ([USD_PLUGINS.md](USD_PLUGINS.md) §3): its discovery calls `AiBegin` |
 | Cycles | **none** (Blender's Hydra delegate ships no Sdr plugin) | ours: `cycles` | `cycles:principled_bsdf` (the delegate also accepts `cycles_*`) | ours, from `ccl::NodeType` | needs generated definitions (§3.4) |
 | V-Ray | **none** in the App SDK's USD bundle | ours: `vray` | `vray:BRDFVRayMtl`, to be confirmed against a V-Ray USD export | V-Ray `PluginCategory` (bsdf, material, texture, uvwgen) | needs generated definitions (§3.4) |
 | MDL | **none** that USD can use (§3.5) | ours: `mdl` | `mdl:<module>::<name>`, for the catalog only. Prims use `.mdl` asset + subIdentifier | the module's folder; `anno::in_group` → pages | needs our parser and generated definitions (§3.5) |
@@ -180,7 +207,20 @@ and RTX plugins bring their own. MDL's is built in, as its parser is. Each profi
 - the default surface node for "New Material" (`UsdPreviewSurface`, `ND_standard_surface_surfaceshader`,
   `OmniPBR`, `arnold:standard_surface`, ...);
 - which terminals "New Material" connects (MDL's are `surface`, `displacement` and `volume`);
-- extra hidden contexts.
+- extra hidden contexts;
+- how its nodes group, where `role` doesn't say: the metadata to group by, a group for each node
+  that has none, and groups and nodes to hide.
+
+**Arnold's** profile (`arnoldRendererProfile()`) is added by `enableArnold()`, so it's there only
+when Arnold is. arnold-usd 7.5.4 gives all its 160 nodes the context `arnold`, and a `role` to one of
+them, so by role they were one group, "Other". The profile:
+
+- groups by `category`, which 134 nodes have. It can't be a fallback for every system: MaterialX's
+  `category` is the output type;
+- hides the group "Light Filter" (4 nodes), the 13 imagers (`arnold:imager_*`) and the 9 operators
+  (`merge`, `set_parameter`, ...), which Sdr lists as it does shaders, with no category;
+- places the four shaders that have none: `ramp_float` and `ramp_rgb` in Texture, `cryptomatte` in
+  AOV, `osl` in Utility.
 
 ### 3.4 Renderers without an Sdr plugin: generated definitions
 

@@ -34,8 +34,7 @@ constexpr int kIdentifierRole = Qt::UserRole;
 constexpr int kSystemRole = Qt::UserRole + 1;
 
 void addNode(QTreeWidgetItem* parent, const ShaderNodeInfo& node) {
-    const QString name = qs(node.variant.empty() ? node.label : node.variant);
-    auto* item = new QTreeWidgetItem(parent, {name});
+    auto* item = new QTreeWidgetItem(parent, {qs(node.leafName)});
     item->setData(0, kIdentifierRole, qs(node.identifier));
     item->setData(0, kSystemRole, qs(node.shadingSystem));
     item->setToolTip(0, qs(node.identifier));
@@ -121,7 +120,7 @@ void ShaderNodesDialog::rebuild() {
     }
     const std::size_t all = catalog.allNodes().size();
     const std::size_t shown = catalog.nodes().size();
-    m_summary->setText(tr("%1 nodes, and %2 hidden as lights or marked hidden.").arg(shown).arg(all - shown));
+    m_summary->setText(tr("%1 nodes, and %2 hidden: lights, deprecated ones, and those marked hidden.").arg(shown).arg(all - shown));
 }
 
 void ShaderNodesDialog::applySearch(const QString& text) {

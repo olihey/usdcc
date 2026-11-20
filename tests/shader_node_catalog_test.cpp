@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <set>
 #include <string>
 
 using usdcc::usd::RendererProfile;
@@ -37,6 +38,25 @@ std::size_t countNodes(const ShaderNodeGroup& group) {
     for (const ShaderNodeGroup& child : group.groups) count += countNodes(child);
     return count;
 }
+
+const ShaderNodeInfo* nodeUnder(const ShaderNodeGroup& group, const std::string& identifier) {
+    if (const ShaderNodeInfo* node = nodeNamed(group.nodes, identifier)) return node;
+    for (const ShaderNodeGroup& child : group.groups) {
+        if (const ShaderNodeInfo* node = nodeUnder(child, identifier)) return node;
+    }
+    return nullptr;
+}
+
+// What reads the same as something beside it, anywhere under `group`.
+void collectTwins(const ShaderNodeGroup& group, const std::string& path, std::vector<std::string>& twins) {
+    std::set<std::string> seen;
+    const auto see = [&](const std::string& name) {
+        if (name.empty() || !seen.insert(name).second) twins.push_back(path + "/" + (name.empty() ? "(nothing)" : name));
+    };
+    for (const ShaderNodeGroup& child : group.groups) see(child.name);
+    for (const ShaderNodeInfo& node : group.nodes) see(node.leafName);
+    for (const ShaderNodeGroup& child : group.groups) collectTwins(child, path + "/" + child.name, twins);
+}
 }  // namespace
 
 USDCC_TEST(shader_catalog_counts_match_the_registry) {
@@ -45,10 +65,10 @@ USDCC_TEST(shader_catalog_counts_match_the_registry) {
     std::size_t expected = 0;
     for (SdrShaderNodeConstPtr node : SdrRegistry::GetInstance().GetAllShaderNodes()) {
         const SdrVersion version = node->GetShaderVersion();
-        if (!version || version.IsDefault()) ++expected;
+        if ((!version || version.IsDefault()) && !usdcc::usd::isSupersededShaderNode(*node)) ++expected;
     }
     CHECK(expected > 100, "the USD build has preview and MaterialX nodes: %d", int(expected));
-    CHECK(all.size() == expected, "every default version is listed: %d of %d", int(all.size()), int(expected));
+    CHECK(all.size() == expected, "every current version is listed: %d of %d", int(all.size()), int(expected));
 
     const std::vector<ShaderNodeInfo> shown = catalog.nodes();
     const auto hidden = std::count_if(all.begin(), all.end(), [](const ShaderNodeInfo& node) { return node.hidden; });
@@ -61,6 +81,7 @@ USDCC_TEST(shader_catalog_counts_match_the_registry) {
 
     for (const ShaderNodeInfo& node : all) {
         CHECK(!node.label.empty(), "%s has a label", node.identifier.c_str());
+        CHECK(node.leafName == node.label, "%s reads as its label outside the tree: %s", node.identifier.c_str(), node.leafName.c_str());
         CHECK(node.context != "usda", "%s has a real context", node.identifier.c_str());
         CHECK(!node.group.empty(), "%s has a group", node.identifier.c_str());
     }
@@ -103,7 +124,7 @@ USDCC_TEST(shader_catalog_groups_preview_nodes) {
     const ShaderNodeGroup* pattern = childNamed(root.groups, "Pattern");
     CHECK(pattern != nullptr, "the others are patterns");
     if (!pattern) return;
-    const ShaderNodeGroup* primvar = childNamed(pattern->groups, "primvar");
+    const ShaderNodeGroup* primvar = childNamed(pattern->groups, "Primvar");
     CHECK(primvar != nullptr, "grouped by role");
     if (primvar) {
         const ShaderNodeGroup* reader = childNamed(primvar->groups, "UsdPrimvarReader");
@@ -111,7 +132,10 @@ USDCC_TEST(shader_catalog_groups_preview_nodes) {
         if (reader) {
             const ShaderNodeInfo* float2 = nodeNamed(reader->nodes, "UsdPrimvarReader_float2");
             CHECK(float2 != nullptr, "a reader is there");
-            if (float2) CHECK(float2->label == "UsdPrimvarReader_float2", "with its name for a label, as Sdr has none");
+            if (float2) {
+                CHECK(float2->label == "UsdPrimvarReader_float2", "with its name for a label, as Sdr has none, and USD's names stay");
+                CHECK(float2->leafName == "float2", "and reading as its type beside the others: %s", float2->leafName.c_str());
+            }
         }
     }
     const std::vector<ShaderNodeInfo> all = catalog.allNodes();
@@ -132,28 +156,147 @@ USDCC_TEST(shader_catalog_groups_materialx_nodes) {
     const ShaderNodeGroup* surface = childNamed(root.groups, "Surface");
     CHECK(surface != nullptr, "a Surface context");
     if (surface) {
-        const ShaderNodeGroup* pbr = childNamed(surface->groups, "pbr");
-        CHECK(pbr != nullptr, "with nodegroup pbr");
-        const std::function<bool(const ShaderNodeGroup&)> hasStandard = [&hasStandard](const ShaderNodeGroup& group) {
-            if (nodeNamed(group.nodes, "ND_standard_surface_surfaceshader")) return true;
-            return std::any_of(group.groups.begin(), group.groups.end(), hasStandard);
-        };
-        if (pbr) CHECK(hasStandard(*pbr), "holding standard_surface");
+        const ShaderNodeGroup* pbr = childNamed(surface->groups, "PBR");
+        CHECK(pbr != nullptr, "with nodegroup pbr, as a name to read");
+        if (pbr) {
+            // Each is its function's only node, and reads as the function: not as "surfaceshader",
+            // the part of the identifier they all end in.
+            const ShaderNodeInfo* standard = nodeNamed(pbr->nodes, "ND_standard_surface_surfaceshader");
+            CHECK(standard && standard->leafName == "Standard Surface", "holding standard_surface: %s", standard ? standard->leafName.c_str() : "not there");
+            const ShaderNodeInfo* openPbr = nodeNamed(pbr->nodes, "ND_open_pbr_surface_surfaceshader");
+            CHECK(openPbr && openPbr->leafName == "Open PBR Surface", "and open_pbr_surface: %s", openPbr ? openPbr->leafName.c_str() : "not there");
+            const ShaderNodeInfo* gltf = nodeNamed(pbr->nodes, "ND_gltf_pbr_surfaceshader");
+            CHECK(gltf && gltf->leafName == "glTF PBR" && gltf->function == "gltf_pbr", "and gltf_pbr, still with MaterialX's name for it");
+            const ShaderNodeInfo* preview = nodeNamed(pbr->nodes, "ND_UsdPreviewSurface_surfaceshader");
+            CHECK(preview && preview->leafName == "UsdPreviewSurface", "USD's name stays as it is");
+        }
+        const ShaderNodeInfo* mix = nodeNamed(surface->nodes, "ND_mix_surfaceshader");
+        CHECK(mix && mix->leafName == "Mix", "a group of one gives its node up, under its own name");
     }
+    // standard_surface 1.0.0 has no version in Sdr, and is named after the one that replaced it.
+    const std::vector<ShaderNodeInfo> all = catalog.allNodes();
+    CHECK(!nodeNamed(all, "ND_standard_surface_surfaceshader_100"), "an old version isn't listed");
+    const ShaderNodeInfo* uvTexture = nodeNamed(all, "ND_UsdUVTexture_23");
+    CHECK(uvTexture && uvTexture->variant.empty(), "a version in an identifier isn't a variant: %s", uvTexture ? uvTexture->variant.c_str() : "");
+    const ShaderNodeInfo* normalMap = nodeNamed(all, "ND_gltf_normalmap_vector3_1_0");
+    CHECK(normalMap && normalMap->variant == "vector3" && normalMap->label == "glTF Normal Map", "nor at a variant's end: %s",
+          normalMap ? normalMap->variant.c_str() : "");
 
     const ShaderNodeGroup* pattern = childNamed(root.groups, "Pattern");
     CHECK(pattern != nullptr, "a Pattern context");
     if (!pattern) return;
-    const ShaderNodeGroup* math = childNamed(pattern->groups, "math");
+    const ShaderNodeGroup* math = childNamed(pattern->groups, "Math");
     CHECK(math != nullptr, "with nodegroup math");
     if (!math) return;
-    const ShaderNodeGroup* add = childNamed(math->groups, "add");
+    const ShaderNodeGroup* add = childNamed(math->groups, "Add");
     CHECK(add != nullptr && add->nodes.size() > 3, "one nodedef per signature, under their function");
     if (add) {
         const ShaderNodeInfo* color3 = nodeNamed(add->nodes, "ND_add_color3");
         CHECK(color3 != nullptr, "ND_add_color3 is one");
-        if (color3) CHECK(color3->variant == "color3", "its variant says which: %s", color3->variant.c_str());
+        if (color3) CHECK(color3->variant == "color3" && color3->leafName == "color3", "its variant says which: %s", color3->variant.c_str());
     }
+    CHECK(childNamed(pattern->groups, "Procedural 2D") && childNamed(pattern->groups, "Color Transform"), "groups have names to read");
+    const ShaderNodeInfo* position = nodeUnder(*pattern, "ND_position_vector3");
+    CHECK(position && position->leafName == "Position", "a function of one type reads as the function, not the type: %s",
+          position ? position->leafName.c_str() : "not there");
+
+    // Lama's identifiers don't hold their function: ND_lama_add_bsdf is a LamaAdd.
+    const ShaderNodeGroup* pbr = childNamed(pattern->groups, "PBR");
+    const ShaderNodeGroup* lamaAdd = pbr ? childNamed(pbr->groups, "LamaAdd") : nullptr;
+    CHECK(lamaAdd != nullptr && lamaAdd->nodes.size() == 2, "LamaAdd has two");
+    if (lamaAdd) {
+        const ShaderNodeInfo* bsdf = nodeNamed(lamaAdd->nodes, "ND_lama_add_bsdf");
+        const ShaderNodeInfo* edf = nodeNamed(lamaAdd->nodes, "ND_lama_add_edf");
+        CHECK(bsdf && edf && bsdf->leafName == "bsdf" && edf->leafName == "edf", "told apart by where their identifiers differ: %s, %s",
+              bsdf ? bsdf->leafName.c_str() : "", edf ? edf->leafName.c_str() : "");
+    }
+}
+
+USDCC_TEST(shader_catalog_no_two_read_the_same) {
+    ShaderNodeCatalog catalog;
+    std::vector<std::string> twins;
+    for (const ShaderNodeGroup& root : catalog.tree()) collectTwins(root, root.name, twins);
+    std::string listed;
+    for (std::size_t i = 0; i < twins.size() && i < 8; ++i) listed += twins[i] + "; ";
+    CHECK(twins.empty(), "beside each other in the palette: %d do: %s", int(twins.size()), listed.c_str());
+}
+
+USDCC_TEST(shader_catalog_display_names) {
+    using usdcc::usd::shaderDisplayName;
+    const auto reads = [](const char* name, const char* expected) {
+        const std::string shown = shaderDisplayName(name);
+        CHECK(shown == expected, "%s reads as \"%s\": \"%s\"", name, expected, shown.c_str());
+    };
+    reads("standard_surface", "Standard Surface");
+    reads("open_pbr_surface", "Open PBR Surface");
+    reads("oren_nayar_diffuse_bsdf", "Oren Nayar Diffuse BSDF");
+    reads("rgba_to_float", "RGBA to Float");
+    reads("and", "And");
+    reads("noise2d", "Noise 2D");
+    reads("cellnoise3d", "Cell Noise 3D");
+    reads("heighttonormal", "Height to Normal");
+    reads("combine3", "Combine3");
+    reads("srgb_texture_to_lin_rec709", "sRGB Texture to Linear Rec.709");
+    reads("procedural2d", "Procedural 2D");
+    reads("pbr", "PBR");
+    // Somebody's own names stay as they're written.
+    reads("UsdPreviewSurface", "UsdPreviewSurface");
+    reads("UsdPrimvarReader_float2", "UsdPrimvarReader_float2");
+    reads("standard_surface_to_UsdPreviewSurface", "Standard Surface to UsdPreviewSurface");
+    reads("LamaConductor", "LamaConductor");
+    reads("OmniPBR", "OmniPBR");
+    reads("User Data", "User Data");
+    reads("", "");
+}
+
+USDCC_TEST(shader_catalog_profile_groups_and_hides) {
+    ShaderNodeCatalog catalog;
+    // What Arnold's needs, on MaterialX's nodes: Arnold's aren't here.
+    RendererProfile profile = *catalog.profile("mtlx");
+    profile.groupMetadata = "mtlxNodeType";
+    profile.hiddenGroups = {"vector2"};
+    profile.hiddenNodes = {"ND_image_*", "ND_add_float"};
+    catalog.setProfile(profile);
+    std::vector<ShaderNodeInfo> all = catalog.allNodes();
+    const ShaderNodeInfo* addColor = nodeNamed(all, "ND_add_color3");
+    CHECK(addColor && addColor->group == "color3" && !addColor->hidden, "grouped by the metadata its profile names: %s",
+          addColor ? addColor->group.c_str() : "");
+    const ShaderNodeInfo* addVector = nodeNamed(all, "ND_add_vector2");
+    CHECK(addVector && addVector->hidden, "a group can be hidden");
+    const ShaderNodeInfo* addFloat = nodeNamed(all, "ND_add_float");
+    CHECK(addFloat && addFloat->hidden, "and a node");
+    const ShaderNodeInfo* image = nodeNamed(all, "ND_image_color3");
+    CHECK(image && image->hidden, "and all that start alike");
+    const ShaderNodeInfo* tiled = nodeNamed(all, "ND_tiledimage_color3");
+    CHECK(tiled && !tiled->hidden, "and no others");
+
+    // Nodes that say nothing can be given a group.
+    profile = *catalog.profile("mtlx");
+    profile.groupMetadata = "no such metadata";
+    profile.hiddenGroups.clear();
+    profile.hiddenNodes.clear();
+    profile.nodeGroups = {{"ND_add_float", "Sums"}};
+    // And with one context left, it isn't a level.
+    profile.hiddenContexts = {"surface", "displacement", "volume"};
+    catalog.setProfile(profile);
+    all = catalog.allNodes();
+    addFloat = nodeNamed(all, "ND_add_float");
+    CHECK(addFloat && addFloat->group == "Sums", "a node without one takes its profile's: %s", addFloat ? addFloat->group.c_str() : "");
+    addColor = nodeNamed(all, "ND_add_color3");
+    CHECK(addColor && addColor->group == "Other", "and the rest are Other");
+    const std::vector<ShaderNodeGroup> tree = catalog.tree({"mtlx"});
+    CHECK(tree.size() == 1 && !childNamed(tree.front().groups, "Pattern") && childNamed(tree.front().groups, "Other"),
+          "a system's only context gives its groups to the system");
+    if (!tree.empty()) {
+        const ShaderNodeInfo* lone = nodeNamed(tree.front().nodes, "ND_add_float");
+        CHECK(lone != nullptr, "and its lone nodes");
+    }
+
+    const RendererProfile arnold = usdcc::usd::arnoldRendererProfile();
+    CHECK(arnold.shadingSystem == "arnold" && arnold.displayName == "Arnold" && arnold.terminalPrefix == "arnold", "Arnold's profile");
+    CHECK(arnold.groupMetadata == "category", "groups by category, as arnold-usd gives no role");
+    CHECK(std::find(arnold.hiddenGroups.begin(), arnold.hiddenGroups.end(), "Light Filter") != arnold.hiddenGroups.end(), "without light filters");
+    CHECK(arnold.nodeGroups.count("arnold:ramp_rgb") == 1, "and places the shaders that have none");
 }
 
 USDCC_TEST(shader_catalog_profiles) {
@@ -164,7 +307,7 @@ USDCC_TEST(shader_catalog_profiles) {
     CHECK(mdl && mdl->terminals.size() == 3, "MDL's connects three terminals");
     const RendererProfile* preview = catalog.profile("glslfx");
     CHECK(preview && preview->terminalPrefix.empty(), "the preview's terminal has no prefix");
-    CHECK(!catalog.profile("arnold"), "nothing for a renderer not here");
+    CHECK(!catalog.profile("arnold"), "nothing for a renderer not here: enableArnold() adds Arnold's");
 
     catalog.setProfile({"testsystem", "Test System", "", "test", "Node", {"surface"}, {}});
     CHECK(catalog.profile("testsystem") && catalog.profile("testsystem")->displayName == "Test System", "a plugin can add one");

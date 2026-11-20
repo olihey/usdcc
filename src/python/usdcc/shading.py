@@ -27,18 +27,27 @@ def _app():
 
 def catalog():
     """Each node's default version, as dicts: identifier, label, shading_system, context,
-    group, function, variant and help."""
+    group, function, variant and help. The label is the one the palette shows, "Open PBR
+    Surface"; function is the name as its renderer writes it, "open_pbr_surface"."""
     return _app().shader_nodes()
 
 
 def register_renderer_profile(shading_system, display_name, terminal_prefix="", default_surface_node="",
-                              terminals=("surface",), hidden_contexts=(), icon=""):
+                              terminals=("surface",), hidden_contexts=(), icon="", group_metadata="",
+                              hidden_groups=(), hidden_nodes=(), node_groups=None):
     """Says how the editor treats a shading system: its name in the palette, its Material
     terminals (``outputs:<prefix>:surface``), what "New Material" creates and connects,
     and any contexts to leave out. Registering one again replaces it. A plugin's goes
-    when it reloads."""
+    when it reloads.
+
+    The palette groups a system's nodes by their ``role`` metadata. For one that says
+    it elsewhere, ``group_metadata`` names where (Arnold's is ``"category"``), and
+    ``node_groups`` maps the identifiers of nodes that say nothing to a group.
+    ``hidden_groups`` leaves whole groups out, and ``hidden_nodes`` identifiers, or
+    with a ``*`` at the end, all that start so (``"arnold:imager_*"``)."""
     _app().set_renderer_profile(shading_system, display_name, str(icon), terminal_prefix, default_surface_node,
-                                list(terminals), list(hidden_contexts))
+                                list(terminals), list(hidden_contexts), group_metadata, list(hidden_groups),
+                                list(hidden_nodes), dict(node_groups or {}))
     _plugins.note("Renderer profile", display_name)
     _plugins.track(lambda: remove_renderer_profile(shading_system))
 
