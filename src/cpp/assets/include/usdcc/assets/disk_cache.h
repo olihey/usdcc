@@ -1,10 +1,14 @@
 #pragma once
 
 // The disk cache (docs/REMOTE_ASSETS.md §7). A file is stored per version, never
-// overwritten:
+// overwritten, and named by hashes, never by the server's path:
 //
-//     <root>/<endpoint cache id>/chars/hero@3f9a1c2e.usd        the bytes
-//     <root>/<endpoint cache id>/chars/hero@3f9a1c2e.usd.meta   ETag, time, size, where from
+//     <root>/v2/<endpoint cache id>/3f/3f9a1c2e7b04d8aa@7c21aa04.usd        the bytes
+//     <root>/v2/<endpoint cache id>/3f/3f9a1c2e7b04d8aa@7c21aa04.usd.meta   path, ETag, time, size
+//
+// The first hash is of the path (case and all), the second of its version, and the
+// folder the path hash's first two characters. A path that differs only in case or a
+// trailing dot, a Windows device name (con, aux) or a long one can't collide or fail.
 //
 // Windows can't replace a file the .usdc reader has mapped, an open layer keeps the
 // bytes it loaded until Reload, and TEST's and PROD's versions of one path sit side

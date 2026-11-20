@@ -248,16 +248,41 @@ are remembered the same way.
   listings and winners are fixed, so one composition sees one consistent state.
 - **Outside a scope** they are remembered for a few seconds (configurable).
 
-**Files on disk are stored per version:** `<cache>/<endpoint id>/<path>@<etag hash>.<ext>`, with a
-small record beside each (ETag, modified time, size, last use). A new version is a new file, never
-an overwrite:
+**Files on disk are stored per version, named by hashes:**
+
+```
+<cache>/v2/<endpoint id>/3f/3f9a1c2e7b04d8aa@7c21aa04.usd        the bytes
+<cache>/v2/<endpoint id>/3f/3f9a1c2e7b04d8aa@7c21aa04.usd.meta   path, ETag, modified time, size
+```
+
+- **`v2`:** the layout. Copies of the earlier one, named after the server's path, go at the next
+  trim (only files with a record beside them).
+- **The endpoint id** is a hash of its scheme, URL and credential id.
+- **The path hash** (16 hex digits) is of the exact path on the server, case and all. Its first two
+  digits are the folder, so none holds more than a 256th of an endpoint's files.
+- **The version hash** (8 hex digits) is of the ETag, or of the modified time and size without one.
+- **The extension** is the path's, when it's letters and digits; it's for people and tools that
+  look at the file. USD goes by the URL.
+- **The record** (`.meta`) says which path a file is, and its time is the version's last use.
+
+Nothing of the server's path is in a name, so none of it can trip the file system:
+
+- Linux servers tell `Hero.usd` from `hero.usd`, and Apache's and nginx's ETags come from the size
+  and the time, which two copies of one file share. Windows and macOS don't tell the names apart.
+- Windows drops a trailing dot (`chars./`) and refuses device names (`con`, `aux`, `nul`, `com1`).
+- Windows limits a path to 260 characters. A name is the same length however long the server's
+  path: about 90 characters after the cache's folder.
+
+Offline mode (below) lists the path hash's folder and checks each record's path, so two paths with
+one hash can't be mixed up there. The price: the cache can't be read in Explorer; the records say
+what each file is.
+
+A new version is a new file, never an overwrite:
 
 - Windows can't replace a file the `.usdc` reader has memory-mapped.
 - An open layer keeps the bytes it loaded until Reload.
 - TEST's and PROD's versions of one path sit side by side, so switching environment downloads
   nothing twice.
-
-The extension is kept, for renderers that are handed the cache file (§10).
 
 - **Revalidation:** before a cached version is used, its ETag is compared with the listing's. Equal
   means no request at all; different means a conditional fetch.
@@ -265,10 +290,9 @@ The extension is kept, for renderers that are handed the cache file (§10).
   want one version, it downloads once. Another process wanting it waits: a lock folder beside the
   file, which its holder touches every few seconds, and which is taken over when nobody has for
   half a minute (a crash).
-- **A path that can't be a file name** as it is (too long for Windows with the cache's folder in
-  front, or with characters Windows refuses) is stored under a hash of it, in a `_` folder.
 - **Location:** `USDCC_ASSET_CACHE`, or else `asset-cache` in the user's usdcc data folder. Shared
-  by every usdcc process and tool.
+  by every usdcc process and tool on the machine, not between machines: the locks go by file times,
+  and a network share's clock isn't the machine's.
 - **Size limit:** least recently used first, checked after every 64 MB downloaded. A version
   handed out in the last minute stays, as its path may not be opened yet; an open one is safe
   anyway (Windows refuses to remove it, and elsewhere its bytes stay until it's closed).

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
@@ -25,34 +26,36 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Longer than this and the cache file gets a hashed name: Windows' limit is 260
-// characters for the whole path, and the cache's own folder comes first.
-constexpr size_t kLongestKeptPath = 120;
+// The folder of this layout in the cache's root. The copies of an earlier one, which
+// nothing finds any more, go at the next trim.
+constexpr const char* kLayout = "v2";
 // Another process's lock that nothing has touched for this long was left by a crash.
 constexpr auto kStaleLock = std::chrono::seconds(30);
 constexpr auto kLockHeartbeat = std::chrono::seconds(5);
 constexpr uint64_t kTrimEvery = 64ull * 1024 * 1024;
 
-bool keepable(const std::string& path) {
-    if (path.size() > kLongestKeptPath) return false;
-    for (const unsigned char c : path) {
-        // Not valid in a Windows file name, or with a meaning of its own there or here.
-        if (c < 32 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || c == '\\' ||
-            c == '%' || c == '@') {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Of the path, not of a query string after it.
+// Of the path, not of a query string after it: ".usd", or nothing unless it's letters
+// and digits. Only for people and tools looking at the file; USD goes by the URL.
 std::string extensionOf(const std::string& path) {
     const std::string plain = path.substr(0, path.find('?'));
     const size_t slash = plain.rfind('/');
     const size_t dot = plain.rfind('.');
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash) || dot + 1 == plain.size()) return {};
     const std::string extension = plain.substr(dot);
-    return keepable(extension) && extension.size() <= 16 ? extension : std::string();
+    if (extension.size() > 16) return {};
+    for (size_t i = 1; i < extension.size(); ++i) {
+        if (!std::isalnum(static_cast<unsigned char>(extension[i]))) return {};
+    }
+    return extension;
+}
+
+// The path's part of a cache file's name: the same for every version of it, and
+// different for paths that differ only in case or in a trailing dot.
+std::string pathKey(const std::string& path) { return stableHash("path|" + path, 16); }
+
+bool isInside(const fs::path& file, const fs::path& folder) {
+    const fs::path relative = file.lexically_relative(folder);
+    return !relative.empty() && *relative.begin() != "..";
 }
 
 fs::path recordOf(const fs::path& file) {
@@ -75,6 +78,7 @@ void writeRecord(const fs::path& file, const Endpoint& endpoint, const std::stri
     PXR_NAMESPACE_USING_DIRECTIVE
     JsObject record;
     record["url"] = JsValue(endpoint.url + path);
+    record["path"] = JsValue(path);
     record["endpoint"] = JsValue(endpoint.id);
     record["etag"] = JsValue(entry.etag);
     record["modified"] = JsValue(entry.modified);
@@ -83,7 +87,8 @@ void writeRecord(const fs::path& file, const Endpoint& endpoint, const std::stri
     output << JsWriteToString(JsValue(record));
 }
 
-std::optional<Entry> readRecord(const fs::path& file) {
+// The Entry it holds, and the path on the endpoint into `path`.
+std::optional<Entry> readRecord(const fs::path& file, std::string* path = nullptr) {
     PXR_NAMESPACE_USING_DIRECTIVE
     std::ifstream input(recordOf(file), std::ios::binary);
     if (!input) return std::nullopt;
@@ -99,6 +104,10 @@ std::optional<Entry> readRecord(const fs::path& file) {
     if (modified != object.end() && (modified->second.IsReal() || modified->second.IsInt())) entry.modified = modified->second.GetReal();
     const auto size = object.find("size");
     if (size != object.end() && size->second.IsInt()) entry.size = size->second.GetUInt64();
+    if (path) {
+        const auto stored = object.find("path");
+        *path = stored != object.end() && stored->second.IsString() ? stored->second.GetString() : std::string();
+    }
     return entry;
 }
 
@@ -207,18 +216,12 @@ void DiskCache::setSharedRoot(const fs::path& root) {
 }
 
 fs::path DiskCache::fileFor(const Endpoint& endpoint, const std::string& path, const Entry& version) const {
-    const std::string extension = extensionOf(path);
-    const std::string suffix = "@" + version.versionKey() + extension;
-    fs::path file = m_root / endpoint.cacheId();
-    if (keepable(path)) {
-        // "/chars/hero.usd" -> chars/hero@3f9a1c2e.usd
-        const std::string stem = path.substr(1, path.size() - 1 - extension.size());
-        file /= fromUtf8(stem + suffix);
-    } else {
-        file /= "_";
-        file /= stableHash(path, 16) + suffix;
-    }
-    return file;
+    // "/chars/Hero.usd" -> v2/<endpoint>/3f/3f9a1c2e7b04d8aa@7c21aa04.usd: nothing of the
+    // path but its extension, so no case, reserved name or length of a server's path
+    // matters here. The record beside it says which path it is.
+    const std::string key = pathKey(path);
+    return m_root / kLayout / endpoint.cacheId() / key.substr(0, 2) /
+           (key + "@" + version.versionKey() + extensionOf(path));
 }
 
 void DiskCache::handedOut(const fs::path& file) {
@@ -249,8 +252,10 @@ std::optional<std::pair<fs::path, Entry>> DiskCache::findAny(const Endpoint& end
         const std::string other = toUtf8(each.path().filename());
         if (other.rfind(prefix, 0) != 0 || !isVersionFile(each.path())) continue;
         if (other.size() != prefix.size() + 8 + extension.size()) continue;
-        const std::optional<Entry> entry = readRecord(each.path());
-        if (!entry) continue;
+        std::string stored;
+        const std::optional<Entry> entry = readRecord(each.path(), &stored);
+        // Two paths with one hash: not this one's.
+        if (!entry || stored != path) continue;
         const fs::file_time_type used = lastUse(each.path());
         if (!newest || used > newestUse) {
             newest = std::make_pair(each.path(), *entry);
@@ -449,9 +454,17 @@ void DiskCache::trim(std::chrono::seconds grace) {
     std::vector<Version> versions;
     uint64_t total = 0;
     std::error_code error;
+    const fs::path current = m_root / kLayout;
     for (const fs::directory_entry& each : fs::recursive_directory_iterator(m_root, error)) {
         if (!each.is_regular_file(error) || !isVersionFile(each.path())) continue;
         const uint64_t size = each.file_size(error);
+        // An earlier layout's copy, which nothing finds any more. Only with its record:
+        // that says it's one of the cache's.
+        if (!isInside(each.path(), current) && fs::exists(recordOf(each.path()), error) &&
+            fs::remove(each.path(), error) && !error) {
+            fs::remove(recordOf(each.path()), error);
+            continue;
+        }
         versions.push_back({each.path(), size, lastUse(each.path())});
         total += size;
     }

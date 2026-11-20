@@ -228,12 +228,16 @@ std::string contentOf(const std::shared_ptr<ArAsset>& asset) {
     return buffer ? std::string(buffer.get(), asset->GetSize()) : std::string();
 }
 
+// The copies of a file named `stem` the cache holds: their names are hashes, so by
+// the path in their records.
 int cachedVersions(const fs::path& cache, const std::string& stem) {
     int count = 0;
     std::error_code error;
     for (const fs::directory_entry& each : fs::recursive_directory_iterator(cache, error)) {
-        const std::string name = toUtf8(each.path().filename());
-        if (name.rfind(stem + "@", 0) == 0 && each.path().extension() != ".meta") ++count;
+        if (each.path().extension() != ".meta") continue;
+        fs::path version = each.path();
+        version.replace_extension();
+        if (fs::exists(version) && readFile(each.path()).find("/" + stem + ".") != std::string::npos) ++count;
     }
     return count;
 }
@@ -508,8 +512,8 @@ USDCC_TEST(assets_cache_keeps_versions_side_by_side) {
     const Result<fs::path> two = cache.ensure(prod, "/chars/hero.usda", second, downloadOf("version two", second));
     CHECK(one.ok() && two.ok() && one.value != two.value, "two versions of one path are two files");
     CHECK(readFile(one.value) == "version one" && readFile(two.value) == "version two", "each with its own bytes");
-    CHECK(one.value.extension() == ".usda" && toUtf8(one.value.filename()).rfind("hero@", 0) == 0,
-          "named after the file, with its extension: %s", toUtf8(one.value.filename()).c_str());
+    CHECK(one.value.extension() == ".usda" && toUtf8(one.value.filename()).find("hero") == std::string::npos,
+          "named by hashes, with the file's extension: %s", toUtf8(one.value.filename()).c_str());
     fs::path record = one.value;
     record += ".meta";
     CHECK(fs::exists(record) && readFile(record).find("\"one\"") != std::string::npos, "with a record of its ETag beside it");
@@ -531,8 +535,12 @@ USDCC_TEST(assets_cache_keeps_versions_side_by_side) {
 
     const std::string awkward = "/a%20b/" + std::string(200, 'x') + ".usd";
     const fs::path hashed = cache.fileFor(prod, awkward, first);
-    CHECK(hashed.parent_path().filename() == "_" && hashed.extension() == ".usd",
-          "a path that can't be a file name as it is gets a hashed one: %s", toUtf8(hashed.filename()).c_str());
+    const fs::path plain = cache.fileFor(prod, "/x.usd", first);
+    CHECK(hashed.extension() == ".usd" && toUtf8(hashed.lexically_relative(fixture.root)).size() ==
+                                              toUtf8(plain.lexically_relative(fixture.root)).size(),
+          "a long path's name is no longer than a short one's: %s", toUtf8(hashed.filename()).c_str());
+    CHECK(cache.fileFor(prod, "/x.u$d", first).extension().empty() && cache.fileFor(prod, "/x?.usd", first).extension().empty(),
+          "an extension that isn't letters and digits, or one after a query, is left off");
 }
 
 USDCC_TEST(assets_cache_downloads_once_for_many_threads) {
@@ -558,6 +566,62 @@ USDCC_TEST(assets_cache_downloads_once_for_many_threads) {
     for (std::thread& thread : threads) thread.join();
     CHECK(downloads == 1, "eight threads asking for one version download it once: %d", downloads.load());
     CHECK(succeeded == 8, "and all eight get the file: %d", succeeded.load());
+}
+
+// Servers on Linux tell Hero.usd from hero.usd, and Apache's and nginx's ETags come
+// from the size and the time, which two copies of one file share. Windows and macOS
+// don't tell the names apart, and Windows drops a trailing dot and refuses device names.
+USDCC_TEST(assets_cache_names_by_hash_not_by_path) {
+    Fixture fixture;
+    DiskCache cache(fixture.root / "own-cache");
+    const Endpoint& prod = fixture.config.endpoints.at("prod");
+    Entry same;
+    same.etag = "\"1a2b-5f3c\"";
+    const auto content = [&same](const std::string& text) {
+        return [text, &same](const fs::path& into) {
+            writeFile(into, text);
+            return Result<Entry>::success(same);
+        };
+    };
+    const Result<fs::path> lower = cache.ensure(prod, "/chars/hero.usda", same, content("lower"));
+    const Result<fs::path> upper = cache.ensure(prod, "/chars/Hero.usda", same, content("upper"));
+    const Result<fs::path> folder = cache.ensure(prod, "/Chars/hero.usda", same, content("folder"));
+    const Result<fs::path> dotted = cache.ensure(prod, "/chars./hero.usda", same, content("dotted"));
+    CHECK(lower.ok() && upper.ok() && folder.ok() && dotted.ok(), "all four are downloaded");
+    CHECK(readFile(lower.value) == "lower" && readFile(upper.value) == "upper" && readFile(folder.value) == "folder" &&
+              readFile(dotted.value) == "dotted",
+          "paths that differ in case or a trailing dot, with one ETag, keep their own bytes");
+
+    for (const char* device : {"/con.usda", "/aux/x.usda", "/nul/com1.usda", "/lpt1"}) {
+        const Result<fs::path> file = cache.ensure(prod, device, same, content(device));
+        CHECK(file.ok() && readFile(file.value) == device, "a Windows device name is cached too: %s", device);
+    }
+    const std::string deep = "/" + std::string(300, 'd') + "/" + std::string(200, 'e') + ".usda";
+    const Result<fs::path> longOne = cache.ensure(prod, deep, same, content("deep"));
+    CHECK(longOne.ok() && readFile(longOne.value) == "deep", "and a 500 character path");
+
+    // Offline: the newest version of the path asked for, not of one sharing its name on Windows.
+    const auto anyUpper = cache.findAny(prod, "/chars/Hero.usda");
+    CHECK(anyUpper && readFile(anyUpper->first) == "upper", "offline finds the path's own copy");
+    CHECK(!cache.findAny(prod, "/chars/HERO.usda"), "and none for a path that isn't cached");
+}
+
+// A copy from the layout before hashes (its record beside it) goes at the next trim;
+// a file that isn't the cache's stays.
+USDCC_TEST(assets_cache_drops_the_old_layout) {
+    Fixture fixture;
+    const fs::path root = fixture.root / "own-cache";
+    const fs::path old = root / "a1b2c3d4e5f6" / "chars" / "hero@3f9a1c2e.usd";
+    fs::path oldRecord = old;
+    oldRecord += ".meta";
+    const fs::path stranger = root / "notes@home.txt";
+    writeFile(old, "old");
+    writeFile(oldRecord, "{}");
+    writeFile(stranger, "mine");
+    DiskCache cache(root);
+    cache.trim();
+    CHECK(!fs::exists(old) && !fs::exists(oldRecord), "the old copy and its record go, under the limit or not");
+    CHECK(fs::exists(stranger), "a file without a record isn't touched");
 }
 
 USDCC_TEST(assets_cache_limit_the_app_sets_wins) {
