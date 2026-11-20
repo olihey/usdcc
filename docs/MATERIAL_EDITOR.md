@@ -627,8 +627,9 @@ Rejected:
 
 ### 7.3 Shapes
 
-- **Folders:** `resources/preview/shapes/` ships a shader ball, sphere, cube, plane and a cloth over a
-  ball. A new setting, `Materials/previewShapePaths` (`FolderList`), adds the user's folders. Each
+- **Folders:** `resources/preview/shapes/` ships the USD Working Group's Standard USD Shader Ball, a
+  plain shader ball, sphere, cube, plane and a cloth over a ball. A new preview starts on the Standard
+  USD Shader Ball (`kDefaultPreviewShape`): its set, camera and lights. A new setting, `Materials/previewShapePaths` (`FolderList`), adds the user's folders. Each
   `.usd`, `.usda`, `.usdc` or `.usdz` is one entry, named after the file. Folders are listed when the
   menu opens.
 - **Only the top of each folder is listed,** not its subfolders, so a shape can keep its textures and

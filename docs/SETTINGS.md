@@ -119,7 +119,7 @@ take them for a `bool`.
 | `Color/pickerSpace` | Choice: Color picking, Through the view | Color picking | `color_management.cpp`: what the attribute editor's color swatches and picker show ([COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §7) |
 | `Renderers/<pluginId>/<key>` | Bool, Int, Float or String | the delegate's | `ViewportViewPanel`: a render delegate's own settings, one group each on Settings > Renderers, defined when a viewport first uses the renderer or the dialog opens ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md) §7); a viewport can override each |
 | `Materials/previewShapePaths`, `previewHdriPaths` | Folders | none | `ShadingPreviewWidget`: where the Material Editor preview's shapes and HDRIs are, before the shipped ones ([MATERIAL_EDITOR.md](MATERIAL_EDITOR.md) §7.3, §7.4) |
-| `Materials/previewShape`, `previewHdri` | String | `Shader Ball`, `studio_wizja_02_1k` | `ShadingPreviewWidget`: what a new preview starts with, by name |
+| `Materials/previewShape`, `previewHdri` | String | `Standard USD Shader Ball`, `studio_wizja_02_1k` | `ShadingPreviewWidget`: what a new preview starts with, by name |
 | `Files/recentFilesCount` | Int 0–100 | 10 | `recent_files.cpp`: how many files File > Open Recent lists. The list itself is UI state (`RecentFiles/paths`) |
 | `Workspaces/folders` | Folders | none | `WorkspaceLibrary`: folders of workspace files, after your own and before the shipped ones; applies at once ([WORKSPACES.md](WORKSPACES.md) §5). The active workspace is UI state (`Workspaces/current`) |
 | `Notifications/position` | Choice | Bottom right | `ToastManager` ([NOTIFICATIONS.md](NOTIFICATIONS.md) §4) |
