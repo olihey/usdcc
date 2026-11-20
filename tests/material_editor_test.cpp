@@ -12,6 +12,7 @@
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/shading_preview.h"
 #include "usdcc/usd/shading_preview_widget.h"
+#include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/shader_node_graphics.h"
 #include "usdcc/usd/shader_node_palette.h"
 #include "usdcc/usd/shader_nodes_dialog.h"
@@ -677,6 +678,24 @@ USDCC_TEST(material_editor_tab_search_adds_a_node) {
     CHECK(palette.firstMatch().isEmpty(), "a search can find nothing");
     palette.search()->setText("standard_surface");
     CHECK(palette.firstMatch().contains("standard_surface"), "MaterialX is there too: %s", qPrintable(palette.firstMatch()));
+
+    // A catalog change, as a plugin's profile or definitions make, reaches an open palette.
+    const auto roots = [&palette]() {
+        QStringList names;
+        for (int i = 0; i < palette.tree()->topLevelItemCount(); ++i) names << palette.tree()->topLevelItem(i)->text(0);
+        return names;
+    };
+    auto& catalog = usdcc::usd::ShaderNodeCatalog::instance();
+    const usdcc::usd::RendererProfile original = *catalog.profile("glslfx");
+    usdcc::usd::RendererProfile renamed = original;
+    renamed.displayName = "Renamed Preview";
+    catalog.setProfile(renamed);
+    CHECK(!roots().contains("Renamed Preview"), "not inside the change itself");
+    settle();
+    CHECK(roots().contains("Renamed Preview"), "the palette reads the catalog again by itself: %s", qPrintable(roots().join(", ")));
+    catalog.setProfile(original);
+    settle();
+    CHECK(!roots().contains("Renamed Preview"), "and again when it changes back");
 }
 
 USDCC_TEST(material_editor_group_ungroup_and_layout) {

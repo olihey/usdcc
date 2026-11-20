@@ -45,6 +45,13 @@ def is_release_build():
     return _app().is_release_build()
 
 
+def user_data_folder():
+    """The folder usdcc keeps the user's files in: logs, sessions, workspaces,
+    plugins. %LOCALAPPDATA%/usdcc_config on Windows, another under a test profile
+    (USDCC_TEST_PROFILE). It may not exist yet. Plugins keep theirs in a subfolder."""
+    return _app().user_data_folder()
+
+
 def stage_manager():
     """The app's StageManager (see usdcc.usd for working with its stages)."""
     return _app().stage_manager()

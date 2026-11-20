@@ -317,6 +317,32 @@ USDCC_TEST(shader_catalog_profiles) {
     CHECK(!catalog.removeProfile("testsystem"), "which is gone");
 }
 
+USDCC_TEST(shader_catalog_says_it_changed) {
+    ShaderNodeCatalog catalog;
+    int heard = 0;
+    const int id = catalog.subscribe([&heard]() { ++heard; });
+    catalog.setProfile({"testsystem", "Test System", "", "test", "Node", {"surface"}, {}});
+    CHECK(heard == 1, "a profile added: %d", heard);
+    catalog.removeProfile("testsystem");
+    CHECK(heard == 2, "removed: %d", heard);
+    catalog.removeProfile("testsystem");
+    CHECK(heard == 2, "not when there was nothing to remove: %d", heard);
+    catalog.notifyChanged();
+    CHECK(heard == 3, "definitions registered, as a plugin says: %d", heard);
+    catalog.unsubscribe(id);
+    catalog.notifyChanged();
+    CHECK(heard == 3, "nothing once unsubscribed: %d", heard);
+
+    // A listener that unsubscribes another during the call: that one isn't called.
+    int second = 0;
+    int other = 0;
+    const int first = catalog.subscribe([&catalog, &other]() { catalog.unsubscribe(other); });
+    other = catalog.subscribe([&second]() { ++second; });
+    catalog.notifyChanged();
+    CHECK(second == 0, "a listener gone before its turn isn't called");
+    catalog.unsubscribe(first);
+}
+
 USDCC_TEST(shader_catalog_definition_of_a_prim) {
     const UsdStageRefPtr stage = UsdStage::CreateInMemory();
 

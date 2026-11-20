@@ -374,6 +374,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def("is_available", []() { return s_context != nullptr; });
     m.def("version", []() { return std::string(usdcc::core::version()); }, "usdcc's version (docs/RELEASE.md).");
     m.def("is_release_build", []() { return usdcc::core::isReleaseBuild(); });
+    m.def("user_data_folder", []() { return usdcc::ui::userDataFolder().toStdString(); });
     m.def(
         "stage_manager", []() { return context().stageManager; }, py::return_value_policy::reference,
         "The app's StageManager.");

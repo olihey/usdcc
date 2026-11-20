@@ -196,7 +196,7 @@ below).
 | MaterialX | usdMtlx (built in, `--materialx`) | `mtlx` | `ND_standard_surface_surfaceshader` | `nodegroup` → role; context from the output type | yes |
 | Arnold | arnold-usd `nodeRegistryArnold` | `arnold` | `arnold:standard_surface` | `category` (Shading, Math, Utility, Texture, ...), through its profile; `ui.groups` → pages | once Settings names an Arnold folder ([USD_PLUGINS.md](USD_PLUGINS.md) §3): its discovery calls `AiBegin` |
 | Cycles | **none** (Blender's Hydra delegate ships no Sdr plugin) | ours: `cycles` | `cycles:principled_bsdf` (the delegate also accepts `cycles_*`) | ours, from `ccl::NodeType` | needs generated definitions (§3.4) |
-| V-Ray | **none** in the App SDK's USD bundle | ours: `vray` | `vray:BRDFVRayMtl`, to be confirmed against a V-Ray USD export | V-Ray `PluginCategory` (bsdf, material, texture, uvwgen) | needs generated definitions (§3.4) |
+| V-Ray | **none** in the App SDK's USD bundle | ours: `vray` | `vray:BRDFVRayMtl`, checked against what V-Ray's reader makes of it ([VRAY_RENDER.md](VRAY_RENDER.md) §8) | `role`: plugininfo's folder or texture category (BRDF, Material, UVW, Texture, Float Texture, ...) | generated definitions, registered by the V-Ray plugin (§3.4) |
 | MDL | **none** that USD can use (§3.5) | ours: `mdl` | `mdl:<module>::<name>`, for the catalog only. Prims use `.mdl` asset + subIdentifier | the module's folder; `anno::in_group` → pages | needs our parser and generated definitions (§3.5) |
 
 A **renderer profile** is a small table per shading system. Plugins can add profiles, so the V-Ray
@@ -251,13 +251,21 @@ Where each generated file comes from:
 - **Cycles:** `ccl::NodeType::types()` gives every node's sockets, with `ui_name`, type,
   `default_value`, `enum_values` and the `LINKABLE` flag. A small build-time tool that links Cycles
   writes `cycles_shaders.usda`, and the file ships with the build.
-- **V-Ray:**
-  - The App SDK enumerates `getPluginTypesOfCategory()` and `getPluginMeta()`, which give each
-    parameter's type, default and description, plus UI guides: display name, enum strings, rollout,
-    enable/hide conditions and min/max.
-  - It has to run in the existing V-Ray helper process, because V-Ray's DLL names clash with usdcc's.
-  - The helper writes `vray_shaders.usda`. It is cached in the user data folder per V-Ray version,
-    regenerated when that version changes, and registered by the V-Ray plugin.
+- **V-Ray** (done, [VRAY_RENDER.md](VRAY_RENDER.md) §8):
+  - The App SDK's `plugininfo.exe` writes each plugin's parameters as JSON: type, default,
+    description and UI guides (display name, enum items, rollout, min/max). It needs no
+    license, which creating a `VRayRenderer` to ask `getPluginMeta()` does, and runs in a
+    process of its own, so V-Ray's DLLs never meet usdcc's. The helper isn't needed.
+  - The V-Ray plugin writes `vray_shaders.usda`, caches it in the user data folder per V-Ray
+    build, and registers it.
+- **What registering taught:**
+  - A `<system>:<name>` identifier can't be a prim name, and the parser tries it as one
+    first: one warning per node, the first time it's parsed. Parse them all right after
+    registering, inside a `Tf.DiagnosticTrap` that erases those warnings; Sdr keeps the parsed
+    nodes, so nothing warns later.
+  - Sdr can't say it changed. Whoever registers calls `usdcc.shading.nodes_changed()`, and open
+    palettes read the catalog again.
+  - Sdr has no 3×3 matrix type: the parser refuses a `matrix3d` input, and the node with it.
 - **Arnold:** nothing to generate once arnold-usd is built for our USD. It ships as an optional plugin
   whose manifest puts its `plugInfo.json` on the path.
 - **MDL:** parsed from the `.mdl` files themselves, §3.5.
@@ -472,7 +480,9 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
 - **Python:**
   - `usdcc.shading.catalog()`, a pybind11 binding of the Qt-free catalog (§5, phase 1).
   - `register_renderer_profile()`, so plugins can add profiles.
-  - Definitions are registered by calling `Sdr` directly.
+  - Definitions are registered by calling `Sdr` directly, then `nodes_changed()`, which
+    has open palettes read the catalog again. A profile registered or removed does that by
+    itself (`ShaderNodeCatalog::subscribe()`).
 
 ## 5. Phases
 
@@ -528,8 +538,9 @@ dragging from the palette (not run), a real person's hand on any of it.
 
 ## 6. Open questions
 
-1. **V-Ray identifiers:** check `vray:<PluginClass>` against a USD file exported by V-Ray for Houdini
-   or Maya before generating definitions.
+1. ~~**V-Ray identifiers**~~ Answered: `vray:<PluginClass>` on `outputs:vray:surface`, checked
+   against what V-Ray's own reader makes of a stage, not a Houdini or Maya export
+   ([VRAY_RENDER.md](VRAY_RENDER.md) §8).
 2. **Cycles in the build:** is Blender's Cycles Hydra delegate (`3rd_party/cycles` in the USD build)
    meant to ship with usdcc? If not, Cycles is limited to the preview and MaterialX nodes it remaps,
    and phase 5 drops its generator.

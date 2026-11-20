@@ -287,6 +287,7 @@ void bindStageManager(py::module_& m) {
     m.def(
         "remove_renderer_profile",
         [](const std::string& system) { return usdcc::usd::ShaderNodeCatalog::instance().removeProfile(system); }, py::arg("shading_system"));
+    m.def("shader_nodes_changed", []() { usdcc::usd::ShaderNodeCatalog::instance().notifyChanged(); });
     m.def("hide_create_entry", [](const std::string& type) { PrimCreationCatalog::instance().hide(type); }, py::arg("type"));
     m.def(
         "remove_create_entry", [](const std::string& type) { return PrimCreationCatalog::instance().remove(type); },

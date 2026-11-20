@@ -14,6 +14,8 @@ import tempfile
 
 from pxr import Gf, Sdf, Usd, UsdGeom
 
+from . import shaders
+
 # Where the export puts its own prims; nothing in a user's stage is named like this.
 ROOT = Sdf.Path("/__usdccVRay")
 CAMERA = ROOT.AppendChild("Camera")
@@ -62,7 +64,8 @@ class SceneFiles:
 
     def export(self, stage, camera, resolution):
         """Writes `stage` as it is now, unsaved edits and session layer included,
-        flattened into one file, and returns its path. It adds a camera at
+        flattened into one file, and returns its path. V-Ray shaders' list
+        counts are filled in (shaders.fill_list_counts()). It adds a camera at
         `camera` (a Camera) and render settings using it at `resolution`
         (width, height): V-Ray reads a USD file's prims only through its render
         settings, and the camera only seeds the image's framing, which the
@@ -70,6 +73,7 @@ class SceneFiles:
         layer = stage.Flatten()
         export = Usd.Stage.Open(layer)
         _add_render_prims(export, camera, resolution)
+        shaders.fill_list_counts(export)  # V-Ray reads a list only up to its count
         path = os.path.join(self.folder, "scene_%d.usdc" % next(self._numbers))
         layer.Export(path)
         self._files.append(path)

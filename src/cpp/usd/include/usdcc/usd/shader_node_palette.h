@@ -25,10 +25,12 @@ public:
     static constexpr auto kMimeType = "application/x-usdcc-shader-node";
 
     explicit ShaderNodePalette(QWidget* parent = nullptr);
+    ~ShaderNodePalette() override;
 
     // These come first and start open: what the graph is using.
     void setPreferredSystems(const std::vector<std::string>& systems);
-    // Reads the catalog again, as a plugin may have added to it.
+    // Reads the catalog again. It does so by itself when the catalog says it changed,
+    // as when a plugin adds definitions.
     void refresh();
 
     QLineEdit* search() const { return m_search; }
@@ -48,6 +50,7 @@ private:
     QLineEdit* m_search = nullptr;
     QTreeWidget* m_tree = nullptr;
     std::vector<std::string> m_preferred;
+    int m_catalogSubscription = 0;
 };
 
 // The same in a popup at the mouse, for Tab: type, Return, gone.
