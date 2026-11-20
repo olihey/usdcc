@@ -5,7 +5,7 @@ The Hydra viewport draws what's selected in one of three **selection styles**:
 | Style | Looks like |
 |---|---|
 | **Solid** | The prim filled with the selection color (the look before this feature) |
-| **Outline** | The prim keeps its shading; a line in the selection color runs around its silhouette |
+| **Outline** (the default) | The prim keeps its shading; a line in the selection color runs around its silhouette |
 | **Wireframe** | The prim keeps its shading; its edges are drawn on it in the selection color |
 
 The style, the selection **color** and the line **width** are Settings > Viewport defaults
@@ -158,7 +158,7 @@ renderNow()
 
 | Key | Type | Default |
 |---|---|---|
-| `Viewport/selectionStyle` | Choice: `Solid`, `Outline`, `Wireframe` | `Solid` |
+| `Viewport/selectionStyle` | Choice: `Solid`, `Outline`, `Wireframe` | `Outline` |
 | `Viewport/selectionColor` | Color | `#ffa600` |
 | `Viewport/selectionWidth` | Int 1–8 (px) | 2 |
 
@@ -208,7 +208,10 @@ and whether Wireframe's lines flicker while orbiting.
 
 1. **One mechanism for both styles:** the overlay engine (§3). Alternative B stays the
    fallback for Wireframe.
-2. **Solid is the default**, so nothing changes until a user picks another style.
+2. **Outline is the default**: a selected prim keeps its shading and materials visible.
+   Solid was the default at first, so that nothing changed until a user picked another
+   style. A user who never chose a style gets Outline now; a style saved in Settings or in
+   a viewport's overrides stays.
 3. **An outline behind other geometry is drawn faint (35%)**, not left out. *Open:* draw only
    the visible part, as Blender does, or offer both.
 4. **The overlay engine is always Storm**, so the styles don't depend on the viewport's

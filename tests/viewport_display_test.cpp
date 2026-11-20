@@ -70,9 +70,12 @@ USDCC_TEST(viewport_display_settings) {
     CHECK(settings.contains(usdcc::usd::kViewportSelectionStyleKey) && settings.contains(usdcc::usd::kViewportSelectionColorKey) &&
               settings.contains(usdcc::usd::kViewportSelectionWidthKey),
           "the selection settings are defined");
-    CHECK(defaults.selectionStyle == SelectionStyle::Solid && defaults.selectionColor == QColor("#ffa600") &&
+    CHECK(defaults.selectionStyle == SelectionStyle::Outline && defaults.selectionColor == QColor("#ffa600") &&
               defaults.selectionWidth == 2,
-          "Solid, orange, 2px by default");
+          "Outline, orange, 2px by default");
+    CHECK(settings.definition(usdcc::usd::kViewportSelectionStyleKey)->defaultValue ==
+              usdcc::core::SettingValue(std::string("Outline")),
+          "and the setting's default is Outline");
     CHECK(settings.definition(usdcc::usd::kViewportSelectionStyleKey)->choices ==
               std::vector<std::string>({"Solid", "Outline", "Wireframe"}),
           "the style's choices");
@@ -185,18 +188,18 @@ USDCC_TEST(viewport_display_panel) {
         settings.setValue(usdcc::usd::kViewportShowGridKey, true);
         CHECK(!window->displayOptions().showGrid, "and it stays off");
 
-        // The Selection submenu: radio entries, Solid ticked, a choice overrides.
+        // The Selection submenu: radio entries, Outline (the default) ticked, a choice overrides.
         QMenu* selection = menu.findChild<QMenu*>("selectionStyleMenu");
         CHECK(selection && selection->actions().size() == 3, "a Selection submenu with three styles");
         QAction* solid = menuAction(*selection, "selectionStyle_solid");
         QAction* outline = menuAction(*selection, "selectionStyle_outline");
-        CHECK(solid && solid->isChecked() && outline && !outline->isChecked(), "Solid ticked");
-        if (outline) outline->trigger();
-        CHECK(panel->displayOverrides().selectionStyle == SelectionStyle::Outline &&
-                  window->displayOptions().selectionStyle == SelectionStyle::Outline,
-              "Outline chosen here");
+        CHECK(outline && outline->isChecked() && solid && !solid->isChecked(), "Outline ticked");
+        if (solid) solid->trigger();
+        CHECK(panel->displayOverrides().selectionStyle == SelectionStyle::Solid &&
+                  window->displayOptions().selectionStyle == SelectionStyle::Solid,
+              "Solid chosen here");
         settings.setValue(usdcc::usd::kViewportSelectionStyleKey, std::string("Wireframe"));
-        CHECK(window->displayOptions().selectionStyle == SelectionStyle::Outline, "and it stays");
+        CHECK(window->displayOptions().selectionStyle == SelectionStyle::Solid, "and it stays");
         settings.setValue(usdcc::usd::kViewportSelectionColorKey, std::string("#00ff00"));
         CHECK(window->displayOptions().selectionColor == QColor("#00ff00"), "the color, not overridden, follows");
     }

@@ -104,7 +104,7 @@ take them for a `bool`.
 | `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |
 | `Viewport/gridSize`, `gridStep` | Float | 20, 1 | `ViewportViewPanel`: the grid's width and line spacing |
 | `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |
-| `Viewport/selectionStyle` | Choice: Solid, Outline, Wireframe | Solid | `ViewportViewPanel`: how the selection is drawn ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)); a viewport can override it, and the next two |
+| `Viewport/selectionStyle` | Choice: Solid, Outline, Wireframe | Outline | `ViewportViewPanel`: how the selection is drawn ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)); a viewport can override it, and the next two |
 | `Viewport/selectionColor` | Color | `#ffa600` | `ViewportViewPanel`: the selection's color, in every style |
 | `Viewport/selectionWidth` | Int 1–8 | 2 | `ViewportViewPanel`: the Outline and Wireframe lines' width, in pixels at 100% UI scale |
 | `Viewport/complexity` | Choice: Low, Medium, High, Very High | Low | `ViewportViewPanel`: how finely subdivision surfaces are refined ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)); a viewport can override it, and each one below |

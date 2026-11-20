@@ -191,7 +191,7 @@ public:
         QColor background = QColor(0x1c, 0x1c, 0x1e);
         // How the selection is drawn (docs/VIEWPORT_SELECTION.md): the style, its color
         // (opaque), and the width of the line styles' lines, in UI pixels (1-8).
-        SelectionStyle selectionStyle = SelectionStyle::Solid;
+        SelectionStyle selectionStyle = SelectionStyle::Outline;
         QColor selectionColor = QColor(0xff, 0xa6, 0x00);
         int selectionWidth = 2;
         // How Hydra draws the stage (docs/VIEWPORT_DISPLAY.md): shading, refinement, which
