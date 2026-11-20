@@ -33,6 +33,10 @@ constexpr float kHiddenOpacity = 0.35f;
 // depth, and a wire on a surface is a line over the triangles under it. Relative to the
 // distance from the camera.
 constexpr float kDepthTolerance = 0.003f;
+// Wireframe's mask is drawn with its edges on the surface (DRAW_WIREFRAME_ON_SURFACE): a
+// selected face is white, and Storm mixes this color into it along the edges, so a
+// selected edge is grey (below 0.75) and an edge of anything else stays black.
+const PXR_NS::GfVec4f kMaskWireColor(0.0f, 0.0f, 0.0f, 0.5f);
 
 QOpenGLExtraFunctions* gl() { return QOpenGLContext::currentContext()->extraFunctions(); }
 
@@ -44,11 +48,11 @@ void main() {
 }
 )";
 
-// Pass 1. Which pixels are the selection's: "strong" ones are drawn at full strength,
-// "weak" ones faintly. Outline: strong = selected and visible (the overlay's depth is the
-// viewport's), weak = selected at all. Wireframe: strong = a selected edge that is
-// visible, no weak ones. Per pixel, the horizontal distance to the nearest of each,
-// within `radius` (radius + 1 = none), for pass 2 to finish into distances in 2D.
+// Pass 1. Which pixels are the selection's. Outline: "strong" = selected and visible (the
+// overlay's depth is the viewport's), drawn at full strength; "weak" = selected at all,
+// drawn faintly. Wireframe: strong = selected and visible, for the contour; weak = a
+// selected edge that is visible. Per pixel, the horizontal distance to the nearest of
+// each, within `radius` (radius + 1 = none), for pass 2 to finish into distances in 2D.
 constexpr const char* kRowsFragment = R"(#version 330 core
 uniform sampler2D maskColor;
 uniform sampler2D maskDepth;
@@ -66,13 +70,15 @@ float linearDepth(float depth) {
 }
 
 void classify(ivec2 p, out bool strong, out bool weak) {
-    bool selected = texelFetch(maskColor, p, 0).r > 0.5;
+    float mask = texelFetch(maskColor, p, 0).r;
+    bool selected = mask > 0.25;  // white, or grey on a selected edge
     strong = false;
     weak = selected && wireframe == 0;
     if (!selected) return;
     float overlay = linearDepth(texelFetch(maskDepth, p, 0).r);
     float scene = linearDepth(texelFetch(sceneDepth, p, 0).r);
     strong = overlay <= scene * (1.0 + tolerance);
+    if (wireframe != 0) weak = strong && mask < 0.75;
 }
 
 void main() {
@@ -96,7 +102,8 @@ void main() {
 
 // Pass 2. The distance to the nearest strong and weak pixel, from pass 1's rows, and the
 // line from those. Outline: a ring `width` wide outside the selection, faint where it
-// only reaches hidden pixels. Wireframe: the visible edges, widened to `width`.
+// only reaches hidden pixels. Wireframe: the same ring around the visible part only (the
+// contour), and the visible edges inside it 1 pixel wide.
 constexpr const char* kCompositeFragment = R"(#version 330 core
 uniform sampler2D rows;
 uniform sampler2D maskColor;
@@ -123,15 +130,16 @@ void main() {
     }
     float strongDistance = sqrt(strong2);
     float weakDistance = sqrt(weak2);
+    // The ring is outside the selection only: its own pixels keep their shading.
+    float inside = texelFetch(maskColor, p, 0).r > 0.25 ? 1.0 : 0.0;
+    float visible = clamp(width + 1.0 - strongDistance, 0.0, 1.0) * (1.0 - inside);
     float alpha;
     if (wireframe != 0) {
-        alpha = clamp((width - 1.0) * 0.5 + 1.0 - strongDistance, 0.0, 1.0);
+        float edge = clamp(1.0 - weakDistance, 0.0, 1.0);  // the edge pixel itself, not widened
+        alpha = max(visible, edge);
     } else {
-        // Outside the selection only: its own pixels keep their shading.
-        float inside = clamp(texelFetch(maskColor, p, 0).r, 0.0, 1.0);
-        float visible = clamp(width + 1.0 - strongDistance, 0.0, 1.0);
-        float hidden = clamp(width + 1.0 - weakDistance, 0.0, 1.0) * hiddenOpacity;
-        alpha = max(visible, hidden) * (1.0 - inside);
+        float hidden = clamp(width + 1.0 - weakDistance, 0.0, 1.0) * hiddenOpacity * (1.0 - inside);
+        alpha = max(visible, hidden);
     }
     if (alpha <= 0.0) discard;
     fragColor = vec4(color.rgb, color.a * alpha);
@@ -293,8 +301,10 @@ void SelectionOverlay::renderMask(const Frame& frame) {
     params.showProxy = frame.params.showProxy;
     params.showRender = frame.params.showRender;
     params.cullStyle = frame.params.cullStyle;
-    params.drawMode = frame.style == SelectionStyle::Wireframe ? PXR_NS::UsdImagingGLDrawMode::DRAW_WIREFRAME
+    // Wireframe: the faces too, for the contour, with the edges on them (kMaskWireColor).
+    params.drawMode = frame.style == SelectionStyle::Wireframe ? PXR_NS::UsdImagingGLDrawMode::DRAW_WIREFRAME_ON_SURFACE
                                                                : PXR_NS::UsdImagingGLDrawMode::DRAW_SHADED_FLAT;
+    params.wireframeColor = kMaskWireColor;
     params.enableLighting = false;
     params.enableSceneMaterials = false;
     params.enableSceneLights = false;
@@ -325,8 +335,8 @@ void SelectionOverlay::composite(const Frame& frame) {
 
     const bool wireframe = frame.style == SelectionStyle::Wireframe;
     const float width = static_cast<float>(std::max(1.0, frame.width));
-    // How far pass 1 and 2 look: as far as a line reaches, and a pixel more for its edge.
-    const int radius = static_cast<int>(std::ceil(wireframe ? (width - 1.0f) * 0.5f : width)) + 1;
+    // How far pass 1 and 2 look: as far as the ring reaches, and a pixel more for its edge.
+    const int radius = static_cast<int>(std::ceil(width)) + 1;
 
     f->glDisable(GL_DEPTH_TEST);
     f->glDepthMask(GL_FALSE);

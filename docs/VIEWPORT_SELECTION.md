@@ -6,7 +6,7 @@ The Hydra viewport draws what's selected in one of three **selection styles**:
 |---|---|
 | **Solid** | The prim filled with the selection color (the look before this feature) |
 | **Outline** (the default) | The prim keeps its shading; a line in the selection color runs around its silhouette |
-| **Wireframe** | The prim keeps its shading; its edges are drawn on it in the selection color |
+| **Wireframe** | The prim keeps its shading; its edges are drawn on it in the selection color, inside a line around its silhouette |
 
 The style, the selection **color** and the line **width** are Settings > Viewport defaults
 that each viewport can override, like the grid and background
@@ -20,9 +20,9 @@ default (`USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX`).
 
 - **Color.** All three styles use the selection color, `#ffa600` (orange) by default. It is
   opaque: Solid always fills fully, and the line styles draw at full strength.
-- **Width.** Outline and Wireframe draw their lines this many pixels wide: 1 to 8, default 2,
-  scaled with the UI scale and the screen's pixel ratio. Solid has no lines, so it ignores
-  the width.
+- **Width.** Outline and Wireframe draw their silhouette lines this many pixels wide: 1 to
+  8, default 2, scaled with the UI scale and the screen's pixel ratio. Wireframe's edges are
+  always 1 pixel. Solid has no lines, so it ignores the width.
 - **Solid:** Storm tints the prim in its shaders, in the selection color.
 - **Outline**
   - The line is the width wide and runs outside the silhouette, so it doesn't cover the
@@ -36,9 +36,10 @@ default (`USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX`).
   - The edges Storm draws for the selected prims (`DRAW_WIREFRAME`, at the viewport's refine
     level) are drawn in the selection color. Implicit shapes (cube, sphere, cone) get the
     edges of their tessellation.
-  - Storm draws them 1px wide, and the composite widens them to the width (§3). On a dense
-    mesh seen from afar the edges are close enough to fill the prim; width 1 keeps them
-    apart longest.
+  - The edges are 1 pixel wide, whatever the width, so a dense mesh seen from afar keeps
+    them apart as long as it can.
+  - The **contour** is Outline's line, the width wide, around the part of the selection
+    that is visible: no faint line where it is hidden.
   - Edges on the far side of the prim, or behind other geometry, are not drawn.
 - **Native instances** work in every style: selecting one instance draws only that one.
 - **Picking and tools** don't change. Only the drawing of the selection changes.
@@ -87,7 +88,9 @@ renderNow()
     overlay engine: PrepareBatch + RenderBatch(roots) -> mask FBO (color + depth)
                     unlit, overrideColor black, selection white:
                     selected pixels are white, anything else drawn is black
-                    Outline: DRAW_SHADED_FLAT   Wireframe: DRAW_WIREFRAME
+                    Outline: DRAW_SHADED_FLAT
+                    Wireframe: DRAW_WIREFRAME_ON_SURFACE, wireframeColor (0,0,0,0.5):
+                    selected edges grey, other edges stay black
     depth copy:     the viewport FBO's depth, blitted into a texture
     pass 1:         per pixel, the horizontal distance to the nearest "strong" and
                     "weak" mask pixel (-> RG16F)
@@ -96,14 +99,16 @@ renderNow()
   drawGizmo()
 ```
 
-- **Strong and weak pixels.** A mask pixel is selected when it's white. It is *visible* when
+- **Strong and weak pixels.** A mask pixel is selected when it's white, or grey (a selected
+  edge, below 0.75, in Wireframe). It is *visible* when
   its overlay depth is within 0.3% (of the distance from the camera) of the viewport's depth
   there: the same surface drawn by both engines, or a wire lying on it.
   - Outline: strong = selected and visible, weak = selected. The ring is drawn where a
     strong pixel is within the width, or at 35% where only a weak one is, and only outside
     the selection.
-  - Wireframe: strong = a selected, visible wire pixel; no weak ones. Lines are widened to
-    the width around them.
+  - Wireframe: strong = selected and visible, for the contour, drawn as Outline's ring;
+    weak = a selected, visible edge pixel, drawn as it is (1 pixel, not widened). The
+    edges lie on the mask's own faces, so the depth test compares surface to surface.
 - **The render roots.** `SelectionOverlay::renderRoots()`: the selected paths, plus
   `/UsdNiPropagatedPrototypes` when the selection is, holds or sits inside a native
   instance. Which instances are selected is then told apart by the engine's own selection
