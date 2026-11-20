@@ -13,6 +13,7 @@ add_executable(usdcc_tests
     test_main.cpp
     applied_schemas_test.cpp
     schema_info_test.cpp
+    schema_library_test.cpp
     prim_selection_test.cpp
     categorizer_spike_test.cpp
     composition_arcs_test.cpp
@@ -147,6 +148,7 @@ add_executable(usdcc_python_tests
     plugin_native_test.cpp
     plugin_tab_test.cpp
     python_app_test.cpp
+    schema_generator_test.cpp
     python_runtime_test.cpp
     script_editor_panel_test.cpp
     session_test.cpp

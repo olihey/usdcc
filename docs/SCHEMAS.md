@@ -1,7 +1,8 @@
 # Schemas
 
-Status: **phases 1 to 3 are built** (§12): the Schemas panel, its data, and the stage in it. The rest
-is a plan; §9 has the decisions to make first, §10 the phases.
+Status: **phases 1 to 4 are built** (§12): the Schemas panel, its data, the stage in it, and generating
+a codeless library, which has no UI yet (phase 5). The rest is a plan; §9 has the decisions still
+open, §10 the phases.
 
 Three things, in the order to build them:
 
@@ -87,6 +88,7 @@ multiple-apply API and an API auto-applied to Mesh; then a second library `show`
 | 5 | **A library that builds on another needs that one registered while generating:** otherwise "Could not find the defining layer for schema: StudioAsset" | The generator runs with the base library's folder on `PXR_PLUGINPATH_NAME` |
 | 6 | **`usdGenSchema` always warns that `__init__.py`, `CMakeLists.txt` and `module.cpp` are missing,** codeless or not | Those three lines are dropped from what the user sees |
 | 7 | **It can't run inside usdcc.** It sets an environment variable USD reads once, and ends with `sys.exit()` | A child process |
+| 8 | **Run as `python -m pxr.Usd.usdGenSchema`, a library that builds on another fails** with "list index out of range": importing `pxr.Usd` first has OpenUSD read `USD_DISABLE_PRIM_DEFINITIONS_FOR_USDGENSCHEMA` before the script sets it. *Found in phase 4.* OpenUSD's own `bin/usdGenSchema` runs the file as a script | The child gets the variable from the start |
 
 **What `usdGenSchema` does catch,** each with exit 1 and a message naming the prim: an API not named
 `...API`, a multiple-apply API with properties and no `propertyNamespacePrefix`, a class that is
@@ -332,7 +334,7 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
 
 ## 9. Decisions to make
 
-1. **Where `jinja2` comes from.** `usdGenSchema` imports it; the deploy doesn't have it.
+1. *Decided in phase 4: vendored, as recommended (§12).* **Where `jinja2` comes from.** `usdGenSchema` imports it; the deploy doesn't have it.
    Recommended: **ship it in the deploy** (`jinja2` and `markupsafe`, both BSD-3-Clause, 1.3 MB),
    so Generate works on a machine with no network. The alternatives:
    - Install it through the shared packages folder when the editor first needs it
@@ -359,7 +361,7 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
 | **1. The Explorer's data** *(done)* | `schema_info.h` (`usdcc_usd`, Qt-free): every schema with its kind, plugin, codeless or not, family and version, inheritance, built-in, auto-apply and can-apply-to lists, properties with their declaring schema, source paths; `stageSchemaUse(stage)` with counts and the unregistered ones. `usdcc.usd.schemas()`, `schema()` | Tests: the 140 schemas by kind; a codeless test plugin told from a C++ one; an inherited property's owner; a stage with an unknown type and an unregistered API |
 | **2. The Explorer** *(done)* | The Schemas view panel: tree, filter, Show, details, links between schemas, Show Source | Every schema of §1 is found by name; a plugin's codeless schema shows as one; the source opens at the class |
 | **3. The stage in it** *(done)* | This stage, Select, Create, Apply to Selection | Counts follow edits; the unregistered list matches the amber pills; Create and Apply make the same undo steps as their menus |
-| **4. Generating** | `schema_library.h`: reading and writing `schema.usda` through Sdf, the checks of §5.4, the two child processes, the placeholders, moving into place. `jinja2` as decided | Tests against the deploy's Python: the `studio` and `show` libraries of §2 generate and load; each trap of §2 is caught with its message; a failed Generate leaves the old files |
+| **4. Generating** *(done)* | `schema_library.h`: reading and writing `schema.usda` through Sdf, the checks of §5.4, the two child processes, the placeholders, moving into place. `jinja2` as decided | Tests against the deploy's Python: the `studio` and `show` libraries of §2 generate and load; each trap of §2 is caught with its message; a failed Generate leaves the old files |
 | **5. The editor** | The form, New Schema Library..., Edit as Text, "generated, not loaded", what a Generate changes for existing files (§5.5), Restart | A library made, generated and, after a restart, creating prims and applying APIs, by a script driving the widgets |
 | **6. Promote** | Make Schema from Attributes..., and applying the API after the restart | A prim's custom attributes become an API whose fallbacks are their values; the prims get it in one undo step |
 
@@ -485,3 +487,60 @@ Phases 1 and 2.
   details as above.
 - **Not done:** the panel isn't in any shipped workspace; open it from a panel menu. Prims inside an
   unloaded payload aren't counted, as they aren't on the stage.
+
+### Phase 4: generating
+
+No UI yet: the Schema Editor (phase 5) is what will call it.
+
+- **`jinja2` is vendored** (§9, decision 1): `jinja2` 3.1.6 and `markupsafe` 3.0.4 in
+  `src/python/usdcc/_vendor`, beside `packaging`, each with its `LICENSE.txt` (BSD-3-Clause). Pure
+  Python, 560 KB; `markupsafe` without its optional C speedups. They came from the build Python's
+  install, every file checked against its `RECORD`. So dev builds, CI and the deploy all have it,
+  with no download and no change to how a deploy is made; `tools/deploy.py` now requires them.
+  The child process puts `usdcc/_vendor` on `PYTHONPATH`, as `usdGenSchema` imports `jinja2` as a
+  top-level package; nothing in the app does.
+- **`schema_library.h`** (`usdcc_usd`, Qt-free):
+  - `SchemaLibraryDef`, `SchemaClassDef`, `SchemaPropertyDef`: a library as the editor will see it.
+  - `readSchemaLibrary()` and `writeSchemaLibrary()` through Sdf. Writing updates the file in place,
+    so what the definition doesn't cover is kept (the layer's comment, a class's other customData);
+    classes and properties it no longer lists go; a fallback that doesn't parse stops it before
+    anything is written. *Found:* USDA writes a prim's properties sorted by name, whatever order
+    they were in, so a definition has them by name too.
+  - `parseFallback()` parses a fallback as USDA would, with USD's own message when it can't;
+    `usdaValueText()` writes one back (the Explorer's fallbacks use it too).
+  - `checkSchemaLibrary(library, bases)`: §5.4's checks, and more: two classes or properties of one
+    name, an unknown base, value type or built-in API, an API not named `...API`, a multiple-apply
+    API with properties and no prefix, allowed tokens on a non-token attribute, auto-apply on a
+    prim type. Errors stop Generate; warnings (a replaced inherited property, no namespace, an
+    unknown type to apply to) are said. `bases` are the libraries it builds on, not registered
+    yet, whose classes count as known.
+  - `fillPlugInfoPlaceholders()`, `findSchemaLibrary()`, the paths of a library's files.
+- **`generateSchemaLibrary()`** (`schema_generator.h`, `usdcc_usd_ui`, as it uses `QProcess`), §5.3:
+  1. reads and checks the source, with the base libraries' sources;
+  2. runs `usdGenSchema` with the app's Python and `sys.path` (`SchemaPython`), into a temporary
+     folder holding the current `plugInfo.json`, with the base libraries on `PXR_PLUGINPATH_NAME`;
+  3. fills in the placeholders;
+  4. runs `python -m usdcc._schema_check` on the result: registers it, makes a prim of each type,
+     applies each API (a multiple-apply one as an instance), and reports any USD error;
+  5. puts both files in place, each through a `.new` and an `.old`, putting back what was there if
+     either fails.
+  It blocks, up to two minutes per process; phase 5 runs it off the UI thread. The output shown
+  is `usdGenSchema`'s without its boilerplate (trap 6).
+- **Tests:**
+  - `schema_library_*` (`usdcc_tests`): the test library read; a round trip unchanged; edits (a
+    property added, a fallback changed, a class removed) read back as written, a class's own
+    customData kept; a bad fallback refused with the file untouched; fallbacks of several types;
+    each check; the placeholders.
+  - `schema_generator` (`usdcc_python_tests`, with the app's own Python): `studio` generates, with its
+    placeholders filled, every schema tried and nothing left over; `show`, which builds on it, is
+    refused by the check without it and generates with it, its API applying to its type;
+    `usdGenSchema`'s own failure (a base whose file isn't sublayered) is reported and leaves the old
+    files; a name another plugin has is stopped before `usdGenSchema` runs; no Python, and a
+    library whose name isn't its folder's.
+  - **The deploy's Python:** the local deploy's `python.exe`, with this build's `usdcc` package on
+    `PYTHONPATH` (the deploy predates the vendored files), generated `test_data/schemas/usdccTestSchemas`
+    and `_schema_check` made or applied all five schemas without an error.
+- **Not done:** the manifest's `"usd"` entry (§5.3 step 6) and finding a library's base libraries
+  from its sublayers are the editor's, in phase 5. A schema.usda written by hand that Sdf can read
+  but the definition can't express (a non-applied API, `nonApplied`, ...) reads, and is written
+  back with what the definition holds.

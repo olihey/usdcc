@@ -1,8 +1,8 @@
 #usda 1.0
 (
-    "A codeless schema library for usdcc's tests (docs/SCHEMAS.md). Regenerate with"
-    "usdGenSchema usdccTestSchemas/schema.usda . in the folder above this one, then"
-    "fill in plugInfo.json's three @PLUG_INFO_...@ placeholders."
+    """A codeless schema library for usdcc's tests (docs/SCHEMAS.md). Regenerate with
+    usdGenSchema usdccTestSchemas/schema.usda . in the folder above this one, then
+    fill in plugInfo.json's three @PLUG_INFO_...@ placeholders."""
     subLayers = [
         @usd/schema.usda@,
         @usdGeom/schema.usda@

@@ -257,7 +257,8 @@ tool's own work on each event is its own cost.
    Only one could load anyway, and this makes the choice explicit rather than down to load order.
 
 **The version check needs a parser** for requirement strings, which the standard library doesn't have. `packaging` 24.2 is vendored at
-`usdcc._vendor.packaging`, rather than in `site-packages`, so that a plugin's own copy can't clash with it.
+`usdcc._vendor.packaging`, rather than in `site-packages`, so that a plugin's own copy can't clash with it. `jinja2` and `markupsafe`
+are vendored beside it for generating schemas ([SCHEMAS.md](SCHEMAS.md) §12); only the `usdGenSchema` process imports them.
 
 **Folders of packages on `sys.path`.** The shared folder the app installs into, the **Additional package folders** setting, and `USDCC_PYTHON_PATH`, which a studio can fill
 with `pip install --target` or `uv pip install --target`, using a Python of the same version. **A copy found there is fixed:** a bundled one can't override it, and a plugin it doesn't

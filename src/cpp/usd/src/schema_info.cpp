@@ -2,6 +2,7 @@
 
 #include "usdcc/assets/paths.h"
 #include "usdcc/usd/applied_schemas.h"
+#include "usdcc/usd/schema_library.h"
 
 #include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
@@ -66,14 +67,6 @@ const UsdPrimDefinition* typedDefinitionOf(const TfToken& name) {
     return definition ? definition : registry.FindAbstractPrimDefinition(name);
 }
 
-// As USDA writes a value: strings and tokens quoted, assets in @s.
-std::string formatValue(const VtValue& value) {
-    if (value.IsHolding<std::string>()) return "\"" + value.UncheckedGet<std::string>() + "\"";
-    if (value.IsHolding<TfToken>()) return "\"" + value.UncheckedGet<TfToken>().GetString() + "\"";
-    if (value.IsHolding<SdfAssetPath>()) return "@" + value.UncheckedGet<SdfAssetPath>().GetAssetPath() + "@";
-    if (value.IsHolding<bool>()) return value.UncheckedGet<bool>() ? "true" : "false";
-    return TfStringify(value);
-}
 
 // An API's definition lists itself first: "LightAPI", or a multiple-apply one
 // as "CollectionAPI:__INSTANCE_NAME__".
@@ -138,7 +131,7 @@ std::vector<SchemaProperty> propertiesOf(const TfToken& self, SchemaInfo::Kind k
             VtValue fallback;
             if (attribute.GetFallbackValue(&fallback) && !fallback.IsEmpty()) {
                 p.hasFallback = true;
-                p.fallback = formatValue(fallback);
+                p.fallback = usdaValueText(fallback);
             }
             VtTokenArray allowed;
             if (property.GetMetadata(SdfFieldKeys->AllowedTokens, &allowed)) {
