@@ -162,6 +162,39 @@ double perspectiveDistanceFor(double size, double verticalFovDegrees) {
     return tangent > 0.0 ? size / (2.0 * tangent) : size;
 }
 
+double panUnitsPerPixel(double depth, double verticalFovDegrees, double viewHeight) {
+    // The view's height at that depth, over its height in pixels.
+    return orthographicSizeFor(depth, verticalFovDegrees) / std::max(viewHeight, 1.0);
+}
+
+GfVec3d panOrbitTarget(const GfVec3d& target, const OrbitCameraAxes& axes, double dx, double dy, double unitsPerPixel) {
+    return target + axes.right * (-dx * unitsPerPixel) + axes.up * (dy * unitsPerPixel);
+}
+
+std::optional<double> perspectiveDepthFromBuffer(double bufferDepth, const OrbitClipping& clipping) {
+    if (!(bufferDepth >= 0.0) || bufferDepth >= 1.0) return std::nullopt;
+    const double nearClip = clipping.nearClip;
+    const double farClip = clipping.farClip;
+    // The projection's z, undone: buffer depth d is NDC z = 2d - 1.
+    const double depth = farClip * nearClip / (farClip - bufferDepth * (farClip - nearClip));
+    if (!(depth > 0.0) || !std::isfinite(depth)) return std::nullopt;
+    return depth;
+}
+
+std::optional<double> groundDepthAlongRay(const OrbitCameraAxes& axes, const GfVec3d& direction, bool zUp, double halfExtent) {
+    const int upAxis = zUp ? 2 : 1;
+    if (std::abs(direction[upAxis]) < 1e-12) return std::nullopt;  // along the ground
+    const double along = -axes.eye[upAxis] / direction[upAxis];
+    if (!(along > 0.0) || !std::isfinite(along)) return std::nullopt;  // behind the eye
+    const GfVec3d point = axes.eye + direction * along;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (axis != upAxis && std::abs(point[axis]) > halfExtent) return std::nullopt;
+    }
+    const double depth = PXR_NS::GfDot(point - axes.eye, axes.forward);
+    if (!(depth > 0.0)) return std::nullopt;
+    return depth;
+}
+
 double wrapDegrees(double degrees) {
     const double wrapped = std::fmod(degrees, 360.0);
     if (wrapped > 180.0) return wrapped - 360.0;

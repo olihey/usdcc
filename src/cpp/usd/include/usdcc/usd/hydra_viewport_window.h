@@ -395,6 +395,13 @@ private:
     OrbitClipping clipping() const;
     // How far the eye of an orthographic view is from its target.
     double orthographicDepth() const;
+    // How far in front of the eye a pan starting at `position` holds the scene under the
+    // cursor (panUnitsPerPixel()): what's drawn there, else the grid where it shows, else
+    // as far as the target. Perspective only: orthographic, the depth makes no difference.
+    double panDepthAt(const QPointF& position);
+    // The depth of what the frame on screen has at `position`, from its depth buffer.
+    // Nothing where it drew nothing, or while that frame isn't the camera's (paused).
+    std::optional<double> drawnDepthAt(const QPointF& position);
 
     usdcc::tools::ToolContext buildToolContext();
     PXR_NS::GfVec2d ndcFromPixel(const QPointF& pixelPos) const;
@@ -448,6 +455,7 @@ private:
     bool m_orbiting = false;
     bool m_orbitReversed = false;  // this drag began upside down, so turns the other way
     bool m_panning = false;
+    double m_panDepth = kDefaultOrbitDistance;  // this pan's panDepthAt(), where it began
     bool m_dragging = false;
     bool m_toolEditActive = false;  // between toolEditStarted() and toolEditFinished()
     bool m_firstFrameRendered = false;
