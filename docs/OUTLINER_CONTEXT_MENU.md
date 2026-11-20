@@ -55,6 +55,7 @@ disabled, with a tooltip saying why.
 
 | Entry | What it does (OpenUSD) | Undo |
 |---|---|---|
+| **Look Through** | On a camera only: the viewport showing the stage (the active one if it does, else the oldest) looks through it ([VIEWPORT_CAMERA.md](VIEWPORT_CAMERA.md) §3). Disabled, with a tooltip, when no viewport shows the stage | — |
 | **Active** | `SetActive(bool)` on each selected prim. Checked when all of them are active; a mix shows unchecked and activates them all | `UndoManager::apply()` |
 | **Visible / Invisible** | `UsdGeomImageable::MakeVisible()` / `MakeInvisible()`. `MakeVisible()` also authors on ancestors and their other children when an ancestor is invisible, so the prim really shows (usdview's behaviour) | `apply()` |
 | **Show Only This** | Makes the selection visible and its siblings, and its ancestors' siblings, invisible | `apply()` |

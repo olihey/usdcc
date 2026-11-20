@@ -6,6 +6,8 @@
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/physics_overlay.h"
+#include "usdcc/usd/scene_bounds.h"
+#include "usdcc/usd/stage_camera.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_grid.h"
 #include "usdcc/usd/viewport_render_params.h"
@@ -37,6 +39,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/timeCode.h>
+#include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usdImaging/usdImagingGL/engine.h>
@@ -184,6 +187,8 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
         return;
     }
     m_stage = stage;
+    // Its cameras were the other stage's.
+    forgetStageCamera();
     m_firstFrameRendered = false;  // firstFrameRendered() is per stage
     m_engineFailures = 0;
 
@@ -213,6 +218,8 @@ void HydraViewportWindow::setTime(PXR_NS::UsdTimeCode time) {
     m_time = time;
     // Not renderNow(): scrubbing and playback send these faster than frames draw.
     requestUpdate();
+    // A stage camera is where it is at that time: it may have moved.
+    if (isLookingThroughStageCamera()) Q_EMIT cameraChanged();
 }
 
 void HydraViewportWindow::rebuildEngine() {
@@ -532,10 +539,18 @@ HudInput HydraViewportWindow::hudInput() const {
     input.cursor = m_cursorPos;
 
     input.showCamera = m_display.hudCamera;
-    // The orbit camera's view, until the viewport can look through the stage's cameras.
-    input.camera = QString::fromLatin1(cameraViewLabel(m_view));
-    if (m_orthographic && m_view == CameraView::Persp) input.camera = QStringLiteral("Ortho");
-    if (!m_orthographic && m_view != CameraView::Persp) input.camera += QStringLiteral(" (Persp)");
+    // The stage camera's name, or the orbit camera's view, and the camera it left
+    // (docs/VIEWPORT_CAMERA.md §2.1): "Persp ← shotCam".
+    if (isLookingThroughStageCamera()) {
+        input.camera = QString::fromStdString(m_stageCamera.GetName());
+    } else {
+        input.camera = QString::fromLatin1(cameraViewLabel(m_view));
+        if (m_orthographic && m_view == CameraView::Persp) input.camera = QStringLiteral("Ortho");
+        if (!m_orthographic && m_view != CameraView::Persp) input.camera += QStringLiteral(" (Persp)");
+        if (!m_detachedFrom.IsEmpty()) {
+            input.camera += QStringLiteral(" ") + QChar(0x2190) + QStringLiteral(" ") + QString::fromStdString(m_detachedFrom.GetName());
+        }
+    }
     const PXR_NS::TfToken renderer = currentRendererPlugin();
     input.renderer = rendererDisplayName(renderer);
     input.shading = shadingModeLabel(effectiveShading(m_display, renderer));
@@ -696,6 +711,8 @@ void HydraViewportWindow::recordFrame(double milliseconds) {
 }
 
 void HydraViewportWindow::snapToAxis(HudItem item) {
+    // From where it looks now: a stage camera is left, keeping its target.
+    detachFromStageCamera();
     if (item == HudItem::AxisCenter) {
         // Back to the default perspective view.
         setView(CameraView::Persp, false);
@@ -712,6 +729,8 @@ void HydraViewportWindow::snapToAxis(HudItem item) {
     const OrbitAngles angles = orbitAnglesLookingFrom(*direction, 0.0, cameraZUp());
     m_yaw = angles.yaw;
     m_pitch = angles.pitch;
+    m_roll = 0.0;
+    forgetStageCamera();  // another view now
     cameraMoved();
 }
 
@@ -779,7 +798,7 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
 }
 
 HydraViewportWindow::CameraState HydraViewportWindow::cameraState() const {
-    return {m_target, m_distance, m_yaw, m_pitch, m_orthographic, m_orthoSize, m_view};
+    return {m_target, m_distance, m_yaw, m_pitch, m_orthographic, m_orthoSize, m_view, m_roll};
 }
 
 void HydraViewportWindow::setCameraState(const CameraState& state) {
@@ -790,6 +809,111 @@ void HydraViewportWindow::setCameraState(const CameraState& state) {
     m_orthographic = state.orthographic;
     m_orthoSize = std::max(kMinDistance, state.orthoSize);
     m_view = state.view;
+    m_roll = state.roll;
+    forgetStageCamera();
+    cameraMoved();
+}
+
+void HydraViewportWindow::forgetStageCamera() {
+    if (m_stageCamera.IsEmpty() && m_detachedFrom.IsEmpty()) return;
+    m_stageCamera = {};
+    m_detachedFrom = {};
+    Q_EMIT stageCameraChanged();
+}
+
+bool HydraViewportWindow::setStageCamera(const PXR_NS::SdfPath& path) {
+    if (path.IsEmpty()) {
+        forgetStageCamera();
+        cameraMoved();
+        return true;
+    }
+    if (!m_stage) return false;
+    const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(path);
+    if (!prim || !prim.IsActive() || !prim.IsA<PXR_NS::UsdGeomCamera>()) return false;
+    if (path == m_stageCamera) return true;
+    m_stageCamera = path;
+    m_detachedFrom = {};
+    Q_EMIT stageCameraChanged();
+    cameraMoved();
+    return true;
+}
+
+std::optional<PXR_NS::GfCamera> HydraViewportWindow::stageCameraNow() const {
+    if (m_stageCamera.IsEmpty() || !m_stage) return std::nullopt;
+    const PXR_NS::UsdPrim prim = m_stage->GetPrimAtPath(m_stageCamera);
+    if (!prim || !prim.IsActive()) return std::nullopt;
+    return stageCameraAt(prim, m_time);
+}
+
+double HydraViewportWindow::detachDistance(const PXR_NS::GfFrustum& frustum, const std::optional<PXR_NS::GfCamera>& camera,
+                                           bool useDrawn) {
+    // In the camera's own space: a scaled camera, or one under a scaled parent, has it
+    // scaled too (a model in centimetres under a millimetre stage's camera rig).
+    if (camera) {
+        if (const std::optional<double> focus = stageCameraFocusDistance(*camera)) return *focus;
+    }
+    if (useDrawn) {
+        if (const std::optional<double> drawn = drawnDepthAt(QPointF(width() / 2.0, height() / 2.0))) return *drawn;
+    }
+    const PXR_NS::GfMatrix4d toWorld = frustum.ComputeViewInverse();
+    OrbitCameraAxes axes;
+    axes.eye = frustum.GetPosition();
+    axes.right = PXR_NS::GfVec3d(toWorld[0][0], toWorld[0][1], toWorld[0][2]).GetNormalized();
+    axes.up = PXR_NS::GfVec3d(toWorld[1][0], toWorld[1][1], toWorld[1][2]).GetNormalized();
+    axes.forward = -PXR_NS::GfVec3d(toWorld[2][0], toWorld[2][1], toWorld[2][2]).GetNormalized();
+    if (m_stage && m_display.showGrid && !m_previewMode) {
+        if (const std::optional<double> ground = groundDepthAlongRay(axes, axes.forward, stageIsZUp(), m_display.gridSize / 2.0)) {
+            return *ground;
+        }
+    }
+    if (m_stage) {
+        if (const std::optional<PXR_NS::GfRange3d> bounds = sceneBounds(m_stage, {}, m_time, viewportPurposes(m_display))) {
+            const double depth = PXR_NS::GfDot(bounds->GetMidpoint() - axes.eye, axes.forward);
+            if (depth > 0.0) return depth;
+        }
+    }
+    return kDefaultOrbitDistance;
+}
+
+void HydraViewportWindow::adoptPose(const OrbitPose& pose) {
+    m_target = pose.target;
+    m_distance = std::max(kMinDistance, pose.distance);
+    m_yaw = pose.yaw;
+    m_pitch = pose.pitch;
+    m_roll = pose.roll;
+    m_orthographic = pose.orthographic;
+    if (pose.orthographic) m_orthoSize = std::max(kMinDistance, pose.orthoSize);
+    if (pose.fovY) m_fovY = std::clamp(*pose.fovY, 1.0, 179.0);
+    m_view = CameraView::Persp;
+}
+
+void HydraViewportWindow::detachFromStageCamera() {
+    if (!isLookingThroughStageCamera()) return;
+    const std::optional<PXR_NS::GfCamera> camera = stageCameraNow();
+    const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, windowAspect()) : m_lastStageFrustum;
+    // What's at the centre of the frame on screen, drawn through the camera: still it.
+    const double distance = detachDistance(frustum, camera, camera.has_value());
+    adoptPose(orbitPoseFromFrustum(frustum, distance, m_yaw, cameraZUp()));
+    m_detachedFrom = std::exchange(m_stageCamera, PXR_NS::SdfPath());
+    Q_EMIT stageCameraChanged();
+    cameraMoved();
+}
+
+void HydraViewportWindow::stageCameraEdited() {
+    if (!isLookingThroughStageCamera()) return;
+    if (stageCameraNow()) {
+        requestUpdate();
+        Q_EMIT cameraChanged();
+        return;
+    }
+    // Gone: on from where it was, with the orbit camera.
+    const PXR_NS::SdfPath lost = m_stageCamera;
+    adoptPose(orbitPoseFromFrustum(m_lastStageFrustum, detachDistance(m_lastStageFrustum, std::nullopt, false), m_yaw,
+                                   cameraZUp()));
+    m_stageCamera = {};
+    m_detachedFrom = {};
+    Q_EMIT stageCameraChanged();
+    Q_EMIT stageCameraLost(lost);
     cameraMoved();
 }
 
@@ -805,6 +929,8 @@ void HydraViewportWindow::stageUpAxisMayHaveChanged() {
 }
 
 void HydraViewportWindow::setView(CameraView view, std::optional<bool> orthographic) {
+    forgetStageCamera();
+    m_roll = 0.0;
     const bool ortho = orthographic.value_or(view != CameraView::Persp);
     if (ortho != m_orthographic) {
         if (ortho) {
@@ -823,7 +949,9 @@ void HydraViewportWindow::setView(CameraView view, std::optional<bool> orthograp
 
 void HydraViewportWindow::setOrthographic(bool orthographic) {
     // Only the projection changes: the view keeps looking the way it did (setView() would
-    // put a turned Persp view back on its default angles).
+    // put a turned Persp view back on its default angles). From a stage camera, from where
+    // it looks.
+    detachFromStageCamera();
     if (orthographic == m_orthographic) return;
     if (orthographic) {
         m_orthoSize = std::max(kMinDistance, orthographicSizeFor(m_distance, m_fovY));
@@ -835,10 +963,10 @@ void HydraViewportWindow::setOrthographic(bool orthographic) {
 }
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
+    detachFromStageCamera();  // fits from where it looks (§3)
     const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
     if (m_orthographic) {
-        const OrthographicFraming framing =
-            frameOrthographic(box, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp()), aspect, m_orthoSize);
+        const OrthographicFraming framing = frameOrthographic(box, orbitAxes(m_distance), aspect, m_orthoSize);
         m_target = framing.target;
         m_orthoSize = std::max(kMinDistance, framing.size);
         cameraMoved();
@@ -912,15 +1040,46 @@ void HydraViewportWindow::updateEngineSelection() {
 usdcc::tools::Tool* HydraViewportWindow::activeToolInstance() const { return &m_toolSet->activeTool(); }
 
 PXR_NS::GfVec3d HydraViewportWindow::cameraPosition() const {
+    if (isLookingThroughStageCamera()) {
+        const PXR_NS::GfFrustum frustum = currentFrustum();
+        if (frustum.GetProjectionType() == PXR_NS::GfFrustum::Perspective) return frustum.GetPosition();
+        // As below, with the camera's own position for the target: where a perspective
+        // camera would see as much there.
+        const PXR_NS::GfMatrix4d toWorld = frustum.ComputeViewInverse();
+        const PXR_NS::GfVec3d back = PXR_NS::GfVec3d(toWorld[2][0], toWorld[2][1], toWorld[2][2]).GetNormalized();
+        return frustum.GetPosition() + back * perspectiveDistanceFor(frustum.GetWindow().GetSize()[1], m_fovY);
+    }
     // Orthographic, where a perspective camera would see the same at the target: what
     // sizes the gizmo (its eye is much further back).
     const double distance = m_orthographic ? perspectiveDistanceFor(m_orthoSize, m_fovY) : m_distance;
-    return orbitCameraAxes(m_target, distance, m_yaw, m_pitch, cameraZUp()).eye;
+    return orbitAxes(distance).eye;
+}
+
+OrbitCameraAxes HydraViewportWindow::orbitAxes(double distance) const {
+    return orbitCameraAxes(m_target, distance, m_yaw, m_pitch, cameraZUp(), m_roll);
+}
+
+double HydraViewportWindow::windowAspect() const {
+    const qreal pixelRatio = devicePixelRatio();
+    const int w = std::max(1, static_cast<int>(width() * pixelRatio));
+    const int h = std::max(1, static_cast<int>(height() * pixelRatio));
+    return static_cast<double>(w) / static_cast<double>(h);
+}
+
+bool HydraViewportWindow::orthographicNow() const {
+    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) {
+        return camera->GetProjection() == PXR_NS::GfCamera::Orthographic;
+    }
+    return m_orthographic;
 }
 
 double HydraViewportWindow::orthographicDepth() const { return std::max(1000.0, 50.0 * m_orthoSize); }
 
 OrbitClipping HydraViewportWindow::clipping() const {
+    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) {
+        const PXR_NS::GfRange1f range = camera->GetClippingRange();
+        return {range.GetMin(), range.GetMax()};
+    }
     if (!m_orthographic) return orbitClipping(m_distance);
     // The eye is far back along the view; what's within that depth either side of the
     // target is seen. Depth is linear in an orthographic view, so the ratio doesn't matter.
@@ -929,22 +1088,14 @@ OrbitClipping HydraViewportWindow::clipping() const {
 }
 
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
+    const double aspect = windowAspect();
+    // A stage camera's, fitted in the window (docs/VIEWPORT_CAMERA.md §3). Everything that
+    // draws, picks or places goes by this, so it all agrees with what Hydra draws.
+    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) return stageCameraFrustum(*camera, aspect);
+
     const double distance = m_orthographic ? orthographicDepth() : m_distance;
-    const auto [eye, forward, right, up] = orbitCameraAxes(m_target, distance, m_yaw, m_pitch, cameraZUp());
-
-    PXR_NS::GfMatrix4d cameraToWorld(1.0);
-    cameraToWorld.SetRow(0, PXR_NS::GfVec4d(right[0], right[1], right[2], 0.0));
-    cameraToWorld.SetRow(1, PXR_NS::GfVec4d(up[0], up[1], up[2], 0.0));
-    cameraToWorld.SetRow(2, PXR_NS::GfVec4d(-forward[0], -forward[1], -forward[2], 0.0));
-    cameraToWorld.SetRow(3, PXR_NS::GfVec4d(eye[0], eye[1], eye[2], 1.0));
-
-    const qreal pixelRatio = devicePixelRatio();
-    const int w = std::max(1, static_cast<int>(width() * pixelRatio));
-    const int h = std::max(1, static_cast<int>(height() * pixelRatio));
-    const double aspect = static_cast<double>(w) / static_cast<double>(h);
-
     PXR_NS::GfFrustum frustum;
-    frustum.SetPositionAndRotationFromMatrix(cameraToWorld);
+    frustum.SetPositionAndRotationFromMatrix(orbitCameraToWorld(orbitAxes(distance)));
     const OrbitClipping range = clipping();
     if (m_orthographic) {
         const double halfHeight = m_orthoSize / 2.0;
@@ -961,7 +1112,7 @@ double HydraViewportWindow::panDepthAt(const QPointF& position) {
     // Empty space over the grid: the ground, which the grid's lines show moving.
     if (m_stage && m_display.showGrid && !m_previewMode) {
         const PXR_NS::GfRay ray = currentFrustum().ComputePickRay(ndcFromPixel(position));
-        const OrbitCameraAxes axes = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp());
+        const OrbitCameraAxes axes = orbitAxes(m_distance);
         if (const std::optional<double> ground =
                 groundDepthAlongRay(axes, ray.GetDirection(), stageIsZUp(), m_display.gridSize / 2.0)) {
             return *ground;
@@ -971,7 +1122,7 @@ double HydraViewportWindow::panDepthAt(const QPointF& position) {
 }
 
 std::optional<double> HydraViewportWindow::drawnDepthAt(const QPointF& position) {
-    if (m_orthographic || m_paused || !m_stage || !m_context || !m_framebuffer || !m_firstFrameRendered) return std::nullopt;
+    if (orthographicNow() || m_paused || !m_stage || !m_context || !m_framebuffer || !m_firstFrameRendered) return std::nullopt;
     const qreal pixelRatio = devicePixelRatio();
     const int x = static_cast<int>(std::floor(position.x() * pixelRatio));
     // GL counts the rows from the bottom.
@@ -1040,6 +1191,7 @@ usdcc::tools::ToolContext HydraViewportWindow::buildToolContext() {
     ctx.stage = m_stage;
     ctx.selection = m_selectedPaths;
     const PXR_NS::GfFrustum frustum = currentFrustum();
+    if (isLookingThroughStageCamera()) m_lastStageFrustum = frustum;  // where to go on from, should it go
     ctx.viewMatrix = frustum.ComputeViewMatrix();
     ctx.projMatrix = frustum.ComputeProjectionMatrix();
     // The gizmos size themselves by their distance from it (cameraPosition()).
@@ -1459,14 +1611,21 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
+        // Through a stage camera, the drag goes on with the orbit camera from there
+        // (docs/VIEWPORT_CAMERA.md §2.1).
+        detachFromStageCamera();
         // An orthographic axis view doesn't tumble: a Top view stays a Top view (§3.5.3).
         m_orbiting = cameraViewTumbles(m_view, m_orthographic);
         // For the whole drag, so that crossing a pole during it doesn't reverse it.
         m_orbitReversed = orbitIsUpsideDown(m_pitch);
     } else if (event->button() == Qt::MiddleButton) {
         m_panning = true;
-        // What the cursor is on now stays under it for the whole drag.
-        if (!m_orthographic) m_panDepth = panDepthAt(event->position());
+        // What the cursor is on now stays under it for the whole drag. Its depth comes from
+        // the frame on screen, so it's read before a stage camera is left for the orbit
+        // camera, which then sees the same.
+        const std::optional<double> drawn = drawnDepthAt(event->position());
+        detachFromStageCamera();
+        if (!m_orthographic) m_panDepth = drawn ? *drawn : panDepthAt(event->position());
     }
 }
 
@@ -1524,8 +1683,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         const double viewHeight = std::max(1, height());
         const double unitsPerPixel =
             m_orthographic ? m_orthoSize / viewHeight : panUnitsPerPixel(m_panDepth, m_fovY, viewHeight);
-        m_target = panOrbitTarget(m_target, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp()), delta.x(),
-                                  delta.y(), unitsPerPixel);
+        m_target = panOrbitTarget(m_target, orbitAxes(m_distance), delta.x(), delta.y(), unitsPerPixel);
         cameraMoved();
     }
 }
@@ -1550,6 +1708,7 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
+    detachFromStageCamera();  // as a drag does
     const double factor = std::pow(0.9, event->angleDelta().y() / 120.0);
     if (m_orthographic) {
         m_orthoSize = std::max(kMinDistance, m_orthoSize * factor);

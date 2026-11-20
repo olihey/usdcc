@@ -365,6 +365,19 @@ class Viewport:
 
         return usd._stage(_app().viewport_stage(self._id))
 
+    @property
+    def camera(self):
+        """The path of the stage camera (a UsdGeom.Camera) it looks through, as a string, or
+        None for its own camera (docs/VIEWPORT_CAMERA.md). Setting a path looks through that
+        camera, as its Camera menu does; None goes back to its own camera, where it was.
+        ValueError for a path that isn't a camera of its stage. Navigating in the viewport
+        leaves the stage camera, which stays where it is."""
+        return _app().viewport_camera(self._id) or None
+
+    @camera.setter
+    def camera(self, path):
+        _app().set_viewport_camera(self._id, "" if path is None else str(path))
+
     def renderer(self):
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
         return _app().viewport_renderer(self._id)

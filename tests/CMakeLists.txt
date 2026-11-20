@@ -33,6 +33,7 @@ add_executable(usdcc_tests
     log_test.cpp
     move_tool_test.cpp
     orbit_camera_test.cpp
+    stage_camera_test.cpp
     physics_spike_test.cpp
     physics_test.cpp
     physics_bake_joints_test.cpp

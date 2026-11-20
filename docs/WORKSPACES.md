@@ -204,7 +204,7 @@ camera is applied.
 | `yaw`, `pitch` | degrees | the view's | Turn the view, about the stage's up axis (§3.5.2); mostly for `persp` (`{"view": "persp", "yaw": 135, "pitch": 30}` looks from behind) |
 | `fov` | degrees | the app's | A perspective camera's vertical field of view (`setFieldOfView()`) |
 | `target`, `distance` / `size` | `[x, y, z]`, number | | Exact placement in scene units: the orbit target, and the perspective distance or the orthographic view's height. Giving either means `fit` `none` unless set. For workspaces made for one show's scale |
-| `path` | prim path, or `"first"` | | **Later** (§3.5.5): look through a `UsdGeomCamera` of the stage, `"first"` being the first one found. Where there's none, the rest of the object applies |
+| `path` | prim path, or `"first"` | | Look through a `UsdGeomCamera` of the stage (§3.5.5), `"first"` being the first one found. Where there's none, the rest of the object applies |
 
 Applied when the workspace **makes** the viewport. A viewport reused from before keeps its camera; it's
 picked for the entry only if its view and projection match (§7.1 step 3), so a Top view is never reused
@@ -273,12 +273,16 @@ per stage. So the extra views are `"stage": "current"` viewports:
 - With no stage open they're empty, like any viewport.
 - Sessions store the following (`"follows": true` on the panel's entry).
 
-#### 3.5.5 Looking through a scene camera (later)
+#### 3.5.5 Looking through a scene camera
 
 `"path"` needs the viewport to render through a stage's `UsdGeomCamera`, which it can't yet (the HUD
 plan lists it, [VIEWPORT_HUD.md](VIEWPORT_HUD.md) §2.1). Once it can, a *Review* workspace can show the
 shot camera: `{"path": "first", "view": "persp"}`, falling back to a framed perspective view on a stage
 without one. Until then the key is read and ignored, so files written for later still load.
+
+**Done** ([VIEWPORT_CAMERA.md](VIEWPORT_CAMERA.md) §3): a viewport the workspace makes looks through the camera when the
+stage has it, and isn't fitted; a following view does so for each stage it's given. Saving a workspace writes the
+`path` of a viewport looking through a camera.
 
 #### 3.5.6 A four-view workspace
 

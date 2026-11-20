@@ -266,7 +266,8 @@ Where it differs from the plan:
   there, and keeping the current one gave a turned top view.
 - **The counts are at the earliest time**, whatever the timeline shows: they count what is there,
   which rarely changes over time.
-- The **Camera menu** has Persp (the only camera so far), Fit to View and Reset Camera.
+- The **Camera menu** has the views, Fit to View and Reset Camera; since [VIEWPORT_CAMERA.md](VIEWPORT_CAMERA.md)
+  phase 1 also the stage's cameras, Back to / Copy View to the camera left, and New Camera from View.
 - **Plates, not shadows.** Each corner's text (top left, bottom left, bottom right, and the
   view name under the triad) sits on a semi-transparent black plate (`HudLayout::plates`),
   as the triad does on its disc and Paused, the readout and the rollover on their own. The

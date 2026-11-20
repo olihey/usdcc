@@ -9,9 +9,11 @@
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/variant_editor_dialog.h"
+#include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/variantSets.h>
+#include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/tokens.h>
 
@@ -151,6 +153,19 @@ void populatePrimMenu(QMenu* menu, const PrimMenuContext& context) {
     title->setEnabled(false);
     if (paths.size() > 1) title->setText(tr("%1 Prims").arg(paths.size()));
     menu->addSeparator();
+
+    // A camera: the viewport on this stage looks through it (docs/VIEWPORT_CAMERA.md §3).
+    if (clicked.IsA<PXR_NS::UsdGeomCamera>()) {
+        ViewportViewPanel* viewport = ViewportViewPanel::viewportFor(stage);
+        const PXR_NS::SdfPath camera = context.clicked;
+        QAction* look = menu->addAction(tr("Look Through"), menu, [stage, camera]() {
+            if (ViewportViewPanel* target = ViewportViewPanel::viewportFor(stage)) target->lookThrough(camera);
+        });
+        look->setObjectName(QStringLiteral("lookThroughAction"));
+        look->setEnabled(viewport && clicked.IsActive());
+        if (!viewport) look->setToolTip(tr("No viewport shows this stage."));
+        menu->addSeparator();
+    }
 
     // Create, under the clicked prim, not the rest of the selection.
     QMenu* create = menu->addMenu(tr("Create"));

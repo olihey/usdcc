@@ -5,14 +5,18 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/camera_framing.h"
 #include "usdcc/usd/layer_stack.h"
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/scene_bounds.h"
+#include "usdcc/usd/stage_camera.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_render_params.h"
 
+#include <pxr/base/gf/range1f.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
@@ -791,6 +795,16 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
         runPendingFit();  // a resize: it may have a size now
     });
     connect(m_viewport, &HydraViewportWindow::firstFrameRendered, this, [this]() { runPendingFit(); });
+    // Looking through another camera (docs/VIEWPORT_CAMERA.md): the active camera changed.
+    connect(m_viewport, &HydraViewportWindow::stageCameraChanged, this, [this]() {
+        if (activeViewport() == this) activeViewportChanged()();
+    });
+    connect(m_viewport, &HydraViewportWindow::stageCameraLost, this, [](const PXR_NS::SdfPath& path) {
+        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Camera gone"};
+        USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                           "{} is no longer a camera of the stage: the viewport goes on from there with Persp.",
+                           path.GetString());
+    });
     // A HUD label's menu, under it (docs/VIEWPORT_HUD.md §3).
     connect(m_viewport, &HydraViewportWindow::hudMenuRequested, this, [this](HudItem item, QPoint globalPos) {
         makeActive();
@@ -858,6 +872,14 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
         m_viewport->requestUpdate();
         // The camera orbits about the stage's up axis, which Layer Properties can change.
         m_viewport->stageUpAxisMayHaveChanged();
+        // The stage camera looked through, or one of its parents, moved, changed lens or went.
+        if (const PXR_NS::SdfPath camera = m_viewport->stageCamera(); !camera.IsEmpty()) {
+            const auto touches = [&camera](const PXR_NS::SdfPath& path) { return camera.HasPrefix(path.GetPrimPath()); };
+            if (std::any_of(changes.resyncedPaths.begin(), changes.resyncedPaths.end(), touches) ||
+                std::any_of(changes.changedInfoOnlyPaths.begin(), changes.changedInfoOnlyPaths.end(), touches)) {
+                m_viewport->stageCameraEdited();
+            }
+        }
         // The HUD's counts change with what's there, and with what decides whether it's
         // drawn or how big it is; not with a transform or a color.
         static const PXR_NS::TfToken counted[] = {
@@ -879,17 +901,127 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     m_editTargetConnection = stage->editTargetChanged.connect([this]() { m_viewport->refreshHud(); });
     syncTarget();
     // A view following the current stage frames each stage it's given (§3.5.4).
-    if (followsCurrentStage() && !m_cameraSpec.isEmpty()) {
+    if (followsCurrentStage() && !m_cameraSpec.isEmpty() && !lookThroughSpecCamera()) {
         const QString fit = m_cameraSpec.value(QStringLiteral("fit")).toString(QStringLiteral("stage"));
         if (fit != QLatin1String("none")) fitView(fit);
     }
 }
 
 void ViewportViewPanel::resetCamera() {
-    const CameraView view = m_viewport->view();
-    const bool orthographic = m_viewport->isOrthographic();
+    // Detached from a stage camera: back to it first (docs/VIEWPORT_CAMERA.md §2.1).
+    if (backToCamera()) return;
+    const CameraView view = m_viewport->isLookingThroughStageCamera() ? CameraView::Persp : m_viewport->view();
+    const bool orthographic = !m_viewport->isLookingThroughStageCamera() && m_viewport->isOrthographic();
     m_viewport->setCameraState({});
+    // A field of view taken from a stage camera goes too: the workspace's, or the default.
+    m_viewport->setFieldOfView(m_cameraSpec.value(QStringLiteral("fov")).toDouble(HydraViewportWindow::verticalFieldOfView()));
     if (view != CameraView::Persp || orthographic) m_viewport->setView(view, orthographic);
+}
+
+ViewportViewPanel* ViewportViewPanel::viewportFor(const StageRefPtr& stage) {
+    if (!stage) return nullptr;
+    ViewportViewPanel* active = activeViewport();
+    if (active && active->currentStage() == stage) return active;
+    for (ViewportViewPanel* viewport : openViewports()) {
+        if (viewport->currentStage() == stage) return viewport;
+    }
+    return nullptr;
+}
+
+bool ViewportViewPanel::lookThrough(const PXR_NS::SdfPath& path) { return m_viewport->setStageCamera(path); }
+
+bool ViewportViewPanel::backToCamera() {
+    const PXR_NS::SdfPath camera = m_viewport->detachedFrom();
+    return !camera.IsEmpty() && m_viewport->setStageCamera(camera);
+}
+
+PXR_NS::GfCamera ViewportViewPanel::viewAsCamera(const PXR_NS::GfCamera& like) const {
+    const HydraViewportWindow::CameraState state = m_viewport->cameraState();
+    const PXR_NS::GfFrustum frustum = m_viewport->frustum();
+    const PXR_NS::GfVec2d window = frustum.GetWindow().GetSize();
+    OrbitView view;
+    view.cameraToWorld = frustum.ComputeViewInverse();
+    view.orthographic = state.orthographic;
+    view.fovY = m_viewport->fieldOfView();
+    view.orthoSize = state.orthoSize;
+    return cameraSeeingView(like, view, window[1] > 0.0 ? window[0] / window[1] : 1.0);
+}
+
+bool ViewportViewPanel::copyViewToCamera() {
+    const StageRefPtr stage = currentStage();
+    const PXR_NS::SdfPath path = m_viewport->detachedFrom();
+    if (!stage || path.IsEmpty()) return false;
+    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+    const PXR_NS::UsdTimeCode time = stage->timeCode();
+    const std::optional<PXR_NS::GfCamera> camera = stageCameraAt(prim, time);
+    std::string problem = camera ? whyNotSetCamera(prim) : std::string("It's no longer on the stage.");
+    if (problem.empty()) {
+        const PXR_NS::GfCamera wanted = viewAsCamera(*camera);
+        const auto edit = [&]() {
+            problem = setCameraFromView(prim, wanted, time);
+            return problem.empty();
+        };
+        // Undone at once when the edit wouldn't show (a stronger layer).
+        if (m_undoManager) {
+            m_undoManager->apply(stage, tr("Copy View to %1").arg(QString::fromStdString(path.GetName())), edit);
+        } else {
+            edit();
+        }
+    }
+    if (!problem.empty()) {
+        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning,
+                                              .title = "Can't copy the view to " + path.GetName()};
+        USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "{}", problem);
+        return false;
+    }
+    return m_viewport->setStageCamera(path);
+}
+
+PXR_NS::SdfPath ViewportViewPanel::newCameraFromView() {
+    const StageRefPtr stage = currentStage();
+    // Through a stage camera, the view is that camera's: there's nothing new to make.
+    if (!stage || m_viewport->isLookingThroughStageCamera()) return {};
+    const auto refuse = [](const std::string& why) {
+        const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Can't make a camera"};
+        USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "{}", why);
+    };
+    // Where Create puts a prim with nothing selected (docs/CREATE_MENU.md §3).
+    const prim_actions::CreateTarget target = prim_actions::createTarget(stage, {});
+    if (!target.problem.isEmpty()) {
+        refuse(target.problem.toStdString());
+        return {};
+    }
+    PXR_NS::GfCamera like;
+    const PXR_NS::GfRange1d nearFar = m_viewport->frustum().GetNearFar();
+    like.SetClippingRange(PXR_NS::GfRange1f(static_cast<float>(nearFar.GetMin()), static_cast<float>(nearFar.GetMax())));
+    const PXR_NS::GfCamera wanted = viewAsCamera(like);
+    PXR_NS::SdfPath made;
+    const auto edit = [&]() {
+        made = defineCameraFromView(stage->usdStage(), target.parent, wanted, stage->timeCode());
+        return !made.IsEmpty();
+    };
+    if (!(m_undoManager ? m_undoManager->apply(stage, tr("New Camera from View"), edit) : edit())) {
+        refuse("The camera couldn't be defined in the edit target.");
+        return {};
+    }
+    stage->primCreated(made);
+    m_viewport->setStageCamera(made);
+    return made;
+}
+
+bool ViewportViewPanel::lookThroughSpecCamera() {
+    const QString path = m_cameraSpec.value(QStringLiteral("path")).toString();
+    const StageRefPtr stage = currentStage();
+    if (path.isEmpty() || !stage) return false;
+    PXR_NS::SdfPath camera;
+    if (path == QLatin1String("first")) {
+        const std::vector<PXR_NS::SdfPath> cameras = stageCameraPaths(stage->usdStage());
+        if (cameras.empty()) return false;
+        camera = cameras.front();
+    } else if (PXR_NS::SdfPath::IsValidPathString(path.toStdString())) {
+        camera = PXR_NS::SdfPath(path.toStdString());
+    }
+    return !camera.IsEmpty() && m_viewport->setStageCamera(camera);
 }
 
 void ViewportViewPanel::applyWorkspaceCamera(const QJsonObject& camera) {
@@ -911,6 +1043,8 @@ void ViewportViewPanel::applyWorkspaceCamera(const QJsonObject& camera) {
     state.orthoSize = camera.value(QStringLiteral("size")).toDouble(state.orthoSize);
     m_viewport->setCameraState(state);
     if (camera.value(QStringLiteral("fov")).isDouble()) m_viewport->setFieldOfView(camera.value(QStringLiteral("fov")).toDouble());
+    // A stage camera to look through (§3.5.5): where the stage has it, nothing to fit.
+    if (lookThroughSpecCamera()) return;
 
     // Exact placement means no fit, unless asked for.
     const QString fit = camera.value(QStringLiteral("fit")).toString(placed ? QStringLiteral("none") : QStringLiteral("stage"));
@@ -930,6 +1064,9 @@ QJsonObject ViewportViewPanel::workspaceCamera() const {
     if (m_viewport->isOrthographic() != (view != CameraView::Persp)) {
         camera.insert(QStringLiteral("projection"),
                       m_viewport->isOrthographic() ? QStringLiteral("orthographic") : QStringLiteral("perspective"));
+    }
+    if (m_viewport->isLookingThroughStageCamera()) {
+        camera.insert(QStringLiteral("path"), QString::fromStdString(m_viewport->stageCamera().GetString()));
     }
     if (view == CameraView::Persp && camera.size() == 1) return {};
     return camera;
@@ -1191,13 +1328,17 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     // both once that happens rather than immediately.
     const PXR_NS::TfToken rendererPluginId = m_viewport->currentRendererPlugin();
     const HydraViewportWindow::CameraState cameraState = m_viewport->cameraState();
+    const double fov = m_viewport->fieldOfView();
+    const PXR_NS::SdfPath stageCamera = m_viewport->stageCamera();
     connect(copy->m_viewport, &HydraViewportWindow::rendererPluginsChanged, copy,
-            [copy, rendererPluginId, cameraState]() {
+            [copy, rendererPluginId, cameraState, fov, stageCamera]() {
                 const std::vector<PXR_NS::TfToken> plugins = copy->m_viewport->rendererPlugins();
                 if (std::find(plugins.begin(), plugins.end(), rendererPluginId) != plugins.end()) {
                     copy->m_viewport->setRendererPlugin(rendererPluginId);
                 }
                 copy->m_viewport->setCameraState(cameraState);
+                copy->m_viewport->setFieldOfView(fov);
+                if (!stageCamera.IsEmpty()) copy->m_viewport->setStageCamera(stageCamera);
             });
 
     return copy;
@@ -1215,6 +1356,14 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     if (camera.orthographic) {
         orbit.insert(QStringLiteral("orthographic"), true);
         orbit.insert(QStringLiteral("size"), camera.orthoSize);
+    }
+    // What a stage camera left it with, and the camera it looks through (docs/VIEWPORT_CAMERA.md §3).
+    if (camera.roll != 0.0) orbit.insert(QStringLiteral("roll"), camera.roll);
+    if (m_viewport->fieldOfView() != HydraViewportWindow::verticalFieldOfView()) {
+        orbit.insert(QStringLiteral("fov"), m_viewport->fieldOfView());
+    }
+    if (m_viewport->isLookingThroughStageCamera()) {
+        orbit.insert(QStringLiteral("path"), QString::fromStdString(m_viewport->stageCamera().GetString()));
     }
     QJsonObject state;
     state.insert(QStringLiteral("camera"), orbit);
@@ -1263,13 +1412,29 @@ void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
     camera.view = cameraViewFromName(orbit.value(QStringLiteral("view")).toString().toStdString()).value_or(CameraView::Persp);
     camera.orthographic = orbit.value(QStringLiteral("orthographic")).toBool(false);
     camera.orthoSize = orbit.value(QStringLiteral("size")).toDouble(camera.orthoSize);
+    camera.roll = orbit.value(QStringLiteral("roll")).toDouble(0.0);
+    const std::optional<double> fov =
+        orbit.value(QStringLiteral("fov")).isDouble() ? std::optional<double>(orbit.value(QStringLiteral("fov")).toDouble()) : std::nullopt;
+    const std::string stageCamera = orbit.value(QStringLiteral("path")).toString().toStdString();
     const PXR_NS::TfToken renderer(state.value(QStringLiteral("renderer")).toString().toStdString());
-    auto apply = [this, camera, renderer]() {
+    auto apply = [this, camera, renderer, fov, stageCamera]() {
         const std::vector<PXR_NS::TfToken> plugins = m_viewport->rendererPlugins();
         if (!renderer.IsEmpty() && std::find(plugins.begin(), plugins.end(), renderer) != plugins.end()) {
             m_viewport->setRendererPlugin(renderer);
         }
         m_viewport->setCameraState(camera);
+        if (fov) m_viewport->setFieldOfView(*fov);
+        // The camera it looked through, if the stage still has it.
+        if (!stageCamera.empty()) {
+            const bool found = PXR_NS::SdfPath::IsValidPathString(stageCamera) &&
+                               m_viewport->setStageCamera(PXR_NS::SdfPath(stageCamera));
+            if (!found) {
+                const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Camera not found"};
+                USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
+                                   "The session's viewport looked through {}, which the stage no longer has: it shows Persp.",
+                                   stageCamera);
+            }
+        }
     };
     // As for duplicate(): a viewport that hasn't drawn yet has no renderers to pick from.
     if (!m_viewport->rendererPlugins().empty()) {
@@ -1392,41 +1557,85 @@ void ViewportViewPanel::addShadingEntries(QMenu* menu) {
     }
 }
 
+void ViewportViewPanel::addCameraEntries(QMenu* menu) {
+    const bool through = m_viewport->isLookingThroughStageCamera();
+    // The orbit camera's views (docs/WORKSPACES.md §3.5.2), then the stage's cameras
+    // (docs/VIEWPORT_CAMERA.md §3): one of them is checked.
+    auto* views = new QActionGroup(menu);
+    for (CameraView view : kCameraViews) {
+        QAction* action = menu->addAction(tr(cameraViewLabel(view)));
+        action->setObjectName(QStringLiteral("hudCamera%1").arg(QLatin1String(cameraViewLabel(view))));
+        action->setCheckable(true);
+        action->setChecked(!through && view == m_viewport->view());
+        views->addAction(action);
+        connect(action, &QAction::triggered, this, [this, view]() {
+            // From a stage camera, Persp is the orbit camera where it was.
+            if (view == CameraView::Persp && m_viewport->isLookingThroughStageCamera()) {
+                lookThrough({});
+                return;
+            }
+            m_viewport->setView(view);
+            fitView(QStringLiteral("selection"));
+        });
+    }
+    const StageRefPtr stage = currentStage();
+    const std::vector<PXR_NS::SdfPath> cameras = stage ? stageCameraPaths(stage->usdStage()) : std::vector<PXR_NS::SdfPath>{};
+    if (!cameras.empty()) {
+        menu->addSeparator();
+        for (const PXR_NS::SdfPath& path : cameras) {
+            QAction* action = menu->addAction(QString::fromStdString(path.GetName()).replace(QLatin1Char('&'), QStringLiteral("&&")));
+            action->setObjectName(QStringLiteral("hudStageCamera"));
+            action->setData(QString::fromStdString(path.GetString()));
+            action->setToolTip(QString::fromStdString(path.GetString()));
+            action->setCheckable(true);
+            action->setChecked(through && path == m_viewport->stageCamera());
+            views->addAction(action);
+            connect(action, &QAction::triggered, this, [this, path]() { lookThrough(path); });
+        }
+    }
+    menu->setToolTipsVisible(true);
+
+    // Leaving a stage camera and going back (§2.1).
+    menu->addSeparator();
+    const PXR_NS::SdfPath detached = m_viewport->detachedFrom();
+    if (!detached.IsEmpty() && stage) {
+        const QString name = QString::fromStdString(detached.GetName()).replace(QLatin1Char('&'), QStringLiteral("&&"));
+        QAction* back = menu->addAction(tr("Back to %1").arg(name), this, [this]() { backToCamera(); });
+        back->setObjectName(QStringLiteral("backToCameraAction"));
+        QAction* copy = menu->addAction(tr("Copy View to %1").arg(name), this, [this]() { copyViewToCamera(); });
+        copy->setObjectName(QStringLiteral("copyViewToCameraAction"));
+        const std::string why = whyNotSetCamera(stage->usdStage()->GetPrimAtPath(detached));
+        copy->setEnabled(why.empty());
+        copy->setToolTip(QString::fromStdString(why));
+    }
+    QAction* newCamera = menu->addAction(tr("New Camera from View"), this, [this]() { newCameraFromView(); });
+    newCamera->setObjectName(QStringLiteral("newCameraFromViewAction"));
+    newCamera->setEnabled(stage && !through);
+
+    menu->addSeparator();
+    QAction* orthographic = menu->addAction(tr("Orthographic"));
+    orthographic->setObjectName(QStringLiteral("hudCameraOrthographic"));
+    orthographic->setCheckable(true);
+    const std::optional<PXR_NS::GfCamera> camera = m_viewport->stageCameraNow();
+    orthographic->setChecked(camera ? camera->GetProjection() == PXR_NS::GfCamera::Orthographic : m_viewport->isOrthographic());
+    connect(orthographic, &QAction::toggled, this, [this](bool on) { m_viewport->setOrthographic(on); });
+    menu->addSeparator();
+    const QKeySequence key = usdcc::ui::settingShortcut(kFitToViewShortcutKey);
+    const QString fitText = key.isEmpty() ? tr("Fit to View")
+                                          : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
+    menu->addAction(fitText, this, [this]() { fitToView(); });
+    const QKeySequence allKey = usdcc::ui::settingShortcut(kFitAllViewsShortcutKey);
+    const QString allText = allKey.isEmpty() ? tr("Fit All Views")
+                                             : tr("Fit All Views") + QStringLiteral("\t") + allKey.toString(QKeySequence::NativeText);
+    menu->addAction(allText, this, []() { fitAllViews(); });
+    menu->addAction(tr("Reset Camera"), this, [this]() { resetCamera(); });
+}
+
 void ViewportViewPanel::populateHudMenu(QMenu* menu, HudItem item) {
     switch (item) {
-        case HudItem::Camera: {
-            // The orbit camera's views (docs/WORKSPACES.md §3.5.2); the stage's cameras
-            // will be listed here too.
-            auto* views = new QActionGroup(menu);
-            for (CameraView view : kCameraViews) {
-                QAction* action = menu->addAction(tr(cameraViewLabel(view)));
-                action->setObjectName(QStringLiteral("hudCamera%1").arg(QLatin1String(cameraViewLabel(view))));
-                action->setCheckable(true);
-                action->setChecked(view == m_viewport->view());
-                views->addAction(action);
-                connect(action, &QAction::triggered, this, [this, view]() {
-                    m_viewport->setView(view);
-                    fitView(QStringLiteral("selection"));
-                });
-            }
-            menu->addSeparator();
-            QAction* orthographic = menu->addAction(tr("Orthographic"));
-            orthographic->setObjectName(QStringLiteral("hudCameraOrthographic"));
-            orthographic->setCheckable(true);
-            orthographic->setChecked(m_viewport->isOrthographic());
-            connect(orthographic, &QAction::toggled, this, [this](bool on) { m_viewport->setOrthographic(on); });
-            menu->addSeparator();
-            const QKeySequence key = usdcc::ui::settingShortcut(kFitToViewShortcutKey);
-            const QString fitText = key.isEmpty() ? tr("Fit to View")
-                                                  : tr("Fit to View") + QStringLiteral("\t") + key.toString(QKeySequence::NativeText);
-            menu->addAction(fitText, this, [this]() { fitToView(); });
-            const QKeySequence allKey = usdcc::ui::settingShortcut(kFitAllViewsShortcutKey);
-            const QString allText = allKey.isEmpty() ? tr("Fit All Views")
-                                                     : tr("Fit All Views") + QStringLiteral("\t") + allKey.toString(QKeySequence::NativeText);
-            menu->addAction(allText, this, []() { fitAllViews(); });
-            menu->addAction(tr("Reset Camera"), this, [this]() { resetCamera(); });
+        case HudItem::Camera:
+            addCameraEntries(menu);
             break;
-        }
         case HudItem::Renderer:
             addRendererEntries(menu);
             break;
@@ -1470,6 +1679,10 @@ void ViewportViewPanel::populateHudMenu(QMenu* menu, HudItem item) {
 void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     QMenu* renderers = menu->addMenu(tr("Renderer"));
     addRendererEntries(renderers);
+    // What the HUD's camera label opens (docs/VIEWPORT_CAMERA.md §3).
+    QMenu* cameraMenu = menu->addMenu(tr("Camera"));
+    cameraMenu->setObjectName(QStringLiteral("cameraMenu"));
+    addCameraEntries(cameraMenu);
 
     menu->addSeparator();
     const HydraViewportWindow::DisplayOptions shown = displayOptions();

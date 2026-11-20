@@ -772,6 +772,20 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "viewport_title", [](int id) { return viewportWithId(id).windowTitle().toStdString(); }, py::arg("id"));
     m.def(
         "viewport_stage", [](int id) { return cacheIdOf(viewportWithId(id).currentStage()); }, py::arg("id"));
+    // The stage camera it looks through, "" for its own (docs/VIEWPORT_CAMERA.md §3).
+    m.def(
+        "viewport_camera", [](int id) { return viewportWithId(id).hydraWindow()->stageCamera().GetString(); },
+        py::arg("id"));
+    m.def(
+        "set_viewport_camera",
+        [](int id, const std::string& path) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            if (!path.empty() && !PXR_NS::SdfPath::IsValidPathString(path)) throw py::value_error("not a prim path: '" + path + "'");
+            if (!viewport.lookThrough(path.empty() ? PXR_NS::SdfPath() : PXR_NS::SdfPath(path))) {
+                throw py::value_error("the viewport's stage has no camera at '" + path + "'");
+            }
+        },
+        py::arg("id"), py::arg("path"));
     // Every renderer Hydra knows, as {id: display name}.
     m.def("renderers", []() {
         PXR_NS::HfPluginDescVector plugins;

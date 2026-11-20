@@ -10,6 +10,7 @@
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/viewport_display.h"
 
+#include <pxr/base/gf/camera.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
 
@@ -118,8 +119,28 @@ public:
     static QAction* addFitAllViewsAction(QWidget* window);
 
     // Reset Camera: the default perspective view; an axis view stays that view, at the
-    // origin.
+    // origin. Detached from a stage camera, it looks through that camera again first
+    // (docs/VIEWPORT_CAMERA.md §2.1).
     void resetCamera();
+
+    // Looking through the stage's cameras (docs/VIEWPORT_CAMERA.md). `path`: one of the
+    // stage's UsdGeomCamera prims, or empty for the orbit camera, where it was. False for a
+    // path that isn't a camera of the stage.
+    bool lookThrough(const PXR_NS::SdfPath& path);
+    // Back to Camera (§2.1): looks through the camera the orbit camera last left. False
+    // when there's none.
+    bool backToCamera();
+    // Copy View to Camera (§2.1): sets the camera the orbit camera left to the view, one
+    // undo step in the edit target, then looks through it. False, with a toast saying why,
+    // when it can't (whyNotSetCamera()).
+    bool copyViewToCamera();
+    // New Camera from View (§2.1): defines a camera seeing the view at the stage's root (in
+    // variant edit mode, under the variant's prim), one undo step, then looks through it.
+    // Its path; empty when it couldn't, with a toast.
+    PXR_NS::SdfPath newCameraFromView();
+    // Where a Look Through on `stage`'s camera goes: the active viewport when it shows the
+    // stage, else the oldest open one that does. Null for none.
+    static ViewportViewPanel* viewportFor(const StageRefPtr& stage);
 
     // Workspaces (docs/WORKSPACES.md §3.5): a workspace entry's camera, the view as a
     // workspace names it, and fitting without a toast. A fit asked for before the
@@ -259,9 +280,15 @@ private:
     // Hands the current renderer's rendererSettingValues() to the viewport and tells
     // rendererSettingsChanged().
     void applyRendererSettings();
-    // The Renderer and Shading entries, for the options menu and the HUD's.
+    // The Renderer, Shading and Camera entries, for the options menu and the HUD's.
     void addRendererEntries(QMenu* menu);
     void addShadingEntries(QMenu* menu);
+    void addCameraEntries(QMenu* menu);
+    // The workspace camera's "path" (docs/WORKSPACES.md §3.5.5): looks through it, once the
+    // stage has it. Whether it does.
+    bool lookThroughSpecCamera();
+    // The orbit camera's view as `like` would see it (its aperture's shape, its clipping).
+    PXR_NS::GfCamera viewAsCamera(const PXR_NS::GfCamera& like) const;
 
     // The HUD's counts (docs/VIEWPORT_HUD.md §2.3), a slice at a time on the main thread,
     // as the stage is edited there. `reset` drops the numbers shown until new ones come.

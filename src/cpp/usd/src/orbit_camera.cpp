@@ -16,7 +16,8 @@ GfVec3d fromYUp(const GfVec3d& v, bool zUp) { return zUp ? GfVec3d(v[0], -v[2], 
 GfVec3d toYUp(const GfVec3d& v, bool zUp) { return zUp ? GfVec3d(v[0], v[2], -v[1]) : v; }
 }  // namespace
 
-OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double yawDegrees, double pitchDegrees, bool zUp) {
+OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double yawDegrees, double pitchDegrees, bool zUp,
+                                double rollDegrees) {
     const double yaw = PXR_NS::GfDegreesToRadians(yawDegrees);
     const double pitch = PXR_NS::GfDegreesToRadians(pitchDegrees);
     const GfVec3d fromTarget =
@@ -27,6 +28,14 @@ OrbitCameraAxes orbitCameraAxes(const GfVec3d& target, double distance, double y
     // Depends on yaw alone, so it stays put going over a pole and up turns smoothly.
     axes.right = fromYUp(GfVec3d(std::cos(yaw), 0.0, -std::sin(yaw)), zUp);
     axes.up = PXR_NS::GfCross(axes.right, axes.forward);
+    if (rollDegrees != 0.0) {
+        const double roll = PXR_NS::GfDegreesToRadians(rollDegrees);
+        const double c = std::cos(roll), s = std::sin(roll);
+        const GfVec3d right = axes.right * c - axes.up * s;
+        const GfVec3d up = axes.up * c + axes.right * s;
+        axes.right = right;
+        axes.up = up;
+    }
     return axes;
 }
 
