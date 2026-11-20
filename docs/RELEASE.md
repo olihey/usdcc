@@ -15,7 +15,8 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 **To make a release:** write its section of [CHANGELOG.md](../CHANGELOG.md) and merge it
 (§8). Then on GitHub, Releases > Draft a new release, a new tag that is the
-version (`0.2.0` or `v0.2.0`, or `0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes
+version (`2026.12.1`, or `2026.12.1-beta.1` with "Set as a pre-release"; §1 says which
+number is next) on `master`, the notes
 (that section, then "Generate release notes" for the list of pull requests),
 then Publish; or do both from a shell (§8). About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
 its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
@@ -23,12 +24,19 @@ same tag (Actions > Release > Run workflow).
 
 ## 1. Decisions
 
-- **The release's tag is the version.** You create a release with the tag `0.2.0` (or
-  `0.2.0-beta.1` for a prerelease; a leading `v`, as in `v0.2.0`, works too), and that build
-  is version `0.2.0`. Nothing to bump by
+- **The release's tag is the version.** You create a release with the tag `2026.12.1` (or
+  `2026.12.1-beta.1` for a prerelease; a leading `v`, as in `v2026.12.1`, works too), and
+  that build is version `2026.12.1`. Nothing to bump by
   hand before releasing; the hand-kept `0.1.0` in `CMakeLists.txt` goes.
+- **A version is `YYYY.MM.N`:** the year, the month without a leading zero, and a counter
+  that starts at 1 each month and goes up by one with every release. `2026.12.2` is
+  December 2026's second release, whether that is the same day as the first or two weeks
+  later. It stays three numbers that only go up, because an install is only offered a
+  higher version: [UPDATES.md](UPDATES.md) §5, "Version numbers", says why a fourth number
+  or a suffix doesn't do, how to find the next number, and that November 2026 carries on
+  from `2026.11.20`. The releases before `2026.11.18` were `0.0.1` to `0.0.3`.
 - **Every other build is a development build**, named after the last release before it:
-  `0.2.0+5.3b70ef2` is 5 commits after `v0.2.0`, at commit `3b70ef2`. The About dialog
+  `2026.12.1+5.3b70ef2` is 5 commits after `2026.12.1`, at commit `3b70ef2`. The About dialog
   says "Development build" for these. With no release tag yet, it's `0.0.0+<commit>`.
 - **CI builds the archive from the tag, not from `master`:** exactly the commit you released.
 - **The archive is `tools/deploy.py`'s folder**, as it is today, so a release is what you
@@ -45,18 +53,18 @@ same tag (Actions > Release > Run workflow).
 
 **Where it comes from.** `cmake/modules/UsdccVersion.cmake` works it out:
 
-1. `-DUSDCC_VERSION=0.2.0`, which the release workflow passes from the tag.
-2. Otherwise `git describe --tags --match "v[0-9]*"`: the last release tag, the commits
-   since it, the commit, and whether files are changed (`+dirty`).
+1. `-DUSDCC_VERSION=2026.12.1`, which the release workflow passes from the tag.
+2. Otherwise `git describe --tags --match "v[0-9]*" --match "[0-9]*"`: the last release
+   tag, the commits since it, the commit, and whether files are changed (`+dirty`).
 3. Otherwise (no git, no tags) `0.0.0`.
 
 **Two parts, updated at different times:**
 
-- **The release number** (`0.2.0`), worked out at configure time. It's `project(VERSION)`,
-  and it's what C++ plugins are checked against (`built_for.usdcc`,
-  [PLUGIN_SDK.md](PLUGIN_SDK.md) §3). So a plugin built for 0.2.0 loads in 0.2.0 and in
-  development builds after it, but not in 0.3.0, without anyone having to remember to
-  raise a version.
+- **The release number** (`2026.12.1`), worked out at configure time. It's
+  `project(VERSION)`, and it's what C++ plugins are checked against (`built_for.usdcc`,
+  [PLUGIN_SDK.md](PLUGIN_SDK.md) §3). So a plugin built for 2026.12.1 loads in 2026.12.1
+  and in development builds after it, but not in 2026.12.2, without anyone having to
+  remember to raise a version.
 - **The build's identity** (commits since the tag, commit, `dirty`, build date), written at
   build time into a small generated source in `usdcc_core` (`cmake/scripts/write_version.cmake`).
   It's rewritten only when it changes, so a new commit recompiles one file, and the About
@@ -71,7 +79,7 @@ tags, so they're `0.0.0+<commit>`.
 `isReleaseBuild()`, `commit()`, `buildDate()`), used by:
 
 - the About dialog (§3);
-- the log's first line at startup ("usdcc 0.2.0+5.3b70ef2 (development build) starting"),
+- the log's first line at startup ("usdcc 2026.12.1+5.3b70ef2 (development build) starting"),
   so every log file says which build wrote it;
 - Python, as `usdcc.app.version()` and `usdcc.app.is_release_build()`, for scripts and
   plugins;
@@ -115,9 +123,10 @@ finds it ([CI.md](CI.md) §8). No PySide6 on Linux yet.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand
 (`workflow_dispatch`) with a tag, to rebuild a release whose run failed.
 
-1. **Check the tag.** It has to be a version (`0.2.0`, `v0.2.0`, `0.2.0-beta.1`). The
-   first version of this workflow only took `v0.2.0`, and turned down the first release,
-   `0.0.1`.
+1. **Check the tag.** It has to be a version (`2026.12.1`, `v2026.12.1`,
+   `2026.12.1-beta.1`): three numbers, and nothing after them but a prerelease's suffix.
+   The first version of this workflow only took a tag with the `v`, and turned down the
+   first release, `0.0.1`.
    Otherwise the run fails before building anything.
 2. **Check out the tag**, with submodules.
 3. **The same steps as `build.yml`:** OpenUSD and PySide6 from their release assets, Qt
