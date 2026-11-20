@@ -7,6 +7,7 @@
 
 #include <pxr/usd/ar/resolverContextBinder.h>
 
+#include "usdcc/ui/find_line_edit.h"
 #include "usdcc/ui/line_view.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -159,27 +160,6 @@ QPushButton* barButton(const QString& text, QWidget* parent) {
     button->setAutoDefault(false);
     return button;
 }
-
-// The find box: Enter for the next match, Shift+Enter the previous one, Esc closes.
-class FindLineEdit : public QLineEdit {
-public:
-    using QLineEdit::QLineEdit;
-    std::function<void(bool backward)> onEnter;
-    std::function<void()> onEscape;
-
-protected:
-    void keyPressEvent(QKeyEvent* event) override {
-        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && onEnter) {
-            onEnter(event->modifiers() & Qt::ShiftModifier);
-            return;
-        }
-        if (event->key() == Qt::Key_Escape && onEscape) {
-            onEscape();
-            return;
-        }
-        QLineEdit::keyPressEvent(event);
-    }
-};
 }  // namespace
 
 UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::move(host)) {
@@ -247,7 +227,7 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     m_findBar->setAttribute(Qt::WA_StyledBackground);
     auto* findLayout = new QHBoxLayout(m_findBar);
     usdcc::ui::scaled::margins(findLayout, 8, 3, 8, 3);
-    auto* findText = new FindLineEdit(m_findBar);
+    auto* findText = new usdcc::ui::FindLineEdit(m_findBar);
     m_findText = findText;
     m_findText->setPlaceholderText(tr("Find"));
     m_findText->setClearButtonEnabled(true);

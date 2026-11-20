@@ -647,6 +647,87 @@ USDCC_TEST(material_editor_keys) {
     }
 }
 
+// Find (docs/MATERIAL_EDITOR.md §4.1): it frames what it finds and leaves the selection be.
+USDCC_TEST(material_editor_find_frames_without_selecting) {
+    Fixture f;
+    using Mark = UsdShadeGraphModel::FindMark;
+    const SdfPath tex("/World/Looks/Wood/Maps/Tex");
+    const auto mark = [&f](const SdfPath& path) {
+        auto* node = f.item(path);
+        return node ? f.panel->model()->findMark(node->nodeId()) : Mark::None;
+    };
+    const auto framed = [&f](const SdfPath& path) {
+        auto* node = f.item(path);
+        if (!node) return false;
+        const QPoint middle = f.panel->view()->mapFromScene(node->sceneBoundingRect().center());
+        return f.panel->view()->viewport()->rect().contains(middle);
+    };
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    const std::vector<SdfPath> selection{kSurface};
+
+    f.panel->view()->setFocus();
+    QTest::keyClick(f.panel->view(), Qt::Key_F, Qt::ControlModifier);
+    settle();
+    CHECK(f.panel->isFindShown(), "Ctrl+F shows the bar");
+    CHECK(f.panel->findField()->currentText() == "Any", "looking at anything to start: %s", qPrintable(f.panel->findField()->currentText()));
+    CHECK(mark(kSurface) == Mark::None, "with no text nothing's dimmed");
+
+    QTest::keyClicks(f.panel->findEdit(), "tex");
+    settle();
+    CHECK(f.panel->findMatches().size() == 2, "a name and a type, across the material: %zu", f.panel->findMatches().size());
+    CHECK(f.panel->currentFindMatch() == 1 && f.panel->shownLevel() == kWood, "it starts on one on this level: %d", f.panel->currentFindMatch());
+    CHECK(f.panel->findCount()->text() == "2 of 2", "and says where it is: %s", qPrintable(f.panel->findCount()->text()));
+    CHECK(mark(kNormal) == Mark::Current, "that's outlined");
+    CHECK(mark(kMaps) == Mark::Found, "a NodeGraph with one inside isn't dimmed");
+    CHECK(mark(kSurface) == Mark::Dimmed, "what isn't found is");
+    CHECK(framed(kNormal), "it's in view");
+    CHECK(f.stages.selectedPaths(f.stage) == selection, "the selection is left alone");
+
+    // Enter steps on, into the NodeGraph the next one's in.
+    QTest::keyClick(f.panel->findEdit(), Qt::Key_Return);
+    settle();
+    CHECK(f.panel->currentFindMatch() == 0, "Enter goes round to the first: %d", f.panel->currentFindMatch());
+    CHECK(f.panel->shownLevel() == kMaps, "entering the NodeGraph it's in: %s", f.panel->shownLevel().GetText());
+    CHECK(mark(tex) == Mark::Current && framed(tex), "framing it");
+    CHECK(f.panel->findCount()->text() == "1 of 2", "%s", qPrintable(f.panel->findCount()->text()));
+    CHECK(f.stages.selectedPaths(f.stage) == selection, "still not selecting it");
+    QTest::keyClick(f.panel->findEdit(), Qt::Key_Return, Qt::ShiftModifier);
+    settle();
+    CHECK(f.panel->currentFindMatch() == 1 && f.panel->shownLevel() == kWood, "Shift+Enter goes back, and out");
+
+    // The dropdown narrows it.
+    f.panel->findField()->setCurrentIndex(f.panel->findField()->findData(static_cast<int>(usdcc::usd::ShadeFindField::Name)));
+    settle();
+    CHECK(f.panel->findMatches().size() == 1 && f.panel->findMatches()[0].path == tex, "Name: only Tex: %zu", f.panel->findMatches().size());
+    CHECK(f.panel->shownLevel() == kMaps, "and it goes there");
+
+    // An edit from anywhere finds again, without moving the view.
+    f.stage->usdStage()->DefinePrim(SdfPath("/World/Looks/Wood/Texture2"), TfToken("Shader"));
+    settle();
+    CHECK(f.panel->findMatches().size() == 2, "a new node named so is found: %zu", f.panel->findMatches().size());
+    CHECK(f.panel->currentFindMatch() == 0 && f.panel->shownLevel() == kMaps, "and it stays on the one it was on");
+
+    // Esc closes it and takes the marks away.
+    QTest::keyClick(f.panel->findEdit(), Qt::Key_Escape);
+    settle();
+    CHECK(!f.panel->isFindShown(), "Esc closes the bar");
+    CHECK(mark(tex) == Mark::None, "nothing's marked");
+    CHECK(f.stages.selectedPaths(f.stage) == selection, "and the selection never changed");
+
+    // Open again, it finds what it had.
+    f.panel->showFind();
+    settle();
+    CHECK(f.panel->findMatches().size() == 2 && f.panel->findField()->currentText() == "Name", "the text and field are kept");
+    QTest::keyClick(f.panel->findEdit(), Qt::Key_Escape);
+    settle();
+
+    // The field is part of the panel's session.
+    MaterialEditorViewPanel other(&f.stages, f.stage, f.undo, "Other");
+    other.restoreSessionState(f.panel->saveSessionState());
+    CHECK(other.findField()->currentText() == "Name", "a duplicate or a session keeps the field");
+}
+
 USDCC_TEST(material_editor_tab_search_adds_a_node) {
     Fixture f;
     f.panel->view()->setFocus();

@@ -337,6 +337,30 @@ std::vector<NodeId> UsdShadeGraphModel::nodesFor(const SdfPath& path) const {
     return ids;
 }
 
+void UsdShadeGraphModel::setFindMarks(std::vector<SdfPath> found, SdfPath current) {
+    m_finding = true;
+    m_found = std::move(found);
+    m_currentFound = std::move(current);
+}
+
+void UsdShadeGraphModel::clearFindMarks() {
+    m_finding = false;
+    m_found.clear();
+    m_currentFound = SdfPath();
+}
+
+UsdShadeGraphModel::FindMark UsdShadeGraphModel::findMark(NodeId id) const {
+    if (!m_finding) return FindMark::None;
+    const Entry* entry = entryOf(id);
+    if (!entry || (entry->node.kind != ShadeNodeKind::Shader && entry->node.kind != ShadeNodeKind::NodeGraph)) return FindMark::Dimmed;
+    const SdfPath& path = entry->node.path;
+    if (!m_currentFound.IsEmpty() && path == m_currentFound) return FindMark::Current;
+    for (const SdfPath& found : m_found) {
+        if (found.HasPrefix(path)) return FindMark::Found;  // it, or inside it
+    }
+    return FindMark::Dimmed;
+}
+
 void UsdShadeGraphModel::togglePage(NodeId id, const std::string& page) {
     const ShadeGraphNode* node = shadeNode(id);
     if (!node) return;

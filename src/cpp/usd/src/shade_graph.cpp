@@ -25,6 +25,7 @@
 #include <pxr/usd/usdUI/tokens.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <initializer_list>
 #include <set>
@@ -445,6 +446,82 @@ ShadeGraph readShadeGraph(const UsdPrim& level, const ShadePageStates& pages) {
     }
     for (Draft& draft : drafts) graph.nodes.push_back(std::move(draft.node));
     return graph;
+}
+
+namespace {
+std::string lowered(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
+// What `field` of a node says, lower case, words apart.
+std::string findText(const UsdPrim& prim, ShadeFindField field) {
+    const auto wants = [field](ShadeFindField one) { return field == ShadeFindField::Any || field == one; };
+    std::string text;
+    const auto add = [&text](const std::string& more) {
+        if (more.empty()) return;
+        text += lowered(more);
+        text += ' ';
+    };
+    if (wants(ShadeFindField::Name)) add(prim.GetName().GetString());
+    if (!prim.IsA<UsdShadeShader>()) {
+        if (wants(ShadeFindField::Type)) add("NodeGraph");
+        return text;
+    }
+    const UsdShadeShader shader(prim);
+    SdrShaderNodeConstPtr definition = ShaderNodeCatalog::definitionOf(shader);
+    if (!definition) {
+        if (wants(ShadeFindField::Type)) {
+            TfToken id;
+            shader.GetShaderId(&id);
+            add(id.GetString());
+        }
+        return text;
+    }
+    if (wants(ShadeFindField::Type)) {
+        add(definition->GetLabel().GetString());
+        add(definition->GetName());
+        add(definition->GetIdentifier().GetString());
+        add(definition->GetFunction().GetString());
+    }
+    if (wants(ShadeFindField::ShadingSystem)) {
+        const std::string system = definition->GetShadingSystem().GetString();
+        add(system);
+        if (const RendererProfile* profile = ShaderNodeCatalog::instance().profile(system)) add(profile->displayName);
+    }
+    if (wants(ShadeFindField::Context)) add(shaderContextOf(*definition));
+    return text;
+}
+
+void findUnder(const UsdPrim& parent, const SdfPath& level, const std::vector<std::string>& words, ShadeFindField field, std::vector<ShadeFindMatch>& found) {
+    for (const UsdPrim& child : parent.GetChildren()) {
+        const bool shader = child.IsA<UsdShadeShader>();
+        const bool container = !shader && isContainer(child);
+        if (shader || container) {
+            const std::string text = findText(child, field);
+            if (std::all_of(words.begin(), words.end(), [&text](const std::string& word) { return text.find(word) != std::string::npos; })) {
+                found.push_back({child.GetPath(), level});
+            }
+        }
+        if (shader) continue;
+        findUnder(child, container ? child.GetPath() : level, words, field, found);  // into a NodeGraph, or through a Scope
+    }
+}
+}  // namespace
+
+UsdPrim shadeFindRoot(const UsdPrim& level) {
+    const std::vector<UsdPrim> chain = shadeLevelChain(level);
+    return chain.empty() ? UsdPrim() : chain.front();
+}
+
+std::vector<ShadeFindMatch> findShadeNodes(const UsdPrim& root, const std::string& text, ShadeFindField field) {
+    std::vector<ShadeFindMatch> found;
+    if (!root || !isContainer(root)) return found;
+    std::vector<std::string> words;
+    for (const std::string& word : TfStringTokenize(lowered(text))) words.push_back(word);
+    if (words.empty()) return found;
+    findUnder(root, root.GetPath(), words, field, found);
+    return found;
 }
 
 std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights) {

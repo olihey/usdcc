@@ -451,7 +451,8 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
     editor for that type, allowed tokens (for a token), connectability, display name and group, and
     documentation (`AddShadeInputDialog`). It refuses a name that's taken, and on a Shader one its
     definition has. `shade_actions::addInput()` authors only what was given.
-- **Keys, over the graph:** Tab searches nodes, Delete or Backspace deletes, F2 renames, Ctrl+D duplicates,
+- **Keys, over the graph:** Tab searches nodes to add, Ctrl+F finds nodes in the material (§4.1), Delete or
+  Backspace deletes, F2 renames, Ctrl+D duplicates,
   Ctrl+C, X and V copy, cut and paste, Ctrl+G groups, Ctrl+Shift+G ungroups, L lays out, F frames. They're
   caught before QtNodes' own, whose Delete would edit its own copy. Right-click offers the same, plus
   what's for the port under the mouse.
@@ -473,6 +474,34 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   - `usdcc.shading.catalog()`, a pybind11 binding of the Qt-free catalog (§5, phase 1).
   - `register_renderer_profile()`, so plugins can add profiles.
   - Definitions are registered by calling `Sdr` directly.
+
+### 4.1 Find
+
+Finding a node that's already in the material, where Tab finds one to add. Ctrl+F over the graph, or
+Find... in the ... menu or a right-click on empty space, shows a bar under the toolbar:
+
+```
+[ Any ▾ ][ uv texture               ✕ ]  2 of 7  [Previous] [Next] ✕
+```
+
+- **The dropdown** says what's looked at in each node: Any (the default: all of these), Name (the prim's
+  name), Type (the definition's label, name, identifier and function, `info:id` for a shader with no
+  definition, "NodeGraph" for a NodeGraph), Shading System (`glslfx`, `mtlx`, and the profile's name,
+  MaterialX) or Context (surface, pattern, ...). It's kept per panel, in a session or a duplicate.
+- **The text:** every word has to be in that, anywhere and in any order, ignoring case. `uv texture`
+  finds a node named `Tex` that's a `UsdUVTexture`.
+- **Where:** the whole material the shown level is in, NodeGraphs included, in the stage's order
+  (`findShadeNodes()` in `shade_graph.h`, Qt-free).
+- **Going to one frames it, and doesn't select it.** It's centred, at a size to read, and a match inside
+  another NodeGraph enters that level first, pinned or not. The stage's selection, and so the Parameters
+  pane and the Attribute Editor, stay as they were. Typing goes to the first match on the shown level, or
+  the first anywhere. Enter or F3 goes to the next, Shift+Enter or Shift+F3 to the previous, round the end.
+  Whether going to one should select it too is to be tried out.
+- **What it shows:** what isn't found is dimmed on the shown level, the one it's on is outlined in amber,
+  and a NodeGraph with a match inside isn't dimmed. The count says "2 of 7", or "No matches".
+- **Live:** an edit from anywhere finds again, staying on the match it was on, without moving the view.
+- **Esc** closes it, in the bar or over the graph, and the marks go. Opened again, it keeps the text and
+  the dropdown and finds again.
 
 ## 5. Phases
 

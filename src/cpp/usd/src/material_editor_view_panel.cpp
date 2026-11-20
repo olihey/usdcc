@@ -1,10 +1,12 @@
 #include "usdcc/usd/material_editor_view_panel.h"
 
+#include "usdcc/ui/find_line_edit.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/usd/add_shade_input_dialog.h"
 #include "usdcc/usd/prim_actions.h"
+#include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/shade_actions.h"
 #include "usdcc/usd/shader_node_catalog.h"
@@ -34,6 +36,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QCursor>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -48,6 +51,7 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -57,6 +61,7 @@
 
 #include <algorithm>
 #include <set>
+#include <utility>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -191,7 +196,66 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_split->setStretchFactor(0, 0);
     m_split->setStretchFactor(1, 1);
     m_split->setStretchFactor(2, 0);
+    // Find: under the toolbar, shown by Ctrl+F (§4.1).
+    m_findBar = new QWidget(container);
+    m_findBar->setObjectName(QStringLiteral("panelToolbar"));
+    m_findBar->setAttribute(Qt::WA_StyledBackground);
+    auto* findLayout = new QHBoxLayout(m_findBar);
+    usdcc::ui::scaled::margins(findLayout, 8, 3, 8, 3);
+    m_findField = new QComboBox(m_findBar);
+    m_findField->setObjectName(QStringLiteral("materialEditorFindField"));
+    m_findField->setToolTip(tr("What to look at in each node"));
+    const auto addField = [this](const QString& text, ShadeFindField field, const QString& toolTip) {
+        m_findField->addItem(text, static_cast<int>(field));
+        m_findField->setItemData(m_findField->count() - 1, toolTip, Qt::ToolTipRole);
+    };
+    addField(tr("Any"), ShadeFindField::Any, tr("All of these"));
+    addField(tr("Name"), ShadeFindField::Name, tr("The node's prim name"));
+    addField(tr("Type"), ShadeFindField::Type, tr("What it is: its definition's label, name, identifier or function, or NodeGraph"));
+    addField(tr("Shading System"), ShadeFindField::ShadingSystem, tr("glslfx, mtlx and so on, or their names, such as MaterialX"));
+    addField(tr("Context"), ShadeFindField::Context, tr("Surface, displacement, volume, pattern and so on"));
+    auto* findEdit = new usdcc::ui::FindLineEdit(m_findBar);
+    m_findEdit = findEdit;
+    m_findEdit->setObjectName(QStringLiteral("materialEditorFind"));
+    m_findEdit->setPlaceholderText(tr("Find nodes"));
+    m_findEdit->setClearButtonEnabled(true);
+    findEdit->onEnter = [this](bool backward) { findNext(backward); };
+    findEdit->onEscape = [this]() { closeFind(); };
+    m_findCount = new QLabel(m_findBar);
+    m_findCount->setObjectName(QStringLiteral("propertyNote"));
+    const auto barButton = [this](const QString& text, const QString& toolTip) {
+        auto* button = new QPushButton(text, m_findBar);
+        button->setAutoDefault(false);
+        button->setToolTip(toolTip);
+        return button;
+    };
+    QPushButton* previous = barButton(tr("Previous"), tr("The previous match (Shift+Enter, Shift+F3)"));
+    QPushButton* next = barButton(tr("Next"), tr("The next match (Enter, F3)"));
+    QToolButton* close = properties::iconButton(QStringLiteral(":/usdcc/theme/close.png"), tr("Close (Esc)"), m_findBar);
+    findLayout->addWidget(m_findField);
+    findLayout->addWidget(m_findEdit, 1);
+    findLayout->addWidget(m_findCount);
+    findLayout->addWidget(previous);
+    findLayout->addWidget(next);
+    findLayout->addWidget(close);
+    m_findBar->setVisible(false);
+    connect(previous, &QPushButton::clicked, this, [this]() { findNext(true); });
+    connect(next, &QPushButton::clicked, this, [this]() { findNext(false); });
+    connect(close, &QToolButton::clicked, this, [this]() { closeFind(); });
+    connect(m_findEdit, &QLineEdit::textChanged, this, [this]() { updateFind(true); });
+    connect(m_findField, &QComboBox::currentIndexChanged, this, [this]() { updateFind(true); });
+    for (const auto& [keys, backward] : {std::pair{QKeySequence(QKeySequence::FindNext), false}, std::pair{QKeySequence(QKeySequence::FindPrevious), true}}) {
+        auto* step = new QShortcut(keys, m_findBar, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+        connect(step, &QShortcut::activated, this, [this, backward = backward]() { findNext(backward); });
+    }
+    // An edit anywhere may change what's found: once it's settled, without moving the view.
+    m_findRefresh = new QTimer(this);
+    m_findRefresh->setSingleShot(true);
+    m_findRefresh->setInterval(50);
+    connect(m_findRefresh, &QTimer::timeout, this, [this]() { updateFind(false); });
+
     layout->addWidget(toolbar);
+    layout->addWidget(m_findBar);
     layout->addWidget(m_split, 1);
     setContentWidget(container);
 
@@ -246,16 +310,20 @@ usdcc::ui::ViewPanel* MaterialEditorViewPanel::duplicate(QWidget* parent) const 
 QJsonObject MaterialEditorViewPanel::saveSessionState() const {
     return {{QStringLiteral("preview"), isPreviewShown()},
             {QStringLiteral("parameters"), areParametersShown()},
-            {QStringLiteral("previewState"), m_preview->saveState()}};
+            {QStringLiteral("previewState"), m_preview->saveState()},
+            {QStringLiteral("findField"), m_findField->currentIndex()}};
 }
 
 void MaterialEditorViewPanel::restoreSessionState(const QJsonObject& state) {
     if (state.contains(QStringLiteral("preview"))) setPreviewShown(state.value(QStringLiteral("preview")).toBool());
     if (state.contains(QStringLiteral("parameters"))) setParametersShown(state.value(QStringLiteral("parameters")).toBool());
     if (state.contains(QStringLiteral("previewState"))) m_preview->restoreState(state.value(QStringLiteral("previewState")).toObject());
+    const int field = state.value(QStringLiteral("findField")).toInt(-1);
+    if (field >= 0 && field < m_findField->count()) m_findField->setCurrentIndex(field);
 }
 
 void MaterialEditorViewPanel::populateOptionsMenu(QMenu* menu) {
+    menu->addAction(tr("Find..."), QKeySequence(QKeySequence::Find), this, [this]() { showFind(); });
     menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
     menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); });
 }
@@ -268,7 +336,9 @@ void MaterialEditorViewPanel::attachStage() {
     m_scene.reset();
     m_model.reset();
     m_primsMoved = {};
+    m_findStageChanged = {};
     m_level = SdfPath();
+    m_findRoot = SdfPath();
     const StageRefPtr& stage = currentStage();
     m_params->setStage(stage);
     m_preview->setStage(stage);
@@ -327,6 +397,9 @@ void MaterialEditorViewPanel::attachStage() {
             const SdfPath moved = pathAfterMoves(m_level, moves);
             if (moved != m_level) showLevel(moved);
         });
+        m_findStageChanged = stage->changed.connect([this](const StageChanges&) {
+            if (isFindShown() && !m_findEdit->text().trimmed().isEmpty()) m_findRefresh->start();
+        });
     }
     pickLevel();
 }
@@ -363,6 +436,128 @@ void MaterialEditorViewPanel::showLevel(const SdfPath& level) {
     if (changed) fitGraph(kSmallestToOpenAt);
     showSelectionInGraph();
     updateSidePane();
+    // Another material is another search; within this one, only the marks are drawn anew.
+    if (isFindShown()) {
+        const UsdPrim root = currentStage() && !level.IsEmpty() ? shadeFindRoot(currentStage()->usdStage()->GetPrimAtPath(level)) : UsdPrim();
+        if ((root ? root.GetPath() : SdfPath()) != m_findRoot) {
+            updateFind(false);
+        } else {
+            updateFindMarks();
+        }
+    }
+}
+
+bool MaterialEditorViewPanel::isFindShown() const { return !m_findBar->isHidden(); }
+
+void MaterialEditorViewPanel::showFind() {
+    const bool wasShown = isFindShown();
+    m_findBar->setVisible(true);
+    m_findEdit->setFocus();
+    m_findEdit->selectAll();
+    if (!wasShown) updateFind(true);
+}
+
+void MaterialEditorViewPanel::closeFind() {
+    if (!isFindShown()) return;
+    m_findBar->setVisible(false);
+    m_findRefresh->stop();
+    m_findMatches.clear();
+    m_findIndex = -1;
+    updateFindMarks();
+    updateFindCount();
+    m_view->setFocus();
+}
+
+void MaterialEditorViewPanel::updateFind(bool frame) {
+    const SdfPath was = m_findIndex >= 0 ? m_findMatches[static_cast<std::size_t>(m_findIndex)].path : SdfPath();
+    m_findMatches.clear();
+    m_findIndex = -1;
+    m_findRoot = SdfPath();
+    if (isFindShown() && currentStage() && !m_level.IsEmpty()) {
+        if (const UsdPrim root = shadeFindRoot(currentStage()->usdStage()->GetPrimAtPath(m_level))) {
+            m_findRoot = root.GetPath();
+            const auto field = static_cast<ShadeFindField>(m_findField->currentData().toInt());
+            m_findMatches = findShadeNodes(root, m_findEdit->text().toStdString(), field);
+        }
+    }
+    const auto indexWhere = [this](const std::function<bool(const ShadeFindMatch&)>& test) {
+        for (std::size_t i = 0; i < m_findMatches.size(); ++i) {
+            if (test(m_findMatches[i])) return static_cast<int>(i);
+        }
+        return -1;
+    };
+    if (frame && !m_findMatches.empty()) {
+        // The first on the level that's shown, else the first anywhere.
+        m_findIndex = std::max(0, indexWhere([this](const ShadeFindMatch& match) { return match.level == m_level; }));
+        showFindMatch();
+        return;
+    }
+    // Still on the one it was on, if that's still found, and the view stays where it is.
+    if (!was.IsEmpty()) m_findIndex = indexWhere([&was](const ShadeFindMatch& match) { return match.path == was; });
+    updateFindMarks();
+    updateFindCount();
+}
+
+void MaterialEditorViewPanel::findNext(bool backward) {
+    if (!isFindShown()) {
+        showFind();
+        return;
+    }
+    if (m_findMatches.empty()) return;
+    const int count = static_cast<int>(m_findMatches.size());
+    if (m_findIndex < 0) {
+        m_findIndex = backward ? count - 1 : 0;
+    } else {
+        m_findIndex = (m_findIndex + (backward ? count - 1 : 1)) % count;
+    }
+    showFindMatch();
+}
+
+void MaterialEditorViewPanel::showFindMatch() {
+    if (m_findIndex < 0 || m_findIndex >= static_cast<int>(m_findMatches.size())) return;
+    const ShadeFindMatch match = m_findMatches[static_cast<std::size_t>(m_findIndex)];
+    // Pinned or not: the pin is about the selection, and this doesn't change it.
+    if (match.level != m_level) showLevel(match.level);
+    updateFindMarks();
+    updateFindCount();
+    if (!m_model || !m_scene) return;
+    for (NodeId id : m_model->nodesFor(match.path)) {
+        auto* node = m_scene->nodeGraphicsObject(id);
+        if (!node) continue;
+        // Framed, as near the middle as the view goes, and big enough to read.
+        if (m_view->transform().m11() < kSmallestToOpenAt) m_view->setTransform(QTransform::fromScale(kSmallestToOpenAt, kSmallestToOpenAt));
+        m_view->centerOn(node);
+        break;
+    }
+}
+
+void MaterialEditorViewPanel::updateFindMarks() {
+    if (!m_model) return;
+    if (!isFindShown() || m_findEdit->text().trimmed().isEmpty()) {
+        m_model->clearFindMarks();
+    } else {
+        std::vector<SdfPath> found;
+        found.reserve(m_findMatches.size());
+        for (const ShadeFindMatch& match : m_findMatches) found.push_back(match.path);
+        m_model->setFindMarks(std::move(found), m_findIndex >= 0 ? m_findMatches[static_cast<std::size_t>(m_findIndex)].path : SdfPath());
+    }
+    if (!m_scene) return;
+    for (NodeId id : m_model->allNodeIds()) {
+        if (auto* node = m_scene->nodeGraphicsObject(id)) node->update();
+    }
+}
+
+void MaterialEditorViewPanel::updateFindCount() {
+    const int count = static_cast<int>(m_findMatches.size());
+    if (!isFindShown() || m_findEdit->text().trimmed().isEmpty()) {
+        m_findCount->clear();
+    } else if (count == 0) {
+        m_findCount->setText(tr("No matches"));
+    } else if (m_findIndex >= 0) {
+        m_findCount->setText(tr("%1 of %2").arg(m_findIndex + 1).arg(count));
+    } else {
+        m_findCount->setText(count == 1 ? tr("1 match") : tr("%1 matches").arg(count));
+    }
 }
 
 void MaterialEditorViewPanel::setPreviewShown(bool shown) { m_previewButton->setChecked(shown); }
@@ -785,6 +980,7 @@ void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePositi
         menu->addSeparator();
         menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); })->setEnabled(editable);
         menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
+        menu->addAction(tr("Find..."), QKeySequence(QKeySequence::Find), this, [this]() { showFind(); });
         return;
     }
 
@@ -886,8 +1082,12 @@ bool MaterialEditorViewPanel::handleKey(QKeyEvent* event, bool run) {
         if (key == Qt::Key_F2) return when([this]() { startRename(); });
         if (key == Qt::Key_Tab) return when([this]() { showNodeSearch(); });
         if (key == Qt::Key_L) return when([this]() { autoLayout(); });
+        if (key == Qt::Key_F3 && isFindShown()) return when([this]() { findNext(false); });
+        if (key == Qt::Key_Escape && isFindShown()) return when([this]() { closeFind(); });
     }
+    if (modifiers == Qt::ShiftModifier && key == Qt::Key_F3 && isFindShown()) return when([this]() { findNext(true); });
     if (modifiers == Qt::ControlModifier) {
+        if (key == Qt::Key_F) return when([this]() { showFind(); });
         if (key == Qt::Key_D) return when([this]() { duplicateSelected(); });
         if (key == Qt::Key_C) return when([this]() { copySelected(); });
         if (key == Qt::Key_X) return when([this]() { cutSelected(); });

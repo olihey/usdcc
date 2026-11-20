@@ -135,6 +135,26 @@ std::vector<ShaderInputInfo> shaderInputs(const PXR_NS::UsdPrim& shader);
 // A definition's default for an input, as text. Empty if it has none.
 std::string defaultValueText(const PXR_NS::UsdPrim& shader, const PXR_NS::TfToken& attribute);
 
+// What Find looks at in a node (docs/MATERIAL_EDITOR.md §4.1). Any is all of them.
+enum class ShadeFindField { Any, Name, Type, ShadingSystem, Context };
+
+// A node Find found: a Shader or NodeGraph, and the level it's drawn on.
+struct ShadeFindMatch {
+    PXR_NS::SdfPath path;
+    PXR_NS::SdfPath level;
+};
+
+// The Shaders and NodeGraphs under `root`, at any depth, whose `field` holds every word of
+// `text`, ignoring case. In the stage's order, depth first. Nothing for an empty text.
+// - Name: the prim's name.
+// - Type: the definition's label, name, identifier and function, or the info:id of a shader
+//   with none; "NodeGraph" for a NodeGraph.
+// - ShadingSystem: "glslfx", "mtlx", ..., and its profile's display name, "MaterialX".
+// - Context: "surface", "pattern", ...
+std::vector<ShadeFindMatch> findShadeNodes(const PXR_NS::UsdPrim& root, const std::string& text, ShadeFindField field = ShadeFindField::Any);
+// The Material, or NodeGraph standing alone, that `level` is in: what Find searches.
+PXR_NS::UsdPrim shadeFindRoot(const PXR_NS::UsdPrim& level);
+
 // Where nodes go, in pixels: in columns by their distance from where the graph ends, on the
 // right, and in each column in the order that crosses the fewest lines it can quickly find.
 // `heights` is each node's.
