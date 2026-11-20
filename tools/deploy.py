@@ -50,7 +50,9 @@ On Linux the folder is a prefix of its own, which is also the Python's
       lib/usd/      OpenUSD's built-in plugins
       lib/python3.XY/   the standard library, and in site-packages: usdcc, pxr
       Qt6/plugins/  Qt's plugins (platforms: xcb, wayland, offscreen, ...)
-      plugin/usd/   OpenUSD's other plugins
+      plugin/usd/   OpenUSD's other plugins, and those of the USD plugin packs,
+                    whose libraries are in lib/
+      usd-plugins/  a file per USD plugin pack, as on Windows
       plugins/, examples/plugins/, resources/preview/, resources/workspaces/, tools/ruff/, tools/uv/,
       sdk/ (its lib/ links to the libraries in lib/), LICENSE.txt, licenses/
 
@@ -197,20 +199,22 @@ def _usd_packs(usd_install):
 
 
 def _pack_dlls(packs):
-    """The names of the packs' DLLs among OpenUSD's own, in its bin and lib."""
+    """The names of the packs' DLLs (.so files on Linux) among OpenUSD's own, in its
+    bin and lib."""
     return [Path(file).name for manifest in packs.values() for file in manifest["files"]
             if file.count("/") == 1 and file.split("/")[0] in ("bin", "lib")]
 
 
-def _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources):
-    """Copies a pack's files to where a Windows deploy has such files, and writes
-    the deploy's usd-plugins/<pack>.json, which lists them there."""
+def _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources, libraries="bin"):
+    """Copies a pack's files to where a deploy has such files, and writes the
+    deploy's usd-plugins/<pack>.json, which lists them there. `libraries` is the
+    folder OpenUSD's own libraries are in: bin on Windows, lib on Linux."""
     licences = f"licenses/{USD_PACKS_DIR}/{pack}/"
     deployed = []
     for file in manifest["files"]:
         folder = file.split("/")[0]
         if folder in ("bin", "lib") and file.count("/") == 1:
-            target = f"bin/{Path(file).name}"  # with OpenUSD's own DLLs
+            target = f"{libraries}/{Path(file).name}"  # with OpenUSD's own libraries
         elif folder == "plugin":
             target = file
         elif file.startswith(licences):
@@ -835,12 +839,25 @@ def deploy_linux(args):
     # --- lib: OpenUSD first, then vcpkg's and the app's -----------------------
     # As on Windows, the app's libraries win where both have one (libpng16, ...).
 
+    # The USD plugin packs in the install, as on Windows: the standard set is
+    # shipped, file by file from each pack's list, and the others' files stay behind.
+    usd_packs = _usd_packs(usd_install)
+    shipped_packs = {} if args.with_blender_mesh_tools else {
+        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
+
     print(f"  OpenUSD libraries and plugins ({usd_install})", flush=True)
     mesh_exclusions = ["*_debug.so*", "libtbbbind*.so*", "libtbb_preview*.so*"] if args.with_blender_mesh_tools else []
-    _copy_linux_tree(usd_install / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES + mesh_exclusions, top_level_only=True)
+    _copy_linux_tree(usd_install / "lib", lib_dir, top_level_only=True,
+                     exclude_files=LINUX_BUILD_ONLY_FILES + mesh_exclusions + _pack_dlls(usd_packs))
     _copy_linux_tree(usd_install / "lib/usd", lib_dir / "usd", exclude_files=LINUX_BUILD_ONLY_FILES)
-    # No USD plugin packs on Linux yet (docs/USD_PLUGINS.md section 7, phase 8).
     _openusd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", _copy_linux_tree)
+    # Here, before the RUNPATHs are set: a pack's libraries get the deploy's too.
+    pack_sources = []
+    for pack, manifest in shipped_packs.items():
+        print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, pack_sources, libraries="lib")
+    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+        print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
     print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
     replaced = _copy_linux_tree(vcpkg_dir / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES, top_level_only=True)
@@ -956,6 +973,7 @@ def deploy_linux(args):
         "",
     ]
     _vcpkg_licences(licenses_dir, sources)
+    sources += pack_sources
     python_licence = next((file for file in (python_stdlib / "LICENSE.txt",
                                              Path(f"/usr/share/doc/python{python_version}/copyright"))
                            if file.is_file()), None)

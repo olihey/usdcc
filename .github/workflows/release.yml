@@ -304,6 +304,11 @@ jobs:
           unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
           echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
 
+      # Required, as in the windows job: a release has every USD plugin pack of
+      # the standard set for its platform (docs/USD_PLUGINS.md section 5).
+      - name: Download the USD plugin packs
+        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
+
       # build.yml's cache, only read: build.yml keeps it.
       - name: Name the vcpkg cache
         id: vcpkg
@@ -344,7 +349,7 @@ jobs:
       - name: Start the deploy
         run: |
           python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" \
-            --expect-version ${{ steps.tag.outputs.version }}
+            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
 
       # The symbols' top folder is the deploy's name: unpacked where the release
       # was, each .debug file lands next to its binary, where gdb looks. xz at

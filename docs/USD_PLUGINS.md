@@ -5,7 +5,8 @@ way it already builds OpenUSD itself, and which of them a release ships. This is
 "USD plugins" item of [CI.md](CI.md) §7.
 
 **Status:** phases 1 and 2 are on `master`, and CI has published the OpenUSD asset for
-Python 3.13 with the Adobe pack. Phase 3, Gatling, is built and checked locally on Windows
+Python 3.13 with the Adobe pack for Windows; its Linux pack, and usdcc's Linux build and
+deploy with it, are built and checked locally (phase 8). Phase 3, Gatling, is built and checked locally on Windows
 and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
 Phase 7, Arnold, is built locally on Windows and renders in usdcc's viewport when
 Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds. The
@@ -57,7 +58,7 @@ rest is a plan.
 
 | Pack | Source and licence | Needs | Against our OpenUSD (26.08, `typhoon/main`) |
 |---|---|---|---|
-| `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check (§7 phase 1), though its README only names USD 23.08–25.11 |
+| `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check, on Windows (§7 phase 1) and on Linux (phase 8), though its README only names USD 23.08–25.11 |
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | Not proven. The last commit is from August 2025; an earlier local attempt needed `/WX` turned off |
@@ -144,7 +145,7 @@ Notes:
   "version": "2026.07",
   "patches": [],
   "cmake": ["-Dpxr_ROOT={usd}", "-DUSD_FILEFORMATS_BUILD_TESTS=OFF", "-DUSD_FILEFORMATS_ENABLE_FBX=OFF", "..."],
-  "platforms": ["win64"],
+  "platforms": ["win64", "linux-x64"],
   "license": "Apache-2.0",
   "set": "standard",
   "check": {
@@ -157,6 +158,12 @@ Notes:
 
 - `{usd}` and `{pack}` in `cmake` become the OpenUSD install and the pack folder.
 - `patches` are relative to `deps/usd-plugins/`.
+- `platforms`: where the pack is built. CI's `windows` and `linux` jobs each take the
+  packs that list theirs.
+- One of Adobe's `cmake` arguments is for Linux only: `-DUSD_FILEFORMATS_ENABLE_CXX11_ABI=ON`.
+  Without it Adobe's build sets `_GLIBCXX_USE_CXX11_ABI=0`, the old `std::string`, and
+  the plugins then don't find OpenImageIO's functions in our OpenUSD, which GCC 13 built
+  with the new one. Windows ignores the argument.
 - An unknown key is an error, so a misspelt one isn't ignored.
 - What Gatling's pin adds (`deps/usd-plugins/gatling.json`):
   - `submodules`: the checkout's submodules too, at the commits it names.
@@ -201,7 +208,18 @@ Notes:
    list of the pack's files, which `deploy.py` and the check go by.
 
 `--install` copies the pack over the OpenUSD install, which is what `build.ps1` did.
-Linux, with RUNPATHs relative to `$ORIGIN`, is phase 8.
+
+**On Linux** it configures with Ninja, and after step 5 gives the pack's binaries RUNPATHs
+relative to `$ORIGIN` (patchelf), so the pack works wherever it is unzipped. A binary is
+changed in two cases, and gets its own folder and the `lib` folder:
+
+- the build linked it by absolute path, to the OpenUSD install's `lib` (Gatling's
+  `hdGatling.so`);
+- it needs a library of `lib`, the pack's or the install's, and its RUNPATH doesn't lead
+  there. Adobe's plugins are installed into `plugin/usd` with `$ORIGIN/.` only, and
+  `libfileformatUtils.so`, which all five need, goes into `lib`.
+
+A prebuilt library that came with an SDK is neither and stays as it is.
 
 **Folders are used as given, not resolved.** A plugin with many submodules, like OpenUSD
 itself, doesn't fit under Windows' 260-character path limit in a deep folder. CI builds in
@@ -249,8 +267,9 @@ self-hosted runner) and is kept as a workflow artifact, never published.
   - `--zips <folder>` takes the zips from a folder first, for a pack built locally.
 - **`build.yml` and `release.yml`** run it with `--packs-only` after unzipping OpenUSD.
   A pack that isn't published is a warning in `build.yml` (it may still be building, and
-  usdcc builds without it) and an error in `release.yml` (`--require-packs`). Windows
-  only, as the packs are.
+  usdcc builds without it) and an error in `release.yml` (`--require-packs`). The
+  `windows` and the `linux` jobs both do: each gets the standard packs whose pins list
+  its platform.
 - **`tools/deploy.py`** no longer copies all of `plugin/usd`:
   - OpenUSD's own plugins come from a list of names (`OPENUSD_PLUGINS`), reviewed against
     the pinned OpenUSD and its flags. The Blender configuration already worked that way.
@@ -261,7 +280,11 @@ self-hosted runner) and is kept as a workflow artifact, never published.
   - The deploy gets `usd-plugins/<pack>.json`, listing the pack's files as they are there.
   - A pack of another set stays behind, with a line saying so. The Blender configuration
     takes no packs: its review covers OpenUSD's own plugins only.
-  - On Linux only the list of OpenUSD's own plugins applies; packs come with phase 8.
+  - On Linux it is the same, with the libraries in `lib/`, beside OpenUSD's, where
+    Windows has `bin/`. The packs go in before the deploy sets its RUNPATHs, so their
+    files get the deploy's (`$ORIGIN/../../lib` in `plugin/usd`, `$ORIGIN` in `lib`) and
+    are among those the deploy checks with `ldd`. The libraries of a pack that is left
+    out stay behind too, though they sit among OpenUSD's own in the install's `lib`.
 - **`tools/ci/smoke_test.py`**, inside the started deploy: OpenUSD finds Storm and Embree
   and loads them from the deploy, and for each pack the deploy says it has, the pin's
   `check` holds (the plugins load from the deploy, the extensions have file formats, the
@@ -418,8 +441,36 @@ Three sets, decided by licence:
      nodes, GPU rendering, Linux, and the self-hosted runner.*
 8. **Linux** for each pack that supports it (all but Aurora's DirectX backend), as
    `linux` jobs in the same matrix. *The job and the build script's RUNPATH step are
-   there since phase 3, with Gatling's pack. Left: the Adobe pack's pin, and
-   `tools/deploy.py` and `tools/fetch_usd.py` taking packs on Linux.*
+   there since phase 3, with Gatling's pack.*
+   - *Adobe's file formats (2026-11-20): the pin lists `linux-x64`. Built and checked
+     locally, in WSL (Ubuntu 24.04, GCC 13, a Python 3.13 from uv) against the published
+     Linux asset; no workflow has run with it. The source needed no patch, and the build
+     takes a minute and a half. Two things were wrong with the first pack, and the check
+     found both: the plugins' RUNPATH didn't lead to `lib` (§4, the build script's Linux
+     step now covers that), and they were built with the old `std::string` (§4, the pin's
+     `-DUSD_FILEFORMATS_ENABLE_CXX11_ABI=ON`). The pack is 34 files, 2.8 MB zipped: five
+     plugins in `plugin/usd`, three libraries in `lib`, the licences. Its zip, unzipped
+     over a second copy of the asset with the build folder moved away, passes the same
+     check as on Windows. zlib is the system's there (`libz.so.1`; the job installs
+     `zlib1g-dev`), since OpenUSD brings none on Linux. The RUNPATH step, tried on
+     Gatling's pack from phase 3, changes nothing in it. The Windows pack wasn't built
+     again locally: the edits rename it, so CI builds it again.*
+   - *usdcc with the pack (2026-11-20): `tools/deploy.py` takes packs on Linux (§4), and
+     the `linux` jobs of `build.yml` and `release.yml` download them with
+     `tools/fetch_usd.py`, which needed no change; `release.yml` requires them and passes
+     `--expect-standard-usd-packs` to the smoke test. Checked locally in WSL, with no
+     workflow run: `fetch_usd.py --packs-only --zips` put the zip built there over the
+     Linux asset; usdcc built against it passes all twelve test programs under Xvfb with
+     llvmpipe, and `usd_plugin_pack_file_formats` reads the four samples (4 of 4, none
+     skipped). Its deploy has the five plugins in `plugin/usd`, the three libraries in
+     `lib`, the licences in `licenses/OpenUSD-plugins/adobe-fileformats/`, the entry in
+     `SOURCES.txt` and `usd-plugins/adobe-fileformats.json`; the deploy's own `ldd` check
+     passes, and the smoke test with `--expect-standard-usd-packs` loads the five plugins
+     from the deploy and opens the samples.*
+   - *One thing about that machine, not the pack: `usdcc_python_tests` needs the Python's
+     `lib` folder on `LD_LIBRARY_PATH` when the Python is uv's, whose program doesn't link
+     its own `libpython`. `actions/setup-python` sets that on a runner.*
+   - *Left: a workflow run of all of it, and Gatling's items from phase 3.*
 
 ## 8. Open questions
 

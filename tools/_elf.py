@@ -49,6 +49,14 @@ def runpath(path):
     return [entry for entry in result.stdout.strip().split(":") if entry]
 
 
+def needed(path):
+    """The names of the libraries an ELF file links (its NEEDED entries)."""
+    result = subprocess.run([_patchelf(), "--print-needed", str(path)], capture_output=True, text=True)
+    if result.returncode != 0:
+        return []
+    return result.stdout.split()
+
+
 def set_runpath(path, entries):
     """Sets an ELF file's RUNPATH to `entries` (a list), or removes it when empty."""
     path = Path(path)

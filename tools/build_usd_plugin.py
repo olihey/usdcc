@@ -109,21 +109,39 @@ def _prune(pack_dir):
             Path(folder).rmdir()
 
 
-def _relative_runpaths(pack_dir):
-    """Linux: points what the build linked by absolute path (the OpenUSD install's
-    lib folder) at the same place relative to the file, so the pack works over an
-    OpenUSD install or a deploy wherever that is. A prebuilt library that came with
-    an SDK has no such path and is left as it is. Returns the files it changed."""
-    from _elf import elf_files, origin_relative, runpath, set_runpath
+def _relative_runpaths(pack_dir, usd):
+    """Linux: makes the pack's binaries find their libraries from wherever the pack
+    is, over an OpenUSD install or in a deploy. Two kinds of file are changed:
+
+      - what the build linked by absolute path (the OpenUSD install's lib folder):
+        that is pointed at the same place relative to the file;
+      - what needs a library of the lib folder, the pack's or the install's, with a
+        RUNPATH that doesn't lead there. Adobe's plugins are installed with
+        "$ORIGIN/." only, and the library they share is in lib.
+
+    Both get the file's own folder and the lib folder, relative to $ORIGIN. A
+    prebuilt library that came with an SDK is neither and is left as it is.
+    Returns the files it changed."""
+    from _elf import elf_files, needed, origin_relative, runpath, set_runpath
+    lib = pack_dir / "lib"
+    in_lib = {file.name for folder in (lib, usd / "lib") if folder.is_dir() for file in folder.iterdir()}
+
+    def folder_of(entry, file):
+        origin = str(file.parent)
+        return os.path.normpath(entry.replace("${ORIGIN}", origin).replace("$ORIGIN", origin))
+
     changed = []
     for file in elf_files(pack_dir):
         entries = runpath(file)
-        if not any(entry.startswith("/") for entry in entries):
-            continue
         kept = [entry for entry in entries if not entry.startswith("/")]
-        for entry in ("$ORIGIN", origin_relative(file, pack_dir / "lib")):
-            if entry not in kept:
+        reached = {folder_of(entry, file) for entry in kept}
+        if len(kept) == len(entries) and (
+                os.path.normpath(lib) in reached or not any(name in in_lib for name in needed(file))):
+            continue
+        for entry in ("$ORIGIN", origin_relative(file, lib)):
+            if folder_of(entry, file) not in reached:
                 kept.append(entry)
+                reached.add(folder_of(entry, file))
         set_runpath(file, kept)
         changed.append(file.relative_to(pack_dir).as_posix())
     return changed
@@ -298,7 +316,7 @@ def main(argv=None):
     if not pack_files(pack_dir):
         fail(f"The {pack} build installed nothing that runs into {pack_dir}")
     if LINUX:
-        print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir)) or 'none to change'}", flush=True)
+        print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir, usd)) or 'none to change'}", flush=True)
 
     # The licences: the plugin's own and what CMake fetched into it, its
     # submodules', and the files the pin names (an SDK's, shipped beside it).

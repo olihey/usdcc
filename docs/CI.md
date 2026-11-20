@@ -342,10 +342,12 @@ has how Linux was brought up, in WSL 2):
   `deps/usd.json`, and the Windows asset's name, are unchanged. Either job may make the
   release; the other adds its zip, and the `windows` job writes the notes.
 - **`build.yml`** builds against it with the same CPython at the same path (pxrConfig.cmake
-  names it), and runs the tests under `xvfb-run` with llvmpipe. vcpkg's cache is the
+  names it), with the standard USD plugin packs for Linux unzipped over it
+  ([USD_PLUGINS.md](USD_PLUGINS.md) §4), and runs the tests under `xvfb-run` with llvmpipe. vcpkg's cache is the
   `windows` job's scheme with the Linux triplet in its keys.
 - **`release.yml`** deploys with `tools/deploy.py`'s Linux layout (a prefix of its own,
-  RUNPATHs relative to `$ORIGIN`, the CPython bundled), moves usdcc's debug info out with
+  RUNPATHs relative to `$ORIGIN`, the CPython bundled, the standard USD plugin packs,
+  which it requires), moves usdcc's debug info out with
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
   `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
 
