@@ -564,6 +564,7 @@ QPointF MaterialEditorViewPanel::mouseScenePosition() const {
 
 SdfPath MaterialEditorViewPanel::addNode(const QString& identifier, QPointF scenePosition) {
     if (!currentStage() || m_level.IsEmpty()) return SdfPath();
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     const SdfPath path = shade_actions::createShader(*m_undo, currentStage(), m_level, identifier.toStdString(), stored(scenePosition));
     if (!path.IsEmpty()) selectAfterEdit({path});
     return path;
@@ -587,6 +588,7 @@ bool MaterialEditorViewPanel::deleteSelected() {
         for (const QtNodes::ConnectionId& line : lines) any = m_model->deleteConnection(line) || any;
         return any;
     }
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     const bool done = shade_actions::deleteNodes(*m_undo, currentStage(), paths);
     if (done) stageManager()->setSelectedPaths(currentStage(), {});
     return done;
@@ -595,6 +597,7 @@ bool MaterialEditorViewPanel::deleteSelected() {
 void MaterialEditorViewPanel::duplicateSelected() {
     const std::vector<SdfPath> paths = selectedPrims();
     if (paths.empty()) return;
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     selectAfterEdit(shade_actions::duplicate(*m_undo, currentStage(), paths, GfVec2f(kPasteOffset, kPasteOffset)));
 }
 
@@ -616,6 +619,7 @@ void MaterialEditorViewPanel::cutSelected() {
 void MaterialEditorViewPanel::paste() {
     const QMimeData* data = QApplication::clipboard()->mimeData();
     if (!data || !data->hasFormat(QString::fromLatin1(kClipboardMime)) || m_level.IsEmpty()) return;
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     selectAfterEdit(shade_actions::pasteFromText(*m_undo, currentStage(), m_level, data->data(QString::fromLatin1(kClipboardMime)).toStdString(),
                                                  GfVec2f(kPasteOffset, kPasteOffset)));
 }
@@ -623,11 +627,14 @@ void MaterialEditorViewPanel::paste() {
 void MaterialEditorViewPanel::groupSelected() {
     const std::vector<SdfPath> paths = selectedPrims();
     if (paths.empty()) return;
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     const SdfPath graph = shade_actions::group(*m_undo, currentStage(), paths);
     if (!graph.IsEmpty()) selectAfterEdit({graph});
 }
 
 void MaterialEditorViewPanel::ungroupSelected() {
+    if (!currentStage()) return;
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     std::vector<SdfPath> all;
     for (const SdfPath& path : selectedPrims()) {
         const UsdPrim prim = currentStage()->usdStage()->GetPrimAtPath(path);
@@ -658,6 +665,7 @@ SdfPath MaterialEditorViewPanel::addBackdrop(QPointF scenePosition) {
         at = around.topLeft();
         size = around.size();
     }
+    const UndoManager::SelectionScope selection(*m_undo, currentStage());  // the selection it makes is part of the step
     const SdfPath path = shade_actions::createBackdrop(*m_undo, currentStage(), m_level, stored(at), GfVec2f(float(size.width()) / kShadeNodePixels, float(size.height()) / kShadeNodePixels));
     if (!path.IsEmpty()) selectAfterEdit({path});
     return path;

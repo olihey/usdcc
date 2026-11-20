@@ -43,6 +43,7 @@ add_executable(usdcc_tests
     rotate_tool_test.cpp
     scene_bounds_test.cpp
     scene_counts_test.cpp
+    selection_undo_test.cpp
     settings_test.cpp
     usd_runtime_info_test.cpp
     usd_file_formats_test.cpp

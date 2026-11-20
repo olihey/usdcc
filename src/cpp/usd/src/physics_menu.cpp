@@ -186,7 +186,10 @@ void PhysicsMenu::rebuild() {
     const std::vector<SdfPath> selection = stage ? m_stageManager->selectedPaths(stage) : std::vector<SdfPath>{};
     const bool canEdit = stage && m_undo;
 
-    auto select = [this, stage](const SdfPath& path) {
+    // Makes a prim and selects it, as one undo step.
+    auto select = [this, stage](const std::function<SdfPath()>& make) {
+        const UndoManager::SelectionScope selection(*m_undo, stage);
+        const SdfPath path = make();
         if (!path.IsEmpty()) m_stageManager->setSelectedPaths(stage, {path});
     };
     QAction* body = addAction(tr("Make Rigid Body"), this, [this, stage, selection]() {
@@ -203,12 +206,12 @@ void PhysicsMenu::rebuild() {
     collider->setToolTip(tr("The selection stays where it is, and bodies land on it: CollisionAPI on its geometry"));
     collider->setEnabled(canEdit && !selection.empty());
     QAction* ground = addAction(tr("Add Ground Plane"), this,
-                                [this, stage, select]() { select(physics_actions::addGroundPlane(*m_undo, stage)); });
+                                [this, stage, select]() { select([&]() { return physics_actions::addGroundPlane(*m_undo, stage); }); });
     ground->setObjectName(QStringLiteral("physicsAddGroundPlane"));
     ground->setToolTip(tr("A plane at the up axis' zero that bodies land on"));
     ground->setEnabled(canEdit);
     QAction* scene = addAction(tr("Add Physics Scene"), this,
-                               [this, stage, select]() { select(physics_actions::addPhysicsScene(*m_undo, stage)); });
+                               [this, stage, select]() { select([&]() { return physics_actions::addPhysicsScene(*m_undo, stage); }); });
     scene->setObjectName(QStringLiteral("physicsAddScene"));
     scene->setToolTip(tr("Gravity for the stage's simulation; without one, it uses Earth's down the up axis"));
     scene->setEnabled(canEdit);

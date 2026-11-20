@@ -8,6 +8,7 @@
 #include "usdcc/usd/sim_cache.h"
 
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include "usdcc/core/log.h"
 
@@ -230,6 +231,8 @@ void apply(StageManager& stageManager, const StageRefPtr& stage, const QJsonObje
     if (dropped > 0) {
         USDCC_LOG_INFO("usdcc.session", "{}: {} selected prim(s) are gone", name.toStdString(), dropped);
     }
+    // As the session left it, not something to undo.
+    const UndoManager::SelectionPause notAStep;
     stageManager.setSelectedPaths(stage, std::move(selection));
 }
 

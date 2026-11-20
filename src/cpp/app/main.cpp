@@ -325,6 +325,7 @@ int main(int argc, char** argv) {
     usdcc::usd::defineRecentFilesSetting(&app);
     const auto recentFilesConnection = usdcc::usd::rememberOpenedStages(stageManager);
     auto undoManager = std::make_shared<usdcc::usd::UndoManager>();
+    undoManager->trackSelection(stageManager);  // selecting is undone and redone too
     // The ViewPanel types the Stages menu (and the viewport for a newly opened
     // stage) can create; filled in below, once the tool set exists. Declared
     // before `window` so it outlives the menu that reads it.

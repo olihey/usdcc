@@ -179,6 +179,10 @@ The rule: **one Run of a script is one undo step per stage it changed**, named a
   `undo_manager.begin_edit/end_edit`.
 - `usdcc.usd.undo()`, `redo()`, `can_undo()`, `can_redo()` drive the current stage's stack,
   the same as Edit > Undo/Redo.
+- The selection is in the history too. What a run selects with `usdcc.usd.select()` is part of
+  the run's step, undone and redone with its edits. A run that only selects gives one step,
+  named for the selection ("Select Chair"). Outside a run or an `edit()`, each `select()` is a
+  step of its own, as a click in the Outliner is.
 
 Exit-criterion check: a script opens a stage, defines a prim, sets an attribute. Edit > Undo
 removes the prim and restores the attribute in one step, and Redo brings both back, exactly

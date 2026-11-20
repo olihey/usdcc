@@ -102,7 +102,8 @@ its old place.
 - **Inactive prims stay in the Outliner,** greyed, as they do when deactivated by hand. That shows the prim is still there, in a lower
   layer, and can be activated again.
 - **The selection:** deleted prims are dropped from it. Deactivated ones stay selected.
-- **Undo** brings the prims back but not the selection.
+- **Undo** brings the prims back, selected as they were: the delete and what it does to the selection are one step
+  (`UndoManager::SelectionScope`).
 
 ### 3.7 Muted layers
 

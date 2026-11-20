@@ -51,6 +51,7 @@ void addCreateEntries(QMenu* menu, StageManager* stageManager, const StageRefPtr
     const PXR_NS::SdfPath parent = target.parent;
     auto addEntry = [=](QMenu* into, const QString& label, const std::string& type, const QString& toolTip) {
         QAction* action = into->addAction(typeIcon(type), label, menu, [=]() {
+            const UndoManager::SelectionScope selection(*undo, stage);  // selecting it is part of the step
             const PXR_NS::SdfPath path = prim_actions::createPrim(*undo, stage, parent, type);
             if (!path.IsEmpty() && stageManager) stageManager->setSelectedPaths(stage, {path});
         });
