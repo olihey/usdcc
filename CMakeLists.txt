@@ -129,9 +129,7 @@ if(USDCC_LINK_RELEASE_QT)
 endif()
 
 # QWindowKit: frameless window + custom title bar (usdcc::ui::MainWindow's
-# title bar). Vendored as a git submodule because vcpkg has no port for it;
-# it tracks olihey/qwindowkit, a fork carrying the fix for maximizing through
-# Windows (stdware/qwindowkit#256) until that is merged upstream.
+# title bar). Vendored as a git submodule because vcpkg has no port for it.
 # Static and Widgets-only (no Quick, examples, tests or install), and without
 # its system-theme "style agent" — usdcc has one fixed dark theme.
 set(QWINDOWKIT_BUILD_STATIC ON CACHE BOOL "" FORCE)

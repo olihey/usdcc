@@ -586,9 +586,9 @@ things that will bite later if not addressed early:
     now frameless; its `menuWidget` is a `TitleBar` (`title_bar.h`/`.cpp`: logo, the window's
     `QMenuBar`, centered title, minimize/maximize/close buttons — plain Qt, no QWindowKit types),
     and a `QWK::WidgetWindowAgent` supplies the native behaviour. QWindowKit is vendored as a git
-    submodule at `external/qwindowkit` (vcpkg has no port; the submodule tracks the fork
-    `olihey/qwindowkit`, pinned by the gitlink to `69a647a`: upstream `main` plus the fix for
-    maximizing through Windows, stdware/qwindowkit#256, until that is merged) and built static,
+    submodule at `external/qwindowkit` (vcpkg has no port; upstream `stdware/qwindowkit`,
+    which since stdware/qwindowkit#258 has the fix for maximizing through Windows that usdcc
+    needed, stdware/qwindowkit#256) and built static,
     Widgets-only, without its system-theme "style agent" via `add_subdirectory` in the top-level
     `CMakeLists.txt`. `MainWindow` registers the title bar as the agent's
     drag area, the menu bar as hit-test-visible, and the logo/buttons as system buttons (which is
