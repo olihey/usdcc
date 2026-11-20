@@ -24,6 +24,10 @@ concurrency:
 
 jobs:
   windows:
+    # A pull request from a branch of this repository is merged as soon as it
+    # is opened (docs/RELEASE.md §8), and the push to master that makes is
+    # built. Only a fork's pull request is built as one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
     runs-on: windows-2022
     timeout-minutes: 300
@@ -204,6 +208,10 @@ jobs:
   # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
   # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
   linux:
+    # A pull request from a branch of this repository is merged as soon as it
+    # is opened (docs/RELEASE.md §8), and the push to master that makes is
+    # built. Only a fork's pull request is built as one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     defaults:

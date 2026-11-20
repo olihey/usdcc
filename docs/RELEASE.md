@@ -13,9 +13,11 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 **Status:** built (§5).
 
-**To make a release:** on GitHub, Releases > Draft a new release, a new tag that is the
-version (`0.2.0` or `v0.2.0`, or `0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes,
-then Publish. About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
+**To make a release:** write its section of [CHANGELOG.md](../CHANGELOG.md) and merge it
+(§8). Then on GitHub, Releases > Draft a new release, a new tag that is the
+version (`0.2.0` or `v0.2.0`, or `0.2.0-beta.1` with "Set as a pre-release") on `master`, the notes
+(that section, then "Generate release notes" for the list of pull requests),
+then Publish; or do both from a shell (§8). About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
 its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
 same tag (Actions > Release > Run workflow).
 
@@ -272,3 +274,67 @@ and 31 Ubuntu source packages. The Windows receipt cannot approve Linux.
 | 1 | Should `build.yml` keep the deploy zip of every `master` build as a workflow artifact too (CI.md §7, "Deploy artifact")? | Yes, once phase 2 works: the same steps 6–8, kept for a few days, for testing a build before releasing it |
 | 2 | The repository's Releases page also lists the `deps/…` prereleases (OpenUSD, PySide6) | Fine for now: they're prereleases, so they never become "Latest". Move them to a separate repository if they crowd the page |
 | 3 | An installer (MSI or similar) rather than a zip? | Done, beside the 7z: Velopack's, which also updates an install ([UPDATES.md](UPDATES.md)). A browser's download mark on the 7z made Defender scan each of its unsigned DLLs at the first start |
+
+## 8. Pull requests, the changelog and release notes
+
+A release's notes say what changed since the one before. Three things make them, and
+each feeds the next.
+
+**Every change reaches `master` through a pull request.** Not for review: it is merged as
+soon as it is opened. The pull request is where the change is described, and what GitHub
+builds a release's notes from. A commit pushed straight to `master` is in no release's
+generated notes.
+
+1. The work is committed on a branch of its own, and the branch is pushed.
+2. `gh pr create --base master`, with:
+   - **a title** that says what changed, as the commit's subject does. It becomes a line of
+     the release's notes, so it's written for someone who uses usdcc, not for whoever
+     reads the diff;
+   - **a description**: what changed and why, and how it was checked;
+   - **one label**, which picks the heading the title goes under:
+
+     | Label | Heading | For |
+     |---|---|---|
+     | `enhancement` | New | A feature, or more of one |
+     | `bug` | Fixed | Something that was wrong, in the app or a test |
+     | `build` | Build, CI and packaging | The build, the workflows, dependencies, the deploy, the installer |
+     | `documentation` | Plans and documentation | A plan, a spike's results, the docs |
+     | `skip-changelog` | (left out) | What no reader of the notes needs, such as a typo |
+
+     `.github/release.yml` maps the labels to the headings. A pull request with none of
+     them is listed under "Other changes".
+3. `gh pr merge <number> --squash`: one commit on `master` per pull request, with the pull
+   request's number in its subject. The repository deletes the branch once it's merged.
+
+`build.yml` doesn't build such a pull request, only the push to `master` its merge makes:
+the two jobs are skipped for a pull request from a branch of this repository, and run for
+one from a fork ([CI.md](CI.md) §4). So nothing gates the merge. To have the Build gate
+it, protect `master` with the two jobs as required checks, drop that condition, and merge
+with `gh pr merge --auto`; that is about 25 minutes per change.
+
+**[CHANGELOG.md](../CHANGELOG.md) gets a section per release, written when the release is
+made.** Not a line per pull request under an "Unreleased" heading: several sessions merge
+into `master` at once, and all of them editing the same lines would conflict each time.
+The section is written from `git log <last tag>..master` and the descriptions of those
+pull requests, in the words of someone using the app, under the same headings as the
+labels. A plain `## <version> - <date>` heading starts it, newest first. It goes in by a
+pull request like any other change (label `documentation`), before the tag, so the
+release's own commit has it.
+
+**The release's notes are that section, then GitHub's generated list.** From a shell:
+
+```
+python tools/release_notes.py 2026.11.21 > notes.md
+gh release create 2026.11.21 --target master --title 2026.11.21 --notes-file notes.md --generate-notes
+```
+
+`tools/release_notes.py` prints the version's section without its heading, turns links to
+files in the repository into links to them at the tag, and fails when the changelog has no
+such section, so a release isn't published with empty notes. `--generate-notes` adds, under
+it, the pull requests merged since the last release, grouped by label, and a link to the
+full comparison. Publishing the release starts `release.yml` (§4), as it does from the
+website.
+
+The releases up to `2026.11.20` were made before this: their commits went straight to
+`master`, so their generated notes are only the comparison link, and their sections in
+the changelog were written afterwards from the commits.
