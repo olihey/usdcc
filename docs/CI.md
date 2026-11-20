@@ -181,9 +181,12 @@ the whole job 2 h 3 min, inside the 6-hour job limit. The runner started with 79
 
 ## 4. Workflow `build.yml`
 
-Runs on pushes to `master`, and on pull requests from forks. A pull request from a branch
-of this repository is merged as soon as it is opened ([RELEASE.md](RELEASE.md) §8), so
-both jobs are skipped for it, and the push to `master` its merge makes is what gets built.
+Runs on pull requests and on pushes to `master`. Its two jobs, `windows` and `linux`, are
+`master`'s required checks: a pull request is merged once both pass, and stays open when
+one fails ([RELEASE.md](RELEASE.md) §8). What a pull request builds is its branch merged
+into `master` as it was when the run started. The push to `master` the merge makes is
+built again: that run saves the vcpkg cache (step 5), and it is the one that has the
+pull requests merged in the meantime together.
 
 1. Check out usdcc with submodules (`external/vcpkg`, `external/qwindowkit`), then
    fetch the vcpkg submodule's full history. `actions/checkout` clones submodules at

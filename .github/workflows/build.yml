@@ -1,5 +1,6 @@
 # Builds usdcc on Windows and Linux against the prebuilt OpenUSD that
-# deps-usd.yml publishes, and runs the tests (docs/CI.md §4). vcpkg's packages
+# deps-usd.yml publishes, and runs the tests (docs/CI.md §4): for a pull
+# request, whose merge it gates, and for each push to master. vcpkg's packages
 # (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
 # actions/cache, one per platform.
 name: Build
@@ -23,11 +24,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Both jobs are master's required checks: a pull request is merged, by GitHub's
+  # auto-merge, once they pass, and stays open when one fails (docs/RELEASE.md
+  # §8). A job that is renamed has to be renamed in master's protection too.
   windows:
-    # A pull request from a branch of this repository is merged as soon as it
-    # is opened (docs/RELEASE.md §8), and the push to master that makes is
-    # built. Only a fork's pull request is built as one.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
     runs-on: windows-2022
     timeout-minutes: 300
@@ -208,10 +208,6 @@ jobs:
   # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
   # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
   linux:
-    # A pull request from a branch of this repository is merged as soon as it
-    # is opened (docs/RELEASE.md §8), and the push to master that makes is
-    # built. Only a fork's pull request is built as one.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     defaults:

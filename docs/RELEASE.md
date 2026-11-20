@@ -15,7 +15,7 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 
 **To make a release:** write its section of [CHANGELOG.md](../CHANGELOG.md) and merge it
 (§8). Then on GitHub, Releases > Draft a new release, a new tag that is the
-version (`2026.12.1`, or `2026.12.1-beta.1` with "Set as a pre-release"; §1 says which
+version (`26.12.1`, or `26.12.1-beta.1` with "Set as a pre-release"; §1 says which
 number is next) on `master`, the notes
 (that section, then "Generate release notes" for the list of pull requests),
 then Publish; or do both from a shell (§8). About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
@@ -24,19 +24,20 @@ same tag (Actions > Release > Run workflow).
 
 ## 1. Decisions
 
-- **The release's tag is the version.** You create a release with the tag `2026.12.1` (or
-  `2026.12.1-beta.1` for a prerelease; a leading `v`, as in `v2026.12.1`, works too), and
-  that build is version `2026.12.1`. Nothing to bump by
+- **The release's tag is the version.** You create a release with the tag `26.12.1` (or
+  `26.12.1-beta.1` for a prerelease; a leading `v`, as in `v26.12.1`, works too), and
+  that build is version `26.12.1`. Nothing to bump by
   hand before releasing; the hand-kept `0.1.0` in `CMakeLists.txt` goes.
-- **A version is `YYYY.MM.N`:** the year, the month without a leading zero, and a counter
-  that starts at 1 each month and goes up by one with every release. `2026.12.2` is
-  December 2026's second release, whether that is the same day as the first or two weeks
-  later. It stays three numbers that only go up, because an install is only offered a
-  higher version: [UPDATES.md](UPDATES.md) §5, "Version numbers", says why a fourth number
-  or a suffix doesn't do, how to find the next number, and that November 2026 carries on
-  from `2026.11.20`. The releases before `2026.11.18` were `0.0.1` to `0.0.3`.
+- **A version is `YY.MM.N`:** the year's last two digits, the month without a leading
+  zero, and a counter that starts at 1 each month and goes up by one with every release.
+  `26.12.2` is December 2026's second release, whether that is the same day as the first
+  or two weeks later. It stays three numbers that only go up, because an install is only
+  offered a higher version: [UPDATES.md](UPDATES.md) §5, "Version numbers", says why a
+  fourth number or a suffix doesn't do, how to find the next number, and what the change
+  from four-digit years means for the installs of `2026.11.18` to `2026.11.20`. Those
+  releases, and `0.0.1` to `0.0.3` before them, are deleted from GitHub, tags and all.
 - **Every other build is a development build**, named after the last release before it:
-  `2026.12.1+5.3b70ef2` is 5 commits after `2026.12.1`, at commit `3b70ef2`. The About dialog
+  `26.12.1+5.3b70ef2` is 5 commits after `26.12.1`, at commit `3b70ef2`. The About dialog
   says "Development build" for these. With no release tag yet, it's `0.0.0+<commit>`.
 - **CI builds the archive from the tag, not from `master`:** exactly the commit you released.
 - **The archive is `tools/deploy.py`'s folder**, as it is today, so a release is what you
@@ -53,17 +54,17 @@ same tag (Actions > Release > Run workflow).
 
 **Where it comes from.** `cmake/modules/UsdccVersion.cmake` works it out:
 
-1. `-DUSDCC_VERSION=2026.12.1`, which the release workflow passes from the tag.
+1. `-DUSDCC_VERSION=26.12.1`, which the release workflow passes from the tag.
 2. Otherwise `git describe --tags --match "v[0-9]*" --match "[0-9]*"`: the last release
    tag, the commits since it, the commit, and whether files are changed (`+dirty`).
 3. Otherwise (no git, no tags) `0.0.0`.
 
 **Two parts, updated at different times:**
 
-- **The release number** (`2026.12.1`), worked out at configure time. It's
+- **The release number** (`26.12.1`), worked out at configure time. It's
   `project(VERSION)`, and it's what C++ plugins are checked against (`built_for.usdcc`,
-  [PLUGIN_SDK.md](PLUGIN_SDK.md) §3). So a plugin built for 2026.12.1 loads in 2026.12.1
-  and in development builds after it, but not in 2026.12.2, without anyone having to
+  [PLUGIN_SDK.md](PLUGIN_SDK.md) §3). So a plugin built for 26.12.1 loads in 26.12.1
+  and in development builds after it, but not in 26.12.2, without anyone having to
   remember to raise a version.
 - **The build's identity** (commits since the tag, commit, `dirty`, build date), written at
   build time into a small generated source in `usdcc_core` (`cmake/scripts/write_version.cmake`).
@@ -79,7 +80,7 @@ tags, so they're `0.0.0+<commit>`.
 `isReleaseBuild()`, `commit()`, `buildDate()`), used by:
 
 - the About dialog (§3);
-- the log's first line at startup ("usdcc 2026.12.1+5.3b70ef2 (development build) starting"),
+- the log's first line at startup ("usdcc 26.12.1+5.3b70ef2 (development build) starting"),
   so every log file says which build wrote it;
 - Python, as `usdcc.app.version()` and `usdcc.app.is_release_build()`, for scripts and
   plugins;
@@ -123,8 +124,11 @@ finds it ([CI.md](CI.md) §8). No PySide6 on Linux yet.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand
 (`workflow_dispatch`) with a tag, to rebuild a release whose run failed.
 
-1. **Check the tag.** It has to be a version (`2026.12.1`, `v2026.12.1`,
-   `2026.12.1-beta.1`): three numbers, and nothing after them but a prerelease's suffix.
+1. **Check the tag.** It has to be a version (`26.12.1`, `v26.12.1`,
+   `26.12.1-beta.1`): a two-digit year, a month from 1 to 12, a counter from 1, none
+   with a leading zero, and nothing after them but a prerelease's suffix. So a tag with
+   the year in full (`2026.12.1`), which every install would take for the newest release
+   from then on ([UPDATES.md](UPDATES.md) §5), is turned down.
    The first version of this workflow only took a tag with the `v`, and turned down the
    first release, `0.0.1`.
    Otherwise the run fails before building anything.
@@ -289,10 +293,11 @@ and 31 Ubuntu source packages. The Windows receipt cannot approve Linux.
 A release's notes say what changed since the one before. Three things make them, and
 each feeds the next.
 
-**Every change reaches `master` through a pull request.** Not for review: it is merged as
-soon as it is opened. The pull request is where the change is described, and what GitHub
-builds a release's notes from. A commit pushed straight to `master` is in no release's
-generated notes.
+**Every change reaches `master` through a pull request, merged once its Build passes.**
+Not for review: nobody has to approve it. The pull request is where the change is
+described, what gets built and tested before it is on `master`, and what GitHub builds a
+release's notes from. A commit pushed straight to `master` is in no release's generated
+notes.
 
 1. The work is committed on a branch of its own, and the branch is pushed.
 2. `gh pr create --base master`, with:
@@ -312,14 +317,41 @@ generated notes.
 
      `.github/release.yml` maps the labels to the headings. A pull request with none of
      them is listed under "Other changes".
-3. `gh pr merge <number> --squash`: one commit on `master` per pull request, with the pull
-   request's number in its subject. The repository deletes the branch once it's merged.
+3. `gh pr merge <number> --squash --auto`, right after creating it. Opening the pull
+   request starts `build.yml` ([CI.md](CI.md) §4), and GitHub merges it when both jobs
+   have passed, about 25 minutes later: one commit on `master` per pull request, with the
+   pull request's number in its subject. The repository deletes the branch once it's
+   merged.
+4. **When the Build fails, nothing happens:** the pull request stays open and `master` is
+   as it was. A push to the branch that fixes it starts the Build again, and the merge
+   follows by itself. `gh pr merge <number> --disable-auto` takes the merge back.
 
-`build.yml` doesn't build such a pull request, only the push to `master` its merge makes:
-the two jobs are skipped for a pull request from a branch of this repository, and run for
-one from a fork ([CI.md](CI.md) §4). So nothing gates the merge. To have the Build gate
-it, protect `master` with the two jobs as required checks, drop that condition, and merge
-with `gh pr merge --auto`; that is about 25 minutes per change.
+Two settings of the repository do the waiting, so nobody has to watch the run:
+
+- **`master` is protected, with `windows` and `linux` as required status checks.** These
+  are `build.yml`'s two jobs, by name. The branch doesn't have to be level with `master`
+  ("Require branches to be up to date" is off): several sessions merge at once, and each
+  would otherwise build again after every other merge. Administrators aren't held to it,
+  so the owner can still merge by hand (`gh pr merge --squash --admin`) when the Build
+  itself is what's broken.
+- **Auto-merge is allowed** (Settings > General > Pull Requests), which is what `--auto`
+  needs.
+
+```
+gh api -X PATCH repos/olihey/usdcc -F allow_auto_merge=true
+gh api -X PUT repos/olihey/usdcc/branches/master/protection --input protection.json
+```
+
+with `protection.json`:
+
+```json
+{
+  "required_status_checks": { "strict": false, "contexts": ["windows", "linux"] },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+```
 
 **[CHANGELOG.md](../CHANGELOG.md) gets a section per release, written when the release is
 made.** Not a line per pull request under an "Unreleased" heading: several sessions merge
@@ -333,8 +365,8 @@ release's own commit has it.
 **The release's notes are that section, then GitHub's generated list.** From a shell:
 
 ```
-python tools/release_notes.py 2026.11.21 > notes.md
-gh release create 2026.11.21 --target master --title 2026.11.21 --notes-file notes.md --generate-notes
+python tools/release_notes.py 26.11.1 > notes.md
+gh release create 26.11.1 --target master --title 26.11.1 --notes-file notes.md --generate-notes
 ```
 
 `tools/release_notes.py` prints the version's section without its heading, turns links to
@@ -344,6 +376,7 @@ it, the pull requests merged since the last release, grouped by label, and a lin
 full comparison. Publishing the release starts `release.yml` (§4), as it does from the
 website.
 
-The releases up to `2026.11.20` were made before this: their commits went straight to
+The releases up to `2026.11.20` (since deleted, [UPDATES.md](UPDATES.md) §5) were made
+before this: their commits went straight to
 `master`, so their generated notes are only the comparison link, and their sections in
 the changelog were written afterwards from the commits.

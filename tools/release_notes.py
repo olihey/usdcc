@@ -1,14 +1,14 @@
 """Prints one release's section of CHANGELOG.md, for the release's notes on GitHub.
 
-A section starts at its `## <version>` heading (`## 2026.11.20 - 2026-11-20`) and
+A section starts at its `## <version>` heading (`## 26.12.1 - 2026-12-03`) and
 ends before the next one. The heading itself is left out: the release's page has
 the version as its title. The tag may have a leading v, as release.yml allows.
 Links to files in the repository (docs/PEERS.md) become links to them at the tag.
 Exits with 1, and says so, when the changelog has no section for the version, so
 a release isn't made with empty notes (docs/RELEASE.md section 8).
 
-    python tools/release_notes.py 2026.11.20 > notes.md
-    gh release create 2026.11.20 --target master --title 2026.11.20 --notes-file notes.md --generate-notes
+    python tools/release_notes.py 26.12.1 > notes.md
+    gh release create 26.12.1 --target master --title 26.12.1 --notes-file notes.md --generate-notes
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def section(text: str, version: str) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("version", help="the release's tag, such as 2026.11.20")
+    parser.add_argument("version", help="the release's tag, such as 26.12.1")
     parser.add_argument("--changelog", type=Path, default=CHANGELOG, help="the file to read (CHANGELOG.md)")
     parser.add_argument("--repository", default=REPOSITORY, help="where the changelog's relative links point")
     args = parser.parse_args()
