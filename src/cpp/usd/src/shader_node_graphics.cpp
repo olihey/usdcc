@@ -28,6 +28,9 @@ constexpr int kBottomMargin = 6;
 constexpr int kMinWidth = 140;
 constexpr int kTextInset = 12;
 constexpr double kDotDiameter = 9.0;
+// Find: what it didn't find fades, and the one it's on is outlined.
+constexpr double kFindDimmedOpacity = 0.3;
+const QColor kFindCurrentColor(255, 189, 46);
 
 QFont captionFont() {
     QFont font = QApplication::font();
@@ -269,7 +272,10 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
 
     constexpr double kRadius = 5.0;
     const QRectF body(QPointF(0, 0), QSizeF(geometry.size(id)));
+    painter->save();  // for Find's opacity
     painter->setRenderHint(QPainter::Antialiasing);
+    const UsdShadeGraphModel::FindMark mark = model.findMark(id);
+    if (mark == UsdShadeGraphModel::FindMark::Dimmed) painter->setOpacity(painter->opacity() * kFindDimmedOpacity);
 
     // The body, and its header in the kind of node's colour.
     QPainterPath outline;
@@ -289,6 +295,13 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
     painter->setPen(border);
     painter->setBrush(Qt::NoBrush);
     painter->drawPath(outline);
+    if (mark == UsdShadeGraphModel::FindMark::Current) {
+        // Inside the body, as its bounding box has little room above and below.
+        QPainterPath inner;
+        inner.addRoundedRect(body.adjusted(1.5, 1.5, -1.5, -1.5), kRadius - 1, kRadius - 1);
+        painter->setPen(QPen(kFindCurrentColor, 3.0));
+        painter->drawPath(inner);
+    }
 
     // What it is.
     const QRectF header = geometry.headerRect(id).adjusted(kTextInset, 4, -kTextInset, -4);
@@ -332,6 +345,7 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
         painter->setPen(port.authored || port.connected ? QColor(225, 225, 228) : QColor(150, 150, 155));
         painter->drawText(rect.adjusted(kTextInset, 0, -kTextInset, 0), (input ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter, rowText(*node, row));
     }
+    painter->restore();
 }
 
 }  // namespace usdcc::usd

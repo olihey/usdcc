@@ -16,6 +16,7 @@
 #include <memory>
 #include <vector>
 
+class QComboBox;
 class QHBoxLayout;
 class QKeyEvent;
 class QLabel;
@@ -23,6 +24,7 @@ class QLineEdit;
 class QMouseEvent;
 class QSplitter;
 class QStackedWidget;
+class QTimer;
 class QToolButton;
 
 namespace QtNodes {
@@ -91,6 +93,22 @@ public:
     // What a right-click there offers, on what's under it.
     void populateGraphMenu(QMenu* menu, QPointF scenePosition);
 
+    // Find (docs/MATERIAL_EDITOR.md §4.1): a bar under the toolbar, Ctrl+F, over the whole
+    // material. It frames what it finds, entering the level that's on, and leaves the
+    // selection alone. What it didn't find on the shown level is dimmed.
+    void showFind();
+    void closeFind();
+    bool isFindShown() const;
+    // The next match, or the previous one, round the end. F3 and Shift+F3.
+    void findNext(bool backward = false);
+    QLineEdit* findEdit() const { return m_findEdit; }
+    // Any, Name, Type, Shading System or Context: ShadeFindField, as the item's data.
+    QComboBox* findField() const { return m_findField; }
+    QLabel* findCount() const { return m_findCount; }
+    const std::vector<ShadeFindMatch>& findMatches() const { return m_findMatches; }
+    // Into findMatches(); -1 when it isn't on one.
+    int currentFindMatch() const { return m_findIndex; }
+
     QtNodes::GraphicsView* view() const { return m_view; }
     QtNodes::BasicGraphicsScene* scene() const { return m_scene.get(); }
     UsdShadeGraphModel* model() const { return m_model.get(); }
@@ -132,8 +150,21 @@ private:
     // Keeps the preview's picture square, as wide as the pane on the right, with the
     // Parameters below in what's left (docs/MATERIAL_EDITOR.md §7.5).
     void fitPreview();
+    // Finds again. `frame`: and goes to the first match, on this level if one is.
+    void updateFind(bool frame);
+    void showFindMatch();
+    void updateFindMarks();
+    void updateFindCount();
 
     std::shared_ptr<UndoManager> m_undo;
+    QWidget* m_findBar = nullptr;
+    QLineEdit* m_findEdit = nullptr;
+    QComboBox* m_findField = nullptr;
+    QLabel* m_findCount = nullptr;
+    QTimer* m_findRefresh = nullptr;
+    std::vector<ShadeFindMatch> m_findMatches;
+    int m_findIndex = -1;
+    PXR_NS::SdfPath m_findRoot;
     QSplitter* m_split = nullptr;
     ShaderNodePalette* m_palette = nullptr;
     QToolButton* m_paletteButton = nullptr;
@@ -163,6 +194,7 @@ private:
     bool m_keepSelectionOnRelease = false;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChanged;
     usdcc::core::Signal<const PrimMoves&>::Connection m_primsMoved;
+    usdcc::core::Signal<const StageChanges&>::Connection m_findStageChanged;
 };
 
 }  // namespace usdcc::usd

@@ -314,3 +314,39 @@ USDCC_TEST(shade_graph_matches_the_file) {
     }
     CHECK(static_cast<std::size_t>(inFile) == drawn, "all of them are drawn: %d in the file, %d drawn", int(inFile), int(drawn));
 }
+
+// Find in the Material Editor (docs/MATERIAL_EDITOR.md §4.1).
+USDCC_TEST(shade_graph_find_nodes) {
+    UsdStageRefPtr stage = materials();
+    const UsdPrim wood = stage->GetPrimAtPath(SdfPath("/World/Looks/Wood"));
+    const auto paths = [](const std::vector<ShadeFindMatch>& matches) {
+        std::vector<std::string> found;
+        for (const ShadeFindMatch& match : matches) found.push_back(match.path.GetName());
+        return found;
+    };
+    using Names = std::vector<std::string>;
+
+    const std::vector<ShadeFindMatch> any = findShadeNodes(wood, "tex");
+    CHECK(paths(any) == (Names{"Tex", "Normal"}), "Any finds a name and a type, in the stage's order, inside a NodeGraph too: %zu", any.size());
+    CHECK(any.size() == 2 && any[0].level == SdfPath("/World/Looks/Wood/Maps") && any[1].level == wood.GetPath(), "each with the level it's drawn on");
+    CHECK(paths(findShadeNodes(wood, "tex", ShadeFindField::Name)) == (Names{"Tex"}), "Name is only the name");
+    CHECK(paths(findShadeNodes(wood, "uvtexture", ShadeFindField::Type)) == (Names{"Tex", "Normal"}), "Type is what it is");
+    CHECK(paths(findShadeNodes(wood, "tex", ShadeFindField::Type)) == (Names{"Tex", "Normal"}), "a part of it will do");
+    CHECK(paths(findShadeNodes(wood, "nodegraph", ShadeFindField::Type)) == (Names{"Maps"}), "a NodeGraph's type");
+    CHECK(paths(findShadeNodes(wood, "surface", ShadeFindField::Context)) == (Names{"Surface"}), "Context");
+    CHECK(paths(findShadeNodes(wood, "pattern", ShadeFindField::Context)).size() == 3, "pattern: UV, Tex and Normal");
+    CHECK(paths(findShadeNodes(wood, "maps", ShadeFindField::Context)).empty(), "a name isn't a context");
+    CHECK(findShadeNodes(wood, "glslfx", ShadeFindField::ShadingSystem).size() == 4, "a shading system");
+    CHECK(paths(findShadeNodes(wood, "uv texture")) == (Names{"Tex", "Normal"}), "every word, anywhere in the node");
+    CHECK(paths(findShadeNodes(wood, "SURFACE", ShadeFindField::Name)) == (Names{"Surface"}), "case doesn't matter");
+    CHECK(findShadeNodes(wood, "  ").empty(), "no words, nothing found");
+    CHECK(findShadeNodes(wood, "steel").empty(), "only under the root");
+
+    const UsdPrim steel = stage->GetPrimAtPath(SdfPath("/World/Looks/Steel"));
+    CHECK(findShadeNodes(steel, "materialx", ShadeFindField::ShadingSystem).size() == 3, "a system by its profile's name");
+    CHECK(paths(findShadeNodes(steel, "ND_multiply", ShadeFindField::Type)) == (Names{"Multiply"}), "a MaterialX node by its identifier");
+
+    CHECK(shadeFindRoot(stage->GetPrimAtPath(SdfPath("/World/Looks/Wood/Maps"))) == wood, "Find searches the whole material from a NodeGraph in it");
+    CHECK(shadeFindRoot(wood) == wood, "and from the material");
+    CHECK(!shadeFindRoot(stage->GetPrimAtPath(SdfPath("/World"))), "nothing for what isn't in one");
+}

@@ -62,6 +62,18 @@ public:
     // Everything, in columns, as one undo step.
     void autoLayout();
 
+    // How Find shows a node (docs/MATERIAL_EDITOR.md §4.1). Only for drawing: it's not in the stage.
+    enum class FindMark {
+        None,     // Find isn't open, or has no text
+        Dimmed,   // not found
+        Found,    // found, or a NodeGraph with something found inside
+        Current,  // the one Find is on
+    };
+    // `found` may be on any level: what isn't on this one only keeps its NodeGraph lit.
+    void setFindMarks(std::vector<PXR_NS::SdfPath> found, PXR_NS::SdfPath current);
+    void clearFindMarks();
+    FindMark findMark(QtNodes::NodeId id) const;
+
     const std::vector<ShadeGraphBackdrop>& backdrops() const { return m_backdrops; }
     // In pixels, during a gesture.
     void setBackdropRect(const PXR_NS::SdfPath& path, const QRectF& rect);
@@ -125,6 +137,9 @@ private:
     std::map<std::string, QPointF> m_placed;  // where a node with no position first went
     QtNodes::NodeId m_nextId = 1;
     std::vector<ShadeGraphBackdrop> m_backdrops;
+    bool m_finding = false;
+    std::vector<PXR_NS::SdfPath> m_found;
+    PXR_NS::SdfPath m_currentFound;
     bool m_interacting = false;
     bool m_session = false;
     bool m_readAfterInteraction = false;
