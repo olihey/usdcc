@@ -1,5 +1,7 @@
 #pragma once
 
+#include "usdcc/usd/layered_layout.h"
+
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/tf/token.h>
@@ -155,12 +157,25 @@ std::vector<ShadeFindMatch> findShadeNodes(const PXR_NS::UsdPrim& root, const st
 // The Material, or NodeGraph standing alone, that `level` is in: what Find searches.
 PXR_NS::UsdPrim shadeFindRoot(const PXR_NS::UsdPrim& level);
 
-// Where nodes go, in pixels: in columns by their distance from where the graph ends, on the
-// right, and in each column in the order that crosses the fewest lines it can quickly find.
-// `heights` is each node's.
+// A node as it's drawn, in pixels: its size, and how far down from its top each port is.
+struct ShadeNodeBox {
+    float width = 200.0f;
+    float height = 100.0f;
+    std::vector<float> in;
+    std::vector<float> out;
+};
+
+// Where nodes go, each one's top-left in pixels: a layered layout (layered_layout.h), left to
+// right, with the level's inputs in a column of their own on the left and what it ends in on
+// the right.
+std::vector<PXR_NS::GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes);
+// The same knowing only each node's height: a node's width, and its ports spread down it in
+// its rows' order.
+std::vector<ShadeNodeBox> shadeNodeBoxes(const ShadeGraph& graph, const std::vector<float>& heights);
 std::vector<PXR_NS::GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights);
-// How many lines cross, for that order.
-int countCrossings(const ShadeGraph& graph, const std::vector<PXR_NS::GfVec2f>& positions);
+// How good a layout is: crossings, lines through nodes, overlaps.
+LayeredLayoutQuality shadeLayoutQuality(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes,
+                                        const std::vector<PXR_NS::GfVec2f>& positions);
 
 // Whether a dragged node is being shaken: its mouse going back and forth, quickly.
 class ShakeDetector {

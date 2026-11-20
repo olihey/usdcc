@@ -24,6 +24,9 @@ public:
     explicit ShaderNodeGeometry(UsdShadeGraphModel& model);
 
     static int heightFor(const ShadeGraphNode& node);
+    static int widthFor(const ShadeGraphNode& node);
+    // Its size and where its ports are, for laying it out. Its width if known, or widthFor's.
+    static ShadeNodeBox boxFor(const ShadeGraphNode& node, int width = 0);
 
     // The page whose row is at a point of the node, if one is.
     std::optional<std::string> pageAt(QtNodes::NodeId id, QPointF nodePoint) const;

@@ -78,9 +78,11 @@ QtNodes doesn't provide is written here.
   - **Backdrops:** our own `QGraphicsItem` behind the nodes, backed by `UsdUIBackdrop`. Moving one
     moves the nodes on it.
   - **Tab search and shake to disconnect:** written here, on the scene's own events.
-  - **Auto-layout:** our own layered layout in `usdcc_usd`, Qt-free and unit-tested: nodes in columns by
-    their distance from the Material, ordered to reduce crossings. It's a few hundred lines, against
-    adding Graphviz and its dependencies to the build for one command.
+  - **Auto-layout:** our own layered (Sugiyama) layout in `usdcc_usd`, `layered_layout.h`, Qt- and
+    USD-free and unit-tested. Its steps are the published ones, in the form dot and ELK Layered use for
+    graphs with ports (§4, Auto-layout). It's about 900 lines, against adding Graphviz and its dependencies to the
+    build for one command. OGDF has the same algorithms but is GPL, and ELK, made for exactly this,
+    is Java.
 - **Known issues, as handled in the spike:**
   - QtNodes issue #529: a `QOpenGLWidget` viewport in ADS tabs turns black. We keep the default raster
     viewport, a plain `QWidget`.
@@ -413,9 +415,36 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   gives it to QtNodes; `ShaderNodeGeometry` and `ShaderNodePainter` lay it out and draw it.
 - **Positions:** `ui:nodegraph:node:pos` counts in node sizes, not pixels ("assume that the size of a node
   is approximately 1.0x1.0", `nodeGraphNodeAPI.h`), so it's stored as pixels / 200. A node with no position
-  goes in a column by its distance from the end of the graph, and stays there for as long as the panel
-  shows that stage. A Material's Outputs node uses the Material's position. A level's other interface
+  goes where the auto-layout (below) would put it, and stays there for as long as the panel shows that
+  stage. A Material's Outputs node uses the Material's position. A level's other interface
   nodes have nowhere in USD to keep one, so theirs last as long as the panel does.
+- **Auto-layout:** Auto Layout (L, or the menu on the graph's background) lays the whole level
+  out, as one undo step, from `layoutShadeGraph`, with each node's drawn size and ports
+  (`ShaderNodeGeometry::boxFor`). `layeredLayout` does it in steps:
+  1. **Loops** (UsdShade lets them be authored) are broken by turning round the lines a depth-first
+     search finds going back up its path.
+  2. **Columns** by network simplex (Gansner et al. 1993): the least line length in total. Then what it
+     makes no difference to moves as far right as it goes, so a texture sits next to the surface it's read
+     into. The level's Inputs get a column of their own on the left, and the Material's terminals (or a
+     NodeGraph's Outputs) one on the right. The longest path, used before, left a node used near the end
+     far from it.
+  3. **A line across several columns** gets a point in each, ordered with the nodes there.
+  4. **The order in each column** follows where each node's lines meet the next column, port by port,
+     sweeping both ways with swaps of neighbours, and keeps the fewest crossings found. Ports matter: two
+     textures read into one surface go in the order of the surface's inputs.
+  5. **Heights:** each column is placed, in turn, as near to where its lines pull it as its order and spacing
+     let it: an isotonic regression, solved exactly by pooling neighbours. Over and over until it settles,
+     least squares first, then with lines far off counting less (Huber's loss), which levels most lines fully.
+     QtNodes draws a line as one curve, nearly straight when it's long, so a long line's points are held
+     on the straight line between its ends: what that line passes in a column keeps clear of it.
+  6. **Columns' x:** each as wide as its widest node, with more room after it the steeper its lines are.
+
+  Parts that aren't connected are laid out on their own, under the one with the Material's terminals, and
+  nodes with no lines go in rows under those. `layeredLayoutQuality` counts crossings, lines through nodes
+  and overlaps. On 20 made-up material networks of 10 to 29 nodes, against the column layout before it, it
+  has 41% fewer crossings, 26% fewer lines through nodes and 3% less line length
+  (`layered_layout_beats_the_column_layout`). 250 nodes take a few hundredths of a second. With `USDCC_LAYOUT_SVG` set to a folder, that test draws
+  each layout there, before and after.
 - **Selection is two-way:**
   - Selecting nodes selects their prims, so the Attribute Editor edits them.
   - Shift+click adds a node or backdrop to the selection, and Shift+drag on empty space adds what the

@@ -24,6 +24,7 @@ add_executable(usdcc_tests
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp
+    layered_layout_test.cpp
     shade_actions_test.cpp
     shade_imaging_test.cpp
     shading_preview_test.cpp

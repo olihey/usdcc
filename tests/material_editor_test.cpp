@@ -856,8 +856,15 @@ USDCC_TEST(material_editor_backdrops_carry_nodes) {
     steps = history->index();
     const QPointF normalBefore = normal->pos();
     const QPointF surfaceBefore = f.item(kSurface)->pos();
-    // Its title bar, not the node on it.
-    const QPointF grab = rect.topLeft() + QPointF(12, 8);
+    // Its title bar, not the node on it, nor one above that the bar's under.
+    QPointF grab = rect.topLeft() + QPointF(12, 8);
+    for (double x = 12; x < rect.width() - 12; x += 8) {
+        const QPointF at = rect.topLeft() + QPointF(x, 8);
+        if (f.panel->view()->scene()->itemAt(at, f.panel->view()->transform()) == item) {
+            grab = at;
+            break;
+        }
+    }
     drag(f.panel->view(), grab, grab + QPointF(80, 60));
     settle();
     CHECK(history->index() == steps + 1, "moving it is one undo step: %d", history->index() - steps);
