@@ -207,6 +207,104 @@ USDCC_TEST(orbit_camera_frames_a_box) {
     CHECK(closeTo(point.target, GfVec3d(1, 2, 3)) && closeTo(point.distance, 7.0), "a point: aimed at, from where it was");
 }
 
+// Panning: what the cursor was on stays under it, however far away it is.
+USDCC_TEST(orbit_camera_pan_keeps_the_point_under_the_cursor) {
+    constexpr double kWidth = 800.0, kHeight = 600.0, kFovY = 45.0, kYaw = 30.0, kPitch = 20.0;
+    const auto pixelOf = [&](const OrbitFraming& camera, const GfVec3d& point) {
+        const PXR_NS::GfFrustum frustum = orbitFrustum(camera, kYaw, kPitch, kFovY, kWidth / kHeight);
+        const GfVec3d ndc = (frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix()).Transform(point);
+        return PXR_NS::GfVec2d((ndc[0] + 1.0) / 2.0 * kWidth, (1.0 - ndc[1]) / 2.0 * kHeight);
+    };
+    const OrbitFraming start{GfVec3d(1, 2, 3), 12.0};
+    const OrbitCameraAxes axes = orbitCameraAxes(start.target, start.distance, kYaw, kPitch);
+    // Nearer than the target, further away, and off to the sides.
+    for (const GfVec3d& point : {GfVec3d(1, 2, 3), GfVec3d(4, 3, 9), GfVec3d(-6, 0, -20), GfVec3d(2, 5, -3)}) {
+        const double depth = PXR_NS::GfDot(point - axes.eye, axes.forward);
+        CHECK(depth > 0.0, "in front of the camera: %f", depth);
+        const double perPixel = panUnitsPerPixel(depth, kFovY, kHeight);
+        const PXR_NS::GfVec2d before = pixelOf(start, point);
+
+        OrbitFraming panned = start;
+        panned.target = panOrbitTarget(start.target, axes, 37.0, -52.0, perPixel);
+        PXR_NS::GfVec2d moved = pixelOf(panned, point) - before;
+        CHECK(closeTo(moved[0], 37.0, 1e-6) && closeTo(moved[1], -52.0, 1e-6), "it moves as the cursor did: %f %f (depth %f)",
+              moved[0], moved[1], depth);
+
+        // A drag is many small moves, at the depth it began with.
+        panned = start;
+        for (int step = 0; step < 100; ++step) {
+            const OrbitCameraAxes now = orbitCameraAxes(panned.target, panned.distance, kYaw, kPitch);
+            panned.target = panOrbitTarget(panned.target, now, -3.0, 2.0, perPixel);
+        }
+        moved = pixelOf(panned, point) - before;
+        CHECK(closeTo(moved[0], -300.0, 1e-6) && closeTo(moved[1], 200.0, 1e-6), "and through a long drag: %f %f", moved[0],
+              moved[1]);
+    }
+
+    // What's nearer than the point passes the cursor, what's further lags behind.
+    const double perPixel = panUnitsPerPixel(start.distance, kFovY, kHeight);
+    OrbitFraming panned = start;
+    panned.target = panOrbitTarget(start.target, axes, 100.0, 0.0, perPixel);
+    const GfVec3d nearer = start.target - axes.forward * 6.0;
+    const GfVec3d further = start.target + axes.forward * 12.0;
+    CHECK(closeTo((pixelOf(panned, nearer) - pixelOf(start, nearer))[0], 200.0, 1e-6), "half as far: twice as fast");
+    CHECK(closeTo((pixelOf(panned, further) - pixelOf(start, further))[0], 50.0, 1e-6), "twice as far: half as fast");
+    CHECK(closeTo(panUnitsPerPixel(8.0, kFovY, kHeight) * kHeight, orthographicSizeFor(8.0, kFovY)),
+          "a pixel covers the view's height at that depth, over its pixels");
+}
+
+USDCC_TEST(orbit_camera_pan_depth_from_the_depth_buffer) {
+    for (double distance : {0.05, 10.0, 4000.0}) {
+        const OrbitFraming camera{GfVec3d(1, 2, 3), distance};
+        const OrbitCameraAxes axes = orbitCameraAxes(camera.target, camera.distance, 30.0, 20.0);
+        const PXR_NS::GfFrustum frustum = orbitFrustum(camera, 30.0, 20.0, 45.0, 1.5);
+        const PXR_NS::GfMatrix4d toNdc = frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix();
+        const OrbitClipping clipping = orbitClipping(distance);
+        for (double fraction : {0.02, 0.5, 1.0, 3.0, 40.0}) {
+            const double depth = distance * fraction;
+            const GfVec3d point = axes.eye + axes.forward * depth + axes.right * (depth * 0.2) + axes.up * (depth * 0.1);
+            // What the depth buffer holds for it: NDC z from -1..1 to 0..1.
+            const double bufferDepth = (toNdc.Transform(point)[2] + 1.0) / 2.0;
+            const std::optional<double> read = perspectiveDepthFromBuffer(bufferDepth, clipping);
+            CHECK(read && closeTo(*read / depth, 1.0, 1e-6), "the depth it was drawn at: %f for %f (distance %f)",
+                  read ? *read : -1.0, depth, distance);
+        }
+        const std::optional<double> nearest = perspectiveDepthFromBuffer(0.0, clipping);
+        CHECK(nearest && closeTo(*nearest, clipping.nearClip), "0 is the near plane");
+    }
+    CHECK(!perspectiveDepthFromBuffer(1.0, OrbitClipping{}), "the far plane: nothing drawn there");
+    CHECK(!perspectiveDepthFromBuffer(1.5, OrbitClipping{}) && !perspectiveDepthFromBuffer(-0.1, OrbitClipping{}), "nor outside");
+}
+
+USDCC_TEST(orbit_camera_pan_depth_on_the_ground) {
+    for (bool zUp : {false, true}) {
+        // Looking down at the origin, which is on the ground.
+        const OrbitCameraAxes axes = orbitCameraAxes(GfVec3d(0), 10.0, kDefaultOrbitYaw, kDefaultOrbitPitch, zUp);
+        std::optional<double> depth = groundDepthAlongRay(axes, axes.forward, zUp, 10.0);
+        CHECK(depth && closeTo(*depth, 10.0), "straight ahead: the target's depth (z-up %d): %f", zUp, depth ? *depth : -1.0);
+
+        // Lower in the view the ground is nearer, and its depth is along the view, not the ray.
+        GfVec3d direction = axes.forward - axes.up * 0.2;
+        depth = groundDepthAlongRay(axes, direction, zUp, 10.0);
+        const int upAxis = zUp ? 2 : 1;
+        CHECK(depth && *depth < 10.0, "nearer below the middle: %f", depth ? *depth : -1.0);
+        const GfVec3d hit = axes.eye + direction * (*depth / PXR_NS::GfDot(direction, axes.forward));
+        CHECK(closeTo(hit[upAxis], 0.0), "the point at that depth along the ray is on the ground: %f", hit[upAxis]);
+
+        CHECK(!groundDepthAlongRay(axes, axes.up, zUp, 10.0), "looking at the sky: no ground");
+        CHECK(!groundDepthAlongRay(axes, axes.right, zUp, 10.0), "nor along it");
+        direction = axes.forward + axes.up * 0.3;  // towards the horizon
+        CHECK(groundDepthAlongRay(axes, direction, zUp, 1000.0), "far off, it's still the ground");
+        CHECK(!groundDepthAlongRay(axes, direction, zUp, 10.0), "but not past the grid's edge");
+        CHECK(!groundDepthAlongRay(axes, axes.forward, zUp, 0.0) || closeTo(*groundDepthAlongRay(axes, axes.forward, zUp, 0.0), 10.0),
+              "a grid of no size has only its origin");
+    }
+    // From below the ground, looking up at it.
+    const OrbitCameraAxes below = orbitCameraAxes(GfVec3d(0), 5.0, 0.0, -90.0);
+    const std::optional<double> up = groundDepthAlongRay(below, below.forward, false, 10.0);
+    CHECK(up && closeTo(*up, 5.0), "from underneath too: %f", up ? *up : -1.0);
+}
+
 USDCC_TEST(orbit_camera_clipping_follows_the_distance) {
     const OrbitClipping atDefault = orbitClipping(kDefaultOrbitDistance);
     CHECK(closeTo(atDefault.nearClip, 0.1) && closeTo(atDefault.farClip, 10000.0), "0.1 to 10000 at the default distance");

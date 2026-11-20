@@ -956,6 +956,37 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     return frustum;
 }
 
+double HydraViewportWindow::panDepthAt(const QPointF& position) {
+    if (const std::optional<double> drawn = drawnDepthAt(position)) return *drawn;
+    // Empty space over the grid: the ground, which the grid's lines show moving.
+    if (m_stage && m_display.showGrid && !m_previewMode) {
+        const PXR_NS::GfRay ray = currentFrustum().ComputePickRay(ndcFromPixel(position));
+        const OrbitCameraAxes axes = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp());
+        if (const std::optional<double> ground =
+                groundDepthAlongRay(axes, ray.GetDirection(), stageIsZUp(), m_display.gridSize / 2.0)) {
+            return *ground;
+        }
+    }
+    return m_distance;
+}
+
+std::optional<double> HydraViewportWindow::drawnDepthAt(const QPointF& position) {
+    if (m_orthographic || m_paused || !m_stage || !m_context || !m_framebuffer || !m_firstFrameRendered) return std::nullopt;
+    const qreal pixelRatio = devicePixelRatio();
+    const int x = static_cast<int>(std::floor(position.x() * pixelRatio));
+    // GL counts the rows from the bottom.
+    const int y = m_framebuffer->height() - 1 - static_cast<int>(std::floor(position.y() * pixelRatio));
+    if (x < 0 || y < 0 || x >= m_framebuffer->width() || y >= m_framebuffer->height()) return std::nullopt;
+    if (!m_context->makeCurrent(this)) return std::nullopt;
+    // Hydra's composite left the scene's depth in our framebuffer (see drawGrid()); the
+    // grid and the gizmos write none.
+    float depth = 1.0f;
+    m_framebuffer->bind();
+    m_context->functions()->glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    QOpenGLFramebufferObject::bindDefault();
+    return perspectiveDepthFromBuffer(depth, clipping());
+}
+
 PXR_NS::GfVec2d HydraViewportWindow::ndcFromPixel(const QPointF& pixelPos) const {
     const double w = std::max(1, width());
     const double h = std::max(1, height());
@@ -1434,6 +1465,8 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         m_orbitReversed = orbitIsUpsideDown(m_pitch);
     } else if (event->button() == Qt::MiddleButton) {
         m_panning = true;
+        // What the cursor is on now stays under it for the whole drag.
+        if (!m_orthographic) m_panDepth = panDepthAt(event->position());
     }
 }
 
@@ -1486,10 +1519,13 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         }
         cameraMoved();
     } else if (m_panning) {
-        const auto [eye, forward, right, up] = orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp());
-        // Orthographic, the scene follows the cursor exactly.
-        const double panScale = m_orthographic ? m_orthoSize / std::max(1, height()) : m_distance * 0.0015;
-        m_target += right * (-delta.x() * panScale) + up * (delta.y() * panScale);
+        // The scene follows the cursor exactly: orthographic all of it, in perspective
+        // what's as far away as the point the drag began on.
+        const double viewHeight = std::max(1, height());
+        const double unitsPerPixel =
+            m_orthographic ? m_orthoSize / viewHeight : panUnitsPerPixel(m_panDepth, m_fovY, viewHeight);
+        m_target = panOrbitTarget(m_target, orbitCameraAxes(m_target, m_distance, m_yaw, m_pitch, cameraZUp()), delta.x(),
+                                  delta.y(), unitsPerPixel);
         cameraMoved();
     }
 }

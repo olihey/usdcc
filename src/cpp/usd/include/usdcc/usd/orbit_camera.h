@@ -103,6 +103,30 @@ OrthographicFraming frameOrthographic(const PXR_NS::GfRange3d& box, const OrbitC
 double orthographicSizeFor(double distance, double verticalFovDegrees);
 double perspectiveDistanceFor(double size, double verticalFovDegrees);
 
+// Panning (the middle drag) moves the camera across its view so that what the cursor was
+// on when the drag began stays under it. In a perspective view, how far that is depends
+// on how far away the point is: nearer things pass the cursor faster.
+//
+// The scene units across the view that one pixel covers, `depth` in front of the eye
+// (along the view, not along the cursor's ray), in a perspective view `viewHeight`
+// pixels high. The camera's depths don't change while it pans, so it holds for the drag.
+double panUnitsPerPixel(double depth, double verticalFovDegrees, double viewHeight);
+// The target after the cursor moved `dx` pixels right and `dy` down: the camera goes the
+// other way, and the scene with the cursor. Orthographic, a pixel covers the view's
+// height over `viewHeight` whatever the depth.
+PXR_NS::GfVec3d panOrbitTarget(const PXR_NS::GfVec3d& target, const OrbitCameraAxes& axes, double dx, double dy,
+                               double unitsPerPixel);
+// How far in front of the eye is what a perspective view's depth buffer holds as
+// `bufferDepth`: 0 on the near plane, 1 on the far one. Nothing from there on: nothing
+// was drawn at that pixel.
+std::optional<double> perspectiveDepthFromBuffer(double bufferDepth, const OrbitClipping& clipping);
+// How far in front of the eye (along `axes.forward`) the ray from it along `direction`
+// meets the stage's ground, the plane through the origin that the grid is on, no further
+// than `halfExtent` from the origin along either ground axis: where the grid is drawn.
+// Nothing if it doesn't.
+std::optional<double> groundDepthAlongRay(const OrbitCameraAxes& axes, const PXR_NS::GfVec3d& direction, bool zUp,
+                                          double halfExtent);
+
 // `degrees` as the same angle in (-180, 180], so that turning on and on doesn't lose
 // precision.
 double wrapDegrees(double degrees);
