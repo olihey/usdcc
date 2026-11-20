@@ -99,6 +99,7 @@ take them for a `bool`.
 | `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport |
 | `Shortcuts/viewport.fitAllViews` | Shortcut | `Shift+F` | `ViewportViewPanel::addFitAllViewsAction()`: Fit All Views, every viewport on screen ([WORKSPACES.md](WORKSPACES.md) §3.5.7) |
 | `Shortcuts/file.openStage`, `file.openStageWithOptions` | Shortcut | `Ctrl+O`, `Ctrl+Shift+O` | `main.cpp`: File > Open Stage... and Open Stage with Options... ([WORKSPACES.md](WORKSPACES.md) §8) |
+| `Shortcuts/file.saveStage` | Shortcut | `Ctrl+S` | `bindSaveStageShortcut()` (`main.cpp`): the only open stage saved, else a question which one; the Layers panel and Script Editor keep their own while focused ([LAYER_EDITOR.md](LAYER_EDITOR.md) §5) |
 | `Shortcuts/workspace.<id>` | Shortcut | none | `WorkspaceController`: switch to that workspace, one per workspace found ([WORKSPACES.md](WORKSPACES.md) §6) |
 | `Shortcuts/viewport.toggleHud` | Shortcut | none | `ViewportViewPanel::addToggleHudAction()`: the active viewport's HUD on or off |
 | `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |

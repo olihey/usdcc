@@ -875,13 +875,30 @@ int main(int argc, char** argv) {
     QObject::connect(saveStageAsAction, &QAction::triggered, &window, [&stageManager, saveStageAs]() {
         if (stageManager.stages().size() == 1) saveStageAs(stageManager.stages().front());
     });
+    // The Save Stage key (Ctrl+S, a setting): the only stage, or a question which one. The
+    // window owns it, so it works with the menu shut; the Layers panel and the Script Editor
+    // keep Ctrl+S while focus is in them (bindSaveStageShortcut()).
+    QAction* saveStageKeyAction = new QAction(QObject::tr("Save Stage"), &window);
+    saveStageKeyAction->setObjectName(QStringLiteral("saveStageShortcut"));
+    window.addAction(saveStageKeyAction);
+    usdcc::usd::bindSaveStageShortcut(saveStageKeyAction);
+    QObject::connect(saveStageKeyAction, &QAction::triggered, &window,
+                     [&stageManager, &window]() { usdcc::usd::saveStageFromShortcut(stageManager, &window); });
     QObject::connect(fileMenu, &QMenu::aboutToShow, &window,
                      [&stageManager, saveStageAction, saveStageMenu, saveStageAsAction, saveStageAsMenu]() {
         const auto& stages = stageManager.stages();
         const bool several = stages.size() > 1;
         bool anyUnsaved = false;
         for (const usdcc::usd::StageRefPtr& stage : stages) anyUnsaved = anyUnsaved || usdcc::usd::stageHasUnsavedLayers(stage);
-        // No stage open: the plain actions, greyed.
+        // No stage open: the plain actions, greyed. The plain Save Stage shows the key the
+        // window's action has, as text only: a second action with it would be ambiguous.
+        // So does the submenu with several stages, where the key asks which one to save.
+        const QKeySequence key = usdcc::ui::settingShortcut(usdcc::usd::kSaveStageShortcutKey);
+        const QString saveLabel = key.isEmpty() ? QObject::tr("&Save Stage")
+                                                : QObject::tr("&Save Stage") + QLatin1Char('\t') +
+                                                      key.toString(QKeySequence::NativeText);
+        saveStageAction->setText(saveLabel);
+        saveStageMenu->menuAction()->setText(saveLabel);
         saveStageAction->setVisible(!several);
         saveStageAction->setEnabled(stages.size() == 1 && anyUnsaved);
         saveStageAsAction->setVisible(!several);

@@ -229,7 +229,20 @@ Phase 3 as built:
   - On an in-memory sublayer, the file takes its place in the parent's list (one undo step)
     and becomes the edit target if the in-memory layer was.
 - **Saving is per stage**, never "the current stage": the current stage isn't always the one
-  you mean, and there's no shortcut (Ctrl+S stays the Layers panel's and the Script Editor's own).
+  you mean.
+  - **Ctrl+S** (`Shortcuts/file.saveStage`, `saveStageFromShortcut()`): with one stage open, it
+    saves that stage as Save Stage does. With more, it asks which in a dropdown of the open
+    stages, starting on the current one (`SaveStageDialog`). With none, it does nothing.
+    - The window owns the action, application-wide, so it works in floating panels too.
+    - The Layers panel's and the Script Editor's own Ctrl+S win while focus is in them: the
+      action lets go of its key there (`bindSaveStageShortcut()`, `focusHasOwnShortcut()`), so
+      the key is never ambiguous.
+    - File > Save Stage shows the key as text only, both as the plain entry and as the
+      submenu with several stages.
+  - Every Save Stage (the key, the File and Stages menus, a panel tab) ends in a toast: a
+    success toast naming the stage and how many layers were written, an info toast when it
+    had no unsaved changes, or an error toast, until dismissed, saying why a layer couldn't
+    be saved (`saveStageInteractively()`).
   - **File > Save Stage** and **File > Save Stage As**, above Close Stage: with one stage open,
     plain actions for that stage; with more, a submenu of the open stages each (as Close
     Stage's), Save Stage's entries greyed for stages with nothing unsaved. Greyed with none open.
