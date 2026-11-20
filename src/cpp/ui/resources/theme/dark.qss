@@ -1002,6 +1002,32 @@ QFrame#variantEditBanner QLabel {
     color: #ffb340;
 }
 
+/* The USDA view's text is older than the stage (docs/USDA_VIEW.md section 4): the
+   same amber, as a bar across the panel. */
+QWidget#usdaStaleBar {
+    background: rgba(255, 179, 64, 18%);
+    border-top: 1px solid #ffb340;
+    border-bottom: 1px solid #ffb340;
+}
+
+QWidget#usdaStaleBar QLabel {
+    color: #ffb340;
+    font-weight: 600;
+}
+
+/* Its Refresh: the accent, as a dialog's main button (QPushButton:default), without
+   being the default, which would take Enter in the USDA preview dialog. */
+QWidget#usdaStaleBar QPushButton {
+    background: @accent;
+    border-color: @accent;
+    color: #ffffff;
+}
+
+QWidget#usdaStaleBar QPushButton:hover {
+    background: @accent-hover;
+    border-color: @accent-hover;
+}
+
 /* Transform stack (TransformStackEditor) and the tool target. */
 QLabel#dragHandle {
     color: rgba(255, 255, 255, 35%);

@@ -82,7 +82,7 @@ Colours from the Script Editor's palette, so both read alike:
   last change. This only applies when the panel is visible and the text is under a size limit
   (§8, question 3).
 - **Manual refresh:** past the limit, or for Flattened Stage (which composes the whole stage),
-  the bar says "Out of date" and Refresh (F5) brings it up to date.
+  an amber bar under the text says "Out of date" and Refresh (F5) brings it up to date.
 - **Position kept:** a refresh keeps the scroll position by line, and by prim when the prim
   index (§6) has it.
 

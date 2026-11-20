@@ -139,10 +139,11 @@ bool readLayerFile(const PXR_NS::SdfLayerHandle& layer, std::string* text) {
     return readTextFile(QString::fromStdString(layer->GetRealPath()), text);
 }
 
-// A bar under the text: a message and buttons (styled as the panel toolbar).
-QWidget* makeBar(QWidget* parent, QLabel** label) {
+// A bar under the text: a message and buttons. Styled as the panel toolbar, or by
+// theme/dark.qss as `objectName`.
+QWidget* makeBar(QWidget* parent, QLabel** label, const QString& objectName = QStringLiteral("panelToolbar")) {
     auto* bar = new QWidget(parent);
-    bar->setObjectName(QStringLiteral("panelToolbar"));
+    bar->setObjectName(objectName);
     bar->setAttribute(Qt::WA_StyledBackground);
     auto* layout = new QHBoxLayout(bar);
     usdcc::ui::scaled::margins(layout, 8, 3, 8, 3);
@@ -283,8 +284,9 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     });
 
     QLabel* staleLabel = nullptr;
-    m_staleBar = makeBar(this, &staleLabel);
-    staleLabel->setText(tr("Out of date: the stage changed since this was shown."));
+    // Amber, as a warning: the text no longer says what the stage does.
+    m_staleBar = makeBar(this, &staleLabel, QStringLiteral("usdaStaleBar"));
+    staleLabel->setText(QString::fromUtf8("\xE2\x9A\xA0  ") + tr("Out of date: the stage changed since this was shown."));  // ⚠
     auto* refreshNow = barButton(tr("Refresh"), m_staleBar);
     m_staleBar->layout()->addWidget(refreshNow);
     connect(refreshNow, &QPushButton::clicked, this, &UsdaView::refresh);
