@@ -108,6 +108,7 @@ add_executable(usdcc_ui_tests
     schema_pills_test.cpp
     schema_explorer_test.cpp
     material_editor_test.cpp
+    save_stage_shortcut_test.cpp
     settings_ui_test.cpp
     shader_connections_ui_test.cpp
     add_shade_input_ui_test.cpp
