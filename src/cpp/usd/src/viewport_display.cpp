@@ -227,7 +227,8 @@ void defineViewportDisplaySettings() {
         .category = "Viewport",
         .group = "Selection",
         .label = "Selection line width",
-        .description = "How wide the Outline and Wireframe styles draw their lines, in pixels at 100% UI scale.",
+        .description = "How wide the Outline and Wireframe styles draw the line around the selection, in pixels "
+                       "at 100% UI scale. Wireframe's edges are always 1 pixel.",
         .type = SettingType::Int,
         .defaultValue = builtIn.selectionWidth,
         .minimum = kMinSelectionWidth,

@@ -107,7 +107,7 @@ take them for a `bool`.
 | `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |
 | `Viewport/selectionStyle` | Choice: Solid, Outline, Wireframe | Outline | `ViewportViewPanel`: how the selection is drawn ([VIEWPORT_SELECTION.md](VIEWPORT_SELECTION.md)); a viewport can override it, and the next two |
 | `Viewport/selectionColor` | Color | `#ffa600` | `ViewportViewPanel`: the selection's color, in every style |
-| `Viewport/selectionWidth` | Int 1–8 | 2 | `ViewportViewPanel`: the Outline and Wireframe lines' width, in pixels at 100% UI scale |
+| `Viewport/selectionWidth` | Int 1–8 | 2 | `ViewportViewPanel`: the width of the Outline and Wireframe line around the selection, in pixels at 100% UI scale (Wireframe's edges are always 1 px) |
 | `Viewport/complexity` | Choice: Low, Medium, High, Very High | Low | `ViewportViewPanel`: how finely subdivision surfaces are refined ([VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md)); a viewport can override it, and each one below |
 | `Viewport/showGuides`, `showProxy`, `showRender` | Bool | off, on, off | `ViewportViewPanel`: which purposes the viewport draws, picks and frames |
 | `Viewport/cullBackfaces` | Bool | off | `ViewportViewPanel`: leave out the back of faces, except double-sided ones |
