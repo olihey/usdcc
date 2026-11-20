@@ -443,9 +443,9 @@ int main(int argc, char** argv) {
                    });
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
-                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
-                                   QWidget* parent) -> usdcc::ui::ViewPanel* {
-                       return new usdcc::usd::SchemaExplorerViewPanel(&stageManager, stage, title, parent);
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::SchemaExplorerViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
 
     // The stage passed on the command line, if any. Without one (or if it

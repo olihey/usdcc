@@ -1,5 +1,9 @@
 #pragma once
 
+#include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/stage.h>
+
+#include <map>
 #include <string>
 #include <vector>
 
@@ -73,6 +77,23 @@ bool isAPI(SchemaInfo::Kind kind);
 // usdGenSchema finds them: its own folder, then every plugin's resources. Empty
 // for any other file.
 std::vector<std::string> schemaSourceSearchPaths(const std::string& path);
+
+// What a stage uses (docs/SCHEMAS.md §4, This stage): every defined, non-class
+// prim, inside instances too, inactive ones included.
+struct StageSchemaUse {
+    // A registered prim type or API schema, to its prims by path. An API counts
+    // whether authored, built in or auto-applied; instances count under their
+    // schema ("CollectionAPI"), a prim once.
+    std::map<std::string, std::vector<PXR_NS::SdfPath>> prims;
+    // A type or applied schema USD doesn't know (a plugin not loaded, a typo), to
+    // the prims that name it; an instance's under its schema's name.
+    std::map<std::string, std::vector<PXR_NS::SdfPath>> unregistered;
+    // An unregistered type: what its prims compose as instead (the stage's
+    // fallbackPrimTypes), or empty for nothing.
+    std::map<std::string, std::string> composesAs;
+    std::size_t count(const std::string& schema) const;
+};
+StageSchemaUse stageSchemaUse(const PXR_NS::UsdStageRefPtr& stage);
 
 // A plugin's friendly name ("usdLux" is "Lighting"); one this doesn't know
 // keeps its own. The categories of the Applied Schemas menu too.

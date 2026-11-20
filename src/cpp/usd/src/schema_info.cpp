@@ -1,6 +1,7 @@
 #include "usdcc/usd/schema_info.h"
 
 #include "usdcc/assets/paths.h"
+#include "usdcc/usd/applied_schemas.h"
 
 #include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
@@ -13,6 +14,7 @@
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usd/primDefinition.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/schemaBase.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usd/typed.h>
@@ -266,6 +268,35 @@ SchemaInfo schemaInfo(const std::string& name) {
     const TfToken schema = UsdSchemaRegistry::GetTypeNameAndInstance(TfToken(name)).first;
     const UsdSchemaRegistry::SchemaInfo* registered = UsdSchemaRegistry::FindSchemaInfo(schema);
     return registered ? infoFor(registered->type) : SchemaInfo();
+}
+
+std::size_t StageSchemaUse::count(const std::string& schema) const {
+    const auto it = prims.find(schema);
+    return it == prims.end() ? 0 : it->second.size();
+}
+
+StageSchemaUse stageSchemaUse(const UsdStageRefPtr& stage) {
+    StageSchemaUse use;
+    if (!stage) return use;
+    for (const UsdPrim& prim : stage->Traverse(UsdTraverseInstanceProxies(UsdPrimIsDefined && !UsdPrimIsAbstract))) {
+        const SdfPath& path = prim.GetPath();
+        if (const TfToken type = prim.GetTypeName(); !type.IsEmpty()) {
+            if (UsdSchemaRegistry::FindSchemaInfo(type)) {
+                use.prims[type.GetString()].push_back(path);
+            } else {
+                use.unregistered[type.GetString()].push_back(path);
+                const TfToken composed = prim.GetPrimTypeInfo().GetSchemaTypeName();
+                use.composesAs.emplace(type.GetString(), composed == type ? std::string() : composed.GetString());
+            }
+        }
+        std::set<std::string> counted;  // two instances of one schema count once
+        for (const AppliedSchema& applied : appliedSchemas(prim)) {
+            const std::string schema = applied.name.substr(0, applied.name.find(':'));
+            if (!counted.insert(schema).second) continue;
+            (applied.state == AppliedSchema::State::Unregistered ? use.unregistered : use.prims)[schema].push_back(path);
+        }
+    }
+    return use;
 }
 
 std::vector<std::string> schemaSourceSearchPaths(const std::string& path) {

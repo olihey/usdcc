@@ -6,6 +6,11 @@
 #include "usdcc/usd/schema_info.h"
 
 #include <pxr/base/tf/stringUtils.h>
+#include <pxr/base/vt/dictionary.h>
+#include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/references.h>
+#include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/tokens.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -165,4 +170,57 @@ USDCC_TEST(schema_info_codeless) {
 
     const SchemaInfo mesh = usdcc::usd::schemaInfo("Mesh");
     CHECK(!mesh.codeless, "and USD's own aren't codeless");
+}
+
+// What a stage uses (docs/SCHEMAS.md §4, This stage), and applying a schema to
+// several prims in one undo step.
+USDCC_TEST(schema_info_stage_use) {
+    using namespace PXR_NS;
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    stage->DefinePrim(SdfPath("/Cube"), TfToken("Cube"));
+    stage->DefinePrim(SdfPath("/Cube2"), TfToken("Cube"));
+    const UsdPrim mesh = stage->DefinePrim(SdfPath("/Mesh"), TfToken("Mesh"));
+    mesh.AddAppliedSchema(TfToken("MotionAPI"));
+    stage->DefinePrim(SdfPath("/Light"), TfToken("RectLight"));
+    const UsdPrim off = stage->DefinePrim(SdfPath("/Off"), TfToken("Xform"));
+    off.SetActive(false);
+    stage->CreateClassPrim(SdfPath("/_class_Cube")).SetTypeName(TfToken("Cube"));
+    // An instance: its prototype's Sphere counts, through the instance proxy.
+    stage->DefinePrim(SdfPath("/Proto"), TfToken("Scope"));
+    stage->DefinePrim(SdfPath("/Proto/Ball"), TfToken("Sphere"));
+    const UsdPrim instance = stage->DefinePrim(SdfPath("/Instance"));
+    instance.GetReferences().AddInternalReference(SdfPath("/Proto"));
+    instance.SetInstanceable(true);
+    // Names USD doesn't know.
+    stage->DefinePrim(SdfPath("/Thing"), TfToken("StudioThing"));
+    const UsdPrim tagged = stage->DefinePrim(SdfPath("/Tagged"), TfToken("Xform"));
+    tagged.AddAppliedSchema(TfToken("OldRigAPI"));
+    tagged.AddAppliedSchema(TfToken("OldTagAPI:a"));
+    tagged.AddAppliedSchema(TfToken("OldTagAPI:b"));
+
+    const usdcc::usd::StageSchemaUse use = usdcc::usd::stageSchemaUse(stage);
+    CHECK(use.count("Cube") == 2, "a type's prims, not its class: [%zu]", use.count("Cube"));
+    CHECK(use.count("MotionAPI") == 1 && use.prims.at("MotionAPI").front() == SdfPath("/Mesh"), "an applied API's");
+    CHECK(use.count("LightAPI") == 1, "a built-in API counts");
+    CHECK(use.count("CollectionAPI") == 1, "two instances of one schema count the prim once");
+    CHECK(use.count("Xform") == 2, "an inactive prim counts");
+    CHECK(use.count("Sphere") == 2, "inside an instance too, and its prototype source: [%zu]", use.count("Sphere"));
+    CHECK(use.unregistered.count("StudioThing") && use.unregistered.at("StudioThing").front() == SdfPath("/Thing"),
+          "an unknown type");
+    CHECK(use.composesAs.count("StudioThing") && use.composesAs.at("StudioThing").empty(), "composing as nothing");
+    CHECK(use.unregistered.count("OldRigAPI") && use.unregistered.count("OldTagAPI") &&
+              use.unregistered.at("OldTagAPI").size() == 1,
+          "unknown APIs, an instance's under its schema, once a prim");
+    CHECK(!use.composesAs.count("OldRigAPI"), "an API composes as nothing in particular");
+    CHECK(usdcc::usd::stageSchemaUse(nullptr).prims.empty(), "no stage, nothing");
+
+    // A fallback type: the prim composes as it.
+    const UsdStageRefPtr fallback = UsdStage::CreateInMemory();
+    VtDictionary fallbacks;
+    fallbacks["StudioAsset"] = VtTokenArray{TfToken("Xform")};
+    fallback->SetMetadata(TfToken("fallbackPrimTypes"), fallbacks);
+    fallback->DefinePrim(SdfPath("/A"), TfToken("StudioAsset"));
+    const usdcc::usd::StageSchemaUse fallbackUse = usdcc::usd::stageSchemaUse(fallback);
+    CHECK(fallbackUse.composesAs.count("StudioAsset") && fallbackUse.composesAs.at("StudioAsset") == "Xform",
+          "an unknown type with a fallback composes as it");
 }

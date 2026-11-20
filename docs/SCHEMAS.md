@@ -1,7 +1,7 @@
 # Schemas
 
-Status: **phases 1 and 2 are built** (§12): the Schemas panel and its data. The rest is a plan; §9 has
-the decisions to make first, §10 the phases.
+Status: **phases 1 to 3 are built** (§12): the Schemas panel, its data, and the stage in it. The rest
+is a plan; §9 has the decisions to make first, §10 the phases.
 
 Three things, in the order to build them:
 
@@ -356,9 +356,9 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
 
 | Phase | Work | Done when |
 |---|---|---|
-| **1. The Explorer's data** *(done, but `stageSchemaUse()`: phase 3)* | `schema_info.h` (`usdcc_usd`, Qt-free): every schema with its kind, plugin, codeless or not, family and version, inheritance, built-in, auto-apply and can-apply-to lists, properties with their declaring schema, source paths; `stageSchemaUse(stage)` with counts and the unregistered ones. `usdcc.usd.schemas()`, `schema()` | Tests: the 140 schemas by kind; a codeless test plugin told from a C++ one; an inherited property's owner; a stage with an unknown type and an unregistered API |
+| **1. The Explorer's data** *(done)* | `schema_info.h` (`usdcc_usd`, Qt-free): every schema with its kind, plugin, codeless or not, family and version, inheritance, built-in, auto-apply and can-apply-to lists, properties with their declaring schema, source paths; `stageSchemaUse(stage)` with counts and the unregistered ones. `usdcc.usd.schemas()`, `schema()` | Tests: the 140 schemas by kind; a codeless test plugin told from a C++ one; an inherited property's owner; a stage with an unknown type and an unregistered API |
 | **2. The Explorer** *(done)* | The Schemas view panel: tree, filter, Show, details, links between schemas, Show Source | Every schema of §1 is found by name; a plugin's codeless schema shows as one; the source opens at the class |
-| **3. The stage in it** | This stage, Select, Create, Apply to Selection | Counts follow edits; the unregistered list matches the amber pills; Create and Apply make the same undo steps as their menus |
+| **3. The stage in it** *(done)* | This stage, Select, Create, Apply to Selection | Counts follow edits; the unregistered list matches the amber pills; Create and Apply make the same undo steps as their menus |
 | **4. Generating** | `schema_library.h`: reading and writing `schema.usda` through Sdf, the checks of §5.4, the two child processes, the placeholders, moving into place. `jinja2` as decided | Tests against the deploy's Python: the `studio` and `show` libraries of §2 generate and load; each trap of §2 is caught with its message; a failed Generate leaves the old files |
 | **5. The editor** | The form, New Schema Library..., Edit as Text, "generated, not loaded", what a Generate changes for existing files (§5.5), Restart | A library made, generated and, after a restart, creating prims and applying APIs, by a script driving the widgets |
 | **6. Promote** | Make Schema from Attributes..., and applying the API after the restart | A prim's custom attributes become an API whose fallbacks are their values; the prims get it in one undo step |
@@ -441,4 +441,47 @@ Phases 1 and 2.
   - `python_app_api` (`usdcc_python_tests`): `schema()` and `schemas()`.
 - **In the app:** a script opened the panel on a stage and chose RectLight and CollectionAPI; the
   pictures show the tree, details and properties as above, in the dark theme.
-- **Not done:** the panel isn't in any shipped workspace; open it from a panel menu.
+
+### Phase 3: the stage in it
+
+- **`stageSchemaUse(stage)`** (`schema_info.h`): every registered type and API schema the stage's prims
+  have, to their prims; the types and applied schemas it names that USD doesn't know; and what such a
+  type composes as instead. It walks every defined prim that isn't a class, inactive ones and instance
+  proxies included. An API counts whether authored, built in or auto-applied, and two instances of
+  one schema count a prim once (a RectLight is one prim for `CollectionAPI`).
+- **This stage**, last in the tree, with a stage: a row per schema it uses with how many prims, then
+  **Not registered** in amber, the Applied Schemas pill's colour. It opens by itself when something
+  isn't registered. **Show: On This Stage** lists only what the stage uses.
+- **It follows the stage:** a resync (a type or an applied schema changed, a prim added or removed)
+  counts again, coalesced. Behind another tab it only notes the edit, and counts when shown.
+- **The details** of a schema, with a stage, start with **On this stage** (how many, **Select**),
+  then **Create** for a prim type (where it would go: "at the root", "under /World", or why not) or
+  **Apply** for an applicable API ("Apply to Selection (2 prims selected)", or "Select prims to apply
+  it to"). They change with the selection.
+- **An unregistered one's details** say what that means: an unknown type's prims compose as the
+  stage's `fallbackPrimTypes` type, or have no schema; an unknown API adds nothing. Then its prims,
+  each a link that selects it. It has no properties.
+- **Create** is the Create menu's: `prim_actions::createTarget()` and `createPrim()`, the "Create Cube"
+  undo step, then the prim selected.
+- **Apply to Selection** is the Attribute Editor's + menu, on several prims: the questions moved from
+  `PropertySheet` into **`askAndApplySchema()`** (`apply_schema_ui.h`), which both use.
+  - One undo step for all of them: `prim_actions::applySchema()` and `applySchemaWithTarget()` take a
+    list of paths ("Apply MotionAPI to 2 prims"; one prim keeps "Apply MotionAPI to Mesh").
+  - A prim it can't go on (has it already, USD says it can't apply, an instance proxy) is left out,
+    and the question names it. When that's every prim, it says why and changes nothing.
+  - A multiple-apply schema's instance name must suit every prim it's applied to; MaterialBindingAPI
+    asks for one material for all.
+- The right-click menu has **Select Prims Using It (n)**, **Create *Type*** and **Apply to Selection**
+  too; an unregistered row has Select and Copy Name.
+- The panel type takes the app's `UndoManager` now.
+- **Tests:** `schema_info_stage_use` (`usdcc_tests`: counts, classes left out, inactive prims and
+  instance proxies counted, unknown types and APIs, a fallback type); `schema_explorer_stage`
+  (`usdcc_ui_tests`: the group and its counts, Select, Create under the selection and its undo step,
+  the counts following an edit and its undo, Apply to two prims in one step, applying again refused
+  with why, a prim left out and named, Show: On This Stage, an unregistered one's details and links,
+  and its row going when its prims do). `schema_pills` still passes, through `askAndApplySchema()`.
+- **In the app:** on a stage with a Cube carrying `MotionAPI` and an unknown `OldRigAPI`, and a prim of
+  an unknown type: This stage listed them with counts, the two unknown ones in amber, and each one's
+  details as above.
+- **Not done:** the panel isn't in any shipped workspace; open it from a panel menu. Prims inside an
+  unloaded payload aren't counted, as they aren't on the stage.

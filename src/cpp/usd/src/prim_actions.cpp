@@ -977,26 +977,51 @@ bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_N
     });
 }
 
+namespace {
+// "Apply MotionAPI to Cube", or "... to 3 prims".
+QString applyText(const std::string& schema, const std::vector<PXR_NS::SdfPath>& paths) {
+    return paths.size() == 1 ? tr("Apply %1 to %2").arg(qs(schema), qs(paths.front().GetName()))
+                             : tr("Apply %1 to %2 prims").arg(qs(schema)).arg(paths.size());
+}
+
+// Inside an undo step.
+bool applyTo(const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
+             const std::vector<PXR_NS::TfToken>& attributes) {
+    if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
+    // Looked up afresh: applying the schema recomposed the prim.
+    const PXR_NS::UsdPrim applied = stage->usdStage()->GetPrimAtPath(path);
+    const PXR_NS::UsdPrimDefinition& definition = applied.GetPrimDefinition();
+    for (const PXR_NS::TfToken& name : attributes) {
+        const PXR_NS::UsdPrimDefinition::Attribute attributeDefinition = definition.GetAttributeDefinition(name);
+        if (!attributeDefinition) continue;
+        const PXR_NS::UsdAttribute attribute = applied.CreateAttribute(
+            name, attributeDefinition.GetTypeName(), /*custom=*/false, attributeDefinition.GetVariability());
+        if (!attribute) return false;
+        // Still reads as the schema's fallback, until this makes it authored.
+        PXR_NS::VtValue value;
+        if (attribute.Get(&value) && !value.IsEmpty() && !attribute.Set(value)) return false;
+    }
+    return true;
+}
+}  // namespace
+
 bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
                  bool addAttributes) {
-    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
-    if (!isEditable(prim) || schema.empty()) return false;
-    const std::vector<PXR_NS::TfToken> attributes =
-        addAttributes ? schemaAttributesToAdd(prim, schema) : std::vector<PXR_NS::TfToken>();
-    return undo.apply(stage, tr("Apply %1 to %2").arg(qs(schema), qs(path.GetName())), [&]() {
-        if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
-        // Looked up afresh: applying the schema recomposed the prim.
-        const PXR_NS::UsdPrim applied = stage->usdStage()->GetPrimAtPath(path);
-        const PXR_NS::UsdPrimDefinition& definition = applied.GetPrimDefinition();
-        for (const PXR_NS::TfToken& name : attributes) {
-            const PXR_NS::UsdPrimDefinition::Attribute attributeDefinition = definition.GetAttributeDefinition(name);
-            if (!attributeDefinition) continue;
-            const PXR_NS::UsdAttribute attribute = applied.CreateAttribute(
-                name, attributeDefinition.GetTypeName(), /*custom=*/false, attributeDefinition.GetVariability());
-            if (!attribute) return false;
-            // Still reads as the schema's fallback, until this makes it authored.
-            PXR_NS::VtValue value;
-            if (attribute.Get(&value) && !value.IsEmpty() && !attribute.Set(value)) return false;
+    return applySchema(undo, stage, std::vector<PXR_NS::SdfPath>{path}, schema, addAttributes);
+}
+
+bool applySchema(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                 const std::string& schema, bool addAttributes) {
+    if (schema.empty() || paths.empty()) return false;
+    std::vector<std::vector<PXR_NS::TfToken>> attributes;
+    for (const PXR_NS::SdfPath& path : paths) {
+        const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+        if (!isEditable(prim)) return false;
+        attributes.push_back(addAttributes ? schemaAttributesToAdd(prim, schema) : std::vector<PXR_NS::TfToken>());
+    }
+    return undo.apply(stage, applyText(schema, paths), [&]() {
+        for (std::size_t i = 0; i < paths.size(); ++i) {
+            if (!applyTo(stage, paths[i], schema, attributes[i])) return false;
         }
         return true;
     });
@@ -1013,11 +1038,21 @@ bool setTarget(const PXR_NS::UsdPrim& prim, const PXR_NS::TfToken& name, const P
 
 bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
                            const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target) {
-    const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
-    if (!isEditable(prim) || schema.empty() || target.IsEmpty()) return false;
-    return undo.apply(stage, tr("Apply %1 to %2").arg(qs(schema), qs(path.GetName())), [&]() {
-        if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
-        return setTarget(stage->usdStage()->GetPrimAtPath(path), relationship, target, /*replace=*/true);
+    return applySchemaWithTarget(undo, stage, std::vector<PXR_NS::SdfPath>{path}, schema, relationship, target);
+}
+
+bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                           const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target) {
+    if (schema.empty() || target.IsEmpty() || paths.empty()) return false;
+    for (const PXR_NS::SdfPath& path : paths) {
+        if (!isEditable(stage->usdStage()->GetPrimAtPath(path))) return false;
+    }
+    return undo.apply(stage, applyText(schema, paths), [&]() {
+        for (const PXR_NS::SdfPath& path : paths) {
+            if (!stage->usdStage()->GetPrimAtPath(path).AddAppliedSchema(PXR_NS::TfToken(schema))) return false;
+            if (!setTarget(stage->usdStage()->GetPrimAtPath(path), relationship, target, /*replace=*/true)) return false;
+        }
+        return true;
     });
 }
 

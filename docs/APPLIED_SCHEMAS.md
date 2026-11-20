@@ -186,7 +186,9 @@ weaker layer is removed by a delete in the edit target's list op, and that works
 - **`applied_schemas.h`** (usdcc_usd, Qt-free): `appliedSchemas()`, `schemaCatalog()`,
   `canApplyInstance()`, `orphanedProperties()`.
 - **`prim_actions::applySchema()` and `removeSchema()`**, each one undo step. `removeSchema()` refuses a
-  built-in schema.
+  built-in schema. `applySchema()` also takes several prims, for one step (docs/SCHEMAS.md §12).
+- **`askAndApplySchema()`** (`apply_schema_ui.h`): the questions of §4.3 and §4.4, shared with the
+  Schemas panel's Apply to Selection, which may leave out prims it can't apply to and say so.
 - **`SchemaPillsEditor`** (`properties/schema_pills.h`) and **`usdcc::ui::FlowLayout`**. The + is the
   editor's `rowButton()`, so it's the row's rightmost control.
 - **`AttributesViewPanel`:** `populateSchemaMenu()`, `applySchemaInteractively()`,

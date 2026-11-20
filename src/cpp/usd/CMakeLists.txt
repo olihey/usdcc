@@ -162,6 +162,7 @@ add_library(usdcc_usd_ui SHARED
     src/recent_files.cpp
     include/usdcc/usd/dependencies_view_panel.h
     include/usdcc/usd/schema_explorer_view_panel.h
+    include/usdcc/usd/apply_schema_ui.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/layer_actions.h
     include/usdcc/usd/layer_editor_view_panel.h
@@ -236,6 +237,7 @@ add_library(usdcc_usd_ui SHARED
     src/attributes_view_panel.cpp
     src/dependencies_view_panel.cpp
     src/schema_explorer_view_panel.cpp
+    src/apply_schema_ui.cpp
     src/hydra_viewport_window.cpp
     src/selection_overlay.cpp
     src/selection_overlay.h

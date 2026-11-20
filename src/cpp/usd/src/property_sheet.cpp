@@ -6,6 +6,7 @@
 #include "usdcc/usd/add_shade_input_dialog.h"
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/applied_schemas.h"
+#include "usdcc/usd/apply_schema_ui.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/properties/connected_inputs_editor.h"
 #include "usdcc/usd/properties/relationship_targets_editor.h"
@@ -1238,61 +1239,7 @@ void PropertySheet::populateSchemaMenu(QMenu* menu) {
 void PropertySheet::applySchemaInteractively(const QString& schema, bool multipleApply) {
     const UsdPrim prim = currentPrim();
     if (!prim) return;
-    QString applied = schema;
-    if (multipleApply) {
-        QString instance;
-        for (;;) {
-            bool ok = false;
-            instance = QInputDialog::getText(this, tr("Apply %1").arg(schema), tr("Instance name:"), QLineEdit::Normal,
-                                             instance, &ok)
-                           .trimmed();
-            if (!ok) return;
-            std::string why;
-            if (canApplyInstance(prim, schema.toStdString(), instance.toStdString(), &why)) break;
-            QMessageBox::warning(this, tr("Apply %1").arg(schema), qs(why));
-        }
-        applied = schema + QLatin1Char(':') + instance;
-    }
-    // Its material, rather than a binding to find afterwards.
-    if (applied == QLatin1String(kMaterialBindingApi)) {
-        RelationshipTargetDialog dialog(m_stage->usdStage(), kMaterialBinding.GetString(), SdfPath(), this);
-        dialog.setWindowTitle(tr("Bind a Material to %1").arg(qs(prim.GetName().GetString())));
-        dialog.allowNoTarget(tr("Apply Without Material"));
-        if (dialog.exec() != QDialog::Accepted) return;
-        if (dialog.selectedPath().IsEmpty()) {
-            prim_actions::applySchema(*m_undoManager, m_stage, prim.GetPath(), applied.toStdString());
-        } else {
-            prim_actions::applySchemaWithTarget(*m_undoManager, m_stage, prim.GetPath(), applied.toStdString(),
-                                                kMaterialBinding, dialog.selectedPath());
-        }
-        return;
-    }
-    // Nothing to add, nothing to choose between.
-    bool addAttributes = false;
-    const std::vector<TfToken> attributes = schemaAttributesToAdd(prim, applied.toStdString());
-    if (!attributes.empty()) {
-        constexpr std::size_t kMaxListed = 12;
-        QStringList lines;
-        for (std::size_t i = 0; i < attributes.size() && i < kMaxListed; ++i) {
-            lines << QStringLiteral("    ") + qs(attributes[i].GetString());
-        }
-        if (attributes.size() > kMaxListed) {
-            lines << QStringLiteral("    ") + tr("and %1 more").arg(attributes.size() - kMaxListed);
-        }
-        QMessageBox box(QMessageBox::Question, tr("Apply %1").arg(applied),
-                        tr("Apply %1 to %2?").arg(applied, qs(prim.GetPath().GetString())), QMessageBox::Cancel, this);
-        box.setInformativeText((attributes.size() == 1
-                                    ? tr("Add its attribute to the prim, with its default value?")
-                                    : tr("Add its %1 attributes to the prim, with their default values?").arg(attributes.size())) +
-                               QLatin1Char('\n') + lines.join(QLatin1Char('\n')));
-        QPushButton* only = box.addButton(tr("Apply Schema Only"), QMessageBox::AcceptRole);
-        QPushButton* add = box.addButton(tr("Apply and Add Attributes"), QMessageBox::AcceptRole);
-        box.setDefaultButton(only);
-        box.exec();
-        if (box.clickedButton() != only && box.clickedButton() != add) return;
-        addAttributes = box.clickedButton() == add;
-    }
-    prim_actions::applySchema(*m_undoManager, m_stage, prim.GetPath(), applied.toStdString(), addAttributes);
+    askAndApplySchema(this, *m_undoManager, m_stage, {prim.GetPath()}, schema, multipleApply);
 }
 
 void PropertySheet::removeSchemaInteractively(const QString& schema) {

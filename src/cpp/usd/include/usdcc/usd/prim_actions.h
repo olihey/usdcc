@@ -160,12 +160,18 @@ bool unload(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_N
 // with its fallback value (declared only, if it has none).
 bool applySchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
                  bool addAttributes = false);
+// To several prims in one undo step ("Apply MotionAPI to 3 prims"); each gets its
+// own attributes. Refuses all if any can't be edited.
+bool applySchema(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
+                 const std::string& schema, bool addAttributes = false);
 bool removeSchema(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path, const std::string& schema,
                   bool cleanUp);
 
 // Applies `schema` and sets a relationship's target, in one undo step (adding
 // MaterialBindingAPI with its material).
 bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& path,
+                           const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target);
+bool applySchemaWithTarget(UndoManager& undo, const StageRefPtr& stage, const std::vector<PXR_NS::SdfPath>& paths,
                            const std::string& schema, const PXR_NS::TfToken& relationship, const PXR_NS::SdfPath& target);
 
 // Relationship targets (docs/RELATIONSHIPS.md), in the stage's edit target. Adding

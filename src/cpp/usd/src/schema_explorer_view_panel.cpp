@@ -1,7 +1,10 @@
 #include "usdcc/usd/schema_explorer_view_panel.h"
 
+#include "usdcc/usd/apply_schema_ui.h"
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view.h"
 
@@ -10,7 +13,9 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
 #include <QComboBox>
+#include <QEvent>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,7 +25,9 @@
 #include <QMenu>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QScrollBar>
 #include <QTextBrowser>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -34,11 +41,21 @@ namespace usdcc::usd {
 
 namespace {
 constexpr int kNameRole = Qt::UserRole;  // a schema's name; empty on a category row
+constexpr int kUnregisteredRole = Qt::UserRole + 1;  // This stage: a name USD doesn't know
+constexpr int kStageRowRole = Qt::UserRole + 2;      // This stage: a schema it uses
+// As the Applied Schemas pill of an unregistered schema (theme/dark.qss).
+const QColor kUnregisteredColor(0xff, 0xb3, 0x40);
+constexpr std::size_t kMaxPrimsListed = 20;
 
 enum Column { Name, Kind, ColumnCount };
 enum PropertyColumn { PropertyName, PropertyType, Fallback, DeclaredBy, PropertyColumnCount };
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
+
+// "1 prim", "3 prims".
+QString primCount(std::size_t n) {
+    return n == 1 ? QObject::tr("1 prim") : QObject::tr("%1 prims").arg(n);
+}
 
 QString escaped(const std::string& text) { return qs(text).toHtmlEscaped(); }
 
@@ -62,6 +79,7 @@ bool matchesShow(const SchemaInfo& info, SchemaExplorerViewPanel::Show show) {
             return info.kind == SchemaInfo::Kind::AbstractTyped || info.kind == SchemaInfo::Kind::AbstractBase;
         case SchemaExplorerViewPanel::Show::APISchemas: return isAPI(info.kind);
         case SchemaExplorerViewPanel::Show::Codeless: return info.codeless;
+        case SchemaExplorerViewPanel::Show::OnStage: return true;  // the panel asks its counts
     }
     return true;
 }
@@ -88,9 +106,10 @@ QString propertyToolTip(const SchemaProperty& property) {
 }
 }  // namespace
 
-SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title,
+SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, StageRefPtr stage,
+                                                 std::shared_ptr<UndoManager> undoManager, const QString& title,
                                                  QWidget* parent)
-    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
+    : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent), m_undoManager(std::move(undoManager)) {
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -114,6 +133,7 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_show->addItem(tr("Abstract Types"), int(Show::AbstractTypes));
     m_show->addItem(tr("API Schemas"), int(Show::APISchemas));
     m_show->addItem(tr("Codeless"), int(Show::Codeless));
+    m_show->addItem(tr("On This Stage"), int(Show::OnStage));
     m_show->setToolTip(tr("Which schemas to list. Codeless ones come from a plugin with no library"));
     toolbarLayout->addWidget(m_show);
     m_summary = new QLabel(toolbar);
@@ -135,7 +155,10 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_details->setObjectName(QStringLiteral("schemaDetails"));
     m_details->setOpenLinks(false);
     m_details->setFrameShape(QFrame::NoFrame);
-    connect(m_details, &QTextBrowser::anchorClicked, this, &SchemaExplorerViewPanel::openLink);
+    // Queued: a link can create a prim or ask a question, which rebuilds the details.
+    connect(m_details, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
+        QMetaObject::invokeMethod(this, [this, url]() { openLink(url); }, Qt::QueuedConnection);
+    });
 
     m_properties = new QTreeWidget(container);
     m_properties->setObjectName(QStringLiteral("schemaProperties"));
@@ -168,12 +191,44 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     connect(m_filter, &QLineEdit::textChanged, this, [this]() { applyFilter(); });
     connect(m_show, &QComboBox::currentIndexChanged, this, [this]() { applyFilter(); });
 
+    // A single edit can send several notices, and a drag many.
+    m_stageTimer = new QTimer(this);
+    m_stageTimer->setSingleShot(true);
+    m_stageTimer->setInterval(150);
+    connect(m_stageTimer, &QTimer::timeout, this, &SchemaExplorerViewPanel::refreshStageUse);
+    // Hidden behind another tab, edits are only noted, and counted when it shows.
+    m_tree->installEventFilter(this);
+    // Create and Apply to Selection say what they'd do with the selection.
+    m_selectionConnection =
+        this->stageManager()->selectionChanged.connect([this](StageRefPtr stage, std::vector<PXR_NS::SdfPath>) {
+            if (stage == currentStage()) updateDetailsText();
+        });
+
     refreshStageCombo();
+    // See ViewportViewPanel's constructor for why this is explicit.
+    onStageChanged(currentStage());
+}
+
+void SchemaExplorerViewPanel::onStageChanged(const StageRefPtr& stage) {
+    m_stageChangedConnection = {};
+    if (stage) {
+        // Types and applied schemas change by resync.
+        m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
+            if (!changes.resyncedPaths.empty()) m_stageTimer->start();
+        });
+    }
     refresh();
 }
 
+bool SchemaExplorerViewPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_tree && event->type() == QEvent::Show && m_stageUseStale) {
+        QMetaObject::invokeMethod(this, &SchemaExplorerViewPanel::refreshStageUse, Qt::QueuedConnection);
+    }
+    return usdcc::ui::ViewPanel::eventFilter(watched, event);
+}
+
 usdcc::ui::ViewPanel* SchemaExplorerViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new SchemaExplorerViewPanel(stageManager(), currentStage(), windowTitle(), parent);
+    auto* copy = new SchemaExplorerViewPanel(stageManager(), currentStage(), m_undoManager, windowTitle(), parent);
     copy->restoreSessionState(saveSessionState());
     return copy;
 }
@@ -201,6 +256,80 @@ const SchemaInfo* SchemaExplorerViewPanel::find(const std::string& name) const {
 const SchemaInfo* SchemaExplorerViewPanel::currentSchema() const {
     const QTreeWidgetItem* item = m_tree->currentItem();
     return item ? find(item->data(Name, kNameRole).toString().toStdString()) : nullptr;
+}
+
+QString SchemaExplorerViewPanel::currentUnregistered() const {
+    const QTreeWidgetItem* item = m_tree->currentItem();
+    return item ? item->data(Name, kUnregisteredRole).toString() : QString();
+}
+
+bool SchemaExplorerViewPanel::selectUnregistered(const QString& name) {
+    if (!m_stageGroup) return false;
+    for (QTreeWidgetItemIterator it(m_tree); *it; ++it) {
+        if ((*it)->data(Name, kUnregisteredRole).toString() != name) continue;
+        if ((*it)->isHidden()) {
+            const QSignalBlocker blocker(m_show);
+            m_show->setCurrentIndex(0);
+            m_filter->clear();
+            applyFilter();
+        }
+        for (QTreeWidgetItem* parent = (*it)->parent(); parent; parent = parent->parent()) parent->setExpanded(true);
+        m_tree->setCurrentItem(*it);
+        m_tree->scrollToItem(*it);
+        return true;
+    }
+    return false;
+}
+
+std::vector<PXR_NS::SdfPath> SchemaExplorerViewPanel::selection() const {
+    return currentStage() ? stageManager()->selectedPaths(currentStage()) : std::vector<PXR_NS::SdfPath>();
+}
+
+bool SchemaExplorerViewPanel::selectPrimsUsing(const QString& schema) {
+    if (!currentStage()) return false;
+    const std::string name = schema.toStdString();
+    const std::vector<PXR_NS::SdfPath>* prims = nullptr;
+    if (const auto it = m_use.prims.find(name); it != m_use.prims.end()) prims = &it->second;
+    if (const auto it = m_use.unregistered.find(name); !prims && it != m_use.unregistered.end()) prims = &it->second;
+    if (!prims || prims->empty()) return false;
+    stageManager()->setSelectedPaths(currentStage(), *prims);
+    return true;
+}
+
+QString SchemaExplorerViewPanel::createTargetText(bool* possible) const {
+    if (possible) *possible = false;
+    if (!currentStage()) return tr("No stage");
+    const prim_actions::CreateTarget target = prim_actions::createTarget(currentStage(), selection());
+    if (!target.problem.isEmpty()) return target.problem;
+    if (possible) *possible = true;
+    return target.parent == PXR_NS::SdfPath::AbsoluteRootPath() ? tr("at the root")
+                                                                : tr("under %1").arg(qs(target.parent.GetString()));
+}
+
+PXR_NS::SdfPath SchemaExplorerViewPanel::createPrim(const QString& type, QString* why) {
+    const SchemaInfo* info = find(type.toStdString());
+    auto refuse = [why](const QString& reason) {
+        if (why) *why = reason;
+        return PXR_NS::SdfPath();
+    };
+    if (!info || info->kind != SchemaInfo::Kind::ConcreteTyped) return refuse(tr("%1 isn't a prim type").arg(type));
+    if (!currentStage() || !m_undoManager) return refuse(tr("No stage"));
+    const prim_actions::CreateTarget target = prim_actions::createTarget(currentStage(), selection());
+    if (!target.problem.isEmpty()) return refuse(target.problem);
+    const PXR_NS::SdfPath path = prim_actions::createPrim(*m_undoManager, currentStage(), target.parent, info->name);
+    if (path.IsEmpty()) return refuse(tr("It couldn't be created there"));
+    stageManager()->setSelectedPaths(currentStage(), {path});
+    return path;
+}
+
+bool SchemaExplorerViewPanel::applyToSelection(const QString& schema) {
+    const SchemaInfo* info = find(schema.toStdString());
+    if (!info || !currentStage() || !m_undoManager) return false;
+    if (info->kind != SchemaInfo::Kind::SingleApplyAPI && info->kind != SchemaInfo::Kind::MultipleApplyAPI) return false;
+    const std::vector<PXR_NS::SdfPath> paths = selection();
+    if (paths.empty()) return false;
+    return askAndApplySchema(this, *m_undoManager, currentStage(), paths, qs(info->name),
+                             info->kind == SchemaInfo::Kind::MultipleApplyAPI);
 }
 
 bool SchemaExplorerViewPanel::selectSchema(const QString& name) {
@@ -235,12 +364,101 @@ void SchemaExplorerViewPanel::populateOptionsMenu(QMenu* menu) {
 
 void SchemaExplorerViewPanel::refresh() {
     const QString current = currentSchema() ? qs(currentSchema()->name) : QString();
+    const QString unregistered = currentUnregistered();
     m_schemas = allSchemas();
     m_index.clear();
     for (std::size_t i = 0; i < m_schemas.size(); ++i) m_index[m_schemas[i].name] = i;
-    rebuildTree();
-    applyFilter();
-    if (current.isEmpty() || !selectSchema(current)) showDetails();
+    m_stageTimer->stop();
+    m_stageUseStale = false;
+    m_use = currentStage() ? stageSchemaUse(currentStage()->usdStage()) : StageSchemaUse();
+    {
+        const QSignalBlocker blocker(m_tree);  // one showDetails() below, not one per step
+        m_stageGroup = nullptr;                // rebuildTree() clears the tree, the group too
+        rebuildTree();
+        rebuildStageGroup();
+        applyFilter();
+        const bool found = !unregistered.isEmpty() ? selectUnregistered(unregistered)
+                                                   : !current.isEmpty() && selectSchema(current);
+        if (!found) m_tree->setCurrentItem(nullptr);
+    }
+    showDetails();
+}
+
+void SchemaExplorerViewPanel::refreshStageUse() {
+    m_stageTimer->stop();
+    if (!m_tree->isVisible()) {
+        m_stageUseStale = true;
+        return;
+    }
+    m_stageUseStale = false;
+    // What's chosen in This stage, to choose again in the new one.
+    const QTreeWidgetItem* item = m_tree->currentItem();
+    const QString unregistered = currentUnregistered();
+    const QString stageRow =
+        item && item->data(Name, kStageRowRole).toBool() ? item->data(Name, kNameRole).toString() : QString();
+    m_use = currentStage() ? stageSchemaUse(currentStage()->usdStage()) : StageSchemaUse();
+    {
+        const QSignalBlocker blocker(m_tree);
+        rebuildStageGroup();
+        applyFilter();
+        if (!unregistered.isEmpty() && !selectUnregistered(unregistered)) m_tree->setCurrentItem(nullptr);
+        if (!stageRow.isEmpty()) {
+            m_tree->setCurrentItem(nullptr);
+            for (int i = 0; m_stageGroup && i < m_stageGroup->childCount(); ++i) {
+                if (m_stageGroup->child(i)->data(Name, kNameRole).toString() == stageRow) {
+                    m_tree->setCurrentItem(m_stageGroup->child(i));
+                }
+            }
+        }
+    }
+    if (!unregistered.isEmpty() || !stageRow.isEmpty()) {
+        showDetails();  // the row is a new one
+    } else {
+        updateDetailsText();  // the counts
+    }
+}
+
+void SchemaExplorerViewPanel::rebuildStageGroup() {
+    const bool hadGroup = m_stageGroup != nullptr;
+    const bool wasExpanded = hadGroup && m_stageGroup->isExpanded();
+    delete m_stageGroup;
+    m_stageGroup = nullptr;
+    if (!currentStage()) return;
+
+    m_stageGroup = new QTreeWidgetItem(m_tree, {tr("This stage")});
+    QFont font = m_stageGroup->font(Name);
+    font.setBold(true);
+    m_stageGroup->setFont(Name, font);
+    m_stageGroup->setFlags(m_stageGroup->flags() & ~Qt::ItemIsSelectable);
+    m_stageGroup->setText(Kind, m_use.prims.size() == 1 ? tr("1 schema") : tr("%1 schemas").arg(m_use.prims.size()));
+    m_stageGroup->setToolTip(Name, tr("The types and API schemas the stage's prims have, inside instances and inactive "
+                                      "prims too, and those it names that USD doesn't know"));
+    for (const auto& [name, prims] : m_use.prims) {
+        const SchemaInfo* info = find(name);
+        if (!info) continue;
+        auto* item = new QTreeWidgetItem(m_stageGroup, {qs(name), primCount(prims.size())});
+        item->setData(Name, kNameRole, qs(name));
+        item->setData(Name, kStageRowRole, true);
+        if (isTyped(info->kind)) item->setIcon(Name, prim_icons::icon(prim_icons::iconNameForType(PXR_NS::TfToken(name))));
+        item->setToolTip(Name, tr("%1, on %2").arg(qs(schemaKindName(info->kind)), primCount(prims.size())));
+    }
+    if (!m_use.unregistered.empty()) {
+        auto* group = new QTreeWidgetItem(m_stageGroup, {tr("Not registered")});
+        group->setFlags(group->flags() & ~Qt::ItemIsSelectable);
+        group->setForeground(Name, kUnregisteredColor);
+        group->setText(Kind, QString::number(m_use.unregistered.size()));
+        group->setToolTip(Name, tr("Types and API schemas the stage names that USD doesn't know: their plugin may not be "
+                                   "loaded, or the name is misspelt"));
+        for (const auto& [name, prims] : m_use.unregistered) {
+            auto* item = new QTreeWidgetItem(group, {qs(name), primCount(prims.size())});
+            item->setData(Name, kUnregisteredRole, qs(name));
+            item->setForeground(Name, kUnregisteredColor);
+            item->setToolTip(Name, tr("Not registered: its plugin may not be loaded, or the name is misspelt"));
+        }
+        group->setExpanded(true);
+    }
+    // Open at first when there's something wrong to see.
+    m_stageGroup->setExpanded(hadGroup ? wasExpanded : !m_use.unregistered.empty());
 }
 
 void SchemaExplorerViewPanel::rebuildTree() {
@@ -321,16 +539,25 @@ void SchemaExplorerViewPanel::applyFilter() {
         for (int i = 0; i < item->childCount(); ++i) any = visit(item->child(i)) || any;
         bool matches = false;
         if (const SchemaInfo* info = find(item->data(Name, kNameRole).toString().toStdString())) {
-            matches = matchesShow(*info, show) &&
-                      (text.isEmpty() || qs(info->name).contains(text, Qt::CaseInsensitive) ||
-                       qs(info->typeName).contains(text, Qt::CaseInsensitive));
-            if (matches) ++shown;
+            const bool kind = show == Show::OnStage ? m_use.count(info->name) > 0 : matchesShow(*info, show);
+            matches = kind && (text.isEmpty() || qs(info->name).contains(text, Qt::CaseInsensitive) ||
+                               qs(info->typeName).contains(text, Qt::CaseInsensitive));
+            // This stage's rows repeat the tree's: count each schema once.
+            if (matches && !item->data(Name, kStageRowRole).toBool()) ++shown;
+        } else if (const QString unregistered = item->data(Name, kUnregisteredRole).toString(); !unregistered.isEmpty()) {
+            matches = (show == Show::All || show == Show::OnStage) &&
+                      (text.isEmpty() || unregistered.contains(text, Qt::CaseInsensitive));
         }
         item->setHidden(!matches && !any);
         // An ancestor shown only for a match below it is dimmed.
-        item->setForeground(Name, matches || !item->data(Name, kNameRole).isValid() || !filtering
-                                      ? QBrush()
-                                      : m_tree->palette().brush(QPalette::Disabled, QPalette::Text));
+        // This stage's unregistered rows, and their group, keep their amber.
+        const bool amber = item->data(Name, kUnregisteredRole).isValid() ||
+                           (m_stageGroup && item->parent() == m_stageGroup && !item->data(Name, kNameRole).isValid());
+        if (!amber) {
+            item->setForeground(Name, matches || !item->data(Name, kNameRole).isValid() || !filtering
+                                          ? QBrush()
+                                          : m_tree->palette().brush(QPalette::Disabled, QPalette::Text));
+        }
         if (filtering && any) item->setExpanded(true);
         return matches || any;
     };
@@ -361,6 +588,22 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
     auto row = [&rows](const QString& label, const QString& value) {
         if (!value.isEmpty()) rows += QStringLiteral("<tr><td><i>%1</i>&nbsp;&nbsp;</td><td>%2</td></tr>").arg(label, value);
     };
+    // What the stage does with it, and what can be done.
+    if (currentStage()) {
+        row(tr("On this stage"), stageUseHtml(info.name));
+        if (info.kind == SchemaInfo::Kind::ConcreteTyped) {
+            bool possible = false;
+            const QString where = createTargetText(&possible).toHtmlEscaped();
+            row(tr("Create"), possible ? QStringLiteral("<a href=\"create:%1\">%2</a> %3").arg(escaped(info.name), tr("Create"), where)
+                                       : QStringLiteral("<i>%1</i>").arg(where));
+        } else if (info.kind == SchemaInfo::Kind::SingleApplyAPI || info.kind == SchemaInfo::Kind::MultipleApplyAPI) {
+            const std::size_t selected = selection().size();
+            row(tr("Apply"), selected == 0 ? QStringLiteral("<i>%1</i>").arg(tr("Select prims to apply it to"))
+                                           : QStringLiteral("<a href=\"apply:%1\">%2</a> %3")
+                                                 .arg(escaped(info.name), tr("Apply to Selection"),
+                                                      tr("(%1 selected)").arg(primCount(selected))));
+        }
+    }
     // The chain to the root: Mesh ‹ PointBased ‹ Gprim ...
     QStringList chain;
     for (const SchemaInfo* base = find(info.base); base; base = find(base->base)) chain << schemaLink(base->name);
@@ -396,14 +639,69 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
     return html;
 }
 
+QString SchemaExplorerViewPanel::stageUseHtml(const std::string& name) const {
+    std::size_t count = m_use.count(name);
+    if (count == 0) {
+        const auto it = m_use.unregistered.find(name);
+        count = it == m_use.unregistered.end() ? 0 : it->second.size();
+    }
+    if (count == 0) return tr("none");
+    return QStringLiteral("%1 · <a href=\"select:%2\">%3</a>").arg(primCount(count), escaped(name), tr("Select"));
+}
+
+QString SchemaExplorerViewPanel::unregisteredHtml(const std::string& name) const {
+    QString html = QStringLiteral("<h3>%1</h3>").arg(escaped(name));
+    html += QStringLiteral("<p>%1</p>").arg(tr("Not registered: USD knows no schema of this name. Its plugin may not be "
+                                               "loaded, or the name is misspelt."));
+    const auto composes = m_use.composesAs.find(name);
+    if (composes != m_use.composesAs.end()) {
+        // A type: what its prims are instead.
+        html += QStringLiteral("<p>%1</p>")
+                    .arg(composes->second.empty()
+                             ? tr("Its prims have no schema: no properties of their own and no fallbacks. Their values "
+                                  "are kept, as authored.")
+                             : tr("Its prims compose as %1, which the stage's fallbackPrimTypes names for it. Their "
+                                  "values are kept, as authored.")
+                                   .arg(schemaLink(composes->second)));
+    } else {
+        html += QStringLiteral("<p>%1</p>").arg(tr("Applied in the file, it adds nothing: no properties and no "
+                                                   "fallbacks. The Attribute Editor shows it as an amber pill."));
+    }
+    QString rows = QStringLiteral("<tr><td><i>%1</i>&nbsp;&nbsp;</td><td>%2</td></tr>")
+                       .arg(tr("On this stage"), stageUseHtml(name));
+    html += QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">%1</table>").arg(rows);
+    if (const auto it = m_use.unregistered.find(name); it != m_use.unregistered.end()) {
+        QStringList prims;
+        for (std::size_t i = 0; i < it->second.size() && i < kMaxPrimsListed; ++i) {
+            const QString path = qs(it->second[i].GetString());
+            prims << QStringLiteral("<a href=\"prim:%1\">%2</a>").arg(path.toHtmlEscaped(), path.toHtmlEscaped());
+        }
+        if (it->second.size() > kMaxPrimsListed) prims << tr("and %1 more").arg(it->second.size() - kMaxPrimsListed);
+        html += QStringLiteral("<p>%1</p>").arg(prims.join(QStringLiteral("<br>")));
+    }
+    return html;
+}
+
+void SchemaExplorerViewPanel::updateDetailsText() {
+    // Kept where it was: the counts or the selection changed, not the schema.
+    const int scroll = m_details->verticalScrollBar()->value();
+    if (const QString unregistered = currentUnregistered(); !unregistered.isEmpty()) {
+        m_details->setHtml(unregisteredHtml(unregistered.toStdString()));
+    } else if (const SchemaInfo* info = currentSchema()) {
+        m_details->setHtml(detailsHtml(*info));
+    } else {
+        m_details->setHtml(QStringLiteral("<p><i>%1</i></p>").arg(tr("Choose a schema to see what it defines.")));
+    }
+    m_details->verticalScrollBar()->setValue(scroll);
+}
+
 void SchemaExplorerViewPanel::showDetails() {
     m_properties->clear();
+    m_properties->setHeaderLabels({tr("Property"), tr("Type"), tr("Fallback"), tr("Declared by")});
+    updateDetailsText();
+    m_details->verticalScrollBar()->setValue(0);
     const SchemaInfo* info = currentSchema();
-    if (!info) {
-        m_details->setHtml(QStringLiteral("<p><i>%1</i></p>").arg(tr("Choose a schema to see what it defines.")));
-        return;
-    }
-    m_details->setHtml(detailsHtml(*info));
+    if (!info) return;
     for (const SchemaProperty& property : info->properties) {
         auto* item = new QTreeWidgetItem(m_properties);
         item->setText(PropertyName, qs(property.name));
@@ -426,12 +724,22 @@ void SchemaExplorerViewPanel::showDetails() {
 
 void SchemaExplorerViewPanel::openLink(const QUrl& url) {
     const QString target = url.toString();
-    if (target.startsWith(QLatin1String("schema:"))) {
-        selectSchema(target.mid(7));
-    } else if (target.startsWith(QLatin1String("source:"))) {
-        showSource(target.mid(7));
-    } else if (target.startsWith(QLatin1String("generated:"))) {
-        showSource(target.mid(10), true);
+    const QString scheme = target.section(QLatin1Char(':'), 0, 0);
+    const QString rest = target.section(QLatin1Char(':'), 1);
+    if (scheme == QLatin1String("schema")) {
+        selectSchema(rest);
+    } else if (scheme == QLatin1String("source")) {
+        showSource(rest);
+    } else if (scheme == QLatin1String("generated")) {
+        showSource(rest, true);
+    } else if (scheme == QLatin1String("select")) {
+        selectPrimsUsing(rest);
+    } else if (scheme == QLatin1String("create")) {
+        createPrim(rest);
+    } else if (scheme == QLatin1String("apply")) {
+        applyToSelection(rest);
+    } else if (scheme == QLatin1String("prim") && currentStage()) {
+        stageManager()->setSelectedPaths(currentStage(), {PXR_NS::SdfPath(rest.toStdString())});
     }
 }
 
@@ -447,17 +755,55 @@ UsdaPreviewDialog* SchemaExplorerViewPanel::showSource(const QString& name, bool
 
 void SchemaExplorerViewPanel::showMenu(const QPoint& pos) {
     QTreeWidgetItem* item = m_tree->itemAt(pos);
-    const SchemaInfo* info = item ? find(item->data(Name, kNameRole).toString().toStdString()) : nullptr;
+    if (!item) return;
+    QMenu menu(this);
+    menu.setToolTipsVisible(true);
+    auto addSelect = [this, &menu](const QString& name, std::size_t count) {
+        QAction* select = menu.addAction(count ? tr("Select Prims Using It (%1)").arg(count) : tr("Select Prims Using It"),
+                                         this, [this, name]() { selectPrimsUsing(name); });
+        select->setEnabled(count > 0 && currentStage());
+    };
+
+    if (const QString unregistered = item->data(Name, kUnregisteredRole).toString(); !unregistered.isEmpty()) {
+        const auto it = m_use.unregistered.find(unregistered.toStdString());
+        addSelect(unregistered, it == m_use.unregistered.end() ? 0 : it->second.size());
+        menu.addSeparator();
+        menu.addAction(tr("Copy Name"), this, [unregistered]() { QApplication::clipboard()->setText(unregistered); });
+        menu.exec(m_tree->viewport()->mapToGlobal(pos));
+        return;
+    }
+
+    const SchemaInfo* info = find(item->data(Name, kNameRole).toString().toStdString());
     if (!info) return;
     const QString name = qs(info->name);
-    QMenu menu(this);
+    if (currentStage()) {
+        addSelect(name, m_use.count(info->name));
+        if (info->kind == SchemaInfo::Kind::ConcreteTyped) {
+            bool possible = false;
+            const QString where = createTargetText(&possible);
+            QAction* create = menu.addAction(tr("Create %1").arg(name), this, [this, name]() { createPrim(name); });
+            create->setEnabled(possible);
+            create->setToolTip(where);
+        } else if (info->kind == SchemaInfo::Kind::SingleApplyAPI || info->kind == SchemaInfo::Kind::MultipleApplyAPI) {
+            const std::size_t selected = selection().size();
+            QAction* apply = menu.addAction(info->kind == SchemaInfo::Kind::MultipleApplyAPI ? tr("Apply to Selection...")
+                                                                                            : tr("Apply to Selection"),
+                                            this, [this, name]() {
+                                                // Queued: it may ask, and the menu should be gone first.
+                                                QMetaObject::invokeMethod(
+                                                    this, [this, name]() { applyToSelection(name); }, Qt::QueuedConnection);
+                                            });
+            apply->setEnabled(selected > 0);
+            apply->setToolTip(selected ? primCount(selected) : tr("Select prims to apply it to"));
+        }
+        menu.addSeparator();
+    }
     QAction* source = menu.addAction(tr("Show Source"), this, [this, name]() { showSource(name); });
     source->setToolTip(tr("Its plugin's schema.usda, where the schema is written"));
     source->setEnabled(!info->sourcePath.empty() || !info->generatedPath.empty());
     QAction* generated = menu.addAction(tr("Show Generated Schema"), this, [this, name]() { showSource(name, true); });
     generated->setToolTip(tr("Its plugin's generatedSchema.usda, what USD reads"));
     generated->setEnabled(!info->generatedPath.empty());
-    menu.setToolTipsVisible(true);
     menu.addSeparator();
     menu.addAction(tr("Copy Name"), this, [name]() { QApplication::clipboard()->setText(name); });
     const QString typeName = qs(info->typeName);
