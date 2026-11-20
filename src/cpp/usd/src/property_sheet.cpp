@@ -21,6 +21,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/prim_picker_dialog.h"
 #include "usdcc/usd/prim_tree_dialog.h"
+#include "usdcc/usd/promote_schema_dialog.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/variant_actions.h"
 #include "usdcc/usd/variant_editor_dialog.h"
@@ -514,6 +515,28 @@ void PropertySheet::rebuild() {
         }
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
         if (interfaceInputs && category.key == "inputs") addInputButton(section, prim);
+        // Properties no schema defines: they can become one (docs/SCHEMAS.md §6).
+        if (category.key == "custom" || TfStringStartsWith(category.key, "ns:")) {
+            QStringList names;
+            for (const UsdProperty& property : category.properties) names << qs(property.GetName().GetString());
+            QToolButton* promote = properties::iconButton(QStringLiteral(":/usdcc/theme/more.png"), tr("%1 actions").arg(qs(category.label)));
+            promote->setObjectName(QStringLiteral("promoteButton"));
+            promote->setPopupMode(QToolButton::InstantPopup);
+            auto* menu = new QMenu(promote);
+            menu->setToolTipsVisible(true);
+            QAction* make = menu->addAction(tr("Make Schema from Attributes..."), this, [this, path = prim.GetPath(), names]() {
+                // Queued: the menu goes first, and the panel may rebuild.
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, path, names]() {
+                        if (m_stage) promoteToSchemaInteractively(this, m_stage->usdStage()->GetPrimAtPath(path), names);
+                    },
+                    Qt::QueuedConnection);
+            });
+            make->setToolTip(tr("An API schema with these properties, their values as its fallbacks, in a codeless schema library"));
+            promote->setMenu(menu);
+            section->addHeaderWidget(promote);
+        }
         std::set<TfToken> inStack;
         const std::set<std::string> groups = primvarGroups(category);
         std::map<std::string, GroupFrame> frames;

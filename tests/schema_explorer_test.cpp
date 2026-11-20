@@ -12,6 +12,8 @@
 #include "usdcc/usd/usda_view.h"
 
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/types.h>
+#include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/stage.h>
@@ -21,6 +23,8 @@
 #include <QMessageBox>
 #include <QTimer>
 #include <QUndoStack>
+
+#include <cstdio>
 #include <QElapsedTimer>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -333,4 +337,52 @@ USDCC_TEST(schema_explorer_stage) {
     settle();
     CHECK(!stageRow(tree, "StudioThing") && panel.currentUnregistered().isEmpty(), "gone once its prims are");
     CHECK(panel.details()->toPlainText().contains("Choose a schema"), "and its details with it");
+}
+
+// Prims that author a codeless API's properties without having it (Promote to
+// Schema's second step, docs/SCHEMAS.md §6): the details count them, and Apply
+// to Them gives them it in one undo step, their values kept. Needs
+// test_data/schemas/usdccTestSchemas registered at startup, which the
+// usdcc_ui_schema_adopt test does.
+USDCC_TEST(schema_explorer_adopt) {
+    using namespace PXR_NS;
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    SchemaExplorerViewPanel panel(&stages, stage, undo);
+    if (!panel.selectSchema(QStringLiteral("UsdccTestShotAPI"))) {
+        std::printf("  skipped: the usdccTestSchemas plugin isn't registered (run the usdcc_ui_schema_adopt test)\n");
+        return;
+    }
+    const UsdStageRefPtr& s = stage->usdStage();
+    for (const char* path : {"/A", "/B"}) {
+        s->DefinePrim(SdfPath(path), TfToken("Xform"))
+            .CreateAttribute(TfToken("usdccTest:shot:frameStart"), SdfValueTypeNames->Int, /*custom=*/true)
+            .Set(990);
+    }
+    s->DefinePrim(SdfPath("/C"), TfToken("Xform")).AddAppliedSchema(TfToken("UsdccTestShotAPI"));
+    s->DefinePrim(SdfPath("/D"), TfToken("Xform"));
+    panel.show();
+    settle();  // the panel follows the stage's edits
+    panel.selectSchema(QStringLiteral("UsdccTestShotAPI"));
+    CHECK(panel.primsWithAttributesOf(QStringLiteral("UsdccTestShotAPI")) == std::vector<SdfPath>({SdfPath("/A"), SdfPath("/B")}),
+          "the prims with its attributes, not those with it already");
+    CHECK(panel.details()->toPlainText().contains("Has its attributes") && panel.details()->toPlainText().contains("Apply to Them"),
+          "the details offer it");
+    CHECK(panel.applyToPrimsWithItsAttributes(QStringLiteral("UsdccTestShotAPI")), "Apply to Them");
+    QUndoStack* stack = undo->stack(stage);
+    CHECK(stack->undoText() == "Apply UsdccTestShotAPI to 2 prims", "one undo step: [%s]", qPrintable(stack->undoText()));
+    const UsdPrim a = s->GetPrimAtPath(SdfPath("/A"));
+    int frame = 0;
+    CHECK(a.HasAPI(TfToken("UsdccTestShotAPI")) && a.GetAttribute(TfToken("usdccTest:shot:frameStart")).Get(&frame) && frame == 990,
+          "they have it, their values kept");
+    std::printf("  a custom attribute a schema now defines reads as custom: %s\n",
+                a.GetAttribute(TfToken("usdccTest:shot:frameStart")).IsCustom() ? "yes" : "no");
+    CHECK(panel.primsWithAttributesOf(QStringLiteral("UsdccTestShotAPI")).empty(), "none left");
+    stack->undo();
+    CHECK(!s->GetPrimAtPath(SdfPath("/A")).HasAPI(TfToken("UsdccTestShotAPI")), "undo takes it off again");
 }

@@ -3,6 +3,8 @@
 #include "usdcc/usd/apply_schema_ui.h"
 #include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/prim_icons.h"
+#include "usdcc/usd/schema_libraries.h"
+#include "usdcc/usd/schema_library_editor.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
@@ -10,6 +12,8 @@
 
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/stage.h>
 
 #include <QApplication>
 #include <QClipboard>
@@ -25,7 +29,10 @@
 #include <QMenu>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QInputDialog>
+#include <QMessageBox>
 #include <QScrollBar>
+#include <QStackedWidget>
 #include <QTextBrowser>
 #include <QTimer>
 #include <QTreeWidget>
@@ -43,6 +50,7 @@ namespace {
 constexpr int kNameRole = Qt::UserRole;  // a schema's name; empty on a category row
 constexpr int kUnregisteredRole = Qt::UserRole + 1;  // This stage: a name USD doesn't know
 constexpr int kStageRowRole = Qt::UserRole + 2;      // This stage: a schema it uses
+constexpr int kLibraryRole = Qt::UserRole + 3;       // Schema Libraries: a library's name
 // As the Applied Schemas pill of an unregistered schema (theme/dark.qss).
 const QColor kUnregisteredColor(0xff, 0xb3, 0x40);
 constexpr std::size_t kMaxPrimsListed = 20;
@@ -150,6 +158,12 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &SchemaExplorerViewPanel::showMenu);
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this]() { showDetails(); });
+    // A library opens in the editor.
+    connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
+        if (const QString library = item ? item->data(Name, kLibraryRole).toString() : QString(); !library.isEmpty()) {
+            QMetaObject::invokeMethod(this, [this, library]() { editLibrary(library); }, Qt::QueuedConnection);
+        }
+    });
 
     m_details = new QTextBrowser(container);
     m_details->setObjectName(QStringLiteral("schemaDetails"));
@@ -178,9 +192,19 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     right->addWidget(m_properties);
     right->setStretchFactor(0, 2);
     right->setStretchFactor(1, 3);
+    // The details, or the Schema Editor in their place.
+    m_stack = new QStackedWidget(container);
+    m_stack->addWidget(right);
+    m_editor = new SchemaLibraryEditor(m_stack);
+    m_stack->addWidget(m_editor);
+    connect(m_editor, &SchemaLibraryEditor::closeRequested, this, [this]() {
+        m_stack->setCurrentIndex(0);
+        rebuildLibraryGroup();
+    });
+    connect(m_editor, &SchemaLibraryEditor::libraryChanged, this, [this]() { rebuildLibraryGroup(); });
     auto* split = new QSplitter(Qt::Horizontal, container);
     split->addWidget(m_tree);
-    split->addWidget(right);
+    split->addWidget(m_stack);
     split->setStretchFactor(0, 2);
     split->setStretchFactor(1, 3);
 
@@ -360,6 +384,168 @@ void SchemaExplorerViewPanel::populateOptionsMenu(QMenu* menu) {
     refreshAction->setToolTip(tr("Read USD's schema registry again"));
     menu->addAction(tr("Expand All"), m_tree, &QTreeWidget::expandAll);
     menu->addAction(tr("Collapse All"), m_tree, &QTreeWidget::collapseAll);
+    menu->addSeparator();
+    QAction* newLibraryAction = menu->addAction(tr("New Schema Library..."), this, [this]() {
+        QMetaObject::invokeMethod(this, [this]() { newLibraryInteractively(); }, Qt::QueuedConnection);
+    });
+    newLibraryAction->setToolTip(tr("Make a library of codeless schemas, as a plugin in your plugins folder"));
+}
+
+bool SchemaExplorerViewPanel::canClose() { return !isEditing() || m_editor->maybeSave(); }
+
+bool SchemaExplorerViewPanel::isEditing() const { return m_stack->currentIndex() == 1; }
+
+bool SchemaExplorerViewPanel::editLibrary(const QString& library, const QString& schema) {
+    const std::optional<SchemaLibraryLocation> location = SchemaLibraries::instance().find(library.toStdString());
+    if (!location) return false;
+    if (isEditing() && m_editor->library() != library && !m_editor->maybeSave()) return false;
+    if (!isEditing() || m_editor->library() != library) {
+        QString error;
+        if (!m_editor->open(library, &error)) {
+            QMessageBox::warning(this, tr("Schema Library"), error);
+            return false;
+        }
+    }
+    if (!schema.isEmpty()) m_editor->selectClass(schema);
+    m_stack->setCurrentIndex(1);
+    return true;
+}
+
+bool SchemaExplorerViewPanel::closeEditor() {
+    if (!isEditing()) return true;
+    if (!m_editor->maybeSave()) return false;
+    m_stack->setCurrentIndex(0);
+    rebuildLibraryGroup();
+    return true;
+}
+
+bool SchemaExplorerViewPanel::newLibrary(const QString& name, QString* error) {
+    std::string why;
+    SchemaLibraryLocation location;
+    if (!SchemaLibraries::instance().create(name.toStdString(), &location, &why)) {
+        if (error) *error = qs(why);
+        return false;
+    }
+    rebuildLibraryGroup();
+    return editLibrary(name);
+}
+
+void SchemaExplorerViewPanel::newLibraryInteractively() {
+    QString name;
+    for (;;) {
+        bool ok = false;
+        name = QInputDialog::getText(this, tr("New Schema Library"),
+                                     tr("Name, as its schemas' namespace (studio, myShow):"), QLineEdit::Normal, name, &ok)
+                   .trimmed();
+        if (!ok || name.isEmpty()) return;
+        QString error;
+        if (newLibrary(name, &error)) return;
+        QMessageBox::warning(this, tr("New Schema Library"), error);
+    }
+}
+
+QString SchemaExplorerViewPanel::currentLibrary() const {
+    const QTreeWidgetItem* item = m_tree->currentItem();
+    return item ? item->data(Name, kLibraryRole).toString() : QString();
+}
+
+bool SchemaExplorerViewPanel::selectLibrary(const QString& name) {
+    for (int i = 0; m_libraryGroup && i < m_libraryGroup->childCount(); ++i) {
+        if (m_libraryGroup->child(i)->data(Name, kLibraryRole).toString() != name) continue;
+        m_libraryGroup->setExpanded(true);
+        m_tree->setCurrentItem(m_libraryGroup->child(i));
+        return true;
+    }
+    return false;
+}
+
+void SchemaExplorerViewPanel::rebuildLibraryGroup() {
+    const QString chosen = currentLibrary();
+    const bool wasExpanded = m_libraryGroup ? m_libraryGroup->isExpanded() : true;
+    delete m_libraryGroup;
+    m_libraryGroup = nullptr;
+    const std::vector<SchemaLibraryLocation> libraries = SchemaLibraries::instance().libraries();
+    if (libraries.empty()) return;
+    // Before This stage, after the categories.
+    m_libraryGroup = new QTreeWidgetItem();
+    const int at = m_stageGroup ? m_tree->indexOfTopLevelItem(m_stageGroup) : m_tree->topLevelItemCount();
+    m_tree->insertTopLevelItem(at, m_libraryGroup);
+    m_libraryGroup->setText(Name, tr("Schema Libraries"));
+    QFont font = m_libraryGroup->font(Name);
+    font.setBold(true);
+    m_libraryGroup->setFont(Name, font);
+    m_libraryGroup->setFlags(m_libraryGroup->flags() & ~Qt::ItemIsSelectable);
+    m_libraryGroup->setToolTip(Name, tr("Libraries of codeless schemas usdcc can edit. Double-click one to edit it"));
+    for (const SchemaLibraryLocation& library : libraries) {
+        const QString state = !library.writable           ? tr("read-only")
+                              : !library.generated         ? tr("not generated")
+                              : library.changed            ? tr("changed")
+                              : library.waitingForRestart  ? tr("restart to load")
+                                                           : tr("loaded");
+        auto* item = new QTreeWidgetItem(m_libraryGroup, {qs(library.name), state});
+        item->setData(Name, kLibraryRole, qs(library.name));
+        item->setToolTip(Name, qs(library.source()));
+    }
+    m_libraryGroup->setExpanded(wasExpanded);
+    if (!chosen.isEmpty()) {
+        const QSignalBlocker blocker(m_tree);
+        selectLibrary(chosen);
+    }
+}
+
+QString SchemaExplorerViewPanel::libraryHtml(const std::string& name) const {
+    const std::optional<SchemaLibraryLocation> library = SchemaLibraries::instance().find(name);
+    if (!library) return QStringLiteral("<p><i>%1</i></p>").arg(tr("It's gone."));
+    QString html = QStringLiteral("<h3>%1</h3>").arg(escaped(name));
+    const QString state = !library->writable           ? tr("Read-only: its folder can't be written.")
+                          : !library->generated         ? tr("Not generated yet: USD doesn't know its schemas.")
+                          : library->changed            ? tr("Changed since it was generated.")
+                          : library->waitingForRestart  ? tr("Generated: it loads at the next start.")
+                                                        : tr("Loaded.");
+    html += QStringLiteral("<p>%1 <a href=\"edit:%2\">%3</a></p>").arg(state, escaped(name), tr("Edit"));
+    QString rows;
+    auto row = [&rows](const QString& label, const QString& value) {
+        rows += QStringLiteral("<tr><td><i>%1</i>&nbsp;&nbsp;</td><td>%2</td></tr>").arg(label, value);
+    };
+    row(tr("Source"), escaped(library->source()));
+    if (!library->pluginFolder.empty()) row(tr("Plugin"), escaped(library->pluginFolder));
+    SchemaLibraryDef definition;
+    if (readSchemaLibrary(library->source(), &definition, nullptr)) {
+        QStringList schemas;
+        for (const SchemaClassDef& c : definition.classes) {
+            schemas << (find(c.name) ? schemaLink(c.name) : escaped(c.name));
+        }
+        row(tr("Schemas"), schemas.isEmpty() ? tr("none yet") : schemas.join(QStringLiteral(", ")));
+    }
+    html += QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">%1</table>").arg(rows);
+    return html;
+}
+
+std::vector<PXR_NS::SdfPath> SchemaExplorerViewPanel::primsWithAttributesOf(const QString& schema) const {
+    std::vector<PXR_NS::SdfPath> prims;
+    const SchemaInfo* info = find(schema.toStdString());
+    if (!info || info->kind != SchemaInfo::Kind::SingleApplyAPI || !currentStage()) return prims;
+    std::vector<PXR_NS::TfToken> names;
+    for (const SchemaProperty& property : info->properties) names.emplace_back(property.name);
+    const PXR_NS::TfToken api(info->name);
+    for (const PXR_NS::UsdPrim& prim : currentStage()->usdStage()->Traverse()) {
+        const PXR_NS::TfTokenVector applied = prim.GetAppliedSchemas();
+        if (std::find(applied.begin(), applied.end(), api) != applied.end()) continue;
+        for (const PXR_NS::TfToken& name : names) {
+            const PXR_NS::UsdProperty property = prim.GetProperty(name);
+            if (property && property.IsAuthored()) {
+                prims.push_back(prim.GetPath());
+                break;
+            }
+        }
+    }
+    return prims;
+}
+
+bool SchemaExplorerViewPanel::applyToPrimsWithItsAttributes(const QString& schema) {
+    const std::vector<PXR_NS::SdfPath> prims = primsWithAttributesOf(schema);
+    if (prims.empty() || !m_undoManager) return false;
+    return prim_actions::applySchema(*m_undoManager, currentStage(), prims, schema.toStdString());
 }
 
 void SchemaExplorerViewPanel::refresh() {
@@ -374,10 +560,14 @@ void SchemaExplorerViewPanel::refresh() {
     {
         const QSignalBlocker blocker(m_tree);  // one showDetails() below, not one per step
         m_stageGroup = nullptr;                // rebuildTree() clears the tree, the group too
+        m_libraryGroup = nullptr;
+        const QString library = currentLibrary();
         rebuildTree();
         rebuildStageGroup();
+        rebuildLibraryGroup();
         applyFilter();
         const bool found = !unregistered.isEmpty() ? selectUnregistered(unregistered)
+                           : !library.isEmpty()    ? selectLibrary(library)
                                                    : !current.isEmpty() && selectSchema(current);
         if (!found) m_tree->setCurrentItem(nullptr);
     }
@@ -547,11 +737,14 @@ void SchemaExplorerViewPanel::applyFilter() {
         } else if (const QString unregistered = item->data(Name, kUnregisteredRole).toString(); !unregistered.isEmpty()) {
             matches = (show == Show::All || show == Show::OnStage) &&
                       (text.isEmpty() || unregistered.contains(text, Qt::CaseInsensitive));
+        } else if (const QString library = item->data(Name, kLibraryRole).toString(); !library.isEmpty()) {
+            matches = (show == Show::All || show == Show::Codeless) &&
+                      (text.isEmpty() || library.contains(text, Qt::CaseInsensitive));
         }
         item->setHidden(!matches && !any);
         // An ancestor shown only for a match below it is dimmed.
         // This stage's unregistered rows, and their group, keep their amber.
-        const bool amber = item->data(Name, kUnregisteredRole).isValid() ||
+        const bool amber = item->data(Name, kUnregisteredRole).isValid() || item->data(Name, kLibraryRole).isValid() ||
                            (m_stageGroup && item->parent() == m_stageGroup && !item->data(Name, kNameRole).isValid());
         if (!amber) {
             item->setForeground(Name, matches || !item->data(Name, kNameRole).isValid() || !filtering
@@ -602,6 +795,14 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
                                            : QStringLiteral("<a href=\"apply:%1\">%2</a> %3")
                                                  .arg(escaped(info.name), tr("Apply to Selection"),
                                                       tr("(%1 selected)").arg(primCount(selected))));
+            // Prims that have its attributes, made into it by Promote to Schema (§6).
+            if (info.codeless && info.kind == SchemaInfo::Kind::SingleApplyAPI) {
+                const std::size_t having = primsWithAttributesOf(qs(info.name)).size();
+                if (having > 0) {
+                    row(tr("Has its attributes"), QStringLiteral("%1 · <a href=\"adopt:%2\">%3</a>")
+                                                      .arg(primCount(having), escaped(info.name), tr("Apply to Them")));
+                }
+            }
         }
     }
     // The chain to the root: Mesh ‹ PointBased ‹ Gprim ...
@@ -627,6 +828,12 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
     }
     row(tr("Derived"), links(derived));
     row(tr("Built into"), links(builtInto));
+    if (info.codeless) {
+        const std::optional<SchemaLibraryLocation> library = SchemaLibraries::instance().find(info.plugin);
+        if (library && library->writable) {
+            row(tr("Library"), QStringLiteral("%1 · <a href=\"edit:%1:%2\">%3</a>").arg(escaped(info.plugin), escaped(info.name), tr("Edit")));
+        }
+    }
     QStringList files;
     if (!info.sourcePath.empty()) files << QStringLiteral("<a href=\"source:%1\">schema.usda</a>").arg(escaped(info.name));
     if (!info.generatedPath.empty()) {
@@ -687,6 +894,8 @@ void SchemaExplorerViewPanel::updateDetailsText() {
     const int scroll = m_details->verticalScrollBar()->value();
     if (const QString unregistered = currentUnregistered(); !unregistered.isEmpty()) {
         m_details->setHtml(unregisteredHtml(unregistered.toStdString()));
+    } else if (const QString library = currentLibrary(); !library.isEmpty()) {
+        m_details->setHtml(libraryHtml(library.toStdString()));
     } else if (const SchemaInfo* info = currentSchema()) {
         m_details->setHtml(detailsHtml(*info));
     } else {
@@ -738,6 +947,10 @@ void SchemaExplorerViewPanel::openLink(const QUrl& url) {
         createPrim(rest);
     } else if (scheme == QLatin1String("apply")) {
         applyToSelection(rest);
+    } else if (scheme == QLatin1String("edit")) {
+        editLibrary(rest.section(QLatin1Char(':'), 0, 0), rest.section(QLatin1Char(':'), 1));
+    } else if (scheme == QLatin1String("adopt")) {
+        applyToPrimsWithItsAttributes(rest);
     } else if (scheme == QLatin1String("prim") && currentStage()) {
         stageManager()->setSelectedPaths(currentStage(), {PXR_NS::SdfPath(rest.toStdString())});
     }
@@ -764,6 +977,17 @@ void SchemaExplorerViewPanel::showMenu(const QPoint& pos) {
         select->setEnabled(count > 0 && currentStage());
     };
 
+    if (const QString library = item->data(Name, kLibraryRole).toString(); !library.isEmpty()) {
+        menu.addAction(tr("Edit"), this, [this, library]() { editLibrary(library); });
+        menu.addSeparator();
+        const std::optional<SchemaLibraryLocation> location = SchemaLibraries::instance().find(library.toStdString());
+        const QString path = location ? qs(location->source()) : QString();
+        QAction* source = menu.addAction(tr("Show Source"), this, [this, path]() { showUsdaPreview(path, this); });
+        source->setEnabled(!path.isEmpty());
+        menu.addAction(tr("Copy Path"), this, [path]() { QApplication::clipboard()->setText(path); });
+        menu.exec(m_tree->viewport()->mapToGlobal(pos));
+        return;
+    }
     if (const QString unregistered = item->data(Name, kUnregisteredRole).toString(); !unregistered.isEmpty()) {
         const auto it = m_use.unregistered.find(unregistered.toStdString());
         addSelect(unregistered, it == m_use.unregistered.end() ? 0 : it->second.size());

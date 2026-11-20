@@ -149,6 +149,7 @@ add_executable(usdcc_python_tests
     plugin_tab_test.cpp
     python_app_test.cpp
     schema_generator_test.cpp
+    schema_editor_test.cpp
     python_runtime_test.cpp
     script_editor_panel_test.cpp
     session_test.cpp
@@ -284,6 +285,11 @@ add_test(NAME usdcc_schema_info COMMAND usdcc_tests schema_info)
 get_test_property(usdcc_tests ENVIRONMENT_MODIFICATION _usdcc_schema_info_env)
 set_tests_properties(usdcc_schema_info PROPERTIES ENVIRONMENT_MODIFICATION
     "${_usdcc_schema_info_env};PXR_PLUGINPATH_NAME=path_list_append:${CMAKE_SOURCE_DIR}/test_data/schemas/usdccTestSchemas")
+# And the Schemas panel's Apply to Them, which needs a codeless API registered.
+add_test(NAME usdcc_ui_schema_adopt COMMAND usdcc_ui_tests schema_explorer_adopt)
+get_test_property(usdcc_ui_tests ENVIRONMENT_MODIFICATION _usdcc_ui_schema_env)
+set_tests_properties(usdcc_ui_schema_adopt PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" ENVIRONMENT_MODIFICATION
+    "${_usdcc_ui_schema_env};PXR_PLUGINPATH_NAME=path_list_append:${CMAKE_SOURCE_DIR}/test_data/schemas/usdccTestSchemas")
 
 # Qt's plugins beside the test programs, as the app has them (src/cpp/app/CMakeLists.txt):
 # ctest points Qt at vcpkg's folder, but a test program started by hand, or from Visual

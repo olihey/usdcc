@@ -14,6 +14,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QStackedWidget;
 class QTextBrowser;
 class QTimer;
 class QTreeWidget;
@@ -22,6 +23,7 @@ class QUrl;
 
 namespace usdcc::usd {
 
+class SchemaLibraryEditor;
 class StageManager;
 class UndoManager;
 class UsdaPreviewDialog;
@@ -39,6 +41,10 @@ class UsdaPreviewDialog;
 // prim type, where the Create menu would put it) and Apply to Selection (an
 // API schema, asking what the Attribute Editor's + asks). They follow the
 // stage's edits and the selection.
+//
+// Schema Libraries lists the codeless libraries usdcc can edit, each with its
+// state (SchemaLibraries); Edit opens the Schema Editor in place of the
+// details (docs/SCHEMAS.md §5), and New Schema Library makes one.
 class USDCC_USD_UI_API SchemaExplorerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
@@ -52,6 +58,7 @@ public:
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
     QJsonObject saveSessionState() const override;
+    bool canClose() override;
     void restoreSessionState(const QJsonObject& state) override;
 
     // As of the last refresh, by name.
@@ -76,6 +83,26 @@ public:
     // Applies API schema `schema` to the selected prims, asking as the Attribute
     // Editor does (askAndApplySchema()). Whether anything was applied.
     bool applyToSelection(const QString& schema);
+
+    // The stage's prims that author one of API schema `schema`'s properties
+    // without having it applied (a schema made from them, docs/SCHEMAS.md §6).
+    std::vector<PXR_NS::SdfPath> primsWithAttributesOf(const QString& schema) const;
+    // Applies it to all of those, one undo step. Whether anything was applied.
+    bool applyToPrimsWithItsAttributes(const QString& schema);
+
+    // The Schema Editor (docs/SCHEMAS.md §5).
+    SchemaLibraryEditor* editor() const { return m_editor; }
+    bool isEditing() const;
+    // Opens library `library` in the editor, at `schema` if given; false if it
+    // isn't one usdcc can edit, or the user kept the edits of another open.
+    Q_INVOKABLE bool editLibrary(const QString& library, const QString& schema = {});
+    // Back to the details; false if the user cancelled saving.
+    bool closeEditor();
+    // Makes a library in the user's plugins folder, and edits it.
+    bool newLibrary(const QString& name, QString* error = nullptr);
+    // The chosen row of Schema Libraries, or empty.
+    QString currentLibrary() const;
+    bool selectLibrary(const QString& name);
     // Chooses `name` ("Mesh"; an instance names its schema), clearing a filter
     // that hides it. False if USD doesn't know it.
     bool selectSchema(const QString& name);
@@ -101,6 +128,8 @@ public Q_SLOTS:
     void refresh();
     // Counts what the stage uses again; its edits do this by themselves.
     void refreshStageUse();
+    // Asks for a name, then newLibrary().
+    void newLibraryInteractively();
 
 protected:
     void populateOptionsMenu(QMenu* menu) override;
@@ -110,6 +139,7 @@ protected:
 private:
     void rebuildTree();
     void rebuildStageGroup();
+    void rebuildLibraryGroup();
     void applyFilter();
     void showDetails();
     void updateDetailsText();
@@ -118,6 +148,7 @@ private:
     QString detailsHtml(const SchemaInfo& info) const;
     QString unregisteredHtml(const std::string& name) const;
     QString stageUseHtml(const std::string& name) const;
+    QString libraryHtml(const std::string& name) const;
     QString schemaLink(const std::string& name) const;
     const SchemaInfo* find(const std::string& name) const;
 
@@ -132,6 +163,9 @@ private:
     bool m_stageUseStale = false;  // edited while hidden: counted when shown
     StageSchemaUse m_use;
     QTreeWidgetItem* m_stageGroup = nullptr;
+    QTreeWidgetItem* m_libraryGroup = nullptr;
+    QStackedWidget* m_stack;
+    SchemaLibraryEditor* m_editor;
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
     std::vector<SchemaInfo> m_schemas;

@@ -76,6 +76,8 @@
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
+#include "usdcc/usd/schema_libraries.h"
+#include "usdcc/usd/schema_library_editor.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/layer_editor_view_panel.h"
 #include "usdcc/usd/prim_tree_dialog.h"
@@ -286,6 +288,20 @@ int main(int argc, char** argv) {
     usdcc::scripting::PluginManager plugins(
         usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
     plugins.scan();
+    // The codeless schema libraries the Schemas panel can edit (docs/SCHEMAS.md §5.1):
+    // in every plugin's usd folders, enabled or not; a new one in the user's plugins folder.
+    {
+        std::vector<std::string> usdFolders;
+        for (const usdcc::scripting::PluginInfo& plugin : plugins.plugins()) {
+            for (const std::string& folder : plugin.manifest.usdFolders) {
+                const std::u8string text = (plugin.manifest.folder / std::filesystem::u8path(folder)).lexically_normal().u8string();
+                usdFolders.emplace_back(text.begin(), text.end());
+            }
+        }
+        const std::u8string user = usdcc::scripting::PluginManager::userFolder().u8string();
+        usdcc::usd::SchemaLibraries::instance().configure(std::move(usdFolders), std::string(user.begin(), user.end()),
+                                                          usdcc::scripting::kPluginApiVersion);
+    }
     // Settings > Assets (docs/REMOTE_ASSETS.md §10): which servers a webdav:// path
     // means, before a stage can open one. After the scan, which registers the protocols.
     usdcc::usd::defineAssetSettings();
@@ -1169,6 +1185,45 @@ int main(int argc, char** argv) {
                          scriptEditor->raise();
                          scriptEditor->openPlugin(id, name, folder, mainFile);
                      });
+    // The Schema Editor (docs/SCHEMAS.md §5): usdGenSchema with the app's own Python;
+    // Restart as Restart and Load does, back to the Last session; Edit as Text in the
+    // Script Editor; and the Schemas panel for Promote to Schema.
+    {
+        usdcc::usd::SchemaEditorHooks schemaHooks;
+        if (python.isAvailable()) {
+            schemaHooks.python.executable = python.executable();
+            schemaHooks.python.paths = python.settings().paths;
+        }
+        // A deploy's OpenUSD libraries are beside the executable.
+        schemaHooks.python.dllFolders = {std::filesystem::path(QCoreApplication::applicationDirPath().toStdU16String())};
+        schemaHooks.restart = [&window, &restartRequested, &restartArguments]() {
+            restartRequested = true;
+            restartArguments = {QStringLiteral("--open-session"), QLatin1String(usdcc::ui::session::kLastSessionName)};
+            window.close();
+            if (window.isVisible()) restartRequested = false;
+            return restartRequested;
+        };
+        schemaHooks.editText = [scriptEditor](const QString& path) {
+            scriptEditor->show();
+            scriptEditor->setCollapsed(false);
+            scriptEditor->raise();
+            scriptEditor->openFile(path);
+        };
+        schemaHooks.showSchemasPanel = [&window, &panelTypes, &stageManager]() -> usdcc::usd::SchemaExplorerViewPanel* {
+            const QList<usdcc::usd::SchemaExplorerViewPanel*> open = window.findChildren<usdcc::usd::SchemaExplorerViewPanel*>();
+            usdcc::usd::SchemaExplorerViewPanel* panel = open.isEmpty() ? nullptr : open.front();
+            if (!panel) {
+                panel = qobject_cast<usdcc::usd::SchemaExplorerViewPanel*>(
+                    panelTypes.open(QStringLiteral("schemas"), stageManager.currentStage(), window.dockManager(), &window));
+            }
+            if (panel) {
+                panel->setAsCurrentTab();
+                panel->raise();
+            }
+            return panel;
+        };
+        usdcc::usd::setSchemaEditorHooks(std::move(schemaHooks));
+    }
     QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::reloadPluginRequested, scriptEditor,
                      &usdcc::scripting::ScriptEditorSidePanel::reloadPlugin);
     QObject::connect(scriptEditor, &usdcc::scripting::ScriptEditorSidePanel::pluginReloaded, pluginPanel,

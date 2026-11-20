@@ -1,8 +1,8 @@
 # Schemas
 
-Status: **phases 1 to 4 are built** (§12): the Schemas panel, its data, the stage in it, and generating
-a codeless library, which has no UI yet (phase 5). The rest is a plan; §9 has the decisions still
-open, §10 the phases.
+Status: **all six phases are built** (§12): the Schemas panel, its data, the stage in it, generating a
+codeless library, the Schema Editor, and Promote to Schema. §12 also says what was left out of the
+plan, and §11 what wasn't checked.
 
 Three things, in the order to build them:
 
@@ -342,16 +342,16 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
      the first Generate.
    - Write the two files without `usdGenSchema`: no dependency, but its rules reimplemented and
      kept in step with each OpenUSD.
-2. **A view panel, or a tab in Help > USD Runtime?** Recommended: **a view panel.** The Explorer
+2. *Decided: as recommended.* **A view panel, or a tab in Help > USD Runtime?** Recommended: **a view panel.** The Explorer
    acts on the stage and the selection, which a dialog about the runtime shouldn't.
-3. **The editor inside the Explorer, or a window of its own?** Recommended: **inside**, replacing
+3. *Decided: as recommended.* **The editor inside the Explorer, or a window of its own?** Recommended: **inside**, replacing
    the details of an editable schema when Edit is pressed, so the tree is the same in both.
-4. **Require a namespace on property names?** Recommended: **warn, don't refuse** (§5.4). Many
+4. *Decided: as recommended.* **Require a namespace on property names?** Recommended: **warn, don't refuse** (§5.4). Many
    studios have attributes without one already, and Promote has to take them as they are.
-5. **Promote: keep the attribute names, or move them into a namespace?** Recommended: **keep them
+5. *Decided: as recommended.* **Promote: keep the attribute names, or move them into a namespace?** Recommended: **keep them
    by default.** A schema that matches existing files is the point, and renaming is a change to
    every file.
-6. **Restart from the app?** Recommended: **yes**, a Restart button that goes through the usual
+6. *Decided: as recommended.* **Restart from the app?** Recommended: **yes**, a Restart button that goes through the usual
    unsaved-changes questions and comes back with the session ([SESSIONS.md](SESSIONS.md)).
 
 ## 10. Phases
@@ -362,8 +362,8 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
 | **2. The Explorer** *(done)* | The Schemas view panel: tree, filter, Show, details, links between schemas, Show Source | Every schema of §1 is found by name; a plugin's codeless schema shows as one; the source opens at the class |
 | **3. The stage in it** *(done)* | This stage, Select, Create, Apply to Selection | Counts follow edits; the unregistered list matches the amber pills; Create and Apply make the same undo steps as their menus |
 | **4. Generating** *(done)* | `schema_library.h`: reading and writing `schema.usda` through Sdf, the checks of §5.4, the two child processes, the placeholders, moving into place. `jinja2` as decided | Tests against the deploy's Python: the `studio` and `show` libraries of §2 generate and load; each trap of §2 is caught with its message; a failed Generate leaves the old files |
-| **5. The editor** | The form, New Schema Library..., Edit as Text, "generated, not loaded", what a Generate changes for existing files (§5.5), Restart | A library made, generated and, after a restart, creating prims and applying APIs, by a script driving the widgets |
-| **6. Promote** | Make Schema from Attributes..., and applying the API after the restart | A prim's custom attributes become an API whose fallbacks are their values; the prims get it in one undo step |
+| **5. The editor** *(done)* | The form, New Schema Library..., Edit as Text, "generated, not loaded", what a Generate changes for existing files (§5.5), Restart | A library made, generated and, after a restart, creating prims and applying APIs, by a script driving the widgets |
+| **6. Promote** *(done)* | Make Schema from Attributes..., and applying the API after the restart | A prim's custom attributes become an API whose fallbacks are their values; the prims get it in one undo step |
 
 Phases 1 to 3 need nothing from 4 to 6 and are useful alone.
 
@@ -375,8 +375,8 @@ Phases 1 to 3 need nothing from 4 to 6 and are useful alone.
 - **Linux.** The Linux deploy leaves `*.cmake` files out of `lib/usd`; the codeless path needs only
   the `plugInfo.json` template, which isn't one.
 - **How the app shows a prim of an unknown type** today, in the Outliner and the Attribute Editor.
-- **An authored `custom` attribute that a schema then defines:** whether it still reads as custom,
-  which Promote's second step depends on.
+- *Checked in phase 6:* **an authored `custom` attribute that a schema then defines** reads as not
+  custom once the API is applied; the layer's spec still says `custom`, which nothing minds.
 - **Schema versions made by hand** (`StudioAsset_1` in a codeless library), and
   `WriteFallbackPrimTypes()`.
 - **A codeless library on an older USD.** Codeless schemas exist since 21.08; what this build
@@ -544,3 +544,99 @@ No UI yet: the Schema Editor (phase 5) is what will call it.
   from its sublayers are the editor's, in phase 5. A schema.usda written by hand that Sdf can read
   but the definition can't express (a non-applied API, `nonApplied`, ...) reads, and is written
   back with what the definition holds.
+
+### Phases 5 and 6: the Schema Editor and Promote to Schema
+
+**Where libraries are** (`schema_libraries.h`, `usdcc_usd`):
+
+- `SchemaLibraries`, filled by the app after the plugin scan: every plugin's usd folders, enabled
+  or not, and the user's plugins folder. A library is a `<name>/schema.usda` in one of them. Codeless
+  plugins USD registered from elsewhere (`PXR_PLUGINPATH_NAME`) that ship their source count too.
+- **Each library's state:** writable; generated; loaded at this start; changed since it was
+  generated (its `schema.usda` is newer); waiting for a restart (generated since this start, or not
+  loaded).
+- `create(name)`: a plugin of its own in the user's plugins folder, `<name>/usdcc-plugin.json`
+  (id `user.schemas.<name>`, `"usd": ["usd"]`) and `usd/<name>/schema.usda` building on OpenUSD's
+  base and geometry schemas. It's found as a plugin at the next start.
+- `baseFolders()`: the libraries a library builds on, from its sublayers (`studio/schema.usda` is
+  studio's), for Generate (trap 5) and for the checks.
+- `schemaLibraryChanges()` (§5.5): against what USD loaded at this start, schemas removed,
+  properties removed or changing type, fallbacks changing. A library not loaded yet changes nothing.
+- `promotableProperties()`, `suggestedApiName()`, `addApiToLibrary()` for Promote.
+
+**The Schema Editor** (`SchemaLibraryEditor`, in the Schemas panel, decision 3):
+
+- **Schema Libraries**, a group in the panel's tree before This stage, lists every library with its
+  state ("not generated", "changed", "restart to load", "loaded", "read-only"); a library's details
+  give its source, plugin and schemas, and Edit. A codeless schema's details have Library · Edit too.
+  Double-click, Edit or the right-click menu open the editor in place of the details.
+- **New Schema Library...** is in the panel's options menu, not View > Plugins as §5.1 had it: the
+  panel is where the library is then edited.
+- **The form:** classes on the left (+ Schema: Prim Type, Abstract Type, API, Multiple-apply API;
+  Remove); for the chosen one its name, kind, base (an editable list of USD's prim types and the
+  library's), documentation, built-in APIs (with completion), what an API applies itself to and can
+  only apply to, a multiple-apply API's prefix; its properties in a table: name, type (every USDA
+  value type, or relationship), uniform, fallback, allowed tokens, display name and group,
+  documentation. A new class is named for the library (`StudioTestThing`), a new property in its
+  namespace (`studioTest:property`).
+- **The checks run as you type**, a quarter second after: errors red, warnings amber; double-click
+  one to go to its schema.
+- **Save** writes `schema.usda`. **Generate** refuses while there are errors; asks first when
+  `schemaLibraryChanges()` lists something; saves; runs `generateSchemaLibrary()` on a thread of its
+  own, with the library's base folders. Its error and `usdGenSchema`'s output go in the issues list.
+- **Restart** (decision 6), shown once a Generate waits for a start: closes the app, asking what
+  closing asks, and starts it with `--open-session "Last session"`, which closing just saved.
+- **Edit as Text** saves, then opens `schema.usda` in the Script Editor. **Reload** reads it again.
+  The form follows the file when it changes on disk and has no edits of its own; with edits, it says
+  so. *Found while testing:* Save checked nothing, so a Generate after Promote had written the file
+  saved the form's older copy over it. Now Save reloads first when the file changed and the form has
+  no edits, and asks before overwriting when it has; the form knows its own writes by the file's time
+  and size.
+- The app gives the editor its hooks (`setSchemaEditorHooks()`): its Python, the restart, the text
+  editor, and a way to raise or open a Schemas panel.
+
+**Promote to Schema** (§6, decision 5):
+
+- The Attribute Editor's Custom section, and each section of a namespace no schema has, get a `…`
+  button with **Make Schema from Attributes...**.
+- The dialog lists the prim's authored properties no schema defines (the transform stack's left
+  out), those of that section ticked; each with its type and its value now, which becomes the
+  fallback. It names the API for their shared namespace (`grading:...` is `GradingAPI`). The library
+  is any writable one, or a new one. **Make Schema** adds a single-apply API, the names as they were,
+  and opens the editor at it.
+- **After Generate and a restart,** a codeless API's details count the stage's prims that author one
+  of its properties without having it ("Has its attributes: 2 prims"), and **Apply to Them** applies
+  it to all of them in one undo step. This needs nothing remembered across the restart: any codeless
+  API offers it.
+
+**Not done, of the plan:**
+
+- **The form's own undo** (§5.2): edits undo only inside a field. Reload drops unsaved edits.
+- **New Version** (§5.5) and writing `fallbackPrimTypes` into saved files.
+- **Promote's namespace option** (§6): the names stay as they are, as decision 5 recommends; there is
+  no way yet to move them into one, on the prims or in the schema.
+- **Reading a generated but not loaded library's schemas in the tree** (§5.3): the library's row says
+  "restart to load" instead, and its details list its schemas.
+- **A library in a plugin whose manifest lacks `"usd"`**: New Schema Library writes it; one made by
+  hand elsewhere has to have it, or isn't found.
+
+**Tests:**
+
+- `schema_editor` (`usdcc_python_tests`, the app's own Python): New Schema Library (a bad name
+  refused, the plugin's files, its state, not twice); a prim type and an API made through the form's
+  widgets, the definition they write; an error as you type, and Generate refusing it; Save;
+  Generate in the background, both schemas tried, the status, Restart offered and calling the app;
+  Promote's dialog (every property no schema defines, the ticked ones with their types and values,
+  the suggested name), Make Schema, the editor following the file, Generate with the value as the
+  fallback in `generatedSchema.usda`; Close and the library's details.
+- `schema_explorer_adopt` (`usdcc_ui_tests`, run as `usdcc_ui_schema_adopt` with the test library
+  registered): the prims with a codeless API's attributes, not those with it already; the details
+  offering it; Apply to Them in one undo step, the values kept; undo.
+- **In the app, across a restart**, on a fresh test profile:
+  - Run 1, a script driving the widgets: options menu's New Schema Library (the dialog answered),
+    + Schema > Prim Type, the name, + Attribute and its cells, + Schema > API, Generate. The status
+    said "Generated: it loads at the next start", with Restart showing.
+  - Run 2, started again as Restart would: both schemas registered, `AppcheckAsset` codeless from the
+    `appcheck` plugin; the panel's Create link made `/AppcheckAsset` (its `appcheck:status` read its
+    fallback, "wip"); its Apply to Selection link applied `AppcheckThingAPI`, as one undo step.
+  - The Restart button itself was clicked in the test, through the app's hook, not in the app.

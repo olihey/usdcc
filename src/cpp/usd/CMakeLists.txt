@@ -9,6 +9,8 @@ add_library(usdcc_usd SHARED
     src/schema_info.cpp
     include/usdcc/usd/schema_library.h
     src/schema_library.cpp
+    include/usdcc/usd/schema_libraries.h
+    src/schema_libraries.cpp
     include/usdcc/usd/prim_selection.h
     include/usdcc/usd/composition_arcs.h
     include/usdcc/usd/dependencies.h
@@ -242,6 +244,10 @@ add_library(usdcc_usd_ui SHARED
     src/schema_explorer_view_panel.cpp
     src/apply_schema_ui.cpp
     src/schema_generator.cpp
+    include/usdcc/usd/schema_library_editor.h
+    src/schema_library_editor.cpp
+    include/usdcc/usd/promote_schema_dialog.h
+    src/promote_schema_dialog.cpp
     src/hydra_viewport_window.cpp
     src/selection_overlay.cpp
     src/selection_overlay.h
