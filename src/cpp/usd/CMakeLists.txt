@@ -2,6 +2,10 @@
 add_library(usdcc_usd SHARED
     include/usdcc/usd/orbit_camera.h
     src/orbit_camera.cpp
+    include/usdcc/usd/camera_framing.h
+    src/camera_framing.cpp
+    include/usdcc/usd/stage_camera.h
+    src/stage_camera.cpp
     include/usdcc/usd/viewport_grid.h
     src/viewport_grid.cpp
     include/usdcc/usd/applied_schemas.h

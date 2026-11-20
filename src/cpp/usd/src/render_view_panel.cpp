@@ -11,6 +11,7 @@
 
 #include <pxr/base/gf/camera.h>
 #include <pxr/base/gf/frustum.h>
+#include <pxr/base/gf/math.h>
 #include <pxr/base/gf/range1f.h>
 #include <pxr/base/gf/range2d.h>
 #include <pxr/usd/usd/primRange.h>
@@ -94,7 +95,12 @@ RenderCamera viewportRenderCamera(const ViewportViewPanel& viewport) {
     camera.cameraToWorld = frustum.ComputeViewInverse();
     const PXR_NS::GfRange2d window = frustum.GetWindow();
     camera.aspect = window.GetSize()[1] > 0.0 ? window.GetSize()[0] / window.GetSize()[1] : 1.0;
-    camera.fovY = HydraViewportWindow::verticalFieldOfView();
+    // Its own field of view: a stage camera's lens, or one the orbit camera took from it
+    // (docs/VIEWPORT_CAMERA.md §2.3). The window is one unit in front of the eye.
+    const HydraViewportWindow* hydra = viewport.hydraWindow();
+    camera.fovY = hydra->isLookingThroughStageCamera() && frustum.GetProjectionType() == PXR_NS::GfFrustum::Perspective
+                      ? PXR_NS::GfRadiansToDegrees(2.0 * std::atan(window.GetSize()[1] / 2.0))
+                      : hydra->fieldOfView();
     camera.fovX = scaledFov(camera.fovY, camera.aspect);
     camera.nearClip = frustum.GetNearFar().GetMin();
     camera.farClip = frustum.GetNearFar().GetMax();

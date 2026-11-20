@@ -4,10 +4,12 @@
 
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/usd/camera_framing.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/viewport_hud.h"
 
+#include <pxr/base/gf/camera.h>
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/range3d.h>
 #include <pxr/base/gf/vec3d.h>
@@ -143,9 +145,35 @@ public:
         double orthoSize = kDefaultOrbitDistance;
         // The named view it was put on (Top, Front, ...); Persp once orbited.
         CameraView view = CameraView::Persp;
+        // Turned about the way it looks, in degrees (orbitCameraAxes()): what a stage
+        // camera it left had (docs/VIEWPORT_CAMERA.md §2.3).
+        double roll = 0.0;
     };
     CameraState cameraState() const;
+    // Also looks through the orbit camera, if it looked through a stage camera.
     void setCameraState(const CameraState& state);
+
+    // Looking through one of the stage's UsdGeomCamera prims instead of the orbit camera
+    // (docs/VIEWPORT_CAMERA.md §3), as it is at the viewport's time. An empty path looks
+    // through the orbit camera again, where it was: its state is kept meanwhile. False,
+    // changing nothing, for a path that isn't a camera of the stage.
+    bool setStageCamera(const PXR_NS::SdfPath& path);
+    const PXR_NS::SdfPath& stageCamera() const { return m_stageCamera; }
+    bool isLookingThroughStageCamera() const { return !m_stageCamera.IsEmpty(); }
+    // The stage camera's lens and world transform now; nothing while looking through the
+    // orbit camera, or once the camera is gone.
+    std::optional<PXR_NS::GfCamera> stageCameraNow() const;
+    // Detach (§2.1): leaves the stage camera for the orbit camera, which starts exactly
+    // where it is, seeing the same. A drag, the wheel, Fit to View and the axis triad do
+    // this first. The stage camera isn't touched.
+    void detachFromStageCamera();
+    // The stage camera the orbit camera last left by Detach, until another view is put on
+    // (a named view, a camera, a reset): Back to Camera's. Empty otherwise.
+    const PXR_NS::SdfPath& detachedFrom() const { return m_detachedFrom; }
+    // Something of the camera looked through, or of its parents, changed: draws again
+    // and says cameraChanged(); if the camera is gone, the orbit camera goes on from where
+    // it was and stageCameraLost() says so. Its panel calls this on the stage's notices.
+    void stageCameraEdited();
 
     // Looks from a named view (docs/WORKSPACES.md §3.5.2), keeping the target, on the
     // stage's up axis. `orthographic` unset: orthographic for the axis views,
@@ -334,6 +362,12 @@ Q_SIGNALS:
     // The camera moved (orbit, pan, zoom, setCameraState()) or the window's
     // aspect ratio changed: frustum() is different now.
     void cameraChanged();
+    // Which camera it looks through changed: setStageCamera(), Detach, or the stage
+    // camera was lost; or detachedFrom() did.
+    void stageCameraChanged();
+    // The stage camera it looked through is gone (deleted, deactivated, no longer a
+    // camera): the orbit camera took over where it was.
+    void stageCameraLost(const PXR_NS::SdfPath& path);
 
 protected:
     void exposeEvent(QExposeEvent* event) override;
@@ -390,9 +424,25 @@ private:
     // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3).
     bool cameraZUp() const { return !m_previewMode && stageIsZUp(); }
     PXR_NS::GfFrustum currentFrustum() const;
-    // The near and far planes in use: from the distance, or for an orthographic view,
-    // around its target.
+    // Width over height of the window, in device pixels.
+    double windowAspect() const;
+    // Whether the camera looked through is orthographic: the stage camera's, or the
+    // orbit camera's.
+    bool orthographicNow() const;
+    // The orbit camera's axes, its roll included.
+    OrbitCameraAxes orbitAxes(double distance) const;
+    // The near and far planes in use: the stage camera's, from the distance, or for an
+    // orthographic view, around its target.
     OrbitClipping clipping() const;
+    // How far in front of `frustum`'s eye Detach puts the orbit target (§2.3): the stage
+    // camera's focus distance, what's drawn at the centre (`useDrawn`: the frame on screen
+    // is the camera's), the ground, the stage's bounds, or the default distance.
+    double detachDistance(const PXR_NS::GfFrustum& frustum, const std::optional<PXR_NS::GfCamera>& camera, bool useDrawn);
+    // Puts the orbit camera on `pose`, on Persp.
+    void adoptPose(const OrbitPose& pose);
+    // Looks through the orbit camera; forgets what it detached from. Says
+    // stageCameraChanged() if either changed. No redraw.
+    void forgetStageCamera();
     // How far the eye of an orthographic view is from its target.
     double orthographicDepth() const;
     // How far in front of the eye a pan starting at `position` holds the scene under the
@@ -449,7 +499,13 @@ private:
     bool m_orthographic = false;
     double m_orthoSize = kDefaultOrbitDistance;
     CameraView m_view = CameraView::Persp;
+    double m_roll = 0.0;
     bool m_cameraWasZUp = false;  // cameraZUp() as cameraChanged() last told of it
+    PXR_NS::SdfPath m_stageCamera;   // looked through; empty: the orbit camera
+    PXR_NS::SdfPath m_detachedFrom;  // detachedFrom()
+    // The stage camera's frustum as last drawn: where the orbit camera goes on from if
+    // the camera goes.
+    PXR_NS::GfFrustum m_lastStageFrustum;
 
     QPoint m_lastMousePos;
     bool m_orbiting = false;

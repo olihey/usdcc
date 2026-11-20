@@ -91,7 +91,7 @@ What each panel would store:
 
 | Panel | State |
 |---|---|
-| Viewport | Orbit camera (`HydraViewportWindow::cameraState()`), renderer, grid/background overrides (`"display"`, [VIEWPORT_GRID.md](VIEWPORT_GRID.md) §4) and renderer settings overrides (`"rendererSettings"`, per renderer, [VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md) §7). **Done.** (No scene camera to look through yet.) |
+| Viewport | Orbit camera (`HydraViewportWindow::cameraState()`), renderer, grid/background overrides (`"display"`, [VIEWPORT_GRID.md](VIEWPORT_GRID.md) §4) and renderer settings overrides (`"rendererSettings"`, per renderer, [VIEWPORT_DISPLAY.md](VIEWPORT_DISPLAY.md) §7). **Done.** With the stage camera it looks through (`"path"` in `"camera"`), its roll and field of view ([VIEWPORT_CAMERA.md](VIEWPORT_CAMERA.md) §3). |
 | Outliner | Expanded paths, search text, type filter, scroll position. **Done.** Exactly the saved rows come back open: a stage with a single root prim shows it expanded by default, but one that was collapsed stays collapsed. |
 | USDA | What it shows (a layer, flattened, or a file) and the scroll position. **Done.** |
 | Python panels | Whatever `save_state()` returns (anything that converts to JSON); `restore_state(state)` gets it back. **Done.** |

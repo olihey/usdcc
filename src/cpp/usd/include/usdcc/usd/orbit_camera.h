@@ -51,8 +51,12 @@ OrbitClipping orbitClipping(double distance);
 // The angles are about the stage's up axis: yaw turns around it, pitch is the height
 // above the ground. `zUp`: that axis is Z and the ground XY, else Y and XZ. The same
 // angles look at the ground the same way on either, so a Z-up stage stands upright.
+//
+// `rollDegrees` turns the camera about the way it looks: positive turns its up towards
+// its right, so the picture turns the other way. A stage camera's pose can have it
+// (docs/VIEWPORT_CAMERA.md §2.3); the orbit camera's own drags leave it as it is.
 OrbitCameraAxes orbitCameraAxes(const PXR_NS::GfVec3d& target, double distance, double yawDegrees, double pitchDegrees,
-                                bool zUp = false);
+                                bool zUp = false, double rollDegrees = 0.0);
 
 // The yaw and pitch, in degrees, that put the eye on the side `direction` points to from
 // the target (any length but zero), looking back at it: (1, 0, 0) looks along -X from +X.
