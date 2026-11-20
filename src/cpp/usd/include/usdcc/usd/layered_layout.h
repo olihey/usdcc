@@ -62,6 +62,15 @@ struct LayeredPoint {
 std::vector<LayeredPoint> layeredLayout(const std::vector<LayeredNode>& nodes, const std::vector<LayeredEdge>& edges,
                                         const LayeredLayoutOptions& options = {});
 
+// Lays out only the nodes `chosen` says, near where they are (`current`), leaving the others where
+// they are. What they're connected to that isn't chosen is laid out with them, to give them
+// their columns and their order, and then they're moved together so that those nodes would land
+// where they are: across from what they feed if they feed anything, and level with all of them
+// on average. With nothing connected, the chosen node furthest right stays where it is.
+std::vector<LayeredPoint> layeredLayoutOf(const std::vector<LayeredNode>& nodes, const std::vector<LayeredEdge>& edges,
+                                          const std::vector<LayeredPoint>& current, const std::vector<bool>& chosen,
+                                          const LayeredLayoutOptions& options = {});
+
 // How good a layout is, for tests and comparisons, with lines as straight segments from an
 // output to an input.
 struct LayeredLayoutQuality {

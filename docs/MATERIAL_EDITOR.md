@@ -443,8 +443,17 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
   nodes with no lines go in rows under those. `layeredLayoutQuality` counts crossings, lines through nodes
   and overlaps. On 20 made-up material networks of 10 to 29 nodes, against the column layout before it, it
   has 41% fewer crossings, 26% fewer lines through nodes and 3% less line length
-  (`layered_layout_beats_the_column_layout`). 250 nodes take a few hundredths of a second. With `USDCC_LAYOUT_SVG` set to a folder, that test draws
-  each layout there, before and after.
+  (`layered_layout_beats_the_column_layout`). 250 nodes take a few hundredths of a second. With
+  `USDCC_LAYOUT_SVG` set to a folder, that test draws each layout there, before and after.
+
+  **Layout Selected** (Shift+L, or the menus on a node, the background and the panel's options) lays out
+  only the selected nodes, near where they are, as one undo step named for it; nothing else moves
+  (`layeredLayoutOf`). The nodes they're connected to that aren't selected are laid out with them, which
+  gives them their columns and their order, port by port. Then the selection is moved so that those
+  nodes would land where they are: across from what it feeds, if it feeds anything, and level with all of
+  them on average. With nothing connected, the selected node furthest right stays where it is. Textures
+  scattered about and laid out this way go back to where Auto Layout put them, but other nodes already
+  where they land aren't moved out of the way.
 - **Selection is two-way:**
   - Selecting nodes selects their prims, so the Attribute Editor edits them.
   - Shift+click adds a node or backdrop to the selection, and Shift+drag on empty space adds what the
@@ -472,7 +481,7 @@ tested that USD would call it for an asset. `definitionOf()` doesn't stop that b
 - **Edits:** each of these is one call in `shade_actions.h` (`prim_actions` for rename and disconnect) and
   one undo step: create, delete, rename, duplicate, copy/paste, connect, disconnect, group into a NodeGraph,
   ungroup, promote an input to the interface, add an input, add/remove a Material terminal, create a
-  backdrop, and auto-layout.
+  backdrop, and auto-layout, of everything or of the selection.
   - Creating a node authors `info:id` (MDL: its source asset instead, §3.5) and the
     `UsdUINodeGraphNodeAPI` position, and nothing else.
   - Deleting a node also removes connections to it. A prim a weaker layer defines is deactivated instead, keeping its overrides (docs/PRIM_DELETE.md §3.1).

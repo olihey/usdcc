@@ -326,6 +326,8 @@ void MaterialEditorViewPanel::populateOptionsMenu(QMenu* menu) {
     menu->addAction(tr("Find..."), QKeySequence(QKeySequence::Find), this, [this]() { showFind(); });
     menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
     menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); });
+    QAction* selected = menu->addAction(tr("Layout Selected"), this, [this]() { layoutSelected(); });
+    selected->setEnabled(m_scene && !m_scene->selectedNodes().empty());
 }
 
 void MaterialEditorViewPanel::onStageChanged(const StageRefPtr&) { attachStage(); }
@@ -846,6 +848,14 @@ void MaterialEditorViewPanel::autoLayout() {
     QTimer::singleShot(0, this, [this]() { fitGraph(kSmallestToOpenAt); });
 }
 
+void MaterialEditorViewPanel::layoutSelected() {
+    if (!m_model || !m_scene) return;
+    std::vector<NodeId> ids;
+    for (QtNodes::NodeGraphicsObject* node : m_scene->selectedNodes()) ids.push_back(node->nodeId());
+    // The view stays: they're laid out where they are.
+    m_model->layoutNodes(ids);
+}
+
 SdfPath MaterialEditorViewPanel::addBackdrop(QPointF scenePosition) {
     if (!currentStage() || m_level.IsEmpty()) return SdfPath();
     // Around what's selected, if anything is.
@@ -979,6 +989,7 @@ void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePositi
         pasteAction->setEnabled(editable && data && data->hasFormat(QString::fromLatin1(kClipboardMime)));
         menu->addSeparator();
         menu->addAction(tr("Auto Layout"), this, [this]() { autoLayout(); })->setEnabled(editable);
+        menu->addAction(tr("Layout Selected"), this, [this]() { layoutSelected(); })->setEnabled(editable && !m_scene->selectedNodes().empty());
         menu->addAction(tr("Frame All"), this, [this]() { fitGraph(kSmallestToFrame); });
         menu->addAction(tr("Find..."), QKeySequence(QKeySequence::Find), this, [this]() { showFind(); });
         return;
@@ -1048,6 +1059,7 @@ void MaterialEditorViewPanel::populateGraphMenu(QMenu* menu, QPointF scenePositi
         addInputAction();
     }
     menu->addAction(tr("Group into NodeGraph"), this, [this]() { groupSelected(); })->setEnabled(editable);
+    menu->addAction(tr("Layout Selected"), this, [this]() { layoutSelected(); })->setEnabled(editable);
     menu->addSeparator();
     menu->addAction(tr("Rename"), this, [this]() { startRename(); })->setEnabled(editable);
     menu->addAction(tr("Duplicate"), this, [this]() { duplicateSelected(); })->setEnabled(editable);
@@ -1095,6 +1107,7 @@ bool MaterialEditorViewPanel::handleKey(QKeyEvent* event, bool run) {
         if (key == Qt::Key_G) return when([this]() { groupSelected(); });
     }
     if (modifiers == (Qt::ControlModifier | Qt::ShiftModifier) && key == Qt::Key_G) return when([this]() { ungroupSelected(); });
+    if (modifiers == Qt::ShiftModifier && key == Qt::Key_L) return when([this]() { layoutSelected(); });
     return false;
 }
 

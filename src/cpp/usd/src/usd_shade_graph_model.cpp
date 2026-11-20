@@ -237,7 +237,15 @@ bool UsdShadeGraphModel::wouldLoop(NodeId from, NodeId to) const {
     return false;
 }
 
-void UsdShadeGraphModel::autoLayout() {
+void UsdShadeGraphModel::autoLayout() { layout(nullptr); }
+
+void UsdShadeGraphModel::layoutNodes(const std::vector<NodeId>& only) {
+    if (only.empty()) return;
+    const std::set<NodeId> chosen(only.begin(), only.end());
+    layout(&chosen);
+}
+
+void UsdShadeGraphModel::layout(const std::set<NodeId>* only) {
     ShadeGraph graph;
     std::vector<NodeId> ids;
     std::map<NodeId, std::size_t> indexOf;
@@ -251,9 +259,22 @@ void UsdShadeGraphModel::autoLayout() {
     for (const ConnectionId& id : m_connections) {
         graph.connections.push_back({indexOf[id.outNodeId], static_cast<std::size_t>(id.outPortIndex), indexOf[id.inNodeId], static_cast<std::size_t>(id.inPortIndex)});
     }
-    const std::vector<GfVec2f> at = layoutShadeGraph(graph, boxes);
+    std::vector<GfVec2f> at;
+    if (only) {
+        std::vector<GfVec2f> current;
+        std::vector<bool> chosen;
+        for (NodeId id : ids) {
+            const QPointF position = m_nodes[id].position;
+            current.emplace_back(static_cast<float>(position.x()), static_cast<float>(position.y()));
+            chosen.push_back(only->count(id) > 0);
+        }
+        at = layoutShadeNodes(graph, boxes, current, chosen);
+    } else {
+        at = layoutShadeGraph(graph, boxes);
+    }
     std::vector<std::pair<SdfPath, GfVec2f>> stored;
     for (std::size_t n = 0; n < ids.size(); ++n) {
+        if (only && !only->count(ids[n])) continue;
         Entry& entry = m_nodes[ids[n]];
         const QPointF position(at[n][0], at[n][1]);
         if (storesPosition(entry)) {
@@ -264,7 +285,7 @@ void UsdShadeGraphModel::autoLayout() {
             Q_EMIT nodePositionUpdated(ids[n]);
         }
     }
-    shade_actions::setPositions(*m_undo, m_stage, stored);
+    shade_actions::setPositions(*m_undo, m_stage, stored, only ? "Layout Selected" : "Auto Layout");
 }
 
 void UsdShadeGraphModel::setBackdropRect(const SdfPath& path, const QRectF& rect) {

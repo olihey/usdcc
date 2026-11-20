@@ -86,7 +86,9 @@ USDCC_USD_UI_API std::vector<PXR_NS::SdfPath> ungroup(UndoManager& undo, const S
 // A new input on the level around `port`, holding its value, that it's connected to.
 USDCC_USD_UI_API bool promote(UndoManager& undo, const StageRefPtr& stage, const PortRef& port, const PXR_NS::SdfPath& level);
 
-USDCC_USD_UI_API bool setPositions(UndoManager& undo, const StageRefPtr& stage, const std::vector<std::pair<PXR_NS::SdfPath, PXR_NS::GfVec2f>>& positions);
+// `description` names the undo step, untranslated.
+USDCC_USD_UI_API bool setPositions(UndoManager& undo, const StageRefPtr& stage, const std::vector<std::pair<PXR_NS::SdfPath, PXR_NS::GfVec2f>>& positions,
+                                   const char* description = "Auto Layout");
 
 USDCC_USD_UI_API PXR_NS::SdfPath createBackdrop(UndoManager& undo, const StageRefPtr& stage, const PXR_NS::SdfPath& parent, const PXR_NS::GfVec2f& position,
                                                 const PXR_NS::GfVec2f& size);

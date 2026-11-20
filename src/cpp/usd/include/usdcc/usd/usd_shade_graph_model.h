@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -59,8 +60,10 @@ public:
     // Whether the level can be edited: not an instance proxy, say.
     bool isEditable() const;
 
-    // Everything, in columns, as one undo step.
+    // Everything (layered_layout.h), as one undo step.
     void autoLayout();
+    // Only these, near where they are (layeredLayoutOf), as one undo step.
+    void layoutNodes(const std::vector<QtNodes::NodeId>& only);
 
     // How Find shows a node (docs/MATERIAL_EDITOR.md §4.1). Only for drawing: it's not in the stage.
     enum class FindMark {
@@ -112,6 +115,8 @@ private:
     };
 
     void rebuild();
+    // All of them, or only those in `only`.
+    void layout(const std::set<QtNodes::NodeId>* only);
     void scheduleRead();
     void openSession(const QString& description);
     const Entry* entryOf(QtNodes::NodeId id) const;
