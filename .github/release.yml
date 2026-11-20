@@ -1,0 +1,23 @@
+# How GitHub groups a release's generated notes (docs/RELEASE.md §8): one line
+# per pull request merged since the last release, under the heading its label
+# picks. A pull request gets exactly one of these labels when it is opened.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: New
+      labels:
+        - enhancement
+    - title: Fixed
+      labels:
+        - bug
+    - title: Build, CI and packaging
+      labels:
+        - build
+    - title: Plans and documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"
