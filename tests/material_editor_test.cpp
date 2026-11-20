@@ -85,6 +85,19 @@ void settle() {
     for (int passes = 0; passes < 3 || timer.elapsed() < 80; ++passes) QApplication::processEvents();
 }
 
+// Settles until `done`, for what a timer runs later than settle() waits: on Linux's
+// offscreen platform one pass can outlast a short timer's interval.
+template <typename Done>
+bool settleUntil(Done done, int timeoutMs = 3000) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!done()) {
+        if (timer.elapsed() > timeoutMs) return false;
+        settle();
+    }
+    return true;
+}
+
 const SdfPath kWood("/World/Looks/Wood");
 const SdfPath kMaps("/World/Looks/Wood/Maps");
 const SdfPath kSteel("/World/Looks/Steel");
@@ -702,10 +715,10 @@ USDCC_TEST(material_editor_find_frames_without_selecting) {
     CHECK(f.panel->findMatches().size() == 1 && f.panel->findMatches()[0].path == tex, "Name: only Tex: %zu", f.panel->findMatches().size());
     CHECK(f.panel->shownLevel() == kMaps, "and it goes there");
 
-    // An edit from anywhere finds again, without moving the view.
+    // An edit from anywhere finds again, once it's settled, without moving the view.
     f.stage->usdStage()->DefinePrim(SdfPath("/World/Looks/Wood/Texture2"), TfToken("Shader"));
-    settle();
-    CHECK(f.panel->findMatches().size() == 2, "a new node named so is found: %zu", f.panel->findMatches().size());
+    CHECK(settleUntil([&] { return f.panel->findMatches().size() == 2; }), "a new node named so is found: %zu",
+          f.panel->findMatches().size());
     CHECK(f.panel->currentFindMatch() == 0 && f.panel->shownLevel() == kMaps, "and it stays on the one it was on");
 
     // Esc closes it and takes the marks away.
