@@ -25,6 +25,8 @@ add_library(usdcc_usd SHARED
     src/shader_node_catalog.cpp
     include/usdcc/usd/renderer_settings.h
     src/renderer_settings.cpp
+    include/usdcc/usd/layered_layout.h
+    src/layered_layout.cpp
     include/usdcc/usd/shade_graph.h
     src/shade_graph.cpp
     include/usdcc/usd/shading_preview.h

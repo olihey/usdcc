@@ -524,89 +524,71 @@ std::vector<ShadeFindMatch> findShadeNodes(const UsdPrim& root, const std::strin
     return found;
 }
 
-std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights) {
-    constexpr float kColumnWidth = 300.0f;
-    constexpr float kRowGap = 40.0f;
-    const std::size_t count = graph.nodes.size();
-    std::vector<int> column(count, 0);
-    // The longest way to the end of the graph. As many passes as nodes: a loop, which UsdShade
-    // allows to be authored, doesn't go on for ever.
-    for (std::size_t pass = 0; pass < count; ++pass) {
-        bool changed = false;
-        for (const ShadeGraphConnection& connection : graph.connections) {
-            if (column[connection.fromNode] < column[connection.toNode] + 1) {
-                column[connection.fromNode] = column[connection.toNode] + 1;
-                changed = true;
-            }
-        }
-        if (!changed) break;
-    }
-    int last = 0;
-    for (int value : column) last = std::max(last, value);
-    // The level's inputs start at the far left, used by what's nearest or not.
-    for (std::size_t n = 0; n < count; ++n) {
-        if (graph.nodes[n].kind == ShadeNodeKind::Inputs) column[n] = last + 1;
-    }
-    for (int value : column) last = std::max(last, value);
+namespace {
 
-    // The order in each column: by where what it's connected to is, a few times over.
-    std::map<int, std::vector<std::size_t>> columns;
-    for (std::size_t n = 0; n < count; ++n) columns[column[n]].push_back(n);
-    std::vector<double> rank(count, 0.0);
-    const auto rerank = [&rank](const std::vector<std::size_t>& nodes) {
-        for (std::size_t i = 0; i < nodes.size(); ++i) rank[nodes[i]] = static_cast<double>(i);
-    };
-    for (const auto& [value, nodes] : columns) rerank(nodes);
-    const auto sweep = [&](std::vector<std::size_t>& nodes, int thisColumn) {
-        std::map<std::size_t, double> wanted;
-        for (std::size_t node : nodes) {
-            double total = 0.0;
-            int neighbours = 0;
-            for (const ShadeGraphConnection& connection : graph.connections) {
-                const std::size_t other = connection.fromNode == node ? connection.toNode : connection.toNode == node ? connection.fromNode : node;
-                if (other == node || column[other] == thisColumn) continue;
-                total += rank[other];
-                ++neighbours;
-            }
-            wanted[node] = neighbours ? total / neighbours : rank[node];
-        }
-        std::stable_sort(nodes.begin(), nodes.end(), [&wanted](std::size_t a, std::size_t b) { return wanted[a] < wanted[b]; });
-        rerank(nodes);
-    };
-    for (int pass = 0; pass < 4; ++pass) {
-        if (pass % 2 == 0) {
-            for (auto& [value, nodes] : columns) sweep(nodes, value);
-        } else {
-            for (auto at = columns.rbegin(); at != columns.rend(); ++at) sweep(at->second, at->first);
-        }
+std::vector<LayeredEdge> layeredEdges(const ShadeGraph& graph) {
+    std::vector<LayeredEdge> edges;
+    for (const ShadeGraphConnection& connection : graph.connections) {
+        edges.push_back(LayeredEdge{connection.fromNode, connection.fromPort, connection.toNode, connection.toPort});
     }
+    return edges;
+}
 
-    std::vector<GfVec2f> positions(count);
-    for (const auto& [value, nodes] : columns) {
-        float height = 0.0f;
-        for (std::size_t node : nodes) height += heights[node] + kRowGap;
-        float y = -height / 2.0f;
-        for (std::size_t node : nodes) {
-            positions[node] = GfVec2f(static_cast<float>(last - value) * kColumnWidth, y);
-            y += heights[node] + kRowGap;
+}  // namespace
+
+std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes) {
+    std::vector<LayeredNode> nodes;
+    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
+        LayeredNode node;
+        if (n < boxes.size()) {
+            node.width = boxes[n].width;
+            node.height = boxes[n].height;
+            node.in = boxes[n].in;
+            node.out = boxes[n].out;
         }
+        // The level's inputs at the far left, used by what's nearest or not, and what it ends in
+        // at the far right.
+        if (graph.nodes[n].kind == ShadeNodeKind::Inputs) node.side = LayeredNode::Side::First;
+        if (graph.nodes[n].kind == ShadeNodeKind::Outputs) node.side = LayeredNode::Side::Last;
+        nodes.push_back(std::move(node));
     }
+    std::vector<GfVec2f> positions;
+    for (const LayeredPoint& at : layeredLayout(nodes, layeredEdges(graph))) positions.emplace_back(at.x, at.y);
     return positions;
 }
 
-int countCrossings(const ShadeGraph& graph, const std::vector<GfVec2f>& positions) {
-    int crossings = 0;
-    for (std::size_t a = 0; a < graph.connections.size(); ++a) {
-        for (std::size_t b = a + 1; b < graph.connections.size(); ++b) {
-            const ShadeGraphConnection& one = graph.connections[a];
-            const ShadeGraphConnection& two = graph.connections[b];
-            if (positions[one.fromNode][0] != positions[two.fromNode][0] || positions[one.toNode][0] != positions[two.toNode][0]) continue;
-            const float from = positions[one.fromNode][1] - positions[two.fromNode][1];
-            const float to = positions[one.toNode][1] - positions[two.toNode][1];
-            if (from * to < 0) ++crossings;
+std::vector<ShadeNodeBox> shadeNodeBoxes(const ShadeGraph& graph, const std::vector<float>& heights) {
+    std::vector<ShadeNodeBox> boxes;
+    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
+        const ShadeGraphNode& node = graph.nodes[n];
+        ShadeNodeBox box;
+        box.width = kShadeNodePixels;
+        box.height = n < heights.size() ? heights[n] : 100.0f;
+        box.in.assign(node.in.size(), box.height / 2.0f);
+        box.out.assign(node.out.size(), box.height / 2.0f);
+        // The rows share the height below a caption a fifth of it.
+        const float row = node.rows.empty() ? 0.0f : box.height * 0.8f / static_cast<float>(node.rows.size());
+        for (std::size_t r = 0; r < node.rows.size(); ++r) {
+            const ShadeGraphRow& at = node.rows[r];
+            std::vector<float>& ports = at.kind == ShadeGraphRow::Kind::Input ? box.in : box.out;
+            if (at.kind == ShadeGraphRow::Kind::Page || at.port < 0 || static_cast<std::size_t>(at.port) >= ports.size()) continue;
+            ports[static_cast<std::size_t>(at.port)] = box.height * 0.2f + row * (static_cast<float>(r) + 0.5f);
         }
+        boxes.push_back(std::move(box));
     }
-    return crossings;
+    return boxes;
+}
+
+std::vector<GfVec2f> layoutShadeGraph(const ShadeGraph& graph, const std::vector<float>& heights) {
+    return layoutShadeGraph(graph, shadeNodeBoxes(graph, heights));
+}
+
+LayeredLayoutQuality shadeLayoutQuality(const ShadeGraph& graph, const std::vector<ShadeNodeBox>& boxes, const std::vector<GfVec2f>& positions) {
+    std::vector<LayeredNode> nodes;
+    for (const ShadeNodeBox& box : boxes) nodes.push_back(LayeredNode{box.width, box.height, box.in, box.out});
+    std::vector<LayeredPoint> at;
+    for (const GfVec2f& position : positions) at.push_back(LayeredPoint{position[0], position[1]});
+    return layeredLayoutQuality(nodes, layeredEdges(graph), at);
 }
 
 std::vector<ShadeGraphPort> unauthoredInputs(const UsdPrim& shader) {

@@ -110,6 +110,31 @@ int ShaderNodeGeometry::heightFor(const ShadeGraphNode& node) {
     return kHeaderHeight + static_cast<int>(node.rows.size()) * kRowHeight + kBottomMargin;
 }
 
+int ShaderNodeGeometry::widthFor(const ShadeGraphNode& node) {
+    const QFontMetricsF caption(captionFont());
+    const QFontMetricsF small(smallFont());
+    const QFontMetricsF text(QApplication::font());
+    double width = kMinWidth;
+    width = std::max(width, caption.horizontalAdvance(QString::fromStdString(node.caption)) + 2.0 * kTextInset);
+    width = std::max(width, small.horizontalAdvance(QString::fromStdString(node.subtitle)) + 2.0 * kTextInset);
+    for (const ShadeGraphRow& row : node.rows) {
+        width = std::max(width, text.horizontalAdvance(rowText(node, row)) + 2.0 * kTextInset + (row.kind == ShadeGraphRow::Kind::Page ? 14.0 : 0.0));
+    }
+    return static_cast<int>(width + 0.5);
+}
+
+ShadeNodeBox ShaderNodeGeometry::boxFor(const ShadeGraphNode& node, int width) {
+    ShadeNodeBox box;
+    box.width = static_cast<float>(width > 0 ? width : widthFor(node));
+    box.height = static_cast<float>(heightFor(node));
+    const auto rowMiddle = [&node](ShadeGraphRow::Kind kind, std::size_t port) {
+        return static_cast<float>(kHeaderHeight + rowIndexOf(node, kind, port) * kRowHeight) + kRowHeight / 2.0f;
+    };
+    for (std::size_t i = 0; i < node.in.size(); ++i) box.in.push_back(rowMiddle(ShadeGraphRow::Kind::Input, i));
+    for (std::size_t i = 0; i < node.out.size(); ++i) box.out.push_back(rowMiddle(ShadeGraphRow::Kind::Output, i));
+    return box;
+}
+
 QSize ShaderNodeGeometry::size(NodeId nodeId) const { return m_model.nodeData(nodeId, QtNodes::NodeRole::Size).toSize(); }
 
 QRectF ShaderNodeGeometry::boundingRect(NodeId nodeId) const {
@@ -120,16 +145,7 @@ QRectF ShaderNodeGeometry::boundingRect(NodeId nodeId) const {
 void ShaderNodeGeometry::recomputeSize(NodeId nodeId) const {
     const ShadeGraphNode* node = m_model.shadeNode(nodeId);
     if (!node) return;
-    const QFontMetricsF caption(captionFont());
-    const QFontMetricsF small(smallFont());
-    const QFontMetricsF text(QApplication::font());
-    double width = kMinWidth;
-    width = std::max(width, caption.horizontalAdvance(QString::fromStdString(node->caption)) + 2.0 * kTextInset);
-    width = std::max(width, small.horizontalAdvance(QString::fromStdString(node->subtitle)) + 2.0 * kTextInset);
-    for (const ShadeGraphRow& row : node->rows) {
-        width = std::max(width, text.horizontalAdvance(rowText(*node, row)) + 2.0 * kTextInset + (row.kind == ShadeGraphRow::Kind::Page ? 14.0 : 0.0));
-    }
-    m_model.setNodeData(nodeId, QtNodes::NodeRole::Size, QSize(static_cast<int>(width + 0.5), heightFor(*node)));
+    m_model.setNodeData(nodeId, QtNodes::NodeRole::Size, QSize(widthFor(*node), heightFor(*node)));
 }
 
 QRectF ShaderNodeGeometry::rowRect(NodeId id, int row) const {

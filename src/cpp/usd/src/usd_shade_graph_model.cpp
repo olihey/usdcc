@@ -89,9 +89,9 @@ void UsdShadeGraphModel::rebuild() {
 
     Q_EMIT aboutToReset();
     m_signature = std::move(signature);
-    std::vector<float> heights;
-    for (const ShadeGraphNode& node : graph.nodes) heights.push_back(static_cast<float>(ShaderNodeGeometry::heightFor(node)));
-    const std::vector<GfVec2f> defaults = layoutShadeGraph(graph, heights);
+    std::vector<ShadeNodeBox> boxes;
+    for (const ShadeGraphNode& node : graph.nodes) boxes.push_back(ShaderNodeGeometry::boxFor(node));
+    const std::vector<GfVec2f> defaults = layoutShadeGraph(graph, boxes);
 
     std::map<NodeId, Entry> nodes;
     std::vector<NodeId> ids;
@@ -241,17 +241,17 @@ void UsdShadeGraphModel::autoLayout() {
     ShadeGraph graph;
     std::vector<NodeId> ids;
     std::map<NodeId, std::size_t> indexOf;
-    std::vector<float> heights;
+    std::vector<ShadeNodeBox> boxes;
     for (const auto& [id, entry] : m_nodes) {
         indexOf[id] = ids.size();
         ids.push_back(id);
         graph.nodes.push_back(entry.node);
-        heights.push_back(static_cast<float>(entry.size.isValid() && entry.size.height() > 0 ? entry.size.height() : ShaderNodeGeometry::heightFor(entry.node)));
+        boxes.push_back(ShaderNodeGeometry::boxFor(entry.node, entry.size.isValid() ? entry.size.width() : 0));
     }
     for (const ConnectionId& id : m_connections) {
         graph.connections.push_back({indexOf[id.outNodeId], static_cast<std::size_t>(id.outPortIndex), indexOf[id.inNodeId], static_cast<std::size_t>(id.inPortIndex)});
     }
-    const std::vector<GfVec2f> at = layoutShadeGraph(graph, heights);
+    const std::vector<GfVec2f> at = layoutShadeGraph(graph, boxes);
     std::vector<std::pair<SdfPath, GfVec2f>> stored;
     for (std::size_t n = 0; n < ids.size(); ++n) {
         Entry& entry = m_nodes[ids[n]];

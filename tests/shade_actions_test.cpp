@@ -451,8 +451,9 @@ def Material "M"
 }
 )");
     const ShadeGraph graph = readShadeGraph(f.prim("/M"));
-    const std::vector<GfVec2f> at = layoutShadeGraph(graph, std::vector<float>(graph.nodes.size(), 100.0f));
-    CHECK(countCrossings(graph, at) == 0, "its order avoids them: %d", countCrossings(graph, at));
+    const std::vector<ShadeNodeBox> boxes = shadeNodeBoxes(graph, std::vector<float>(graph.nodes.size(), 100.0f));
+    const LayeredLayoutQuality quality = shadeLayoutQuality(graph, boxes, layoutShadeGraph(graph, boxes));
+    CHECK(quality.crossings == 0, "its order avoids them: %d", quality.crossings);
 }
 
 USDCC_TEST(shake_detector) {
