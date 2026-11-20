@@ -32,7 +32,8 @@ inline constexpr const char* kPreviewShapeFoldersKey = "Materials/previewShapePa
 inline constexpr const char* kPreviewHdriFoldersKey = "Materials/previewHdriPaths";
 inline constexpr const char* kPreviewShapeKey = "Materials/previewShape";
 inline constexpr const char* kPreviewHdriKey = "Materials/previewHdri";
-// The shipped HDRI a new preview starts with, by name (its file's, without .hdr).
+// The shipped shape and HDRI a new preview starts with, by name (the file's, without its extension).
+inline constexpr const char* kDefaultPreviewShape = "Standard USD Shader Ball";
 inline constexpr const char* kDefaultPreviewHdri = "studio_wizja_02_1k";
 USDCC_USD_UI_API void defineMaterialPreviewSettings();
 // What usdcc ships: resources/preview, next to bin/ when deployed, else in the source tree.

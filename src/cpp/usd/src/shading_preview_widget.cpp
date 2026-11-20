@@ -120,7 +120,7 @@ void defineMaterialPreviewSettings() {
         .label = "Shape for new previews",
         .description = "The name of the shape a new Material Editor's preview starts with, as its menu lists it.",
         .type = SettingType::String,
-        .defaultValue = std::string("Shader Ball"),
+        .defaultValue = std::string(kDefaultPreviewShape),
     });
     settings.define({
         .key = kPreviewHdriKey,
@@ -155,7 +155,7 @@ QStringList previewHdriFolders() {
 }
 
 ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
-    m_shapeName = settingText(kPreviewShapeKey, "Shader Ball");
+    m_shapeName = settingText(kPreviewShapeKey, kDefaultPreviewShape);
     m_hdriName = settingText(kPreviewHdriKey, kDefaultPreviewHdri);
 
     auto* layout = new QVBoxLayout(this);

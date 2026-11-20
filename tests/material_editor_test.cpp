@@ -921,7 +921,8 @@ USDCC_TEST(material_editor_preview_shows_the_material) {
     usdcc::usd::ShadingPreviewStage* stage = preview->previewStage();
     CHECK(stage && stage->stage()->GetPrimAtPath(kSurface), "on a preview stage that has its shaders");
     CHECK(stage && !stage->stage()->GetPrimAtPath(SdfPath("/World/WoodBall")), "but not the scene");
-    CHECK(preview->shapeName() == "Shader Ball", "on the default shape: %s", qPrintable(preview->shapeName()));
+    CHECK(preview->shapeName() == usdcc::usd::kDefaultPreviewShape && preview->shapeName() == "Standard USD Shader Ball",
+          "on the default shape: %s", qPrintable(preview->shapeName()));
     CHECK(stage && !stage->shapeBounds().IsEmpty(), "which is loaded from what usdcc ships");
     CHECK(preview->problem().isEmpty(), "with nothing wrong: %s", qPrintable(preview->problem()));
 
@@ -1023,6 +1024,18 @@ USDCC_TEST(material_editor_preview_toolbar_and_camera) {
         }
         return nullptr;
     };
+    // A new preview is on the Standard USD Shader Ball: a set with a camera and lights of its own.
+    {
+        const auto menu = menuOf();
+        CHECK(find(menu.get(), "Shape: Standard USD Shader Ball") && find(menu.get(), "Light: Scene lights"),
+              "the default shape, lit by its own lights");
+        CHECK(preview->hasShapeCamera() && menu->findChild<QAction*>("previewResetView"), "Reset View: it has a camera");
+        QAction* use = menu->findChild<QAction*>("previewSceneLights");
+        CHECK(preview->shapeHasLights() && use && use->isChecked(), "and Use scene lights, checked");
+    }
+
+    // The plain Shader Ball has neither.
+    preview->setShapeName("Shader Ball");
     {
         const auto menu = menuOf();
         QAction* node = find(menu.get(), "Selected Node");
