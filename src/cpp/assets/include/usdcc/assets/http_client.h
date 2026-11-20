@@ -4,12 +4,14 @@
 // Windows' own TLS there and OpenSSL elsewhere. One call, from any thread; a
 // thread keeps its connections between calls.
 
+#include "usdcc/assets/credentials.h"
 #include "usdcc/assets/result.h"
 #include "usdcc/assets/transport.h"
 
 #include <chrono>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,8 +25,15 @@ struct HttpRequest {
     // A credential id (credentials.h), or empty for anonymous. Sent to this URL's host
     // only: a redirect to another host goes without it.
     std::string credential;
+    // A credential itself, for one the protocol found on its own (S3's AWS lookup). Used
+    // when `credential` is empty, under the same rules.
+    std::optional<Credential> explicitCredential;
     // Over plain http:// a credential is only sent when this is set.
     bool credentialOverHttp = false;
+    // Signs the request with AWS Signature Version 4 instead of sending Basic or a bearer
+    // token: "aws:amz:<region>:s3" (docs/S3_RESOLVER.md §2). The credential's user is the
+    // access key ID, its password the secret, and its token a session token.
+    std::string awsSigV4;
     // The body is written here; left empty, it is kept in HttpResponse::body.
     std::filesystem::path into;
     // Up to five, to other hosts too, and never from https to http. Off, a 3xx is the answer.

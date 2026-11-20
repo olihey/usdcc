@@ -412,6 +412,17 @@ else()
             "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
 endif()
 
+# The S3 spike (docs/S3_RESOLVER.md §8): signed requests to a real S3, run by hand. Not
+# a test. Beside usdcc_assets_tests, whose copied libraries it uses.
+add_executable(usdcc_s3_spike s3_spike.cpp)
+target_link_libraries(usdcc_s3_spike PRIVATE usdcc_assets pugixml::pugixml)
+if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+    target_link_libraries(usdcc_s3_spike PRIVATE "${Python3_LIBRARY}")
+endif()
+if(WIN32)
+    add_dependencies(usdcc_s3_spike usdcc_assets_tests_copy_libraries)
+endif()
+
 # usdcc_peers (docs/PEERS.md §15), in a test program of its own: rooms over 127.0.0.1,
 # with no USD and no widgets, as the library has none. libsodium's DLL is copied beside
 # it by vcpkg's step, as a dependency of usdcc_peers.dll.

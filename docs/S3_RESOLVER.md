@@ -3,7 +3,8 @@
 A USD asset resolver plugin that loads assets from Amazon S3 and the stores that speak its API,
 through `s3://` asset paths such as `s3://studio/chars/hero/hero.usd`.
 
-**Status:** planned (2026-11-20), nothing built. The caching, the server names, the environments
+**Status:** planned (2026-11-20). The spike (§8.1) has run against rclone's S3 server and Garage;
+AWS is still to do. The caching, the server names, the environments
 and the usdcc integration are the shared library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This
 document is only what is S3's own, and the few things S3 needs from the shared library (§6).
 
@@ -70,9 +71,11 @@ the same ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4, §5). An S3 endpoint:
   Requests go to `https://<bucket>.s3.<region>.amazonaws.com/<prefix>/<path>`.
 - **`https://…`** is any S3-compatible store. The bucket is the path's first part (path style,
   which MinIO and Ceph use by default), or the host name's first part with `"bucketInHost": true`.
-- **`region`** is part of the signature. On AWS it may be left out: S3 names a bucket's region in
-  the `x-amz-bucket-region` header of any answer about it, even a refusal, and it's remembered for
-  the session. Other stores get `us-east-1` unless they say otherwise.
+- **`region`** is part of the signature. It may be left out: a request signed for the wrong
+  region is refused with `AuthorizationHeaderMalformed`, whose error body names the right one in
+  `<Region>` (Garage does, §8.1), and AWS also sends it in an `x-amz-bucket-region` header. So the
+  transport asks with a `GET` (a `HEAD`'s answer has no body), takes the header or else the
+  element, and remembers it for the session. Without either, `us-east-1`.
 - **`mirrors`** are replica buckets, in other regions too: each URL finds its own region.
 
 ### 3.2 By bucket
@@ -191,13 +194,62 @@ forces". This is what it forces:
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **S3.0 Spike** | Signed `HEAD`, `GET` and `ListObjectsV2` through `httpRequest`, against AWS and MinIO | Keys with a space, `+`, `=`, `%`, `~` and accented letters read on both; a listing of more than 1,000 keys pages; a region is found from a refusal; a session token works |
+| **S3.0 Spike** | Signed `HEAD`, `GET` and `ListObjectsV2` through `httpRequest`, against AWS and MinIO. **Run against rclone's S3 server and Garage** (§8.1; MinIO's image is no longer public); AWS still to do | Keys with a space, `+`, `=`, `%`, `~` and accented letters read on both; a listing of more than 1,000 keys pages; a region is found from a refusal; a session token works |
 | **S3.1 Read-only** | §6, the transport and plugin, by name, with usdcc credential ids; S3 in the test server (§10) | `usdcat s3://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST, with a listing per folder and nothing downloaded on the second open |
 | **S3.2 AWS credentials** | §4.2: the environment, the shared files, `credential_process`, EC2's role, renewal | A profile using AWS single sign-on through `credential_process` opens a stage, and keeps working past its credentials' expiry |
 | **S3.3 By bucket** | §3.2, finding the region, Allowed buckets | `usdcat s3://<bucket>/shot.usda` works with only the AWS command line set up; a stage naming another bucket is refused with the toast |
 | **S3.4 usdcc** | §7 | A reference to a file in a bucket is added by browsing to it in the picker |
 | **With phase 6** | `put` (§5) | Save on a layer from PROD, in the test environment, writes it to the TEST bucket |
 | **Later** | Reading part of a large file; pinning an object version (`versionId`); requester pays | |
+
+### 8.1 What the spike found
+
+[tests/s3_spike.cpp](../tests/s3_spike.cpp) (`usdcc_s3_spike`, built with the tests, run by hand)
+sends signed requests through `httpRequest` and prints what each got. `HttpRequest` gained
+`awsSigV4` and `explicitCredential` for it (§6), which the plugin will use as they are.
+
+Run 2026-11-20 against two servers that check signatures, each with a bucket of 13 awkwardly named
+files, a folder with a space, and a folder of 1,100 files:
+
+- **`rclone serve s3`** (rclone 1.72) over a local folder.
+- **Garage** v2.5.0 (`dxflrs/garage` in Docker), one node, region `eu-central-1`, the files uploaded
+  through Windows' curl with `--aws-sigv4`. In place of MinIO: `minio/minio` is gone from Docker
+  Hub and `quay.io/minio/minio` wants a login.
+
+What they showed:
+
+- **Keys must be escaped strictly, by the plugin.** Everything but `A-Z a-z 0-9 - . _ ~` and `/`
+  escaped, and every key read: a space, `+ = % ~ ( ) $ , ; @ & '` and `café`. Escaped the way
+  `percentEncodePath()` does, which leaves `+ = ( ) $ , ; @ & '` as they are (valid in a URL
+  path), they failed the signature (403 on both servers), and a bare `%` was a 400 on rclone and a
+  403 on Garage. libcurl's source says why: for
+  S3 it signs the path exactly as sent and doesn't escape it again, while S3 escapes the key
+  strictly when it checks. So the transport decodes the path it's given and escapes each key
+  itself, not with `percentEncodePath()`.
+- **libcurl sorts and escapes the query string for the signature,** so a listing's parameters can
+  go in any order. Values are escaped strictly too (a prefix with a space worked).
+- **libcurl adds `x-amz-content-sha256`** for the service `s3` itself: the hash of the empty body
+  for `GET` and `HEAD`, `UNSIGNED-PAYLOAD` for an upload from a file (phase 6). Nothing to add.
+- **`If-None-Match` with the ETag gives 304,** as the cache needs. ETags are quoted, as HTTP's.
+- **Paging:** a folder of 1,100 files came in two pages of the default 1,000 on both, all keys
+  once, and Garage paged the root two keys at a time correctly (8 pages; folders count towards a
+  page). With two keys a page, rclone looped: it lists keys out of order, and its continuation
+  token, the last key of a page, then skips back. rclone's bug, but the transport stops when a
+  token comes back or a page brings no new key, rather than trusting the server.
+- **Errors come as S3's XML** with a code and a message: `NoSuchKey` on a 404; on a 403,
+  `SignatureDoesNotMatch` (rclone) or `AccessDenied: Invalid signature` (Garage) for a wrong secret,
+  and `AccessDenied` for an unsigned request on Garage (rclone said 400 `UnsupportedAlgorithm`).
+  Worth showing as they are (§7). A `HEAD`'s answer has no body, so only its status.
+- **The region:** rclone ignores it (signed for the wrong one, it answered 200). Garage refused with
+  400 `AuthorizationHeaderMalformed`, named the scope it expected, and put the right region in a
+  `<Region>` element; no `x-amz-bucket-region` header. Hence §3.1's way of finding it.
+- **The bucket in the host name** (`spike.s3.localhost:3900`, Garage's `root_domain`) read as the
+  path style did. libcurl resolves `*.localhost` to the machine itself.
+
+**Still to run, on AWS:** a session token (neither server has STS), `x-amz-bucket-region`, AWS's own
+virtual-hosted URLs, and its answer to a missing key without `s3:ListBucket` (§5). It needs a test
+bucket and keys: `USDCC_SPIKE_S3_KEY`, `USDCC_SPIKE_S3_SECRET`, and `USDCC_SPIKE_S3_TOKEN` for
+temporary ones.
 
 ## 9. Not planned
 
@@ -212,12 +264,13 @@ forces". This is what it forces:
   `ListObjectsV2` with paging over a folder, `HEAD`, `GET` and 304, and a switch for 403 on a
   missing key. It checks that a request carries a SigV4 `Authorization` header, not that the
   signature is right: that would mean writing SigV4 a second time.
+- **Garage in Docker** (`dxflrs/garage`) as the server that checks signatures for real, as in the
+  spike (§8.1): one container, a bucket and a key made with its command line.
 - **Tests** in [assets_net_test.cpp](../tests/assets_net_test.cpp), as WebDAV's: list, stat and
   fetch with awkward keys, a missing folder, a 304, paging; a stage through `UsdStage::Open` from
   two buckets; the 403 message; the shared files and `credential_process` from a test folder.
 - **Signatures for real:** a test that runs only when `USDCC_TEST_S3_URL` and its credentials are
-  set, against MinIO (`minio server <folder>`, one binary, no install) or a real bucket. Run by hand
-  before a release, as the WebDAV servers are.
+  set, against Garage or a real bucket. Run by hand before a release, as the WebDAV servers are.
 
 ## 11. Open questions
 

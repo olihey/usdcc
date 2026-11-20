@@ -233,13 +233,23 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
 
     curl_slist* headers = nullptr;
     for (const std::string& header : request.headers) headers = curl_slist_append(headers, header.c_str());
-    if (!request.credential.empty()) {
+    if (!request.credential.empty() || request.explicitCredential) {
         const bool secure = request.url.rfind("https:", 0) == 0;
+        const std::optional<Credential> credential =
+            request.credential.empty() ? request.explicitCredential : credentialFor(request.credential);
         if (!secure && !request.credentialOverHttp) {
             warnOncePerHost(hostOf(request.url), "its credential isn't sent over plain http://");
-        } else if (const std::optional<Credential> credential = credentialFor(request.credential)) {
+        } else if (credential) {
             if (!secure) warnOncePerHost(hostOf(request.url), "its credential is sent unencrypted, over plain http://");
-            if (!credential->token.empty()) {
+            if (!request.awsSigV4.empty()) {
+                // libcurl signs: the secret never goes over the wire, a session token does.
+                curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, request.awsSigV4.c_str());
+                curl_easy_setopt(curl, CURLOPT_USERNAME, credential->user.c_str());
+                curl_easy_setopt(curl, CURLOPT_PASSWORD, credential->password.c_str());
+                if (!credential->token.empty()) {
+                    headers = curl_slist_append(headers, ("x-amz-security-token: " + credential->token).c_str());
+                }
+            } else if (!credential->token.empty()) {
                 headers = curl_slist_append(headers, ("Authorization: Bearer " + credential->token).c_str());
             } else {
                 // Basic, sent with the first request. With more than one scheme allowed,
