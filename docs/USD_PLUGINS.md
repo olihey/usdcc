@@ -127,10 +127,26 @@ Notes:
     `HdRenderIndex::IsSceneIndexEmulationEnabled()`, which the render delegate calls in
     two places. With 26.08 the render index always takes scene indices, so the patch
     answers `true` from that version on. The other three plugins build unpatched.
-  - **Not right yet.** Usdcc's grid and axis lines draw over Arnold's picture, as if the
+  - **Not right yet.** Known issues, each tracked on GitHub with the `known-issue` label
+    ([RELEASE.md](RELEASE.md) §9):
+    [#7](https://github.com/olihey/usdcc/issues/7) the stretched orthographic view,
+    [#8](https://github.com/olihey/usdcc/issues/8) the grid over Arnold's picture,
+    [#9](https://github.com/olihey/usdcc/issues/9) "AiEnd() was not called".
+    Usdcc's grid and axis lines draw over Arnold's picture, as if the
     depth Arnold gives is not what the overlay compares against. Built with
     `-DHYDRA_NORMALIZE_DEPTH=ON` they no longer do, but the grid is then gone everywhere;
     neither is right. At exit Arnold logs "AiEnd() was not called".
+    An orthographic view is stretched by the viewport's width/height ratio, more as a
+    resize takes it further from square (Storm and Embree aren't). arnold-usd's bug, not
+    usdcc's: `HdArnoldCamera::GetScreenWindowFromOrthoProjection` (`camera.cpp`, also
+    called from `render_pass.cpp` on every resize) gives the `ortho_camera` a
+    `screen_window` whose Y is the projection's own half-height, but Arnold scales the
+    window's Y by the image aspect itself, so the aspect counts twice. A 0.5-unit sphere
+    rendered 200×100 by Arnold alone: window (-1,-1)–(1,1) gives 50×50 px, round; the
+    (-1,-0.5)–(1,0.5) arnold-usd passes gives 50×100. Its comment calls taking Y from
+    the X extent wrong, but that is what Arnold wants; upstream `master` still has it
+    (2026-11-20). The fix, for the patch: Y from the X extent again, offset included
+    (`unitX` throughout).
   - **Licence.** Without an Arnold licence every render has an "arnold" watermark. The
     3ds Max and Maya entitlement only covers rendering inside those programs.
 
@@ -437,7 +453,7 @@ Three sets, decided by licence:
      settings in the viewport's renderer settings. With 3ds Max's 7.5.2 as the folder, a
      warning in the log and no Arnold. `usdcc_tests`' `arnold_runtime` checks the version
      rule and what stops it early, without an Arnold.*
-   - *Not done: the overlay's depth (§3), materials and the Material Editor's Arnold
+   - *Not done: the overlay's depth and the stretched orthographic view (§3; #8, #7), materials and the Material Editor's Arnold
      nodes, GPU rendering, Linux, and the self-hosted runner.*
 8. **Linux** for each pack that supports it (all but Aurora's DirectX backend), as
    `linux` jobs in the same matrix. *The job and the build script's RUNPATH step are

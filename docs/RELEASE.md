@@ -17,7 +17,8 @@ the dialog is the first step of M10's Info dialog ([PLAN.md](PLAN.md)).
 (§8). Then on GitHub, Releases > Draft a new release, a new tag that is the
 version (`26.12.1`, or `26.12.1-beta.1` with "Set as a pre-release"; §1 says which
 number is next) on `master`, the notes
-(that section, then "Generate release notes" for the list of pull requests),
+(that section and the open known issues, §9, then "Generate release notes" for the list
+of pull requests),
 then Publish; or do both from a shell (§8). About 25 minutes later the release has `usdcc-<version>-windows-x64.7z` and
 its symbols. If the run fails, fix the cause and run the Release workflow by hand with the
 same tag (Actions > Release > Run workflow).
@@ -371,7 +372,9 @@ gh release create 26.11.1 --target master --title 26.11.1 --notes-file notes.md 
 
 `tools/release_notes.py` prints the version's section without its heading, turns links to
 files in the repository into links to them at the tag, and fails when the changelog has no
-such section, so a release isn't published with empty notes. `--generate-notes` adds, under
+such section, so a release isn't published with empty notes. Under the section it lists
+the open known issues (§9); it needs `gh` for that, signed in, and fails without it
+unless given `--no-known-issues`. `--generate-notes` adds, under
 it, the pull requests merged since the last release, grouped by label, and a link to the
 full comparison. Publishing the release starts `release.yml` (§4), as it does from the
 website.
@@ -380,3 +383,29 @@ The releases up to `2026.11.20` (since deleted, [UPDATES.md](UPDATES.md) §5) we
 before this: their commits went straight to
 `master`, so their generated notes are only the comparison link, and their sections in
 the changelog were written afterwards from the commits.
+
+## 9. Known issues
+
+A known issue is a problem someone using usdcc should know about until it's fixed. Each
+is **one GitHub issue with the `known-issue` label**, and that issue is the record: what
+you see, who it affects, what's known of the cause, a workaround if there is one, and how
+far the fix is. Nothing else lists them by hand, so no list goes stale.
+
+- **The title** is a line of every release's notes, so it says what a user sees, in
+  their words, with the area first: "Arnold: an orthographic view is stretched unless
+  the viewport is square".
+- **`upstream` as well** when the cause is in another project (a USD plugin, OpenUSD,
+  Qt). The issue links theirs, or says it still has to be reported.
+- **`bug` as well**, as for any bug.
+- **The docs link to it** where they describe the problem (a plan's "not right yet",
+  a phase's "not done"), so a reader of the plan finds whether it's fixed, and the issue
+  links back to the doc for the details it doesn't repeat.
+- **Fixed means closed.** The fix's pull request says "Fixes #<number>", which closes the
+  issue when it's merged, and the fix is in the next release's notes under "Fixed" like
+  any other.
+
+**Every release's notes end with the ones still open**: `tools/release_notes.py` (§8)
+puts a "Known issues" list under the changelog's section, a line per open `known-issue`
+issue with its link, oldest first, and leaves the heading out when there are none. A
+release's page therefore shows what was known when it was made. The open ones now:
+[issues labelled known-issue](https://github.com/olihey/usdcc/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-issue).
