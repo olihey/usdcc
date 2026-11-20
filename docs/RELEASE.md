@@ -34,8 +34,8 @@ same tag (Actions > Release > Run workflow).
   or two weeks later. It stays three numbers that only go up, because an install is only
   offered a higher version: [UPDATES.md](UPDATES.md) §5, "Version numbers", says why a
   fourth number or a suffix doesn't do, how to find the next number, and what the change
-  from four-digit years means for the installs of `2026.11.18` to `2026.11.20`. The
-  releases before those were `0.0.1` to `0.0.3`.
+  from four-digit years means for the installs of `2026.11.18` to `2026.11.20`. Those
+  releases, and `0.0.1` to `0.0.3` before them, are deleted from GitHub, tags and all.
 - **Every other build is a development build**, named after the last release before it:
   `26.12.1+5.3b70ef2` is 5 commits after `26.12.1`, at commit `3b70ef2`. The About dialog
   says "Development build" for these. With no release tag yet, it's `0.0.0+<commit>`.
@@ -376,6 +376,7 @@ it, the pull requests merged since the last release, grouped by label, and a lin
 full comparison. Publishing the release starts `release.yml` (§4), as it does from the
 website.
 
-The releases up to `2026.11.20` were made before this: their commits went straight to
+The releases up to `2026.11.20` (since deleted, [UPDATES.md](UPDATES.md) §5) were made
+before this: their commits went straight to
 `master`, so their generated notes are only the comparison link, and their sections in
 the changelog were written afterwards from the commits.

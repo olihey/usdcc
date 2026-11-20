@@ -147,19 +147,17 @@ than its own. That rules out the other ways to number a second release in a day:
 version there will be, so each install would be offered it, and nothing after it. The tag
 check turns it down.
 
-**The three releases with the year in full.** `2026.11.18` to `2026.11.20` were made
-before the year was shortened, and to Velopack each of them is higher than `26.11.1` and
-everything after it. Two things follow:
+**The releases with the year in full are deleted.** `2026.11.18` to `2026.11.20` were
+made before the year was shortened, and to Velopack each of them is higher than `26.11.1`
+and everything after it. With one of them on GitHub, an install of `26.11.1` would read
+its feed, take `2026.11.20` for the newest release and offer it, and `release.yml`'s
+`vpk pack` would turn down a version lower than the package `vpk download` fetched. So
+the three were deleted from GitHub, with their tags, and `0.0.1` to `0.0.3` with them;
+[CHANGELOG.md](../CHANGELOG.md) still says what was in each.
 
-- **Their installs aren't offered a `YY.MM.N` release.** They say "usdcc is up to date".
-  Running `usdcc-win-Setup.exe` from a later release installs over them, after asking;
-  the user's files, in `%LOCALAPPDATA%\usdcc_config`, stay.
-- **Their feeds are gone.** With a `releases.win.json` (or `RELEASES`, the same list in
-  the older format) on one of them, an install of `26.11.1` would read it, take
-  `2026.11.20` for the newest release and offer it, and `release.yml`'s `vpk pack` would
-  turn down a version lower than the package `vpk download` fetched. So both files were
-  deleted from the three releases, which are now skipped, as the `deps/...` ones are.
-  Their 7z, Setup and packages are still there.
+An install of one of them finds no update, now or later. Running `usdcc-win-Setup.exe`
+from a `YY.MM.N` release installs over it, after asking; the user's files, in
+`%LOCALAPPDATA%\usdcc_config`, stay.
 
 **The next number.** The latest release's tag:
 
@@ -168,8 +166,8 @@ git fetch --tags
 git tag --list "[0-9][0-9].[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
 ```
 
-Raise its last number by one; in a new month, start at 1. The pattern leaves out the tags
-with the year in full, which would sort first; with no tag yet, the first is `26.11.1`.
+Raise its last number by one; in a new month, start at 1. With no tag yet, the first is
+`26.11.1`.
 
 ## 6. Trying it locally
 
