@@ -3,6 +3,7 @@
 #include <pxr/pxr.h>
 #include <pxr/usd/sdr/declare.h>
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -90,10 +91,19 @@ public:
     // (docs/MATERIAL_EDITOR.md §3.5), and are null for now.
     static PXR_NS::SdrShaderNodeConstPtr definitionOf(const PXR_NS::UsdShadeShader& shader);
 
+    // What shows the catalog, such as a palette, hears through these that it
+    // changed: a profile came or went, or definitions were registered (Sdr can't
+    // say so, so whoever registers calls notifyChanged()). Main thread only.
+    int subscribe(std::function<void()> changed);
+    void unsubscribe(int id);
+    void notifyChanged();
+
 private:
     ShaderNodeInfo describe(const PXR_NS::SdrShaderNode& node) const;
 
     std::map<std::string, RendererProfile> m_profiles;
+    std::map<int, std::function<void()>> m_listeners;
+    int m_nextListener = 1;
 };
 
 // A node's context, "surface", "pattern" and so on, never Sdr's "usda" (§3.2).

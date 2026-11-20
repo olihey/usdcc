@@ -677,6 +677,8 @@ USDCC_TEST(plugin_example) {
     TestSettings settings;
     auto& app = pythonTestApp();
     OpenStage open("example");
+    // The V-Ray plugin is among them: no plugininfo run for its shader nodes.
+    run("import os\nos.environ['USDCC_VRAY_SHADER_NODES'] = '0'");
     PluginManager::Options options;
     options.folders = {std::filesystem::u8path(USDCC_EXAMPLE_PLUGINS)};
     PluginManager manager(options);

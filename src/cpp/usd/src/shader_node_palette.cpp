@@ -105,8 +105,15 @@ ShaderNodePalette::ShaderNodePalette(QWidget* parent) : QWidget(parent) {
         if (!identifier.isEmpty()) Q_EMIT nodeChosen(identifier);
     });
     m_search->installEventFilter(this);
+    // Queued, so a refresh never runs inside whatever changed the catalog, and Qt drops
+    // it if the palette is gone by then.
+    m_catalogSubscription = ShaderNodeCatalog::instance().subscribe([this]() {
+        QMetaObject::invokeMethod(this, [this]() { refresh(); }, Qt::QueuedConnection);
+    });
     refresh();
 }
+
+ShaderNodePalette::~ShaderNodePalette() { ShaderNodeCatalog::instance().unsubscribe(m_catalogSubscription); }
 
 void ShaderNodePalette::setPreferredSystems(const std::vector<std::string>& systems) {
     if (systems == m_preferred) return;

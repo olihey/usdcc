@@ -336,9 +336,30 @@ ShaderNodeCatalog::ShaderNodeCatalog() {
 void ShaderNodeCatalog::setProfile(RendererProfile profile) {
     std::string system = profile.shadingSystem;
     m_profiles[std::move(system)] = std::move(profile);
+    notifyChanged();
 }
 
-bool ShaderNodeCatalog::removeProfile(const std::string& shadingSystem) { return m_profiles.erase(shadingSystem) > 0; }
+bool ShaderNodeCatalog::removeProfile(const std::string& shadingSystem) {
+    const bool removed = m_profiles.erase(shadingSystem) > 0;
+    if (removed) notifyChanged();
+    return removed;
+}
+
+int ShaderNodeCatalog::subscribe(std::function<void()> changed) {
+    const int id = m_nextListener++;
+    m_listeners[id] = std::move(changed);
+    return id;
+}
+
+void ShaderNodeCatalog::unsubscribe(int id) { m_listeners.erase(id); }
+
+void ShaderNodeCatalog::notifyChanged() {
+    // A copy: a listener may unsubscribe, or subscribe another.
+    const std::map<int, std::function<void()>> listeners = m_listeners;
+    for (const auto& [id, changed] : listeners) {
+        if (m_listeners.count(id)) changed();
+    }
+}
 
 const RendererProfile* ShaderNodeCatalog::profile(const std::string& shadingSystem) const {
     const auto found = m_profiles.find(shadingSystem);

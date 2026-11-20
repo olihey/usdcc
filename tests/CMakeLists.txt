@@ -219,7 +219,7 @@ endif()
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp
                                               render_view_panel_python_test.cpp
-                                              vray_render_plugin_test.cpp)
+                                              vray_render_plugin_test.cpp vray_shader_nodes_test.cpp)
     target_compile_definitions(usdcc_python_tests PRIVATE USDCC_EXAMPLE_PLUGINS="${CMAKE_SOURCE_DIR}/src/plugins")
     add_dependencies(usdcc_python_tests usdcc_ui_python)
 endif()

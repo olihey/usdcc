@@ -164,6 +164,13 @@ renderer. It drives the app's panel through its controls' object names (`renderB
 - Stop keeps the helper, and deleting the panel ends it and removes the files;
 - a missing App SDK is reported.
 
+`vray_shader_nodes` ([vray_shader_nodes_test.cpp](../tests/vray_shader_nodes_test.cpp))
+generates definitions from plugininfo-like JSON written for it and loads them through the
+cache, with a folder that passes for an App SDK. It checks each kind of parameter in §8
+as Sdr reads it back, the palette's catalog, that registering again adds nothing, the
+list counts in an export, and that stopping takes the profile away. plugininfo itself
+isn't run.
+
 The panel itself is tested on its own (RENDER_VIEW_PANEL.md §7). `active_viewport_camera` and
 `stage_edited_event` ([viewport_camera_test.cpp](../tests/viewport_camera_test.cpp)) cover
 the app calls underneath.
@@ -178,7 +185,117 @@ These checks were made before the move to the app's render view panel and haven'
 repeated since. The camera numbers V-Ray gets are the same; the fake-renderer test checks
 them.
 
-## 8. Limits and next steps
+## 8. Shader nodes for the Material Editor
+
+The plugin gives the Material Editor V-Ray's own shader nodes: BRDFs, materials, textures
+and UVW generators, 340 of them in V-Ray 7.40, in a "V-Ray" part of the palette. A network
+built from them renders in this panel. [shaders.py](../src/plugins/vray_render/python/usdcc_vray_render/shaders.py)
+makes and registers them; [node_loader.py](../src/plugins/vray_render/python/usdcc_vray_render/node_loader.py)
+does so when the plugin starts.
+
+**How V-Ray reads them.** V-Ray's USD reader (Chaos's Hydra delegate for Solaris, inside
+the App SDK) takes a shader whose `info:id` is `vray:` and a plugin class, on the Material's
+`outputs:vray:surface`:
+
+```usda
+def Material "Mat"
+{
+    token outputs:vray:surface.connect = </Looks/Mat/Mtl.outputs:out>
+    def Shader "Mtl"
+    {
+        uniform token info:id = "vray:BRDFVRayMtl"
+        color3f inputs:diffuse.connect = </Looks/Mat/Checker.outputs:out>
+        float inputs:reflect_glossiness.connect = </Looks/Mat/Checker.outputs:out_alpha>
+        uniform int inputs:brdf_type = 3
+        token outputs:out
+    }
+    def Shader "Checker"
+    {
+        uniform token info:id = "vray:TexChecker"
+        color3f inputs:white_color = (1, 1, 0)
+        color3f outputs:out
+        float outputs:out_alpha
+    }
+}
+```
+
+- An input is the V-Ray parameter of its name. `outputs:out` is the plugin itself, and any
+  other output is the V-Ray output parameter of its name (`Checker::out_alpha`).
+- A BRDF on the terminal is wrapped in a `MtlSingleBRDF` by V-Ray.
+- `BRDFVRayMtl` or `VRayNodeBRDFVRayMtl` as the `info:id` is rejected ("Invalid info:id").
+- A list of connections is `inputs:<list>_count` and one input per element, numbered from 1:
+  `brdfs_count = 2`, `brdfs_1`, `brdfs_2`. Without the count the list is empty; numbered from
+  0, the first element is lost. A list of values (`float[] opacities`) is an array.
+
+All of this was read from what V-Ray made of test stages, not from Chaos's documentation:
+`vray.exe` loads a USD file and writes V-Ray's own scene when `VRAY_USD_VRSCENE_DUMP_PATH`
+names a file. That needs no license. Checked that way: colors (a `color3f` becomes an
+`AColor`), floats, ints, bools, `float3`, `float[]`, asset paths, `matrix4d` for a V-Ray
+transform, connections to the plugin and to an output, and lists.
+
+**Where the definitions come from.** V-Ray's `plugininfo.exe`, in the App SDK's `bin`,
+describes every plugin as JSON with no license (`-json -outputDir`), and
+`-list -listByCategory` gives its categories. `generate()` writes one `.usda` of shader
+definitions, as USD's `shaderDefs.usda` is written, for the JSON folders BRDF, material,
+textures and uvwgen:
+
+| V-Ray | Definition |
+|---|---|
+| `TEXTURE`, `FLOAT_TEXTURE`, `INT_TEXTURE`, `VECTOR_TEXTURE` | `color3f` (the default's alpha dropped), `float`, `int`, `float3`; connectable |
+| `PLUGIN` | `token`, connectable, no value |
+| `BOOL`, `INT`, `FLOAT`, `COLOR`, `ACOLOR`, `VECTOR`, `STRING` | `bool`, `int`, `float`, `color3f`, `color4f`, `float3`, `string`; `connectability = "interfaceOnly"`, as V-Ray takes a value only |
+| `STRING` with file extensions in its UI | `asset` |
+| `ENUM` | `int`, its items as Sdr `options` |
+| `TRANSFORM`, `MATRIX` (and their textures) | `matrix4d`: the three axes as rows, then the offset. Sdr has no 3×3 matrix |
+| `*_LIST` of values | arrays |
+| `PLUGIN_LIST`, `TEXTURE_LIST`, `FLOAT_TEXTURE_LIST` | `<list>_count` and 8 slots, `<list>_1` to `<list>_8`, on a page of their own |
+| `OUTPUT_*` | an output of that type |
+| `LIST`, `LIST_LIST`, `scene_name`, `channels` | left out |
+
+- The node's label is V-Ray's name for it ("Checker"). Its group in the palette is its
+  folder or texture category: BRDF, Material, UVW, Texture, Float Texture, Bitmap, ...
+- A parameter's label, page (its UI rollout), help and enum items are V-Ray's.
+- `outputs:out` is a `token` for BRDFs, materials and UVW generators. For a texture, it's the
+  type of its category (`color3f` for Textures, `float` for Textures Float).
+- V-Ray's 677 `ND_*` plugins are its versions of MaterialX's nodes. They are left out:
+  V-Ray reads MaterialX networks as they are.
+
+**The cache.** plugininfo takes about 35 seconds, so the file is cached in the user data
+folder, `vray/shader_nodes/<build>/vray_shaders.usda`, with its identifiers beside it. The
+build key hashes the App SDK's `git_hash.txt` and the size and time of its SDK library and
+plugin DLLs, so another V-Ray makes a new file. The first time, it's made in a thread, and
+the nodes appear in open palettes when it's done.
+
+**Registration.** Each node is added with `Sdr.Registry().AddDiscoveryResult()`: discovery
+type `usda`, source type `vray`, the file as its URI, and the prim name as its
+subIdentifier. USD's parser first looks for a prim named after the identifier, which
+`vray:...` can't be, and warns once per node. So they are all parsed at once, in a
+`Tf.DiagnosticTrap` that drops those warnings, and Sdr keeps the parsed nodes. Sdr can't
+forget a node: a plugin reload finds them registered and adds nothing. Then the plugin adds
+its renderer profile (prefix `vray`, terminal `surface`, default surface `vray:BRDFVRayMtl`)
+and calls `usdcc.shading.nodes_changed()`, which open palettes listen for.
+
+**The export fills in list counts.** `fill_list_counts()` raises each list's count to its
+last slot that is set or connected. A count already larger stays. Only the copy V-Ray gets
+changes, not the stage.
+
+**Off:** `USDCC_VRAY_SHADER_NODES=0`. The tests that load every plugin set it, as the real
+plugininfo would run on a machine with V-Ray.
+
+**Checked by hand** (V-Ray App SDK 7.40.01, a test profile, an in-app script):
+- the first start made the file in 36 s and registered 340 nodes; the next took it from
+  the cache at once;
+- the palette has a V-Ray part with BRDF, Material, Texture, Float Texture and the rest;
+- Tab, "V-Ray Mtl", Return in the Material Editor made a `vray:BRDFVRayMtl` node, drawn with
+  V-Ray's labels; the same for `vray:TexChecker`;
+- wired to `outputs:vray:surface` (by script: the editor's connections are drags), the
+  panel's export, given to `vray.exe`, became a `BRDFVRayMtl` with the checker in `diffuse`
+  and its `out_alpha` in `reflect_glossiness`, on the sphere's `Node`.
+
+Not checked: an image. The license server wasn't reachable, so nothing was rendered; what
+V-Ray made of the files was read from its scene dumps.
+
+## 9. Limits and next steps
 
 - **Every edit reloads the whole stage.** V-Ray makes real plugins from the file (`Node`,
   `GeomStaticMesh`, lights), so an edited transform could update its `Node` in place
@@ -189,6 +306,13 @@ them.
   them. The background is then black, unless the scene has V-Ray's own settings for it.
 - **The stage's own render settings are replaced in the export.**
 - **Materials:** what V-Ray's USD reader understands (UsdPreviewSurface, MaterialX, V-Ray's
-  own shaders). Storm-only looks differ.
+  own shaders, §8). Storm-only looks differ.
+- **V-Ray nodes don't draw in Storm:** it reads no `outputs:vray:surface`, and the Material
+  Editor's preview says so. A Material for both needs a preview or MaterialX network on
+  `outputs:surface` too.
+- **List slots:** 8 per list. A longer list needs `inputs:<list>_9` and on, authored by
+  script, and its count set by hand.
+- **Only `outputs:vray:surface`:** V-Ray's displacement and volume terminals aren't
+  offered, as what V-Ray makes of them wasn't checked.
 - **Live tests need V-Ray:** the camera conversions and the real helper are checked by
   hand, not in CI.

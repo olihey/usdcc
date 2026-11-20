@@ -55,3 +55,10 @@ def register_renderer_profile(shading_system, display_name, terminal_prefix="", 
 def remove_renderer_profile(shading_system):
     """Removes a profile. True if there was one."""
     return _app().remove_renderer_profile(shading_system)
+
+
+def nodes_changed():
+    """Tells the palettes to read the catalog again. Call it after registering
+    definitions with ``pxr.Sdr``, which can't say so itself; profiles say so
+    when they're registered or removed."""
+    _app().shader_nodes_changed()
