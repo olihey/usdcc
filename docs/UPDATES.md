@@ -77,7 +77,7 @@ doesn't log Velopack's errors.
 
 **Help > Check for Updates...**
 - In an install: checks in the background (the status bar says so), then shows one of
-  - "usdcc 2026.12.1 is available": what you have, the download's size (the delta's when there
+  - "usdcc 26.12.1 is available": what you have, the download's size (the delta's when there
     is one), and **Download and Install** and **Release Notes**. It stays until closed.
   - "usdcc is up to date".
   - "Couldn't check for updates", with Velopack's error.
@@ -88,20 +88,20 @@ Updates > Check for updates when usdcc starts** is on (the default). It only say
 when there is an update; a failure goes to the log.
 
 **Download and Install** downloads in the background, with the progress in the status bar.
-Then "usdcc 2026.12.1 is ready" with **Restart Now**. Without a restart, the launcher installs
+Then "usdcc 26.12.1 is ready" with **Restart Now**. Without a restart, the launcher installs
 it the next time usdcc starts (§3).
 
 **Restart Now** closes the window as File > Exit does, so it asks about unsaved changes;
 cancelled, nothing happens. Once the app has quit, Velopack's updater waits for the process
 to end, installs the update with a progress window, and starts usdcc again, which shows
-"Updated to usdcc 2026.12.1" with **Release Notes**.
+"Updated to usdcc 26.12.1" with **Release Notes**.
 
 **Settings > Updates** (only in builds with Velopack):
 
 | Setting | Default | |
 |---|---|---|
 | Check for updates when usdcc starts | on | |
-| Include prereleases | off | Also offer betas (`2026.12.1-beta.1`) |
+| Include prereleases | off | Also offer betas (`26.12.1-beta.1`) |
 
 usdcc logs each step under `usdcc.updates`, and what Velopack's library reports in the app
 goes there too. Velopack's updater (`Update.exe`, which also rebuilds the full package
@@ -126,35 +126,50 @@ prereleases have no feed and are skipped.
 
 ### Version numbers
 
-A release's version is `YYYY.MM.N`: the year, the month, and a counter that starts at 1
-each month and goes up by one with every release. `2026.12.1` is December 2026's first
-release and `2026.12.2` its second, whether that is the same day or two weeks later. The
-tag is the version ([RELEASE.md](RELEASE.md) §1), so this is what the release's tag is.
+A release's version is `YY.MM.N`: the year's last two digits, the month, and a counter
+that starts at 1 each month and goes up by one with every release. `26.12.1` is December
+2026's first release and `26.12.2` its second, whether that is the same day or two weeks
+later. The tag is the version ([RELEASE.md](RELEASE.md) §1), so this is what the release's
+tag is.
 
 Velopack orders versions as SemVer 2 does, and an install is only offered a version higher
 than its own. That rules out the other ways to number a second release in a day:
 
-- **Three numbers, never four.** `2026.12.1.1` isn't a version to Velopack, and
+- **Three numbers, never four.** `26.12.1.1` isn't a version to Velopack, and
   `release.yml`'s tag check turns it down.
-- **A `-suffix` makes a version lower, not higher.** `2026.12.1-hotfix.1` is older than
-  `2026.12.1`, and no install of `2026.12.1` would be offered it. The suffix is for betas
-  only: `2026.12.1-beta.1`, with "Set as a pre-release", comes before `2026.12.1`.
+- **A `-suffix` makes a version lower, not higher.** `26.12.1-hotfix.1` is older than
+  `26.12.1`, and no install of `26.12.1` would be offered it. The suffix is for betas
+  only: `26.12.1-beta.1`, with "Set as a pre-release", comes before `26.12.1`.
 - **A `+suffix` isn't compared at all**, and the tag check turns it down too.
-- **No leading zeros**, which SemVer doesn't allow: January is `2027.1.1`, not `2027.01.1`.
+- **No leading zeros**, which SemVer doesn't allow: January is `27.1.1`, not `27.01.1`.
 
-**November 2026 is the exception.** Its first releases were named after the day
-(`2026.11.18` to `2026.11.20`), so November's counter carries on from them: the next is
-`2026.11.21`, whatever the day. `2026.11.1` would be lower than what is installed. December
-starts at `2026.12.1`.
+**The year in two digits, never four.** `2026.12.1` is higher than every `YY.MM.N`
+version there will be, so each install would be offered it, and nothing after it. The tag
+check turns it down.
+
+**The three releases with the year in full.** `2026.11.18` to `2026.11.20` were made
+before the year was shortened, and to Velopack each of them is higher than `26.11.1` and
+everything after it. Two things follow:
+
+- **Their installs aren't offered a `YY.MM.N` release.** They say "usdcc is up to date".
+  Running `usdcc-win-Setup.exe` from a later release installs over them, after asking;
+  the user's files, in `%LOCALAPPDATA%\usdcc_config`, stay.
+- **Their feeds are gone.** With a `releases.win.json` (or `RELEASES`, the same list in
+  the older format) on one of them, an install of `26.11.1` would read it, take
+  `2026.11.20` for the newest release and offer it, and `release.yml`'s `vpk pack` would
+  turn down a version lower than the package `vpk download` fetched. So both files were
+  deleted from the three releases, which are now skipped, as the `deps/...` ones are.
+  Their 7z, Setup and packages are still there.
 
 **The next number.** The latest release's tag:
 
 ```powershell
 git fetch --tags
-git tag --list "[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
+git tag --list "[0-9][0-9].[0-9]*.[0-9]*" --sort=-v:refname | Select-Object -First 1
 ```
 
-Raise its last number by one; in a new month, start at 1.
+Raise its last number by one; in a new month, start at 1. The pattern leaves out the tags
+with the year in full, which would sort first; with no tag yet, the first is `26.11.1`.
 
 ## 6. Trying it locally
 

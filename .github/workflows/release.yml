@@ -1,6 +1,6 @@
 # Builds a GitHub release's Windows 7z and Linux tar.xz and attaches them
 # (docs/RELEASE.md §4): publish a release (or prerelease) with a tag such as
-# v0.2.0, and this builds that tag on each platform, runs the tests, deploys,
+# 26.12.1, and this builds that tag on each platform, runs the tests, deploys,
 # starts the deploy as a user would, and attaches
 # usdcc-<version>-windows-x64.7z and usdcc-<version>-linux-x64.tar.xz, each
 # with its symbols, and on Windows the installer (usdcc-win-Setup.exe) and the
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The release's tag, such as v0.2.0
+        description: The release's tag, such as 26.12.1
         required: true
         type: string
 
@@ -42,8 +42,10 @@ jobs:
       - name: Check the tag
         id: tag
         run: |
-          if ($env:TAG -notmatch '^v?(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
-            Write-Host "::error::The tag '$env:TAG' isn't a version, such as 0.2.0, v0.2.0 or 0.2.0-beta.1."
+          # YY.MM.N (docs/UPDATES.md §5). A year in full, 2026.12.1, would be higher
+          # than every YY.MM.N there will be, to each install.
+          if ($env:TAG -notmatch '^v?(\d\d\.([1-9]|1[0-2])\.[1-9]\d*(-[0-9A-Za-z.-]+)?)$') {
+            Write-Host "::error::The tag '$env:TAG' isn't a version (YY.MM.N), such as 26.12.1, v26.12.1 or 26.12.1-beta.1."
             exit 1
           }
           $version = $Matches[1]
@@ -215,7 +217,7 @@ jobs:
           $repo = "https://github.com/$env:GITHUB_REPOSITORY"
           $releases = "$env:RUNNER_TEMP\velopack"
           New-Item -ItemType Directory -Force $releases | Out-Null
-          # A prerelease (0.2.0-beta.1) updates from, and is offered to, prereleases too.
+          # A prerelease (26.12.1-beta.1) updates from, and is offered to, prereleases too.
           $pre = if ('${{ steps.tag.outputs.version }}' -match '-') { @('--pre') } else { @() }
           vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases @pre
           if ($LASTEXITCODE) { Write-Host "::notice::No earlier release with update packages, so no delta this time." }
@@ -245,8 +247,9 @@ jobs:
       - name: Check the tag
         id: tag
         run: |
-          if ! [[ "$TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
-            echo "::error::The tag '$TAG' isn't a version, such as 0.2.0, v0.2.0 or 0.2.0-beta.1."
+          # YY.MM.N, as the windows job checks it.
+          if ! [[ "$TAG" =~ ^v?([0-9][0-9]\.([1-9]|1[0-2])\.[1-9][0-9]*(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::The tag '$TAG' isn't a version (YY.MM.N), such as 26.12.1, v26.12.1 or 26.12.1-beta.1."
             exit 1
           fi
           version="${BASH_REMATCH[1]}"
