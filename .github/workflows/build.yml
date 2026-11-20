@@ -290,7 +290,7 @@ jobs:
 
       - name: Note the cached packages
         run: |
-          find'${{ steps.vcpkg.outputs.dir }}' -name '*.zip' -printf '%f\n' | sort > "$RUNNER_TEMP/vcpkg-cache-before.txt"
+          find '${{ steps.vcpkg.outputs.dir }}' -name '*.zip' -printf '%f\n' | sort > "$RUNNER_TEMP/vcpkg-cache-before.txt"
           echo "$(wc -l < "$RUNNER_TEMP/vcpkg-cache-before.txt") package(s) in the cache"
 
       - name: Build
