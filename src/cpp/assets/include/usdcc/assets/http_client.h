@@ -38,6 +38,9 @@ struct HttpRequest {
     std::filesystem::path into;
     // Up to five, to other hosts too, and never from https to http. Off, a 3xx is the answer.
     bool followRedirects = false;
+    // In place of setHttpTimeouts()' connect timeout when set: EC2's metadata service,
+    // which off EC2 never answers (docs/S3_RESOLVER.md §4.2).
+    std::chrono::milliseconds connectTimeout{0};
 };
 
 struct HttpResponse {
@@ -48,6 +51,8 @@ struct HttpResponse {
     std::map<std::string, std::string> headers;  // names in lowercase; the last response's, after redirects
     std::string body;
     std::string message;
+    // The TLS handshake of an https:// request failed: the server may not speak TLS at all.
+    bool tlsFailed = false;
 
     // Empty when the server didn't send it.
     std::string header(const std::string& lowercaseName) const;
@@ -70,6 +75,9 @@ Result<T> httpFailure(const HttpResponse& response) {
 double parseHttpDate(const std::string& text);
 // And back, for If-Modified-Since.
 std::string formatHttpDate(double seconds);
+// An ISO 8601 time ("2026-11-20T09:15:00.000Z", "2026-11-20T10:15:00+01:00"), as S3's
+// listings and AWS's credentials have them, as seconds since the epoch; 0 when it isn't one.
+double parseIsoDate(const std::string& text);
 
 // Five seconds to connect and sixty with no data unless set.
 void setHttpTimeouts(std::chrono::milliseconds connect, std::chrono::milliseconds stalled);

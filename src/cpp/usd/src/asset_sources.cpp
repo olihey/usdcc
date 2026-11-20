@@ -47,16 +47,41 @@ public:
         const usdcc::assets::Result<std::vector<usdcc::assets::ListedEntry>> listed =
             usdcc::assets::listUri(uri, contextOf(context));
         if (cancel.cancelled()) return {};
-        if (!listed.ok()) {
-            std::string message = usdcc::assets::statusName(listed.status);
-            if (!listed.message.empty()) message += ": " + listed.message;
-            throw std::runtime_error(message);
+        if (!listed.ok()) throwFailure(uri, context, listed.status, listed.message);
+        return entriesOf(listed.value);
+    }
+
+    AssetListPage listPage(const std::string& uri, const PXR_NS::ArResolverContext& context, usdcc::assets::Cancel& cancel,
+                           const std::string& from) override {
+        const usdcc::assets::Result<usdcc::assets::ListedPage> listed = usdcc::assets::listUriPage(uri, contextOf(context), from);
+        if (cancel.cancelled()) return {};
+        if (!listed.ok()) throwFailure(uri, context, listed.status, listed.message);
+        AssetListPage page;
+        page.entries = entriesOf(listed.value.entries);
+        page.next = listed.value.next;
+        return page;
+    }
+
+private:
+    [[noreturn]] static void throwFailure(const std::string& uri, const PXR_NS::ArResolverContext& context,
+                                          usdcc::assets::Status status, const std::string& why) {
+        // Missing with no more to say: the picker's words for it.
+        if (status == usdcc::assets::Status::Missing && why.empty()) throw std::runtime_error("This folder isn't there");
+        std::string message = usdcc::assets::statusName(status);
+        if (!why.empty()) message += ": " + why;
+        if (status == usdcc::assets::Status::NotAllowed) {
+            const std::string credential = refusedCredential(uri, contextOf(context), why);
+            if (!credential.empty()) throw AssetLoginNeeded(message, credential, schemeOf(uri));
         }
+        throw std::runtime_error(message);
+    }
+
+    static std::vector<AssetListEntry> entriesOf(const std::vector<usdcc::assets::ListedEntry>& listed) {
         // An origin only says something when a name has more than one server.
         std::set<std::string> origins;
-        for (const usdcc::assets::ListedEntry& each : listed.value) origins.insert(each.origin);
+        for (const usdcc::assets::ListedEntry& each : listed) origins.insert(each.origin);
         std::vector<AssetListEntry> entries;
-        for (const usdcc::assets::ListedEntry& each : listed.value) {
+        for (const usdcc::assets::ListedEntry& each : listed) {
             AssetListEntry entry;
             entry.name = each.entry.name;
             entry.isFolder = each.entry.isFolder;
@@ -68,7 +93,34 @@ public:
         return entries;
     }
 
-private:
+    static std::string schemeOf(const std::string& uri) {
+        const size_t colon = uri.find("://");
+        return colon == std::string::npos ? std::string() : uri.substr(0, colon);
+    }
+
+    // The credential id of the server that refused listing `uri`: the stack's endpoint the
+    // message names ("test: HTTP 401 ..."), or the endpoint an address means. Empty when
+    // no login can be saved for it: none named, or AWS's own (docs/S3_RESOLVER.md §4.2).
+    static std::string refusedCredential(const std::string& uri, const usdcc::assets::Context& context,
+                                         const std::string& message) {
+        usdcc::assets::Endpoint refused;
+        usdcc::assets::Uri named;
+        const std::shared_ptr<const usdcc::assets::Stack> stack =
+            usdcc::assets::parseUri(uri, &named) && named.stackId.empty() ? context.stack(named.scheme, named.name) : nullptr;
+        if (stack) {
+            for (const usdcc::assets::Endpoint& endpoint : stack->endpoints) {
+                if (message.rfind(endpoint.id + ": ", 0) == 0) refused = endpoint;
+            }
+        } else if (const usdcc::assets::AddressParser parser = usdcc::assets::addressParserFor(schemeOf(uri))) {
+            std::string path;
+            std::string normalized;
+            if (!parser(uri, &refused, &path, &normalized)) return {};
+        }
+        const std::string& id = refused.credential;
+        if (id.empty() || id == "aws" || id.rfind("aws:", 0) == 0) return {};
+        return id;
+    }
+
     // The stage's environment, or else the default one.
     static usdcc::assets::Context contextOf(const PXR_NS::ArResolverContext& context) {
         if (const usdcc::assets::Context* own = context.Get<usdcc::assets::Context>()) return *own;

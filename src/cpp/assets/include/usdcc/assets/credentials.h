@@ -13,7 +13,11 @@ namespace usdcc::assets {
 struct Credential {
     std::string user;
     std::string password;
-    std::string token;  // a bearer token, used instead of user and password when set
+    // A bearer token, used instead of user and password when set. For S3 (signed with
+    // the user and password), a session token that goes with them.
+    std::string token;
+    // When a temporary credential stops working, in seconds since the epoch; 0 for never.
+    double expires = 0;
 };
 
 using CredentialCallback = std::function<std::optional<Credential>(const std::string& id)>;

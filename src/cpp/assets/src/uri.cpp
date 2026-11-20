@@ -162,6 +162,21 @@ std::string percentEncodePath(const std::string& path) {
     return out;
 }
 
+std::string percentEncodeStrict(const std::string& text, bool keepSlash) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string out;
+    for (const unsigned char c : text) {
+        if (isUnreserved(c) || (keepSlash && c == '/')) {
+            out += static_cast<char>(c);
+        } else {
+            out += '%';
+            out += kHex[c >> 4];
+            out += kHex[c & 15];
+        }
+    }
+    return out;
+}
+
 std::string stableHash(const std::string& text, int hexDigits) {
     // FNV-1a, 64 bits: std::hash may differ between builds, and these name folders on disk.
     uint64_t hash = 14695981039346656037ull;

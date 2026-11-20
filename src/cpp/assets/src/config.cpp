@@ -8,7 +8,9 @@
 #include <pxr/base/tf/diagnostic.h>
 #include <pxr/base/tf/getenv.h>
 
+#include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace usdcc::assets {
@@ -25,6 +27,15 @@ std::string textOf(const JsObject& object, const char* key) {
 bool flagOf(const JsObject& object, const char* key) {
     const auto found = object.find(key);
     return found != object.end() && found->second.IsBool() && found->second.GetBool();
+}
+
+// A value of a key the library doesn't know, as text: what Endpoint::options holds.
+std::string optionText(const JsValue& value) {
+    if (value.IsString()) return value.GetString();
+    if (value.IsBool()) return value.GetBool() ? "true" : "false";
+    if (value.IsInt()) return std::to_string(value.GetInt64());
+    if (value.IsReal()) return std::to_string(value.GetReal());
+    return std::string();
 }
 
 const JsObject* objectOf(const JsObject& object, const char* key) {
@@ -67,6 +78,14 @@ Result<Config> Config::parse(const std::string& json) {
             }
         }
     }
+    if (const JsObject* s3 = objectOf(top, "s3")) {
+        const auto allow = s3->find("allow");
+        if (allow != s3->end() && allow->second.IsArray()) {
+            for (const JsValue& pattern : allow->second.GetJsArray()) {
+                if (pattern.IsString()) config.s3Allow.push_back(pattern.GetString());
+            }
+        }
+    }
 
     if (const JsObject* endpoints = objectOf(top, "endpoints")) {
         for (const auto& [id, value] : *endpoints) {
@@ -82,6 +101,12 @@ Result<Config> Config::parse(const std::string& json) {
             endpoint.credential = textOf(object, "credential");
             endpoint.readOnly = flagOf(object, "readOnly");
             endpoint.optional = flagOf(object, "optional");
+            for (const auto& [key, value] : object) {
+                static const char* kKnown[] = {"scheme", "url", "credential", "readOnly", "optional", "mirrors"};
+                if (std::find(std::begin(kKnown), std::end(kKnown), key) != std::end(kKnown)) continue;
+                const std::string text = optionText(value);
+                if (!text.empty()) endpoint.options[key] = text;
+            }
             const auto mirrors = object.find("mirrors");
             if (mirrors != object.end() && mirrors->second.IsArray()) {
                 for (const JsValue& mirror : mirrors->second.GetJsArray()) {

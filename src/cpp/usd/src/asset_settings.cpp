@@ -133,6 +133,9 @@ void apply(core::Settings& settings, const std::string& key) {
         usdcc::assets::DiskCache::shared().setLimit(limit);
         trimCacheSoon();
     }
+    if (key.empty() || key == kAssetS3BucketsKey) {
+        usdcc::assets::setExtraAllowedBuckets(splitHosts(settings.get<std::string>(kAssetS3BucketsKey)));
+    }
     if (key.empty() || key == kAssetHttpHostsKey) {
         usdcc::assets::setExtraAllowedHosts(splitHosts(settings.get<std::string>(kAssetHttpHostsKey)));
         // A host refused this session may be on the list now.
@@ -247,6 +250,16 @@ void defineAssetSettings(core::Settings& settings) {
                                     "A stage can name any address, so others are refused.",
                      .type = SettingType::String,
                      .defaultValue = std::string()});
+    settings.define({.key = kAssetS3BucketsKey,
+                     .category = kCategory,
+                     .group = "S3",
+                     .label = "Allowed buckets",
+                     .description = "The buckets a stage may name by themselves, as s3://<bucket>/..., separated by "
+                                    "';': a name, or a pattern with * (studio-*). A signed request tells a bucket's "
+                                    "owner who sent it, so others are refused. A bucket you open yourself is allowed "
+                                    "until you quit, and S3 servers named in the configuration need nothing here.",
+                     .type = SettingType::String,
+                     .defaultValue = std::string()});
     settings.define({.key = kAssetCacheLimitKey,
                      .category = kCategory,
                      .group = "Cache",
@@ -293,6 +306,18 @@ void installAssetActivity(QMainWindow* window) {
         }
         return usdcc::assets::HostAnswer::No;
     });
+    usdcc::assets::setBucketRefusedCallback([](const std::string& bucket) {
+        static std::mutex mutex;
+        static std::set<std::string> told;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!told.insert(bucket).second) return;
+        }
+        USDCC_LOG_TOAST_STICKY(core::LogLevel::Warning, "usdcc.assets",
+                               "A stage asked for files from the S3 bucket {}, which isn't an allowed bucket. To allow "
+                               "it, add it in Settings > Assets > Allowed buckets, then reload the stage.",
+                               bucket);
+    });
 }
 
 QString displayPath(const QString& path) {
@@ -305,14 +330,14 @@ QString askForAssetUrl(QWidget* parent) {
     bool ok = false;
     const QString url =
         QInputDialog::getText(parent, QObject::tr("Open Stage from URL"),
-                              QObject::tr("A stage on a server, such as webdav://studio/shots/s010.usda or "
-                                          "https://example.com/scene.usdz:"),
+                              QObject::tr("A stage on a server, such as webdav://studio/shots/s010.usda, "
+                                          "s3://bucket/shots/s010.usda or https://example.com/scene.usdz:"),
                               QLineEdit::Normal, QString(), &ok)
             .trimmed();
     return ok ? url : QString();
 }
 
-void showAssetLoginDialog(QWidget* parent) {
+bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QString& scheme) {
     QDialog dialog(parent);
     dialog.setWindowTitle(QObject::tr("Asset Server Login"));
     dialog.setObjectName(QStringLiteral("assetLoginDialog"));
@@ -320,7 +345,8 @@ void showAssetLoginDialog(QWidget* parent) {
     auto* intro = new QLabel(QObject::tr("Saved in Windows Credential Manager, under the credential id the asset "
                                          "configuration names for a server. For a server opened by its address "
                                          "(webdav://192.168.1.5:5000/...), the address: 192.168.1.5, or "
-                                         "192.168.1.5:5000 for that port only."),
+                                         "192.168.1.5:5000 for that port only. For S3, an access key; the ids aws "
+                                         "and aws:<profile> come from AWS's own files instead."),
                              &dialog);
     intro->setWordWrap(true);
     layout->addWidget(intro);
@@ -330,14 +356,25 @@ void showAssetLoginDialog(QWidget* parent) {
     id->setObjectName(QStringLiteral("credentialId"));
     id->setEditable(true);
     std::set<std::string> ids;
+    // An S3 server's: an access key ID and its secret, not a user and password.
+    auto s3Ids = std::make_shared<std::set<std::string>>();
     const usdcc::assets::Config config = usdcc::assets::defaultConfig();
     for (const auto& [name, endpoint] : config.endpoints) {
-        if (!endpoint.credential.empty()) ids.insert(endpoint.credential);
+        if (endpoint.credential.empty()) continue;
+        // AWS's own lookup (docs/S3_RESOLVER.md §4.2): nothing to save here.
+        if (endpoint.credential == "aws" || endpoint.credential.rfind("aws:", 0) == 0) continue;
+        ids.insert(endpoint.credential);
+        if (endpoint.scheme == "s3") s3Ids->insert(endpoint.credential);
     }
     for (const auto& [host, entry] : config.httpHosts) {
         if (!entry.credential.empty()) ids.insert(entry.credential);
     }
+    if (!credential.isEmpty()) {
+        ids.insert(credential.toStdString());
+        if (scheme == QLatin1String("s3")) s3Ids->insert(credential.toStdString());
+    }
     for (const std::string& each : ids) id->addItem(QString::fromStdString(each));
+    if (!credential.isEmpty()) id->setCurrentText(credential);
     form->addRow(QObject::tr("Credential:"), id);
 
     auto* userMode = new QRadioButton(QObject::tr("User and password"), &dialog);
@@ -354,10 +391,20 @@ void showAssetLoginDialog(QWidget* parent) {
     form->addRow(QObject::tr("Password or token:"), secret);
     layout->addLayout(form);
     QObject::connect(tokenMode, &QRadioButton::toggled, user, [user](bool token) { user->setEnabled(!token); });
-    const auto showStored = [id, user, userMode, tokenMode]() {
-        const std::optional<usdcc::assets::Credential> stored = usdcc::assets::storedCredential(id->currentText().toStdString());
+    const auto showStored = [id, user, secret, form, userMode, tokenMode, s3Ids]() {
+        const std::string credentialId = id->currentText().toStdString();
+        const bool s3 = s3Ids->count(credentialId) > 0;
+        if (auto* label = qobject_cast<QLabel*>(form->labelForField(user))) {
+            label->setText(s3 ? QObject::tr("Access key ID:") : QObject::tr("User:"));
+        }
+        if (auto* label = qobject_cast<QLabel*>(form->labelForField(secret))) {
+            label->setText(s3 ? QObject::tr("Secret access key:") : QObject::tr("Password or token:"));
+        }
+        userMode->setVisible(!s3);
+        tokenMode->setVisible(!s3);
+        const std::optional<usdcc::assets::Credential> stored = usdcc::assets::storedCredential(credentialId);
         user->setText(stored ? QString::fromStdString(stored->user) : QString());
-        (stored && !stored->token.empty() ? tokenMode : userMode)->setChecked(true);
+        (!s3 && stored && !stored->token.empty() ? tokenMode : userMode)->setChecked(true);
     };
     QObject::connect(id, &QComboBox::currentTextChanged, &dialog, showStored);
     showStored();
@@ -391,7 +438,7 @@ void showAssetLoginDialog(QWidget* parent) {
         dialog.accept();
     });
     dialog.setMinimumWidth(420);
-    dialog.exec();
+    return dialog.exec() == QDialog::Accepted;
 }
 
 }  // namespace usdcc::usd

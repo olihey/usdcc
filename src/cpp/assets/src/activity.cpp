@@ -9,6 +9,7 @@
 #include <cctype>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace usdcc::assets {
 
@@ -20,6 +21,9 @@ struct State {
     HostCallback hostCallback;
     std::map<std::string, bool> answered;  // host -> allowed
     std::vector<std::string> extraAllowed;
+    std::set<std::string> openedBuckets;
+    std::vector<std::string> extraBuckets;
+    std::function<void(const std::string&)> bucketRefused;
 };
 
 State& state() {
@@ -135,12 +139,71 @@ void allowHostOfUrl(const std::string& url) {
     State& all = state();
     std::lock_guard<std::mutex> lock(all.mutex);
     all.answered[lowered(host)] = true;
+    if (lowered(url.substr(0, scheme)) == "s3") all.openedBuckets.insert(lowered(host));
+}
+
+bool bucketMatches(const std::string& pattern, const std::string& bucket) {
+    const std::string wanted = lowered(pattern);
+    const std::string given = lowered(bucket);
+    // A '*' anywhere stands for any characters, none included.
+    size_t p = 0, b = 0, star = std::string::npos, resume = 0;
+    while (b < given.size()) {
+        if (p < wanted.size() && wanted[p] == '*') {
+            star = p++;
+            resume = b;
+        } else if (p < wanted.size() && wanted[p] == given[b]) {
+            ++p;
+            ++b;
+        } else if (star != std::string::npos) {
+            p = star + 1;
+            b = ++resume;
+        } else {
+            return false;
+        }
+    }
+    while (p < wanted.size() && wanted[p] == '*') ++p;
+    return p == wanted.size();
+}
+
+bool bucketAllowed(const std::string& bucket) {
+    for (const std::string& pattern : defaultConfig().s3Allow) {
+        if (bucketMatches(pattern, bucket)) return true;
+    }
+    for (const std::string& pattern : PXR_NS::TfStringTokenize(PXR_NS::TfGetenv("USDCC_S3_ALLOW"), ",; ")) {
+        if (bucketMatches(pattern, bucket)) return true;
+    }
+    State& all = state();
+    std::function<void(const std::string&)> refused;
+    {
+        std::lock_guard<std::mutex> lock(all.mutex);
+        for (const std::string& pattern : all.extraBuckets) {
+            if (bucketMatches(pattern, bucket)) return true;
+        }
+        if (all.openedBuckets.count(lowered(bucket))) return true;
+        refused = all.bucketRefused;
+    }
+    // Told without the lock: usdcc's shows a note.
+    if (refused) refused(bucket);
+    return false;
+}
+
+void setBucketRefusedCallback(std::function<void(const std::string& bucket)> callback) {
+    State& all = state();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    all.bucketRefused = std::move(callback);
+}
+
+void setExtraAllowedBuckets(std::vector<std::string> patterns) {
+    State& all = state();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    all.extraBuckets = std::move(patterns);
 }
 
 void forgetHostAnswers() {
     State& all = state();
     std::lock_guard<std::mutex> lock(all.mutex);
     all.answered.clear();
+    all.openedBuckets.clear();
 }
 
 }  // namespace usdcc::assets

@@ -17,6 +17,7 @@ inline constexpr const char* kAssetEnvironmentKey = "Assets/environment";
 inline constexpr const char* kAssetOfflineKey = "Assets/offline";
 inline constexpr const char* kAssetCacheLimitKey = "Assets/cacheLimitGB";
 inline constexpr const char* kAssetHttpHostsKey = "Assets/httpHosts";
+inline constexpr const char* kAssetS3BucketsKey = "Assets/s3Buckets";
 inline constexpr const char* kAssetClearCacheKey = "Assets/clearCache";  // a button
 
 // Defines Settings > Assets and applies it to the asset library, now and whenever one
@@ -36,7 +37,9 @@ USDCC_USD_UI_API QString askForAssetUrl(QWidget* parent);
 USDCC_USD_UI_API QString displayPath(const QString& path);
 
 // Edit > Asset Server Login...: a credential id's user and password, or token, into
-// the system's credential store (Windows Credential Manager).
-USDCC_USD_UI_API void showAssetLoginDialog(QWidget* parent);
+// the system's credential store (Windows Credential Manager). With `credential`, that
+// one is filled in; with `scheme` "s3", it's an access key and its secret. True when
+// one was saved.
+USDCC_USD_UI_API bool showAssetLoginDialog(QWidget* parent, const QString& credential = {}, const QString& scheme = {});
 
 }  // namespace usdcc::usd

@@ -1,10 +1,12 @@
-# S3 Resolver (plan)
+# S3 Resolver
 
 A USD asset resolver plugin that loads assets from Amazon S3 and the stores that speak its API,
 through `s3://` asset paths such as `s3://studio/chars/hero/hero.usd`.
 
-**Status:** planned (2026-11-20). The spike (§8.1) has run against rclone's S3 server and Garage;
-AWS is still to do. The caching, the server names, the environments
+**Status:** reading is built (2026-11-20), phases S3.1 to S3.4, in
+[src/plugins/s3](../src/plugins/s3), tested against the test program's S3 server (§10) after the
+spike (§8.1) ran against rclone's and Garage. Not yet run against AWS itself. §8.2 is what was built
+and where it differs from the plan; writing comes with phase 6. The caching, the server names, the environments
 and the usdcc integration are the shared library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This
 document is only what is S3's own, and the few things S3 needs from the shared library (§6).
 
@@ -97,7 +99,38 @@ environment has, it's a bucket on AWS, as an address is for WebDAV
   Assets gets **Allowed buckets**, and a bucket the user opens (File > Open, Open Stage from URL,
   Open Recent, the command line, a session's stage) is allowed for the session. Any other is
   refused, with a toast saying how to allow it.
-- **Only AWS.** A bucket on another store needs its URL, so a name in the configuration.
+- **Only AWS.** A bucket on another store needs its URL: a name in the configuration, or the
+  server's address (§3.3). A refusal from AWS for a bucket named by itself says so, since
+  `s3://nas1/` looks like a server and is a bucket.
+
+### 3.3 By address
+
+```
+s3://nas1:9000/media/shots/s010.usda
+s3://192.168.178.53:3900/
+```
+
+A server on the network, a NAS say, named by its address, as WebDAV's are
+([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §2.1). Added 2026-11-20, after `s3://nas1/` in the
+picker went to a bucket of that name on AWS.
+
+- **When it's an address:** the part after `//` has a port (no bucket name has a `:`), is an IP
+  address (no bucket name may be one), or is `localhost`. `s3://nas1/` without a port is still a
+  bucket on AWS.
+- **The whole server:** the path's first part is the bucket. `s3://nas1:9000/` lists the server's
+  buckets (`ListBuckets`), so the picker can start there. A configured endpoint whose URL is a
+  server without a bucket (`"url": "http://nas1:9000"`) works the same way.
+- **https:// first.** A server that connects but never completes TLS (most NAS S3 servers have
+  none) is asked over `http://` from then on, with a warning in the Log once. A server whose TLS
+  fails for another reason, such as a certificate Windows doesn't trust, isn't.
+- **Its login** is saved under the address, as WebDAV's: `nas1:9000` when one is saved for that
+  port, else `nas1` (Edit > Asset Server Login, or `USDCC_ASSETS_NAS1_USER` and `_PASSWORD`): the
+  access key ID and the secret. A `"hosts"` entry in the configuration's `"http"` section can name
+  another credential.
+- **A host like plain HTTP's** ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4): allowed, as a stage can
+  name any address, when opened by the user or on Allowed hosts. Not Allowed buckets.
+- **No stack, no stack id;** a relative path stays on the same server. It writes the address into
+  what is saved, as WebDAV's do.
 
 ## 4. Credentials
 
@@ -140,8 +173,9 @@ unsigned.
 
 | Call | Request | Notes |
 |---|---|---|
-| `list` | `GET /?list-type=2&prefix=<folder>/&delimiter=/` (`ListObjectsV2`) | `Contents` are files (`Key`, `Size`, `LastModified`, `ETag`), `CommonPrefixes` folders. A page holds 1,000; `continuation-token` asks for the next. The empty `folder/` objects some tools make for folders are left out |
-| `stat` | `HEAD /<key>` | `Content-Length`, `Last-Modified`, `ETag`. Used where a listing isn't allowed (below) |
+| `listPage` | `GET /?list-type=2&prefix=<folder>/&delimiter=/` (`ListObjectsV2`) | For browsing, a page at a time. `Contents` are files (`Key`, `Size`, `LastModified`, `ETag`), `CommonPrefixes` folders. A page holds 1,000; `continuation-token` asks for the next. The empty `folder/` objects some tools make for folders are left out. A server's root (§3.3) lists its buckets |
+| `list` | not supported | So resolving asks `stat` for each file (below) |
+| `stat` | `HEAD /<key>` | `Content-Length`, `Last-Modified`, `ETag`. What resolving asks |
 | `fetch` | `GET /<key>`, with `If-None-Match` | A 304 writes nothing |
 | `put` (phase 6) | `PUT /<key>`, with `If-None-Match: *` for a new file and `If-Match` over an old one | S3 has had conditional writes since 2024, so saving over a file changed meanwhile is the clear error phase 6 plans |
 
@@ -149,8 +183,12 @@ unsigned.
   it. A file asked for as a folder, or the other way round, is told apart by the listing.
 - **ETags:** an object uploaded in parts has an ETag ending in `-<parts>` that isn't its MD5. It
   still changes with the content, which is all the cache needs.
-- **Resolving lists folders,** as WebDAV does: one request answers for every file in a folder, and
-  tells "not in TEST" from "TEST is down" cheaply.
+- **Resolving asks for each file** (`HEAD`), not for its folder's listing as WebDAV does. *Changed
+  2026-11-20:* a NAS's `mesh/` of thousands of folders took 7 to 30 seconds a page to list, so
+  resolving one file in it waited minutes; a `HEAD` is one cheap request whatever the folder holds.
+  A `HEAD` still tells "not in TEST" (404) from "TEST is down".
+- **Browsing goes a page at a time** (`listPage`): the asset picker shows the first page as it
+  comes, with **Show More** for the next ([ASSET_PICKER.md](ASSET_PICKER.md) §9).
 - **403 against missing.** Without the right to list a bucket (`s3:ListBucket`), S3 answers a
   missing key with 403, not 404. A TEST bucket would then stop PROD's file instead of letting it
   through. So a bucket must allow listing, and when it doesn't, the 403 says so: "can't list
@@ -195,10 +233,10 @@ forces". This is what it forces:
 | Phase | Builds | Done when |
 |---|---|---|
 | **S3.0 Spike** | Signed `HEAD`, `GET` and `ListObjectsV2` through `httpRequest`, against AWS and MinIO. **Run against rclone's S3 server and Garage** (§8.1; MinIO's image is no longer public); AWS still to do | Keys with a space, `+`, `=`, `%`, `~` and accented letters read on both; a listing of more than 1,000 keys pages; a region is found from a refusal; a session token works |
-| **S3.1 Read-only** | §6, the transport and plugin, by name, with usdcc credential ids; S3 in the test server (§10) | `usdcat s3://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST, with a listing per folder and nothing downloaded on the second open |
-| **S3.2 AWS credentials** | §4.2: the environment, the shared files, `credential_process`, EC2's role, renewal | A profile using AWS single sign-on through `credential_process` opens a stage, and keeps working past its credentials' expiry |
-| **S3.3 By bucket** | §3.2, finding the region, Allowed buckets | `usdcat s3://<bucket>/shot.usda` works with only the AWS command line set up; a stage naming another bucket is refused with the toast |
-| **S3.4 usdcc** | §7 | A reference to a file in a bucket is added by browsing to it in the picker |
+| **S3.1 Read-only** | §6, the transport and plugin, by name, with usdcc credential ids; S3 in the test server (§10). **Built** (§8.2) | `usdcat s3://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST, with a listing per folder and nothing downloaded on the second open |
+| **S3.2 AWS credentials** | §4.2: the environment, the shared files, `credential_process`, EC2's role, renewal. **Built**; EC2's role and renewal untested | A profile using AWS single sign-on through `credential_process` opens a stage, and keeps working past its credentials' expiry |
+| **S3.3 By bucket** | §3.2, finding the region, Allowed buckets. **Built**, against the test server through `AWS_ENDPOINT_URL_S3`, not AWS | `usdcat s3://<bucket>/shot.usda` works with only the AWS command line set up; a stage naming another bucket is refused with the toast |
+| **S3.4 usdcc** | §7. **Built**, but for the Asset Servers editor's fields: the editor isn't built yet | A reference to a file in a bucket is added by browsing to it in the picker |
 | **With phase 6** | `put` (§5) | Save on a layer from PROD, in the test environment, writes it to the TEST bucket |
 | **Later** | Reading part of a large file; pinning an object version (`versionId`); requester pays | |
 
@@ -251,6 +289,89 @@ virtual-hosted URLs, and its answer to a missing key without `s3:ListBucket` (§
 bucket and keys: `USDCC_SPIKE_S3_KEY`, `USDCC_SPIKE_S3_SECRET`, and `USDCC_SPIKE_S3_TOKEN` for
 temporary ones.
 
+### 8.2 S3.1 to S3.4 as built
+
+**Where:** [s3_protocol.cpp](../src/plugins/s3/s3_protocol.cpp) (the transport, the resolver,
+a bucket by itself), [aws_credentials.cpp](../src/plugins/s3/aws_credentials.cpp) (§4.2),
+and the shared library's part (§6).
+
+**What the shared library gained** (§6, as planned, and):
+
+- `percentEncodeStrict()` in `uri.h`, for keys and query values.
+- `HttpRequest::connectTimeout`, for EC2's metadata service, which off EC2 never answers: one
+  second, and asked once a process.
+- The bucket allow list in `activity.h`: `bucketAllowed()`, `setExtraAllowedBuckets()`,
+  `setBucketRefusedCallback()`, the configuration's `"s3": { "allow": [...] }` and
+  `USDCC_S3_ALLOW`. A pattern is a name with `*` for any characters (`studio-*`), not the
+  `*.domain` of hosts. `allowHostOfUrl()` of an `s3://` URL allows its bucket.
+- The XML helpers in [src/plugins/common/xml_names.h](../src/plugins/common/xml_names.h),
+  header-only, which WebDAV uses too.
+- A plain `http://` request that's signed gives no warning about its credential: the secret
+  doesn't go over the wire. With a session token, which does, it still warns.
+
+**How it works:**
+
+- **The region.** Asked for with `us-east-1` (on AWS, the bucket's global name,
+  `<bucket>.s3.amazonaws.com`) until an answer names another: a 301 or 400 with
+  `x-amz-bucket-region`, or `<Region>` in the error body. That one request is sent again for the
+  named region, and the region is remembered for the session, by the bucket's URL. A configured
+  `region` is never second-guessed.
+- **On AWS,** a bucket with a dot in its name goes path style
+  (`s3.<region>.amazonaws.com/<bucket>`): AWS's certificate doesn't cover the dots.
+- **A bucket by itself** goes to AWS, or to `AWS_ENDPOINT_URL_S3` (else `AWS_ENDPOINT_URL`), path
+  style, as AWS's tools do. The tests use that to send it to the test server.
+- **Folders.** S3 can't tell a folder with no keys from one that isn't there, so both list as
+  empty, and the picker says "Nothing here". A NAS's server that keeps objects as files was seen
+  listing `mesh/11003001/` as a folder of `mesh/` while no key at all is under it: an empty
+  directory on its disk. A path that isn't a key is missing to `stat`, but an endpoint's or a
+  bucket's root, which is a folder:
+  resolving asks for files, and asking whether a folder exists would be a listing again.
+- **Paging** stops at the token it was given coming back, or a page with nothing new (§8.1).
+- **The region from a `HEAD`:** its refusal has no body to name the region in, and Garage sends
+  no `x-amz-bucket-region`, so the same key's first byte is asked for (`Range: bytes=0-0`), whose
+  refusal names it.
+- **`credential_process`** runs through `cmd.exe /c` on Windows, without a console window (usdcc
+  is a windowed program), and is waited for a minute at most; elsewhere through the shell.
+- **Refusals** say how the request went: signed with which credential, or unsigned and why
+  (nothing saved under the id; no AWS credentials, and where they were looked for), and the
+  permission a 403 needs.
+
+**In usdcc** (§7): Settings > Assets > S3 > Allowed buckets; a sticky toast once per bucket a stage
+was refused; Edit > Asset Server Login labels an S3 server's credential Access key ID and Secret
+access key, without the token choice, and leaves out `aws` and `aws:<profile>`; Open Stage from URL
+names `s3://` as an example. The picker browses buckets with nothing added, and lists a bucket by
+itself only when it's allowed.
+
+**Differences from the plan:**
+
+- **Session tokens with a usdcc credential id** come only from `USDCC_ASSETS_<ID>_TOKEN`: Windows
+  Credential Manager keeps a user and a password. They expire within hours, so saving one is of
+  little use; AWS's own lookup (§4.2) is the way to temporary credentials.
+- **No question for a bucket,** as there's none for a host: a note, and Allowed buckets.
+- **The Asset Servers editor's S3 fields** wait for the editor (REMOTE_ASSETS.md §10.1).
+
+**Tests** ([assets_net_test.cpp](../tests/assets_net_test.cpp), `assets_s3_…`, and
+[asset_picker_test.cpp](../tests/asset_picker_test.cpp), `asset_settings_allowed_buckets`):
+
+- list, stat and fetch through a prefix, with `+ = ( ) @` and a space in keys, a 304, paging two
+  keys a page, a missing folder and a file asked for as one, the region found from one refusal and
+  remembered;
+- a missing key without `s3:ListBucket` (403) and a refused listing, saying why; a credential id
+  nothing knows;
+- a stage through `UsdStage::Open` from two buckets, TEST over PROD, and a texture with a space;
+- a profile's keys, a profile's `credential_process` with a session token, a profile that isn't
+  there, and the environment's keys for `aws`;
+- a bucket by itself: refused, then allowed by opening it, resolving with no stack id, opening with
+  its reference, listing for the picker; a configured name never taken for a bucket;
+  `USDCC_S3_ALLOW` patterns; the setting reaching the library, and the refusal being told.
+
+- a server by its address (§3.3): refused without a login, naming the credential to save it
+  under; its buckets listed at its root; a stage opened from it, with a relative reference and a
+  texture with a space; https:// tried first and http:// taken when it had no TLS.
+
+**Not tested:** AWS itself (§8.1's list), EC2's role, renewal before expiry, a dotted bucket's
+path style, `bucketInHost`, and a real NAS.
+
 ## 9. Not planned
 
 - **AWS's single sign-on flow itself,** and assuming roles (`role_arn` with `source_profile`):
@@ -260,10 +381,12 @@ temporary ones.
 
 ## 10. Testing
 
-- **Test server** ([assets_test_server.h](../tests/assets_test_server.h)) gains S3's requests:
-  `ListObjectsV2` with paging over a folder, `HEAD`, `GET` and 304, and a switch for 403 on a
-  missing key. It checks that a request carries a SigV4 `Authorization` header, not that the
-  signature is right: that would mean writing SigV4 a second time.
+- **Test server** ([assets_test_server.h](../tests/assets_test_server.h), `serveS3()`): S3's
+  requests over a folder, path style: `ListObjectsV2` with paging, `HEAD`, `GET` and 304, and
+  switches for 403 on a missing key and on listing. It checks what it can short of the signature:
+  an `Authorization` header with the access key and the server's region (the wrong one refused
+  with `<Region>`, as Garage does), `x-amz-content-sha256`, and the key escaped strictly, as S3's
+  signature needs it. Checking the signature itself would mean writing SigV4 a second time.
 - **Garage in Docker** (`dxflrs/garage`) as the server that checks signatures for real, as in the
   spike (§8.1): one container, a bucket and a key made with its command line.
 - **Tests** in [assets_net_test.cpp](../tests/assets_net_test.cpp), as WebDAV's: list, stat and

@@ -22,6 +22,7 @@
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -34,7 +35,10 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QSet>
+#include <QTimer>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QSettings>
@@ -504,6 +508,8 @@ void AssetPickerDialog::navigate(const QString& target) {
             entries.push_back({QDir::toNativeSeparators(drive.absoluteFilePath()), true, 0, 0, {}, drive.absoluteFilePath()});
         }
         entries.push_back({tr("Home"), true, 0, 0, {}, QDir::cleanPath(QDir::homePath())});
+        m_pages.clear();
+        m_next.clear();
         showEntries(entries, {});
         return;
     }
@@ -516,6 +522,8 @@ void AssetPickerDialog::navigate(const QString& target) {
                 entries.push_back({QString::fromStdString(each.label), true, 0, 0, {}, QString::fromStdString(each.uri)});
             }
         }
+        m_pages.clear();
+        m_next.clear();
         showEntries(entries, {});
         setStatus(source ? (entries.empty() ? tr("No servers of %1:// in the asset configuration: type a server's "
                                                  "address, such as %1://192.168.1.5:5000/")
@@ -525,6 +533,8 @@ void AssetPickerDialog::navigate(const QString& target) {
         return;
     }
     if (remote && !source) {
+        m_pages.clear();
+        m_next.clear();
         showEntries({}, {});
         setStatus(tr("%1:// can't be browsed: type the file's name below, or its whole path above").arg(scheme));
         return;
@@ -532,24 +542,61 @@ void AssetPickerDialog::navigate(const QString& target) {
     listOnWorker(location);
 }
 
-void AssetPickerDialog::listOnWorker(const QString& location) {
+void AssetPickerDialog::listOnWorker(const QString& location, const std::string& from) {
     const QString scheme = schemeOf(location);
     const std::shared_ptr<AssetSource> source =
         scheme == QStringLiteral("file") ? nullptr : AssetSourceRegistry::instance().forScheme(scheme.toStdString());
     m_cancel = std::make_shared<usdcc::assets::Cancel>();
     const int generation = m_generation;
     m_listing = true;
-    m_entries->clear();
-    m_listedFiles.clear();
-    setStatus(tr("Listing %1...").arg(displayPath(location)));
+    if (from.empty()) {
+        m_entries->clear();
+        m_listedFiles.clear();
+        m_pages.clear();
+        m_next.clear();
+        setStatus(tr("Listing %1...").arg(displayPath(location)));
+    } else {
+        setStatus(tr("Listing more of %1...").arg(displayPath(location)));
+    }
+    // A busy row under what's shown until the page comes, with the seconds it has taken:
+    // a slow server's page can take half a minute. Gone when the entries are shown again.
+    {
+        auto* row = new QTreeWidgetItem(m_entries);
+        row->setFlags(Qt::ItemIsEnabled);
+        auto* holder = new QWidget(m_entries);
+        holder->setObjectName(QStringLiteral("assetPickerBusy"));
+        auto* layout = new QHBoxLayout(holder);
+        layout->setContentsMargins(4, 4, 4, 4);
+        auto* bar = new QProgressBar(holder);
+        bar->setRange(0, 0);
+        bar->setTextVisible(false);
+        bar->setMaximumWidth(usdcc::ui::scaled::pixels(160));
+        bar->setMaximumHeight(usdcc::ui::scaled::pixels(8));
+        auto* label = new QLabel(tr("Waiting for the server..."), holder);
+        layout->addWidget(bar);
+        layout->addWidget(label);
+        layout->addStretch(1);
+        m_entries->setItemWidget(row, 0, holder);
+        m_entries->scrollToItem(row);
+        auto* timer = new QTimer(holder);
+        auto started = std::make_shared<QElapsedTimer>();
+        started->start();
+        connect(timer, &QTimer::timeout, label, [label, started]() {
+            label->setText(tr("Waiting for the server... %1 s").arg(started->elapsed() / 1000));
+        });
+        timer->start(1000);
+    }
 
     QPointer<AssetPickerDialog> guard(this);
     const std::shared_ptr<usdcc::assets::Cancel> cancel = m_cancel;
     const PXR_NS::ArResolverContext context = m_options.context;
     // Detached: an offline share or a slow server mustn't hold up the dialog, or its closing.
-    std::thread([guard, generation, location, source, cancel, context]() {
+    std::thread([guard, generation, location, source, cancel, context, from]() {
         std::vector<Listed> entries;
+        std::string next;
         QString error;
+        QString loginCredential;
+        QString loginScheme;
         try {
             if (!source) {
                 const QDir folder(location);
@@ -562,33 +609,75 @@ void AssetPickerDialog::listOnWorker(const QString& location) {
                     }
                 }
             } else {
-                for (const AssetListEntry& each : source->list(location.toStdString(), context, *cancel)) {
+                const AssetListPage page = source->listPage(location.toStdString(), context, *cancel, from);
+                for (const AssetListEntry& each : page.entries) {
                     entries.push_back({QString::fromStdString(each.name), each.isFolder, each.size, each.modified,
                                        QString::fromStdString(each.origin), {}});
                 }
+                next = page.next;
             }
+        } catch (const AssetLoginNeeded& refused) {
+            error = QString::fromStdString(refused.what());
+            loginCredential = QString::fromStdString(refused.credential());
+            loginScheme = QString::fromStdString(refused.scheme());
         } catch (const std::exception& failure) {
             error = QString::fromStdString(failure.what());
         }
         if (cancel->cancelled()) return;
         QMetaObject::invokeMethod(
             qApp,
-            [guard, generation, entries = std::move(entries), error]() {
+            [guard, generation, entries = std::move(entries), next, from, error, loginCredential, loginScheme]() {
                 if (!guard || guard->m_generation != generation) return;
                 guard->m_listing = false;
-                guard->showEntries(entries, error);
+                if (!error.isEmpty()) {
+                    guard->m_pages.clear();
+                    guard->m_next.clear();
+                    guard->showEntries({}, error, loginCredential, loginScheme);
+                    return;
+                }
+                // A later page adds what an earlier one didn't have.
+                QSet<QString> shown;
+                for (const Listed& each : guard->m_pages) shown.insert(each.name);
+                for (const Listed& each : entries) {
+                    if (!shown.contains(each.name)) guard->m_pages.push_back(each);
+                }
+                // A page with nothing new ends it: a server that doesn't move on.
+                guard->m_next = from.empty() || guard->m_pages.size() > size_t(shown.size()) ? next : std::string();
+                const std::vector<Listed> all = guard->m_pages;
+                guard->showEntries(all, {});
             },
             Qt::QueuedConnection);
     }).detach();
 }
 
-void AssetPickerDialog::showEntries(const std::vector<Listed>& entries, const QString& error) {
+void AssetPickerDialog::showEntries(const std::vector<Listed>& entries, const QString& error, const QString& loginCredential,
+                                    const QString& loginScheme) {
     m_entries->clear();
     m_listedFiles.clear();
     if (!error.isEmpty()) {
         auto* item = new QTreeWidgetItem(m_entries, {error});
         item->setDisabled(true);
+        item->setToolTip(0, error);
         setStatus(tr("Couldn't list %1: %2").arg(displayPath(m_location), error));
+        if (!loginCredential.isEmpty()) {
+            // Here, where the user is browsing, a question is safe; resolving never asks
+            // (docs/REMOTE_ASSETS.md §10).
+            auto* row = new QTreeWidgetItem(m_entries);
+            row->setFlags(Qt::ItemIsEnabled);
+            auto* login = new QPushButton(tr("Log In as %1...").arg(loginCredential), m_entries);
+            login->setObjectName(QStringLiteral("assetPickerLogIn"));
+            login->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+            auto* holder = new QWidget(m_entries);
+            auto* layout = new QHBoxLayout(holder);
+            layout->setContentsMargins(0, 2, 0, 2);
+            layout->addWidget(login);
+            layout->addStretch(1);
+            m_entries->setItemWidget(row, 0, holder);
+            const QString location = m_location;
+            connect(login, &QPushButton::clicked, this, [this, loginCredential, loginScheme, location]() {
+                if (showAssetLoginDialog(this, loginCredential, loginScheme) && location == m_location) listOnWorker(location);
+            });
+        }
         return;
     }
     QList<QRegularExpression> filters;
@@ -635,9 +724,31 @@ void AssetPickerDialog::showEntries(const std::vector<Listed>& entries, const QS
     }
     m_entries->setColumnHidden(3, !origins);
     if (folders + files == 0) {
-        setStatus(tr("Nothing here"));
-    } else {
+        setStatus(m_next.empty() ? tr("Nothing here") : tr("Nothing here yet: there's more"));
+    } else if (m_next.empty()) {
         setStatus(tr("%1 folders, %2 files").arg(folders).arg(files));
+    } else {
+        setStatus(tr("The first %1 folders and %2 files: there are more").arg(folders).arg(files));
+    }
+    if (!m_next.empty()) {
+        // A folder too big for one page: the next one on request, as each may take a while.
+        auto* row = new QTreeWidgetItem(m_entries);
+        row->setFlags(Qt::ItemIsEnabled);
+        auto* more = new QPushButton(tr("Show More"), m_entries);
+        more->setObjectName(QStringLiteral("assetPickerShowMore"));
+        more->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        auto* holder = new QWidget(m_entries);
+        auto* layout = new QHBoxLayout(holder);
+        layout->setContentsMargins(0, 2, 0, 2);
+        layout->addWidget(more);
+        layout->addStretch(1);
+        m_entries->setItemWidget(row, 0, holder);
+        const QString location = m_location;
+        const std::string next = m_next;
+        connect(more, &QPushButton::clicked, this, [this, location, next, more]() {
+            more->setEnabled(false);
+            if (location == m_location && !m_listing) listOnWorker(location, next);
+        });
     }
     // A file named in the field is selected when it's here.
     for (int i = 0; i < m_entries->topLevelItemCount(); ++i) {

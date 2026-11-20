@@ -110,7 +110,18 @@ Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::strin
 
 // The folder `uri` names (webdav://studio/chars/, webdav://192.168.1.5:5000/single/), listed
 // as listFolder() lists one: a name `context`'s environment has, else a server by address
-// whose host is allowed (activity.h). What the asset picker browses with.
+// whose host is allowed (activity.h). Every page of it.
 Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context);
+
+// A page of a folder, and where the next starts: what the asset picker browses with, so a
+// folder of thousands shows its first entries at once (docs/S3_RESOLVER.md §5).
+struct ListedPage {
+    std::vector<ListedEntry> entries;
+    std::string next;  // `from` for the next page; empty when that was all
+};
+// One page from each endpoint of the stack that has more, merged as listFolder() merges.
+// An entry an upper endpoint has on a later page than a lower one's may come twice.
+Result<ListedPage> listFolderPage(const Stack& stack, const std::string& folder, const std::string& from = {});
+Result<ListedPage> listUriPage(const std::string& uri, const Context& context, const std::string& from = {});
 
 }  // namespace usdcc::assets

@@ -111,7 +111,9 @@ with its status.
 - **Source:** [src/plugins/webdav](../src/plugins/webdav): `webdav_protocol.cpp`, the resolver and
   its transport, built with `usdcc_add_asset_protocol()` ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12),
   which writes the `plugInfo.json` and the plugin's manifest.
-- **Links:** `usdcc_assets`, whose HTTP client it uses, and pugixml for the replies to `PROPFIND`.
+- **Links:** `usdcc_assets`, whose HTTP client it uses, and pugixml for the replies to `PROPFIND`,
+  through the helpers it shares with S3 in
+  [src/plugins/common/xml_names.h](../src/plugins/common/xml_names.h).
 
 ## 6. Testing
 

@@ -3,6 +3,7 @@
 #include "usdcc/assets/credentials.h"
 
 #include <pxr/base/tf/diagnostic.h>
+#include <pxr/base/tf/getenv.h>
 
 #include <curl/curl.h>
 
@@ -165,6 +166,35 @@ double parseHttpDate(const std::string& text) {
     return seconds < 0 ? 0 : static_cast<double>(seconds);
 }
 
+double parseIsoDate(const std::string& text) {
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0;
+    double second = 0;
+    char separator = 0;
+    int used = 0;
+    if (std::sscanf(text.c_str(), "%4d-%2d-%2d%c%2d:%2d:%lf%n", &year, &month, &day, &separator, &hour, &minute, &second,
+                    &used) < 7 ||
+        (separator != 'T' && separator != 't' && separator != ' ') || month < 1 || month > 12 || day < 1 || day > 31) {
+        return 0;
+    }
+    // Days since 1970-01-01 of a date in the proleptic Gregorian calendar (Howard Hinnant's).
+    const int y = year - (month <= 2 ? 1 : 0);
+    const int era = (y >= 0 ? y : y - 399) / 400;
+    const int yearOfEra = y - era * 400;
+    const int dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const int dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    const long long days = static_cast<long long>(era) * 146097 + dayOfEra - 719468;
+    double seconds = static_cast<double>(days) * 86400.0 + hour * 3600.0 + minute * 60.0 + second;
+    // "Z", nothing (taken as UTC), or an offset from it.
+    const std::string zone = text.substr(static_cast<size_t>(used));
+    if (!zone.empty() && (zone[0] == '+' || zone[0] == '-')) {
+        int hours = 0, minutes = 0;
+        if (std::sscanf(zone.c_str() + 1, "%2d:%2d", &hours, &minutes) < 1) return 0;
+        const double offset = hours * 3600.0 + minutes * 60.0;
+        seconds += zone[0] == '+' ? -offset : offset;
+    }
+    return seconds;
+}
+
 std::string formatHttpDate(double seconds) {
     const time_t time = static_cast<time_t>(seconds);
     std::tm utc{};
@@ -207,9 +237,14 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+    // libcurl's own trace of every request on stderr, to see what a server does. Its
+    // Authorization header is in it: for looking at by hand only.
+    static const bool verbose = !PXR_NS::TfGetenv("USDCC_CURL_VERBOSE").empty();
+    if (verbose) curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connectMs().load());
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
+                     request.connectTimeout.count() > 0 ? static_cast<long>(request.connectTimeout.count()) : connectMs().load());
     // "Stalled" is under one byte a second for that long, not a limit on the whole transfer.
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, std::max(1L, stalledMs().load() / 1000));
@@ -240,7 +275,10 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
         if (!secure && !request.credentialOverHttp) {
             warnOncePerHost(hostOf(request.url), "its credential isn't sent over plain http://");
         } else if (credential) {
-            if (!secure) warnOncePerHost(hostOf(request.url), "its credential is sent unencrypted, over plain http://");
+            // A signature gives the secret away to nobody; a session token, or a password, goes as it is.
+            if (!secure && (request.awsSigV4.empty() || !credential->token.empty())) {
+                warnOncePerHost(hostOf(request.url), "its credential is sent unencrypted, over plain http://");
+            }
             if (!request.awsSigV4.empty()) {
                 // libcurl signs: the secret never goes over the wire, a session token does.
                 curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, request.awsSigV4.c_str());
@@ -278,6 +316,15 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     if (transfer.file) std::fclose(transfer.file);
 
     response.status = statusOfCurlCode(code);
+    // Connected, but no TLS came of it: an error in the handshake, or a server that never
+    // answered one (a plain one waiting for headers), whatever error libcurl gave.
+    if (code != CURLE_OK && request.url.rfind("https:", 0) == 0) {
+        curl_off_t connected = 0;
+        curl_off_t secured = 0;
+        curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME_T, &connected);
+        curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME_T, &secured);
+        response.tlsFailed = code == CURLE_SSL_CONNECT_ERROR || (connected > 0 && secured == 0);
+    }
     if (transfer.writeFailed) {
         response.status = Status::Error;
         response.message = "can't write the downloaded file";

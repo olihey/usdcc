@@ -270,6 +270,7 @@ add_subdirectory(src/plugins/cpp_example)
 # copied beside, as shipped plugins are.
 add_subdirectory(src/plugins/http)
 add_subdirectory(src/plugins/webdav)
+add_subdirectory(src/plugins/s3)
 # Viewport Broadcast: a viewport on a web page, through a room of usdcc_peers
 # (docs/VIEWPORT_BROADCAST.md). Bundled and enabled, like Jolt Physics.
 add_subdirectory(src/plugins/viewport_broadcast)

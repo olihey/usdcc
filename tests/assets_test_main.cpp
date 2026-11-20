@@ -9,5 +9,6 @@ int main(int argc, char** argv) {
     // And the real ones (assets_net_test.cpp), as the app's plugin scan registers them.
     PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(USDCC_ASSETS_HTTP_PROTOCOL_DIR);
     PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(USDCC_ASSETS_WEBDAV_PROTOCOL_DIR);
+    PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(USDCC_ASSETS_S3_PROTOCOL_DIR);
     return usdcc::test::runTests(argc, argv);
 }

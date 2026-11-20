@@ -79,6 +79,26 @@ struct FolderServer {
 // The reply of a web and WebDAV server over `folder.root`.
 ServerResponse serveFolder(const FolderServer& folder, const ServerRequest& request);
 
+// An S3 server over a folder, the bucket in the path: /<bucket>/<key>
+// (docs/S3_RESOLVER.md §10). The folder's files are the bucket's keys. A request is
+// checked as S3 would, short of the signature itself: an Authorization header for the
+// access key and the server's region, x-amz-content-sha256, and the key escaped as the
+// signature needs it (every byte but A-Z a-z 0-9 - . _ ~ and '/').
+struct S3Server {
+    std::filesystem::path root;
+    std::string bucket = "assets";
+    std::string region = "eu-central-1";
+    std::string accessKey;                  // the one a request must be signed with; empty: unsigned ones too
+    std::atomic<int> pageSize{1000};        // keys and folders a page of ListObjectsV2
+    std::atomic<bool> missingIs403{false};  // a missing key's answer without s3:ListBucket
+    std::atomic<bool> refuseList{false};    // 403 on ListObjectsV2
+    std::atomic<int> wrongRegion{0};        // requests refused for being signed for another region
+    mutable std::mutex mutex;
+    std::vector<std::string> sessionTokens;  // the x-amz-security-token of each request that had one
+};
+
+ServerResponse serveS3(S3Server& server, const ServerRequest& request);
+
 // A port nothing listens on, for "connection refused".
 int unusedPort();
 

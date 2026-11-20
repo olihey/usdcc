@@ -6,6 +6,7 @@
 #include <pxr/base/tf/diagnostic.h>
 
 #include <algorithm>
+#include <sstream>
 #include <atomic>
 
 namespace usdcc::assets {
@@ -187,12 +188,18 @@ Found findInStack(const Stack& stack, const std::string& path, Lookups* scope) {
     return found;
 }
 
-Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context) {
-    using Listed = Result<std::vector<ListedEntry>>;
+namespace {
+
+// The stack and folder `uri` names for browsing: a name of the context's environment, or
+// a server by its address whose host (or bucket) is allowed.
+Result<bool> browsedStack(const std::string& uri, const Context& context, Stack* found, std::string* folder) {
+    using Located = Result<bool>;
     Uri named;
     if (parseUri(uri, &named) && named.stackId.empty()) {
         if (const std::shared_ptr<const Stack> stack = context.stack(named.scheme, named.name)) {
-            return listFolder(*stack, named.path);
+            *found = *stack;
+            *folder = named.path;
+            return Located::success(true);
         }
     }
     const size_t colon = uri.find("://");
@@ -201,45 +208,111 @@ Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& 
     std::string path;
     std::string normalized;
     if (!parser || !parser(uri, &endpoint, &path, &normalized)) {
-        return Listed::failure(Status::Missing, named.name.empty() ? "it isn't a server's path"
-                                                                   : "the environment '" + context.environment() +
-                                                                         "' has no server named '" + named.name + "'");
+        return Located::failure(Status::Missing, named.name.empty() ? "it isn't a server's path"
+                                                                    : "the environment '" + context.environment() +
+                                                                          "' has no server named '" + named.name + "'");
     }
     const size_t start = normalized.find("://") + 3;
     std::string host = normalized.substr(start, normalized.find('/', start) - start);
     if (host.rfind(':') != std::string::npos && host.find(']', host.rfind(':')) == std::string::npos) host.erase(host.rfind(':'));
-    if (!hostAllowed(host)) return Listed::failure(Status::NotAllowed, "the host '" + host + "' isn't allowed");
-    Stack stack;
-    stack.scheme = endpoint.scheme;
-    stack.name = endpoint.id;
-    stack.endpoints.push_back(endpoint);
-    return listFolder(stack, path);
+    // An S3 bucket named by itself has an allow list of its own (docs/S3_RESOLVER.md §3.2);
+    // an S3 server by its address is a host as any other.
+    const bool bucket = endpoint.scheme == "s3" && endpoint.url.rfind("s3://", 0) == 0;
+    if (bucket ? !bucketAllowed(host) : !hostAllowed(host)) {
+        return Located::failure(Status::NotAllowed, (bucket ? "the bucket '" : "the host '") + host + "' isn't allowed");
+    }
+    found->scheme = endpoint.scheme;
+    found->name = endpoint.id;
+    found->endpoints = {endpoint};
+    *folder = path;
+    return Located::success(true);
 }
 
-Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::string& folder, Lookups* scope) {
+// Every page of a folder, as one listing.
+Result<std::vector<ListedEntry>> allPages(const Stack& stack, const std::string& folder) {
     using Listed = Result<std::vector<ListedEntry>>;
-    const std::shared_ptr<Transport> transport = transportFor(stack.scheme);
-    if (!transport) return Listed::failure(Status::Error, "no protocol plugin is loaded for " + stack.scheme + "://");
-    if (isOffline()) return Listed::failure(Status::Unreachable, "offline");
-    Lookups& lookups = scope ? *scope : sharedLookups();
-
     std::map<std::string, ListedEntry> merged;
-    bool anywhere = false;
-    for (const Endpoint& endpoint : stack.endpoints) {
-        const Lookups::Listing listing = listingOf(*transport, endpoint, folder, lookups);
-        if (listing.status == Status::Missing) continue;
-        if (!listing.ok()) {
-            if (endpoint.optional) continue;
-            return Listed::failure(listing.status, listing.message.empty() ? endpoint.id : endpoint.id + ": " + listing.message);
-        }
-        anywhere = true;
-        // emplace keeps what an upper endpoint already put there.
-        for (const auto& [name, entry] : listing.value) merged.emplace(name, ListedEntry{entry, endpoint.id});
+    std::string from;
+    for (int page = 0; page < 100000; ++page) {
+        Result<ListedPage> listed = listFolderPage(stack, folder, from);
+        if (!listed.ok()) return Listed::failure(listed.status, listed.message);
+        const size_t before = merged.size();
+        for (ListedEntry& entry : listed.value.entries) merged.emplace(entry.entry.name, std::move(entry));
+        // A page with nothing new ends it: a server that doesn't move on (rclone, S3_RESOLVER.md §8.1).
+        if (page > 0 && merged.size() == before) break;
+        from = listed.value.next;
+        if (from.empty()) break;
     }
-    if (!anywhere) return Listed::failure(Status::Missing);
     std::vector<ListedEntry> entries;
     for (auto& [name, entry] : merged) entries.push_back(std::move(entry));
     return Listed::success(std::move(entries));
+}
+
+}  // namespace
+
+Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context) {
+    Stack stack;
+    std::string folder;
+    const Result<bool> located = browsedStack(uri, context, &stack, &folder);
+    if (!located.ok()) return Result<std::vector<ListedEntry>>::failure(located.status, located.message);
+    return allPages(stack, folder);
+}
+
+Result<ListedPage> listUriPage(const std::string& uri, const Context& context, const std::string& from) {
+    Stack stack;
+    std::string folder;
+    const Result<bool> located = browsedStack(uri, context, &stack, &folder);
+    if (!located.ok()) return Result<ListedPage>::failure(located.status, located.message);
+    return listFolderPage(stack, folder, from);
+}
+
+Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::string& folder, Lookups*) {
+    return allPages(stack, folder);
+}
+
+Result<ListedPage> listFolderPage(const Stack& stack, const std::string& folder, const std::string& from) {
+    using Paged = Result<ListedPage>;
+    const std::shared_ptr<Transport> transport = transportFor(stack.scheme);
+    if (!transport) return Paged::failure(Status::Error, "no protocol plugin is loaded for " + stack.scheme + "://");
+    if (isOffline()) return Paged::failure(Status::Unreachable, "offline");
+
+    // `from` is, per endpoint that has more, "<its index>=<where its next page starts>", one
+    // a line. Empty: every endpoint from its start.
+    const bool start = from.empty();
+    std::map<size_t, std::string> resume;
+    std::istringstream lines(from);
+    std::string line;
+    while (std::getline(lines, line)) {
+        const size_t equals = line.find('=');
+        if (equals != std::string::npos) resume[static_cast<size_t>(std::stoul(line.substr(0, equals)))] = line.substr(equals + 1);
+    }
+    std::map<std::string, ListedEntry> merged;
+    std::string next;
+    bool anywhere = false;
+    for (size_t i = 0; i < stack.endpoints.size(); ++i) {
+        const Endpoint& endpoint = stack.endpoints[i];
+        if (!start && !resume.count(i)) continue;
+        const std::string token = start ? std::string() : resume[i];
+        const Result<EntryPage> page = withMirrors(endpoint, [&transport, &folder, &token](const Endpoint& at) {
+            Cancel cancel;
+            return transport->listPage(at, folder, token, cancel);
+        });
+        if (page.status == Status::Missing) continue;
+        if (!page.ok()) {
+            if (endpoint.optional) continue;
+            return Paged::failure(page.status, page.message.empty() ? endpoint.id : endpoint.id + ": " + page.message);
+        }
+        anywhere = true;
+        // emplace keeps what an upper endpoint already put there.
+        for (const Entry& entry : page.value.entries) merged.emplace(entry.name, ListedEntry{entry, endpoint.id});
+        if (!page.value.next.empty()) next += std::to_string(i) + "=" + page.value.next + "\n";
+    }
+    // A later page that's empty is the end of one; only a first one says the folder isn't there.
+    if (!anywhere && start) return Paged::failure(Status::Missing);
+    ListedPage listed;
+    for (auto& [name, entry] : merged) listed.entries.push_back(std::move(entry));
+    listed.next = std::move(next);
+    return Paged::success(std::move(listed));
 }
 
 }  // namespace usdcc::assets

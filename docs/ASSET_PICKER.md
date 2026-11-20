@@ -294,6 +294,19 @@ layer when both are on one server (`relativeAssetPath()`), else by its logical p
 - **A file picked from a listing is taken as it is;** one typed or pasted is first resolved through
   the stage's environment (on the UI thread, once, for that file).
 - **Going to a server's folder allows its host for the session,** as opening a stage does.
+- **A busy row while a page comes** (added 2026-11-20): a busy bar and the seconds it has taken,
+  at the top of an empty list or under what's shown for Show More, as a slow server's page can take
+  half a minute.
+- **A folder too big for one page shows its first** (added 2026-11-20): the source's `listPage()`
+  gives a page and where the next starts, the status says there are more, and a **Show More** row
+  under the entries asks for the next page, added to what's shown. An S3 folder of thousands on a
+  slow server shows its first thousand after one request, not after all of them.
+- **A refused listing offers Log In** (added 2026-11-20): when a server refused for want of a
+  login that Edit > Asset Server Login can save, a **Log In as <credential>...** button under the
+  message opens that dialog with the credential filled in (an access key and its secret for S3),
+  and the folder is listed again once one is saved. The source says so by throwing
+  `AssetLoginNeeded` with the credential id; none is offered for AWS's own credentials
+  ([S3_RESOLVER.md](S3_RESOLVER.md) §4.2), which come from AWS's files.
 - **The scheme dropdown** holds `file://`, the schemes a source lists, then the rest OpenUSD
   registered; each one's tooltip says whether it can be browsed and through which resolver.
 - **Places' server headings** are the schemes with roots (`webdav://` and its names); a scheme with

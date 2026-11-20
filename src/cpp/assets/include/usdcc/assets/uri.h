@@ -43,6 +43,10 @@ std::string percentDecode(const std::string& text);
 // A path as it goes into a request: what a URL can't hold as it is (a space, anything
 // outside ASCII) becomes an escape, and escapes already there stay.
 std::string percentEncodePath(const std::string& path);
+// Every byte but A-Z a-z 0-9 - . _ ~ escaped, and '/' too unless `keepSlash`: what an
+// S3 key and a query value must be, as their signatures are made of them as escaped
+// (docs/S3_RESOLVER.md §8.1).
+std::string percentEncodeStrict(const std::string& text, bool keepSlash);
 
 // A short, stable hash as lowercase hex: the same in every process and build, as it
 // names stacks and cache folders.

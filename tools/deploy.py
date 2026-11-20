@@ -96,10 +96,10 @@ BUILD_ONLY_FILES = ["*.pdb", "*.lib", "*.exp", "*.ilk"]
 SHIPPED_PLUGINS = ["vray_render"]
 # Built ones, from build/plugins: Jolt Physics, with Jolt's library and licence in its
 # folder (docs/PHYSICS.md section 4.1). MIT, so in every artifact. And the protocols of
-# remote assets, http and webdav (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
+# remote assets, http, webdav and s3 (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
 # on bin's usdcc_assets, libcurl, zlib and pugixml. Not beside the plugin: OpenUSD loads
 # a plugin's library with plain LoadLibraryW, which doesn't look there.
-SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "viewport_broadcast"]
+SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "s3", "viewport_broadcast"]
 
 
 def _full(path):
@@ -636,6 +636,7 @@ def main(argv=None):
         "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
         "bin/usdcc_assets.dll", "bin/libcurl.dll", "licenses/vcpkg/curl.txt", "licenses/vcpkg/pugixml.txt",
         "bin/pugixml.dll", "plugins/http/usd/plugInfo.json", "plugins/webdav/usd/plugInfo.json",
+        "plugins/s3/usd/plugInfo.json",
     ]
     if has_velopack:
         required += ["usdcc.exe", "bin/velopack_libc.dll", "licenses/Velopack/LICENSE"]

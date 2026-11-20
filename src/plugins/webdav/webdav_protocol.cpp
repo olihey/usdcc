@@ -11,6 +11,8 @@
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
+#include "xml_names.h"
+
 #include <pxr/pxr.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/usd/ar/defineResolver.h>
@@ -35,20 +37,8 @@ const char* kPropfindBody =
     "<D:resourcetype/><D:getetag/><D:getlastmodified/><D:getcontentlength/>"
     "</D:prop></D:propfind>";
 
-// Servers pick their own namespace prefix (D:, d:, lp1:, none), so elements are found
-// by the name after it.
-const char* localName(const pugi::xml_node& node) {
-    const char* name = node.name();
-    const char* colon = std::strchr(name, ':');
-    return colon ? colon + 1 : name;
-}
-
-pugi::xml_node childNamed(const pugi::xml_node& parent, const char* name) {
-    for (const pugi::xml_node& child : parent.children()) {
-        if (std::strcmp(localName(child), name) == 0) return child;
-    }
-    return pugi::xml_node();
-}
+using xml::childNamed;
+using xml::localName;
 
 // The path of an href, decoded and without a trailing slash: servers send hrefs
 // absolute or relative, encoded their own way, and with a slash on folders.

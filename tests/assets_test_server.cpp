@@ -4,7 +4,9 @@
 #include "usdcc/assets/paths.h"
 #include "usdcc/assets/uri.h"
 
+#include <algorithm>
 #include <cctype>
+#include <ctime>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -86,6 +88,8 @@ const char* reasonOf(int code) {
         case 207: return "Multi-Status";
         case 302: return "Found";
         case 304: return "Not Modified";
+        case 400: return "Bad Request";
+        case 403: return "Forbidden";
         case 401: return "Unauthorized";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
@@ -218,6 +222,13 @@ void TestServer::serve(std::intptr_t handle) {
             return;
         }
         data.append(buffer, static_cast<size_t>(count));
+        // A TLS hello (a handshake record, 0x16): as plain web servers do, a 400 in plain
+        // text at once, not a wait for headers that never come.
+        if (static_cast<unsigned char>(data[0]) == 0x16) {
+            sendAll(connection, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+            closeSocket(connection);
+            return;
+        }
     }
     ServerRequest request;
     std::istringstream head(data.substr(0, headerEnd));
@@ -342,6 +353,189 @@ ServerResponse serveFolder(const FolderServer& folder, const ServerRequest& requ
         response.headers.push_back({"Content-Range", "bytes 0-0/" + std::to_string(response.body.size())});
         response.body = response.body.substr(0, 1);
     }
+    return response;
+}
+
+namespace {
+
+std::string xmlEscaped(const std::string& text) {
+    std::string out;
+    for (const char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
+std::string isoDate(double seconds) {
+    const time_t time = static_cast<time_t>(seconds);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &time);
+#else
+    gmtime_r(&time, &utc);
+#endif
+    char text[64];
+    std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%S.000Z", &utc);
+    return text;
+}
+
+ServerResponse s3Error(int code, const std::string& s3Code, const std::string& message, const std::string& extra = {}) {
+    ServerResponse response;
+    response.code = code;
+    response.headers.push_back({"Content-Type", "application/xml"});
+    response.body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>" + s3Code + "</Code><Message>" +
+                    xmlEscaped(message) + "</Message>" + extra + "</Error>";
+    return response;
+}
+
+std::map<std::string, std::string> queryOf(const std::string& target) {
+    std::map<std::string, std::string> query;
+    const size_t mark = target.find('?');
+    if (mark == std::string::npos) return query;
+    std::istringstream parts(target.substr(mark + 1));
+    std::string part;
+    while (std::getline(parts, part, '&')) {
+        const size_t equals = part.find('=');
+        query[usdcc::assets::percentDecode(part.substr(0, equals))] =
+            equals == std::string::npos ? std::string() : usdcc::assets::percentDecode(part.substr(equals + 1));
+    }
+    return query;
+}
+
+}  // namespace
+
+ServerResponse serveS3(S3Server& server, const ServerRequest& request) {
+    // Signed: "AWS4-HMAC-SHA256 Credential=<key>/<date>/<region>/s3/aws4_request, SignedHeaders=..., Signature=...".
+    const std::string authorization = headerOf(request, "authorization");
+    if (!authorization.empty()) {
+        const size_t start = authorization.find("Credential=");
+        std::vector<std::string> scope;
+        if (start != std::string::npos) {
+            std::istringstream parts(authorization.substr(start + 11, authorization.find(',', start) - start - 11));
+            std::string part;
+            while (std::getline(parts, part, '/')) scope.push_back(part);
+        }
+        if (authorization.rfind("AWS4-HMAC-SHA256 ", 0) != 0 || scope.size() != 5 || scope[3] != "s3") {
+            return s3Error(400, "AuthorizationHeaderMalformed", "not a SigV4 signature for s3");
+        }
+        if (!server.accessKey.empty() && scope[0] != server.accessKey) {
+            return s3Error(403, "InvalidAccessKeyId", "The AWS Access Key Id you provided does not exist in our records.");
+        }
+        if (scope[2] != server.region) {
+            ++server.wrongRegion;
+            return s3Error(400, "AuthorizationHeaderMalformed",
+                           "The authorization header is malformed; the region '" + scope[2] + "' is wrong; expecting '" +
+                               server.region + "'",
+                           "<Region>" + server.region + "</Region>");
+        }
+        if (headerOf(request, "x-amz-content-sha256").empty()) {
+            return s3Error(400, "InvalidRequest", "Missing required header for this request: x-amz-content-sha256");
+        }
+        const std::string token = headerOf(request, "x-amz-security-token");
+        if (!token.empty()) {
+            std::lock_guard<std::mutex> lock(server.mutex);
+            server.sessionTokens.push_back(token);
+        }
+    } else if (!server.accessKey.empty()) {
+        return s3Error(403, "AccessDenied", "Access Denied");
+    }
+
+    const std::string rawPath = request.target.substr(0, request.target.find('?'));
+    const std::string path = usdcc::assets::percentDecode(rawPath);
+    if (path == "/" && request.method == "GET") {
+        // ListBuckets: the one bucket it has.
+        ServerResponse response;
+        response.headers.push_back({"Content-Type", "application/xml"});
+        response.body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListAllMyBucketsResult><Owner><ID>test</ID></Owner>"
+                        "<Buckets><Bucket><Name>" + server.bucket + "</Name><CreationDate>" + isoDate(kModified) +
+                        "</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>";
+        return response;
+    }
+    const std::string bucketPrefix = "/" + server.bucket;
+    if (path != bucketPrefix && path.rfind(bucketPrefix + "/", 0) != 0) {
+        return s3Error(404, "NoSuchBucket", "The specified bucket does not exist");
+    }
+    const std::string key = path.size() > bucketPrefix.size() + 1 ? path.substr(bucketPrefix.size() + 1) : std::string();
+    // S3 makes the signature of the key escaped strictly: escaped otherwise, it doesn't match.
+    if (!authorization.empty() && rawPath != bucketPrefix + (key.empty() ? std::string(path.size() > bucketPrefix.size() ? "/" : "")
+                                                                         : "/" + usdcc::assets::percentEncodeStrict(key, true))) {
+        return s3Error(403, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.");
+    }
+    const std::map<std::string, std::string> query = queryOf(request.target);
+    std::error_code error;
+
+    if (key.empty() && query.count("list-type") && query.at("list-type") == "2") {
+        if (server.refuseList) return s3Error(403, "AccessDenied", "Access Denied");
+        const std::string prefix = query.count("prefix") ? query.at("prefix") : std::string();
+        const std::string delimiter = query.count("delimiter") ? query.at("delimiter") : std::string();
+        const std::string after = query.count("continuation-token") ? query.at("continuation-token") : std::string();
+        int maxKeys = server.pageSize;
+        if (query.count("max-keys")) maxKeys = std::min(maxKeys, std::stoi(query.at("max-keys")));
+        // Every key and folder under the prefix, in order, as S3 lists them.
+        std::map<std::string, fs::path> items;  // key, or folder ending in the delimiter -> file
+        for (const fs::directory_entry& each : fs::recursive_directory_iterator(server.root, error)) {
+            if (!each.is_regular_file(error)) continue;
+            std::string full = usdcc::assets::toUtf8(each.path().lexically_relative(server.root));
+            std::replace(full.begin(), full.end(), '\\', '/');
+            if (full.rfind(prefix, 0) != 0) continue;
+            const size_t cut = delimiter.empty() ? std::string::npos : full.find(delimiter, prefix.size());
+            if (cut == std::string::npos) {
+                items[full] = each.path();
+            } else {
+                items[full.substr(0, cut + delimiter.size())] = fs::path();
+            }
+        }
+        std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">";
+        xml += "<Name>" + server.bucket + "</Name><Prefix>" + xmlEscaped(prefix) + "</Prefix>";
+        int count = 0;
+        std::string last;
+        bool truncated = false;
+        std::string contents;
+        for (auto it = after.empty() ? items.begin() : items.upper_bound(after); it != items.end(); ++it) {
+            if (count == maxKeys) {
+                truncated = true;
+                break;
+            }
+            ++count;
+            last = it->first;
+            if (it->second.empty()) {
+                contents += "<CommonPrefixes><Prefix>" + xmlEscaped(it->first) + "</Prefix></CommonPrefixes>";
+            } else {
+                contents += "<Contents><Key>" + xmlEscaped(it->first) + "</Key><LastModified>" + isoDate(kModified) +
+                            "</LastModified><ETag>" + xmlEscaped(etagOf(it->second)) + "</ETag><Size>" +
+                            std::to_string(fs::file_size(it->second, error)) + "</Size><StorageClass>STANDARD</StorageClass></Contents>";
+            }
+        }
+        xml += "<KeyCount>" + std::to_string(count) + "</KeyCount><MaxKeys>" + std::to_string(maxKeys) +
+               "</MaxKeys><IsTruncated>" + (truncated ? "true" : "false") + "</IsTruncated>";
+        if (truncated) xml += "<NextContinuationToken>" + xmlEscaped(last) + "</NextContinuationToken>";
+        xml += contents + "</ListBucketResult>";
+        ServerResponse response;
+        response.headers.push_back({"Content-Type", "application/xml"});
+        response.body = std::move(xml);
+        return response;
+    }
+    if (request.method != "GET" && request.method != "HEAD") return s3Error(405, "MethodNotAllowed", "not here");
+    const fs::path file = server.root / usdcc::assets::fromUtf8(key);
+    if (key.empty() || !fs::is_regular_file(file, error)) {
+        if (server.missingIs403) return s3Error(403, "AccessDenied", "Access Denied");
+        return s3Error(404, "NoSuchKey", "The specified key does not exist.");
+    }
+    ServerResponse response;
+    const std::string etag = etagOf(file);
+    response.headers.push_back({"ETag", etag});
+    response.headers.push_back({"Last-Modified", usdcc::assets::formatHttpDate(kModified)});
+    if (headerOf(request, "if-none-match") == etag) {
+        response.code = 304;
+        return response;
+    }
+    response.body = readFile(file);
     return response;
 }
 

@@ -71,7 +71,16 @@ std::string bucketUrl(const Options& options) {
     return options.url.substr(0, scheme + 3) + options.bucket + "." + options.url.substr(scheme + 3);
 }
 
+// --credential <id>: a login saved for usdcc (Edit > Asset Server Login), used without
+// printing it.
+std::string savedCredential;
+
 std::optional<Credential> credential(bool wrongSecret = false) {
+    if (!savedCredential.empty()) {
+        std::optional<Credential> saved = credentialFor(savedCredential);
+        if (saved && wrongSecret) saved->password += "x";
+        return saved;
+    }
     Credential found;
     found.user = env("USDCC_SPIKE_S3_KEY");
     found.password = env("USDCC_SPIKE_S3_SECRET");
@@ -182,6 +191,24 @@ int main(int argc, char** argv) {
         else if (arg == "--host-style") options.hostStyle = true;
         else if (arg == "--expect") options.expect = fromUtf8(next());
         else if (arg == "--many") options.many = next();
+        else if (arg == "--credential") savedCredential = next();
+        else if (arg == "--query") {
+            // One request with that query as it is ("list-type=2&prefix=mesh%2F&max-keys=20").
+            const std::string query = next();
+            HttpResponse response = send(options, "GET", bucketUrl(options) + "/?" + query);
+            std::printf("%s, %d bytes\n%s\n", describe(response).c_str(), int(response.body.size()),
+                        response.body.substr(0, 4000).c_str());
+            return 0;
+        }
+        else if (arg == "--prefix") {
+            // One page of ListObjectsV2 for that prefix, as the server answers it.
+            const std::string prefix = next();
+            HttpResponse response = send(options, "GET", bucketUrl(options) + "/?list-type=2&delimiter=%2F&prefix=" +
+                                                           percentEncodeStrict(prefix, false));
+            std::printf("prefix '%s': %s, %d bytes\n%s\n", prefix.c_str(), describe(response).c_str(), int(response.body.size()),
+                        response.body.substr(0, 2500).c_str());
+            return 0;
+        }
     }
     if (options.url.empty() || options.bucket.empty()) {
         std::fprintf(stderr, "usage: usdcc_s3_spike --url <url> --bucket <bucket> [--region r] [--host-style] [--expect dir] [--many prefix]\n");

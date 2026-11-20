@@ -38,6 +38,9 @@ struct Config {
     // "http": { "hosts": { "<host>": { "credential": "...", "insecure": false } }, "allow": ["*.studio.local"] }
     std::map<std::string, HttpHost> httpHosts;
     std::vector<std::string> httpAllow;
+    // "s3": { "allow": ["studio-*"] }: the buckets a stage may name by themselves
+    // (docs/S3_RESOLVER.md §3.2), with the patterns hosts have.
+    std::vector<std::string> s3Allow;
     // Resolve and open from the disk cache only (§7).
     bool offline = false;
     // The disk cache's size limit; "cacheLimitGB" in the file. Unset leaves it as it is.

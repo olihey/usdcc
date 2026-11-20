@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,6 +26,9 @@ struct Endpoint {
     std::string credential;            // a credential id, never a secret; empty for anonymous
     bool readOnly = false;
     bool optional = false;             // a stack carries on when this one is unreachable
+    // The configuration's other keys, as text, for the protocol: S3's "region" and
+    // "bucketInHost" (docs/S3_RESOLVER.md §6). Not part of the cache id.
+    std::map<std::string, std::string> options;
 
     // Names its folder in the disk cache. From the scheme, URL and credential id,
     // so it's the same in every process.
@@ -58,6 +62,12 @@ public:
     virtual void advanced(uint64_t /*done*/, uint64_t /*total*/) {}
 };
 
+// A page of a folder's entries, and where the next one starts: empty when that was the last.
+struct EntryPage {
+    std::vector<Entry> entries;
+    std::string next;
+};
+
 class Transport {
 public:
     virtual ~Transport();
@@ -65,9 +75,15 @@ public:
     // `path` starts with '/' and is relative to the endpoint's URL.
     virtual Result<Entry> stat(const Endpoint& endpoint, const std::string& path, Cancel& cancel) = 0;
 
-    // The files and folders directly in `folder`. "Not supported" unless overridden.
+    // The files and folders directly in `folder`, for resolving: one answer for every file in
+    // it. "Not supported" unless overridden; resolving then asks stat() for each file.
     virtual Result<std::vector<Entry>> list(const Endpoint& endpoint, const std::string& folder, Cancel& cancel);
-    // Whether list() does: what makes a protocol's folders browsable in the asset picker.
+    // One page of them, for browsing, from where `from` says (empty: the start): a folder too
+    // big to list at once shows its first page while the rest waits. Unless overridden, the
+    // whole of list() as one page. S3's are pages of ListObjectsV2 (docs/S3_RESOLVER.md §5).
+    virtual Result<EntryPage> listPage(const Endpoint& endpoint, const std::string& folder, const std::string& from,
+                                       Cancel& cancel);
+    // Whether listPage() lists: what makes a protocol's folders browsable in the asset picker.
     virtual bool canList() const { return false; }
 
     // Writes the file to `into`. With `knownEtag`, NotModified is a result and nothing is written.

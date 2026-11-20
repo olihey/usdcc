@@ -36,6 +36,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -787,4 +788,310 @@ USDCC_TEST(assets_downloads_report_progress_and_can_be_cancelled) {
     folder.delayMs = 0;
     CHECK(!opened && listener->lastStatus == int(Status::Cancelled), "cancelDownloads() stops one that is running");
     CHECK(resolver.OpenAsset(three), "and not ones started afterwards");
+}
+
+// ---- s3:// (docs/S3_RESOLVER.md §10) ----------------------------------------------------
+
+namespace {
+
+using usdcc::test::S3Server;
+
+// An S3 server in the test program, over `root`.
+struct S3 {
+    S3Server bucket;
+    TestServer server;
+
+    S3(const fs::path& root, const std::string& name, const std::string& region)
+        : server([this](const ServerRequest& request) { return usdcc::test::serveS3(bucket, request); }) {
+        bucket.root = root;
+        bucket.bucket = name;
+        bucket.region = region;
+    }
+};
+
+// Every page of a folder, as a listing.
+Result<std::vector<Entry>> allPagesOf(Transport& transport, const Endpoint& endpoint, const std::string& folder, Cancel& cancel) {
+    std::vector<Entry> entries;
+    std::string from;
+    for (int page = 0; page < 100; ++page) {
+        Result<EntryPage> listed = transport.listPage(endpoint, folder, from, cancel);
+        if (!listed.ok()) return Result<std::vector<Entry>>::failure(listed.status, listed.message);
+        entries.insert(entries.end(), listed.value.entries.begin(), listed.value.entries.end());
+        from = listed.value.next;
+        if (from.empty()) break;
+    }
+    return Result<std::vector<Entry>>::success(std::move(entries));
+}
+
+// The value of an environment variable for as long as it lives, and none afterwards.
+struct EnvVar {
+    std::string name;
+    EnvVar(std::string variable, const std::string& value) : name(std::move(variable)) { TfSetenv(name, value); }
+    ~EnvVar() { TfUnsetenv(name); }
+};
+
+}  // namespace
+
+USDCC_TEST(assets_s3_lists_stats_and_fetches) {
+    Net net;
+    S3 s3(net.root / "bucket", "assets", "eu-central-1");
+    s3.bucket.accessKey = "AKIDS3TEST";
+    writeScene(net.root / "bucket/prod", "prod", true);
+    writeFile(net.root / "bucket/prod/chars/plus+eq=(1)@x.txt", "awkward");
+    writeFile(net.root / "bucket/other/not-ours.txt", "outside the prefix");
+    const EnvVar user("USDCC_ASSETS_S3TEST_USER", "AKIDS3TEST");
+    const EnvVar password("USDCC_ASSETS_S3TEST_PASSWORD", "secret");
+    Endpoint endpoint;
+    endpoint.id = "prod";
+    endpoint.scheme = "s3";
+    endpoint.url = s3.server.url() + "/assets/prod";
+    endpoint.credential = "s3test";
+    const std::shared_ptr<Transport> transport = transportFor("s3");
+    CHECK(transport && transport->canList(), "the S3 plugin registered its transport, which lists");
+    if (!transport) return;
+    Cancel cancel;
+    Progress progress;
+
+    Result<std::vector<Entry>> listed = allPagesOf(*transport, endpoint, "/chars", cancel);
+    CHECK(listed.ok() && listed.value.size() == 5, "a folder lists its five keys: %s %d %s", statusName(listed.status),
+          int(listed.value.size()), listed.message.c_str());
+    CHECK(s3.bucket.wrongRegion == 1, "after one refusal for the region (us-east-1 until told), which named eu-central-1: %d",
+          s3.bucket.wrongRegion.load());
+    std::sort(listed.value.begin(), listed.value.end(), [](const Entry& a, const Entry& b) { return a.name < b.name; });
+    if (listed.value.size() == 5) {
+        CHECK(listed.value[2].name == "plus+eq=(1)@x.txt" && listed.value[4].name == "wood grain.txt", "with their real names: '%s'",
+              listed.value[2].name.c_str());
+        const Entry& tex = listed.value[3];
+        CHECK(tex.name == "tex.txt" && !tex.isFolder && tex.size == 12 && !tex.etag.empty() && tex.modified == 1700000000.0,
+              "and each one's size, ETag and time: %d bytes, %s, %.0f", int(tex.size), tex.etag.c_str(), tex.modified);
+    }
+    listed = allPagesOf(*transport, endpoint, "/", cancel);
+    CHECK(listed.ok() && listed.value.size() == 2 && listed.value[0].isFolder && listed.value[1].isFolder,
+          "the endpoint's root lists its two folders, not the bucket's: %d", int(listed.value.size()));
+    const Result<std::vector<Entry>> nowhere = allPagesOf(*transport, endpoint, "/nowhere", cancel);
+    CHECK(nowhere.ok() && nowhere.value.empty(), "a folder no key is in is empty: S3 can't tell it from one that isn't there");
+    const Result<std::vector<Entry>> fileAsFolder = allPagesOf(*transport, endpoint, "/chars/tex.txt", cancel);
+    CHECK(fileAsFolder.ok() && fileAsFolder.value.empty(), "and so is a file asked for as a folder");
+    CHECK(s3.bucket.wrongRegion == 1, "the region is remembered: no second refusal");
+
+    s3.bucket.pageSize = 2;
+    const Result<EntryPage> first = transport->listPage(endpoint, "/chars", std::string(), cancel);
+    CHECK(first.ok() && first.value.entries.size() == 2 && !first.value.next.empty(), "a page of two keys says where the next starts");
+    listed = allPagesOf(*transport, endpoint, "/chars", cancel);
+    CHECK(listed.ok() && listed.value.size() == 5, "page after page: all five, once each (%d)", int(listed.value.size()));
+    const Result<ListedPage> browsed = listFolderPage(Stack{"prod", "s3", "", {endpoint}}, "/chars");
+    CHECK(browsed.ok() && browsed.value.entries.size() == 2 && !browsed.value.next.empty() &&
+              listFolderPage(Stack{"prod", "s3", "", {endpoint}}, "/chars", browsed.value.next).value.entries.size() == 2,
+          "and browsing goes a page at a time, from where the last one ended");
+    s3.bucket.pageSize = 1000;
+
+    const Result<Entry> stat = transport->stat(endpoint, "/chars/plus+eq=(1)@x.txt", cancel);
+    CHECK(stat.ok() && stat.value.size == 7 && !stat.value.isFolder, "a key with + = ( ) @ in it stats, escaped as S3 signs it: %s %s",
+          statusName(stat.status), stat.message.c_str());
+    CHECK(transport->stat(endpoint, "/chars/wood%20grain.txt", cancel).ok(), "a path spelling a space with an escape too");
+    CHECK(transport->stat(endpoint, "/chars/nothing.txt", cancel).status == Status::Missing, "a missing key is missing");
+    const Result<Entry> root = transport->stat(endpoint, "/", cancel);
+    CHECK(root.ok() && root.value.isFolder, "the endpoint's root stats as a folder");
+    CHECK(transport->stat(endpoint, "/chars", cancel).status == Status::Missing,
+          "a folder isn't a key: resolving asks for files, and a folder is no file");
+    CHECK(transport->list(endpoint, "/chars", cancel).status == Status::NotSupported,
+          "resolving doesn't list: it asks for each file (HEAD), as a folder of thousands is pages of requests");
+
+    const fs::path into = net.root / "fetched.txt";
+    const Result<Entry> fetched = transport->fetch(endpoint, "/chars/wood grain.txt", into, std::string(), progress, cancel);
+    CHECK(fetched.ok() && readFile(into) == "prod grain", "a key with a space fetches: %s", fetched.message.c_str());
+    CHECK(transport->fetch(endpoint, "/chars/wood grain.txt", into, fetched.value.etag, progress, cancel).status == Status::NotModified,
+          "asked with the ETag it has, the server says not modified");
+
+    s3.bucket.missingIs403 = true;
+    const Result<Entry> refused = transport->stat(endpoint, "/chars/nothing.txt", cancel);
+    CHECK(refused.status == Status::NotAllowed && refused.message.find("s3:ListBucket") != std::string::npos,
+          "without s3:ListBucket, a missing key is refused, and says why: %s", refused.message.c_str());
+    s3.bucket.missingIs403 = false;
+    s3.bucket.refuseList = true;
+    const Result<std::vector<Entry>> refusedList = allPagesOf(*transport, endpoint, "/chars", cancel);
+    CHECK(refusedList.status == Status::NotAllowed && refusedList.message.find("AccessDenied") != std::string::npos &&
+              refusedList.message.find("s3:ListBucket") != std::string::npos &&
+              refusedList.message.find("signed with credential 's3test'") != std::string::npos,
+          "a refused listing names S3's code, the credential and the permission: %s", refusedList.message.c_str());
+    s3.bucket.refuseList = false;
+
+    endpoint.credential = "nobody-saved-this";
+    const Result<std::vector<Entry>> unsignedList = allPagesOf(*transport, endpoint, "/chars", cancel);
+    CHECK(unsignedList.status == Status::NotAllowed && unsignedList.message.find("nothing is saved under credential") != std::string::npos,
+          "a credential id nothing knows goes unsigned, and is refused saying so: %s", unsignedList.message.c_str());
+}
+
+USDCC_TEST(assets_s3_stage_composes_through_two_buckets) {
+    Net net;
+    S3 prod(net.root / "prod", "prod-assets", "us-east-1");
+    S3 test(net.root / "test", "test-assets", "us-east-1");
+    writeScene(net.root / "prod", "prod", true);
+    writeScene(net.root / "test", "test", false);
+    Config config;
+    Endpoint prodEndpoint;
+    prodEndpoint.id = "prod";
+    prodEndpoint.scheme = "s3";
+    prodEndpoint.url = prod.server.url() + "/prod-assets";
+    prodEndpoint.readOnly = true;
+    Endpoint testEndpoint = prodEndpoint;
+    testEndpoint.id = "test";
+    testEndpoint.url = test.server.url() + "/test-assets";
+    testEndpoint.readOnly = false;
+    config.environment = "test";
+    config.endpoints["prod"] = prodEndpoint;
+    config.endpoints["test"] = testEndpoint;
+    config.environments["prod"]["s3"]["studio"] = {"prod"};
+    config.environments["test"]["s3"]["studio"] = {"test", "prod"};
+    setDefaultConfig(config);
+
+    const UsdStageRefPtr stage = UsdStage::Open("s3://studio/shots/shot.usda", ArResolverContext(Context(config, "test")));
+    CHECK(stage, "a stage opens from two buckets");
+    if (!stage) return;
+    CHECK(stringAttribute(stage, "/Shot/Hero", "origin") == "test" && stringAttribute(stage, "/Shot/Hero/Geo", "geoOrigin") == "prod",
+          "the model from TEST, its sublayer from PROD");
+    CHECK(openedContent(assetAttribute(stage, "/Shot/Hero", "grain")) == "test grain",
+          "a texture with a space in its name opens TEST's: %s", assetAttribute(stage, "/Shot/Hero", "grain").c_str());
+    int listings = 0;
+    for (const TestServer* server : {&prod.server, &test.server}) {
+        for (const ServerRequest& request : server->requests()) {
+            if (request.target.find("list-type") != std::string::npos) ++listings;
+        }
+    }
+    CHECK(listings == 0, "resolving asked for each file, and listed no folder: %d listings", listings);
+}
+
+USDCC_TEST(assets_s3_aws_credentials) {
+    Net net;
+    S3 s3(net.root / "bucket", "assets", "us-east-1");
+    writeFile(net.root / "bucket/a.txt", "a");
+    const fs::path aws = net.root / "aws";
+    writeFile(aws / "credentials", "[render]\naws_access_key_id = AKIDRENDER\naws_secret_access_key = secret\n");
+    writeFile(aws / "process.json", "{\"Version\": 1, \"AccessKeyId\": \"AKIDPROCESS\", \"SecretAccessKey\": \"secret\", "
+                                    "\"SessionToken\": \"token-from-the-process\", \"Expiration\": \"2099-01-01T00:00:00Z\"}");
+#if defined(_WIN32)
+    // The path as Windows writes it: type takes a '/' for a switch.
+    const std::u8string native = (aws / "process.json").u8string();
+    const std::string printIt = "type \"" + std::string(native.begin(), native.end()) + "\"";
+#else
+    const std::string printIt = "cat '" + toUtf8(aws / "process.json") + "'";
+#endif
+    writeFile(aws / "config", "[profile sso]\nregion = eu-west-1\ncredential_process = " + printIt + "\n");
+    const EnvVar credentials("AWS_SHARED_CREDENTIALS_FILE", toUtf8(aws / "credentials"));
+    const EnvVar configFile("AWS_CONFIG_FILE", toUtf8(aws / "config"));
+    const EnvVar noEc2("AWS_EC2_METADATA_DISABLED", "true");
+    const std::shared_ptr<Transport> transport = transportFor("s3");
+    if (!transport) return;
+    Cancel cancel;
+    Endpoint endpoint;
+    endpoint.id = "prod";
+    endpoint.scheme = "s3";
+    endpoint.url = s3.server.url() + "/assets";
+
+    s3.bucket.accessKey = "AKIDRENDER";
+    endpoint.credential = "aws:render";
+    CHECK(transport->stat(endpoint, "/a.txt", cancel).ok(), "a profile's keys in the shared credentials file sign");
+
+    s3.bucket.accessKey = "AKIDPROCESS";
+    endpoint.credential = "aws:sso";
+    const Result<Entry> fromProcess = transport->stat(endpoint, "/a.txt", cancel);
+    CHECK(fromProcess.ok(), "a profile's credential_process signs: %s", fromProcess.message.c_str());
+    {
+        std::lock_guard<std::mutex> lock(s3.bucket.mutex);
+        CHECK(!s3.bucket.sessionTokens.empty() && s3.bucket.sessionTokens.back() == "token-from-the-process",
+              "with the session token it printed");
+    }
+
+    endpoint.credential = "aws:nobody";
+    const Result<Entry> none = transport->stat(endpoint, "/a.txt", cancel);
+    CHECK(none.status == Status::NotAllowed && none.message.find("isn't in the AWS shared files") != std::string::npos,
+          "a profile that isn't there goes unsigned, and the refusal says where it was looked for: %s", none.message.c_str());
+
+    const EnvVar key("AWS_ACCESS_KEY_ID", "AKIDENVIRONMENT");
+    const EnvVar secret("AWS_SECRET_ACCESS_KEY", "secret");
+    s3.bucket.accessKey = "AKIDENVIRONMENT";
+    endpoint.credential = "aws";
+    CHECK(transport->stat(endpoint, "/a.txt", cancel).ok(), "\"aws\" takes the environment's keys first");
+}
+
+// An S3 server by its address (docs/S3_RESOLVER.md §3.3), as a NAS on the network: its
+// buckets in the path, its login under the address, https:// first and http:// when it
+// has no TLS, as the test server hasn't.
+USDCC_TEST(assets_s3_server_by_address) {
+    Net net;
+    S3 s3(net.root / "bucket", "media", "us-east-1");
+    s3.bucket.accessKey = "AKIDNAS";
+    writeScene(net.root / "bucket", "nas", true);
+    const std::string authority = "127.0.0.1:" + std::to_string(s3.server.port());
+    const std::string uri = "s3://" + authority + "/media/shots/shot.usda";
+    ArResolver& resolver = ArGetResolver();
+
+    CHECK(resolver.Resolve(uri).empty(), "an address nobody allowed doesn't resolve");
+    allowHostOfUrl(uri);
+    const Result<std::vector<ListedEntry>> refused = listUri("s3://" + authority + "/", *defaultContext());
+    CHECK(refused.status == Status::NotAllowed && refused.message.find("nothing is saved under credential '127.0.0.1'") != std::string::npos,
+          "without a login it's refused, naming the credential to save it under: %s", refused.message.c_str());
+
+    const EnvVar user("USDCC_ASSETS_127_0_0_1_USER", "AKIDNAS");
+    const EnvVar password("USDCC_ASSETS_127_0_0_1_PASSWORD", "secret");
+    const Result<std::vector<ListedEntry>> buckets = listUri("s3://" + authority + "/", *defaultContext());
+    CHECK(buckets.ok() && buckets.value.size() == 1 && buckets.value[0].entry.name == "media" && buckets.value[0].entry.isFolder,
+          "with one, the server's root lists its buckets: %s", buckets.message.c_str());
+    const Result<std::vector<ListedEntry>> shots = listUri("s3://" + authority + "/media/shots", *defaultContext());
+    CHECK(shots.ok() && shots.value.size() == 1, "and a bucket's folder its files: %s", shots.message.c_str());
+    CHECK(resolver.Resolve(uri).GetPathString() == uri, "a file resolves to its address, with no stack id");
+    const UsdStageRefPtr stage = UsdStage::Open(uri);
+    CHECK(stage, "and a stage opens");
+    if (!stage) return;
+    CHECK(stringAttribute(stage, "/Shot/Hero", "origin") == "nas", "with its reference beside it");
+    CHECK(openedContent(assetAttribute(stage, "/Shot/Hero", "grain")) == "nas grain",
+          "a texture with a space in its name too: %s", assetAttribute(stage, "/Shot/Hero", "grain").c_str());
+    CHECK(resolver.CreateIdentifier("../chars/tex.txt", ArResolvedPath(uri)) == "s3://" + authority + "/media/chars/tex.txt",
+          "a relative path is anchored on the same server");
+}
+
+USDCC_TEST(assets_s3_bucket_by_itself) {
+    Net net;
+    S3 s3(net.root / "bucket", "open-bucket", "eu-west-2");
+    writeScene(net.root / "bucket", "bucket", true);
+    // Where AWS's tools send a bucket's requests instead of AWS: here.
+    const EnvVar endpointUrl("AWS_ENDPOINT_URL_S3", s3.server.url());
+    const EnvVar noEc2("AWS_EC2_METADATA_DISABLED", "true");
+    Config config;
+    Endpoint named;
+    named.id = "named";
+    named.scheme = "s3";
+    named.url = s3.server.url() + "/open-bucket";
+    config.endpoints["named"] = named;
+    config.environments["other"]["s3"]["configured-name"] = {"named"};
+    setDefaultConfig(config);
+    ArResolver& resolver = ArGetResolver();
+
+    CHECK(resolver.Resolve("s3://open-bucket/shots/shot.usda").empty(), "a bucket nobody allowed doesn't resolve");
+    CHECK(listUri("s3://open-bucket/shots", Context(config, "")).status == Status::NotAllowed, "nor lists");
+    s3.bucket.accessKey = "AKIDSOMEONEELSE";
+    allowHostOfUrl("s3://open-bucket/");
+    const Result<std::vector<ListedEntry>> refused = listUri("s3://open-bucket/shots", Context(config, ""));
+    CHECK(refused.status == Status::NotAllowed && refused.message.find("s3://open-bucket:<port>/<bucket>/") != std::string::npos,
+          "a refused bucket on AWS says how a server on the network is written: %s", refused.message.c_str());
+    s3.bucket.accessKey.clear();
+    forgetHostAnswers();
+    allowHostOfUrl("s3://open-bucket/shots/shot.usda");
+    const std::string resolved = resolver.Resolve("s3://open-bucket/shots/shot.usda").GetPathString();
+    CHECK(resolved == "s3://open-bucket/shots/shot.usda", "once the user opened it, it resolves, with no stack id: %s", resolved.c_str());
+    const UsdStageRefPtr stage = UsdStage::Open("s3://open-bucket/shots/shot.usda");
+    CHECK(stage && stringAttribute(stage, "/Shot/Hero", "origin") == "bucket", "and opens, with its reference beside it");
+    // A HEAD's refusal names no region; the byte asked for after it does.
+    CHECK(s3.bucket.wrongRegion == 2, "finding the bucket's region from one HEAD's refusal and its GET's, once: %d",
+          s3.bucket.wrongRegion.load());
+    const Result<std::vector<ListedEntry>> listed = listUri("s3://open-bucket/shots", Context(config, ""));
+    CHECK(listed.ok() && listed.value.size() == 1, "and lists, for the picker: %s", listed.message.c_str());
+
+    allowHostOfUrl("s3://configured-name/x.usda");
+    CHECK(resolver.Resolve("s3://configured-name/shots/shot.usda").empty(),
+          "a name some environment has is never taken for a bucket, allowed or not");
+    TfSetenv("USDCC_S3_ALLOW", "open-*");
+    forgetHostAnswers();
+    CHECK(bucketAllowed("open-bucket") && !bucketAllowed("closed-bucket"), "USDCC_S3_ALLOW allows by pattern");
+    TfUnsetenv("USDCC_S3_ALLOW");
 }

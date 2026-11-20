@@ -60,6 +60,16 @@ Result<std::vector<Entry>> Transport::list(const Endpoint&, const std::string&, 
     return Result<std::vector<Entry>>::failure(Status::NotSupported, "this protocol can't list folders");
 }
 
+Result<EntryPage> Transport::listPage(const Endpoint& endpoint, const std::string& folder, const std::string& from,
+                                     Cancel& cancel) {
+    if (!from.empty()) return Result<EntryPage>::success({});
+    Result<std::vector<Entry>> all = list(endpoint, folder, cancel);
+    if (!all.ok()) return Result<EntryPage>::failure(all.status, all.message);
+    EntryPage page;
+    page.entries = std::move(all.value);
+    return Result<EntryPage>::success(std::move(page));
+}
+
 Result<Entry> Transport::put(const Endpoint&, const std::string&, const std::filesystem::path&, const std::string&,
                              Progress&, Cancel&) {
     return Result<Entry>::failure(Status::NotSupported, "this protocol can't write");

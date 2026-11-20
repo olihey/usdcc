@@ -4,8 +4,11 @@
 #include "test_harness.h"
 #include "test_settings.h"
 
+#include "usdcc/assets/activity.h"
+#include "usdcc/core/settings.h"
 #include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_sources.h"
 #include "usdcc/ui/scale_controller.h"
 
@@ -16,9 +19,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEvent>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QTemporaryDir>
 #include <QToolButton>
@@ -30,6 +35,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 using namespace usdcc::usd;
 
@@ -56,11 +62,26 @@ public:
                     {"chars", true, 0, 0, {}}};
         }
         if (uri == "pickertest://alpha/chars/") return {{"hero.usd", false, 1, 0, {}}};
+        if (uri == "pickertest://locked/") throw AssetLoginNeeded("not allowed: HTTP 401", "locked-login", "pickertest");
         if (uri == "pickertest://slow/") {
             for (int i = 0; i < 40 && !cancel.cancelled(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
             return {{"late.usda", false, 1, 0, {}}};
         }
         throw std::runtime_error("unreachable: the test says so");
+    }
+    // pickertest://paged/: two pages, of two entries and one.
+    AssetListPage listPage(const std::string& uri, const PXR_NS::ArResolverContext& context, usdcc::assets::Cancel& cancel,
+                           const std::string& from) override {
+        if (uri != "pickertest://paged/") return AssetSource::listPage(uri, context, cancel, from);
+        ++lists;
+        AssetListPage page;
+        if (from.empty()) {
+            page.entries = {{"a.usda", false, 1, 0, {}}, {"b.usda", false, 1, 0, {}}};
+            page.next = "page2";
+        } else if (from == "page2") {
+            page.entries = {{"c.usda", false, 1, 0, {}}};
+        }
+        return page;
     }
 };
 
@@ -208,6 +229,33 @@ USDCC_TEST(asset_picker_browses_a_source) {
     CHECK(recentAssetFolders().value(0) == "pickertest://alpha/chars/", "and its folder is recent");
 }
 
+// A folder too big for one page shows its first and offers the next (docs/S3_RESOLVER.md §5).
+USDCC_TEST(asset_picker_shows_more) {
+    TestSettings settings;
+    ScopedScale scale;
+    fakeSource();
+    AssetPickerDialog dialog(AssetPickerOptions{});
+    dialog.navigate("pickertest://slow/");
+    CHECK(dialog.findChild<QWidget*>(QStringLiteral("assetPickerBusy")), "while a page is coming, the list says so");
+    waitForListing(dialog);
+    // The tree deletes a row's widget later, as Qt does.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(!dialog.findChild<QWidget*>(QStringLiteral("assetPickerBusy")), "and not once it's there");
+    dialog.navigate("pickertest://paged/");
+    waitForListing(dialog);
+    auto* more = dialog.findChild<QPushButton*>(QStringLiteral("assetPickerShowMore"));
+    CHECK(names(dialog.entriesView()).contains("a.usda") && !names(dialog.entriesView()).contains("c.usda") && more,
+          "the first page is shown, with Show More: %s", names(dialog.entriesView()).join(", ").toStdString().c_str());
+    CHECK(dialog.statusLabel()->text().contains("there are more"), "and the status says there's more: %s",
+          dialog.statusLabel()->text().toStdString().c_str());
+    if (!more) return;
+    more->click();
+    waitForListing(dialog);
+    const QStringList all = names(dialog.entriesView());
+    CHECK(all.contains("a.usda") && all.contains("c.usda") && !dialog.findChild<QPushButton*>(QStringLiteral("assetPickerShowMore")),
+          "Show More adds the next page, and with none after it, goes: %s", all.join(", ").toStdString().c_str());
+}
+
 USDCC_TEST(asset_picker_errors_and_refusals) {
     TestSettings settings;
     ScopedScale scale;
@@ -217,6 +265,13 @@ USDCC_TEST(asset_picker_errors_and_refusals) {
     waitForListing(dialog);
     CHECK(dialog.statusLabel()->text().contains("unreachable: the test says so"), "a failing listing says why: %s",
           dialog.statusLabel()->text().toStdString().c_str());
+
+    CHECK(!dialog.findChild<QPushButton*>(QStringLiteral("assetPickerLogIn")), "no Log In for a server that's down");
+    dialog.navigate("pickertest://locked/");
+    waitForListing(dialog);
+    auto* login = dialog.findChild<QPushButton*>(QStringLiteral("assetPickerLogIn"));
+    CHECK(login && login->text().contains("locked-login"), "a refusal a login may cure offers Log In, for its credential: %s",
+          login ? login->text().toStdString().c_str() : "none");
 
     const QString before = dialog.location();
     dialog.navigate("nope://somewhere/");
@@ -276,4 +331,25 @@ USDCC_TEST(asset_picker_disk_and_relative_paths) {
     CHECK(second.chosenFile().isEmpty() && second.statusLabel()->text().contains("Not found"), "a file that isn't there isn't chosen");
     second.navigate(QString());
     CHECK(second.location().isEmpty() && names(second.entriesView()).contains("Home"), "This PC: the drives and home");
+}
+
+// Settings > Assets > Allowed buckets (docs/S3_RESOLVER.md §3.2, §7) reaches the
+// library's bucket list, and a refused bucket is told once to the window's note.
+USDCC_TEST(asset_settings_allowed_buckets) {
+    usdcc::core::Settings settings;
+    usdcc::usd::defineAssetSettings(settings);
+    CHECK(settings.definition(usdcc::usd::kAssetS3BucketsKey), "Settings > Assets has Allowed buckets");
+    CHECK(!usdcc::assets::bucketAllowed("studio-assets"), "an unlisted bucket isn't allowed");
+    settings.setValue(usdcc::usd::kAssetS3BucketsKey, std::string("studio-*; render-cache"));
+    CHECK(usdcc::assets::bucketAllowed("studio-assets") && usdcc::assets::bucketAllowed("render-cache") &&
+              !usdcc::assets::bucketAllowed("elsewhere"),
+          "the setting's names and patterns are");
+    std::vector<std::string> refused;
+    usdcc::assets::setBucketRefusedCallback([&refused](const std::string& bucket) { refused.push_back(bucket); });
+    usdcc::assets::bucketAllowed("elsewhere");
+    usdcc::assets::bucketAllowed("studio-assets");
+    usdcc::assets::setBucketRefusedCallback({});
+    CHECK(refused == std::vector<std::string>{"elsewhere"}, "a refusal is told, an allowed bucket isn't");
+    settings.setValue(usdcc::usd::kAssetS3BucketsKey, std::string());
+    CHECK(!usdcc::assets::bucketAllowed("studio-assets"), "and emptied, none are");
 }

@@ -118,8 +118,13 @@ public:
 private:
     struct Listed;
     void buildPlaces();
-    void showEntries(const std::vector<Listed>& entries, const QString& error);
-    void listOnWorker(const QString& location);
+    // With `loginCredential`, the error is a refusal a login may cure: a Log In button
+    // under it opens the login dialog for that credential, and lists again after.
+    void showEntries(const std::vector<Listed>& entries, const QString& error, const QString& loginCredential = {},
+                     const QString& loginScheme = {});
+    // A page of the folder, from `from` (empty: its start, in place of what's shown; else
+    // added to it). While it has more, a Show More row under it asks for the next.
+    void listOnWorker(const QString& location, const std::string& from = {});
     void pathEntered();
     void schemeChosen(int index);
     void goUp();
@@ -140,6 +145,8 @@ private:
     int m_generation = 0;
     std::shared_ptr<usdcc::assets::Cancel> m_cancel;
     QStringList m_listedFiles;  // the files the shown listing has, by their full path
+    std::vector<Listed> m_pages;  // the pages of the folder listed so far
+    std::string m_next;           // where its next page starts; empty when that was all
 
     QComboBox* m_scheme = nullptr;
     QLineEdit* m_path = nullptr;

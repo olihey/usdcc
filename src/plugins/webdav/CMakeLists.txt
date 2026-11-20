@@ -10,3 +10,5 @@ usdcc_add_asset_protocol(usdccWebDavProtocol
     OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins/webdav")
 # The XML that PROPFIND replies come in.
 target_link_libraries(usdccWebDavProtocol PRIVATE pugixml::pugixml)
+# The XML helpers it shares with the S3 protocol.
+target_include_directories(usdccWebDavProtocol PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../common")

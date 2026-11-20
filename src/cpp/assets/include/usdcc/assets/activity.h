@@ -59,10 +59,25 @@ bool hostAllowed(const std::string& host);
 // Forgets what was answered: for tests, and when the host's list changes.
 void forgetHostAnswers();
 // Allows the host of `url` (any scheme://host[:port]/...) until the process ends, as
-// though it had been answered yes: for a URL the user opened themselves.
+// though it had been answered yes: for a URL the user opened themselves. The bucket,
+// for an s3:// URL.
 void allowHostOfUrl(const std::string& url);
 // Patterns the host allows too, besides the configuration's and USDCC_HTTP_ALLOW:
 // usdcc's own setting.
 void setExtraAllowedHosts(std::vector<std::string> patterns);
+
+// ---- S3 buckets (docs/S3_RESOLVER.md §3.2) -------------------------------------------
+
+// Whether a stage may name `bucket` by itself (s3://<bucket>/...): on the default
+// configuration's "s3" "allow" list, USDCC_S3_ALLOW, the host's own list, or opened by
+// the user this session (allowHostOfUrl() of an s3:// URL). Nobody is asked: a signed
+// request tells the bucket's owner who sent it.
+bool bucketAllowed(const std::string& bucket);
+// Told, from whichever thread asked, when bucketAllowed() refuses a bucket: usdcc shows
+// a note saying how to allow it. Empty removes it.
+void setBucketRefusedCallback(std::function<void(const std::string& bucket)> callback);
+// A bucket pattern: a name, with '*' standing for any characters ("studio-*", "*").
+bool bucketMatches(const std::string& pattern, const std::string& bucket);
+void setExtraAllowedBuckets(std::vector<std::string> patterns);
 
 }  // namespace usdcc::assets
