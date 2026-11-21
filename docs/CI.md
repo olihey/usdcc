@@ -29,7 +29,7 @@ one difference: `--no-usdview`.
 | | |
 |---|---|
 | Source | `https://github.com/NVIDIA-Omniverse/OpenUSD`, commit `70c45e83b08a7b45588cd6cdbd2ae67f5147befb` (branch `typhoon/main`; reports itself as 26.08) |
-| Patches | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change. `deps/patches/build_usd-boost-vs2026.patch`: an `if` that should be an `elif`, so Visual Studio 2026 gets Boost 1.90 rather than 1.86 (still so on OpenUSD's `dev`); it only matters on Windows ARM64 (see **arm64** below) |
+| Patches | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change. `deps/patches/build_usd-boost-vs2026.patch`: Visual Studio 2026 gets Boost 1.91, the first whose bootstrap and `b2` know its toolset (`build_usd.py` asks for 1.90, which doesn't, and an `if` that should be an `elif` gave it 1.86 anyway; both still so on OpenUSD's `dev`). It only matters on Windows ARM64 (see **arm64** below) |
 | Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release --generator="Visual Studio 17 2022"` |
 | Python | 3.13.12 x64 from `actions/setup-python`. 3.13 is the VFX Reference Platform's Python for CY2026 and CY2027; it was 3.12.10 until 2026-11-17 (§2.1) |
 | Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.py` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
@@ -369,7 +369,7 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
 - `build_usd.py` only knows the Visual Studio version from a developer prompt's
   `VCToolsVersion`; without one it builds Boost 1.80, whose bootstrap predates Visual
   Studio 2026. So on ARM64 `deps-usd.yml` runs it in an ARM64 developer shell, which gives
-  Boost 1.90 and `toolset=msvc-14.5`, and sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` for the
+  `toolset=msvc-14.5` and, with the patch, Boost 1.91, and sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` for the
   image's CMake 4, which OpenColorIO's bundled yaml-cpp and expat need. The x64 job runs
   as before.
 - The tools run before `actions/setup-python` on the runner's own Python; the Windows

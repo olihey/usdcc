@@ -163,7 +163,8 @@ jobs:
           # build_usd.py knows the Visual Studio version only from a developer
           # prompt's VCToolsVersion. Without one it picks Boost 1.80, whose
           # bootstrap doesn't know Visual Studio 2026 ("Unknown toolset: vcunk"),
-          # so ARM64 builds in an ARM64 developer shell: Boost 1.90, msvc-14.5.
+          # so ARM64 builds in an ARM64 developer shell: msvc-14.5, and with
+          # deps/patches/build_usd-boost-vs2026.patch Boost 1.91, the first that knows it.
           $python = (Get-Command python).Source  # the one set up above, whatever the shell adds to PATH
           if ('${{ matrix.arch }}' -eq 'arm64') {
             $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath

@@ -1,11 +1,28 @@
 diff --git a/build_scripts/build_usd.py b/build_scripts/build_usd.py
 --- a/build_scripts/build_usd.py
 +++ b/build_scripts/build_usd.py
-@@ -826,7 +826,7 @@ def InstallBoost_Helper(context, force, buildArgs):
+@@ -812,7 +812,8 @@ BOOST_VERSION_FILES = [
+     "include/boost/version.hpp",
+     "include/boost-1_80/boost/version.hpp",
+     "include/boost-1_82/boost/version.hpp",
+-    "include/boost-1_86/boost/version.hpp"
++    "include/boost-1_86/boost/version.hpp",
++    "include/boost-1_91/boost/version.hpp"
+ ]
+ 
+ def InstallBoost_Helper(context, force, buildArgs):
+@@ -823,10 +824,12 @@ def InstallBoost_Helper(context, force, buildArgs):
+     #   simplicity.
+     # - Building on MacOS requires v1.82.0 or later for C++17 support starting
+     #   with Xcode 15.
++    # - Building with Visual Studio 2026 requires boost 1.91.0 or newer: it is
++    #   the first whose bootstrap and b2 know the 14.5 toolset (vc145).
      if IsVisualStudio2026OrGreater():
-         BOOST_VERSION = (1, 90, 0)
-         BOOST_SHA256 = "bdc79f179d1a4a60c10fe764172946d0eeafad65e576a8703c4d89d49949973c"
+-        BOOST_VERSION = (1, 90, 0)
+-        BOOST_SHA256 = "bdc79f179d1a4a60c10fe764172946d0eeafad65e576a8703c4d89d49949973c"
 -    if IsVisualStudio2022OrGreater():
++        BOOST_VERSION = (1, 91, 0)
++        BOOST_SHA256 = "69c6f32fbda3c478fb310ec251e6699e5e584dbc71afb5425c2f6e98c9540a77"
 +    elif IsVisualStudio2022OrGreater():
          BOOST_VERSION = (1, 86, 0)
          BOOST_SHA256 = "cd20a5694e753683e1dc2ee10e2d1bb11704e65893ebcc6ced234ba68e5d8646"
