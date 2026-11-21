@@ -9,76 +9,11 @@
 
 #include <QJsonArray>
 #include <QRandomGenerator>
-#include <QTcpServer>
-#include <QTcpSocket>
 
 using namespace usdcc::peers;
 using namespace usdcc::peers::test;
 
 namespace {
-
-// Passes bytes between members and a host, keeping a copy, and can cut them apart.
-class Proxy : public QObject {
-public:
-    explicit Proxy(quint16 target) : m_target(target) {
-        connect(&m_server, &QTcpServer::newConnection, this, [this] {
-            while (QTcpSocket* in = m_server.nextPendingConnection()) {
-                auto* out = new QTcpSocket(this);
-                in->setParent(this);
-                m_pairs.append(std::make_pair(in, out));
-                connect(in, &QTcpSocket::readyRead, this, [this, in, out] {
-                    const QByteArray data = in->readAll();
-                    captured += data;
-                    out->write(data);
-                });
-                connect(out, &QTcpSocket::readyRead, this, [this, in, out] {
-                    const QByteArray data = out->readAll();
-                    captured += data;
-                    in->write(data);
-                });
-                connect(in, &QTcpSocket::disconnected, out, &QTcpSocket::disconnectFromHost);
-                connect(out, &QTcpSocket::disconnected, in, &QTcpSocket::disconnectFromHost);
-                out->connectToHost(QHostAddress::LocalHost, m_target);
-            }
-        });
-        resume();
-    }
-    QString address() const { return QStringLiteral("127.0.0.1:%1").arg(m_port); }
-    // Drops every connection, and takes none until resume().
-    void cut() {
-        m_server.close();
-        for (const auto& [in, out] : m_pairs) {
-            in->abort();
-            out->abort();
-        }
-        m_pairs.clear();
-    }
-    void resume() {
-        m_server.listen(QHostAddress::LocalHost, m_port);
-        m_port = m_server.serverPort();
-    }
-
-    QByteArray captured;
-
-private:
-    quint16 m_target;
-    quint16 m_port = 0;
-    QTcpServer m_server;
-    QList<std::pair<QTcpSocket*, QTcpSocket*>> m_pairs;
-};
-
-std::unique_ptr<Room> joinThrough(const QString& address, const QString& name, const QString& secret,
-                                  QString* closedReason = nullptr) {
-    JoinOptions options;
-    options.profile.name = name;
-    options.secret = secret;
-    std::unique_ptr<Room> room(Room::join(address, options));
-    if (closedReason) {
-        QObject::connect(room.get(), &Room::closed, room.get(), [closedReason](const QString& r) { *closedReason = r; });
-    }
-    waitUntil([&] { return room->state() != Room::State::Connecting; });
-    return room;
-}
 
 // Joins without the secret, as a member that found the room does.
 std::unique_ptr<Room> joinFound(Room& host, const QString& name, QString* closedReason, const QString& password = {},

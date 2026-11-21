@@ -610,7 +610,8 @@ dragging from the palette (not run), a real person's hand on any of it.
    ([VRAY_RENDER.md](VRAY_RENDER.md) §8).
 2. **Cycles in the build:** is Blender's Cycles Hydra delegate (`3rd_party/cycles` in the USD build)
    meant to ship with usdcc? If not, Cycles is limited to the preview and MaterialX nodes it remaps,
-   and phase 5 drops its generator.
+   and phase 5 drops its generator. *Planned: yes, as a `standard` USD plugin pack that also builds
+   the generator's `cycles_shaders.usda` ([USD_PLUGINS.md](USD_PLUGINS.md) §3, §5, §7 phase 5).*
 3. **Arnold:** do we ship arnold-usd built against our USD, or find a user's install? Its Sdr plugin
    needs the Arnold core at discovery time, so startup gets slower when it is on the path.
 4. **MDL types:** the types marked "Expected" in §3.5, above all structs and enums, need a real MDL function network. BuiltInMaterials has only materials with simple inputs, and I couldn't

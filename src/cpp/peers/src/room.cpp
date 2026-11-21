@@ -508,6 +508,9 @@ void Room::trust(const QString& fingerprint) {
 }
 
 qint64 Room::queuedBytes(const PeerId& id) const {
+    if (!d->isHost) {
+        return d->queue ? d->queue->queuedBytes() : 0;  // Everything goes through the host
+    }
     const Member* member = d->welcomedMember(id);
     return member && member->queue ? member->queue->queuedBytes() : 0;
 }

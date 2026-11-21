@@ -183,7 +183,8 @@ public:
     QUrl guestLink(const QString& address = {}) const;
     void remove(const PeerId& id, const QString& reason = {});
     void trust(const QString& fingerprint);
-    // What waits to be sent to a member: what makes it too slow.
+    // What waits to be sent to a member: what makes it too slow. On a member that
+    // joined, what waits to go to the host, whoever it is for.
     qint64 queuedBytes(const PeerId& id) const;
 
 Q_SIGNALS:
