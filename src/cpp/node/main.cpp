@@ -112,6 +112,14 @@ int main(int argc, char** argv) {
     usdcc::ui::QtMessageBridge qtMessages;
     usdcc::app::ScopedLogSink console(std::make_shared<usdcc::core::ConsoleLogSink>());
 
+    // The arguments as given. On X11 systems QGuiApplication takes -name, -title, -display and
+    // the like (also as --name) out of argv, and so out of QCoreApplication::arguments(); serve's
+    // --name would be lost. Windows keeps them, and gives the arguments in UTF-16 there.
+#ifndef _WIN32
+    QStringList givenArguments;
+    for (int i = 0; i < argc; ++i) givenArguments.append(QString::fromLocal8Bit(argv[i]));
+#endif
+
     // Storm's OpenGL, unless there's to be none.
     const bool noGpu = hasArgument(argc, argv, "--no-gpu");
     std::unique_ptr<QCoreApplication> app;
@@ -125,7 +133,10 @@ int main(int argc, char** argv) {
     QCommandLineParser parser;
     Options::add(parser);
     // --help and unknown options print and exit 0 or 1; usage errors are 2.
-    if (!parser.parse(QCoreApplication::arguments())) {
+#ifdef _WIN32
+    const QStringList givenArguments = QCoreApplication::arguments();
+#endif
+    if (!parser.parse(givenArguments)) {
         printError(parser.errorText());
         return kExitUsage;
     }

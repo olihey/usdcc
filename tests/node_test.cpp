@@ -117,9 +117,12 @@ USDCC_TEST(node_render_arguments) {
                  QStringLiteral("--output"), QStringLiteral("out/<stage>.####.exr"), QStringLiteral("--tiles"),
                  QStringLiteral("2x2"), QStringLiteral("--set"), QStringLiteral("embree:ty:maxBounces=8")});
     RenderArguments arguments;
-    const QString error = readRenderArguments(good.parser, QStringLiteral("C:/farm/job"), &arguments);
+    // An absolute folder on every platform: C:/farm/job on Windows, /farm/job elsewhere.
+    const QString farm = QDir::rootPath() + QStringLiteral("farm/job");
+    const QString error = readRenderArguments(good.parser, farm, &arguments);
     CHECK(good.ok && error.isEmpty(), "read: %s", qPrintable(error));
-    CHECK(arguments.output == "C:/farm/job/out/<stage>.####.exr", "a relative output is under the working folder: %s",
+    CHECK(arguments.output == (farm + QStringLiteral("/out/<stage>.####.exr")).toStdString(),
+          "a relative output is under the working folder: %s",
           arguments.output.c_str());
     CHECK(arguments.tiles == GfVec2i(2, 2) && arguments.set.size() == 1 && arguments.set.front().first == "embree:ty:maxBounces",
           "tiles and a setting");
