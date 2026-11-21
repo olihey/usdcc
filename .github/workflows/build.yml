@@ -70,11 +70,13 @@ jobs:
 
       # The tools run on the image's own Python before setup-python; on the Arm
       # image that has to be an arm64 one, or they'd name the x64 assets.
+      # 3.12, not 3.13: Python's installer won't put the pinned 3.13.x beside a
+      # newer 3.13 that's already installed.
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
           architecture: arm64
 
       - name: Name the OpenUSD asset
