@@ -57,6 +57,7 @@ add_executable(usdcc_tests
     stage_time_test.cpp
     time_imaging_test.cpp
     stage_names_test.cpp
+    stage_sync_spike_test.cpp
     undo_manager_test.cpp
     usda_syntax_test.cpp
     value_type_info_test.cpp

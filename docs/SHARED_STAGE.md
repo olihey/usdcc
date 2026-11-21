@@ -3,9 +3,9 @@
 Several people editing one stage at once, each seeing the others' edits, selections and cameras.
 One use of [PEERS.md](PEERS.md), and the largest.
 
-**Status:** planned 2026-11-16 as part of PEERS.md, moved here 2026-11-17. Nothing is built yet.
-"Checked" means looked at in this repository; everything else is an assumption until the spike
-(§10).
+**Status:** planned 2026-11-16 as part of PEERS.md, moved here 2026-11-17. The phase 0 spike is
+done (2026-11-21, §10.1); nothing of the feature is built yet. "Checked" means looked at in this
+repository, "Measured" means the spike tried it; everything else is an assumption.
 
 ## 1. What it is, and what it uses
 
@@ -78,8 +78,10 @@ undo. For the live layer it also keeps the call itself.
 **Values.** An op's value is any `VtValue`, of any of the types the Attribute Editor handles. The
 plan is to let USD serialize it: the batch's fields are written to a scratch layer and sent in
 that layer's file format. USDA text handles every type but is slow and large for a mesh's points;
-crate is compact but is written to a file. Which, and where the size limit between them is, comes
-from the spike.
+crate is compact but is written to a file. *Measured* (§10.1): both carry every value the spike
+tried exactly, and USDC is the format, six times faster to encode and thirty times faster to decode
+than USDA on a million points. Tokens, token lists and path lists go in the batch's header
+instead, since a children field in a scratch layer would name children it hasn't got.
 
 ## 5. Order and conflicts
 
@@ -149,11 +151,54 @@ They need [PEERS.md](PEERS.md) phases 1a and 1b, and nothing after them.
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **0. Spike** | A recorder that replays one layer's ops onto another | It answers: whether replaying the recorded ops gives an identical layer; how to serialize an op's value, timed on a mesh of a million points |
+| **0. Spike** (done) | A recorder that replays one layer's ops onto another: `tests/stage_sync_spike_test.cpp` | It answers: whether replaying the recorded ops gives an identical layer; how to serialize an op's value, timed on a mesh of a million points. Answered in §10.1 |
 | **A. Same files** | The live layer, ops, order, the snapshot, undo, view-only members, merge | Two instances move different prims of one stage and each sees both; both move the same prim and end equal; undo on one side undoes only its own step; a third joins late and is equal; Merge and Save write the result |
 | **B. Presence** | Selections, cameras, Follow | A peer's selection and camera show in the other's Outliner and viewport |
 | **C. Sending the stage** | Packing and sending the files to a peer who doesn't have them | A peer with none of the files joins a shared stage |
 | **Later** | Locks per prim | |
+
+### 10.1 What the spike found
+
+What the plan believed, and what `tests/stage_sync_spike_test.cpp` found (2026-11-21, Release
+build, OpenUSD 26.08, Windows). Run it with `usdcc_tests stage_sync`.
+
+The spike's `OpRecorder` is a layer state delegate, as `EditRecorder` is, that keeps each call
+as an op instead of its inverse. A second layer that started equal gets the ops through its own
+`OpRecorder`'s public calls (`SetField`, `CreateSpec`, `PushChild`, ...), in one change block. The
+two layers are then compared spec by spec, field by field, and as USDA text.
+
+1. **Replaying the ops gives an identical layer. Yes.** The edits were made through `UsdStage`
+   as the app makes them: prims, a mesh, values of many types (matrix, half quaternion, string
+   array, asset path, uniform token, doubles and floats that don't print short), time samples set,
+   replaced and cleared, dictionary keys set and erased, layer metadata, references, payloads,
+   inherits, API schemas, a shader connection, relationship targets, a variant set with prims
+   inside a variant, rename and reparent (Sdf namespace edits), child reordering, a prim and a
+   property deleted, a prim deactivated. Once on an empty layer (190 ops) and once on a scene the
+   other side already had (10 ops). All equal: in memory, through USDA and through USDC.
+2. **Whole-layer calls are recorded too.** `TransferContent` on a layer with a state delegate
+   turns into ordinary ops (98 for a small scene), and `Clear` into the deletes (6). Both replay
+   to an identical layer. So a script that replaces the live layer's content is shared like any
+   edit.
+3. **A new attribute's `custom` comes before its `typeName`.** Sdf sets the fields in that order
+   when it creates an attribute, so when `custom` is recorded the spec has no type yet, and the
+   scratch layer can't make an attribute to hold it. The `typeName` op always follows in the same
+   batch, and the encoder takes the type from there. Phase A's recorder must do the same.
+4. **USDA and USDC both round-trip every value exactly,** fallback values included (`custom = false`
+   isn't lost), and so do 17-digit doubles. The header carries tokens, token lists and path lists
+   itself; everything else goes in a scratch layer that mirrors the spec. A field set twice in one
+   batch needs a second scratch layer (the new scene took 3).
+5. **A million points** (`point3f[]`, 12 MB raw):
+
+   | | Encode | Decode | Size |
+   |---|---|---|---|
+   | Raw copy (the floor) | 4 ms, out and back | | 11.4 MB |
+   | USDC, through a temporary file | 80 ms | 18 ms | 11.4 MB |
+   | USDA text | 500 ms | 600–690 ms | 33.2 MB |
+
+   Recording the op costs nothing (0.1 ms: `VtArray` shares its data), and neither does applying
+   it. **USDC for every batch**, then, not only the large ones: there is no size at which USDA
+   wins, and the small batches above are a kilobyte either way. Reading USDC from memory needs an
+   `ArAsset` of our own instead of the temporary file; that is phase A's work, not a question.
 
 ## 11. Testing
 
