@@ -168,6 +168,29 @@ EmissionScaling scaleEmission(const PXR_NS::SdfLayerHandle& layer, double factor
     return scaler.result;
 }
 
+PXR_NS::UsdGeomCamera definePrivateCamera(const PXR_NS::UsdStageRefPtr& stage, const PXR_NS::SdfPath& path,
+                                          const usdcc::usd::RenderCamera& camera, LightMatch light) {
+    using namespace PXR_NS;
+    auto privateCamera = UsdGeomCamera::Define(stage, path);
+    const Camera view = cameraValues(camera);
+    privateCamera.MakeMatrixXform().Set(camera.cameraToWorld);
+    privateCamera.CreateProjectionAttr().Set(view.orthographic ? UsdGeomTokens->orthographic
+                                                               : UsdGeomTokens->perspective);
+    privateCamera.CreateFocalLengthAttr().Set(10.0f);
+    privateCamera.CreateHorizontalApertureAttr().Set(view.horizontal);
+    privateCamera.CreateVerticalApertureAttr().Set(view.vertical);
+    privateCamera.CreateClippingRangeAttr().Set(GfVec2f(view.nearClip, view.farClip));
+    if (light.on) {
+        // Unit exposure puts ovrtx's output in Storm's units; responsivity carries the
+        // multiplier, as ovrtx 0.6 ignores the `exposure` (EV) attribute.
+        privateCamera.CreateExposureFStopAttr().Set(1.0f);
+        privateCamera.CreateExposureTimeAttr().Set(1.0f);
+        privateCamera.CreateExposureIsoAttr().Set(100.0f);
+        privateCamera.CreateExposureResponsivityAttr().Set(float(light.multiplier));
+    }
+    return privateCamera;
+}
+
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
                                        QSize size, Mode mode, LightMatch light, bool rtxTonemap) {
     using namespace PXR_NS;
@@ -186,23 +209,8 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     SdfPath root("/__usdccRtxNative");
     for (int i = 1; stage->GetPrimAtPath(root); ++i) root = SdfPath("/__usdccRtxNative_" + std::to_string(i));
     UsdGeomScope::Define(stage, root);
-    auto privateCamera = UsdGeomCamera::Define(stage, root.AppendChild(TfToken("Camera")));
+    auto privateCamera = definePrivateCamera(stage, root.AppendChild(TfToken("Camera")), camera, light);
     const Camera view = cameraValues(camera);
-    privateCamera.MakeMatrixXform().Set(camera.cameraToWorld);
-    privateCamera.CreateProjectionAttr().Set(view.orthographic ? UsdGeomTokens->orthographic
-                                                               : UsdGeomTokens->perspective);
-    privateCamera.CreateFocalLengthAttr().Set(10.0f);
-    privateCamera.CreateHorizontalApertureAttr().Set(view.horizontal);
-    privateCamera.CreateVerticalApertureAttr().Set(view.vertical);
-    privateCamera.CreateClippingRangeAttr().Set(GfVec2f(view.nearClip, view.farClip));
-    if (light.on) {
-        // Unit exposure puts ovrtx's output in Storm's units; responsivity carries the
-        // multiplier, as ovrtx 0.6 ignores the `exposure` (EV) attribute.
-        privateCamera.CreateExposureFStopAttr().Set(1.0f);
-        privateCamera.CreateExposureTimeAttr().Set(1.0f);
-        privateCamera.CreateExposureIsoAttr().Set(100.0f);
-        privateCamera.CreateExposureResponsivityAttr().Set(float(light.multiplier));
-    }
     auto product = stage->DefinePrim(root.AppendChild(TfToken("Product")), TfToken("RenderProduct"));
     product.CreateAttribute(TfToken("resolution"), SdfValueTypeNames->Int2, false)
         .Set(GfVec2i(size.width(), size.height()));

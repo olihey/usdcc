@@ -9,8 +9,10 @@
 #include "usdcc/usd/render/render_job.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_spec.h"
+#include "usdcc/usd/render/scene_file_renderer.h"
 
 #include <pxr/base/gf/vec3f.h>
+#include <pxr/base/gf/vec4f.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/sphere.h>
@@ -469,4 +471,151 @@ USDCC_TEST(final_render_embree) {
     }
     CHECK(top > 50 && top > bottom * 2, "the sphere in the top half, the right way up: top %.0f, bottom %.0f", top, bottom);
     CHECK(difference / (64 * 48) < 0.03, "tiles give the frame a whole render gives: %.0f pixels differ", difference);
+}
+
+namespace {
+// Renders the whole frame whatever the tile, from the scene file: R = x / width, G = y / height,
+// B = the file's start time code. SceneFileRenderer cuts it to the tile.
+class WholeFrameFileRenderer : public SceneFileRenderer {
+public:
+    std::string id() const override { return "test.file"; }
+    std::string name() const override { return "File"; }
+    Capabilities capabilities() const override { return {true, true}; }
+    std::vector<std::string> namespaces() const override { return {"file"}; }
+    std::vector<RenderSettingField> settingsSchema() const override { return {}; }
+    std::vector<std::string> files;
+    std::vector<std::string> customized;
+
+protected:
+    void customizeScene(const UsdStageRefPtr& stage, SceneExport& scene, const RenderTask&) override {
+        stage->DefinePrim(SdfPath("/FileRendererWasHere"));
+        customized.push_back(scene.product.GetString());
+    }
+    std::unique_ptr<RenderTaskHandle> renderFile(const RenderTask& task, const SceneExport& scene, TaskCallbacks callbacks) override {
+        files.push_back(scene.file);
+        const UsdStageRefPtr stage = UsdStage::Open(scene.file);
+        const double time = stage ? stage->GetStartTimeCode() : -1.0;
+        GfVec2i resolution(0);
+        if (stage) UsdRenderProduct(stage->GetPrimAtPath(scene.product)).GetResolutionAttr().Get(&resolution);
+        FloatImage whole(resolution[0], resolution[1]);
+        for (int y = 0; y < whole.height; ++y)
+            for (int x = 0; x < whole.width; ++x) {
+                float* p = whole.row(y) + x * 4;
+                p[0] = float(x) / whole.width;
+                p[1] = float(y) / whole.height;
+                p[2] = float(time);
+                p[3] = 1.0f;
+            }
+        std::map<std::string, FloatImage> images;
+        images[task.aovs.front().name] = whole;
+        callbacks.finished(std::move(images));
+        return nullptr;
+    }
+};
+}  // namespace
+
+USDCC_TEST(final_render_scene_export) {
+    UsdStageRefPtr stage = testStage();
+    const SdfPath settings = createRenderSettings(stage);
+    UsdRenderSettings(stage->GetPrimAtPath(settings)).GetResolutionAttr().Set(GfVec2i(100, 50));
+    stage->GetPrimAtPath(settings).CreateAttribute(TfToken("file:quality"), SdfValueTypeNames->Int, true).Set(3);
+    setJobOption(stage->GetPrimAtPath(settings), jobattr::tiles, VtValue(GfVec2i(2, 1)));
+    Registered registered;
+    JobRequest request;
+    request.stage = stage;
+    request.currentTime = 2;
+    request.rendererOverride = "test.gradient";
+    RenderJobPtr job = makeRenderJob(request, nullptr);
+    CHECK(job && job->tasks.size() == 2, "a job in two tiles");
+    if (!job) return;
+
+    QTemporaryDir dir;
+    const RenderTask& right = job->tasks[1].task;
+    const SceneExport scene = exportRenderScene(right, dir.path().toStdString(), [](const UsdStageRefPtr& s, SceneExport&) {
+        s->DefinePrim(SdfPath("/Customized"));
+    });
+    CHECK(QFileInfo::exists(QString::fromStdString(scene.file)), "the scene written: %s", scene.file.c_str());
+    const UsdStageRefPtr written = UsdStage::Open(scene.file);
+    CHECK(written != nullptr, "and it opens");
+    if (!written) return;
+    std::string named;
+    written->GetMetadata(UsdRenderTokens->renderSettingsPrimPath, &named);
+    CHECK(scene.settings == settings && named == settings.GetString(), "the stage's own RenderSettings, named: %s", named.c_str());
+    int quality = 0;
+    written->GetPrimAtPath(settings).GetAttribute(TfToken("file:quality")).Get(&quality);
+    CHECK(quality == 3, "with its renderer settings");
+    const UsdRenderProduct product(written->GetPrimAtPath(scene.product));
+    GfVec2i resolution(0);
+    product.GetResolutionAttr().Get(&resolution);
+    SdfPathVector cameras;
+    product.GetCameraRel().GetForwardedTargets(&cameras);
+    CHECK(resolution == GfVec2i(100, 50) && cameras == SdfPathVector{SdfPath("/World/Cam")}, "the product's size and camera");
+    GfVec4f window(0.0f);
+    product.GetDataWindowNDCAttr().Get(&window);
+    CHECK(window == dataWindowNDC(right), "the tile as dataWindowNDC: %g %g %g %g", window[0], window[1], window[2], window[3]);
+    CHECK(window[0] > 0.4f && window[0] < 0.5f && window[1] == 0.0f && window[2] == 1.0f && window[3] == 1.0f,
+          "the right half, with its overlap");
+    CHECK(written->GetStartTimeCode() == 2.0 && written->GetEndTimeCode() == 2.0, "the frame as the time range");
+    CHECK(written->GetPrimAtPath(SdfPath("/Customized")).IsValid(), "and the renderer's own changes");
+    CHECK(!right.stage->GetPrimAtPath(SdfPath("/Customized")).IsValid(), "the job's snapshot is left alone");
+
+    // Without RenderSettings: made for the task, with a product and a color var.
+    UsdStageRefPtr bare = testStage();
+    JobRequest plain;
+    plain.stage = bare;
+    plain.rendererOverride = "test.gradient";
+    plain.viewportCamera = usdcc::usd::RenderCamera();
+    RenderJobPtr bareJob = makeRenderJob(plain, nullptr);
+    CHECK(bareJob != nullptr, "a job without RenderSettings");
+    if (!bareJob) return;
+    const SceneExport made = exportRenderScene(bareJob->tasks.front().task, dir.path().toStdString());
+    const UsdStageRefPtr madeStage = UsdStage::Open(made.file);
+    SdfPathVector vars;
+    UsdRenderProduct(madeStage->GetPrimAtPath(made.product)).GetOrderedVarsRel().GetForwardedTargets(&vars);
+    CHECK(made.settings == SdfPath("/__usdccRender/Settings") && vars.size() == 1, "settings made, with a product and its var: %s",
+          made.settings.GetText());
+    CHECK(!UsdRenderProduct(madeStage->GetPrimAtPath(made.product)).GetDataWindowNDCAttr().HasAuthoredValue(),
+          "no data window for a whole frame");
+}
+
+USDCC_TEST(final_render_scene_file_renderer) {
+    auto renderer = std::make_shared<WholeFrameFileRenderer>();
+    FinalRenderers::instance().add(renderer);
+    UsdStageRefPtr stage = testStage();
+    const SdfPath settings = createRenderSettings(stage);
+    const UsdPrim prim = stage->GetPrimAtPath(settings);
+    UsdRenderSettings(prim).GetResolutionAttr().Set(GfVec2i(30, 20));
+    setJobOption(prim, jobattr::renderer, VtValue(std::string("test.file")));
+    setJobOption(prim, jobattr::tiles, VtValue(GfVec2i(2, 2)));
+    QTemporaryDir dir;
+    setJobOption(prim, jobattr::output, VtValue((dir.path() + "/<stage>").toStdString()));
+    JobRequest request;
+    request.stage = stage;
+    request.currentTime = 3;
+    RenderJobPtr job = makeRenderJob(request, nullptr);
+    CHECK(job && job->tasks.size() == 4, "four tiles");
+    if (!job) {
+        FinalRenderers::instance().remove("test.file");
+        return;
+    }
+    RenderScheduler scheduler;
+    scheduler.addWorker(std::make_shared<LocalWorker>());
+    QImage frame;
+    QObject::connect(&scheduler, &RenderScheduler::frameRendered, [&frame](const QString&, int, const QImage& image) { frame = image; });
+    scheduler.submit(job);
+    CHECK(waitFor([&job]() { return ended(job); }, 5000) && job->status == RenderJob::Status::Done, "done: %s", job->error.c_str());
+    CHECK(renderer->files.size() == 4 && renderer->customized.size() == 4, "a scene per tile, each customized");
+    bool exact = frame.size() == QSize(30, 20);
+    for (int y = 0; y < 20 && exact; ++y) {
+        const float* row = reinterpret_cast<const float*>(frame.constScanLine(y));
+        for (int x = 0; x < 30 && exact; ++x) {
+            exact = std::abs(row[x * 4] - x / 30.0f) < 1e-5f && std::abs(row[x * 4 + 1] - y / 20.0f) < 1e-5f && row[x * 4 + 2] == 3.0f;
+        }
+    }
+    CHECK(exact, "whole frames cut to their tiles, stitched where they belong, at the frame's time");
+    QCoreApplication::processEvents();
+    CHECK(std::none_of(renderer->files.begin(), renderer->files.end(),
+                       [](const std::string& f) { return QFileInfo::exists(QString::fromStdString(f)); }),
+          "the scene files go with their tasks");
+    FinalRenderers::instance().remove("test.file");
 }

@@ -82,6 +82,7 @@ class RenderClient(QtCore.QObject):
 
     ready = QtCore.Signal(dict)  # the "ready" event's fields: version, api
     image = QtCore.Signal(QtGui.QImage, int, bool)  # the image, V-Ray's change index, and whether it is linear
+    result = QtCore.Signal(QtGui.QImage)  # a final render's image, linear (the "final" command)
     event = QtCore.Signal(str, dict)  # any other event: "loaded", "state", "log", "error"
     output = QtCore.Signal(str)  # a line the helper wrote to stderr
     finished = QtCore.Signal(str)  # the helper ended; why, "" when asked to
@@ -135,6 +136,10 @@ class RenderClient(QtCore.QObject):
                 else:
                     picture = QtGui.QImage(payload, width, height, width * 4, QtGui.QImage.Format.Format_RGBA8888)
                 self.image.emit(picture.copy(), header.get("change", 0), linear)
+            elif name == "result":
+                width, height = header["w"], header["h"]
+                picture = QtGui.QImage(payload, width, height, width * 16, QtGui.QImage.Format.Format_RGBA32FPx4)
+                self.result.emit(picture.copy())
             elif name == "ready":
                 self.ready.emit(header)
             else:

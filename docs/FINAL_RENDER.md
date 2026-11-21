@@ -1,8 +1,8 @@
 # Final Render
 
 Renders a stage's frames to files: one frame, or a frame range, with any renderer usdcc has.
-Every Hydra render delegate is one (Storm, Embree, Arnold, ...). Plugins add others, such as
-RTX and V-Ray (§7).
+Every Hydra render delegate is one (Storm, Embree, Arnold, ...). Plugins add others: RTX and
+V-Ray do (§3.2).
 
 - **What to render:** the stage's own `UsdRenderSettings` prim, which is also where the
   settings are kept, so they go with the file.
@@ -52,7 +52,8 @@ in the renderer's namespace:
 | Renderer | Namespace | Example |
 |---|---|---|
 | A Hydra delegate | Its plugin id without `Hd` and `RendererPlugin` | `embree:ty:maxBounces`, `storm:maxLights`, `arnold:AA_samples` |
-| A plugin renderer | Its own | `vray:...`, `omni:rtx:...` |
+| V-Ray | `vray` | `vray:noiseThreshold`, `vray:engine` |
+| RTX | `omni` | `omni:rtx:rendermode` (ovrtx's own), `omni:rtx:usdcc:samples` |
 
 - A key already in the namespace stays as it is (`arnold:AA_samples`); any other key gets the
   namespace in front.
@@ -113,6 +114,39 @@ A plugin adds one with `Host::addFinalRenderer()` and removes it when it's turne
 - **A stage without lights** gets Hydra's dome, as a viewport does.
 - **Read back:** each AOV's render buffer is mapped and turned into float RGBA. Hydra's rows run
   bottom to top. One-channel AOVs (depth) have the value in R, G and B.
+
+### 3.2 Renderers that read a USD file
+
+[scene_file_renderer.h](../src/cpp/usd/include/usdcc/usd/render/scene_file_renderer.h)
+
+Plugins don't share code with each other, so what RTX and V-Ray both need is here.
+`exportRenderScene()` writes a task's scene to a folder:
+- **The content:** a copy of the job's snapshot, so a task's changes don't reach the others.
+- **The RenderSettings:** the stage's own prim, kept and named in the layer's
+  `renderSettingsPrimPath`. Without one, `/__usdccRender/Settings` is made, beside the job's
+  private camera.
+- **On the settings and their first product:**
+  - the task's camera, resolution and pixel aspect (a product is made if there's none);
+  - the tile, as `dataWindowNDC`;
+  - a `color` RenderVar, if the product has none.
+- **Time:** the frame, as the layer's start and end time code.
+- **The renderer's own touches**, last.
+
+`SceneFileRenderer` is a `FinalRenderer` base built on it:
+- **A subclass implements** `customizeScene()` and `renderFile(task, scene, callbacks)`.
+- **The base** gives each task a temporary folder, removed with the task.
+- **Whole frames for a tile** are cut down to the tile, so a renderer that can't render a region
+  still fits.
+- **A Python renderer** gets the same export from `task.export_scene()` (§6.1).
+
+| | RTX ([RTX_RENDER.md](RTX_RENDER.md)) | V-Ray ([VRAY_RENDER.md](VRAY_RENDER.md) §10) |
+|---|---|---|
+| Built on | `SceneFileRenderer`, C++ | `usdcc.render.FinalRenderer`, Python |
+| Its touches | Emission scaled for light matching; a private camera from the task's camera at the frame; the product's `omni:rtx:rendermode`; an `HdrColor` var only | V-Ray shaders' list counts filled in |
+| Renders with | An engine of its own per task, with a CUDA-only bridge that reads the frame back; done at the sample or frame budget | The V-Ray helper, kept between tasks, in production mode (`final` command) |
+| Tiles | No: whole frames, until ovrtx's handling of `dataWindowNDC` has been checked | Yes: V-Ray's render region |
+| Settings | Mode, samples or frames, light matching, multiplier | Engine, noise threshold, min and max subdivs, GI |
+| AOVs | Color (HdrColor) | Color |
 
 ## 4. Jobs
 
@@ -235,16 +269,45 @@ render.cancel(job_id)
 The calls raise RuntimeError with the reason a job can't be made (no camera, a renderer that
 can't render here). The settings themselves are attributes, set with `Usd` as any others.
 
+### 6.1 A renderer in Python
+
+```python
+class MyRenderer(render.FinalRenderer):
+    id = "com.example.my-renderer"
+    name = "My Renderer"
+    namespaces = ("my",)
+    tiles = False
+
+    def settings_schema(self):
+        return [render.setting("my:samples", "Samples", "int", 64, minimum=1, maximum=4096)]
+
+    def start(self, task):
+        scene = task.export_scene()           # Scene: file, settings, product, camera
+        ...                                   # later, on the UI thread:
+        task.finished({"color": qimage})      # a float QImage per AOV; or task.failed(why)
+
+    def cancel(self, task):
+        ...
+
+render.register_renderer(MyRenderer())        # unregister_renderer(id) in deactivate()
+```
+
+- **`task`:**
+  - `frame`, `resolution`, `pixel_aspect`;
+  - `region` (x, y, width, height from the top left);
+  - `camera`, `render_settings`, `aovs`, `time_limit`;
+  - `settings` (the authored ones, by key);
+  - `progress(fraction, state)`;
+  - `active`, False once it has ended or been cancelled.
+- **Images:** a whole-frame image for a tile is cut to the tile.
+- **Settings:** `setting()` types are `bool`, `int`, `float`, `string`, `choice` and `color`.
+- **Hosting:** [scripted_final_renderer.cpp](../src/cpp/scripting/src/scripted_final_renderer.cpp)
+  hosts the instance. Renderers from Python are removed before Python stops.
+
 ## 7. Next
 
-This is milestone 1 of four.
+Milestones 1 (core and Hydra) and 2 (RTX and V-Ray) are done.
 
-- **2: RTX and V-Ray.**
-  - A shared app-side base for renderers that read a USD file (`SceneFileRenderer`), with the
-    scene export both plugins have now.
-  - RTX without a window, reading frames back to the CPU.
-  - V-Ray's helper with a production mode, region rendering and EXR output.
-  - Python renderers through `usdcc.render.register_renderer()`.
 - **3: transfers.** Chunked file transfers between peers (PEERS.md §7.3), and scene bundles
   made with `UsdUtilsComputeAllDependencies`.
 - **4: distributed rendering.**
@@ -269,6 +332,8 @@ This is milestone 1 of four.
 | `final_render_scheduler_retry_and_fail` | Two failures, then success; failing after three tries; Retry; Cancel; Clear Ended |
 | `final_render_job_errors` | An unknown renderer; no camera; the viewport's camera added to the snapshot only; a renderer without tiles |
 | `final_render_embree` | Embree renders a frame (with a depth AOV) without a GPU, the right way up; the same frame in 2 × 2 tiles matches it |
+| `final_render_scene_export` | The stage's RenderSettings kept and named; its renderer settings; the product's size, camera and tile as `dataWindowNDC`; the frame as the time range; the renderer's touches; the snapshot left alone; settings, product and var made when there are none |
+| `final_render_scene_file_renderer` | A renderer that renders whole frames from the file, in 2 × 2 tiles: cut, stitched exactly, at the frame's time; the files removed with their tasks |
 
 Also:
 - **`render_settings_panel`** (usdcc_ui_tests, [render_settings_panel_test.cpp](../tests/render_settings_panel_test.cpp)):
@@ -276,6 +341,21 @@ Also:
   the Render Queue listing a job and its cancelling.
 - **`python_render_api`** (usdcc_python_tests): `renderers()`; the errors; a job queued from
   settings made by script, and cancelled.
+- **`rtx_native_final`, `rtx_native_final_scene`** (usdcc_python_tests,
+  [rtx_native_final_test.cpp](../tests/rtx_native_final_test.cpp)): RTX with a fake engine:
+  - the prim's mode, budget and light matching reach the engine;
+  - the frame read back;
+  - the scene file's `omni:rtx:rendermode`, `HdrColor` var, private camera and RenderSettings;
+  - a missing runtime, and an engine error;
+  - a camera at a frame.
+- **`vray_final_render`** (usdcc_python_tests, [vray_render_plugin_test.cpp](../tests/vray_render_plugin_test.cpp)):
+  V-Ray with the helper's fake renderer:
+  - the renderer added and removed with the plugin;
+  - its settings list;
+  - two tiles rendered as regions by one helper and stitched exactly, with the prim's noise
+    threshold.
+
+A real ovrtx or V-Ray render hasn't been checked: neither SDK is on this machine.
 
 Storm's offscreen path needs OpenGL, which the tests' platform lacks; it was checked by hand
 in the app (F12 on `test_data/materials.usda`).

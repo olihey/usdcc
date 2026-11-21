@@ -171,15 +171,7 @@ protected:
         QAction* reset = menu->addAction("Reset Camera", this, [this] { m_navigation.reset(); publishNavigation(); });
         reset->setToolTip("Reset this RTX camera (Home over the image)");
     }
-    std::optional<QString> setupProblem() override {
-        const auto runtime = roots(m_host.folder);
-        for (auto& [name, root] :
-             {std::pair{QString("ovrtx"), runtime.rtx}, std::pair{QString("ovstage"), runtime.stage}})
-            if (!QFile::exists(root + "/bin/" + name + "-dynamic.dll"))
-                return QStringLiteral("Native RTX runtime missing: %1. Set %2 in runtime.json or USDCC_RTX_%3_ROOT.")
-                    .arg(root, name, name.toUpper());
-        return std::nullopt;
-    }
+    std::optional<QString> setupProblem() override { return runtimeProblem(runtimeRoots(m_host.folder)); }
     void startRender() override {
         try {
             if (m_engine && m_engine->isClosed()) m_engine.reset();
@@ -500,4 +492,15 @@ usdcc::usd::RenderViewPanel* createRtxPanel(usdcc::plugin::Host& host, usdcc::us
     return new RtxRenderPanel(host, std::move(stage), title, parent, std::move(engine), std::move(presentation));
 }
 void quiesceRtxPanels() { for (auto& panel : panels) if (panel) panel->quiesce(); }
+RuntimeRoots runtimeRoots(const std::filesystem::path& pluginFolder) {
+    const Roots found = roots(pluginFolder);
+    return {found.rtx, found.stage};
+}
+std::optional<QString> runtimeProblem(const RuntimeRoots& runtime) {
+    for (auto& [name, root] : {std::pair{QString("ovrtx"), runtime.rtx}, std::pair{QString("ovstage"), runtime.stage}})
+        if (!QFile::exists(root + "/bin/" + name + "-dynamic.dll"))
+            return QStringLiteral("Native RTX runtime missing: %1. Set %2 in runtime.json or USDCC_RTX_%3_ROOT.")
+                .arg(root, name, name.toUpper());
+    return std::nullopt;
+}
 } // namespace usdcc::rtx

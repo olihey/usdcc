@@ -10,6 +10,24 @@ A render takes its settings from the stage's RenderSettings prim (the one named 
 stage's renderSettingsPrimPath metadata, else the first, else Settings > Final Render's
 defaults), and is queued: the calls return at once, and the Render Queue shows it.
 
+A plugin adds a renderer of its own by subclassing ``FinalRenderer`` and calling
+``register_renderer()`` (docs/FINAL_RENDER.md section 6.1):
+
+    class MyRenderer(render.FinalRenderer):
+        id = "com.example.my-renderer"
+        name = "My Renderer"
+        namespaces = ("my",)
+
+        def settings_schema(self):
+            return [render.setting("my:samples", "Samples", "int", 64, minimum=1, maximum=4096)]
+
+        def start(self, task):
+            scene = task.export_scene()      # the task's USD file, with its RenderSettings
+            ...                              # render it; later:
+            task.finished({"color": qimage})  # a float QImage per AOV
+
+    render.register_renderer(MyRenderer())
+
 Needs the running app.
 """
 
@@ -98,3 +116,136 @@ def job(id):
 def cancel(id):
     """Stops a queued or running job; frames already written stay."""
     _app().cancel_render(id)
+
+
+# --- Renderers from Python (docs/FINAL_RENDER.md section 6.1).
+
+
+def setting(attribute, label, type="float", default=None, group="", help="", minimum=None, maximum=None,
+            choices=None, key=None):
+    """One entry of ``FinalRenderer.settings_schema()``: the attribute on the RenderSettings prim
+    ("my:samples"), its label, its type ("bool", "int", "float", "string", "choice" or "color", an
+    (r, g, b) tuple), its default, and what ``task.settings`` has it by (``key``, the attribute by
+    default)."""
+    return {"attribute": attribute, "label": label, "type": type, "default": default, "group": group,
+            "help": help, "minimum": minimum, "maximum": maximum, "choices": choices, "key": key}
+
+
+class Scene:
+    """What ``Task.export_scene()`` wrote: ``file``, and the paths of its ``settings``,
+    ``product`` and ``camera`` prims."""
+
+    __slots__ = ("file", "settings", "product", "camera")
+
+    def __repr__(self):
+        return f"Scene({self.file!r})"
+
+
+class Task:
+    """One task: a frame of a job, or a tile of one.
+
+    - ``frame``, ``resolution`` (width, height) and ``pixel_aspect``;
+    - ``region``: (x, y, width, height) of the image to render, in pixels from the top left; the
+      whole image unless the job has tiles;
+    - ``camera`` and ``render_settings``: prim paths;
+    - ``aovs``: (name, source name, USD type) of each RenderVar;
+    - ``settings``: the renderer's settings that are authored, by key;
+    - ``time_limit``: seconds, 0 for until it's done.
+
+    Report with ``progress()``, then ``finished()`` or ``failed()``, once, on the UI thread.
+    ``active`` is False once it has ended or was cancelled."""
+
+    def __init__(self, native):
+        self._native = native
+
+    def __getattr__(self, name):
+        return getattr(self._native, name)
+
+    def export_scene(self):
+        """Writes the task's scene, a .usdc in a folder that goes with the task: the job's stage
+        with its RenderSettings prim, and the task's camera, resolution, tile (dataWindowNDC) and
+        frame (the start and end time code) on it. Returns a ``Scene``."""
+        scene = Scene()
+        scene.file, scene.settings, scene.product, scene.camera = self._native.export_scene()
+        return scene
+
+    def progress(self, fraction, state=""):
+        """How far it is, 0 to 1 (negative when it can't tell), and what it's doing."""
+        self._native.progress(float(fraction), str(state))
+
+    def finished(self, images):
+        """Done: ``images`` maps each AOV's name to a float QImage (Format_RGBA32FPx4 or
+        RGBA16FPx4, linear), of the region's size or of the whole image."""
+        import shiboken6
+
+        self._native.finished({name: shiboken6.getCppPointer(image)[0] for name, image in images.items()})
+
+    def failed(self, error):
+        self._native.failed(str(error))
+
+
+class FinalRenderer:
+    """A renderer for final renders. Subclass it, set ``id``, ``name`` and ``namespaces`` (where
+    its settings are on a RenderSettings prim), and ``tiles`` if it can render a region, and
+    implement ``start()``."""
+
+    id = ""
+    name = ""
+    namespaces = ()
+    tiles = False
+
+    def setup_problem(self):
+        """Why it can't render here, or None."""
+        return None
+
+    def settings_schema(self):
+        """Its settings, as ``setting()`` makes them, for the Render Settings panel."""
+        return []
+
+    def start(self, task):
+        """Renders ``task`` (a ``Task``), reporting on it as it goes. Return at once."""
+        raise NotImplementedError
+
+    def cancel(self, task):
+        """Stops ``task``. Nothing it reports afterwards is used."""
+
+
+class _Adapter:
+    """What the app holds: forwards to the renderer with ``Task``s."""
+
+    def __init__(self, renderer):
+        self._renderer = renderer
+        self._tasks = {}
+        self.id = renderer.id
+        self.name = renderer.name or renderer.id
+        self.namespaces = tuple(renderer.namespaces)
+        self.tiles = bool(renderer.tiles)
+
+    def setup_problem(self):
+        return self._renderer.setup_problem()
+
+    def settings_schema(self):
+        return list(self._renderer.settings_schema())
+
+    def start(self, native):
+        task = Task(native)
+        self._tasks[id(native)] = task
+        self._renderer.start(task)
+
+    def cancel(self, native):
+        task = self._tasks.pop(id(native), None)
+        if task is not None:
+            self._renderer.cancel(task)
+
+
+def register_renderer(renderer):
+    """Adds ``renderer`` (a ``FinalRenderer``) to the app's final renderers, replacing one with
+    its id. Remove it in the plugin's ``deactivate()``."""
+    if not isinstance(renderer, FinalRenderer):
+        raise TypeError("register_renderer() needs a FinalRenderer, not %s" % type(renderer).__name__)
+    return _app().register_final_renderer(_Adapter(renderer))
+
+
+def unregister_renderer(id):
+    """Removes the final renderer with ``id``."""
+    _app().unregister_final_renderer(id)

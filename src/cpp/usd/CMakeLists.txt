@@ -331,6 +331,8 @@ add_library(usdcc_usd_ui SHARED
     src/render/render_settings_view_panel.cpp
     include/usdcc/usd/render/render_queue_panel.h
     src/render/render_queue_panel.cpp
+    include/usdcc/usd/render/scene_file_renderer.h
+    src/render/scene_file_renderer.cpp
 )
 # The Outliner's prim icons (see prim_icons.cpp), as a library for the reason in
 # src/cpp/ui/CMakeLists.txt.

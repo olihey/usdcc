@@ -211,7 +211,9 @@ target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
     ../src/plugins/rtx_render_native/stage_bridge.cpp
     ../src/plugins/rtx_render_native/navigation.cpp
     ../src/plugins/rtx_render_native/runtime_identity.cpp
-    ../src/plugins/rtx_render_native/rtx_panel.cpp)
+    ../src/plugins/rtx_render_native/rtx_panel.cpp
+    ../src/plugins/rtx_render_native/rtx_final.cpp
+    rtx_native_final_test.cpp)
 target_include_directories(usdcc_python_tests PRIVATE ../src/plugins/rtx_render_native)
 if(TARGET rtx_render_native)
     target_sources(usdcc_python_tests PRIVATE rtx_native_plugin_test.cpp)

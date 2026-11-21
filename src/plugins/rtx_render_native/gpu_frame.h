@@ -2,6 +2,7 @@
 #include <QSize>
 #include <QString>
 #include <memory>
+#include <vector>
 namespace usdcc::usd {
 class ImageTransform;
 }
@@ -17,5 +18,11 @@ public:
     virtual QSize size() const = 0;
     virtual bool copied() const = 0;
     virtual void save(const QString& file) const = 0;
+    // The frame as linear float RGBA, top row first, for a frame whose pixels are on the CPU
+    // (the headless bridge's, for final renders). False for one that isn't, or isn't linear.
+    virtual bool readLinear(std::vector<float>& rgba) const {
+        (void)rgba;
+        return false;
+    }
 };
 }

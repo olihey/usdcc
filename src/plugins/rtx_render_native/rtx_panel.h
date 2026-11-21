@@ -37,4 +37,12 @@ inline constexpr double kMinLightMultiplier = 0.001;
 inline constexpr double kMaxLightMultiplier = 1000.0;
 void defineRtxSettings();
 void quiesceRtxPanels();
+// Where ovrtx and ovstage are: USDCC_RTX_*_ROOT, runtime.json beside the plugin, or runtime/
+// under its folder (docs/RTX_RENDER.md, Setup).
+struct RuntimeRoots {
+    QString rtx, stage;
+};
+RuntimeRoots runtimeRoots(const std::filesystem::path& pluginFolder);
+// Why RTX can't load from `roots`, or nothing.
+std::optional<QString> runtimeProblem(const RuntimeRoots& roots);
 }

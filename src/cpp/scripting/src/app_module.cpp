@@ -69,6 +69,9 @@ namespace usdcc::scripting {
 
 // The Python class of a render view panel's handle (scripted_render_view_panel.cpp).
 void bindRenderViewPanelHandle(pybind11::module_& m);
+// Final renderers from Python (scripted_final_renderer.cpp).
+void bindFinalRenderers(pybind11::module_& m);
+void removeScriptedFinalRenderers();
 
 namespace {
 const AppContext* s_context = nullptr;
@@ -86,6 +89,10 @@ AppContextScope::~AppContextScope() {
     s_eventConnections.clear();
     usdcc::usd::PrimMenuEntries::instance().clear();
     usdcc::usd::ViewportMenuEntries::instance().clear();
+#if USDCC_HAS_PYTHON
+    // They call into Python, which goes next.
+    if (!m_outer) removeScriptedFinalRenderers();
+#endif
 }
 
 const AppContext* currentAppContext() { return s_context; }
@@ -467,6 +474,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         },
         py::arg("id"), py::arg("display_name"), py::arg("cls"));
     bindRenderViewPanelHandle(m);
+    bindFinalRenderers(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {
