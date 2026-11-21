@@ -179,3 +179,62 @@ answer came from. A room that needs an invitation isn't announced.
 
 **Links:** `usdcc://join/<address>:<port>#k=<fingerprint>&s=<secret>`. The part after `#` is
 URL-encoded and never leaves the two programs.
+
+## 9. Transfers
+
+A bundle of files sent to one member (PEERS.md §7.3), on a channel the sending feature picks
+(`transfer` unless it says otherwise). Every message names one member in `to`, so the host passes
+it to that member alone, unnumbered and outside the history (§5). Each body has `id`, the
+transfer's id: 1 to 64 of `A-Z a-z 0-9 _ -`, chosen by the sender (a UUID).
+
+**The manifest** is `[{path, size, sha256}]`, in order. `path` is relative, with `/`: no empty
+part, `.` or `..`, no `\`, `:`, `<>"|?*` or control character, no part that ends in a dot or a
+space or is a name Windows keeps (`con`, `prn`, `aux`, `nul`, `com0`–`com9`, `lpt0`–`lpt9`, with
+any extension), at most 1024 characters. No two paths may differ only in case, and no file may
+also be a folder of another. `sha256` is 64 lower-case hex characters. The bundle's **hash** is
+the sha256, in lower-case hex, of the manifest written as compact JSON with each object's keys in
+order (`path`, `sha256`, `size`), as Qt writes it.
+
+**Pieces.** With a piece size *c* (1 KB to 1 MB), each file of size *s* is ⌈*s*/*c*⌉ pieces, of
+*c* bytes but the last; an empty file has none. Pieces are numbered from 0 across the files in
+order: piece *i* is in the file whose first piece is the last one at or before *i*.
+
+| Type | Way | Body | Raw bytes |
+|---|---|---|---|
+| `offer` | Sender → receiver | `{id, files, chunk}`: the manifest, and *c* | |
+| `accept` | Receiver → sender | `{id, next}`: send from piece `next` | |
+| `have` | Receiver → sender | `{id}`: the bundle is here already; nothing to send | |
+| `chunk` | Sender → receiver | `{id, i, f, o}`: piece `i`, in file `f` (its index) at offset `o` | The piece |
+| `ack` | Receiver → sender | `{id, next}`: every piece before `next` arrived | |
+| `done` | Receiver → sender | `{id}`: every file arrived and matched its sha256 | |
+| `refuse` | Receiver → sender | `{id, reason}`: the offer is turned down, or the transfer can't go on | |
+| `cancel` | Either way | `{id, reason}`: stopped | |
+
+**The receiver**, offered a bundle:
+
+1. Refuses it (`refuse`) if the sender is a guest, the manifest breaks a rule above, *c* is out of
+   range, it is over the inbox's limits (64 GB and 100,000 files to start with) or its disk's free
+   space, or the inbox's owner says no. A manifest it already has (`<inbox>/<hash>/`) gets `have`.
+2. Otherwise writes into `<inbox>/<hash>.part/`, and answers `accept` with the first piece it
+   doesn't have: 0, or further for a part from before (a broken transfer of the same bundle, from
+   anyone). Files completed and checked are listed in `<inbox>/<hash>.verified`.
+3. Takes pieces in order. One it has is ignored; one after a gap gets `accept` with the missing
+   piece (once a second at most). A piece whose `f`, `o` or length don't fit, or a file that
+   doesn't match its sha256 when its last piece arrives, ends it with `refuse`, and that file is
+   deleted.
+4. Acknowledges with `ack`, gathered over 20 ms. After the last piece, moves the part to
+   `<inbox>/<hash>/` and sends `done`.
+
+An `offer` again with the same `id` is answered with where it is: `accept` (not again within 2 s
+of the last one for the same piece), `done`, `refuse` or `cancel`.
+
+**The sender** starts at `next` whenever an `accept` comes, also going back. It sends while what
+is sent and not acknowledged is under its window (4 MB), its own send queue under 2 MB, and its
+room's pieces under 100 a second. `have` or `done` ends it.
+
+**Breaks.** The side whose connection to the host was restored speaks first: the receiver with
+`accept`, the sender with `offer`. A sender that hears nothing for 5 s sends `offer` again. Either
+side gives up after 2 minutes of silence, or when the other leaves the room. A receiver keeps the
+part unless it was cancelled.
+
+**Cancelling** (`cancel`) ends it at both ends; the receiver deletes the part.

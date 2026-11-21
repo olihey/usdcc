@@ -1,8 +1,9 @@
 #pragma once
 
 // What the usdcc_peers tests share (peers_test.cpp, peers_rooms_test.cpp,
-// peers_discovery_test.cpp): rooms on 127.0.0.1, a member on a thread of its own that
-// the test can stop, and a raw WebSocket that speaks the protocol by hand.
+// peers_discovery_test.cpp, peers_transfer_test.cpp): rooms on 127.0.0.1, a member on a
+// thread of its own that the test can stop, a raw WebSocket that speaks the protocol by
+// hand, and a proxy that can cut a member off.
 
 #include "test_harness.h"
 
@@ -13,6 +14,8 @@
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QSemaphore>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTest>
 #include <QThread>
 #include <QWebSocket>
@@ -205,6 +208,70 @@ struct RawMember {
         return result;
     }
 };
+
+// Passes bytes between members and a host, keeping a copy, and can cut them apart.
+class Proxy : public QObject {
+public:
+    explicit Proxy(quint16 target) : m_target(target) {
+        connect(&m_server, &QTcpServer::newConnection, this, [this] {
+            while (QTcpSocket* in = m_server.nextPendingConnection()) {
+                auto* out = new QTcpSocket(this);
+                in->setParent(this);
+                m_pairs.append(std::make_pair(in, out));
+                connect(in, &QTcpSocket::readyRead, this, [this, in, out] {
+                    const QByteArray data = in->readAll();
+                    captured += data;
+                    out->write(data);
+                });
+                connect(out, &QTcpSocket::readyRead, this, [this, in, out] {
+                    const QByteArray data = out->readAll();
+                    captured += data;
+                    in->write(data);
+                });
+                connect(in, &QTcpSocket::disconnected, out, &QTcpSocket::disconnectFromHost);
+                connect(out, &QTcpSocket::disconnected, in, &QTcpSocket::disconnectFromHost);
+                out->connectToHost(QHostAddress::LocalHost, m_target);
+            }
+        });
+        resume();
+    }
+    QString address() const { return QStringLiteral("127.0.0.1:%1").arg(m_port); }
+    // Drops every connection, and takes none until resume().
+    void cut() {
+        m_server.close();
+        for (const auto& [in, out] : m_pairs) {
+            in->abort();
+            out->abort();
+        }
+        m_pairs.clear();
+    }
+    void resume() {
+        m_server.listen(QHostAddress::LocalHost, m_port);
+        m_port = m_server.serverPort();
+    }
+
+    QByteArray captured;
+
+private:
+    quint16 m_target;
+    quint16 m_port = 0;
+    QTcpServer m_server;
+    QList<std::pair<QTcpSocket*, QTcpSocket*>> m_pairs;
+};
+
+// Joins at `address` (a proxy's), and waits until the host has welcomed or refused it.
+inline std::unique_ptr<Room> joinThrough(const QString& address, const QString& name, const QString& secret,
+                                         QString* closedReason = nullptr) {
+    JoinOptions options;
+    options.profile.name = name;
+    options.secret = secret;
+    std::unique_ptr<Room> room(Room::join(address, options));
+    if (closedReason) {
+        QObject::connect(room.get(), &Room::closed, room.get(), [closedReason](const QString& r) { *closedReason = r; });
+    }
+    waitUntil([&] { return room->state() != Room::State::Connecting; });
+    return room;
+}
 
 inline PeerId idOf(const Room& host, const QString& name) {
     for (const Peer& peer : host.peers()) {
