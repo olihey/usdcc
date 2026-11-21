@@ -149,6 +149,13 @@ jobs:
 
       - name: Build OpenUSD
         if: steps.published.outputs.found != 'true'
+        env:
+          # The windows-11-arm image has CMake 4, which refuses projects asking
+          # for CMake < 3.5 — among them the yaml-cpp and expat that
+          # OpenColorIO 2.2.1 builds itself as nested ExternalProjects, where
+          # build_usd.py's own CMake flags don't reach. CMake 4 reads this from
+          # the environment in every nested configure too; CMake 3 ignores it.
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
           # deps/usd.json's flags as tools/ci/usd_asset.py adapts them (--onetbb on ARM64).
           $flags = python -c "import json, sys; sys.path.insert(0, 'tools/ci'); import usd_asset; print(json.dumps(usd_asset.platform_flags(json.load(open('deps/usd.json'))['flags'])))" | ConvertFrom-Json
