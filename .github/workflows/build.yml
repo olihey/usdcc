@@ -1,4 +1,4 @@
-# Builds usdcc on Windows and Linux (x64 and arm64) against the prebuilt OpenUSD that
+# Builds usdcc on Windows and Linux, x64 and arm64, against the prebuilt OpenUSD that
 # deps-usd.yml publishes, and runs the tests (docs/CI.md §4): for a pull
 # request, whose merge it gates, and for each push to master. vcpkg's packages
 # (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
@@ -24,12 +24,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # windows and linux (x64) are master's required checks, linux-arm64 isn't: a
-  # pull request is merged, by GitHub's auto-merge, once they pass, and stays open when one fails (docs/RELEASE.md
-  # §8). A job that is renamed has to be renamed in master's protection too.
+  # windows and linux (x64) are master's required checks; windows-arm64 and
+  # linux-arm64 aren't. A pull request is merged, by GitHub's auto-merge, once
+  # the required ones pass, and stays open when one fails (docs/RELEASE.md §8).
+  # A job that is renamed has to be renamed in master's protection too.
+  #
+  # Twice, as the linux job: x64, whose check keeps the name windows, and arm64
+  # on GitHub's windows-11-arm runner, checked as windows-arm64. tools/_common.py
+  # picks the triplet (arm64-windows), the OpenUSD and PySide6 assets (win-arm64)
+  # and Visual Studio's -A by the machine.
   windows:
     # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
-    runs-on: windows-2022
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runner: windows-2022
+            arch: x64
+            logs: vcpkg-logs
+          - name: windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+            logs: vcpkg-logs-windows-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -49,6 +68,15 @@ jobs:
       - name: Fetch vcpkg's full history
         run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 assets.
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: arm64
+
       - name: Name the OpenUSD asset
         id: asset
         run: python tools/ci/usd_asset.py --github-output
@@ -59,6 +87,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: ${{ matrix.arch }}
 
       - name: Download OpenUSD
         run: |
@@ -133,8 +162,9 @@ jobs:
           ctest --test-dir build -C RelWithDebInfo --verbose --timeout 900
           if ($LASTEXITCODE) { throw 'tests failed' }
 
+      # x64 only, as on Linux.
       - name: Blender distribution candidate checks
-        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: matrix.arch == 'x64' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         run: |
           python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
           if ($LASTEXITCODE) { throw 'candidate deployment failed' }
@@ -144,7 +174,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'benchmark failed' }
 
       - name: Blender verification reports
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: always() && matrix.arch == 'x64' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         uses: actions/upload-artifact@v4
         with:
           name: blender-verification-windows
@@ -198,7 +228,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vcpkg-logs
+          name: ${{ matrix.logs }}
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log

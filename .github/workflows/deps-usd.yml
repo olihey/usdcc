@@ -2,7 +2,8 @@
 # prerelease asset, which usdcc's CI downloads and plugin authors build against
 # (docs/CI.md). Slow (hours), so it only runs when the pin changes or by hand,
 # and each job skips the build when its asset for the current pin already
-# exists. One zip per platform (win64, linux-x64, linux-arm64), in the same release.
+# exists. One zip per platform (win64, win-arm64, linux-x64, linux-arm64), in the
+# same release.
 name: OpenUSD
 
 on:
@@ -33,10 +34,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Once per architecture: tools/_common.py names the asset win64 or win-arm64 by
+  # the machine. The windows-11-arm image has Visual Studio 2022 too.
   windows:
     # Pinned, never windows-latest: windows-2025 has moved to Visual Studio 2026,
     # and the build has to use the same toolset as usdcc (Visual Studio 2022).
-    runs-on: windows-2022
+    name: windows (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2022
+            vs_arch: x64
+            log: build_usd-log
+          - arch: arm64
+            runner: windows-11-arm
+            vs_arch: ARM64
+            log: build_usd-log-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     defaults:
       run:
@@ -47,6 +63,15 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 asset.
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: arm64
 
       - name: Name the asset
         id: asset
@@ -72,6 +97,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: ${{ matrix.arch }}
 
       - name: Show free disk space
         if: steps.published.outputs.found != 'true'
@@ -95,8 +121,10 @@ jobs:
       - name: Build OpenUSD
         if: steps.published.outputs.found != 'true'
         run: |
-          $spec = Get-Content -Raw deps/usd.json | ConvertFrom-Json
-          python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($spec.flags) `
+          # deps/usd.json's flags as tools/ci/usd_asset.py adapts them (--onetbb on ARM64).
+          $flags = python -c "import json, sys; sys.path.insert(0, 'tools/ci'); import usd_asset; print(json.dumps(usd_asset.platform_flags(json.load(open('deps/usd.json'))['flags'])))" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'no flags' }
+          python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($flags) `
             --src "$env:WORK\src" --build "$env:WORK\build" $env:USD_INSTALL
           if ($LASTEXITCODE) {
             Get-Content "$env:WORK\src\log.txt" -Tail 200 -ErrorAction SilentlyContinue
@@ -107,7 +135,7 @@ jobs:
         if: failure() && steps.published.outputs.found != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: build_usd-log
+          name: ${{ matrix.log }}
           path: |
             C:\b\src\log.txt
             C:\b\build\**\log.txt
@@ -150,7 +178,7 @@ jobs:
           $sdk = "$env:RUNNER_TEMP\usd-sdk"
           7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$sdk" | Select-Object -Last 2
           $build = "$env:RUNNER_TEMP\usd-sdk-check"
-          cmake -S tools/ci/usd-sdk-check -B $build -G 'Visual Studio 17 2022' -A x64 "-DUSD_INSTALL=$sdk"
+          cmake -S tools/ci/usd-sdk-check -B $build -G 'Visual Studio 17 2022' -A ${{ matrix.vs_arch }} "-DUSD_INSTALL=$sdk"
           if ($LASTEXITCODE) { throw 'configure failed' }
           cmake --build $build --config Release --parallel
           if ($LASTEXITCODE) { throw 'build failed' }
@@ -168,6 +196,7 @@ jobs:
           - Patches: $($spec.patches -join ', ')
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
+          - ``win-arm64``: Python $($spec.python) arm64, Visual Studio 2022, with ``--onetbb`` (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
           - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
@@ -188,7 +217,7 @@ jobs:
               --prerelease --target $env:GITHUB_SHA `
               --title 'OpenUSD ${{ steps.asset.outputs.base }}' --notes $notes
             if ($LASTEXITCODE) {
-              # A linux job made the release meanwhile: add to it.
+              # Another job made the release meanwhile: add to it.
               gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
               if (-not $LASTEXITCODE) { gh release edit '${{ steps.asset.outputs.tag }}' --notes $notes }
             }

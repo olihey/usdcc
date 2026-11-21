@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (  # noqa: E402
-    CONFIGURATIONS, EXE_SUFFIX, MACOS, REPO, VCPKG_BOOTSTRAP, VCPKG_EXE, VCPKG_TRIPLET, WINDOWS,
+    CONFIGURATIONS, EXE_SUFFIX, MACOS, REPO, VCPKG_BOOTSTRAP, VCPKG_EXE, VCPKG_TRIPLET, VS_ARCH, WINDOWS,
     cache_on, cache_value, fail, remove_tree, run)
 
 BUILD_DIR = REPO / "build"
@@ -40,7 +40,7 @@ def parser(description=None):
     result.add_argument("--configuration", choices=CONFIGURATIONS, default="RelWithDebInfo",
                         help="CMake build configuration (default: RelWithDebInfo)")
     result.add_argument("--generator", help='CMake generator (default on Windows: "Visual Studio 17 2022")')
-    result.add_argument("--arch", default="x64", help="target architecture, for Visual Studio's -A (default: x64)")
+    result.add_argument("--arch", default=VS_ARCH, help=f"target architecture, for Visual Studio's -A (default: {VS_ARCH}, this machine's)")
     result.add_argument("--usd-install", metavar="DIR",
                         help="an OpenUSD install (holding pxrConfig.cmake); the build remembers it")
     result.add_argument("--usdcc-version", default="", metavar="VERSION",

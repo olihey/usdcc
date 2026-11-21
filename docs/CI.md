@@ -356,12 +356,20 @@ has how Linux was brought up, in WSL 2):
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
   `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
 
-**arm64.** `deps-usd.yml`'s and `build.yml`'s `linux` jobs also run on GitHub's
-`ubuntu-24.04-arm` runner. `tools/_common.py` picks `arm64-linux-dynamic` and names the
-OpenUSD asset `linux-arm64` there, so nothing else changes. Its `build.yml` check is
-`linux-arm64`, not one of master's required checks; the x64 one keeps the name `linux`.
-No USD plugin packs are built for it yet (their pins list `linux-x64`), so it builds
-without them, and `release.yml` has no arm64 job yet.
+**arm64.** `deps-usd.yml`'s and `build.yml`'s `linux` and `windows` jobs also run on
+GitHub's Arm runners, `ubuntu-24.04-arm` and `windows-11-arm`. `tools/_common.py` picks
+the vcpkg triplet (`arm64-linux-dynamic`, `arm64-windows`), the asset names (`linux-arm64`,
+`win-arm64`) and Visual Studio's `-A ARM64` by the machine, so the jobs are the x64 ones
+as a matrix. Their `build.yml` checks are `linux-arm64` and `windows-arm64`, not among
+master's required checks; the x64 ones keep the names `linux` and `windows`.
+
+- On Windows ARM64, OpenUSD's `build_usd.py` requires `--onetbb`, which
+  `tools/ci/usd_asset.py` adds to `deps/usd.json`'s flags there.
+- The tools run before `actions/setup-python` on the runner's own Python; the Windows
+  Arm jobs set up an arm64 Python first, so they name the arm64 assets.
+- Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`),
+  PySide6 (`deps-pyside.yml`, so `windows-arm64` has no `usdcc.ui`), the Blender
+  distribution checks, and `release.yml`. A missing pack or PySide6 is a warning, as on x64.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.

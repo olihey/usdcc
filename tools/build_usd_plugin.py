@@ -59,7 +59,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
-from _common import ASSET_PLATFORM, LINUX, REPO, WINDOWS, copy_file, copy_tree, fail, remove_tree, run  # noqa: E402
+from _common import ASSET_PLATFORM, LINUX, REPO, VS_ARCH, WINDOWS, copy_file, copy_tree, fail, remove_tree, run  # noqa: E402
 from build_usd import fetch  # noqa: E402
 import usd_asset  # noqa: E402
 import usd_licenses  # noqa: E402
@@ -288,7 +288,7 @@ def main(argv=None):
     command = ["cmake", "-S", source, "-B", build]
     if WINDOWS:
         # The toolset OpenUSD and usdcc are built with (docs/CI.md section 2).
-        command += ["-G", "Visual Studio 17 2022", "-A", "x64"]
+        command += ["-G", "Visual Studio 17 2022", "-A", VS_ARCH]
     else:
         command += ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
     command += [
