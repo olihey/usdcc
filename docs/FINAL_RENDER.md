@@ -394,6 +394,9 @@ transfers ([PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §9) on `org.usdcc.render/file
 - **Output on a shared path:** nodes always send the images back; they never write the outputs
   themselves.
 - **One node, one task:** a node renders one task at a time, whatever its cores or GPUs.
+- **A node without a window:** every node is a usdcc instance with its window open. A
+  program of its own for machines with no screen is planned in [RENDER_NODE.md](RENDER_NODE.md),
+  with a queue server that keeps jobs when their submitter closes and writes their frames.
 
 ## 8. Tests
 
