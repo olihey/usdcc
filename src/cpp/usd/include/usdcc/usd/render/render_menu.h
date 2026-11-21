@@ -1,7 +1,7 @@
 #pragma once
 
 // The Render menu (docs/FINAL_RENDER.md §5): Render Frame, Render Animation, Render Settings,
-// Render Queue; and submitRender(), which the menu, the Render Settings panel and Python share.
+// Render Queue, Swarm; and submitRender(), which the menu, the Render Settings panel and Python share.
 
 #include "usdcc/core/export.h"
 #include "usdcc/usd/render/render_job.h"
@@ -36,6 +36,8 @@ USDCC_USD_UI_API RenderJobPtr submitRender(const usdcc::usd::StageRefPtr& stage,
 
 // What submitRender() calls once a job is queued: shows the Render Queue (main.cpp's).
 USDCC_USD_UI_API void setShowRenderQueue(std::function<void()> show);
+// What Render > Swarm calls: shows the Swarm panel (main.cpp's).
+USDCC_USD_UI_API void setShowSwarm(std::function<void()> show);
 
 // The Render menu, for the current stage. "renderSettings" opens with `panelTypes`.
 USDCC_USD_UI_API QMenu* createRenderMenu(usdcc::usd::StageManager* stageManager, usdcc::ui::ViewPanelRegistry* panelTypes,

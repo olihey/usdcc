@@ -11,6 +11,7 @@
 #include <pxr/pxr.h>
 #include <pxr/usd/ar/resolver.h>
 
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -29,6 +30,7 @@ using usdcc::peers::Peer;
 using usdcc::peers::PeerId;
 using usdcc::peers::PeerState;
 using usdcc::peers::Room;
+using usdcc::peers::RoomType;
 using usdcc::peers::Transfer;
 using usdcc::peers::TransferInbox;
 using usdcc::peers::TransferManifest;
@@ -39,6 +41,7 @@ namespace {
 
 RenderNetwork* s_instance = nullptr;
 constexpr int kProgressIntervalMs = 250;
+constexpr int kAdvertiseIntervalMs = 500;  // what it renders, its progress
 
 QString q(const std::string& s) { return QString::fromStdString(s); }
 std::string s(const QString& q) { return q.toStdString(); }
@@ -193,6 +196,19 @@ RenderNode RenderNode::fromJson(Room* room, const Peer& peer, const QJsonObject&
         node.renderers.push_back({s(o["id"].toString()), s(o["name"].toString()), o["tiles"].toBool()});
     }
     for (const QJsonValue& scheme : json["schemes"].toArray()) node.schemes.append(scheme.toString());
+    const QJsonObject current = json["current"].toObject();
+    if (!current.isEmpty()) {
+        RenderNode::Current c;
+        c.title = current["title"].toString();
+        c.scene = current["scene"].toString();
+        c.renderer = current["renderer"].toString();
+        c.from = current["from"].toString();
+        c.frame = current["frame"].toDouble();
+        c.fraction = current["fraction"].toDouble(-1.0);
+        c.startedMs = current["startedMs"].toInteger();
+        c.forPeer = current["forPeer"].toBool();
+        node.current = c;
+    }
     return node;
 }
 
@@ -203,7 +219,7 @@ struct RenderNetwork::RoomLink {
     Channel* jobs = nullptr;
     PeerState* state = nullptr;
     TransferInbox* inbox = nullptr;
-    std::map<PeerId, std::shared_ptr<PeerWorker>> workers;
+    bool takesJobs = false;  // this instance renders for the peers here
     QObject context;  // its connections go with it
 };
 
@@ -231,6 +247,8 @@ struct RenderNetwork::Incoming {
     Peer from;
     QString job;
     std::string renderer;
+    QString title;  // the offer's
+    QString scene;
     enum class Status { Asking, Accepted, Ready, Declined } status = Status::Asking;
     QString bundleHash;
     UsdStageRefPtr stage;
@@ -242,6 +260,8 @@ struct RenderNetwork::NodeTask {
     unsigned serial = 0;
     std::unique_ptr<RenderTaskHandle> handle;
     QElapsedTimer lastProgress;
+    double fraction = -1.0;
+    qint64 startedMs = 0;
 };
 
 class RenderNetwork::RemoteHandle : public RenderTaskHandle {
@@ -263,6 +283,13 @@ RenderNetwork::RenderNetwork(RenderNetworkOptions options, QObject* parent) : QO
     if (m_options.folder.isEmpty()) m_options.folder = QDir::temp().filePath(QStringLiteral("usdcc-render-network"));
     QDir().mkpath(m_options.folder);
     connect(m_options.scheduler, &RenderScheduler::jobEnded, this, &RenderNetwork::jobEnded);
+    m_advertiseTimer = new QTimer(this);
+    m_advertiseTimer->setSingleShot(true);
+    m_advertiseTimer->setInterval(kAdvertiseIntervalMs);
+    connect(m_advertiseTimer, &QTimer::timeout, this, &RenderNetwork::advertise);
+    // Its own jobs show too: idle or busy is the machine's.
+    connect(m_options.scheduler, &RenderScheduler::jobChanged, this, [this]() { advertiseSoon(); });
+    connect(m_options.scheduler, &RenderScheduler::jobsChanged, this, [this]() { advertiseSoon(); });
 }
 
 RenderNetwork::~RenderNetwork() {
@@ -282,10 +309,11 @@ RenderNetwork::RoomLink* RenderNetwork::link(Room* room) const {
 }
 
 void RenderNetwork::addRoom(Room* room) {
-    if (!room || m_rooms.count(room)) return;
+    if (!room || m_rooms.count(room) || room->type() != RoomType::RenderQueue) return;
     auto link = std::make_unique<RoomLink>();
     RoomLink* l = link.get();
     l->room = room;
+    l->takesJobs = m_options.isNode ? m_options.isNode() : false;
     l->jobs = room->channel(QString::fromLatin1(kJobsChannel), Delivery::Direct);
     l->state = room->peerState(QString::fromLatin1(kNodeState));
     TransferInbox::Options inbox;
@@ -297,14 +325,19 @@ void RenderNetwork::addRoom(Room* room) {
     connect(l->jobs, &Channel::received, &l->context, [this, l](const Message& message) { onMessage(*l, message); });
     connect(l->state, &PeerState::changed, &l->context, [this, l](const Peer& peer, const QJsonValue&) { onStateChanged(*l, peer); });
     connect(room, &Room::peerLeft, &l->context, [this, l](const Peer& peer, const QString&) { onPeerLeft(*l, peer); });
-    connect(room, &Room::opened, &l->context, [this]() { advertise(); });
+    connect(room, &Room::opened, &l->context, [this]() {
+        advertise();
+        Q_EMIT roomsChanged();
+    });
+    connect(room, &Room::peerJoined, &l->context, [this]() { Q_EMIT nodesChanged(); });
     connect(room, &Room::closed, &l->context, [this, room](const QString&) {
         QMetaObject::invokeMethod(this, [this, room]() { removeRoom(room); }, Qt::QueuedConnection);
     });
     connect(room, &QObject::destroyed, &l->context, [this, room]() { removeRoom(room); });
     connect(l->inbox, &TransferInbox::received, &l->context, [this, l](Transfer* transfer) { onBundleArrived(*l, transfer); });
     advertise();
-    syncWorkers(*l);
+    syncWorkers();
+    Q_EMIT roomsChanged();
 }
 
 void RenderNetwork::removeRoom(Room* room) {
@@ -312,7 +345,27 @@ void RenderNetwork::removeRoom(Room* room) {
     if (found == m_rooms.end()) return;
     std::unique_ptr<RoomLink> link = std::move(found->second);
     m_rooms.erase(found);
-    for (auto& [id, worker] : link->workers) m_options.scheduler->removeWorker(worker);
+    syncWorkers();
+    // Tasks sent to peers through it go back to the queue (their peer may be a worker still,
+    // through another room).
+    for (auto& [peer, byJob] : m_outgoing) {
+        for (auto it = byJob.begin(); it != byJob.end();) {
+            it = it->second->room == room || !it->second->room ? byJob.erase(it) : std::next(it);
+        }
+    }
+    std::vector<std::shared_ptr<RemoteTask>> stranded;
+    for (auto it = m_remote.begin(); it != m_remote.end();) {
+        if (it->second->room == room || !it->second->room) {
+            stranded.push_back(it->second);
+            it = m_remote.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (const auto& task : stranded) {
+        task->ended = true;
+        if (task->callbacks.declined) task->callbacks.declined("the room has closed");
+    }
     // Tasks rendering here for that room's peers stop.
     for (auto it = m_nodeQueue.begin(); it != m_nodeQueue.end();) {
         const auto incoming = m_incoming.find((*it)->incoming);
@@ -328,13 +381,85 @@ void RenderNetwork::removeRoom(Room* room) {
     for (auto it = m_incoming.begin(); it != m_incoming.end();) {
         it = it->second->room == room || !it->second->room ? m_incoming.erase(it) : std::next(it);
     }
+    advertise();
     Q_EMIT nodesChanged();
+    Q_EMIT roomsChanged();
     Q_EMIT remoteTasksChanged();
 }
 
-void RenderNetwork::advertise() {
-    if (m_advertising) return;
-    m_advertising = true;
+QList<Room*> RenderNetwork::rooms() const {
+    QList<Room*> result;
+    for (const auto& [room, link] : m_rooms) {
+        if (link->room) result.append(link->room);
+    }
+    std::sort(result.begin(), result.end(), [](Room* a, Room* b) { return a->name().localeAwareCompare(b->name()) < 0; });
+    return result;
+}
+
+std::string RenderNetwork::roomKey(Room* room) {
+    if (!room) return {};
+    const Peer host = room->isHost() ? room->me() : room->hostPeer();
+    return s(host.fingerprint + QLatin1Char('/') + room->name());
+}
+
+bool RenderNetwork::takesJobs(Room* room) const {
+    const RoomLink* l = link(room);
+    return l && l->takesJobs;
+}
+
+void RenderNetwork::setTakesJobs(Room* room, bool take) {
+    RoomLink* l = link(room);
+    if (!l || l->takesJobs == take) return;
+    l->takesJobs = take;
+    advertise();
+    Q_EMIT roomsChanged();
+}
+
+void RenderNetwork::setDispatch(const PeerDispatch& dispatch) {
+    if (dispatch == m_dispatch) return;
+    m_dispatch = dispatch;
+    Q_EMIT dispatchChanged();
+}
+
+void RenderNetwork::advertiseSoon() {
+    if (!m_advertiseTimer->isActive()) m_advertiseTimer->start();
+}
+
+std::optional<RenderNode::Current> RenderNetwork::currentTask() const {
+    if (m_nodeRunning) {
+        const auto incoming = m_incoming.find(m_nodeRunning->incoming);
+        if (incoming != m_incoming.end()) {
+            const Incoming& in = *incoming->second;
+            RenderNode::Current current;
+            current.title = in.title;
+            current.scene = in.scene;
+            const std::shared_ptr<FinalRenderer> renderer = FinalRenderers::instance().find(in.renderer);
+            current.renderer = renderer ? q(renderer->name()) : q(in.renderer);
+            current.from = in.from.name;
+            current.frame = m_nodeRunning->message["frame"].toDouble();
+            current.fraction = m_nodeRunning->fraction;
+            current.startedMs = m_nodeRunning->startedMs;
+            current.forPeer = true;
+            return current;
+        }
+    }
+    // One of its own, on this instance.
+    for (const RenderScheduler::RunningTask& running : m_options.scheduler->running()) {
+        if (!dynamic_cast<const LocalWorker*>(running.worker)) continue;
+        const JobTask& task = running.job->tasks[static_cast<size_t>(running.task)];
+        RenderNode::Current current;
+        current.title = q(running.job->title);
+        current.scene = q(running.job->stageName);
+        current.renderer = q(running.job->rendererName);
+        current.frame = task.task.frame;
+        current.fraction = task.progress > 0 ? task.progress : -1.0;
+        current.startedMs = running.startedMs;
+        return current;
+    }
+    return std::nullopt;
+}
+
+QJsonObject RenderNetwork::advertisement(const RoomLink& link) const {
     QJsonArray renderers;
     for (const auto& renderer : FinalRenderers::instance().all()) {
         if (!renderer->setupProblem().empty()) continue;
@@ -342,14 +467,35 @@ void RenderNetwork::advertise() {
     }
     QJsonArray schemes;
     for (const std::string& scheme : ArGetRegisteredURISchemes()) schemes.append(q(scheme));
-    const QJsonObject value{{"renderers", renderers},
-                            {"node", m_options.isNode ? m_options.isNode() : false},
-                            {"busy", m_nodeRunning != nullptr},
-                            {"schemes", schemes}};
+    const std::optional<RenderNode::Current> current = currentTask();
+    QJsonObject value{{"renderers", renderers}, {"node", link.takesJobs}, {"busy", current.has_value()}, {"schemes", schemes}};
+    if (current) {
+        value["current"] = QJsonObject{{"title", current->title},       {"scene", current->scene},
+                                       {"renderer", current->renderer}, {"from", current->from},
+                                       {"frame", current->frame},       {"fraction", current->fraction},
+                                       {"startedMs", current->startedMs}, {"forPeer", current->forPeer}};
+    }
+    return value;
+}
+
+RenderNode RenderNetwork::self(Room* room) const {
+    const RoomLink* l = link(room);
+    if (!l || !l->room) return {};
+    return RenderNode::fromJson(l->room, l->room->me(), advertisement(*l));
+}
+
+void RenderNetwork::advertise() {
+    if (m_advertising) return;
+    m_advertising = true;
+    m_advertiseTimer->stop();
     for (const auto& [room, link] : m_rooms) {
-        if (link->room && link->room->state() == Room::State::Open) link->state->set(value);
+        if (link->room && link->room->state() == Room::State::Open) {
+            const QJsonObject value = advertisement(*link);
+            if (link->state->value(link->room->me().id) != QJsonValue(value)) link->state->set(value);
+        }
     }
     m_advertising = false;
+    Q_EMIT nodesChanged();  // this instance's own row
 }
 
 std::vector<RenderNode> RenderNetwork::nodes() const {
@@ -367,73 +513,95 @@ std::vector<RenderNode> RenderNetwork::nodes() const {
     return result;
 }
 
-std::vector<RenderNode> RenderNetwork::nodesFor(const std::string& rendererId, bool tiles) const {
+std::vector<RenderNode> RenderNetwork::nodesFor(const std::string& rendererId, bool tiles,
+                                                const std::vector<std::string>& rooms) const {
     std::vector<RenderNode> result;
     for (RenderNode& node : nodes()) {
-        if (node.canRender(rendererId, tiles)) result.push_back(std::move(node));
+        const bool inRooms = rooms.empty() || std::find(rooms.begin(), rooms.end(), roomKey(node.room)) != rooms.end();
+        if (inRooms && node.canRender(rendererId, tiles)) result.push_back(std::move(node));
     }
     return result;
 }
 
 int RenderNetwork::remoteTasks() const { return int(m_nodeQueue.size()) + (m_nodeRunning ? 1 : 0); }
 
-void RenderNetwork::syncWorkers(RoomLink& link) {
-    if (!link.room) return;
-    const QHash<PeerId, QJsonValue> values = link.state->values();
-    // Peers that are render nodes are workers; others aren't.
-    for (auto it = values.begin(); it != values.end(); ++it) {
-        if (it.key() == link.room->me().id) continue;
-        const Peer peer = link.room->peer(it.key());
-        const bool node = peer.isValid() && it.value().toObject()["node"].toBool();
-        const bool has = link.workers.count(it.key()) > 0;
-        if (node && !has) {
-            auto worker = std::make_shared<PeerWorker>(this, link.room, peer);
-            link.workers[it.key()] = worker;
-            m_options.scheduler->addWorker(worker);
-            USDCC_LOG_INFO("usdcc.render", "{} renders for this instance", s(peer.name));
-        } else if (!node && has) {
-            m_options.scheduler->removeWorker(link.workers[it.key()]);
-            link.workers.erase(it.key());
+void RenderNetwork::syncWorkers() {
+    // Peers that are render nodes in any room are workers, once each; others aren't.
+    std::map<QString, Peer> nodes;
+    for (const auto& [room, link] : m_rooms) {
+        if (!link->room) continue;
+        const QHash<PeerId, QJsonValue> values = link->state->values();
+        for (auto it = values.begin(); it != values.end(); ++it) {
+            if (it.key() == link->room->me().id || !it.value().toObject()["node"].toBool()) continue;
+            const Peer peer = link->room->peer(it.key());
+            if (peer.isValid()) nodes.emplace(it.key(), peer);
         }
     }
-    for (auto it = link.workers.begin(); it != link.workers.end();) {
-        if (!values.contains(it->first)) {
-            m_options.scheduler->removeWorker(it->second);
-            it = link.workers.erase(it);
+    for (const auto& [id, peer] : nodes) {
+        if (m_workers.count(id)) continue;
+        auto worker = std::make_shared<PeerWorker>(this, peer);
+        m_workers[id] = worker;
+        m_options.scheduler->addWorker(worker);
+        USDCC_LOG_INFO("usdcc.render", "{} renders for this instance", s(peer.name));
+    }
+    for (auto it = m_workers.begin(); it != m_workers.end();) {
+        if (!nodes.count(it->first)) {
+            const std::shared_ptr<PeerWorker> gone = it->second;
+            it = m_workers.erase(it);
+            m_options.scheduler->removeWorker(gone);  // its running task goes back to the queue
         } else {
             ++it;
         }
     }
 }
 
-void RenderNetwork::onStateChanged(RoomLink& link, const Peer&) {
-    syncWorkers(link);
+void RenderNetwork::onStateChanged(RoomLink&, const Peer&) {
+    syncWorkers();
     Q_EMIT nodesChanged();
 }
 
 void RenderNetwork::onPeerLeft(RoomLink& link, const Peer& peer) {
-    const auto worker = link.workers.find(peer.id);
-    if (worker != link.workers.end()) {
-        std::shared_ptr<PeerWorker> gone = worker->second;
-        link.workers.erase(worker);
-        m_options.scheduler->removeWorker(gone);  // its running task goes back to the queue
+    // Only what went through this room: the peer may be in another of this instance's.
+    Room* room = link.room;
+    if (const auto byPeer = m_outgoing.find(peer.id); byPeer != m_outgoing.end()) {
+        for (auto it = byPeer->second.begin(); it != byPeer->second.end();) {
+            it = it->second->room == room || !it->second->room ? byPeer->second.erase(it) : std::next(it);
+        }
+        if (byPeer->second.empty()) m_outgoing.erase(byPeer);
     }
-    m_outgoing.erase(peer.id);
+    std::vector<std::shared_ptr<RemoteTask>> stranded;
     for (auto it = m_remote.begin(); it != m_remote.end();) {
-        it = it->second->peer == peer.id ? m_remote.erase(it) : std::next(it);
+        if (it->second->peer == peer.id && (it->second->room == room || !it->second->room)) {
+            stranded.push_back(it->second);
+            it = m_remote.erase(it);
+        } else {
+            ++it;
+        }
     }
     // What this instance rendered for it stops.
+    const auto fromHere = [&](const QString& key) {
+        const auto incoming = m_incoming.find(key);
+        return key.startsWith(peer.id + QLatin1Char('|')) &&
+               (incoming == m_incoming.end() || incoming->second->room == room || !incoming->second->room);
+    };
     for (auto it = m_nodeQueue.begin(); it != m_nodeQueue.end();) {
-        it = (*it)->incoming.startsWith(peer.id + QLatin1Char('|')) ? m_nodeQueue.erase(it) : it + 1;
+        it = fromHere((*it)->incoming) ? m_nodeQueue.erase(it) : it + 1;
     }
-    if (m_nodeRunning && m_nodeRunning->incoming.startsWith(peer.id + QLatin1Char('|'))) {
+    if (m_nodeRunning && fromHere(m_nodeRunning->incoming)) {
         if (m_nodeRunning->handle) m_nodeRunning->handle->cancel();
         m_nodeRunning.reset();
         advertise();
         QMetaObject::invokeMethod(this, [this]() { pump(); }, Qt::QueuedConnection);
     }
     for (auto it = m_incoming.begin(); it != m_incoming.end();) {
-        it = it->second->from.id == peer.id ? m_incoming.erase(it) : std::next(it);
+        it = it->second->from.id == peer.id && (it->second->room == room || !it->second->room) ? m_incoming.erase(it)
+                                                                                                 : std::next(it);
+    }
+    syncWorkers();  // gone from every room: its worker goes, and its running task back to the queue
+    // Still a worker through another room: its tasks here go back to the queue themselves.
+    for (const auto& task : stranded) {
+        task->ended = true;
+        if (task->callbacks.declined) task->callbacks.declined("it left the room");
     }
     Q_EMIT nodesChanged();
     Q_EMIT remoteTasksChanged();
@@ -491,13 +659,23 @@ void RenderNetwork::onMessage(RoomLink& link, const Message& message) {
 
 // --- Submitting
 
-bool RenderNetwork::canRun(Room* room, const QString& peer, const RenderJob& job) const {
+Room* RenderNetwork::roomFor(const QString& peer, const RenderJob& job) const {
+    // The room its offer went through, if it went.
+    if (const auto byPeer = m_outgoing.find(peer); byPeer != m_outgoing.end()) {
+        const auto out = byPeer->second.find(job.id);
+        if (out != byPeer->second.end() && out->second->room) return out->second->room;
+    }
+    for (const auto& [room, l] : m_rooms) {
+        if (!l->room || !job.spec.options.allowsRoom(roomKey(l->room))) continue;
+        const RenderNode node = RenderNode::fromJson(l->room, l->room->peer(peer), l->state->value(peer).toObject());
+        if (node.peer.isValid() && node.canRender(job.rendererId, job.tilesPerFrame() > 1)) return l->room;
+    }
+    return nullptr;
+}
+
+bool RenderNetwork::canRun(const QString& peer, const RenderJob& job) const {
     if (!job.spec.options.usesPeers()) return false;
-    RoomLink* l = link(room);
-    if (!l || !l->room) return false;
-    const QJsonObject json = l->state->value(peer).toObject();
-    const RenderNode node = RenderNode::fromJson(room, l->room->peer(peer), json);
-    if (!node.canRender(job.rendererId, job.tilesPerFrame() > 1)) return false;
+    if (!roomFor(peer, job)) return false;
     const auto byPeer = m_outgoing.find(peer);
     if (byPeer != m_outgoing.end()) {
         const auto out = byPeer->second.find(job.id);
@@ -509,8 +687,9 @@ bool RenderNetwork::canRun(Room* room, const QString& peer, const RenderJob& job
     return true;
 }
 
-std::unique_ptr<RenderTaskHandle> RenderNetwork::startRemote(Room* room, const QString& peer, const RenderJob& job,
+std::unique_ptr<RenderTaskHandle> RenderNetwork::startRemote(const QString& peer, const RenderJob& job,
                                                              const JobTask& jobTask, TaskCallbacks callbacks) {
+    Room* room = roomFor(peer, job);
     RoomLink* l = link(room);
     if (!l || !l->room) {
         if (callbacks.declined) callbacks.declined("the room has closed");
@@ -523,7 +702,7 @@ std::unique_ptr<RenderTaskHandle> RenderNetwork::startRemote(Room* room, const Q
         out->room = room;
         m_jobStages[job.id] = jobTask.task.stage;
         QJsonObject offer{{"job", q(job.id)}, {"renderer", q(job.rendererId)}, {"title", q(job.title)},
-                          {"frames", int(job.frames.size())}};
+                          {"scene", q(job.stageName)}, {"frames", int(job.frames.size())}};
         if (job.spec.options.delivery == "shared" && job.shared.whyNot.empty()) offer["shared"] = job.shared.toJson();
         l->jobs->send(QStringLiteral("offer"), offer, {}, peer);
     }
@@ -747,7 +926,7 @@ void RenderNetwork::onOffer(RoomLink& link, const Peer& from, const QJsonObject&
     const auto decline = [&](const QString& reason) {
         link.jobs->send(QStringLiteral("decline"), QJsonObject{{"job", job}, {"reason", reason}}, {}, from.id);
     };
-    if (!m_options.isNode || !m_options.isNode()) return decline(QStringLiteral("it isn't a render node"));
+    if (!link.takesJobs) return decline(QStringLiteral("it doesn't take jobs in this room"));
     const std::shared_ptr<FinalRenderer> found = FinalRenderers::instance().find(renderer);
     if (!found || !found->setupProblem().empty()) return decline(QStringLiteral("it hasn't got %1").arg(q(renderer)));
     auto incoming = std::make_unique<Incoming>();
@@ -755,6 +934,8 @@ void RenderNetwork::onOffer(RoomLink& link, const Peer& from, const QJsonObject&
     incoming->from = from;
     incoming->job = job;
     incoming->renderer = renderer;
+    incoming->title = body["title"].toString();
+    incoming->scene = body["scene"].toString();
     const QString key = incomingKey(from.id, job);
     m_incoming[key] = std::move(incoming);
     if (m_options.trusted && m_options.trusted(from)) return answerOffer(link, from, body, true);
@@ -862,6 +1043,7 @@ void RenderNetwork::pump() {
     const unsigned serial = ++m_nodeSerial;
     m_nodeRunning->serial = serial;
     m_nodeRunning->lastProgress.start();
+    m_nodeRunning->startedMs = QDateTime::currentMSecsSinceEpoch();
     advertise();
     Q_EMIT remoteTasksChanged();
     QPointer<RenderNetwork> self(this);
@@ -870,6 +1052,8 @@ void RenderNetwork::pump() {
         QMetaObject::invokeMethod(self, [self, serial, fraction, state]() {
             if (!self || !self->m_nodeRunning || self->m_nodeRunning->serial != serial) return;
             NodeTask& running = *self->m_nodeRunning;
+            if (fraction >= 0) running.fraction = fraction;
+            self->advertiseSoon();
             if (running.lastProgress.elapsed() < kProgressIntervalMs) return;
             running.lastProgress.restart();
             const auto incoming = self->m_incoming.find(running.incoming);
@@ -942,20 +1126,20 @@ void RenderNetwork::finishNodeTask(const std::map<std::string, FloatImage>& imag
 
 // --- PeerWorker
 
-PeerWorker::PeerWorker(RenderNetwork* network, Room* room, Peer peer) : m_network(network), m_room(room), m_peer(std::move(peer)) {}
+PeerWorker::PeerWorker(RenderNetwork* network, Peer peer) : m_network(network), m_peer(std::move(peer)) {}
 
 std::string PeerWorker::name() const { return m_peer.name.isEmpty() ? s(m_peer.id) : s(m_peer.name); }
 
 bool PeerWorker::canRun(const RenderJob& job) const {
-    return m_network && m_room && m_network->canRun(m_room, m_peer.id, job);
+    return m_network && m_network->canRun(m_peer.id, job);
 }
 
 std::unique_ptr<RenderTaskHandle> PeerWorker::start(const RenderJob& job, const JobTask& task, TaskCallbacks callbacks) {
-    if (!m_network || !m_room) {
+    if (!m_network) {
         if (callbacks.declined) callbacks.declined("the peer has gone");
         return nullptr;
     }
-    return m_network->startRemote(m_room, m_peer.id, job, task, std::move(callbacks));
+    return m_network->startRemote(m_peer.id, job, task, std::move(callbacks));
 }
 
 }  // namespace usdcc::render

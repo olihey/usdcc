@@ -23,6 +23,17 @@ class QTreeWidgetItem;
 
 namespace usdcc::ui {
 
+// The dialogs to host and join a room, for the Peers panel (chat rooms) and the Swarm panel
+// (render queues). Each returns the room, or null when cancelled or it couldn't (and said so).
+// Hosting copies the invite link.
+USDCC_UI_API usdcc::peers::Room* hostRoomDialog(PeersController* controller, QWidget* parent,
+                                                usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat);
+USDCC_UI_API usdcc::peers::Room* joinRoomDialog(PeersController* controller, QWidget* parent,
+                                                usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat);
+// Asks for the password, if the room has one.
+USDCC_UI_API usdcc::peers::Room* joinFoundRoom(PeersController* controller, QWidget* parent,
+                                               const usdcc::peers::FoundRoom& room);
+
 class USDCC_UI_API PeersSidePanel : public SidePanel {
     Q_OBJECT
 

@@ -62,6 +62,14 @@ enum class Admission {
     Open,     // Found on this machine or network: in at once. A public room, until there's a hub
 };
 
+// What a room is for (PEERS.md §5.5). The host says, in its welcome and announcement; a
+// room that doesn't say (an older host) is a chat room.
+enum class RoomType {
+    Chat,         // People talking: the Peers panel's
+    Broadcast,    // A viewport shown to watchers
+    RenderQueue,  // Instances rendering each other's jobs (FINAL_RENDER.md §7)
+};
+
 // One message: the frame of PEERS.md §7.1.
 struct USDCC_PEERS_API Message {
     QString channel;
@@ -83,6 +91,8 @@ USDCC_PEERS_API bool isUsdccChannel(const QString& name);
 USDCC_PEERS_API QString kindName(Peer::Kind kind);
 USDCC_PEERS_API QString admissionName(Admission admission);  // "invited", "ask", "open"
 USDCC_PEERS_API Admission admissionFromName(const QString& name);
+USDCC_PEERS_API QString roomTypeName(RoomType type);  // "chat", "broadcast", "render_queue"
+USDCC_PEERS_API RoomType roomTypeFromName(const QString& name);  // Chat for anything else
 
 }  // namespace usdcc::peers
 

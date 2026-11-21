@@ -23,6 +23,8 @@
 #include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
@@ -238,25 +240,6 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         m_timeLimit->setSpecialValueText(tr("Until done"));
         m_timeLimit->setToolTip(tr("How long each frame or tile may refine"));
         form->addRow(tr("Time limit"), m_timeLimit);
-        m_distribute = new QComboBox(page);
-        m_distribute->setObjectName(QStringLiteral("renderSettingsDistribute"));
-        m_distribute->addItem(tr("This instance"), QStringLiteral("local"));
-        m_distribute->addItem(tr("This instance and peers"), QStringLiteral("both"));
-        m_distribute->addItem(tr("Peers only"), QStringLiteral("peers"));
-        m_distribute->setToolTip(tr("Who renders the frames and tiles: peers in your rooms that render for others "
-                                    "(Settings > Final Render > Render for peers) can take a share (usdcc:render:distribute)"));
-        form->addRow(tr("Render on"), m_distribute);
-        m_delivery = new QComboBox(page);
-        m_delivery->setObjectName(QStringLiteral("renderSettingsDelivery"));
-        m_delivery->addItem(tr("Packaged: the scene and its assets, sent"), QStringLiteral("packaged"));
-        m_delivery->addItem(tr("Shared: the same files, where peers have them"), QStringLiteral("shared"));
-        m_delivery->setToolTip(tr("How peers get the scene. Shared is checked on each peer first: one without every "
-                                  "asset, the same, gets it packaged (usdcc:render:delivery)"));
-        form->addRow(tr("Scene for peers"), m_delivery);
-        m_nodes = new QLabel(page);
-        m_nodes->setObjectName(QStringLiteral("renderSettingsNodes"));
-        m_nodes->setWordWrap(true);
-        form->addRow(QString(), m_nodes);
         m_tabs->addTab(page, tr("Output"));
     }
     // Renderer.
@@ -339,8 +322,44 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
     }
     layout->addWidget(m_stack, 1);
 
+    // Where the job goes, and the buttons: the app's choice, not the stage's.
+    auto* dispatch = new QGroupBox(tr("Render"), content);
+    dispatch->setObjectName(QStringLiteral("renderSettingsDispatch"));
+    auto* dispatchGrid = new QGridLayout(dispatch);
+    m_distribute = new QComboBox(dispatch);
+    m_distribute->setObjectName(QStringLiteral("renderSettingsDistribute"));
+    m_distribute->addItem(tr("This instance"), QStringLiteral("local"));
+    m_distribute->addItem(tr("This instance and peers"), QStringLiteral("both"));
+    m_distribute->addItem(tr("Peers only"), QStringLiteral("peers"));
+    m_distribute->setToolTip(tr("Who renders the frames and tiles: instances in your render queue rooms that take jobs "
+                                "(Render > Swarm) can take a share"));
+    m_delivery = new QComboBox(dispatch);
+    m_delivery->setObjectName(QStringLiteral("renderSettingsDelivery"));
+    m_delivery->addItem(tr("Packaged: the scene and its assets, sent"), QStringLiteral("packaged"));
+    m_delivery->addItem(tr("Shared: the same files, where peers have them"), QStringLiteral("shared"));
+    m_delivery->setToolTip(tr("How peers get the scene. Shared is checked on each peer first: one without every "
+                              "asset, the same, gets it packaged"));
+    m_rooms = new QToolButton(dispatch);
+    m_rooms->setObjectName(QStringLiteral("renderSettingsRooms"));
+    m_rooms->setPopupMode(QToolButton::InstantPopup);
+    m_rooms->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_rooms->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_rooms->setToolTip(tr("The render queue rooms whose instances may take the job"));
+    auto* roomsMenu = new QMenu(m_rooms);
+    m_rooms->setMenu(roomsMenu);
+    connect(roomsMenu, &QMenu::aboutToShow, this, [this]() { fillRoomsMenu(); });
+    m_nodes = new QLabel(dispatch);
+    m_nodes->setObjectName(QStringLiteral("renderSettingsNodes"));
+    m_nodes->setWordWrap(true);
+    dispatchGrid->addWidget(new QLabel(tr("Render on"), dispatch), 0, 0);
+    dispatchGrid->addWidget(m_distribute, 0, 1);
+    dispatchGrid->addWidget(new QLabel(tr("Scene"), dispatch), 1, 0);
+    dispatchGrid->addWidget(m_delivery, 1, 1);
+    dispatchGrid->addWidget(new QLabel(tr("Rooms"), dispatch), 2, 0);
+    dispatchGrid->addWidget(m_rooms, 2, 1);
+    dispatchGrid->addWidget(m_nodes, 3, 0, 1, 2);
+    dispatchGrid->setColumnStretch(1, 1);
     auto* buttons = new QHBoxLayout();
-    buttons->setContentsMargins(6, 0, 6, 6);
     buttons->addStretch(1);
     auto* renderFrame = new QPushButton(tr("Render Frame"), content);
     renderFrame->setObjectName(QStringLiteral("renderSettingsRenderFrame"));
@@ -350,7 +369,11 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
     renderAnimation->setToolTip(tr("Render the frame range (Ctrl+F12)"));
     buttons->addWidget(renderFrame);
     buttons->addWidget(renderAnimation);
-    layout->addLayout(buttons);
+    dispatchGrid->addLayout(buttons, 4, 0, 1, 2);
+    auto* dispatchRow = new QHBoxLayout();
+    dispatchRow->setContentsMargins(6, 0, 6, 6);
+    dispatchRow->addWidget(dispatch);
+    layout->addLayout(dispatchRow);
     setContentWidget(content);
 
     m_refreshTimer = new QTimer(this);
@@ -457,22 +480,25 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         edit(tr("Set Render Time Limit"), [this, limit]() { return setJobOption(settingsPrim(), jobattr::timeLimit, VtValue(limit)); });
     });
     connect(m_distribute, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_refreshing) return;
-        const std::string value = m_distribute->currentData().toString().toStdString();
-        edit(tr("Set Render On"), [this, value]() {
-            return setJobOption(settingsPrim(), jobattr::distribute, value == "local" ? VtValue() : VtValue(value));
-        });
+        RenderNetwork* network = RenderNetwork::instance();
+        if (m_refreshing || !network) return;
+        PeerDispatch dispatch = network->dispatch();
+        dispatch.distribute = m_distribute->currentData().toString().toStdString();
+        network->setDispatch(dispatch);
     });
     connect(m_delivery, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_refreshing) return;
-        const std::string value = m_delivery->currentData().toString().toStdString();
-        edit(tr("Set Scene for Peers"), [this, value]() {
-            return setJobOption(settingsPrim(), jobattr::delivery, value == "packaged" ? VtValue() : VtValue(value));
-        });
+        RenderNetwork* network = RenderNetwork::instance();
+        if (m_refreshing || !network) return;
+        PeerDispatch dispatch = network->dispatch();
+        dispatch.delivery = m_delivery->currentData().toString().toStdString();
+        network->setDispatch(dispatch);
     });
     if (RenderNetwork* network = RenderNetwork::instance()) {
         connect(network, &RenderNetwork::nodesChanged, this, [this]() { refreshNodes(); });
+        connect(network, &RenderNetwork::roomsChanged, this, [this]() { refreshDispatch(); });
+        connect(network, &RenderNetwork::dispatchChanged, this, [this]() { refreshDispatch(); });
     }
+    refreshDispatch();
     connect(renderFrame, &QPushButton::clicked, this, [this]() { render(false); });
     connect(renderAnimation, &QPushButton::clicked, this, [this]() { render(true); });
 
@@ -704,9 +730,6 @@ void RenderSettingsViewPanel::refreshValues() {
     m_tilesY->setEnabled(tiles);
     if (!tiles) m_tilesX->setToolTip(tr("%1 renders whole frames only").arg(renderer ? text(renderer->name()) : tr("This renderer")));
     m_timeLimit->setValue(spec.options.timeLimit);
-    m_distribute->setCurrentIndex(std::max(0, m_distribute->findData(text(spec.options.distribute))));
-    m_delivery->setCurrentIndex(std::max(0, m_delivery->findData(text(spec.options.delivery))));
-    m_delivery->setEnabled(spec.options.usesPeers());
 
     // An example of the output's name.
     RenderJob example;
@@ -728,20 +751,112 @@ void RenderSettingsViewPanel::refreshValues() {
 
 void RenderSettingsViewPanel::refreshNodes() {
     RenderNetwork* network = RenderNetwork::instance();
-    if (!network || !currentStage()) {
-        m_nodes->setText(tr("No peers: join or host a room in the Peers panel to render with others."));
+    if (!network || network->rooms().isEmpty()) {
+        m_nodes->setText(tr("No render queue rooms: host or join one in Render > Swarm to render with others."));
+        return;
+    }
+    const PeerDispatch dispatch = network->dispatch();
+    if (dispatch.distribute == "local") {
+        m_nodes->setText(tr("Only this instance renders."));
         return;
     }
     const std::shared_ptr<FinalRenderer> renderer = FinalRenderers::instance().find(rendererId());
     const bool tiles = m_tilesX->value() * m_tilesY->value() > 1;
     QStringList names;
-    for (const RenderNode& node : network->nodesFor(rendererId(), tiles)) {
-        names.append(node.peer.name + (node.busy ? tr(" (busy)") : QString()));
+    for (const RenderNode& node : network->nodesFor(rendererId(), tiles, dispatch.rooms)) {
+        const QString name = node.peer.name + (node.busy ? tr(" (busy)") : QString());
+        if (!names.contains(name)) names.append(name);  // in two of the rooms: once
     }
     if (names.isEmpty()) {
-        m_nodes->setText(tr("No peer renders with %1 for others now.").arg(renderer ? text(renderer->name()) : tr("this renderer")));
+        m_nodes->setText(tr("Nobody in these rooms renders with %1 for others now.")
+                             .arg(renderer ? text(renderer->name()) : tr("this renderer")));
     } else {
-        m_nodes->setText(tr("Peers that can take a share: %1").arg(names.join(QStringLiteral(", "))));
+        m_nodes->setText(tr("Can take a share: %1").arg(names.join(QStringLiteral(", "))));
+    }
+}
+
+void RenderSettingsViewPanel::refreshDispatch() {
+    RenderNetwork* network = RenderNetwork::instance();
+    const PeerDispatch dispatch = network ? network->dispatch() : PeerDispatch();
+    const bool wasRefreshing = m_refreshing;
+    m_refreshing = true;
+    m_distribute->setCurrentIndex(std::max(0, m_distribute->findData(text(dispatch.distribute))));
+    m_delivery->setCurrentIndex(std::max(0, m_delivery->findData(text(dispatch.delivery))));
+    m_refreshing = wasRefreshing;
+    const bool peers = dispatch.distribute != "local";
+    m_distribute->setEnabled(network != nullptr);
+    m_delivery->setEnabled(network && peers);
+    const QList<usdcc::peers::Room*> rooms = network ? network->rooms() : QList<usdcc::peers::Room*>();
+    int chosen = 0;
+    for (usdcc::peers::Room* room : rooms) {
+        if (dispatch.rooms.empty() ||
+            std::find(dispatch.rooms.begin(), dispatch.rooms.end(), RenderNetwork::roomKey(room)) != dispatch.rooms.end()) {
+            ++chosen;
+        }
+    }
+    if (rooms.isEmpty()) {
+        m_rooms->setText(tr("No render queue rooms: open Render > Swarm"));
+    } else if (dispatch.rooms.empty() || chosen == rooms.size()) {
+        m_rooms->setText(rooms.size() == 1 ? rooms.first()->name() : tr("All %1 rooms").arg(rooms.size()));
+    } else if (chosen == 1) {
+        for (usdcc::peers::Room* room : rooms) {
+            if (std::find(dispatch.rooms.begin(), dispatch.rooms.end(), RenderNetwork::roomKey(room)) != dispatch.rooms.end()) {
+                m_rooms->setText(room->name());
+            }
+        }
+    } else {
+        m_rooms->setText(tr("%1 of %2 rooms").arg(chosen).arg(rooms.size()));
+    }
+    m_rooms->setEnabled(peers && !rooms.isEmpty());
+    refreshNodes();
+}
+
+void RenderSettingsViewPanel::fillRoomsMenu() {
+    QMenu* menu = m_rooms->menu();
+    menu->clear();
+    RenderNetwork* network = RenderNetwork::instance();
+    if (!network) return;
+    const QList<usdcc::peers::Room*> rooms = network->rooms();
+    const PeerDispatch dispatch = network->dispatch();
+    std::vector<std::string> keys;
+    for (usdcc::peers::Room* room : rooms) keys.push_back(RenderNetwork::roomKey(room));
+    const auto chosen = [&](const std::string& key) {
+        return dispatch.rooms.empty() || std::find(dispatch.rooms.begin(), dispatch.rooms.end(), key) != dispatch.rooms.end();
+    };
+    QAction* all = menu->addAction(tr("All Rooms"));
+    all->setCheckable(true);
+    all->setChecked(std::all_of(keys.begin(), keys.end(), chosen));
+    connect(all, &QAction::triggered, this, []() {
+        if (RenderNetwork* n = RenderNetwork::instance()) {
+            PeerDispatch d = n->dispatch();
+            d.rooms.clear();
+            n->setDispatch(d);
+        }
+    });
+    menu->addSeparator();
+    for (usdcc::peers::Room* room : rooms) {
+        const std::string key = RenderNetwork::roomKey(room);
+        int takers = 0;
+        for (const RenderNode& node : network->nodes()) {
+            if (node.room == room && node.node) ++takers;
+        }
+        QAction* action = menu->addAction(tr("%1  (%n taking jobs)", nullptr, takers).arg(room->name()));
+        action->setCheckable(true);
+        action->setChecked(chosen(key));
+        connect(action, &QAction::toggled, this, [key, keys](bool on) {
+            RenderNetwork* n = RenderNetwork::instance();
+            if (!n) return;
+            PeerDispatch d = n->dispatch();
+            std::vector<std::string> now = d.rooms.empty() ? keys : d.rooms;
+            now.erase(std::remove(now.begin(), now.end(), key), now.end());
+            if (on) now.push_back(key);
+            if (now.empty()) return;  // at least one: none would be every room
+            const bool every = std::all_of(keys.begin(), keys.end(), [&](const std::string& k) {
+                return std::find(now.begin(), now.end(), k) != now.end();
+            });
+            d.rooms = every ? std::vector<std::string>() : now;
+            n->setDispatch(d);
+        });
     }
 }
 

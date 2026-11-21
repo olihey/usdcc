@@ -337,6 +337,8 @@ add_library(usdcc_usd_ui SHARED
     src/render/render_bundle.cpp
     include/usdcc/usd/render/render_network.h
     src/render/render_network.cpp
+    include/usdcc/usd/render/swarm_panel.h
+    src/render/swarm_panel.cpp
 )
 # The Outliner's prim icons (see prim_icons.cpp), as a library for the reason in
 # src/cpp/ui/CMakeLists.txt.

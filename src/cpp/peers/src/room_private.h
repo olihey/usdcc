@@ -60,6 +60,7 @@ struct Room::Impl {
     bool isHost = false;
     State state = State::Connecting;
     QString name;
+    RoomType type = RoomType::Chat;
     Profile profile;
     Peer me;
     Peer host;

@@ -160,6 +160,7 @@ USDCC_TEST(peers_mdns) {
     announcement.port = 47999;
     announcement.admission = Admission::Open;
     announcement.password = true;
+    announcement.type = RoomType::RenderQueue;
     host->announce(announcement);
     CHECK(host->problem().isEmpty(), "announcing failed: %s", qPrintable(host->problem()));
     QList<FoundRoom> found;
@@ -174,14 +175,65 @@ USDCC_TEST(peers_mdns) {
         const FoundRoom& room = found.last();
         CHECK(room.announcement.name == announcement.name && room.announcement.hostName == "Tester" &&
                   room.announcement.instance == announcement.instance && room.announcement.admission == Admission::Open &&
-                  room.announcement.password && room.address.endsWith(":47999"),
+                  room.announcement.password && room.announcement.type == RoomType::RenderQueue &&
+                  room.address.endsWith(":47999"),
               "found as %s at %s", qPrintable(room.announcement.name), qPrintable(room.address));
         std::printf("  found at %s\n", qPrintable(room.address));
     }
     bool lost = false;
     QObject::connect(looker.get(), &NetworkDiscovery::lost, looker.get(), [&](const QString& id) {
-        lost = lost || id == announcement.hostId();
+        lost = lost || id == announcement.roomId();
     });
-    host->withdraw(announcement.instance);
+    host->withdraw(announcement.roomId());
     CHECK(waitUntil([&] { return lost; }, 15000), "the withdrawn room stayed found");
+}
+
+// What a room is for: said in its announcement and its welcome. One instance hosts a chat room
+// and a render queue at once, and both are found.
+USDCC_TEST(peers_room_types) {
+    QTemporaryDir folder;
+    auto anna = makePeers("Anna", folder.path());
+    auto ben = makePeers("Ben", folder.path());
+
+    HostOptions chat;
+    chat.name = "Talk";
+    chat.admission = Admission::Open;
+    Room* talk = anna->host(chat);
+    HostOptions queue = chat;
+    queue.name = "Farm";
+    queue.type = RoomType::RenderQueue;
+    Room* farm = anna->host(queue);
+    CHECK(talk && farm && talk->type() == RoomType::Chat && farm->type() == RoomType::RenderQueue, "the hosts' types");
+    if (!talk || !farm) {
+        return;
+    }
+    CHECK(anna->rooms(RoomType::RenderQueue) == QList<Room*>{farm} && anna->rooms(RoomType::Chat) == QList<Room*>{talk},
+          "rooms by type");
+
+    CHECK(waitUntil([&] { return ben->foundRooms().size() == 2; }), "both of one instance's rooms are found: %d",
+          int(ben->foundRooms().size()));
+    const QList<FoundRoom> queues = ben->foundRooms(RoomType::RenderQueue);
+    CHECK(queues.size() == 1 && queues.first().announcement.name == "Farm" &&
+              queues.first().announcement.type == RoomType::RenderQueue,
+          "found by type");
+    CHECK(ben->foundRooms(RoomType::Chat).size() == 1, "and the chat room as chat");
+    if (queues.isEmpty()) {
+        return;
+    }
+
+    Room* joined = ben->join(queues.first());
+    CHECK(waitUntil([&] { return joined->state() == Room::State::Open; }), "Ben is in the render queue");
+    CHECK(joined->type() == RoomType::RenderQueue, "a member knows the type");
+    CHECK(ben->foundRooms(RoomType::RenderQueue).isEmpty() && ben->foundRooms(RoomType::Chat).size() == 1,
+          "the room Ben is in isn't found; the other still is");
+
+    // A link to the chat room, expected to be a render queue: left at once, saying why.
+    QString reason;
+    Room* wrong = ben->joinLink(talk->link(), nullptr, RoomType::RenderQueue);
+    CHECK(wrong, "a link is a link");
+    if (wrong) {
+        QObject::connect(wrong, &Room::closed, wrong, [&](const QString& why) { reason = why; });
+        CHECK(waitUntil([&] { return !reason.isEmpty(); }), "a room of the wrong type isn't joined");
+        CHECK(reason.contains("chat room"), "and says why: %s", qPrintable(reason));
+    }
 }

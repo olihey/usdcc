@@ -1,5 +1,7 @@
 #include "usdcc/usd/render/render_job.h"
 
+#include "usdcc/usd/render/render_network.h"
+
 #include "usdcc/usd/time_range.h"
 
 #include <pxr/base/gf/camera.h>
@@ -257,6 +259,11 @@ RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error) {
     spec.camera = camera;
 
     job->title = job->stageName + " · " + job->settingsName;
+    if (request.dispatch) {
+        request.dispatch->applyTo(spec.options);
+    } else if (RenderNetwork* network = RenderNetwork::instance()) {
+        network->dispatch().applyTo(spec.options);
+    }
     // Peers that resolve the stage's paths themselves get it as it is (render_bundle.h).
     if (spec.options.usesPeers() && spec.options.delivery == "shared") job->shared = captureSharedScene(request.stage);
     job->spec = spec;

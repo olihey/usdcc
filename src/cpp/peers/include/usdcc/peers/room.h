@@ -72,6 +72,7 @@ struct USDCC_PEERS_API Limits {
 
 struct USDCC_PEERS_API HostOptions {
     QString name;                             // The room's
+    RoomType type = RoomType::Chat;           // What it is for; said in the welcome and the announcement
     Profile profile;                          // The host's
     QHostAddress address = QHostAddress(QHostAddress::LocalHost);  // Any to be reached from the network
     quint16 port = 0;                         // 0: any free port
@@ -89,6 +90,9 @@ struct USDCC_PEERS_API HostOptions {
 
 struct USDCC_PEERS_API JoinOptions {
     Profile profile;
+    // The kind of room wanted. A host that says it is another kind is left at once
+    // (closed() says why); one that says nothing (older) is taken to be this kind.
+    RoomType type = RoomType::Chat;
     QString secret;                           // From the link: the invitation. Empty when found
     QString password;                         // If the room has one and there's no secret
     QString expectedFingerprint;              // The host's key must be this one (the link's `k`)
@@ -151,6 +155,7 @@ public:
     State state() const;
     bool isHost() const;
     QString name() const;
+    RoomType type() const;
     Peer me() const;
     Peer hostPeer() const;
     // Everyone in the room, this member included.
@@ -163,6 +168,10 @@ public:
     // was). nullptr for a name that isn't valid (isValidChannelName()).
     Channel* channel(const QString& name, Delivery delivery = Delivery::Ordered);
     Channel* findChannel(const QString& name) const;
+    // What is open here, by name: for looking at a room from the outside (Debug > Peer Rooms).
+    QStringList channelNames() const;
+    QStringList stateNames() const;
+    QStringList peerStateNames() const;
     // A map, made on first use (PEERS.md §7.2). nullptr for an invalid name.
     StateMap* state(const QString& name);
     PeerState* peerState(const QString& name);

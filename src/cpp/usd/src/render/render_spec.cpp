@@ -124,8 +124,9 @@ void defineFinalRenderSettings() {
         d.key = "FinalRender/node";
         d.group = "Peers";
         d.label = "Render for peers";
-        d.description = "Peers in the same rooms may send this instance frames and tiles of their final renders "
-                        "(docs/FINAL_RENDER.md section 7). Trusted peers' jobs start at once; others ask first.";
+        d.description = "Whether this instance takes jobs in a render queue room it joins: peers there may send it "
+                        "frames and tiles of their final renders (docs/FINAL_RENDER.md section 7). Each room has its "
+                        "own switch in the Swarm panel. Trusted peers' jobs start at once; others ask first.";
         d.type = SettingType::Bool;
         d.defaultValue = false;
         define(d);
@@ -198,12 +199,6 @@ JobOptions readJobOptions(const UsdPrim& settings) {
         options.tilesY = std::clamp((*v)[1], 1, 64);
     }
     if (auto v = authored<double>(settings, jobattr::timeLimit); v && *v >= 0) options.timeLimit = *v;
-    if (auto v = authored<TfToken>(settings, jobattr::distribute); v && (*v == "local" || *v == "both" || *v == "peers")) {
-        options.distribute = *v;
-    }
-    if (auto v = authored<TfToken>(settings, jobattr::delivery); v && (*v == "packaged" || *v == "shared")) {
-        options.delivery = *v;
-    }
     return options;
 }
 
@@ -361,7 +356,7 @@ bool setJobOption(const UsdPrim& settings, const char* attribute, const VtValue&
     const std::string key(attribute);
     if (key == jobattr::renderer || key == jobattr::output) {
         type = SdfValueTypeNames->String;
-    } else if (key == jobattr::format || key == jobattr::distribute || key == jobattr::delivery) {
+    } else if (key == jobattr::format) {
         type = SdfValueTypeNames->Token;
     } else if (key == jobattr::tiles) {
         type = SdfValueTypeNames->Int2;

@@ -61,4 +61,26 @@ Admission admissionFromName(const QString& name) {
     return Admission::Invited;
 }
 
+QString roomTypeName(RoomType type) {
+    switch (type) {
+    case RoomType::Chat:
+        return QStringLiteral("chat");
+    case RoomType::Broadcast:
+        return QStringLiteral("broadcast");
+    case RoomType::RenderQueue:
+        return QStringLiteral("render_queue");
+    }
+    return QStringLiteral("chat");
+}
+
+RoomType roomTypeFromName(const QString& name) {
+    if (name == u"broadcast") {
+        return RoomType::Broadcast;
+    }
+    if (name == u"render_queue") {
+        return RoomType::RenderQueue;
+    }
+    return RoomType::Chat;
+}
+
 }  // namespace usdcc::peers

@@ -234,6 +234,7 @@ Room* Room::host(const HostOptions& options, QObject* parent, QString* error) {
     d.isHost = true;
     d.options = options;
     d.name = options.name;
+    d.type = options.type;
     d.profile = completed(options.profile, QStringLiteral("Host"));
     d.secret = randomSecret();
     d.guestSecret = options.guests ? randomSecret() : QString();
@@ -254,7 +255,7 @@ Room* Room::host(const HostOptions& options, QObject* parent, QString* error) {
                                                      options.limits.reconnectGraceMs})));
     QObject::connect(d.pingTimer, &QTimer::timeout, room, [&d] { d.hostTick(); });
     d.pingTimer->start();
-    qCInfo(lcPeers).noquote() << "Hosting room" << d.name << "on" << options.address.toString() << "port"
+    qCInfo(lcPeers).noquote() << "Hosting" << roomTypeName(d.type) << "room" << d.name << "on" << options.address.toString() << "port"
                               << d.tcp->serverPort() << "admission" << admissionName(options.admission)
                               << (options.guests ? "with guests" : "without guests");
     return room;
@@ -264,6 +265,7 @@ Room* Room::join(const QString& address, const JoinOptions& options, QObject* pa
     auto* room = new Room(parent);
     Impl& d = *room->d;
     d.joinOptions = options;
+    d.type = options.type;
     d.hostAddress = address;
     d.profile = completed(options.profile, QStringLiteral("Peer"));
     d.socket = new QWebSocket(options.origin, QWebSocketProtocol::VersionLatest, room);
@@ -317,6 +319,22 @@ bool Room::isHost() const {
 
 QString Room::name() const {
     return d->name;
+}
+
+RoomType Room::type() const {
+    return d->type;
+}
+
+QStringList Room::channelNames() const {
+    return d->channels.keys();
+}
+
+QStringList Room::stateNames() const {
+    return d->maps.keys();
+}
+
+QStringList Room::peerStateNames() const {
+    return d->peerStates.keys();
 }
 
 Peer Room::me() const {
@@ -899,7 +917,8 @@ void Room::Impl::welcome(Member* member, bool resumed, qint64 lastSeq) {
                      {QStringLiteral("seq"), seq},
                      {QStringLiteral("peers"), peerList},
                      {QStringLiteral("channels"), channelList},
-                     {QStringLiteral("admission"), admissionName(options.admission)}};
+                     {QStringLiteral("admission"), admissionName(options.admission)},
+                     {QStringLiteral("type"), roomTypeName(type)}};
     if (resumed) {
         body.insert(QStringLiteral("resumed"), true);
         body.insert(QStringLiteral("caughtUp"), caughtUp);
@@ -1490,6 +1509,13 @@ void Room::Impl::onChallenge(const Message& message) {
 }
 
 void Room::Impl::onWelcome(const QJsonObject& body) {
+    const QJsonValue typeValue = body.value(QLatin1String("type"));
+    if (typeValue.isString() && roomTypeFromName(typeValue.toString()) != type) {
+        const QString wanted = roomTypeName(type);
+        const QString is = roomTypeName(roomTypeFromName(typeValue.toString()));
+        q->close(QStringLiteral("That is a %1 room, not a %2 room").arg(is, wanted));
+        return;
+    }
     name = body.value(QLatin1String("name")).toString();
     const PeerId id = body.value(QLatin1String("id")).toString();
     const PeerId hostId = body.value(QLatin1String("host")).toString();

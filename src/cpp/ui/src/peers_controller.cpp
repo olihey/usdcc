@@ -161,7 +161,11 @@ PeersController::~PeersController() = default;
 
 Room* PeersController::host(const HostRequest& request, QString* error) {
     HostOptions options;
-    options.name = request.name.trimmed().isEmpty() ? tr("%1's room").arg(m_peers->profile().name) : request.name.trimmed();
+    options.name = request.name.trimmed().isEmpty()
+                       ? (request.type == RoomType::RenderQueue ? tr("%1's render queue") : tr("%1's room"))
+                             .arg(m_peers->profile().name)
+                       : request.name.trimmed();
+    options.type = request.type;
     options.address = request.onNetwork ? QHostAddress(QHostAddress::Any) : QHostAddress(QHostAddress::LocalHost);
     options.port = quint16(core::Settings::instance().get<int>(portKey, 47800));
     options.admission = request.admission;
@@ -175,10 +179,10 @@ Room* PeersController::join(const FoundRoom& room, const QString& password) {
     return m_peers->join(room, password);
 }
 
-Room* PeersController::joinLinkOrAddress(const QString& text, const QString& password, QString* error) {
+Room* PeersController::joinLinkOrAddress(const QString& text, const QString& password, QString* error, RoomType type) {
     const QString trimmed = text.trimmed();
     if (trimmed.startsWith(QStringLiteral("usdcc:"), Qt::CaseInsensitive)) {
-        return m_peers->joinLink(trimmed, error);
+        return m_peers->joinLink(trimmed, error, type);
     }
     // host:port: as if found, so the host is asked.
     const qsizetype colon = trimmed.lastIndexOf(u':');
@@ -194,10 +198,39 @@ Room* PeersController::joinLinkOrAddress(const QString& text, const QString& pas
     }
     JoinOptions options;
     options.password = password;
+    options.type = type;
     return m_peers->join(trimmed, options);
 }
 
+QList<Room*> PeersController::chatRooms() const {
+    return m_peers->rooms(RoomType::Chat);
+}
+
 void PeersController::adopt(Room* room) {
+    // Every room this instance hosts asks about joiners, and a room that ends unasked says
+    // why; the rest is the chat rooms' (a broadcast and a render queue have their own).
+    if (room->isHost()) {
+        connect(room, &Room::joinRequested, this, [this, room](JoinRequest* request) { askHost(request, room); });
+    }
+    connect(room, &Room::closed, this, [this, room](const QString& reason) {
+        // A room this instance hosts closes only because something here closed it (the
+        // panel, a broadcast's Stop), which says so itself if it wants to.
+        if (!m_window || room->isHost() || reason == u"Left the room" || reason == u"The host closed the room" ||
+            reason == u"usdcc is closing") {
+            return;
+        }
+        core::ToastRequest toast;
+        toast.kind = core::ToastKind::Warning;
+        const bool joined = !room->me().id.isEmpty();  // Set by the host's welcome
+        toast.title = (joined ? tr("Left %1") : tr("Couldn't join %1"))
+                          .arg(room->name().isEmpty() ? tr("the room") : room->name())
+                          .toStdString();
+        toast.body = reason.toStdString();
+        m_window->toasts()->show(toast);
+    });
+    if (room->type() != RoomType::Chat) {
+        return;
+    }
     Channel* chat = room->channel(kChat);
     m_chat.insert(room, {});
     if (room->isHost()) {
@@ -215,7 +248,6 @@ void PeersController::adopt(Room* room) {
             }
             return Channel::Snapshot{{{"lines", lines}}, {}};
         });
-        connect(room, &Room::joinRequested, this, [this, room](JoinRequest* request) { askHost(request, room); });
     }
     connect(chat, &Channel::received, this, [this, room](const Message& message) {
         if (message.type == u"snapshot") {
@@ -284,22 +316,6 @@ void PeersController::adopt(Room* room) {
         addLine(room, {{}, caughtUp ? tr("Back in the room") : tr("Back in the room; messages in between are missing"),
                        QDateTime::currentDateTime()});
         updatePresence();
-    });
-    connect(room, &Room::closed, this, [this, room](const QString& reason) {
-        // A room this instance hosts closes only because something here closed it (the
-        // panel, a broadcast's Stop), which says so itself if it wants to.
-        if (!m_window || room->isHost() || reason == u"Left the room" || reason == u"The host closed the room" ||
-            reason == u"usdcc is closing") {
-            return;
-        }
-        core::ToastRequest toast;
-        toast.kind = core::ToastKind::Warning;
-        const bool joined = !room->me().id.isEmpty();  // Set by the host's welcome
-        toast.title = (joined ? tr("Left %1") : tr("Couldn't join %1"))
-                          .arg(room->name().isEmpty() ? tr("the room") : room->name())
-                          .toStdString();
-        toast.body = reason.toStdString();
-        m_window->toasts()->show(toast);
     });
     PeerState* presence = room->peerState(kPresence);
     connect(presence, &PeerState::changed, this, [this, room] { Q_EMIT peopleChanged(room); });
@@ -410,12 +426,17 @@ void PeersController::setMuted(const Peer& peer, bool muted) {
 
 void PeersController::setPanelShown(bool shown) {
     m_panelShown = shown;
-    m_peers->setLooking(shown && core::Settings::instance().get<bool>(lookOnNetworkKey, true));
+    m_peers->setLooking((m_panelShown || m_swarmShown) && core::Settings::instance().get<bool>(lookOnNetworkKey, true));
+}
+
+void PeersController::setSwarmShown(bool shown) {
+    m_swarmShown = shown;
+    setPanelShown(m_panelShown);
 }
 
 void PeersController::updatePresence() {
     const QString stage = m_hooks.currentStage ? m_hooks.currentStage() : QString();
-    for (Room* room : m_peers->rooms()) {
+    for (Room* room : chatRooms()) {
         if (room->state() == Room::State::Open) {
             room->peerState(kPresence)->set(QJsonObject{{"stage", stage}});
         }
@@ -426,7 +447,7 @@ void PeersController::updateStatus() {
     if (!m_status) {
         return;
     }
-    const QList<Room*> rooms = m_peers->rooms();
+    const QList<Room*> rooms = chatRooms();
     if (rooms.isEmpty()) {
         m_status->hide();
         return;

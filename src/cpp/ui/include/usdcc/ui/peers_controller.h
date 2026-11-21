@@ -62,13 +62,19 @@ public:
         QString password;
         // On every network address; off, on 127.0.0.1 only (tests: no firewall question).
         bool onNetwork = true;
+        // The Peers panel hosts chat rooms; the Swarm panel render queues.
+        usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat;
     };
     // On every network address (Windows asks whether to let it through, the first
     // time), on the port of Settings > Peers or any free one.
     usdcc::peers::Room* host(const HostRequest& request, QString* error = nullptr);
     usdcc::peers::Room* join(const usdcc::peers::FoundRoom& room, const QString& password = {});
     // A usdcc:// link, or "host:port" to ask the host.
-    usdcc::peers::Room* joinLinkOrAddress(const QString& text, const QString& password, QString* error = nullptr);
+    // `type`: the kind of room expected (a link to another kind is left with a toast).
+    usdcc::peers::Room* joinLinkOrAddress(const QString& text, const QString& password, QString* error = nullptr,
+                                          usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat);
+    // The chat rooms: what the Peers panel shows.
+    QList<usdcc::peers::Room*> chatRooms() const;
 
     QList<ChatLine> chat(usdcc::peers::Room* room) const { return m_chat.value(room); }
     void say(usdcc::peers::Room* room, const QString& text);
@@ -86,6 +92,8 @@ public:
     // The panel shows: the network is asked for rooms only now (§5.2), and chat
     // messages don't need toasts.
     void setPanelShown(bool shown);
+    // The Swarm panel looks for render queues on the network as the Peers panel does for rooms.
+    void setSwarmShown(bool shown);
     // Tells every room what this instance has open now.
     void updatePresence();
     // Opens the panel (from a toast or the status bar).
@@ -111,6 +119,7 @@ private:
     QHash<usdcc::peers::Room*, QList<ChatLine>> m_chat;
     QToolButton* m_status = nullptr;
     bool m_panelShown = false;
+    bool m_swarmShown = false;
 };
 
 // The Profile of this instance: the name and color from Settings > Peers, and

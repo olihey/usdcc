@@ -14,6 +14,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace usdcc::peers {
 
@@ -47,12 +48,15 @@ public:
     Room* join(const QString& address, JoinOptions options);
     Room* join(const FoundRoom& room, const QString& password = {});
     // usdcc://join/… (§5.3). nullptr, with why in `error`, for a link that isn't one.
-    Room* joinLink(const QString& link, QString* error = nullptr);
+    // `type`: the kind of room the link is expected to be (JoinOptions::type).
+    Room* joinLink(const QString& link, QString* error = nullptr, RoomType type = RoomType::Chat);
     // Open or still connecting; a room leaves the list when it closes.
     QList<Room*> rooms() const;
+    QList<Room*> rooms(RoomType type) const;
 
-    // Rooms others host that this program isn't in, this machine's first.
-    QList<FoundRoom> foundRooms() const;
+    // Rooms others host that this program isn't in, this machine's first; of one kind only
+    // with `type`.
+    QList<FoundRoom> foundRooms(std::optional<RoomType> type = std::nullopt) const;
     // Asks the network only while something shows the list (§5.2).
     void setLooking(bool looking);
     bool isLooking() const { return m_looking; }

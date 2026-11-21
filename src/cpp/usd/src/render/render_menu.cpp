@@ -15,9 +15,14 @@ std::function<void()>& showQueue() {
     static std::function<void()> show;
     return show;
 }
+std::function<void()>& showSwarm() {
+    static std::function<void()> show;
+    return show;
+}
 }  // namespace
 
 void setShowRenderQueue(std::function<void()> show) { showQueue() = std::move(show); }
+void setShowSwarm(std::function<void()> show) { showSwarm() = std::move(show); }
 
 RenderJobPtr submitRender(const usdcc::usd::StageRefPtr& stage, const PXR_NS::SdfPath& settings, bool animation,
                           QWidget* parent, std::string* error, const std::string& rendererOverride) {
@@ -68,6 +73,10 @@ QMenu* createRenderMenu(usdcc::usd::StageManager* stageManager, usdcc::ui::ViewP
     menu->addAction(QObject::tr("Render &Queue"), parent, []() {
         if (showQueue()) showQueue()();
     });
+    QAction* swarm = menu->addAction(QObject::tr("S&warm"), parent, []() {
+        if (showSwarm()) showSwarm()();
+    });
+    swarm->setToolTip(QObject::tr("The render queue rooms, who is in them, what they render with and what they are rendering"));
     // Nothing to render without a stage.
     QObject::connect(menu, &QMenu::aboutToShow, menu, [stageManager, frame, animation]() {
         const bool any = stageManager->currentStage() != nullptr;

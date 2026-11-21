@@ -159,6 +159,28 @@ gives it as the command `usdcc-relay`, and a Dockerfile comes with it.
 - No accounts and no database. A studio runs one on a machine everyone reaches; Settings > Peers
   holds its URL.
 
+### 5.5 Room types
+
+A room says what it is for (`RoomType`, `HostOptions::type`), and each part of usdcc uses only
+its own:
+
+| Type | What it is | Where |
+|---|---|---|
+| `chat` | people talking | the Peers panel (§10.1), which lists only these |
+| `broadcast` | a viewport shown to watchers | Viewport Broadcast |
+| `render_queue` | instances rendering each other's jobs | Render > Swarm ([FINAL_RENDER.md](FINAL_RENDER.md) §7) |
+
+- **Said by the host:** in its `welcome` (`type`), and in its announcement (the room file's
+  `type`, the TXT record's `type`), so a room is known for what it is before joining it.
+  `Peers::foundRooms(type)` and `Peers::rooms(type)` give one kind.
+- **Expected by the joiner:** `JoinOptions::type`. A host that says it is another kind is left at
+  once, saying so ("That is a chat room, not a render_queue room"). A room that says nothing (an
+  older host) is taken to be what was expected; for an announcement, a chat room.
+- **One instance, several rooms:** each is announced on its own (by its host's id and its port),
+  so a chat room and a render queue hosted by the same instance are both found.
+- **Debug > Peer Rooms:** every room, of every type, with its peers, channels (what arrived since
+  the window opened), maps and per-peer states, as raw JSON.
+
 ## 6. Connecting and trust
 
 - **Hello.** Both sides send the protocol version, peer id, name, color, and what they are (usdcc
@@ -624,7 +646,8 @@ system's buffers fill, and the host's queue for it grows: a real slow member, no
   header with no bytes, which is easier from a page; the host always sends binary. A header may
   say `latest: true`, which matters only on a channel the host hasn't opened (below).
 - **The host's channel `room`** carries the protocol itself: `hello` (the version, the secret, a
-  name), `welcome` (the member's id, the people, the channels it reaches, the current `seq`),
+  name), `welcome` (the member's id, the people, the channels it reaches, the current `seq`,
+  the room's `type`, §5.5),
   `denied`, `joined`, `left`, `leave`, `removed`, `closed`, and `refused` for a message the host
   turned down. Nobody else may open `room`. `joined` and `left` are ordered like any message.
 - **Ordered messages come back to their sender,** with their `seq`, so every member, the host

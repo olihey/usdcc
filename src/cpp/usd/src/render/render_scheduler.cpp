@@ -6,6 +6,7 @@
 
 #include <pxr/usd/sdf/types.h>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -171,6 +172,14 @@ RenderJobPtr RenderScheduler::job(const std::string& jobId) const {
     return found != m_jobs.end() ? *found : nullptr;
 }
 
+std::vector<RenderScheduler::RunningTask> RenderScheduler::running() const {
+    std::vector<RunningTask> result;
+    for (const auto& [worker, running] : m_running) {
+        if (running.job && running.task >= 0) result.push_back({worker, running.job, running.task, running.startedMs});
+    }
+    return result;
+}
+
 bool RenderScheduler::busy() const {
     return std::any_of(m_jobs.begin(), m_jobs.end(), [](const RenderJobPtr& j) {
         return j->status == RenderJob::Status::Queued || j->status == RenderJob::Status::Running;
@@ -290,6 +299,7 @@ void RenderScheduler::startTask(Worker* worker, const RenderJobPtr& job, int tas
     running.job = job;
     running.task = taskIndex;
     running.serial = serial;
+    running.startedMs = QDateTime::currentMSecsSinceEpoch();
 
     // Every report comes back through the event loop, on this thread: a renderer may call
     // from its own threads, and one that reports from inside start() mustn't re-enter here.

@@ -1,7 +1,8 @@
 // Distributed final renders (docs/FINAL_RENDER.md §7), two instances in one process: a room on
 // 127.0.0.1, a submitter and a render node, each with its own RenderNetwork. Tasks go to the
 // node and come back stitched; the scene goes packaged or shared; trust and declining; a node
-// that leaves mid-task; and the wire formats.
+// that leaves mid-task; render_queue rooms only, the rooms a job may use, one worker for a peer
+// in two rooms, what a node says it is rendering; and the wire formats.
 #include "test_harness.h"
 
 #include "usdcc/peers/room.h"
@@ -33,6 +34,7 @@ PXR_NAMESPACE_USING_DIRECTIVE
 using namespace usdcc::render;
 using usdcc::peers::Peer;
 using usdcc::peers::Room;
+using usdcc::peers::RoomType;
 
 namespace {
 
@@ -117,29 +119,62 @@ struct Instance {
     }
 };
 
-struct TwoInstances {
+// A room the submitter hosts and the node joins, with the profiles' keys (so that the node is
+// the same peer in a second room).
+struct RoomPair {
     std::unique_ptr<Room> host;
     std::unique_ptr<Room> member;
-    Instance submitter{false, false};
-    Instance node{true, false};
 
-    TwoInstances() {
+    RoomPair(const QString& name, const usdcc::peers::Profile& submitter, const usdcc::peers::Profile& node,
+             RoomType type = RoomType::RenderQueue) {
         usdcc::peers::HostOptions options;
-        options.name = QStringLiteral("Render farm");
-        options.profile.name = QStringLiteral("Submitter");
+        options.name = name;
+        options.type = type;
+        options.profile = submitter;
         QString error;
         host.reset(Room::host(options, nullptr, &error));
         CHECK(host != nullptr, "a room: %s", qPrintable(error));
         if (!host) return;
         usdcc::peers::JoinOptions join;
-        join.profile.name = QStringLiteral("Node");
+        join.profile = node;
+        join.type = type;
         join.secret = host->secret();
         member.reset(Room::join(QStringLiteral("127.0.0.1:%1").arg(host->port()), join));
         waitFor([this] { return member->state() == Room::State::Open; });
+    }
+};
+
+usdcc::peers::Profile profile(const QString& name) {
+    usdcc::peers::Profile p;
+    p.name = name;
+    p.identity = usdcc::peers::Identity::generate();
+    p.instance = name.toLower();
+    return p;
+}
+
+struct TwoInstances {
+    usdcc::peers::Profile submitterProfile = profile(QStringLiteral("Submitter"));
+    usdcc::peers::Profile nodeProfile = profile(QStringLiteral("Node"));
+    RoomPair farm{QStringLiteral("Render farm"), submitterProfile, nodeProfile};
+    std::unique_ptr<Room>& host = farm.host;
+    std::unique_ptr<Room>& member = farm.member;
+    Instance submitter{false, false};
+    Instance node{true, false};
+
+    TwoInstances() {
+        if (!member) return;
         submitter.network->addRoom(host.get());
         node.network->addRoom(member.get());
     }
 };
+
+PeerDispatch toPeers(const std::string& delivery = "packaged", std::vector<std::string> rooms = {}) {
+    PeerDispatch dispatch;
+    dispatch.distribute = "peers";
+    dispatch.delivery = delivery;
+    dispatch.rooms = std::move(rooms);
+    return dispatch;
+}
 
 UsdStageRefPtr shotStage(const std::string& file = {}) {
     UsdStageRefPtr stage = file.empty() ? UsdStage::CreateInMemory("network_shot.usda") : UsdStage::CreateNew(file);
@@ -151,14 +186,11 @@ UsdStageRefPtr shotStage(const std::string& file = {}) {
     return stage;
 }
 
-SdfPath settingsFor(const UsdStageRefPtr& stage, const QString& output, const std::string& distribute,
-                    const std::string& delivery, GfVec2i tiles) {
+SdfPath settingsFor(const UsdStageRefPtr& stage, const QString& output, GfVec2i tiles) {
     const SdfPath path = createRenderSettings(stage);
     const UsdPrim prim = stage->GetPrimAtPath(path);
     UsdRenderSettings(prim).GetResolutionAttr().Set(GfVec2i(32, 16));
     setJobOption(prim, jobattr::renderer, VtValue(std::string("test.network")));
-    setJobOption(prim, jobattr::distribute, VtValue(distribute));
-    setJobOption(prim, jobattr::delivery, VtValue(delivery));
     setJobOption(prim, jobattr::tiles, VtValue(tiles));
     setJobOption(prim, jobattr::output, VtValue((output + "/<stage>").toStdString()));
     prim.CreateAttribute(TfToken("network:gain"), SdfValueTypeNames->Float, true).Set(2.5f);
@@ -292,10 +324,11 @@ USDCC_TEST(render_network_packaged) {
 
     QTemporaryDir out;
     UsdStageRefPtr stage = shotStage();
-    settingsFor(stage, out.path(), "peers", "packaged", GfVec2i(2, 2));
+    settingsFor(stage, out.path(), GfVec2i(2, 2));
     JobRequest request;
     request.stage = stage;
     request.frames = JobRequest::Frames::Range;
+    request.dispatch = toPeers();
     std::string error;
     RenderJobPtr job = makeRenderJob(request, &error);
     CHECK(job && job->tasks.size() == 8, "2 frames × 4 tiles: %s", error.c_str());
@@ -323,11 +356,12 @@ USDCC_TEST(render_network_shared) {
     QTemporaryDir out;
     const std::string file = out.filePath("shared_shot.usda").toStdString();
     UsdStageRefPtr stage = shotStage(file);
-    settingsFor(stage, out.path(), "peers", "shared", GfVec2i(1, 1));
+    settingsFor(stage, out.path(), GfVec2i(1, 1));
     stage->Save();
     JobRequest request;
     request.stage = stage;
     request.currentTime = 1;
+    request.dispatch = toPeers("shared");
     RenderJobPtr job = makeRenderJob(request, nullptr);
     if (!job) return;
     CHECK(job->shared.whyNot.empty(), "the job has the stage as it is");
@@ -355,10 +389,11 @@ USDCC_TEST(render_network_trust_and_leaving) {
     waitFor([&] { return farm.submitter.scheduler.workers().size() == 1; });
     QTemporaryDir out;
     UsdStageRefPtr stage = shotStage();
-    settingsFor(stage, out.path(), "peers", "packaged", GfVec2i(1, 1));
+    settingsFor(stage, out.path(), GfVec2i(1, 1));
     JobRequest request;
     request.stage = stage;
     request.currentTime = 1;
+    request.dispatch = toPeers();
 
     // Not trusted, and its user says no: the job waits for another node.
     farm.node.trusted = false;
@@ -379,12 +414,10 @@ USDCC_TEST(render_network_trust_and_leaving) {
     CHECK(waitFor([&] { return ended(accepted); }) && accepted->status == RenderJob::Status::Done, "asked, and rendered: %s",
           accepted->error.c_str());
 
-    // Not a node any more: it says so, and stops being a worker.
-    farm.node.node = false;
-    farm.node.network->advertise();
+    // Not taking jobs in the room any more: it says so, and stops being a worker.
+    farm.node.network->setTakesJobs(farm.member.get(), false);
     CHECK(waitFor([&] { return farm.submitter.scheduler.workers().empty(); }), "a peer that stops rendering for others goes from the queue");
-    farm.node.node = true;
-    farm.node.network->advertise();
+    farm.node.network->setTakesJobs(farm.member.get(), true);
     CHECK(waitFor([&] { return farm.submitter.scheduler.workers().size() == 1; }), "and comes back");
 
     // Leaving mid-task: the task goes back to the queue.
@@ -397,4 +430,75 @@ USDCC_TEST(render_network_trust_and_leaving) {
     CHECK(waitFor([&] { return left->tasks.front().status == JobTask::Status::Pending; }), "the node left: the task waits again");
     CHECK(waitFor([&] { return farm.submitter.scheduler.workers().empty(); }), "and the node is no worker");
     farm.submitter.scheduler.cancel(left->id);
+}
+
+USDCC_TEST(render_network_rooms) {
+    Registered registered;
+    TwoInstances farm;
+    if (!farm.member) return;
+    CHECK(waitFor([&] { return farm.submitter.scheduler.workers().size() == 1; }), "the node is a worker");
+
+    // A chat room the two share: not the render network's.
+    RoomPair chat(QStringLiteral("Chat"), farm.submitterProfile, farm.nodeProfile, RoomType::Chat);
+    if (!chat.member) return;
+    farm.submitter.network->addRoom(chat.host.get());
+    farm.node.network->addRoom(chat.member.get());
+    CHECK(farm.submitter.network->rooms().size() == 1 && farm.node.network->rooms().size() == 1, "chat rooms are ignored");
+
+    // A second render queue with the same two: the node is still one worker.
+    RoomPair second(QStringLiteral("Night shift"), farm.submitterProfile, farm.nodeProfile);
+    if (!second.member) return;
+    farm.submitter.network->addRoom(second.host.get());
+    farm.node.network->addRoom(second.member.get());
+    CHECK(waitFor([&] { return farm.submitter.network->nodes().size() == 2; }), "the node shows in both rooms");
+    CHECK(farm.submitter.scheduler.workers().size() == 1, "but is one worker");
+    CHECK(RenderNetwork::roomKey(farm.host.get()) == RenderNetwork::roomKey(farm.member.get()),
+          "a room's key is the same for its host and its members");
+    CHECK(farm.submitter.network->nodesFor("test.network", false, {RenderNetwork::roomKey(second.host.get())}).size() == 1,
+          "nodes by room");
+
+    // A room the node doesn't take jobs in: a job only for that room has nobody.
+    farm.node.network->setTakesJobs(second.member.get(), false);
+    CHECK(waitFor([&] {
+              return farm.submitter.network->nodesFor("test.network", false, {RenderNetwork::roomKey(second.host.get())}).empty();
+          }),
+          "it says it doesn't take jobs there");
+    CHECK(farm.submitter.scheduler.workers().size() == 1, "it is still a worker, through the other room");
+    QTemporaryDir out;
+    UsdStageRefPtr stage = shotStage();
+    settingsFor(stage, out.path(), GfVec2i(1, 1));
+    JobRequest request;
+    request.stage = stage;
+    request.currentTime = 1;
+    request.dispatch = toPeers("packaged", {RenderNetwork::roomKey(second.host.get())});
+    RenderJobPtr elsewhere = makeRenderJob(request, nullptr);
+    CHECK(elsewhere && elsewhere->spec.options.rooms.size() == 1, "the job keeps its rooms");
+    if (!elsewhere) return;
+    CHECK(!farm.submitter.scheduler.workers().front()->canRun(*elsewhere), "and the node can't take it");
+
+    // The same job for the first room: rendered there, and the node says what it renders.
+    registered.renderer->hang = true;
+    request.dispatch = toPeers("packaged", {RenderNetwork::roomKey(farm.host.get())});
+    RenderJobPtr here = makeRenderJob(request, nullptr);
+    if (!here) return;
+    farm.submitter.scheduler.submit(here);
+    CHECK(waitFor([&] { return farm.node.network->remoteTasks() == 1; }), "the node is rendering it");
+    const auto current = [&]() -> std::optional<RenderNode::Current> {
+        for (const RenderNode& node : farm.submitter.network->nodes()) {
+            if (node.room == farm.host.get() && node.current) return node.current;
+        }
+        return std::nullopt;
+    };
+    CHECK(waitFor([&] { return current().has_value(); }), "and says so");
+    if (const auto c = current()) {
+        CHECK(c->forPeer && c->from == QStringLiteral("Submitter") && c->scene == QStringLiteral("network_shot") &&
+                  c->startedMs > 0 && c->frame == 1.0,
+              "for whom, which scene and frame, since when: %s %s %s", qPrintable(c->from), qPrintable(c->scene),
+              qPrintable(c->title));
+    }
+    const RenderNode self = farm.node.network->self(farm.member.get());
+    CHECK(self.busy && self.current && self.node, "its own row says the same");
+    farm.submitter.scheduler.cancel(here->id);
+    CHECK(waitFor([&] { return farm.node.network->remoteTasks() == 0 && !farm.node.network->self(farm.member.get()).busy; }),
+          "and idle again once cancelled");
 }
