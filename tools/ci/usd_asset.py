@@ -35,10 +35,12 @@ from _common import ASSET_PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, 
 def platform_flags(flags):
     """deps/usd.json's build_usd.py flags for this platform: without the Windows-only
     --generator elsewhere, where build_usd.py picks the platform's own. On Windows
-    ARM64 the generator is VS_GENERATOR's (Visual Studio 2026), and --onetbb is
-    added, as build_usd.py refuses classic TBB there."""
+    ARM64 the generator is VS_GENERATOR's (Visual Studio 2026), --onetbb is
+    added, as build_usd.py refuses classic TBB there, and Boost's b2 is told to
+    build for arm64, which build_usd.py doesn't ask for."""
     if WINDOWS and VS_ARCH == "ARM64":
-        return [flag for flag in flags if not flag.startswith("--generator")] + [f"--generator={VS_GENERATOR}", "--onetbb"]
+        return [flag for flag in flags if not flag.startswith("--generator")] + [
+            f"--generator={VS_GENERATOR}", "--onetbb", "--build-args", "boost,architecture=arm"]
     if WINDOWS:
         return list(flags)
     return [flag for flag in flags if not flag.startswith("--generator")]

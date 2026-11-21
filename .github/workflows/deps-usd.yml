@@ -160,7 +160,19 @@ jobs:
           # deps/usd.json's flags as tools/ci/usd_asset.py adapts them (--onetbb on ARM64).
           $flags = python -c "import json, sys; sys.path.insert(0, 'tools/ci'); import usd_asset; print(json.dumps(usd_asset.platform_flags(json.load(open('deps/usd.json'))['flags'])))" | ConvertFrom-Json
           if ($LASTEXITCODE) { throw 'no flags' }
-          python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($flags) `
+          # build_usd.py knows the Visual Studio version only from a developer
+          # prompt's VCToolsVersion. Without one it picks Boost 1.80, whose
+          # bootstrap doesn't know Visual Studio 2026 ("Unknown toolset: vcunk"),
+          # so ARM64 builds in an ARM64 developer shell: Boost 1.90, msvc-14.5.
+          $python = (Get-Command python).Source  # the one set up above, whatever the shell adds to PATH
+          if ('${{ matrix.arch }}' -eq 'arm64') {
+            $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+            Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+            Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=arm64 -host_arch=arm64' | Out-Null
+            Write-Host "MSVC $env:VCToolsVersion ($(Get-Command cl | Select-Object -ExpandProperty Source))"
+            if ($env:VCToolsVersion -notmatch '^14\.5') { throw "Expected MSVC 14.5x, got '$env:VCToolsVersion'" }
+          }
+          & $python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($flags) `
             --src "$env:WORK\src" --build "$env:WORK\build" $env:USD_INSTALL
           if ($LASTEXITCODE) {
             Get-Content "$env:WORK\src\log.txt" -Tail 200 -ErrorAction SilentlyContinue
@@ -232,7 +244,7 @@ jobs:
           - Patches: $($spec.patches -join ', ')
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
-          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb`` (runner image ``windows-11-arm``)
+          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb``, in an ARM64 developer shell (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
           - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
