@@ -28,8 +28,11 @@ LINUX = not WINDOWS and not MACOS
 
 _ARM = platform.machine().lower() in ("arm64", "aarch64")
 
-# Visual Studio's -A for this machine (Windows only).
+# Visual Studio's -A for this machine, and the generator for it (Windows only):
+# 2022 on x64, the toolset of the OpenUSD asset and of usdcc, and 2026 on ARM64,
+# the only one on GitHub's windows-11-arm image (binary compatible with 2022's).
 VS_ARCH = "ARM64" if _ARM else "x64"
+VS_GENERATOR = "Visual Studio 18 2026" if _ARM else "Visual Studio 17 2022"
 
 # What differs between platforms, in one place. The Linux and macOS triplets are
 # the dynamic ones: vcpkg's own defaults there build static libraries, which

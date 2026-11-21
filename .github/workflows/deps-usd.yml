@@ -35,7 +35,8 @@ concurrency:
 
 jobs:
   # Once per architecture: tools/_common.py names the asset win64 or win-arm64 by
-  # the machine. The windows-11-arm image has Visual Studio 2022 too.
+  # the machine. The windows-11-arm image has only Visual Studio 2026, which
+  # tools/ci/usd_asset.py's flags use there.
   windows:
     # Pinned, never windows-latest: windows-2025 has moved to Visual Studio 2026,
     # and the build has to use the same toolset as usdcc (Visual Studio 2022).
@@ -47,10 +48,12 @@ jobs:
           - arch: x64
             runner: windows-2022
             vs_arch: x64
+            vs_generator: Visual Studio 17 2022
             log: build_usd-log
           - arch: arm64
             runner: windows-11-arm
             vs_arch: ARM64
+            vs_generator: Visual Studio 18 2026
             log: build_usd-log-arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -204,7 +207,7 @@ jobs:
           $sdk = "$env:RUNNER_TEMP\usd-sdk"
           7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$sdk" | Select-Object -Last 2
           $build = "$env:RUNNER_TEMP\usd-sdk-check"
-          cmake -S tools/ci/usd-sdk-check -B $build -G 'Visual Studio 17 2022' -A ${{ matrix.vs_arch }} "-DUSD_INSTALL=$sdk"
+          cmake -S tools/ci/usd-sdk-check -B $build -G '${{ matrix.vs_generator }}' -A ${{ matrix.vs_arch }} "-DUSD_INSTALL=$sdk"
           if ($LASTEXITCODE) { throw 'configure failed' }
           cmake --build $build --config Release --parallel
           if ($LASTEXITCODE) { throw 'build failed' }
@@ -222,7 +225,7 @@ jobs:
           - Patches: $($spec.patches -join ', ')
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
-          - ``win-arm64``: Python $($spec.python) arm64, Visual Studio 2022, with ``--onetbb`` (runner image ``windows-11-arm``)
+          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb`` (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
           - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``

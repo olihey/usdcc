@@ -237,7 +237,8 @@ def main(argv=None):
     ]
     arm = platform.machine().lower() in ("arm64", "aarch64")
     if sys.platform == "win32":
-        command += ["-G", "Visual Studio 17 2022", "-A", "ARM64" if arm else "x64"]
+        # As tools/_common.py's VS_GENERATOR: 2026 on ARM64, 2022 on x64.
+        command += ["-G", "Visual Studio 18 2026" if arm else "Visual Studio 17 2022", "-A", "ARM64" if arm else "x64"]
     else:
         command += [f"-DVCPKG_TARGET_TRIPLET={'arm64' if arm else 'x64'}-linux-dynamic"]
     run(command)

@@ -29,15 +29,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import ASSET_PLATFORM, REPO, VS_ARCH, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import ASSET_PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
 
 
 def platform_flags(flags):
     """deps/usd.json's build_usd.py flags for this platform: without the Windows-only
-    --generator elsewhere, where build_usd.py picks the platform's own, and with
-    --onetbb on Windows ARM64, where build_usd.py refuses classic TBB."""
+    --generator elsewhere, where build_usd.py picks the platform's own. On Windows
+    ARM64 the generator is VS_GENERATOR's (Visual Studio 2026), and --onetbb is
+    added, as build_usd.py refuses classic TBB there."""
+    if WINDOWS and VS_ARCH == "ARM64":
+        return [flag for flag in flags if not flag.startswith("--generator")] + [f"--generator={VS_GENERATOR}", "--onetbb"]
     if WINDOWS:
-        return list(flags) + (["--onetbb"] if VS_ARCH == "ARM64" else [])
+        return list(flags)
     return [flag for flag in flags if not flag.startswith("--generator")]
 
 

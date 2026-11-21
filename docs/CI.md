@@ -367,6 +367,10 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
   `tools/ci/usd_asset.py` adds to `deps/usd.json`'s flags there.
 - The tools run before `actions/setup-python` on the runner's own Python; the Windows
   Arm jobs set up an arm64 Python first, so they name the arm64 assets.
+- `windows-11-arm` has only Visual Studio 2026, so Windows ARM64 builds with it
+  (`tools/_common.py`'s `VS_GENERATOR`); x64 stays on 2022. Its pinned Python comes from
+  python.org's `pythonarm64` NuGet package: setup-python can't install an older 3.13
+  beside the newer one the image ships.
 - Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`),
   PySide6 (`deps-pyside.yml`, so `windows-arm64` has no `usdcc.ui`), the Blender
   distribution checks, and `release.yml`. A missing pack or PySide6 is a warning, as on x64.
