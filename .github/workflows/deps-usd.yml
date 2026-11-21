@@ -114,9 +114,11 @@ jobs:
             Write-Host "Uninstalling $($part.DisplayName)"
             $exit = (Start-Process msiexec -ArgumentList '/x', $part.PSChildName, '/qn', '/norestart' -Wait -PassThru).ExitCode
             # 1605: already gone with another part; 3010: needs a restart, which it doesn't here.
-            if ($exit -notin 0, 1605, 3010) { throw "uninstalling $($part.DisplayName) failed ($exit)" }
+            # A part that won't go (1603 for the Test Suite) is a warning: setup-python says whether what's left is in the way.
+            if ($exit -notin 0, 1605, 3010) { Write-Host "::warning::uninstalling $($part.DisplayName) failed ($exit)" }
           }
           if (-not $parts) { Write-Host "No other Python $($pin -replace '\.\d+$') release to remove" }
+          exit 0
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true'
