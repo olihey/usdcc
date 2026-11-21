@@ -39,7 +39,7 @@ struct USDCC_RENDER_API JobOptions {
     // Not on the prim: where the job goes is the app's choice when it is submitted (PeerDispatch,
     // the bottom of the Render Settings panel; docs/FINAL_RENDER.md §7).
     // Who renders: "local" (this instance), "both" (this instance and peers that are render
-    // nodes) or "peers" (only them).
+    // nodes), "peers" (only them) or "queue" (a render queue server's, RenderQueueClient).
     std::string distribute = "local";
     // How peers get the scene: "packaged" (the flattened stage and its assets, sent) or "shared"
     // (the stage as it is, with references, resolved on the peer).
@@ -48,7 +48,7 @@ struct USDCC_RENDER_API JobOptions {
     std::vector<std::string> rooms;
 
     bool usesPeers() const { return distribute == "both" || distribute == "peers"; }
-    bool usesThisInstance() const { return distribute != "peers"; }
+    bool usesThisInstance() const { return distribute == "local" || distribute == "both"; }
     bool allowsRoom(const std::string& roomKey) const {
         return rooms.empty() || std::find(rooms.begin(), rooms.end(), roomKey) != rooms.end();
     }
@@ -60,6 +60,7 @@ struct USDCC_RENDER_API PeerDispatch {
     std::string distribute = "local";      // JobOptions::distribute
     std::string delivery = "packaged";     // JobOptions::delivery
     std::vector<std::string> rooms;        // JobOptions::rooms; empty: every render_queue room
+    std::string queue;                     // with distribute "queue": the queue's name; empty: the first
 
     void applyTo(JobOptions& options) const {
         options.distribute = distribute;

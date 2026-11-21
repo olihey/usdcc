@@ -1,9 +1,11 @@
 #include "usdcc/usd/render/render_queue_panel.h"
 
 #include "usdcc/usd/color_management.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render_view_panel.h"
 
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -27,6 +29,8 @@ constexpr int kUpdateMs = 200;
 constexpr int kPreviewMaxSide = 1600;
 constexpr int kJobRole = Qt::UserRole;
 constexpr int kTaskRole = Qt::UserRole + 1;
+// A queue's job: its key in the queue's map.
+constexpr int kQueueJobRole = Qt::UserRole + 2;
 
 enum Column { NameColumn, StatusColumn, ProgressColumn, WorkerColumn, TimeColumn };
 
@@ -57,6 +61,14 @@ QString percent(double fraction) {
     return QStringLiteral("%1%").arg(static_cast<int>(fraction * 100.0 + 0.5));
 }
 
+QString queueStatus(const QString& status) {
+    if (status == u"running") return QObject::tr("Rendering");
+    if (status == u"done") return QObject::tr("Done");
+    if (status == u"failed") return QObject::tr("Failed");
+    if (status == u"cancelled") return QObject::tr("Cancelled");
+    return QObject::tr("Queued");
+}
+
 QString taskName(const RenderJob& job, const JobTask& task) {
     QString name = QObject::tr("Frame %1").arg(QString::fromStdString(frameText(task.task.frame)));
     if (job.tilesPerFrame() > 1) {
@@ -68,8 +80,9 @@ QString taskName(const RenderJob& job, const JobTask& task) {
 
 }  // namespace
 
-RenderQueueSidePanel::RenderQueueSidePanel(RenderScheduler* scheduler, QWidget* parent)
-    : usdcc::ui::SidePanel(tr("Render Queue"), parent), m_scheduler(scheduler) {
+RenderQueueSidePanel::RenderQueueSidePanel(RenderScheduler* scheduler, QWidget* parent, RenderQueueClient* queues)
+    : usdcc::ui::SidePanel(tr("Render Queue"), parent), m_scheduler(scheduler),
+      m_queues(queues ? queues : RenderQueueClient::instance()) {
     setObjectName(QStringLiteral("RenderQueue"));
     auto* content = new QWidget(this);
     auto* layout = new QVBoxLayout(content);
@@ -113,6 +126,12 @@ RenderQueueSidePanel::RenderQueueSidePanel(RenderScheduler* scheduler, QWidget* 
     layout->addLayout(buttons);
     setWidget(content);
 
+    m_rebuildTimer = new QTimer(this);
+    m_rebuildTimer->setSingleShot(true);
+    m_rebuildTimer->setInterval(50);
+    connect(m_rebuildTimer, &QTimer::timeout, this, [this]() { rebuild(); });
+    if (m_queues) connect(m_queues, &RenderQueueClient::jobsChanged, this, &RenderQueueSidePanel::rebuildSoon);
+
     m_updateTimer = new QTimer(this);
     m_updateTimer->setInterval(kUpdateMs);
     connect(m_updateTimer, &QTimer::timeout, this, [this]() {
@@ -133,9 +152,19 @@ RenderQueueSidePanel::RenderQueueSidePanel(RenderScheduler* scheduler, QWidget* 
     });
     connect(m_scheduler, &RenderScheduler::frameRendered, this, &RenderQueueSidePanel::showFrame);
     connect(m_tree, &QTreeWidget::itemSelectionChanged, this, [this]() { updateButtons(); });
-    connect(m_cancel, &QPushButton::clicked, this, [this]() { m_scheduler->cancel(selectedJob().toStdString()); });
-    connect(m_retry, &QPushButton::clicked, this, [this]() { m_scheduler->retry(selectedJob().toStdString()); });
-    connect(m_remove, &QPushButton::clicked, this, [this]() { m_scheduler->remove(selectedJob().toStdString()); });
+    // A queue's job: the queue does it, if it lets this profile.
+    connect(m_cancel, &QPushButton::clicked, this, [this]() {
+        if (const QString key = selectedQueueJob(); !key.isEmpty()) return m_queues->cancel(key);
+        m_scheduler->cancel(selectedJob().toStdString());
+    });
+    connect(m_retry, &QPushButton::clicked, this, [this]() {
+        if (const QString key = selectedQueueJob(); !key.isEmpty()) return m_queues->retry(key);
+        m_scheduler->retry(selectedJob().toStdString());
+    });
+    connect(m_remove, &QPushButton::clicked, this, [this]() {
+        if (const QString key = selectedQueueJob(); !key.isEmpty()) return m_queues->remove(key);
+        m_scheduler->remove(selectedJob().toStdString());
+    });
     connect(m_clear, &QPushButton::clicked, this, [this]() { m_scheduler->clearEnded(); });
     connect(m_open, &QPushButton::clicked, this, [this]() {
         const RenderJobPtr job = m_scheduler->job(selectedJob().toStdString());
@@ -151,18 +180,37 @@ bool RenderQueueSidePanel::canClose() {
                                  QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Yes;
 }
 
+void RenderQueueSidePanel::setQueueClient(RenderQueueClient* queues) {
+    if (m_queues == queues) return;
+    if (m_queues) disconnect(m_queues, nullptr, this, nullptr);
+    m_queues = queues;
+    if (m_queues) {
+        connect(m_queues, &RenderQueueClient::jobsChanged, this, &RenderQueueSidePanel::rebuildSoon);
+    }
+    rebuild();
+}
+
+void RenderQueueSidePanel::rebuildSoon() {
+    if (!m_rebuildTimer->isActive()) m_rebuildTimer->start();
+}
+
+QString RenderQueueSidePanel::selectedQueueJob() const {
+    const QList<QTreeWidgetItem*> selected = m_tree->selectedItems();
+    return selected.isEmpty() || !m_queues ? QString() : selected.front()->data(NameColumn, kQueueJobRole).toString();
+}
+
 QString RenderQueueSidePanel::selectedJob() const {
     const QList<QTreeWidgetItem*> selected = m_tree->selectedItems();
     if (selected.isEmpty()) {
         // Nothing picked: the newest job.
-        return m_tree->topLevelItemCount() ? m_tree->topLevelItem(m_tree->topLevelItemCount() - 1)->data(NameColumn, kJobRole).toString()
-                                           : QString();
+        return m_scheduler->jobs().empty() ? QString() : QString::fromStdString(m_scheduler->jobs().back()->id);
     }
     return selected.front()->data(NameColumn, kJobRole).toString();
 }
 
 void RenderQueueSidePanel::rebuild() {
     const QString selected = m_tree->selectedItems().isEmpty() ? QString() : m_tree->selectedItems().front()->data(NameColumn, kJobRole).toString();
+    const QString selectedQueue = selectedQueueJob();
     QSet<QString> expanded;
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         if (m_tree->topLevelItem(i)->isExpanded()) expanded.insert(m_tree->topLevelItem(i)->data(NameColumn, kJobRole).toString());
@@ -183,6 +231,30 @@ void RenderQueueSidePanel::rebuild() {
         item->setExpanded(expanded.contains(id));
         if (id == selected) item->setSelected(true);
     }
+    // The queues' jobs, under each queue's name: they're the queue's, not this instance's.
+    if (m_queues) {
+        std::map<QString, QTreeWidgetItem*> headings;
+        for (const QueuedJobInfo& info : m_queues->jobs()) {
+            QTreeWidgetItem*& heading = headings[info.queueName];
+            if (!heading) {
+                heading = new QTreeWidgetItem(m_tree);
+                heading->setText(NameColumn, tr("On %1").arg(info.queueName));
+                heading->setData(NameColumn, kJobRole, QStringLiteral("queue:") + info.queueName);
+                heading->setFlags(Qt::ItemIsEnabled);
+                QFont font = heading->font(NameColumn);
+                font.setBold(true);
+                heading->setFont(NameColumn, font);
+            }
+            auto* child = new QTreeWidgetItem(heading);
+            child->setData(NameColumn, kJobRole, QString());
+            child->setData(NameColumn, kTaskRole, -1);
+            child->setData(NameColumn, kQueueJobRole, info.key);
+            child->setText(NameColumn, QStringLiteral("%1 — %2").arg(info.title, info.renderer));
+            child->setToolTip(NameColumn, tr("%1's job, on %2").arg(info.submitter, info.queueName));
+            if (info.key == selectedQueue) child->setSelected(true);
+        }
+        for (auto& [name, heading] : headings) heading->setExpanded(true);
+    }
     updateItems();
     updateButtons();
     if (m_scheduler->busy()) m_updateTimer->start();
@@ -192,6 +264,23 @@ void RenderQueueSidePanel::updateItems() {
     const auto now = std::chrono::steady_clock::now();
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* item = m_tree->topLevelItem(i);
+        // A queue's heading: its jobs as the queue says.
+        if (m_queues && item->data(NameColumn, kJobRole).toString().startsWith(QStringLiteral("queue:"))) {
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            for (int c = 0; c < item->childCount(); ++c) {
+                QTreeWidgetItem* child = item->child(c);
+                const std::optional<QueuedJobInfo> info = m_queues->job(child->data(NameColumn, kQueueJobRole).toString());
+                if (!info) continue;
+                child->setText(StatusColumn, queueStatus(info->status));
+                child->setToolTip(StatusColumn, info->error);
+                child->setText(ProgressColumn, QStringLiteral("%1/%2 · %3").arg(info->done).arg(info->total).arg(percent(info->progress)));
+                child->setText(WorkerColumn, info->nodes.join(QStringLiteral(", ")));
+                const qint64 end = info->finishedMs ? info->finishedMs : nowMs;
+                child->setText(TimeColumn, info->submittedMs ? QStringLiteral("%1 s").arg((end - info->submittedMs) / 1000.0, 0, 'f', 1)
+                                                             : QString());
+            }
+            continue;
+        }
         const RenderJobPtr job = m_scheduler->job(item->data(NameColumn, kJobRole).toString().toStdString());
         if (!job) continue;
         item->setText(StatusColumn, jobStatus(*job));
@@ -219,6 +308,16 @@ void RenderQueueSidePanel::updateItems() {
 }
 
 void RenderQueueSidePanel::updateButtons() {
+    if (const QString key = selectedQueueJob(); !key.isEmpty()) {
+        const std::optional<QueuedJobInfo> info = m_queues->job(key);
+        const bool activeJob = info && (info->status == u"queued" || info->status == u"running");
+        m_cancel->setEnabled(activeJob);
+        m_retry->setEnabled(info && (info->status == u"failed" || info->status == u"cancelled"));
+        m_remove->setEnabled(info.has_value());
+        m_open->setEnabled(false);
+        m_clear->setEnabled(!m_scheduler->jobs().empty());
+        return;
+    }
     const RenderJobPtr job = m_scheduler->job(selectedJob().toStdString());
     const bool active = job && (job->status == RenderJob::Status::Queued || job->status == RenderJob::Status::Running);
     m_cancel->setEnabled(active);

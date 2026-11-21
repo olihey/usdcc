@@ -13,8 +13,9 @@ manager. It renders final frames ([FINAL_RENDER.md](FINAL_RENDER.md)) in one of 
 
 **Status:** planned 2026-11-21; the queue server added the same day. Phases 1 to 4 built 2026-11-21
 (§7): the shared startup, `usdcc_render`, `usdcc_node render`, `renderers` and `serve`, and the
-OpenGL check for Storm. Not built: the service, the queue server and its page. "Checked" below
-means looked at in this repository; everything else is an assumption until it's tried.
+OpenGL check for Storm. Phases 6 to 9 built 2026-11-22: the queue server, its state, the app's
+side and the web page (§4.4, §4.5, "As built" there). Not built: the service (phase 5). "Checked"
+below means looked at in this repository; everything else is an assumption until it's tried.
 
 ## 1. Decisions
 
@@ -275,6 +276,42 @@ finished.
 - **The queue never runs what it gets.** A scene is rendered by a node's renderer, as now; a
   script in a scene is as harmless or harmful as it is on the artist's own machine.
 
+**As built** (`usdcc/usd/render/render_queue.h`, in `usdcc_render`; `usdcc_node queue`):
+
+- **`RenderQueueServer`** takes jobs, **`RenderQueueClient`** is the artist's side. The app makes
+  a client for its render queue rooms; the node's `queue` command makes the server, its own
+  `RenderScheduler` and a `RenderNetwork` whose nodes are its workers.
+- **Channels:** the messages are on their own Direct channel, `org.usdcc.render/queue-jobs`, and
+  the scenes and fetched frames on `org.usdcc.render/queue-files`, not on
+  `org.usdcc.render/jobs`, so a queue and the peers of FINAL_RENDER.md §7 don't read each
+  other's messages. A queue says it is one in the per-peer state `org.usdcc.render/queuer`
+  (`{name, root}`), which goes when it leaves; its jobs are in the map `org.usdcc.render/queue`,
+  a key `<queue peer id>|<job id>` each, written only by the queue where it hosts the room.
+- **A job travels whole:** `jobToJson()` with its spec and tasks, and the scene as a packaged
+  bundle. The queue gives it an id of its own (`q…`), keeps the scene in `--state`, and sends
+  `queued` once it has both; `refused` when the artist isn't accepted, the job has no frames, or
+  its output leaves the root (`queueOutputPattern()`: a relative pattern under the root, an
+  absolute one only inside it).
+- **Its state:** a JSON file per job (`jobs/`), the scene (`scenes/`), a finished tile's images
+  until its frame is written (`tiles/`), and without a root the frames (`frames/`). Saved as
+  things change, so a queue that's killed loses at most half a second of statuses. At start:
+  running tasks wait again; a frame with every tile done and none kept was written; a done tile
+  kept goes back into its frame (`RenderScheduler::restoreTask()`); a done tile not kept renders
+  again.
+- **Fetching:** without `--output-root`, once a job is done and its artist is in a room, the
+  queue sends the frames; the artist's instance puts them in the folder the job would have
+  written to, says `received`, and the queue lets go of them.
+- **In the app:** Render Settings > Render on lists *Queue: <name>* for each queue in the rooms
+  (`PeerDispatch::queue`, kept between runs); Render Frame and Render Animation then send the job
+  there instead of scheduling it. The Render Queue panel lists each queue's jobs under *On
+  <name>*, with status, progress, nodes and time; Cancel, Retry and Remove go to the queue, which
+  answers `denied` (a toast) when they aren't the artist's to do. Its tasks aren't listed there:
+  the web page has them. A job's end is a toast in the artist's instance.
+- **`--host-room <name>`** hosts on every address (`--local`: 127.0.0.1 only; `--public`: open
+  to anyone on this network, announced), on `--port` or any free one, and prints its link.
+  `--join` puts it in another room, joined again when lost. `--render` adds this machine as a
+  worker. The queue prints its fingerprint, for the nodes' `--trust`.
+
 ### 4.5 The queue's web page
 
 For whoever doesn't have usdcc open: a producer, a supervisor, an artist on a laptop, the farm's
@@ -339,6 +376,30 @@ so the page reads as part of usdcc and not as a separate tool.
 step, like the broadcast's page. Served by the queue's room with Qt HttpServer, which
 `usdcc_peers` already uses for guests' pages (`HostOptions::pageDirectory`).
 
+**As built** (`src/cpp/node/queue_web.h`, `src/cpp/node/web/index.html`):
+
+- **A room of its own** on the `--web` port, that only guests use, so the page works whether the
+  queue hosts its render queue room or joins someone else's. It serves `node-web/` beside
+  `usdcc_node.exe` (the page and `usdcc.css`, copied there by the build).
+- **One channel,** `org.usdcc.render/queue-web`, open to guests: the page gets a `snapshot` when it
+  joins and a `state` (every job with its tasks, and the nodes) a few times a second at most while
+  anything changes, rather than the map's changes, as guests don't see maps (PEERS.md §6.1).
+  `preview` carries the PNG.
+- **The token** is checked on the queue for each `cancel`, `retry` and `remove`; the answer,
+  `result`, goes to that page only. Without `--web-token-file` the page can only look. A file
+  that doesn't exist is made, with 32 random hex characters, readable by its owner only. Each
+  action is logged with the page's name; Qt's guests don't say their address, so it isn't logged.
+  Pausing a node isn't built.
+- **The accent** comes in the snapshot (the profile's Appearance/accentColor) and the page sets
+  `--accent`, `--accent-rgb` and `--accent-hover` from it.
+- **Not built:** the icons (the page uses text buttons, as the panel does), whether a node has
+  turned the queue down (the node list shows renderers, busy or idle, and the task it's on), and
+  the guest link in Render Settings: the queue prints it.
+- **The broadcast's page** links the same `usdcc.css`; the plugin's build copies it beside the
+  page.
+- **Checked** in the in-app browser against sample jobs: the panel's surfaces, density, accent
+  and hairlines, one column at a phone's width with no sideways scroll.
+
 ### 4.3 Profile and settings
 
 - **Its own profile,** `usdcc-node` (`--profile name` for another), so a node on an artist's
@@ -399,10 +460,10 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 | **3. Node for peers** *(built)* | `serve` (§4.2): `--join`, `--public`, trust, `--key-file`, the inbox, Ctrl+C | A test like `render_network_packaged`, with the node as a process: an app instance in the test hands it frames, untrusted is declined, killing the node puts its task back (`node_process_serve`) |
 | **4. Storm headless** *(built, not tried headless)* | The OpenGL check of §5, the scheduled task | On a machine with no monitor, Storm renders a frame in a logged-on session, and is not offered as a service |
 | **5. Service** | `service install`/`remove`, the Event Log | A service on another machine takes frames from an artist's instance across the network |
-| **6. Queue: submitting** | `usdcc_node queue` (§4.4): its room, `submit`, `queued`/`refused`, the queue's scheduler handing tasks to nodes, the frames written under `--output-root`, *Queue* in Render on | A test: an artist's instance submits 3 frames in 2 × 2 tiles to a queue process and closes; two node processes render them; the EXRs under the root match the app's. An artist not accepted is refused |
-| **7. Queue: restarts** | `--state`: jobs, scenes and half-done frames saved and read back; frames fetched by the artist when there's no `--output-root` | The test kills the queue mid-job and starts it again: the job finishes, finished frames aren't rendered again |
-| **8. Queue: watching** | The `org.usdcc.render/queue` map, the queues in the Render Queue panel, `cancel`/`retry`/`remove`, `--admin`, the notification when a job ends | A UI test: the panel lists a queue's job, Cancel from it cancels on the queue; another artist can't cancel it, an admin can |
-| **9. Queue: web page** | §4.5: `usdcc.css` from the app's tokens, the page, `--web`, the token for actions; the broadcast's page moved to `usdcc.css` | A browser on the guest link lists a job and its tasks as they change; Cancel without the token is refused, with it the job cancels; side by side with the app's Render Queue panel, the same colors, type and spacing (screenshots of both in the PR) |
+| **6. Queue: submitting** *(built)* | `usdcc_node queue` (§4.4): its room, `submit`, `queued`/`refused`, the queue's scheduler handing tasks to nodes, the frames written under `--output-root`, *Queue* in Render on | A test: an artist's instance submits 3 frames in 2 × 2 tiles to a queue process and closes; two node processes render them; the EXRs under the root match the app's. An artist not accepted is refused (`node_process_queue`) |
+| **7. Queue: restarts** *(built)* | `--state`: jobs, scenes and half-done frames saved and read back; frames fetched by the artist when there's no `--output-root` | The test kills the queue mid-job and starts it again: the job finishes, finished frames aren't rendered again (`node_process_queue_restart`; tiles: `render_queue_restart`) |
+| **8. Queue: watching** *(built)* | The `org.usdcc.render/queue` map, the queues in the Render Queue panel, `cancel`/`retry`/`remove`, `--admin`, the notification when a job ends | A UI test: the panel lists a queue's job, Cancel from it cancels on the queue; another artist can't cancel it, an admin can (`render_queue_panel_and_permissions`) |
+| **9. Queue: web page** *(built)* | §4.5: `usdcc.css` from the app's tokens, the page, `--web`, the token for actions; the broadcast's page moved to `usdcc.css` | A browser on the guest link lists a job and its tasks as they change; Cancel without the token is refused, with it the job cancels; side by side with the app's Render Queue panel, the same colors, type and spacing (screenshots of both in the PR) (`render_queue_web_page`, `theme_css_matches_dark_qss`) |
 | **Later** | Linux and EGL, several tasks at once on a node with several GPUs, a node writing outputs to a shared path itself (FINAL_RENDER.md §7.4), priorities and per-artist limits on a queue, submitting from a Python peer | |
 
 Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. The queue server

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usdcc render queue</title>
+<link rel="stylesheet" href="usdcc.css">
+<style>
+  /* The render queue's page (docs/RENDER_NODE.md §4.5): the guests' side of
+     docs/PEERS_PROTOCOL.md, on the channel org.usdcc.render/queue-web. Looks like the
+     Render Queue panel: usdcc.css has the app's tokens. What others send is shown as text. */
+  body { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); min-height: 0; background: var(--gap); gap: 1px; }
+  section { background: var(--surface-panel); min-height: 0; overflow: auto; }
+  .toolbar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--surface-toolbar);
+             border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; }
+  #detail-title { color: var(--text); font-weight: 600; padding: 6px 8px 2px; }
+  #detail-sub { padding: 0 8px 6px; }
+  #preview { display: block; max-width: 100%; margin: 0 auto; background: var(--inset); }
+  #preview-box { padding: 8px; border-bottom: 1px solid var(--line); }
+  #preview-note { padding: 8px; }
+  #message { padding: 2px 8px; color: var(--text-muted); min-height: 1.45em; }
+  #message.bad { color: var(--bad); }
+  .empty { padding: 16px; color: var(--text-muted); text-align: center; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .hidden { display: none !important; }
+  @media (max-width: 760px) {
+    main { grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; overflow: auto; }
+    section { overflow: visible; }
+    .wide { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="title" id="queue">usdcc render queue</span>
+  <span class="status" id="status">Connecting…</span>
+  <span style="flex:1"></span>
+  <span class="label" id="token-label">Token</span>
+  <input id="token" type="password" placeholder="for Cancel, Retry, Remove" size="22" autocomplete="off">
+</header>
+<nav class="tabs">
+  <button id="tab-jobs" class="current">Jobs</button>
+  <button id="tab-nodes">Nodes</button>
+</nav>
+<main>
+  <section id="list">
+    <table class="list" id="jobs">
+      <thead><tr><th>Job</th><th class="wide">Submitter</th><th class="wide">Renderer</th><th>State</th><th>Frames</th>
+        <th class="wide">Nodes</th><th class="wide">Time</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <table class="list hidden" id="nodes">
+      <thead><tr><th>Node</th><th>State</th><th>Rendering</th><th class="wide">Renderers</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="empty" id="empty">No jobs yet.</div>
+  </section>
+  <section id="detail">
+    <div class="toolbar">
+      <button id="cancel" disabled>Cancel</button>
+      <button id="retry" disabled>Retry</button>
+      <button id="remove" disabled>Remove</button>
+      <span class="grow"></span>
+    </div>
+    <div id="message"></div>
+    <div id="detail-title">Pick a job</div>
+    <div id="detail-sub" class="muted"></div>
+    <div id="preview-box"><img id="preview" alt="" class="hidden"><div id="preview-note" class="muted">The newest frame shows here while you look.</div></div>
+    <table class="list" id="tasks">
+      <thead><tr><th>Task</th><th>State</th><th>Progress</th><th>Node</th><th class="wide">Tries</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+<script>
+"use strict";
+const CHANNEL = "org.usdcc.render/queue-web";
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.hash.slice(1));
+const secret = params.get("s") || "";
+let state = { jobs: [], nodes: [] };
+let selected = "";
+let tab = "jobs";
+let previewUrl = "";
+try { $("token").value = localStorage.getItem("usdcc.queue.token") || ""; } catch (e) {}
+$("token").addEventListener("change", () => { try { localStorage.setItem("usdcc.queue.token", $("token").value); } catch (e) {} });
+
+function text(value) { return value === undefined || value === null ? "" : String(value); }
+function cell(row, content, className) {
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  if (content instanceof Node) td.appendChild(content); else td.textContent = text(content);
+  row.appendChild(td);
+  return td;
+}
+function bar(fraction) {
+  const outer = document.createElement("div");
+  outer.className = "progress";
+  const inner = document.createElement("span");
+  inner.style.width = Math.max(0, Math.min(1, fraction || 0)) * 100 + "%";
+  outer.appendChild(inner);
+  return outer;
+}
+function stateName(status) {
+  return { queued: "Queued", running: "Rendering", done: "Done", failed: "Failed", cancelled: "Cancelled",
+           receiving: "Receiving", pending: "Waiting" }[status] || text(status);
+}
+function duration(job) {
+  if (!job.submittedMs) return "";
+  const end = job.finishedMs || state.timeMs || Date.now();
+  const s = Math.max(0, (end - job.submittedMs) / 1000);
+  return s < 60 ? s.toFixed(0) + " s" : s < 3600 ? (s / 60).toFixed(1) + " min" : (s / 3600).toFixed(1) + " h";
+}
+function setMessage(message, bad) {
+  $("message").textContent = message || "";
+  $("message").className = bad ? "bad" : "";
+}
+
+function render() {
+  $("queue").textContent = text(state.queue) || "usdcc render queue";
+  document.title = (text(state.queue) || "usdcc") + " · render queue";
+  if (state.accent) {
+    document.documentElement.style.setProperty("--accent", state.accent);
+    document.documentElement.style.setProperty("--accent-rgb", state.accentRgb);
+    document.documentElement.style.setProperty("--accent-hover", state.accentHover);
+  }
+  $("token").classList.toggle("hidden", !state.actions);
+  $("token-label").classList.toggle("hidden", !state.actions);
+  const running = state.jobs.filter(j => j.status === "running" || j.status === "queued").length;
+  $("status").textContent = state.jobs.length + " job(s), " + running + " active · " + state.nodes.length + " node(s)";
+
+  const jobs = $("jobs").tBodies[0];
+  jobs.textContent = "";
+  for (const job of [...state.jobs].reverse()) {
+    const row = document.createElement("tr");
+    row.className = "selectable" + (job.id === selected ? " selected" : "");
+    row.onclick = () => { selected = job.id; setMessage(""); render(); };
+    cell(row, job.title);
+    cell(row, job.submitter, "wide");
+    cell(row, job.renderer, "wide");
+    cell(row, stateName(job.status), "state-" + job.status);
+    const frames = document.createElement("div");
+    frames.style.display = "flex"; frames.style.gap = "6px"; frames.style.alignItems = "center";
+    frames.appendChild(bar(job.progress));
+    frames.appendChild(document.createTextNode(job.done + "/" + job.total));
+    cell(row, frames);
+    cell(row, (job.nodes || []).join(", "), "wide");
+    cell(row, duration(job), "wide num");
+    jobs.appendChild(row);
+  }
+  const nodes = $("nodes").tBodies[0];
+  nodes.textContent = "";
+  for (const node of state.nodes) {
+    const row = document.createElement("tr");
+    cell(row, node.name);
+    cell(row, !node.node ? "Not rendering for others" : node.busy ? "Busy" : "Idle", node.busy ? "" : "muted");
+    cell(row, node.task ? node.task.title + ", frame " + node.task.frame : "");
+    cell(row, (node.renderers || []).join(", "), "wide");
+    nodes.appendChild(row);
+  }
+  $("jobs").classList.toggle("hidden", tab !== "jobs");
+  $("nodes").classList.toggle("hidden", tab !== "nodes");
+  $("empty").classList.toggle("hidden", tab === "jobs" ? state.jobs.length > 0 : state.nodes.length > 0);
+  $("empty").textContent = tab === "jobs" ? "No jobs yet." : "No render nodes in the queue's rooms.";
+  $("tab-jobs").classList.toggle("current", tab === "jobs");
+  $("tab-nodes").classList.toggle("current", tab === "nodes");
+  renderDetail();
+}
+
+function renderDetail() {
+  const job = state.jobs.find(j => j.id === selected);
+  const activeJob = job && (job.status === "running" || job.status === "queued");
+  $("cancel").disabled = !state.actions || !activeJob;
+  $("retry").disabled = !state.actions || !job || !(job.status === "failed" || job.status === "cancelled");
+  $("remove").disabled = !state.actions || !job;
+  $("detail-title").textContent = job ? job.title : "Pick a job";
+  $("detail-sub").textContent = job ? [stateName(job.status), job.frames + " frame(s)", job.submitter, job.output, job.error]
+                                          .filter(Boolean).join(" · ") : "";
+  const tasks = $("tasks").tBodies[0];
+  tasks.textContent = "";
+  for (const task of job ? job.tasks || [] : []) {
+    const row = document.createElement("tr");
+    cell(row, "Frame " + task.frame + (task.tiles > 1 ? " · tile " + task.tile + "/" + task.tiles : ""));
+    const status = cell(row, task.status === "running" && task.state ? task.state : stateName(task.status), "state-" + task.status);
+    if (task.error) status.title = task.error;
+    cell(row, task.status === "done" ? bar(1) : task.status === "running" ? bar(task.progress) : "");
+    cell(row, task.worker);
+    cell(row, task.attempts, "wide num");
+    tasks.appendChild(row);
+  }
+}
+
+function act(action) {
+  if (!selected) return;
+  socket.send(JSON.stringify({ channel: CHANNEL, type: action, body: { id: selected, token: $("token").value } }));
+  setMessage("Asking the queue…");
+}
+$("cancel").onclick = () => act("cancel");
+$("retry").onclick = () => act("retry");
+$("remove").onclick = () => act("remove");
+$("tab-jobs").onclick = () => { tab = "jobs"; render(); };
+$("tab-nodes").onclick = () => { tab = "nodes"; render(); };
+
+// A frame (docs/PEERS_PROTOCOL.md §2): a big-endian u32 header length, the JSON header,
+// then the raw bytes. Text messages are a header alone.
+function decode(data) {
+  if (typeof data === "string") return JSON.parse(data);
+  const length = new DataView(data).getUint32(0);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4, length)));
+  header.bytes = new Uint8Array(data, 4 + length);
+  return header;
+}
+
+const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+socket.binaryType = "arraybuffer";
+socket.onopen = () => socket.send(JSON.stringify({ channel: "room", type: "hello", body: { protocol: 1, secret, name: "Web page" } }));
+socket.onclose = () => { $("status").textContent = "The connection was lost: reload to try again"; };
+socket.onmessage = event => {
+  const message = decode(event.data);
+  const body = message.body || {};
+  if (message.channel === "room") {
+    if (["denied", "removed", "closed"].includes(message.type)) {
+      $("status").textContent = body.reason || (message.type === "denied" ? "This link doesn't open the queue" : "The queue stopped");
+    }
+  } else if (message.channel === CHANNEL) {
+    if (message.type === "snapshot" || message.type === "state") {
+      state = body;
+      state.jobs = state.jobs || [];
+      state.nodes = state.nodes || [];
+      if (!selected && state.jobs.length) selected = state.jobs[state.jobs.length - 1].id;
+      render();
+    } else if (message.type === "result") {
+      setMessage(body.ok ? "Done." : "The queue said no: " + text(body.reason), !body.ok);
+    } else if (message.type === "preview" && message.bytes && message.bytes.length) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(new Blob([message.bytes], { type: "image/png" }));
+      $("preview").src = previewUrl;
+      $("preview").classList.remove("hidden");
+      const job = state.jobs.find(j => j.id === body.id);
+      $("preview-note").textContent = (job ? job.title : text(body.id)) + ", frame " + text(body.frame);
+      if (!selected) selected = body.id;
+    }
+  }
+};
+</script>
+</body>
+</html>

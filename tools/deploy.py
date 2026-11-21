@@ -622,7 +622,7 @@ def main(argv=None):
     (deploy_dir / "usdcc.cmd").write_text('@echo off\nstart "" "%~dp0bin\\usdcc.exe" %*\n', encoding="ascii")
 
     required = [
-        "bin/usdcc.exe", "bin/usdcc_node.exe", "bin/usdcc_render.dll", "bin/usd_plug.dll", "bin/QtNodes.dll", "bin/platforms/qwindows.dll", "bin/usd/plugInfo.json",
+        "bin/usdcc.exe", "bin/usdcc_node.exe", "bin/node-web/index.html", "bin/node-web/usdcc.css", "bin/usdcc_render.dll", "bin/usd_plug.dll", "bin/QtNodes.dll", "bin/platforms/qwindows.dll", "bin/usd/plugInfo.json",
         # What plugins on usdcc_peers load (docs/PEERS.md section 13).
         "bin/usdcc_peers.dll", "bin/Qt6Network.dll", "bin/Qt6WebSockets.dll", "bin/Qt6HttpServer.dll",
         "bin/Qt6Concurrent.dll", "bin/libcrypto-3-x64.dll", "bin/imageformats/qjpeg.dll", "bin/jpeg62.dll",

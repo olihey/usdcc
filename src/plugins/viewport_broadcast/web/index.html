@@ -4,28 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>usdcc broadcast</title>
+<link rel="stylesheet" href="usdcc.css">
 <style>
   /* The page a viewport broadcast serves (docs/VIEWPORT_BROADCAST.md §2.2). It speaks
-     the guests' side of docs/PEERS_PROTOCOL.md. What others send is shown as text only. */
-  :root { color-scheme: dark; --bg: #1e1f22; --bar: #2b2d30; --line: #3c3f45; --fg: #dfe1e5; --dim: #9da0a8; --live: #e5534b; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); color: var(--fg);
-         font: 14px system-ui, sans-serif; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 16px; background: var(--bar); }
+     the guests' side of docs/PEERS_PROTOCOL.md. What others send is shown as text only.
+     Its colors and type are usdcc.css's, the app's theme (docs/RENDER_NODE.md §4.5). */
+  body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; font-size: 13px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px;
+           background: var(--surface-bar); border-bottom: 1px solid var(--line); }
   #title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
-  #live { color: var(--live); font-weight: 600; font-size: 12px; letter-spacing: .06em; }
+  #live { color: var(--bad); font-weight: 600; font-size: 11px; letter-spacing: .06em; }
   #live[hidden] { display: none; }
-  #status, #watchers { color: var(--dim); }
-  main { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
+  #status, #watchers { color: var(--text-muted); }
+  main { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;
+         background: var(--gap); }
   canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
   canvas[hidden] { display: none; }
-  #note { position: absolute; color: var(--dim); padding: 16px; text-align: center; }
-  footer { border-top: 1px solid var(--line); padding: 8px 16px; display: grid; gap: 6px; }
+  #note { position: absolute; color: var(--text-muted); padding: 16px; text-align: center; }
+  footer { border-top: 1px solid var(--line); padding: 8px 16px; display: grid; gap: 6px; background: var(--surface-toolbar); }
   footer[hidden] { display: none; }
-  #log { max-height: 7.5em; overflow: auto; color: var(--dim); overflow-wrap: anywhere; }
-  #log b { color: var(--fg); font-weight: 600; }
-  input { width: 100%; padding: 6px 8px; background: var(--bar); color: inherit; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+  #log { max-height: 7.5em; overflow: auto; color: var(--text-muted); overflow-wrap: anywhere; }
+  #log b { color: var(--text); font-weight: 600; }
+  input { width: 100%; height: 24px; }
 </style>
 </head>
 <body>

@@ -76,6 +76,8 @@ private:
     void refreshNodes();
     void refreshDispatch();
     void fillRoomsMenu();
+    // Render on: this instance, peers, and each render queue in the rooms.
+    void fillDistribute();
     // One undo step on the panel's stage; `edit` returns whether it changed anything.
     void edit(const QString& description, const std::function<bool()>& edit);
     void createSettings();

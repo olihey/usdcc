@@ -32,6 +32,8 @@ int runRender(const QCommandLineParser& parser);
 int runRenderers(const QCommandLineParser& parser);
 // usdcc_node serve [...]: a render node for peers' rooms, until stopped (§4.2).
 int runServe(const QCommandLineParser& parser);
+// usdcc_node queue [...]: a render queue server, until stopped (§4.4, §4.5).
+int runQueue(const QCommandLineParser& parser);
 
 // The options of every command, added to `parser` (main.cpp), so each command reads its own.
 struct Options {

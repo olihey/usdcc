@@ -89,6 +89,7 @@
 #include "usdcc/usd/render/hydra_final_renderer.h"
 #include "usdcc/usd/render/render_menu.h"
 #include "usdcc/usd/render/render_network.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_queue_panel.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_settings_view_panel.h"
@@ -1189,18 +1190,33 @@ int main(int argc, char** argv) {
     };
     auto* renderNetwork = new usdcc::render::RenderNetwork(std::move(renderNetworkOptions), &window);
     usdcc::render::RenderNetwork::setInstance(renderNetwork);
+    // Render queue servers in those rooms (docs/RENDER_NODE.md §4.4): Render on > Queue sends
+    // jobs to them, and the Render Queue panel lists theirs.
+    usdcc::render::RenderQueueClient::Options renderQueueOptions;
+    renderQueueOptions.folder =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("render-queue"));
+    auto* renderQueues = new usdcc::render::RenderQueueClient(std::move(renderQueueOptions), &window);
+    usdcc::render::RenderQueueClient::setInstance(renderQueues);
+    renderQueuePanel->setQueueClient(renderQueues);
     // Only render_queue rooms (addRoom() ignores the others).
     for (usdcc::peers::Room* room : peersController->peers()->rooms(usdcc::peers::RoomType::RenderQueue)) {
         renderNetwork->addRoom(room);
+        renderQueues->addRoom(room);
     }
     QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomAdded, renderNetwork,
-                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->addRoom(room); });
+                     [renderNetwork, renderQueues](usdcc::peers::Room* room) {
+                         renderNetwork->addRoom(room);
+                         if (room->type() == usdcc::peers::RoomType::RenderQueue) renderQueues->addRoom(room);
+                     });
     // Where this instance's jobs go: app state, kept between runs.
     {
         QSettings settings = usdcc::ui::appSettings();
         usdcc::render::PeerDispatch dispatch;
         const QString distribute = settings.value(QStringLiteral("FinalRender/distribute"), QStringLiteral("local")).toString();
-        if (distribute == u"local" || distribute == u"both" || distribute == u"peers") dispatch.distribute = distribute.toStdString();
+        if (distribute == u"local" || distribute == u"both" || distribute == u"peers" || distribute == u"queue") {
+            dispatch.distribute = distribute.toStdString();
+        }
+        dispatch.queue = settings.value(QStringLiteral("FinalRender/queue")).toString().toStdString();
         const QString delivery = settings.value(QStringLiteral("FinalRender/delivery"), QStringLiteral("packaged")).toString();
         if (delivery == u"packaged" || delivery == u"shared") dispatch.delivery = delivery.toStdString();
         for (const QString& key : settings.value(QStringLiteral("FinalRender/rooms")).toStringList()) {
@@ -1213,12 +1229,16 @@ int main(int argc, char** argv) {
         QSettings settings = usdcc::ui::appSettings();
         settings.setValue(QStringLiteral("FinalRender/distribute"), QString::fromStdString(dispatch.distribute));
         settings.setValue(QStringLiteral("FinalRender/delivery"), QString::fromStdString(dispatch.delivery));
+        settings.setValue(QStringLiteral("FinalRender/queue"), QString::fromStdString(dispatch.queue));
         QStringList rooms;
         for (const std::string& key : dispatch.rooms) rooms.append(QString::fromStdString(key));
         settings.setValue(QStringLiteral("FinalRender/rooms"), rooms);
     });
     QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomRemoved, renderNetwork,
-                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->removeRoom(room); });
+                     [renderNetwork, renderQueues](usdcc::peers::Room* room) {
+                         renderNetwork->removeRoom(room);
+                         renderQueues->removeRoom(room);
+                     });
     // Render > Swarm: the render queue rooms and who is in them.
     auto* swarmPanel = new usdcc::render::SwarmSidePanel(renderNetwork, peersController);
     window.addSidePanel(swarmPanel, Qt::RightDockWidgetArea);

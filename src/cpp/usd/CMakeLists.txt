@@ -161,6 +161,8 @@ add_library(usdcc_render SHARED
     src/render/render_bundle.cpp
     include/usdcc/usd/render/render_network.h
     src/render/render_network.cpp
+    include/usdcc/usd/render/render_queue.h
+    src/render/render_queue.cpp
 )
 target_link_libraries(usdcc_render PUBLIC usdcc_usd usdcc_peers Qt6::Core Qt6::Gui)
 target_compile_definitions(usdcc_render PRIVATE USDCC_RENDER_BUILD)

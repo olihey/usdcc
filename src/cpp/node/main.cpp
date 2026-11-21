@@ -146,9 +146,9 @@ int main(int argc, char** argv) {
     }
     const QStringList positional = parser.positionalArguments();
     const QString command = positional.value(0);
-    if (command != u"render" && command != u"renderers" && command != u"serve") {
-        printError(command.isEmpty() ? QStringLiteral("No command: render, renderers or serve (--help).")
-                                     : QStringLiteral("Unknown command '%1': render, renderers or serve (--help).").arg(command));
+    if (command != u"render" && command != u"renderers" && command != u"serve" && command != u"queue") {
+        printError(command.isEmpty() ? QStringLiteral("No command: render, renderers, serve or queue (--help).")
+                                     : QStringLiteral("Unknown command '%1': render, renderers, serve or queue (--help).").arg(command));
         return kExitUsage;
     }
 
@@ -201,8 +201,10 @@ int main(int argc, char** argv) {
             result = runRender(parser);
         } else if (command == u"renderers") {
             result = runRenderers(parser);
-        } else {
+        } else if (command == u"serve") {
             result = runServe(parser);
+        } else {
+            result = runQueue(parser);
         }
         plugins.deactivate(python);
     }

@@ -167,6 +167,27 @@ void RenderScheduler::submit(RenderJobPtr job) {
     schedule();
 }
 
+void RenderScheduler::adopt(RenderJobPtr job) {
+    if (!job || this->job(job->id)) return;
+    for (JobTask& task : job->tasks) {
+        if (task.status == JobTask::Status::Running) {
+            task.status = JobTask::Status::Pending;
+            task.progress = 0.0;
+            task.worker.clear();
+        }
+    }
+    if (job->status == RenderJob::Status::Running) job->status = RenderJob::Status::Queued;
+    m_jobs.push_back(job);
+    USDCC_LOG_INFO("usdcc.render", "Restored {}: {}, {} of {} task(s) done", job->id, job->title, job->doneTasks(), job->tasks.size());
+    Q_EMIT jobsChanged();
+    schedule();
+}
+
+void RenderScheduler::restoreTask(const RenderJobPtr& job, int taskIndex, std::map<std::string, FloatImage> images) {
+    if (!job || taskIndex < 0 || taskIndex >= static_cast<int>(job->tasks.size())) return;
+    addTaskImages(job, taskIndex, std::move(images));
+}
+
 RenderJobPtr RenderScheduler::job(const std::string& jobId) const {
     const auto found = std::find_if(m_jobs.begin(), m_jobs.end(), [&jobId](const RenderJobPtr& j) { return j->id == jobId; });
     return found != m_jobs.end() ? *found : nullptr;
@@ -352,6 +373,11 @@ void RenderScheduler::onFinished(Worker* worker, unsigned serial, std::map<std::
     const RenderJobPtr job = running->job;
     const int taskIndex = running->task;
     m_running.erase(worker);  // deletes the handle: the renderer's done with it
+    if (onTaskImages) onTaskImages(*job, taskIndex, images);
+    addTaskImages(job, taskIndex, std::move(images));
+}
+
+void RenderScheduler::addTaskImages(const RenderJobPtr& job, int taskIndex, std::map<std::string, FloatImage> images) {
     JobTask& task = job->tasks[static_cast<size_t>(taskIndex)];
 
     // Into its frame: the tile without its overlap.
@@ -380,8 +406,8 @@ void RenderScheduler::onFinished(Worker* worker, unsigned serial, std::map<std::
     task.state = "Done";
 
     if (frame.tilesIn >= job->tilesPerFrame()) writeFrame(job, task.frameIndex);
-    if (job->status == RenderJob::Status::Running &&
-        std::all_of(job->tasks.begin(), job->tasks.end(), [](const JobTask& t) { return t.status == JobTask::Status::Done; })) {
+    const bool active = job->status == RenderJob::Status::Running || job->status == RenderJob::Status::Queued;
+    if (active && std::all_of(job->tasks.begin(), job->tasks.end(), [](const JobTask& t) { return t.status == JobTask::Status::Done; })) {
         endJob(job, RenderJob::Status::Done);
     } else {
         Q_EMIT jobChanged(QString::fromStdString(job->id));

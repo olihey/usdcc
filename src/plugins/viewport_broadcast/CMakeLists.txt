@@ -22,6 +22,9 @@ target_link_libraries(viewport_broadcast PRIVATE usdcc_viewport_broadcast_core)
 set(_folder "${CMAKE_BINARY_DIR}/plugins/viewport_broadcast")
 add_custom_command(TARGET viewport_broadcast POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/web" "${_folder}/web"
+    # The app's theme as CSS, which every page usdcc serves shares (docs/RENDER_NODE.md §4.5).
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/cpp/ui/resources/theme/usdcc.css"
+            "${_folder}/web/usdcc.css"
     VERBATIM)
 if(TARGET usdcc)
     # Where PluginManager::shippedFolder() looks, so a build loads it as a deployed app does.

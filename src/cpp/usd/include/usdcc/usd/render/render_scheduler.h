@@ -14,6 +14,7 @@
 #include <QObject>
 #include <QString>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -59,6 +60,15 @@ public:
 
     // Queues a job; it starts when a worker is free.
     void submit(RenderJobPtr job);
+    // Adds a job as it is, with its tasks' and its own status: one a queue saved before it
+    // stopped (docs/RENDER_NODE.md §4.4). Running tasks wait again; an ended job stays ended.
+    void adopt(RenderJobPtr job);
+    // A tile of `job` done before a restart, with its images: into its frame, as a task that
+    // just finished, and the frame is written once every tile is in.
+    void restoreTask(const RenderJobPtr& job, int taskIndex, std::map<std::string, FloatImage> images);
+    // Each finished task's images, as they come in and before they go into their frame (a
+    // queue keeps them until the frame is written). Called on this object's thread.
+    std::function<void(const RenderJob& job, int taskIndex, const std::map<std::string, FloatImage>& images)> onTaskImages;
     // Stops its running tasks; what's done stays written.
     void cancel(const std::string& jobId);
     // Queues its failed and cancelled tasks again.
@@ -114,6 +124,8 @@ private:
     void onFinished(Worker* worker, unsigned serial, std::map<std::string, FloatImage> images);
     void onFailed(Worker* worker, unsigned serial, const std::string& error);
     void onDeclined(Worker* worker, unsigned serial, const std::string& reason);
+    // A finished task's images into its frame; ends the frame and the job when they're done.
+    void addTaskImages(const RenderJobPtr& job, int taskIndex, std::map<std::string, FloatImage> images);
     Running* runningFor(Worker* worker, unsigned serial);
     void writeFrame(const RenderJobPtr& job, int frameIndex);
     void endJob(const RenderJobPtr& job, RenderJob::Status status, const std::string& error = {});

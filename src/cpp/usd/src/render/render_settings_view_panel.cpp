@@ -3,6 +3,7 @@
 #include "usdcc/usd/render/render_job.h"
 #include "usdcc/usd/render/render_menu.h"
 #include "usdcc/usd/render/render_network.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_spec.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
@@ -332,7 +333,7 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
     m_distribute->addItem(tr("This instance and peers"), QStringLiteral("both"));
     m_distribute->addItem(tr("Peers only"), QStringLiteral("peers"));
     m_distribute->setToolTip(tr("Who renders the frames and tiles: instances in your render queue rooms that take jobs "
-                                "(Render > Swarm) can take a share"));
+                                "(Render > Swarm) can take a share, or a render queue server takes the job"));
     m_delivery = new QComboBox(dispatch);
     m_delivery->setObjectName(QStringLiteral("renderSettingsDelivery"));
     m_delivery->addItem(tr("Packaged: the scene and its assets, sent"), QStringLiteral("packaged"));
@@ -483,7 +484,15 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         RenderNetwork* network = RenderNetwork::instance();
         if (m_refreshing || !network) return;
         PeerDispatch dispatch = network->dispatch();
-        dispatch.distribute = m_distribute->currentData().toString().toStdString();
+        const QString choice = m_distribute->currentData().toString();
+        // A queue: "queue:<its name>".
+        if (choice.startsWith(QStringLiteral("queue:"))) {
+            dispatch.distribute = "queue";
+            dispatch.queue = choice.mid(6).toStdString();
+        } else {
+            dispatch.distribute = choice.toStdString();
+            dispatch.queue.clear();
+        }
         network->setDispatch(dispatch);
     });
     connect(m_delivery, &QComboBox::currentIndexChanged, this, [this](int) {
@@ -497,6 +506,9 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         connect(network, &RenderNetwork::nodesChanged, this, [this]() { refreshNodes(); });
         connect(network, &RenderNetwork::roomsChanged, this, [this]() { refreshDispatch(); });
         connect(network, &RenderNetwork::dispatchChanged, this, [this]() { refreshDispatch(); });
+    }
+    if (RenderQueueClient* queues = RenderQueueClient::instance()) {
+        connect(queues, &RenderQueueClient::queuesChanged, this, [this]() { refreshDispatch(); });
     }
     refreshDispatch();
     connect(renderFrame, &QPushButton::clicked, this, [this]() { render(false); });
@@ -760,6 +772,19 @@ void RenderSettingsViewPanel::refreshNodes() {
         m_nodes->setText(tr("Only this instance renders."));
         return;
     }
+    if (dispatch.distribute == "queue") {
+        const RenderQueueClient* queues = RenderQueueClient::instance();
+        const std::optional<RenderQueueInfo> queue = queues ? queues->queue(text(dispatch.queue)) : std::nullopt;
+        if (!queue) {
+            m_nodes->setText(tr("The queue %1 isn't in your rooms now.").arg(text(dispatch.queue)));
+        } else {
+            m_nodes->setText(queue->outputRoot ? tr("The job is %1's: it renders it on its nodes and writes the frames to its "
+                                                    "shared folder. You may close the app.").arg(queue->name)
+                                               : tr("The job is %1's: it renders it on its nodes, and the frames come back here "
+                                                    "when you're in its room.").arg(queue->name));
+        }
+        return;
+    }
     const std::shared_ptr<FinalRenderer> renderer = FinalRenderers::instance().find(rendererId());
     const bool tiles = m_tilesX->value() * m_tilesY->value() > 1;
     QStringList names;
@@ -780,10 +805,12 @@ void RenderSettingsViewPanel::refreshDispatch() {
     const PeerDispatch dispatch = network ? network->dispatch() : PeerDispatch();
     const bool wasRefreshing = m_refreshing;
     m_refreshing = true;
-    m_distribute->setCurrentIndex(std::max(0, m_distribute->findData(text(dispatch.distribute))));
+    fillDistribute();
+    m_distribute->setCurrentIndex(std::max(0, m_distribute->findData(
+        dispatch.distribute == "queue" ? QStringLiteral("queue:") + text(dispatch.queue) : text(dispatch.distribute))));
     m_delivery->setCurrentIndex(std::max(0, m_delivery->findData(text(dispatch.delivery))));
     m_refreshing = wasRefreshing;
-    const bool peers = dispatch.distribute != "local";
+    const bool peers = dispatch.distribute == "both" || dispatch.distribute == "peers";
     m_distribute->setEnabled(network != nullptr);
     m_delivery->setEnabled(network && peers);
     const QList<usdcc::peers::Room*> rooms = network ? network->rooms() : QList<usdcc::peers::Room*>();
@@ -809,6 +836,23 @@ void RenderSettingsViewPanel::refreshDispatch() {
     }
     m_rooms->setEnabled(peers && !rooms.isEmpty());
     refreshNodes();
+}
+
+void RenderSettingsViewPanel::fillDistribute() {
+    while (m_distribute->count() > 3) m_distribute->removeItem(m_distribute->count() - 1);
+    QStringList names;
+    if (const RenderQueueClient* queues = RenderQueueClient::instance()) {
+        for (const RenderQueueInfo& queue : queues->queues()) {
+            if (!names.contains(queue.name)) names.append(queue.name);
+        }
+    }
+    // The one chosen before, while it isn't here.
+    const RenderNetwork* network = RenderNetwork::instance();
+    const QString chosen = network && network->dispatch().distribute == "queue" ? text(network->dispatch().queue) : QString();
+    for (const QString& name : names) m_distribute->addItem(tr("Queue: %1").arg(name), QStringLiteral("queue:") + name);
+    if (!chosen.isEmpty() && !names.contains(chosen)) {
+        m_distribute->addItem(tr("Queue: %1 (not here)").arg(chosen), QStringLiteral("queue:") + chosen);
+    }
 }
 
 void RenderSettingsViewPanel::fillRoomsMenu() {
