@@ -1,3 +1,13 @@
+# What usdcc and usdcc_node both do to start (docs/RENDER_NODE.md §3.1): logging, the
+# profile, settings, USD's environment, the plugins' manifests, the renderers, the peers.
+add_library(usdcc_app_core STATIC startup.cpp startup.h)
+target_include_directories(usdcc_app_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(usdcc_app_core PUBLIC usdcc_core usdcc_usd usdcc_render usdcc_ui usdcc_usd_ui usdcc_peers
+                                            usdcc_scripting_app Qt6::Gui)
+if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
+    target_link_libraries(usdcc_app_core PUBLIC "${Python3_LIBRARY}")
+endif()
+
 # usdcc — the application executable.
 add_executable(usdcc main.cpp app_updates.cpp app_updates.h)
 # Updates of an installed usdcc (docs/UPDATES.md): Velopack's DLL, beside the exe.
@@ -53,9 +63,9 @@ if(UNIX AND NOT APPLE)
 endif()
 # For Help > About usdcc.
 target_compile_definitions(usdcc PRIVATE USDCC_COMPILER="${USDCC_BUILT_FOR_COMPILER}")
-target_link_libraries(usdcc PRIVATE usdcc_ui usdcc_usd usdcc_tools usdcc_usd_ui usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+target_link_libraries(usdcc PRIVATE usdcc_app_core usdcc_ui usdcc_usd usdcc_tools usdcc_render usdcc_usd_ui usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
 # usdcc_peers for the plugins that use it (docs/PEERS.md); the app itself doesn't link it yet.
-usdcc_deploy_core_library(usdcc usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui usdcc_peers)
+usdcc_deploy_core_library(usdcc usdcc_usd usdcc_tools usdcc_ui usdcc_render usdcc_usd_ui usdcc_peers)
 
 # USD's own headers wrap their Python.h include the same way pybind11 does
 # (see src/cpp/usd/python/CMakeLists.txt's comment on usdcc_usd_python) to

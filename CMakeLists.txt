@@ -259,6 +259,8 @@ add_subdirectory(src/cpp/ui)
 add_subdirectory(src/cpp/plugin_sdk)
 add_subdirectory(src/cpp/scripting)
 add_subdirectory(src/cpp/app)
+# usdcc_node.exe beside usdcc.exe: renders with nobody at the machine (docs/RENDER_NODE.md).
+add_subdirectory(src/cpp/node)
 # usdcc.exe at the top of a deploy, which starts bin\usdcc.exe; what the installer's
 # shortcuts start and Velopack runs (docs/UPDATES.md §3).
 if(USDCC_VELOPACK_FOUND)

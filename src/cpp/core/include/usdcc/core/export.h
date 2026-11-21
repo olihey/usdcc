@@ -27,7 +27,14 @@
 #else
 #define USDCC_USD_UI_API __declspec(dllimport)
 #endif
+// usdcc_render: final renders without widgets (docs/RENDER_NODE.md §3.2).
+#if defined(USDCC_RENDER_BUILD)
+#define USDCC_RENDER_API __declspec(dllexport)
+#else
+#define USDCC_RENDER_API __declspec(dllimport)
+#endif
 #else
 #define USDCC_UI_API __attribute__((visibility("default")))
 #define USDCC_USD_UI_API __attribute__((visibility("default")))
+#define USDCC_RENDER_API __attribute__((visibility("default")))
 #endif

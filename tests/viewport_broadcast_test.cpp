@@ -18,6 +18,7 @@
 #include <QImage>
 #include <QImageWriter>
 #include <QJsonArray>
+#include <QLayout>
 #include <QMenu>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>

@@ -531,7 +531,7 @@ def main(argv=None):
     (sdk_dir / "lib").mkdir(parents=True, exist_ok=True)
     (sdk_dir / "cmake").mkdir(parents=True, exist_ok=True)
     for library in ("core/usdcc_core", "assets/usdcc_assets", "usd/usdcc_usd", "tools/usdcc_tools", "ui/usdcc_ui",
-                    "usd/usdcc_usd_ui"):
+                    "usd/usdcc_render", "usd/usdcc_usd_ui"):
         folder, name = library.split("/")
         copy_file(BUILD_DIR / "src/cpp" / folder / configuration / f"{name}.lib", sdk_dir / "lib")
     copy_file(BUILD_DIR / "sdk/UsdccPluginConfig.cmake", sdk_dir)
@@ -622,7 +622,7 @@ def main(argv=None):
     (deploy_dir / "usdcc.cmd").write_text('@echo off\nstart "" "%~dp0bin\\usdcc.exe" %*\n', encoding="ascii")
 
     required = [
-        "bin/usdcc.exe", "bin/usd_plug.dll", "bin/QtNodes.dll", "bin/platforms/qwindows.dll", "bin/usd/plugInfo.json",
+        "bin/usdcc.exe", "bin/usdcc_node.exe", "bin/usdcc_render.dll", "bin/usd_plug.dll", "bin/QtNodes.dll", "bin/platforms/qwindows.dll", "bin/usd/plugInfo.json",
         # What plugins on usdcc_peers load (docs/PEERS.md section 13).
         "bin/usdcc_peers.dll", "bin/Qt6Network.dll", "bin/Qt6WebSockets.dll", "bin/Qt6HttpServer.dll",
         "bin/Qt6Concurrent.dll", "bin/libcrypto-3-x64.dll", "bin/imageformats/qjpeg.dll", "bin/jpeg62.dll",

@@ -22,7 +22,7 @@
 namespace usdcc::render {
 
 // Something that renders tasks: this instance, or (later) a peer.
-class USDCC_USD_UI_API Worker {
+class USDCC_RENDER_API Worker {
 public:
     virtual ~Worker() = default;
     virtual std::string name() const = 0;
@@ -33,14 +33,14 @@ public:
 };
 
 // This instance, with the renderers of FinalRenderers.
-class USDCC_USD_UI_API LocalWorker : public Worker {
+class USDCC_RENDER_API LocalWorker : public Worker {
 public:
     std::string name() const override;
     bool canRun(const RenderJob& job) const override;
     std::unique_ptr<RenderTaskHandle> start(const RenderJob& job, const JobTask& task, TaskCallbacks callbacks) override;
 };
 
-class USDCC_USD_UI_API RenderScheduler : public QObject {
+class USDCC_RENDER_API RenderScheduler : public QObject {
     Q_OBJECT
 
 public:
@@ -130,11 +130,11 @@ private:
 
 // Writes one frame of `job`: each product's file(s), from its AOVs' images (the whole frame
 // each). Returns the files written, or an empty list with `error` set.
-USDCC_USD_UI_API std::vector<std::string> writeFrameFiles(const RenderJob& job, int frameIndex,
+USDCC_RENDER_API std::vector<std::string> writeFrameFiles(const RenderJob& job, int frameIndex,
                                                           const std::map<std::string, FloatImage>& aovs,
                                                           std::string* error);
 
 // A float image as a QImage (Format_RGBA32FPx4), for the Render Queue's preview.
-USDCC_USD_UI_API QImage toQImage(const FloatImage& image);
+USDCC_RENDER_API QImage toQImage(const FloatImage& image);
 
 }  // namespace usdcc::render

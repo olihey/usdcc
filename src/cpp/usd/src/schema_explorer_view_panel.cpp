@@ -13,6 +13,7 @@
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/property.h>
 #include <pxr/usd/usd/stage.h>
 
 #include <QApplication>

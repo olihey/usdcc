@@ -59,7 +59,7 @@ inline constexpr const char* kJobsChannel = "org.usdcc.render/jobs";
 inline constexpr const char* kFilesChannel = "org.usdcc.render/files";
 
 // What a peer says it can do, and is doing.
-struct USDCC_USD_UI_API RenderNode {
+struct USDCC_RENDER_API RenderNode {
     struct Renderer {
         std::string id;
         std::string name;
@@ -88,7 +88,7 @@ struct USDCC_USD_UI_API RenderNode {
     static RenderNode fromJson(usdcc::peers::Room* room, const usdcc::peers::Peer& peer, const QJsonObject& json);
 };
 
-struct USDCC_USD_UI_API RenderNetworkOptions {
+struct USDCC_RENDER_API RenderNetworkOptions {
     QString folder;  // the inbox, bundles and results go under it
     // Whether this instance renders for peers in a room it has just joined, until switched
     // there (setTakesJobs()): Settings > Final Render > Render for peers.
@@ -104,7 +104,7 @@ struct USDCC_USD_UI_API RenderNetworkOptions {
 
 class PeerWorker;
 
-class USDCC_USD_UI_API RenderNetwork : public QObject {
+class USDCC_RENDER_API RenderNetwork : public QObject {
     Q_OBJECT
 
 public:
@@ -221,7 +221,7 @@ private:
 
 // A peer that is a render node, as a worker of this instance's queue: one per peer, however
 // many rooms it shares with this instance. Its tasks go through a room the job allows.
-class USDCC_USD_UI_API PeerWorker : public Worker {
+class USDCC_RENDER_API PeerWorker : public Worker {
 public:
     PeerWorker(RenderNetwork* network, usdcc::peers::Peer peer);
     std::string name() const override;
@@ -235,9 +235,9 @@ private:
 };
 
 // A task as it travels, and back; images as they travel (qCompress of width, height and floats).
-USDCC_USD_UI_API QJsonObject taskToJson(const RenderTask& task);
-USDCC_USD_UI_API RenderTask taskFromJson(const QJsonObject& json, const PXR_NS::UsdStageRefPtr& stage);
-USDCC_USD_UI_API QByteArray packImage(const FloatImage& image);
-USDCC_USD_UI_API std::optional<FloatImage> unpackImage(const QByteArray& bytes);
+USDCC_RENDER_API QJsonObject taskToJson(const RenderTask& task);
+USDCC_RENDER_API RenderTask taskFromJson(const QJsonObject& json, const PXR_NS::UsdStageRefPtr& stage);
+USDCC_RENDER_API QByteArray packImage(const FloatImage& image);
+USDCC_RENDER_API std::optional<FloatImage> unpackImage(const QByteArray& bytes);
 
 }  // namespace usdcc::render

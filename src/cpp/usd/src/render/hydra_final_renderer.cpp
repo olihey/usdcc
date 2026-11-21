@@ -22,9 +22,11 @@
 #include <pxr/usdImaging/usdImagingGL/renderParams.h>
 
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QElapsedTimer>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QPointer>
 #include <QTimer>
 
@@ -53,6 +55,8 @@ public:
     }
 
     bool makeCurrent() {
+        // Without a QGuiApplication (usdcc_node --no-gpu) there's no OpenGL at all.
+        if (!qobject_cast<QGuiApplication*>(QCoreApplication::instance())) return false;
         if (!m_context) {
             m_surface = new QOffscreenSurface(nullptr, this);
             m_surface->setFormat(QSurfaceFormat::defaultFormat());
@@ -339,6 +343,66 @@ std::unique_ptr<RenderTaskHandle> HydraFinalRenderer::start(const RenderTask& ta
         return nullptr;
     }
     return std::make_unique<HydraTask>(m_pluginId, task, std::move(callbacks));
+}
+
+namespace {
+std::string& stormProblemText() {
+    static std::string text;
+    return text;
+}
+
+std::string glString(QOpenGLFunctions* gl, GLenum name) {
+    const auto* text = reinterpret_cast<const char*>(gl->glGetString(name));
+    return text ? std::string(text) : std::string();
+}
+}  // namespace
+
+std::string HydraFinalRenderer::setupProblem() const {
+    return m_pluginId == kStorm ? stormProblemText() : std::string();
+}
+
+void setStormProblem(std::string problem) { stormProblemText() = std::move(problem); }
+
+std::string stormProblem() { return stormProblemText(); }
+
+OpenGlInfo probeOpenGl() {
+    OpenGlInfo info;
+    if (!qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
+        info.why = "started without the GPU (no QGuiApplication)";
+        return info;
+    }
+    if (!OffscreenGl::instance()->makeCurrent()) {
+        info.why = "no OpenGL context could be made";
+        return info;
+    }
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    if (!context) {
+        info.why = "no OpenGL context could be made current";
+        return info;
+    }
+    info.context = true;
+    info.major = context->format().majorVersion();
+    info.minor = context->format().minorVersion();
+    QOpenGLFunctions* gl = context->functions();
+    info.vendor = glString(gl, GL_VENDOR);
+    info.renderer = glString(gl, GL_RENDERER);
+    info.version = glString(gl, GL_VERSION);
+    return info;
+}
+
+std::string stormOpenGlProblem(const OpenGlInfo& info) {
+    if (!info.context) return "Storm needs OpenGL 4.5, and there's no OpenGL here: " + info.why;
+    // Windows' own software OpenGL, all a service in session 0 gets.
+    if (info.renderer.find("GDI Generic") != std::string::npos) {
+        return "Storm needs OpenGL 4.5 on a GPU, and this session only has Microsoft's GDI renderer (OpenGL " +
+               std::to_string(info.major) + "." + std::to_string(info.minor) +
+               "); run it in a logged-on session (docs/RENDER_NODE.md §5)";
+    }
+    if (info.major < 4 || (info.major == 4 && info.minor < 5)) {
+        return "Storm needs OpenGL 4.5, and this context is " + std::to_string(info.major) + "." +
+               std::to_string(info.minor) + " (" + info.renderer + ")";
+    }
+    return {};
 }
 
 void registerHydraFinalRenderers() {

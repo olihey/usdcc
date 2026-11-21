@@ -24,7 +24,7 @@ namespace usdcc::render {
 
 // A renderer's setting, as the Render Settings panel shows it and the stage's RenderSettings
 // prim stores it (docs/FINAL_RENDER.md §2.2).
-struct USDCC_USD_UI_API RenderSettingField {
+struct USDCC_RENDER_API RenderSettingField {
     enum class Type { Bool, Int, Float, String, Choice, Color };
 
     // The attribute on the RenderSettings prim: "arnold:AA_samples", "embree:ty:maxBounces".
@@ -44,7 +44,7 @@ struct USDCC_USD_UI_API RenderSettingField {
 };
 
 // Pixels, x right and y down from the image's top left, as OpenEXR and CameraUtilFraming have them.
-struct USDCC_USD_UI_API PixelRect {
+struct USDCC_RENDER_API PixelRect {
     int x = 0;
     int y = 0;
     int width = 0;
@@ -59,7 +59,7 @@ struct USDCC_USD_UI_API PixelRect {
 
 // A float RGBA image, top row first, R G B A per pixel. One channel AOVs (depth) have it in R,
 // G and B, and 1 in A.
-struct USDCC_USD_UI_API FloatImage {
+struct USDCC_RENDER_API FloatImage {
     int width = 0;
     int height = 0;
     std::vector<float> rgba;
@@ -72,14 +72,14 @@ struct USDCC_USD_UI_API FloatImage {
 };
 
 // One AOV a task renders: a RenderVar of the job's settings.
-struct USDCC_USD_UI_API RenderAov {
+struct USDCC_RENDER_API RenderAov {
     std::string name;          // the RenderVar prim's name: "color", "depth"
     std::string sourceName;    // what the renderer produces: Hydra's AOV name ("color", "depth", "primvars:st")
     PXR_NS::TfToken dataType;  // a USD type name: color3f, float, ...
 };
 
 // One piece of work: a frame of a job, all of it or one tile.
-struct USDCC_USD_UI_API RenderTask {
+struct USDCC_RENDER_API RenderTask {
     std::string jobId;
     int index = 0;  // within the job
     double frame = 0.0;
@@ -103,7 +103,7 @@ struct USDCC_USD_UI_API RenderTask {
 
 // What a renderer reports while a task runs. Call from any thread: the scheduler takes it
 // to the UI thread.
-struct USDCC_USD_UI_API TaskCallbacks {
+struct USDCC_RENDER_API TaskCallbacks {
     // How far it is, 0 to 1, or a negative number when it can't tell; and what it's doing.
     std::function<void(double fraction, const std::string& state)> progress;
     // Done: an image of the task's region's size for each of its AOVs, by RenderAov::name.
@@ -116,13 +116,13 @@ struct USDCC_USD_UI_API TaskCallbacks {
 
 // A task that's running. Deleting it cancels the task if it hasn't ended; after cancel(),
 // no callback comes.
-class USDCC_USD_UI_API RenderTaskHandle {
+class USDCC_RENDER_API RenderTaskHandle {
 public:
     virtual ~RenderTaskHandle() = default;
     virtual void cancel() = 0;
 };
 
-class USDCC_USD_UI_API FinalRenderer {
+class USDCC_RENDER_API FinalRenderer {
 public:
     struct Capabilities {
         bool tiles = false;  // renders a region of the image (RenderTask::region) on its own
@@ -147,7 +147,7 @@ public:
 };
 
 // The renderers the app has, in the order they were added.
-class USDCC_USD_UI_API FinalRenderers {
+class USDCC_RENDER_API FinalRenderers {
 public:
     static FinalRenderers& instance();
 
@@ -165,6 +165,6 @@ private:
 
 // A setting's attribute on a RenderSettings prim: `key` as it is when it's in the namespace
 // already ("arnold:AA_samples"), else `ns:key` ("embree:ty:maxBounces").
-USDCC_USD_UI_API std::string settingAttribute(const std::string& ns, const std::string& key);
+USDCC_RENDER_API std::string settingAttribute(const std::string& ns, const std::string& key);
 
 }  // namespace usdcc::render

@@ -1,6 +1,7 @@
 #include <QApplication>
 
 #include "app_updates.h"
+#include "startup.h"
 
 #include <filesystem>
 #include <functional>
@@ -131,29 +132,14 @@
         USDCC_MATERIALX_STR(MATERIALX_BUILD_VERSION)
 #endif
 
-namespace {
-// Detaches a sink from the hub when it goes out of scope. Declared right after
-// QApplication in main(), so it outlives the window and the stage manager and
-// the log file still gets what they log while being destroyed.
-struct ScopedLogSink {
-    std::shared_ptr<usdcc::core::LogSink> sink;
-    ~ScopedLogSink() {
-        if (sink) usdcc::core::LogHub::instance().removeSink(sink.get());
-    }
-};
-}  // namespace
+using usdcc::app::ScopedLogSink;
 
 int main(int argc, char** argv) {
     // Logging comes first, so nothing logged during start-up is lost: records
     // wait in the hub's ring buffer until the log file (below) attaches and
     // replays them. USDCC_LOG sets levels, e.g. "debug" or
     // "info,usdcc.viewport=debug,usd=warning" (docs/LOGGING.md §3.1).
-    usdcc::core::setThreadName("main");
-    if (const QString spec = qEnvironmentVariable("USDCC_LOG"); !spec.isEmpty()) {
-        if (!usdcc::core::LogHub::instance().configureLevels(spec.toStdString())) {
-            USDCC_LOG_WARNING("usdcc.app", "Ignored parts of USDCC_LOG=\"{}\" that aren't valid", spec.toStdString());
-        }
-    }
+    usdcc::app::configureLogLevels("usdcc.app");
     // Then everything that would otherwise only reach stdout/stderr: the C
     // level streams themselves (TF_DEBUG, printf from libraries), OpenUSD's
     // diagnostics and Qt's messages (docs/LOGGING.md §6). All three outlive
@@ -169,33 +155,10 @@ int main(int argc, char** argv) {
 #else
     const bool logToConsole = true;
 #endif
-    ScopedLogSink console{logToConsole ? std::make_shared<usdcc::core::ConsoleLogSink>() : nullptr};
-    if (console.sink) {
-        usdcc::core::LogHub::instance().addSink(console.sink);
-    }
+    ScopedLogSink console(logToConsole ? std::make_shared<usdcc::core::ConsoleLogSink>() : nullptr);
 
-    // Must be set before QApplication is constructed (QSurfaceFormat docs).
-    // HgiGL_ScopedStateHolder (Hydra/Storm's save-and-restore-caller's-GL-
-    // state wrapper, used so Storm can share a GL context with a foreign
-    // renderer like Qt's) queries/pushes legacy state that doesn't exist in
-    // a Core profile context — confirmed by "GL error: invalid enum" from
-    // HgiGLPostPendingGLErrors when a Core profile was requested here.
-    // Compatibility profile is what it actually expects.
-    QSurfaceFormat format;
-    format.setVersion(4, 5);
-    format.setProfile(QSurfaceFormat::CompatibilityProfile);
-    // Without it Qt asks for a forward-compatible context (no deprecated
-    // functions), which Mesa answers with a Core profile despite the profile
-    // above (docs/LINUX_WSL.md). NVIDIA's Windows driver ignores the flag.
-    format.setOption(QSurfaceFormat::DeprecatedFunctions);
-    format.setDepthBufferSize(24);
-    format.setStencilBufferSize(8);
-    // USDCC_GL_DEBUG=1 asks for a debug context: the viewport then logs each
-    // GL error the driver reports, at the call that caused it, with a stack.
-    if (qEnvironmentVariableIntValue("USDCC_GL_DEBUG") != 0) {
-        format.setOption(QSurfaceFormat::DebugContext);
-    }
-    QSurfaceFormat::setDefaultFormat(format);
+    // Before QApplication: the OpenGL context the viewports and Storm want.
+    usdcc::app::setDefaultSurfaceFormat();
 
     // The viewport is a native child window (QWidget::createWindowContainer),
     // and by default Qt then makes its siblings native too — including the
@@ -206,13 +169,8 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
 
-    // Integration tests need isolation before settings, plugins, Python and
-    // layouts load. APPDATA alone does not redirect Qt's Windows known folders.
-    const auto testProfile = qEnvironmentVariable("USDCC_TEST_PROFILE");
-    if (!testProfile.isEmpty() && !testProfile.contains('/') && !testProfile.contains('\\')) {
-        QStandardPaths::setTestModeEnabled(true);
-        app.setApplicationName("usdcc-test-" + testProfile);
-    }
+    // Integration tests need isolation before settings, plugins, Python and layouts load.
+    usdcc::app::applyTestProfile(app, QStringLiteral("usdcc"));
 
     // usdcc [--script file.py]... [--no-startup-scripts] [--no-plugins] [--open-session name]
     // [--plugin-path folder]... [stage] (docs/SCRIPTING.md §6, docs/PLUGINS.md §2). Qt's own options (-platform, ...) are already
@@ -248,37 +206,13 @@ int main(int argc, char** argv) {
     // Shows a message box and exits for --help and unknown options.
     commandLine.process(app);
 
-    // Needs the application object for its folder (ui/settings.h).
-    const QString logDir = usdcc::ui::userDataFolder() + "/logs";
-    ScopedLogSink fileLog{usdcc::core::FileLogSink::openInDirectory(logDir.toStdU16String())};
     QString logFilePath;
-    if (fileLog.sink) {
-        usdcc::core::LogHub::instance().addSink(fileLog.sink);
-        // First, so every log file says which build wrote it.
-        USDCC_LOG_INFO("usdcc.app", "usdcc {}{} starting", usdcc::core::version(),
-                       usdcc::core::isReleaseBuild() ? "" : " (development build)");
-        const auto& path = static_cast<usdcc::core::FileLogSink&>(*fileLog.sink).path();
-        logFilePath = QString::fromStdU16String(path.generic_u16string());
-        USDCC_LOG_INFO("usdcc.app", "Logging to {}", logFilePath.toStdString());
-    } else {
-        USDCC_LOG_WARNING("usdcc.app", "Could not create a log file in {}", logDir.toStdString());
-    }
+    const auto fileLog = usdcc::app::openLogFile("usdcc.app", "usdcc", &logFilePath);
 
-    // Preferences (docs/SETTINGS.md) load from usdcc.ini from here on; every
-    // setting defined later (the theme's first) starts from its saved value.
-    usdcc::ui::installAppSettings();
-    // Settings > USD: environment variables OpenUSD reads once, so set before
-    // anything below uses its plugin registry or asset resolver (docs/USD_RUNTIME.md §3).
-    usdcc::usd::defineUsdEnvironmentSettings();
-    usdcc::usd::applyUsdEnvironmentSettings();
-    // The OCIO config, and OCIO for Hydra's color correction, before any viewport draws
-    // (docs/COLOR_MANAGEMENT.md).
-    usdcc::usd::defineColorManagementSettings();
-    usdcc::usd::applyColorManagementSettings();
+    // Preferences (docs/SETTINGS.md) from usdcc.ini, USD's environment, the OCIO config, and
+    // the Python and plugins settings (shared with usdcc_node, startup.h).
+    usdcc::app::installSettings();
     usdcc::ui::theme::apply(app);
-    // Read by the plugin manager and Python, just below.
-    usdcc::scripting::definePythonSettings();
-    usdcc::scripting::definePluginSettings();
     usdcc::scripting::SessionController::defineSettings();
     // Settings > Updates (docs/UPDATES.md §4).
     usdcc::app::AppUpdates::defineSettings();
@@ -289,38 +223,16 @@ int main(int argc, char** argv) {
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry
     // doesn't take in a plugin's schemas once it exists (docs/PLUGINS.md §3.1).
-    std::vector<std::filesystem::path> extraPluginFolders;
-    for (const QString& folder : commandLine.values(pluginPathOption)) {
-        // Absolute, so the plugins' paths (their libraries, USD folders, Python
-        // modules) don't depend on the working directory later on.
-        extraPluginFolders.emplace_back(QFileInfo(folder).absoluteFilePath().toStdU16String());
-    }
-    usdcc::scripting::PluginManager plugins(
-        usdcc::scripting::PluginManager::defaultOptions(extraPluginFolders, !commandLine.isSet(noPluginsOption)));
+    usdcc::scripting::PluginManager plugins(usdcc::scripting::PluginManager::defaultOptions(
+        usdcc::app::pluginFolders(commandLine.values(pluginPathOption)), !commandLine.isSet(noPluginsOption)));
     plugins.scan();
-    // The codeless schema libraries the Schemas panel can edit (docs/SCHEMAS.md §5.1):
-    // in every plugin's usd folders, enabled or not; a new one in the user's plugins folder.
-    {
-        std::vector<std::string> usdFolders;
-        for (const usdcc::scripting::PluginInfo& plugin : plugins.plugins()) {
-            for (const std::string& folder : plugin.manifest.usdFolders) {
-                const std::u8string text = (plugin.manifest.folder / std::filesystem::u8path(folder)).lexically_normal().u8string();
-                usdFolders.emplace_back(text.begin(), text.end());
-            }
-        }
-        const std::u8string user = usdcc::scripting::PluginManager::userFolder().u8string();
-        usdcc::usd::SchemaLibraries::instance().configure(std::move(usdFolders), std::string(user.begin(), user.end()),
-                                                          usdcc::scripting::kPluginApiVersion);
-    }
-    // Settings > Assets (docs/REMOTE_ASSETS.md §10): which servers a webdav:// path
-    // means, before a stage can open one. After the scan, which registers the protocols.
-    usdcc::usd::defineAssetSettings();
+    // The schema libraries in the plugins' USD folders, and Settings > Assets.
+    usdcc::app::configurePluginUsd(plugins);
     // Settings > Renderers: each render delegate's own settings, all of them listed only
     // when the dialog opens, as some take a while (a viewport defines its renderer's itself).
     // Final renders (docs/FINAL_RENDER.md): Settings > Final Render, and every Hydra render
     // delegate as a renderer (Arnold's too, set up above). Plugins add theirs when they start.
-    usdcc::render::defineFinalRenderSettings();
-    usdcc::render::registerHydraFinalRenderers();
+    usdcc::app::registerRenderers();
     usdcc::ui::SettingsDialog::setBeforeShow([]() {
         QApplication::setOverrideCursor(Qt::WaitCursor);
         usdcc::usd::defineRendererSettings();
@@ -1180,12 +1092,7 @@ int main(int argc, char** argv) {
     // Peers (docs/PEERS.md): rooms with other usdcc instances, found on this machine and
     // network, with the people in them and their chat. Nothing opens a port or goes on
     // the network until a room is hosted or joined, or the panel looks for rooms (§12).
-    usdcc::ui::PeersController::defineSettings();
-    usdcc::peers::Peers::Options peersOptions;
-    peersOptions.profile = usdcc::ui::peersProfile();
-    peersOptions.identity = &usdcc::ui::peersIdentity;
-    peersOptions.roomsFolder = usdcc::ui::peersRoomsFolder();
-    peersOptions.network = usdcc::peers::createMdnsDiscovery();
+    usdcc::peers::Peers::Options peersOptions = usdcc::app::peersOptions();
     usdcc::ui::PeersController::Hooks peersHooks;
     // A prim path in a chat message selects that prim, if the current stage has it.
     peersHooks.selectPrim = [&stageManager, &window](const QString& path) {

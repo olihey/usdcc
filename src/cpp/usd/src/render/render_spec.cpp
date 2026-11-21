@@ -404,8 +404,11 @@ SdfPath createRenderSettings(const UsdStagePtr& stage) {
     std::string named;
     if (!stage->GetMetadata(UsdRenderTokens->renderSettingsPrimPath, &named) || named.empty() ||
         !SdfPath::IsValidPathString(named) || !UsdRenderSettings(stage->GetPrimAtPath(SdfPath(named)))) {
-        stage->GetRootLayer()->SetField(SdfPath::AbsoluteRootPath(), UsdRenderTokens->renderSettingsPrimPath,
-                                        VtValue(path.GetString()));
+        // Stage metadata is read from the session layer, then the root layer: the session
+        // layer's when it's the edit target (usdcc_node's overrides, which never reach the file).
+        const SdfLayerHandle target = stage->GetEditTarget().GetLayer();
+        const SdfLayerHandle layer = target == stage->GetSessionLayer() ? target : stage->GetRootLayer();
+        layer->SetField(SdfPath::AbsoluteRootPath(), UsdRenderTokens->renderSettingsPrimPath, VtValue(path.GetString()));
     }
     return path;
 }

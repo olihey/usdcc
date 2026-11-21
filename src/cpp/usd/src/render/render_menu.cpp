@@ -2,6 +2,7 @@
 
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/render/render_scheduler.h"
+#include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
