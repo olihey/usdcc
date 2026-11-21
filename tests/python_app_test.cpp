@@ -18,6 +18,8 @@
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_creation_catalog.h"
+#include "usdcc/usd/render/hydra_final_renderer.h"
+#include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/relationship_targets.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/ui/main_window.h"
@@ -644,5 +646,40 @@ USDCC_TEST(python_physics) {
     CHECK(baked, "the bake script ran");
     CHECK(undoCount(stage) == 1, "and made one undo step (%d)", undoCount(stage));
     usdcc::usd::physics::PhysicsBackends::instance().remove("org.usdcc.physics-jolt");
+    app.stages.closeStage(stage);
+}
+
+// usdcc.render (docs/FINAL_RENDER.md §6): the renderers, a render queued with the reason one
+// can't be, the queue's jobs, and cancelling.
+USDCC_TEST(python_render_api) {
+    auto& app = pythonTestApp();
+    usdcc::render::registerHydraFinalRenderers();
+    TempStageFile file("usdcc_render_api");
+    const StageRefPtr stage = app.stages.openStage(file.path.string());
+    app.stages.setCurrentStage(stage);
+
+    CHECK(evaluate("'HdEmbreeRendererPlugin' in [r.id for r in __import__('usdcc.render').render.renderers()]") == "True",
+          "renderers() has Embree");
+    CHECK(!app.python.runString("import usdcc.render\nusdcc.render.render_frame(renderer='no.such')\n"),
+          "an unknown renderer raises");
+    CHECK(!app.python.runString("import usdcc.render\nusdcc.render.render_frame(renderer='HdEmbreeRendererPlugin')\n"),
+          "no camera (and no viewport) raises");
+    CHECK(app.python.runString("import usdcc.usd\nfrom pxr import Gf, UsdGeom, UsdRender, Sdf\n"
+                               "s = usdcc.usd.current_stage()\n"
+                               "UsdGeom.Camera.Define(s, '/World/Cam')\n"
+                               "r = UsdRender.Settings.Define(s, '/Render/Settings')\n"
+                               "r.CreateCameraRel().SetTargets(['/World/Cam'])\n"
+                               "r.CreateResolutionAttr().Set(Gf.Vec2i(32, 24))\n"
+                               "r.GetPrim().CreateAttribute('usdcc:render:renderer', Sdf.ValueTypeNames.String, True)"
+                               ".Set('HdEmbreeRendererPlugin')\n"),
+          "a camera and render settings, by script");
+    const std::string id = evaluate("__import__('usdcc.render').render.render_frame()");
+    CHECK(id.rfind("job-", 0) == 0, "render_frame() queues a job: %s", id.c_str());
+    CHECK(evaluate("__import__('usdcc.render').render.job('" + id + "').renderer") == "HdEmbreeRendererPlugin",
+          "with the prim's renderer");
+    CHECK(evaluate("__import__('usdcc.render').render.job('" + id + "').status in ('queued', 'running')") == "True", "waiting");
+    app.python.runString("import usdcc.render\nusdcc.render.cancel('" + id + "')\n");
+    CHECK(evaluate("__import__('usdcc.render').render.job('" + id + "').status") == "cancelled", "cancel()");
+    usdcc::render::RenderScheduler::instance().clearEnded();
     app.stages.closeStage(stage);
 }

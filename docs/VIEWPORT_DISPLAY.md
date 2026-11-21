@@ -253,7 +253,8 @@ Display options' model: app-wide defaults with a viewport's own overrides.
   viewport.reset_renderer_setting("ty:maxBounces")         # back to Settings > Renderers' value
   ```
 - **Not done:** ranges and choices (delegates don't publish them), argument dialogs for commands,
-  `UsdRenderSettings` prims and AOVs.
+  and `UsdRenderSettings` prims and AOVs in viewports. Final renders read and write those
+  ([FINAL_RENDER.md](FINAL_RENDER.md) §2), starting from these Settings > Renderers values.
 - **Tests:** `renderer_settings_test` (Embree's list and types, the conversions, the Settings
   defaults, overrides through a duplicate and a session, the dialog) and
   `viewport_renderer_python_test` (the Python API, its errors, another renderer's overrides, a

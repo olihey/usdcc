@@ -6,6 +6,7 @@
 // linearExrAvailable() is false and nothing is written. Qt-free.
 
 #include <string>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -18,5 +19,19 @@ bool linearExrAvailable();
 // header. False, with `error` saying why, when it can't.
 bool writeLinearExr(const std::string& path, const float* rgba, int width, int height, std::string* error = nullptr,
                     size_t rowFloats = 0);
+
+// One layer of a multi-layer EXR: `rgba` as writeLinearExr() takes it. A layer named "" or
+// "color" has the plain R, G, B and A channels; another has "<name>.R" and so on, as Nuke
+// and OpenEXR's viewers read layers. `channels` 1 writes only "<name>.Y" from R (depth, ids).
+struct LinearExrLayer {
+    std::string name;
+    const float* rgba = nullptr;
+    int channels = 4;
+};
+
+// Several layers of one image size in one file (final renders' AOVs, docs/FINAL_RENDER.md
+// §4.3). False, with `error` saying why, when it can't.
+bool writeLinearExrLayers(const std::string& path, const std::vector<LinearExrLayer>& layers, int width, int height,
+                          std::string* error = nullptr);
 
 }  // namespace usdcc::usd

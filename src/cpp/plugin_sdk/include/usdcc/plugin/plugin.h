@@ -19,6 +19,7 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/render/final_renderer.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <exception>
@@ -141,6 +142,16 @@ struct Host {
         const std::string added = backend->name();
         usdcc::usd::physics::PhysicsBackends::instance().add(std::move(backend));
         noted("Physics backend", added);
+    }
+
+    // A final-frame renderer (docs/FINAL_RENDER.md §3): Render Settings offers it, and the
+    // render queue renders with it. One with the id of another replaces it. Remove it in
+    // usdcc_plugin_deactivate() with usdcc::render::FinalRenderers::instance().remove(id).
+    void addFinalRenderer(std::shared_ptr<usdcc::render::FinalRenderer> renderer) {
+        if (!renderer) throw std::invalid_argument("no final renderer");
+        const std::string added = renderer->name();
+        usdcc::render::FinalRenderers::instance().add(std::move(renderer));
+        noted("Final renderer", added);
     }
 
     // A key of the plugin's own in usdcc::ui::appSettings().

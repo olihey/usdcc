@@ -315,6 +315,22 @@ add_library(usdcc_usd_ui SHARED
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
     src/undo_manager.cpp
+    include/usdcc/usd/render/final_renderer.h
+    src/render/final_renderer.cpp
+    include/usdcc/usd/render/render_spec.h
+    src/render/render_spec.cpp
+    include/usdcc/usd/render/render_job.h
+    src/render/render_job.cpp
+    include/usdcc/usd/render/hydra_final_renderer.h
+    src/render/hydra_final_renderer.cpp
+    include/usdcc/usd/render/render_scheduler.h
+    src/render/render_scheduler.cpp
+    include/usdcc/usd/render/render_menu.h
+    src/render/render_menu.cpp
+    include/usdcc/usd/render/render_settings_view_panel.h
+    src/render/render_settings_view_panel.cpp
+    include/usdcc/usd/render/render_queue_panel.h
+    src/render/render_queue_panel.cpp
 )
 # The Outliner's prim icons (see prim_icons.cpp), as a library for the reason in
 # src/cpp/ui/CMakeLists.txt.

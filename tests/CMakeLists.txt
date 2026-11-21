@@ -21,6 +21,7 @@ add_executable(usdcc_tests
     create_stage_test.cpp
     dependencies_test.cpp
     dependency_files.h
+    final_render_test.cpp
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp
@@ -106,6 +107,7 @@ add_executable(usdcc_ui_tests
     recent_files_test.cpp
     relationship_editor_test.cpp
     render_view_panel_test.cpp
+    render_settings_panel_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
     schema_explorer_test.cpp
