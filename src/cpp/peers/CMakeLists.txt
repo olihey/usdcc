@@ -1,6 +1,6 @@
 # usdcc.peers — rooms of usdcc instances, programs and browsers that share data over
 # WebSocket (docs/PEERS.md): identities, hosting and joining with an encrypted
-# handshake, channels with their three kinds of delivery, shared state, reconnecting,
+# handshake, channels with their three kinds of delivery, shared state, transfers, reconnecting,
 # guests with the page the room serves them, and finding rooms on this machine and
 # network.
 #
@@ -17,6 +17,7 @@ add_library(usdcc_peers SHARED
     include/usdcc/peers/peers.h
     include/usdcc/peers/room.h
     include/usdcc/peers/state.h
+    include/usdcc/peers/transfer.h
     include/usdcc/peers/types.h
     src/channel.cpp
     src/crypto.cpp
@@ -35,6 +36,7 @@ add_library(usdcc_peers SHARED
     src/send_queue.cpp
     src/send_queue.h
     src/state.cpp
+    src/transfer.cpp
     src/types.cpp
 )
 target_include_directories(usdcc_peers PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

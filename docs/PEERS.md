@@ -278,6 +278,27 @@ For bytes: a file, a packed stage, a screenshot.
 - **Files land in `<AppLocalData>/peers/inbox/<room>/`,** or in memory for a small one a plugin
   asked for.
 
+**As built** (the generic part, §14.4): `Transfer` and `TransferInbox` (`transfer.h`), on any
+channel a feature picks. A transfer is a *bundle*: a manifest of files (`{path, size, sha256}`)
+offered to one member, then its pieces, sent to that member alone.
+
+- **The inbox is addressed by content:** a bundle lands in `<AppLocalData>/peers/inbox/<hash>/`,
+  where `<hash>` is the sha256 of its manifest. A bundle already there is acknowledged at once and
+  nothing is sent; a render node that has a shot's textures gets only the frames' new layers.
+- **Pieces of at most 1 MB,** direct (`to`), so they skip the room's history, and paced: at most
+  4 MB sent and not yet acknowledged, nothing more while this side's send queue holds 2 MB, and
+  100 pieces a second for all of a room's transfers together, half the room's rate limit.
+- **Each file is checked** against its sha256 as its last piece arrives; one that doesn't match
+  ends the transfer and is deleted.
+- **Resuming:** what arrived stays in `<hash>.part/`. After a break, the receiver says from which
+  piece to go on, and so does a later transfer of the same bundle, from anyone.
+- **Either end cancels,** and the receiver then throws away what arrived.
+- **Only safe paths:** relative, with `/`, no `..`, no drive letters, no names Windows keeps for
+  itself, and never written through a link. A limit on a transfer's size (64 GB to start with)
+  and its number of files.
+- **Not built yet:** asking the user about an offer (the inbox takes a callback that decides),
+  the inbox by room, transfers in memory, to everyone at once, and Python.
+
 ### 7.4 What holds for all three
 
 - **A slow peer** has a send queue with a limit. One that falls too far behind is disconnected and
@@ -560,7 +581,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
 | **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
 | **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
-| **5. Transfers** | Transfers, the inbox, **Send to…** | A session sent from one instance loads on the other; a plugin sends a file from Python |
+| **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | See there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
 
@@ -734,6 +755,47 @@ path as a link, and a late joiner gets the chat so far.
 
 **Not tried yet:** two machines (the row's "done when"), the firewall's question, a LAN with
 several interfaces.
+
+### 14.4 Phase 5 as built so far: transfers
+
+The generic part, for final-frame rendering to send a shot to its render nodes and get the
+frames back: `Transfer` and `TransferInbox` in `usdcc_peers` (`transfer.h`, §7.3), with the
+protocol in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §9. No UI, no **Send to…**, no Python yet.
+
+**Its tests** (`tests/peers_transfer_test.cpp`, in `usdcc_peers_tests`, about 8 s):
+
+| What | Test |
+|---|---|
+| Several files in folders, one empty, from one member to another through the host | `peers_transfer_files` |
+| A 5 MB file in pieces of 1 MB | `peers_transfer_large_file` |
+| The proxy cuts the receiver off halfway; it comes back and the rest arrives, without what had arrived | `peers_transfer_resumes_after_cut` |
+| A piece whose bytes were changed, and one of the wrong size, are refused; the file isn't kept | `peers_transfer_corrupt_chunk_refused` |
+| The same bundle again: acknowledged, nothing sent | `peers_transfer_cache_hit` |
+| `..`, absolute paths, drive letters, `\`, and a bundle over the inbox's limit are refused, and nothing is written outside the inbox | `peers_transfer_unsafe_paths_refused`, `peers_transfer_paths` |
+| The receiver cancels, then the sender does | `peers_transfer_cancel` |
+
+The proxy that cuts a member off moved from `peers_rooms_test.cpp` to `peers_test_support.h`.
+
+**What it is:**
+
+- **The API:** `TransferManifest::fromDirectory()` or `fromFiles()` hash a bundle;
+  `Transfer::send(room, channel, to, manifest)` offers it; a `TransferInbox` on the receiving
+  member's room and channel takes it. Both ends have a `Transfer` with `progress`, `finished`,
+  `failed`, `resumed` (the sender's) and `cancel()`. Not §8.1's `Room::send(channel, file)`: a
+  bundle of files to one member is what rendering needs, and to everyone is later.
+- **`Room::queuedBytes()` on a member** that joined is now its own send queue to the host, whoever
+  the message is for, so that a sender there can pace itself too.
+- **Pacing:** the host's queue for the receiver is what drops a member as too slow (16 MB), and a
+  sender that isn't the host can't see it. The window of 4 MB unacknowledged is what keeps it
+  under that. Several transfers to one member at once each have their own window.
+- **After a break** either side may be the one that noticed: the one whose room resumed asks
+  (`accept` from the receiver, `offer` again from the sender), a sender that hears nothing for
+  5 s offers again, and a receiver that gets a piece after a gap asks for the missing one. A
+  sender that hears nothing for 2 minutes, or whose receiver leaves, fails; the part is kept.
+- **Hashing on the sender** is on the calling thread, and so is checking a part that was already
+  complete when a transfer resumes.
+- **Symbolic links:** a sender's bundle with one is refused (`fromDirectory`), and a receiver never
+  writes through one. Not tested on Windows, where making one needs Developer Mode.
 
 ## 15. Testing
 
