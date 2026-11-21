@@ -100,7 +100,7 @@ std::string txtValue(QString value, int room) {
 
 RoomRecords recordsOf(const Announcement& announcement) {
     RoomRecords records;
-    records.instanceName = announcement.hostId().toStdString() + "._usdcc._tcp.local.";
+    records.instanceName = announcement.roomId().toStdString() + "._usdcc._tcp.local.";
     records.hostName = "usdcc-" + announcement.instance.toStdString() + ".local.";
     records.port = announcement.port;
     records.txt = {{"v", std::to_string(kProtocolVersion)},
@@ -109,7 +109,8 @@ RoomRecords recordsOf(const Announcement& announcement) {
                    {"name", txtValue(announcement.name, 200)},
                    {"host", txtValue(announcement.hostName, 200)},
                    {"join", admissionName(announcement.admission).toStdString()},
-                   {"pw", announcement.password ? "1" : "0"}};
+                   {"pw", announcement.password ? "1" : "0"},
+                   {"type", roomTypeName(announcement.type).toStdString()}};
     for (const QHostAddress& address : QNetworkInterface::allAddresses()) {
         if (address.protocol() == QAbstractSocket::IPv4Protocol && !address.isLoopback() && !address.isLinkLocal()) {
             sockaddr_in in{};
@@ -150,18 +151,18 @@ public:
         if (!openService()) {
             return;
         }
-        m_announced.insert(announcement.instance, announcement);
+        m_announced.insert(announcement.roomId(), announcement);
         // Told unasked, twice a second apart, as RFC 6762 §8.3 asks.
         send(announcement, Send::Announce);
-        QTimer::singleShot(1000, this, [this, instance = announcement.instance] {
-            if (m_announced.contains(instance)) {
-                send(m_announced.value(instance), Send::Announce);
+        QTimer::singleShot(1000, this, [this, roomId = announcement.roomId()] {
+            if (m_announced.contains(roomId)) {
+                send(m_announced.value(roomId), Send::Announce);
             }
         });
     }
 
-    void withdraw(const QString& instance) override {
-        const auto found = m_announced.find(instance);
+    void withdraw(const QString& roomId) override {
+        const auto found = m_announced.find(roomId);
         if (found == m_announced.end()) {
             return;
         }
@@ -383,6 +384,8 @@ private:
                     announcement.admission = admissionFromName(value);
                 } else if (key == u"pw") {
                     announcement.password = value == u"1";
+                } else if (key == u"type") {
+                    announcement.type = roomTypeFromName(value);
                 }
             }
             seen.hasTxt = true;
@@ -402,7 +405,7 @@ private:
             room.address = (host.isEmpty() ? QStringLiteral("127.0.0.1") : host) + u':' +
                            QString::number(room.announcement.port);
             seen.room = room;
-            const QString id = room.hostId();
+            const QString id = room.roomId();
             if (!(m_published.value(id) == room)) {
                 m_published.insert(id, room);
                 Q_EMIT found(room);
@@ -413,7 +416,7 @@ private:
     void forgetUnanswered() {
         for (auto it = m_seen.begin(); it != m_seen.end();) {
             if (it->lastSeen.isValid() && it->lastSeen.elapsed() > kForgetAfterMs) {
-                const QString id = it->room.hostId();
+                const QString id = it->room.roomId();
                 it = m_seen.erase(it);
                 if (m_published.remove(id)) {
                     Q_EMIT lost(id);
@@ -425,7 +428,7 @@ private:
         // A room whose PTR answer went (a goodbye): gone too.
         for (auto it = m_published.begin(); it != m_published.end();) {
             const bool still = std::any_of(m_seen.cbegin(), m_seen.cend(),
-                                           [&](const Seen& seen) { return seen.room.hostId() == it.key(); });
+                                           [&](const Seen& seen) { return seen.room.roomId() == it.key(); });
             if (!still) {
                 const QString id = it.key();
                 it = m_published.erase(it);
@@ -442,9 +445,9 @@ private:
     QSocketNotifier* m_serviceNotifier = nullptr;
     QSocketNotifier* m_queryNotifier = nullptr;
     QTimer m_queryTimer;
-    QHash<QString, Announcement> m_announced;  // instance ->
+    QHash<QString, Announcement> m_announced;  // room id ->
     QHash<QString, Seen> m_seen;               // instance name in DNS-SD ->
-    QHash<QString, FoundRoom> m_published;     // host id -> what found() last said
+    QHash<QString, FoundRoom> m_published;     // room id -> what found() last said
     QString m_problem;
 };
 

@@ -74,8 +74,10 @@ These live on the same prim, as custom attributes:
 | `usdcc:render:format` | token: `exr` or `png` | Settings > Final Render > Format |
 | `usdcc:render:tiles` | int2 | 1 × 1 |
 | `usdcc:render:timeLimit` | double, seconds per task | Settings > Final Render > Time limit |
-| `usdcc:render:distribute` | token: `local`, `both` or `peers` (§7) | `local`: this instance only |
-| `usdcc:render:delivery` | token: `packaged` or `shared` (§7.3) | `packaged` |
+
+Where a job goes (this instance, peers, which rooms) isn't the stage's: it is chosen at the
+bottom of the Render Settings panel (§5.1, §7). Stages that still have the older
+`usdcc:render:distribute` and `usdcc:render:delivery` attributes keep them, unread.
 
 ## 3. Renderers
 
@@ -217,16 +219,20 @@ is a view panel, opened from the Render or Stages menu.
     pixel aspect. The resolution and camera are written to the first product when it has its
     own, else to the settings.
   - **Output:** the frame range (the stage's, or its own) and step, the output pattern with an
-    example name, the format, the tiles, and the time limit. Then who renders (**Render on**:
-    this instance, this instance and peers, or peers only), how peers get the scene
-    (**Scene for peers**), and the peers that can take a share now (§7).
+    example name, the format, the tiles, and the time limit.
   - **Renderer:** the renderer's settings, made from its list. Authored values are bold, and ↺
     clears one back to its default.
   - **AOVs:** the products' RenderVars. **Add** makes one under the first product from a
     renderer AOV name (color, depth, normal, primId, `primvars:st`, ...), and **Remove** takes
     one away.
 - **Edits:** each one is an undo step on the stage's edit target.
-- **Render Frame** and **Render Animation** buttons.
+- **Render** box, at the bottom: where jobs go, for every stage. It is app state
+  (`RenderNetwork::dispatch()`, kept in usdcc.ini as `FinalRender/distribute`, `delivery` and
+  `rooms`), and Render Frame and Render Animation from the menu use it too.
+  - **Render on:** this instance, this instance and peers, or peers only.
+  - **Scene:** how peers get it, packaged or shared (§7.3).
+  - **Rooms:** the render queue rooms whose instances may take the job: all of them, or some.
+  - Who can take a share now, and the **Render Frame** and **Render Animation** buttons.
 - **Sessions** keep which prim the panel shows.
 
 ### 5.2 Render Queue
@@ -248,6 +254,7 @@ panel. It opens when a render is queued.
 | Render Animation (Ctrl+F12) | The same, for the frame range |
 | Render Settings | Opens a Render Settings panel for the current stage |
 | Render Queue | Shows the Render Queue |
+| Swarm | Shows the Swarm panel (§7.5) |
 
 ### 5.4 Settings > Final Render
 
@@ -258,7 +265,7 @@ panel. It opens when a render is queued.
 | `FinalRender/format` | `exr` |
 | `FinalRender/width`, `FinalRender/height` | 1920 × 1080 |
 | `FinalRender/timeLimit` | 0 s: until done |
-| `FinalRender/node` | off: this instance doesn't render for peers |
+| `FinalRender/node` | off: in a render queue room it joins, this instance doesn't take jobs until switched on there (Swarm panel) |
 | `FinalRender/trusted` | empty: fingerprints of peers whose jobs start without asking |
 | `FinalRender/askUntrusted` | on: other peers' jobs ask with a notification; off: they're declined |
 
@@ -313,26 +320,39 @@ render.register_renderer(MyRenderer())        # unregister_renderer(id) in deact
 
 ## 7. Rendering with peers
 
-usdcc instances in the same peers rooms ([PEERS.md](PEERS.md)) render each other's frames and
-tiles. The code is [render_network.h](../src/cpp/usd/include/usdcc/usd/render/render_network.h);
-`main.cpp` makes one `RenderNetwork` and gives it every room the Peers panel opens.
+usdcc instances in the same render queue rooms ([PEERS.md](PEERS.md) §5.5: rooms of type
+`render_queue`) render each other's frames and tiles. The code is
+[render_network.h](../src/cpp/usd/include/usdcc/usd/render/render_network.h); `main.cpp` makes
+one `RenderNetwork` and gives it every render queue room (`addRoom()` ignores chat and
+broadcast rooms). An instance may be in several render queues at once.
 
-1. **On the render node:** turn on Settings > Final Render > **Render for peers**, and add the
+1. **A room:** Render > **Swarm** > **Host…** a render queue, and the others **Join…** it (its
+   link, or double-click it where it is found).
+2. **On the render node:** tick **Takes jobs** on the room's row in the Swarm panel (Settings >
+   Final Render > **Render for peers** ticks it for rooms joined from then on), and add the
    submitter's fingerprint to **Trusted peers**, or answer the notification when a job comes.
-2. **On the submitting instance:** in Render Settings > Output, set **Render on** to *This
-   instance and peers* or *Peers only*. The tab lists the peers that can take a share.
-3. **Render:** the Render Queue's Worker column names who renders each task.
+3. **On the submitting instance:** at the bottom of Render Settings, set **Render on** to
+   *This instance and peers* or *Peers only*, and pick the **Rooms**. It lists who can take a share.
+4. **Render:** the Render Queue's Worker column names who renders each task; the Swarm panel
+   shows each instance rendering it.
 
 ### 7.1 Nodes
 
-- **Advertising:** each instance says in each room what it can do, in the PeerState
-  `org.usdcc.render/node`: `{renderers: [{id, name, tiles}], node, busy, schemes}`. It says it
-  again when renderers come or go, or Render for peers changes.
-- **Workers:** each peer that says `node: true` becomes a `PeerWorker` of the render queue, and
-  stops being one when it says otherwise or leaves.
+- **Advertising:** each instance says in each room what it can do and is doing, in the PeerState
+  `org.usdcc.render/node`:
+  `{renderers: [{id, name, tiles}], node, busy, schemes, current?}`.
+  - `node`: whether it takes jobs in that room (its switch there).
+  - `current`: `{title, scene, renderer, from, frame, fraction, startedMs, forPeer}`, the task it
+    renders, a peer's (`forPeer`, `from` its name) or one of its own jobs; `busy` is whether it
+    has one. Progress goes out at most twice a second; viewers count the time from `startedMs`.
+  - It says it again when renderers come or go, a switch changes, or a task starts, moves or ends.
+- **Workers:** each peer that says `node: true` in any room becomes one `PeerWorker` of the
+  render queue, however many rooms it shares with this instance, and stops being one when it
+  says otherwise everywhere or leaves them all.
 - **Which tasks a node gets:** `canRun()` gives it a job's tasks only when:
   - the job may use peers;
-  - the node has the job's renderer (and renders tiles, when the job has them);
+  - in one of the job's rooms (`JobOptions::rooms`; none named: all), the node takes jobs, has
+    the job's renderer and renders tiles, when the job has them; the tasks go through that room;
   - it hasn't declined the job.
 - **Peers only:** the queue gives this instance (`LocalWorker`) none of the job's tasks, so the
   user keeps working. Such a job waits while no node can take it.
@@ -344,20 +364,22 @@ transfers ([PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §9) on `org.usdcc.render/file
 
 | From the submitter | From the node |
 |---|---|
-| `offer {job, renderer, title, frames, shared?}`: before a job's first task | `accept {job, delivery, problems?}` or `decline {job, reason}` |
+| `offer {job, renderer, title, scene, frames, shared?}`: before a job's first task | `accept {job, delivery, problems?}` or `decline {job, reason}` |
 | `bundle {job, hash}`, then the bundle's transfer (packaged) | `progress {job, index, fraction, state}`, at most 4 a second |
 | `task {job, index, frame, resolution, region, camera, settings, aovs, values, purposes, timeLimit}` | `result {job, index, hash}`, then the images' transfer |
 | `cancel {job, index?}`, `end {job}` | `failed {job, index, error}` |
 
-- **Trust:** a node takes an offer without asking when Render for peers is on and the sender's
-  verified fingerprint is trusted. Otherwise it asks with a sticky notification: Render,
-  Always for *name* (which trusts the fingerprint), or Decline. Without Render for peers it
-  declines.
+- **Trust:** a node takes an offer without asking when it takes jobs in that room and the
+  sender's verified fingerprint is trusted. Otherwise it asks with a sticky notification:
+  Render, Always for *name* (which trusts the fingerprint), or Decline. In a room where it
+  doesn't take jobs it declines.
 - **Declining:** a declined task goes back to the queue without counting as a try
   (`TaskCallbacks::declined`). That node doesn't get the job again.
 - **What travels:** a task's settings travel typed (bool, int, float, string, token, color).
   The images come back as one `.rawz` file per AOV: zlib of width, height and float RGBA.
-- **A node that leaves:** its running task goes back to the queue, for another worker.
+- **A node that leaves:** its running task goes back to the queue, for another worker. So do
+  the tasks that went through a room it left, or that closed, even while it is still a worker
+  through another room.
 - **On the node:** it renders one task at a time, from any submitter, with its own renderers.
   Tasks for a job whose scene hasn't arrived wait.
 - **When a job ends:** the submitter sends `end`, and the node lets go of the job's scene.
@@ -387,7 +409,28 @@ transfers ([PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §9) on `org.usdcc.render/file
   - **Not possible:** a stage that was never saved, or that uses an anonymous layer, is always
     packaged.
 
-### 7.4 Not done yet
+### 7.4 Room types
+
+A render queue is a peers room whose host said `type: render_queue` (PEERS.md §5.5). Its
+members are usdcc instances; it has no chat in the Peers panel, which lists chat rooms only.
+Debug > Peer Rooms shows every room with its raw state, this PeerState included.
+
+### 7.5 Swarm panel
+
+[swarm_panel.h](../src/cpp/usd/include/usdcc/usd/render/swarm_panel.h), Render > Swarm, a side
+panel.
+
+- **Buttons:** Host…, Join…, Leave (Close for a room hosted here), Copy Link.
+- **The list:** each render queue this instance is in, with its **Takes jobs** switch for this
+  instance; under it, every instance in it, this one first:
+  - the renderers it has (▦: renders tiles), and whether it takes jobs there;
+  - Idle, or what it renders: the scene, frame, renderer and for whom, a progress bar, and the
+    time it has been at it.
+- **Found:** render queues on this machine and network that this instance isn't in;
+  double-click one to join. While the panel shows, usdcc looks for them on the network, as the
+  Peers panel does.
+
+### 7.6 Not done yet
 
 - **Surviving a restart:** the queue isn't saved, and a node doesn't keep results for a
   submitter that went away; that submitter's tasks go back to its queue.

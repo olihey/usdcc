@@ -221,7 +221,7 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     connect(controller->peers(), &Peers::roomAdded, this, [this](Room* room) { showRoom(room); });
     connect(controller->peers(), &Peers::roomRemoved, this, [this](Room* room) {
         if (room == m_room) {
-            const QList<Room*> rooms = m_controller->peers()->rooms();
+            const QList<Room*> rooms = m_controller->chatRooms();
             showRoom(rooms.isEmpty() ? nullptr : rooms.first());
         }
     });
@@ -252,7 +252,7 @@ void PeersSidePanel::rebuildRooms() {
         return item;
     };
     QTreeWidgetItem* current = nullptr;
-    const QList<Room*> rooms = m_controller->peers()->rooms();
+    const QList<Room*> rooms = m_controller->chatRooms();
     QTreeWidgetItem* yours = section(tr("Your rooms"));
     for (Room* room : rooms) {
         auto* item = new QTreeWidgetItem(yours, {room->name().isEmpty() ? room->address() : room->name(), stateText(room)});
@@ -268,7 +268,7 @@ void PeersSidePanel::rebuildRooms() {
         none->setFlags(Qt::ItemIsEnabled);
         none->setForeground(0, palette().placeholderText());
     }
-    const QList<FoundRoom> found = m_controller->peers()->foundRooms();
+    const QList<FoundRoom> found = m_controller->peers()->foundRooms(RoomType::Chat);
     for (const FoundRoom::Where where : {FoundRoom::Where::ThisMachine, FoundRoom::Where::Network}) {
         QTreeWidgetItem* header = nullptr;
         for (const FoundRoom& room : found) {
@@ -372,25 +372,27 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
                        .arg(time, color, line.from.name.toHtmlEscaped(), chatHtml(line.text)));
 }
 
-void PeersSidePanel::joinFound(const FoundRoom& room) {
+Room* joinFoundRoom(PeersController* controller, QWidget* parent, const FoundRoom& room) {
     QString password;
     if (room.announcement.password) {
         bool ok = false;
-        password = QInputDialog::getText(this, tr("Join %1").arg(room.announcement.name), tr("The room's password:"),
-                                         QLineEdit::Password, {}, &ok);
+        password = QInputDialog::getText(parent, PeersSidePanel::tr("Join %1").arg(room.announcement.name),
+                                         PeersSidePanel::tr("The room's password:"), QLineEdit::Password, {}, &ok);
         if (!ok) {
-            return;
+            return nullptr;
         }
     }
-    m_controller->join(room, password);
+    return controller->join(room, password);
 }
 
-void PeersSidePanel::hostRoom() {
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Host Room"));
+Room* hostRoomDialog(PeersController* controller, QWidget* parent, RoomType type) {
+    const auto tr = [](const char* text) { return PeersSidePanel::tr(text); };
+    const bool queue = type == RoomType::RenderQueue;
+    QDialog dialog(parent);
+    dialog.setWindowTitle(queue ? tr("Host Render Queue") : tr("Host Room"));
     auto* form = new QFormLayout(&dialog);
     auto* name = new QLineEdit(&dialog);
-    name->setPlaceholderText(tr("%1's room").arg(m_controller->peers()->profile().name));
+    name->setPlaceholderText((queue ? tr("%1's render queue") : tr("%1's room")).arg(controller->peers()->profile().name));
     auto* who = new QComboBox(&dialog);
     who->addItem(tr("Only those with the invite link"), int(Admission::Invited));
     who->addItem(tr("Anyone on this network, once I allow them"), int(Admission::Ask));
@@ -399,8 +401,11 @@ void PeersSidePanel::hostRoom() {
     auto* password = new QLineEdit(&dialog);
     password->setEchoMode(QLineEdit::Password);
     password->setPlaceholderText(tr("Optional; the invite link needs none"));
-    auto* note = new QLabel(tr("Others on this network can reach the room, so Windows may ask whether to let usdcc "
-                               "through its firewall the first time. Everything said in the room is encrypted."),
+    auto* note = new QLabel(QString(queue ? tr("Instances in the room can send each other render jobs; each says in "
+                                                "the Swarm panel whether it takes them. ")
+                                             : QString()) +
+                                tr("Others on this network can reach the room, so Windows may ask whether to let usdcc "
+                                   "through its firewall the first time. Everything said in the room is encrypted."),
                             &dialog);
     note->setWordWrap(true);
     note->setObjectName(QStringLiteral("propertyNote"));
@@ -411,24 +416,27 @@ void PeersSidePanel::hostRoom() {
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Host"));
     form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) {
-        return;
+        return nullptr;
     }
     QString error;
-    Room* room = m_controller->host({name->text(), Admission(who->currentData().toInt()), password->text()}, &error);
+    PeersController::HostRequest request{name->text(), Admission(who->currentData().toInt()), password->text()};
+    request.type = type;
+    Room* room = controller->host(request, &error);
     if (!room) {
-        QMessageBox::warning(this, tr("Host Room"), tr("Couldn't host the room: %1").arg(error));
-        return;
+        QMessageBox::warning(parent, dialog.windowTitle(), tr("Couldn't host the room: %1").arg(error));
+        return nullptr;
     }
     QApplication::clipboard()->setText(room->link());
-    showRoom(room);
+    return room;
 }
 
-void PeersSidePanel::joinRoom() {
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Join Room"));
+Room* joinRoomDialog(PeersController* controller, QWidget* parent, RoomType type) {
+    const auto tr = [](const char* text) { return PeersSidePanel::tr(text); };
+    QDialog dialog(parent);
+    dialog.setWindowTitle(type == RoomType::RenderQueue ? tr("Join Render Queue") : tr("Join Room"));
     auto* form = new QFormLayout(&dialog);
     auto* link = new QLineEdit(&dialog);
     link->setPlaceholderText(tr("usdcc://join/… or 192.168.1.20:47800"));
@@ -445,15 +453,31 @@ void PeersSidePanel::joinRoom() {
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Join"));
     form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) {
-        return;
+        return nullptr;
     }
     QString error;
-    if (!m_controller->joinLinkOrAddress(link->text(), password->text(), &error)) {
-        QMessageBox::warning(this, tr("Join Room"), error);
+    Room* room = controller->joinLinkOrAddress(link->text(), password->text(), &error, type);
+    if (!room) {
+        QMessageBox::warning(parent, dialog.windowTitle(), error);
     }
+    return room;
+}
+
+void PeersSidePanel::joinFound(const FoundRoom& room) {
+    joinFoundRoom(m_controller, this, room);
+}
+
+void PeersSidePanel::hostRoom() {
+    if (Room* room = hostRoomDialog(m_controller, this, RoomType::Chat)) {
+        showRoom(room);
+    }
+}
+
+void PeersSidePanel::joinRoom() {
+    joinRoomDialog(m_controller, this, RoomType::Chat);
 }
 
 void PeersSidePanel::roomMenu(const QPoint& position) {

@@ -17,7 +17,7 @@ bool FoundRoom::operator==(const FoundRoom& other) const {
     const Announcement& a = announcement;
     const Announcement& b = other.announcement;
     return a.fingerprint == b.fingerprint && a.instance == b.instance && a.name == b.name &&
-           a.hostName == b.hostName && a.port == b.port && a.admission == b.admission && a.password == b.password &&
+           a.hostName == b.hostName && a.port == b.port && a.admission == b.admission && a.password == b.password && a.type == b.type &&
            address == other.address && where == other.where && protocol == other.protocol;
 }
 
@@ -44,12 +44,12 @@ FakeNetworkDiscovery::~FakeNetworkDiscovery() {
 }
 
 void FakeNetworkDiscovery::announce(const Announcement& announcement) {
-    m_announced.insert(announcement.instance, announcement);
+    m_announced.insert(announcement.roomId(), announcement);
     notifyAll();
 }
 
-void FakeNetworkDiscovery::withdraw(const QString& instance) {
-    m_announced.remove(instance);
+void FakeNetworkDiscovery::withdraw(const QString& roomId) {
+    m_announced.remove(roomId);
     notifyAll();
 }
 
@@ -76,7 +76,7 @@ void FakeNetworkDiscovery::notifyAll() {
                     room.announcement = announcement;
                     room.address = QStringLiteral("127.0.0.1:%1").arg(announcement.port);
                     room.where = FoundRoom::Where::Network;
-                    now.insert(room.hostId(), room);
+                    now.insert(room.roomId(), room);
                 }
             }
         }
@@ -117,11 +117,12 @@ QJsonObject toJson(const Announcement& announcement) {
             {QStringLiteral("host"), announcement.hostName},
             {QStringLiteral("port"), int(announcement.port)},
             {QStringLiteral("admission"), admissionName(announcement.admission)},
-            {QStringLiteral("password"), announcement.password}};
+            {QStringLiteral("password"), announcement.password},
+            {QStringLiteral("type"), roomTypeName(announcement.type)}};
 }
 
 QString fileName(const Announcement& announcement) {
-    return announcement.hostId() + QStringLiteral(".json");
+    return announcement.roomId() + QStringLiteral(".json");
 }
 
 }  // namespace
@@ -143,7 +144,7 @@ RoomDirectory::~RoomDirectory() {
 }
 
 void RoomDirectory::publish(const Announcement& announcement) {
-    m_published.insert(announcement.instance, announcement);
+    m_published.insert(announcement.roomId(), announcement);
     QSaveFile file(QDir(m_folder).filePath(fileName(announcement)));
     if (file.open(QIODevice::WriteOnly)) {
         file.write(QJsonDocument(toJson(announcement)).toJson());
@@ -153,8 +154,8 @@ void RoomDirectory::publish(const Announcement& announcement) {
     }
 }
 
-void RoomDirectory::unpublish(const QString& instance) {
-    const auto found = m_published.find(instance);
+void RoomDirectory::unpublish(const QString& roomId) {
+    const auto found = m_published.find(roomId);
     if (found == m_published.end()) {
         return;
     }
@@ -179,8 +180,9 @@ void RoomDirectory::rescan() {
         announcement.port = quint16(object.value(QLatin1String("port")).toInt());
         announcement.admission = admissionFromName(object.value(QLatin1String("admission")).toString());
         announcement.password = object.value(QLatin1String("password")).toBool();
+        announcement.type = roomTypeFromName(object.value(QLatin1String("type")).toString());
         if (announcement.fingerprint.isEmpty() || announcement.port == 0 ||
-            m_published.contains(announcement.instance)) {
+            m_published.contains(announcement.roomId())) {
             continue;
         }
         FoundRoom room;
@@ -188,8 +190,8 @@ void RoomDirectory::rescan() {
         room.address = QStringLiteral("127.0.0.1:%1").arg(announcement.port);
         room.where = FoundRoom::Where::ThisMachine;
         room.protocol = object.value(QLatin1String("protocol")).toInt();
-        now.insert(room.hostId(), room);
-        if (!m_rooms.contains(room.hostId())) {
+        now.insert(room.roomId(), room);
+        if (!m_rooms.contains(room.roomId())) {
             checkStale(info.absoluteFilePath(), announcement.port);
         }
     }

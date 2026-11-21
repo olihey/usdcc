@@ -74,6 +74,8 @@ struct USDCC_USD_UI_API JobRequest {
     std::string rendererOverride;
     // The camera when the prim names none: the active viewport's.
     std::optional<usdcc::usd::RenderCamera> viewportCamera;
+    // Where it goes; unset: the app's (RenderNetwork::instance()->dispatch()), else this instance.
+    std::optional<PeerDispatch> dispatch;
 };
 
 // The job, or null with `error` saying why (no renderer, no camera, the renderer can't render here).

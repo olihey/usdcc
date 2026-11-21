@@ -28,8 +28,11 @@ struct USDCC_PEERS_API Announcement {
     quint16 port = 0;
     Admission admission = Admission::Ask;
     bool password = false;
+    RoomType type = RoomType::Chat;
 
     QString hostId() const { return fingerprint + u'-' + instance; }
+    // One instance may host several rooms: the host and the port tell them apart.
+    QString roomId() const { return hostId() + u'-' + QString::number(port); }
 };
 
 // A room someone else hosts, as found.
@@ -42,6 +45,7 @@ struct USDCC_PEERS_API FoundRoom {
     int protocol = kProtocolVersion;
 
     QString hostId() const { return announcement.hostId(); }
+    QString roomId() const { return announcement.roomId(); }
     bool operator==(const FoundRoom&) const;
 };
 
@@ -53,9 +57,9 @@ class USDCC_PEERS_API NetworkDiscovery : public QObject {
 public:
     using QObject::QObject;
 
-    // Answers for the room from now on; again with the same instance, it changes it.
+    // Answers for the room from now on; again with the same room id, it changes it.
     virtual void announce(const Announcement& announcement) = 0;
-    virtual void withdraw(const QString& instance) = 0;
+    virtual void withdraw(const QString& roomId) = 0;
     // Asks the network now and then, while true. Only a host answers; a member that
     // is looking only asks (PEERS.md §5.2).
     virtual void setLooking(bool looking) = 0;
@@ -64,7 +68,7 @@ public:
 
 Q_SIGNALS:
     void found(const usdcc::peers::FoundRoom& room);  // Also when it changed
-    void lost(const QString& hostId);
+    void lost(const QString& roomId);
 };
 
 // mDNS and DNS-SD, service type `_usdcc._tcp` (PEERS.md §5.2), with the public-domain
@@ -81,7 +85,7 @@ public:
     explicit FakeNetworkDiscovery(const QString& network, QObject* parent = nullptr);
     ~FakeNetworkDiscovery() override;
     void announce(const Announcement& announcement) override;
-    void withdraw(const QString& instance) override;
+    void withdraw(const QString& roomId) override;
     void setLooking(bool looking) override;
     bool isLooking() const { return m_looking; }
 
@@ -105,7 +109,7 @@ public:
 
     QString folder() const { return m_folder; }
     void publish(const Announcement& announcement);
-    void unpublish(const QString& instance);
+    void unpublish(const QString& roomId);
     // Others' rooms, as last read.
     QList<FoundRoom> rooms() const { return m_rooms.values(); }
     // Reads the folder again (it is watched; this is for tests and a start).
@@ -113,15 +117,15 @@ public:
 
 Q_SIGNALS:
     void found(const usdcc::peers::FoundRoom& room);
-    void lost(const QString& hostId);
+    void lost(const QString& roomId);
 
 private:
     void checkStale(const QString& file, quint16 port);
     QString m_folder;
     QFileSystemWatcher m_watcher;
     QTimer m_rescan;
-    QHash<QString, Announcement> m_published;  // instance ->
-    QHash<QString, FoundRoom> m_rooms;         // hostId ->
+    QHash<QString, Announcement> m_published;  // room id ->
+    QHash<QString, FoundRoom> m_rooms;         // room id ->
 };
 
 }  // namespace usdcc::peers

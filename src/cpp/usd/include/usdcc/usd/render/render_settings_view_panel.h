@@ -3,7 +3,8 @@
 // The Render Settings view panel (docs/FINAL_RENDER.md §5.1): a stage's RenderSettings prim,
 // edited through a form, with undo. The Image and Output tabs are UsdRender's and usdcc's
 // own; the Renderer tab is built from the chosen renderer's settings, and AOVs lists the
-// first product's RenderVars.
+// first product's RenderVars. At the bottom, where the job goes (this instance, peers, which
+// render queue rooms: app state, not the stage's) and the Render buttons.
 
 #include "usdcc/core/export.h"
 #include "usdcc/core/signal.h"
@@ -29,6 +30,7 @@ class QSpinBox;
 class QStackedWidget;
 class QTabWidget;
 class QTimer;
+class QToolButton;
 class QWidget;
 
 namespace usdcc::usd {
@@ -72,6 +74,8 @@ private:
     void refreshRendererForm();
     void fillAovs();
     void refreshNodes();
+    void refreshDispatch();
+    void fillRoomsMenu();
     // One undo step on the panel's stage; `edit` returns whether it changed anything.
     void edit(const QString& description, const std::function<bool()>& edit);
     void createSettings();
@@ -111,6 +115,7 @@ private:
     QDoubleSpinBox* m_timeLimit = nullptr;
     QComboBox* m_distribute = nullptr;
     QComboBox* m_delivery = nullptr;
+    QToolButton* m_rooms = nullptr;
     QLabel* m_nodes = nullptr;
 
     QWidget* m_rendererPage = nullptr;

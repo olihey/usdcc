@@ -73,6 +73,15 @@ public:
     // Whether anything is queued or running.
     bool busy() const;
 
+    // The tasks being rendered now, one per busy worker.
+    struct RunningTask {
+        const Worker* worker = nullptr;
+        RenderJobPtr job;
+        int task = -1;
+        qint64 startedMs = 0;  // since the epoch
+    };
+    std::vector<RunningTask> running() const;
+
     // Where a job's frames go: the folder of its first product's first file.
     static std::string outputFolder(const RenderJob& job);
 
@@ -92,6 +101,7 @@ private:
         int task = -1;
         std::unique_ptr<RenderTaskHandle> handle;
         unsigned serial = 0;  // tells its callbacks from a cancelled one's
+        qint64 startedMs = 0;
     };
     struct FrameBuffers {
         std::map<std::string, FloatImage> aovs;

@@ -18,7 +18,7 @@ Peers::Peers(Options options, QObject* parent)
     if (!options.roomsFolder.isEmpty()) {
         m_directory = std::make_unique<RoomDirectory>(options.roomsFolder);
         connect(m_directory.get(), &RoomDirectory::found, this, [this](const FoundRoom& room) {
-            m_local.insert(room.hostId(), room);
+            m_local.insert(room.roomId(), room);
             Q_EMIT foundRoomsChanged();
         });
         connect(m_directory.get(), &RoomDirectory::lost, this, [this](const QString& id) {
@@ -27,12 +27,12 @@ Peers::Peers(Options options, QObject* parent)
             }
         });
         for (const FoundRoom& room : m_directory->rooms()) {
-            m_local.insert(room.hostId(), room);
+            m_local.insert(room.roomId(), room);
         }
     }
     if (m_network) {
         connect(m_network.get(), &NetworkDiscovery::found, this, [this](const FoundRoom& room) {
-            m_networkRooms.insert(room.hostId(), room);
+            m_networkRooms.insert(room.roomId(), room);
             Q_EMIT foundRoomsChanged();
         });
         connect(m_network.get(), &NetworkDiscovery::lost, this, [this](const QString& id) {
@@ -102,6 +102,7 @@ void Peers::announce(Room* room, const HostOptions& options) {
     announcement.port = room->port();
     announcement.admission = options.admission;
     announcement.password = !options.password.isEmpty();
+    announcement.type = options.type;
     if (m_directory) {
         m_directory->publish(announcement);
     }
@@ -109,13 +110,13 @@ void Peers::announce(Room* room, const HostOptions& options) {
     if (m_network && onNetwork) {
         m_network->announce(announcement);
     }
-    const QString instance = announcement.instance;
-    connect(room, &Room::closed, this, [this, instance] {
+    const QString roomId = announcement.roomId();
+    connect(room, &Room::closed, this, [this, roomId] {
         if (m_directory) {
-            m_directory->unpublish(instance);
+            m_directory->unpublish(roomId);
         }
         if (m_network) {
-            m_network->withdraw(instance);
+            m_network->withdraw(roomId);
         }
     });
 }
@@ -128,12 +129,13 @@ Room* Peers::join(const QString& address, JoinOptions options) {
 
 Room* Peers::join(const FoundRoom& found, const QString& password) {
     JoinOptions options;
+    options.type = found.announcement.type;
     options.password = password;
     options.expectedFingerprint = found.announcement.fingerprint;
     return join(found.address, options);
 }
 
-Room* Peers::joinLink(const QString& link, QString* error) {
+Room* Peers::joinLink(const QString& link, QString* error, RoomType type) {
     const std::optional<JoinLink> parsed = parseJoinLink(link);
     if (!parsed) {
         if (error) {
@@ -144,6 +146,7 @@ Room* Peers::joinLink(const QString& link, QString* error) {
     JoinOptions options;
     options.secret = parsed->secret;
     options.expectedFingerprint = parsed->fingerprint;
+    options.type = type;
     return join(parsed->address, options);
 }
 
@@ -170,22 +173,39 @@ QList<Room*> Peers::rooms() const {
     return result;
 }
 
-QList<FoundRoom> Peers::foundRooms() const {
+QList<Room*> Peers::rooms(RoomType type) const {
+    QList<Room*> result;
+    for (Room* room : rooms()) {
+        if (room->type() == type) {
+            result.append(room);
+        }
+    }
+    return result;
+}
+
+QList<FoundRoom> Peers::foundRooms(std::optional<RoomType> type) const {
+    // A room this instance is in: by its host and port, as announced.
     QSet<QString> mine;
     for (Room* room : rooms()) {
-        mine.insert(room->hostPeer().isValid() ? room->hostPeer().id : room->me().id);
-        if (room->isHost()) {
-            mine.insert(room->me().id);
+        const QString hostId = room->isHost() ? room->me().id
+                               : room->hostPeer().isValid() ? room->hostPeer().id
+                                                            : QString();
+        const QString port = room->isHost() ? QString::number(room->port()) : room->address().section(u':', -1);
+        if (!hostId.isEmpty()) {
+            mine.insert(hostId + u'-' + port);
         }
     }
     QList<FoundRoom> result;
+    const auto wanted = [&](const FoundRoom& room) {
+        return !mine.contains(room.roomId()) && (!type || room.announcement.type == *type);
+    };
     for (const FoundRoom& room : m_local) {
-        if (!mine.contains(room.hostId())) {
+        if (wanted(room)) {
             result.append(room);
         }
     }
     for (const FoundRoom& room : m_networkRooms) {
-        if (!mine.contains(room.hostId()) && !m_local.contains(room.hostId())) {
+        if (wanted(room) && !m_local.contains(room.roomId())) {
             result.append(room);
         }
     }
