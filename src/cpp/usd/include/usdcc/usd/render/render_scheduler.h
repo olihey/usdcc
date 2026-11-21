@@ -103,6 +103,7 @@ private:
     void onProgress(Worker* worker, unsigned serial, double fraction, const std::string& state);
     void onFinished(Worker* worker, unsigned serial, std::map<std::string, FloatImage> images);
     void onFailed(Worker* worker, unsigned serial, const std::string& error);
+    void onDeclined(Worker* worker, unsigned serial, const std::string& reason);
     Running* runningFor(Worker* worker, unsigned serial);
     void writeFrame(const RenderJobPtr& job, int frameIndex);
     void endJob(const RenderJobPtr& job, RenderJob::Status status, const std::string& error = {});

@@ -99,6 +99,7 @@ std::vector<std::string> writeFrameFiles(const RenderJob& job, int frameIndex, c
 std::string LocalWorker::name() const { return "This instance"; }
 
 bool LocalWorker::canRun(const RenderJob& job) const {
+    if (!job.spec.options.usesThisInstance()) return false;
     const std::shared_ptr<FinalRenderer> renderer = FinalRenderers::instance().find(job.rendererId);
     if (!renderer || !renderer->setupProblem().empty()) return false;
     return job.tilesPerFrame() == 1 || renderer->capabilities().tiles;
@@ -310,6 +311,11 @@ void RenderScheduler::startTask(Worker* worker, const RenderJobPtr& job, int tas
             if (self) self->onFailed(worker, serial, error);
         }, Qt::QueuedConnection);
     };
+    callbacks.declined = [self, worker, serial](const std::string& reason) {
+        QMetaObject::invokeMethod(self, [self, worker, serial, reason]() {
+            if (self) self->onDeclined(worker, serial, reason);
+        }, Qt::QueuedConnection);
+    };
     Q_EMIT jobChanged(QString::fromStdString(job->id));
     std::unique_ptr<RenderTaskHandle> handle = worker->start(*job, task, std::move(callbacks));
     if (Running* still = runningFor(worker, serial)) still->handle = std::move(handle);
@@ -399,6 +405,22 @@ void RenderScheduler::onFailed(Worker* worker, unsigned serial, const std::strin
         m_frames.erase(job->id);
         endJob(job, RenderJob::Status::Failed, error);
     }
+    schedule();
+}
+
+void RenderScheduler::onDeclined(Worker* worker, unsigned serial, const std::string& reason) {
+    Running* running = runningFor(worker, serial);
+    if (!running) return;
+    const RenderJobPtr job = running->job;
+    JobTask& task = job->tasks[static_cast<size_t>(running->task)];
+    m_running.erase(worker);
+    USDCC_LOG_INFO("usdcc.render", "{} task {}: {} won't render it: {}", job->id, task.task.index, task.worker, reason);
+    task.status = JobTask::Status::Pending;
+    task.progress = 0.0;
+    task.state = "Waiting";
+    task.worker.clear();
+    if (task.attempts > 0) --task.attempts;  // not a try
+    Q_EMIT jobChanged(QString::fromStdString(job->id));
     schedule();
 }
 

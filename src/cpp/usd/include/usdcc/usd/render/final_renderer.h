@@ -109,6 +109,9 @@ struct USDCC_USD_UI_API TaskCallbacks {
     // Done: an image of the task's region's size for each of its AOVs, by RenderAov::name.
     std::function<void(std::map<std::string, FloatImage> aovs)> finished;
     std::function<void(const std::string& error)> failed;
+    // Not this worker's to render after all (a peer turned the job down): the task goes back
+    // to the queue without counting as a try. Only workers report it.
+    std::function<void(const std::string& reason)> declined;
 };
 
 // A task that's running. Deleting it cancels the task if it hasn't ended; after cancel(),

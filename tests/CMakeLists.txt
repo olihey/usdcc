@@ -22,6 +22,7 @@ add_executable(usdcc_tests
     dependencies_test.cpp
     dependency_files.h
     final_render_test.cpp
+    render_network_test.cpp
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp

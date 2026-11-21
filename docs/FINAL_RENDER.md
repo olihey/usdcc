@@ -74,6 +74,8 @@ These live on the same prim, as custom attributes:
 | `usdcc:render:format` | token: `exr` or `png` | Settings > Final Render > Format |
 | `usdcc:render:tiles` | int2 | 1 × 1 |
 | `usdcc:render:timeLimit` | double, seconds per task | Settings > Final Render > Time limit |
+| `usdcc:render:distribute` | token: `local`, `both` or `peers` (§7) | `local`: this instance only |
+| `usdcc:render:delivery` | token: `packaged` or `shared` (§7.3) | `packaged` |
 
 ## 3. Renderers
 
@@ -215,7 +217,9 @@ is a view panel, opened from the Render or Stages menu.
     pixel aspect. The resolution and camera are written to the first product when it has its
     own, else to the settings.
   - **Output:** the frame range (the stage's, or its own) and step, the output pattern with an
-    example name, the format, the tiles, and the time limit.
+    example name, the format, the tiles, and the time limit. Then who renders (**Render on**:
+    this instance, this instance and peers, or peers only), how peers get the scene
+    (**Scene for peers**), and the peers that can take a share now (§7).
   - **Renderer:** the renderer's settings, made from its list. Authored values are bold, and ↺
     clears one back to its default.
   - **AOVs:** the products' RenderVars. **Add** makes one under the first product from a
@@ -254,6 +258,9 @@ panel. It opens when a render is queued.
 | `FinalRender/format` | `exr` |
 | `FinalRender/width`, `FinalRender/height` | 1920 × 1080 |
 | `FinalRender/timeLimit` | 0 s: until done |
+| `FinalRender/node` | off: this instance doesn't render for peers |
+| `FinalRender/trusted` | empty: fingerprints of peers whose jobs start without asking |
+| `FinalRender/askUntrusted` | on: other peers' jobs ask with a notification; off: they're declined |
 
 ## 6. Python
 
@@ -304,20 +311,89 @@ render.register_renderer(MyRenderer())        # unregister_renderer(id) in deact
 - **Hosting:** [scripted_final_renderer.cpp](../src/cpp/scripting/src/scripted_final_renderer.cpp)
   hosts the instance. Renderers from Python are removed before Python stops.
 
-## 7. Next
+## 7. Rendering with peers
 
-Milestones 1 (core and Hydra) and 2 (RTX and V-Ray) are done.
+usdcc instances in the same peers rooms ([PEERS.md](PEERS.md)) render each other's frames and
+tiles. The code is [render_network.h](../src/cpp/usd/include/usdcc/usd/render/render_network.h);
+`main.cpp` makes one `RenderNetwork` and gives it every room the Peers panel opens.
 
-- **3: transfers.** Chunked file transfers between peers (PEERS.md §7.3), and scene bundles
-  made with `UsdUtilsComputeAllDependencies`.
-- **4: distributed rendering.**
-  - **Nodes:** peers advertise their renderers in a PeerState. Each peer is a `Worker` for the
-    scheduler.
-  - **Splitting:** jobs go out by frames and by tiles.
-  - **Scenes:** sent as a bundle, or as the unflattened stage to nodes whose asset preflight
-    shows they resolve every asset.
-  - **Trust:** opt-in render nodes accept jobs only from trusted fingerprints.
-  - **Peers only:** the submitting app doesn't render.
+1. **On the render node:** turn on Settings > Final Render > **Render for peers**, and add the
+   submitter's fingerprint to **Trusted peers**, or answer the notification when a job comes.
+2. **On the submitting instance:** in Render Settings > Output, set **Render on** to *This
+   instance and peers* or *Peers only*. The tab lists the peers that can take a share.
+3. **Render:** the Render Queue's Worker column names who renders each task.
+
+### 7.1 Nodes
+
+- **Advertising:** each instance says in each room what it can do, in the PeerState
+  `org.usdcc.render/node`: `{renderers: [{id, name, tiles}], node, busy, schemes}`. It says it
+  again when renderers come or go, or Render for peers changes.
+- **Workers:** each peer that says `node: true` becomes a `PeerWorker` of the render queue, and
+  stops being one when it says otherwise or leaves.
+- **Which tasks a node gets:** `canRun()` gives it a job's tasks only when:
+  - the job may use peers;
+  - the node has the job's renderer (and renders tiles, when the job has them);
+  - it hasn't declined the job.
+- **Peers only:** the queue gives this instance (`LocalWorker`) none of the job's tasks, so the
+  user keeps working. Such a job waits while no node can take it.
+
+### 7.2 The protocol
+
+Messages go on the Direct channel `org.usdcc.render/jobs`, each to one member. Files go as
+transfers ([PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §9) on `org.usdcc.render/files`.
+
+| From the submitter | From the node |
+|---|---|
+| `offer {job, renderer, title, frames, shared?}`: before a job's first task | `accept {job, delivery, problems?}` or `decline {job, reason}` |
+| `bundle {job, hash}`, then the bundle's transfer (packaged) | `progress {job, index, fraction, state}`, at most 4 a second |
+| `task {job, index, frame, resolution, region, camera, settings, aovs, values, purposes, timeLimit}` | `result {job, index, hash}`, then the images' transfer |
+| `cancel {job, index?}`, `end {job}` | `failed {job, index, error}` |
+
+- **Trust:** a node takes an offer without asking when Render for peers is on and the sender's
+  verified fingerprint is trusted. Otherwise it asks with a sticky notification: Render,
+  Always for *name* (which trusts the fingerprint), or Decline. Without Render for peers it
+  declines.
+- **Declining:** a declined task goes back to the queue without counting as a try
+  (`TaskCallbacks::declined`). That node doesn't get the job again.
+- **What travels:** a task's settings travel typed (bool, int, float, string, token, color).
+  The images come back as one `.rawz` file per AOV: zlib of width, height and float RGBA.
+- **A node that leaves:** its running task goes back to the queue, for another worker.
+- **On the node:** it renders one task at a time, from any submitter, with its own renderers.
+  Tasks for a job whose scene hasn't arrived wait.
+- **When a job ends:** the submitter sends `end`, and the node lets go of the job's scene.
+
+### 7.3 The scene
+
+[render_bundle.h](../src/cpp/usd/include/usdcc/usd/render/render_bundle.h)
+
+- **Packaged** (the default):
+  - **Making it:** `writeSceneBundle()` writes the job's snapshot as `scene.usdc`, and
+    `UsdUtilsLocalizeAsset` gathers every layer and asset it uses beside it, with relative
+    paths. That's done once a job.
+  - **Sending it:** a transfer. The node's inbox keeps it by its hash, so a bundle it has already
+    isn't sent again.
+- **Shared:** `captureSharedScene()`, at submit, records the root layer's path, the session layer
+  and the unsaved layers as USDA, and every layer and asset the stage uses, with their sizes.
+  - **Checking it:** the node checks each one (`sharedSceneProblems()`):
+    - a file must be there with the same size;
+    - a server's asset must resolve;
+    - its URI scheme must have a resolver.
+  - **Opening it:** if all is well, `openSharedScene()` opens the stage from those paths, puts
+    the unsaved layers' text in, flattens it as a job's snapshot is, and reloads the edited
+    layers from disk.
+  - **Falling back:** a node that can't use it says why in `accept`'s `problems` and gets the
+    bundle instead. So does a node with one of the unsaved layers open itself, which it won't
+    overwrite.
+  - **Not possible:** a stage that was never saved, or that uses an anonymous layer, is always
+    packaged.
+
+### 7.4 Not done yet
+
+- **Surviving a restart:** the queue isn't saved, and a node doesn't keep results for a
+  submitter that went away; that submitter's tasks go back to its queue.
+- **Output on a shared path:** nodes always send the images back; they never write the outputs
+  themselves.
+- **One node, one task:** a node renders one task at a time, whatever its cores or GPUs.
 
 ## 8. Tests
 
@@ -355,6 +431,20 @@ Also:
   - two tiles rendered as regions by one helper and stitched exactly, with the prim's noise
     threshold.
 
+`render_network_test.cpp`, in `usdcc_tests`: two instances in one process, joined in a room on
+127.0.0.1:
+
+| Test | What it checks |
+|---|---|
+| `render_network_wire_formats` | A task and its typed settings to JSON and back; an image packed and unpacked; rubbish refused |
+| `render_network_bundle_and_shared` | A bundle with the scene and the texture it uses; a saved stage captured with its dependencies; a different file, a missing one and an unknown scheme found; an unsaved new stage refused; the stage opened from its paths; an unsaved layer travelling as text, and not overwritten where it's open |
+| `render_network_packaged` | The node becomes a worker; 2 frames × 4 tiles, peers only, all rendered by the node from the bundle with the prim's settings, stitched exactly; no question for a trusted peer |
+| `render_network_shared` | Shared: rendered with no bundle sent; with an unsaved edit, the fallback to packaged, the edit in the scene |
+| `render_network_trust_and_leaving` | An untrusted peer asks, and declined, the task waits without a try; asked and accepted, it renders; a peer that stops rendering for others leaves the queue and comes back; a node that leaves mid-task: the task goes back to the queue |
+
+Two machines haven't been tried: the tests' instances share one process, its layers and its
+renderers.
+
 A real ovrtx or V-Ray render hasn't been checked: neither SDK is on this machine.
 
 Storm's offscreen path needs OpenGL, which the tests' platform lacks; it was checked by hand
@@ -362,7 +452,7 @@ in the app (F12 on `test_data/materials.usda`).
 
 ## 9. Limits
 
-- **One task at a time on this instance.** Renderers keep their own threads busy.
+- **One task at a time on this instance**, and on each node. Renderers keep their own threads busy.
 - **Storm on the UI thread:** a big Storm frame holds the app up while it draws.
 - **The snapshot is a flattened copy.** Big stages take a while to flatten when submitted.
 - **Motion blur and shutter** come from the renderer's own settings. usdcc gives a frame's time only.

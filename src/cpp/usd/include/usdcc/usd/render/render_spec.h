@@ -35,6 +35,15 @@ struct USDCC_USD_UI_API JobOptions {
     int tilesX = 1;                        // usdcc:render:tiles, int2
     int tilesY = 1;
     double timeLimit = 0.0;                // usdcc:render:timeLimit, seconds per task; 0: until done
+    // usdcc:render:distribute: who renders (docs/FINAL_RENDER.md §7): "local" (this instance),
+    // "both" (this instance and peers that are render nodes) or "peers" (only them).
+    std::string distribute = "local";
+    // usdcc:render:delivery: how peers get the scene: "packaged" (the flattened stage and its
+    // assets, sent) or "shared" (the stage as it is, with references, resolved on the peer).
+    std::string delivery = "packaged";
+
+    bool usesPeers() const { return distribute == "both" || distribute == "peers"; }
+    bool usesThisInstance() const { return distribute != "peers"; }
 };
 
 namespace jobattr {
@@ -47,6 +56,8 @@ inline constexpr const char* output = "usdcc:render:output";
 inline constexpr const char* format = "usdcc:render:format";
 inline constexpr const char* tiles = "usdcc:render:tiles";
 inline constexpr const char* timeLimit = "usdcc:render:timeLimit";
+inline constexpr const char* distribute = "usdcc:render:distribute";
+inline constexpr const char* delivery = "usdcc:render:delivery";
 }  // namespace jobattr
 
 struct USDCC_USD_UI_API ProductSpec {

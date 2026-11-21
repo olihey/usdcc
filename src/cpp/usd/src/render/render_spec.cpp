@@ -119,6 +119,38 @@ void defineFinalRenderSettings() {
         d.maximum = 86400;
         define(d);
     }
+    {
+        SettingDefinition d;
+        d.key = "FinalRender/node";
+        d.group = "Peers";
+        d.label = "Render for peers";
+        d.description = "Peers in the same rooms may send this instance frames and tiles of their final renders "
+                        "(docs/FINAL_RENDER.md section 7). Trusted peers' jobs start at once; others ask first.";
+        d.type = SettingType::Bool;
+        d.defaultValue = false;
+        define(d);
+    }
+    {
+        SettingDefinition d;
+        d.key = "FinalRender/trusted";
+        d.group = "Peers";
+        d.label = "Trusted peers";
+        d.description = "The fingerprints of peers whose jobs this instance renders without asking, separated by "
+                        "spaces or commas. The Peers panel shows a peer's fingerprint.";
+        d.type = SettingType::String;
+        d.defaultValue = std::string();
+        define(d);
+    }
+    {
+        SettingDefinition d;
+        d.key = "FinalRender/askUntrusted";
+        d.group = "Peers";
+        d.label = "Ask about other peers' jobs";
+        d.description = "A job from a peer that isn't trusted asks with a notification. Off: such jobs are declined.";
+        d.type = SettingType::Bool;
+        d.defaultValue = true;
+        define(d);
+    }
 }
 
 std::string defaultOutputFolder() {
@@ -166,6 +198,12 @@ JobOptions readJobOptions(const UsdPrim& settings) {
         options.tilesY = std::clamp((*v)[1], 1, 64);
     }
     if (auto v = authored<double>(settings, jobattr::timeLimit); v && *v >= 0) options.timeLimit = *v;
+    if (auto v = authored<TfToken>(settings, jobattr::distribute); v && (*v == "local" || *v == "both" || *v == "peers")) {
+        options.distribute = *v;
+    }
+    if (auto v = authored<TfToken>(settings, jobattr::delivery); v && (*v == "packaged" || *v == "shared")) {
+        options.delivery = *v;
+    }
     return options;
 }
 
@@ -323,7 +361,7 @@ bool setJobOption(const UsdPrim& settings, const char* attribute, const VtValue&
     const std::string key(attribute);
     if (key == jobattr::renderer || key == jobattr::output) {
         type = SdfValueTypeNames->String;
-    } else if (key == jobattr::format) {
+    } else if (key == jobattr::format || key == jobattr::distribute || key == jobattr::delivery) {
         type = SdfValueTypeNames->Token;
     } else if (key == jobattr::tiles) {
         type = SdfValueTypeNames->Int2;

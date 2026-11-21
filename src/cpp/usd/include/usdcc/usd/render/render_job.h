@@ -6,6 +6,7 @@
 
 #include "usdcc/core/export.h"
 #include "usdcc/usd/render/final_renderer.h"
+#include "usdcc/usd/render/render_bundle.h"
 #include "usdcc/usd/render/render_spec.h"
 #include "usdcc/usd/render_view_panel.h"
 
@@ -49,6 +50,8 @@ struct USDCC_USD_UI_API RenderJob {
     Status status = Status::Queued;
     std::string error;
     std::vector<std::string> files;  // written so far
+    // For peers with shared delivery: the stage as it was submitted, unflattened.
+    SharedScene shared;
     std::chrono::steady_clock::time_point submitted = std::chrono::steady_clock::now();
     std::optional<std::chrono::steady_clock::time_point> finished;
 

@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QRegularExpression>
 #include <QStatusBar>
 #include <QToolButton>
 #include <QUrl>
@@ -85,6 +86,7 @@
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/render/hydra_final_renderer.h"
 #include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_network.h"
 #include "usdcc/usd/render/render_queue_panel.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_settings_view_panel.h"
@@ -1221,6 +1223,58 @@ int main(int argc, char** argv) {
     QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
         auto& scheduler = usdcc::render::RenderScheduler::instance();
         for (const usdcc::render::RenderJobPtr& job : scheduler.jobs()) scheduler.cancel(job->id);
+    });
+
+    // Distributed final renders (docs/FINAL_RENDER.md §7): in every room, this instance says
+    // what it renders; render nodes there become workers of the render queue, and with Render
+    // for peers on, it renders theirs.
+    const auto trustedFingerprints = []() {
+        const QString text = QString::fromStdString(usdcc::core::Settings::instance().get<std::string>("FinalRender/trusted"));
+        return text.split(QRegularExpression(QStringLiteral("[\\s,;]+")), Qt::SkipEmptyParts);
+    };
+    usdcc::render::RenderNetworkOptions renderNetworkOptions;
+    renderNetworkOptions.folder =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("render-network"));
+    renderNetworkOptions.isNode = []() { return usdcc::core::Settings::instance().get<bool>("FinalRender/node"); };
+    renderNetworkOptions.trusted = [trustedFingerprints](const usdcc::peers::Peer& peer) {
+        return !peer.fingerprint.isEmpty() && trustedFingerprints().contains(peer.fingerprint, Qt::CaseInsensitive);
+    };
+    renderNetworkOptions.ask = [&window, trustedFingerprints](const usdcc::peers::Peer& from, const QString& what,
+                                                             std::function<void(bool)> answer) {
+        if (!usdcc::core::Settings::instance().get<bool>("FinalRender/askUntrusted", true)) {
+            answer(false);
+            return;
+        }
+        auto answered = std::make_shared<bool>(false);
+        const auto once = [answered, answer](bool take) {
+            if (*answered) return;
+            *answered = true;
+            answer(take);
+        };
+        usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+        request.title = QObject::tr("Render for %1?").arg(from.name).toStdString();
+        request.body = what.toStdString();
+        QList<usdcc::ui::ToastAction> actions;
+        actions.append({QObject::tr("Render"), [once]() { once(true); }});
+        actions.append({QObject::tr("Always for %1").arg(from.name), [once, from, trustedFingerprints]() {
+                            QStringList trusted = trustedFingerprints();
+                            if (!from.fingerprint.isEmpty() && !trusted.contains(from.fingerprint)) trusted.append(from.fingerprint);
+                            usdcc::core::Settings::instance().setValue("FinalRender/trusted", trusted.join(QLatin1Char(' ')).toStdString());
+                            once(true);
+                        }});
+        actions.append({QObject::tr("Decline"), [once]() { once(false); }});
+        window.toasts()->show(request, actions);
+    };
+    auto* renderNetwork = new usdcc::render::RenderNetwork(std::move(renderNetworkOptions), &window);
+    usdcc::render::RenderNetwork::setInstance(renderNetwork);
+    for (usdcc::peers::Room* room : peersController->peers()->rooms()) renderNetwork->addRoom(room);
+    QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomAdded, renderNetwork,
+                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->addRoom(room); });
+    QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomRemoved, renderNetwork,
+                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->removeRoom(room); });
+    auto renderersAdvertised = usdcc::render::FinalRenderers::instance().changed.connect([renderNetwork]() { renderNetwork->advertise(); });
+    auto renderNodeSetting = usdcc::core::Settings::instance().changed.connect([renderNetwork](const std::string& key) {
+        if (key == "FinalRender/node") renderNetwork->advertise();
     });
 
     // `presence` says which stage each peer has open.

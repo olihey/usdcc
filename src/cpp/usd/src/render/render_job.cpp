@@ -257,6 +257,8 @@ RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error) {
     spec.camera = camera;
 
     job->title = job->stageName + " · " + job->settingsName;
+    // Peers that resolve the stage's paths themselves get it as it is (render_bundle.h).
+    if (spec.options.usesPeers() && spec.options.delivery == "shared") job->shared = captureSharedScene(request.stage);
     job->spec = spec;
 
     // Tasks: each frame, whole or in tiles.

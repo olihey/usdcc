@@ -2,6 +2,7 @@
 
 #include "usdcc/usd/render/render_job.h"
 #include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_network.h"
 #include "usdcc/usd/render/render_spec.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
@@ -237,6 +238,25 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         m_timeLimit->setSpecialValueText(tr("Until done"));
         m_timeLimit->setToolTip(tr("How long each frame or tile may refine"));
         form->addRow(tr("Time limit"), m_timeLimit);
+        m_distribute = new QComboBox(page);
+        m_distribute->setObjectName(QStringLiteral("renderSettingsDistribute"));
+        m_distribute->addItem(tr("This instance"), QStringLiteral("local"));
+        m_distribute->addItem(tr("This instance and peers"), QStringLiteral("both"));
+        m_distribute->addItem(tr("Peers only"), QStringLiteral("peers"));
+        m_distribute->setToolTip(tr("Who renders the frames and tiles: peers in your rooms that render for others "
+                                    "(Settings > Final Render > Render for peers) can take a share (usdcc:render:distribute)"));
+        form->addRow(tr("Render on"), m_distribute);
+        m_delivery = new QComboBox(page);
+        m_delivery->setObjectName(QStringLiteral("renderSettingsDelivery"));
+        m_delivery->addItem(tr("Packaged: the scene and its assets, sent"), QStringLiteral("packaged"));
+        m_delivery->addItem(tr("Shared: the same files, where peers have them"), QStringLiteral("shared"));
+        m_delivery->setToolTip(tr("How peers get the scene. Shared is checked on each peer first: one without every "
+                                  "asset, the same, gets it packaged (usdcc:render:delivery)"));
+        form->addRow(tr("Scene for peers"), m_delivery);
+        m_nodes = new QLabel(page);
+        m_nodes->setObjectName(QStringLiteral("renderSettingsNodes"));
+        m_nodes->setWordWrap(true);
+        form->addRow(QString(), m_nodes);
         m_tabs->addTab(page, tr("Output"));
     }
     // Renderer.
@@ -436,6 +456,23 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
         const double limit = m_timeLimit->value();
         edit(tr("Set Render Time Limit"), [this, limit]() { return setJobOption(settingsPrim(), jobattr::timeLimit, VtValue(limit)); });
     });
+    connect(m_distribute, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (m_refreshing) return;
+        const std::string value = m_distribute->currentData().toString().toStdString();
+        edit(tr("Set Render On"), [this, value]() {
+            return setJobOption(settingsPrim(), jobattr::distribute, value == "local" ? VtValue() : VtValue(value));
+        });
+    });
+    connect(m_delivery, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (m_refreshing) return;
+        const std::string value = m_delivery->currentData().toString().toStdString();
+        edit(tr("Set Scene for Peers"), [this, value]() {
+            return setJobOption(settingsPrim(), jobattr::delivery, value == "packaged" ? VtValue() : VtValue(value));
+        });
+    });
+    if (RenderNetwork* network = RenderNetwork::instance()) {
+        connect(network, &RenderNetwork::nodesChanged, this, [this]() { refreshNodes(); });
+    }
     connect(renderFrame, &QPushButton::clicked, this, [this]() { render(false); });
     connect(renderAnimation, &QPushButton::clicked, this, [this]() { render(true); });
 
@@ -667,6 +704,9 @@ void RenderSettingsViewPanel::refreshValues() {
     m_tilesY->setEnabled(tiles);
     if (!tiles) m_tilesX->setToolTip(tr("%1 renders whole frames only").arg(renderer ? text(renderer->name()) : tr("This renderer")));
     m_timeLimit->setValue(spec.options.timeLimit);
+    m_distribute->setCurrentIndex(std::max(0, m_distribute->findData(text(spec.options.distribute))));
+    m_delivery->setCurrentIndex(std::max(0, m_delivery->findData(text(spec.options.delivery))));
+    m_delivery->setEnabled(spec.options.usesPeers());
 
     // An example of the output's name.
     RenderJob example;
@@ -683,6 +723,26 @@ void RenderSettingsViewPanel::refreshValues() {
     }
     m_refreshing = false;
     fillAovs();
+    refreshNodes();
+}
+
+void RenderSettingsViewPanel::refreshNodes() {
+    RenderNetwork* network = RenderNetwork::instance();
+    if (!network || !currentStage()) {
+        m_nodes->setText(tr("No peers: join or host a room in the Peers panel to render with others."));
+        return;
+    }
+    const std::shared_ptr<FinalRenderer> renderer = FinalRenderers::instance().find(rendererId());
+    const bool tiles = m_tilesX->value() * m_tilesY->value() > 1;
+    QStringList names;
+    for (const RenderNode& node : network->nodesFor(rendererId(), tiles)) {
+        names.append(node.peer.name + (node.busy ? tr(" (busy)") : QString()));
+    }
+    if (names.isEmpty()) {
+        m_nodes->setText(tr("No peer renders with %1 for others now.").arg(renderer ? text(renderer->name()) : tr("this renderer")));
+    } else {
+        m_nodes->setText(tr("Peers that can take a share: %1").arg(names.join(QStringLiteral(", "))));
+    }
 }
 
 void RenderSettingsViewPanel::fillAovs() {

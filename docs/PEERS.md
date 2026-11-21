@@ -526,6 +526,10 @@ Not planned here; listed to check that §7 covers them.
 | A renderer plugin showing a colleague's finished frame | A transfer |
 | A laser pointer in the viewport during a review | Per-peer state |
 
+Built since: final renders shared between instances
+([FINAL_RENDER.md](FINAL_RENDER.md) §7). It uses per-peer state for what each instance renders,
+direct messages for jobs and tasks, and transfers for scenes and images.
+
 ## 11. Settings > Peers
 
 Name and color; whether rooms on this network are looked for; the port; rooms joined at start;

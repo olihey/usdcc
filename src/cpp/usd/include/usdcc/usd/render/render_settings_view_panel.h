@@ -71,6 +71,7 @@ private:
     void buildRendererForm();
     void refreshRendererForm();
     void fillAovs();
+    void refreshNodes();
     // One undo step on the panel's stage; `edit` returns whether it changed anything.
     void edit(const QString& description, const std::function<bool()>& edit);
     void createSettings();
@@ -108,6 +109,9 @@ private:
     QSpinBox* m_tilesX = nullptr;
     QSpinBox* m_tilesY = nullptr;
     QDoubleSpinBox* m_timeLimit = nullptr;
+    QComboBox* m_distribute = nullptr;
+    QComboBox* m_delivery = nullptr;
+    QLabel* m_nodes = nullptr;
 
     QWidget* m_rendererPage = nullptr;
     QFormLayout* m_rendererForm = nullptr;
