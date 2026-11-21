@@ -93,6 +93,27 @@ jobs:
           if ($found) { Write-Host "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build." }
           exit 0
 
+      # The windows-11-arm image ships a newer Python 3.13 than the pin, and
+      # Python's installer won't put an older 3.13 beside it, so setup-python
+      # fails. Uninstalling the image's first lets the pinned one install.
+      - name: Remove the image's Python of the pinned minor version
+        if: matrix.arch == 'arm64' && steps.published.outputs.found != 'true'
+        run: |
+          $pin = '${{ steps.asset.outputs.python }}'
+          $minor = ($pin -split '\.')[0..1] -join '\.'
+          $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+                  'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          $all = @(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'Python *' })
+          $all | ForEach-Object { Write-Host "Installed: $($_.DisplayName) $($_.DisplayVersion)" }
+          $bundles = @($all | Where-Object {
+            $_.DisplayName -match "^Python $minor\.\d+ \(ARM64\)" -and $_.QuietUninstallString -and $_.DisplayName -notmatch [regex]::Escape($pin) })
+          foreach ($bundle in $bundles) {
+            Write-Host "Uninstalling $($bundle.DisplayName)"
+            cmd /c $bundle.QuietUninstallString
+            if ($LASTEXITCODE) { throw "uninstalling $($bundle.DisplayName) failed ($LASTEXITCODE)" }
+          }
+          if (-not $bundles) { Write-Host "No other Python $($pin -replace '\.\d+$') release to remove" }
+
       - name: Set up Python
         if: steps.published.outputs.found != 'true'
         id: python
