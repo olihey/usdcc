@@ -85,7 +85,7 @@ jobs:
 
       # The windows-11-arm image ships a newer Python 3.13 than the pin, and
       # Python's installer won't put an older 3.13 beside it, so setup-python
-      # fails. Uninstalling the image's first lets the pinned one install.
+      # fails. Uninstalling the image's (its MSIs) first lets the pinned one install.
       - name: Remove the image's Python of the pinned minor version
         if: matrix.arch == 'arm64'
         run: |
@@ -95,14 +95,18 @@ jobs:
                   'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
           $all = @(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'Python *' })
           $all | ForEach-Object { Write-Host "Installed: $($_.DisplayName) $($_.DisplayVersion)" }
-          $bundles = @($all | Where-Object {
-            $_.DisplayName -match "^Python $minor\.\d+ \(ARM64\)" -and $_.QuietUninstallString -and $_.DisplayName -notmatch [regex]::Escape($pin) })
-          foreach ($bundle in $bundles) {
-            Write-Host "Uninstalling $($bundle.DisplayName)"
-            cmd /c $bundle.QuietUninstallString
-            if ($LASTEXITCODE) { throw "uninstalling $($bundle.DisplayName) failed ($LASTEXITCODE)" }
+          # Each part (Core Interpreter, Standard Library, ...) is an MSI of its own,
+          # whose registry key is its product code.
+          $parts = @($all | Where-Object {
+            $_.DisplayName -match "^Python $minor\.\d+ .*\(ARM64\)$" -and $_.DisplayName -notmatch "^Python $([regex]::Escape($pin)) " -and
+            $_.PSChildName -match '^\{[0-9A-Fa-f-]+\}$' })
+          foreach ($part in $parts) {
+            Write-Host "Uninstalling $($part.DisplayName)"
+            $exit = (Start-Process msiexec -ArgumentList '/x', $part.PSChildName, '/qn', '/norestart' -Wait -PassThru).ExitCode
+            # 1605: already gone with another part; 3010: needs a restart, which it doesn't here.
+            if ($exit -notin 0, 1605, 3010) { throw "uninstalling $($part.DisplayName) failed ($exit)" }
           }
-          if (-not $bundles) { Write-Host "No other Python $($pin -replace '\.\d+$') release to remove" }
+          if (-not $parts) { Write-Host "No other Python $($pin -replace '\.\d+$') release to remove" }
 
       # The Python OpenUSD was built with: its pxrConfig.cmake points at this
       # exact interpreter, and usdcc embeds the same one.
