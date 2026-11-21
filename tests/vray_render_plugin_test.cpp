@@ -15,11 +15,18 @@
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/render/render_job.h"
+#include "usdcc/usd/render/render_scheduler.h"
+#include "usdcc/usd/render/render_spec.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdRender/settings.h>
+
+#include <QFileInfo>
+#include <QTemporaryDir>
 
 #include <DockManager.h>
 
@@ -249,5 +256,78 @@ builtins.vray_broken = broken
     CHECK(run("import builtins\nfor name in [n for n in dir(builtins) if n.startswith('vray_')]: delattr(builtins, name)\n"),
           "cleaning up");
     manager.deactivate(app.python);
+    forgetExampleModules();
+}
+
+// V-Ray for final renders (final.py, docs/VRAY_RENDER.md section 10), with the helper's fake
+// renderer: the plugin adds the renderer and takes it away, a job in two tiles renders through
+// one helper, the setting reaches it, and the tiles go where they belong.
+USDCC_TEST(vray_final_render) {
+    TestSettings settings;
+    auto& app = pythonTestApp();
+    OpenStage open;
+    forgetExampleModules();
+    run("import os\nos.environ['USDCC_VRAY_SHADER_NODES'] = '0'");
+    PluginManager::Options options;
+    options.folders = {std::filesystem::u8path(USDCC_EXAMPLE_PLUGINS)};
+    PluginManager manager(options);
+    manager.scan();
+    MainWindow window;
+    ViewPanelRegistry registry;
+    const AppContextScope scope({&app.stages, &app.undo, &app.tools, &window, &registry, &manager});
+    manager.activate(app.python);
+    const std::string id = "org.usdcc.vray-render";
+    CHECK(usdcc::render::FinalRenderers::instance().find(id) != nullptr, "the plugin adds V-Ray as a final renderer");
+    CHECK(run("import sys\nsys.modules['usdcc_vray_render'].config.FAKE_RENDERER = True\n"), "the fake renderer");
+    const auto renderer = usdcc::render::FinalRenderers::instance().find(id);
+    if (!renderer) return;
+    CHECK(renderer->setupProblem().empty() && renderer->capabilities().tiles, "it can render here, and tiles");
+    const auto schema = renderer->settingsSchema();
+    CHECK(schema.size() == 5 && schema[1].attribute == "vray:noiseThreshold", "its settings: %zu", schema.size());
+
+    const PXR_NS::UsdStageRefPtr stage = open.stage->usdStage();
+    const PXR_NS::SdfPath path = usdcc::render::createRenderSettings(stage);
+    const PXR_NS::UsdPrim prim = stage->GetPrimAtPath(path);
+    PXR_NS::UsdRenderSettings(prim).GetResolutionAttr().Set(PXR_NS::GfVec2i(24, 12));
+    usdcc::render::setJobOption(prim, usdcc::render::jobattr::renderer, PXR_NS::VtValue(id));
+    usdcc::render::setJobOption(prim, usdcc::render::jobattr::tiles, PXR_NS::VtValue(PXR_NS::GfVec2i(2, 1)));
+    QTemporaryDir dir;
+    usdcc::render::setJobOption(prim, usdcc::render::jobattr::output, PXR_NS::VtValue((dir.path() + "/<stage>").toStdString()));
+    prim.CreateAttribute(PXR_NS::TfToken("vray:noiseThreshold"), PXR_NS::SdfValueTypeNames->Float, true).Set(0.25f);
+
+    usdcc::render::JobRequest request;
+    request.stage = stage;
+    std::string error;
+    usdcc::render::RenderJobPtr job = usdcc::render::makeRenderJob(request, &error);
+    CHECK(job && job->tasks.size() == 2, "a job in two tiles: %s", error.c_str());
+    if (!job) return;
+    usdcc::render::RenderScheduler scheduler;
+    scheduler.addWorker(std::make_shared<usdcc::render::LocalWorker>());
+    QImage frame;
+    QObject::connect(&scheduler, &usdcc::render::RenderScheduler::frameRendered,
+                     [&frame](const QString&, int, const QImage& image) { frame = image; });
+    scheduler.submit(job);
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < 60000 && (job->status == usdcc::render::RenderJob::Status::Queued ||
+                                       job->status == usdcc::render::RenderJob::Status::Running)) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    CHECK(job->status == usdcc::render::RenderJob::Status::Done, "rendered: %s", job->error.c_str());
+    bool exact = frame.size() == QSize(24, 12);
+    for (int y = 0; y < 12 && exact; ++y) {
+        const float* row = reinterpret_cast<const float*>(frame.constScanLine(y));
+        for (int x = 0; x < 24 && exact; ++x) {
+            exact = std::abs(row[x * 4] - x / 24.0f) < 1e-5f && std::abs(row[x * 4 + 1] - y / 12.0f) < 1e-5f &&
+                    std::abs(row[x * 4 + 2] - 0.25f) < 1e-6f;
+            if (!exact) std::printf("    pixel %d,%d: %f %f %f\n", x, y, row[x * 4], row[x * 4 + 1], row[x * 4 + 2]);
+        }
+    }
+    CHECK(exact, "each tile rendered as a region of the whole, stitched, with the prim's noise threshold");
+    CHECK(evaluated("len(__import__('sys').modules['usdcc_vray_render'].client._running)") == "1", "one helper for both tiles, kept");
+
+    manager.deactivate(app.python);
+    CHECK(usdcc::render::FinalRenderers::instance().find(id) == nullptr, "deactivating takes the renderer away");
+    CHECK(evaluated("len(__import__('sys').modules['usdcc_vray_render'].client._running)") == "0", "and ends its helper");
     forgetExampleModules();
 }

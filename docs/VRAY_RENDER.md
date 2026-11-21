@@ -48,8 +48,8 @@ exported to `%TEMP%\usdcc-vray-*\scene_<n>.usdc`.
 - The export adds `/__usdccVRay/Camera` and `/__usdccVRay/RenderSettings`, and sets the
   layer's `renderSettingsPrimPath` to the latter. **V-Ray reads a USD file's prims only
   through its render settings:** without any, it loads lights and nothing else.
-- The user's stage isn't changed. Its own render settings are replaced in the export, for
-  now.
+- The user's stage isn't changed. The panel's export replaces the stage's own render
+  settings. Final renders keep them (§10).
 - `.usdc` written by usdcc's OpenUSD 0.26.8 loads in V-Ray's 0.25.5 reader.
 
 **Space.** V-Ray reads USD in USD's own space:
@@ -304,7 +304,7 @@ V-Ray made of the files was read from its scene dumps.
   timeline shows ([ANIMATION.md](ANIMATION.md) phase 5).
 - **Dome lights** are invisible to the camera in V-Ray's import, where `vray.exe` shows
   them. The background is then black, unless the scene has V-Ray's own settings for it.
-- **The stage's own render settings are replaced in the export.**
+- **The panel's export replaces the stage's own render settings.** Final renders keep them.
 - **Materials:** what V-Ray's USD reader understands (UsdPreviewSurface, MaterialX, V-Ray's
   own shaders, §8). Storm-only looks differ.
 - **V-Ray nodes don't draw in Storm:** it reads no `outputs:vray:surface`, and the Material
@@ -316,3 +316,46 @@ V-Ray made of the files was read from its scene dumps.
   offered, as what V-Ray makes of them wasn't checked.
 - **Live tests need V-Ray:** the camera conversions and the real helper are checked by
   hand, not in CI.
+
+## 10. Final renders
+
+The plugin also adds V-Ray as a final renderer ([FINAL_RENDER.md](FINAL_RENDER.md) §3.2), in
+[final.py](../src/plugins/vray_render/python/usdcc_vray_render/final.py). Render Settings offers
+it like any other; the render queue renders with it.
+
+**The scene** is the app's export of each task (`task.export_scene()`):
+- the job's stage, with the stage's own RenderSettings prim, which V-Ray reads prims through;
+- the task's camera, size, tile and frame on it;
+- V-Ray shaders' list counts filled in, as for the panel (§8).
+
+V-Ray renders through the file's camera, not a RenderView of the helper's: in production mode
+nothing moves it.
+
+**The helper:**
+- **One helper process**, the panel's helper program, started with the first task and kept
+  for the next ones. The plugin's `deactivate()` ends it.
+- **The `final` command:** `{path, width, height, region, engine, settings, time_limit}`.
+  - It loads the file and sets the size, and the render region for a tile
+    (`setRenderRegion(x, y, w, h)`).
+  - It applies the settings below, then renders once in production mode (`production`,
+    `productionCuda` or `productionOptix`).
+  - It sends `progress` events, then one `result`: the whole frame, linear float RGBA. The app
+    cuts a tile out of it.
+- **`stop`** cancels it.
+
+| Setting | Attribute | What the helper sets |
+|---|---|---|
+| Engine | `vray:engine` | The production render mode: CPU, CUDA or RTX |
+| Noise threshold | `vray:noiseThreshold` | `SettingsImageSampler.progressive_threshold` (progressive sampler) |
+| Min subdivs, Max subdivs | `vray:minSubdivs`, `vray:maxSubdivs` | `progressive_minSubdivs`, `progressive_maxSubdivs` |
+| Global illumination | `vray:gi` | `SettingsGI.on` |
+| *(the job's time limit)* | `usdcc:render:timeLimit` | `progressive_maxTime`, in minutes |
+
+**An older App SDK:** a setting or the render region that it lacks is logged as a warning, and
+the render goes on without it.
+
+**Not checked with V-Ray:** the license server wasn't reachable here.
+- **Unchecked calls:** `setRenderRegion`, `getInstanceOrCreate`, `waitForRenderEnd`,
+  `setOnProgress` and the production modes are App SDK calls whose behaviour hasn't been seen.
+- **What is checked:** the fake renderer (`--fake`) covers the protocol, the regions and the
+  stitching (`vray_final_render`).

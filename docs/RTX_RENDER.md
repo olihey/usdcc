@@ -89,6 +89,44 @@ snapshot are excluded until reload. Selected views retain a clean GPU companion
 before the outline pass, increasing GPU work and possible VRAM use. Save while
 stopped reads that companion without submitting another render.
 
+## Final renders
+
+The plugin also adds RTX as a final renderer ([FINAL_RENDER.md](FINAL_RENDER.md) §3.2), in
+[rtx_final.cpp](../src/plugins/rtx_render_native/rtx_final.cpp). It's a `SceneFileRenderer`:
+the app writes each task's scene, and RTX adds its own touches:
+- **Light matching:** emission is scaled, as the panel does.
+- **The camera:** a private camera at `/__usdccRtxFinal/Camera`, from the task's camera prim at
+  the frame. The panel's light matching sets its exposure.
+- **The product:** its `omni:rtx:rendermode`, `omni:rtx:pt:samplesPerPixel` 1 for path tracing,
+  and an `HdrColor` var only.
+
+**The engine:**
+- **Each task gets a `RtxEngine` of its own** on the shared native worker.
+- **No window:** its bridge is CUDA only ([headless_bridge.cpp](../src/plugins/rtx_render_native/headless_bridge.cpp)).
+  It copies each frame from the GPU to the CPU, where the task reads it as linear floats
+  (`GpuFrame::readLinear()`).
+- **When it's done:** at the budget, as the panel's Done (path tracing's samples, or the other
+  modes' frames), or at the job's time limit with the latest frame. Then the engine is closed.
+
+| Setting | Attribute | Default |
+|---|---|---|
+| Mode | `omni:rtx:rendermode`: PathTracing, RealTimePathTracing, MinimalRendering | PathTracing |
+| Samples / frames | `omni:rtx:usdcc:samples` | Settings > RTX > sample budget (128) |
+| Match Storm light intensities | `omni:rtx:usdcc:matchStormLights` | Settings > RTX's |
+| Intensity multiplier | `omni:rtx:usdcc:lightMultiplier` | Settings > RTX's |
+
+Its namespace is `omni`: `UsdRenderComputeSpec` matches a namespace by its first part only.
+
+**Limits:**
+- **Whole frames only.** Whether ovrtx honours the product's `dataWindowNDC` hasn't been checked
+  on a GPU, so tiles are off.
+- **Color only.**
+- **The frame's time:** the scene's start and end time code. Whether ovstage evaluates time
+  samples there hasn't been checked either.
+- **What the tests cover:** the controller, scene and settings are tested with a fake engine
+  (`rtx_native_final`). The headless bridge and a real final render need the GPU validation
+  above.
+
 ## Architecture and limits
 
 [rtx_render_native](../src/plugins/rtx_render_native) derives from the shared

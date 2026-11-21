@@ -32,6 +32,8 @@
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
+#include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -67,6 +69,9 @@ namespace usdcc::scripting {
 
 // The Python class of a render view panel's handle (scripted_render_view_panel.cpp).
 void bindRenderViewPanelHandle(pybind11::module_& m);
+// Final renderers from Python (scripted_final_renderer.cpp).
+void bindFinalRenderers(pybind11::module_& m);
+void removeScriptedFinalRenderers();
 
 namespace {
 const AppContext* s_context = nullptr;
@@ -84,6 +89,10 @@ AppContextScope::~AppContextScope() {
     s_eventConnections.clear();
     usdcc::usd::PrimMenuEntries::instance().clear();
     usdcc::usd::ViewportMenuEntries::instance().clear();
+#if USDCC_HAS_PYTHON
+    // They call into Python, which goes next.
+    if (!m_outer) removeScriptedFinalRenderers();
+#endif
 }
 
 const AppContext* currentAppContext() { return s_context; }
@@ -465,6 +474,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         },
         py::arg("id"), py::arg("display_name"), py::arg("cls"));
     bindRenderViewPanelHandle(m);
+    bindFinalRenderers(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {
@@ -839,6 +849,40 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             return result;
         },
         py::arg("renderer"));
+    // Final renders (docs/FINAL_RENDER.md §6), for usdcc.render.
+    m.def("final_renderers", []() {
+        py::list result;
+        for (const auto& renderer : usdcc::render::FinalRenderers::instance().all()) {
+            result.append(py::make_tuple(renderer->id(), renderer->name(), renderer->setupProblem(),
+                                         renderer->capabilities().tiles));
+        }
+        return result;
+    });
+    m.def(
+        "submit_render",
+        [](long cacheId, const std::string& settings, bool animation, const std::string& renderer) {
+            if (!settings.empty() && !PXR_NS::SdfPath::IsValidPathString(settings)) {
+                throw py::value_error("not a prim path: " + settings);
+            }
+            std::string error;
+            const usdcc::render::RenderJobPtr job =
+                usdcc::render::submitRender(stageFor(cacheId), settings.empty() ? PXR_NS::SdfPath() : PXR_NS::SdfPath(settings),
+                                            animation, nullptr, &error, renderer);
+            if (!job) throw std::runtime_error(error);
+            return job->id;
+        },
+        py::arg("stage"), py::arg("settings"), py::arg("animation"), py::arg("renderer"));
+    m.def("render_jobs", []() {
+        py::list result;
+        for (const usdcc::render::RenderJobPtr& job : usdcc::render::RenderScheduler::instance().jobs()) {
+            static const char* statuses[] = {"queued", "running", "done", "failed", "cancelled"};
+            result.append(py::make_tuple(job->id, job->title, job->rendererId, statuses[static_cast<int>(job->status)],
+                                         job->progress(), job->frames, job->files, job->error));
+        }
+        return result;
+    });
+    m.def(
+        "cancel_render", [](const std::string& id) { usdcc::render::RenderScheduler::instance().cancel(id); }, py::arg("id"));
     m.def(
         "viewport_renderer_settings",
         [](int id, const std::string& renderer) {

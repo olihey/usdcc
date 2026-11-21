@@ -1,6 +1,6 @@
 """V-Ray Render: a view panel that renders its stage with V-Ray, progressively, following
-the viewport camera and edits (docs/VRAY_RENDER.md), and V-Ray's shader nodes for the
-Material Editor (section 8).
+the viewport camera and edits (docs/VRAY_RENDER.md), V-Ray's shader nodes for the
+Material Editor (section 8), and V-Ray for final renders (section 10).
 
 V-Ray runs in a helper process through the V-Ray App SDK, which has to be installed
 (Edit > Settings... > V-Ray says where). Try it with
@@ -12,7 +12,7 @@ and Stages > V-Ray Render.
 
 from PySide6 import QtCore
 
-from . import client, config, node_loader, panel
+from . import client, config, final, node_loader, panel
 
 PLUGIN = None
 
@@ -24,10 +24,12 @@ def activate(plugin):
     PLUGIN = plugin
     panel.LOG = plugin.log
     node_loader.LOG = plugin.log
+    final.LOG = plugin.log
     config.define()
     import usdcc.app
 
     usdcc.app.register_view_panel(plugin.id + ".view", "V-Ray Render", panel.VRayRenderPanel)
+    final.register()
     QtCore.QTimer.singleShot(0, _load_shader_nodes)
 
 
@@ -39,5 +41,6 @@ def _load_shader_nodes():
 def deactivate(plugin):
     global PLUGIN
     PLUGIN = None
+    final.unregister()
     node_loader.stop()
     client.shutdown_all()

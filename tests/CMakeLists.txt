@@ -21,6 +21,8 @@ add_executable(usdcc_tests
     create_stage_test.cpp
     dependencies_test.cpp
     dependency_files.h
+    final_render_test.cpp
+    render_network_test.cpp
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp
@@ -106,6 +108,7 @@ add_executable(usdcc_ui_tests
     recent_files_test.cpp
     relationship_editor_test.cpp
     render_view_panel_test.cpp
+    render_settings_panel_test.cpp
     scale_controller_test.cpp
     schema_pills_test.cpp
     schema_explorer_test.cpp
@@ -209,7 +212,9 @@ target_sources(usdcc_python_tests PRIVATE rtx_native_stage_test.cpp
     ../src/plugins/rtx_render_native/stage_bridge.cpp
     ../src/plugins/rtx_render_native/navigation.cpp
     ../src/plugins/rtx_render_native/runtime_identity.cpp
-    ../src/plugins/rtx_render_native/rtx_panel.cpp)
+    ../src/plugins/rtx_render_native/rtx_panel.cpp
+    ../src/plugins/rtx_render_native/rtx_final.cpp
+    rtx_native_final_test.cpp)
 target_include_directories(usdcc_python_tests PRIVATE ../src/plugins/rtx_render_native)
 if(TARGET rtx_render_native)
     target_sources(usdcc_python_tests PRIVATE rtx_native_plugin_test.cpp)

@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QRegularExpression>
 #include <QStatusBar>
 #include <QToolButton>
 #include <QUrl>
@@ -83,6 +84,13 @@
 #include "usdcc/usd/prim_tree_dialog.h"
 #include "usdcc/usd/recent_files.h"
 #include "usdcc/usd/renderer_settings.h"
+#include "usdcc/usd/render/hydra_final_renderer.h"
+#include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_network.h"
+#include "usdcc/usd/render/render_queue_panel.h"
+#include "usdcc/usd/render/render_scheduler.h"
+#include "usdcc/usd/render/render_settings_view_panel.h"
+#include "usdcc/usd/render/render_spec.h"
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/selection_menu.h"
 #include "usdcc/usd/usda_preview_dialog.h"
@@ -307,6 +315,10 @@ int main(int argc, char** argv) {
     usdcc::usd::defineAssetSettings();
     // Settings > Renderers: each render delegate's own settings, all of them listed only
     // when the dialog opens, as some take a while (a viewport defines its renderer's itself).
+    // Final renders (docs/FINAL_RENDER.md): Settings > Final Render, and every Hydra render
+    // delegate as a renderer (Arnold's too, set up above). Plugins add theirs when they start.
+    usdcc::render::defineFinalRenderSettings();
+    usdcc::render::registerHydraFinalRenderers();
     usdcc::ui::SettingsDialog::setBeforeShow([]() {
         QApplication::setOverrideCursor(Qt::WaitCursor);
         usdcc::usd::defineRendererSettings();
@@ -452,6 +464,11 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::MaterialEditorViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    panelTypes.add(QStringLiteral("renderSettings"), QObject::tr("Render Settings"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::render::RenderSettingsViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     panelTypes.add(QStringLiteral("dependencies"), QObject::tr("Dependencies"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -1021,6 +1038,10 @@ int main(int argc, char** argv) {
     // Physics > rigid bodies, colliders, a ground and a scene; Simulate (docs/PHYSICS.md §5.4).
     window.mainMenuBar()->addMenu(new usdcc::usd::PhysicsMenu(&stageManager, undoManager, playback, &window));
 
+    // Render > Render Frame, Render Animation, Render Settings, Render Queue (docs/FINAL_RENDER.md §5).
+    window.mainMenuBar()->addMenu(
+        usdcc::render::createRenderMenu(&stageManager, &panelTypes, window.dockManager(), &window));
+
     // Stages > <stage> > Workspace, a new panel of each type, or Close Stage.
     auto* stagesMenu = new usdcc::usd::StagesMenu(&stageManager, &panelTypes, window.dockManager(), &window);
     stagesMenu->setWorkspaces(&workspaces);
@@ -1189,6 +1210,73 @@ int main(int argc, char** argv) {
         peersPanel->setCollapsed(false);
         peersPanel->raise();
     };
+    // The Render Queue (docs/FINAL_RENDER.md §5.2): off until a render is queued or the user
+    // opens it. Rendering stops when the app quits.
+    auto* renderQueuePanel = new usdcc::render::RenderQueueSidePanel(&usdcc::render::RenderScheduler::instance());
+    window.addSidePanel(renderQueuePanel, Qt::RightDockWidgetArea);
+    renderQueuePanel->hide();
+    usdcc::render::setShowRenderQueue([renderQueuePanel]() {
+        renderQueuePanel->show();
+        renderQueuePanel->setCollapsed(false);
+        renderQueuePanel->raise();
+    });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+        auto& scheduler = usdcc::render::RenderScheduler::instance();
+        for (const usdcc::render::RenderJobPtr& job : scheduler.jobs()) scheduler.cancel(job->id);
+    });
+
+    // Distributed final renders (docs/FINAL_RENDER.md §7): in every room, this instance says
+    // what it renders; render nodes there become workers of the render queue, and with Render
+    // for peers on, it renders theirs.
+    const auto trustedFingerprints = []() {
+        const QString text = QString::fromStdString(usdcc::core::Settings::instance().get<std::string>("FinalRender/trusted"));
+        return text.split(QRegularExpression(QStringLiteral("[\\s,;]+")), Qt::SkipEmptyParts);
+    };
+    usdcc::render::RenderNetworkOptions renderNetworkOptions;
+    renderNetworkOptions.folder =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("render-network"));
+    renderNetworkOptions.isNode = []() { return usdcc::core::Settings::instance().get<bool>("FinalRender/node"); };
+    renderNetworkOptions.trusted = [trustedFingerprints](const usdcc::peers::Peer& peer) {
+        return !peer.fingerprint.isEmpty() && trustedFingerprints().contains(peer.fingerprint, Qt::CaseInsensitive);
+    };
+    renderNetworkOptions.ask = [&window, trustedFingerprints](const usdcc::peers::Peer& from, const QString& what,
+                                                             std::function<void(bool)> answer) {
+        if (!usdcc::core::Settings::instance().get<bool>("FinalRender/askUntrusted", true)) {
+            answer(false);
+            return;
+        }
+        auto answered = std::make_shared<bool>(false);
+        const auto once = [answered, answer](bool take) {
+            if (*answered) return;
+            *answered = true;
+            answer(take);
+        };
+        usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+        request.title = QObject::tr("Render for %1?").arg(from.name).toStdString();
+        request.body = what.toStdString();
+        QList<usdcc::ui::ToastAction> actions;
+        actions.append({QObject::tr("Render"), [once]() { once(true); }});
+        actions.append({QObject::tr("Always for %1").arg(from.name), [once, from, trustedFingerprints]() {
+                            QStringList trusted = trustedFingerprints();
+                            if (!from.fingerprint.isEmpty() && !trusted.contains(from.fingerprint)) trusted.append(from.fingerprint);
+                            usdcc::core::Settings::instance().setValue("FinalRender/trusted", trusted.join(QLatin1Char(' ')).toStdString());
+                            once(true);
+                        }});
+        actions.append({QObject::tr("Decline"), [once]() { once(false); }});
+        window.toasts()->show(request, actions);
+    };
+    auto* renderNetwork = new usdcc::render::RenderNetwork(std::move(renderNetworkOptions), &window);
+    usdcc::render::RenderNetwork::setInstance(renderNetwork);
+    for (usdcc::peers::Room* room : peersController->peers()->rooms()) renderNetwork->addRoom(room);
+    QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomAdded, renderNetwork,
+                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->addRoom(room); });
+    QObject::connect(peersController->peers(), &usdcc::peers::Peers::roomRemoved, renderNetwork,
+                     [renderNetwork](usdcc::peers::Room* room) { renderNetwork->removeRoom(room); });
+    auto renderersAdvertised = usdcc::render::FinalRenderers::instance().changed.connect([renderNetwork]() { renderNetwork->advertise(); });
+    auto renderNodeSetting = usdcc::core::Settings::instance().changed.connect([renderNetwork](const std::string& key) {
+        if (key == "FinalRender/node") renderNetwork->advertise();
+    });
+
     // `presence` says which stage each peer has open.
     auto presenceOnCurrentStage = stageManager.currentStageChanged.connect(
         [peersController](const usdcc::usd::StageRefPtr&) { peersController->updatePresence(); });

@@ -8,7 +8,9 @@
 #include <limits>
 #include <utility>
 
+#include "headless_bridge.h"
 #include "rtx_engine.h"
+#include "rtx_final.h"
 #include "vulkan_window.h"
 
 #include "rtx_panel.h"
@@ -88,5 +90,17 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
                                   return std::make_unique<usdcc::rtx::RtxEngine>(std::move(rtx), std::move(ovstage), std::move(bridge));
                               }, usdcc::rtx::createVulkanPresentation);
                       });
+    // Final renders (docs/RTX_RENDER.md, Final renders): an engine of their own per task, with a
+    // CUDA-only bridge that reads frames back, and no window.
+    const std::filesystem::path folder = host.folder;
+    host.addFinalRenderer(usdcc::rtx::createRtxFinalRenderer(
+        [folder]() -> std::unique_ptr<usdcc::rtx::Engine> {
+            const auto roots = usdcc::rtx::runtimeRoots(folder);
+            return std::make_unique<usdcc::rtx::RtxEngine>(roots.rtx, roots.stage, usdcc::rtx::createHeadlessBridge());
+        },
+        [folder]() { return usdcc::rtx::runtimeProblem(usdcc::rtx::runtimeRoots(folder)); }));
 }
-USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host&) { usdcc::rtx::RtxEngine::shutdown(); }
+USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host&) {
+    usdcc::render::FinalRenderers::instance().remove(usdcc::rtx::kRtxFinalRendererId);
+    usdcc::rtx::RtxEngine::shutdown();
+}

@@ -100,6 +100,7 @@ if(USDCC_PYTHON_FOUND)
         include/usdcc/scripting/scripted_tool.h
         include/usdcc/scripting/scripted_view_panel.h
         src/python_object.h
+        src/scripted_final_renderer.cpp
         src/scripted_render_view_panel.cpp
         src/scripted_tool.cpp
         src/scripted_view_panel.cpp)
