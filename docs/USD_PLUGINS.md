@@ -63,6 +63,7 @@ rest is a plan.
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | Not proven. The last commit is from August 2025; an earlier local attempt needed `/WX` turned off |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
+| `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows**. ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | Not proven. Its own `building/` scripts build their own USD; upstream tests Rocky 9 (GCC 11) and macOS 14–26, not Ubuntu 24.04 |
 
 Notes:
 
@@ -86,14 +87,30 @@ Notes:
   - `gatling-linux-assembly.patch`. On Linux, CMake stops with "CMAKE_ASM_COMPILE_OBJECT"
     not set, because a bundled library enables assembly in its own folder only. The patch
     enables it at the top.
-- **Cycles.** With `PXR_ROOT` set, Cycles takes OpenImageIO, OpenEXR, OpenColorIO,
-  OpenSubdiv, MaterialX, TBB and Python from the USD install (`USD_OVERRIDE_*` in
-  `src/cmake/external_libs.cmake`), but **not Embree**, and Blender's libraries have an
-  `embree4.dll` too. That is the first thing the duplicate-DLL rule has to settle. The CPU
-  renderer needs no SDK. The GPU kernels (CUDA, OptiX, HIP) each need a vendor SDK at build
-  time, so they come after the CPU build works. Cycles has no Sdr plugin; the Material
-  Editor's Cycles nodes need the generator in MATERIAL_EDITOR.md §3.4, which this pack
-  could build.
+- **Cycles.** The render delegate to ship first: it builds on Windows, Linux and macOS,
+  so it is the one renderer besides Storm and Embree that every platform gets (MoonRay
+  has no Windows build).
+  - **Its libraries.** `make update` fetches Blender's precompiled libraries for the
+    platform (Git LFS, several GB; CI caches them). With `PXR_ROOT` set, Cycles takes
+    OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX, TBB and Python from the USD
+    install (`USD_OVERRIDE_*` in `src/cmake/external_libs.cmake`), but **not Embree**, and
+    Blender's libraries have an `embree4.dll` too. That is the first thing the
+    duplicate-DLL rule has to settle: the asset's Embree if it is Embree 4, otherwise
+    Blender's linked statically. What the pack keeps from Blender's libraries is only
+    what hdCycles links and the asset lacks, Open Image Denoise above all.
+  - **TBB.** Blender's libraries are built with oneTBB, and current Cycles expects it; the
+    asset has TBB 2020 (§6). Two TBBs can't share a process, so `--onetbb` in the OpenUSD
+    build comes first (§7 phase 4), and OpenVDB with it (`--openvdb`), so Cycles shares
+    the asset's instead of bringing its own.
+  - **CPU first.** The CPU renderer needs no SDK, so the pack check renders a frame on a
+    hosted runner. The GPU devices each need a vendor SDK at build time and come after,
+    one at a time (§7 phase 5): Metal on macOS needs none; CUDA and OptiX need NVIDIA's
+    CUDA Toolkit and OptiX headers, which build on a runner without a GPU, though
+    compiling kernels for many GPU generations is slow against the 6-hour job limit, so
+    the pin names a few; HIP and oneAPI last.
+  - **Material Editor nodes.** Cycles has no Sdr plugin; the Material Editor's Cycles
+    nodes need the generator in MATERIAL_EDITOR.md §3.4, which this pack builds, so
+    `cycles_shaders.usda` ships with it.
 - **Aurora.** Whether hdAurora's DirectX backend builds against a stock OpenUSD, rather
   than Autodesk's fork, is not known. It decides whether this pack exists at all (§8).
 - **Arnold.** Its Sdr plugin starts the Arnold core at discovery (`AiBegin`), so the pack
@@ -149,6 +166,31 @@ Notes:
     (`unitX` throughout).
   - **Licence.** Without an Arnold licence every render has an "arnold" watermark. The
     3ds Max and Maya entitlement only covers rendering inside those programs.
+- **MoonRay.** A production CPU path tracer with a hybrid GPU mode (XPU: CUDA/OptiX on
+  Linux, Metal on macOS) and a Hydra render delegate, HdMoonRay. It doesn't build on
+  Windows, so it is the first pack that is Linux and macOS only; on Windows the renderer
+  is simply not in the list.
+  - **What the pack is.** HdMoonRay in `plugin/usd`, MoonRay's core libraries in `lib`,
+    and its shader DSOs (the RDL2 classes the scene is made of) in a folder of their own.
+    Not `moonray_gui` or `arras_render`, which need Qt 5 and would put a second Qt into
+    usdcc's process. Not Arras, the distributed rendering framework, if HdMoonRay renders
+    in-process without it (§8); it brings libmicrohttpd (LGPL-2.1) and libcurl.
+  - **CPU only first** (`-DMOONRAY_USE_OPTIX=NO`): no NVIDIA headers on the runner, no
+    CUDA runtime to ship, and nothing hosted runners can't run. Since it renders on the
+    CPU, its check can render a frame, not just load the plugin: the first render delegate
+    that hosted CI can actually try (§2).
+  - **Our OpenUSD, not its own.** MoonRay's `building/` scripts build every dependency,
+    USD included; the Houdini route (`-DNOUSD=1`, the `*-houdini-release` presets) shows
+    it can take an outside USD. The pack builds the dependencies the asset lacks from
+    those scripts, and takes the rest from the asset (§2's duplicate-DLL rule). Where the
+    versions disagree, Embree and TBB first: MoonRay needs Embree 4, and the asset's TBB
+    is TBB 2020 (§6 `--onetbb`). Whatever only MoonRay needs is linked statically or goes
+    into `lib` under a name the asset doesn't have.
+  - **Turning it on.** MoonRay finds its shader DSOs through its environment (its
+    `setup.sh` sets the DSO path). usdcc sets that in-process at start-up, before
+    anything asks for a renderer, the way `enableArnold()` loads Arnold: a
+    `moonray_runtime` beside `arnold_runtime`, Linux and macOS only, on by default since
+    the pack ships (§5) and needs no SDK.
 
 ## 4. The build
 
@@ -316,7 +358,7 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles`, `aurora` |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` and `moonray` (Linux, later macOS), each `optional` and unpublished until its licences are read; `aurora` |
 | `optional` | Its own zip on the usdcc release, unzipped over the usdcc folder by the user | `gatling` |
 | `local` | Built on a machine that has the SDK; never published | `arnold`, `usdfbx`, `usdsbsar` |
 
@@ -344,6 +386,42 @@ Three sets, decided by licence:
 - **Standard packs are Apache-2.0**, but each brings libraries of its own (Cycles: OpenVDB,
   Open Image Denoise; Aurora: Slang, the DirectX shader compiler's `dxil.dll`). Step 5 of
   the build collects their licences, and a pack isn't `standard` until that list is read.
+- **Cycles is Apache-2.0**, kept apart from Blender's GPL code, so it can go in the
+  standard zip, which stays BSD-3-Clause. Apache-2.0 asks for its `LICENSE` and `NOTICE`
+  in the release, and for files our patches change to say so. What it brings:
+  - Cycles' own `third_party/`: small permissive libraries (Apache, MIT, zlib, BSD);
+    licence texts only.
+  - Blender's precompiled libraries: a mix, with GPL ones such as FFmpeg among them.
+    **Only what hdCycles links is shipped**, and Cycles doesn't use FFmpeg. A new step in
+    `tools/ci/check_usd_plugin.py` fails the pack on a library the pin doesn't list, found from what the binaries load
+    (`dumpbin /dependents` on Windows, `ldd` on Linux), so nothing GPL comes in by
+    accident.
+  - Open Image Denoise, OpenVDB, Embree: Apache-2.0; licence texts only.
+  - The GPU devices, each read before it ships: compiled CUDA kernels (NVIDIA's CUDA
+    EULA, which generally allows redistributing compiled kernels), OptiX (its SDK
+    licence; the headers are build-time and the runtime is in the driver), HIP (AMD,
+    mostly MIT), oneAPI (Intel's runtime licence).
+
+  Until step 6 of the build has collected that list and it has been read, Cycles' pin
+  says `"set": "optional"` with `"publish": false`, for the reason given for MoonRay
+  below. If the GPU kernels make the standard archive too big, they become a pack of
+  their own in the `optional` set, and the standard one stays CPU only.
+- **MoonRay is Apache-2.0**, so it can go in the standard zip, which stays BSD-3-Clause.
+  Apache-2.0 asks for its `LICENSE` and `NOTICE` in the release, and for files our patches
+  change to say so. What it brings, as far as is known before a build:
+  - Permissive, licence texts only: OpenImageIO, OpenVDB, Open Image Denoise, OpenSubdiv,
+    Boost, JsonCpp, Lua, log4cplus, libunwind, Random123, libcurl.
+  - Build only, not shipped: ISPC (BSD-3-Clause), CppUnit (LGPL, tests).
+  - libmicrohttpd (LGPL-2.1), Arras only: allowed as a separate shared library the user
+    can replace, with its source named in `SOURCES.txt`, as Qt is (RELEASE.md §6).
+    Better left out with Arras.
+  - NVIDIA's OptiX SDK and CUDA runtime, GPU mode only: their own licences, read before
+    the GPU build ships. The OptiX headers are build-time; the runtime is in the driver.
+
+  Until step 6 of the build has collected that list and it has been read, the pin says
+  `"set": "optional"` with `"publish": false`, as Gatling's does. Not `standard` yet:
+  `release.yml` fetches the standard packs with `--require-packs`, so an unpublished
+  standard pack would fail every Linux release.
 
 ## 6. Changes to the OpenUSD build itself
 
@@ -355,7 +433,7 @@ Three sets, decided by licence:
 | `--draco` | `usdDraco`, and Draco-compressed glTF in Adobe's `usdgltf` | Yes |
 | `--alembic` | `usdAbc`, reading `.abc` | Yes, without `--hdf5` (Ogawa files only) |
 | `--openvdb` | `hioOpenVDB`: volumes in Storm, and an OpenVDB Cycles can share | Yes, if Cycles ships |
-| `--onetbb` | oneTBB instead of TBB 2020, which the install has now (`tbb.dll`). Blender's libraries and Adobe's README expect oneTBB | Try it locally first: it changes the ABI of everything |
+| `--onetbb` | oneTBB instead of TBB 2020, which the install has now (`tbb.dll`). Blender's libraries and Adobe's README expect oneTBB | Yes, before Cycles (§3), which can't share a process with TBB 2020. Try it locally first: it changes the ABI of everything |
 | `--ptex` | Ptex textures | No, until someone asks |
 | `--vulkan` | HgiVulkan for Storm. Needs the Vulkan SDK on the runner | Not now |
 | `--prman` | hdPrman. Needs RenderMan installed | No: a `local` build at most |
@@ -426,8 +504,22 @@ Three sets, decided by licence:
      after this one too, and `build.yml` warns that it is missing until then.*
 4. **The OpenUSD flags** of §6, tried locally first, then one `deps-usd.yml` run. Done when
    the new asset and every pack are published and `build.yml` is green.
-5. **Cycles, CPU only.** Settle the Embree clash, then the pack. Done when it renders a
-   frame on a machine without a GPU. Then the GPU kernels, one device at a time.
+5. **Cycles**, after phase 4 has given the asset oneTBB and OpenVDB (§3, §6).
+   1. A local build on Windows against that asset, CPU only: which Embree it uses, and
+      the list of what hdCycles loads from Blender's libraries.
+   2. `deps/usd-plugins/cycles.json` (`win64` and `linux-x64`, `optional`,
+      `"publish": false`). The pack check renders a small scene on the CPU and fails on a
+      library the pin doesn't list (§5). The pack builds the Material Editor's
+      `cycles_shaders.usda` too.
+   3. In usdcc's viewport on both platforms, and the Material Editor's Cycles nodes.
+   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and only
+      then `"set": "standard"`, so `release.yml` requires it and the smoke test expects it.
+
+   Done when a Windows and a Linux release have Cycles and render with it in the viewport,
+   on a machine without a GPU. Then the GPU devices, one at a time, each a pin change and
+   a licence read (§5): CUDA and OptiX (checked on the self-hosted RTX runner), HIP,
+   oneAPI. On macOS, Cycles and its Metal device follow usdcc's own macOS build, as
+   MoonRay does (phase 10).
 6. **Aurora.** First a local build against our OpenUSD. If it needs Autodesk's fork, stop
    and drop it.
 7. **Arnold**, as a `local` pack on the self-hosted runner.
@@ -487,6 +579,28 @@ Three sets, decided by licence:
      `lib` folder on `LD_LIBRARY_PATH` when the Python is uv's, whose program doesn't link
      its own `libpython`. `actions/setup-python` sets that on a runner.*
    - *Left: a workflow run of all of it, and Gatling's items from phase 3.*
+9. **MoonRay on Linux, CPU only** (§3).
+   1. A local build in WSL (Ubuntu 24.04, GCC 13) against the published Linux asset: first
+      MoonRay's `building/` dependencies without USD and without what the asset has, then
+      MoonRay with the asset's `pxr`. This answers §8 items 8 and 9; carry fixes as patches.
+   2. `deps/usd-plugins/moonray.json` (`linux-x64` only, `optional`, `"publish": false`), and the pack
+      check renders a small scene with HdMoonRay on the CPU.
+   3. `moonray_runtime` in usdcc, and MoonRay in the viewport's renderer list and renders
+      on Linux.
+   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and only
+      then `"set": "standard"`, so `release.yml`'s Linux job requires it and the smoke
+      test expects it. Note the pack's size against the
+      release's 2 GiB limit; if it makes the standard archive too big, it moves to
+      `optional`.
+
+   Done when a Linux release has MoonRay and renders with it in the viewport.
+10. **MoonRay on macOS**, after usdcc itself builds and releases on macOS (CI.md §7): an
+    OpenUSD asset for `macos-arm64`, a usdcc build and release job on a macOS runner,
+    PySide6 for macOS, the app bundle, and signing and notarisation, which need an Apple
+    Developer ID. Then the MoonRay pack is one more platform in its pin, and its Metal
+    XPU mode needs no extra SDK.
+11. **MoonRay's GPU mode on Linux** (CUDA/OptiX), once its licences are read (§5), checked
+    on the self-hosted RTX runner.
 
 ## 8. Open questions
 
@@ -496,16 +610,19 @@ Three sets, decided by licence:
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Arnold's `EULA.txt` allows shipping even the core inside an application, on conditions (§5); Autodesk's general Terms of Use and the FBX SDK's licence are still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | Unknown; phase 6 answers it |
-| 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it |
+| 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it. Cycles waits for it (§7 phase 5) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
 | 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |
+| 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | Unknown; phase 9 step 1 answers it. If Embree or TBB don't fit, MoonRay waits for §6's `--onetbb` and an Embree 4 in the asset |
+| 9 | Does HdMoonRay render in-process without Arras? | Assume yes, and leave Arras out of the pack; if not, ship it, with libmicrohttpd as a replaceable shared library (§5) |
+| 10 | MoonRay on macOS before usdcc runs there? | No: phase 10 follows the macOS build, not the other way round |
 
 ## 9. Later
 
 - **More render delegates.** AMD's Radeon ProRender (`hdRpr`) and Intel's OSPRay
   (`hdOSPRay`, a CPU renderer, so testable on hosted runners) are open source. Whether
-  either still follows current OpenUSD has to be checked first. MoonRay doesn't build on
-  Windows. Karma, Redshift, Octane and V-Ray's delegate ship inside their own products,
+  either still follows current OpenUSD has to be checked first. MoonRay, which doesn't
+  build on Windows, is planned for Linux and macOS (§3, §7 phases 9–11). Karma, Redshift, Octane and V-Ray's delegate ship inside their own products,
   built for those products' USD, and can't be loaded here.
 - **A canary run.** A weekly job that builds the packs against OpenUSD's newest release,
   without publishing, so a plugin that breaks on the next OpenUSD is known before the bump.
