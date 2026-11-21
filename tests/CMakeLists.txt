@@ -23,6 +23,7 @@ add_executable(usdcc_tests
     dependency_files.h
     final_render_test.cpp
     render_network_test.cpp
+    node_test.cpp
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp
@@ -68,6 +69,10 @@ add_executable(usdcc_tests
     xform_target_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
+# usdcc_node (docs/RENDER_NODE.md): its arguments, trust and keys, and the program itself.
+target_link_libraries(usdcc_tests PRIVATE usdcc_node_core)
+target_compile_definitions(usdcc_tests PRIVATE USDCC_NODE_EXE="$<TARGET_FILE:usdcc_node>")
+add_dependencies(usdcc_tests usdcc_node)
 # docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
 # plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
 target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
@@ -197,7 +202,7 @@ if(TARGET blender_mesh_tools)
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
         target_link_libraries(usdcc_blender_mesh_benchmark PRIVATE "${Python3_LIBRARY}")
     endif()
-    usdcc_deploy_core_library(usdcc_blender_mesh_benchmark usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui)
+    usdcc_deploy_core_library(usdcc_blender_mesh_benchmark usdcc_usd usdcc_tools usdcc_ui usdcc_peers usdcc_render usdcc_usd_ui)
     usdcc_deploy_python(usdcc_blender_mesh_benchmark)
     target_sources(usdcc_python_tests PRIVATE blender_mesh_plugin_test.cpp blender_mesh_conversion_test.cpp blender_mesh_operations_test.cpp)
     target_link_libraries(usdcc_python_tests PRIVATE usdcc_blender_mesh_conversion)
@@ -237,7 +242,7 @@ foreach(_usdcc_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
         target_link_libraries(${_usdcc_test} PRIVATE "${Python3_LIBRARY}")
     endif()
-    usdcc_deploy_core_library(${_usdcc_test} usdcc_usd usdcc_tools usdcc_ui usdcc_usd_ui)
+    usdcc_deploy_core_library(${_usdcc_test} usdcc_usd usdcc_tools usdcc_ui usdcc_peers usdcc_render usdcc_usd_ui)
     # OpenUSD's Python DLL rather than vcpkg's (see UsdccPython.cmake).
     usdcc_deploy_python(${_usdcc_test})
     add_test(NAME ${_usdcc_test} COMMAND ${_usdcc_test})

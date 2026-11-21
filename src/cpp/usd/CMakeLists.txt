@@ -138,6 +138,35 @@ usdcc_precompile_headers(usdcc_usd usd_pch.h)
 
 add_subdirectory(python)
 
+# usdcc_render — final renders without widgets (docs/FINAL_RENDER.md, docs/RENDER_NODE.md §3.2):
+# renderers, jobs, the scheduler and rendering with peers. Its own library so that a
+# program without windows (usdcc_node) renders as the app does. Qt Gui only for Storm's
+# offscreen OpenGL context. Its headers stay in usdcc/usd/render/.
+add_library(usdcc_render SHARED
+    include/usdcc/usd/render_camera.h
+    src/render_camera.cpp
+    include/usdcc/usd/render/final_renderer.h
+    src/render/final_renderer.cpp
+    include/usdcc/usd/render/render_spec.h
+    src/render/render_spec.cpp
+    include/usdcc/usd/render/render_job.h
+    src/render/render_job.cpp
+    include/usdcc/usd/render/hydra_final_renderer.h
+    src/render/hydra_final_renderer.cpp
+    include/usdcc/usd/render/render_scheduler.h
+    src/render/render_scheduler.cpp
+    include/usdcc/usd/render/scene_file_renderer.h
+    src/render/scene_file_renderer.cpp
+    include/usdcc/usd/render/render_bundle.h
+    src/render/render_bundle.cpp
+    include/usdcc/usd/render/render_network.h
+    src/render/render_network.cpp
+)
+target_link_libraries(usdcc_render PUBLIC usdcc_usd usdcc_peers Qt6::Core Qt6::Gui)
+target_compile_definitions(usdcc_render PRIVATE USDCC_RENDER_BUILD)
+usdcc_export_library(usdcc_render)
+usdcc_precompile_headers(usdcc_render usd_pch.h)
+
 # usdcc_usd_ui — the USD-aware ViewPanel subclasses (ViewportViewPanel,
 # OutlinerViewPanel, AttributesViewPanel; M3/M4). Kept as a separate
 # target from usdcc_usd (rather than folded into it) so usdcc.usd's
@@ -315,35 +344,19 @@ add_library(usdcc_usd_ui SHARED
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
     src/undo_manager.cpp
-    include/usdcc/usd/render/final_renderer.h
-    src/render/final_renderer.cpp
-    include/usdcc/usd/render/render_spec.h
-    src/render/render_spec.cpp
-    include/usdcc/usd/render/render_job.h
-    src/render/render_job.cpp
-    include/usdcc/usd/render/hydra_final_renderer.h
-    src/render/hydra_final_renderer.cpp
-    include/usdcc/usd/render/render_scheduler.h
-    src/render/render_scheduler.cpp
     include/usdcc/usd/render/render_menu.h
     src/render/render_menu.cpp
     include/usdcc/usd/render/render_settings_view_panel.h
     src/render/render_settings_view_panel.cpp
     include/usdcc/usd/render/render_queue_panel.h
     src/render/render_queue_panel.cpp
-    include/usdcc/usd/render/scene_file_renderer.h
-    src/render/scene_file_renderer.cpp
-    include/usdcc/usd/render/render_bundle.h
-    src/render/render_bundle.cpp
-    include/usdcc/usd/render/render_network.h
-    src/render/render_network.cpp
     include/usdcc/usd/render/swarm_panel.h
     src/render/swarm_panel.cpp
 )
 # The Outliner's prim icons (see prim_icons.cpp), as a library for the reason in
 # src/cpp/ui/CMakeLists.txt.
 usdcc_add_resources(usdcc_usd_ui_resources resources/prim_icons.qrc)
-target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg usdcc_usd_ui_resources)
+target_link_libraries(usdcc_usd_ui PUBLIC usdcc_usd usdcc_render usdcc_ui usdcc_tools Qt6::Widgets Qt6::OpenGL PRIVATE Qt6::Svg usdcc_usd_ui_resources)
 # Only the Material Editor sees it, so plugins built against the SDK don't need it.
 target_link_libraries(usdcc_usd_ui PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_usd_ui PRIVATE USDCC_USD_UI_BUILD

@@ -21,7 +21,7 @@
 namespace usdcc::render {
 
 // What exportRenderScene() wrote.
-struct USDCC_USD_UI_API SceneExport {
+struct USDCC_RENDER_API SceneExport {
     std::string file;           // the .usdc
     PXR_NS::SdfPath settings;   // the RenderSettings prim the file names (renderSettingsPrimPath)
     PXR_NS::SdfPath product;    // its first product, which has the task's camera, size and window
@@ -38,18 +38,18 @@ struct USDCC_USD_UI_API SceneExport {
 // - the frame as the layer's start and end time code;
 // - then `customize`, for the renderer's own touches, before it's written.
 // Throws std::runtime_error when it can't.
-USDCC_USD_UI_API SceneExport exportRenderScene(
+USDCC_RENDER_API SceneExport exportRenderScene(
     const RenderTask& task, const std::string& folder,
     const std::function<void(const PXR_NS::UsdStageRefPtr& stage, SceneExport& scene)>& customize = {});
 
 // The task's region as UsdRender's dataWindowNDC: (xmin, ymin, xmax, ymax), (0, 0) at the
 // bottom left and (1, 1) at the top right of the whole image.
-USDCC_USD_UI_API PXR_NS::GfVec4f dataWindowNDC(const RenderTask& task);
+USDCC_RENDER_API PXR_NS::GfVec4f dataWindowNDC(const RenderTask& task);
 
 // `region` of a whole image, or the image itself when it's that size already.
-USDCC_USD_UI_API FloatImage cropToRegion(const FloatImage& whole, const PixelRect& region);
+USDCC_RENDER_API FloatImage cropToRegion(const FloatImage& whole, const PixelRect& region);
 
-class USDCC_USD_UI_API SceneFileRenderer : public FinalRenderer {
+class USDCC_RENDER_API SceneFileRenderer : public FinalRenderer {
 public:
     // Writes the task's scene to a folder of its own (removed once the task ends), then calls
     // renderFile(). An image the size of the whole frame is cut down to the task's region, so

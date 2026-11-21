@@ -11,7 +11,7 @@ V-Ray do (§3.2).
 
 | | |
 |---|---|
-| **Code** | [src/cpp/usd/include/usdcc/usd/render](../src/cpp/usd/include/usdcc/usd/render), in `usdcc_usd_ui` |
+| **Code** | [src/cpp/usd/include/usdcc/usd/render](../src/cpp/usd/include/usdcc/usd/render): `usdcc_render` without widgets (RENDER_NODE.md §3.2), the menu and panels in `usdcc_usd_ui` |
 | **Menu** | Render > Render Frame (F12), Render Animation (Ctrl+F12), Render Settings, Render Queue |
 | **Python** | `usdcc.render` ([render.py](../src/python/usdcc/render.py)) |
 | **Plugins** | `Host::addFinalRenderer()` ([plugin.h](../src/cpp/plugin_sdk/include/usdcc/plugin/plugin.h)) |

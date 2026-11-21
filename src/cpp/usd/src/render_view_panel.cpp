@@ -45,14 +45,6 @@
 namespace usdcc::usd {
 
 namespace {
-constexpr double kDegrees = 180.0 / std::numbers::pi;
-
-// A field of view across one side from the one across the other, for an image
-// `ratio` times as long on the side wanted: tan(half angle) scales with the side.
-double scaledFov(double degrees, double ratio) {
-    return 2.0 * std::atan(std::tan(degrees / kDegrees / 2.0) * ratio) * kDegrees;
-}
-
 // The Resolution choices: a scale of the panel's size, or a fixed size.
 struct Resolution {
     const char* label;
@@ -77,18 +69,6 @@ void appendPaths(std::vector<PXR_NS::SdfPath>& to, const std::vector<PXR_NS::Sdf
 
 // --- Cameras.
 
-RenderCamera RenderCamera::atAspect(double newAspect) const {
-    RenderCamera camera = *this;
-    if (newAspect <= 0.0) return camera;
-    camera.aspect = newAspect;
-    if (prim.IsEmpty()) {
-        camera.fovX = scaledFov(fovY, newAspect);
-    } else {
-        camera.fovY = scaledFov(fovX, 1.0 / newAspect);
-    }
-    return camera;
-}
-
 RenderCamera viewportRenderCamera(const ViewportViewPanel& viewport) {
     const PXR_NS::GfFrustum frustum = viewport.hydraWindow()->frustum();
     RenderCamera camera;
@@ -109,27 +89,6 @@ RenderCamera viewportRenderCamera(const ViewportViewPanel& viewport) {
         camera.orthoWidth = window.GetSize()[0];
     }
     return camera;
-}
-
-std::optional<RenderCamera> primRenderCamera(const PXR_NS::UsdPrim& prim, double aspect) {
-    const PXR_NS::UsdGeomCamera usdCamera(prim);
-    if (!usdCamera) return std::nullopt;
-    const PXR_NS::GfCamera gfCamera = usdCamera.GetCamera(PXR_NS::UsdTimeCode::Default());
-    RenderCamera camera;
-    camera.prim = prim.GetPath();
-    camera.cameraToWorld = gfCamera.GetTransform();
-    camera.fovX = gfCamera.GetFieldOfView(PXR_NS::GfCamera::FOVHorizontal);
-    camera.nearClip = gfCamera.GetClippingRange().GetMin();
-    camera.farClip = gfCamera.GetClippingRange().GetMax();
-    if (gfCamera.GetProjection() == PXR_NS::GfCamera::Orthographic) {
-        camera.orthographic = true;
-        camera.orthoWidth = gfCamera.GetHorizontalAperture() * PXR_NS::GfCamera::APERTURE_UNIT;
-    }
-    // As its aperture frames it, then at the image's aspect ratio.
-    const double apertureAspect = gfCamera.GetAspectRatio();
-    camera.aspect = apertureAspect > 0.0 ? apertureAspect : 1.0;
-    camera.fovY = scaledFov(camera.fovX, 1.0 / camera.aspect);
-    return camera.atAspect(aspect);
 }
 
 std::vector<PXR_NS::SdfPath> cameraPrims(const StageRefPtr& stage) {

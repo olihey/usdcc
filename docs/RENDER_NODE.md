@@ -11,8 +11,10 @@ manager. It renders final frames ([FINAL_RENDER.md](FINAL_RENDER.md)) in one of 
 - **A queue server:** it takes jobs from artists, keeps them when the artist's instance closes,
   hands their tasks to nodes and writes the frames (§4.4).
 
-**Status:** planned 2026-11-21; the queue server added the same day. Nothing built. "Checked" below means looked at in this
-repository; everything else is an assumption until it's tried.
+**Status:** planned 2026-11-21; the queue server added the same day. Phases 1 to 4 built 2026-11-21
+(§7): the shared startup, `usdcc_render`, `usdcc_node render`, `renderers` and `serve`, and the
+OpenGL check for Storm. Not built: the service, the queue server and its page. "Checked" below
+means looked at in this repository; everything else is an assumption until it's tried.
 
 ## 1. Decisions
 
@@ -70,8 +72,8 @@ repository; everything else is an assumption until it's tried.
 
 ### 3.1 Starting up, shared
 
-`usdcc_app_core` (a static library, or a source file both executables build), with what
-`main.cpp` does before it makes the window:
+`usdcc_app_core`, a static library in `src/cpp/app/` (`startup.h`), with what `main.cpp` does
+before it makes the window:
 
 - the test profile (`USDCC_TEST_PROFILE`) and the application name;
 - settings, the log and its file;
@@ -81,6 +83,12 @@ repository; everything else is an assumption until it's tried.
 - the `Peers` object, without its panel.
 
 Each step is a function. `main.cpp` calls them, then builds the window as it does now.
+
+*As built:* `configureLogLevels()`, `setDefaultSurfaceFormat()`, `applyTestProfile()`,
+`openLogFile()`, `installSettings()` (usdcc.ini, Settings > USD's environment, the OCIO config,
+the Python and plugins settings), `pluginFolders()`, `configurePluginUsd()` (the schema
+libraries, Settings > Assets), `registerRenderers()` and `peersOptions()`. The theme, sessions,
+updates and the viewports' settings stay in `main.cpp`: the node has none of them.
 
 ### 3.2 The render library
 
@@ -92,7 +100,14 @@ Each step is a function. `main.cpp` calls them, then builds the window as it doe
 - **`usdcc_usd_ui` links it** and keeps the menu and the two panels.
 - **The plugin SDK** links it too, for `Host::addFinalRenderer()`.
 - **A helper from `usdcc_usd_ui`** that the moved files use, if any, moves with them or behind
-  an interface. *To check* when moving.
+  an interface. *As built:* `RenderCamera` and `primRenderCamera()` moved out of
+  `render_view_panel.h` into `usdcc/usd/render_camera.h`, in `usdcc_render`; the panel keeps
+  `viewportRenderCamera()` and `cameraPrims()`. The moved headers export with
+  `USDCC_RENDER_API`.
+- **The node still loads `usdcc_usd_ui`,** through the plugin manager (`usdcc_scripting_app`),
+  which plugins' renderers need. It makes no widget: plugins get a `Host` without a window, and
+  view panel types go into a registry that never makes one. Splitting the plugin manager from
+  the app's UI is for later.
 
 ### 3.3 The executable
 
@@ -132,6 +147,10 @@ usdcc_node render shot.usda [--settings /Render/Settings] [--frames 1-24[x2]]
   to read.
 - **Exit codes:** 0 every frame written; 1 the job failed (the reason on stderr); 2 bad
   arguments, or the stage, settings or renderer can't be used; 130 cancelled.
+- *As built:* the overrides go into the stage's session layer, which the job's snapshot flattens
+  in and nothing saves; settings without a RenderSettings prim get one there, aimed at the
+  stage's first camera, and settings that name no camera get the stage's first. A relative
+  `--output` is under the working folder. `--json` lines: `job`, `task`, `file`, `end`.
 - **`usdcc_node renderers`** lists the renderers and why one can't render here
   (`setupProblem()`), so a farm can check a machine before it sends work.
 
@@ -162,6 +181,12 @@ usdcc_node serve --join "usdcc://join/...#k=...&s=..." [--join ...]
   across jobs, so a shot's textures arrive once. Over `--inbox-limit` the oldest bundles not in
   use are removed. (The inbox's limit is in PEERS.md §11's list of settings, not built.)
 - **`--config node.json`** holds the same as the arguments, for a service. Arguments win.
+  *Not built yet:* with the service (phase 5). Nor is `--inbox-limit`.
+- *As built:* the key file is a secret key's 64 bytes, as `identity.key`; it's made, readable
+  by its owner only, when it doesn't exist. `--trust` takes a whole fingerprint or its first
+  eight (`abcd-efgh`). Ctrl+C or the console closing closes the rooms, so submitters put the
+  node's tasks back at once; a node that's killed is noticed when the room gives up on it
+  (PEERS.md's reconnect grace, 30 s).
 
 ### 4.4 A queue server
 
@@ -332,7 +357,9 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 
 - **Storm is only offered when it works.** At start the node makes a `QOpenGLContext` and reads
   its version and vendor. Below 4.5, or Microsoft's GDI renderer: Storm's `setupProblem()` says
-  why, and it isn't advertised. `usdcc_node renderers` shows it.
+  why, and it isn't advertised. `usdcc_node renderers` shows it. *As built:* `probeOpenGl()`,
+  `stormOpenGlProblem()` and `setStormProblem()` in `hydra_final_renderer.h`; only the node sets
+  the problem, so the app offers Storm as before. With `--no-gpu` there's no context at all.
 - **Qt's `offscreen` platform plugin has no OpenGL on Windows.** The node uses `windows`, which
   needs no monitor, only a desktop. On Linux, `offscreen` or `eglfs` with EGL; to be chosen when
   Linux is tried.
@@ -347,7 +374,16 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
   config. Its log goes to the profile's log folder and the Event Log for start, stop and errors.
   `service install --queue --config queue.json` does the same for a queue server, which needs
   no GPU and suits a service best.
-- **Scheduled task:** for Storm (§5). An example in this page when it's built.
+- **Scheduled task:** for Storm (§5): a user that logs on by itself starts the node at log on,
+  in its session, where Storm has the GPU. For example, as that user:
+
+  ```
+  schtasks /Create /TN "usdcc render node" /SC ONLOGON /RL LIMITED ^
+           /TR "\"C:\Program Files\usdcc\bin\usdcc_node.exe\" serve --public --trust-file C:\farm\trusted.txt --key-file C:\farm\node.key"
+  ```
+
+  `usdcc_node renderers` in that session says whether Storm can render there. *Not tried* on a
+  machine without a monitor.
 - **Linux:** a systemd unit, when Linux is tried.
 - **Docker:** not planned (§9).
 - **Updates:** the node doesn't update itself. Velopack updates the folder when the app does; a
@@ -358,10 +394,10 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **1. Split** | §3.1 and §3.2: starting up shared, `usdcc_render` out of `usdcc_usd_ui` | The app starts, renders and renders with peers as before; every test passes |
-| **2. One render** | `usdcc_node` (§3.3) with `render` and `renderers` (§4.1) | A test runs `usdcc_node render` on a test stage with Embree, 3 frames in 2 × 2 tiles, and the EXRs match the app's; the exit codes for a missing stage, an unknown renderer and no camera |
-| **3. Node for peers** | `serve` (§4.2): `--join`, `--public`, trust, `--key-file`, the inbox, Ctrl+C | A test like `render_network_packaged`, with the node as a process: an app instance in the test hands it frames, untrusted is declined, killing the node puts its task back |
-| **4. Storm headless** | The OpenGL check of §5, the scheduled task | On a machine with no monitor, Storm renders a frame in a logged-on session, and is not offered as a service |
+| **1. Split** *(built)* | §3.1 and §3.2: starting up shared, `usdcc_render` out of `usdcc_usd_ui` | The app starts, renders and renders with peers as before; every test passes |
+| **2. One render** *(built)* | `usdcc_node` (§3.3) with `render` and `renderers` (§4.1) | A test runs `usdcc_node render` on a test stage with Embree, 3 frames in 2 × 2 tiles, and the EXRs match the app's; the exit codes for a missing stage, an unknown renderer and no camera (`node_process_render`) |
+| **3. Node for peers** *(built)* | `serve` (§4.2): `--join`, `--public`, trust, `--key-file`, the inbox, Ctrl+C | A test like `render_network_packaged`, with the node as a process: an app instance in the test hands it frames, untrusted is declined, killing the node puts its task back (`node_process_serve`) |
+| **4. Storm headless** *(built, not tried headless)* | The OpenGL check of §5, the scheduled task | On a machine with no monitor, Storm renders a frame in a logged-on session, and is not offered as a service |
 | **5. Service** | `service install`/`remove`, the Event Log | A service on another machine takes frames from an artist's instance across the network |
 | **6. Queue: submitting** | `usdcc_node queue` (§4.4): its room, `submit`, `queued`/`refused`, the queue's scheduler handing tasks to nodes, the frames written under `--output-root`, *Queue* in Render on | A test: an artist's instance submits 3 frames in 2 × 2 tiles to a queue process and closes; two node processes render them; the EXRs under the root match the app's. An artist not accepted is refused |
 | **7. Queue: restarts** | `--state`: jobs, scenes and half-done frames saved and read back; frames fetched by the artist when there's no `--output-root` | The test kills the queue mid-job and starts it again: the job finishes, finished frames aren't rendered again |

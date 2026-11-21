@@ -8,7 +8,7 @@
 #include "usdcc/usd/render/final_renderer.h"
 #include "usdcc/usd/render/render_bundle.h"
 #include "usdcc/usd/render/render_spec.h"
-#include "usdcc/usd/render_view_panel.h"
+#include "usdcc/usd/render_camera.h"
 
 #include <pxr/usd/usd/stage.h>
 
@@ -20,7 +20,7 @@
 
 namespace usdcc::render {
 
-struct USDCC_USD_UI_API JobTask {
+struct USDCC_RENDER_API JobTask {
     enum class Status { Pending, Running, Done, Failed, Cancelled };
 
     RenderTask task;
@@ -35,7 +35,7 @@ struct USDCC_USD_UI_API JobTask {
     std::string error;
 };
 
-struct USDCC_USD_UI_API RenderJob {
+struct USDCC_RENDER_API RenderJob {
     enum class Status { Queued, Running, Done, Failed, Cancelled };
 
     std::string id;
@@ -63,7 +63,7 @@ struct USDCC_USD_UI_API RenderJob {
 
 using RenderJobPtr = std::shared_ptr<RenderJob>;
 
-struct USDCC_USD_UI_API JobRequest {
+struct USDCC_RENDER_API JobRequest {
     PXR_NS::UsdStageRefPtr stage;
     PXR_NS::SdfPath settings;  // empty: the stage's default RenderSettings, else defaults
     // Which frames: the stage's current time, or the prim's frame range (the stage's when it
@@ -79,17 +79,17 @@ struct USDCC_USD_UI_API JobRequest {
 };
 
 // The job, or null with `error` saying why (no renderer, no camera, the renderer can't render here).
-USDCC_USD_UI_API RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error);
+USDCC_RENDER_API RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error);
 
 // The regions of a `tilesX` × `tilesY` grid over an image, each grown by `overlap` pixels on
 // the sides that touch another tile (and clipped to the image); `cores` gets the tiles without it.
-USDCC_USD_UI_API std::vector<PixelRect> tileRegions(int width, int height, int tilesX, int tilesY, int overlap,
+USDCC_RENDER_API std::vector<PixelRect> tileRegions(int width, int height, int tilesX, int tilesY, int overlap,
                                                     std::vector<PixelRect>* cores);
 
 // The file a frame of a product (and, for PNG, an AOV) goes to (docs/FINAL_RENDER.md §4.3).
-USDCC_USD_UI_API std::string outputPath(const RenderJob& job, const ProductSpec& product, const std::string& aov,
+USDCC_RENDER_API std::string outputPath(const RenderJob& job, const ProductSpec& product, const std::string& aov,
                                         double frame);
 // What the frame part of a name is: 4 digits, or 4 digits and a fraction for a fractional frame.
-USDCC_USD_UI_API std::string frameText(double frame);
+USDCC_RENDER_API std::string frameText(double frame);
 
 }  // namespace usdcc::render
