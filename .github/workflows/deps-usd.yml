@@ -2,7 +2,7 @@
 # prerelease asset, which usdcc's CI downloads and plugin authors build against
 # (docs/CI.md). Slow (hours), so it only runs when the pin changes or by hand,
 # and each job skips the build when its asset for the current pin already
-# exists. One zip per platform (win64, linux-x64), in the same release.
+# exists. One zip per platform (win64, linux-x64, linux-arm64), in the same release.
 name: OpenUSD
 
 on:
@@ -169,6 +169,7 @@ jobs:
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
+          - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
 
           Includes the licences of OpenUSD's dependencies in ``licenses/``.
@@ -187,7 +188,7 @@ jobs:
               --prerelease --target $env:GITHUB_SHA `
               --title 'OpenUSD ${{ steps.asset.outputs.base }}' --notes $notes
             if ($LASTEXITCODE) {
-              # The linux job made the release meanwhile: add to it.
+              # A linux job made the release meanwhile: add to it.
               gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
               if (-not $LASTEXITCODE) { gh release edit '${{ steps.asset.outputs.tag }}' --notes $notes }
             }
@@ -196,9 +197,19 @@ jobs:
 
   # The same OpenUSD for Linux, with tools/build_usd.py (the steps above, as a
   # script), against actions/setup-python's CPython, which build.yml's and
-  # release.yml's linux jobs set up at the same path.
+  # release.yml's linux jobs set up at the same path. Once per architecture:
+  # tools/_common.py names the asset linux-x64 or linux-arm64 by the machine.
   linux:
-    runs-on: ubuntu-24.04
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     defaults:
       run:
@@ -260,7 +271,7 @@ jobs:
         if: failure() && steps.published.outputs.found != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: build_usd-log-linux
+          name: build_usd-log-linux-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/b/src/log.txt
             ${{ runner.temp }}/b/build/**/log.txt

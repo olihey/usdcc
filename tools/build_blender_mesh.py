@@ -238,7 +238,8 @@ def main(argv=None):
     if sys.platform == "win32":
         command += ["-G", "Visual Studio 17 2022", "-A", "x64"]
     else:
-        command += ["-DVCPKG_TARGET_TRIPLET=x64-linux-dynamic"]
+        arm = platform.machine().lower() in ("arm64", "aarch64")
+        command += [f"-DVCPKG_TARGET_TRIPLET={'arm64' if arm else 'x64'}-linux-dynamic"]
     run(command)
     if args.configure_only:
         return

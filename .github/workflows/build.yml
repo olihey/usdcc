@@ -1,4 +1,4 @@
-# Builds usdcc on Windows and Linux against the prebuilt OpenUSD that
+# Builds usdcc on Windows and Linux (x64 and arm64) against the prebuilt OpenUSD that
 # deps-usd.yml publishes, and runs the tests (docs/CI.md §4): for a pull
 # request, whose merge it gates, and for each push to master. vcpkg's packages
 # (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
@@ -24,8 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Both jobs are master's required checks: a pull request is merged, by GitHub's
-  # auto-merge, once they pass, and stays open when one fails (docs/RELEASE.md
+  # windows and linux (x64) are master's required checks, linux-arm64 isn't: a
+  # pull request is merged, by GitHub's auto-merge, once they pass, and stays open when one fails (docs/RELEASE.md
   # §8). A job that is renamed has to be renamed in master's protection too.
   windows:
     # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
@@ -207,8 +207,20 @@ jobs:
   # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). No PySide6 yet
   # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
   # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
+  # Twice: x64, whose check keeps the name linux (master's required check), and
+  # arm64 on GitHub's Arm runner, checked as linux-arm64, which isn't required.
+  # tools/_common.py picks the vcpkg triplet and the OpenUSD asset by the machine.
   linux:
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -298,15 +310,16 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: 1
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --test-dir build --verbose --timeout 900
 
+      # x64 only: deps/blender-linux-distribution.json locks a linux-x86_64 package.
       - name: Blender distribution candidate checks
-        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: matrix.name == 'linux' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         run: |
           python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
           python tools/ci/blender_mesh_smoke_test.py --deploy build/blender-candidate
           python tools/benchmark_blender_mesh.py
 
       - name: Blender verification reports
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: always() && matrix.name == 'linux' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         uses: actions/upload-artifact@v4
         with:
           name: blender-verification-linux
@@ -318,8 +331,8 @@ jobs:
 
       # As the windows job's: after a successful build, drops the packages it
       # didn't use; each installed package's vcpkg_abi_info.txt hashes to its zip's name.
-      # Every triplet counts: Qt's host tools are built for x64-linux, beside
-      # x64-linux-dynamic, and the Blender mesh backend has an install tree of its own.
+      # Every triplet counts: Qt's host tools are built for x64-linux (arm64-linux),
+      # beside the dynamic triplet, and the Blender mesh backend has an install tree of its own.
       - name: Prune the vcpkg cache
         id: vcpkg-prune
         if: always() && steps.vcpkg.outputs.key != ''
@@ -350,7 +363,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vcpkg-logs-linux
+          name: vcpkg-logs-${{ matrix.name }}
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log

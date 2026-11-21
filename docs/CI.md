@@ -319,8 +319,8 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 7. Later
 
-- **macOS and Linux arm64.** Hosted `macos-latest` and `ubuntu-24.04-arm`, each with its
-  own OpenUSD asset, as the Linux x64 one (§8). Still Windows only: `tools/build_pyside.py`,
+- **macOS.** Hosted `macos-latest`, with its own OpenUSD asset, as the Linux ones (§8).
+  Still Windows only: `tools/build_pyside.py`,
   so Linux has no PySide6 (no `usdcc.ui`, no Python-made panels, no V-Ray Render).
 
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
@@ -355,6 +355,13 @@ has how Linux was brought up, in WSL 2):
   which it requires), moves usdcc's debug info out with
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
   `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
+
+**arm64.** `deps-usd.yml`'s and `build.yml`'s `linux` jobs also run on GitHub's
+`ubuntu-24.04-arm` runner. `tools/_common.py` picks `arm64-linux-dynamic` and names the
+OpenUSD asset `linux-arm64` there, so nothing else changes. Its `build.yml` check is
+`linux-arm64`, not one of master's required checks; the x64 one keeps the name `linux`.
+No USD plugin packs are built for it yet (their pins list `linux-x64`), so it builds
+without them, and `release.yml` has no arm64 job yet.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.
