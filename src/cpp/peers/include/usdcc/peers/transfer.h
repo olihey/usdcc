@@ -78,6 +78,32 @@ USDCC_PEERS_API bool isSafeTransferPath(const QString& path, QString* why = null
 
 class TransferInbox;
 
+// How a transfer is sent (Transfer::Options). Outside the class, as GCC won't take a
+// nested struct with member initializers as a default argument of its own class.
+struct USDCC_PEERS_API TransferOptions {
+    qint64 chunkBytes = 1024 * 1024;       // One piece; at most Transfer::kMaxChunkBytes
+    qint64 windowBytes = 4 * 1024 * 1024;  // Sent but not yet acknowledged
+    qint64 queueBytes = 2 * 1024 * 1024;   // Waiting in this side's send queue (Room::queuedBytes())
+    // Pieces a second, from every transfer of this room together: half the room's
+    // usual limit (Limits::messagesPerSecond), so the rest of the room still fits.
+    double messagesPerSecond = 100;
+    // Nothing heard from the receiver this long: offer again, which also resumes.
+    int stallMs = 5000;
+    int giveUpMs = 120000;  // Nothing heard this long: failed
+};
+
+// What an inbox takes (TransferInbox::Options).
+struct USDCC_PEERS_API TransferInboxOptions {
+    QString directory;  // Empty: <AppLocalData>/peers/inbox
+    qint64 maxTransferBytes = qint64(64) * 1024 * 1024 * 1024;
+    int maxFiles = 100000;
+    // Asked about each offer that fits the limits; empty: every one is accepted.
+    std::function<bool(const Peer& from, const TransferManifest& manifest)> accept;
+    int ackIntervalMs = 20;  // Acknowledgements are gathered this long
+    // Nothing heard from the sender this long: failed (what arrived is kept).
+    int giveUpMs = 120000;
+};
+
 // One transfer, either way: Transfer::send() makes an outgoing one, a TransferInbox the
 // incoming ones. It ends finished() or failed(), and is deleted with its parent.
 class USDCC_PEERS_API Transfer : public QObject {
@@ -95,17 +121,7 @@ public:
         Cancelled,  // Either end cancelled it
     };
 
-    struct Options {
-        qint64 chunkBytes = kMaxChunkBytes;    // One piece; at most kMaxChunkBytes
-        qint64 windowBytes = 4 * 1024 * 1024;  // Sent but not yet acknowledged
-        qint64 queueBytes = 2 * 1024 * 1024;   // Waiting in this side's send queue (Room::queuedBytes())
-        // Pieces a second, from every transfer of this room together: half the room's
-        // usual limit (Limits::messagesPerSecond), so the rest of the room still fits.
-        double messagesPerSecond = 100;
-        // Nothing heard from the receiver this long: offer again, which also resumes.
-        int stallMs = 5000;
-        int giveUpMs = 120000;  // Nothing heard this long: failed
-    };
+    using Options = TransferOptions;
 
     ~Transfer() override;
 
@@ -157,16 +173,7 @@ class USDCC_PEERS_API TransferInbox : public QObject {
     Q_OBJECT
 
 public:
-    struct Options {
-        QString directory;  // Empty: <AppLocalData>/peers/inbox
-        qint64 maxTransferBytes = qint64(64) * 1024 * 1024 * 1024;
-        int maxFiles = 100000;
-        // Asked about each offer that fits the limits; empty: every one is accepted.
-        std::function<bool(const Peer& from, const TransferManifest& manifest)> accept;
-        int ackIntervalMs = 20;  // Acknowledgements are gathered this long
-        // Nothing heard from the sender this long: failed (what arrived is kept).
-        int giveUpMs = 120000;
-    };
+    using Options = TransferInboxOptions;
 
     // Opens `channel` (Direct, if it isn't open yet) and listens on it.
     TransferInbox(Room* room, const QString& channel = QStringLiteral("transfer"), Options options = {},
