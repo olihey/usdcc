@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -155,6 +156,41 @@ USDCC_TEST(physics_bake_keeps_every_frame) {
 
     undo.stack(stage)->undo();
     CHECK(GfIsClose(world(usd, "/Crate", 20).ExtractTranslation(), GfVec3d(0, 3, 0), 1e-9), "undone: as authored again");
+}
+
+// Baked through the keying code (anim::setSamples()): into a sublayer that starts 10 frames
+// later, the frames still land where they were simulated, in stage time.
+USDCC_TEST(physics_bake_into_an_offset_sublayer) {
+    WithJolt jolt;
+    StageManager stages;
+    const StageRefPtr stage = stages.createStage();
+    const UsdStageRefPtr& usd = stage->usdStage();
+    const SdfLayerRefPtr shot = SdfLayer::CreateAnonymous("shot.usda");
+    usd->GetRootLayer()->InsertSubLayerPath(shot->GetIdentifier());
+    usd->GetRootLayer()->SetSubLayerOffset(SdfLayerOffset(10.0), 0);
+    usd->SetEditTarget(usd->GetEditTargetForLocalLayer(shot));
+    ground(usd);
+    box(usd, "/Crate", GfVec3d(0, 3, 0));
+    stage->setPlaybackRange({1.0, 20.0});
+
+    PhysicsSession& session = stage->physics();
+    CHECK(session.start(1.0) && session.stepTo(20.0), "twenty frames simulated");
+    std::vector<GfMatrix4d> simulated;
+    for (int f = 1; f <= 20; ++f) simulated.push_back(world(usd, "/Crate", f));
+
+    UndoManager undo;
+    const BakeResult result = physics_actions::bakeSimulation(undo, stage, {});
+    CHECK(result.baked.size() == 1 && result.reports.empty(), "baked into the sublayer, nothing reported");
+    const std::set<double> layerTimes = shot->ListTimeSamplesForPath(SdfPath("/Crate.xformOp:translate:sim"));
+    CHECK(!layerTimes.empty() && GfIsClose(*layerTimes.begin(), -9.0, 1e-9),
+          "the sublayer holds them at its own times, stage frame 1 at -9: %g", layerTimes.empty() ? 0.0 : *layerTimes.begin());
+    double worst = 0.0;
+    for (int f = 1; f <= 20; ++f) {
+        const GfMatrix4d baked = world(usd, "/Crate", f);
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c) worst = std::max(worst, std::abs(baked[r][c] - simulated[f - 1][r][c]));
+    }
+    CHECK(worst < 1e-4, "every frame where it was simulated (worst %.2g)", worst);
 }
 
 // Phase 3: baking the selection leaves the rest; marking kinematic; a stale cache is solved
