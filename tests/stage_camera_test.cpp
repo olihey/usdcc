@@ -396,3 +396,11 @@ USDCC_TEST(viewport_gate_math) {
     CHECK(std::abs(px - (tall.x + tall.width)) < 1e-3 && std::abs(py - tall.y) < 1e-3,
           "the gate's corner in the widened view: %g %g (gate %g %g)", px, py, tall.x + tall.width, tall.y);
 }
+
+// Render scale (docs/VIEWPORT_CAMERA.md §5): the size Hydra renders at.
+USDCC_TEST(viewport_render_scale_size) {
+    CHECK(scaledBufferSize(1920, 1080, 100) == std::make_pair(1920, 1080), "100 %: as it is");
+    CHECK(scaledBufferSize(1920, 1080, 50) == std::make_pair(960, 540), "50 %: half each way");
+    CHECK(scaledBufferSize(1001, 333, 25) == std::make_pair(250, 83), "25 %, rounded");
+    CHECK(scaledBufferSize(2, 2, 25) == std::make_pair(1, 1), "never less than a pixel");
+}

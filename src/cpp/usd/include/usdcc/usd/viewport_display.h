@@ -50,6 +50,7 @@ inline constexpr const char* kViewportSafeTitleKey = "Viewport/safeTitle";
 inline constexpr const char* kViewportSafeTitlePercentKey = "Viewport/safeTitlePercent";
 inline constexpr const char* kViewportSafeCenterKey = "Viewport/safeCenter";
 inline constexpr const char* kViewportSafeAspectKey = "Viewport/safeAspect";
+inline constexpr const char* kViewportRenderScaleKey = "Viewport/renderScale";
 
 // Whether `key` is one of the settings above: a viewport follows them as they change.
 bool isViewportDisplayKey(const std::string& key);
@@ -131,6 +132,7 @@ struct ViewportDisplayOverrides {
     std::optional<double> safeTitlePercent;
     std::optional<bool> safeCenter;
     std::optional<double> safeAspect;
+    std::optional<int> renderScale;  // 100, 75, 50 or 25
 
     bool isEmpty() const { return *this == ViewportDisplayOverrides{}; }
     bool operator==(const ViewportDisplayOverrides&) const = default;
@@ -147,7 +149,8 @@ struct ViewportDisplayOverrides {
     //  "hudAxes", "hudStats", "hudPerformance", "hudToolReadout", "hudRollover", "showColliders",
     //  "colorView": the OCIO view's name, "resolution": "fill"/"renderSettings"/"WxH",
     //  "gateMaskOpacity": 0-1, "safeAction", "safeTitle", "safeCenter": bools,
-    //  "safeActionPercent", "safeTitlePercent": 1-100, "safeAspect": 0 or more}.
+    //  "safeActionPercent", "safeTitlePercent": 1-100, "safeAspect": 0 or more,
+    //  "renderScale": 100, 75, 50 or 25}.
     QJsonObject toJson() const;
     // Ignores what doesn't fit: a size or step that isn't positive, a color that isn't one,
     // a style, shading or complexity that isn't one, a width outside 1-8, a switch that

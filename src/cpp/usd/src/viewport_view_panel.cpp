@@ -1745,6 +1745,20 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
             if (ok && wanted) edit([wanted](ViewportDisplayOverrides& o) { o.resolution = resolutionName(*wanted); });
         });
     }
+    // Render scale (§5).
+    QMenu* scaleMenu = menu->addMenu(tr("Render Scale"));
+    scaleMenu->setObjectName(QStringLiteral("renderScaleMenu"));
+    auto* scales = new QActionGroup(scaleMenu);
+    for (const int scale : kRenderScales) {
+        QAction* action = scaleMenu->addAction(QStringLiteral("%1 %").arg(scale));
+        action->setObjectName(QStringLiteral("renderScale_%1").arg(scale));
+        action->setCheckable(true);
+        action->setChecked(shown.renderScale == scale);
+        scales->addAction(action);
+        connect(action, &QAction::triggered, this, [edit, scale]() {
+            edit([scale](ViewportDisplayOverrides& o) { o.renderScale = scale; });
+        });
+    }
     QMenu* safeMenu = menu->addMenu(tr("Safe Frames"));
     safeMenu->setObjectName(QStringLiteral("safeFramesMenu"));
     const auto addSafe = [&](const QString& text, bool on, std::optional<bool> ViewportDisplayOverrides::*field) {

@@ -269,6 +269,9 @@ public:
         double safeTitlePercent = 90.0;
         bool safeCenter = false;
         double safeAspect = 0.0;
+        // Render scale (§5): Hydra renders at this percentage of the device pixels (100, 75,
+        // 50 or 25), scaled up, and the grid, outline and gizmos are drawn at full size.
+        int renderScale = 100;
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -512,6 +515,10 @@ private:
     RendererSettingValues m_rendererSettings;
     // What Storm and the gizmo draw into; copied to the window each frame.
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
+    // What Hydra renders into at a render scale below 100 %: then scaled up into m_framebuffer.
+    std::unique_ptr<QOpenGLFramebufferObject> m_scaledFramebuffer;
+    // The framebuffer Hydra renders into this frame: m_framebuffer, or the scaled one.
+    QOpenGLFramebufferObject* bindHydraFramebuffer(int width, int height);
     PXR_NS::UsdStageRefPtr m_stage;
     PXR_NS::UsdTimeCode m_time = PXR_NS::UsdTimeCode::Default();
 
