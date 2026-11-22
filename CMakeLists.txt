@@ -226,7 +226,9 @@ add_custom_target(
 add_compile_definitions(QT_NO_KEYWORDS)
 
 # What a C++ plugin has to have been built with (docs/PLUGINS.md §3.2).
-if(WIN32)
+if(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(USDCC_BUILT_FOR_PLATFORM "windows-arm64")
+elseif(WIN32)
     set(USDCC_BUILT_FOR_PLATFORM "windows-x64")
 elseif(APPLE)
     set(USDCC_BUILT_FOR_PLATFORM "macos-${CMAKE_SYSTEM_PROCESSOR}")

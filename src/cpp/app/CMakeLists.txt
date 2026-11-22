@@ -148,12 +148,18 @@ if(WIN32)
     #   without one Qt Network warns "No functional TLS backend was found", and wss://
     #   to a relay (docs/PEERS.md §13) can't work.
     set(_usdcc_qt_bin "$<TARGET_FILE_DIR:Qt6::Core>")
+    # OpenSSL's DLL names the architecture: libcrypto-3-x64.dll, libcrypto-3-arm64.dll.
+    if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+        set(_usdcc_libcrypto "libcrypto-3-arm64.dll")
+    else()
+        set(_usdcc_libcrypto "libcrypto-3-x64.dll")
+    endif()
     add_custom_command(
         TARGET usdcc
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE:Qt6::HttpServer>"
-            "${_usdcc_qt_bin}/Qt6Concurrent.dll" "${_usdcc_qt_bin}/libcrypto-3-x64.dll" "${_usdcc_qt_bin}/jpeg62.dll"
+            "${_usdcc_qt_bin}/Qt6Concurrent.dll" "${_usdcc_qt_bin}/${_usdcc_libcrypto}" "${_usdcc_qt_bin}/jpeg62.dll"
             "$<TARGET_FILE_DIR:usdcc>/"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/imageformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
