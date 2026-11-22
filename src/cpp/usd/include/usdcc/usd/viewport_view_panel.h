@@ -97,6 +97,9 @@ public:
     ~ViewportViewPanel() override;
 
     HydraViewportWindow* hydraWindow() const { return m_viewport; }
+    // Through a stage camera, what a drag does (docs/VIEWPORT_CAMERA.md §2): "detach", "drive"
+    // or "locked". This viewport's own choice, over Settings' default.
+    void setCameraNavigation(const std::string& mode);
 
     // A border in `color` around the 3D view, to set this viewport apart: a broadcast
     // marks the one it sends (docs/VIEWPORT_BROADCAST.md §2.1). The view shrinks by the
@@ -310,6 +313,7 @@ private:
     QString m_pendingFit;
     std::shared_ptr<usdcc::tools::ToolSet> m_toolSet;
     std::shared_ptr<UndoManager> m_undoManager;
+    std::string m_driveProblem;  // why the drive in progress can't show; empty while it can
     StageRefPtr m_toolEditStage;  // the stage a gizmo drag's undo session was opened on
     ViewportDisplayOverrides m_displayOverrides;
     QPointer<QDialog> m_displayDialog;

@@ -800,6 +800,47 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     connect(m_viewport, &HydraViewportWindow::stageCameraChanged, this, [this]() {
         if (activeViewport() == this) activeViewportChanged()();
     });
+    // Drive (docs/VIEWPORT_CAMERA.md §2.2): each drag one undo step at the edit target; the
+    // camera set to the orbit camera as it moves; a stronger layer that hides it ends it.
+    connect(m_viewport, &HydraViewportWindow::driveStarted, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (stage && m_undoManager) {
+            m_undoManager->beginEdit(stage, tr("Move %1").arg(QString::fromStdString(m_viewport->stageCamera().GetName())));
+        }
+        m_driveProblem.clear();
+    });
+    connect(m_viewport, &HydraViewportWindow::driveMoved, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (!stage || !m_driveProblem.empty()) return;
+        const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(m_viewport->stageCamera());
+        const PXR_NS::UsdTimeCode time = stage->timeCode();
+        const std::optional<PXR_NS::GfCamera> camera = stageCameraAt(prim, time);
+        if (!camera) return;
+        m_driveProblem = setCameraFromView(prim, m_viewport->orbitViewAsCamera(*camera), time);
+    });
+    connect(m_viewport, &HydraViewportWindow::driveFinished, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (stage && m_undoManager && m_undoManager->isEditing(stage)) {
+            if (m_driveProblem.empty()) {
+                m_undoManager->endEdit(stage);
+            } else {
+                m_undoManager->cancelEdit(stage);  // it wouldn't show: as it was
+            }
+        }
+        if (!m_driveProblem.empty()) {
+            const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning,
+                                                  .title = "Can't drive " + m_viewport->stageCamera().GetName()};
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "{}", m_driveProblem);
+            m_driveProblem.clear();
+        }
+    });
+    connect(m_viewport, &HydraViewportWindow::navigationRefused, this, [this](const QString& why, bool locked) {
+        const usdcc::core::ToastRequest toast{
+            .kind = locked ? usdcc::core::ToastKind::Info : usdcc::core::ToastKind::Warning,
+            .title = locked ? std::string("Camera locked") : "Can't drive " + m_viewport->stageCamera().GetName()};
+        USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Info, "usdcc.viewport", toast, "{}",
+                           locked ? why.toStdString() : why.toStdString() + " Left it for the viewport's own camera instead.");
+    });
     connect(m_viewport, &HydraViewportWindow::stageCameraLost, this, [](const PXR_NS::SdfPath& path) {
         const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Camera gone"};
         USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast,
@@ -937,15 +978,8 @@ bool ViewportViewPanel::backToCamera() {
 }
 
 PXR_NS::GfCamera ViewportViewPanel::viewAsCamera(const PXR_NS::GfCamera& like) const {
-    const HydraViewportWindow::CameraState state = m_viewport->cameraState();
-    const PXR_NS::GfFrustum frustum = m_viewport->frustum();
-    const PXR_NS::GfVec2d window = frustum.GetWindow().GetSize();
-    OrbitView view;
-    view.cameraToWorld = frustum.ComputeViewInverse();
-    view.orthographic = state.orthographic;
-    view.fovY = m_viewport->fieldOfView();
-    view.orthoSize = state.orthoSize;
-    return cameraSeeingView(like, view, window[1] > 0.0 ? window[0] / window[1] : 1.0);
+    // What the orbit camera sees in the gate (docs/VIEWPORT_CAMERA.md §4), not the overscan around it.
+    return m_viewport->orbitViewAsCamera(like);
 }
 
 bool ViewportViewPanel::copyViewToCamera() {
@@ -1615,6 +1649,24 @@ void ViewportViewPanel::addCameraEntries(QMenu* menu) {
         copy->setEnabled(why.empty());
         copy->setToolTip(QString::fromStdString(why));
     }
+    // What a drag does through a stage camera (§2).
+    QMenu* navigation = menu->addMenu(tr("Navigation"));
+    navigation->setObjectName(QStringLiteral("cameraNavigationMenu"));
+    navigation->setToolTipsVisible(true);
+    auto* modes = new QActionGroup(navigation);
+    const std::string mode = displayOptions().cameraNavigation;
+    for (const char* name : kCameraNavigations) {
+        QAction* action = navigation->addAction(cameraNavigationLabel(name));
+        action->setObjectName(QStringLiteral("cameraNavigation_%1").arg(QLatin1String(name)));
+        action->setCheckable(true);
+        action->setChecked(mode == name);
+        modes->addAction(action);
+        const std::string wanted = name;
+        action->setToolTip(wanted == "detach" ? tr("A drag leaves the camera for the viewport's own, where it was")
+                           : wanted == "drive" ? tr("A drag moves the camera: one undo step each")
+                                               : tr("A drag does nothing"));
+        connect(action, &QAction::triggered, this, [this, wanted]() { setCameraNavigation(wanted); });
+    }
     QAction* newCamera = menu->addAction(tr("New Camera from View"), this, [this]() { newCameraFromView(); });
     newCamera->setObjectName(QStringLiteral("newCameraFromViewAction"));
     newCamera->setEnabled(stage && !through);
@@ -1936,6 +1988,16 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     defaults->setEnabled(!m_displayOverrides.isEmpty());
 
     ViewportMenuEntries::instance().populate(menu, this);
+}
+
+void ViewportViewPanel::setCameraNavigation(const std::string& mode) {
+    if (std::find_if(std::begin(kCameraNavigations), std::end(kCameraNavigations),
+                     [&mode](const char* name) { return mode == name; }) == std::end(kCameraNavigations)) {
+        return;
+    }
+    ViewportDisplayOverrides overrides = m_displayOverrides;
+    overrides.cameraNavigation = mode;
+    setDisplayOverrides(overrides);
 }
 
 }  // namespace usdcc::usd

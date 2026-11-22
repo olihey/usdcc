@@ -108,6 +108,11 @@ public:
     // Viewport (or Render Settings on a stage without them); and where the gate is in the
     // window, in logical pixels: the whole window without a resolution.
     std::optional<Resolution> gateResolution() const;
+    // `like` (its clipping, apertures' shape and the rest) set to see what the orbit camera
+    // sees in the gate: what Copy View to Camera and Drive write.
+    PXR_NS::GfCamera orbitViewAsCamera(const PXR_NS::GfCamera& like) const;
+    // Drive or Locked: done with a drag now (for a drag that ends some other way).
+    bool isDriving() const { return m_driving; }
     ViewRect gate() const;
 
     // Whether firstFrameRendered() has already fired for the current stage —
@@ -272,6 +277,9 @@ public:
         // Render scale (§5): Hydra renders at this percentage of the device pixels (100, 75,
         // 50 or 25), scaled up, and the grid, outline and gizmos are drawn at full size.
         int renderScale = 100;
+        // What a tumble, pan or dolly does through a stage camera (§2): "detach" leaves it for
+        // the orbit camera, "drive" moves it (one undo step a drag), "locked" does nothing.
+        std::string cameraNavigation = "detach";
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -337,6 +345,15 @@ public:
     void snapToAxis(HudItem item);
 
 Q_SIGNALS:
+    // Drive (docs/VIEWPORT_CAMERA.md §2.2): a drag through a stage camera began; the orbit
+    // camera moved, so the stage camera is to be set to it (orbitViewAsCamera()); the drag
+    // ended. The panel makes them one undo step.
+    void driveStarted();
+    void driveMoved();
+    void driveFinished();
+    // A drag through a stage camera did nothing (Locked), or Drive couldn't move the camera
+    // and detached instead: why.
+    void navigationRefused(const QString& why, bool locked);
     // A HUD label was clicked (Camera, Renderer, Shading, EditTarget): its menu belongs
     // under `globalPos`.
     void hudMenuRequested(usdcc::usd::HudItem item, QPoint globalPos);
@@ -492,6 +509,14 @@ private:
     // The HUD (docs/VIEWPORT_HUD.md §4): laid out, painted into m_hudImage when the layout
     // changed, and drawn as one textured quad over the default framebuffer.
     bool hudActive() const { return m_display.hud && !m_previewMode; }
+    // Where a tumble, pan, dolly or Fit to View starts (§2): false when it's to do nothing
+    // (Locked). Through a stage camera in Drive, the orbit camera takes its pose and the
+    // camera follows it (driveStarted(), driveMoved()); otherwise it detaches.
+    bool startNavigation();
+    // Ends a Drive (driveFinished()).
+    void finishNavigation();
+    bool m_driving = false;
+    bool m_navigationBlocked = false;  // a drag Locked refused: its moves do nothing
     // The gate's mask or a safe frame is drawn (docs/VIEWPORT_CAMERA.md §4, §6): the HUD's
     // pass runs for them even with the HUD off.
     bool gateOverlaysActive() const;
