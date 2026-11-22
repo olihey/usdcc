@@ -15,8 +15,9 @@ the Python module (keys, encryption, reconnecting, shared state, several rooms, 
 phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Until the
 hub of phase 3, a *public room* (anyone on the network may join, §6) stands in for the studio's
 room. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md). `usdcc.peers` for
-Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two machines haven't
-been tried; everything so far ran on one.
+Python is set aside (decided 2026-11-17), and with it 1b's last criterion. The hub is a mode of
+`usdcc_node`, not a Python program (decided 2026-11-22, §9). Two machines haven't been tried;
+everything so far ran on one.
 
 ## 1. Can it work without a server?
 
@@ -71,7 +72,8 @@ rows.
 |---|---|---|
 | `usdcc_peers` (DLL; Qt Core, Network, WebSockets, HttpServer; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, messages, shared state, transfers, the page for guests |
 | `usdcc.peers` (pybind11, like `usdcc.usd`) | Inside the app | The same for scripts and plugins (§8.2) |
-| `usdcc_peers` (pure Python: `websockets`, `PyNaCl`) | `src/python/usdcc_peers/`, installable with pip | The protocol for other programs, the hub (§9) and the relay (§5.4) |
+| `usdcc_node hub` | `src/cpp/node/` ([RENDER_NODE.md](RENDER_NODE.md)) | The studio's room that is always there, and its HTTP side for services (§9) |
+| `usdcc_peers` (pure Python: `websockets`) | `src/python/usdcc_peers/`, installable with pip | The relay (§5.4) |
 | UI | `usdcc_ui` | The Peers side panel (rooms, people, chat, notifications), toasts, Settings > Peers |
 | Stage sharing | `usdcc_usd_ui` | [SHARED_STAGE.md](SHARED_STAGE.md) |
 
@@ -133,7 +135,7 @@ runs, and joined again after a lost connection. This is how every artist is in t
 
 ### 5.4 The relay
 
-A small program in the `usdcc_peers` Python package (§9), supported and tested like the rest, not
+A small program in the `usdcc_peers` Python package (§3), supported and tested like the rest, not
 an example:
 
 ```
@@ -346,8 +348,9 @@ each thing costs the host:
   with, set per room). The people list still works: joining and leaving are ordered messages.
 - **A room per show or department,** rather than one for the whole studio. It keeps notifications
   relevant as well as cheap. A hub hosts several (§9).
-- **More than one core.** One process uses one: the hub and the relay are Python. Rooms don't depend on each other and a room's id is in its URL, so several relay or
-  hub processes run behind the proxy, which sends each room to one of them.
+- **More than one core.** One process uses one: the hub runs its rooms on one Qt event loop, and
+  the relay is Python. Rooms don't depend on each other and a room's id is in its URL, so several
+  relay or hub processes run behind the proxy, which sends each room to one of them.
 - **Bulk data is the relay's real load.** A 2 GB transfer to five peers is 10 GB through it.
   Hence the limit of bytes per second per room (§5.4), and sending a URL instead of a file when
   the files are on a server (§10.3).
@@ -439,37 +442,45 @@ def add_note(room, plugin, prim_path, text):
 
 ## 9. Other programs
 
-A render farm, an asset tracker, a CI job or a studio's own tool is a peer like any other. The
-protocol is written down (`docs/PEERS_PROTOCOL.md`, with phase 1b) and has a version.
+A render farm, an asset tracker, a CI job or a studio's own tool reaches the artists through a
+room. The protocol is written down ([PEERS_PROTOCOL.md](PEERS_PROTOCOL.md)) and has a version.
 
-**`usdcc_peers`,** a pure-Python package, speaks it with no usdcc and no Qt, with the same calls as
-§8.2 where they make sense:
-
-```python
-import usdcc_peers
-
-room = usdcc_peers.join(link, name="Render Farm", key_file="farm.key")
-room.notify("Render finished", "shot_012 · 240 frames · 1 h 12 m", kind="success", to="anna")
-room.state("farm.jobs").set("8812", {"shot": "shot_012", "progress": 1.0})
-```
-
-**The hub** is the ready-made way to give a studio one room that is always there:
+**The hub** is the ready-made way to give a studio one room that is always there. It is a mode of
+`usdcc_node` ([RENDER_NODE.md](RENDER_NODE.md)), the console program beside `usdcc.exe`:
 
 ```
-python -m usdcc_peers.hub --name "Studio" --port 47800 --http 8080 --token-file hub.token
+usdcc_node hub --host-room "Studio" --port 47800 --http 8080 --token-file hub.token
+               [--key-file hub.key] [--config hub.json]
 ```
 
 - **It hosts a room** that never closes. Artists list its link under rooms joined at start (§5.3).
-- **Or several rooms,** one per show or department, each with its own link, named in a
-  configuration file (§7.5).
-- **It takes plain HTTP** for services that can only call a webhook:
-  `POST /notify` with a token and a JSON body becomes a notification to the room, or to one person.
-- **It decides who may send.** Members read `notify`; only the hub and named services write it
-  (§6).
+- **Or several rooms,** one per show or department, each with its own link, named in `--config`
+  (§7.5).
+- **It takes plain HTTP** for services that can only call a webhook, with the token from
+  `--token-file` (made on first start if the file is missing, as `queue --web-token-file` does):
+  - `POST /notify` with a JSON body (§10.2) becomes a notification to the room, or to one person.
+  - `PUT /state/<map>/<key>` sets a key in a shared map, so a service keeps `farm.jobs` up to
+    date with nothing but `curl`.
+- **It decides who may send.** Members read `notify`; only the hub and named members write it
+  (§6). What comes in over HTTP is sent as the hub.
 - **It keeps shared state while it runs,** so a map like `farm.jobs` is there for whoever joins.
+- **It loads no USD, no plugins and no Python:** `QCoreApplication`, `usdcc_peers` and Qt
+  HttpServer, so it starts in a moment and runs on a machine with no GPU. It ships with the rest
+  of usdcc; there's nothing else to install.
+- **A render queue** ([RENDER_NODE.md](RENDER_NODE.md) §4.4) joins the hub's room by link, as a
+  member, or hosts a room of its own.
 
-Two implementations of one protocol, C++ in the app and Python outside, is a cost. They are tested
-against each other (§15).
+```
+curl -X POST http://hub:8080/notify -H "Authorization: Bearer $(cat hub.token)" \
+     -d '{"id": "farm/8812", "kind": "success", "title": "Render finished", "to": "anna"}'
+```
+
+*Decided 2026-11-22:* the hub was first planned in Python (`python -m usdcc_peers.hub`). It is
+`usdcc_node hub` instead, on the C++ `usdcc_peers` the app uses: one implementation of the
+handshake, the encryption and shared state rather than two kept in step, and `usdcc_node queue`
+already hosts a room that stays up, with a web side and a token. A service that only notifies
+needs HTTP, not a peer. **A Python peer** (a pure-Python `usdcc_peers.join(…)` for a service that
+wants its own channel) is set aside until a service needs more than the hub's HTTP side.
 
 **One machine, one usdcc:** a program that wants to drive a single running usdcc should use
 [MCP.md](MCP.md)'s endpoint instead. Peers is for many instances and for data, not for commands.
@@ -587,15 +598,16 @@ limit. ([SETTINGS.md](SETTINGS.md))
   (done in phase 1a, §14.1).
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
-- **Deploy:** `Qt6Network.dll`, `Qt6WebSockets.dll` and `usdcc_peers.dll` in `bin/`, and the
-  `usdcc_peers` Python package (hub and relay included) in the package. TLS is only needed for `wss://` to a relay,
+- **Deploy:** `Qt6Network.dll`, `Qt6WebSockets.dll` and `usdcc_peers.dll` in `bin/`, the hub
+  in `usdcc_node.exe` (already shipped), and the `usdcc_peers` Python package (the relay) in the
+  package. TLS is only needed for `wss://` to a relay,
   which also needs Qt's TLS plugin. **OpenSSL's `libcrypto-3-x64.dll` is needed from phase 1a,
   TLS or not:** Qt Network as built here links it at load time, and without it `Qt6Network.dll`
   doesn't load (*measured* in the broadcast spike, [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)
   §8). PySide6 ships a `libcrypto` of the same file name ([REMOTE_ASSETS.md](REMOTE_ASSETS.md)
   §12); both are OpenSSL 3.6.3 today (*checked*), so they don't clash yet.
 - **PySide6** needs no QtWebSockets binding: `usdcc.peers` is pybind11.
-- **The Python package** needs `websockets` and `PyNaCl` where it runs. The app doesn't use it.
+- **The Python package** needs `websockets` where it runs. The app doesn't use it.
 
 ## 14. Phases
 
@@ -605,8 +617,8 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **1a. Rooms and channels** | `usdcc_peers` with hosting and joining by address, the frame, channels and their three kinds of delivery, who may send, limits, and guests with their page (§6.1). Built for [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) phase 1, its first user; until 1b only guests join | Its tests pass on loopback: ordered messages arrive in one order on three members, a latest-only message replaces one still waiting, a slow member is dropped, a wrong secret is refused, a guest is refused a channel not opened to it |
 | **1b. The rest of the framework** | Identity, the handshake and encryption with the room key, reconnecting, shared state, several rooms, `usdcc.peers`. The protocol written down | Two peers join by address and nothing readable is on the wire; a reconnect catches up; a wrong key is refused; a map ends equal after both sides set the same key; a late joiner has the map. A test plugin shares a map from Python |
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
-| **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
-| **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
+| **3. Other programs and notifications** | `usdcc_node hub` with its HTTP side (§9), rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a `curl` to the hub shows as a toast on both, and one without the token is refused; a map set with `PUT /state` is there for a late joiner; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
+| **4. Links and the relay** | Invite links, the `usdcc_peers` Python package with `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
 | **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | See there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
@@ -832,13 +844,14 @@ The proxy that cuts a member off moved from `peers_rooms_test.cpp` to `peers_tes
   sits behind an interface with a fake, since multicast isn't dependable in CI ([CI.md](CI.md): no
   external network).
 - **Python in the app:** a test plugin opens a channel and a map, and loses them on reload.
-- **C++ against Python:** the fixture starts the Python hub on a free port, like the HTTP test
-  server ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §7); a C++ peer joins, gets a notification posted
-  over HTTP, and sees a map the hub set. This is what keeps the two implementations equal.
-- **The relay:** started by the fixture the same way.
-- **Load** (`tools/peers_load.py`, run by hand and before a release, not in CI): many Python peers
-  from one script against a hub or a relay, reporting how long delivery takes. The targets to
-  start with, to be corrected by the first measurements:
+- **The hub** (`node_process_hub`, beside RENDER_NODE.md's `node_process_*` tests): the fixture
+  starts `usdcc_node hub` on free ports; two C++ peers join, get a notification posted over HTTP,
+  and see a map set with `PUT /state`; a post without the token is refused.
+- **The relay:** the fixture starts the Python relay on a free port, like the HTTP test server
+  ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §7), and two C++ peers talk through it.
+- **Load** (`usdcc_peers_load`, a small C++ program in `tests/`, run by hand and before a release,
+  not in CI): many peers from one process against a hub or a relay, reporting how long delivery
+  takes. The targets to start with, to be corrected by the first measurements:
 
   | Case | Target |
   |---|---|
@@ -864,8 +877,8 @@ The proxy that cuts a member off moved from `peers_rooms_test.cpp` to `peers_tes
 | 5 | Is shared state kept after the room ends? | No. A plugin saves what it wants to keep; the hub keeps its maps while it runs. A hub that writes them to disk is a small later step |
 | 6 | Is chat history saved? | No |
 | 7 | Our own encryption (libsodium), or TLS between peers? | libsodium: it is the same directly and through a relay, with no certificates to trust by hand, and Python has it as `PyNaCl` |
-| 8 | A second implementation in Python, or only bindings to the C++ one? | A second one. A service shouldn't need Qt or a usdcc build to send a notification. The cost is keeping two in step, which the tests of §15 do |
-| 9 | Should the hub and the relay be one program? | No: one package, two commands. The relay can't read what it forwards; the hub is a member that can. One process doing both would blur which one a studio trusts with what |
+| 8 | A second implementation in Python, or only bindings to the C++ one? | Neither for now (changed 2026-11-22). The hub is C++ (`usdcc_node hub`), and a service reaches it over HTTP, so it needs no Qt, no usdcc build and no Python to send a notification. A Python peer only if a service needs more than that (§9) |
+| 9 | Should the hub and the relay be one program? | No: the hub is a mode of `usdcc_node`, the relay a Python program. The relay can't read what it forwards; the hub is a member that can. One process doing both would blur which one a studio trusts with what |
 | 10 | Which actions may a notification carry? | The four of §10.2. More only when a use needs one, and never one that runs code |
 | 11 | Is a guest on a plain `http://` LAN link encrypted? | Not in the first version (§6.1). The panel says so beside the link. Add the page's key exchange there too if people broadcast on networks they don't trust |
 | 12 | How large a room and how many rooms are promised? | None until measured. The targets of §15 are the aim, and §7.5 says what to do beyond them |

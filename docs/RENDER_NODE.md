@@ -10,11 +10,14 @@ manager. It renders final frames ([FINAL_RENDER.md](FINAL_RENDER.md)) in one of 
   artists' instances hand out, like an instance with **Render for peers** on (FINAL_RENDER.md §7).
 - **A queue server:** it takes jobs from artists, keeps them when the artist's instance closes,
   hands their tasks to nodes and writes the frames (§4.4).
+- **A hub:** the studio's room that is always there, with an HTTP side for services
+  ([PEERS.md](PEERS.md) §9, §4.6 here). It renders nothing.
 
 **Status:** planned 2026-11-21; the queue server added the same day. Phases 1 to 4 built 2026-11-21
 (§7): the shared startup, `usdcc_render`, `usdcc_node render`, `renderers` and `serve`, and the
 OpenGL check for Storm. Phases 6 to 9 built 2026-11-22: the queue server, its state, the app's
-side and the web page (§4.4, §4.5, "As built" there). Not built: the service (phase 5). "Checked"
+side and the web page (§4.4, §4.5, "As built" there). The hub moved here from Python 2026-11-22
+(§4.6, phase 10). Not built: the service (phase 5) and the hub (phase 10). "Checked"
 below means looked at in this repository; everything else is an assumption until it's tried.
 
 ## 1. Decisions
@@ -47,9 +50,18 @@ below means looked at in this repository; everything else is an assumption until
     node takes tasks, a queue hands them out. They're set up and deployed differently: a node on
     every farm machine, a queue once per studio or team. `queue --render` does both in one
     process, for a team with one big machine.
-  - Not in the Python hub (PEERS.md §9): the hub has no USD and no Qt, so the scheduler, the
-    tiles' stitching and the EXR writing would be written twice. The queue joins the hub's room
-    as a member, or hosts a room of its own.
+  - Not part of the hub (PEERS.md §9): the hub is for every studio, the queue only for one that
+    renders on a farm, and the hub loads no USD. The queue joins the hub's room as a member, or
+    hosts a room of its own.
+- **The hub is a mode of `usdcc_node` too** (`usdcc_node hub`, §4.6), not a Python program as
+  PEERS.md first planned (changed 2026-11-22):
+  - A Python hub would be a second implementation of the handshake, the encryption and shared
+    state, kept in step with the C++ one by tests. On `usdcc_peers` there is one.
+  - `queue --host-room` already is most of a hub: a hosted room that stays up, rejoins, keeps
+    shared state, and a web side behind a token file. The hub adds several rooms, `POST /notify`
+    and `PUT /state`, and who may send on `notify`.
+  - Services still need nothing installed: they call the hub over HTTP. The relay (PEERS.md
+    §5.4) stays Python, since it forwards bytes it can't read and shares no code with the app.
 
 ## 2. What's already there
 
@@ -172,7 +184,7 @@ usdcc_node serve --join "usdcc://join/...#k=...&s=..." [--join ...]
 - **Who it renders for:** only fingerprints in `--trust` or `--trust-file`. Others are declined
   (`decline {job, reason: "not trusted"}`), and their tasks go back to the submitter without
   counting as a try. The file is read again when it changes.
-- **Identity:** `--key-file`, a key pair in a file, as the Python peers have (PEERS.md §9). A
+- **Identity:** `--key-file`, a key pair in a file, as the hub has (§4.6). A
   service account then needs no credential store, and a machine image can carry its key. Without
   it, the profile's key as in the app. The fingerprint is printed at start, to put in the
   artists' trust lists if they keep one.
@@ -400,6 +412,27 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 - **Checked** in the in-app browser against sample jobs: the panel's surfaces, density, accent
   and hairlines, one column at a phone's width with no sideways scroll.
 
+### 4.6 A hub
+
+The studio's room that is always there. What it does, its options and its HTTP side are in
+PEERS.md §9; this is how it sits in `usdcc_node`.
+
+```
+usdcc_node hub --host-room "Studio" --port 47800 --http 8080 --token-file hub.token
+               [--key-file hub.key] [--config hub.json] [--local]
+```
+
+- **Starts short:** the log, settings and `Peers`, then the rooms. No `registerRenderers()`, no
+  plugin scan, no `PythonRuntime`: `main.cpp` branches for `hub` before them, and it runs on a
+  `QCoreApplication` as `--no-gpu` does. It works on a machine without USD's plugins or a GPU.
+- **Shares with `queue`:** hosting a room and printing its link, rejoining, Ctrl+C, the token
+  file (made on first start), and the HTTP server under `QueueWeb`. Those move into
+  `serve_support` where both use them.
+- **`--config`:** JSON, a room per show or department, each with its name, port and who may
+  send on `notify`. `--host-room` is the one-room shorthand.
+- **A queue in the same process** (`hub --queue`, as `queue --render` combines two) is later. A
+  queue joins the hub's room by link until then.
+
 ### 4.3 Profile and settings
 
 - **Its own profile,** `usdcc-node` (`--profile name` for another), so a node on an artist's
@@ -464,6 +497,7 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 | **7. Queue: restarts** *(built)* | `--state`: jobs, scenes and half-done frames saved and read back; frames fetched by the artist when there's no `--output-root` | The test kills the queue mid-job and starts it again: the job finishes, finished frames aren't rendered again (`node_process_queue_restart`; tiles: `render_queue_restart`) |
 | **8. Queue: watching** *(built)* | The `org.usdcc.render/queue` map, the queues in the Render Queue panel, `cancel`/`retry`/`remove`, `--admin`, the notification when a job ends | A UI test: the panel lists a queue's job, Cancel from it cancels on the queue; another artist can't cancel it, an admin can (`render_queue_panel_and_permissions`) |
 | **9. Queue: web page** *(built)* | §4.5: `usdcc.css` from the app's tokens, the page, `--web`, the token for actions; the broadcast's page moved to `usdcc.css` | A browser on the guest link lists a job and its tasks as they change; Cancel without the token is refused, with it the job cancels; side by side with the app's Render Queue panel, the same colors, type and spacing (screenshots of both in the PR) (`render_queue_web_page`, `theme_css_matches_dark_qss`) |
+| **10. Hub** | `usdcc_node hub` (§4.6): several rooms, `POST /notify` and `PUT /state` behind the token, who may send on `notify`. PEERS.md phase 3 | As PEERS.md phase 3 (`node_process_hub`) |
 | **Later** | Linux and EGL, several tasks at once on a node with several GPUs, a node writing outputs to a shared path itself (FINAL_RENDER.md §7.4), priorities and per-artist limits on a queue, submitting from a Python peer | |
 
 Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. The queue server
@@ -511,3 +545,4 @@ Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. 
 | 11 | Can there be several queues in one room? | Yes, each listed by name in Render on. A node renders for every queue it trusts, one task at a time |
 | 12 | The web page's theme: copied tokens with a test, or `dark.qss` and `usdcc.css` both generated from one tokens file? | Copied with a test, to start with: `dark.qss` stays the file people edit, and only its header's tokens are shared. Generate both if a third consumer appears |
 | 13 | Who may act from the web page? | One admin token to start with. Per-person logins only if a studio needs to know who cancelled what |
+| 14 | The studio's hub: the Python program PEERS.md planned, or a mode of `usdcc_node`? | A mode of `usdcc_node`, `hub` (§1, §4.6), decided 2026-11-22 |

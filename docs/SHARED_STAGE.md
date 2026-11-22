@@ -214,4 +214,4 @@ two test profiles on one machine, then two machines.
 | 1 | Undo under someone else's later change: put the old value back, or skip? | Put it back, as for any edit. Change it if it surprises people in use |
 | 2 | Locks ("Anna is editing this prim")? | Not in the first version. Presence shows it; a soft warning before a hard lock |
 | 3 | May a member edit a layer other than the live layer? | No, in the first version. It is what keeps files safe and the sync small |
-| 4 | Can a hub ([PEERS.md](PEERS.md) §9) host a shared stage, so it outlives any one artist? | Later. It would need the Python package to hold a live layer, which means OpenUSD on the hub |
+| 4 | Can a hub ([PEERS.md](PEERS.md) §9) host a shared stage, so it outlives any one artist? | Later. The hub is `usdcc_node hub` (decided 2026-11-22), which ships with OpenUSD, so it could hold the live layer; it would load USD for that, as it doesn't now |
