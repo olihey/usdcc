@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <deque>
+#include <optional>
 #include <functional>
 #include <utility>
 
@@ -33,6 +34,9 @@ struct InverseEdit {
     std::function<void(EditRecorder&)> apply;
     PXR_NS::SdfPath path;
     PXR_NS::TfToken field;
+    // Set only for one time sample, so a run of sets of that sample (a drag keying at one
+    // frame) is coalesced too (docs/ANIMATION.md phase 2).
+    std::optional<double> sampleTime;
 };
 using InverseEdits = std::vector<InverseEdit>;
 
@@ -151,11 +155,16 @@ protected:
 
     void _OnSetTimeSample(const PXR_NS::SdfPath& path, double time, const PXR_NS::VtValue& value) override {
         if (observing()) m_observer(share::setTimeSampleOp(_GetLayer(), path, time, value));
+        m_dirty = true;
+        if (!m_recording) return;
+        // Within a run of sets of one sample only the first old value matters.
+        if (!m_recording->empty() && m_recording->back().sampleTime == time && m_recording->back().path == path) return;
         PXR_NS::VtValue old;  // stays empty if there was no sample (setting empty erases)
-        if (m_recording) _GetLayer()->QueryTimeSample(path, time, &old);
-        record([path, time, old = std::move(old)](EditRecorder& r) {
-            r.guarded(share::setTimeSampleOp({}, path, time, old));
-        });
+        _GetLayer()->QueryTimeSample(path, time, &old);
+        m_recording->push_back({[path, time, old = std::move(old)](EditRecorder& r) {
+                                    r.guarded(share::setTimeSampleOp({}, path, time, old));
+                                },
+                                path, {}, time});
     }
     void _OnSetTimeSample(const PXR_NS::SdfPath& path, double time,
                           const PXR_NS::SdfAbstractDataConstValue& value) override {

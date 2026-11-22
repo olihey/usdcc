@@ -9,10 +9,12 @@
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/properties/number_field.h"
+#include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/session_stages.h"
 #include "usdcc/usd/stage_manager.h"
@@ -560,7 +562,7 @@ USDCC_TEST(attributes_show_the_value_at_the_stage_time) {
     CHECK(size != nullptr, "the size row has a number field");
     if (!size) return;
     CHECK(isNear(size->value(), 1.0), "at the stage's time, its first sample (%g)", size->value());
-    CHECK(size->isReadOnly(), "animated: still read-only until keys can be set");
+    CHECK(!size->isReadOnly(), "animated, and editable: an edit sets a key (docs/ANIMATION.md §4.5)");
 
     stage->setTime(5.0);
     QTest::qWait(150);
@@ -682,4 +684,87 @@ USDCC_TEST(timeline_loops_in_a_shortened_range) {
         playback.stop();
     }
     playback.setMode(PlaybackMode::EveryFrame);
+}
+
+// Keys (docs/ANIMATION.md phase 2): the selection's keys on the ruler, next and previous key,
+// Set Key on the selection's transform, auto-key, and a row's key button and menu.
+USDCC_TEST(timeline_keys) {
+    TestSettings settings;
+    Scale scale;
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    PlaybackController playback(&stages);
+    TimelineBar bar(&playback, undo);
+    bar.resize(1000, 52);
+    const StageRefPtr stage = stages.createStage();
+    const UsdGeomCube cube = UsdGeomCube::Define(stage->usdStage(), PXR_NS::SdfPath("/Box"));
+    PXR_NS::UsdGeomXformOp translate = cube.AddTranslateOp();
+    translate.Set(PXR_NS::GfVec3d(0, 0, 0), 5.0);
+    translate.Set(PXR_NS::GfVec3d(4, 0, 0), 25.0);
+    cube.GetSizeAttr().Set(1.0, 40.0);
+    cube.GetSizeAttr().Set(2.0, 60.0);
+
+    CHECK(bar.ruler()->keys().empty(), "nothing selected: no keys");
+    stages.setSelectedPaths(stage, {PXR_NS::SdfPath("/Box")});
+    QTest::qWait(200);
+    CHECK(bar.ruler()->keys() == std::vector<double>({5.0, 25.0, 40.0, 60.0}), "the selection's keys, every attribute's: %d",
+          int(bar.ruler()->keys().size()));
+
+    stage->setTime(10.0);
+    bar.goToNextKey();
+    CHECK(isNear(stage->time(), 25.0), "next key: %g", stage->time());
+    bar.goToNextKey();
+    bar.goToNextKey();
+    bar.goToNextKey();
+    CHECK(isNear(stage->time(), 60.0), "and stays on the last");
+    bar.goToPreviousKey();
+    CHECK(isNear(stage->time(), 40.0), "previous key: %g", stage->time());
+
+    // Set Key: the transform ops, at the frame shown, one undo step.
+    stage->setTime(15.0);
+    QUndoStack* stack = undo->stack(stage);
+    const int steps = stack->count();
+    bar.setKeyOnSelection();
+    CHECK(stack->count() == steps + 1 && translate.GetAttr().GetNumTimeSamples() == 3, "Set Key: a key on the translate");
+    QTest::qWait(200);
+    CHECK(bar.ruler()->keys().size() == 5, "and on the ruler");
+    stack->undo();
+    CHECK(translate.GetAttr().GetNumTimeSamples() == 2, "undone");
+
+    // Auto-key: the button and anim::autoKey() are one.
+    CHECK(!bar.autoKeyButton()->isChecked(), "auto-key off at start");
+    bar.autoKeyButton()->click();
+    CHECK(bar.autoKeyButton()->isChecked() && anim::autoKey(), "the button turns it on");
+    anim::setAutoKey(false);
+    CHECK(!bar.autoKeyButton()->isChecked(), "and follows it");
+
+    // A row's key button: Set Key, then a click removes the key at this frame.
+    AttributesViewPanel panel(&stages, stage, undo, QStringLiteral("Attributes"));
+    panel.resize(420, 700);
+    settle();
+    PropertyRow* sizeRow = nullptr;
+    for (PropertyRow* row : panel.findChildren<PropertyRow*>()) {
+        if (row->propertyPath() == "/Box.size") sizeRow = row;
+    }
+    CHECK(sizeRow && sizeRow->keyButton() && !sizeRow->keyButton()->isHidden(), "the size row has a key button");
+    if (!sizeRow) return;
+    stage->setTime(50.0);
+    QTest::qWait(150);
+    CHECK(sizeRow->keyState() == PropertyRow::KeyState::Animated, "animated, no key at 50");
+    sizeRow->keyButton()->click();
+    CHECK(cube.GetSizeAttr().GetNumTimeSamples() == 3, "the button set a key at 50");
+    QTest::qWait(150);
+    CHECK(sizeRow->keyState() == PropertyRow::KeyState::KeyedHere, "keyed here now");
+    sizeRow->keyButton()->click();
+    CHECK(cube.GetSizeAttr().GetNumTimeSamples() == 2, "and a second click removed it");
+
+    // Editing an animated value keys it, at the frame shown, auto-key off.
+    auto* field = sizeRow->findChild<NumberField*>();
+    CHECK(field && !field->isReadOnly(), "editable");
+    Q_EMIT sizeRow->editor()->editStarted();
+    Q_EMIT sizeRow->editor()->valueEdited(PXR_NS::VtValue(9.0));
+    Q_EMIT sizeRow->editor()->editFinished();
+    double keyed = 0.0;
+    cube.GetSizeAttr().Get(&keyed, 50.0);
+    CHECK(cube.GetSizeAttr().GetNumTimeSamples() == 3 && isNear(keyed, 9.0), "an edit at 50 is a key there (%g)", keyed);
 }

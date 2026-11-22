@@ -1,6 +1,7 @@
 #include "usdcc/tools/move_tool.h"
 
 #include "usdcc/tools/gizmo_shapes.h"
+#include "usdcc/usd/anim_edit.h"
 
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -20,10 +21,10 @@ constexpr PXR_NS::GfVec4f kColorCenter(0.9f, 0.9f, 0.9f, 1.0f);
 // the world. Only the parent's transform matters here — the prim's own
 // existing ops (rotate/scale) must not also be un-applied, since they still
 // have to affect the child's rendered position exactly as before.
-PXR_NS::GfMatrix4d parentToWorld(const PXR_NS::UsdPrim& prim) {
+PXR_NS::GfMatrix4d parentToWorld(const PXR_NS::UsdPrim& prim, PXR_NS::UsdTimeCode time) {
     if (const PXR_NS::UsdPrim parent = prim.GetParent()) {
         if (const PXR_NS::UsdGeomXformable parentXformable{parent}) {
-            return parentXformable.ComputeLocalToWorldTransform(PXR_NS::UsdTimeCode::Default());
+            return parentXformable.ComputeLocalToWorldTransform(time);
         }
     }
     return PXR_NS::GfMatrix4d(1.0);
@@ -41,18 +42,18 @@ PXR_NS::UsdGeomXformOp findTranslateOp(const PXR_NS::UsdGeomXformable& xformable
     return {};
 }
 
-PXR_NS::GfVec3d readTranslate(const PXR_NS::UsdGeomXformable& xformable) {
+PXR_NS::GfVec3d readTranslate(const PXR_NS::UsdGeomXformable& xformable, PXR_NS::UsdTimeCode time) {
     const PXR_NS::UsdGeomXformOp op = findTranslateOp(xformable);
     if (!op) {
         return PXR_NS::GfVec3d(0.0);
     }
     if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
         PXR_NS::GfVec3f v(0.0f);
-        op.Get(&v);
+        op.Get(&v, time);
         return PXR_NS::GfVec3d(v);
     }
     PXR_NS::GfVec3d v(0.0);
-    op.Get(&v);
+    op.Get(&v, time);
     return v;
 }
 }  // namespace
@@ -247,15 +248,15 @@ ToolResult MoveTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec2
     m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
     if (isMatrixOp(m_targetOp)) {
         // A matrix op: Move edits its translation row.
-        m_dragStartMatrix = readOpMatrix(m_targetOp);
+        m_dragStartMatrix = readOpMatrix(m_targetOp, ctx.time);
         m_dragStartLocal = m_dragStartMatrix.ExtractTranslation();
         m_worldToValue = opValueSpace(xformable, target.index).GetInverse();
     } else if (m_targetOp) {
-        const std::vector<double> start = readOpNumbers(m_targetOp);
+        const std::vector<double> start = readOpNumbers(m_targetOp, ctx.time);
         m_dragStartLocal = start.size() == 3 ? PXR_NS::GfVec3d(start[0], start[1], start[2]) : PXR_NS::GfVec3d(0.0);
         m_worldToValue = opValueSpace(xformable, target.index).GetInverse();
     } else {
-        m_dragStartLocal = readTranslate(xformable);
+        m_dragStartLocal = readTranslate(xformable, ctx.time);
     }
 
     ToolResult result;
@@ -326,9 +327,9 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
         if (isMatrixOp(m_targetOp)) {
             PXR_NS::GfMatrix4d m = m_dragStartMatrix;
             m.SetTranslateOnly(value);  // the 3x3 part (rotation, scale) stays as it was
-            writeOpMatrix(m_targetOp, m);
+            writeOpMatrix(m_targetOp, m, ctx.time, ctx.autoKey);
         } else {
-            writeOpNumbers(m_targetOp, {value[0], value[1], value[2]});
+            writeOpNumbers(m_targetOp, {value[0], value[1], value[2]}, ctx.time, ctx.autoKey);
         }
         ToolResult result;
         result.handled = true;
@@ -350,12 +351,12 @@ ToolResult MoveTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, c
         }
     }
 
-    const PXR_NS::GfMatrix4d worldToParent = parentToWorld(xformable.GetPrim()).GetInverse();
+    const PXR_NS::GfMatrix4d worldToParent = parentToWorld(xformable.GetPrim(), ctx.time).GetInverse();
     const PXR_NS::GfVec3d newValue = m_dragStartLocal + worldToParent.TransformDir(worldDelta);
     if (translateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
-        translateOp.Set(PXR_NS::GfVec3f(newValue));
+        usdcc::usd::anim::setValue(translateOp.GetAttr(), PXR_NS::VtValue(PXR_NS::GfVec3f(newValue)), ctx.time, ctx.autoKey);
     } else {
-        translateOp.Set(newValue);
+        usdcc::usd::anim::setValue(translateOp.GetAttr(), PXR_NS::VtValue(newValue), ctx.time, ctx.autoKey);
     }
 
     ToolResult result;

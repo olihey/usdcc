@@ -5,13 +5,17 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/usd/stage.h"
 
+#include <pxr/usd/sdf/path.h>
+
 #include <QWidget>
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 class QLabel;
 class QMenu;
+class QTimer;
 class QToolButton;
 
 namespace usdcc::usd {
@@ -67,7 +71,21 @@ public:
     // codes, one undo step, and goes back to following the stage's range.
     void setStageRangeToPlaybackRange();
 
+    // Keys (docs/ANIMATION.md phase 2). The ruler marks the selection's keys, those of
+    // every animated attribute of the selected prims.
+    QToolButton* autoKeyButton() const { return m_autoKey; }
+    std::vector<double> selectionKeyTimes() const;
+    // A key on every transform op of the selected prims, at the frame shown: one undo step.
+    void setKeyOnSelection();
+    void goToNextKey();
+    void goToPreviousKey();
+    // Set Key, Next Key and Previous Key as the window's actions, with their shortcuts
+    // (Settings > Shortcuts > Timeline): S, Alt+. and Alt+, by default.
+    void addActions(QWidget* window);
+
 private:
+    void refreshKeys();
+    void refreshAutoKey();
     void bindStage();
     void refreshTime();
     // `fit`: the shown range is worked out anew; otherwise it only grows, to hold the
@@ -85,6 +103,9 @@ private:
     usdcc::core::Signal<>::Connection m_rangeConnection;
     usdcc::core::Signal<const StageChanges&>::Connection m_changedConnection;
     usdcc::core::Signal<>::Connection m_physicsConnection;
+    usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
+    usdcc::core::Signal<bool>::Connection m_autoKeyConnection;
+    QTimer* m_keysTimer;  // the key marks again, a moment after edits stop
 
     properties::NumberField* m_frame;
     properties::NumberField* m_start;
@@ -94,6 +115,7 @@ private:
     QToolButton* m_play;
     QToolButton* m_loop;
     QToolButton* m_simulate;
+    QToolButton* m_autoKey;
     QLabel* m_rate;
     TimeRange m_shown = kDefaultTimeRange;
     // The stage's own range as last seen (nothing: it has none), to tell when it changes.

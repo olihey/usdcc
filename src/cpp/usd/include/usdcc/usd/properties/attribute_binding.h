@@ -31,7 +31,8 @@ class PropertyEditor;
 //
 // refresh() pulls the attribute's value at the stage's time into the editor; it is
 // skipped while a gesture is in progress so live notices can't fight the user.
-// Edits still set the default (docs/ANIMATION.md phase 2 makes them keys).
+// Edits go through usdcc::usd::anim::setValue() (docs/ANIMATION.md §4.5): the default, or a
+// key at the stage's time when the attribute is animated or auto-key is on.
 class USDCC_USD_UI_API AttributeBinding : public QObject {
     Q_OBJECT
 

@@ -378,9 +378,9 @@ Phases 1 to 4 as built, where they differ from the plan above:
   so no ancestors-first order is needed. Each body gets `[translate:sim, orient:sim, scale:sim]`
   in the edit target, or one `transform:sim` matrix where its local transform has shear; its
   own ops stay, unused.
-- `anim_edit` ([ANIMATION.md](ANIMATION.md) phase 2) doesn't exist yet, so a bake writes to the
-  edit target directly and reports when a stronger layer hides it, rather than following
-  `anim_edit`'s rule for a weaker layer's animation.
+- A bake writes to the edit target directly and reports when a stronger layer hides it. Since
+  `anim_edit` exists ([ANIMATION.md](ANIMATION.md) §6.3) that is still so: the bake writes new
+  ops of its own (`translate:sim`, ...), which no weaker layer animates, so its rule changes nothing.
 - Articulations are simulated as plain joints between their bodies, and each is reported once.
 
 ## 7. Checked in phase 0

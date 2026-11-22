@@ -5,6 +5,8 @@
 #include "usdcc/usd/properties/property_style.h"
 
 #include <QApplication>
+
+#include <algorithm>
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QGraphicsOpacityEffect>
@@ -101,6 +103,24 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     m_badge->setVisible(false);
     layout->addWidget(m_badge, 0, Qt::AlignTop);
 
+    // Keys (docs/ANIMATION.md phase 2): hollow grey, not animated; hollow in the accent,
+    // animated; filled, a key at the frame shown. A click sets a key, or removes the one here.
+    m_keyButton = new QToolButton(this);
+    m_keyButton->setObjectName(QStringLiteral("propertyKeyButton"));
+    m_keyButton->setAutoRaise(true);
+    usdcc::ui::scaled::fixedSize(m_keyButton, style::kFieldHeight, style::kFieldHeight);
+    m_keyButton->setVisible(false);
+    connect(m_keyButton, &QToolButton::clicked, this, [this]() {
+        if (m_keyState == KeyState::KeyedHere) {
+            Q_EMIT removeKeyRequested();
+        } else {
+            Q_EMIT setKeyRequested();
+        }
+    });
+    // In front of the label, its width taken from the label's (setLabelWidth()), so a row
+    // with a key button is no wider than one without.
+    layout->insertWidget(0, m_keyButton, 0, Qt::AlignTop);
+
     // Last of all: addTrailingWidget() goes before the note, so this stays
     // the rightmost control.
     if (QWidget* button = editor->rowButton()) {
@@ -113,7 +133,12 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     setLabelWidth(110);
 }
 
-void PropertyRow::setLabelWidth(int width) { usdcc::ui::scaled::fixedWidth(m_label, width); }
+void PropertyRow::setLabelWidth(int width) {
+    m_labelWidth = width;
+    // The key button and its gap come out of the label's width.
+    const int key = m_keyButton && !m_keyButton->isHidden() ? style::kFieldHeight + 8 : 0;
+    usdcc::ui::scaled::fixedWidth(m_label, std::max(width - key, 24));
+}
 
 void PropertyRow::addTrailingWidget(QWidget* widget) {
     QHBoxLayout* rowLayout = m_rowLayout;
@@ -211,16 +236,49 @@ void PropertyRow::setReadOnly(bool readOnly) {
 }
 
 void PropertyRow::updateReadOnly() {
-    m_editor->setReadOnly(m_readOnly || m_animated || !m_connectedSource.isEmpty());
+    // Animated is editable: an edit sets a key at the frame shown (docs/ANIMATION.md §4.5).
+    m_editor->setReadOnly(m_readOnly || !m_connectedSource.isEmpty());
+    m_keyButton->setEnabled(!m_readOnly && m_connectedSource.isEmpty());
+}
+
+void PropertyRow::setKeyState(KeyState state) {
+    m_keyState = state;
+    const bool shown = state != KeyState::None;
+    if (shown == m_keyButton->isHidden()) {
+        m_keyButton->setVisible(shown);
+        setLabelWidth(m_labelWidth);
+    }
+    switch (state) {
+        case KeyState::None:
+            break;
+        case KeyState::Static:
+            m_keyButton->setText(QStringLiteral("\xE2\x97\x87"));  // ◇
+            m_keyButton->setToolTip(tr("Set a key at this frame"));
+            break;
+        case KeyState::Animated:
+            m_keyButton->setText(QStringLiteral("\xE2\x97\x87"));
+            m_keyButton->setToolTip(tr("Animated. Set a key at this frame; an edit here sets one too"));
+            break;
+        case KeyState::KeyedHere:
+            m_keyButton->setText(QStringLiteral("\xE2\x97\x86"));  // ◆
+            m_keyButton->setToolTip(tr("A key at this frame. Click to remove it"));
+            break;
+    }
+    m_keyButton->setProperty("keyState", state == KeyState::Static     ? QStringLiteral("static")
+                                         : state == KeyState::Animated ? QStringLiteral("animated")
+                                                                       : QStringLiteral("keyed"));
+    repolish(m_keyButton);
+    updateBadge();
 }
 
 void PropertyRow::updateBadge() {
     QString text;
     QString tip;
-    // A connection shows its source as a link under the value instead.
-    if (m_animated) {
+    // A connection shows its source as a link under the value instead; with a key button,
+    // that says it.
+    if (m_animated && m_keyState == KeyState::None) {
         text = tr("animated");
-        tip = tr("This attribute has time samples. Editing them needs a timeline, which usdcc doesn't have yet.");
+        tip = tr("This attribute is animated: an edit sets a key at the frame shown.");
     }
     m_badge->setText(text);
     m_badge->setToolTip(tip);
@@ -238,6 +296,17 @@ void PropertyRow::contextMenuEvent(QContextMenuEvent* event) {
     menu.addSeparator();
     QAction* reset = menu.addAction(tr("Reset to Default"), this, [this]() { Q_EMIT resetRequested(); });
     reset->setEnabled(m_resettable && !m_editor->isReadOnly());
+    if (m_keyState != KeyState::None) {
+        const bool editable = m_keyButton->isEnabled();
+        menu.addSeparator();
+        QAction* setKey = menu.addAction(tr("Set Key"), this, [this]() { Q_EMIT setKeyRequested(); });
+        setKey->setEnabled(editable && m_keyState != KeyState::KeyedHere);
+        QAction* removeKey = menu.addAction(tr("Remove Key"), this, [this]() { Q_EMIT removeKeyRequested(); });
+        removeKey->setEnabled(editable && m_keyState == KeyState::KeyedHere);
+        QAction* removeAnimation =
+            menu.addAction(tr("Remove Animation"), this, [this]() { Q_EMIT removeAnimationRequested(); });
+        removeAnimation->setEnabled(editable && m_keyState != KeyState::Static);
+    }
     if (m_extraMenu) {
         menu.addSeparator();
         m_extraMenu(&menu);

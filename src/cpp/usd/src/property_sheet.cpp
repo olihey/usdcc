@@ -4,6 +4,7 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/add_shade_input_dialog.h"
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/composition_arcs.h"
 #include "usdcc/usd/applied_schemas.h"
 #include "usdcc/usd/apply_schema_ui.h"
@@ -711,6 +712,7 @@ PropertySheet::Row PropertySheet::buildShaderInputRow(const UsdPrim& prim, const
     }
     connect(row.row, &PropertyRow::resetRequested, row.binding, &AttributeBinding::resetToDefault);
     connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
+    if (exists) wireKeys(row);
     row.row->setReadOnly(!prim_actions::isEditable(prim));
     if (exists && isReceiver(attr)) {
         addConnectionButton(row, attr.GetPath());
@@ -760,7 +762,11 @@ void PropertySheet::buildTransformStack(const UsdPrim& prim, CategorySection* se
         row.property = prim.GetAttribute(opRow.attrName);
         row.searchText = (opRow.row->labelText() + QLatin1Char(' ') + qs(opRow.opName.GetString())).toLower();
         row.managedByStack = true;
-        if (const UsdAttribute attr = row.property.As<UsdAttribute>()) row.timeVarying = attr.ValueMightBeTimeVarying();
+        if (const UsdAttribute attr = row.property.As<UsdAttribute>()) {
+            row.timeVarying = attr.ValueMightBeTimeVarying();
+            wireKeys(row);
+            updateKeyState(row);
+        }
         if (row.binding) {
             connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
         }
@@ -1323,6 +1329,7 @@ PropertySheet::Row PropertySheet::buildRow(const UsdProperty& property, const Pr
         row.row = new PropertyRow(label, row.editor);
         row.binding = new AttributeBinding(attr, row.editor, m_stage, m_undoManager.get(), row.row);
         connect(row.row, &PropertyRow::resetRequested, row.binding, &AttributeBinding::resetToDefault);
+        wireKeys(row);
         // Rebuilds wait for a gesture to finish; pick up any that were held back.
         connect(row.binding, &AttributeBinding::editCommitted, this, [this]() { queueProcessPendingChanges(); });
         row.row->setReadOnly(!prim_actions::isEditable(attr.GetPrim()));
@@ -1370,9 +1377,10 @@ void PropertySheet::updateRowState(Row& row) {
         const bool editable = prim_actions::isEditable(attr.GetPrim());
         row.row->setUnauthored(!authored);
         row.row->setResettable(authored && editable);
-        // Time samples or a spline: either hides an edit of the default.
-        row.row->setAnimated(attr.GetNumTimeSamples() > 0 || attr.HasSpline());
+        // Time samples or a spline: an edit sets a key (docs/ANIMATION.md §4.5).
+        row.row->setAnimated(anim::isAnimated(attr));
         row.timeVarying = attr.ValueMightBeTimeVarying();
+        updateKeyState(row);
         const SdfPath source = connectedSource(attr);
         const QString label = source.IsEmpty() ? QString() : qs(relativeLabel(source, connectionScope(attr.GetPrim())));
         row.row->setConnectedSource(label, qs(source.GetString()));
@@ -1558,6 +1566,42 @@ void PropertySheet::refreshTimeVaryingValues() {
     if (!currentPrim() || anyEditing()) return;
     for (Row& row : m_rows) {
         if (row.timeVarying && row.binding) row.binding->refresh();
+        // Keyed here or not depends on the time.
+        if (row.keyable && row.row->keyState() != PropertyRow::KeyState::Static) updateKeyState(row);
+    }
+}
+
+void PropertySheet::wireKeys(Row& row) {
+    if (!row.row || !m_undoManager || !row.property.As<UsdAttribute>()) return;
+    row.keyable = true;
+    const SdfPath path = row.property.GetPath();
+    const auto act = [this, path](const QString& label, bool (*edit)(const UsdAttribute&, UsdTimeCode)) {
+        if (!m_stage) return;
+        const UsdAttribute attribute = m_stage->usdStage()->GetAttributeAtPath(path);
+        if (!attribute) return;
+        const UsdTimeCode time = m_stage->timeCode();
+        m_undoManager->apply(m_stage, label, [&]() { return edit(attribute, time); });
+        for (Row& each : m_rows) {
+            if (each.keyable && each.property.GetPath() == path) {
+                if (each.binding) each.binding->refresh();
+                updateRowState(each);
+            }
+        }
+    };
+    connect(row.row, &PropertyRow::setKeyRequested, this, [act]() { act(tr("Set Key"), &anim::setKey); });
+    connect(row.row, &PropertyRow::removeKeyRequested, this, [act]() { act(tr("Remove Key"), &anim::removeKey); });
+    connect(row.row, &PropertyRow::removeAnimationRequested, this,
+            [act]() { act(tr("Remove Animation"), &anim::removeAnimation); });
+}
+
+void PropertySheet::updateKeyState(Row& row) {
+    const UsdAttribute attribute = row.property.As<UsdAttribute>();
+    if (!row.keyable || !attribute) return;
+    const UsdTimeCode time = m_stage ? m_stage->timeCode() : UsdTimeCode::Default();
+    switch (anim::keyState(attribute, time)) {
+        case anim::KeyState::Static: row.row->setKeyState(PropertyRow::KeyState::Static); break;
+        case anim::KeyState::Animated: row.row->setKeyState(PropertyRow::KeyState::Animated); break;
+        case anim::KeyState::KeyedHere: row.row->setKeyState(PropertyRow::KeyState::KeyedHere); break;
     }
 }
 

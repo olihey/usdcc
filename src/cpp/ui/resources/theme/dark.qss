@@ -853,6 +853,22 @@ QLabel#propertyBadge {
     font-size: 10px;
 }
 
+/* A row's key (docs/ANIMATION.md phase 2): muted when the attribute isn't animated, the
+   accent when it is, filled (its glyph) when there's a key at the frame shown. */
+QToolButton#propertyKeyButton {
+    color: #8a8d93;
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+QToolButton#propertyKeyButton[keyState="animated"],
+QToolButton#propertyKeyButton[keyState="keyed"] {
+    color: @accent;
+}
+QToolButton#propertyKeyButton:disabled {
+    color: rgba(232, 232, 234, 25%);
+}
+
 /* Second line under a value: resolved asset path, connection source. */
 QLabel#propertySubLine {
     color: @accent;
@@ -1228,4 +1244,11 @@ QToolButton#toastDismissAll {
 QToolButton#toastDismissAll:hover {
     color: #e8e8ea;
     background: #2c2c30;
+}
+
+/* Auto-key on (docs/ANIMATION.md phase 2): red, as the record button of a DCC is. */
+QToolButton#timelineAutoKey:checked {
+    background: #c0392b;
+    color: #ffffff;
+    border-radius: 3px;
 }
