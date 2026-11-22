@@ -96,6 +96,10 @@ cancelled, nothing happens. Once the app has quit, Velopack's updater waits for 
 to end, installs the update with a progress window, and starts usdcc again, which shows
 "Updated to usdcc 26.12.1" with **Release Notes**.
 
+A build without the Updates feature (`USDCC_BUILD_UPDATES=OFF`,
+[BUILD_OPTIONS.md](BUILD_OPTIONS.md) §11) has none of this section: no menu item, no check,
+no settings.
+
 **Settings > Updates** (only in builds with Velopack):
 
 | Setting | Default | |

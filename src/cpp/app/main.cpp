@@ -1,6 +1,8 @@
 #include <QApplication>
 
+#if USDCC_FEATURE_UPDATES
 #include "app_updates.h"
+#endif
 #include "startup.h"
 
 #include <filesystem>
@@ -221,8 +223,10 @@ int main(int argc, char** argv) {
     usdcc::app::installSettings();
     usdcc::ui::theme::apply(app);
     usdcc::scripting::SessionController::defineSettings();
+#if USDCC_FEATURE_UPDATES
     // Settings > Updates (docs/UPDATES.md §4).
     usdcc::app::AppUpdates::defineSettings();
+#endif
     // Settings > Viewport's grid and background, there before any viewport opens.
     usdcc::usd::defineViewportDisplaySettings();
     usdcc::usd::defineMaterialPreviewSettings();
@@ -1054,18 +1058,21 @@ int main(int argc, char** argv) {
     QObject::connect(usdRuntimeAction, &QAction::triggered, &window,
                      [&window]() { usdcc::usd::UsdRuntimeDialog::showDialog(&window); });
     helpMenu->addSeparator();
+#if USDCC_FEATURE_UPDATES
     // Help > Check for Updates (docs/UPDATES.md §4): an installed usdcc updates itself from the
     // GitHub releases; any other copy is pointed to them. Closing for Restart Now asks what
-    // File > Exit asks.
+    // File > Exit asks. Not in a build without the Updates feature (docs/BUILD_OPTIONS.md).
     usdcc::app::AppUpdates updates(&window, [&window]() {
         window.close();
         return !window.isVisible();
     });
     QAction* checkForUpdatesAction = helpMenu->addAction(QObject::tr("Check for &Updates..."));
+    checkForUpdatesAction->setObjectName(QStringLiteral("checkForUpdatesAction"));
     checkForUpdatesAction->setStatusTip(updates.canUpdate()
                                             ? QObject::tr("Look for a newer release of usdcc, and install it")
                                             : QObject::tr("Look for a newer release of usdcc on its releases page"));
     QObject::connect(checkForUpdatesAction, &QAction::triggered, &window, [&updates]() { updates.checkNow(); });
+#endif
     QAction* projectHomeAction = helpMenu->addAction(QObject::tr("&Project Home"));
     projectHomeAction->setStatusTip(QObject::tr("Open usdcc's GitHub page in your browser"));
     QObject::connect(projectHomeAction, &QAction::triggered, &window, []() {
@@ -1494,8 +1501,10 @@ int main(int argc, char** argv) {
     // Downloads in the status bar, and a note when a stage asks for a host that isn't allowed.
     usdcc::usd::installAssetActivity(&window);
     window.show();
+#if USDCC_FEATURE_UPDATES
     // "Updated to ..." after an update, and the check a few seconds later (docs/UPDATES.md §4).
     updates.start();
+#endif
 
     // Once the window is up and its layout settled (so panels the scripts add
     // stay docked, see MainWindow::layoutSettled()), with the initial stage
@@ -1543,7 +1552,9 @@ int main(int argc, char** argv) {
             USDCC_LOG_ERROR("usdcc.app", "Couldn't start the app again");
         }
     }
+#if USDCC_FEATURE_UPDATES
     // Restart Now on a downloaded update: Velopack's updater takes over once this process ends.
     updates.applyIfRequested();
+#endif
     return result;
 }
