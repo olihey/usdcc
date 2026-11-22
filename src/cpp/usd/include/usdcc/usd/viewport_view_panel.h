@@ -239,6 +239,10 @@ public:
     QJsonObject saveSessionState() const override;
     void restoreSessionState(const QJsonObject& state) override;
 
+    // While busy (docs/PANEL_BUSY.md §4): the viewport's last frame, which it has even when
+    // covered, in place of a screen grab.
+    QImage busySnapshot(QWidget* container) override;
+
 protected:
     // Adds "Fit to View" and "Reset Camera" entries on top of ViewPanel's base "Duplicate" —
     // see ViewPanel::populateContextMenu() for the extension mechanism.

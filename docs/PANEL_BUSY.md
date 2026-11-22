@@ -1,7 +1,7 @@
 # Busy Panels (plan)
 
-Status: **plan**, nothing built. Planned 2026-11-12 against master `5644706` plus the uncommitted
-USDA panel change ([USDA_VIEW.md](USDA_VIEW.md) §5.1). §8 lists the decisions still open.
+Status: **all phases built** (2026-11-22, §9), with §8's proposed answers. Planned 2026-11-12
+against master `5644706` plus the uncommitted USDA panel change ([USDA_VIEW.md](USDA_VIEW.md) §5.1).
 
 A way for any view panel to say "I'm working on something": the panel dims, and over it a card
 shows what it's doing, a progress bar and, where the work allows, Cancel. The rest of the app stays
@@ -202,3 +202,34 @@ which would move from the app-modal dialog to the viewport alone.
    ("A USDA conversion is still running") with Wait / Quit Anyway?
 5. **Keep the Convert bar** now that the app doesn't freeze? Proposed: yes, for the disk, memory
    and CPU it costs (§5.4), with the new message.
+
+All five were decided as proposed: snapshot and step aside; the dim covers the toolbar; the
+estimate held at 95%; wait up to 10 s, then quit without static destructors; the Convert bar
+stays, with the new message.
+
+## 9. As built
+
+| Piece | Where | Notes |
+|---|---|---|
+| `Busy`, `BusyOptions` | [busy.h](../src/cpp/ui/include/usdcc/ui/busy.h) | As §3. A handle shares a small state with the overlay: the setters write it under a mutex from any thread, and the overlay reads it on a 30 Hz timer while it's up, so nothing is posted per call. On the UI thread with `paintNow`, a setter repaints at once, at most ten times a second |
+| `ViewPanel::beginBusy()`, `isBusy()`, `busyChanged`, `busySnapshot()` | [view_panel.h](../src/cpp/ui/include/usdcc/ui/view_panel.h) | `beginBusy()` may be called from any thread: the handle works at once, and the panel takes it up on the UI thread. Closing the panel (ADS's `closed()`) or destroying it cancels every handle |
+| The overlay | `src/cpp/ui/src/busy_overlay.cpp` (private) | A child widget over the whole dock widget. 45% black, the card (text, bar, detail, the time once past 2 s, Cancel) centred and at most 320 px wide; under 160×100 a spinner instead. The 120 ms fade. It takes clicks, the wheel and keys; Esc cancels. It takes the focus only when the focus was in the panel. A cancelled handle goes at once; the newest one still running is the one shown |
+| Native windows | Same | Every visible `QWindowContainer` in the panel is hidden while the overlay is up, `busySnapshot()` painted in its place. Shown again, the window inside is asked to draw (`requestUpdate()`): otherwise it kept what was on screen. `ViewportViewPanel` returns `grabFrame()` (no HUD); the default grabs the container from the screen |
+| USDA in the background | [usda_view.cpp](../src/cpp/usd/src/usda_view.cpp) | A source that waited for Convert converts on a `std::thread` (§5.1's table): a file as it is on disk opened by the worker with the stage's resolver context, a layer with unsaved changes or an anonymous one copied first (`TransferContent()`), the flattened views made first, those three under a `paintNow` overlay. The worker `Export()`s to `usdcc-usda-XXXXXX.usda` in the temp folder, held with a `QLockFile` beside it. Progress every 250 ms from the file's size against 1.1 × the source, at most 95%, and "1.2 GB of text" as the detail and in the status line. What's shown is read from the file (up to `kShowLimitBytes`); Show All reads the rest from it. An edit meanwhile marks the result out of date instead of starting again. Cancel, a new refresh or closing the view drop the result at once; the file goes with the worker. The panel passes its `beginBusy()` through `UsdaView::Host::beginBusy`; the preview dialog has none and says so in its status line only |
+| Leftovers and quitting | [main.cpp](../src/cpp/app/main.cpp), `UsdaView::removeLeftoverConversions()`, `waitForConversions()` | At start, temporary files whose lock can be taken (their instance is gone) are removed. After the event loop, running conversions get up to 10 s, then `std::quick_exit()`. **Changed from §5.3:** the note is in the log, as the main window has closed by then |
+| Python | [ui.py](../src/python/usdcc/ui.py), `_usdcc_app.begin_busy()` | `ViewPanel.busy(text, cancellable=False)` returns `usdcc.ui.Busy`, a context manager with `progress` (None: indeterminate), `text`, `detail`, `cancelled` and `finish()`. On the UI thread it uses `paintNow`. `begin_busy()` takes any widget inside a view panel, so a C++ panel can be made busy from Python too |
+
+**Checked in the app** (Storm, `cube_and_sphere.usda`, a test profile): busy over the viewport, the
+Hydra window hidden behind a still of its last frame under the card, no black frame; afterwards
+the viewport draws again, HUD and gizmo included, its engine kept. A window-DC grab
+(`QScreen::grabWindow(winId)`) doesn't capture the GL window at all: check it with a grab of the
+desktop region. **Not tried:** the RTX view and the Material Editor's preview (the same code: any
+`QWindowContainer`); the lion file itself.
+
+Tests: `busy_panel_overlay`, `busy_panel_cancel`, `busy_panel_native_windows` (`usdcc_ui_tests`:
+the delay, quick work never shown, the card, input, progress and finish from a worker thread, two
+handles, Cancel and Esc, `paintNow`, closing cancels, a handle outliving its panel, a native window
+hidden and back); `usda_view_converts_in_the_background` (progress, Cancel back to Convert with the
+worker's file removed, an edit meanwhile, a layer with unsaved changes, the file going with the
+panel) and `usda_view_asks_before_converting`, now waiting for the conversion;
+`python_view_panel` (`busy()` on the UI thread and from a Python thread, Cancel reaching Python).

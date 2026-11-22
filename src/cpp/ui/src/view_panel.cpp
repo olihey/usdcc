@@ -1,5 +1,6 @@
 #include "usdcc/ui/view_panel.h"
 
+#include "busy_overlay.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/options_menu_view.h"
@@ -26,10 +27,13 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPixmap>
+#include <QScreen>
 #include <QSettings>
 #include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QThread>
 #include <QToolButton>
 
 #include <algorithm>
@@ -114,6 +118,44 @@ ViewPanel::ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRe
         const QString type = property(ViewPanelRegistry::kTypeProperty).toString();
         if (!type.isEmpty() && key == ViewPanelRegistry::followSettingKey(type)) applyFollowSetting(true);
     });
+}
+
+ViewPanel::~ViewPanel() {
+    // Without busyChanged(): what listens may be half gone with the panel.
+    if (m_busyOverlay) {
+        blockSignals(true);
+        m_busyOverlay->cancelAll();
+    }
+}
+
+std::shared_ptr<Busy> ViewPanel::beginBusy(const QString& text, BusyOptions options) {
+    auto state = std::make_shared<Busy::State>();
+    state->options = std::move(options);
+    state->text = text;
+    const auto add = [this, state]() {
+        if (!m_busyOverlay) {
+            m_busyOverlay = new BusyOverlay(this);
+            // Closing the panel (its tab's ×, Close in a menu) cancels the work.
+            connect(this, &ads::CDockWidget::closed, m_busyOverlay, &BusyOverlay::cancelAll);
+        }
+        m_busyOverlay->add(state);
+    };
+    // From another thread (a Python thread, say) the handle works at once, and the panel
+    // takes it up on the UI thread.
+    if (QThread::currentThread() == thread()) {
+        add();
+    } else {
+        QMetaObject::invokeMethod(this, add, Qt::QueuedConnection);
+    }
+    return std::make_shared<Busy>(state);
+}
+
+bool ViewPanel::isBusy() const { return m_busyOverlay && m_busyOverlay->hasWork(); }
+
+QImage ViewPanel::busySnapshot(QWidget* container) {
+    QScreen* screen = container->screen();
+    if (!screen) return {};
+    return screen->grabWindow(container->winId()).toImage();
 }
 
 void ViewPanel::setFollowsCurrentStage(bool follows) {

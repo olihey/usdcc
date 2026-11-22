@@ -31,6 +31,8 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
     UsdaView::Host host;
     host.addControls = [this](QBoxLayout* toolbar) { addPanelControls(toolbar); };
     host.openInNewLabel = tr("Open in New Panel");
+    // A big conversion makes the panel busy (docs/PANEL_BUSY.md §5).
+    host.beginBusy = [this](const QString& text, usdcc::ui::BusyOptions options) { return beginBusy(text, std::move(options)); };
     host.openInNew = [this](const Source& source, const QString&) {
         UsdaViewPanel* panel = newPanelHandler() ? newPanelHandler()(currentStage()) : nullptr;
         if (panel) panel->setSource(source);

@@ -30,6 +30,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/toast_log_sink.h
     include/usdcc/ui/toast_manager.h
     include/usdcc/ui/panel_maximizer.h
+    include/usdcc/ui/busy.h
     include/usdcc/ui/view_panel.h
     include/usdcc/ui/view_panel_registry.h
     include/usdcc/ui/workspace.h
@@ -64,6 +65,8 @@ add_library(usdcc_ui SHARED
     src/toast_log_sink.cpp
     src/toast_manager.cpp
     src/panel_maximizer.cpp
+    src/busy_overlay.cpp
+    src/busy_overlay.h
     src/view_panel.cpp
     src/view_panel_registry.cpp
     src/workspace.cpp
