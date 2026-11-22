@@ -685,22 +685,21 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             usdcc::usd::PrimMenuEntry entry;
             entry.id = id;
             entry.label = QString::fromStdString(label);
-            const auto paths = [](const usdcc::usd::PrimMenuContext& menu) {
-                std::vector<std::string> list;
-                for (const PXR_NS::SdfPath& path : menu.paths) list.push_back(path.GetString());
-                return list;
-            };
+            // pathStrings, not a local lambda captured by the two below: MSVC's ARM64
+            // compiler (Visual Studio 2026) crashes on that (C1001).
             auto held = std::make_shared<PythonObject>(std::move(callback));
             const std::string description = label.substr(label.rfind('/') + 1);
-            entry.run = [held, paths, description](const usdcc::usd::PrimMenuContext& menu) {
-                runAsOneStep(description, [&]() { held->object(cacheIdOf(menu.stage), paths(menu), menu.clicked.GetString()); });
+            entry.run = [held, description](const usdcc::usd::PrimMenuContext& menu) {
+                runAsOneStep(description,
+                             [&]() { held->object(cacheIdOf(menu.stage), pathStrings(menu.paths), menu.clicked.GetString()); });
             };
             if (!applies.is_none()) {
                 auto heldApplies = std::make_shared<PythonObject>(std::move(applies));
-                entry.applies = [heldApplies, paths](const usdcc::usd::PrimMenuContext& menu) {
+                entry.applies = [heldApplies](const usdcc::usd::PrimMenuContext& menu) {
                     py::gil_scoped_acquire gil;
                     try {
-                        return heldApplies->object(cacheIdOf(menu.stage), paths(menu), menu.clicked.GetString()).cast<bool>();
+                        return heldApplies->object(cacheIdOf(menu.stage), pathStrings(menu.paths), menu.clicked.GetString())
+                            .cast<bool>();
                     } catch (py::error_already_set& error) {
                         logPythonError(error);
                         return false;
