@@ -3,8 +3,10 @@
 A user who is stuck sends a **support request** to a colleague. The colleague sees usdcc's windows,
 live, and, if the user allows it, works in them with mouse and keyboard.
 
-**Status:** planned 2026-11-22. Nothing is built. "Checked" below means looked at in this
-repository; everything else is an assumption until it's tried.
+**Status:** planned 2026-11-22. The phase 0 spike ran the same day on one Windows machine (§10):
+capture and input both work. Nothing of the feature is built. "Checked" below means looked at in
+this repository, "measured" means the spike ran it; everything else is an assumption until it's
+tried.
 
 ## 1. Decisions
 
@@ -118,10 +120,12 @@ page doesn't detect or mark them. This keeps the user's file system out of the p
 
 ## 4. Input
 
-- **The page sends events, not OS input:** pointer moves, buttons, wheel and keys, with the picture's
-  coordinates and which window they belong to.
-- **The plugin replays them** with `QCoreApplication::sendEvent()` (or `QWindow`'s events for the
-  native 3D views) to the window under that point.
+- **The page sends events, not OS input:** pointer moves, buttons, wheel and keys, with the point as a
+  fraction of the picture.
+- **The plugin replays them through `QWindowSystemInterface`,** the way Qt's platform plugin
+  delivers real input, into the window under that point (a native 3D view directly). Not
+  `QCoreApplication::sendEvent()` to widgets: that skips shortcuts, popups' grabs, enter and leave,
+  and double clicks. It is a private Qt API (`Qt6::GuiPrivate`), and it takes native pixels (§10).
 - **Keys are sent as text and key codes,** so the helper's keyboard layout gives the characters
   they typed.
 - **The user always wins:** any local mouse or key input pauses replay until a short quiet time
@@ -142,10 +146,12 @@ Defined by the plugin, so a build without it (§6) has none of them. Settings > 
 
 - **Turning `Support/enabled` off** ends a running session at once and removes the entries.
   Turning it on adds them. Both without a restart.
-- **Removing the entries at runtime needs the app.** *Checked:* `Host::addViewportMenuAction()` has
-  `applies`, which leaves an entry out when false, but `Host::addMenuAction()` (the main menu) has
-  neither `applies` nor a way to remove an entry
-  ([plugin.h](../src/cpp/plugin_sdk/include/usdcc/plugin/plugin.h)). Phase 1 adds `applies` to it.
+- **Removing the entries at runtime needs a small change to the plugin API.** *Checked:*
+  `Host::addViewportMenuAction()` has `applies`, which leaves an entry out when false.
+  `Host::addMenuAction()` (the main menu) has no `applies` and no way to remove an entry
+  ([plugin.h](../src/cpp/plugin_sdk/include/usdcc/plugin/plugin.h)), although the app has
+  `removeMainMenuAction()` in `main_menu_actions.cpp`. Phase 1 adds `Host::removeMenuAction()`
+  on top of it.
 - **A remote peer can never change these.** They are read and written only locally. A script can set
   them through `usdcc.settings`, as it can any setting; a script already runs with the user's rights,
   so that is no new door (§8).
@@ -179,8 +185,8 @@ This follows the convention planned in [BUILD_OPTIONS.md](BUILD_OPTIONS.md), and
 
 | Phase | What | Done when |
 |---|---|---|
-| **0. Spike** | In-app capture of the main window with a viewport and a floating panel composited in; replaying a click and a key from a page | A picture with the 3D view in place; a button clicked and a text field typed into from the browser; milliseconds per frame at 2560×1440 |
-| **1. View-only** | The CMake option, the plugin id refused when off, the settings, `applies` for main menu actions, Help > Request Support (link), the session bar and border, the page, ending | The entries exist only with the setting on; turning it off ends a session; a build with the option off has no plugin and refuses a copied one |
+| **0. Spike** *(done, §10)* | In-app capture of the main window with a viewport and a floating panel composited in; replaying a click and a key from a page | A picture with the 3D view in place; a button clicked and a text field typed into from the browser; milliseconds per frame at 2560×1440 |
+| **1. View-only** | The CMake option, the plugin id refused when off, the settings, `Host::removeMenuAction()`, Help > Request Support (link), the session bar and border, the page, ending | The entries exist only with the setting on; turning it off ends a session; a build with the option off has no plugin and refuses a copied one |
 | **2. Control** | Ask, Allow, input replay, the user always wins, the stop shortcut | A helper edits an attribute and moves a prim in the outliner; local input pauses them |
 | **3. Requests to a peer** | Sending a request to a person in a room, the toast with Open | A request reaches a peer on another machine and opens the page |
 | **4. Faster pictures** | H.264 from Viewport Broadcast's phase 5; Windows Graphics Capture behind `FrameSource` | A session over a relay stays usable at 1920×1080 |
@@ -207,3 +213,103 @@ to `usdcc.exe`, or a machine-wide `usdcc.ini` the user's can't override). A larg
 **Decided 2026-11-22:** one helper at a time (§1); OS dialogs are operated by the user, not the
 helper (§3.3); the build option on by default (§6); the build
 option convention as its own plan ([BUILD_OPTIONS.md](BUILD_OPTIONS.md)).
+
+## 10. Phase 0: the spike
+
+### 10.1 What ran
+
+[src/plugins/remote_support_spike](../src/plugins/remote_support_spike), a plugin for developers:
+built only with `-DUSDCC_BUILD_REMOTE_SUPPORT_SPIKE=ON` (off by default) and never deployed. It
+reuses Viewport Broadcast's `Broadcast` and `FrameSource` unchanged
+([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11.2), with a `FrameSource` of all usdcc's windows.
+Its page is Broadcast's page plus the pointer, wheel and keys, sent to the host on a direct channel
+open to guests. **Help > Remote Support Spike** has Start, Stop and Benchmark.
+`USDCC_REMOTE_SUPPORT_SPIKE=1` starts it at launch, `USDCC_REMOTE_SUPPORT_SPIKE_BENCH=1` runs the
+benchmark, and `USDCC_REMOTE_SUPPORT_SPIKE_OUT=<folder>` writes `link.txt`, `stats.txt` and
+`bench.txt` there.
+
+Run 2026-11-22 on one Windows 11 machine at 150 % scaling (a screen of 1920×1152 logical pixels),
+with a test profile, `test_data/cube_and_sphere.usda` and Storm. The helper was a browser on the
+same machine, over loopback. **Not tried:** a second machine, the LAN, a relay, macOS, Linux.
+
+### 10.2 Capture
+
+**It works.** One picture of every visible usdcc window, the native 3D view in place (filled in from
+`grabFrame()`; a widget grab leaves it blank), with the user's and the helper's pointers drawn in.
+Menus (their own popup windows), the Settings dialog and a floated panel were all composited in
+their places.
+
+*Measured*, 30 grabs each, the Benchmark entry:
+
+| Picture | Grab, UI thread | of which widgets `grab()` | of which the 3D view | JPEG q60 / q85 at full size | at 1920 wide |
+|---|---|---|---|---|---|
+| 2560×1440 | **39.6 ms** (max 49.8) | 21.6 ms | 10.9 ms | 12.8 ms, 133 KB / 13.5 ms, 202 KB | 7.1 ms, 76 KB / 8.3 ms, 116 KB |
+| 2880×1728 (maximized) | **48.3 ms** (max 50.6) | 26.5 ms | 12.6 ms | 17.4 ms, 164 KB / 17.6 ms, 244 KB | 7.9 ms, 78 KB / 8.5 ms, 118 KB |
+
+The rest of a grab (about 7 ms) is the picture's allocation and compositing. JPEG runs on a pool
+thread, as in Broadcast.
+
+**What it means:**
+
+- **The grab is the cost, not the JPEG,** and it is on the UI thread: about 40 ms a frame at
+  2560×1440 caps a fully changing picture at about 20 a second and stalls the app that long each
+  time. For support (clicks and forms) it is enough. Broadcast's pacing already grabs at most once
+  per encode and nothing while nobody watches.
+- **Phase 1 should grab only what changed:** keep each window's last picture and grab again only
+  the windows that painted since (the spike already sees every `Paint` and `UpdateRequest`), and
+  the 3D view only after `frameRendered()`. A click in a form then costs one window, not all.
+- **The OS's title bars are missing.** `grab()` covers a window's client area. The main window
+  draws its own title bar (qwindowkit), so it is complete, but dialogs and floating panels show
+  without theirs, and the helper can't move them by it. Phase 1 draws a plain strip with the title
+  in their place; moving them stays with the user.
+- **Stacking is guessed** from the kind of window (main, tool, dialog, popup, tooltip), since Qt
+  doesn't know the OS's order. Right for everything tried; two overlapping floating panels could
+  be drawn in the wrong order.
+- **OS capture (§3.2) isn't needed** for phases 1 to 3.
+
+### 10.3 Input
+
+**It works**, through `QWindowSystemInterface` (§4). From the browser:
+
+- a click selects a prim in the Outliner; File opens its menu, and Escape closes it;
+- typing into the Outliner's search filters it;
+- shortcuts: **W** (Move tool), **Ctrl+Z** (undid a move), **Ctrl+,** (opened Settings);
+- in the native 3D view: a click picks the sphere, a drag of the gizmo moves it, the wheel zooms;
+- in other windows: **Close** in the Settings dialog, a panel's float button, a click in the floated
+  panel.
+
+**Found on the way:**
+
+1. **Native pixels.** `QWindowSystemInterface` takes the platform's pixels. The first try passed
+   logical ones: at 150 % every event landed at two thirds of its point and was ignored. The spike
+   converts with `QHighDpi::toNativeLocalPosition()` and `toNativeGlobalPosition()`, as `QTest`
+   does.
+2. **A private Qt API.** `Qt6::GuiPrivate` needs `find_package(Qt6 COMPONENTS GuiPrivate)` since
+   Qt 6.10, and private headers are tied to the exact Qt version. Fine for a plugin built and
+   shipped with the app, which is the plan (§1); a plugin built outside against another Qt would
+   break.
+3. **Replaying is cheap,** a few milliseconds, except that delivery is synchronous: a click that
+   opens a dialog takes as long as the dialog takes to build (648 ms for Settings).
+4. **The wheel has no synchronous variant;** it is queued and the event loop delivers it.
+5. **Text that isn't keys doesn't arrive.** The page only sends key events, so a paste, an input
+   method or a browser's inserted text sends nothing. Phase 2 also sends the page's `input` and
+   `compositionend` text.
+6. **While a button is held,** everything goes to the window it was pressed in, as the OS's capture
+   would. That is what makes the gizmo drag work.
+
+**Not tried:** dragging between windows (docking a panel by its tab, where Qt Advanced Docking
+follows the real cursor through `QCursor::pos()` and probably won't follow the helper's), double
+clicks, right-click menus, input methods, the user always winning, latency over a real network.
+
+### 10.4 Found in passing, not this plan's
+
+- **This checkout didn't build without precompiled headers.**
+  [peers_side_panel.h](../src/cpp/ui/include/usdcc/ui/peers_side_panel.h) declared a member as
+  `class QVBoxLayout*` inside `usdcc::ui`, which declares a new `usdcc::ui::QVBoxLayout`; with the
+  precompiled Qt headers the global one was already visible. Fixed with a forward declaration at
+  global scope.
+- **Configuring needs the Blender mesh backend** in `external/blender-mesh-install` (`tools/
+  build_blender_mesh.py`), also for work that has nothing to do with it. The spike configured with
+  `USDCC_BLENDER_MESH_ROOT` pointed at another checkout's.
+  [BUILD_OPTIONS.md](BUILD_OPTIONS.md)'s `USDCC_BUILD_BLENDER_MESH_TOOLS` would let such a build
+  leave it out.

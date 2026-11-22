@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usdcc remote support spike</title>
+<link rel="stylesheet" href="usdcc.css">
+<style>
+  /* Remote Support's phase 0 spike (docs/REMOTE_SUPPORT.md §10): Viewport Broadcast's
+     page, plus the pointer and keys on the picture sent back to be replayed. */
+  body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; font-size: 13px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px;
+           background: var(--surface-bar); border-bottom: 1px solid var(--line); }
+  #title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+  #live { color: var(--bad); font-weight: 600; font-size: 11px; letter-spacing: .06em; }
+  #live[hidden] { display: none; }
+  #status, #watchers { color: var(--text-muted); }
+  main { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;
+         background: var(--gap); }
+  canvas { outline: none; cursor: none; max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
+  canvas[hidden] { display: none; }
+  #note { position: absolute; color: var(--text-muted); padding: 16px; text-align: center; }
+  footer { border-top: 1px solid var(--line); padding: 8px 16px; display: grid; gap: 6px; background: var(--surface-toolbar); }
+  footer[hidden] { display: none; }
+  #log { max-height: 7.5em; overflow: auto; color: var(--text-muted); overflow-wrap: anywhere; }
+  #log b { color: var(--text); font-weight: 600; }
+  input { width: 100%; height: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <span id="live" hidden>LIVE</span>
+  <span id="title">usdcc remote support spike</span>
+  <span id="status">Connecting…</span>
+  <span id="watchers"></span>
+</header>
+<main>
+  <canvas id="view" tabindex="0" hidden></canvas>
+  <div id="note">Connecting…</div>
+</main>
+<footer id="chat" hidden>
+  <div id="log"></div>
+  <input id="say" placeholder="Message the host and the other watchers" maxlength="2000">
+</footer>
+<script>
+"use strict";
+const VIEW = "org.usdcc.viewport-broadcast/view";
+const INPUT = "org.usdcc.remote-support-spike/input";
+const params = new URLSearchParams(location.hash.slice(1));
+const secret = params.get("s") || "";
+let name = (params.get("n") || "").trim();
+if (!name) {
+  try { name = localStorage.getItem("usdcc.room.name") || ""; } catch (e) {}
+}
+if (!name) {
+  name = (window.prompt("Your name, for the host and the other watchers") || "").trim();
+  try { if (name) localStorage.setItem("usdcc.room.name", name); } catch (e) {}
+}
+name = (name || "Watcher").slice(0, 64);
+
+const $ = id => document.getElementById(id);
+const canvas = $("view"), context = canvas.getContext("2d");
+const people = new Map();
+let me = "";
+let ended = false;
+let drawing = Promise.resolve();
+
+function setNote(text) {
+  $("note").textContent = text;
+  $("note").hidden = !text;
+}
+function showPeople() {
+  const watchers = [...people.values()].filter(p => p.kind === "guest");
+  $("watchers").textContent = watchers.length ? "Watching: " + watchers.map(p => p.id === me ? p.name + " (you)" : p.name).join(", ") : "";
+}
+function chatLine(who, text) {
+  const div = document.createElement("div");
+  if (who) {
+    const b = document.createElement("b");
+    b.textContent = who + ": ";
+    div.appendChild(b);
+  }
+  div.appendChild(document.createTextNode(text));
+  $("log").appendChild(div);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function end(reason) {
+  ended = true;
+  $("live").hidden = true;
+  $("status").textContent = reason || "The broadcast ended";
+  $("say").disabled = true;
+  if (canvas.hidden) setNote(reason || "The broadcast ended");
+}
+
+// A frame (docs/PEERS_PROTOCOL.md §2): a big-endian u32 header length, the JSON header,
+// then the raw bytes. Text messages are a header alone.
+function decode(data) {
+  if (typeof data === "string") return JSON.parse(data);
+  const length = new DataView(data).getUint32(0);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4, length)));
+  header.bytes = new Uint8Array(data, 4 + length);
+  return header;
+}
+
+// Pictures are drawn one after another; one that arrives while another is decoding
+// waits for it, and only the newest waiting is drawn.
+let waiting = null;
+function showPicture(message) {
+  if (!message.bytes || !message.bytes.length) return;
+  const first = waiting === null;
+  waiting = message;
+  if (!first) return;
+  drawing = drawing.then(async () => {
+    const next = waiting;
+    waiting = null;
+    try {
+      const bitmap = await createImageBitmap(new Blob([next.bytes], { type: "image/jpeg" }));
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+      }
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      canvas.hidden = false;
+      setNote("");
+    } catch (e) {
+      console.warn("A picture didn't decode", e);
+    }
+    const body = next.body || {};
+    if (body.title) {
+      $("title").textContent = body.title;
+      document.title = body.title + " · usdcc broadcast";
+    }
+  });
+}
+
+const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+socket.binaryType = "arraybuffer";
+socket.onopen = () => socket.send(JSON.stringify({ channel: "room", type: "hello", body: { protocol: 1, secret, name } }));
+socket.onclose = () => { if (!ended) end("The connection was lost"); };
+socket.onmessage = event => {
+  const message = decode(event.data);
+  const body = message.body || {};
+  if (message.channel === "room") {
+    if (message.type === "welcome") {
+      me = body.id || "";
+      for (const peer of body.peers || []) people.set(peer.id, peer);
+      showPeople();
+      $("live").hidden = false;
+      $("status").textContent = "";
+      if (canvas.hidden) setNote("Waiting for the picture…");
+      $("chat").hidden = !(body.channels || []).some(c => c.name === "chat");
+    } else if (message.type === "joined") {
+      people.set(body.id, body);
+      showPeople();
+    } else if (message.type === "left") {
+      people.delete(body.id);
+      showPeople();
+    } else if (["denied", "removed", "closed"].includes(message.type)) {
+      end(body.reason || (message.type === "denied" ? "This link doesn't open the broadcast" : "The broadcast ended"));
+    }
+  } else if (message.channel === VIEW && (message.type === "frame" || message.type === "snapshot")) {
+    showPicture(message);
+  } else if (message.channel === "chat") {
+    if (message.type === "snapshot") {
+      // Lines nobody said ("You host …") are the host's own panel's: not for watchers.
+      for (const line of body.lines || []) {
+        if (line.from) chatLine(line.name, String(line.text || ""));
+      }
+    } else if (message.type === "say") {
+      const peer = people.get(message.from);
+      chatLine(peer ? peer.name : "Someone", String(body.text || ""));
+    }
+  }
+};
+
+$("say").addEventListener("keydown", event => {
+  const text = $("say").value.trim();
+  if (event.key !== "Enter" || !text || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ channel: "chat", type: "say", body: { text } }));
+  $("say").value = "";
+});
+
+// Input (docs/REMOTE_SUPPORT.md §4): points as fractions of the picture, so the host
+// maps them to its desktop whatever size the picture is shown at.
+function sendInput(body) {
+  if (ended || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ channel: INPUT, type: "input", body }));
+}
+function mods(e) { return (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0); }
+function at(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+let pendingMove = null;
+canvas.addEventListener("pointermove", e => {
+  const first = pendingMove === null;
+  pendingMove = { t: "move", ...at(e), bs: e.buttons, m: mods(e) };
+  if (first) requestAnimationFrame(() => { sendInput(pendingMove); pendingMove = null; });
+});
+canvas.addEventListener("pointerdown", e => {
+  canvas.focus();
+  canvas.setPointerCapture(e.pointerId);
+  if (pendingMove) { sendInput(pendingMove); pendingMove = null; }
+  sendInput({ t: "down", ...at(e), b: e.button, bs: e.buttons, m: mods(e) });
+  e.preventDefault();
+});
+canvas.addEventListener("pointerup", e => {
+  if (pendingMove) { sendInput(pendingMove); pendingMove = null; }
+  sendInput({ t: "up", ...at(e), b: e.button, bs: e.buttons, m: mods(e) });
+  e.preventDefault();
+});
+canvas.addEventListener("wheel", e => {
+  const unit = e.deltaMode === 1 ? 100 / 3 : e.deltaMode === 2 ? 800 : 1;  // lines, pages
+  sendInput({ t: "wheel", ...at(e), dx: e.deltaX * unit, dy: e.deltaY * unit, m: mods(e) });
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+for (const kind of ["keydown", "keyup"]) {
+  canvas.addEventListener(kind, e => {
+    sendInput({ t: "key", down: kind === "keydown", key: e.key, code: e.code, repeat: e.repeat, m: mods(e) });
+    e.preventDefault();
+  });
+}
+</script>
+</body>
+</html>

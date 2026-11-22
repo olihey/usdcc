@@ -20,6 +20,7 @@ class QToolButton;
 class QTextBrowser;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QVBoxLayout;
 
 namespace usdcc::ui {
 
@@ -85,7 +86,7 @@ private:
     QPushButton* m_send = nullptr;
     QToolButton* m_emoji = nullptr;
     QWidget* m_roomView = nullptr;
-    class QVBoxLayout* m_roomSections = nullptr;
+    QVBoxLayout* m_roomSections = nullptr;
 };
 
 // Turns chat text into HTML: escaped, with prim paths (/World/Cube) as links "prim:<path>".

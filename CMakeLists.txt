@@ -276,6 +276,11 @@ add_subdirectory(src/plugins/s3)
 # Viewport Broadcast: a viewport on a web page, through a room of usdcc_peers
 # (docs/VIEWPORT_BROADCAST.md). Bundled and enabled, like Jolt Physics.
 add_subdirectory(src/plugins/viewport_broadcast)
+# Remote Support's phase 0 spike (docs/REMOTE_SUPPORT.md §10): for developers, not deployed.
+option(USDCC_BUILD_REMOTE_SUPPORT_SPIKE "Build the Remote Support phase 0 spike plugin" OFF)
+if(USDCC_BUILD_REMOTE_SUPPORT_SPIKE)
+    add_subdirectory(src/plugins/remote_support_spike)
+endif()
 # Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
 add_subdirectory(src/plugins/physics_jolt)
 
