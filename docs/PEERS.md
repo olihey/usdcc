@@ -491,6 +491,34 @@ ordered.
   saved, and isn't part of a session.
 - **The status bar** shows the rooms and how many are in them.
 
+### 10.1.1 Shared images
+
+The Render Queue's Share ([FINAL_RENDER.md](FINAL_RENDER.md) §5.5) puts an image in the chat:
+to the room, or to one person (a line sent with `to`, which only they and the sender see and
+which a joiner's history leaves out).
+
+- **On the wire:** `chat` message `image` {text, preview, previewName, previewBytes, and when
+  offered original, originalName, originalBytes, and sharedPath}. Each file is a bundle of one
+  file whose hash names it. The receiver asks the sender with `fetch` {hash} (to the sender);
+  the sender answers with a transfer on the Direct channel `chat-files`, or `gone` {hash, reason}.
+- **Nothing comes unasked.** Every image line waits for **Accept** (the preview and the
+  original), **Preview Only** or **Decline**, in the chat or on its toast; the original can be
+  downloaded later with a click. There are no exceptions for trusted people. `Peers/acceptImages`
+  `never`: lines say images are off, and nothing can be downloaded.
+- **The receiver takes** only bundles a line announced, from whoever announced them, that it
+  asked for, of one file with an image name (jpg, png, exr, tif) no larger than announced, and
+  while the received images stay under `Peers/receivedImagesMaxGB` (2 GB).
+- **What arrives is checked:** its first bytes must be the type its name says (PNG, JPEG, EXR,
+  TIFF signatures); a file that isn't is deleted at once and the line says "Not an image;
+  removed". A preview larger than 8192 px a side isn't decoded. Open uses the default app for
+  that type; nothing received is run. A shared-drive path is only shown in Explorer.
+- **Flooding:** more than 10 image lines a minute from one sender are left out, with one line
+  saying so.
+- **The sender** offers an image for 24 hours, to the room or the one person, and can **Stop
+  Sharing** it from its line. Received images are deleted after `Peers/keepReceivedImagesDays`
+  (30) when usdcc starts; Settings > Peers > Clear Received Images deletes them all.
+- They're kept in `<AppLocalData>/peers/chat-images/<hash>/`.
+
 ### 10.2 Notifications
 
 Channel `notify`, ordered. Anything in a room that may send on it can raise a toast on every

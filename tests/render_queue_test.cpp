@@ -4,10 +4,12 @@
 // fetched by the artist, the jobs in the Render Queue panel with who may cancel them, the
 // queue's web page and its token, and the wire formats.
 #include "test_harness.h"
+#include "test_settings.h"
 
 #include "peers_test_support.h"
 #include "queue_web.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/peers/room.h"
 #include "usdcc/usd/linear_exr.h"
 #include "usdcc/usd/render/render_job.h"
@@ -16,6 +18,7 @@
 #include "usdcc/usd/render/render_queue_panel.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_spec.h"
+#include "usdcc/usd/render_view_panel.h"
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
@@ -27,6 +30,8 @@
 #include <QDateTime>
 #include <QHostAddress>
 #include <QJsonArray>
+#include <QLabel>
+#include <QMenu>
 #include <QTest>
 #include <QDir>
 #include <QFile>
@@ -262,8 +267,16 @@ USDCC_TEST(render_queue_wire_formats) {
     const QString keep = QDir::rootPath() + QStringLiteral("state/frames/q1");
     const std::string mine = (QDir::rootPath() + QStringLiteral("mine/<stage>")).toStdString();
     const std::string rootText = root.toStdString();
+    CHECK(!job->folderName.empty() && back->folderName == job->folderName, "the job's own folder travels: %s",
+          back->folderName.c_str());
     auto pattern = queueOutputPattern(*job, root, keep, &error);
-    CHECK(pattern && *pattern == rootText + "/<stage>", "relative: under the root (%s)", pattern ? pattern->c_str() : error.c_str());
+    CHECK(pattern && *pattern == rootText + "/<job>/<stage>", "relative: in the job's folder under the root (%s)",
+          pattern ? pattern->c_str() : error.c_str());
+    job->spec.options.output = "renders/<job>_<stage>";
+    pattern = queueOutputPattern(*job, root, keep, &error);
+    CHECK(pattern && *pattern == rootText + "/renders/<job>_<stage>", "<job> says where it goes (%s)",
+          pattern ? pattern->c_str() : error.c_str());
+    job->spec.options.output = "<stage>";
     job->spec.options.output = rootText + "/shots/<stage>";
     pattern = queueOutputPattern(*job, root, {}, &error);
     CHECK(pattern && *pattern == rootText + "/shots/<stage>", "absolute inside the root");
@@ -276,7 +289,12 @@ USDCC_TEST(render_queue_wire_formats) {
     CHECK(pattern && *pattern == keep.toStdString() + "/<stage>", "no root: the file name, kept for the artist");
     job->spec.options.output.clear();
     pattern = queueOutputPattern(*job, root, {}, &error);
-    CHECK(pattern && *pattern == rootText + "/<stage>_<settings>", "none authored: the default name");
+    CHECK(pattern && *pattern == rootText + "/<job>/<stage>_<settings>", "none authored: the default name");
+    // A folder name that would leave the output folder isn't taken.
+    QJsonObject sneaky = jobToJson(*job, true);
+    sneaky["jobFolder"] = QStringLiteral("../../escape");
+    const RenderJobPtr dropped = jobFromJson(sneaky, nullptr);
+    CHECK(dropped && dropped->folderName.empty(), "a folder name with a path in it is dropped");
 }
 
 
@@ -319,8 +337,10 @@ USDCC_TEST(render_queue_submit) {
     if (!theirs) return;
     CHECK(std::all_of(theirs->tasks.begin(), theirs->tasks.end(), [](const JobTask& t) { return t.worker == "Node"; }),
           "every task by the node");
-    const QString frame1 = root.filePath(QStringLiteral("shots/queue_shot.0001.exr"));
-    const QString frame2 = root.filePath(QStringLiteral("shots/queue_shot.0002.exr"));
+    // In the job's own folder under the root.
+    const QString folder = QString::fromStdString(job->folderName) + QLatin1Char('/');
+    const QString frame1 = root.filePath(folder + QStringLiteral("shots/queue_shot.0001.exr"));
+    const QString frame2 = root.filePath(folder + QStringLiteral("shots/queue_shot.0002.exr"));
     if (usdcc::usd::linearExrAvailable()) {
         CHECK(QFileInfo::exists(frame1) && QFileInfo::exists(frame2), "the frames under the root: %s",
               theirs->files.empty() ? "none" : theirs->files.front().c_str());
@@ -367,7 +387,8 @@ USDCC_TEST(render_queue_restart) {
     QTest::qWait(800);  // saved
     const int frame1Before = registered.renderer->startedFor(1.0);
     const int frame2Before = registered.renderer->startedFor(2.0);
-    const QString frame1 = root.filePath(QStringLiteral("queue_shot.0001.exr"));
+    const QString folder = QString::fromStdString(job->folderName) + QLatin1Char('/');
+    const QString frame1 = root.filePath(folder + QStringLiteral("queue_shot.0001.exr"));
     const QDateTime written = QFileInfo(frame1).lastModified();
 
     // Stopped, and started again from its state.
@@ -388,7 +409,7 @@ USDCC_TEST(render_queue_restart) {
           registered.renderer->startedFor(2.0) - frame2Before);
     if (usdcc::usd::linearExrAvailable()) {
         CHECK(QFileInfo(frame1).lastModified() == written, "frame 1's file as it was");
-        CHECK(QFileInfo::exists(root.filePath(QStringLiteral("queue_shot.0002.exr"))), "frame 2 written");
+        CHECK(QFileInfo::exists(root.filePath(folder + QStringLiteral("queue_shot.0002.exr"))), "frame 2 written");
     }
     CHECK(QDir(state.filePath(QStringLiteral("tiles/") + id)).isEmpty() || !QDir(state.filePath(QStringLiteral("tiles/") + id)).exists(),
           "its tiles let go");
@@ -610,4 +631,110 @@ USDCC_TEST(render_queue_web_page) {
               !usdcc::node::QueueWeb::tokenMatches(QStringLiteral("abc"), QStringLiteral("abd")) &&
               !usdcc::node::QueueWeb::tokenMatches({}, {}),
           "tokens");
+}
+
+// The panel's frames (docs/FINAL_RENDER.md §5.2): a job renders into a folder of its own;
+// a double-clicked frame is read from its file into the preview, and stays there; jobs and
+// frames have their menus.
+USDCC_TEST(render_queue_panel_frames) {
+    TestSettings settings;
+    defineFinalRenderSettings();
+    QTemporaryDir out;
+    usdcc::core::Settings::instance().setValue("FinalRender/outputFolder", out.path().toStdString());
+    Registered registered;
+
+    UsdStageRefPtr stage = UsdStage::CreateInMemory("queue_shot.usda");
+    stage->SetStartTimeCode(1);
+    stage->SetEndTimeCode(2);
+    UsdGeomCamera camera = UsdGeomCamera::Define(stage, SdfPath("/World/Cam"));
+    UsdGeomXformCommonAPI(camera).SetTranslate(GfVec3d(0, 0, 10));
+    const SdfPath settingsPath = createRenderSettings(stage);
+    const UsdPrim prim = stage->GetPrimAtPath(settingsPath);
+    UsdRenderSettings(prim).GetResolutionAttr().Set(GfVec2i(32, 16));
+    setJobOption(prim, jobattr::renderer, VtValue(std::string("test.queue")));
+    JobRequest request;
+    request.stage = stage;
+    request.settings = settingsPath;
+    request.frames = JobRequest::Frames::Range;
+    request.dispatch = PeerDispatch{};
+    std::string error;
+    RenderJobPtr job = makeRenderJob(request, &error);
+    CHECK(job != nullptr, "a job: %s", error.c_str());
+    if (!job) return;
+    CHECK(!job->folderName.empty() && job->folderName.rfind("queue_shot_", 0) == 0, "a folder of its own: %s",
+          job->folderName.c_str());
+
+    RenderScheduler scheduler;
+    scheduler.addWorker(std::make_shared<LocalWorker>());
+    RenderQueueSidePanel panel(&scheduler);
+    scheduler.submit(job);
+    CHECK(waitUntil([&] { return ended(job); }, 20000) && job->status == RenderJob::Status::Done, "rendered: %s",
+          job->error.c_str());
+    if (!usdcc::usd::linearExrAvailable()) return;
+    const QString folder = out.filePath(QString::fromStdString(job->folderName));
+    CHECK(QFileInfo::exists(QDir(folder).filePath("queue_shot_RenderSettings.0001.exr")) ||
+              !QDir(folder).entryList({"*.0001.exr"}).isEmpty(),
+          "frame 1 in the job's folder: %s", job->files.empty() ? "none" : job->files.front().c_str());
+    CHECK(QDir::cleanPath(QString::fromStdString(RenderScheduler::outputFolder(*job))) == QDir::cleanPath(folder),
+          "the job's folder is its output folder");
+    CHECK(panel.followsNewest(), "following the newest frame at first");
+
+    // A frame read back from its file.
+    const LoadedFrame read = loadFrameFile(QString::fromStdString(job->files.front()), 0);
+    CHECK(read.linear && read.image.size() == QSize(32, 16) && read.error.isEmpty(), "an EXR read back: %s",
+          qPrintable(read.error));
+
+    // Double-click frame 2: from its file, and it stays.
+    QTreeWidgetItem* jobItem = panel.tree()->topLevelItem(0);
+    if (!jobItem || jobItem->childCount() != 2) {
+        CHECK(false, "the job with its two frames in the tree");
+        return;
+    }
+    QString shownError = QStringLiteral("none yet");
+    int shownFrame = -1;
+    QObject::connect(&panel, &RenderQueueSidePanel::frameFileShown, &panel,
+                     [&](const QString&, int frame, const QString& why) {
+                         shownFrame = frame;
+                         shownError = why;
+                     });
+    Q_EMIT panel.tree()->itemDoubleClicked(jobItem->child(1), 0);
+    CHECK(waitUntil([&] { return shownFrame >= 0; }, 10000) && shownFrame == 1 && shownError.isEmpty(),
+          "frame 2 read from its file: %s", qPrintable(shownError));
+    CHECK(!panel.followsNewest(), "a double-click stops following the newest frame");
+    CHECK(panel.preview()->image().size() == QSize(32, 16), "in the preview");
+    CHECK(panel.previewLabel()->text().contains(QStringLiteral("0002")), "named: %s", qPrintable(panel.previewLabel()->text()));
+
+    // The menus.
+    const auto texts = [](QMenu* menu) {
+        QStringList result;
+        for (QAction* action : menu->actions()) {
+            result.append(action->text());
+            if (action->menu()) {
+                for (QAction* sub : action->menu()->actions()) result.append(QStringLiteral("> ") + sub->text());
+            }
+        }
+        return result;
+    };
+    QMenu jobMenu;
+    panel.fillMenu(&jobMenu, jobItem);
+    const QStringList jobTexts = texts(&jobMenu);
+    for (const char* entry : {"Show Newest Frame", "Open in Explorer", "Copy Folder Path", "Remove", "Remove and Delete Files…"}) {
+        CHECK(jobTexts.contains(QString::fromUtf8(entry)), "the job's menu has %s: %s", entry, qPrintable(jobTexts.join(" | ")));
+    }
+    QMenu frameMenu;
+    panel.fillMenu(&frameMenu, jobItem->child(0));
+    const QStringList frameTexts = texts(&frameMenu);
+    for (const char* entry : {"Show in Preview", "Open in Explorer", "Open in Default App", "Open in Viewer", "Copy Path",
+                              "Copy Image", "Share", "> Join a chat room in the Peers panel to share"}) {
+        CHECK(frameTexts.contains(QString::fromUtf8(entry)), "the frame's menu has %s: %s", entry,
+              qPrintable(frameTexts.join(" | ")));
+    }
+
+    // Open in Viewer's command line.
+    CHECK(viewerCommand(QStringLiteral("\"C:/Program Files/DJV/djv.exe\" --seq {sequence}"), "a/b.0001.exr", "a/b.####.exr") ==
+              QStringList({"C:/Program Files/DJV/djv.exe", "--seq", QDir::toNativeSeparators("a/b.####.exr")}),
+          "{sequence} filled in");
+    CHECK(viewerCommand(QStringLiteral("mrv"), "a/b.exr", "a/b.exr") == QStringList({"mrv", QDir::toNativeSeparators("a/b.exr")}),
+          "the file last without a placeholder");
+    CHECK(viewerCommand(QStringLiteral("  "), "a/b.exr", "a/b.exr").isEmpty(), "none set: nothing");
 }

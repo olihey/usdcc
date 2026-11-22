@@ -13,6 +13,7 @@
 #include <pxr/usd/usd/stage.h>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -44,6 +45,9 @@ struct USDCC_RENDER_API RenderJob {
     std::string settingsName;  // the RenderSettings prim's name, or "default"
     std::string rendererId;
     std::string rendererName;
+    // The job's own folder (docs/FINAL_RENDER.md §4.3): a relative output pattern goes in it,
+    // under the output folder, and <job> names it. Empty: no folder of its own.
+    std::string folderName;
     ResolvedSpec spec;
     std::vector<double> frames;
     std::vector<JobTask> tasks;
@@ -91,5 +95,14 @@ USDCC_RENDER_API std::string outputPath(const RenderJob& job, const ProductSpec&
                                         double frame);
 // What the frame part of a name is: 4 digits, or 4 digits and a fraction for a fractional frame.
 USDCC_RENDER_API std::string frameText(double frame);
+
+// A job's own folder name: "<stage>_<settings>_<yyyyMMdd-HHmmss>", with "-2", "-3"... when
+// `taken` says the name is in use. Names this process gave out are never given again.
+USDCC_RENDER_API std::string newJobFolderName(const std::string& stageName, const std::string& settingsName,
+                                              const std::function<bool(const std::string&)>& taken = {});
+
+// The files frame `frameIndex` of `job` goes to, in the order they're written: each product's
+// (and for PNG, each AOV's).
+USDCC_RENDER_API std::vector<std::string> frameFiles(const RenderJob& job, int frameIndex);
 
 }  // namespace usdcc::render

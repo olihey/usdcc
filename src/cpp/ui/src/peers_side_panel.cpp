@@ -9,11 +9,15 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QImageReader>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,12 +25,15 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
+#include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QUrl>
 #include <QWidgetAction>
 #include <QVBoxLayout>
 
@@ -37,6 +44,124 @@ using namespace usdcc::peers;
 namespace {
 
 enum Role { RoomRole = Qt::UserRole + 1, FoundRole, PeerRole };
+
+constexpr int kThumbnailWidth = 240;
+constexpr int kThumbnailHeight = 180;
+constexpr int kMaxPreviewSide = 8192;  // a shared preview larger than this isn't decoded
+
+QString sizeText(qint64 bytes) {
+    if (bytes >= qint64(1024) * 1024 * 1024) {
+        return QObject::tr("%1 GB").arg(bytes / (1024.0 * 1024.0 * 1024.0), 0, 'f', 1);
+    }
+    if (bytes >= 1024 * 1024) {
+        return QObject::tr("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1);
+    }
+    return QObject::tr("%1 KB").arg(std::max<qint64>(1, bytes / 1024));
+}
+
+// Explorer (Finder, the file manager) with the file picked, where it can.
+void revealInFolder(const QString& path) {
+#ifdef _WIN32
+    QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
+#elif defined(__APPLE__)
+    QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-R"), path});
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+#endif
+}
+
+// A shared image under its chat line: the preview, and the original with what can be done
+// with it. Every link names a bundle hash; nothing a member sent goes in unescaped.
+QString imageHtml(const PeersController* controller, const PeersController::ChatImage& image, bool mine) {
+    using State = PeersController::ImageFile::State;
+    QString html;
+    const QString what = image.original.isEmpty()
+                             ? QObject::tr("a preview, %1").arg(sizeText(image.previewBytes))
+                             : QObject::tr("a preview, %1, and %2, %3")
+                                   .arg(sizeText(image.previewBytes), image.originalName.toHtmlEscaped(),
+                                        sizeText(image.originalBytes));
+    if (!mine) {
+        // Nothing comes before the receiver says so.
+        if (!PeersController::acceptsImages()) {
+            return QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>")
+                .arg(QObject::tr("An image (%1); images shared with you are off in Settings > Peers").arg(what));
+        }
+        if (controller->isDeclined(image.preview)) {
+            return QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("Declined: %1").arg(what));
+        }
+        if (!controller->isAccepted(image.preview)) {
+            html += QStringLiteral("<br><span style=\"color:#8a8d93\">%1</span><br><a href=\"accept:%2\">%3</a>")
+                        .arg(QObject::tr("Wants to share %1").arg(what), image.preview, QObject::tr("Accept"));
+            if (!image.original.isEmpty()) {
+                html += QStringLiteral(" · <a href=\"previewonly:%1\">%2</a>").arg(image.preview, QObject::tr("Preview Only"));
+            }
+            html += QStringLiteral(" · <a href=\"decline:%1\">%2</a>").arg(image.preview, QObject::tr("Decline"));
+            return html;
+        }
+    }
+    const PeersController::ImageFile preview = controller->imageFile(image.preview);
+    switch (preview.state) {
+    case State::Done: {
+        // Its size from the header first: one that's unreasonably large isn't decoded.
+        QSize size = QImageReader(preview.path).size();
+        if (!size.isValid() || size.width() > kMaxPreviewSide || size.height() > kMaxPreviewSide) {
+            html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("The preview can't be shown"));
+            break;
+        }
+        size.scale(std::min(size.width(), kThumbnailWidth), std::min(size.height(), kThumbnailHeight), Qt::KeepAspectRatio);
+        html += QStringLiteral("<br><a href=\"image:%1\"><img src=\"%2\" width=\"%3\" height=\"%4\"></a>")
+                    .arg(image.preview, QUrl::fromLocalFile(preview.path).toString().toHtmlEscaped())
+                    .arg(size.width())
+                    .arg(size.height());
+        break;
+    }
+    case State::Fetching:
+    case State::Missing:
+        html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("The preview is on its way…"));
+        break;
+    case State::Failed:
+        html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>")
+                    .arg(QObject::tr("No preview: %1").arg(preview.error).toHtmlEscaped());
+        break;
+    }
+    if (!image.original.isEmpty()) {
+        const PeersController::ImageFile original = controller->imageFile(image.original);
+        const QString name = image.originalName.toHtmlEscaped();
+        const QString size = sizeText(image.originalBytes);
+        html += QStringLiteral("<br>");
+        switch (original.state) {
+        case State::Done:
+            html += QStringLiteral("%1 · <a href=\"open:%2\">%3</a> · <a href=\"reveal:%2\">%4</a>")
+                        .arg(name, image.original, QObject::tr("Open"), QObject::tr("Show in Folder"));
+            break;
+        case State::Fetching:
+            html += QObject::tr("%1 · %2% of %3")
+                        .arg(name)
+                        .arg(original.total > 0 ? int(original.done * 100 / original.total) : 0)
+                        .arg(size);
+            break;
+        case State::Missing:
+            html += QStringLiteral("<a href=\"fetch:%1\">%2</a>")
+                        .arg(image.original, QObject::tr("Download %1 (%2)").arg(name, size));
+            break;
+        case State::Failed:
+            html += QStringLiteral("%1: %2 · <a href=\"fetch:%3\">%4</a>")
+                        .arg(name, original.error.toHtmlEscaped(), image.original, QObject::tr("Try Again"));
+            break;
+        }
+    }
+    if (mine) {
+        html += controller->isSharing(image.preview)
+                    ? QStringLiteral("<br><a href=\"stop:%1\">%2</a>").arg(image.preview, QObject::tr("Stop Sharing"))
+                    : QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("No longer shared"));
+    }
+    if (!image.sharedPath.isEmpty()) {
+        html += QStringLiteral("<br><span style=\"color:#8a8d93\">%1</span> <a href=\"shared:%2\">%3</a>")
+                    .arg(QObject::tr("On a shared drive:"), image.preview,
+                         QDir::toNativeSeparators(image.sharedPath).toHtmlEscaped());
+    }
+    return html;
+}
 
 QIcon dot(const QString& color) {
     QPixmap pixmap(12, 12);
@@ -169,6 +294,42 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     connect(m_chat, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
         if (url.scheme() == u"prim" && m_controller->hooks().selectPrim) {
             m_controller->hooks().selectPrim(url.path());
+            return;
+        }
+        // A shared image's: what's here of it, by its bundle hash.
+        const QString hash = url.path();
+        const PeersController::ImageFile file = m_controller->imageFile(hash);
+        const bool here = file.state == PeersController::ImageFile::State::Done && QFileInfo::exists(file.path);
+        if (url.scheme() == u"image" || url.scheme() == u"open") {
+            if (here) {
+                QDesktopServices::openUrl(QUrl::fromLocalFile(file.path));
+            }
+        } else if (url.scheme() == u"reveal") {
+            if (here) {
+                revealInFolder(file.path);
+            }
+        } else if (url.scheme() == u"fetch") {
+            m_controller->fetchImage(m_room, hash);
+        } else if (url.scheme() == u"accept" || url.scheme() == u"previewonly") {
+            m_controller->acceptImage(m_room, hash, url.scheme() == u"accept");
+        } else if (url.scheme() == u"decline") {
+            m_controller->declineImage(hash);
+        } else if (url.scheme() == u"stop") {
+            m_controller->stopSharing(hash);
+        } else if (url.scheme() == u"shared" && m_room) {
+            // Shown in its folder, never run: the path is what the sender typed.
+            for (const PeersController::ChatLine& line : m_controller->chat(m_room)) {
+                if (line.image && line.image->preview == hash) {
+                    if (QFileInfo::exists(line.image->sharedPath)) {
+                        revealInFolder(line.image->sharedPath);
+                    } else {
+                        QMessageBox::information(this, tr("Shared Image"),
+                                                 tr("%1 isn't reachable from here.")
+                                                     .arg(QDir::toNativeSeparators(line.image->sharedPath)));
+                    }
+                    break;
+                }
+            }
         }
     });
     roomSplit->setStretchFactor(0, 1);
@@ -219,6 +380,17 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     connect(controller, &PeersController::chatReset, this, [this](Room* room) {
         if (room == m_room) {
             rebuildChat();
+        }
+    });
+    connect(controller, &PeersController::imageChanged, this, [this](const QString& hash) {
+        if (!m_room) {
+            return;
+        }
+        for (const PeersController::ChatLine& line : m_controller->chat(m_room)) {
+            if (line.image && (line.image->preview == hash || line.image->original == hash)) {
+                rebuildChat();
+                return;
+            }
         }
     });
     connect(controller->peers(), &Peers::roomAdded, this, [this](Room* room) { showRoom(room); });
@@ -359,6 +531,10 @@ void PeersSidePanel::rebuildPeople() {
 }
 
 void PeersSidePanel::rebuildChat() {
+    // Where it was, unless at the end, which it stays at.
+    QScrollBar* bar = m_chat->verticalScrollBar();
+    const bool atEnd = bar->value() >= bar->maximum();
+    const int was = bar->value();
     m_chat->clear();
     if (!m_room) {
         return;
@@ -366,6 +542,7 @@ void PeersSidePanel::rebuildChat() {
     for (const PeersController::ChatLine& line : m_controller->chat(m_room)) {
         appendLine(line);
     }
+    bar->setValue(atEnd ? bar->maximum() : was);
 }
 
 void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
@@ -376,8 +553,20 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
         return;
     }
     const QString color = line.from.color.isEmpty() ? QStringLiteral("#dfe1e5") : line.from.color;
-    m_chat->append(QStringLiteral("<span style=\"color:#8a8d93\">%1</span> <b style=\"color:%2\">%3</b> %4")
-                       .arg(time, color, line.from.name.toHtmlEscaped(), chatHtml(line.text)));
+    QString name = line.from.name.toHtmlEscaped();
+    if (!line.to.isEmpty() && m_room) {
+        // To one member: whom, from the sender's side; "to you" on the other.
+        const bool mine = line.from.id == m_room->me().id;
+        const Peer to = m_room->peer(line.to);
+        name += QStringLiteral(" <span style=\"color:#8a8d93\">→ %1</span>")
+                    .arg(mine ? (to.isValid() ? to.name : tr("someone")).toHtmlEscaped() : tr("you"));
+    }
+    QString html = QStringLiteral("<span style=\"color:#8a8d93\">%1</span> <b style=\"color:%2\">%3</b> %4")
+                       .arg(time, color, name, chatHtml(line.text));
+    if (line.image) {
+        html += imageHtml(m_controller, *line.image, m_room && line.from.id == m_room->me().id);
+    }
+    m_chat->append(html);
 }
 
 Room* joinFoundRoom(PeersController* controller, QWidget* parent, const FoundRoom& room) {

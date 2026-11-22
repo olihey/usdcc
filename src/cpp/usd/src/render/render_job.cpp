@@ -1,5 +1,6 @@
 #include "usdcc/usd/render/render_job.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/usd/render/render_network.h"
 
 #include "usdcc/usd/time_range.h"
@@ -11,6 +12,7 @@
 #include <pxr/usd/usdGeom/scope.h>
 #include <pxr/usd/usdGeom/xformable.h>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QString>
@@ -19,6 +21,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
+#include <set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -173,8 +177,15 @@ std::string outputPath(const RenderJob& job, const ProductSpec& product, const s
         pattern = insertBeforeExtension(pattern, "_<aov>");
     }
 
+    // A relative pattern goes in the job's own folder, unless it says where with <job>.
+    const bool relative = QDir::isRelativePath(QDir::fromNativeSeparators(QString::fromStdString(pattern)));
+    if (relative && !job.folderName.empty() && pattern.find("<job>") == std::string::npos) {
+        pattern = "<job>/" + pattern;
+    }
+
     const std::string frameString = frameText(frame);
     std::string path = pattern;
+    path = replaceAll(path, "<job>", job.folderName.empty() ? job.stageName + "_" + job.settingsName : job.folderName);
     path = replaceAll(path, "<stage>", job.stageName);
     path = replaceAll(path, "<settings>", job.settingsName);
     path = replaceAll(path, "<product>", product.name);
@@ -187,6 +198,34 @@ std::string outputPath(const RenderJob& job, const ProductSpec& product, const s
     QString result = QString::fromStdString(path);
     if (QDir::isRelativePath(result)) result = QDir(QString::fromStdString(defaultOutputFolder())).filePath(result);
     return QDir::cleanPath(result).toStdString();
+}
+
+std::string newJobFolderName(const std::string& stageName, const std::string& settingsName,
+                             const std::function<bool(const std::string&)>& taken) {
+    static std::mutex mutex;
+    static std::set<std::string> given;
+    const std::lock_guard<std::mutex> lock(mutex);
+    const std::string base = stageName + "_" + settingsName + "_" +
+                             QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")).toStdString();
+    std::string name = base;
+    for (int n = 2; given.count(name) || (taken && taken(name)); ++n) name = base + "-" + std::to_string(n);
+    given.insert(name);
+    return name;
+}
+
+std::vector<std::string> frameFiles(const RenderJob& job, int frameIndex) {
+    std::vector<std::string> files;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(job.frames.size())) return files;
+    const double frame = job.frames[static_cast<size_t>(frameIndex)];
+    const bool png = job.spec.options.format == "png";
+    for (const ProductSpec& product : job.spec.products) {
+        if (png) {
+            for (const RenderAov& aov : product.aovs) files.push_back(outputPath(job, product, aov.name, frame));
+        } else {
+            files.push_back(outputPath(job, product, std::string(), frame));
+        }
+    }
+    return files;
 }
 
 RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error) {
@@ -218,6 +257,12 @@ RenderJobPtr makeRenderJob(const JobRequest& request, std::string* error) {
     job->stageName = baseName(request.stage->GetRootLayer()->GetDisplayName());
     if (job->stageName.empty()) job->stageName = "untitled";
     job->settingsName = settingsPath.IsEmpty() ? "default" : settingsPath.GetName();
+    if (usdcc::core::Settings::instance().get<bool>("FinalRender/jobFolders", true)) {
+        const QDir output(QString::fromStdString(defaultOutputFolder()));
+        job->folderName = newJobFolderName(job->stageName, job->settingsName, [&output](const std::string& name) {
+            return output.exists(QString::fromStdString(name));
+        });
+    }
 
     // Frames.
     if (request.frames == JobRequest::Frames::Current) {

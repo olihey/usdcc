@@ -679,7 +679,9 @@ USDCC_TEST(node_process_queue) {
     CHECK(waitFor([&] { return ended(appJob); }, 120000) && appJob->status == RenderJob::Status::Done, "the app renders");
     for (int frame = 1; frame <= 3; ++frame) {
         const QString name = QStringLiteral("shot.%1.exr").arg(frame, 4, 10, QLatin1Char('0'));
-        const double difference = meanDifference(QDir(root).filePath(name), dir.filePath(QStringLiteral("app/") + name));
+        // In the job's own folder under the root.
+        const QString underRoot = QDir(root).filePath(QString::fromStdString(job->folderName) + QLatin1Char('/') + name);
+        const double difference = meanDifference(underRoot, dir.filePath(QStringLiteral("app/") + name));
         CHECK(difference < 0.03, "%s under the root matches the app's: mean difference %.4f", qPrintable(name), difference);
     }
 
@@ -734,11 +736,13 @@ USDCC_TEST(node_process_queue_restart) {
     client.reset();
     room.reset();
 
-    const QString frame1 = dir.filePath(QStringLiteral("root/shot.0001.exr"));
+    // In the job's own folder under the root.
+    const QString jobRoot = QStringLiteral("root/") + QString::fromStdString(job->folderName) + QLatin1Char('/');
+    const QString frame1 = dir.filePath(jobRoot + QStringLiteral("shot.0001.exr"));
     CHECK(waitFor([&] { return QFileInfo::exists(frame1); }, 90000), "frame 1 written");
     waitFor([] { return false; }, 700);  // its state saved
     const QDateTime written = QFileInfo(frame1).lastModified();
-    CHECK(!QFileInfo::exists(dir.filePath(QStringLiteral("root/shot.0003.exr"))), "frame 3 not yet");
+    CHECK(!QFileInfo::exists(dir.filePath(jobRoot + QStringLiteral("shot.0003.exr"))), "frame 3 not yet");
     // Killed, as a crash or a power cut would.
     queue->process.kill();
     queue->process.waitForFinished(10000);
@@ -752,7 +756,7 @@ USDCC_TEST(node_process_queue_restart) {
     CHECK(waitFor([&] { return queue->output.contains(QStringLiteral(" done: 3 file(s)")); }, 120000), "the job finishes: %s",
           qPrintable(queue->output.right(400)));
     CHECK(QFileInfo(frame1).lastModified() == written, "frame 1 wasn't rendered again");
-    CHECK(QFileInfo::exists(dir.filePath(QStringLiteral("root/shot.0003.exr"))), "frame 3 is there");
+    CHECK(QFileInfo::exists(dir.filePath(jobRoot + QStringLiteral("shot.0003.exr"))), "frame 3 is there");
 }
 
 #endif
