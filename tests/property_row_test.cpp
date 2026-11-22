@@ -97,3 +97,27 @@ USDCC_TEST(property_row_edit_button_is_rightmost) {
           "Edit comes after everything else: %d > %d", edit->geometry().left(), rightmost);
     CHECK(edit->width() == edit->height(), "and is square: %dx%d", edit->width(), edit->height());
 }
+
+// The tool target's mark and a key's are different glyphs (docs/ANIMATION.md phase 2): ◎ in
+// the label for the op the transform tools act on, ◆ on the key button for a key here.
+USDCC_TEST(property_row_target_mark_is_not_a_key) {
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    PropertyRow row(QStringLiteral("Translate"), usdcc::usd::properties::createPropertyEditor(SdfValueTypeNames->Double3));
+    const QString diamond = QString::fromUtf8("\xE2\x97\x86");
+    const QString bullseye = QString::fromUtf8("\xE2\x97\x8E");
+    row.setTargeted(true);
+    row.setKeyState(PropertyRow::KeyState::KeyedHere);
+    QString label;
+    for (const QLabel* each : row.findChildren<QLabel*>()) {
+        if (each->objectName() == "propertyLabel") label = each->text();
+    }
+    CHECK(label.contains(bullseye) && !label.contains(diamond), "the target: %s", qPrintable(label));
+    CHECK(row.keyButton()->text() == diamond, "a key here: %s", qPrintable(row.keyButton()->text()));
+    row.setTargeted(false);
+    for (const QLabel* each : row.findChildren<QLabel*>()) {
+        if (each->objectName() == "propertyLabel") label = each->text();
+    }
+    CHECK(label == "Translate", "not the target: the plain label");
+}

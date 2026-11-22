@@ -157,8 +157,9 @@ void PropertyRow::addLeadingWidget(QWidget* widget) {
 QString PropertyRow::labelText() const { return m_labelText; }
 
 void PropertyRow::setTargeted(bool targeted) {
-    // "◆" marks the op the transform tools act on.
-    m_label->setText(targeted ? m_labelText + QStringLiteral("  \xE2\x97\x86") : m_labelText);
+    // "◎" marks the op the transform tools act on: what they aim at. Not "◆", which
+    // is a key (setKeyState(), docs/ANIMATION.md phase 2).
+    m_label->setText(targeted ? m_labelText + QStringLiteral("  \xE2\x97\x8E") : m_labelText);
     m_label->setProperty("target", targeted);
     repolish(m_label);
 }
