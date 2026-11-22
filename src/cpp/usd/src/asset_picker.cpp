@@ -7,6 +7,7 @@
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_sources.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -964,7 +965,21 @@ void AssetPickerDialog::systemDialog() {
 
 void AssetPickerDialog::placesMenu(const QPoint& at) {
     QTreeWidgetItem* item = m_places->itemAt(at);
-    if (!item || item->data(0, kKindRole).toString() != kFavorite) return;
+    if (!item) return;
+    // A server's group or one of its roots: the names an environment has, made in the
+    // Asset Servers editor (docs/REMOTE_ASSETS.md §10.1).
+    const auto isServerGroup = [](const QTreeWidgetItem* each) {
+        return each && each->data(0, kPathRole).toString().endsWith(QStringLiteral("://"));
+    };
+    if (isServerGroup(item) || isServerGroup(item->parent())) {
+        QMenu menu(this);
+        menu.addAction(tr("Edit Servers..."), this, [this]() {
+            if (showAssetServersEditor(this)) buildPlaces();
+        });
+        menu.exec(m_places->viewport()->mapToGlobal(at));
+        return;
+    }
+    if (item->data(0, kKindRole).toString() != kFavorite) return;
     const QString path = item->data(0, kPathRole).toString();
     QMenu menu(this);
     menu.addAction(tr("Rename..."), this, [this, path, item]() {

@@ -10,6 +10,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/core/toast.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_servers_editor.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -233,6 +234,15 @@ void defineAssetSettings(core::Settings& settings) {
                                     environmentsText() + " The servers are in " + config + ".",
                      .type = SettingType::String,
                      .defaultValue = std::string()});
+    settings.define({.key = kAssetEditServersKey,
+                     .category = kCategory,
+                     .group = "Servers",
+                     .label = "Servers and environments",
+                     .description = "The servers, the environments and their stacks, and the web hosts, as " + config +
+                                    " has them (also Edit > Asset Servers...).",
+                     .type = SettingType::Action,
+                     .defaultValue = std::string("Edit Asset Servers..."),
+                     .action = []() { showAssetServersEditor(QApplication::activeWindow()); }});
     settings.define({.key = kAssetOfflineKey,
                      .category = kCategory,
                      .group = "Servers",
