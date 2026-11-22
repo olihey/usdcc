@@ -75,8 +75,10 @@ struct MoveOptions {
     // Before this row of the new parent's children, as they are before the move; -1 is
     // wherever the move leaves them.
     int row = -1;
-    // Changes the local transform so a prim stays where it is in the world, unless the
-    // prim or a parent is animated, which is logged.
+    // Changes the local transform so a prim stays where it is in the world. An animated one
+    // (or under an animated parent) keeps its ops and gets a transform op ahead of them,
+    // "xformOp:transform:reparent", so it stays where it is at the frame shown
+    // (docs/ANIMATION.md phase 2); that is logged.
     bool keepWorldPosition = false;
     std::vector<StageRefPtr> openStages;  // as for rename()
 };

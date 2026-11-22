@@ -1,6 +1,7 @@
 #include "usdcc/tools/rotate_tool.h"
 
 #include "usdcc/tools/gizmo_shapes.h"
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/xform_math.h"
 
 #include <pxr/base/gf/math.h>
@@ -48,17 +49,17 @@ PXR_NS::UsdGeomXformOp findRotateOp(const PXR_NS::UsdGeomXformable& xformable) {
     return {};
 }
 
-PXR_NS::GfVec3d readEuler(const PXR_NS::UsdGeomXformOp& op) {
+PXR_NS::GfVec3d readEuler(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time) {
     if (!op) {
         return PXR_NS::GfVec3d(0.0);
     }
     if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
         PXR_NS::GfVec3d v(0.0);
-        op.Get(&v);
+        op.Get(&v, time);
         return v;
     }
     PXR_NS::GfVec3f v(0.0f);
-    op.Get(&v);
+    op.Get(&v, time);
     return PXR_NS::GfVec3d(v);
 }
 }  // namespace
@@ -183,9 +184,9 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
     if (m_targetOp) {
         // Whatever kind of rotation it is, its matrix is the starting point.
         m_dragStartRotation =
-            m_targetOp.GetOpTransform(PXR_NS::UsdTimeCode::Default()).ExtractRotationMatrix();
-        m_dragStartMatrix = readOpMatrix(m_targetOp);  // used if it's a matrix op
-        const std::vector<double> value = readOpNumbers(m_targetOp);
+            m_targetOp.GetOpTransform(ctx.time).ExtractRotationMatrix();
+        m_dragStartMatrix = readOpMatrix(m_targetOp, ctx.time);  // used if it's a matrix op
+        const std::vector<double> value = readOpNumbers(m_targetOp, ctx.time);
         if (value.size() == 3) {
             m_lastEuler = PXR_NS::GfVec3d(value[0], value[1], value[2]);
         } else if (value.size() == 1) {
@@ -194,7 +195,7 @@ ToolResult RotateTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVe
             m_lastQuat = PXR_NS::GfVec4d(value[0], value[1], value[2], value[3]);
         }
     } else {
-        m_lastEuler = readEuler(findRotateOp(xformable));
+        m_lastEuler = readEuler(findRotateOp(xformable), ctx.time);
         m_dragStartRotation = usdcc::usd::eulerToMatrix(m_lastEuler, PXR_NS::UsdGeomXformOp::TypeRotateXYZ);
     }
 
@@ -273,10 +274,10 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
                         m[r][c] = turned[r][c];
                     }
                 }
-                writeOpMatrix(m_targetOp, m);
+                writeOpMatrix(m_targetOp, m, ctx.time, ctx.autoKey);
             }
         } else if (usdcc::usd::singleRotationAxis(type) >= 0) {
-            writeOpNumbers(m_targetOp, {m_startAngle + appliedDegrees});
+            writeOpNumbers(m_targetOp, {m_startAngle + appliedDegrees}, ctx.time, ctx.autoKey);
         } else if (type == PXR_NS::UsdGeomXformOp::TypeOrient) {
             const PXR_NS::GfQuatd q = PXR_NS::GfMatrix4d(rotated, PXR_NS::GfVec3d(0.0)).ExtractRotation().GetQuat();
             PXR_NS::GfVec4d value(q.GetReal(), q.GetImaginary()[0], q.GetImaginary()[1], q.GetImaginary()[2]);
@@ -285,10 +286,10 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
                 value = -value;
             }
             m_lastQuat = value;
-            writeOpNumbers(m_targetOp, {value[0], value[1], value[2], value[3]});
+            writeOpNumbers(m_targetOp, {value[0], value[1], value[2], value[3]}, ctx.time, ctx.autoKey);
         } else {
             m_lastEuler = usdcc::usd::matrixToEuler(rotated, type, m_lastEuler);
-            writeOpNumbers(m_targetOp, {m_lastEuler[0], m_lastEuler[1], m_lastEuler[2]});
+            writeOpNumbers(m_targetOp, {m_lastEuler[0], m_lastEuler[1], m_lastEuler[2]}, ctx.time, ctx.autoKey);
         }
         ToolResult result;
         result.handled = true;
@@ -314,9 +315,9 @@ ToolResult RotateTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&,
         usdcc::usd::matrixToEuler(rotated, PXR_NS::UsdGeomXformOp::TypeRotateXYZ, m_lastEuler);
     m_lastEuler = euler;
     if (rotateOp.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionDouble) {
-        rotateOp.Set(euler);
+        usdcc::usd::anim::setValue(rotateOp.GetAttr(), PXR_NS::VtValue(euler), ctx.time, ctx.autoKey);
     } else {
-        rotateOp.Set(PXR_NS::GfVec3f(euler));
+        usdcc::usd::anim::setValue(rotateOp.GetAttr(), PXR_NS::VtValue(PXR_NS::GfVec3f(euler)), ctx.time, ctx.autoKey);
     }
 
     ToolResult result;

@@ -39,6 +39,7 @@ public:
 
     // The stage it drives: StageManager's current one. Null with none open.
     StageRefPtr stage() const { return m_stage; }
+    StageManager* stageManager() const { return m_stageManager; }
 
     bool isPlaying() const { return m_playing; }
     // From the time shown; from the first frame when that is the last one or outside the

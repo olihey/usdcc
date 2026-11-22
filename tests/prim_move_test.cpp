@@ -358,15 +358,25 @@ USDCC_TEST(prim_move_keeps_the_world_position) {
     CHECK(s.move("/Pa/Local", "/Pb").isEmpty(), "moves");
     CHECK(GfIsClose(world("/Pb/Local"), GfVec3d(2, 5, 0), 1e-9), "so it changes place");
 
-    // Animated: it can't hold still, so it keeps its own values.
+    // Under an animated parent (docs/ANIMATION.md phase 2): it keeps its own ops and values, and a
+    // transform op ahead of them keeps it where it was at the frame shown (0 here).
     translated("/Anim", GfVec3d(0, 0, 0));
     UsdGeomXformOp animated = UsdGeomXformable(s.usd->GetPrimAtPath(SdfPath("/Anim"))).GetOrderedXformOps(&resets).front();
     animated.Set(GfVec3d(1, 1, 1), 1.0);
     animated.Set(GfVec3d(2, 2, 2), 2.0);  // one sample alone is no animation
     translated("/Pa/Kid", GfVec3d(3, 0, 0));
     CHECK(s.move("/Pa/Kid", "/Anim", keep).isEmpty(), "moves under an animated parent");
-    UsdGeomXformable(s.usd->GetPrimAtPath(SdfPath("/Anim/Kid"))).GetOrderedXformOps(&resets).front().Get(&local);
-    CHECK(GfIsClose(local, GfVec3d(3, 0, 0), 1e-9), "its local transform untouched");
+    const std::vector<UsdGeomXformOp> kidOps =
+        UsdGeomXformable(s.usd->GetPrimAtPath(SdfPath("/Anim/Kid"))).GetOrderedXformOps(&resets);
+    CHECK(kidOps.size() == 2 && kidOps.front().GetOpName() == TfToken("xformOp:transform:reparent"),
+          "a transform op ahead of its own: %d op(s)", int(kidOps.size()));
+    if (kidOps.size() == 2) kidOps.back().Get(&local);
+    CHECK(GfIsClose(local, GfVec3d(3, 0, 0), 1e-9), "its own values untouched");
+    const GfVec3d atFrame = UsdGeomXformCache(UsdTimeCode(0.0))
+                                .GetLocalToWorldTransform(s.usd->GetPrimAtPath(SdfPath("/Anim/Kid")))
+                                .ExtractTranslation();
+    CHECK(GfIsClose(atFrame, GfVec3d(13, 0, 0), 1e-9), "where it was at the frame shown: (%g, %g, %g)", atFrame[0],
+          atFrame[1], atFrame[2]);
 
     // A prim that ignores its parents' transform has nothing to change.
     UsdGeomXformable free = translated("/Pa/Free", GfVec3d(4, 0, 0));

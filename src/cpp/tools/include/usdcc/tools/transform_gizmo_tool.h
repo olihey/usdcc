@@ -119,10 +119,12 @@ protected:
     static PXR_NS::GfMatrix4d opValueSpace(const PXR_NS::UsdGeomXformable& xformable, int opIndex,
                                            PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default());
 
-    // An op's value as plain numbers / written back from them, whatever its
-    // precision (half, float or double).
-    static std::vector<double> readOpNumbers(const PXR_NS::UsdGeomXformOp& op);
-    static bool writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers);
+    // An op's value at `time` as plain numbers / written back from them, whatever its
+    // precision (half, float or double). Written through usdcc::usd::anim::setValue(): an
+    // animated op, or any with `autoKey`, gets a key at `time` (docs/ANIMATION.md §4.5).
+    static std::vector<double> readOpNumbers(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time);
+    static bool writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers,
+                               PXR_NS::UsdTimeCode time, bool autoKey);
 
     // A gizmo color greyed out (a target this tool can't drive).
     static PXR_NS::GfVec4f dimmed(const PXR_NS::GfVec4f& color);
@@ -132,8 +134,9 @@ protected:
     // leaves the rest alone. The matrix is read at press and every move
     // writes a variation of it.
     static bool isMatrixOp(const PXR_NS::UsdGeomXformOp& op);
-    static PXR_NS::GfMatrix4d readOpMatrix(const PXR_NS::UsdGeomXformOp& op);
-    static bool writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix);
+    static PXR_NS::GfMatrix4d readOpMatrix(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time);
+    static bool writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix,
+                              PXR_NS::UsdTimeCode time, bool autoKey);
     PXR_NS::GfMatrix4d m_dragStartMatrix{1.0};
     double gizmoScale(const PXR_NS::GfVec3d& origin, const PXR_NS::GfVec3d& cameraPos) const;
 

@@ -288,7 +288,9 @@ int main(int argc, char** argv) {
     // in a bar under the dock area. Both are the window's.
     auto* playback = new usdcc::usd::PlaybackController(&stageManager, &window);
     playback->addActions(&window);
-    window.setBottomBar(new usdcc::usd::TimelineBar(playback, undoManager, &window), QObject::tr("Timeline"));
+    auto* timelineBar = new usdcc::usd::TimelineBar(playback, undoManager, &window);
+    timelineBar->addActions(&window);  // Set Key, Next Key, Previous Key (docs/ANIMATION.md phase 2)
+    window.setBottomBar(timelineBar, QObject::tr("Timeline"));
     // F: fit the active viewport to the selection, or to the whole stage.
     usdcc::usd::ViewportViewPanel::addFitToViewAction(&window);
     // The active viewport's HUD on or off (no key until one is set).

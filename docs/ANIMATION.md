@@ -1,7 +1,7 @@
 # Animation — Plan
 
-Status: **phase 1 (playback) built**, §6.1; phases 2 to 5 are plan. The choices are in §4, the
-questions still open in §8.
+Status: **phases 1 (playback) and 2 (keyframing) built**, §6.1 and §6.3; phases 3 to 5 are plan.
+The choices are in §4, and §8's questions are answered as recommended.
 
 Before this, usdcc had no notion of time: every read and write was at `UsdTimeCode::Default()`,
 the viewport rendered `params.frame = Default`, and the Attribute Editor disabled time-sampled rows
@@ -282,6 +282,36 @@ Tests: `stage_time_test.cpp` (stage time, ranges, playback steps, the time axis)
 `timeline_test.cpp` (ruler, slider, transport, bar, bottom bar, viewport, Attribute Editor, session),
 and `python_time` in `python_app_test.cpp`. Checked in the app with Storm on
 `test_data/animated.usda`: scrubbing and playing at 24 fps, the HUD's frame, the animated row.
+
+### 6.3 Phase 2: what was built
+
+**Try it:** open `test_data/animated.usda`, select the Hopper, go to frame 10 and drag it, or
+press S: a key at 10, the ruler's diamonds and the Attribute Editor's row keys say so.
+
+| Piece | Where | Notes |
+|---|---|---|
+| The rule | [anim_edit.h](../src/cpp/usd/include/usdcc/usd/anim_edit.h), `usdcc_usd`, Qt-free | §5.3's functions, plus `animatedAttributes()` and the app-wide `autoKey()` / `setAutoKey()` / `autoKeyChanged()`. A static attribute gets its default unless auto-key is on; an animated one gets a key either way (§4.5). A spline-driven attribute gets a knot, keeping that knot's tangents when there is one already. Through `UsdAttribute`, so a sublayer's offset applies (checked) |
+| Localizing | `localizeAnimation()` | A weaker layer's samples (or spline) are copied into the edit target before the first key, read all first: each one written changes what the rest read. Logged |
+| Removing | `removeKey()`, `removeAnimation()` | The last key gone, its value stays as the default. Remove Animation clears the edit target's samples and spline and sets the default to the value at the frame shown; that default also holds still a weaker layer's animation, which is left as it is |
+| Attribute Editor | `AttributeBinding`, `PropertyRow`, `PropertySheet` | Animated rows are editable now, and an edit keys them. Every attribute row (the transform stack's too) has a key in front of its label, taking its width from the label so rows are no wider: ◇ grey (static), ◇ in the accent (animated), ◆ (a key at this frame). A click sets a key, or removes the one here; the menu has Set Key, Remove Key, Remove Animation, each one undo step |
+| Gizmos | `ToolContext::autoKey`; Move, Rotate, Scale | Read and write at `ToolContext::time` through `anim::setValue()`: a drag on an animated prim keys it at the frame shown, one undo step. The viewport fills `autoKey` from `anim::autoKey()` |
+| Undo | [undo_manager.cpp](../src/cpp/usd/src/undo_manager.cpp) | A run of sets of one time sample keeps only the first old value, as fields already did |
+| Timeline | [timeline_bar.cpp](../src/cpp/usd/src/timeline_bar.cpp), `TimeRuler::setKeys()` | The selection's keys as diamonds on the ruler (every animated attribute of the selected prims), again 100 ms after selection or stage changes. ‹◆ and ◆› go to the previous and next key; **Auto** turns auto-key on, red while it is. The menu's **Held Between Keys** sets the stage's interpolation (`UsdStage::SetInterpolationType()`, not saved) |
+| Shortcuts | Settings > Shortcuts > Timeline | Set Key (S: every transform op of the selection, one undo step), Next Key (Alt+.), Previous Key (Alt+,) |
+| Reparent | `prim_actions::movePrims()` | With Keep World Position, an animated prim (or one under an animated parent) keeps its ops and gets `xformOp:transform:reparent` ahead of them, so it stays where it is at the frame shown |
+| Op renames | `xform_stack.cpp` | Copy a spline too, besides the default and samples |
+| Python | `usdcc.usd.set_key()`, `remove_key()`, `remove_animation()`, `key_times()`, `auto_key()`, `set_auto_key()` | By `Usd.Attribute` or path; a script's run is one undo step |
+
+Left out, against the plan: **Physics' Bake** still writes its own ops directly (they're new
+attributes, so no rule of §4.5 changes what it does). The targeted-op mark in the Transform
+section's labels is a ◆ too, beside a key's ◆: worth a different glyph.
+
+Tests: `anim_edit_test.cpp` (§4.5 case by case, localizing, a sublayer's offset, splines, a drag's
+keys as one undo step), `timeline_keys` in `timeline_test.cpp` (the ruler's keys, next and
+previous key, Set Key, auto-key, a row's key button, an edit keying an animated row),
+`prim_move_keeps_the_world_position` (reparenting under an animated parent) and `python_time`.
+Checked in the app with `test_data/animated.usda`: Set Key at 10 from the window's action, the
+ruler's diamonds, the rows' keys.
 
 ### 6.2 The order
 

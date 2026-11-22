@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 
 #include "usdcc/core/settings.h"
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/physics_bake.h"
 #include "usdcc/usd/physics_check.h"
 #include "usdcc/usd/physics_session.h"
@@ -35,6 +36,9 @@ StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
 }  // namespace
 
 void bindStageManager(py::module_& m) {
+    // Auto-key (docs/ANIMATION.md phase 2): app-wide, off at start.
+    m.def("auto_key", []() { return anim::autoKey(); });
+    m.def("set_auto_key", [](bool on) { anim::setAutoKey(on); }, py::arg("on"));
     py::class_<StageManager>(m, "StageManager")
         .def(py::init<>())
         .def(
@@ -108,6 +112,49 @@ void bindStageManager(py::module_& m) {
         .def(
             "set_time", [](StageManager& self, long cacheId, double time) { openStageWithId(self, cacheId)->setTime(time); },
             py::arg("cache_id"), py::arg("time"))
+        // Keys (docs/ANIMATION.md phase 2), by attribute path; a script's run is one undo step.
+        .def(
+            "set_key",
+            [](const StageManager& self, long cacheId, const std::string& path, double time) {
+                const PXR_NS::UsdAttribute attribute = openStageWithId(self, cacheId)->usdStage()->GetAttributeAtPath(PXR_NS::SdfPath(path));
+                if (!attribute) throw py::value_error("no attribute " + path);
+                return anim::setKey(attribute, time);
+            },
+            py::arg("cache_id"), py::arg("path"), py::arg("time"))
+        .def(
+            "remove_key",
+            [](const StageManager& self, long cacheId, const std::string& path, double time) {
+                const PXR_NS::UsdAttribute attribute = openStageWithId(self, cacheId)->usdStage()->GetAttributeAtPath(PXR_NS::SdfPath(path));
+                if (!attribute) throw py::value_error("no attribute " + path);
+                return anim::removeKey(attribute, time);
+            },
+            py::arg("cache_id"), py::arg("path"), py::arg("time"))
+        .def(
+            "remove_animation",
+            [](const StageManager& self, long cacheId, const std::string& path, double time) {
+                const PXR_NS::UsdAttribute attribute = openStageWithId(self, cacheId)->usdStage()->GetAttributeAtPath(PXR_NS::SdfPath(path));
+                if (!attribute) throw py::value_error("no attribute " + path);
+                return anim::removeAnimation(attribute, time);
+            },
+            py::arg("cache_id"), py::arg("path"), py::arg("time"))
+        .def(
+            "key_times",
+            [](const StageManager& self, long cacheId, const std::vector<std::string>& paths) {
+                // An attribute's keys, or a prim's: those of its animated attributes.
+                const PXR_NS::UsdStageRefPtr& usd = openStageWithId(self, cacheId)->usdStage();
+                std::vector<PXR_NS::UsdAttribute> attributes;
+                for (const std::string& path : paths) {
+                    const PXR_NS::SdfPath sdfPath(path);
+                    if (sdfPath.IsPropertyPath()) {
+                        if (const PXR_NS::UsdAttribute attribute = usd->GetAttributeAtPath(sdfPath)) attributes.push_back(attribute);
+                    } else {
+                        const auto animated = anim::animatedAttributes(usd->GetPrimAtPath(sdfPath));
+                        attributes.insert(attributes.end(), animated.begin(), animated.end());
+                    }
+                }
+                return anim::keyTimes(attributes);
+            },
+            py::arg("cache_id"), py::arg("paths"))
         .def(
             "time_range",
             [](const StageManager& self, long cacheId) {

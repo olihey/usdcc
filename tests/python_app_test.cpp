@@ -588,6 +588,26 @@ USDCC_TEST(python_time) {
     CHECK(stage->time() == 3.0 && !stage->hasPlaybackRange(), "and moved the app's stage (%g)", stage->time());
     CHECK(app.runner.lastUndoSteps() == 0 && undoCount(stage) == 0, "time isn't an edit: no undo step (%d)", undoCount(stage));
     CHECK(evaluate("__import__('usdcc.usd').usd.current_time()") == "3.0", "readable as an expression");
+
+    // Keys (docs/ANIMATION.md phase 2): one undo step for the script's run.
+    const bool keyed = app.runner.run(
+        "import usdcc.usd\n"
+        "from pxr import UsdGeom\n"
+        "stage = usdcc.usd.current_stage()\n"
+        "size = UsdGeom.Cube.Define(stage, '/Box').GetSizeAttr()\n"
+        "size.Set(2.0)\n"
+        "assert not usdcc.usd.auto_key()\n"
+        "assert usdcc.usd.set_key(size, 10) and usdcc.usd.set_key('/Box.size', 20)\n"
+        "assert usdcc.usd.key_times([size]) == [10.0, 20.0], usdcc.usd.key_times([size])\n"
+        "assert usdcc.usd.key_times([stage.GetPrimAtPath('/Box')]) == [10.0, 20.0]\n"
+        "assert usdcc.usd.remove_key(size, 20) and usdcc.usd.key_times(['/Box.size']) == [10.0]\n"
+        "assert usdcc.usd.remove_animation(size) and usdcc.usd.key_times([size]) == []\n"
+        "usdcc.usd.set_auto_key(True)\n"
+        "assert usdcc.usd.auto_key()\n"
+        "usdcc.usd.set_auto_key(False)\n",
+        "keys.py");
+    CHECK(keyed, "the keys script ran");
+    CHECK(undoCount(stage) == 1, "one undo step (%d)", undoCount(stage));
     app.stages.closeStage(stage);
 }
 

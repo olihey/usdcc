@@ -1,6 +1,7 @@
 #include "usdcc/usd/stage.h"
 #include "usdcc/tools/transform_gizmo_tool.h"
 
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/value_type_info.h"
 #include "usdcc/usd/xform_math.h"
 
@@ -171,31 +172,33 @@ TransformGizmoTool::GizmoFrame TransformGizmoTool::opFrame(const PXR_NS::UsdGeom
     return frame;
 }
 
-std::vector<double> TransformGizmoTool::readOpNumbers(const PXR_NS::UsdGeomXformOp& op) {
+std::vector<double> TransformGizmoTool::readOpNumbers(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time) {
     PXR_NS::VtValue value;
-    if (!op || !op.GetAttr().Get(&value, PXR_NS::UsdTimeCode::Default())) {
+    if (!op || !op.GetAttr().Get(&value, time)) {
         return {};
     }
     return usdcc::usd::numericComponents(value);
 }
 
-bool TransformGizmoTool::writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers) {
+bool TransformGizmoTool::writeOpNumbers(const PXR_NS::UsdGeomXformOp& op, const std::vector<double>& numbers,
+                                        PXR_NS::UsdTimeCode time, bool autoKey) {
     const PXR_NS::VtValue value = usdcc::usd::makeNumericValue(op.GetAttr().GetTypeName(), numbers);
-    return !value.IsEmpty() && op.GetAttr().Set(value, PXR_NS::UsdTimeCode::Default());
+    return !value.IsEmpty() && usdcc::usd::anim::setValue(op.GetAttr(), value, time, autoKey);
 }
 
 bool TransformGizmoTool::isMatrixOp(const PXR_NS::UsdGeomXformOp& op) {
     return op && op.GetOpType() == PXR_NS::UsdGeomXformOp::TypeTransform;
 }
 
-PXR_NS::GfMatrix4d TransformGizmoTool::readOpMatrix(const PXR_NS::UsdGeomXformOp& op) {
+PXR_NS::GfMatrix4d TransformGizmoTool::readOpMatrix(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time) {
     PXR_NS::GfMatrix4d m(1.0);
-    if (op) op.Get(&m, PXR_NS::UsdTimeCode::Default());  // transform ops are always double precision
+    if (op) op.Get(&m, time);  // transform ops are always double precision
     return m;
 }
 
-bool TransformGizmoTool::writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix) {
-    return op && op.Set(matrix, PXR_NS::UsdTimeCode::Default());
+bool TransformGizmoTool::writeOpMatrix(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfMatrix4d& matrix,
+                                       PXR_NS::UsdTimeCode time, bool autoKey) {
+    return op && usdcc::usd::anim::setValue(op.GetAttr(), PXR_NS::VtValue(matrix), time, autoKey);
 }
 
 PXR_NS::GfVec4f TransformGizmoTool::dimmed(const PXR_NS::GfVec4f& color) {

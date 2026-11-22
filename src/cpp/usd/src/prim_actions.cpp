@@ -595,21 +595,24 @@ QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector
         PXR_NS::SdfPath to;
         PXR_NS::GfMatrix4d world;
         PXR_NS::GfMatrix4d oldParent;
+        bool animated = false;
     };
+    // At the frame shown (docs/ANIMATION.md phase 2).
+    const PXR_NS::UsdTimeCode time = stage->timeCode();
     std::vector<Keep> keep;
     if (options.keepWorldPosition) {
-        PXR_NS::UsdGeomXformCache cache;
+        PXR_NS::UsdGeomXformCache cache(time);
         const bool parentAnimated = isAnimated(usdStage->GetPrimAtPath(newParent));
         for (const auto& [from, to] : moves) {
             const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(from);
             const PXR_NS::UsdGeomXformable xformable(prim);
             if (!xformable || xformable.GetResetXformStack()) continue;  // no transform, or the parent's doesn't reach it
-            if (parentAnimated || isAnimated(prim)) {
-                USDCC_LOG_INFO("usdcc.stage", "{} is animated, or a parent is: keeping its local transform, so it may change place",
-                               from.GetString());
-                continue;
+            const bool animated = parentAnimated || isAnimated(prim);
+            if (animated) {
+                USDCC_LOG_INFO("usdcc.stage", "{} is animated, or a parent is: it keeps its place at frame {}, its animation "
+                               "as it was", from.GetString(), time.IsDefault() ? 0.0 : time.GetValue());
             }
-            keep.push_back({to, cache.GetLocalToWorldTransform(prim), cache.GetParentToWorldTransform(prim)});
+            keep.push_back({to, cache.GetLocalToWorldTransform(prim), cache.GetParentToWorldTransform(prim), animated});
         }
     }
 
@@ -618,12 +621,26 @@ QString movePrims(UndoManager& undo, const StageRefPtr& stage, const std::vector
         undo, stage, moves, moves.size() == 1 ? tr("Move %1 to %2").arg(qs(moves.front().first.GetName()), qs(newParent.GetString())) : describe(verb, top),
         options.openStages,
         [&]() {
-            PXR_NS::UsdGeomXformCache cache;
+            PXR_NS::UsdGeomXformCache cache(time);
             for (const Keep& kept : keep) {
                 const PXR_NS::UsdPrim prim = usdStage->GetPrimAtPath(kept.to);
                 const PXR_NS::GfMatrix4d newParentWorld = cache.GetParentToWorldTransform(prim);
                 if (PXR_NS::GfIsClose(newParentWorld, kept.oldParent, 1e-9)) continue;
-                if (!XformStack(prim).setLocalTransform(kept.world * newParentWorld.GetInverse())) return false;
+                if (!kept.animated) {
+                    if (!XformStack(prim).setLocalTransform(kept.world * newParentWorld.GetInverse())) return false;
+                    continue;
+                }
+                // Animated: its ops stay as they are, and one transform op ahead of them (the
+                // outermost) makes up for the new parent, as it is at this frame.
+                PXR_NS::UsdGeomXformable xformable(prim);
+                bool resets = false;
+                std::vector<PXR_NS::UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
+                const PXR_NS::TfToken suffix =
+                    XformStack(prim).uniqueSuffix(PXR_NS::UsdGeomXformOp::TypeTransform, PXR_NS::TfToken("reparent"));
+                PXR_NS::UsdGeomXformOp offset = xformable.AddTransformOp(PXR_NS::UsdGeomXformOp::PrecisionDouble, suffix);
+                if (!offset || !offset.Set(kept.oldParent * newParentWorld.GetInverse())) return false;
+                ops.insert(ops.begin(), offset);
+                if (!xformable.SetXformOpOrder(ops, resets)) return false;
             }
             return order.empty() || writeChildOrder(usdStage, newParent, order);
         },

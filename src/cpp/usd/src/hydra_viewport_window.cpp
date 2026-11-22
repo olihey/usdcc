@@ -1,4 +1,5 @@
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/anim_edit.h"
 
 #include "selection_overlay.h"
 #include "usdcc/ui/app_settings.h"
@@ -1234,6 +1235,7 @@ usdcc::tools::ToolContext HydraViewportWindow::buildToolContext() {
     ctx.pickPrim = [this](const PXR_NS::GfVec2d& ndcPos) { return pickPrim(ndcPos); };
     ctx.targetOpName = m_targetOp;
     ctx.time = m_time;
+    ctx.autoKey = usdcc::usd::anim::autoKey();
     return ctx;
 }
 

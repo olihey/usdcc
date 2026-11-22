@@ -130,6 +130,8 @@ private:
         bool shaderOutput = false;
         // Its value changes with time (updateRowState()): read again as the time moves.
         bool timeVarying = false;
+        // It has a key button (docs/ANIMATION.md phase 2): an attribute that exists.
+        bool keyable = false;
     };
     struct PrimHeader {
         properties::PropertyEditor* name = nullptr;
@@ -147,6 +149,9 @@ private:
     // follows the new path. A name that isn't valid or is taken is refused.
     void renameCurrentPrim(const std::string& name);
     void updateRowState(Row& row);
+    // The key button and the menu's key entries of an attribute's row, each one undo step.
+    void wireKeys(Row& row);
+    void updateKeyState(Row& row);
     void applyFilter();
     void buildPrimSection(const PXR_NS::UsdPrim& prim, QVBoxLayout* layout);
     // Shading mode's first line: the prim's name and what it is.

@@ -1,5 +1,6 @@
 #include "usdcc/usd/properties/attribute_binding.h"
 
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/properties/property_editor.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -101,7 +102,9 @@ void AttributeBinding::onValueEdited(const VtValue& value) {
     // treat it as one.
     const bool implicitGesture = !m_editing;
     if (implicitGesture) onEditStarted();
-    if (exists() && m_attribute.Set(value, UsdTimeCode::Default())) {
+    // A default, or a key at the stage's time when the attribute is animated or auto-key
+    // is on (docs/ANIMATION.md §4.5).
+    if (exists() && anim::setValue(m_attribute, value, time(), anim::autoKey())) {
         Q_EMIT valueWritten(value);
     }
     if (implicitGesture) onEditFinished();
@@ -123,7 +126,7 @@ void AttributeBinding::onEditCanceled() {
     if (m_undoManager && m_stage) {
         m_undoManager->cancelEdit(m_stage);
     } else if (m_startAuthored) {
-        m_attribute.Set(m_startValue, UsdTimeCode::Default());
+        anim::setValue(m_attribute, m_startValue, time(), /*autoKey=*/false);
     } else if (exists()) {
         m_attribute.ClearDefault();
     }
