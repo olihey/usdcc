@@ -482,7 +482,23 @@ Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. 
 - **`render_queue_web`:** §7 phase 9 without a browser: the page and `usdcc.css` are served on
   the guest link only, the WebSocket gets a job's changes, an action without the token is refused.
 - **CI** ([CI.md](CI.md)) has no GPU: Embree only. Storm and RTX are checked by hand.
-- **Two machines** haven't been tried for peers at all (PEERS.md §14). Phase 5 is the first time.
+- **Across a network boundary** (2026-11-22, Windows and WSL 2 on one PC, PEERS.md §14.3): a
+  queue on Windows (`--host-room`, `--accept`), a node on **Linux** (`serve --join --trust`, built
+  in WSL against Python 3.13's OpenUSD) and an artist's usdcc on Windows with Render on set to the
+  queue. The job went artist → queue → Linux node → queue → artist: 3 Embree frames at 320×240
+  in 1.3 s from submitting to the frames in the artist's folder. Found on the way:
+  - `usdcc.render.jobs()` and `job()` didn't see a job sent to a queue: they listed the app's
+    `RenderScheduler` only, so `render_animation()` returned an id that `job()` never found.
+    *Fixed:* `RenderQueueClient` keeps what it sent (`sentJobs()`, by the artist's job id, with
+    the queue's id once queued, the refusal, the queue's status and the fetched files), and
+    `jobs()` lists those too, with `Job.queue`; `cancel()` reaches the queue once it has queued
+    the job. Tested in `render_queue_fetch` and `render_queue_submit`.
+  - Fetched frames go to the user's Pictures folder even under `USDCC_TEST_PROFILE`.
+  - `usdcc_node queue` has no `--name`: every queue is "Render queue", which is also what an
+    artist's Render on names it by. §4.4's synopsis shows a `--name`.
+  - Every `usdcc_node` start logs an error from Mesh Tools ("the app has no main window here").
+  - The queue's web page took 5 s to answer its first request from WSL.
+  Still not tried: a second physical machine, the service (phase 5).
 
 ## 9. Not planned
 

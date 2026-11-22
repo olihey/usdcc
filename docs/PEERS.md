@@ -861,6 +861,18 @@ path as a link, and a late joiner gets the chat so far.
 **Not tried yet:** two machines (the row's "done when"), the firewall's question, a LAN with
 several interfaces.
 
+**Across a network boundary, 2026-11-22.** Windows and WSL 2 in NAT mode on one PC stand in for
+two machines: WSL has its own address (172.29.x), and its connections to Windows' LAN address
+go through Windows Firewall. A `usdcc_node queue` hosted on Windows (`0.0.0.0:47911`, the LAN
+address in its link), a `usdcc_node serve` on Linux joined by that link, and a usdcc on Windows
+joined too. Handshake, room key, the members' list and transfers both ways worked: the Linux
+node took the scene and sent back three EXRs (RENDER_NODE.md §7). **The firewall's question:**
+Windows asked once per program path, and what was answered stayed a rule: an Allow for
+`usdcc_node.exe`, a Block for `usdcc.exe` (the prompt cancelled). With the Block rule the app's
+room was unreachable from WSL while the app showed and logged nothing about it. Not tried: mDNS
+discovery across the boundary (WSL's NAT passes no multicast), a second physical machine, the
+Peers panel's chat between the two.
+
 ### 14.4 Phase 5 as built so far: transfers
 
 The generic part, for final-frame rendering to send a shot to its render nodes and get the

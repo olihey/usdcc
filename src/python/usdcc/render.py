@@ -56,9 +56,12 @@ class Renderer:
 class Job:
     """A render job, as it was when ``jobs()`` was called: ``id``, ``title``, ``renderer``,
     ``status`` ("queued", "running", "done", "failed" or "cancelled"), ``progress`` (0 to 1),
-    ``frames``, ``files`` (written so far) and ``error``."""
+    ``frames``, ``files`` (written so far) and ``error``; ``queue``, the render queue server's
+    name for a job sent to one (Render on: Queue), else "". A queue's job is "queued" until the
+    queue starts it, "failed" when the queue refused it, and its ``files`` are those fetched
+    here: none when the queue writes them to a shared path."""
 
-    __slots__ = ("id", "title", "renderer", "status", "progress", "frames", "files", "error")
+    __slots__ = ("id", "title", "renderer", "status", "progress", "frames", "files", "error", "queue")
 
     def __repr__(self):
         return f"Job({self.id!r}, {self.status!r}, {self.progress:.0%})"
@@ -98,12 +101,13 @@ def render_animation(stage=None, settings=None, renderer=None):
 
 
 def jobs():
-    """The Render Queue's jobs, oldest first."""
+    """The Render Queue's jobs, oldest first, then those sent to render queue servers."""
     result = []
-    for id, title, renderer, status, progress, frames, files, error in _app().render_jobs():
+    for id, title, renderer, status, progress, frames, files, error, queue in _app().render_jobs():
         job = Job()
         job.id, job.title, job.renderer, job.status = id, title, renderer, status
         job.progress, job.frames, job.files, job.error = progress, list(frames), list(files), error
+        job.queue = queue
         result.append(job)
     return result
 
@@ -114,7 +118,8 @@ def job(id):
 
 
 def cancel(id):
-    """Stops a queued or running job; frames already written stay."""
+    """Stops a queued or running job; frames already written stay. A job sent to a queue
+    server is cancelled there, once the queue has queued it."""
     _app().cancel_render(id)
 
 
