@@ -224,7 +224,7 @@ Read sites, in phase 5:
 Save sites, with writing in phase 6: Save Stage As, New Layer File, Save Layer As, Flatten to File.
 The picker gets a save mode: a name field, **New Folder**, an overwrite question, and only
 locations where `canWrite()` is true. In an environment with a stack, a save lands on the first
-writable endpoint, and the dialog says which.
+writable endpoint, and the dialog says which. *Built 2026-11-22* (§9.1).
 
 Not changed: scripts, session import and export, render images, settings folders. Those are local
 files.
@@ -318,9 +318,50 @@ layer when both are on one server (`relativeAssetPath()`), else by its logical p
 - **Dragging** a folder onto Favourites, and reordering them by dragging: Move Up and Move Down do it.
 - **Completion** of the path from the folder's listing.
 - **Python** (§6), and `Host::addAssetSource()` for C++ plugins.
-- **The save mode** (§5): writing is phase 6. New Layer File, Save As and the rest keep the system
-  dialog.
 - **The session's "Where is …?"** keeps the system dialog: a stage on a server is never reported
   missing, so it only ever asks for a file on disk.
 
 **Not checked:** the dialog clicked through by hand, and drawn: the tests drive it offscreen.
+
+### 9.1 The save mode as built
+
+Built 2026-11-22, with phase 6 of [REMOTE_ASSETS.md](REMOTE_ASSETS.md) (§13.6).
+
+- **`pickSaveAsset()`** ([asset_picker.h](../src/cpp/usd/include/usdcc/usd/asset_picker.h)), or
+  `AssetPickerOptions::save`: a **Save** button, **New Folder...**, and a question before a file is
+  replaced. It returns a path on disk or a server's logical path, never made relative. With
+  nothing to browse it is the system's save dialog, as `pickAsset()` is the system's open dialog.
+- **Used by** Save Stage As, New Layer File, Save Layer As and Flatten to File. File > Create Stage
+  > As File, scripts, session export and render images keep the system dialog: they are files on
+  disk.
+- **Where it goes.** In a server's folder a note under the list says **Saves to <server>**: the
+  first server of the stack that isn't read-only. Where none can take it (every server read-only,
+  offline, or a protocol that can't write) the note says **Can't save here** with the resolver's
+  reason, and Save refuses with the same words. Nothing is greyed out: the plan had only writable
+  locations shown, but a read-only folder is still where a user browses to a writable one.
+- **Replacing.** On a server a file is asked about only when it is on the server the save goes
+  to. One only PROD has, saved in the test environment, is a new file on TEST, so there is no
+  question.
+- **A name without an extension** gets the filter's first (`shot` becomes `shot.usda`).
+- **New Folder** makes the folder on disk at once. On a server it goes into a folder that isn't
+  there yet and says so. The folder is made when a file is saved in it: WebDAV's `put` makes the
+  folders a file is in, and S3 has none.
+- **A suggested name** for a file not there yet (an in-memory layer's) starts the dialog in its
+  folder with the name filled in.
+- **Saving to a server** (`layer_actions`): the stage's resolver context is bound around the write,
+  so a server's path means the stage's servers. A failure says why. *Can't write
+  webdav://studio/shots/shot.usda:* is followed by the resolver's words, such as a file changed on
+  the server since it was opened. Relative paths aren't rewritten for a file on a server: there's
+  no folder on disk to rewrite them for, so they are written as they read from the layer's own
+  folder. A layer on a server has no folder on disk either; before this its server path was read as
+  a local one.
+- **Tests** ([asset_picker_save_test.cpp](../tests/asset_picker_save_test.cpp), in
+  `usdcc_ui_tests`, which registers the WebDAV plugin at start and runs the test servers in
+  process):
+  - on disk: the Save button, the suggested name, the default extension, the question before
+    replacing, and New Folder;
+  - on TEST over PROD: the note, no question for a file only PROD has, a question for one TEST
+    has, New Folder on a server, and a refusal where every server is read-only;
+  - `layer_actions::saveStageAs` writing to TEST with PROD untouched, a new file, a conflict named
+    in the error, and a read-only stack refusing.
+- **Not checked:** the dialog clicked through by hand in the app.

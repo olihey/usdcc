@@ -639,7 +639,14 @@ std::string LayerEditorViewPanel::addLayer(AddKind kind, const std::string& pare
         const QString dir = entry ? QFileInfo(realPath(*entry)).absolutePath() : QString();
         const QString filter = tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)");
         if (kind == AddKind::NewFile) {
-            path = QFileDialog::getSaveFileName(this, tr("New Layer File"), dir, filter);
+            // On disk or on a server (docs/ASSET_PICKER.md §5), in the parent's folder.
+            AssetPickerOptions options;
+            options.title = tr("New Layer File");
+            options.filters = {tr("USD Layers (*.usda *.usd *.usdc)")};
+            const std::string parentPath = entry && entry->layer ? entry->layer->GetIdentifier() : std::string();
+            options.start = isLocalAssetPath(parentPath) ? dir : QString::fromStdString(parentPath);
+            options.context = currentStage()->usdStage()->GetPathResolverContext();
+            path = pickSaveAsset(this, options);
         } else {
             // The asset picker (docs/ASSET_PICKER.md): a layer on disk or on a server, in the
             // parent's folder, where a relative path is shortest.
@@ -772,9 +779,16 @@ bool LayerEditorViewPanel::flattenToFile(const std::string& identifier, const QS
         const QString name = entry->session ? QStringLiteral("session") : QFileInfo(qs(entry->displayName)).completeBaseName();
         const QString real = realPath(*entry);
         const QString dir = real.isEmpty() ? QString() : QFileInfo(real).absolutePath();
-        const QString start = QDir(dir).filePath(name + QStringLiteral("_flat.usda"));
-        path = QFileDialog::getSaveFileName(this, tr("Flatten %1 to File").arg(qs(entry->displayName)), start,
-                                            tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)"));
+        AssetPickerOptions options;
+        options.title = tr("Flatten %1 to File").arg(qs(entry->displayName));
+        options.filters = {tr("USD Layers (*.usda *.usd *.usdc)")};
+        const std::string identifier = entry->layer ? entry->layer->GetIdentifier() : std::string();
+        options.start = !identifier.empty() && !isLocalAssetPath(identifier)
+                            ? QString::fromStdString(identifier).section(QLatin1Char('/'), 0, -2) + QLatin1Char('/') +
+                                  name + QStringLiteral("_flat.usda")
+                            : QDir(dir).filePath(name + QStringLiteral("_flat.usda"));
+        options.context = currentStage()->usdStage()->GetPathResolverContext();
+        path = pickSaveAsset(this, options);
         if (path.isEmpty()) return false;
         if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
     }
@@ -814,9 +828,17 @@ std::string LayerEditorViewPanel::saveLayerAs(const std::string& identifier, con
     QString path = file;
     if (path.isEmpty()) {
         const QString current = qs(layer->GetRealPath());
-        const QString start = current.isEmpty() ? name + QStringLiteral(".usda") : current;
-        path = QFileDialog::getSaveFileName(this, tr("Save %1 As").arg(name), start,
-                                            tr("USD Layers (*.usda *.usd *.usdc);;All Files (*)"));
+        AssetPickerOptions options;
+        options.title = tr("Save %1 As").arg(name);
+        options.filters = {tr("USD Layers (*.usda *.usd *.usdc)")};
+        // An in-memory layer: its name, in the folder files were last picked from.
+        const QString recent = recentAssetFolders().value(0, QDir::homePath());
+        const QString fileName = name + QStringLiteral(".usda");
+        options.start = !current.isEmpty()                         ? qs(displayAssetPath(current.toStdString()))
+                        : isLocalAssetPath(recent.toStdString()) ? QDir(recent).filePath(fileName)
+                                                                   : recent + fileName;  // a server's ends with '/'
+        options.context = currentStage()->usdStage()->GetPathResolverContext();
+        path = pickSaveAsset(this, options);
         if (path.isEmpty()) return {};
         if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");
     }

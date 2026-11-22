@@ -1,6 +1,7 @@
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/asset_servers.h"
 
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
 
 #include "usdcc/usd/undo_manager.h"
@@ -36,10 +37,30 @@ const LayerEntry* find(const std::vector<LayerEntry>& entries, const std::string
     return nullptr;
 }
 
-// The folder of a file layer; empty for an in-memory one.
+// A path on a server (webdav://, s3://), written through the asset resolver (docs/REMOTE_ASSETS.md
+// §6): no folder on disk to anchor relative paths at.
+bool onServer(const QString& file) { return !isLocalAssetPath(file.toStdString()); }
+
+// The folder of a file layer; empty for an in-memory one, and for one on a server.
 QString layerFolder(const PXR_NS::SdfLayerHandle& layer) {
-    return !layer || layer->GetRealPath().empty() ? QString()
-                                                  : QFileInfo(QString::fromStdString(layer->GetRealPath())).absolutePath();
+    if (!layer || layer->GetRealPath().empty() || onServer(QString::fromStdString(layer->GetRealPath()))) return {};
+    return QFileInfo(QString::fromStdString(layer->GetRealPath())).absolutePath();
+}
+
+// A file as messages name it: a server's by its path, without the stack id a resolved one carries.
+QString shown(const QString& file) {
+    return onServer(file) ? QString::fromStdString(displayAssetPath(file.toStdString())) : QDir::toNativeSeparators(file);
+}
+
+// "Can't write <file>", with why when OpenUSD or the resolver said (a server that refused, or
+// a file changed on the server since it was opened).
+QString writeFailure(const QString& file, PXR_NS::TfErrorMark& mark) {
+    QString why;
+    for (auto it = mark.GetBegin(); it != mark.GetEnd(); ++it) {
+        if (why.isEmpty()) why = QString::fromStdString(it->GetCommentary());
+    }
+    mark.Clear();
+    return why.isEmpty() ? tr("Can't write %1.").arg(shown(file)) : tr("Can't write %1: %2").arg(shown(file), why);
 }
 
 // `asset`, as written in a layer in the folder `from`, rewritten to find the
@@ -323,9 +344,12 @@ std::string addNewLayerFile(UndoManager& undo, const StageRefPtr& stage, const s
         if (error) *error = tr("%1 is open already; add it as an existing layer.").arg(QFileInfo(file).fileName());
         return {};
     }
+    // A server's path means the stage's servers (docs/REMOTE_ASSETS.md §5).
+    const PXR_NS::ArResolverContextBinder binder(stage->usdStage()->GetPathResolverContext());
+    PXR_NS::TfErrorMark mark;
     const PXR_NS::SdfLayerRefPtr layer = PXR_NS::SdfLayer::CreateNew(path);
     if (!layer || !layer->Save()) {
-        if (error) *error = tr("Can't create %1.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = writeFailure(file, mark);
         return {};
     }
     return insert(undo, stage, parent, layer, tr("Add %1").arg(QFileInfo(file).fileName()), error);
@@ -476,11 +500,15 @@ bool flattenToFile(const StageRefPtr& stage, const std::string& identifier, cons
         if (error) *error = tr("%1 isn't a USD file name.").arg(QFileInfo(file).fileName());
         return false;
     }
-    const PXR_NS::SdfLayerRefPtr flat =
-        flattenedLayerStack(stage, entry->layer, QFileInfo(file).absolutePath(), error);
+    // Relative paths are rewritten for the new file's folder; one on a server has none on
+    // disk, so they're written as they read from the layer's own folder.
+    const QString to = onServer(file) ? layerFolder(entry->layer) : QFileInfo(file).absolutePath();
+    const PXR_NS::SdfLayerRefPtr flat = flattenedLayerStack(stage, entry->layer, to, error);
     if (!flat) return false;
+    const PXR_NS::ArResolverContextBinder binder(stage->usdStage()->GetPathResolverContext());
+    PXR_NS::TfErrorMark mark;
     if (!flat->Export(path)) {
-        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = writeFailure(file, mark);
         return false;
     }
     return true;
@@ -534,13 +562,17 @@ std::string saveLayerAs(UndoManager& undo, const StageRefPtr& stage, const std::
         if (error) *error = tr("%1 is open as another layer.").arg(QFileInfo(file).fileName());
         return {};
     }
+    // A server's path means the stage's servers: the file goes to the first one that isn't
+    // read-only (docs/REMOTE_ASSETS.md §5), and opens from there.
+    const PXR_NS::ArResolverContextBinder binder(stage->usdStage()->GetPathResolverContext());
+    PXR_NS::TfErrorMark mark;
     if (!entry->layer->Export(path)) {
-        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = writeFailure(file, mark);
         return {};
     }
     const PXR_NS::SdfLayerRefPtr saved = PXR_NS::SdfLayer::FindOrOpen(path);
     if (!saved) {
-        if (error) *error = tr("Can't open %1 after writing it.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = tr("Can't open %1 after writing it.").arg(shown(file));
         return {};
     }
     // Opened before (a reload of what was on disk): what was just written.
@@ -581,12 +613,14 @@ bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* err
         if (error) *error = tr("%1 is open as another layer.").arg(QFileInfo(file).fileName());
         return false;
     }
+    const PXR_NS::ArResolverContextBinder binder(stage->usdStage()->GetPathResolverContext());
+    PXR_NS::TfErrorMark mark;
     if (existing == root) {  // its own file: a plain save
         if (root->Save()) {
             stage->layersSaved();
             return true;
         }
-        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = writeFailure(file, mark);
         return false;
     }
     const PXR_NS::SdfFileFormatConstPtr format = PXR_NS::SdfFileFormat::FindByExtension(path);
@@ -601,13 +635,14 @@ bool saveStageAs(const StageRefPtr& stage, const std::string& path, QString* err
     // A relative path is anchored at the root's folder; written from another
     // folder it must say where that is from there. An in-memory root has no
     // folder, and its paths are kept as they are.
+    // On a server there's no folder on disk to rewrite them for: they're written as they are.
     const QString from = layerFolder(root);
     const QDir to = QFileInfo(file).absoluteDir();
-    if (!from.isEmpty() && QDir(from) != to) {
+    if (!from.isEmpty() && !onServer(file) && QDir(from) != to) {
         PXR_NS::UsdUtilsModifyAssetPaths(copy, [&](const std::string& asset) { return reanchor(asset, from, to); });
     }
     if (!copy->Export(path)) {
-        if (error) *error = tr("Can't write %1.").arg(QDir::toNativeSeparators(file));
+        if (error) *error = writeFailure(file, mark);
         return false;
     }
     // Open before (from an earlier save): what was just written.

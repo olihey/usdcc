@@ -1,5 +1,6 @@
 #include "usdcc/usd/physics_bake.h"
 
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/sim_cache.h"
 
@@ -128,6 +129,8 @@ BakeResult bakeFromCache(const UsdStageRefPtr& stage, const PhysicsSession& sess
 
     const UsdEditTarget target = stage->GetEditTarget();
     const SdfLayerHandle layer = target.GetLayer();
+    // First the specs, fresh, with their defaults and the op order, which have no time.
+    std::map<SdfPath, bool> asMatrix;
     {
         SdfChangeBlock block;
         for (const SdfPath& path : bodies) {
@@ -137,22 +140,16 @@ BakeResult bakeFromCache(const UsdStageRefPtr& stage, const PhysicsSession& sess
                 result.reports.push_back({path, "couldn't be written in the edit target"});
                 continue;
             }
-            const bool asMatrix = std::any_of(samples.begin(), samples.end(), sheared);
+            const bool matrix = std::any_of(samples.begin(), samples.end(), sheared);
+            asMatrix[path] = matrix;
             VtTokenArray order;
-            if (asMatrix) {
+            if (matrix) {
                 order.push_back(transformOp());
-                const SdfAttributeSpecHandle matrix = freshAttribute(prim, transformOp(), SdfValueTypeNames->Matrix4d);
-                for (size_t i = 0; i < times.size(); ++i) layer->SetTimeSample(matrix->GetPath(), times[i], samples[i]);
+                freshAttribute(prim, transformOp(), SdfValueTypeNames->Matrix4d);
             } else {
                 order.insert(order.end(), {translateOp(), orientOp(), scaleOp()});
-                const SdfAttributeSpecHandle translate = freshAttribute(prim, translateOp(), SdfValueTypeNames->Double3);
-                const SdfAttributeSpecHandle orient = freshAttribute(prim, orientOp(), SdfValueTypeNames->Quatf);
-                for (size_t i = 0; i < times.size(); ++i) {
-                    const GfTransform transform(samples[i]);
-                    layer->SetTimeSample(translate->GetPath(), times[i], transform.GetTranslation());
-                    layer->SetTimeSample(orient->GetPath(), times[i],
-                                         GfQuatf(transform.GetRotation().GetQuat().GetNormalized()));
-                }
+                freshAttribute(prim, translateOp(), SdfValueTypeNames->Double3);
+                freshAttribute(prim, orientOp(), SdfValueTypeNames->Quatf);
                 freshAttribute(prim, scaleOp(), SdfValueTypeNames->Float3)
                     ->SetDefaultValue(VtValue(GfVec3f(GfTransform(samples.front()).GetScale())));
             }
@@ -163,6 +160,29 @@ BakeResult bakeFromCache(const UsdStageRefPtr& stage, const PhysicsSession& sess
                     ->SetDefaultValue(VtValue(true));
             }
             result.baked.push_back(path);
+        }
+    }
+    // Then the frames, through the keying code (anim::setSamples(), docs/ANIMATION.md §6.3) and
+    // so UsdAttribute: the edit target's time offset applies, so a bake into a sublayer that
+    // starts later still lands on the frames that were simulated.
+    {
+        SdfChangeBlock block;
+        for (const SdfPath& path : result.baked) {
+            const std::vector<GfMatrix4d>& samples = locals[path];
+            const UsdPrim prim = stage->GetPrimAtPath(path);
+            if (asMatrix[path]) {
+                std::vector<VtValue> matrices(samples.begin(), samples.end());
+                anim::setSamples(prim.GetAttribute(transformOp()), times, matrices);
+            } else {
+                std::vector<VtValue> translations, orientations;
+                for (const GfMatrix4d& sample : samples) {
+                    const GfTransform transform(sample);
+                    translations.emplace_back(transform.GetTranslation());
+                    orientations.emplace_back(GfQuatf(transform.GetRotation().GetQuat().GetNormalized()));
+                }
+                anim::setSamples(prim.GetAttribute(translateOp()), times, translations);
+                anim::setSamples(prim.GetAttribute(orientOp()), times, orientations);
+            }
         }
     }
 

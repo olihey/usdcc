@@ -25,7 +25,7 @@ follow the GPL compliance policy in section 9.
 | Scene ownership | The existing `UsdStage`, its layer stack, and usdcc's undo manager own all persistent edits |
 | Working geometry | Temporary BMesh for each operation; no parallel persistent Blender scene |
 | Source baseline | Blender 5.2.4 LTS, pinned to `cd5dc428cce1993a4b35986f227c6a24e42a365c` with archive SHA-256 in `deps/blender.json` |
-| Build | `USDCC_BUILD_BLENDER_MESH_TOOLS=ON` is enforced; `tools/build.py` builds the pinned backend before app configuration |
+| Build | `USDCC_BUILD_BLENDER_MESH_TOOLS`, on by default ([BUILD_OPTIONS.md](BUILD_OPTIONS.md)); `tools/build.py` builds the pinned backend before app configuration, unless `--without blender_mesh_tools` |
 | Platforms | Windows x64 first, then Linux x64 before the first supported release; macOS deferred |
 | Execution | One persistent serialized backend executor; owned numeric buffers cross the job boundary |
 | Packaging | Separate standard artifact without Blender code and optional artifact containing the GPL-compliant linked configuration |

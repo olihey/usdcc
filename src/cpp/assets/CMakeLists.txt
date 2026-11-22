@@ -11,6 +11,7 @@ add_library(usdcc_assets SHARED
     include/usdcc/assets/activity.h
     include/usdcc/assets/caching_resolver.h
     include/usdcc/assets/config.h
+    include/usdcc/assets/config_editor.h
     include/usdcc/assets/context.h
     include/usdcc/assets/credentials.h
     include/usdcc/assets/disk_cache.h
@@ -23,6 +24,7 @@ add_library(usdcc_assets SHARED
     src/activity.cpp
     src/caching_resolver.cpp
     src/config.cpp
+    src/config_editor.cpp
     src/context.cpp
     src/credentials.cpp
     src/disk_cache.cpp

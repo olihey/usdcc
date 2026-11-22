@@ -11,8 +11,10 @@
 #include "node.h"
 #include "startup.h"
 
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/console_log_sink.h"
 #include "usdcc/core/log.h"
+#include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -142,6 +144,12 @@ int main(int argc, char** argv) {
     }
     if (parser.isSet(QStringLiteral("help"))) {
         printLine(parser.helpText());
+        return kExitDone;
+    }
+    // The version, and what was left out of this build (docs/BUILD_OPTIONS.md §5).
+    if (parser.isSet(QStringLiteral("version"))) {
+        printLine(QStringLiteral("usdcc_node %1").arg(QString::fromUtf8(usdcc::core::version())));
+        printLine(QString::fromStdString(usdcc::core::buildFeaturesText()).trimmed());
         return kExitDone;
     }
     const QStringList positional = parser.positionalArguments();
