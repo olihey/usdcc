@@ -24,6 +24,7 @@ add_executable(usdcc_tests
     final_render_test.cpp
     render_network_test.cpp
     node_test.cpp
+    theme_css_test.cpp
     layer_stack_test.cpp
     shader_node_catalog_test.cpp
     shade_graph_test.cpp
@@ -140,12 +141,16 @@ add_executable(usdcc_ui_tests
     panel_maximizer_test.cpp
     peers_panel_test.cpp
     viewport_broadcast_test.cpp
+    render_queue_test.cpp
     workspace_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend usdcc_viewport_broadcast_core)
+# The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
+target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)
+target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own

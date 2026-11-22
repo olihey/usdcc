@@ -15,6 +15,8 @@
 #include "usdcc/usd/render/hydra_final_renderer.h"
 #include "usdcc/usd/render/render_job.h"
 #include "usdcc/usd/render/render_network.h"
+#include "usdcc/usd/render/render_queue.h"
+#include "usdcc/usd/linear_exr.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_spec.h"
 
@@ -38,6 +40,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QTemporaryDir>
+
 
 #include <cmath>
 #include <memory>
@@ -529,4 +532,227 @@ USDCC_TEST(node_process_serve) {
           "killed: its task waits again");
     scheduler.cancel(slow->id);
 }
+namespace {
+
+// A line usdcc_node printed that starts with `prefix`, without it; empty until there is one.
+QString printed(const NodeProcess& process, const QString& prefix) {
+    for (const QString& line : process.output.split(QLatin1Char('\n'))) {
+        if (line.startsWith(prefix)) return line.mid(prefix.size()).trimmed();
+    }
+    return {};
+}
+
+// An artist's instance in the queue's room, from the link the queue printed.
+struct QueueArtist {
+    usdcc::peers::Profile who;
+    std::unique_ptr<usdcc::peers::Room> room;
+    QTemporaryDir folder;
+    std::unique_ptr<RenderQueueClient> client;
+    QStringList queued, refused;
+
+    QueueArtist(const QString& link, const QString& name, usdcc::peers::Identity identity = {}) {
+        who.name = name;
+        who.identity = identity.isValid() ? identity : usdcc::peers::Identity::generate();
+        who.instance = name.toLower();
+        const std::optional<usdcc::peers::JoinLink> parsed = usdcc::peers::parseJoinLink(link);
+        CHECK(parsed.has_value(), "a link: %s", qPrintable(link));
+        if (!parsed) return;
+        usdcc::peers::JoinOptions options;
+        options.profile = who;
+        options.type = usdcc::peers::RoomType::RenderQueue;
+        options.secret = parsed->secret;
+        options.expectedFingerprint = parsed->fingerprint;
+        room.reset(usdcc::peers::Room::join(parsed->address, options));
+        client = std::make_unique<RenderQueueClient>(RenderQueueClient::Options{folder.path()});
+        client->addRoom(room.get());
+        QObject::connect(client.get(), &RenderQueueClient::queued, client.get(),
+                         [this](const QString&, const QString& id, int) { queued.append(id); });
+        QObject::connect(client.get(), &RenderQueueClient::refused, client.get(),
+                         [this](const QString&, const QString& reason) { refused.append(reason); });
+    }
+};
+
+// The queue's arguments, in a folder of its own.
+QStringList queueArguments(const QTemporaryDir& dir, const QString& accept) {
+    return {QStringLiteral("queue"),        QStringLiteral("--no-plugins"),     QStringLiteral("--host-room"),
+            QStringLiteral("Farm"),         QStringLiteral("--local"),          QStringLiteral("--name"),
+            QStringLiteral("Farm queue"),   QStringLiteral("--key-file"),       dir.filePath(QStringLiteral("queue.key")),
+            QStringLiteral("--state"),      dir.filePath(QStringLiteral("state")), QStringLiteral("--output-root"),
+            dir.filePath(QStringLiteral("root")), QStringLiteral("--accept"),   accept};
+}
+
+std::unique_ptr<NodeProcess> serveQueue(const QTemporaryDir& dir, const QString& link, const QString& queueFingerprint, int n) {
+    return std::make_unique<NodeProcess>(
+        QStringList{QStringLiteral("serve"), QStringLiteral("--no-plugins"), QStringLiteral("--join"), link,
+                    QStringLiteral("--trust"), queueFingerprint, QStringLiteral("--key-file"),
+                    dir.filePath(QStringLiteral("node%1.key").arg(n)), QStringLiteral("--name"), QStringLiteral("Farm 0%1").arg(n),
+                    QStringLiteral("--inbox"), dir.filePath(QStringLiteral("inbox%1").arg(n)), QStringLiteral("--renderers"),
+                    QStringLiteral("HdEmbreeRendererPlugin")},
+        false);
+}
+
+// The Embree job: the shot's 3 frames at 48 × 32, `tiles`, its frames named <stage>.####.exr.
+RenderJobPtr embreeJob(const QString& stageFile, GfVec2i tiles, double timeLimit, int samples, GfVec2i resolution = GfVec2i(48, 32),
+                       bool slow = false) {
+    RenderArguments arguments;
+    arguments.renderer = "HdEmbreeRendererPlugin";
+    arguments.frames = FrameRange{1, 3, 1};
+    arguments.resolution = resolution;
+    arguments.tiles = tiles;
+    arguments.timeLimit = timeLimit;
+    arguments.output = "<stage>.####.exr";  // relative: under the queue's root
+    arguments.set = {{embreeSamples().attribute, std::to_string(samples)}};
+    // Slow: no adaptive sampling, so each frame takes its time limit however simple the scene.
+    if (slow) {
+        const auto embree = FinalRenderers::instance().find("HdEmbreeRendererPlugin");
+        for (const RenderSettingField& field : embree ? embree->settingsSchema() : std::vector<RenderSettingField>{}) {
+            if (TfStringEndsWith(field.rendererKey.GetString(), "adaptiveThreshold")) arguments.set.push_back({field.attribute, "0"});
+        }
+    }
+    std::string error;
+    UsdStageRefPtr stage = UsdStage::Open(stageFile.toStdString());
+    const auto request = prepareRenderRequest(stage, arguments, &error);
+    RenderJobPtr job = request ? makeRenderJob(*request, &error) : nullptr;
+    CHECK(job != nullptr, "the job: %s", error.c_str());
+    return job;
+}
+
+double meanDifference(const QString& a, const QString& b) {
+    int aw = 0, ah = 0, bw = 0, bh = 0;
+    const std::vector<float> x = readExr(a, &aw, &ah);
+    const std::vector<float> y = readExr(b, &bw, &bh);
+    if (x.empty() || x.size() != y.size()) return 1e9;
+    double sum = 0.0;
+    for (size_t i = 0; i < x.size(); i += 4) {
+        for (int c = 0; c < 3; ++c) sum += std::abs(x[i + c] - y[i + c]);
+    }
+    return sum / (double(aw) * ah * 3);
+}
+
+}  // namespace
+
+// Phase 6 (docs/RENDER_NODE.md §7): an artist submits 3 frames in 2 × 2 tiles to a queue
+// process and leaves; two node processes render them; the EXRs under the root match the app's.
+// An artist the queue doesn't accept is refused.
+USDCC_TEST(node_process_queue) {
+    registerHydraFinalRenderers();
+    if (!FinalRenderers::instance().find("HdEmbreeRendererPlugin") || !usdcc::usd::linearExrAvailable()) return;
+    QTemporaryDir dir;
+    const QString stageFile = dir.filePath(QStringLiteral("shot.usda"));
+    shotStage(stageFile.toStdString())->Save();
+    QString error;
+    const usdcc::peers::Identity queueKey = loadKeyFile(dir.filePath(QStringLiteral("queue.key")), &error);
+    const usdcc::peers::Identity anna = usdcc::peers::Identity::generate();
+
+    NodeProcess queue(queueArguments(dir, anna.fingerprint()), false);
+    CHECK(waitFor([&] { return !printed(queue, QStringLiteral("link ")).isEmpty(); }, 90000), "the queue prints its link: %s",
+          qPrintable(queue.errors()));
+    const QString link = printed(queue, QStringLiteral("link "));
+    if (link.isEmpty()) return;
+    auto node1 = serveQueue(dir, link, usdcc::peers::shortFingerprint(queueKey.fingerprint()), 1);
+    auto node2 = serveQueue(dir, link, usdcc::peers::shortFingerprint(queueKey.fingerprint()), 2);
+
+    // The artist, as the app would: the job made here, sent with its scene; the queue accepts
+    // her by her key.
+    QueueArtist annaSeat(link, QStringLiteral("Anna"), anna);
+    CHECK(waitFor([&] { return annaSeat.client->queues().size() == 1; }, 30000), "Anna sees the queue");
+    RenderJobPtr job = embreeJob(stageFile, GfVec2i(2, 2), 20.0, 16);
+    if (!job) return;
+    CHECK(annaSeat.client->submit(job, QStringLiteral("Farm queue"), &error), "sent: %s", qPrintable(error));
+    CHECK(waitFor([&] { return !annaSeat.queued.isEmpty(); }, 60000), "queued");
+    // The job is the queue's: Anna goes.
+    annaSeat.client.reset();
+    annaSeat.room.reset();
+
+    const QString root = dir.filePath(QStringLiteral("root"));
+    CHECK(waitFor([&] { return queue.output.contains(QStringLiteral(" done: 3 file(s)")); }, 180000),
+          "the queue writes the 3 frames: %s", qPrintable(queue.output.right(600)));
+
+    // The app's, from the same file and settings.
+    RenderJobPtr appJob = embreeJob(stageFile, GfVec2i(2, 2), 20.0, 16);
+    if (!appJob) return;
+    appJob->spec.options.output = dir.filePath(QStringLiteral("app/<stage>.####.exr")).toStdString();
+    appJob->spec.options.distribute = "local";
+    RenderScheduler scheduler;
+    scheduler.addWorker(std::make_shared<LocalWorker>());
+    scheduler.submit(appJob);
+    CHECK(waitFor([&] { return ended(appJob); }, 120000) && appJob->status == RenderJob::Status::Done, "the app renders");
+    for (int frame = 1; frame <= 3; ++frame) {
+        const QString name = QStringLiteral("shot.%1.exr").arg(frame, 4, 10, QLatin1Char('0'));
+        const double difference = meanDifference(QDir(root).filePath(name), dir.filePath(QStringLiteral("app/") + name));
+        CHECK(difference < 0.03, "%s under the root matches the app's: mean difference %.4f", qPrintable(name), difference);
+    }
+
+    // Not accepted.
+    QueueArtist stranger(link, QStringLiteral("Stranger"));
+    waitFor([&] { return stranger.client->queues().size() == 1; }, 30000);
+    RenderJobPtr other = embreeJob(stageFile, GfVec2i(1, 1), 5.0, 4);
+    if (!other) return;
+    stranger.client->submit(other, {}, &error);
+    CHECK(waitFor([&] { return !stranger.refused.isEmpty(); }, 30000), "a stranger is refused");
+    CHECK(queue.output.contains(QStringLiteral("refused a job from Stranger")), "and the queue says so");
+}
+
+// Phase 7: the queue is killed mid-job and started again from its --state: the job finishes,
+// and the frames done before aren't rendered again.
+USDCC_TEST(node_process_queue_restart) {
+    registerHydraFinalRenderers();
+    if (!FinalRenderers::instance().find("HdEmbreeRendererPlugin") || !usdcc::usd::linearExrAvailable()) return;
+    QTemporaryDir dir;
+    const QString stageFile = dir.filePath(QStringLiteral("shot.usda"));
+    shotStage(stageFile.toStdString())->Save();
+    QString error;
+    const usdcc::peers::Identity queueKey = loadKeyFile(dir.filePath(QStringLiteral("queue.key")), &error);
+    const usdcc::peers::Identity anna = usdcc::peers::Identity::generate();
+    const QString trusted = usdcc::peers::shortFingerprint(queueKey.fingerprint());
+
+    auto queue = std::make_unique<NodeProcess>(queueArguments(dir, anna.fingerprint()), false);
+    CHECK(waitFor([&] { return !printed(*queue, QStringLiteral("link ")).isEmpty(); }, 90000), "the queue's link");
+    QString link = printed(*queue, QStringLiteral("link "));
+    if (link.isEmpty()) return;
+    auto node = serveQueue(dir, link, trusted, 1);
+    const std::optional<usdcc::peers::JoinLink> parsed = usdcc::peers::parseJoinLink(link);
+    usdcc::peers::JoinOptions options;
+    options.profile.name = QStringLiteral("Anna");
+    options.profile.identity = anna;
+    options.profile.instance = QStringLiteral("anna");
+    options.type = usdcc::peers::RoomType::RenderQueue;
+    options.secret = parsed->secret;
+    std::unique_ptr<usdcc::peers::Room> room(usdcc::peers::Room::join(parsed->address, options));
+    QTemporaryDir annaFolder;
+    auto client = std::make_unique<RenderQueueClient>(RenderQueueClient::Options{annaFolder.path()});
+    client->addRoom(room.get());
+    QStringList queued;
+    QObject::connect(client.get(), &RenderQueueClient::queued, client.get(),
+                     [&queued](const QString&, const QString& id, int) { queued.append(id); });
+    CHECK(waitFor([&] { return client->queues().size() == 1; }, 30000), "Anna sees the queue");
+    // Each frame takes its time limit: 3 s.
+    RenderJobPtr job = embreeJob(stageFile, GfVec2i(1, 1), 3.0, 1000000, GfVec2i(160, 120), true);
+    if (!job) return;
+    client->submit(job, {});
+    CHECK(waitFor([&] { return !queued.isEmpty(); }, 60000), "queued");
+    client.reset();
+    room.reset();
+
+    const QString frame1 = dir.filePath(QStringLiteral("root/shot.0001.exr"));
+    CHECK(waitFor([&] { return QFileInfo::exists(frame1); }, 90000), "frame 1 written");
+    waitFor([] { return false; }, 700);  // its state saved
+    const QDateTime written = QFileInfo(frame1).lastModified();
+    CHECK(!QFileInfo::exists(dir.filePath(QStringLiteral("root/shot.0003.exr"))), "frame 3 not yet");
+    // Killed, as a crash or a power cut would.
+    queue->process.kill();
+    queue->process.waitForFinished(10000);
+    node.reset();
+
+    queue = std::make_unique<NodeProcess>(queueArguments(dir, anna.fingerprint()), false);
+    CHECK(waitFor([&] { return !printed(*queue, QStringLiteral("link ")).isEmpty(); }, 90000), "the queue starts again");
+    CHECK(queue->output.contains(QStringLiteral("restored 1 job(s)")), "with the job: %s", qPrintable(queue->output.left(400)));
+    link = printed(*queue, QStringLiteral("link "));
+    node = serveQueue(dir, link, trusted, 1);
+    CHECK(waitFor([&] { return queue->output.contains(QStringLiteral(" done: 3 file(s)")); }, 120000), "the job finishes: %s",
+          qPrintable(queue->output.right(400)));
+    CHECK(QFileInfo(frame1).lastModified() == written, "frame 1 wasn't rendered again");
+    CHECK(QFileInfo::exists(dir.filePath(QStringLiteral("root/shot.0003.exr"))), "frame 3 is there");
+}
+
 #endif

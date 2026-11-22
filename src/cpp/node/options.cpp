@@ -10,9 +10,10 @@ void Options::add(QCommandLineParser& parser) {
         "Commands:\n"
         "  render <stage>   render a stage's frames, then exit (0 done, 1 failed, 2 bad arguments, 130 cancelled)\n"
         "  renderers        list the renderers, and why one can't render here\n"
-        "  serve            render for peers in render queue rooms, until stopped"));
+        "  serve            render for peers in render queue rooms, until stopped\n"
+        "  queue            a render queue server: takes artists' jobs and hands them to nodes, until stopped"));
     parser.addHelpOption();
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("render, renderers or serve"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("render, renderers, serve or queue"));
     parser.addPositionalArgument(QStringLiteral("stage"), QStringLiteral("render: the USD file"), QStringLiteral("[stage]"));
     // Every command.
     parser.addOption({QStringLiteral("profile"), QStringLiteral("The profile: its settings, logs and key (default usdcc-node)."),
@@ -62,6 +63,32 @@ void Options::add(QCommandLineParser& parser) {
                       QStringLiteral("ids")});
     parser.addOption({QStringLiteral("inbox"), QStringLiteral("serve: where the scenes peers send are kept."),
                       QStringLiteral("folder")});
+    // queue.
+    parser.addOption({QStringLiteral("host-room"), QStringLiteral("queue: host a render queue room of this name."),
+                      QStringLiteral("name")});
+    parser.addOption({QStringLiteral("port"), QStringLiteral("queue: the hosted room's port (default: any free one)."),
+                      QStringLiteral("port")});
+    parser.addOption({QStringLiteral("local"), QStringLiteral("queue: the hosted room on this machine only (127.0.0.1).")});
+    parser.addOption({QStringLiteral("accept"), QStringLiteral("queue: an artist's fingerprint (or abcd-efgh) to take jobs from. "
+                                                               "Repeatable."),
+                      QStringLiteral("fingerprint")});
+    parser.addOption({QStringLiteral("accept-file"), QStringLiteral("queue: a file of artists' fingerprints, one a line."),
+                      QStringLiteral("file")});
+    parser.addOption({QStringLiteral("admin"), QStringLiteral("queue: a fingerprint that may cancel, retry and remove anyone's "
+                                                              "jobs. Repeatable."),
+                      QStringLiteral("fingerprint")});
+    parser.addOption({QStringLiteral("state"), QStringLiteral("queue: where jobs, scenes and finished tiles are kept, to go on "
+                                                              "after a restart."),
+                      QStringLiteral("folder")});
+    parser.addOption({QStringLiteral("output-root"), QStringLiteral("queue: where the frames are written (a shared path); "
+                                                                    "without it the artists fetch them."),
+                      QStringLiteral("folder")});
+    parser.addOption({QStringLiteral("render"), QStringLiteral("queue: render on this machine too.")});
+    parser.addOption({QStringLiteral("web"), QStringLiteral("queue: serve the queue's web page on this port."),
+                      QStringLiteral("port")});
+    parser.addOption({QStringLiteral("web-token-file"), QStringLiteral("queue: the web page's token for Cancel, Retry and "
+                                                                       "Remove, made there if it isn't."),
+                      QStringLiteral("file")});
 }
 
 }  // namespace usdcc::node

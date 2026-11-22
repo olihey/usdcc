@@ -1,6 +1,8 @@
 #include "usdcc/usd/render/render_menu.h"
 
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/render/render_network.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
@@ -48,6 +50,21 @@ RenderJobPtr submitRender(const usdcc::usd::StageRefPtr& stage, const PXR_NS::Sd
         if (error) *error = why;
         if (parent) QMessageBox::warning(parent, QObject::tr("Render"), QString::fromStdString(why));
         return nullptr;
+    }
+    // Render on a queue: the job is the queue's, and this instance doesn't schedule it.
+    if (job->spec.options.distribute == "queue") {
+        RenderQueueClient* queues = RenderQueueClient::instance();
+        const RenderNetwork* network = RenderNetwork::instance();
+        const QString queue = network ? QString::fromStdString(network->dispatch().queue) : QString();
+        QString queueError;
+        if (!queues || !queues->submit(job, queue, &queueError)) {
+            if (queueError.isEmpty()) queueError = QObject::tr("there's no render queue here");
+            if (error) *error = queueError.toStdString();
+            if (parent) QMessageBox::warning(parent, QObject::tr("Render"), QObject::tr("Couldn't send the job: %1").arg(queueError));
+            return nullptr;
+        }
+        if (showQueue()) showQueue()();
+        return job;
     }
     RenderScheduler::instance().submit(job);
     if (showQueue()) showQueue()();

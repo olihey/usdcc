@@ -280,6 +280,8 @@ Small and general, so other plugins gain from them too:
 
 The plugin (`usdcc_add_plugin(viewport_broadcast …)`): a room from `usdcc_peers` (§7) with the
 page served beside it, the frame source, the page in `web/`, and its settings. As built, §11.2.
+The page's colors and type are `usdcc.css`, the app's dark theme as CSS that every page usdcc
+serves shares ([RENDER_NODE.md](RENDER_NODE.md) §4.5); the plugin's build copies it beside the page.
 
 **Sources other than the Storm viewport.** The frame source is an interface: "a new picture",
 "read it", "move the camera". The viewport is the first. A Render View panel (V-Ray, RTX) already

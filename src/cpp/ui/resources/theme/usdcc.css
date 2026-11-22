@@ -1,0 +1,109 @@
+/*
+ * usdcc's dark theme for the web pages it serves: the render queue's (docs/RENDER_NODE.md §4.5)
+ * and the viewport broadcast's (docs/VIEWPORT_BROADCAST.md). The same tokens as the top of
+ * dark.qss, as CSS custom properties; tests/theme_css_test.cpp keeps the two equal.
+ *
+ * The accent is set by the page from what its server says (the profile's
+ * Appearance/accentColor), as theme.cpp does for the app; #3d8bfd until then.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --surface-bar: #161618;    /* menu, status, header */
+  --surface-toolbar: #1a1a1c; /* bars */
+  --surface-panel: #1c1c1e;  /* panels */
+  --inset: #141416;          /* inputs, tracks */
+  --gap: #0e0e10;            /* between panels */
+  --popup: #232326;          /* tooltips */
+
+  /* Hairlines */
+  --line: rgba(255, 255, 255, 0.06);        /* dividers */
+  --line-input: rgba(255, 255, 255, 0.08);  /* input borders */
+  --line-popup: rgba(255, 255, 255, 0.10);  /* popups */
+
+  /* Text */
+  --text: #e8e8ea;
+  --text-secondary: rgba(255, 255, 255, 0.75);
+  --text-muted: rgba(255, 255, 255, 0.50);
+  --text-label: rgba(255, 255, 255, 0.40);
+
+  /* Accent: the selection fill is 18% of it */
+  --accent: #3d8bfd;
+  --accent-rgb: 61, 139, 253;
+  --accent-hover: #6aa6fd;
+  --selection: rgba(var(--accent-rgb), 0.18);
+
+  /* Status, as the toasts have them */
+  --ok: #4fd671;
+  --warn: #ffb340;
+  --bad: #ff5f56;
+
+  /* Shape and density */
+  --radius: 3px;        /* controls */
+  --radius-group: 4px;  /* groups */
+  --font-size: 11px;
+  --control-height: 20px;
+  --font: "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--surface-panel);
+  color: var(--text);
+  font: var(--font-size)/1.45 var(--font);
+}
+
+header.bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  min-height: 26px; padding: 3px 10px;
+  background: var(--surface-bar); border-bottom: 1px solid var(--line);
+}
+header.bar .title { color: var(--text); font-weight: 600; }
+header.bar .status { color: var(--text-muted); }
+
+.label { color: var(--text-label); }
+.muted { color: var(--text-muted); }
+
+button {
+  height: var(--control-height); padding: 0 10px;
+  background: var(--inset); color: var(--text-secondary);
+  border: 1px solid var(--line-input); border-radius: var(--radius);
+  font: inherit; cursor: pointer;
+}
+button:hover:not(:disabled) { color: var(--text); border-color: var(--line-popup); }
+button:disabled { color: var(--text-label); cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+input {
+  height: var(--control-height); padding: 0 6px;
+  background: var(--inset); color: var(--text);
+  border: 1px solid var(--line-input); border-radius: var(--radius);
+  font: inherit;
+}
+input:focus { outline: none; border-color: var(--accent); }
+
+table.list { width: 100%; border-collapse: collapse; }
+table.list th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; font-weight: 400; color: var(--text-label);
+  padding: 3px 8px; background: var(--surface-toolbar); border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.list td { padding: 2px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; color: var(--text-secondary); }
+table.list tr.selectable { cursor: pointer; }
+table.list tr.selectable:hover td { background: rgba(255, 255, 255, 0.03); }
+table.list tr.selected td { background: var(--selection); color: var(--text); }
+
+.progress { position: relative; height: 4px; min-width: 60px; background: var(--inset); border-radius: 2px; overflow: hidden; }
+.progress > span { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.state-done, table.list td.state-done { color: var(--ok); }
+.state-failed, table.list td.state-failed { color: var(--bad); }
+.state-cancelled, .state-receiving, table.list td.state-cancelled, table.list td.state-receiving { color: var(--warn); }
+
+.tabs { display: flex; gap: 2px; padding: 0 8px; background: var(--surface-toolbar); border-bottom: 1px solid var(--line); }
+.tabs button { height: 22px; background: transparent; border: none; border-radius: 0; border-bottom: 2px solid transparent; }
+.tabs button.current { color: var(--text); border-bottom-color: var(--accent); }
