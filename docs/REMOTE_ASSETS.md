@@ -32,7 +32,7 @@ assumption.
   server (§5).
 - **Each protocol ships as a usdcc plugin with only a `usd/` folder** (§11). It has no usdcc code:
   the settings page, login dialog and browsing are the app's, written once for every protocol.
-- **Read-only first.** Writing is the last phase.
+- **Read-only first.** Writing is the last phase (built 2026-11-22, §13.6).
 
 ## 2. The parts
 
@@ -156,7 +156,7 @@ resolved path.
 | Relative references | Resolved through the whole stack |
 | Folder listing | The union of all endpoints, the upper one winning, each entry marked with its origin |
 | Open | Downloads from the winner into the cache (§7) and returns an `ArFilesystemAsset` on that file |
-| Save (phase 6) | Goes to the first endpoint not marked `readOnly`. Saving a layer that came from PROD writes a copy to TEST |
+| Save (phase 6, built) | Goes to the first endpoint not marked `readOnly`. Saving a layer that came from PROD writes a copy to TEST. Only if the file there is still the version it was opened at, or, when it came from another endpoint, only if there is none; otherwise it's an error saying the file changed on that server (§13.6) |
 | Timestamp | Changes whenever the winner or its ETag changes, so `SdfLayer::Reload` notices a file that appears in TEST |
 | Asset info | The version is the ETag; the repository path is the logical path (`webdav://studio/a.usdz`), and which endpoint delivered it is the resolver info. *Changed 2026-11-17:* the plan had the server's real URL as the repository path, but Sdf anchors the relative paths inside a package (a `.usdz`'s textures) against it, so they went to the plain HTTP resolver |
 
@@ -217,9 +217,11 @@ public:
     // Writes to `file`. With `knownEtag`, "not modified" is a result and nothing is written.
     virtual Result<Entry> fetch(const Endpoint&, const std::string& path, const std::filesystem::path& file,
                                 const std::string& knownEtag, Progress&, Cancel&) = 0;
-    // Phase 6. `knownEtag` empty means "only if it doesn't exist yet".
+    // Phase 6: only if the file is the version `knownEtag` names (If-Match); empty means "only if
+    // it doesn't exist yet" (If-None-Match: *), "*" any version. Otherwise Status::Conflict.
     virtual Result<Entry> put(const Endpoint&, const std::string& path, const std::filesystem::path& file,
                               const std::string& knownEtag, Progress&, Cancel&);
+    virtual bool canPut() const;  // false unless overridden: the protocol is read-only
 };
 
 }  // namespace usdcc::assets
@@ -630,7 +632,7 @@ is not an `ArResolver` written in Python.
 | **4. usdcc** | Everything in §10 but the picker | **Done** (§13.4), with gaps marked in §10. A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | **Done** (ASSET_PICKER.md §9), but for dragging, completion and Python. A reference to a file on the server is added by browsing to it |
 | **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
-| **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
+| **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | **Built** (§13.6) for WebDAV and S3, but for Save in the picker, which comes next. Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **S3** | An S3 plugin, [S3_RESOLVER.md](S3_RESOLVER.md) §8 (phases S3.0 to S3.4) | **Built** (S3_RESOLVER.md §8.2), reading, but for a run against AWS itself. It needed no change to `usdcc_assets` beyond what S3 itself forces (S3_RESOLVER.md §6) |
 | **Later** | More storage backends through Apache OpenDAL (§13.5): one plugin, one transport per scheme | A stage opens from a second backend (Azure Blob or SFTP, say) through the same plugin, and the deploy ships the full notice list for its Rust dependencies |
 | **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
@@ -830,6 +832,46 @@ WebDAV, HTTP, Swift, Aliyun OSS, Tencent COS, Huawei OBS, B2, Dropbox, Google Dr
   credential system; better as a mount the default resolver reads); Arrow's `arrow::fs` (only S3,
   GCS, Azure and HDFS, and all of Arrow); one vendor SDK per provider (what this is meant to avoid).
 
+### 13.6 Phase 6 as built
+
+*Built 2026-11-22,* for WebDAV and S3. Plain HTTP stays read-only: its endpoints are `readOnly`
+and its transport has no `put`.
+
+- **`_ResolveForNewAsset`** locates the path and returns the stack's resolved path
+  (`webdav://studio~7c21/a.usda`), there or not.
+- **`_CanWriteAssetToPath`** is false, with the reason, when every endpoint of the stack is
+  `readOnly` (it names them), when the protocol can't write (`Transport::canPut()`), and offline.
+  The old answer, "read-only in this version", is gone.
+- **`_OpenAssetForWrite`** returns an `ArWritableAsset` that writes to a file of its own under
+  `<cache>/writes`. Its `Close()` puts that file to the stack's first endpoint that isn't
+  `readOnly`, through its mirrors. `Update` (a `.usdc` saved over itself) starts from the
+  version that was opened.
+- **Which version it replaces.** Beside the file each resolved path was opened as, the resolver
+  remembers the endpoint and the ETag. Writing to that same endpoint sends `If-Match` with that
+  ETag (`*` when it had none); writing elsewhere (a layer from PROD saved into TEST) sends
+  `If-None-Match: *`. A 412, or S3's `PreconditionFailed` and 409, is `Status::Conflict`:
+  `Close()` returns false, and the error says the file changed on the server, by its id, since it
+  was opened. Nothing is written.
+- **After a write** the new version goes into the cache as if downloaded, what the servers said
+  about that path and its folders is forgotten, and the next write replaces that version.
+- **HTTP:** `HttpRequest::uploadFrom` streams a file as the body, with its size sent ahead, no
+  `Expect: 100-continue`, and progress counting what went up. Signed with SigV4, the body is
+  `x-amz-content-sha256: UNSIGNED-PAYLOAD`.
+- **WebDAV** (WEBDAV_RESOLVER.md §3): `MKCOL` for each missing folder (405 is one that's there),
+  then `PUT`. A weak ETag is never sent in `If-Match`: it is compared with a `PROPFIND` first,
+  and the `PUT` then says `If-Match: *`. A reply without an ETag is followed by a `PROPFIND`.
+- **S3** (S3_RESOLVER.md §5): a signed `PUT /<key>` with the same conditions, its errors with
+  S3's code, a 403 naming `s3:PutObject`; a `HEAD` afterwards for the new version's time.
+
+**Checked:** `usdcc_assets_tests` ([assets_net_test.cpp](../tests/assets_net_test.cpp), 
+`assets_webdav_writes`, `assets_s3_writes`, `assets_webdav_put_compares_a_weak_etag_itself` and
+`assets_http_refuses_to_write`, 90 checks) against the test servers, which now take `PUT` and
+`MKCOL` with the conditions: a new file and its folders; a PROD layer saved in the test
+environment landing in TEST, PROD untouched and the path resolving from TEST afterwards; a second
+save; a conflict both ways (changed on TEST, and made on TEST meanwhile); a read-only stack and
+offline refusing, with their reasons; `SdfLayer::Save()`, `Export()` to `.usda` and
+`.usdc`, and a `.usdc` saved over itself; a refused `PUT`; HTTP refusing. **Not checked:** a
+real WebDAV server or S3 bucket, and the app (no Save there until the picker's save mode).
 ## 14. Testing
 
 - **`usdcc_assets`** ([assets_test.cpp](../tests/assets_test.cpp), 18 tests, in a program of its
