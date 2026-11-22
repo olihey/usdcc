@@ -302,9 +302,9 @@ press S: a key at 10, the ruler's diamonds and the Attribute Editor's row keys s
 | Op renames | `xform_stack.cpp` | Copy a spline too, besides the default and samples |
 | Python | `usdcc.usd.set_key()`, `remove_key()`, `remove_animation()`, `key_times()`, `auto_key()`, `set_auto_key()` | By `Usd.Attribute` or path; a script's run is one undo step |
 
-Left out, against the plan: **Physics' Bake** still writes its own ops directly (they're new
-attributes, so no rule of §4.5 changes what it does). The targeted-op mark in the Transform
-section's labels is a ◆ too, beside a key's ◆: worth a different glyph.
+**Since:** Physics' Bake writes its frames with `anim::setSamples()`, which replaces an
+attribute's animation in the edit target whole (no localizing: nothing of it is kept), through
+`UsdAttribute` so the edit target's offset applies; phase 4's Bake to Samples can use it too.
 
 Tests: `anim_edit_test.cpp` (§4.5 case by case, localizing, a sublayer's offset, splines, a drag's
 keys as one undo step), `timeline_keys` in `timeline_test.cpp` (the ruler's keys, next and
