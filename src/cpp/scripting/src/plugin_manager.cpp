@@ -297,9 +297,14 @@ LoadedLibrary loadLibrary(const std::filesystem::path& given) {
     const std::filesystem::path absolute = std::filesystem::absolute(given, absoluteError);
     const std::filesystem::path& path = absoluteError ? given : absolute;
 #if defined(_WIN32)
+    // No system error box for a library that isn't one, or for one that can't load: the error
+    // comes back here instead (a box would wait for a click, as on Windows on Arm's CI runner).
+    DWORD previousMode = 0;
+    SetThreadErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX, &previousMode);
     HMODULE module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    const DWORD code = module ? ERROR_SUCCESS : GetLastError();
+    SetThreadErrorMode(previousMode, nullptr);
     if (!module) {
-        const DWORD code = GetLastError();
         wchar_t* text = nullptr;
         FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0,
                        reinterpret_cast<wchar_t*>(&text), 0, nullptr);
