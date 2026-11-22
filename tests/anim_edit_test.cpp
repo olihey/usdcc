@@ -21,6 +21,7 @@
 #include <QUndoStack>
 
 #include <cmath>
+#include <set>
 
 using namespace PXR_NS;
 namespace anim = usdcc::usd::anim;
@@ -183,4 +184,119 @@ USDCC_TEST(anim_edit_gizmo_drag) {
     stack->undo();
     CHECK(translate.GetAttr().GetNumTimeSamples() == 2 && anim::keyState(translate.GetAttr(), 10.0) == anim::KeyState::Animated,
           "undo takes the key back: %zu", translate.GetAttr().GetNumTimeSamples());
+}
+
+// ---- Key editing (docs/ANIMATION.md phase 3) ----------------------------------------------
+
+namespace {
+// size keyed 1 at 0, 2 at 10 and 3 at 20.
+UsdAttribute keyedSize(const UsdStageRefPtr& stage, const char* path = "/Cube") {
+    const UsdAttribute size = UsdGeomCube::Define(stage, SdfPath(path)).GetSizeAttr();
+    size.Set(1.0, 0.0);
+    size.Set(2.0, 10.0);
+    size.Set(3.0, 20.0);
+    return size;
+}
+}  // namespace
+
+// Moving keys keeps their values; one landing on a key that stays replaces it.
+USDCC_TEST(anim_edit_move_keys) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = keyedSize(stage);
+    CHECK(anim::moveKeys(anim::keysAt({size}, 10.0), 5.0), "moved");
+    CHECK(anim::keyTimes({size}) == std::vector<double>({0.0, 15.0, 20.0}) && isClose(at(size, 15.0), 2.0),
+          "the key at 10 is at 15, with its value");
+    CHECK(anim::moveKeys({{size, 15.0}}, 5.0) && anim::keyTimes({size}) == std::vector<double>({0.0, 20.0}) &&
+              isClose(at(size, 20.0), 2.0),
+          "one landing on another replaces it");
+    CHECK(!anim::moveKeys({{size, 7.0}}, 3.0), "a time that isn't a key moves nothing");
+    // Two keys moved past each other's times at once, both kept.
+    CHECK(anim::moveKeys({{size, 0.0}, {size, 20.0}}, 20.0) && anim::keyTimes({size}) == std::vector<double>({20.0, 40.0}) &&
+              isClose(at(size, 20.0), 1.0) && isClose(at(size, 40.0), 2.0),
+          "moved together, read first");
+}
+
+USDCC_TEST(anim_edit_scale_keys) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = keyedSize(stage);
+    CHECK(anim::scaleKeys({{size, 0.0}, {size, 10.0}, {size, 20.0}}, 0.0, 2.0) &&
+              anim::keyTimes({size}) == std::vector<double>({0.0, 20.0, 40.0}) && isClose(at(size, 40.0), 3.0),
+          "about 0 by 2: 0, 20, 40");
+    CHECK(anim::scaleKeys({{size, 0.0}, {size, 20.0}, {size, 40.0}}, 40.0, 0.25) &&
+              anim::keyTimes({size}) == std::vector<double>({30.0, 35.0, 40.0}),
+          "about the last by a quarter: 30, 35, 40");
+    CHECK(anim::scaleKeys({{size, 30.0}, {size, 35.0}}, 30.0, 0.3) &&
+              anim::keyTimes({size}) == std::vector<double>({30.0, 32.0, 40.0}),
+          "new times snap to whole frames");
+}
+
+// Removing keys, copying and pasting them, on the same attribute and on another prim's.
+USDCC_TEST(anim_edit_copy_paste_remove_keys) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = keyedSize(stage);
+    const anim::CopiedKeys copied = anim::copyKeys({{size, 10.0}, {size, 20.0}});
+    CHECK(copied.attributes.size() == 1 && copied.attributes[0].keys.size() == 2 &&
+              isClose(copied.attributes[0].keys[1].offset, 10.0),
+          "copied with times from the earliest");
+    CHECK(anim::pasteKeys(copied, stage, 50.0) == 2 &&
+              anim::keyTimes({size}) == std::vector<double>({0.0, 10.0, 20.0, 50.0, 60.0}) && isClose(at(size, 60.0), 3.0),
+          "pasted at 50 onto the attribute they came from");
+
+    const UsdAttribute other = UsdGeomCube::Define(stage, SdfPath("/Other")).GetSizeAttr();
+    other.Set(7.0);
+    CHECK(anim::pasteKeys(copied, stage, 5.0, {SdfPath("/Other")}) == 2 &&
+              anim::keyTimes({other}) == std::vector<double>({5.0, 15.0}) && isClose(at(other, 5.0), 2.0),
+          "onto another prim's attribute of the same name");
+
+    CHECK(anim::removeKeys({{size, 50.0}, {size, 60.0}}) && anim::keyTimes({size}) == std::vector<double>({0.0, 10.0, 20.0}),
+          "removed");
+    CHECK(anim::removeKeys(anim::keysAt({other}, 5.0)) && anim::removeKeys(anim::keysAt({other}, 15.0)) &&
+              !anim::isAnimated(other) && isClose(at(other, 0.0), 3.0),
+          "the last key gone, its value stays as the default");
+}
+
+// A spline's knots move with their tangents; keys of a sublayer move in stage time.
+USDCC_TEST(anim_edit_move_knots_and_offsets) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetSizeAttr();
+    TsSpline spline(TfType::Find<double>());
+    for (const auto& [time, value] : {std::pair{0.0, 1.0}, std::pair{20.0, 3.0}}) {
+        TsKnot knot(TfType::Find<double>());
+        knot.SetTime(time);
+        knot.SetValue(value);
+        knot.SetPostTanWidth(4.0);
+        spline.SetKnot(knot);
+    }
+    size.SetSpline(spline);
+    CHECK(anim::moveKeys({{size, 20.0}}, 10.0) && size.GetNumTimeSamples() == 0, "a knot moved, still a spline");
+    TsKnot moved;
+    CHECK(size.GetSpline().GetKnot(30.0, &moved) && isClose(moved.GetPostTanWidth(), 4.0) && isClose(at(size, 30.0), 3.0),
+          "at 30, with its value and tangent");
+
+    const SdfLayerRefPtr sub = SdfLayer::CreateAnonymous("sub.usda");
+    const SdfLayerRefPtr root = SdfLayer::CreateAnonymous("root.usda");
+    root->InsertSubLayerPath(sub->GetIdentifier());
+    root->SetSubLayerOffset(SdfLayerOffset(10.0), 0);
+    const UsdStageRefPtr offset = UsdStage::Open(root);
+    offset->SetEditTarget(offset->GetEditTargetForLocalLayer(sub));
+    const UsdAttribute shifted = keyedSize(offset);  // stage times 0, 10, 20: the sublayer's -10, 0, 10
+    CHECK(anim::moveKeys({{shifted, 20.0}}, 5.0) && anim::keyTimes({shifted}) == std::vector<double>({0.0, 10.0, 25.0}),
+          "in stage time");
+    const std::set<double> times = sub->ListTimeSamplesForPath(shifted.GetPath());
+    CHECK(times.count(15.0) == 1, "the sublayer's own 15");
+}
+
+// A move done in an undo session is one step, and undoes.
+USDCC_TEST(anim_edit_move_keys_undo) {
+    StageManager manager;
+    UndoManager undo;
+    const StageRefPtr stage = manager.createStage();
+    const UsdAttribute size = keyedSize(stage->usdStage());
+    QUndoStack* stack = undo.stack(stage);
+    const int before = stack->count();
+    CHECK(undo.apply(stage, "Move Keys", [&]() { return anim::moveKeys(anim::keysAt({size}, 10.0), 3.0); }) &&
+              stack->count() == before + 1,
+          "one step");
+    stack->undo();
+    CHECK(anim::keyTimes({size}) == std::vector<double>({0.0, 10.0, 20.0}) && isClose(at(size, 10.0), 2.0), "undone");
 }

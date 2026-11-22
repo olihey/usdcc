@@ -79,12 +79,21 @@ public:
     void setKeyOnSelection();
     void goToNextKey();
     void goToPreviousKey();
+    // Phase 3, what the ruler's key marks do: each moves, deletes or copies every key of
+    // the selection at that time; paste puts the keys copied last at the frame shown, on
+    // the selected prims. One undo step each.
+    void moveSelectionKeys(double from, double to);
+    void deleteSelectionKeys(double time);
+    void copySelectionKeys(double time);
+    void pasteKeys();
     // Set Key, Next Key and Previous Key as the window's actions, with their shortcuts
     // (Settings > Shortcuts > Timeline): S, Alt+. and Alt+, by default.
     void addActions(QWidget* window);
 
 private:
     void refreshKeys();
+    std::vector<PXR_NS::SdfPath> selectedPaths() const;
+    std::vector<PXR_NS::UsdAttribute> selectionAnimatedAttributes() const;
     void refreshAutoKey();
     void bindStage();
     void refreshTime();

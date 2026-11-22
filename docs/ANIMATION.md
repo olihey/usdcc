@@ -1,6 +1,7 @@
 # Animation — Plan
 
-Status: **phases 1 (playback) and 2 (keyframing) built**, §6.1 and §6.3; phases 3 to 5 are plan.
+Status: **phases 1 (playback), 2 (keyframing) and 3 (key editing) built**, §6.1, §6.3 and §6.4;
+phases 4 and 5 are plan.
 The choices are in §4, and §8's questions are answered as recommended.
 
 Before this, usdcc had no notion of time: every read and write was at `UsdTimeCode::Default()`,
@@ -312,6 +313,32 @@ previous key, Set Key, auto-key, a row's key button, an edit keying an animated 
 `prim_move_keeps_the_world_position` (reparenting under an animated parent) and `python_time`.
 Checked in the app with `test_data/animated.usda`: Set Key at 10 from the window's action, the
 ruler's diamonds, the rows' keys.
+
+### 6.4 Phase 3: what was built
+
+**Try it:** open `test_data/animated.usda`, select World, and open a Dope Sheet (the Stages
+menu). Drag a key, box-pick a column of them and drag the handle at the end of the bar above
+them, or press Delete.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Key editing | [anim_edit.h](../src/cpp/usd/include/usdcc/usd/anim_edit.h), `usdcc_usd`, Qt-free | `KeyRef`, `keysAt()`, `retimeKeys()`, `moveKeys()`, `scaleKeys()` (about a pivot, new times rounded to frames), `removeKeys()`, `copyKeys()` / `pasteKeys()` and the app's `keyClipboard()`. In stage time, through `UsdAttribute`, so a sublayer's offset applies; a weaker layer's animation is copied into the edit target first, as keying does; a spline's knots move with their tangents. All values are read before any is written. A key landing on one that stays replaces it |
+| Pasting | `pasteKeys()` | Onto the attributes the keys came from; or, when they came from one prim and other prims are selected, onto those prims' attributes of the same name. Through `setValue()` with auto-key, so a static attribute gets keys |
+| The ruler | [time_ruler.cpp](../src/cpp/usd/src/time_ruler.cpp), [timeline_bar.cpp](../src/cpp/usd/src/timeline_bar.cpp) | Pressing a key mark picks it (outlined in white) instead of scrubbing; dragging moves every key of the selection at that time, whole frames. With the ruler focused: Delete, Ctrl+C, and Ctrl+V at the frame shown, onto the selected prims |
+| Dope Sheet | [dope_sheet_view_panel.cpp](../src/cpp/usd/src/dope_sheet_view_panel.cpp), panel type `dopeSheet` | A tree of prims and their animated attributes beside `DopeSheetView`, which paints the rows against its own `TimeAxis`, with a `TimeRuler` over it showing the same times and the playhead. The tree's header is the ruler's height, and the view finds each row's place from the tree, so they line up as it scrolls and folds |
+| Rows | | The selected prims and their animated descendants, so picking a character's root shows its parts; **Show All Animated** (options menu, kept in sessions) every animated prim of the stage, at most 2,000. A prim row's keys are those of all its attributes; picking one picks them all |
+| Picking and editing | `DopeSheetView` | Click, Ctrl or Shift click to add, a box over rows and times. Dragging a picked key moves them all; the bar over the picked keys' span has a handle at each end, and dragging one scales about the other. Delete, Ctrl+C, Ctrl+V (at the frame shown), Ctrl+A, F frames all keys, a double-click goes to a key's frame. Ctrl+wheel zooms the time, middle drag pans it, the wheel scrolls the rows. Every gesture is one undo step |
+
+Not built, against the plan: dragging a box on the ruler (it picks one mark at a time), and a
+scale on the ruler; both are the Dope Sheet's. The picked keys aren't shared between the ruler
+and the Dope Sheet.
+
+Tests: `anim_edit_move_keys`, `anim_edit_scale_keys`, `anim_edit_copy_paste_remove_keys`,
+`anim_edit_move_knots_and_offsets`, `anim_edit_move_keys_undo` (usdcc_tests), and
+`dope_sheet_rows`, `dope_sheet_edits_keys`, `dope_sheet_ruler_keys` (usdcc_ui_tests: rows,
+Show All, a click and a drag, a box, scaling by the handle, copy, paste and delete, each one
+undo step; the ruler's mark dragged, copied, pasted and deleted). Seen in the app with
+`test_data/animated.usda`: the rows and keys against the ruler. Not tried by hand: the drags.
 
 ### 6.2 The order
 

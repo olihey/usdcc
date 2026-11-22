@@ -161,6 +161,11 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
 
     // Scrubbing, in the ruler and in the frame field: whole frames, and playing stops.
     connect(m_ruler, &TimeRuler::timeScrubbed, m_playback, &PlaybackController::setTime);
+    // The selection's key marks (phase 3): dragged, deleted, copied; and pasting.
+    connect(m_ruler, &TimeRuler::keyMoved, this, &TimelineBar::moveSelectionKeys);
+    connect(m_ruler, &TimeRuler::keyDeleteRequested, this, &TimelineBar::deleteSelectionKeys);
+    connect(m_ruler, &TimeRuler::keyCopyRequested, this, &TimelineBar::copySelectionKeys);
+    connect(m_ruler, &TimeRuler::keyPasteRequested, this, &TimelineBar::pasteKeys);
     connect(m_frame, &NumberField::editStarted, this, [this]() { m_timeBeforeEdit = m_stage ? m_stage->time() : 0.0; });
     connect(m_frame, &NumberField::valueEdited, this, [this](double value) { m_playback->setTime(snappedToFrame(value)); });
     connect(m_frame, &NumberField::editFinished, this, [this]() { refreshTime(); });
@@ -240,15 +245,55 @@ void TimelineBar::bindStage() {
     refreshKeys();
 }
 
-std::vector<double> TimelineBar::selectionKeyTimes() const {
-    if (!m_stage) return {};
+std::vector<PXR_NS::SdfPath> TimelineBar::selectedPaths() const {
     StageManager* stages = m_playback->stageManager();
+    return m_stage && stages ? stages->selectedPaths(m_stage) : std::vector<PXR_NS::SdfPath>();
+}
+
+std::vector<PXR_NS::UsdAttribute> TimelineBar::selectionAnimatedAttributes() const {
     std::vector<PXR_NS::UsdAttribute> attributes;
-    for (const PXR_NS::SdfPath& path : stages ? stages->selectedPaths(m_stage) : std::vector<PXR_NS::SdfPath>()) {
+    for (const PXR_NS::SdfPath& path : selectedPaths()) {
         const std::vector<PXR_NS::UsdAttribute> animated = anim::animatedAttributes(m_stage->usdStage()->GetPrimAtPath(path));
         attributes.insert(attributes.end(), animated.begin(), animated.end());
     }
-    return anim::keyTimes(attributes);
+    return attributes;
+}
+
+std::vector<double> TimelineBar::selectionKeyTimes() const {
+    if (!m_stage) return {};
+    return anim::keyTimes(selectionAnimatedAttributes());
+}
+
+void TimelineBar::moveSelectionKeys(double from, double to) {
+    if (!m_stage || !m_undoManager || from == to) return;
+    const std::vector<anim::KeyRef> keys = anim::keysAt(selectionAnimatedAttributes(), from);
+    if (keys.empty()) return;
+    m_undoManager->apply(m_stage, tr("Move Keys"), [&]() { return anim::moveKeys(keys, to - from); });
+    refreshKeys();
+    m_ruler->setSelectedKey(to);
+}
+
+void TimelineBar::deleteSelectionKeys(double time) {
+    if (!m_stage || !m_undoManager) return;
+    const std::vector<anim::KeyRef> keys = anim::keysAt(selectionAnimatedAttributes(), time);
+    if (keys.empty()) return;
+    m_undoManager->apply(m_stage, tr("Delete Keys"), [&]() { return anim::removeKeys(keys); });
+    refreshKeys();
+}
+
+void TimelineBar::copySelectionKeys(double time) {
+    if (!m_stage) return;
+    const anim::CopiedKeys copied = anim::copyKeys(anim::keysAt(selectionAnimatedAttributes(), time));
+    if (!copied.empty()) anim::keyClipboard() = copied;
+}
+
+void TimelineBar::pasteKeys() {
+    if (!m_stage || !m_undoManager || anim::keyClipboard().empty()) return;
+    const double time = m_stage->time();
+    const std::vector<PXR_NS::SdfPath> prims = selectedPaths();
+    m_undoManager->apply(m_stage, tr("Paste Keys"),
+                         [&]() { return anim::pasteKeys(anim::keyClipboard(), m_stage->usdStage(), time, prims) > 0; });
+    refreshKeys();
 }
 
 void TimelineBar::refreshKeys() { m_ruler->setKeys(selectionKeyTimes()); }
