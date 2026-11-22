@@ -38,7 +38,7 @@ TfToken attributeNameFor(const SdfValueTypeName& type) {
 QString noteFor(const ValueTypeInfo& info) {
     QString note = QString::fromStdString(info.typeName.GetType().GetTypeName());
     if (!info.role.IsEmpty()) {
-        note += QStringLiteral(" \xC2\xB7 ") + QString::fromStdString(info.role.GetString());
+        note += QString::fromUtf8(" \xC2\xB7 ") + QString::fromStdString(info.role.GetString());
     }
     return note;
 }
@@ -197,7 +197,7 @@ void DataTypeGalleryDialog::rebuild() {
         auto* binding = new AttributeBinding(attr, editor, nullptr, nullptr, row);
         const QString name = QString::fromStdString(type.GetAsToken().GetString());
         connect(binding, &AttributeBinding::valueWritten, this, [this, name](const VtValue& v) {
-            log(QStringLiteral("%1 \xE2\x86\x92 %2").arg(name, QString::fromStdString(formatValue(v, 3, 4))));
+            log(QString::fromUtf8("%1 \xE2\x86\x92 %2").arg(name, QString::fromStdString(formatValue(v, 3, 4))));
         });
         connect(binding, &AttributeBinding::editCommitted, this,
                 [this, name]() { log(tr("%1 \xE2\x86\x92 edit finished (one undo step in a real panel)").arg(name)); });

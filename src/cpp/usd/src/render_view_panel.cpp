@@ -46,12 +46,12 @@ namespace usdcc::usd {
 
 namespace {
 // The Resolution choices: a scale of the panel's size, or a fixed size.
-struct Resolution {
+struct RenderResolution {
     const char* label;
     double scale;  // 0 for a fixed size
     QSize size;
 };
-const Resolution kResolutions[] = {
+const RenderResolution kResolutions[] = {
     {"Fit Panel", 1.0, {}},
     {"Fit Panel ½", 0.5, {}},
     {"Fit Panel ¼", 0.25, {}},
@@ -193,7 +193,7 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     m_resolutionCombo->hide();
     m_resolutionCombo->setObjectName(QStringLiteral("renderResolution"));
     m_resolutionCombo->setToolTip(tr("The image's size"));
-    for (const Resolution& resolution : kResolutions) {
+    for (const RenderResolution& resolution : kResolutions) {
         m_resolutionCombo->addItem(QString::fromUtf8(resolution.label));
     }
     connect(m_resolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { sendSize(); });
@@ -404,7 +404,7 @@ bool RenderViewPanel::updatesOnEdits() const { return m_liveCheck->isChecked(); 
 
 QSize RenderViewPanel::renderSize() const {
     const int index = std::clamp(m_resolutionCombo->currentIndex(), 0, int(std::size(kResolutions)) - 1);
-    const Resolution& resolution = kResolutions[index];
+    const RenderResolution& resolution = kResolutions[index];
     double width = resolution.size.width();
     double height = resolution.size.height();
     if (resolution.scale > 0.0) {

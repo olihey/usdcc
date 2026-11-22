@@ -14,7 +14,9 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/tools/tool_set.h"
+#if USDCC_FEATURE_PHYSICS_JOLT
 #include "jolt_backend.h"
+#endif
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_creation_catalog.h"
@@ -237,6 +239,12 @@ USDCC_TEST(python_app_api) {
     CHECK(evaluate("__import__('usdcc.app').app.is_release_build()") ==
               (usdcc::core::isReleaseBuild() ? "True" : "False"),
           "and so is is_release_build()");
+    // docs/BUILD_OPTIONS.md §5.
+    const std::string broadcast =
+        evaluate("[f for f in __import__('usdcc.app').app.build_features() if f[0] == 'VIEWPORT_BROADCAST'][0]");
+    CHECK(broadcast == std::string("('VIEWPORT_BROADCAST', 'Viewport Broadcast', ") +
+                           (USDCC_FEATURE_VIEWPORT_BROADCAST ? "True" : "False") + ", ['org.usdcc.viewport-broadcast'])",
+          "build_features() says what the build has: %s", broadcast.c_str());
     CHECK(evaluate("__import__('usdcc.usd').usd.EMBEDDED") == "True", "usdcc.usd uses the app's module");
     CHECK(evaluate("__import__('usdcc.usd').usd.current_stage().GetRootLayer().realPath.replace('\\\\', '/')") ==
               file.python(),
@@ -611,6 +619,7 @@ USDCC_TEST(python_time) {
     app.stages.closeStage(stage);
 }
 
+#if USDCC_FEATURE_PHYSICS_JOLT
 // usdcc.physics (docs/PHYSICS.md §5.4): solving without the timeline, the cache's range,
 // reports, Reset, the "physics_changed" event and the timeline's Simulate.
 USDCC_TEST(python_physics) {
@@ -668,6 +677,7 @@ USDCC_TEST(python_physics) {
     usdcc::usd::physics::PhysicsBackends::instance().remove("org.usdcc.physics-jolt");
     app.stages.closeStage(stage);
 }
+#endif  // USDCC_FEATURE_PHYSICS_JOLT
 
 // usdcc.render (docs/FINAL_RENDER.md §6): the renderers, a render queued with the reason one
 // can't be, the queue's jobs, and cancelling.

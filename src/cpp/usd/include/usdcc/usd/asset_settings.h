@@ -19,6 +19,7 @@ inline constexpr const char* kAssetCacheLimitKey = "Assets/cacheLimitGB";
 inline constexpr const char* kAssetHttpHostsKey = "Assets/httpHosts";
 inline constexpr const char* kAssetS3BucketsKey = "Assets/s3Buckets";
 inline constexpr const char* kAssetClearCacheKey = "Assets/clearCache";  // a button
+inline constexpr const char* kAssetEditServersKey = "Assets/editServers";  // a button: the Asset Servers editor
 
 // Defines Settings > Assets and applies it to the asset library, now and whenever one
 // changes. Before the first stage opens.

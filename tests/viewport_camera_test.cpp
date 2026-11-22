@@ -12,6 +12,7 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/base/gf/frustum.h>
@@ -473,5 +474,31 @@ USDCC_TEST(viewport_camera_in_sessions_and_workspaces) {
     CHECK(spec->hydraWindow()->stageCamera() == PXR_NS::SdfPath("/Rig/Shot"), "a workspace's \"first\" camera");
     spec.reset();
     restored.reset();
+    viewport.reset();
+}
+
+// The resolution gate (docs/VIEWPORT_CAMERA.md §4): the viewport sees the gate's shape, and
+// the window around it more; the camera's field of view goes to the gate.
+USDCC_TEST(viewport_resolution_gate) {
+    OpenStage open("gate");
+    auto viewport = makeViewport(open.stage);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    window->resize(400, 900);
+    const PXR_NS::GfFrustum filled = window->frustum();
+    CHECK((window->gate() == usdcc::usd::ViewRect{0, 0, 400, 900}) && !window->gateResolution(), "Fill Viewport: the window");
+
+    usdcc::usd::ViewportDisplayOverrides overrides;
+    overrides.resolution = "1920x1080";
+    viewport->setDisplayOverrides(overrides);
+    const usdcc::usd::ViewRect gate = window->gate();
+    CHECK((window->gateResolution() == usdcc::usd::Resolution{1920, 1080}) && std::abs(gate.height - 225.0) < 1e-6 &&
+              std::abs(gate.y - 337.5) < 1e-6,
+          "a 16:9 gate in a tall viewport: as wide, centred");
+    const PXR_NS::GfFrustum gated = window->frustum();
+    const PXR_NS::GfVec2d size = gated.GetWindow().GetSize();
+    CHECK(std::abs(size[0] / size[1] - 400.0 / 900.0) < 1e-6, "the frustum still covers the whole window");
+    // The orbit camera's vertical field of view now spans the gate, so the window sees 4 times as much up and down.
+    const double filledHeight = filled.GetWindow().GetSize()[1];
+    CHECK(std::abs(size[1] / filledHeight - 4.0) < 1e-6, "the field of view spans the gate: %g", size[1] / filledHeight);
     viewport.reset();
 }

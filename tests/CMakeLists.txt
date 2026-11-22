@@ -38,9 +38,6 @@ add_executable(usdcc_tests
     move_tool_test.cpp
     orbit_camera_test.cpp
     stage_camera_test.cpp
-    physics_spike_test.cpp
-    physics_test.cpp
-    physics_bake_joints_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
@@ -79,7 +76,11 @@ target_compile_definitions(usdcc_tests PRIVATE USDCC_NODE_EXE="$<TARGET_FILE:usd
 add_dependencies(usdcc_tests usdcc_node)
 # docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
 # plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
-target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
+# A feature left out of the build (docs/BUILD_OPTIONS.md) takes its tests with it.
+if(USDCC_BUILD_PHYSICS_JOLT)
+    target_sources(usdcc_tests PRIVATE physics_spike_test.cpp physics_test.cpp physics_bake_joints_test.cpp)
+    target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
+endif()
 target_compile_definitions(usdcc_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 usdcc_precompile_headers(usdcc_tests ui_pch.h)
 
@@ -115,6 +116,10 @@ add_executable(usdcc_ui_tests
     property_row_test.cpp
     asset_path_test.cpp
     asset_picker_test.cpp
+    asset_picker_save_test.cpp
+    assets_test_server.h
+    assets_test_server.cpp
+    asset_servers_editor_test.cpp
     prim_tree_filter_test.cpp
     recent_files_test.cpp
     relationship_editor_test.cpp
@@ -130,7 +135,6 @@ add_executable(usdcc_ui_tests
     add_shade_input_ui_test.cpp
     session_store_test.cpp
     side_panel_test.cpp
-    physics_timeline_test.cpp
     timeline_test.cpp
     toast_test.cpp
     usda_view_test.cpp
@@ -145,17 +149,30 @@ add_executable(usdcc_ui_tests
     panel_maximizer_test.cpp
     peers_panel_test.cpp
     shared_stages_test.cpp
-    viewport_broadcast_test.cpp
     render_queue_test.cpp
     workspace_test.cpp
 )
 target_link_libraries(usdcc_ui_tests PRIVATE QtNodes::QtNodes)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_usd_ui Qt6::Test)
-target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend usdcc_viewport_broadcast_core)
+if(USDCC_BUILD_PHYSICS_JOLT)
+    target_sources(usdcc_ui_tests PRIVATE physics_timeline_test.cpp)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_physics_jolt_backend)
+endif()
+if(USDCC_BUILD_VIEWPORT_BROADCAST)
+    target_sources(usdcc_ui_tests PRIVATE viewport_broadcast_test.cpp)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_core)
+endif()
 # The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# Saving through the asset picker to WebDAV servers inside the test program
+# (asset_picker_save_test.cpp): the protocol plugin, registered at start, and the server's sockets.
+target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_UI_TESTS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
+add_dependencies(usdcc_ui_tests usdccWebDavProtocol)
+if(WIN32)
+    target_link_libraries(usdcc_ui_tests PRIVATE ws2_32)
+endif()
 usdcc_precompile_headers(usdcc_ui_tests ui_pch.h)
 
 #   usdcc_python_tests — the embedded Python (docs/SCRIPTING.md). Its own
@@ -202,7 +219,9 @@ target_link_libraries(usdcc_test_plugin PRIVATE usdcc_test_plugin_helper)
 add_dependencies(usdcc_python_tests usdcc_test_plugin)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_PLUGINS="${_usdcc_test_plugins}")
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_plugin_sdk)
-target_link_libraries(usdcc_python_tests PRIVATE usdcc_physics_jolt_backend)
+if(USDCC_BUILD_PHYSICS_JOLT)
+    target_link_libraries(usdcc_python_tests PRIVATE usdcc_physics_jolt_backend)
+endif()
 target_link_libraries(usdcc_python_tests PRIVATE Qt6::Test)
 if(TARGET blender_mesh_tools)
     add_executable(usdcc_blender_mesh_benchmark blender_mesh_benchmark.cpp)
@@ -241,8 +260,10 @@ endif()
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp
-                                              render_view_panel_python_test.cpp
-                                              vray_render_plugin_test.cpp vray_shader_nodes_test.cpp)
+                                              render_view_panel_python_test.cpp)
+    if(USDCC_BUILD_VRAY_RENDER)
+        target_sources(usdcc_python_tests PRIVATE vray_render_plugin_test.cpp vray_shader_nodes_test.cpp)
+    endif()
     target_compile_definitions(usdcc_python_tests PRIVATE USDCC_EXAMPLE_PLUGINS="${CMAKE_SOURCE_DIR}/src/plugins")
     add_dependencies(usdcc_python_tests usdcc_ui_python)
 endif()
@@ -370,7 +391,7 @@ endif()
 # Jolt's DLL beside every test program that links the physics backend, wherever Jolt was
 # found (docs/PHYSICS.md).
 foreach(_physics_test usdcc_tests usdcc_ui_tests usdcc_python_tests)
-    if(TARGET ${_physics_test})
+    if(TARGET ${_physics_test} AND USDCC_BUILD_PHYSICS_JOLT)
         add_custom_command(TARGET ${_physics_test} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Jolt::Jolt>" "$<TARGET_FILE_DIR:${_physics_test}>"
             VERBATIM)
@@ -416,14 +437,22 @@ if(WIN32)
     # The test server's sockets.
     target_link_libraries(usdcc_assets_tests PRIVATE ws2_32)
 endif()
-# The http://, webdav:// and s3:// protocols, tested against a server inside the test program.
-target_compile_definitions(
-    usdcc_assets_tests
-    PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}"
-            USDCC_ASSETS_HTTP_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/http/usd"
-            USDCC_ASSETS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd"
-            USDCC_ASSETS_S3_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/s3/usd")
-add_dependencies(usdcc_assets_tests usdccFakeProtocol usdccHttpProtocol usdccWebDavProtocol usdccS3Protocol)
+# The http://, webdav:// and s3:// protocols, tested against a server inside the test program:
+# those the build has (docs/BUILD_OPTIONS.md); a protocol's tests need its directory defined.
+target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}")
+add_dependencies(usdcc_assets_tests usdccFakeProtocol)
+if(USDCC_BUILD_HTTP)
+    target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_HTTP_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/http/usd")
+    add_dependencies(usdcc_assets_tests usdccHttpProtocol)
+endif()
+if(USDCC_BUILD_WEBDAV)
+    target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
+    add_dependencies(usdcc_assets_tests usdccWebDavProtocol)
+endif()
+if(USDCC_BUILD_S3)
+    target_compile_definitions(usdcc_assets_tests PRIVATE USDCC_ASSETS_S3_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/s3/usd")
+    add_dependencies(usdcc_assets_tests usdccS3Protocol)
+endif()
 foreach(_assets_target usdccFakeProtocol usdcc_assets_tests)
     # USD's headers ask for the release Python import library in every configuration.
     if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
