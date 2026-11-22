@@ -8,6 +8,7 @@
 #include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/side_panel.h"
 
+#include <QDateTime>
 #include <QPointer>
 #include <QStringList>
 
@@ -15,7 +16,8 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QMenu;
-class QPushButton;
+class QPlainTextEdit;
+class QTabBar;
 class QToolButton;
 class QTextBrowser;
 class QTreeWidget;
@@ -47,7 +49,18 @@ public:
     // The dialogs, for **Host Room…** and **Join…**.
     void hostRoom();
     void joinRoom();
+    // Asks the host for the room's new name (Room::rename()).
+    void renameRoom(usdcc::peers::Room* room);
 
+    // The conversation on show: empty for the room's chat, else the person of a private
+    // one, each a tab over the chat.
+    QString currentConversation() const { return m_with; }
+    // Opens a private conversation with someone in the room on show, as a tab.
+    void openConversation(const usdcc::peers::Peer& peer);
+    // Shows that room, on that conversation (from a private message's toast).
+    void showConversation(usdcc::peers::Room* room, const QString& with);
+
+    // The message is written over lines: Enter sends it, Shift+Enter starts a new line.
     // The emoji button beside the message: puts `emoji` where the cursor is, and
     // first among the recent ones.
     void insertEmoji(const QString& emoji);
@@ -73,19 +86,32 @@ private:
     void personMenu(const QPoint& position);
     void updateShown();
     void fillEmojiMenu(QMenu* menu);
+    void updateTitle();
+    void updateYou();
+    void rebuildTabs();
+    void updateTyping();
+    void updateSayState();
+    void send();
 
     PeersController* m_controller;
     QPointer<usdcc::peers::Room> m_room;
-    QLabel* m_you = nullptr;
+    QToolButton* m_you = nullptr;
+    QTabBar* m_tabs = nullptr;
+    QLabel* m_typing = nullptr;
+    QString m_with;
     QTreeWidget* m_rooms = nullptr;
     QLabel* m_roomTitle = nullptr;
     QListWidget* m_people = nullptr;
     QTextBrowser* m_chat = nullptr;
-    QLineEdit* m_say = nullptr;
-    QPushButton* m_send = nullptr;
+    QPlainTextEdit* m_say = nullptr;
+    QToolButton* m_send = nullptr;
     QToolButton* m_emoji = nullptr;
     QWidget* m_roomView = nullptr;
     class QVBoxLayout* m_roomSections = nullptr;
+    // The chat's last group: whose it is and when they last said something in it.
+    QString m_lastFrom;
+    QDateTime m_lastWhen;
+    static constexpr int kChatGroupSeconds = 5 * 60;
 };
 
 // Turns chat text into HTML: escaped, with prim paths (/World/Cube) as links "prim:<path>".

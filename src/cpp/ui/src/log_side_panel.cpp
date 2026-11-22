@@ -559,6 +559,12 @@ void LogSidePanel::showContextMenu(const QPoint& position) {
     QAction* copy = menu.addAction(tr("Copy"), this, [this]() { copySelection(false); });
     copy->setShortcut(QKeySequence::Copy);
     menu.addAction(tr("Copy with Details"), this, [this]() { copySelection(true); });
+    const QList<LogRecord> selected = selectedRecords();
+    if (m_shareMenu && !selected.isEmpty()) {
+        QMenu* share = menu.addMenu(selected.size() == 1 ? tr("Share") : tr("Share %1 Messages").arg(selected.size()));
+        share->setObjectName(QStringLiteral("logShareMenu"));
+        m_shareMenu(share, selected);
+    }
     if (index.isValid()) {
         const LogRecord& record = m_model->record(m_filter->mapToSource(index).row());
         const QString category = qs(record.category);
@@ -590,12 +596,17 @@ void LogSidePanel::showContextMenu(const QPoint& position) {
     menu.exec(m_view->viewport()->mapToGlobal(position));
 }
 
-void LogSidePanel::copySelection(bool withDetails) const {
+QList<LogRecord> LogSidePanel::selectedRecords() const {
     QModelIndexList rows = m_view->selectionModel()->selectedRows();
     std::sort(rows.begin(), rows.end(), [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
+    QList<LogRecord> records;
+    for (const QModelIndex& row : rows) records.append(m_model->record(m_filter->mapToSource(row).row()));
+    return records;
+}
+
+void LogSidePanel::copySelection(bool withDetails) const {
     std::string text;
-    for (const QModelIndex& row : rows) {
-        LogRecord record = m_model->record(m_filter->mapToSource(row).row());
+    for (LogRecord record : selectedRecords()) {
         if (!withDetails) record.details.clear();
         text += usdcc::core::FileLogSink::formatRecord(record);
     }

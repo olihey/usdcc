@@ -393,3 +393,60 @@ USDCC_TEST(peers_room_key_changes_when_someone_leaves) {
     chat->send("say", {{"n", 3}});
     CHECK(waitUntil([&] { return aChat.messages.size() == 3; }), "A can't read the room after the key changed");
 }
+
+// Sealed messages between two people (PEERS.md §6.2): only the one it is for opens it;
+// the host passes it on, and no one else in the room gets it.
+USDCC_TEST(peers_private_messages) {
+    auto host = hostRoom();
+    auto ben = joinRoom(*host, "Ben");
+    auto carl = joinRoom(*host, "Carl");
+    auto dan = joinRoom(*host, "Dan");
+    CHECK(waitUntil([&] { return ben->peers().size() == 4 && carl->peers().size() == 4; }), "not everyone is in");
+
+    // Everyone has the others' keys, each the one its fingerprint is of.
+    const Peer carlAtBen = ben->peer(carl->me().id);
+    CHECK(!carlAtBen.publicKey.isEmpty() && fingerprintOf(carlAtBen.publicKey) == carlAtBen.fingerprint,
+          "Ben doesn't have Carl's key");
+    CHECK(!ben->peer(host->me().id).publicKey.isEmpty(), "Ben doesn't have the host's key");
+
+    Inbox atHost, atCarl, atDan, atBen;
+    atHost.listen(host->channel("chat"));
+    atCarl.listen(carl->channel("chat"));
+    atDan.listen(dan->channel("chat"));
+    atBen.listen(ben->channel("chat"));
+    Channel* benChat = ben->channel("chat");
+
+    CHECK(benChat->sendPrivate("say", {{"text", "just us"}}, carl->me().id), "Ben couldn't send privately");
+    CHECK(waitUntil([&] { return !atCarl.messages.isEmpty(); }), "Carl didn't get it");
+    const Message got = atCarl.messages.value(0);
+    CHECK(got.sealed && got.type == "say" && got.body.value("text").toString() == "just us" &&
+              got.from == ben->me().id && got.seq == 0,
+          "Carl got type '%s', sealed %d, from %s", qPrintable(got.type), int(got.sealed), qPrintable(got.from));
+    QTest::qWait(200);
+    CHECK(atHost.messages.isEmpty() && atDan.messages.isEmpty() && atBen.messages.isEmpty(),
+          "someone besides Carl got it: host %lld, Dan %lld, Ben %lld", qlonglong(atHost.messages.size()),
+          qlonglong(atDan.messages.size()), qlonglong(atBen.messages.size()));
+
+    // The host sends and gets them too.
+    CHECK(host->channel("chat")->sendPrivate("say", {{"text", "from the host"}}, ben->me().id), "the host couldn't");
+    CHECK(waitUntil([&] { return !atBen.messages.isEmpty() && atBen.messages.last().sealed; }), "Ben didn't get the host's");
+    CHECK(benChat->sendPrivate("say", {{"text", "to the host"}}, host->me().id), "Ben couldn't send to the host");
+    CHECK(waitUntil([&] { return !atHost.messages.isEmpty(); }) && atHost.messages.last().sealed &&
+              atHost.messages.last().body.value("text").toString() == "to the host",
+          "the host didn't get Ben's");
+
+    // A box that wasn't sealed for Carl by Ben's key is dropped; a plain direct message
+    // still arrives, but not as sealed.
+    const qsizetype before = atCarl.messages.size();
+    benChat->send("sealed", {{"box", QString::fromLatin1(QByteArray(80, 'x').toBase64())}}, {}, carl->me().id);
+    benChat->send("say", {{"text", "plain"}}, {}, carl->me().id);
+    CHECK(waitUntil([&] { return atCarl.messages.size() > before; }), "the plain direct message didn't arrive");
+    QTest::qWait(200);
+    CHECK(atCarl.messages.size() == before + 1 && !atCarl.messages.last().sealed &&
+              atCarl.messages.last().body.value("text").toString() == "plain",
+          "a forged box was taken, or the plain one came as sealed");
+
+    // No one to seal it for.
+    CHECK(!benChat->sendPrivate("say", {{"text", "?"}}, "nobody"), "sent privately to nobody");
+    CHECK(!benChat->sendPrivate("say", {{"text", "?"}}, ben->me().id), "sent privately to itself");
+}

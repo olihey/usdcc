@@ -1122,6 +1122,19 @@ int main(int argc, char** argv) {
         peersPanel->setCollapsed(false);
         peersPanel->raise();
     };
+    peersController->showConversation = [peersController, peersPanel](usdcc::peers::Room* room, const QString& with) {
+        peersController->showPanel();
+        peersPanel->showConversation(room, with);
+    };
+    // The Log panel's Share: to a room, or privately to someone in it.
+    window.logPanel()->setShareMenu(
+        [peersController](QMenu* menu, const QList<usdcc::core::LogRecord>& records) {
+            QList<usdcc::ui::PeersController::SharedLogRecord> shared;
+            for (const usdcc::core::LogRecord& record : records) {
+                shared.append(usdcc::ui::PeersController::sharedRecord(record));
+            }
+            peersController->fillShareMenu(menu, shared);
+        });
     // Shared stages (docs/SHARED_STAGE.md): a section of the Peers panel's room view.
     usdcc::usd::share::SharedStages::Hooks shareHooks;
     shareHooks.ask = [&window](const QString& title, const QString& text, const QStringList& buttons) {

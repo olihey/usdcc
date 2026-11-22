@@ -31,6 +31,10 @@ void Channel::send(const QString& type, const QJsonObject& body, const QByteArra
     m_room->d->send(this, type, body, bytes, to);
 }
 
+bool Channel::sendPrivate(const QString& type, const QJsonObject& body, const PeerId& to) {
+    return m_room->d->sendPrivate(this, type, body, to);
+}
+
 void Channel::setSenders(Senders senders) {
     m_senders = senders;
 }

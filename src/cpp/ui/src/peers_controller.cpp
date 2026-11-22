@@ -14,12 +14,16 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QMenu>
 #include <QRegularExpression>
 #include <QUuid>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolButton>
 
 namespace usdcc::ui {
@@ -34,6 +38,13 @@ constexpr int kSnapshotLines = 200;   // Given to a joiner
 constexpr int kToastTextLength = 300;
 const QString kChat = QStringLiteral("chat");
 const QString kPresence = QStringLiteral("presence");
+const QString kTyping = QStringLiteral("typing");
+const QString kDoNotDisturbKey = QStringLiteral("Peers/doNotDisturb");
+constexpr int kTypingEveryMs = 2000;     // "Typing" is said at most this often
+constexpr int kTypingShownMs = 5000;     // ... and shown this long after the last
+constexpr int kAwayAfterSeconds = 5 * 60;
+constexpr int kSharedTextLength = 4000;  // A shared log message's text, and its details
+constexpr int kSharedBytes = 64 * 1024;  // All of one share, as JSON
 const QString kMutedRoomsKey = QStringLiteral("Peers/mutedRooms");
 const QString kMutedPeersKey = QStringLiteral("Peers/mutedPeers");
 const QString kTrustedKey = QStringLiteral("Peers/trusted");
@@ -136,6 +147,54 @@ QString roomKey(Room* room) {
 
 QString settingText(const char* key) {
     return QString::fromStdString(core::Settings::instance().get<std::string>(key));
+}
+
+QJsonArray recordsJson(const QList<PeersController::SharedLogRecord>& records) {
+    QJsonArray array;
+    for (const PeersController::SharedLogRecord& record : records) {
+        QJsonObject object{{"time", record.time.toString(Qt::ISODateWithMs)},
+                           {"level", record.level},
+                           {"source", record.source},
+                           {"category", record.category},
+                           {"text", record.text}};
+        if (!record.details.isEmpty()) {
+            object.insert("details", record.details);
+        }
+        array.append(object);
+    }
+    return array;
+}
+
+QList<PeersController::SharedLogRecord> recordsFrom(const QJsonValue& value) {
+    QList<PeersController::SharedLogRecord> records;
+    for (const QJsonValue& item : value.toArray()) {
+        if (records.size() >= PeersController::kMaxSharedRecords) {
+            break;
+        }
+        const QJsonObject object = item.toObject();
+        records.append({QDateTime::fromString(object.value("time").toString(), Qt::ISODateWithMs),
+                        object.value("level").toString().left(16), object.value("source").toString().left(64),
+                        object.value("category").toString().left(128),
+                        object.value("text").toString().left(kSharedTextLength),
+                        object.value("details").toString().left(kSharedTextLength)});
+    }
+    return records;
+}
+
+QJsonObject lineJson(const PeersController::ChatLine& line) {
+    QJsonObject object{{"from", line.from.id},
+                       {"name", line.from.name},
+                       {"color", line.from.color},
+                       {"text", line.text},
+                       {"time", line.when.toString(Qt::ISODate)}};
+    if (!line.records.isEmpty()) {
+        object.insert("records", recordsJson(line.records));
+    }
+    return object;
+}
+
+QString typingKey(Room* room, const QString& with) {
+    return QString::number(quintptr(room), 16) + u'/' + with;
 }
 
 }  // namespace
@@ -249,6 +308,8 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
     connect(m_peers.get(), &Peers::roomAdded, this, [this](Room* room) { adopt(room); });
     connect(m_peers.get(), &Peers::roomRemoved, this, [this](Room* room) {
         m_chat.remove(room);
+        m_private.remove(room);
+        m_typists.removeIf([room](const Typist& typist) { return typist.room == room; });
         m_imageInboxes.remove(room);
         updateStatus();
         Q_EMIT roomsChanged();
@@ -292,7 +353,37 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
             }
         });
         m_window->statusBar()->addPermanentWidget(m_status);
+        // Away: no input in the app for a while, or the window minimized.
+        m_lastInput = QDateTime::currentDateTimeUtc();
+        qApp->installEventFilter(this);
+        m_idleTimer = new QTimer(this);
+        m_idleTimer->setInterval(15000);
+        connect(m_idleTimer, &QTimer::timeout, this, [this] {
+            setAway((m_window && m_window->isMinimized()) ||
+                    m_lastInput.secsTo(QDateTime::currentDateTimeUtc()) >= kAwayAfterSeconds);
+        });
+        m_idleTimer->start();
     }
+    m_typingTimer = new QTimer(this);
+    m_typingTimer->setInterval(1000);
+    connect(m_typingTimer, &QTimer::timeout, this, &PeersController::expireTypists);
+}
+
+bool PeersController::eventFilter(QObject* watched, QEvent* event) {
+    switch (event->type()) {
+    case QEvent::KeyPress:
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+        m_lastInput = QDateTime::currentDateTimeUtc();
+        if (m_away) {
+            setAway(false);
+        }
+        break;
+    default:
+        break;
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 PeersController::~PeersController() = default;
@@ -377,16 +468,13 @@ void PeersController::adopt(Room* room) {
         chat->setSnapshotProvider([this, room] {
             QJsonArray lines;
             const QList<ChatLine> history = m_chat.value(room);
+            // What people said: the host's own notices ("You host …") are its alone.
             for (qsizetype i = std::max<qsizetype>(0, history.size() - kSnapshotLines); i < history.size(); ++i) {
                 const ChatLine& line = history[i];
-                if (!line.to.isEmpty()) {
-                    continue;  // One member's, not the room's
+                if (!line.from.isValid() || !line.to.isEmpty()) {
+                    continue;  // The host's own notices, and one member's lines, aren't the room's
                 }
-                QJsonObject json{{"from", line.from.id},
-                                 {"name", line.from.name},
-                                 {"color", line.from.color},
-                                 {"text", line.text},
-                                 {"time", line.when.toString(Qt::ISODate)}};
+                QJsonObject json = lineJson(line);
                 if (line.image) {
                     json["image"] = imageToJson(*line.image);
                 }
@@ -395,113 +483,9 @@ void PeersController::adopt(Room* room) {
             return Channel::Snapshot{{{"lines", lines}}, {}};
         });
     }
-    connect(chat, &Channel::received, this, [this, room](const Message& message) {
-        if (message.type == u"snapshot") {
-            QList<ChatLine> lines;
-            for (const QJsonValue& value : message.body.value("lines").toArray()) {
-                const QJsonObject object = value.toObject();
-                Peer from;
-                from.id = object.value("from").toString();
-                from.name = object.value("name").toString();
-                from.color = object.value("color").toString();
-                ChatLine line{from, object.value("text").toString(),
-                              QDateTime::fromString(object.value("time").toString(), Qt::ISODate), std::nullopt, {}};
-                if (object.contains("image")) {
-                    line.image = imageFromJson(object.value("image").toObject());
-                    if (!line.image) {
-                        continue;
-                    }
-                }
-                lines.append(line);
-            }
-            m_chat[room] = lines + m_chat.value(room);
-            for (const ChatLine& line : lines) {
-                if (line.image) {
-                    onImageLine(room, line);
-                }
-            }
-            Q_EMIT chatReset(room);
-            return;
-        }
-        if (message.type == u"fetch") {
-            onFetch(room, message);
-            return;
-        }
-        if (message.type == u"gone") {
-            const QString hash = message.body.value("hash").toString();
-            const auto expected = m_expected.constFind(hash);
-            if (expected != m_expected.constEnd() && expected->from == message.from &&
-                m_images.value(hash).state == ImageFile::State::Fetching) {
-                ImageFile& file = m_images[hash];
-                file.state = ImageFile::State::Failed;
-                file.error = message.body.value("reason").toString().left(300);
-                Q_EMIT imageChanged(hash);
-            }
-            return;
-        }
-        std::optional<ChatImage> image;
-        if (message.type == u"image") {
-            image = imageFromJson(message.body);
-            if (!image) {
-                return;
-            }
-        } else if (message.type != u"say") {
-            return;
-        }
-        Peer from = room->peer(message.from);
-        if (!from.isValid()) {
-            from.id = message.from;
-            from.name = tr("Someone");
-        }
-        const QString text = message.body.value("text").toString().left(4000);
-        if (image && from.id != room->me().id) {
-            // At most kImagesPerMinute a minute from one sender; the rest are left out.
-            const QDateTime now = QDateTime::currentDateTime();
-            QList<QDateTime>& times = m_imageTimes[from.id];
-            times.removeIf([&now](const QDateTime& when) { return when.secsTo(now) >= 60; });
-            if (times.size() >= kImagesPerMinute) {
-                const QDateTime noted = m_floodNoted.value(from.id);
-                if (!noted.isValid() || noted.secsTo(now) >= 60) {
-                    m_floodNoted.insert(from.id, now);
-                    addLine(room, {{}, tr("%1 is sharing many images; the rest of this minute's are left out").arg(from.name),
-                                   now});
-                }
-                return;
-            }
-            times.append(now);
-        }
-        const ChatLine line{from, text, QDateTime::currentDateTime(), image, message.to};
-        addLine(room, line);
-        if (image) {
-            onImageLine(room, line);
-        }
-        const bool mine = from.id == room->me().id;
-        if (!mine && m_window && !m_panelShown && core::Settings::instance().get<bool>(chatToastsKey, true) &&
-            !isMuted(room) && !isMuted(from)) {
-            core::ToastRequest toast;
-            toast.title = tr("%1 in %2").arg(from.name, room->name()).toStdString();
-            const QString shown = image && text.isEmpty() ? tr("Shared an image") : text;
-            toast.body = (shown.size() > kToastTextLength ? shown.left(kToastTextLength) + u'…' : shown).toStdString();
-            QList<ToastAction> actions;
-            if (image && acceptsImages()) {
-                // Asked here too: nothing comes before the answer.
-                QPointer<Room> guard(room);
-                const QString preview = image->preview;
-                actions.append({tr("Accept"), [this, guard, preview] {
-                                    if (guard) {
-                                        acceptImage(guard, preview, true);
-                                    }
-                                }});
-                actions.append({tr("Decline"), [this, preview] { declineImage(preview); }});
-            }
-            actions.append({tr("Open Peers"), [this] {
-                                if (showPanel) {
-                                    showPanel();
-                                }
-                            }});
-            m_window->toasts()->show(toast, actions);
-        }
-    });
+    connect(chat, &Channel::received, this, [this, room](const Message& message) { onChat(room, message); });
+    connect(room->channel(kTyping, Delivery::LatestOnly), &Channel::received, this,
+            [this, room](const Message& message) { onTyping(room, message); });
     connect(room, &Room::opened, this, [this, room] {
         updatePresence();
         addLine(room, {{}, tr("You joined %1").arg(room->name()), QDateTime::currentDateTime()});
@@ -517,8 +501,20 @@ void PeersController::adopt(Room* room) {
     connect(room, &Room::peerLeft, this, [this, room](const Peer& peer, const QString& reason) {
         addLine(room, {{}, reason.isEmpty() ? tr("%1 left").arg(peer.name) : tr("%1 left: %2").arg(peer.name, reason),
                        QDateTime::currentDateTime()});
+        if (conversation(room, peer.id)) {
+            addPrivateLine(room, peer, {{}, tr("%1 left the room").arg(peer.name), QDateTime::currentDateTime()});
+        }
+        if (m_typists.removeIf([&](const Typist& t) { return t.room == room && t.peer.id == peer.id; }) > 0) {
+            Q_EMIT typingChanged(room, {});
+            Q_EMIT typingChanged(room, peer.id);
+        }
         updateStatus();
         Q_EMIT peopleChanged(room);
+    });
+    connect(room, &Room::renamed, this, [this, room](const QString& name) {
+        addLine(room, {{}, tr("The room is now called %1").arg(name), QDateTime::currentDateTime()});
+        Q_EMIT roomsChanged();
+        Q_EMIT roomRenamed(room);
     });
     connect(room, &Room::stateChanged, this, [this, room](Room::State state) {
         if (state == Room::State::Reconnecting) {
@@ -547,14 +543,340 @@ void PeersController::addLine(Room* room, const ChatLine& line) {
     while (lines.size() > kHistoryLines) {
         lines.removeFirst();
     }
-    Q_EMIT chatAdded(room, line);
+
+    Q_EMIT chatAdded(room, {}, line);
+}
+
+void PeersController::onChat(Room* room, const Message& message) {
+    if (message.type == u"snapshot") {
+        QList<ChatLine> lines;
+        for (const QJsonValue& value : message.body.value("lines").toArray()) {
+            const QJsonObject object = value.toObject();
+            Peer from;
+            from.id = object.value("from").toString();
+            from.name = object.value("name").toString();
+            from.color = object.value("color").toString();
+            ChatLine line{from, object.value("text").toString(),
+                          QDateTime::fromString(object.value("time").toString(), Qt::ISODate)};
+            line.records = recordsFrom(object.value("records"));
+            if (object.contains("image")) {
+                line.image = imageFromJson(object.value("image").toObject());
+                if (!line.image) {
+                    continue;
+                }
+            }
+            lines.append(line);
+        }
+        m_chat[room] = lines + m_chat.value(room);
+        for (const ChatLine& line : lines) {
+            if (line.image) {
+                onImageLine(room, line);
+            }
+        }
+        Q_EMIT chatReset(room);
+        return;
+    }
+    if (message.type == u"fetch") {
+        onFetch(room, message);
+        return;
+    }
+    if (message.type == u"gone") {
+        const QString hash = message.body.value("hash").toString();
+        const auto expected = m_expected.constFind(hash);
+        if (expected != m_expected.constEnd() && expected->from == message.from &&
+            m_images.value(hash).state == ImageFile::State::Fetching) {
+            ImageFile& file = m_images[hash];
+            file.state = ImageFile::State::Failed;
+            file.error = message.body.value("reason").toString().left(300);
+            Q_EMIT imageChanged(hash);
+        }
+        return;
+    }
+    std::optional<ChatImage> image;
+    if (message.type == u"image") {
+        image = imageFromJson(message.body);
+        if (!image) {
+            return;
+        }
+    } else if (message.type != u"say" && message.type != u"log") {
+        return;
+    }
+    // To this member alone: a private conversation. Words and log messages count only
+    // sealed (§6.2); an image may also come plain from an older sender, since its files
+    // are offered to this member alone either way.
+    const bool privately = !message.to.isEmpty();
+    if (privately && !message.sealed && !image) {
+        return;
+    }
+    Peer from = room->peer(message.from);
+    if (!from.isValid()) {
+        from.id = message.from;
+        from.name = tr("Someone");
+    }
+    const QString text = message.body.value("text").toString().left(kSharedTextLength);
+    if (image && from.id != room->me().id) {
+        // At most kImagesPerMinute a minute from one sender; the rest are left out.
+        const QDateTime now = QDateTime::currentDateTime();
+        QList<QDateTime>& times = m_imageTimes[from.id];
+        times.removeIf([&now](const QDateTime& when) { return when.secsTo(now) >= 60; });
+        if (times.size() >= kImagesPerMinute) {
+            const QDateTime noted = m_floodNoted.value(from.id);
+            if (!noted.isValid() || noted.secsTo(now) >= 60) {
+                m_floodNoted.insert(from.id, now);
+                addLine(room, {{}, tr("%1 is sharing many images; the rest of this minute's are left out").arg(from.name),
+                               now});
+            }
+            return;
+        }
+        times.append(now);
+    }
+    ChatLine line{from, text, QDateTime::currentDateTime(), image, message.to};
+    if (message.type == u"log") {
+        line.records = recordsFrom(message.body.value("records"));
+        if (line.records.isEmpty()) {
+            return;
+        }
+    }
+    const bool mine = from.id == room->me().id;
+    if (privately) {
+        addPrivateLine(room, from, line);
+    } else {
+        addLine(room, line);
+    }
+    if (image) {
+        onImageLine(room, line);
+    }
+    if (!mine) {
+        const QString shown = !line.records.isEmpty()
+                                  ? (line.records.size() == 1 ? tr("Shared a log message")
+                                                              : tr("Shared %1 log messages").arg(line.records.size()))
+                              : image && text.isEmpty() ? tr("Shared an image")
+                                                        : text;
+        toastChat(room, from, shown, privately, image);
+    }
+}
+
+void PeersController::toastChat(Room* room, const Peer& from, const QString& text, bool privately,
+                                const std::optional<ChatImage>& image) {
+    if (!m_window || m_panelShown || isDoNotDisturb() || !core::Settings::instance().get<bool>(chatToastsKey, true) ||
+        (!privately && isMuted(room)) || isMuted(from)) {
+        return;
+    }
+    core::ToastRequest toast;
+    toast.title = (privately ? tr("%1 (private) in %2") : tr("%1 in %2")).arg(from.name, room->name()).toStdString();
+    toast.body = (text.size() > kToastTextLength ? text.left(kToastTextLength) + u'…' : text).toStdString();
+    QPointer<Room> guard = room;
+    QList<ToastAction> actions;
+    if (image && acceptsImages()) {
+        // Asked here too: nothing comes before the answer.
+        const QString preview = image->preview;
+        actions.append({tr("Accept"), [this, guard, preview] {
+                            if (guard) {
+                                acceptImage(guard, preview, true);
+                            }
+                        }});
+        actions.append({tr("Decline"), [this, preview] { declineImage(preview); }});
+    }
+    const QString with = privately ? from.id : QString();
+    actions.append({tr("Open Peers"), [this, guard, with] {
+                        if (guard && showConversation) {
+                            showConversation(guard, with);
+                        } else if (showPanel) {
+                            showPanel();
+                        }
+                    }});
+    m_window->toasts()->show(toast, actions);
+}
+
+PeersController::Conversation* PeersController::conversation(Room* room, const PeerId& with) {
+    auto found = m_private.find(room);
+    if (found == m_private.end()) {
+        return nullptr;
+    }
+    for (Conversation& c : *found) {
+        if (c.with.id == with) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
+
+void PeersController::addPrivateLine(Room* room, const Peer& with, const ChatLine& line) {
+    openConversation(room, with);
+    Conversation* c = conversation(room, with.id);
+    if (!c) {
+        return;
+    }
+    c->lines.append(line);
+    while (c->lines.size() > kHistoryLines) {
+        c->lines.removeFirst();
+    }
+    if (line.from.isValid() && line.from.id != room->me().id) {
+        ++c->unread;
+        Q_EMIT conversationsChanged(room);
+    }
+    Q_EMIT chatAdded(room, with.id, line);
+}
+
+QList<PeersController::ChatLine> PeersController::chat(Room* room, const PeerId& with) const {
+    if (with.isEmpty()) {
+        return m_chat.value(room);
+    }
+    for (const Conversation& c : m_private.value(room)) {
+        if (c.with.id == with) {
+            return c.lines;
+        }
+    }
+    return {};
 }
 
 void PeersController::say(Room* room, const QString& text) {
     const QString trimmed = text.trimmed();
     if (!trimmed.isEmpty() && room && room->state() == Room::State::Open) {
+        stoppedTyping(room, {});
         // It comes back from the host in the room's order, and is shown then.
         room->channel(kChat)->send(QStringLiteral("say"), {{"text", trimmed}});
+    }
+}
+
+bool PeersController::sayTo(Room* room, const PeerId& with, const QString& text) {
+    const QString trimmed = text.trimmed().left(kSharedTextLength);
+    if (trimmed.isEmpty() || !room || room->state() != Room::State::Open) {
+        return false;
+    }
+    const Peer peer = room->peer(with);
+    if (!canMessage(room, peer) || !room->channel(kChat)->sendPrivate(QStringLiteral("say"), {{"text", trimmed}}, with)) {
+        return false;
+    }
+    stoppedTyping(room, with);
+    // Nothing comes back from a private message: shown here at once.
+    addPrivateLine(room, peer, {room->me(), trimmed, QDateTime::currentDateTime(), std::nullopt, with});
+    return true;
+}
+
+PeersController::SharedLogRecord PeersController::sharedRecord(const core::LogRecord& record) {
+    return {QDateTime::fromMSecsSinceEpoch(
+                std::chrono::duration_cast<std::chrono::milliseconds>(record.time.time_since_epoch()).count()),
+            QString::fromLatin1(core::logLevelName(record.level).data(), qsizetype(core::logLevelName(record.level).size())),
+            QString::fromStdString(record.source),
+            QString::fromStdString(record.category),
+            QString::fromStdString(record.message).left(kSharedTextLength),
+            QString::fromStdString(record.details).left(kSharedTextLength)};
+}
+
+bool PeersController::shareLog(Room* room, const PeerId& with, QList<SharedLogRecord> records) {
+    if (!room || room->state() != Room::State::Open || records.isEmpty()) {
+        return false;
+    }
+    records = records.mid(0, kMaxSharedRecords);
+    for (SharedLogRecord& record : records) {
+        record.text = record.text.left(kSharedTextLength);
+        record.details = record.details.left(kSharedTextLength);
+    }
+    // Within the size one message may have: the last ones go first.
+    while (records.size() > 1 && QJsonDocument(recordsJson(records)).toJson(QJsonDocument::Compact).size() > kSharedBytes) {
+        records.removeLast();
+    }
+    const QJsonObject body{{"records", recordsJson(records)}};
+    if (with.isEmpty()) {
+        room->channel(kChat)->send(QStringLiteral("log"), body);
+        return true;
+    }
+    const Peer peer = room->peer(with);
+    if (!canMessage(room, peer) || !room->channel(kChat)->sendPrivate(QStringLiteral("log"), body, with)) {
+        return false;
+    }
+    ChatLine line{room->me(), {}, QDateTime::currentDateTime(), std::nullopt, with};
+    line.records = records;
+    addPrivateLine(room, peer, line);
+    return true;
+}
+
+void PeersController::fillShareMenu(QMenu* menu, const QList<SharedLogRecord>& records) {
+    QList<Room*> rooms;
+    for (Room* room : chatRooms()) {
+        if (room->state() == Room::State::Open) {
+            rooms.append(room);
+        }
+    }
+    if (rooms.isEmpty()) {
+        menu->addAction(tr("Host or join a room in Peers to share"))->setEnabled(false);
+        return;
+    }
+    if (records.size() > kMaxSharedRecords) {
+        menu->addAction(tr("Shares the first %1 of %2").arg(kMaxSharedRecords).arg(records.size()))->setEnabled(false);
+        menu->addSeparator();
+    }
+    for (Room* room : rooms) {
+        QMenu* sub = menu->addMenu(room->name());
+        sub->setObjectName(QStringLiteral("peersShareRoom"));
+        QPointer<Room> guard = room;
+        sub->addAction(tr("Everyone"), this, [this, guard, records] {
+            if (guard) {
+                shareLog(guard, {}, records);
+            }
+        });
+        bool separated = false;
+        for (const Peer& peer : room->peers()) {
+            if (!canMessage(room, peer)) {
+                continue;
+            }
+            if (!separated) {
+                sub->addSeparator();
+                separated = true;
+            }
+            const PeerId id = peer.id;
+            sub->addAction(tr("%1 (private)").arg(peer.name), this, [this, guard, id, records] {
+                if (guard) {
+                    shareLog(guard, id, records);
+                }
+            });
+        }
+    }
+}
+
+QList<Peer> PeersController::conversations(Room* room) const {
+    QList<Peer> result;
+    for (const Conversation& c : m_private.value(room)) {
+        result.append(c.with);
+    }
+    return result;
+}
+
+bool PeersController::canMessage(Room* room, const Peer& peer) const {
+    return room && peer.isValid() && peer.id != room->me().id && peer.kind != Peer::Kind::Guest &&
+           !peer.publicKey.isEmpty() && room->peer(peer.id).isValid();
+}
+
+void PeersController::openConversation(Room* room, const Peer& peer) {
+    if (!room || !peer.isValid() || conversation(room, peer.id)) {
+        return;
+    }
+    m_private[room].append({peer, {}, 0});
+    Q_EMIT conversationsChanged(room);
+}
+
+void PeersController::closeConversation(Room* room, const PeerId& with) {
+    auto found = m_private.find(room);
+    if (found != m_private.end() && found->removeIf([&](const Conversation& c) { return c.with.id == with; }) > 0) {
+        Q_EMIT conversationsChanged(room);
+    }
+}
+
+int PeersController::unread(Room* room, const PeerId& with) const {
+    for (const Conversation& c : m_private.value(room)) {
+        if (c.with.id == with) {
+            return c.unread;
+        }
+    }
+    return 0;
+}
+
+void PeersController::markRead(Room* room, const PeerId& with) {
+    Conversation* c = conversation(room, with);
+    if (c && c->unread != 0) {
+        c->unread = 0;
+        Q_EMIT conversationsChanged(room);
     }
 }
 
@@ -842,12 +1164,18 @@ bool PeersController::shareImage(const ShareRequest& request, QString* error) {
     }
     QJsonObject body = imageToJson(image);
     body["text"] = request.caption.trimmed().left(4000);
-    room->channel(kChat)->send(QStringLiteral("image"), body, {}, request.to);
+    const Peer to = request.to.isEmpty() ? Peer() : room->peer(request.to);
+    if (to.isValid() && canMessage(room, to)) {
+        room->channel(kChat)->sendPrivate(QStringLiteral("image"), body, request.to);  // Sealed (§6.2)
+    } else {
+        room->channel(kChat)->send(QStringLiteral("image"), body, {}, request.to);
+    }
     if (!request.to.isEmpty()) {
-        // To one member: it doesn't come back from the host, so it's shown here now.
+        // To one member: it doesn't come back from the host, so it's shown here now, in
+        // the private conversation with them.
         const ChatLine line{room->me(), request.caption.trimmed().left(4000), QDateTime::currentDateTime(), image,
                             request.to};
-        addLine(room, line);
+        addPrivateLine(room, to.isValid() ? to : Peer{request.to, tr("someone")}, line);
         onImageLine(room, line);
     }
     return true;
@@ -856,6 +1184,134 @@ bool PeersController::shareImage(const ShareRequest& request, QString* error) {
 QString PeersController::stageOf(Room* room, const Peer& peer) const {
     PeerState* presence = room->peerState(kPresence);
     return presence ? presence->value(peer.id).toObject().value("stage").toString() : QString();
+}
+
+namespace {
+
+QString statusName(PeersController::Status status) {
+    switch (status) {
+    case PeersController::Status::Away:
+        return QStringLiteral("away");
+    case PeersController::Status::DoNotDisturb:
+        return QStringLiteral("dnd");
+    case PeersController::Status::Active:
+        break;
+    }
+    return QStringLiteral("active");
+}
+
+}  // namespace
+
+PeersController::Status PeersController::statusOf(Room* room, const Peer& peer) const {
+    if (room && peer.id == room->me().id) {
+        return status();
+    }
+    PeerState* presence = room ? room->peerState(kPresence) : nullptr;
+    const QString name = presence ? presence->value(peer.id).toObject().value("status").toString() : QString();
+    return name == u"dnd" ? Status::DoNotDisturb : name == u"away" ? Status::Away : Status::Active;
+}
+
+PeersController::Status PeersController::status() const {
+    return isDoNotDisturb() ? Status::DoNotDisturb : m_away ? Status::Away : Status::Active;
+}
+
+bool PeersController::isDoNotDisturb() const {
+    return appSettings().value(kDoNotDisturbKey, false).toBool();
+}
+
+void PeersController::setDoNotDisturb(bool on) {
+    if (on == isDoNotDisturb()) {
+        return;
+    }
+    QSettings settings = appSettings();
+    settings.setValue(kDoNotDisturbKey, on);
+    updatePresence();
+    Q_EMIT statusChanged();
+}
+
+void PeersController::setAway(bool away) {
+    if (away == m_away) {
+        return;
+    }
+    m_away = away;
+    updatePresence();
+    Q_EMIT statusChanged();
+}
+
+void PeersController::typing(Room* room, const PeerId& with) {
+    if (!room || room->state() != Room::State::Open) {
+        return;
+    }
+    const QString key = typingKey(room, with);
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime last = m_typingSent.value(key);
+    if (last.isValid() && last.msecsTo(now) < kTypingEveryMs) {
+        return;
+    }
+    m_typingSent.insert(key, now);
+    // To the room, or to that person alone: no one else learns who writes to whom.
+    room->channel(kTyping, Delivery::LatestOnly)->send(QStringLiteral("typing"), {}, {}, with);
+}
+
+void PeersController::stoppedTyping(Room* room, const PeerId& with) {
+    if (!room || !m_typingSent.remove(typingKey(room, with)) || room->state() != Room::State::Open) {
+        return;
+    }
+    room->channel(kTyping, Delivery::LatestOnly)->send(QStringLiteral("stopped"), {}, {}, with);
+}
+
+void PeersController::onTyping(Room* room, const Message& message) {
+    const Peer from = room->peer(message.from);
+    if (!from.isValid() || from.id == room->me().id) {
+        return;
+    }
+    // To this member alone: the private conversation with whoever writes.
+    const QString with = message.to.isEmpty() ? QString() : from.id;
+    const auto same = [&](const Typist& t) { return t.room == room && t.with == with && t.peer.id == from.id; };
+    if (message.type == u"typing") {
+        const QDateTime until = QDateTime::currentDateTimeUtc().addMSecs(kTypingShownMs);
+        auto found = std::find_if(m_typists.begin(), m_typists.end(), same);
+        if (found != m_typists.end()) {
+            found->until = until;
+            return;
+        }
+        m_typists.append({room, with, from, until});
+        m_typingTimer->start();
+    } else if (message.type == u"stopped") {
+        if (m_typists.removeIf(same) == 0) {
+            return;
+        }
+    } else {
+        return;
+    }
+    Q_EMIT typingChanged(room, with);
+}
+
+void PeersController::expireTypists() {
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QList<QPair<Room*, QString>> changed;
+    for (qsizetype i = m_typists.size() - 1; i >= 0; --i) {
+        if (m_typists[i].until <= now) {
+            changed.append({m_typists[i].room, m_typists[i].with});
+            m_typists.removeAt(i);
+        }
+    }
+    if (m_typists.isEmpty()) {
+        m_typingTimer->stop();
+    }
+    for (const auto& [room, with] : changed) {
+        Q_EMIT typingChanged(room, with);
+    }
+}
+
+QList<Peer> PeersController::typingIn(Room* room, const PeerId& with) const {
+    QList<Peer> result;
+    for (const Typist& t : m_typists) {
+        if (t.room == room && t.with == with) {
+            result.append(t.peer);
+        }
+    }
+    return result;
 }
 
 void PeersController::askHost(JoinRequest* request, Room* room) {
@@ -947,7 +1403,7 @@ void PeersController::updatePresence() {
     const QString stage = m_hooks.currentStage ? m_hooks.currentStage() : QString();
     for (Room* room : chatRooms()) {
         if (room->state() == Room::State::Open) {
-            room->peerState(kPresence)->set(QJsonObject{{"stage", stage}});
+            room->peerState(kPresence)->set(QJsonObject{{"stage", stage}, {"status", statusName(status())}});
         }
     }
 }

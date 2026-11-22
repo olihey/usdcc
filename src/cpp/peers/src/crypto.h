@@ -60,4 +60,11 @@ QByteArray sealForRoom(const QByteArray& roomKey, quint32 epoch, const QByteArra
 std::optional<QByteArray> openFromRoom(const QHash<quint32, QByteArray>& roomKeys, const QByteArray& hostKey,
                                        const QByteArray& envelope);
 
+// A message from one member to another that the host passes on but can't open: a
+// crypto_box between their Ed25519 keys turned into X25519 ones. It also proves which of
+// the two sealed it. [nonce][ciphertext]; empty if either key is no good.
+QByteArray sealForPeer(const Identity& mine, const QByteArray& theirPublicKey, const QByteArray& plain);
+std::optional<QByteArray> openFromPeer(const Identity& mine, const QByteArray& theirPublicKey,
+                                       const QByteArray& sealed);
+
 }  // namespace usdcc::peers

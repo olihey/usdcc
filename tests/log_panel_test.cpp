@@ -22,6 +22,7 @@
 #include <QTableView>
 #include <QTreeWidget>
 #include <QThread>
+#include <QTimer>
 #include <QToolButton>
 
 #include <functional>
@@ -496,4 +497,57 @@ USDCC_TEST(log_side_panel_pinned_filters) {
         settle();
         CHECK(!panel.isFiltersPinned(), "and they stay unpinned after a restart");
     }
+}
+
+// Share (docs/PEERS.md §10.1): the selected messages, oldest first, go to whatever fills
+// the Share submenu; without a filler, there's no Share.
+USDCC_TEST(log_side_panel_share) {
+    ScratchSettings settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
+    LogHub hub;
+    LogSidePanel panel(nullptr, hub, settings.path);
+    panel.resize(800, 300);
+    panel.show();
+    post(hub, LogLevel::Info, "usdcc", "usdcc.stage", "first");
+    post(hub, LogLevel::Warning, "usd", "TF_DIAGNOSTIC_WARNING_TYPE", "second");
+    post(hub, LogLevel::Error, "qt", "default", "third");
+    CHECK(waitFor([&] { return panel.model()->rowCount() == 3; }), "the records didn't arrive");
+    QTableView* view = panel.view();
+    const auto select = [&](int row) {
+        view->selectionModel()->select(view->model()->index(row, 0),
+                                       QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    };
+    select(2);
+    select(0);
+    const QList<LogRecord> records = panel.selectedRecords();
+    CHECK(records.size() == 2 && records[0].message == "first" && records[1].message == "third",
+          "the selection is %lld records, not first and third in order", qlonglong(records.size()));
+
+    // The context menu: Share only with a filler, which gets the selection.
+    const auto menuTexts = [&]() {
+        QStringList texts;
+        QList<LogRecord> given;
+        QTimer::singleShot(100, [&] {
+            if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                for (QAction* action : menu->actions()) {
+                    texts.append(action->text());
+                    if (action->menu()) {
+                        for (QAction* inner : action->menu()->actions()) texts.append("> " + inner->text());
+                    }
+                }
+                menu->close();
+            }
+        });
+        Q_EMIT view->customContextMenuRequested(view->visualRect(view->model()->index(0, 0)).center());
+        return texts;
+    };
+    CHECK(!menuTexts().join("|").contains("Share"), "Share shows with nothing to share to");
+    QList<LogRecord> shared;
+    panel.setShareMenu([&](QMenu* menu, const QList<LogRecord>& given) {
+        shared = given;
+        menu->addAction(QStringLiteral("To the room"));
+    });
+    const QString texts = menuTexts().join("|");
+    CHECK(texts.contains("Share 2 Messages") && texts.contains("> To the room"), "the menu is %s", qPrintable(texts));
+    CHECK(shared.size() == 2 && shared[0].message == "first", "the filler got %lld records", qlonglong(shared.size()));
 }

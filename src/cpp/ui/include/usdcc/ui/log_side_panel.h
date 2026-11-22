@@ -5,7 +5,10 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/side_panel.h"
 
+#include <QList>
 #include <QString>
+
+#include <functional>
 
 #include <vector>
 
@@ -72,6 +75,13 @@ public:
     // Public for tests.
     void populateFilterMenu(QMenu* menu);
 
+    // Fills a Share submenu in the messages' context menu with where the selected ones
+    // can go (the Peers rooms); without one, there's no Share.
+    using ShareMenu = std::function<void(QMenu* menu, const QList<usdcc::core::LogRecord>& records)>;
+    void setShareMenu(ShareMenu fill) { m_shareMenu = std::move(fill); }
+    // The selected messages, oldest first.
+    QList<usdcc::core::LogRecord> selectedRecords() const;
+
     bool isFiltersPinned() const { return m_pinned; }
     // The pinned column's filters, for tests: null unless pinned.
     OptionsMenuView* pinnedFilters() const { return m_pinnedView; }
@@ -129,6 +139,7 @@ private:
     bool m_follow = true;
     bool m_adjusting = false;  // rows are being inserted or removed
     int m_unseenErrors = 0;
+    ShareMenu m_shareMenu;
 };
 
 }  // namespace usdcc::ui
