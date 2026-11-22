@@ -492,3 +492,27 @@ def _render_stage_edited(panel, resynced, changed):
     from pxr import Sdf
 
     panel.stage_edited([Sdf.Path(p) for p in resynced], [Sdf.Path(p) for p in changed])
+
+
+def set_prim_icon(type_name, path):
+    """Gives prims of `type_name` (a schema's name, "MyStudioLight") the icon in the
+    file at `path`, in the Outliner, the Attributes panel and wherever prims show
+    their icons (docs/PRIM_ICONS.md phase 2). An SVG is drawn as the built-in icons
+    are: ``currentColor`` in the theme's grey, white on a selected row, faded for an
+    inactive prim, badged for references, payloads and instances. Other images are
+    drawn as they are. Types derived from `type_name` without an icon of their own
+    get it too. ``None`` (or "") goes back to the built-in icon. For a startup
+    script, so a pipeline's schemas have their icons."""
+    import os
+
+    import _usdcc_app
+
+    _usdcc_app.set_prim_icon(str(type_name), "" if path is None else os.fspath(path))
+
+
+def prim_icon(type_name):
+    """The icon prims of `type_name` get: a built-in icon's name ("cube", "bulb"), or
+    "file:" and the path set with ``set_prim_icon()``."""
+    import _usdcc_app
+
+    return _usdcc_app.prim_icon(str(type_name))

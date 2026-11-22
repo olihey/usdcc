@@ -8,6 +8,7 @@
 #include "usdcc/scripting/scripted_render_view_panel.h"
 #include "usdcc/scripting/scripted_tool.h"
 #include "usdcc/scripting/scripted_view_panel.h"
+#include "usdcc/usd/prim_icons.h"
 #include "usdcc/usd/python/bind_usd.h"
 #endif
 
@@ -45,6 +46,7 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/imaging/hd/rendererPluginRegistry.h>
 
+#include <QFileInfo>
 #include <QCoreApplication>
 #include <QSettings>
 #include <QTimer>
@@ -517,6 +519,23 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             return py::none();
         },
         py::arg("id"), py::arg("cache_id"), "Opens a panel of the type for the stage, like the Stages menu.");
+    // Pipelines' prim icons (docs/PRIM_ICONS.md phase 2).
+    m.def(
+        "set_prim_icon",
+        [](const std::string& typeName, const std::string& file) {
+            if (typeName.empty()) throw py::value_error("no type name");
+            if (!file.empty() && !QFileInfo::exists(QString::fromStdString(file))) {
+                throw py::value_error("no such file: " + file);
+            }
+            usdcc::usd::prim_icons::setTypeIcon(typeName, QString::fromStdString(file));
+        },
+        py::arg("type_name"), py::arg("file"));
+    m.def(
+        "prim_icon",
+        [](const std::string& typeName) {
+            return usdcc::usd::prim_icons::iconNameForType(PXR_NS::TfToken(typeName)).toStdString();
+        },
+        py::arg("type_name"));
     m.def("view_panel_types", []() {
         std::vector<std::pair<std::string, std::string>> types;
         for (const auto& entry : viewPanels().entries()) {

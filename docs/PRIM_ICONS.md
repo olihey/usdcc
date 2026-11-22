@@ -1,6 +1,6 @@
 # Prim Icons — Plan
 
-Status: **phase 1 done** (§7): the Outliner shows the icons. Phases 2 and 3 are still to do.
+Status: **done** (§7, §8): the Outliner shows the icons (phase 1); a pipeline sets icons for its own types from Python, and the Attributes panel shows the prim's icon (phase 2); payloads and instances get badges as references do (phase 3).
 
 Give every prim in the Outliner an icon that says what kind of prim it is, for every concrete prim
 type OpenUSD ships, with sensible icons for types from plugins the app doesn't know.
@@ -149,8 +149,9 @@ LICENSE.
 - **States**, without new icons: an inactive (deactivated) prim draws its icon at 35% opacity,
   like its text. A prim with references has a small arrow badge at the icon's lower left, in
   the accent color (the `Appearance/accentColor` setting, blue `#3d8bfd` by default), on selected rows too (`badge-reference.svg`; a circle under it is
-  cleared so it reads on any row). Badges for payloads and instance proxies are still to do
-  (§7 phase 3).
+  cleared so it reads on any row). A payload's is an arrow down into a tray
+  (`badge-payload.svg`), an instance's and a prim inside one's two overlapping squares
+  (`badge-instance.svg`); one badge a prim, an instance's first, then a payload's (§8).
 
 ## 5. Types without their own icon
 
@@ -197,8 +198,27 @@ pipelines with their own schemas.
 | Phase | Work | Done when |
 |---|---|---|
 | **1. Icons in the Outliner** *(done)* | `qtsvg` (decision 1), the SVGs and LICENSE in `src/cpp/usd/resources/prim-icons/`, the `prim_icons` lookup in `usdcc_usd_ui` (type name → icon, the `TfType` fallback, a cache per type, state and scale), `Qt::DecorationRole` in `UsdPrimTreeModel`, white when selected, dim when inactive | Every type in §3 shows its icon; a custom schema shows its base type's; the icons stay sharp at 300% |
-| **2. Python** | `usdcc.ui.set_prim_icon()` / `prim_icon()`; the Attributes panel shows the prim's icon beside its path | A pipeline can give its schemas icons from a startup script |
-| **3. State badges** | References *(done)*; payloads and instance proxies | — |
+| **2. Python** *(done)* | `usdcc.ui.set_prim_icon()` / `prim_icon()`; the Attributes panel shows the prim's icon beside its path | A pipeline can give its schemas icons from a startup script |
+| **3. State badges** *(done)* | References; payloads and instance proxies | — |
 
 Tests: the lookup (each concrete type, the versioned ones, a custom derived type, `def`,
 `class`, `over`), and a rendered icon isn't empty at 16px.
+
+## 8. Phases 2 and 3 as built (2026-11-22)
+
+- **A pipeline's icons:** `usdcc.ui.set_prim_icon(type_name, path)` (`prim_icons::setTypeIcon()`)
+  gives a type name an icon from a file; `None` goes back. An SVG is drawn as ours are (its
+  `currentColor` in the theme's grey, white when selected, faded, badged); another image (PNG)
+  as it is. It counts before the built-in icons while the type's bases are walked, so types
+  derived from it get it too, but a type with its own built-in icon keeps that unless it's set
+  itself (a studio light deriving from `SphereLight` gets the studio's `SphereLight` icon only
+  when that is set). The name needn't be a type OpenUSD knows. `prim_icon(type_name)` says what
+  a type gets: a built-in icon's name, or `file:` and the path. Views showing prim icons draw
+  them again (`prim_icons::iconsChanged()`: the Outliner's model, the Attributes panel).
+- **The Attributes panel** has a line under its toolbar: the prim's icon (badged), its path and
+  its type.
+- **Badges** (`prim_icons::Badge`, `badgeFor()`): Instance for an instance or a prim inside one
+  (an instance proxy), else Payload, else Reference. One a prim: the lower-left corner holds one.
+- **Tests:** `prim_icons_badges` and `prim_icons_from_a_pipeline` (usdcc_ui_tests), and
+  `python_prim_icons` (usdcc_python_tests). In the app: a stage with a reference, a payload and an
+  instance showed their three badges in the Outliner, and the Attributes panel's line.
