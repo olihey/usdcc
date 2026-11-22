@@ -27,3 +27,15 @@ diff --git a/build_scripts/build_usd.py b/build_scripts/build_usd.py
          BOOST_VERSION = (1, 86, 0)
          BOOST_SHA256 = "cd20a5694e753683e1dc2ee10e2d1bb11704e65893ebcc6ced234ba68e5d8646"
      elif MacOS():
+@@ -943,7 +946,10 @@ def InstallBoost_Helper(context, force, buildArgs):
+ 
+         if context.buildOIIO or context.enableOpenVDB:
+             b2_settings.append("--with-chrono")
+-            b2_settings.append("--with-system")
++            # Boost.System is header-only since 1.69 and its stub library
++            # is gone since 1.89, where b2 rejects --with-system.
++            if BOOST_VERSION < (1, 89, 0):
++                b2_settings.append("--with-system")
+             b2_settings.append("--with-thread")
+ 
+         if context.enableOpenVDB:
