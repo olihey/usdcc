@@ -56,6 +56,7 @@ Result<Config> Config::parse(const std::string& json) {
     const JsObject& top = root.GetJsObject();
     std::vector<std::string> problems;
     Config config;
+    config.source = json;
     config.environment = textOf(top, "environment");
 
     config.offline = flagOf(top, "offline");
@@ -171,6 +172,138 @@ Result<Config> Config::parse(const std::string& json) {
         return Result<Config>::failure(Status::Error, message);
     }
     return Result<Config>::success(std::move(config));
+}
+
+namespace {
+
+// The object at `key` of `object`, or an empty one: where the keys a writer doesn't know live.
+JsObject objectAt(const JsObject& object, const char* key) {
+    const JsObject* found = objectOf(object, key);
+    return found ? *found : JsObject();
+}
+
+// An endpoint's option as the file had it when its text is unchanged, else as text, a flag
+// spelled "true" or "false" as a JSON bool.
+JsValue optionValue(const JsObject* before, const std::string& key, const std::string& text) {
+    if (before) {
+        const auto found = before->find(key);
+        if (found != before->end() && optionText(found->second) == text) return found->second;
+    }
+    if (text == "true") return JsValue(true);
+    if (text == "false") return JsValue(false);
+    return JsValue(text);
+}
+
+JsArray stringArray(const std::vector<std::string>& texts) {
+    JsArray array;
+    for (const std::string& text : texts) array.push_back(JsValue(text));
+    return array;
+}
+
+// `key` set to `value`, or gone when `keep` is false.
+void setOrErase(JsObject& object, const std::string& key, bool keep, JsValue value) {
+    if (keep) {
+        object[key] = std::move(value);
+    } else {
+        object.erase(key);
+    }
+}
+
+}  // namespace
+
+std::string Config::toJson() const {
+    JsObject top;
+    if (!source.empty()) {
+        const JsValue before = JsParseString(source);
+        if (before.IsObject()) top = before.GetJsObject();
+    }
+
+    setOrErase(top, "environment", !environment.empty(), JsValue(environment));
+    setOrErase(top, "offline", offline || top.count("offline"), JsValue(offline));
+    setOrErase(top, "cacheLimitGB", cacheLimitGB.has_value(), JsValue(cacheLimitGB.value_or(0.0)));
+
+    JsObject http = objectAt(top, "http");
+    {
+        const JsObject hostsBefore = objectAt(http, "hosts");
+        JsObject hosts;
+        for (const auto& [host, entry] : httpHosts) {
+            const auto found = hostsBefore.find(host);
+            JsObject object = found != hostsBefore.end() && found->second.IsObject() ? found->second.GetJsObject()
+                                                                                     : JsObject();
+            setOrErase(object, "credential", !entry.credential.empty(), JsValue(entry.credential));
+            setOrErase(object, "insecure", entry.insecure || object.count("insecure"), JsValue(entry.insecure));
+            hosts[host] = JsValue(object);
+        }
+        setOrErase(http, "hosts", !hosts.empty(), JsValue(hosts));
+        setOrErase(http, "allow", !httpAllow.empty(), JsValue(stringArray(httpAllow)));
+    }
+    setOrErase(top, "http", !http.empty(), JsValue(http));
+
+    JsObject s3 = objectAt(top, "s3");
+    setOrErase(s3, "allow", !s3Allow.empty(), JsValue(stringArray(s3Allow)));
+    setOrErase(top, "s3", !s3.empty(), JsValue(s3));
+
+    const JsObject endpointsBefore = objectAt(top, "endpoints");
+    JsObject endpointsObject;
+    for (const auto& [id, endpoint] : endpoints) {
+        const auto found = endpointsBefore.find(id);
+        const JsObject* before =
+            found != endpointsBefore.end() && found->second.IsObject() ? &found->second.GetJsObject() : nullptr;
+        JsObject object;
+        // What the file had that isn't text (an option the library couldn't read as one) stays.
+        if (before) {
+            for (const auto& [key, value] : *before) {
+                if (value.IsObject() || value.IsArray()) object[key] = value;
+            }
+        }
+        object["scheme"] = JsValue(endpoint.scheme);
+        object["url"] = JsValue(endpoint.url);
+        setOrErase(object, "credential", !endpoint.credential.empty(), JsValue(endpoint.credential));
+        setOrErase(object, "readOnly", endpoint.readOnly, JsValue(true));
+        setOrErase(object, "optional", endpoint.optional, JsValue(true));
+        setOrErase(object, "mirrors", !endpoint.mirrors.empty(), JsValue(stringArray(endpoint.mirrors)));
+        for (const auto& [key, text] : endpoint.options) object[key] = optionValue(before, key, text);
+        endpointsObject[id] = JsValue(object);
+    }
+    setOrErase(top, "endpoints", !endpointsObject.empty(), JsValue(endpointsObject));
+
+    JsObject environmentsObject;
+    for (const auto& [environment, schemes] : environments) {
+        JsObject schemesObject;
+        for (const auto& [scheme, names] : schemes) {
+            JsObject namesObject;
+            for (const auto& [name, ids] : names) namesObject[name] = JsValue(stringArray(ids));
+            schemesObject[scheme] = JsValue(namesObject);
+        }
+        environmentsObject[environment] = JsValue(schemesObject);
+    }
+    setOrErase(top, "environments", !environmentsObject.empty(), JsValue(environmentsObject));
+
+    std::ostringstream text;
+    {
+        JsWriter writer(text, JsWriter::Style::Pretty);
+        JsWriteValue(&writer, JsValue(top));
+    }
+    return text.str() + "\n";
+}
+
+Result<bool> Config::save(const std::filesystem::path& file) const {
+    std::error_code error;
+    if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), error);
+    std::filesystem::path temporary = file;
+    temporary += ".saving";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) return Result<bool>::failure(Status::NotAllowed, "can't write " + toUtf8(temporary));
+        output << toJson();
+        if (!output) return Result<bool>::failure(Status::Error, "couldn't write " + toUtf8(temporary));
+    }
+    std::filesystem::rename(temporary, file, error);
+    if (error) {
+        std::filesystem::remove(temporary, error);
+        return Result<bool>::failure(Status::NotAllowed, "can't replace " + toUtf8(file));
+    }
+    return Result<bool>::success(true);
 }
 
 Result<Config> Config::load(const std::filesystem::path& file) {

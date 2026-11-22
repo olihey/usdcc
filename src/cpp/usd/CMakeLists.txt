@@ -180,6 +180,8 @@ usdcc_precompile_headers(usdcc_render usd_pch.h)
 add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/asset_picker.h
     src/asset_picker.cpp
+    include/usdcc/usd/asset_servers_editor.h
+    src/asset_servers_editor.cpp
     include/usdcc/usd/asset_settings.h
     src/asset_settings.cpp
     include/usdcc/usd/attributes_view_panel.h
