@@ -191,6 +191,9 @@ public:
     QString link(const QString& address = {}) const;
     QUrl guestLink(const QString& address = {}) const;
     void remove(const PeerId& id, const QString& reason = {});
+    // Gives the room another name, for everyone in it and where it is announced. False
+    // for a name that is empty once trimmed, or on a member.
+    bool rename(const QString& name);
     void trust(const QString& fingerprint);
     // What waits to be sent to a member: what makes it too slow. On a member that
     // joined, what waits to go to the host, whoever it is for.
@@ -204,6 +207,8 @@ Q_SIGNALS:
     // A member back after a lost connection: `caughtUp` if it got every ordered message
     // it missed, false if the host no longer had them and sent its state afresh.
     void resumed(bool caughtUp);
+    // The host gave the room another name (rename()), here too on the host.
+    void renamed(const QString& name);
     void closed(const QString& reason);
     // Host only: someone asks to join (Admission::Ask).
     void joinRequested(usdcc::peers::JoinRequest* request);

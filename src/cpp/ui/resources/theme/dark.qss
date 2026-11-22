@@ -405,15 +405,70 @@ QTabBar#scriptTabs[focused="true"]::tab:selected:hover {
     background: @accent-hover;
 }
 
-/* The Peers panel's emoji button and its grid (docs/PEERS.md §14.3): square cells with
-   nothing but the emoji, which a button's usual padding would leave no room for. */
-QToolButton#peersEmoji {
-    padding: 0 6px;
+/* The Peers panel's emoji and Send buttons beside the message, square, and the emoji
+   grid (docs/PEERS.md §14.3): square cells with nothing but the emoji, which a button's
+   usual padding would leave no room for. */
+QToolButton#peersEmoji,
+QToolButton#peersSend {
+    padding: 0;
 }
 
 QToolButton#peersEmoji::menu-indicator {
     image: none;
     width: 0;
+}
+
+/* The Peers panel: You (with your status, a menu), the chat's tabs (the room's and each
+   private conversation's) and who is typing under it. */
+QToolButton#peersYou {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+}
+
+QToolButton#peersYou:hover {
+    background: rgba(255, 255, 255, 8%);
+}
+
+QToolButton#peersYou::menu-indicator {
+    image: none;
+    width: 0;
+}
+
+QTabBar#peersChatTabs::tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 3px 10px;
+    color: #a8aab0;
+}
+
+QTabBar#peersChatTabs::tab:selected {
+    color: #e8e8ea;
+    border-bottom-color: @accent;
+}
+
+QTabBar#peersChatTabs::tab:hover:!selected {
+    color: #e8e8ea;
+}
+
+QTabBar#peersChatTabs::close-button {
+    image: url(:/usdcc/theme/close.png);
+    subcontrol-position: right;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+}
+
+QTabBar#peersChatTabs::close-button:hover {
+    image: url(:/usdcc/theme/close-white.png);
+    background: rgba(255, 255, 255, 10%);
+}
+
+QLabel#peersTyping {
+    color: #8a8d93;
+    font-style: italic;
+    padding: 1px 4px;
 }
 
 QToolButton#peersEmojiCell {

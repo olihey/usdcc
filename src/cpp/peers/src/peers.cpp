@@ -111,6 +111,17 @@ void Peers::announce(Room* room, const HostOptions& options) {
         m_network->announce(announcement);
     }
     const QString roomId = announcement.roomId();
+    // The same room id again changes what is announced.
+    connect(room, &Room::renamed, this, [this, announcement, onNetwork](const QString& name) {
+        Announcement renamed = announcement;
+        renamed.name = name;
+        if (m_directory) {
+            m_directory->publish(renamed);
+        }
+        if (m_network && onNetwork) {
+            m_network->announce(renamed);
+        }
+    });
     connect(room, &Room::closed, this, [this, roomId] {
         if (m_directory) {
             m_directory->unpublish(roomId);

@@ -107,6 +107,9 @@ QJsonObject peerJson(const Peer& peer) {
         result.insert(QStringLiteral("fingerprint"), peer.fingerprint);
         result.insert(QStringLiteral("instance"), peer.instance);
     }
+    if (!peer.publicKey.isEmpty()) {
+        result.insert(QStringLiteral("key"), QString::fromLatin1(peer.publicKey.toBase64()));
+    }
     if (!peer.color.isEmpty()) {
         result.insert(QStringLiteral("color"), peer.color);
     }
@@ -126,6 +129,12 @@ Peer peerFromJson(const QJsonObject& object) {
     peer.instance = object.value(QLatin1String("instance")).toString();
     peer.color = object.value(QLatin1String("color")).toString();
     peer.app = object.value(QLatin1String("app")).toString();
+    // Only a key the fingerprint is of: the host can't hand out a key of its own under
+    // someone's name without changing the fingerprint everyone sees.
+    const QByteArray key = QByteArray::fromBase64(object.value(QLatin1String("key")).toString().toLatin1());
+    if (!key.isEmpty() && !peer.fingerprint.isEmpty() && fingerprintOf(key) == peer.fingerprint) {
+        peer.publicKey = key;
+    }
     return peer;
 }
 
@@ -222,8 +231,14 @@ Profile completed(Profile profile, const QString& fallbackName) {
 
 Peer peerOf(const Profile& profile, Peer::Kind kind) {
     const QString fingerprint = profile.identity.fingerprint();
-    return {fingerprint + u'-' + profile.instance, profile.name, kind, fingerprint, profile.instance, profile.color,
-            profile.app};
+    return {fingerprint + u'-' + profile.instance,
+            profile.name,
+            kind,
+            fingerprint,
+            profile.instance,
+            profile.color,
+            profile.app,
+            profile.identity.publicKey()};
 }
 
 }  // namespace
@@ -414,6 +429,21 @@ PeerState* Room::peerState(const QString& name) {
     auto* state = new PeerState(this, name);
     d->peerStates.insert(name, state);
     return state;
+}
+
+bool Room::rename(const QString& name) {
+    const QString cleaned = name.simplified().left(kNameLength);
+    if (!d->isHost || cleaned.isEmpty() || d->state == State::Closed) {
+        return false;
+    }
+    if (cleaned == d->name) {
+        return true;
+    }
+    qCInfo(lcPeers).noquote() << "Renaming room" << d->name << "to" << cleaned;
+    d->name = cleaned;
+    d->broadcast(control(QStringLiteral("renamed"), {{QStringLiteral("name"), cleaned}}), true, {}, nullptr, {});
+    Q_EMIT renamed(cleaned);
+    return true;
 }
 
 void Room::close(const QString& reason) {
@@ -769,7 +799,8 @@ void Room::Impl::onAuth(Member* member, const Message& message) {
                     fingerprint,
                     instance,
                     cleanColor(body.value(QLatin1String("color")).toString()),
-                    body.value(QLatin1String("app")).toString().left(64)};
+                    body.value(QLatin1String("app")).toString().left(64),
+                    key};
 
     // The same peer back after a lost connection (PEERS.md §7.4): its key proves it.
     if (Member* previous = welcomedMember(member->peer.id); previous && previous != member &&
@@ -1135,7 +1166,7 @@ void Room::Impl::route(Message message, bool latest, Member* sender) {
     if (!message.to.isEmpty()) {
         if (message.to == me.id) {
             if (channel) {
-                Q_EMIT channel->received(message);
+                deliver(channel, message);
             }
             return;
         }
@@ -1590,6 +1621,12 @@ void Room::Impl::onHostFrame(const Message& message) {
                 joinedPeers.append(peer);
                 Q_EMIT q->peerJoined(peer);
             }
+        } else if (type == u"renamed") {
+            const QString renamedTo = body.value(QLatin1String("name")).toString().simplified().left(kNameLength);
+            if (!renamedTo.isEmpty() && renamedTo != name) {
+                name = renamedTo;
+                Q_EMIT q->renamed(name);
+            }
         } else if (type == u"left") {
             removePeerLocally(body.value(QLatin1String("id")).toString(), reason);
         } else if (type == u"denied" || type == u"removed" || type == u"closed") {
@@ -1658,8 +1695,70 @@ void Room::Impl::onHostFrame(const Message& message) {
         return;
     }
     if (Channel* channel = channels.value(message.channel)) {
-        Q_EMIT channel->received(message);
+        deliver(channel, message);
     }
+}
+
+namespace {
+
+constexpr int kOpenedIdsKept = 4096;
+const QString kSealedType = QStringLiteral("sealed");
+
+}  // namespace
+
+void Room::Impl::deliver(Channel* channel, Message message) {
+    if (message.type != kSealedType || message.to != me.id) {
+        Q_EMIT channel->received(message);
+        return;
+    }
+    // Opened with the sender's key: the host names the sender and never takes that from
+    // anyone, and the box only opens if that key's owner sealed it.
+    const Peer from = q->peer(message.from);
+    const QByteArray box = QByteArray::fromBase64(message.body.value(QLatin1String("box")).toString().toLatin1());
+    const std::optional<QByteArray> plain = openFromPeer(profile.identity, from.publicKey, box);
+    if (!plain) {
+        qCWarning(lcPeers).noquote() << "A private message on" << channel->name() << "from" << message.from
+                                     << "didn't open; dropped";
+        return;
+    }
+    const QJsonObject inner = QJsonDocument::fromJson(*plain).object();
+    const QString id = inner.value(QLatin1String("id")).toString();
+    if (inner.value(QLatin1String("channel")).toString() != channel->name() ||
+        inner.value(QLatin1String("to")).toString() != me.id || id.isEmpty() || openedIds.contains(id)) {
+        qCWarning(lcPeers).noquote() << "A private message on" << channel->name() << "was for elsewhere or "
+                                     << "came twice; dropped";
+        return;
+    }
+    openedIds.insert(id);
+    openedOrder.push_back(id);
+    while (int(openedOrder.size()) > kOpenedIdsKept) {
+        openedIds.remove(openedOrder.front());
+        openedOrder.pop_front();
+    }
+    message.type = inner.value(QLatin1String("type")).toString();
+    message.body = inner.value(QLatin1String("body")).toObject();
+    message.sealed = true;
+    Q_EMIT channel->received(message);
+}
+
+bool Room::Impl::sendPrivate(Channel* channel, const QString& type, const QJsonObject& body, const PeerId& to) {
+    const Peer target = q->peer(to);
+    if (!target.isValid() || target.publicKey.isEmpty() || target.id == me.id) {
+        return false;
+    }
+    // Where it is for is sealed in too, so the host can't hand it on elsewhere.
+    const QJsonObject inner{{QStringLiteral("id"), randomId(16)},
+                            {QStringLiteral("channel"), channel->name()},
+                            {QStringLiteral("to"), to},
+                            {QStringLiteral("type"), type},
+                            {QStringLiteral("body"), body}};
+    const QByteArray box =
+        sealForPeer(profile.identity, target.publicKey, QJsonDocument(inner).toJson(QJsonDocument::Compact));
+    if (box.isEmpty()) {
+        return false;
+    }
+    send(channel, kSealedType, {{QStringLiteral("box"), QString::fromLatin1(box.toBase64())}}, {}, to);
+    return true;
 }
 
 void Room::Impl::removePeerLocally(const PeerId& id, const QString& reason) {

@@ -80,6 +80,12 @@ ICONS = {
         ],
     ),
     "plus": (1.4, LIGHT, [[(8, 3.5), (8, 12.5)], [(3.5, 8), (12.5, 8)]]),
+    # The Peers panel's Send, beside its message: a paper plane.
+    "send": (
+        1.3,
+        LIGHT,
+        [[(2.5, 7.5), (13.5, 2.5), (9, 13.5), (7.3, 8.7), (2.5, 7.5)], [(7.3, 8.7), (13.5, 2.5)]],
+    ),
     # Plugins panel: Install Packages (an arrow down into a tray).
     "download": (
         1.3,

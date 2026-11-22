@@ -36,6 +36,11 @@ public:
 
     // The host's rules for this channel. On a member that only joined, they change
     // nothing: the host's own channel decides.
+    // To one member only, sealed for its key (PEERS.md §6.2): the host passes it on but
+    // can't read it. It arrives as `type` with Message::sealed set. False, and nothing
+    // sent, for a member without a key (a guest, or one whose host is older).
+    bool sendPrivate(const QString& type, const QJsonObject& body, const PeerId& to);
+
     void setSenders(Senders senders);
     void setNamedSenders(const QList<PeerId>& peers);  // Also sets Senders::Named
     Senders senders() const;

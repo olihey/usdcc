@@ -5,6 +5,8 @@
 #include "test_harness.h"
 #include "test_settings.h"
 
+#include <algorithm>
+
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/main_window.h"
@@ -16,9 +18,12 @@
 #include "usdcc/ui/toast_manager.h"
 
 #include <QApplication>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPlainTextEdit>
+#include <QTabBar>
 #include <QPointer>
 #include <QToolButton>
 #include <QTemporaryDir>
@@ -117,18 +122,68 @@ USDCC_TEST(peers_panel_rooms_people_and_chat) {
           "Anna's panel shows %d people", people->count());
 
     // Chat: what Ben types arrives at Anna's, a prim path as a link.
-    QLineEdit* say = benPanel.findChild<QLineEdit*>("peersSay");
-    say->setText("Check /World/Lamp please");
+    QPlainTextEdit* say = benPanel.findChild<QPlainTextEdit*>("peersSay");
+    say->setPlainText("Check /World/Lamp please");
     QTest::keyClick(say, Qt::Key_Return);
     QTextBrowser* annaChat = annaPanel.findChild<QTextBrowser*>("peersChat");
-    CHECK(QTest::qWaitFor([&] { return annaChat->toPlainText().contains("Ben Check /World/Lamp please"); }),
+    CHECK(QTest::qWaitFor([&] {
+              const QString text = annaChat->toPlainText();
+              return text.contains("Ben") && text.contains("Check /World/Lamp please");
+          }),
           "Anna's chat shows: %s", qPrintable(annaChat->toPlainText()));
     CHECK(annaChat->toHtml().contains("prim:/World/Lamp"), "the prim path isn't a link");
     QTextBrowser* benChat = benPanel.findChild<QTextBrowser*>("peersChat");
-    CHECK(QTest::qWaitFor([&] { return benChat->toPlainText().contains("Ben Check /World/Lamp please"); }),
+    CHECK(QTest::qWaitFor([&] { return benChat->toPlainText().contains("Check /World/Lamp please"); }),
           "Ben's own message didn't come back in the room's order");
     Q_EMIT benChat->anchorClicked(QUrl("prim:/World/Lamp"));
     CHECK(selected == QStringList{"/World/Lamp"}, "the prim link selected %s", qPrintable(selected.join(",")));
+    CHECK(say->toPlainText().isEmpty(), "the message stayed after it was sent");
+
+    // Over lines: Shift+Enter starts a new one, and the box grows; Enter sends it all.
+    const int oneLine = say->height();
+    QTest::keyClicks(say, "line one");
+    QTest::keyClick(say, Qt::Key_Return, Qt::ShiftModifier);
+    QTest::keyClicks(say, "line two");
+    CHECK(say->toPlainText() == "line one\nline two", "Shift+Enter made '%s'", qPrintable(say->toPlainText()));
+    CHECK(say->height() > oneLine, "the message didn't grow with its second line (%d, was %d)", say->height(), oneLine);
+    QTest::keyClick(say, Qt::Key_Return);
+    CHECK(QTest::qWaitFor([&] {
+              const QList<PeersController::ChatLine> lines = anna->chat(room);
+              return !lines.isEmpty() && lines.last().text == "line one\nline two";
+          }),
+          "the message over two lines didn't arrive whole");
+    CHECK(annaChat->toHtml().contains("line one") && say->toPlainText().isEmpty() && say->height() == oneLine,
+          "after sending, the message is '%s' and %d tall (was %d)", qPrintable(say->toPlainText()), say->height(),
+          oneLine);
+
+    // The emoji and Send buttons are square, as tall as the message's one line.
+    auto* emojiButton = benPanel.findChild<QToolButton*>("peersEmoji");
+    auto* sendButton = benPanel.findChild<QToolButton*>("peersSend");
+    CHECK(emojiButton && sendButton && emojiButton->width() == emojiButton->height() &&
+              sendButton->width() == sendButton->height() && sendButton->height() == oneLine &&
+              !sendButton->icon().isNull() && sendButton->text().isEmpty(),
+          "the buttons beside the message aren't square icons");
+
+    // Anna renames the room: Ben's panel says so, and someone looking finds it by its new name.
+    auto dora = makeController("Dora", folder.path());
+    dora->setPanelShown(true);
+    CHECK(!ben->peers()->rooms().first()->rename("Mine now"), "a member renamed the host's room");
+    CHECK(!room->rename("   "), "a room was renamed to nothing");
+    CHECK(room->rename("  Rushes   Wednesday "), "Anna couldn't rename the room");
+    CHECK(room->name() == "Rushes Wednesday", "the new name is '%s'", qPrintable(room->name()));
+    CHECK(QTest::qWaitFor([&] { return benRoom->name() == "Rushes Wednesday"; }), "Ben's room is still '%s'",
+          qPrintable(benRoom->name()));
+    QLabel* benTitle = benPanel.findChild<QLabel*>("peersRoomTitle");
+    CHECK(benTitle && benTitle->text().contains("Rushes Wednesday"), "Ben's panel title is '%s'",
+          benTitle ? qPrintable(benTitle->text()) : "");
+    CHECK(QTest::qWaitFor([&] { return benChat->toPlainText().contains("The room is now called Rushes Wednesday"); }),
+          "Ben's chat doesn't say the room was renamed");
+    CHECK(QTest::qWaitFor([&] {
+              const QList<FoundRoom> rooms = dora->peers()->foundRooms();
+              return std::any_of(rooms.begin(), rooms.end(),
+                                 [](const FoundRoom& f) { return f.announcement.name == "Rushes Wednesday"; });
+          }),
+          "Dora doesn't find the room by its new name");
 
     // A late joiner gets the chat so far.
     auto carl = makeController("Carl", folder.path());
@@ -164,12 +219,13 @@ USDCC_TEST(peers_panel_emoji) {
     CHECK(PeersSidePanel::emojiChoices().size() >= 32 && PeersSidePanel::emojiChoices().contains(QStringLiteral("👍")),
           "the emoji on offer are missing");
 
-    QLineEdit* say = panel.findChild<QLineEdit*>("peersSay");
-    say->setText("great work ");
+    QPlainTextEdit* say = panel.findChild<QPlainTextEdit*>("peersSay");
+    say->setPlainText("great work ");
+    say->moveCursor(QTextCursor::End);
     panel.insertEmoji(QStringLiteral("👍"));
-    say->setCursorPosition(0);
+    say->moveCursor(QTextCursor::Start);
     panel.insertEmoji(QStringLiteral("🎉"));
-    CHECK(say->text() == QStringLiteral("🎉great work 👍"), "the message is '%s'", qPrintable(say->text()));
+    CHECK(say->toPlainText() == QStringLiteral("🎉great work 👍"), "the message is '%s'", qPrintable(say->toPlainText()));
     panel.insertEmoji(QStringLiteral("👍"));
     CHECK(PeersSidePanel::recentEmoji() == QStringList({QStringLiteral("👍"), QStringLiteral("🎉")}),
           "the recent emoji are %s", qPrintable(PeersSidePanel::recentEmoji().join(" ")));
@@ -227,8 +283,8 @@ USDCC_TEST(peers_panel_emoji) {
             break;
         }
     }
-    CHECK(say->text() == QStringLiteral("🚀") && PeersSidePanel::recentEmoji().value(0) == QStringLiteral("🚀"),
-          "clicking an emoji in the menu put in '%s'", qPrintable(say->text()));
+    CHECK(say->toPlainText() == QStringLiteral("🚀") && PeersSidePanel::recentEmoji().value(0) == QStringLiteral("🚀"),
+          "clicking an emoji in the menu put in '%s'", qPrintable(say->toPlainText()));
 }
 
 // The host closing its own room (a broadcast's Stop) says so where it closed it, so the
@@ -281,4 +337,242 @@ USDCC_TEST(peers_host_closing_its_room_has_no_toast) {
     CHECK(titles(annaWindow).isEmpty(), "the host is told it closed its own room: %s", qPrintable(titles(annaWindow).join(" | ")));
     CHECK(titles(benWindow).size() == 1 && titles(benWindow).front().startsWith(QStringLiteral("Left ")),
           "the member isn't told the room ended: %s", qPrintable(titles(benWindow).join(" | ")));
+}
+
+namespace {
+
+// Anna hosts; Ben and Carl join by link. Waits until everyone sees everyone.
+struct ThreeInARoom {
+    QTemporaryDir folder;
+    std::unique_ptr<PeersController> anna = makeController("Anna", folder.path());
+    std::unique_ptr<PeersController> ben = makeController("Ben", folder.path());
+    std::unique_ptr<PeersController> carl = makeController("Carl", folder.path());
+    Room* annaRoom = nullptr;
+    Room* benRoom = nullptr;
+    Room* carlRoom = nullptr;
+
+    bool start() {
+        QString error;
+        annaRoom = anna->host({"Review", Admission::Invited, {}, false}, &error);
+        if (!annaRoom) {
+            return false;
+        }
+        benRoom = ben->joinLinkOrAddress(annaRoom->link(), {}, &error);
+        carlRoom = carl->joinLinkOrAddress(annaRoom->link(), {}, &error);
+        return benRoom && carlRoom && QTest::qWaitFor([&] {
+                   return benRoom->peers().size() == 3 && carlRoom->peers().size() == 3 && annaRoom->peers().size() == 3;
+               });
+    }
+    Peer at(Room* room, Room* whose) const { return room->peer(whose->me().id); }
+};
+
+bool hasText(const QList<PeersController::ChatLine>& lines, const QString& text) {
+    return std::any_of(lines.begin(), lines.end(), [&](const auto& line) { return line.text == text; });
+}
+
+}  // namespace
+
+// Private chats (docs/PEERS.md §10.1): a tab each, sealed so only the two can read them.
+USDCC_TEST(peers_private_chat) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    ThreeInARoom room;
+    CHECK(room.start(), "the three didn't get into the room");
+    if (!room.benRoom) {
+        return;
+    }
+    PeersSidePanel benPanel(room.ben.get());
+    PeersSidePanel carlPanel(room.carl.get());
+    benPanel.show();
+    carlPanel.show();
+    benPanel.showRoom(room.benRoom);
+    carlPanel.showRoom(room.carlRoom);
+    auto* benTabs = benPanel.findChild<QTabBar*>("peersChatTabs");
+    auto* carlTabs = carlPanel.findChild<QTabBar*>("peersChatTabs");
+    CHECK(benTabs && benTabs->isHidden(), "the tabs show with no private conversation");
+    CHECK(!room.ben->canMessage(room.benRoom, room.benRoom->me()), "Ben can message himself");
+
+    // Ben opens one with Carl and writes.
+    const Peer carlAtBen = room.at(room.benRoom, room.carlRoom);
+    CHECK(room.ben->canMessage(room.benRoom, carlAtBen), "Ben can't message Carl");
+    benPanel.openConversation(carlAtBen);
+    CHECK(benTabs->isVisible() && benTabs->count() == 2 && benPanel.currentConversation() == carlAtBen.id,
+          "Ben's panel didn't open Carl's tab");
+    auto* benSay = benPanel.findChild<QPlainTextEdit*>("peersSay");
+    benSay->setPlainText("between us");
+    QTest::keyClick(benSay, Qt::Key_Return);
+    CHECK(benSay->toPlainText().isEmpty() && hasText(room.ben->chat(room.benRoom, carlAtBen.id), "between us"),
+          "Ben's own private message isn't in his tab");
+
+    // Carl gets it in a tab of its own, unread; the room and Anna never see it.
+    const PeerId benId = room.benRoom->me().id;
+    CHECK(QTest::qWaitFor([&] { return hasText(room.carl->chat(room.carlRoom, benId), "between us"); }),
+          "Carl didn't get it");
+    CHECK(room.carl->unread(room.carlRoom, benId) == 1, "Carl's unread count is %d",
+          room.carl->unread(room.carlRoom, benId));
+    CHECK(QTest::qWaitFor([&] { return carlTabs->count() == 2 && carlTabs->tabText(1) == "Ben (1)"; }),
+          "Carl's tab says '%s'", qPrintable(carlTabs->tabText(1)));
+    QTest::qWait(200);
+    CHECK(!hasText(room.carl->chat(room.carlRoom), "You host Review"), "the host's own notice reached a joiner");
+    CHECK(!hasText(room.carl->chat(room.carlRoom), "between us") && !hasText(room.anna->chat(room.annaRoom), "between us") &&
+              room.anna->conversations(room.annaRoom).isEmpty(),
+          "the private message showed outside the conversation");
+
+    // Carl reads it, and answers.
+    carlPanel.showConversation(room.carlRoom, benId);
+    CHECK(room.carl->unread(room.carlRoom, benId) == 0 && carlTabs->tabText(1) == "Ben", "reading it left it unread");
+    QTextBrowser* carlChat = carlPanel.findChild<QTextBrowser*>("peersChat");
+    CHECK(carlChat->toPlainText().contains("between us"), "Carl's chat shows: %s", qPrintable(carlChat->toPlainText()));
+    CHECK(room.carl->sayTo(room.carlRoom, benId, "got it"), "Carl couldn't answer");
+    CHECK(QTest::qWaitFor([&] { return hasText(room.ben->chat(room.benRoom, carlAtBen.id), "got it"); }),
+          "Ben didn't get the answer");
+    QTextBrowser* benChat = benPanel.findChild<QTextBrowser*>("peersChat");
+    CHECK(benChat->toPlainText().contains("got it"), "Ben's open tab doesn't show the answer");
+
+    // Ben leaves: Carl's tab stays, says so, and can't be written in.
+    room.benRoom->close();
+    CHECK(QTest::qWaitFor([&] { return hasText(room.carl->chat(room.carlRoom, benId), "Ben left the room"); }),
+          "Carl's conversation doesn't say Ben left");
+    CHECK(QTest::qWaitFor([&] { return !carlPanel.findChild<QPlainTextEdit*>("peersSay")->isEnabled(); }),
+          "Carl can still write to Ben");
+    CHECK(!room.carl->sayTo(room.carlRoom, benId, "hello?"), "a private message went to someone who left");
+    // Closing the tab goes back to the room's chat.
+    Q_EMIT carlTabs->tabCloseRequested(1);
+    CHECK(carlPanel.currentConversation().isEmpty() && carlTabs->isHidden(), "closing the tab didn't go back to the room");
+}
+
+// Log messages shared from the Log panel (docs/PEERS.md §10.1): to everyone, or privately.
+USDCC_TEST(peers_share_log) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    ThreeInARoom room;
+    CHECK(room.start(), "the three didn't get into the room");
+    if (!room.benRoom) {
+        return;
+    }
+    PeersSidePanel benPanel(room.ben.get());
+    benPanel.show();
+    benPanel.showRoom(room.benRoom);
+    const QDateTime when = QDateTime::currentDateTime();
+    const QList<PeersController::SharedLogRecord> three{
+        {when, "info", "usdcc", "usdcc.stage", "Opened shot.usda", {}},
+        {when, "warning", "usd", "TF_DIAGNOSTIC_WARNING_TYPE", "Unresolved reference </Lamp>", "at layer.usda:12"},
+        {when, "error", "qt", "default", "<b>not html</b>", {}}};
+
+    // To everyone: in the room's chat, at each end, as the Log panel shows them.
+    CHECK(room.anna->shareLog(room.annaRoom, {}, three), "Anna couldn't share");
+    const auto lastRecords = [](const QList<PeersController::ChatLine>& lines) {
+        return lines.isEmpty() ? QList<PeersController::SharedLogRecord>() : lines.last().records;
+    };
+    CHECK(QTest::qWaitFor([&] { return lastRecords(room.ben->chat(room.benRoom)).size() == 3; }), "Ben didn't get them");
+    const auto got = lastRecords(room.ben->chat(room.benRoom));
+    CHECK(got.size() == 3 && got[1].level == "warning" && got[1].details == "at layer.usda:12" &&
+              got[2].text == "<b>not html</b>",
+          "the records changed on the way");
+    QTextBrowser* benChat = benPanel.findChild<QTextBrowser*>("peersChat");
+    const QString shown = benChat->toPlainText();
+    CHECK(shown.contains("shared 3 log messages") && shown.contains("WARNING") && shown.contains("Unresolved reference </Lamp>") &&
+              shown.contains("<b>not html</b>") && shown.contains("at layer.usda:12"),
+          "Ben's chat shows: %s", qPrintable(shown));
+    CHECK(QTest::qWaitFor([&] { return lastRecords(room.carl->chat(room.carlRoom)).size() == 3; }), "Carl didn't get them");
+
+    // Privately to Ben: only in their conversation.
+    const PeerId benId = room.benRoom->me().id;
+    const PeerId annaId = room.annaRoom->me().id;
+    CHECK(room.anna->shareLog(room.annaRoom, benId, three.mid(1, 1)), "Anna couldn't share with Ben");
+    CHECK(QTest::qWaitFor([&] { return lastRecords(room.ben->chat(room.benRoom, annaId)).size() == 1; }),
+          "Ben didn't get the private share");
+    CHECK(lastRecords(room.anna->chat(room.annaRoom, benId)).size() == 1, "Anna's own private share isn't shown to her");
+    QTest::qWait(200);
+    CHECK(room.carl->conversations(room.carlRoom).isEmpty() && lastRecords(room.carl->chat(room.carlRoom)).size() == 3,
+          "Carl saw the private share");
+
+    // The menu: each room, with everyone and each person; more than 50 says what goes.
+    QList<PeersController::SharedLogRecord> many;
+    for (int i = 0; i < 60; ++i) {
+        many.append({when, "info", "usdcc", "test", QStringLiteral("line %1").arg(i), {}});
+    }
+    QMenu menu;
+    room.anna->fillShareMenu(&menu, many);
+    QStringList texts;
+    for (QAction* action : menu.actions()) {
+        texts.append(action->text());
+        if (action->menu()) {
+            for (QAction* inner : action->menu()->actions()) {
+                texts.append("> " + inner->text());
+            }
+        }
+    }
+    CHECK(texts.contains("Shares the first 50 of 60") && texts.contains("Review") && texts.contains("> Everyone") &&
+              texts.contains("> Ben (private)") && texts.contains("> Carl (private)") && !texts.contains("> Anna (private)"),
+          "the menu is %s", qPrintable(texts.join(" | ")));
+    CHECK(room.anna->shareLog(room.annaRoom, {}, many), "Anna couldn't share 60");
+    CHECK(QTest::qWaitFor([&] { return lastRecords(room.ben->chat(room.benRoom)).size() == 50; }),
+          "more than 50 went, or none");
+    QTemporaryDir otherFolder;
+    auto alone = makeController("Dora", otherFolder.path());
+    QMenu empty;
+    alone->fillShareMenu(&empty, three);
+    CHECK(empty.actions().size() == 1 && !empty.actions()[0]->isEnabled(), "with no room, the menu offers something");
+}
+
+// Presence (docs/PEERS.md §10.1): active, away, do not disturb, and who is typing.
+USDCC_TEST(peers_presence_and_typing) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    ThreeInARoom room;
+    CHECK(room.start(), "the three didn't get into the room");
+    if (!room.benRoom) {
+        return;
+    }
+    PeersSidePanel annaPanel(room.anna.get());
+    annaPanel.show();
+    annaPanel.showRoom(room.annaRoom);
+    const Peer benAtAnna = room.at(room.annaRoom, room.benRoom);
+    CHECK(room.anna->statusOf(room.annaRoom, benAtAnna) == PeersController::Status::Active, "Ben doesn't start active");
+
+    room.ben->setDoNotDisturb(true);
+    CHECK(room.ben->status() == PeersController::Status::DoNotDisturb, "Ben's own status isn't do not disturb");
+    CHECK(QTest::qWaitFor([&] {
+              return room.anna->statusOf(room.annaRoom, benAtAnna) == PeersController::Status::DoNotDisturb;
+          }),
+          "Anna doesn't see Ben's do not disturb");
+    QListWidget* people = annaPanel.findChild<QListWidget*>("peersPeople");
+    bool tipSays = false;
+    for (int i = 0; i < people->count(); ++i) {
+        tipSays = tipSays || (people->item(i)->text().startsWith("Ben") &&
+                              people->item(i)->toolTip().startsWith("do not disturb"));
+    }
+    CHECK(tipSays, "the people list doesn't say Ben doesn't want to be disturbed");
+    room.ben->setDoNotDisturb(false);
+    room.carl->setAway(true);
+    const Peer carlAtAnna = room.at(room.annaRoom, room.carlRoom);
+    CHECK(QTest::qWaitFor([&] {
+              return room.anna->statusOf(room.annaRoom, carlAtAnna) == PeersController::Status::Away &&
+                     room.anna->statusOf(room.annaRoom, benAtAnna) == PeersController::Status::Active;
+          }),
+          "Anna doesn't see Carl away and Ben back");
+
+    // Typing in the room: Anna's panel says so, and stops saying it.
+    QLabel* typing = annaPanel.findChild<QLabel*>("peersTyping");
+    room.ben->typing(room.benRoom, {});
+    CHECK(QTest::qWaitFor([&] { return typing->text() == QStringLiteral("Ben is typing…"); }), "Anna's panel says '%s'",
+          qPrintable(typing->text()));
+    room.ben->stoppedTyping(room.benRoom, {});
+    CHECK(QTest::qWaitFor([&] { return typing->text().isEmpty(); }), "Ben stopped, but Anna still sees him typing");
+    QTest::qWait(2100);  // "Typing" is said at most every 2 s
+    room.ben->typing(room.benRoom, {});
+    CHECK(QTest::qWaitFor([&] { return !typing->text().isEmpty(); }), "Ben typing again didn't show");
+    CHECK(QTest::qWaitFor([&] { return typing->text().isEmpty(); }, 8000), "typing didn't clear by itself");
+
+    // Typing privately: only the one it is for sees it.
+    const PeerId carlId = room.carlRoom->me().id;
+    const PeerId benId = room.benRoom->me().id;
+    room.ben->typing(room.benRoom, carlId);
+    CHECK(QTest::qWaitFor([&] { return room.carl->typingIn(room.carlRoom, benId).size() == 1; }),
+          "Carl doesn't see Ben typing to him");
+    QTest::qWait(200);
+    CHECK(room.anna->typingIn(room.annaRoom, {}).isEmpty() && room.anna->typingIn(room.annaRoom, benId).isEmpty() &&
+              room.carl->typingIn(room.carlRoom, {}).isEmpty(),
+          "Ben's private typing showed elsewhere");
 }

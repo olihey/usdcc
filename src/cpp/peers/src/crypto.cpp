@@ -96,6 +96,62 @@ std::optional<QByteArray> Sealer::open(const QByteArray& envelope) {
     return plain;
 }
 
+namespace {
+
+bool boxKeys(const Identity& mine, const QByteArray& theirPublicKey, QByteArray* theirs, QByteArray* secret) {
+    const QByteArray mySecret = mine.secretKey();
+    if (theirPublicKey.size() != int(crypto_sign_PUBLICKEYBYTES) || mySecret.size() != int(crypto_sign_SECRETKEYBYTES)) {
+        return false;
+    }
+    theirs->resize(crypto_box_PUBLICKEYBYTES);
+    secret->resize(crypto_box_SECRETKEYBYTES);
+    return crypto_sign_ed25519_pk_to_curve25519(bytes(*theirs), bytes(theirPublicKey)) == 0 &&
+           crypto_sign_ed25519_sk_to_curve25519(bytes(*secret), bytes(mySecret)) == 0;
+}
+
+}  // namespace
+
+QByteArray sealForPeer(const Identity& mine, const QByteArray& theirPublicKey, const QByteArray& plain) {
+    ensureSodium();
+    QByteArray theirs;
+    QByteArray secret;
+    if (!boxKeys(mine, theirPublicKey, &theirs, &secret)) {
+        return {};
+    }
+    QByteArray result = randomBytes(crypto_box_NONCEBYTES);
+    QByteArray cipher(plain.size() + int(crypto_box_MACBYTES), Qt::Uninitialized);
+    if (crypto_box_easy(bytes(cipher), bytes(plain), quint64(plain.size()), bytes(result), bytes(theirs),
+                        bytes(secret)) != 0) {
+        sodium_memzero(secret.data(), size_t(secret.size()));
+        return {};
+    }
+    sodium_memzero(secret.data(), size_t(secret.size()));
+    return result + cipher;
+}
+
+std::optional<QByteArray> openFromPeer(const Identity& mine, const QByteArray& theirPublicKey,
+                                       const QByteArray& sealed) {
+    ensureSodium();
+    if (sealed.size() < int(crypto_box_NONCEBYTES + crypto_box_MACBYTES)) {
+        return std::nullopt;
+    }
+    QByteArray theirs;
+    QByteArray secret;
+    if (!boxKeys(mine, theirPublicKey, &theirs, &secret)) {
+        return std::nullopt;
+    }
+    const QByteArray nonce = sealed.left(crypto_box_NONCEBYTES);
+    const QByteArray cipher = sealed.mid(crypto_box_NONCEBYTES);
+    QByteArray plain(cipher.size() - int(crypto_box_MACBYTES), Qt::Uninitialized);
+    const bool ok = crypto_box_open_easy(bytes(plain), bytes(cipher), quint64(cipher.size()), bytes(nonce),
+                                         bytes(theirs), bytes(secret)) == 0;
+    sodium_memzero(secret.data(), size_t(secret.size()));
+    if (!ok) {
+        return std::nullopt;
+    }
+    return plain;
+}
+
 // [2][epoch, 4 bytes big-endian][nonce][signature][ciphertext]; the signature covers
 // the epoch, the nonce and the ciphertext.
 QByteArray sealForRoom(const QByteArray& roomKey, quint32 epoch, const QByteArray& plain, const Identity& host) {

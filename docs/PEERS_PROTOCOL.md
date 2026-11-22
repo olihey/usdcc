@@ -68,13 +68,15 @@ All on the channel `room`. Peers first:
 6. **Host → member:** `welcome` `{protocol, id, name, host, seq, peers, channels, admission,
    roomKey?, resumed?, caughtUp?}`. `id` is the member's own, `host` the host's, `seq` the
    number of the last ordered message, `peers` everyone as objects `{id, name, kind, fingerprint,
-   instance, color, app}`, and `channels` `[{name, delivery}]` the member reaches. `roomKey` is
+   instance, color, app, key?}`, and `channels` `[{name, delivery}]` the member reaches. `roomKey` is
    `{epoch, key}`, for peers only. Then, unless the member caught up (§6), the snapshots: `state`
    for each map, `peers.state` for each per-peer map, and a `snapshot` on each channel that has
    one.
 
 A peer's id is `<fingerprint>-<instance>`. The fingerprint is 32 lower-case base32 characters of
-a 20-byte BLAKE2b hash of its Ed25519 public key.
+a 20-byte BLAKE2b hash of its Ed25519 public key. `key` is that public key, base64, so members can
+seal messages for each other (§5); a member keeps it only if the fingerprint is of it. A guest
+has none, nor does a peer whose host is older.
 
 **Guests on a plain link.** `hello` `{protocol, secret, name}` with no `eph`, sent plain or as
 text. With the guests' secret it gets a plain `welcome` and plain frames from then on; anything
@@ -110,6 +112,13 @@ The room's member limit and guest limit apply in every case.
   recipient.
 - **Ordered** (the rest): numbered `seq` and sent to everyone, the sender included.
 
+**Sealed for one member** (`Channel::sendPrivate()`, PEERS.md §6.2): a direct message of type
+`sealed`, body `{box}`. `box` is base64 of `[nonce 24][crypto_box_easy]` between the sender's and
+the recipient's Ed25519 keys turned into X25519 ones. Inside is JSON `{id, channel, to, type,
+body}`. The recipient opens it with the key of `from`, which the host sets, and drops it unless
+`channel` and `to` are where it came and `id` is new to it. It then arrives as `type` with `body`.
+The host passes it on like any direct message and can't read it.
+
 Guests get only channels the host opened to guests. A message the host turns down comes back as
 `refused` `{channel, type, reason}` on `room`.
 
@@ -122,6 +131,7 @@ key}`, `peer.set` `{map, value?}`.
 |---|---|---|
 | `joined` | A peer object | Ordered |
 | `left` | `{id, reason}` | Ordered |
+| `renamed` | `{name}`: the room's new name (`Room::rename()`), trimmed, at most 64 characters | Ordered |
 | `changed` | `{map, key, value?, by}` (no value: removed) | Ordered, peers only |
 | `peer.changed` | `{map, peer, value?}` | Latest only |
 | `state` | `{map, items}` | To one member, after `welcome` |

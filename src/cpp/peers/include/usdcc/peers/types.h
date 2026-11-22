@@ -35,6 +35,10 @@ struct USDCC_PEERS_API Peer {
     QString instance;     // Which running instance of that key
     QString color;        // "#rrggbb"; empty for none
     QString app;          // What it is: "usdcc 0.3.0", a program's own name
+    // Its Ed25519 public key, which the host passes on (its fingerprint is of this). Empty
+    // for a guest, and for a peer whose host is older. Needed to send it something
+    // privately (Channel::sendPrivate()).
+    QByteArray publicKey;
 
     bool isValid() const { return !id.isEmpty(); }
     bool operator==(const Peer&) const = default;
@@ -79,6 +83,9 @@ struct USDCC_PEERS_API Message {
     qint64 seq = 0;   // The host's number for an ordered message to everyone; 0 for the others
     QJsonObject body;
     QByteArray bytes; // A body that isn't JSON (a picture), sent raw after the header
+    // Sent with Channel::sendPrivate() and opened here: only its sender and this member
+    // could read it, not the host that passed it on.
+    bool sealed = false;
 };
 
 // A channel's name (PEERS.md §7): letters, digits and `.`, `_`, `-`, `/`, at most

@@ -148,6 +148,11 @@ struct Room::Impl {
     void onHostData(const QByteArray& data, bool text);
     void onChallenge(const Message& message);
     void onHostFrame(const Message& message);
+    // Hands a message for this member to its channel; a sealed one opened first.
+    void deliver(Channel* channel, Message message);
+    bool sendPrivate(Channel* channel, const QString& type, const QJsonObject& body, const PeerId& to);
+    QSet<QString> openedIds;  // Sealed messages already opened: a host can't replay one
+    std::deque<QString> openedOrder;
     void onWelcome(const QJsonObject& body);
     void onDisconnected();
     void joinerTick();

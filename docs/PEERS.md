@@ -235,6 +235,22 @@ viewport ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)).
   itself arrives unprotected there, so encrypting after it would only stop someone listening,
   not someone interfering (§16 question 11).
 
+### 6.2 Private messages
+
+A message for one member alone can be **sealed for its key** (`Channel::sendPrivate()`): the
+host passes it on but can't read it, so private chats (§10.1) aren't readable by whoever hosts
+the room, nor in its logs.
+
+- **The keys come from the host,** in each peer object (`key`). A member keeps one only if the
+  peer's fingerprint is of it.
+- **A box between the two keys** (libsodium's `crypto_box`, with the Ed25519 identities turned
+  into X25519 ones). It also proves which of the two sealed it. What is inside names the channel,
+  the recipient and a fresh id, so the host can't hand it on elsewhere or twice.
+- **The limit:** this protects against a host that reads along, not one that lies about who is
+  who. A host could make up a peer with a key of its own under someone's name. The fingerprint in
+  each person's tooltip is how two people check each other outside usdcc.
+- **Guests and older peers** have no key, so they can't be messaged privately.
+
 ## 7. The building blocks
 
 Everything is addressed by a **channel name**. Names without a dot are usdcc's own (`chat`,
@@ -490,6 +506,11 @@ ordered.
 - **History** lasts as long as the room, in memory. A joiner gets the recent messages. It isn't
   saved, and isn't part of a session.
 - **The status bar** shows the rooms and how many are in them.
+- **Private chats** between two people in a room, sealed so only they can read them (§6.2): a tab
+  over the room's chat for each, with an unread count.
+- **Presence:** whether someone is around (active, away, do not disturb) beside their name, and
+  "Anna is typing…" under the chat.
+- **Log messages** shared from the Log panel, to the room or to one person.
 
 ### 10.2 Notifications
 
@@ -762,15 +783,39 @@ path as a link, and a late joiner gets the chat so far.
 - **The Peers panel** (§10.1): your name, **Host Room…** and **Join…** (an invite link, or an
   address that asks the host); your rooms, this machine's and this network's; the selected
   room's people with their color and stage (`presence`), and its chat. A room's menu: **Copy
-  Invite Link**, **Mute**, **Leave Room** / **Close Room**. A person's: **Mute**, and on the
+  Invite Link** and **Rename Room…** on the host (everyone in it sees the new name, and it is
+  announced by it), **Mute**, **Leave Room** / **Close Room**. A person's: **Mute**, and on the
   host **Always Allow** and **Remove**.
 - **Chat** (§10.1): channel `chat`, ordered; history in memory, the last 1,000 lines a room; a
   joiner gets the last 200 as the channel's snapshot. A prim path in a message is a link that
   selects the prim in the current stage, if it has it (the message doesn't say which stage).
-  Text is never HTML. A 🙂 button beside the message offers 40 emoji, the last 8 used first
-  (kept in `usdcc.ini`); Windows' own picker (Win + .) works in the message too.
+  Text is never HTML. Messages are grouped: the name and time on a line, what was said indented
+  below, and what the same person says within five minutes under the same name; what the room
+  itself says (joins, renames) is in grey and ends a group. A message may span lines: Enter sends it, Shift+Enter starts a new line,
+  and the box grows to six lines before it scrolls. Beside it, two square buttons: a 🙂 that
+  offers 40 emoji, the last 8 used first (kept in `usdcc.ini`), and Send, a paper plane.
+  Windows' own picker (Win + .) works in the message too.
+- **Private chats** (§6.2): **Message Anna** in a person's menu, or a double-click on them,
+  opens a tab over the chat beside **Everyone**. A message there goes as `say` on `chat` through
+  `sendPrivate()`, so no one else gets it, the host included. It's shown here at once, since nothing
+  comes back. The tab shows the person's dot and an unread count. It closes with its ×, stays
+  once they leave (saying so) but can't be written in, and is kept in memory only, like the
+  room's chat. Guests and peers without a key can't be messaged ("needs a newer usdcc").
+- **Share from the Log panel:** select messages, right-click, **Share ▸**, then a room and
+  **Everyone** or **Anna (private)**. Type `log` on `chat`, body `{records: [{time, level,
+  source, category, text, details?}]}`, at most 50 records and 64 KB; more and the menu says
+  which go. The chat shows them under the sender's name, one line each as the Log panel does
+  (time, level in its color, category, text), the details below. An older peer ignores `log`.
+- **Presence:** `presence` also says `status`: `active`, `away` (no input in usdcc for five
+  minutes, or the window minimized) or `dnd`. Do not disturb is chosen from the menu on **You:**
+  and kept in `usdcc.ini`; it silences chat toasts, while join requests still ask. A small mark on
+  each person's dot says which: green, amber, red. While someone writes, channel `typing` (latest
+  only) says `typing` at most every 2 s, and `stopped` on sending. It goes to the room for the
+  room's chat, and to the one person for a private one, so no one else learns who writes to whom.
+  "Anna is typing…" shows under the chat until 5 s after the last.
 - **Toasts:** a chat message while the panel is closed (a setting; muted rooms and people
-  excepted), "Anna wants to join" with **Allow**, **Always Allow Anna** and **Deny**, and a room
+  excepted, and none while you don't want to be disturbed; a private one says so, and opens its
+  tab), "Anna wants to join" with **Allow**, **Always Allow Anna** and **Deny**, and a room
   that ends or refuses.
 - **The status bar** says the rooms and how many are in them, and opens the panel.
 - **Settings > Peers** (§11): name, color, looking on the network, port, asking before a join by
