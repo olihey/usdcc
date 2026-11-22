@@ -531,3 +531,32 @@ USDCC_TEST(viewport_draw_panel) {
     }
     dialog->close();
 }
+
+// The resolution gate and safe frames as overrides (docs/VIEWPORT_CAMERA.md §7).
+USDCC_TEST(viewport_gate_overrides) {
+    ViewportDisplayOverrides overrides;
+    overrides.resolution = "1920x1080";
+    overrides.gateMaskOpacity = 0.4;
+    overrides.safeAction = true;
+    overrides.safeTitlePercent = 80.0;
+    overrides.safeAspect = 2.39;
+    const QJsonObject json = overrides.toJson();
+    CHECK(json.value("resolution").toString() == "1920x1080" && json.value("safeAction").toBool() &&
+              json.value("safeAspect").toDouble() == 2.39,
+          "saved by name");
+    CHECK(ViewportDisplayOverrides::fromJson(json) == overrides, "round trip");
+    CHECK(ViewportDisplayOverrides::fromJson(QJsonObject{{"resolution", "big"}, {"gateMaskOpacity", 2.0},
+                                                         {"safeActionPercent", 0.0}})
+              .isEmpty(),
+          "a resolution, opacity or percentage that doesn't fit is ignored");
+    CHECK(ViewportDisplayOverrides::fromJson(QJsonObject{{"resolution", "renderSettings"}}).resolution == "renderSettings",
+          "Render Settings is one");
+    usdcc::usd::HydraViewportWindow::DisplayOptions defaults;
+    CHECK(defaults.resolution == "fill" && !defaults.safeAction && defaults.safeActionPercent == 93.0 &&
+              defaults.safeTitlePercent == 90.0,
+          "Fill Viewport and no safe frames by default, SMPTE's percentages");
+    const auto applied = overrides.applyTo(defaults);
+    CHECK(applied.resolution == "1920x1080" && applied.gateMaskOpacity == 0.4 && applied.safeAction &&
+              applied.safeTitlePercent == 80.0 && !applied.safeTitle,
+          "applied over the defaults");
+}
