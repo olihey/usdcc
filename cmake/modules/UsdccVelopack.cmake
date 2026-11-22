@@ -9,7 +9,7 @@
 # launcher (src/cpp/launcher), a small Win32 program, links the static library
 # and is itself built with the static runtime; the app, on the runtime DLL as
 # all of usdcc is, links the DLL, which keeps its runtime to itself. The zip's
-# velopack_libc_win_x64_msvc.dll is velopack_libc.dll to its import library, so
+# velopack_libc_win_<x64|arm64>_msvc.dll is velopack_libc.dll to its import library, so
 # it is unpacked under that name and copied beside usdcc.exe as it.
 #
 # Windows only: on Linux the release stays a tar.xz (docs/UPDATES.md §2).
@@ -38,11 +38,17 @@ set(USDCC_VELOPACK_LICENSE_URL
     "https://raw.githubusercontent.com/velopack/velopack/${USDCC_VELOPACK_VERSION}/LICENSE")
 set(USDCC_VELOPACK_LICENSE_SHA256 "91845db83551c877ebbb1118e0fb92e4e527290d23b995c55dcd438b3293943f")
 
+# The zip has x86, x64 and ARM64 libraries: the target's (MSVC's architecture id).
+if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(_usdcc_velopack_arch "arm64")
+else()
+    set(_usdcc_velopack_arch "x64")
+endif()
 set(_usdcc_velopack_dir "${CMAKE_BINARY_DIR}/velopack")
 set(_usdcc_velopack_stamp "${_usdcc_velopack_dir}/VERSION")
-set(_usdcc_velopack_lib "${_usdcc_velopack_dir}/lib-static/velopack_libc_win_x64_msvc.lib")
+set(_usdcc_velopack_lib "${_usdcc_velopack_dir}/lib-static/velopack_libc_win_${_usdcc_velopack_arch}_msvc.lib")
 set(_usdcc_velopack_dll "${_usdcc_velopack_dir}/lib/velopack_libc.dll")
-set(_usdcc_velopack_implib "${_usdcc_velopack_dir}/lib/velopack_libc_win_x64_msvc.dll.lib")
+set(_usdcc_velopack_implib "${_usdcc_velopack_dir}/lib/velopack_libc_win_${_usdcc_velopack_arch}_msvc.dll.lib")
 set(USDCC_VELOPACK_FOUND FALSE)
 
 if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND USDCC_VELOPACK)
@@ -52,7 +58,7 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND USDCC_VELOPACK)
         string(STRIP "${_usdcc_velopack_have}" _usdcc_velopack_have)
     endif()
     if(NOT _usdcc_velopack_have STREQUAL USDCC_VELOPACK_VERSION OR NOT EXISTS "${_usdcc_velopack_lib}"
-       OR NOT EXISTS "${_usdcc_velopack_dll}")
+       OR NOT EXISTS "${_usdcc_velopack_implib}" OR NOT EXISTS "${_usdcc_velopack_dll}")
         message(STATUS "Downloading Velopack ${USDCC_VELOPACK_VERSION}")
         file(REMOVE_RECURSE "${_usdcc_velopack_dir}")
         set(_usdcc_velopack_archive "${CMAKE_BINARY_DIR}/velopack_libc_${USDCC_VELOPACK_VERSION}.zip")
@@ -70,12 +76,13 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND USDCC_VELOPACK)
             set(_usdcc_velopack_unpacked "${CMAKE_BINARY_DIR}/velopack-unpacked")
             file(REMOVE_RECURSE "${_usdcc_velopack_unpacked}")
             file(ARCHIVE_EXTRACT INPUT "${_usdcc_velopack_archive}" DESTINATION "${_usdcc_velopack_unpacked}"
-                 PATTERNS "include/*" "lib-static/velopack_libc_win_x64_msvc.lib"
-                          "lib/velopack_libc_win_x64_msvc.dll" "lib/velopack_libc_win_x64_msvc.dll.lib")
+                 PATTERNS "include/*" "lib-static/velopack_libc_win_${_usdcc_velopack_arch}_msvc.lib"
+                          "lib/velopack_libc_win_${_usdcc_velopack_arch}_msvc.dll"
+                          "lib/velopack_libc_win_${_usdcc_velopack_arch}_msvc.dll.lib")
             foreach(_usdcc_velopack_part include lib lib-static)
                 file(COPY "${_usdcc_velopack_unpacked}/${_usdcc_velopack_part}" DESTINATION "${_usdcc_velopack_dir}")
             endforeach()
-            file(RENAME "${_usdcc_velopack_dir}/lib/velopack_libc_win_x64_msvc.dll" "${_usdcc_velopack_dll}")
+            file(RENAME "${_usdcc_velopack_dir}/lib/velopack_libc_win_${_usdcc_velopack_arch}_msvc.dll" "${_usdcc_velopack_dll}")
             file(WRITE "${_usdcc_velopack_stamp}" "${USDCC_VELOPACK_VERSION}\n")
             file(REMOVE_RECURSE "${_usdcc_velopack_unpacked}")
         else()

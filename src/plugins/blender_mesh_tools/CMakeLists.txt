@@ -48,6 +48,8 @@ usdcc_add_plugin(blender_mesh_tools
 # USD lives on the app side of the C boundary. This library contains no Blender
 # headers; it is shared by the optional plugin and its conversion tests.
 add_library(usdcc_blender_mesh_conversion STATIC src/conversion.cpp src/conversion.h src/jobs.cpp src/jobs.h)
+# Linked into the plugin's shared library: aarch64's linker refuses non-PIC code there.
+set_target_properties(usdcc_blender_mesh_conversion PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(usdcc_blender_mesh_conversion PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(usdcc_blender_mesh_conversion PUBLIC usdcc::plugin_sdk usdcc::blender_mesh_backend)
 target_link_libraries(blender_mesh_tools PRIVATE usdcc_blender_mesh_conversion)
