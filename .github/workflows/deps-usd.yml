@@ -245,7 +245,7 @@ jobs:
           - Patches: $($spec.patches -join ', ')
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
-          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb``, in an ARM64 developer shell (runner image ``windows-11-arm``)
+          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb``, in an ARM64 developer shell, with Boost 1.91 and Embree 4.5.0 (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
           - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
