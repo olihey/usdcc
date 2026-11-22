@@ -20,7 +20,7 @@ jobs:
           if (-not (Test-Path "$env:USDCC_PYSIDE_DIR/PySide6/__init__.py")) { throw 'Set USDCC_PYSIDE_DIR to matching PySide6/shiboken6 packages on the runner' }
           external/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DUSD_INSTALL=$env:USD_INSTALL" "-DUSDCC_PYSIDE_DIR=$env:USDCC_PYSIDE_DIR" -DUSDCC_BUILD_RTX_PLUGIN=ON -DUSDCC_RTX_GPU_TESTS=ON "-DUSDCC_RTX_OVRTX_ROOT=$env:USDCC_RTX_OVRTX_ROOT" "-DUSDCC_RTX_OVSTAGE_ROOT=$env:USDCC_RTX_OVSTAGE_ROOT"
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DUSD_INSTALL=$env:USD_INSTALL" "-DUSDCC_PYSIDE_DIR=$env:USDCC_PYSIDE_DIR" -DUSDCC_BUILD_RTX_RENDER=ON -DUSDCC_RTX_GPU_TESTS=ON "-DUSDCC_RTX_OVRTX_ROOT=$env:USDCC_RTX_OVRTX_ROOT" "-DUSDCC_RTX_OVSTAGE_ROOT=$env:USDCC_RTX_OVSTAGE_ROOT"
           if ($LASTEXITCODE) { throw 'native RTX configure failed' }
           cmake --build build --config RelWithDebInfo --parallel
           if ($LASTEXITCODE) { throw 'app build failed' }

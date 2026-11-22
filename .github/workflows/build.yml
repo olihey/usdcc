@@ -251,6 +251,21 @@ jobs:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
 
+      # docs/BUILD_OPTIONS.md §8: the same build again with every optional feature left
+      # out, so one that's off keeps compiling, its tests with it, and the build says what
+      # it left out. Last, as it reconfigures build/. Not deployed, its tests not run.
+      - name: Build with every optional feature left out
+        if: matrix.arch == 'x64'
+        run: |
+          python tools/build.py --usd-install $env:USD_INSTALL --without-rtx --without viewport_broadcast --without http --without webdav --without s3 --without physics_jolt --without vray_render --without blender_mesh_tools
+          if ($LASTEXITCODE) { throw 'the build without the optional features failed' }
+          # Not deployed: USD's libraries from its install, as tools/build.py runs the app.
+          $env:PATH = "$env:USD_INSTALL\bin;$env:USD_INSTALL\lib;$env:PATH"
+          $features = & build/src/cpp/app/RelWithDebInfo/usdcc_node.exe --version --no-gpu
+          if ($LASTEXITCODE) { throw "usdcc_node --version failed with exit code $LASTEXITCODE" }
+          $features
+          if (($features | Select-String 'Left out of this build').Count -lt 7) { throw 'usdcc_node --version should list 7 features as left out' }
+
       - name: Upload vcpkg's logs
         if: failure()
         uses: actions/upload-artifact@v4

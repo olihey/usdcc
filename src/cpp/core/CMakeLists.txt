@@ -5,6 +5,7 @@
 # later C++ plugins must all see as one instance. A static copy linked into
 # each of those DLLs would give each its own hub.
 add_library(usdcc_core SHARED
+    include/usdcc/core/build_features.h
     include/usdcc/core/console_log_sink.h
     include/usdcc/core/core.h
     include/usdcc/core/export.h
@@ -15,6 +16,7 @@ add_library(usdcc_core SHARED
     include/usdcc/core/signal.h
     include/usdcc/core/toast.h
     include/usdcc/core/version.h
+    src/build_features.cpp
     src/console_log_sink.cpp
     src/file_log_sink.cpp
     src/log.cpp
@@ -25,6 +27,10 @@ add_library(usdcc_core SHARED
 usdcc_add_version_source(usdcc_core)
 target_include_directories(usdcc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(usdcc_core PRIVATE USDCC_CORE_BUILD)
+# The features this build has (docs/BUILD_OPTIONS.md): buildFeatures() from the source
+# usdcc_write_features() generated, and USDCC_FEATURE_<NAME>=0/1 for code that links this.
+target_sources(usdcc_core PRIVATE "${CMAKE_BINARY_DIR}/generated/build_features.cpp")
+target_compile_definitions(usdcc_core PUBLIC ${USDCC_FEATURE_DEFINITIONS})
 set_target_properties(usdcc_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 # Windows has no rpath: copy usdcc_core.dll, and the other usdcc libraries named,
