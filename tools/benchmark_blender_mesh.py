@@ -9,7 +9,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from _common import REPO, WINDOWS, cache_value
+from _common import REPO, WINDOWS, cache_value, vcpkg_triplet
 
 
 def main():
@@ -36,7 +36,7 @@ def main():
     variable = "PATH" if WINDOWS else "LD_LIBRARY_PATH"
     paths = [usd / "bin", usd / "lib"]
     if WINDOWS:
-        paths.append(build / "vcpkg_installed/x64-windows/bin")
+        paths.append(build / "vcpkg_installed" / vcpkg_triplet(build) / "bin")
     environment[variable] = os.pathsep.join(
         [*(str(p) for p in paths), environment.get(variable, "")]
     )

@@ -1,0 +1,14 @@
+diff --git a/build_scripts/build_usd.py b/build_scripts/build_usd.py
+--- a/build_scripts/build_usd.py
++++ b/build_scripts/build_usd.py
+@@ -1745,6 +1745,10 @@ MATERIALX = Dependency("MaterialX", InstallMaterialX, "include/MaterialXCore/Lib
+ 
+ def InstallEmbree(context, force, buildArgs):
+     EMBREE_URL = "https://github.com/RenderKit/embree/archive/refs/tags/v4.3.3.zip"
++    # Embree 4.5.0 is the first that builds for Windows ARM64 with MSVC; 4.3.3
++    # includes x86 intrinsics headers there.
++    if Windows() and GetWindowsHostArch() == "ARM64":
++        EMBREE_URL = "https://github.com/RenderKit/embree/archive/refs/tags/v4.5.0.zip"
+ 
+     with CurrentWorkingDirectory(DownloadURL(EMBREE_URL, context, force)):
+         extraArgs = [

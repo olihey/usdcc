@@ -28,6 +28,12 @@ LINUX = not WINDOWS and not MACOS
 
 _ARM = platform.machine().lower() in ("arm64", "aarch64")
 
+# Visual Studio's -A for this machine, and the generator for it (Windows only):
+# 2022 on x64, the toolset of the OpenUSD asset and of usdcc, and 2026 on ARM64,
+# the only one on GitHub's windows-11-arm image (binary compatible with 2022's).
+VS_ARCH = "ARM64" if _ARM else "x64"
+VS_GENERATOR = "Visual Studio 18 2026" if _ARM else "Visual Studio 17 2022"
+
 # What differs between platforms, in one place. The Linux and macOS triplets are
 # the dynamic ones: vcpkg's own defaults there build static libraries, which
 # PySide6 and usdcc's plugins can't share a Qt through.
@@ -35,10 +41,10 @@ if WINDOWS:
     PLATFORM = "windows"
     EXE_SUFFIX = ".exe"
     SHARED_LIBRARY_SUFFIX = ".dll"
-    VCPKG_TRIPLET = "x64-windows"
+    VCPKG_TRIPLET = "arm64-windows" if _ARM else "x64-windows"
     VCPKG_BOOTSTRAP = "bootstrap-vcpkg.bat"
     VCPKG_EXE = "vcpkg.exe"
-    ASSET_PLATFORM = "win64"
+    ASSET_PLATFORM = "win-arm64" if _ARM else "win64"
 elif MACOS:
     PLATFORM = "macos"
     EXE_SUFFIX = ""

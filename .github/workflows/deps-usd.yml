@@ -2,7 +2,8 @@
 # prerelease asset, which usdcc's CI downloads and plugin authors build against
 # (docs/CI.md). Slow (hours), so it only runs when the pin changes or by hand,
 # and each job skips the build when its asset for the current pin already
-# exists. One zip per platform (win64, linux-x64), in the same release.
+# exists. One zip per platform (win64, win-arm64, linux-x64, linux-arm64), in the
+# same release.
 name: OpenUSD
 
 on:
@@ -33,10 +34,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Once per architecture: tools/_common.py names the asset win64 or win-arm64 by
+  # the machine. The windows-11-arm image has only Visual Studio 2026, which
+  # tools/ci/usd_asset.py's flags use there.
   windows:
     # Pinned, never windows-latest: windows-2025 has moved to Visual Studio 2026,
     # and the build has to use the same toolset as usdcc (Visual Studio 2022).
-    runs-on: windows-2022
+    name: windows (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2022
+            vs_arch: x64
+            vs_generator: Visual Studio 17 2022
+            log: build_usd-log
+          - arch: arm64
+            runner: windows-11-arm
+            vs_arch: ARM64
+            vs_generator: Visual Studio 18 2026
+            log: build_usd-log-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     defaults:
       run:
@@ -47,6 +66,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 asset.
+      # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
 
       - name: Name the asset
         id: asset
@@ -67,11 +96,37 @@ jobs:
           exit 0
 
       - name: Set up Python
-        if: steps.published.outputs.found != 'true'
+        if: matrix.arch == 'x64' && steps.published.outputs.found != 'true'
         id: python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: x64
+
+      # On the Arm image setup-python can't install the pinned 3.13: the image
+      # ships a newer 3.13, and Python's installer won't put an older one beside
+      # it, even with the image's uninstalled. python.org's NuGet package of the
+      # same version is a plain archive, unpacked where setup-python would put it.
+      - name: Set up Python (arm64, from python.org's NuGet package)
+        if: matrix.arch == 'arm64' && steps.published.outputs.found != 'true'
+        run: |
+          $version = '${{ steps.asset.outputs.python }}'
+          $dir = "$env:RUNNER_TOOL_CACHE\Python\$version\arm64"
+          if (-not (Test-Path "$dir\python.exe")) {
+            $zip = "$env:RUNNER_TEMP\pythonarm64.$version.zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/pythonarm64/$version/pythonarm64.$version.nupkg" -OutFile $zip
+            Expand-Archive $zip "$env:RUNNER_TEMP\pythonarm64" -Force
+            New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+            Move-Item "$env:RUNNER_TEMP\pythonarm64\tools" $dir
+            Remove-Item -Recurse -Force $zip, "$env:RUNNER_TEMP\pythonarm64"
+          }
+          & "$dir\python.exe" -m ensurepip --upgrade --default-pip | Select-Object -Last 1
+          if ($LASTEXITCODE) { throw 'ensurepip failed' }
+          # As setup-python does: first on PATH, and where CMake's FindPython looks.
+          Add-Content $env:GITHUB_PATH "$dir\Scripts"
+          Add-Content $env:GITHUB_PATH $dir
+          "pythonLocation=$dir", "Python_ROOT_DIR=$dir", "Python3_ROOT_DIR=$dir" | Add-Content $env:GITHUB_ENV
+          & "$dir\python.exe" -c "import platform, sys; print(sys.version, platform.machine())"
 
       - name: Show free disk space
         if: steps.published.outputs.found != 'true'
@@ -94,9 +149,31 @@ jobs:
 
       - name: Build OpenUSD
         if: steps.published.outputs.found != 'true'
+        env:
+          # The windows-11-arm image has CMake 4, which refuses projects asking
+          # for CMake < 3.5 — among them the yaml-cpp and expat that
+          # OpenColorIO 2.2.1 builds itself as nested ExternalProjects, where
+          # build_usd.py's own CMake flags don't reach. CMake 4 reads this from
+          # the environment in every nested configure too; CMake 3 ignores it.
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
-          $spec = Get-Content -Raw deps/usd.json | ConvertFrom-Json
-          python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($spec.flags) `
+          # deps/usd.json's flags as tools/ci/usd_asset.py adapts them (--onetbb on ARM64).
+          $flags = python -c "import json, sys; sys.path.insert(0, 'tools/ci'); import usd_asset; print(json.dumps(usd_asset.platform_flags(json.load(open('deps/usd.json'))['flags'])))" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'no flags' }
+          # build_usd.py knows the Visual Studio version only from a developer
+          # prompt's VCToolsVersion. Without one it picks Boost 1.80, whose
+          # bootstrap doesn't know Visual Studio 2026 ("Unknown toolset: vcunk"),
+          # so ARM64 builds in an ARM64 developer shell: msvc-14.5, and with
+          # deps/patches/build_usd-boost-vs2026.patch Boost 1.91, the first that knows it.
+          $python = (Get-Command python).Source  # the one set up above, whatever the shell adds to PATH
+          if ('${{ matrix.arch }}' -eq 'arm64') {
+            $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+            Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+            Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=arm64 -host_arch=arm64' | Out-Null
+            Write-Host "MSVC $env:VCToolsVersion ($(Get-Command cl | Select-Object -ExpandProperty Source))"
+            if ($env:VCToolsVersion -notmatch '^14\.5') { throw "Expected MSVC 14.5x, got '$env:VCToolsVersion'" }
+          }
+          & $python "$env:WORK\OpenUSD\build_scripts\build_usd.py" @($flags) `
             --src "$env:WORK\src" --build "$env:WORK\build" $env:USD_INSTALL
           if ($LASTEXITCODE) {
             Get-Content "$env:WORK\src\log.txt" -Tail 200 -ErrorAction SilentlyContinue
@@ -107,7 +184,7 @@ jobs:
         if: failure() && steps.published.outputs.found != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: build_usd-log
+          name: ${{ matrix.log }}
           path: |
             C:\b\src\log.txt
             C:\b\build\**\log.txt
@@ -150,7 +227,7 @@ jobs:
           $sdk = "$env:RUNNER_TEMP\usd-sdk"
           7z x "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" "-o$sdk" | Select-Object -Last 2
           $build = "$env:RUNNER_TEMP\usd-sdk-check"
-          cmake -S tools/ci/usd-sdk-check -B $build -G 'Visual Studio 17 2022' -A x64 "-DUSD_INSTALL=$sdk"
+          cmake -S tools/ci/usd-sdk-check -B $build -G '${{ matrix.vs_generator }}' -A ${{ matrix.vs_arch }} "-DUSD_INSTALL=$sdk"
           if ($LASTEXITCODE) { throw 'configure failed' }
           cmake --build $build --config Release --parallel
           if ($LASTEXITCODE) { throw 'build failed' }
@@ -168,7 +245,9 @@ jobs:
           - Patches: $($spec.patches -join ', ')
           - ``build_usd.py`` flags: ``$($spec.flags -join ' ')`` (on Linux without ``--generator``)
           - ``win64``: Python $($spec.python) x64, Visual Studio 2022 (runner image ``windows-2022``)
+          - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb``, in an ARM64 developer shell, with Boost 1.91 and Embree 4.5.0 (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
+          - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
 
           Includes the licences of OpenUSD's dependencies in ``licenses/``.
@@ -187,7 +266,7 @@ jobs:
               --prerelease --target $env:GITHUB_SHA `
               --title 'OpenUSD ${{ steps.asset.outputs.base }}' --notes $notes
             if ($LASTEXITCODE) {
-              # The linux job made the release meanwhile: add to it.
+              # Another job made the release meanwhile: add to it.
               gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
               if (-not $LASTEXITCODE) { gh release edit '${{ steps.asset.outputs.tag }}' --notes $notes }
             }
@@ -196,9 +275,19 @@ jobs:
 
   # The same OpenUSD for Linux, with tools/build_usd.py (the steps above, as a
   # script), against actions/setup-python's CPython, which build.yml's and
-  # release.yml's linux jobs set up at the same path.
+  # release.yml's linux jobs set up at the same path. Once per architecture:
+  # tools/_common.py names the asset linux-x64 or linux-arm64 by the machine.
   linux:
-    runs-on: ubuntu-24.04
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     defaults:
       run:
@@ -260,7 +349,7 @@ jobs:
         if: failure() && steps.published.outputs.found != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: build_usd-log-linux
+          name: build_usd-log-linux-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/b/src/log.txt
             ${{ runner.temp }}/b/build/**/log.txt

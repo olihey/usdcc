@@ -11,7 +11,7 @@ self-hosted runners come later (§7).
   unlimited. A hosted runner starts clean every time, which is what M0's exit criterion
   ("a fresh clone builds") needs. Self-hosted runners on a public repo would run fork PRs'
   code on our own machines, so they wait (§7).
-- **Everything lives in this repo.** No OpenUSD fork: the OpenUSD pin, its one patch and
+- **Everything lives in this repo.** No OpenUSD fork: the OpenUSD pin, its patches and
   the build flags sit in `deps/`, next to the code that depends on them, so a USD bump
   and the usdcc fixes it needs land in one commit.
 - **OpenUSD is built once and reused.** A slow, rarely run workflow builds it and
@@ -29,7 +29,7 @@ one difference: `--no-usdview`.
 | | |
 |---|---|
 | Source | `https://github.com/NVIDIA-Omniverse/OpenUSD`, commit `70c45e83b08a7b45588cd6cdbd2ae67f5147befb` (branch `typhoon/main`; reports itself as 26.08) |
-| Patch | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change |
+| Patches | `deps/patches/build_usd-glm.patch`: adds GLM to `build_usd.py`, which `--embree` needs. Taken from the local checkout's uncommitted change. `deps/patches/build_usd-boost-vs2026.patch`: Visual Studio 2026 gets Boost 1.91, the first whose bootstrap and `b2` know its toolset (`build_usd.py` asks for 1.90, which doesn't, and an `if` that should be an `elif` gave it 1.86 anyway; both still so on OpenUSD's `dev`), and no `--with-system` from Boost 1.89, which has no Boost.System library to build. `deps/patches/build_usd-embree-windows-arm64.patch`: Embree 4.5.0 on Windows ARM64, the first that builds there with MSVC (4.3.3 includes x86 intrinsics headers); elsewhere it stays 4.3.3. Both only matter on Windows ARM64 (see **arm64** below) |
 | Flags | `--no-examples --no-tutorials --no-usdview --materialx --openimageio --opencolorio --embree --build-variant=release --generator="Visual Studio 17 2022"` |
 | Python | 3.13.12 x64 from `actions/setup-python`. 3.13 is the VFX Reference Platform's Python for CY2026 and CY2027; it was 3.12.10 until 2026-11-17 (§2.1) |
 | Compiler | MSVC from Visual Studio 2022, like usdcc (`tools/build.py` uses the `Visual Studio 17 2022` generator), on the `windows-2022` runner image. Never `windows-latest`: `windows-2025` moved to Visual Studio 2026 in June 2026 |
@@ -137,7 +137,8 @@ One file pins the build:
 {
   "repository": "https://github.com/NVIDIA-Omniverse/OpenUSD",
   "commit": "70c45e83b08a7b45588cd6cdbd2ae67f5147befb",
-  "patches": ["patches/build_usd-glm.patch"],
+  "patches": ["patches/build_usd-glm.patch", "patches/build_usd-boost-vs2026.patch",
+              "patches/build_usd-embree-windows-arm64.patch"],
   "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
             "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
             "--generator=Visual Studio 17 2022"],
@@ -319,8 +320,8 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 7. Later
 
-- **macOS and Linux arm64.** Hosted `macos-latest` and `ubuntu-24.04-arm`, each with its
-  own OpenUSD asset, as the Linux x64 one (§8). Still Windows only: `tools/build_pyside.py`,
+- **macOS.** Hosted `macos-latest`, with its own OpenUSD asset, as the Linux ones (§8).
+  Still Windows only: `tools/build_pyside.py`,
   so Linux has no PySide6 (no `usdcc.ui`, no Python-made panels, no V-Ray Render).
 
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
@@ -355,6 +356,32 @@ has how Linux was brought up, in WSL 2):
   which it requires), moves usdcc's debug info out with
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
   `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
+
+**arm64.** `deps-usd.yml`'s and `build.yml`'s `linux` and `windows` jobs also run on
+GitHub's Arm runners, `ubuntu-24.04-arm` and `windows-11-arm`. `tools/_common.py` picks
+the vcpkg triplet (`arm64-linux-dynamic`, `arm64-windows`), the asset names (`linux-arm64`,
+`win-arm64`) and Visual Studio's `-A ARM64` by the machine, so the jobs are the x64 ones
+as a matrix. Their `build.yml` checks are `linux-arm64` and `windows-arm64`, not among
+master's required checks; the x64 ones keep the names `linux` and `windows`.
+
+- On Windows ARM64, OpenUSD's `build_usd.py` requires `--onetbb`, which
+  `tools/ci/usd_asset.py` adds to `deps/usd.json`'s flags there, with
+  `--build-args boost,architecture=arm` so Boost's `b2` builds arm64 libraries.
+- `build_usd.py` only knows the Visual Studio version from a developer prompt's
+  `VCToolsVersion`; without one it builds Boost 1.80, whose bootstrap predates Visual
+  Studio 2026. So on ARM64 `deps-usd.yml` runs it in an ARM64 developer shell, which gives
+  `toolset=msvc-14.5` and, with the patch, Boost 1.91, and sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` for the
+  image's CMake 4, which OpenColorIO's bundled yaml-cpp and expat need. The x64 job runs
+  as before.
+- The tools run before `actions/setup-python` on the runner's own Python; the Windows
+  Arm jobs set up an arm64 Python first, so they name the arm64 assets.
+- `windows-11-arm` has only Visual Studio 2026, so Windows ARM64 builds with it
+  (`tools/_common.py`'s `VS_GENERATOR`); x64 stays on 2022. Its pinned Python comes from
+  python.org's `pythonarm64` NuGet package: setup-python can't install an older 3.13
+  beside the newer one the image ships.
+- Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`),
+  PySide6 (`deps-pyside.yml`, so `windows-arm64` has no `usdcc.ui`), the Blender
+  distribution checks, and `release.yml`. A missing pack or PySide6 is a warning, as on x64.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.

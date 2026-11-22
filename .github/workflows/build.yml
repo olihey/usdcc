@@ -1,4 +1,4 @@
-# Builds usdcc on Windows and Linux against the prebuilt OpenUSD that
+# Builds usdcc on Windows and Linux, x64 and arm64, against the prebuilt OpenUSD that
 # deps-usd.yml publishes, and runs the tests (docs/CI.md §4): for a pull
 # request, whose merge it gates, and for each push to master. vcpkg's packages
 # (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
@@ -24,12 +24,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Both jobs are master's required checks: a pull request is merged, by GitHub's
-  # auto-merge, once they pass, and stays open when one fails (docs/RELEASE.md
-  # §8). A job that is renamed has to be renamed in master's protection too.
+  # windows and linux (x64) are master's required checks; windows-arm64 and
+  # linux-arm64 aren't. A pull request is merged, by GitHub's auto-merge, once
+  # the required ones pass, and stays open when one fails (docs/RELEASE.md §8).
+  # A job that is renamed has to be renamed in master's protection too.
+  #
+  # Twice, as the linux job: x64, whose check keeps the name windows, and arm64
+  # on GitHub's windows-11-arm runner, checked as windows-arm64. tools/_common.py
+  # picks the triplet (arm64-windows), the OpenUSD and PySide6 assets (win-arm64)
+  # and Visual Studio's -A by the machine.
   windows:
     # Visual Studio 2022, as for the OpenUSD asset (see deps-usd.yml).
-    runs-on: windows-2022
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runner: windows-2022
+            arch: x64
+            logs: vcpkg-logs
+          - name: windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+            logs: vcpkg-logs-windows-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -49,6 +68,16 @@ jobs:
       - name: Fetch vcpkg's full history
         run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 assets.
+      # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+
       - name: Name the OpenUSD asset
         id: asset
         run: python tools/ci/usd_asset.py --github-output
@@ -56,9 +85,36 @@ jobs:
       # The Python OpenUSD was built with: its pxrConfig.cmake points at this
       # exact interpreter, and usdcc embeds the same one.
       - name: Set up Python
+        if: matrix.arch == 'x64'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: x64
+
+      # On the Arm image setup-python can't install the pinned 3.13: the image
+      # ships a newer 3.13, and Python's installer won't put an older one beside
+      # it, even with the image's uninstalled. python.org's NuGet package of the
+      # same version is a plain archive, unpacked where setup-python would put it.
+      - name: Set up Python (arm64, from python.org's NuGet package)
+        if: matrix.arch == 'arm64'
+        run: |
+          $version = '${{ steps.asset.outputs.python }}'
+          $dir = "$env:RUNNER_TOOL_CACHE\Python\$version\arm64"
+          if (-not (Test-Path "$dir\python.exe")) {
+            $zip = "$env:RUNNER_TEMP\pythonarm64.$version.zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/pythonarm64/$version/pythonarm64.$version.nupkg" -OutFile $zip
+            Expand-Archive $zip "$env:RUNNER_TEMP\pythonarm64" -Force
+            New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+            Move-Item "$env:RUNNER_TEMP\pythonarm64\tools" $dir
+            Remove-Item -Recurse -Force $zip, "$env:RUNNER_TEMP\pythonarm64"
+          }
+          & "$dir\python.exe" -m ensurepip --upgrade --default-pip | Select-Object -Last 1
+          if ($LASTEXITCODE) { throw 'ensurepip failed' }
+          # As setup-python does: first on PATH, and where CMake's FindPython looks.
+          Add-Content $env:GITHUB_PATH "$dir\Scripts"
+          Add-Content $env:GITHUB_PATH $dir
+          "pythonLocation=$dir", "Python_ROOT_DIR=$dir", "Python3_ROOT_DIR=$dir" | Add-Content $env:GITHUB_ENV
+          & "$dir\python.exe" -c "import platform, sys; print(sys.version, platform.machine())"
 
       - name: Download OpenUSD
         run: |
@@ -133,8 +189,9 @@ jobs:
           ctest --test-dir build -C RelWithDebInfo --verbose --timeout 900
           if ($LASTEXITCODE) { throw 'tests failed' }
 
+      # x64 only, as on Linux.
       - name: Blender distribution candidate checks
-        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: matrix.arch == 'x64' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         run: |
           python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
           if ($LASTEXITCODE) { throw 'candidate deployment failed' }
@@ -144,7 +201,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'benchmark failed' }
 
       - name: Blender verification reports
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: always() && matrix.arch == 'x64' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         uses: actions/upload-artifact@v4
         with:
           name: blender-verification-windows
@@ -198,7 +255,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vcpkg-logs
+          name: ${{ matrix.logs }}
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log
@@ -207,8 +264,20 @@ jobs:
   # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). No PySide6 yet
   # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
   # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
+  # Twice: x64, whose check keeps the name linux (master's required check), and
+  # arm64 on GitHub's Arm runner, checked as linux-arm64, which isn't required.
+  # tools/_common.py picks the vcpkg triplet and the OpenUSD asset by the machine.
   linux:
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -298,15 +367,16 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: 1
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --test-dir build --verbose --timeout 900
 
+      # x64 only: deps/blender-linux-distribution.json locks a linux-x86_64 package.
       - name: Blender distribution candidate checks
-        if: github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: matrix.name == 'linux' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         run: |
           python tools/deploy.py build/blender-candidate --with-blender-mesh-tools
           python tools/ci/blender_mesh_smoke_test.py --deploy build/blender-candidate
           python tools/benchmark_blender_mesh.py
 
       - name: Blender verification reports
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
+        if: always() && matrix.name == 'linux' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
         uses: actions/upload-artifact@v4
         with:
           name: blender-verification-linux
@@ -318,8 +388,8 @@ jobs:
 
       # As the windows job's: after a successful build, drops the packages it
       # didn't use; each installed package's vcpkg_abi_info.txt hashes to its zip's name.
-      # Every triplet counts: Qt's host tools are built for x64-linux, beside
-      # x64-linux-dynamic, and the Blender mesh backend has an install tree of its own.
+      # Every triplet counts: Qt's host tools are built for x64-linux (arm64-linux),
+      # beside the dynamic triplet, and the Blender mesh backend has an install tree of its own.
       - name: Prune the vcpkg cache
         id: vcpkg-prune
         if: always() && steps.vcpkg.outputs.key != ''
@@ -350,7 +420,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vcpkg-logs-linux
+          name: vcpkg-logs-${{ matrix.name }}
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log

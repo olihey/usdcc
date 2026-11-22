@@ -235,10 +235,12 @@ def main(argv=None):
         f"-DCMAKE_INSTALL_PREFIX={args.install.resolve().as_posix()}",
         f"-DCMAKE_BUILD_TYPE={args.configuration}",
     ]
+    arm = platform.machine().lower() in ("arm64", "aarch64")
     if sys.platform == "win32":
-        command += ["-G", "Visual Studio 17 2022", "-A", "x64"]
+        # As tools/_common.py's VS_GENERATOR: 2026 on ARM64, 2022 on x64.
+        command += ["-G", "Visual Studio 18 2026" if arm else "Visual Studio 17 2022", "-A", "ARM64" if arm else "x64"]
     else:
-        command += ["-DVCPKG_TARGET_TRIPLET=x64-linux-dynamic"]
+        command += [f"-DVCPKG_TARGET_TRIPLET={'arm64' if arm else 'x64'}-linux-dynamic"]
     run(command)
     if args.configure_only:
         return
