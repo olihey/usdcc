@@ -3,6 +3,7 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
+#include "usdcc/usd/share/layer_ops.h"
 #include "usdcc/usd/stage.h"
 
 #include <pxr/usd/sdf/layer.h>
@@ -179,6 +180,17 @@ public:
     // Drops the stage's undo stack (and the reference it holds to the stage);
     // called when the stage is closed.
     void removeStage(const StageRefPtr& stage);
+
+    // docs/SHARED_STAGE.md §4: `observer` sees every change to `layer` as an op, just
+    // before it is made, whatever makes it (an edit, undo and redo, a script). Empty
+    // stops. The layer records through this class's recorder from now on.
+    static void observeLayer(const PXR_NS::SdfLayerHandle& layer,
+                             std::function<void(const share::LayerOp&)> observer);
+    // Runs `change` on `layer` as nobody's edit: nothing is recorded for undo, even in
+    // an open session, and the observer doesn't see it. A peer's edit (§5). `change`
+    // gets the layer's state delegate, whose public calls change the layer directly.
+    static void changeUnrecorded(const PXR_NS::SdfLayerHandle& layer,
+                                 const std::function<void(PXR_NS::SdfLayerStateDelegateBase&)>& change);
 
 private:
     struct Session;  // the open edit and the changes recorded so far; see the .cpp

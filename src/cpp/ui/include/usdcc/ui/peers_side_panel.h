@@ -56,6 +56,13 @@ public:
     static QStringList recentEmoji();
     static constexpr int kRecentEmoji = 8;
 
+    // A section of the room view, above its people: what another part of usdcc shows
+    // for the room on show (the stages shared in it). roomShown() says which room.
+    void addRoomSection(QWidget* section);
+
+Q_SIGNALS:
+    void roomShown(usdcc::peers::Room* room);
+
 private:
     void rebuildRooms();
     void rebuildPeople();
@@ -78,6 +85,7 @@ private:
     QPushButton* m_send = nullptr;
     QToolButton* m_emoji = nullptr;
     QWidget* m_roomView = nullptr;
+    class QVBoxLayout* m_roomSections = nullptr;
 };
 
 // Turns chat text into HTML: escaped, with prim paths (/World/Cube) as links "prim:<path>".

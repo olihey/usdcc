@@ -2,6 +2,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/usd/applied_schemas.h"
+#include "usdcc/usd/share/live_layers.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/xform_stack.h"
 
@@ -250,6 +251,15 @@ std::vector<PXR_NS::TfToken> childNames(const PXR_NS::UsdStageRefPtr& usdStage, 
 bool applyMoves(UndoManager& undo, const StageRefPtr& stage, const PrimMoves& moves, const QString& description,
                 const std::vector<StageRefPtr>& openStages, const std::function<bool()>& also, QString* why) {
     const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
+    // A shared stage moves only what its live layer made (docs/SHARED_STAGE.md §2).
+    if (QString refused; !share::movesAllowed(usdStage, moves, &refused)) {
+        if (why) {
+            *why = refused;
+        } else {
+            USDCC_LOG_TOAST(usdcc::core::LogLevel::Warning, "usdcc.share", "{}", refused.toStdString());
+        }
+        return false;
+    }
     PrimMoves inverse;
     for (auto it = moves.rbegin(); it != moves.rend(); ++it) inverse.emplace_back(it->second, it->first);
     // The tool's target op: USD's change notice drops it when its prim goes.

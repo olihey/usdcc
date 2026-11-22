@@ -1,5 +1,6 @@
 #include "usdcc/usd/undo_manager.h"
 
+#include "usdcc/usd/share/layer_ops.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include "usdcc/core/log.h"
@@ -62,6 +63,18 @@ public:
     bool isRecording() const { return m_recording != nullptr; }
     void setRecording(InverseEdits* edits) { m_recording = edits; }
 
+    // docs/SHARED_STAGE.md §4: every change, as an op, before it is made.
+    void setObserver(std::function<void(const share::LayerOp&)> observer) { m_observer = std::move(observer); }
+    // Runs `change` with nothing recorded for undo and nothing observed: a peer's
+    // edit, which is nobody's here.
+    void unrecorded(const std::function<void(PXR_NS::SdfLayerStateDelegateBase&)>& change) {
+        InverseEdits* const recording = std::exchange(m_recording, nullptr);
+        ++m_silent;
+        change(*this);
+        --m_silent;
+        m_recording = recording;
+    }
+
     // Applies `edits` newest first, as one change notice, and replaces them
     // with the inverses of what that did: undo turns an undo list into the
     // matching redo list, and back.
@@ -85,50 +98,81 @@ protected:
     void _MarkCurrentStateAsDirty() override { m_dirty = true; }
     void _OnSetLayer(const PXR_NS::SdfLayerHandle&) override {}
 
-    void _OnSetField(const PXR_NS::SdfPath& path, const PXR_NS::TfToken& field, const PXR_NS::VtValue&) override {
+    void _OnSetField(const PXR_NS::SdfPath& path, const PXR_NS::TfToken& field, const PXR_NS::VtValue& value) override {
         m_dirty = true;
+        if (observing()) {
+            for (const share::LayerOp& op : share::setFieldOps(_GetLayer(), path, field, value)) m_observer(op);
+        }
         if (!m_recording) return;
+        // A child list set is undone by taking out the children it added and putting
+        // back those it took out, where they were: a shared stage's peer may have
+        // added others since, which stay.
+        if (share::isChildrenField(field)) {
+            const PXR_NS::VtValue before = _GetLayer()->GetField(path, field);
+            if (auto inverse = childListInverse<PXR_NS::TfToken>(path, field, before, value)) {
+                record(std::move(*inverse));
+                return;
+            }
+            if (auto inverse = childListInverse<PXR_NS::SdfPath>(path, field, before, value)) {
+                record(std::move(*inverse));
+                return;
+            }
+        }
         // Within a run of sets of one field only the first old value matters.
         if (!m_recording->empty() && m_recording->back().field == field && m_recording->back().path == path) {
             return;
         }
         PXR_NS::VtValue old = _GetLayer()->GetField(path, field);  // empty: the field didn't exist (set erases)
-        m_recording->push_back({[path, field, old = std::move(old)](EditRecorder& r) { r.SetField(path, field, old); },
+        m_recording->push_back({[path, field, old = std::move(old)](EditRecorder& r) {
+                                    r.guarded(share::setFieldOp({}, path, field, old));
+                                },
                                 path, field});
     }
     void _OnSetField(const PXR_NS::SdfPath& path, const PXR_NS::TfToken& field,
-                     const PXR_NS::SdfAbstractDataConstValue&) override {
-        _OnSetField(path, field, PXR_NS::VtValue());  // only the old value is used
+                     const PXR_NS::SdfAbstractDataConstValue& value) override {
+        PXR_NS::VtValue v;
+        if (observing()) value.GetValue(&v);  // only the old value is used for undo
+        _OnSetField(path, field, v);
     }
 
     void _OnSetFieldDictValueByKey(const PXR_NS::SdfPath& path, const PXR_NS::TfToken& field,
-                                   const PXR_NS::TfToken& keyPath, const PXR_NS::VtValue&) override {
+                                   const PXR_NS::TfToken& keyPath, const PXR_NS::VtValue& value) override {
+        if (observing()) m_observer(share::setDictValueOp(_GetLayer(), path, field, keyPath, value));
         record([path, field, keyPath, old = _GetLayer()->GetFieldDictValueByKey(path, field, keyPath)](
-                   EditRecorder& r) { r.SetFieldDictValueByKey(path, field, keyPath, old); });
+                   EditRecorder& r) { r.guarded(share::setDictValueOp({}, path, field, keyPath, old)); });
     }
     void _OnSetFieldDictValueByKey(const PXR_NS::SdfPath& path, const PXR_NS::TfToken& field,
                                    const PXR_NS::TfToken& keyPath,
-                                   const PXR_NS::SdfAbstractDataConstValue&) override {
-        _OnSetFieldDictValueByKey(path, field, keyPath, PXR_NS::VtValue());
+                                   const PXR_NS::SdfAbstractDataConstValue& value) override {
+        PXR_NS::VtValue v;
+        if (observing()) value.GetValue(&v);
+        _OnSetFieldDictValueByKey(path, field, keyPath, v);
     }
 
-    void _OnSetTimeSample(const PXR_NS::SdfPath& path, double time, const PXR_NS::VtValue&) override {
+    void _OnSetTimeSample(const PXR_NS::SdfPath& path, double time, const PXR_NS::VtValue& value) override {
+        if (observing()) m_observer(share::setTimeSampleOp(_GetLayer(), path, time, value));
         PXR_NS::VtValue old;  // stays empty if there was no sample (setting empty erases)
         if (m_recording) _GetLayer()->QueryTimeSample(path, time, &old);
-        record([path, time, old = std::move(old)](EditRecorder& r) { r.SetTimeSample(path, time, old); });
+        record([path, time, old = std::move(old)](EditRecorder& r) {
+            r.guarded(share::setTimeSampleOp({}, path, time, old));
+        });
     }
     void _OnSetTimeSample(const PXR_NS::SdfPath& path, double time,
-                          const PXR_NS::SdfAbstractDataConstValue&) override {
-        _OnSetTimeSample(path, time, PXR_NS::VtValue());
+                          const PXR_NS::SdfAbstractDataConstValue& value) override {
+        PXR_NS::VtValue v;
+        if (observing()) value.GetValue(&v);
+        _OnSetTimeSample(path, time, v);
     }
 
-    void _OnCreateSpec(const PXR_NS::SdfPath& path, PXR_NS::SdfSpecType, bool inert) override {
-        record([path, inert](EditRecorder& r) { r.DeleteSpec(path, inert); });
+    void _OnCreateSpec(const PXR_NS::SdfPath& path, PXR_NS::SdfSpecType type, bool inert) override {
+        if (observing()) m_observer(share::createSpecOp(path, type, inert));
+        record([path, inert](EditRecorder& r) { r.guarded(share::deleteSpecOp(path, inert)); });
     }
 
     // Deleting a spec takes its whole subtree with it, so all of it is copied
     // (cheaply: VtArray values share their data) to be recreated parents first.
     void _OnDeleteSpec(const PXR_NS::SdfPath& path, bool inert) override {
+        if (observing()) m_observer(share::deleteSpecOp(path, inert));
         if (!m_recording) {
             m_dirty = true;
             return;
@@ -152,7 +196,7 @@ protected:
         });
         record([specs = std::move(specs), inert](EditRecorder& r) {
             for (const Spec& spec : specs) {
-                r.CreateSpec(spec.path, spec.type, inert);
+                if (!r.guarded(share::createSpecOp(spec.path, spec.type, inert))) continue;
                 for (const auto& [field, value] : spec.fields) {
                     r.SetField(spec.path, field, value);
                 }
@@ -161,34 +205,87 @@ protected:
     }
 
     void _OnMoveSpec(const PXR_NS::SdfPath& oldPath, const PXR_NS::SdfPath& newPath) override {
-        record([oldPath, newPath](EditRecorder& r) { r.MoveSpec(newPath, oldPath); });
+        if (observing()) m_observer(share::moveSpecOp(oldPath, newPath));
+        record([oldPath, newPath](EditRecorder& r) { r.guarded(share::moveSpecOp(newPath, oldPath)); });
     }
 
     void _OnPushChild(const PXR_NS::SdfPath& parent, const PXR_NS::TfToken& field,
                       const PXR_NS::TfToken& value) override {
-        record([parent, field, value](EditRecorder& r) { r.PopChild(parent, field, value); });
+        if (observing()) m_observer(share::pushChildOp(parent, field, value));
+        record([parent, field, value](EditRecorder& r) { r.guarded(share::popChildOp(parent, field, value)); });
     }
     void _OnPushChild(const PXR_NS::SdfPath& parent, const PXR_NS::TfToken& field,
                       const PXR_NS::SdfPath& value) override {
-        record([parent, field, value](EditRecorder& r) { r.PopChild(parent, field, value); });
+        if (observing()) m_observer(share::pushChildOp(parent, field, value));
+        record([parent, field, value](EditRecorder& r) { r.guarded(share::popChildOp(parent, field, value)); });
     }
     void _OnPopChild(const PXR_NS::SdfPath& parent, const PXR_NS::TfToken& field,
                      const PXR_NS::TfToken& oldValue) override {
-        record([parent, field, oldValue](EditRecorder& r) { r.PushChild(parent, field, oldValue); });
+        if (observing()) m_observer(share::popChildOp(parent, field, oldValue));
+        record([parent, field, oldValue](EditRecorder& r) { r.guarded(share::pushChildOp(parent, field, oldValue)); });
     }
     void _OnPopChild(const PXR_NS::SdfPath& parent, const PXR_NS::TfToken& field,
                      const PXR_NS::SdfPath& oldValue) override {
-        record([parent, field, oldValue](EditRecorder& r) { r.PushChild(parent, field, oldValue); });
+        if (observing()) m_observer(share::popChildOp(parent, field, oldValue));
+        record([parent, field, oldValue](EditRecorder& r) { r.guarded(share::pushChildOp(parent, field, oldValue)); });
     }
 
 private:
+    // The inverse of setting a child list from `before` to `after`, made at undo time
+    // from the list as it is then.
+    template <class T>
+    static std::optional<std::function<void(EditRecorder&)>> childListInverse(const PXR_NS::SdfPath& path,
+                                                                             const PXR_NS::TfToken& field,
+                                                                             const PXR_NS::VtValue& before,
+                                                                             const PXR_NS::VtValue& after) {
+        using List = std::vector<T>;
+        if ((!before.IsEmpty() && !before.IsHolding<List>()) || (!after.IsEmpty() && !after.IsHolding<List>())) {
+            return std::nullopt;
+        }
+        const List old = before.GetWithDefault<List>();
+        const List now = after.GetWithDefault<List>();
+        const auto has = [](const List& list, const T& item) {
+            return std::find(list.begin(), list.end(), item) != list.end();
+        };
+        List added;
+        for (const T& item : now) {
+            if (!has(old, item)) added.push_back(item);
+        }
+        return [path, field, old, now, added, has](EditRecorder& r) {
+            const PXR_NS::SdfLayerHandle layer = r._GetLayer();
+            if (!layer->HasSpec(path)) return;  // a peer deleted it
+            const List current = layer->GetFieldAs<List>(path, field);
+            List result;
+            for (const T& item : old) {
+                // Taken out by the step: back where it was. Kept by it: unless a peer
+                // has taken it out since.
+                if (!has(now, item) || has(current, item)) result.push_back(item);
+            }
+            for (const T& item : current) {
+                if (!has(old, item) && !has(added, item)) result.push_back(item);  // a peer's since
+            }
+            r.SetField(path, field, result.empty() ? PXR_NS::VtValue() : PXR_NS::VtValue(result));
+        };
+    }
+
     void record(std::function<void(EditRecorder&)> inverse) {
         m_dirty = true;
         if (m_recording) m_recording->push_back({std::move(inverse), {}, {}});
     }
 
+    bool observing() const { return m_observer && m_silent == 0; }
+
+public:
+    // Applies one inverse, unless a peer has changed the layer so that it no longer
+    // fits (the spec is gone, say). Whether it was applied.
+    bool guarded(const share::LayerOp& op) { return share::applyOps(*this, _GetLayer(), {op}) == 0; }
+
+private:
+
     InverseEdits* m_recording = nullptr;
     bool m_dirty = false;
+    std::function<void(const share::LayerOp&)> m_observer;
+    int m_silent = 0;
 };
 
 class LayerEditCommand : public UndoStep {
@@ -500,6 +597,18 @@ bool UndoManager::apply(const StageRefPtr& stage, const QString& description, co
     }
     endEdit(stage);
     return true;
+}
+
+void UndoManager::observeLayer(const PXR_NS::SdfLayerHandle& layer,
+                               std::function<void(const share::LayerOp&)> observer) {
+    if (!layer) return;
+    EditRecorder::forLayer(layer)->setObserver(std::move(observer));
+}
+
+void UndoManager::changeUnrecorded(const PXR_NS::SdfLayerHandle& layer,
+                                   const std::function<void(PXR_NS::SdfLayerStateDelegateBase&)>& change) {
+    if (!layer || !change) return;
+    EditRecorder::forLayer(layer)->unrecorded(change);
 }
 
 bool UndoManager::apply(const StageRefPtr& stage, const PXR_NS::SdfLayerHandle& layer, const QString& description,

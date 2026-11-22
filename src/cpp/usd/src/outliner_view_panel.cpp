@@ -1,4 +1,5 @@
 #include "usdcc/usd/outliner_view_panel.h"
+#include "usdcc/usd/share/presence.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -75,7 +76,21 @@ OutlinerViewPanel::OutlinerViewPanel(StageManager* stageManager, StageRefPtr sta
     m_treeView = new QTreeView(container);
     m_treeView->setModel(m_proxy);
     // Prim icons, and the active checkbox at the row's right edge.
-    m_treeView->setItemDelegate(new OutlinerItemDelegate(m_treeView));
+    auto* delegate = new OutlinerItemDelegate(m_treeView);
+    m_treeView->setItemDelegate(delegate);
+    // Who else has a prim selected, on a shared stage (docs/SHARED_STAGE.md §8).
+    delegate->setPeerMarks([this](const QModelIndex& index) {
+        const StageRefPtr& stage = currentStage();
+        if (!stage) return std::vector<QColor>();
+        const PXR_NS::UsdStage* usdStage = get_pointer(stage->usdStage());
+        auto& presence = usdcc::usd::share::PresenceHub::instance();
+        if (presence.peers(usdStage).empty()) return std::vector<QColor>();
+        return presence.colorsSelecting(usdStage, m_model->pathForIndex(m_proxy->mapToSource(index)));
+    });
+    connect(&usdcc::usd::share::PresenceHub::instance(), &usdcc::usd::share::PresenceHub::peersChanged, this,
+            [this](const PXR_NS::UsdStage* stage) {
+                if (currentStage() && get_pointer(currentStage()->usdStage()) == stage) m_treeView->viewport()->update();
+            });
     usdcc::ui::scaled::iconSize(m_treeView, 16, 16);
     m_treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_treeView->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
