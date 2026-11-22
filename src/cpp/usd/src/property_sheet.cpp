@@ -1323,7 +1323,7 @@ PropertySheet::Row PropertySheet::buildRow(const UsdProperty& property, const Pr
         tooltip += QStringLiteral("<br>%1").arg(qs(attr.GetTypeName().GetAsToken().GetString()));
         EditorHints hints = EditorHints::forAttribute(attr);
         if (TfStringStartsWith(property.GetName().GetString(), "xformOp:rotate")) {
-            hints.suffix = QStringLiteral("\xC2\xB0");
+            hints.suffix = QString::fromUtf8("\xC2\xB0");
         }
         row.editor = properties::createPropertyEditor(attr.GetTypeName(), hints);
         row.row = new PropertyRow(label, row.editor);

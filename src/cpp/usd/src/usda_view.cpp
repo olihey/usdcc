@@ -974,7 +974,7 @@ void UsdaView::updateStatus() {
         return;
     }
     const QLocale locale;
-    const QString dot = QStringLiteral("  \xC2\xB7  ");
+    const QString dot = QString::fromUtf8("  \xC2\xB7  ");
     if (m_awaitingConvert) {
         m_status->setText(m_name + dot + tr("not converted"));
         m_status->setToolTip(QString());

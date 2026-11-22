@@ -87,7 +87,7 @@ private:
 class DragHandle : public QLabel {
 public:
     DragHandle(size_t index, StackRows* rows, QWidget* parent)
-        : QLabel(QStringLiteral("\xE2\x89\xA1"), parent), m_index(index), m_rows(rows) {
+        : QLabel(QString::fromUtf8("\xE2\x89\xA1"), parent), m_index(index), m_rows(rows) {
         setObjectName(QStringLiteral("dragHandle"));
         setCursor(Qt::OpenHandCursor);
         setToolTip(tr("Drag to reorder"));
@@ -192,7 +192,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
         } else {
             EditorHints hints = EditorHints::forAttribute(op.GetAttr());
             if (isRotation(op.GetOpType()) && op.GetOpType() != UsdGeomXformOp::TypeOrient) {
-                hints.suffix = QStringLiteral("\xC2\xB0");
+                hints.suffix = QString::fromUtf8("\xC2\xB0");
             }
             editor = createPropertyEditor(op.GetAttr().GetTypeName(), hints);
         }
