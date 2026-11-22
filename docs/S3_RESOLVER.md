@@ -6,7 +6,7 @@ through `s3://` asset paths such as `s3://studio/chars/hero/hero.usd`.
 **Status:** reading is built (2026-11-20), phases S3.1 to S3.4, in
 [src/plugins/s3](../src/plugins/s3), tested against the test program's S3 server (§10) after the
 spike (§8.1) ran against rclone's and Garage. Not yet run against AWS itself. §8.2 is what was built
-and where it differs from the plan; writing comes with phase 6. The caching, the server names, the environments
+and where it differs from the plan; writing (phase 6) is built too (2026-11-22). The caching, the server names, the environments
 and the usdcc integration are the shared library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This
 document is only what is S3's own, and the few things S3 needs from the shared library (§6).
 
@@ -25,7 +25,7 @@ document is only what is S3's own, and the few things S3 needs from the shared l
 - **S3-compatible stores come with it:** MinIO, Ceph's RADOS Gateway, Cloudflare R2, Wasabi,
   Backblaze B2, and Google Cloud Storage through its XML API with HMAC keys. They differ in URL,
   region and where the bucket goes (§3), not in requests.
-- **Read-only first.** Writing comes with the shared library's phase 6 (§8).
+- **Read-only first.** Writing came with the shared library's phase 6 (§8; built 2026-11-22, [REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.6).
 
 ## 2. Signing: libcurl, not an SDK
 
@@ -177,7 +177,7 @@ unsigned.
 | `list` | not supported | So resolving asks `stat` for each file (below) |
 | `stat` | `HEAD /<key>` | `Content-Length`, `Last-Modified`, `ETag`. What resolving asks |
 | `fetch` | `GET /<key>`, with `If-None-Match` | A 304 writes nothing |
-| `put` (phase 6) | `PUT /<key>`, with `If-None-Match: *` for a new file and `If-Match` over an old one | S3 has had conditional writes since 2024, so saving over a file changed meanwhile is the clear error phase 6 plans |
+| `put` (phase 6, built) | `PUT /<key>`, signed, the body `UNSIGNED-PAYLOAD`, with `If-None-Match: *` for a new file and `If-Match` over an old one; a `HEAD` afterwards | S3 has had conditional writes since 2024, so saving over a file changed meanwhile is the clear error phase 6 plans: 412 `PreconditionFailed` and 409 `ConditionalRequestConflict` are `Status::Conflict`. Other errors carry S3's code; a 403 names `s3:PutObject` |
 
 - **Folders don't exist in S3,** only keys with slashes. A folder is there when a key starts with
   it. A file asked for as a folder, or the other way round, is told apart by the listing.
@@ -237,7 +237,7 @@ forces". This is what it forces:
 | **S3.2 AWS credentials** | §4.2: the environment, the shared files, `credential_process`, EC2's role, renewal. **Built**; EC2's role and renewal untested | A profile using AWS single sign-on through `credential_process` opens a stage, and keeps working past its credentials' expiry |
 | **S3.3 By bucket** | §3.2, finding the region, Allowed buckets. **Built**, against the test server through `AWS_ENDPOINT_URL_S3`, not AWS | `usdcat s3://<bucket>/shot.usda` works with only the AWS command line set up; a stage naming another bucket is refused with the toast |
 | **S3.4 usdcc** | §7. **Built**, but for the Asset Servers editor's fields: the editor isn't built yet | A reference to a file in a bucket is added by browsing to it in the picker |
-| **With phase 6** | `put` (§5) | Save on a layer from PROD, in the test environment, writes it to the TEST bucket |
+| **With phase 6** | `put` (§5). **Built** (REMOTE_ASSETS.md §13.6), against the test server: `assets_s3_writes` | Save on a layer from PROD, in the test environment, writes it to the TEST bucket |
 | **Later** | Reading part of a large file; pinning an object version (`versionId`); requester pays | |
 
 ### 8.1 What the spike found
@@ -267,7 +267,7 @@ What they showed:
 - **libcurl sorts and escapes the query string for the signature,** so a listing's parameters can
   go in any order. Values are escaped strictly too (a prefix with a space worked).
 - **libcurl adds `x-amz-content-sha256`** for the service `s3` itself: the hash of the empty body
-  for `GET` and `HEAD`, `UNSIGNED-PAYLOAD` for an upload from a file (phase 6). Nothing to add.
+  for `GET` and `HEAD`. For an upload from a file (phase 6) usdcc sends `UNSIGNED-PAYLOAD` itself, which libcurl then signs with: a streamed body isn't hashed ahead.
 - **`If-None-Match` with the ETag gives 304,** as the cache needs. ETags are quoted, as HTTP's.
 - **Paging:** a folder of 1,100 files came in two pages of the default 1,000 on both, all keys
   once, and Garage paged the root two keys at a time correctly (8 pages; folders count towards a

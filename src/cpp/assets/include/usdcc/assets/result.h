@@ -16,6 +16,7 @@ enum class Status {
     Unreachable,   // no answer: timeout, refused, TLS, 5xx
     NotAllowed,    // 401, 403
     NotSupported,  // the protocol can't do this (plain HTTP can't list)
+    Conflict,      // put: the file isn't the version the write was meant for (412, 409)
     Cancelled,
     Error,
 };

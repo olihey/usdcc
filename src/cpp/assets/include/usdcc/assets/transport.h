@@ -90,9 +90,15 @@ public:
     virtual Result<Entry> fetch(const Endpoint& endpoint, const std::string& path, const std::filesystem::path& into,
                                 const std::string& knownEtag, Progress& progress, Cancel& cancel) = 0;
 
-    // Phase 6. An empty `knownEtag` means "only if it doesn't exist yet". "Not supported" unless overridden.
+    // Writes `from` to `path` (phase 6), making the folders it's in where the protocol has
+    // folders, and returns the new version. Only if the file is the version `knownEtag`
+    // names (If-Match); an empty `knownEtag` means "only if it doesn't exist yet"
+    // (If-None-Match: *), and "*" "whichever version is there". A file that isn't is a
+    // Conflict. "Not supported" unless overridden.
     virtual Result<Entry> put(const Endpoint& endpoint, const std::string& path, const std::filesystem::path& from,
                               const std::string& knownEtag, Progress& progress, Cancel& cancel);
+    // Whether put() writes: an endpoint of a protocol that can't is read-only, whatever it says.
+    virtual bool canPut() const { return false; }
 };
 
 // One transport per scheme, for the whole process. A protocol's library registers its
