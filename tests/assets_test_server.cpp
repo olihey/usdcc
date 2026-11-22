@@ -84,6 +84,8 @@ void sendAll(SocketHandle connection, const std::string& data) {
 const char* reasonOf(int code) {
     switch (code) {
         case 200: return "OK";
+        case 201: return "Created";
+        case 204: return "No Content";
         case 206: return "Partial Content";
         case 207: return "Multi-Status";
         case 302: return "Found";
@@ -93,6 +95,8 @@ const char* reasonOf(int code) {
         case 401: return "Unauthorized";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
+        case 409: return "Conflict";
+        case 412: return "Precondition Failed";
         case 503: return "Service Unavailable";
         default: return "Status";
     }
@@ -129,6 +133,26 @@ std::string headerOf(const ServerRequest& request, const char* name) {
 const double kModified = 1700000000.0;
 
 std::string etagOf(const fs::path& file) { return "\"" + usdcc::assets::stableHash(readFile(file), 16) + "\""; }
+
+// Whether a write's If-Match and If-None-Match hold for `file` (RFC 9110 §13.1). With
+// `etags` off, If-Match can only be "*".
+bool conditionsHold(const ServerRequest& request, const fs::path& file, bool etags) {
+    std::error_code error;
+    const bool exists = fs::is_regular_file(file, error);
+    const std::string match = headerOf(request, "if-match");
+    const std::string noneMatch = headerOf(request, "if-none-match");
+    if (noneMatch == "*" && exists) return false;
+    if (!match.empty()) {
+        if (!exists) return false;
+        // Strong comparison: a weak ETag never matches.
+        if (match != "*" && (!etags || match.rfind("W/", 0) == 0 || match != etagOf(file))) return false;
+    }
+    return true;
+}
+
+void writeBody(const fs::path& file, const std::string& body) {
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << body;
+}
 
 std::string propfindEntry(const FolderServer& folder, const fs::path& file, const std::string& href) {
     std::error_code error;
@@ -321,6 +345,37 @@ ServerResponse serveFolder(const FolderServer& folder, const ServerRequest& requ
         response.code = 207;
         response.headers.push_back({"Content-Type", "application/xml; charset=utf-8"});
         response.body = std::move(xml);
+        return response;
+    }
+    if (request.method == "MKCOL" || request.method == "PUT") {
+        if (!folder.allowWrite) {
+            response.code = 403;
+            return response;
+        }
+        // As WebDAV says: the folder it goes in has to be there.
+        std::string trimmed = path;
+        while (trimmed.size() > 1 && trimmed.back() == '/') trimmed.pop_back();
+        const fs::path target = folder.root / usdcc::assets::fromUtf8(trimmed.substr(1));
+        if (!fs::is_directory(target.parent_path(), error)) {
+            response.code = 409;
+            return response;
+        }
+        if (request.method == "MKCOL") {
+            response.code = fs::exists(target, error) ? 405 : (fs::create_directory(target, error) ? 201 : 500);
+            return response;
+        }
+        if (fs::is_directory(target, error)) {
+            response.code = 405;
+            return response;
+        }
+        if (!conditionsHold(request, target, folder.etags)) {
+            response.code = 412;
+            return response;
+        }
+        const bool existed = fs::exists(target, error);
+        writeBody(target, request.body);
+        response.code = existed ? 204 : 201;
+        if (folder.etags && folder.etagOnPut) response.headers.push_back({"ETag", etagOf(target)});
         return response;
     }
     if (request.method != "GET" && request.method != "HEAD") {
@@ -519,6 +574,26 @@ ServerResponse serveS3(S3Server& server, const ServerRequest& request) {
         ServerResponse response;
         response.headers.push_back({"Content-Type", "application/xml"});
         response.body = std::move(xml);
+        return response;
+    }
+    if (request.method == "PUT") {
+        if (!server.allowWrite) return s3Error(403, "AccessDenied", "Access Denied");
+        if (key.empty() || key.back() == '/') return s3Error(400, "InvalidRequest", "a PUT names a key");
+        // A streamed body is sent unsigned; it still says so.
+        if (!authorization.empty() && headerOf(request, "x-amz-content-sha256") != "UNSIGNED-PAYLOAD") {
+            return s3Error(400, "XAmzContentSHA256Mismatch", "The provided 'x-amz-content-sha256' header does not match what was computed.");
+        }
+        const fs::path target = server.root / usdcc::assets::fromUtf8(key);
+        if (!conditionsHold(request, target, true)) {
+            return s3Error(412, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold",
+                           "<Condition>" + std::string(headerOf(request, "if-match").empty() ? "If-None-Match" : "If-Match") +
+                               "</Condition>");
+        }
+        // S3 has no folders; the files of this one are in them.
+        fs::create_directories(target.parent_path(), error);
+        writeBody(target, request.body);
+        ServerResponse response;
+        response.headers.push_back({"ETag", etagOf(target)});
         return response;
     }
     if (request.method != "GET" && request.method != "HEAD") return s3Error(405, "MethodNotAllowed", "not here");

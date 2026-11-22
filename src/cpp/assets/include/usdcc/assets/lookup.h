@@ -34,6 +34,8 @@ public:
     bool entry(const std::string& key, Result<Entry>* entry);
     void setEntry(const std::string& key, const Result<Entry>& entry);
     void clear();
+    // What any endpoint of `stack` said about `path` and its folder: after a write to it.
+    void forget(const Stack& stack, const std::string& path);
 
 private:
     template <class T>
