@@ -72,6 +72,30 @@ void defineFinalRenderSettings() {
     }
     {
         SettingDefinition d;
+        d.key = "FinalRender/jobFolders";
+        d.group = "Defaults";
+        d.label = "A folder for each job";
+        d.description = "Each job's images go in a folder of their own under the output folder, "
+                        "<stage>_<settings>_<date>-<time>. Off: all in the output folder. An absolute output "
+                        "isn't changed; <job> in an output names the folder.";
+        d.type = SettingType::Bool;
+        d.defaultValue = true;
+        define(d);
+    }
+    {
+        SettingDefinition d;
+        d.key = "FinalRender/imageViewer";
+        d.group = "Defaults";
+        d.label = "Image viewer";
+        d.description = "The Render Queue's Open in Viewer: a program and its arguments, {file} for the frame's file "
+                        "and {sequence} for its frames with #### for the number (DJV, mrViewer, RV, Nuke...). "
+                        "Empty: no Open in Viewer. A path with spaces goes in quotes.";
+        d.type = SettingType::String;
+        d.defaultValue = std::string();
+        define(d);
+    }
+    {
+        SettingDefinition d;
         d.key = "FinalRender/format";
         d.group = "Defaults";
         d.label = "Format";

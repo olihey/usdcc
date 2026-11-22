@@ -250,6 +250,33 @@ USDCC_TEST(final_render_output_names) {
     job.spec.options.format = "exr";
     job.spec.products.front().productName = "beauty.####.exr";
     CHECK(name("", 7) == "beauty.0007.exr", "the product's own name: %s", qPrintable(name("", 7)));
+
+    // A folder for each job: a relative pattern goes in it, an absolute one doesn't, and
+    // <job> says where it goes.
+    job.folderName = "shot_Settings_20261122-101500";
+    const auto path = [&job](double frame) {
+        return QDir::fromNativeSeparators(QString::fromStdString(outputPath(job, job.spec.products.front(), "", frame)));
+    };
+    CHECK(path(7).endsWith("/shot_Settings_20261122-101500/beauty.0007.exr"), "in the job's folder: %s", qPrintable(path(7)));
+    job.spec.options.output = (root + "/abs/<stage>").toStdString();
+    CHECK(path(7) == root + "/abs/shot.exr", "an absolute output as it is: %s", qPrintable(path(7)));
+    job.spec.options.output = (root + "/abs/<job>/<stage>").toStdString();
+    CHECK(path(7) == root + "/abs/shot_Settings_20261122-101500/shot.exr", "<job> in an absolute one: %s", qPrintable(path(7)));
+    job.spec.options.output = "renders/<job>_<stage>";
+    CHECK(path(7).endsWith("/renders/shot_Settings_20261122-101500_shot.exr") && !path(7).contains("101500/renders"),
+          "<job> in a relative one, no folder added: %s", qPrintable(path(7)));
+    const std::vector<std::string> files = frameFiles(job, 0);
+    CHECK(files.size() == 1 && files.front() == outputPath(job, job.spec.products.front(), "", 7), "a frame's files");
+
+    // Each name once, and not one that's taken.
+    const std::string first = newJobFolderName("shot", "Settings");
+    const std::string second = newJobFolderName("shot", "Settings");
+    CHECK(first != second && second.rfind(first, 0) == 0 && second.substr(first.size(), 1) == "-",
+          "a second job in the same second gets -2: %s, %s", first.c_str(), second.c_str());
+    const std::string free = newJobFolderName("other", "Settings", [](const std::string& name) {
+        return name.find('-', name.size() - 3) == std::string::npos;  // only the plain name is taken
+    });
+    CHECK(free.size() > 2 && free.substr(free.size() - 2) == "-2", "a name that's taken: %s", free.c_str());
 }
 
 USDCC_TEST(final_render_scheduler_tiles) {

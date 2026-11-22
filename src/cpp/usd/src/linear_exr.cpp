@@ -4,11 +4,14 @@
 #include <OpenEXR/ImfChannelList.h>
 #include <OpenEXR/ImfFrameBuffer.h>
 #include <OpenEXR/ImfHeader.h>
+#include <OpenEXR/ImfInputFile.h>
 #include <OpenEXR/ImfOutputFile.h>
 #include <OpenEXR/ImfStandardAttributes.h>
 #endif
 
+#include <cstddef>
 #include <exception>
+#include <set>
 
 namespace usdcc::usd {
 
@@ -95,6 +98,55 @@ bool writeLinearExrLayers(const std::string& path, const std::vector<LinearExrLa
     }
 #else
     (void)path;
+    return fail("usdcc was built without OpenEXR");
+#endif
+}
+
+bool readLinearExr(const std::string& path, std::vector<float>& rgba, int& width, int& height, std::string* error) {
+    const auto fail = [error](std::string why) {
+        if (error) *error = std::move(why);
+        return false;
+    };
+#ifdef USDCC_HAS_OPENEXR
+    try {
+        Imf::InputFile file(path.c_str());
+        const Imath::Box2i window = file.header().dataWindow();
+        width = window.max.x - window.min.x + 1;
+        height = window.max.y - window.min.y + 1;
+        if (width < 1 || height < 1) return fail("the image is empty");
+        // The plain channels, else the first layer's ("diffuse.R"...).
+        const Imf::ChannelList& channels = file.header().channels();
+        std::string prefix;
+        if (!channels.findChannel("R") && !channels.findChannel("Y")) {
+            std::set<std::string> layers;
+            channels.layers(layers);
+            if (!layers.empty()) prefix = *layers.begin() + ".";
+        }
+        const bool gray = !channels.findChannel((prefix + "R").c_str()) && channels.findChannel((prefix + "Y").c_str());
+        rgba.assign(size_t(width) * size_t(height) * 4, 0.0f);
+        Imf::FrameBuffer frame;
+        // The slices are addressed by the data window's coordinates.
+        const std::ptrdiff_t pixel = std::ptrdiff_t(sizeof(float) * 4);
+        char* base = reinterpret_cast<char*>(rgba.data()) -
+                     (std::ptrdiff_t(window.min.x) + std::ptrdiff_t(window.min.y) * width) * pixel;
+        const char* rgbaNames[] = {"R", "G", "B", "A"};
+        std::vector<std::string> names;
+        names.reserve(4);
+        for (int c = 0; c < 4; ++c) {
+            names.push_back(prefix + (gray && c < 3 ? std::string("Y") : std::string(rgbaNames[c])));
+            frame.insert(names.back().c_str(), Imf::Slice(Imf::FLOAT, base + sizeof(float) * c, sizeof(float) * 4,
+                                                          sizeof(float) * 4 * size_t(width), 1, 1, c == 3 ? 1.0 : 0.0));
+        }
+        file.setFrameBuffer(frame);
+        file.readPixels(window.min.y, window.max.y);
+        return true;
+    } catch (const std::exception& exception) {
+        return fail(exception.what());
+    }
+#else
+    (void)path;
+    rgba.clear();
+    width = height = 0;
     return fail("usdcc was built without OpenEXR");
 #endif
 }

@@ -178,11 +178,17 @@ Plugins don't share code with each other, so what RTX and V-Ray both need is her
 - **Where the pattern comes from:** `usdcc:render:output`, else the product's `productName`,
   else `<stage>_<settings>` (`_<product>` added when there are several products).
 - **Tokens:** `<stage>` (the root layer's name), `<settings>`, `<product>`, `<aov>`,
-  `<renderer>`, and `<frame>`, `####`, `$F4` or `$F` for the frame. Frames have 4 digits; a
+  `<renderer>`, `<job>` (the job's own folder name, below), and `<frame>`, `####`, `$F4` or `$F` for the frame. Frames have 4 digits; a
   fractional one is written `0012.500`.
 - **A range without a frame token** gets `.<frame>` before the extension.
 - **Folders:** a relative pattern is in Settings > Final Render > Output folder (Pictures/usdcc
   renders by default). Missing folders are made.
+- **A folder for each job:** a relative pattern goes in the job's own folder under the output
+  folder, `<stage>_<settings>_<yyyyMMdd-HHmmss>` (`-2`, `-3`... when the name is taken), so one
+  render never overwrites another's files. `<job>` in a pattern says where that folder goes
+  instead. An absolute pattern isn't changed. A render queue server puts it under its output
+  root the same way; a folder name from a job that isn't one plain name is dropped.
+  `FinalRender/jobFolders` off: everything straight in the output folder, as before.
 - **OpenEXR:** a file for each product, with every AOV as a layer. The first layer has the plain
   R, G, B and A channels, and the others are `<aov>.R`, ... (`<aov>.Y` for one channel). Values
   are linear, with Rec.709/D65 chromaticities (`writeLinearExrLayers()`, [linear_exr.h](../src/cpp/usd/include/usdcc/usd/linear_exr.h)).
@@ -241,8 +247,27 @@ is a view panel, opened from the Render or Stages menu.
 panel. It opens when a render is queued.
 
 - **The list:** each job, then its tasks, with their status, progress, worker and time.
-- **The preview:** the newest frame, through the view transform.
+- **The preview:** the newest frame, through the view transform, while **Follow newest** is on.
+  Double-clicking a frame (or a tile of it) reads it from its file into the preview and turns
+  Follow newest off; double-clicking a job shows its newest written frame. EXRs are read on
+  another thread (`readLinearExr()`) and go through the view transform; PNGs show as they are.
+- **A job's menu:** Show Newest Frame, Open in Explorer (its folder), Copy Folder Path, Cancel,
+  Retry, Remove, Remove and Delete Files… (asks, then moves its files to the recycle bin and
+  removes its folder once empty), Clear Ended. A queue's job: Open Output Folder (when this
+  machine reaches it), Copy Output Path, Cancel, Retry, Remove.
+- **A frame's menu:** Show in Preview, Open in Explorer (the file picked), Open in Default App,
+  Open in Viewer (`FinalRender/imageViewer`), Copy Path, Copy Image (through the view
+  transform), and **Share** (§5.5). With several files (products, PNG AOVs) the Open and Copy
+  Path entries list each.
 - **Buttons:** Cancel, Retry, Remove, Clear Ended, and Open Folder.
+
+### 5.5 Share
+
+A frame's **Share** lists the open chat rooms ([PEERS.md](PEERS.md) §10.1), with Everyone and
+each person in them. Its dialog takes a message and whether to include the original file (its
+size, and what it adds up to for a whole room, are shown). A preview always goes: the frame
+through the view transform, JPEG, at most 2048 px. A file on a network drive also sends its
+path. Each receiver accepts or declines before anything is downloaded.
 
 ### 5.3 Render menu
 
@@ -268,6 +293,8 @@ panel. It opens when a render is queued.
 | `FinalRender/node` | off: in a render queue room it joins, this instance doesn't take jobs until switched on there (Swarm panel) |
 | `FinalRender/trusted` | empty: fingerprints of peers whose jobs start without asking |
 | `FinalRender/askUntrusted` | on: other peers' jobs ask with a notification; off: they're declined |
+| `FinalRender/jobFolders` | on: a folder for each job (§4.3) |
+| `FinalRender/imageViewer` | empty: no Open in Viewer; else a program and its arguments, `{file}` and `{sequence}` (#### for the frame) filled in, the file last without either |
 
 ## 6. Python
 

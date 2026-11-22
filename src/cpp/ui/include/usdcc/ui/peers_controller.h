@@ -11,17 +11,26 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QImage>
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QStringList>
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 class QMenu;
 class QTimer;
 class QToolButton;
+
+namespace usdcc::peers {
+class Transfer;
+class TransferInbox;
+struct TransferManifest;
+}  // namespace usdcc::peers
 
 namespace usdcc::ui {
 
@@ -37,6 +46,9 @@ public:
     static constexpr auto portKey = "Peers/port";
     static constexpr auto askBeforeLinkJoinKey = "Peers/askBeforeLinkJoin";
     static constexpr auto chatToastsKey = "Peers/chatToasts";
+    static constexpr auto acceptImagesKey = "Peers/acceptImages";
+    static constexpr auto receivedImagesMaxKey = "Peers/receivedImagesMaxGB";
+    static constexpr auto keepReceivedImagesKey = "Peers/keepReceivedImagesDays";
     static void defineSettings();
 
     struct Hooks {
@@ -44,6 +56,18 @@ public:
         std::function<void(const QString& path)> selectPrim;
         // What `presence` says this instance has open.
         std::function<QString()> currentStage;
+    };
+
+    // An image shared in the chat (PEERS.md §10.1): a preview, and the original file when the
+    // sender offers it. Each is a bundle of one file, fetched from the sender.
+    struct ChatImage {
+        QString preview;         // the preview's bundle hash
+        QString previewName;     // its file
+        qint64 previewBytes = 0;
+        QString original;        // the original's bundle hash; empty: not offered
+        QString originalName;
+        qint64 originalBytes = 0;
+        QString sharedPath;      // where the original is on a shared drive, as the sender sees it
     };
 
     // One log message as shared in a chat (the Log panel's Share).
@@ -63,7 +87,30 @@ public:
         usdcc::peers::Peer from;  // Invalid for what the room itself says ("Anna joined")
         QString text;
         QDateTime when;
+        std::optional<ChatImage> image;
+        usdcc::peers::PeerId to;  // One member's only; empty: the room's
         QList<SharedLogRecord> records;  // Log messages someone shared
+    };
+
+    // A shared image's file here.
+    struct ImageFile {
+        enum class State { Missing, Fetching, Done, Failed };
+        State state = State::Missing;
+        QString path;  // once Done
+        qint64 done = 0;
+        qint64 total = 0;
+        QString error;
+    };
+
+    // What Share sends (the Render Queue's Share, PEERS.md §10.1).
+    struct ShareRequest {
+        usdcc::peers::Room* room = nullptr;
+        usdcc::peers::PeerId to;  // empty: everyone in the room
+        QString caption;
+        QImage preview;           // as it should look: through the view transform
+        QString previewName;      // "shot010_0012.jpg"
+        QString original;         // a file offered with it; empty: the preview only
+        QString sharedPath;       // shown as where the original is, for a file on a shared drive
     };
 
     // Whether someone is around (PEERS.md §10.1): from `presence`.
@@ -100,6 +147,28 @@ public:
     // A conversation: the room's, with `with` empty, or a private one with that person.
     QList<ChatLine> chat(usdcc::peers::Room* room, const usdcc::peers::PeerId& with = {}) const;
     void say(usdcc::peers::Room* room, const QString& text);
+    // Shares an image in a chat room, or with one person there: the chat line goes out at
+    // once, the files when each member asks for them. False, with `error`, when it can't.
+    bool shareImage(const ShareRequest& request, QString* error = nullptr);
+    ImageFile imageFile(const QString& hash) const;
+    // Asks the sender for a shared image's file. Only on the receiver's word: nothing is
+    // fetched by itself (PEERS.md §10.1).
+    void fetchImage(usdcc::peers::Room* room, const QString& hash);
+    // The receiver's answer to a shared image, by its preview's hash: the preview, and the
+    // original too with `original`; or no.
+    void acceptImage(usdcc::peers::Room* room, const QString& preview, bool original);
+    void declineImage(const QString& preview);
+    bool isAccepted(const QString& preview) const { return m_accepted.contains(preview); }
+    bool isDeclined(const QString& preview) const { return m_declined.contains(preview); }
+    // Whether Accept is asked at all (Settings > Peers > Accept shared images).
+    static bool acceptsImages();
+    // The sender's: whether an image of this instance's is still offered, and taking it back.
+    bool isSharing(const QString& preview) const { return m_offers.contains(preview); }
+    void stopSharing(const QString& preview);
+    // Where received images are, and emptying it (Settings > Peers > Clear Received Images).
+    static QString receivedImagesFolder();
+    void clearReceivedImages();
+
     // Sealed for that person alone (Channel::sendPrivate()); shown here at once. False if
     // they can't be messaged privately.
     bool sayTo(usdcc::peers::Room* room, const usdcc::peers::PeerId& with, const QString& text);
@@ -170,6 +239,8 @@ Q_SIGNALS:
     void typingChanged(usdcc::peers::Room* room, const QString& with);
     // This instance's own status (do not disturb, away).
     void statusChanged();
+    // A shared image's file arrived, is on its way, or failed.
+    void imageChanged(const QString& hash);
 
 private:
     struct Conversation {
@@ -190,10 +261,15 @@ private:
     Conversation* conversation(usdcc::peers::Room* room, const usdcc::peers::PeerId& with);
     void onChat(usdcc::peers::Room* room, const usdcc::peers::Message& message);
     void onTyping(usdcc::peers::Room* room, const usdcc::peers::Message& message);
-    void toastChat(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const QString& text, bool privately);
+    void toastChat(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const QString& text, bool privately,
+                   const std::optional<ChatImage>& image = std::nullopt);
     void expireTypists();
     void askHost(usdcc::peers::JoinRequest* request, usdcc::peers::Room* room);
     void updateStatus();
+    void openImageInbox(usdcc::peers::Room* room);
+    void onImageLine(usdcc::peers::Room* room, const ChatLine& line);
+    void onFetch(usdcc::peers::Room* room, const usdcc::peers::Message& message);
+    void watchTransfer(usdcc::peers::Transfer* transfer, const QString& hash);
     QStringList storedList(const QString& key) const;
     void storeList(const QString& key, const QStringList& list) const;
 
@@ -208,6 +284,31 @@ private:
     QTimer* m_idleTimer = nullptr;
     QDateTime m_lastInput;
     bool m_away = false;
+    // Shared images: what this instance offers, by bundle hash, and what it expects.
+    struct Offer {
+        QPointer<usdcc::peers::Room> room;
+        usdcc::peers::PeerId to;  // empty: anyone in the room
+        std::shared_ptr<usdcc::peers::TransferManifest> manifest;
+        QString path;  // the file here
+        QDateTime expires;
+        QString original;  // a preview's original, taken back with it
+    };
+    QHash<QString, Offer> m_offers;
+    struct Expected {
+        QPointer<usdcc::peers::Room> room;
+        usdcc::peers::PeerId from;
+        QString name;
+        qint64 bytes = 0;
+    };
+    QHash<QString, Expected> m_expected;
+    QHash<QString, ImageFile> m_images;
+    QHash<QString, QString> m_originals;  // a preview's original
+    QSet<QString> m_accepted;  // preview hashes the receiver said yes to
+    QSet<QString> m_declined;
+    // Image lines a minute from each sender, so one can't flood the chat (by peer id).
+    QHash<QString, QList<QDateTime>> m_imageTimes;
+    QHash<QString, QDateTime> m_floodNoted;
+    QHash<usdcc::peers::Room*, usdcc::peers::TransferInbox*> m_imageInboxes;
     QToolButton* m_status = nullptr;
     bool m_panelShown = false;
     bool m_swarmShown = false;

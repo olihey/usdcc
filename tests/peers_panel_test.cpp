@@ -19,6 +19,9 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QFile>
+#include <QFileInfo>
+#include <QImage>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -429,6 +432,29 @@ USDCC_TEST(peers_private_chat) {
     QTextBrowser* benChat = benPanel.findChild<QTextBrowser*>("peersChat");
     CHECK(benChat->toPlainText().contains("got it"), "Ben's open tab doesn't show the answer");
 
+    // An image shared with one person goes in the private conversation too, not the room's.
+    QImage picture(32, 16, QImage::Format_RGBA8888);
+    picture.fill(Qt::blue);
+    PeersController::ShareRequest request;
+    request.room = room.benRoom;
+    request.to = room.carlRoom->me().id;
+    request.caption = "just this frame";
+    request.preview = picture;
+    request.previewName = "frame.jpg";
+    QString why;
+    CHECK(room.ben->shareImage(request, &why), "Ben couldn't share an image with Carl: %s", qPrintable(why));
+    const auto hasImage = [](const QList<PeersController::ChatLine>& lines) {
+        return std::any_of(lines.begin(), lines.end(),
+                           [](const auto& line) { return line.image && line.text == "just this frame"; });
+    };
+    CHECK(hasImage(room.ben->chat(room.benRoom, carlAtBen.id)), "Ben's image to Carl isn't in their conversation");
+    CHECK(QTest::qWaitFor([&] { return hasImage(room.carl->chat(room.carlRoom, benId)); }),
+          "Carl didn't get the image in their conversation");
+    QTest::qWait(200);
+    CHECK(!hasImage(room.carl->chat(room.carlRoom)) && !hasImage(room.anna->chat(room.annaRoom)) &&
+              !hasImage(room.ben->chat(room.benRoom)),
+          "the image to Carl showed in the room's chat");
+
     // Ben leaves: Carl's tab stays, says so, and can't be written in.
     room.benRoom->close();
     CHECK(QTest::qWaitFor([&] { return hasText(room.carl->chat(room.carlRoom, benId), "Ben left the room"); }),
@@ -575,4 +601,133 @@ USDCC_TEST(peers_presence_and_typing) {
     CHECK(room.anna->typingIn(room.annaRoom, {}).isEmpty() && room.anna->typingIn(room.annaRoom, benId).isEmpty() &&
               room.carl->typingIn(room.carlRoom, {}).isEmpty(),
           "Ben's private typing showed elsewhere");
+}
+
+// Shared images (docs/PEERS.md §10.1): nothing comes before the receiver accepts; a declined
+// one never comes; a file that isn't the image its name says is removed; an image no
+// longer shared can't be fetched; "never" turns them off.
+USDCC_TEST(peers_shared_images_ask_first) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir folder;
+    auto anna = makeController("Anna", folder.path());
+    auto ben = makeController("Ben", folder.path());
+    ben->clearReceivedImages();
+    PeersSidePanel benPanel(ben.get());
+    QString error;
+    Room* room = anna->host({"Dailies", Admission::Open, {}, false}, &error);
+    CHECK(room, "Anna couldn't host: %s", qPrintable(error));
+    if (!room) {
+        return;
+    }
+    Room* benRoom = ben->joinLinkOrAddress(room->link(), {}, &error);
+    CHECK(benRoom, "Ben couldn't join: %s", qPrintable(error));
+    if (!benRoom) {
+        return;
+    }
+    CHECK(QTest::qWaitFor([&] { return benRoom->state() == Room::State::Open && room->peers().size() == 2; }, 10000),
+          "Ben is in");
+    benPanel.showRoom(benRoom);
+
+    QTemporaryDir files;
+    QImage picture(64, 32, QImage::Format_RGBA8888);
+    picture.fill(Qt::red);
+    const QString original = files.filePath("shot.0001.png");
+    picture.save(original);
+    // Each share its own picture: the same file twice is the same bundle, already here.
+    int shared = 0;
+    const auto share = [&](const QString& caption, QString file, const PeerId& to = {}) -> QString {
+        ++shared;
+        QImage own = picture;
+        own.fill(QColor::fromHsv((shared * 50) % 360, 200, 200));
+        if (file == original) {
+            file = files.filePath(QStringLiteral("shot.%1.png").arg(shared, 4, 10, QLatin1Char('0')));
+            own.save(file);
+        }
+        PeersController::ShareRequest request;
+        request.room = room;
+        request.to = to;
+        request.caption = caption;
+        request.preview = own;
+        request.previewName = QFileInfo(file).completeBaseName() + ".jpg";
+        request.original = file;
+        QString why;
+        CHECK(anna->shareImage(request, &why), "Anna couldn't share: %s", qPrintable(why));
+        // Ben's line for it, by its caption.
+        QString preview;
+        QTest::qWaitFor([&] {
+            for (const PeersController::ChatLine& line : ben->chat(benRoom)) {
+                if (line.image && line.text == caption) {
+                    preview = line.image->preview;
+                }
+            }
+            return !preview.isEmpty();
+        }, 10000);
+        CHECK(!preview.isEmpty(), "Ben's chat has %s", qPrintable(caption));
+        return preview;
+    };
+    const auto originalOf = [&](const QString& preview) {
+        for (const PeersController::ChatLine& line : ben->chat(benRoom)) {
+            if (line.image && line.image->preview == preview) {
+                return line.image->original;
+            }
+        }
+        return QString();
+    };
+    using State = PeersController::ImageFile::State;
+
+    // Asked first: nothing comes by itself.
+    const QString first = share("Look at this", original);
+    if (first.isEmpty()) {
+        return;
+    }
+    QTest::qWait(500);
+    CHECK(ben->imageFile(first).state == State::Missing && ben->imageFile(originalOf(first)).state == State::Missing,
+          "nothing downloaded before Accept");
+    QTextBrowser* benChat = benPanel.findChild<QTextBrowser*>("peersChat");
+    CHECK(benChat->toHtml().contains("accept:" + first) && benChat->toHtml().contains("decline:" + first),
+          "Ben's chat asks: %s", qPrintable(benChat->toPlainText()));
+    Q_EMIT benChat->anchorClicked(QUrl("accept:" + first));
+    CHECK(QTest::qWaitFor([&] {
+              return ben->imageFile(first).state == State::Done && ben->imageFile(originalOf(first)).state == State::Done;
+          }, 10000),
+          "accepted: the preview and the original came (%d, %d)", int(ben->imageFile(first).state),
+          int(ben->imageFile(originalOf(first)).state));
+    CHECK(QImage(ben->imageFile(originalOf(first)).path).size() == QSize(64, 32), "the original as it was sent");
+    CHECK(QTest::qWaitFor([&] { return benChat->toHtml().contains("open:" + originalOf(first)); }), "with Open");
+
+    // Declined: never comes.
+    const QString second = share("Another", original);
+    Q_EMIT benChat->anchorClicked(QUrl("decline:" + second));
+    ben->acceptImage(benRoom, second, false);  // Accept after Decline is a new answer...
+    CHECK(QTest::qWaitFor([&] { return ben->imageFile(second).state == State::Done; }, 10000), "...which counts");
+    CHECK(ben->imageFile(originalOf(second)).state == State::Missing, "Preview Only: the original stays where it is");
+
+    // Not what its name says: removed when it arrives.
+    const QString fake = files.filePath("evil.0001.png");
+    {
+        QFile file(fake);
+        file.open(QIODevice::WriteOnly);
+        file.write("MZ this is not a picture");
+    }
+    const QString third = share("Totally a picture", fake);
+    ben->acceptImage(benRoom, third, true);
+    CHECK(QTest::qWaitFor([&] { return ben->imageFile(originalOf(third)).state == State::Failed; }, 10000),
+          "a file that isn't an image fails");
+    CHECK(ben->imageFile(originalOf(third)).error.contains("Not an image"), "saying why: %s",
+          qPrintable(ben->imageFile(originalOf(third)).error));
+
+    // No longer shared: can't be fetched.
+    const QString fourth = share("Taken back", original);
+    anna->stopSharing(fourth);
+    ben->acceptImage(benRoom, fourth, false);
+    CHECK(QTest::qWaitFor([&] { return ben->imageFile(fourth).state == State::Failed; }, 10000), "a preview taken back fails");
+
+    // Off: nothing is asked, and nothing comes.
+    usdcc::core::Settings::instance().setValue(PeersController::acceptImagesKey, std::string("never"));
+    const QString fifth = share("While off", original);
+    ben->acceptImage(benRoom, fifth, true);
+    QTest::qWait(500);
+    CHECK(ben->imageFile(fifth).state == State::Missing, "off: not downloaded");
+    ben->clearReceivedImages();
 }

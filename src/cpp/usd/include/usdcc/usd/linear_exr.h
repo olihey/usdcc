@@ -1,6 +1,6 @@
 #pragma once
 
-// Linear images to OpenEXR (docs/COLOR_MANAGEMENT.md §6): what a render view panel's
+// Linear images to and from OpenEXR (docs/COLOR_MANAGEMENT.md §6): what a render view panel's
 // Save Image writes for "OpenEXR, linear", the renderer's working-space values with no view
 // transform. OpenEXR comes from the OpenUSD install, as OpenColorIO does; built without it,
 // linearExrAvailable() is false and nothing is written. Qt-free.
@@ -33,5 +33,11 @@ struct LinearExrLayer {
 // �4.3). False, with `error` saying why, when it can't.
 bool writeLinearExrLayers(const std::string& path, const std::vector<LinearExrLayer>& layers, int width, int height,
                           std::string* error = nullptr);
+
+// An EXR's plain R, G, B and A channels (a missing one: 0, A: 1) as float RGBA, top row
+// first, into `rgba` (width x height x 4 floats). A file without plain channels gives its
+// first layer's. False, with `error` saying why, when it can't be read.
+bool readLinearExr(const std::string& path, std::vector<float>& rgba, int& width, int& height,
+                   std::string* error = nullptr);
 
 }  // namespace usdcc::usd

@@ -5,16 +5,23 @@
 #include "usdcc/core/version.h"
 #include "usdcc/peers/channel.h"
 #include "usdcc/peers/state.h"
+#include "usdcc/peers/transfer.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/toast_manager.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QDirIterator>
 #include <QEvent>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
+#include <QRegularExpression>
+#include <QUuid>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolButton>
@@ -41,6 +48,90 @@ constexpr int kSharedBytes = 64 * 1024;  // All of one share, as JSON
 const QString kMutedRoomsKey = QStringLiteral("Peers/mutedRooms");
 const QString kMutedPeersKey = QStringLiteral("Peers/mutedPeers");
 const QString kTrustedKey = QStringLiteral("Peers/trusted");
+// Shared images' files (PEERS.md §10.1): a bundle of one file each, fetched from the sender.
+const QString kChatFiles = QStringLiteral("chat-files");
+constexpr qint64 kMaxPreviewBytes = 32 * 1024 * 1024;
+constexpr int kImagesPerMinute = 10;  // from one sender; more are left out
+constexpr int kOfferHours = 24;       // an image stays offered this long
+
+// Whether the file's first bytes are what its name says: the image types, nothing else.
+bool contentMatchesName(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    const QByteArray head = file.read(8);
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == u"png") {
+        return head.startsWith(QByteArray("\x89PNG\r\n\x1a\n", 8));
+    }
+    if (suffix == u"jpg" || suffix == u"jpeg") {
+        return head.startsWith(QByteArray("\xff\xd8\xff", 3));
+    }
+    if (suffix == u"exr") {
+        return head.startsWith(QByteArray("\x76\x2f\x31\x01", 4));
+    }
+    if (suffix == u"tif" || suffix == u"tiff") {
+        return head.startsWith(QByteArray("II*\0", 4)) || head.startsWith(QByteArray("MM\0*", 4));
+    }
+    return false;
+}
+
+qint64 folderBytes(const QString& folder) {
+    qint64 total = 0;
+    QDirIterator it(folder, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        total += it.nextFileInfo().size();
+    }
+    return total;
+}
+
+// A shared image's file name: one plain name, of an image.
+bool isImageName(const QString& name) {
+    static const QStringList suffixes = {QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("png"),
+                                         QStringLiteral("exr"), QStringLiteral("tif"),  QStringLiteral("tiff")};
+    return !name.contains(u'/') && isSafeTransferPath(name) && suffixes.contains(QFileInfo(name).suffix().toLower());
+}
+
+bool isBundleHash(const QString& hash) {
+    static const QRegularExpression hex(QStringLiteral("^[0-9a-f]{64}$"));
+    return hex.match(hash).hasMatch();
+}
+
+QJsonObject imageToJson(const PeersController::ChatImage& image) {
+    QJsonObject json{{"preview", image.preview}, {"previewName", image.previewName}, {"previewBytes", image.previewBytes}};
+    if (!image.original.isEmpty()) {
+        json["original"] = image.original;
+        json["originalName"] = image.originalName;
+        json["originalBytes"] = image.originalBytes;
+    }
+    if (!image.sharedPath.isEmpty()) {
+        json["sharedPath"] = image.sharedPath;
+    }
+    return json;
+}
+
+// Nothing for a message without a valid preview; an original that isn't valid is left out.
+std::optional<PeersController::ChatImage> imageFromJson(const QJsonObject& json) {
+    PeersController::ChatImage image;
+    image.preview = json.value("preview").toString();
+    image.previewName = json.value("previewName").toString();
+    image.previewBytes = json.value("previewBytes").toInteger();
+    if (!isBundleHash(image.preview) || !isImageName(image.previewName) || image.previewBytes <= 0 ||
+        image.previewBytes > kMaxPreviewBytes) {
+        return std::nullopt;
+    }
+    image.original = json.value("original").toString();
+    image.originalName = json.value("originalName").toString();
+    image.originalBytes = json.value("originalBytes").toInteger();
+    if (!isBundleHash(image.original) || !isImageName(image.originalName) || image.originalBytes <= 0) {
+        image.original.clear();
+        image.originalName.clear();
+        image.originalBytes = 0;
+    }
+    image.sharedPath = json.value("sharedPath").toString().left(1024);
+    return image;
+}
 
 QString defaultName() {
     QString name = qEnvironmentVariable("USERNAME");
@@ -156,6 +247,33 @@ void PeersController::defineSettings() {
                      .description = "While the Peers panel is closed.",
                      .type = SettingType::Bool,
                      .defaultValue = true});
+    settings.define({.key = acceptImagesKey,
+                     .category = "Peers",
+                     .group = "Shared images",
+                     .label = "Images shared with you",
+                     .description = "ask: each one waits for Accept, Preview Only or Decline, and nothing is "
+                                    "downloaded before. never: they're listed, and nothing can be downloaded.",
+                     .type = SettingType::Choice,
+                     .defaultValue = std::string("ask"),
+                     .choices = {"ask", "never"}});
+    settings.define({.key = receivedImagesMaxKey,
+                     .category = "Peers",
+                     .group = "Shared images",
+                     .label = "Received images up to (GB)",
+                     .description = "Over this, an image you accept isn't downloaded until you clear some.",
+                     .type = SettingType::Int,
+                     .defaultValue = 2,
+                     .minimum = 1,
+                     .maximum = 10000});
+    settings.define({.key = keepReceivedImagesKey,
+                     .category = "Peers",
+                     .group = "Shared images",
+                     .label = "Keep received images (days)",
+                     .description = "Older ones are deleted when usdcc starts.",
+                     .type = SettingType::Int,
+                     .defaultValue = 30,
+                     .minimum = 1,
+                     .maximum = 3650});
 }
 
 Identity peersIdentity() {
@@ -192,10 +310,30 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
         m_chat.remove(room);
         m_private.remove(room);
         m_typists.removeIf([room](const Typist& typist) { return typist.room == room; });
+        m_imageInboxes.remove(room);
         updateStatus();
         Q_EMIT roomsChanged();
     });
     connect(m_peers.get(), &Peers::foundRoomsChanged, this, &PeersController::roomsChanged);
+    // Received images older than the setting says go when usdcc starts.
+    {
+        const QDateTime cutoff =
+            QDateTime::currentDateTime().addDays(-core::Settings::instance().get<int>(keepReceivedImagesKey, 30));
+        const QDir folder(receivedImagesFolder());
+        for (const QFileInfo& bundle : folder.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (bundle.lastModified() < cutoff) {
+                QDir(bundle.absoluteFilePath()).removeRecursively();
+            }
+        }
+    }
+    core::Settings::instance().define({.key = "Peers/clearReceivedImages",
+                                       .category = "Peers",
+                                       .group = "Shared images",
+                                       .label = "Received images",
+                                       .description = "Deletes every image shared with you that was downloaded.",
+                                       .type = SettingType::Action,
+                                       .defaultValue = std::string("Clear Received Images"),
+                                       .action = [this] { clearReceivedImages(); }});
     onSettingsChanged(this, [this](const std::string& key) {
         if (key == nameKey || key == colorKey) {
             m_peers->setProfile(settingText(nameKey), settingText(colorKey));
@@ -324,6 +462,7 @@ void PeersController::adopt(Room* room) {
     }
     Channel* chat = room->channel(kChat);
     m_chat.insert(room, {});
+    openImageInbox(room);
     if (room->isHost()) {
         // A joiner gets the recent chat first (PEERS.md §10.1).
         chat->setSnapshotProvider([this, room] {
@@ -331,9 +470,15 @@ void PeersController::adopt(Room* room) {
             const QList<ChatLine> history = m_chat.value(room);
             // What people said: the host's own notices ("You host …") are its alone.
             for (qsizetype i = std::max<qsizetype>(0, history.size() - kSnapshotLines); i < history.size(); ++i) {
-                if (history[i].from.isValid()) {
-                    lines.append(lineJson(history[i]));
+                const ChatLine& line = history[i];
+                if (!line.from.isValid() || !line.to.isEmpty()) {
+                    continue;  // The host's own notices, and one member's lines, aren't the room's
                 }
+                QJsonObject json = lineJson(line);
+                if (line.image) {
+                    json["image"] = imageToJson(*line.image);
+                }
+                lines.append(json);
             }
             return Channel::Snapshot{{{"lines", lines}}, {}};
         });
@@ -411,19 +556,56 @@ void PeersController::onChat(Room* room, const Message& message) {
             from.id = object.value("from").toString();
             from.name = object.value("name").toString();
             from.color = object.value("color").toString();
-            lines.append({from, object.value("text").toString(),
-                          QDateTime::fromString(object.value("time").toString(), Qt::ISODate),
-                          recordsFrom(object.value("records"))});
+            ChatLine line{from, object.value("text").toString(),
+                          QDateTime::fromString(object.value("time").toString(), Qt::ISODate)};
+            line.records = recordsFrom(object.value("records"));
+            if (object.contains("image")) {
+                line.image = imageFromJson(object.value("image").toObject());
+                if (!line.image) {
+                    continue;
+                }
+            }
+            lines.append(line);
         }
         m_chat[room] = lines + m_chat.value(room);
+        for (const ChatLine& line : lines) {
+            if (line.image) {
+                onImageLine(room, line);
+            }
+        }
         Q_EMIT chatReset(room);
         return;
     }
-    if (message.type != u"say" && message.type != u"log") {
+    if (message.type == u"fetch") {
+        onFetch(room, message);
         return;
     }
-    // Only a sealed message is private: a plain one to this member alone is ignored.
-    if (!message.to.isEmpty() && !message.sealed) {
+    if (message.type == u"gone") {
+        const QString hash = message.body.value("hash").toString();
+        const auto expected = m_expected.constFind(hash);
+        if (expected != m_expected.constEnd() && expected->from == message.from &&
+            m_images.value(hash).state == ImageFile::State::Fetching) {
+            ImageFile& file = m_images[hash];
+            file.state = ImageFile::State::Failed;
+            file.error = message.body.value("reason").toString().left(300);
+            Q_EMIT imageChanged(hash);
+        }
+        return;
+    }
+    std::optional<ChatImage> image;
+    if (message.type == u"image") {
+        image = imageFromJson(message.body);
+        if (!image) {
+            return;
+        }
+    } else if (message.type != u"say" && message.type != u"log") {
+        return;
+    }
+    // To this member alone: a private conversation. Words and log messages count only
+    // sealed (§6.2); an image may also come plain from an older sender, since its files
+    // are offered to this member alone either way.
+    const bool privately = !message.to.isEmpty();
+    if (privately && !message.sealed && !image) {
         return;
     }
     Peer from = room->peer(message.from);
@@ -431,7 +613,24 @@ void PeersController::onChat(Room* room, const Message& message) {
         from.id = message.from;
         from.name = tr("Someone");
     }
-    ChatLine line{from, message.body.value("text").toString().left(kSharedTextLength), QDateTime::currentDateTime()};
+    const QString text = message.body.value("text").toString().left(kSharedTextLength);
+    if (image && from.id != room->me().id) {
+        // At most kImagesPerMinute a minute from one sender; the rest are left out.
+        const QDateTime now = QDateTime::currentDateTime();
+        QList<QDateTime>& times = m_imageTimes[from.id];
+        times.removeIf([&now](const QDateTime& when) { return when.secsTo(now) >= 60; });
+        if (times.size() >= kImagesPerMinute) {
+            const QDateTime noted = m_floodNoted.value(from.id);
+            if (!noted.isValid() || noted.secsTo(now) >= 60) {
+                m_floodNoted.insert(from.id, now);
+                addLine(room, {{}, tr("%1 is sharing many images; the rest of this minute's are left out").arg(from.name),
+                               now});
+            }
+            return;
+        }
+        times.append(now);
+    }
+    ChatLine line{from, text, QDateTime::currentDateTime(), image, message.to};
     if (message.type == u"log") {
         line.records = recordsFrom(message.body.value("records"));
         if (line.records.isEmpty()) {
@@ -439,20 +638,26 @@ void PeersController::onChat(Room* room, const Message& message) {
         }
     }
     const bool mine = from.id == room->me().id;
-    if (message.sealed) {
+    if (privately) {
         addPrivateLine(room, from, line);
     } else {
         addLine(room, line);
     }
+    if (image) {
+        onImageLine(room, line);
+    }
     if (!mine) {
-        const QString text = line.records.isEmpty()
-                                 ? line.text
-                                 : (line.records.size() == 1 ? tr("Shared a log message") : tr("Shared %1 log messages").arg(line.records.size()));
-        toastChat(room, from, text, message.sealed);
+        const QString shown = !line.records.isEmpty()
+                                  ? (line.records.size() == 1 ? tr("Shared a log message")
+                                                              : tr("Shared %1 log messages").arg(line.records.size()))
+                              : image && text.isEmpty() ? tr("Shared an image")
+                                                        : text;
+        toastChat(room, from, shown, privately, image);
     }
 }
 
-void PeersController::toastChat(Room* room, const Peer& from, const QString& text, bool privately) {
+void PeersController::toastChat(Room* room, const Peer& from, const QString& text, bool privately,
+                                const std::optional<ChatImage>& image) {
     if (!m_window || m_panelShown || isDoNotDisturb() || !core::Settings::instance().get<bool>(chatToastsKey, true) ||
         (!privately && isMuted(room)) || isMuted(from)) {
         return;
@@ -461,14 +666,26 @@ void PeersController::toastChat(Room* room, const Peer& from, const QString& tex
     toast.title = (privately ? tr("%1 (private) in %2") : tr("%1 in %2")).arg(from.name, room->name()).toStdString();
     toast.body = (text.size() > kToastTextLength ? text.left(kToastTextLength) + u'…' : text).toStdString();
     QPointer<Room> guard = room;
+    QList<ToastAction> actions;
+    if (image && acceptsImages()) {
+        // Asked here too: nothing comes before the answer.
+        const QString preview = image->preview;
+        actions.append({tr("Accept"), [this, guard, preview] {
+                            if (guard) {
+                                acceptImage(guard, preview, true);
+                            }
+                        }});
+        actions.append({tr("Decline"), [this, preview] { declineImage(preview); }});
+    }
     const QString with = privately ? from.id : QString();
-    m_window->toasts()->show(toast, {{tr("Open Peers"), [this, guard, with] {
-                                          if (guard && showConversation) {
-                                              showConversation(guard, with);
-                                          } else if (showPanel) {
-                                              showPanel();
-                                          }
-                                      }}});
+    actions.append({tr("Open Peers"), [this, guard, with] {
+                        if (guard && showConversation) {
+                            showConversation(guard, with);
+                        } else if (showPanel) {
+                            showPanel();
+                        }
+                    }});
+    m_window->toasts()->show(toast, actions);
 }
 
 PeersController::Conversation* PeersController::conversation(Room* room, const PeerId& with) {
@@ -533,7 +750,7 @@ bool PeersController::sayTo(Room* room, const PeerId& with, const QString& text)
     }
     stoppedTyping(room, with);
     // Nothing comes back from a private message: shown here at once.
-    addPrivateLine(room, peer, {room->me(), trimmed, QDateTime::currentDateTime()});
+    addPrivateLine(room, peer, {room->me(), trimmed, QDateTime::currentDateTime(), std::nullopt, with});
     return true;
 }
 
@@ -569,7 +786,9 @@ bool PeersController::shareLog(Room* room, const PeerId& with, QList<SharedLogRe
     if (!canMessage(room, peer) || !room->channel(kChat)->sendPrivate(QStringLiteral("log"), body, with)) {
         return false;
     }
-    addPrivateLine(room, peer, {room->me(), {}, QDateTime::currentDateTime(), records});
+    ChatLine line{room->me(), {}, QDateTime::currentDateTime(), std::nullopt, with};
+    line.records = records;
+    addPrivateLine(room, peer, line);
     return true;
 }
 
@@ -659,6 +878,307 @@ void PeersController::markRead(Room* room, const PeerId& with) {
         c->unread = 0;
         Q_EMIT conversationsChanged(room);
     }
+}
+
+// --- Shared images (PEERS.md §10.1)
+
+void PeersController::openImageInbox(Room* room) {
+    TransferInbox::Options options;
+    options.directory = receivedImagesFolder();
+    // Only what a chat line announced, from whoever announced it, at most its size.
+    options.accept = [this, room](const Peer& from, const TransferManifest& manifest) {
+        const auto expected = m_expected.constFind(manifest.hash());
+        const qint64 cap =
+            qint64(core::Settings::instance().get<int>(receivedImagesMaxKey, 2)) * 1024 * 1024 * 1024;
+        return acceptsImages() && expected != m_expected.constEnd() && expected->room == room &&
+               expected->from == from.id && m_images.value(manifest.hash()).state == ImageFile::State::Fetching &&
+               manifest.files.size() == 1 && manifest.files.front().path == expected->name &&
+               manifest.totalBytes() <= expected->bytes &&
+               folderBytes(receivedImagesFolder()) + manifest.totalBytes() <= cap;
+    };
+    auto* inbox = new TransferInbox(room, kChatFiles, options, room);
+    m_imageInboxes.insert(room, inbox);
+    connect(inbox, &TransferInbox::started, this, [this](Transfer* transfer) {
+        watchTransfer(transfer, transfer->bundleHash());
+    });
+    connect(inbox, &TransferInbox::received, this, [this, inbox](Transfer* transfer) {
+        const QString hash = transfer->bundleHash();
+        ImageFile& file = m_images[hash];
+        const QString path = QDir(inbox->bundleDirectory(hash)).filePath(m_expected.value(hash).name);
+        if (!contentMatchesName(path)) {
+            // Not the image it says it is: it goes at once, and is never opened.
+            QDir(inbox->bundleDirectory(hash)).removeRecursively();
+            file = ImageFile{};
+            file.state = ImageFile::State::Failed;
+            file.error = tr("Not an image; removed");
+            USDCC_LOG_WARNING("usdcc.peers", "A shared file that isn't the image its name says was removed: {}",
+                              m_expected.value(hash).name.toStdString());
+            Q_EMIT imageChanged(hash);
+            return;
+        }
+        file.state = ImageFile::State::Done;
+        file.path = path;
+        file.done = file.total = transfer->bytesTotal();
+        file.error.clear();
+        Q_EMIT imageChanged(hash);
+    });
+}
+
+void PeersController::watchTransfer(Transfer* transfer, const QString& hash) {
+    ImageFile& file = m_images[hash];
+    file.state = ImageFile::State::Fetching;
+    file.total = transfer->bytesTotal();
+    Q_EMIT imageChanged(hash);
+    connect(transfer, &Transfer::progress, this, [this, hash](qint64 done, qint64 total) {
+        ImageFile& file = m_images[hash];
+        if (file.state != ImageFile::State::Fetching) {
+            return;
+        }
+        // A step of 1% or more, so a large file doesn't redraw the chat for every piece.
+        const qint64 step = std::max<qint64>(1, total / 100);
+        if (done / step == file.done / step && done != total) {
+            return;
+        }
+        file.done = done;
+        file.total = total;
+        Q_EMIT imageChanged(hash);
+    });
+    connect(transfer, &Transfer::failed, this, [this, hash](const QString& reason) {
+        ImageFile& file = m_images[hash];
+        if (file.state == ImageFile::State::Done) {
+            return;
+        }
+        file.state = ImageFile::State::Failed;
+        file.error = reason;
+        Q_EMIT imageChanged(hash);
+    });
+}
+
+void PeersController::onImageLine(Room* room, const ChatLine& line) {
+    const ChatImage& image = *line.image;
+    const bool mine = line.from.id == room->me().id;
+    TransferInbox* inbox = m_imageInboxes.value(room);
+    const auto note = [&](const QString& hash, const QString& name, qint64 bytes) {
+        if (hash.isEmpty() || m_images.value(hash).state == ImageFile::State::Done) {
+            return;
+        }
+        if (const auto offer = m_offers.constFind(hash); offer != m_offers.constEnd()) {
+            // This instance's own: the file it shared.
+            ImageFile& file = m_images[hash];
+            file.state = ImageFile::State::Done;
+            file.path = offer->path;
+            file.done = file.total = bytes;
+            Q_EMIT imageChanged(hash);
+            return;
+        }
+        m_expected.insert(hash, {room, line.from.id, name, bytes});
+        if (inbox && inbox->hasBundle(hash) && contentMatchesName(QDir(inbox->bundleDirectory(hash)).filePath(name)) &&
+            m_accepted.contains(image.preview)) {
+            ImageFile& file = m_images[hash];
+            file.state = ImageFile::State::Done;
+            file.path = QDir(inbox->bundleDirectory(hash)).filePath(name);
+            file.done = file.total = bytes;
+            Q_EMIT imageChanged(hash);
+        }
+    };
+    note(image.preview, image.previewName, image.previewBytes);
+    note(image.original, image.originalName, image.originalBytes);
+    if (!image.original.isEmpty()) {
+        m_originals.insert(image.preview, image.original);
+    }
+    // Nothing is fetched here: the receiver answers first (acceptImage()).
+}
+
+bool PeersController::acceptsImages() {
+    return core::Settings::instance().get<std::string>(acceptImagesKey, "ask") != "never";
+}
+
+void PeersController::acceptImage(Room* room, const QString& preview, bool original) {
+    if (!acceptsImages() || !m_expected.contains(preview)) {
+        return;
+    }
+    m_declined.remove(preview);
+    m_accepted.insert(preview);
+    fetchImage(room, preview);
+    if (original && m_originals.contains(preview)) {
+        fetchImage(room, m_originals.value(preview));
+    }
+    Q_EMIT imageChanged(preview);
+}
+
+void PeersController::declineImage(const QString& preview) {
+    if (m_accepted.contains(preview)) {
+        return;
+    }
+    m_declined.insert(preview);
+    Q_EMIT imageChanged(preview);
+}
+
+void PeersController::stopSharing(const QString& preview) {
+    const auto offer = m_offers.constFind(preview);
+    if (offer == m_offers.constEnd()) {
+        return;
+    }
+    const QString original = offer->original;
+    // The preview's copy was this instance's own; the original is the user's file and stays.
+    QDir(QFileInfo(offer->path).absolutePath()).removeRecursively();
+    m_offers.remove(preview);
+    m_offers.remove(original);
+    Q_EMIT imageChanged(preview);
+}
+
+QString PeersController::receivedImagesFolder() {
+    return usdcc::ui::userDataFolder() + QStringLiteral("/peers/chat-images");
+}
+
+void PeersController::clearReceivedImages() {
+    QDir(receivedImagesFolder()).removeRecursively();
+    QList<QString> cleared;
+    for (auto it = m_images.begin(); it != m_images.end(); ++it) {
+        if (it->state == ImageFile::State::Done && !m_offers.contains(it.key())) {
+            *it = ImageFile{};
+            cleared.append(it.key());
+        }
+    }
+    m_accepted.clear();
+    for (const QString& hash : cleared) {
+        Q_EMIT imageChanged(hash);
+    }
+}
+
+PeersController::ImageFile PeersController::imageFile(const QString& hash) const {
+    return m_images.value(hash);
+}
+
+void PeersController::fetchImage(Room* room, const QString& hash) {
+    const auto expected = m_expected.constFind(hash);
+    if (!room || expected == m_expected.constEnd() || expected->room != room) {
+        return;
+    }
+    if (!acceptsImages()) {
+        return;
+    }
+    ImageFile& file = m_images[hash];
+    if (file.state == ImageFile::State::Done || file.state == ImageFile::State::Fetching) {
+        return;
+    }
+    file.total = expected->bytes;
+    file.done = 0;
+    const qint64 cap = qint64(core::Settings::instance().get<int>(receivedImagesMaxKey, 2)) * 1024 * 1024 * 1024;
+    if (folderBytes(receivedImagesFolder()) + expected->bytes > cap) {
+        file.state = ImageFile::State::Failed;
+        file.error = tr("Your received images are at their limit (Settings > Peers); clear some first");
+    } else if (room->state() != Room::State::Open || !room->peer(expected->from).isValid()) {
+        file.state = ImageFile::State::Failed;
+        file.error = tr("The sender isn't in the room any more");
+    } else {
+        file.state = ImageFile::State::Fetching;
+        file.error.clear();
+        room->channel(kChat)->send(QStringLiteral("fetch"), {{"hash", hash}}, {}, expected->from);
+    }
+    Q_EMIT imageChanged(hash);
+}
+
+void PeersController::onFetch(Room* room, const Message& message) {
+    const QString hash = message.body.value("hash").toString();
+    const auto refuse = [&](const QString& reason) {
+        room->channel(kChat)->send(QStringLiteral("gone"), {{"hash", hash}, {"reason", reason}}, {}, message.from);
+    };
+    const auto offer = m_offers.constFind(hash);
+    if (offer == m_offers.constEnd() || offer->room != room || (!offer->to.isEmpty() && offer->to != message.from)) {
+        return refuse(tr("It isn't shared with you"));
+    }
+    if (offer->expires.isValid() && QDateTime::currentDateTime() > offer->expires) {
+        return refuse(tr("It isn't shared any more"));
+    }
+    if (!QFileInfo::exists(offer->path)) {
+        return refuse(tr("The file isn't there any more"));
+    }
+    QString error;
+    Transfer* transfer = Transfer::send(room, kChatFiles, message.from, *offer->manifest, {}, this, &error);
+    if (!transfer) {
+        return refuse(error);
+    }
+    connect(transfer, &Transfer::finished, transfer, &QObject::deleteLater);
+    connect(transfer, &Transfer::failed, transfer, &QObject::deleteLater);
+}
+
+bool PeersController::shareImage(const ShareRequest& request, QString* error) {
+    const auto fail = [error](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    Room* room = request.room;
+    if (!room || room->state() != Room::State::Open || !m_chat.contains(room)) {
+        return fail(tr("Not in that room"));
+    }
+    if (!request.to.isEmpty() && !room->peer(request.to).isValid()) {
+        return fail(tr("They aren't in the room any more"));
+    }
+    if (request.preview.isNull()) {
+        return fail(tr("No image"));
+    }
+    // The preview, kept while this instance runs.
+    QString previewName = QFileInfo(request.previewName).completeBaseName();
+    previewName.replace(QRegularExpression(QStringLiteral(R"([^A-Za-z0-9._ -])")), QStringLiteral("_"));
+    previewName = (previewName.trimmed().isEmpty() ? QStringLiteral("image") : previewName.trimmed().left(100)) +
+                  QStringLiteral(".jpg");
+    const QString folder = usdcc::ui::userDataFolder() + QStringLiteral("/peers/shared/") +
+                           QUuid::createUuid().toString(QUuid::Id128);
+    if (!QDir().mkpath(folder) || !request.preview.save(QDir(folder).filePath(previewName), "JPG", 90)) {
+        return fail(tr("Couldn't write the preview in %1").arg(QDir::toNativeSeparators(folder)));
+    }
+    QString why;
+    const std::optional<TransferManifest> preview = TransferManifest::fromFiles(folder, {previewName}, &why);
+    if (!preview) {
+        return fail(why);
+    }
+    ChatImage image;
+    image.preview = preview->hash();
+    image.previewName = previewName;
+    image.previewBytes = preview->totalBytes();
+    image.sharedPath = request.sharedPath;
+    std::optional<TransferManifest> original;
+    const QFileInfo originalFile(request.original);
+    if (!request.original.isEmpty()) {
+        if (!isImageName(originalFile.fileName())) {
+            return fail(tr("%1 can't be shared: only images (EXR, PNG, JPEG, TIFF) with a plain name")
+                            .arg(originalFile.fileName()));
+        }
+        original = TransferManifest::fromFiles(originalFile.absolutePath(), {originalFile.fileName()}, &why);
+        if (!original) {
+            return fail(why);
+        }
+        image.original = original->hash();
+        image.originalName = originalFile.fileName();
+        image.originalBytes = original->totalBytes();
+    }
+    const QDateTime expires = QDateTime::currentDateTime().addSecs(qint64(kOfferHours) * 3600);
+    m_offers.insert(image.preview, {room, request.to, std::make_shared<TransferManifest>(*preview),
+                                    QDir(folder).filePath(previewName), expires, image.original});
+    if (original) {
+        m_offers.insert(image.original, {room, request.to, std::make_shared<TransferManifest>(*original),
+                                         originalFile.absoluteFilePath(), expires, QString()});
+    }
+    QJsonObject body = imageToJson(image);
+    body["text"] = request.caption.trimmed().left(4000);
+    const Peer to = request.to.isEmpty() ? Peer() : room->peer(request.to);
+    if (to.isValid() && canMessage(room, to)) {
+        room->channel(kChat)->sendPrivate(QStringLiteral("image"), body, request.to);  // Sealed (§6.2)
+    } else {
+        room->channel(kChat)->send(QStringLiteral("image"), body, {}, request.to);
+    }
+    if (!request.to.isEmpty()) {
+        // To one member: it doesn't come back from the host, so it's shown here now, in
+        // the private conversation with them.
+        const ChatLine line{room->me(), request.caption.trimmed().left(4000), QDateTime::currentDateTime(), image,
+                            request.to};
+        addPrivateLine(room, to.isValid() ? to : Peer{request.to, tr("someone")}, line);
+        onImageLine(room, line);
+    }
+    return true;
 }
 
 QString PeersController::stageOf(Room* room, const Peer& peer) const {
