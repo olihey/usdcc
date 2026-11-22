@@ -224,6 +224,7 @@ forces". This is what it forces:
 - **Settings > Assets > Allowed buckets** (§3.2), beside Allowed hosts.
 - **The Asset Servers editor** ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1) gains S3's fields:
   bucket and prefix or URL, region, bucket in the host name. Its Test button lists the root.
+  *Built* with the bucket and prefix in the URL field (REMOTE_ASSETS.md §10.2).
 - **Errors say what S3 said:** its XML error body carries a code (`AccessDenied`,
   `NoSuchBucket`, `SignatureDoesNotMatch`, `ExpiredToken`) and a message, which go into the Log
   and the toast with the HTTP status.
@@ -236,7 +237,7 @@ forces". This is what it forces:
 | **S3.1 Read-only** | §6, the transport and plugin, by name, with usdcc credential ids; S3 in the test server (§10). **Built** (§8.2) | `usdcat s3://studio/shot.usda` prints a shot whose model comes from PROD and one texture from TEST, with a listing per folder and nothing downloaded on the second open |
 | **S3.2 AWS credentials** | §4.2: the environment, the shared files, `credential_process`, EC2's role, renewal. **Built**; EC2's role and renewal untested | A profile using AWS single sign-on through `credential_process` opens a stage, and keeps working past its credentials' expiry |
 | **S3.3 By bucket** | §3.2, finding the region, Allowed buckets. **Built**, against the test server through `AWS_ENDPOINT_URL_S3`, not AWS | `usdcat s3://<bucket>/shot.usda` works with only the AWS command line set up; a stage naming another bucket is refused with the toast |
-| **S3.4 usdcc** | §7. **Built**, but for the Asset Servers editor's fields: the editor isn't built yet | A reference to a file in a bucket is added by browsing to it in the picker |
+| **S3.4 usdcc** | §7. **Built**, the Asset Servers editor's fields with the editor (REMOTE_ASSETS.md §10.2) | A reference to a file in a bucket is added by browsing to it in the picker |
 | **With phase 6** | `put` (§5) | Save on a layer from PROD, in the test environment, writes it to the TEST bucket |
 | **Later** | Reading part of a large file; pinning an object version (`versionId`); requester pays | |
 
@@ -348,7 +349,8 @@ itself only when it's allowed.
   Credential Manager keeps a user and a password. They expire within hours, so saving one is of
   little use; AWS's own lookup (§4.2) is the way to temporary credentials.
 - **No question for a bucket,** as there's none for a host: a note, and Allowed buckets.
-- **The Asset Servers editor's S3 fields** wait for the editor (REMOTE_ASSETS.md §10.1).
+- **The Asset Servers editor's S3 fields** are Region and Bucket in the host name; the bucket and
+  prefix stay in the URL (REMOTE_ASSETS.md §10.2).
 
 **Tests** ([assets_net_test.cpp](../tests/assets_net_test.cpp), `assets_s3_…`, and
 [asset_picker_test.cpp](../tests/asset_picker_test.cpp), `asset_settings_allowed_buckets`):

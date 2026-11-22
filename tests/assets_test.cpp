@@ -5,6 +5,7 @@
 #include "test_harness.h"
 
 #include "usdcc/assets/config.h"
+#include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
 #include "usdcc/assets/disk_cache.h"
@@ -332,6 +333,176 @@ USDCC_TEST(assets_config_says_what_is_wrong) {
     CHECK(message.find("lowercase") != std::string::npos, "a name in capitals");
     CHECK(message.find("'nowhere'") != std::string::npos, "a default environment that isn't there");
     CHECK(!Config::parse("[1, 2").ok() && !Config::parse("[]").ok(), "and text that isn't a JSON object");
+}
+
+// ---- Writing the configuration, and the Asset Servers editor's model (§10.1) ------------
+
+namespace {
+const char* kEditableConfig = R"({
+    "environment": "prod",
+    "futureKey": { "kept": [1, 2, 3] },
+    "http": { "hosts": { "assets.example.com": { "credential": "web", "insecure": true, "note": "kept" } },
+              "allow": ["*.studio.local"], "proxy": "kept" },
+    "s3": { "allow": ["studio-*"] },
+    "endpoints": {
+        "prod": { "scheme": "webdav", "url": "https://dav.studio.local/assets", "credential": "studio-dav",
+                  "readOnly": true, "mirrors": ["https://dav2.studio.local/assets"], "extra": { "deep": true } },
+        "test": { "scheme": "webdav", "url": "https://dav-test.studio.local/assets" },
+        "bucket": { "scheme": "s3", "url": "https://minio.studio.local/assets", "region": "eu-central-1",
+                    "bucketInHost": false, "retries": 3 }
+    },
+    "environments": {
+        "prod": { "webdav": { "studio": ["prod"] }, "s3": { "lib": ["bucket"] } },
+        "test": { "webdav": { "studio": ["test", "prod"] } }
+    }
+})";
+}  // namespace
+
+USDCC_TEST(assets_config_writes_what_it_read) {
+    const Result<Config> parsed = Config::parse(kEditableConfig);
+    CHECK(parsed.ok(), "the sample parses: %s", parsed.message.c_str());
+    const std::string written = parsed.value.toJson();
+    const Result<Config> again = Config::parse(written);
+    CHECK(again.ok(), "what it writes parses again: %s", again.message.c_str());
+    CHECK(again.value.toJson() == written, "and writes the same text a second time");
+    CHECK(written.find("\"futureKey\"") != std::string::npos && written.find("\"proxy\"") != std::string::npos &&
+              written.find("\"note\"") != std::string::npos && written.find("\"deep\"") != std::string::npos,
+          "keys it doesn't know stay, at every level:\n%s", written.c_str());
+    const Endpoint& bucket = again.value.endpoints.at("bucket");
+    CHECK(bucket.options.at("region") == "eu-central-1" && bucket.options.at("bucketInHost") == "false" &&
+              bucket.options.at("retries") == "3",
+          "an S3 endpoint's own keys come back as they were");
+    CHECK(written.find("\"bucketInHost\": false") != std::string::npos &&
+              written.find("\"retries\": 3") != std::string::npos,
+          "with their JSON types:\n%s", written.c_str());
+    CHECK(written.find("\n    ") != std::string::npos, "indented, as a person would edit it");
+
+    Config edited = parsed.value;
+    edited.endpoints.at("bucket").options["region"] = "us-east-1";
+    edited.endpoints.at("bucket").options["bucketInHost"] = "true";
+    edited.endpoints.at("test").readOnly = true;
+    const std::string changed = edited.toJson();
+    CHECK(changed.find("\"region\": \"us-east-1\"") != std::string::npos &&
+              changed.find("\"bucketInHost\": true") != std::string::npos,
+          "a changed option is written, a flag as a bool:\n%s", changed.c_str());
+    const Result<Config> reread = Config::parse(changed);
+    CHECK(reread.ok() && reread.value.endpoints.at("test").readOnly, "and a changed flag is read back");
+
+    Config fresh;
+    Endpoint endpoint;
+    endpoint.id = "dav";
+    endpoint.scheme = "webdav";
+    endpoint.url = "http://127.0.0.1:5000";
+    fresh.endpoints["dav"] = endpoint;
+    fresh.environments["prod"]["webdav"]["studio"] = {"dav"};
+    const Result<Config> fromNothing = Config::parse(fresh.toJson());
+    CHECK(fromNothing.ok() && fromNothing.value.endpoints.at("dav").url == endpoint.url,
+          "a configuration made from nothing writes a file that reads back: %s", fresh.toJson().c_str());
+}
+
+USDCC_TEST(assets_config_editor_edits_servers_and_stacks) {
+    const Result<Config> parsed = Config::parse(kEditableConfig);
+    ConfigEditor editor(parsed.value);
+    CHECK(!editor.modified() && editor.problems().empty(), "unchanged, and nothing wrong");
+
+    Endpoint extra;
+    extra.id = "prod";
+    extra.scheme = "webdav";
+    extra.url = "https://x";
+    CHECK(!editor.addServer(extra).empty(), "an id in use is refused");
+    extra.id = "with space";
+    CHECK(!editor.addServer(extra).empty(), "an id with a space is refused");
+    extra.id = "lib2";
+    CHECK(editor.addServer(extra).empty() && editor.modified(), "a new server");
+
+    const std::string inUse = editor.removeServer("prod");
+    CHECK(inUse.find("environment 'test', webdav://studio") != std::string::npos,
+          "a server in use isn't removed, and where it's used is named: %s", inUse.c_str());
+    CHECK(editor.renameServer("prod", "live").empty(), "renaming one");
+    CHECK(editor.config().environments.at("test").at("webdav").at("studio") ==
+                  std::vector<std::string>({"test", "live"}) &&
+              editor.config().environments.at("prod").at("webdav").at("studio") == std::vector<std::string>({"live"}),
+          "renames it in every stack");
+    CHECK(!editor.renameServer("live", "test").empty(), "not onto an id in use");
+
+    CHECK(editor.setStack("test", "webdav", "studio", {"live", "test"}).empty(), "a stack reordered");
+    const Result<Config> written = Config::parse(editor.config().toJson());
+    CHECK(written.ok() && written.value.environments.at("test").at("webdav").at("studio") ==
+                              std::vector<std::string>({"live", "test"}),
+          "is written in that order");
+    CHECK(!editor.setStack("test", "webdav", "studio", {"live", "bucket"}).empty(), "a stack holds one protocol");
+    CHECK(!editor.setStack("test", "webdav", "studio", {"live", "live"}).empty(), "a server once");
+    CHECK(!editor.setStack("test", "webdav", "studio", {}).empty(), "and at least one");
+
+    CHECK(editor.duplicateEnvironment("prod", "staging").empty(), "Duplicate");
+    CHECK(editor.config().environments.at("staging") == editor.config().environments.at("prod"),
+          "copies the names and stacks");
+    CHECK(!editor.duplicateEnvironment("prod", "staging").empty(), "not onto one that exists");
+    CHECK(!editor.addName("staging", "Studio", "test").empty(), "a name in capitals is refused");
+    CHECK(editor.addName("staging", "shots", "test").empty() &&
+              editor.config().environments.at("staging").at("webdav").at("shots") == std::vector<std::string>({"test"}),
+          "a name with its first server, for that server's protocol");
+    CHECK(editor.removeName("staging", "webdav", "shots").empty(), "and removed");
+    CHECK(editor.renameEnvironment("prod", "live").empty() && editor.config().environment == "live",
+          "renaming the default environment renames the default too");
+    CHECK(editor.removeEnvironment("live").empty() && editor.config().environment.empty(),
+          "removing it clears the default");
+    CHECK(!editor.removeServer("bucket").empty(), "the copy's stacks count as uses too");
+    CHECK(editor.removeName("staging", "s3", "lib").empty() && editor.removeServer("bucket").empty(),
+          "a server no stack uses any more is removed");
+    CHECK(editor.problems().empty(), "still nothing wrong");
+
+    editor.config().endpoints.at("test").url.clear();
+    editor.config().environment = "nowhere";
+    const std::vector<std::string> problems = editor.problems();
+    const auto names = [&problems](const std::string& text) {
+        return std::any_of(problems.begin(), problems.end(),
+                           [&text](const std::string& problem) { return problem.find(text) != std::string::npos; });
+    };
+    CHECK(names("endpoint 'test' has no \"url\"") && names("'nowhere'"),
+          "each problem as Config::parse() names it, one per line (%zu)", problems.size());
+    CHECK(!editor.save().ok(), "and nothing is saved while there are any");
+}
+
+USDCC_TEST(assets_config_editor_saves_and_notices_changes) {
+    const fs::path folder =
+        fs::temp_directory_path() /
+        ("usdcc-config-editor-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path file = folder / "assets.json";
+    writeFile(file, kEditableConfig);
+    {
+        ConfigEditor editor(file);
+        CHECK(editor.loadProblem().empty() && editor.writable(), "a file it can read and write");
+        CHECK(editor.save().ok(), "saving it unchanged");
+        const Result<Config> saved = Config::load(file);
+        CHECK(saved.ok() && readFile(file).find("\"futureKey\"") != std::string::npos,
+              "writes the same configuration, unknown keys kept");
+        CHECK(saved.ok() && saved.value.toJson() == readFile(file), "as toJson() has it");
+
+        editor.config().endpoints.at("test").credential = "tester";
+        // Someone else writes the file meanwhile, a little bigger so the change shows whatever the clock.
+        writeFile(file, std::string(kEditableConfig) + "\n\n");
+        CHECK(editor.changedOnDisk(), "a file changed on disk since it was read is noticed");
+        CHECK(!editor.save().ok(), "and not overwritten without asking");
+        CHECK(editor.save(true).ok() && !editor.changedOnDisk() && !editor.modified(), "unless told to");
+        const Result<Config> overwritten = Config::load(file);
+        CHECK(overwritten.ok() && overwritten.value.endpoints.at("test").credential == "tester", "with the change");
+
+        const fs::path mine = folder / "mine" / "assets.json";
+        CHECK(editor.saveAs(mine).ok() && editor.file() == mine && fs::exists(mine), "Save a Copy as Mine");
+    }
+    writeFile(file, "{ \"endpoints\": [ }");
+    {
+        ConfigEditor editor(file);
+        CHECK(!editor.loadProblem().empty(), "a broken file says why it can't be read");
+    }
+    {
+        ConfigEditor editor(folder / "new" / "assets.json");
+        CHECK(editor.loadProblem().empty() && editor.config().endpoints.empty() && editor.writable(),
+              "a file that isn't there yet is an empty configuration that can be written");
+    }
+    std::error_code error;
+    fs::remove_all(folder, error);
 }
 
 USDCC_TEST(assets_context_holds_stacks_and_no_secrets) {

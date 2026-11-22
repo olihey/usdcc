@@ -10,6 +10,7 @@
 
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/config.h"
+#include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/http_client.h"
@@ -1094,4 +1095,48 @@ USDCC_TEST(assets_s3_bucket_by_itself) {
     forgetHostAnswers();
     CHECK(bucketAllowed("open-bucket") && !bucketAllowed("closed-bucket"), "USDCC_S3_ALLOW allows by pattern");
     TfUnsetenv("USDCC_S3_ALLOW");
+}
+
+// ---- The Asset Servers editor's Test button (docs/REMOTE_ASSETS.md §10.1) ----------------
+
+USDCC_TEST(assets_editor_test_button_asks_a_server) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "dav";
+    writeScene(folder.root, "prod", true);
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    Endpoint endpoint;
+    endpoint.id = "prod";
+    endpoint.scheme = "webdav";
+    endpoint.url = server.url();
+    Cancel cancel;
+
+    const EndpointTest answered = testEndpoint(endpoint, cancel);
+    CHECK(answered.status == Status::Ok && answered.entries == 2,
+          "a server that answers, with its root's entries: %s", answered.summary.c_str());
+    CHECK(answered.summary.find("answered in") != std::string::npos && answered.summary.find("2 entries") != std::string::npos,
+          "said so: %s", answered.summary.c_str());
+
+    folder.basicAuth = "ada:secret";
+    endpoint.credential = "editor-test";
+    const EndpointTest refused = testEndpoint(endpoint, cancel);
+    CHECK(refused.status == Status::NotAllowed && refused.summary.find("'editor-test'") != std::string::npos,
+          "one that wants a login names the credential it refused: %s", refused.summary.c_str());
+    TfSetenv("USDCC_ASSETS_EDITOR_TEST_USER", "ada");
+    TfSetenv("USDCC_ASSETS_EDITOR_TEST_PASSWORD", "secret");
+    CHECK(testEndpoint(endpoint, cancel).status == Status::Ok, "and answers once the login is there");
+    TfUnsetenv("USDCC_ASSETS_EDITOR_TEST_USER");
+    TfUnsetenv("USDCC_ASSETS_EDITOR_TEST_PASSWORD");
+
+    Endpoint dead = endpoint;
+    dead.credential.clear();
+    dead.url = "http://127.0.0.1:" + std::to_string(usdcc::test::unusedPort());
+    const EndpointTest unreachable = testEndpoint(dead, cancel);
+    CHECK(unreachable.status == Status::Unreachable && unreachable.summary.find(dead.url) != std::string::npos,
+          "one that doesn't answer is unreachable, naming the URL: %s", unreachable.summary.c_str());
+    folder.basicAuth.clear();
+    dead.mirrors = {server.url()};
+    const EndpointTest mirrored = testEndpoint(dead, cancel);
+    CHECK(mirrored.status == Status::Ok && mirrored.url == server.url(),
+          "its mirror is tried next, as resolving does: %s", mirrored.summary.c_str());
 }
