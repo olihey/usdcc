@@ -249,6 +249,42 @@ function(usdcc_precompile_headers target header)
     endif()
 endfunction()
 
+# Features a build may leave out (docs/BUILD_OPTIONS.md): USDCC_BUILD_<NAME> each. Off,
+# the feature isn't compiled or deployed, and the app refuses its plugin ids from any folder.
+include(UsdccFeatures)
+# USDCC_BUILD_RTX_PLUGIN was RTX Render's option: a value given for it, or changed since the
+# last configure, still sets USDCC_BUILD_RTX_RENDER, with a note to use the new name.
+if(DEFINED USDCC_BUILD_RTX_PLUGIN AND NOT "${USDCC_BUILD_RTX_PLUGIN}" STREQUAL "${_USDCC_RTX_PLUGIN_SEEN}")
+    message(DEPRECATION "USDCC_BUILD_RTX_PLUGIN is now USDCC_BUILD_RTX_RENDER (docs/BUILD_OPTIONS.md)")
+    set(USDCC_BUILD_RTX_RENDER ${USDCC_BUILD_RTX_PLUGIN} CACHE BOOL "" FORCE)
+    set(_USDCC_RTX_PLUGIN_SEEN "${USDCC_BUILD_RTX_PLUGIN}" CACHE INTERNAL "")
+endif()
+usdcc_feature(VIEWPORT_BROADCAST LABEL "Viewport Broadcast" DEFAULT ON
+    DOC "Viewport Broadcast: a viewport on a web page (docs/VIEWPORT_BROADCAST.md)"
+    PLUGINS org.usdcc.viewport-broadcast FOLDERS viewport_broadcast)
+usdcc_feature(HTTP LABEL "HTTP assets" DEFAULT ON
+    DOC "Stages and assets from http:// and https:// (docs/HTTP_RESOLVER.md)"
+    PLUGINS org.usdcc.http-assets FOLDERS http)
+usdcc_feature(WEBDAV LABEL "WebDAV assets" DEFAULT ON
+    DOC "Stages and assets from WebDAV servers (docs/WEBDAV_RESOLVER.md)"
+    PLUGINS org.usdcc.webdav-assets FOLDERS webdav)
+usdcc_feature(S3 LABEL "S3 assets" DEFAULT ON
+    DOC "Stages and assets from S3 buckets (docs/S3_RESOLVER.md)"
+    PLUGINS org.usdcc.s3-assets FOLDERS s3)
+usdcc_feature(PHYSICS_JOLT LABEL "Jolt Physics" DEFAULT ON
+    DOC "Rigid body simulation with Jolt (docs/PHYSICS.md)"
+    PLUGINS org.usdcc.physics-jolt FOLDERS physics_jolt)
+usdcc_feature(VRAY_RENDER LABEL "V-Ray Render" DEFAULT ON
+    DOC "The V-Ray render view, a Python plugin: deployed or not (docs/VRAY_RENDER.md)"
+    PLUGINS org.usdcc.vray-render FOLDERS vray_render)
+usdcc_feature(BLENDER_MESH_TOOLS LABEL "Blender mesh tools" DEFAULT ON
+    DOC "Mesh operations on Blender's BMesh, GPL-linked (docs/BLENDER_MESH_TOOLS.md)"
+    PLUGINS org.usdcc.blender-mesh-tools FOLDERS blender_mesh_tools)
+usdcc_feature(RTX_RENDER LABEL "RTX Render" DEFAULT OFF
+    DOC "The native RTX Render view, Windows with NVIDIA's SDKs (docs/RTX_RENDER.md)"
+    PLUGINS org.usdcc.rtx-render FOLDERS rtx_render)
+usdcc_write_features()
+
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/assets)
 # Rooms and channels between usdcc instances, programs and browsers (docs/PEERS.md).
@@ -270,25 +306,35 @@ add_subdirectory(src/plugins/cpp_example)
 # The protocols of remote assets (docs/REMOTE_ASSETS.md §11): usdcc plugins with only
 # a usd/ part, each a resolver library on usdcc_assets. After the app, which they are
 # copied beside, as shipped plugins are.
-add_subdirectory(src/plugins/http)
-add_subdirectory(src/plugins/webdav)
-add_subdirectory(src/plugins/s3)
+if(USDCC_BUILD_HTTP)
+    add_subdirectory(src/plugins/http)
+endif()
+if(USDCC_BUILD_WEBDAV)
+    add_subdirectory(src/plugins/webdav)
+endif()
+if(USDCC_BUILD_S3)
+    add_subdirectory(src/plugins/s3)
+endif()
 # Viewport Broadcast: a viewport on a web page, through a room of usdcc_peers
 # (docs/VIEWPORT_BROADCAST.md). Bundled and enabled, like Jolt Physics.
-add_subdirectory(src/plugins/viewport_broadcast)
-# Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
-add_subdirectory(src/plugins/physics_jolt)
-
-set(USDCC_BUILD_BLENDER_MESH_TOOLS ON CACHE BOOL "Build the GPL-linked Blender mesh tools plugin" FORCE)
-add_subdirectory(src/plugins/blender_mesh_tools)
-add_dependencies(usdcc blender_mesh_tools)
-
-option(USDCC_BUILD_RTX_PLUGIN "Build the optional native RTX Render plugin (Windows)" OFF)
-option(USDCC_RTX_GPU_TESTS "Register explicit RTX/CUDA GPU acceptance tests" OFF)
-if(USDCC_RTX_GPU_TESTS AND NOT USDCC_BUILD_RTX_PLUGIN)
-    message(FATAL_ERROR "USDCC_RTX_GPU_TESTS requires USDCC_BUILD_RTX_PLUGIN=ON and the native SDK")
+if(USDCC_BUILD_VIEWPORT_BROADCAST)
+    add_subdirectory(src/plugins/viewport_broadcast)
 endif()
-if(USDCC_BUILD_RTX_PLUGIN)
+# Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
+if(USDCC_BUILD_PHYSICS_JOLT)
+    add_subdirectory(src/plugins/physics_jolt)
+endif()
+
+if(USDCC_BUILD_BLENDER_MESH_TOOLS)
+    add_subdirectory(src/plugins/blender_mesh_tools)
+    add_dependencies(usdcc blender_mesh_tools)
+endif()
+
+option(USDCC_RTX_GPU_TESTS "Register explicit RTX/CUDA GPU acceptance tests" OFF)
+if(USDCC_RTX_GPU_TESTS AND NOT USDCC_BUILD_RTX_RENDER)
+    message(FATAL_ERROR "USDCC_RTX_GPU_TESTS requires USDCC_BUILD_RTX_RENDER=ON and the native SDK")
+endif()
+if(USDCC_BUILD_RTX_RENDER)
     add_subdirectory(src/plugins/rtx_render_native)
 endif()
 

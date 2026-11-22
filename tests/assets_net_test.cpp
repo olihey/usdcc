@@ -192,6 +192,8 @@ int cachedFiles(const fs::path& cache, const std::string& extension) {
 
 }  // namespace
 
+// Each protocol's tests are built only with its plugin (docs/BUILD_OPTIONS.md).
+#ifdef USDCC_ASSETS_HTTP_PROTOCOL_DIR
 // ---- http:// ---------------------------------------------------------------------------
 
 USDCC_TEST(assets_http_stage_opens_from_a_url) {
@@ -342,7 +344,9 @@ USDCC_TEST(assets_http_missing_and_unreachable) {
     CHECK(took.count() < 6000, "within the connect timeout: %d ms", int(took.count()));
     CHECK(resolver.Resolve("https://h.example.com/a.usd#frag").empty(), "and a URL with a fragment is refused");
 }
+#endif  // USDCC_ASSETS_HTTP_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 // ---- webdav:// -------------------------------------------------------------------------
 
 USDCC_TEST(assets_webdav_lists_stats_and_fetches) {
@@ -789,7 +793,9 @@ USDCC_TEST(assets_downloads_report_progress_and_can_be_cancelled) {
     CHECK(!opened && listener->lastStatus == int(Status::Cancelled), "cancelDownloads() stops one that is running");
     CHECK(resolver.OpenAsset(three), "and not ones started afterwards");
 }
+#endif  // USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_S3_PROTOCOL_DIR
 // ---- s3:// (docs/S3_RESOLVER.md §10) ----------------------------------------------------
 
 namespace {
@@ -1095,3 +1101,4 @@ USDCC_TEST(assets_s3_bucket_by_itself) {
     CHECK(bucketAllowed("open-bucket") && !bucketAllowed("closed-bucket"), "USDCC_S3_ALLOW allows by pattern");
     TfUnsetenv("USDCC_S3_ALLOW");
 }
+#endif  // USDCC_ASSETS_S3_PROTOCOL_DIR
