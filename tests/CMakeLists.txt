@@ -115,6 +115,7 @@ add_executable(usdcc_ui_tests
     property_row_test.cpp
     asset_path_test.cpp
     asset_picker_test.cpp
+    asset_servers_editor_test.cpp
     prim_tree_filter_test.cpp
     recent_files_test.cpp
     relationship_editor_test.cpp

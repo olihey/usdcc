@@ -69,6 +69,7 @@
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/open_stage_options_dialog.h"
+#include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/asset_servers.h"
@@ -935,6 +936,10 @@ int main(int argc, char** argv) {
     // A login for an asset server, kept in the system's credential store (docs/REMOTE_ASSETS.md §8).
     editMenu->addAction(QObject::tr("Asset Server &Login..."), &window,
                         [&window]() { usdcc::usd::showAssetLoginDialog(&window); });
+    // The servers, environments and web hosts of the asset configuration (docs/REMOTE_ASSETS.md §10.1).
+    usdcc::usd::AssetServersDialog::setStageManager(&stageManager);
+    editMenu->addAction(QObject::tr("Asset Ser&vers..."), &window,
+                        [&window]() { usdcc::usd::showAssetServersEditor(&window); });
     QAction* settingsAction = editMenu->addAction(QObject::tr("&Settings..."), &window,
                                                   [&window]() { usdcc::ui::SettingsDialog::showDialog(&window); });
     settingsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));

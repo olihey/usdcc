@@ -10,7 +10,8 @@ of it. The first two protocols are plain HTTP ([HTTP_RESOLVER.md](HTTP_RESOLVER.
 `usdcc_assets` (§13.2), the HTTP and WebDAV protocols with mirrors, offline mode, the cache's
 limit, `RefreshContext`, progress and cancel (§13.3), and usdcc itself (§13.4): stages open in an
 environment, the panels show servers' paths, sessions keep both, and the deploy ships it all.
-Phase 4 left out parts of the plan, each marked *not built* in §10. "Checked" below means run in the spike or the tests,
+Phase 4 left out parts of the plan, each marked *not built* in §10. **Phase 5.1, the Asset Servers
+editor (§10.1), is built** (2026-11-22). "Checked" below means run in the spike or the tests,
 or looked at in this repository or the local OpenUSD build (26.08); everything else is still an
 assumption.
 
@@ -400,8 +401,8 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
 - **Settings > Assets** ([asset_settings.cpp](../src/cpp/usd/src/asset_settings.cpp)): the
   default environment, Work offline, Allowed hosts for plain HTTP, the cache's size, and a
   Clear Cache button (§7). The settings dialog builds its pages from typed settings and has no
-  tables, so **the servers and environments stay in the configuration file** (§4), whose path
-  the page names. *Planned:* the Asset Servers editor for them, with a Test button (§10.1).
+  tables, so **the servers and environments are edited in the Asset Servers editor** (§10.1),
+  which an **Edit Asset Servers...** button on the page opens; the page names the file.
 - **Login.** **Edit > Asset Server Login...** saves a credential id's user and password, or a token,
   in Windows Credential Manager (`usdcc-assets:<id>`), which the library reads (§8). A 401 says
   in the Log which credential the server refused. *Changed from the plan:* no dialog pops up on a
@@ -426,7 +427,7 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
 
 ### 10.1 The Asset Servers editor
 
-*Planned 2026-11-17, not built.* A dialog for what the configuration file (§4) holds, so nobody
+*Planned 2026-11-17, built 2026-11-22* (§10.2 says how it came out). A dialog for what the configuration file (§4) holds, so nobody
 has to edit its JSON by hand: the servers, the environments and their stacks, and the hosts of
 plain HTTP. In the picker ([ASSET_PICKER.md](ASSET_PICKER.md)), the roots a protocol lists are the
 names an environment has; this is where they're made.
@@ -513,6 +514,43 @@ refused; a stack reordered by dragging is written in that order; Duplicate; each
 read-only one opens read-only; Test against the tests' own WebDAV server answering, refusing a
 missing login (naming the credential) and unreachable; and saving reloads the library's
 configuration, an open stage keeping its servers.
+
+### 10.2 The Asset Servers editor as built
+
+Built 2026-11-22, as §10.1 has it but for what follows.
+
+- **Where it is.** The editing itself is Qt-free, in `usdcc_assets`:
+  [config_editor.h](../src/cpp/assets/include/usdcc/assets/config_editor.h) (`ConfigEditor`, and
+  `testEndpoint()` for the Test button), with `Config::toJson()` and `Config::save()` in
+  [config.h](../src/cpp/assets/include/usdcc/assets/config.h). The dialog is
+  [asset_servers_editor.cpp](../src/cpp/usd/src/asset_servers_editor.cpp). It opens from **Edit >
+  Asset Servers...**, **Edit Servers...** on a server in the picker's Places, and the **Edit Asset
+  Servers...** button on Settings > Assets.
+- **The file as written:** indented JSON, keys sorted (`JsObject`'s order, which is fixed). Keys this
+  version doesn't know are kept at the top, in `"http"`, in each web host and in each server: a
+  server's other scalar keys are its options (`region`, `bucketInHost`) and keep their JSON type
+  while unchanged; objects and arrays stay as they were. Written through a temporary file beside it.
+- **S3's fields** are Region and Bucket in the host name, shown for an `s3` server. The bucket and
+  its prefix are the URL itself (`s3://bucket/prefix`, `https://host/bucket/prefix`), as the
+  configuration already has them, so there are no separate fields for them.
+- **Ids** of servers and environments take no spaces, quotes or slashes. Environments can also be
+  renamed (the default environment follows).
+- **Problems** are listed under the tabs, and a server or environment a problem names is marked,
+  with the problem as its tooltip. Save stays off while there are any, and while nothing changed.
+- **A file that doesn't parse** opens read-only, saying why: the editor would otherwise write back
+  only what it understood. It is fixed in a text editor, then **Reload**.
+- **Test** tries the URL, then each mirror in turn while one is unreachable, without marking any down
+  (resolving's own marks are left alone). A protocol that can't list is asked for the root's stat.
+  **Login...** is off for `aws` and `aws:<profile>` credentials, which come from AWS's own files.
+- **Saving applies at once** with `reloadDefaultConfig()`, which also forgets what servers answered.
+  No `ResolverChanged` notice is sent: open stages keep their stacks, so nothing of theirs resolves
+  differently. The dialog says how many open stages are in an environment the save changed
+  (`AssetServersDialog::setStageManager()`, set by the app).
+- **Tests:** `assets_config_writes_what_it_read`, `assets_config_editor_edits_servers_and_stacks` and
+  `assets_config_editor_saves_and_notices_changes` ([assets_test.cpp](../tests/assets_test.cpp)),
+  `assets_editor_test_button_asks_a_server` against the tests' WebDAV server
+  ([assets_net_test.cpp](../tests/assets_net_test.cpp)), and the dialog in
+  [asset_servers_editor_test.cpp](../tests/asset_servers_editor_test.cpp).
 
 ## 11. A protocol as a plugin
 
@@ -631,7 +669,7 @@ is not an `ArResolver` written in Python.
 | **3. Robustness** | Mirrors, offline mode, the size limit, `RefreshContext`, progress and cancel | **Done** (§13.3), but for one thing: offline is a switch, and a network that goes away does not turn it on. Reopening a stage makes no downloads |
 | **4. usdcc** | Everything in §10 but the picker | **Done** (§13.4), with gaps marked in §10. A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | **Done** (ASSET_PICKER.md §9), but for dragging, completion and Python. A reference to a file on the server is added by browsing to it |
-| **5.1 Asset Servers editor** | §10.1 | A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
+| **5.1 Asset Servers editor** | §10.1 | **Done** (§10.2). A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
 | **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | **Built** (§13.6) for WebDAV and S3, but for Save in the picker, which comes next. Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **S3** | An S3 plugin, [S3_RESOLVER.md](S3_RESOLVER.md) §8 (phases S3.0 to S3.4) | **Built** (S3_RESOLVER.md §8.2), reading, but for a run against AWS itself. It needed no change to `usdcc_assets` beyond what S3 itself forces (S3_RESOLVER.md §6) |
 | **Later** | More storage backends through Apache OpenDAL (§13.5): one plugin, one transport per scheme | A stage opens from a second backend (Azure Blob or SFTP, say) through the same plugin, and the deploy ships the full notice list for its Rust dependencies |
