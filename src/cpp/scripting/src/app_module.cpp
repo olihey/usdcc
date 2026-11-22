@@ -33,6 +33,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/stage_manager.h"
@@ -877,12 +878,33 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         for (const usdcc::render::RenderJobPtr& job : usdcc::render::RenderScheduler::instance().jobs()) {
             static const char* statuses[] = {"queued", "running", "done", "failed", "cancelled"};
             result.append(py::make_tuple(job->id, job->title, job->rendererId, statuses[static_cast<int>(job->status)],
-                                         job->progress(), job->frames, job->files, job->error));
+                                         job->progress(), job->frames, job->files, job->error, std::string()));
+        }
+        // Jobs sent to a queue server are the queue's, not the scheduler's: by the id
+        // submit_render() returned, with the queue's status.
+        if (const usdcc::render::RenderQueueClient* queues = usdcc::render::RenderQueueClient::instance()) {
+            for (const usdcc::render::SentJobInfo& job : queues->sentJobs()) {
+                std::string status = job.status.toStdString();
+                if (status == "sending" || status == "receiving") status = "queued";
+                if (status == "refused") status = "failed";
+                std::vector<std::string> files;
+                for (const QString& file : job.files) files.push_back(file.toStdString());
+                result.append(py::make_tuple(job.artistJob.toStdString(), job.title.toStdString(), job.renderer.toStdString(),
+                                             status, job.progress, job.frames, files, job.error.toStdString(),
+                                             job.queueName.toStdString()));
+            }
         }
         return result;
     });
     m.def(
-        "cancel_render", [](const std::string& id) { usdcc::render::RenderScheduler::instance().cancel(id); }, py::arg("id"));
+        "cancel_render",
+        [](const std::string& id) {
+            usdcc::render::RenderScheduler::instance().cancel(id);
+            if (usdcc::render::RenderQueueClient* queues = usdcc::render::RenderQueueClient::instance()) {
+                queues->cancelSent(QString::fromStdString(id));
+            }
+        },
+        py::arg("id"));
     m.def(
         "viewport_renderer_settings",
         [](int id, const std::string& renderer) {

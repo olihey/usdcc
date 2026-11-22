@@ -6,8 +6,9 @@ step toward the Linux CI job in [CI.md](CI.md) §7 and the "Windows + Linux" tar
 
 **Status (2026-11-14): done.** On Ubuntu 24.04 in WSL 2, with GCC 13.3, usdcc builds, runs
 on the RTX 4090 (Storm, picking, the gizmos), and passes all three test programs. They pass
-both on WSLg with the GPU and headless under Xvfb with llvmpipe. Not done yet: PySide6 for
-Linux, a Linux CI job, a Linux deploy, and checks on a native Linux desktop (§6).
+both on WSLg with the GPU and headless under Xvfb with llvmpipe. Since then CI has a Linux
+job, a Linux OpenUSD asset and a Linux release tarball ([CI.md](CI.md) §8). Not done yet:
+PySide6 for Linux, a desktop entry, and checks on a native Linux desktop (§6).
 
 **Since 2026-11-17 `deps/usd.json` pins Python 3.13** ([CI.md](CI.md) §2.1), and nothing
 below has been run again with it. `tools/build_usd.py` refuses to run on another minor
@@ -157,11 +158,9 @@ in WSL, to drop anything left over from syncing. Commit and push from Windows on
 
 - **PySide6 on Linux:** port `tools/build_pyside.py` (libclang for Linux, the `.so`
   layout). Until then `usdcc.ui` and Python-made panels are off on Linux.
-- **Linux CI:** an `ubuntu-24.04` job in `build.yml`, with a Linux OpenUSD asset from
-  `deps-usd.yml` built by `tools/build_usd.py`, and `deps/usd.json` given per-platform
-  parts. The headless llvmpipe run above is what that job would do.
-- **Linux deploy:** `tools/deploy.py` for an `$ORIGIN`-rpath tarball or AppImage, and the
-  `resources/linux` desktop entry and icons.
+- **A desktop entry:** `tools/deploy.py` makes an `$ORIGIN`-rpath folder, which
+  `release.yml` packs as `usdcc-<version>-linux-x64.tar.xz`, but there's no `.desktop` file or
+  icons for it yet. (Linux CI and the Linux OpenUSD asset are done: [CI.md](CI.md) §8.)
 - **A native Linux desktop:** QWindowKit's title bar (moving, edge resizing, snapping) and ADS
   floating windows have only been seen under WSLg's compositor; native Wayland not at all.
 - **Crash analysis:** core dumps and `gdb` in place of `analyze_crash.py`/`cdb`.

@@ -355,6 +355,9 @@ USDCC_TEST(render_queue_submit) {
     stranger.client->submit(other, {}, &error);
     CHECK(waitUntil([&] { return !stranger.refused.isEmpty(); }, 10000) && stranger.refused.front().contains("doesn't take"),
           "refused: %s", stranger.refused.isEmpty() ? "nothing" : qPrintable(stranger.refused.front()));
+    const std::optional<SentJobInfo> refusedJob = stranger.client->sentJob(QString::fromStdString(other->id));
+    CHECK(refusedJob && refusedJob->status == QStringLiteral("refused") && refusedJob->error.contains("doesn't take"),
+          "the refusal is kept for the job: %s", refusedJob ? qPrintable(refusedJob->status) : "gone");
     CHECK(queue.server->jobs().size() == 1, "and not queued");
 }
 
@@ -437,7 +440,19 @@ USDCC_TEST(render_queue_fetch) {
     RenderJobPtr job = shotJob(QDir(mine.path()).filePath(QStringLiteral("<stage>")));
     if (!job) return;
     client.submit(job, {});
+    // What usdcc.render reports: the job by the id it had here, as the queue sees it.
+    const QString mineId = QString::fromStdString(job->id);
+    const std::optional<SentJobInfo> sending = client.sentJob(mineId);
+    CHECK(sending && sending->id.isEmpty() && sending->queueName == QStringLiteral("Farm queue") &&
+              sending->frames.size() == 2 && !client.cancelSent(mineId),
+          "sent, not yet queued: no id to cancel by");
     CHECK(waitUntil([&] { return arrived.size() == 2; }, 30000), "both frames came back: %d", int(arrived.size()));
+    waitUntil([&] { const auto j = client.sentJob(mineId); return j && j->status == QStringLiteral("done"); }, 10000);
+    const std::optional<SentJobInfo> done = client.sentJob(mineId);
+    CHECK(done &&!done->id.isEmpty() && done->status == QStringLiteral("done") && done->progress == 1.0 &&
+              done->files == arrived,
+          "done, with the fetched files: %s", done ? qPrintable(done->status) : "gone");
+    CHECK(client.sentJobs().size() == 1 && !client.sentJob(QStringLiteral("job-nope")), "only what was sent");
     CHECK(QFileInfo::exists(mine.filePath(QStringLiteral("queue_shot.0001.exr"))) &&
               QFileInfo::exists(mine.filePath(QStringLiteral("queue_shot.0002.exr"))),
           "where the artist wanted them");
