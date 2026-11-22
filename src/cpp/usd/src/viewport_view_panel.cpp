@@ -1385,6 +1385,12 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     return state;
 }
 
+QImage ViewportViewPanel::busySnapshot(QWidget* container) {
+    // The framebuffer is at device pixels; the overlay scales it into the container.
+    const QImage frame = m_viewport->grabFrame();
+    return frame.isNull() ? ViewPanel::busySnapshot(container) : frame;
+}
+
 void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
     // Needs no renderer, so applies at once. None saved (an older session): no overrides.
     setDisplayOverrides(ViewportDisplayOverrides::fromJson(state.value(QStringLiteral("display")).toObject()));

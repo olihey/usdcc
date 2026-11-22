@@ -3,6 +3,7 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
+#include "usdcc/ui/busy.h"
 #include "usdcc/ui/line_view.h"
 #include "usdcc/usd/stage.h"
 
@@ -14,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -91,9 +93,21 @@ public:
         // A prim path of the stage was clicked. Without one, a click goes to
         // the prim's definition in the text.
         std::function<void(const PXR_NS::SdfPath& path)> selectPrim;
+        // The panel says it's busy while a big conversion runs (docs/PANEL_BUSY.md §5): its
+        // ViewPanel::beginBusy(). None: the status line says so instead.
+        std::function<std::shared_ptr<usdcc::ui::Busy>(const QString& text, usdcc::ui::BusyOptions options)> beginBusy;
     };
 
     explicit UsdaView(Host host, QWidget* parent = nullptr);
+    ~UsdaView() override;
+
+    // Conversions in the background (docs/PANEL_BUSY.md §5): those still running in this
+    // process, including ones whose view gave up on them (USD can't stop an export).
+    static int runningConversions();
+    // Waits up to `ms` for them all to end; false if some still run.
+    static bool waitForConversions(int ms);
+    // Removes the temporary files a crashed instance left behind; not another instance's.
+    static void removeLeftoverConversions();
 
     // Shows `stage`'s root layer, starting a new history.
     void setStage(const StageRefPtr& stage);
@@ -138,8 +152,13 @@ public:
     bool isAwaitingConvert() const { return m_awaitingConvert; }
     // How much on disk makes it ask; kAskBeforeExportBytes unless a test sets less.
     void setAskBeforeExportBytes(std::size_t bytes) { m_askBytes = bytes; }
-    // Converts what's shown even though it's big, as the bar's Convert does.
+    // Converts what's shown even though it's big, as the bar's Convert does: in the
+    // background, the panel busy meanwhile (docs/PANEL_BUSY.md §5).
     void convert();
+    // A conversion in the background is running for what's shown.
+    bool isConverting() const { return bool(m_conversion); }
+    // Drops the running conversion as Cancel does: back to the Convert bar.
+    void cancelConversion();
     // Scrolls to `line` once the text is there: now, or after a pending refresh.
     void scrollToLine(int line);
     // Closes the Find bar if it's open; false if it wasn't.
@@ -180,6 +199,15 @@ private:
     // What converting the source would start from, on disk, when it has to be
     // converted rather than read as text: 0 when it's read, or unknown (anonymous).
     std::size_t exportSourceBytes() const;
+    // The background conversion (docs/PANEL_BUSY.md §5): started by refresh() for a source
+    // Convert was clicked for; shows the result when it ends.
+    void startConversion(std::size_t sourceBytes);
+    void finishConversion();
+    // Gives up on the running conversion: its worker ends on its own and removes its file.
+    void dropConversion();
+    // What refresh() does with the text once it has it, wherever it came from. `wholeBytes`:
+    // the whole text's size when `text` is only its start (a conversion's file).
+    void showText(std::string text, qint64 exportMs, std::size_t wholeBytes = 0);
     void goToLine();
     void startCounting();
     // Shows `source` as a step in the history.
@@ -243,6 +271,13 @@ private:
     // Prim path to line, made when it's first needed after a refresh.
     std::unordered_map<std::string, int> m_primLines;
     bool m_primLinesValid = false;
+
+    // The background conversion running, and the finished one whose file is shown (Show All
+    // reads the rest from it). Their temporary files go with them.
+    struct Conversion;
+    std::shared_ptr<Conversion> m_conversion;
+    std::shared_ptr<Conversion> m_converted;
+    QTimer* m_conversionTimer = nullptr;
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
 };

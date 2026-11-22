@@ -1,6 +1,6 @@
 # USDA View — Plan
 
-Status: **phases 1 and 2 done** (§9), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export.
+Status: **phases 1 and 2 done** (§9), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export. Since 2026-11-22 a big one, after Convert, exports in the background while the panel shows it's busy, and the app stays usable ([PANEL_BUSY.md](PANEL_BUSY.md) §5, §9).
 
 A view panel that shows a stage as USDA text: any layer of it as authored, or the stage
 flattened. It has syntax highlighting, and asset paths work as links that open the file in this

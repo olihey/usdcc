@@ -23,6 +23,7 @@
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/toast_manager.h"
+#include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/ui/workspace_controller.h"
 #include "usdcc/ui/workspace_library.h"
@@ -416,6 +417,29 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "remove_side_panel",
         [](std::uintptr_t address) { mainWindow().removeSidePanel(reinterpret_cast<usdcc::ui::SidePanel*>(address)); },
         py::arg("address"));
+    // A view panel busy (docs/PANEL_BUSY.md §6): usdcc.ui.ViewPanel.busy() wraps the handle.
+    py::class_<usdcc::ui::Busy, std::shared_ptr<usdcc::ui::Busy>>(m, "Busy")
+        .def("set_text", [](usdcc::ui::Busy& self, const std::string& text) { self.setText(QString::fromStdString(text)); })
+        .def("set_detail", [](usdcc::ui::Busy& self, const std::string& text) { self.setDetail(QString::fromStdString(text)); })
+        .def("set_progress", &usdcc::ui::Busy::setProgress)
+        .def("is_cancelled", &usdcc::ui::Busy::isCancelled)
+        .def("finish", &usdcc::ui::Busy::finish);
+    m.def(
+        "begin_busy",
+        [](std::uintptr_t widgetAddress, const std::string& text, bool cancellable, bool paintNow) {
+            // The panel is the widget's first ancestor that is one.
+            usdcc::ui::ViewPanel* panel = nullptr;
+            for (QWidget* widget = reinterpret_cast<QWidget*>(widgetAddress); widget && !panel; widget = widget->parentWidget()) {
+                panel = qobject_cast<usdcc::ui::ViewPanel*>(widget);
+            }
+            if (!panel) throw py::value_error("the widget isn't in a view panel");
+            usdcc::ui::BusyOptions options;
+            options.paintNow = paintNow;
+            // Cancel shows; what it does is the handle's is_cancelled(), which the script reads.
+            if (cancellable) options.onCancel = []() {};
+            return panel->beginBusy(QString::fromStdString(text), std::move(options));
+        },
+        py::arg("widget"), py::arg("text"), py::arg("cancellable"), py::arg("paint_now"));
     m.def(
         "unregister_view_panel",
         [](const std::string& id) {

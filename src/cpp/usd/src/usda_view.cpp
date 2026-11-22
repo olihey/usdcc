@@ -40,19 +40,28 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QLockFile>
 #include <QMenu>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStandardItemModel>
+#include <QTemporaryFile>
 #include <QTextCharFormat>
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 namespace usdcc::usd {
@@ -447,6 +456,275 @@ void UsdaView::convert() {
     refresh();
 }
 
+// --- Converting in the background (docs/PANEL_BUSY.md §5) ------------------------------
+
+namespace {
+// Conversions still running in the process, for quitting (§5.3).
+std::mutex g_runningMutex;
+std::condition_variable g_runningChanged;
+int g_running = 0;
+
+QString conversionPattern() { return QStringLiteral("usdcc-usda-*.usda"); }
+}  // namespace
+
+// What the view and its worker share. The temporary file and its lock go with the last of
+// them, the worker's copy when the view gave up first.
+struct UsdaView::Conversion {
+    QString file;
+    std::unique_ptr<QLockFile> lock;  // held while the file is in use: another instance leaves it be
+    std::shared_ptr<usdcc::ui::Busy> busy;
+    std::atomic<bool> done{false};
+    std::atomic<bool> dropped{false};
+    std::string error;
+    std::size_t estimate = 0;  // bytes of text expected
+    bool changedMeanwhile = false;
+    QElapsedTimer timer;
+
+    ~Conversion() {
+        lock.reset();
+        if (!file.isEmpty()) QFile::remove(file);
+    }
+};
+
+int UsdaView::runningConversions() {
+    std::lock_guard lock(g_runningMutex);
+    return g_running;
+}
+
+bool UsdaView::waitForConversions(int ms) {
+    std::unique_lock lock(g_runningMutex);
+    return g_runningChanged.wait_for(lock, std::chrono::milliseconds(ms), [] { return g_running == 0; });
+}
+
+void UsdaView::removeLeftoverConversions() {
+    const QDir temp(QDir::tempPath());
+    for (const QString& name : temp.entryList({conversionPattern()}, QDir::Files)) {
+        // Free to lock: its instance has gone (QLockFile tells a dead owner by its process id).
+        QLockFile lock(temp.filePath(name + QStringLiteral(".lock")));
+        lock.setStaleLockTime(0);
+        if (!lock.tryLock(0)) continue;
+        QFile::remove(temp.filePath(name));
+        lock.unlock();
+    }
+}
+
+UsdaView::~UsdaView() { dropConversion(); }
+
+void UsdaView::dropConversion() {
+    if (!m_conversion) return;
+    m_conversion->dropped = true;
+    if (m_conversion->busy) m_conversion->busy->finish();
+    m_conversion.reset();
+    if (m_conversionTimer) m_conversionTimer->stop();
+}
+
+void UsdaView::cancelConversion() {
+    if (!m_conversion) return;
+    dropConversion();
+    // Back to the Convert bar.
+    m_convertApproved = false;
+    refresh();
+}
+
+void UsdaView::startConversion(std::size_t sourceBytes) {
+    auto conversion = std::make_shared<Conversion>();
+    conversion->timer.start();
+    // About 1.1 times the binary file (the lion: 1.95 GB of usdc, 2.15 GB of text).
+    conversion->estimate = std::max<std::size_t>(sourceBytes + sourceBytes / 10, 1);
+    {
+        QTemporaryFile reserve(QDir::temp().filePath(QStringLiteral("usdcc-usda-XXXXXX.usda")));
+        reserve.setAutoRemove(false);
+        if (reserve.open()) conversion->file = reserve.fileName();
+    }
+    if (conversion->file.isEmpty()) {
+        m_name = tr("Can't make a temporary file in %1").arg(QDir::toNativeSeparators(QDir::tempPath()));
+        updateStatus();
+        return;
+    }
+    conversion->lock = std::make_unique<QLockFile>(conversion->file + QStringLiteral(".lock"));
+    conversion->lock->setStaleLockTime(0);
+    conversion->lock->tryLock(0);
+
+    m_text->setText(std::string());
+    m_lineStates.clear();
+    m_primLinesValid = false;
+    m_textBytes = 0;
+    m_truncated = false;
+    m_outOfDate = false;
+    m_fromFile = false;
+    m_payloadNote.clear();
+    m_limitBar->setVisible(false);
+    m_staleBar->setVisible(false);
+    m_anchor = PXR_NS::SdfLayerHandle();
+    if (m_source.kind != Source::Kind::File) m_fileLayer.Reset();
+
+    // What the worker exports: its own copy (§5.1). A layer as it is on disk it opens itself;
+    // one with changes, and the flattened views, are made here, on this thread, where USD
+    // allows it, under an overlay painted at once.
+    std::string path;                    // a file the worker opens
+    PXR_NS::ArResolverContext context;   // to resolve it with
+    PXR_NS::SdfLayerRefPtr copy;         // or a copy it exports
+    std::shared_ptr<usdcc::ui::Busy> prepare;
+    const auto prepareBusy = [this, &prepare](const QString& text) {
+        if (m_host.beginBusy) {
+            usdcc::ui::BusyOptions options;
+            options.paintNow = true;
+            prepare = m_host.beginBusy(text, options);
+        }
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+    };
+    const auto copyOf = [&](const PXR_NS::SdfLayerHandle& layer) {
+        prepareBusy(tr("Copying %1").arg(qs(layer->GetDisplayName())));
+        PXR_NS::SdfLayerRefPtr made = PXR_NS::SdfLayer::CreateAnonymous("usda_conversion.usda");
+        made->TransferContent(layer);
+        return made;
+    };
+    if (m_stage) {
+        context = m_stage->usdStage()->GetPathResolverContext();
+        m_anchor = m_stage->usdStage()->GetRootLayer();
+    }
+    switch (m_source.kind) {
+        case Source::Kind::File: {
+            const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(m_source.identifier);
+            m_name = open ? qs(open->GetDisplayName()) : QFileInfo(qs(m_source.identifier)).fileName();
+            m_anchor = open;
+            if (open && open->IsDirty()) {
+                copy = copyOf(open);
+            } else {
+                path = m_source.identifier;
+            }
+            break;
+        }
+        case Source::Kind::Layer: {
+            const PXR_NS::SdfLayerHandle layer = m_source.identifier.empty() && m_stage
+                                                     ? m_stage->usdStage()->GetRootLayer()
+                                                     : PXR_NS::SdfLayer::Find(m_source.identifier);
+            if (!layer) break;
+            m_name = qs(layer->GetDisplayName());
+            m_anchor = layer;
+            if (!layer->IsDirty() && !layer->IsAnonymous() && !layer->GetRealPath().empty()) {
+                path = layer->GetRealPath();
+            } else {
+                copy = copyOf(layer);
+            }
+            break;
+        }
+        case Source::Kind::FlattenedLayerStack:
+            m_name = tr("Flattened Layer Stack");
+            if (m_stage) {
+                prepareBusy(tr("Flattening the layer stack"));
+                copy = PXR_NS::UsdUtilsFlattenLayerStack(m_stage->usdStage());
+            }
+            break;
+        case Source::Kind::FlattenedStage:
+            m_name = tr("Flattened Stage");
+            if (m_stage) {
+                // On this thread: USD can't flatten a stage that may be edited meanwhile.
+                prepareBusy(tr("Flattening the stage"));
+                const PXR_NS::UsdStageRefPtr& usdStage = m_stage->usdStage();
+                copy = usdStage->Flatten(/*addSourceFileComment=*/false);
+                if (usdStage->GetLoadSet().size() < usdStage->FindLoadable().size()) {
+                    m_payloadNote = tr("payloads not loaded");
+                }
+            }
+            break;
+    }
+    if (prepare) prepare->finish();
+    if (QApplication::overrideCursor()) QApplication::restoreOverrideCursor();
+    if (path.empty() && !copy) {
+        if (m_name.isEmpty()) m_name = tr("Nothing to convert");
+        updateStatus();
+        return;
+    }
+
+    m_conversion = conversion;
+    if (m_host.beginBusy) {
+        usdcc::ui::BusyOptions options;
+        // Weak: the handle is the conversion's, and a strong pointer back would keep both.
+        options.onCancel = [view = QPointer<UsdaView>(this), weak = std::weak_ptr<Conversion>(conversion)]() {
+            const std::shared_ptr<Conversion> running = weak.lock();
+            if (view && running && view->m_conversion == running) view->cancelConversion();
+        };
+        conversion->busy = m_host.beginBusy(tr("Converting %1 to text").arg(m_name), options);
+    }
+    if (!m_conversionTimer) {
+        m_conversionTimer = new QTimer(this);
+        m_conversionTimer->setInterval(250);
+        connect(m_conversionTimer, &QTimer::timeout, this, [this]() {
+            if (!m_conversion) return;
+            // How far: the text written so far against what's expected, held under the end
+            // until it is the end (§5.2).
+            const qint64 written = QFileInfo(m_conversion->file).size();
+            const QLocale locale;
+            const QString detail = tr("%1 of text").arg(locale.formattedDataSize(written));
+            if (m_conversion->busy) {
+                m_conversion->busy->setProgress(std::min(0.95, double(written) / double(m_conversion->estimate)));
+                m_conversion->busy->setDetail(detail);
+            }
+            m_status->setText(tr("Converting %1 to text: %2").arg(m_name, detail));
+        });
+    }
+    m_conversionTimer->start();
+    m_status->setText(tr("Converting %1 to text").arg(m_name));
+
+    {
+        std::lock_guard lock(g_runningMutex);
+        ++g_running;
+    }
+    std::thread([conversion, path, context, copy, view = QPointer<UsdaView>(this)]() mutable {
+        PXR_NS::SdfLayerRefPtr layer = copy;
+        if (!layer) {
+            const PXR_NS::ArResolverContextBinder binder(context);
+            layer = PXR_NS::SdfLayer::OpenAsAnonymous(path);
+        }
+        if (!layer) {
+            conversion->error = "can't open " + path;
+        } else if (!layer->Export(conversion->file.toStdString())) {
+            conversion->error = "the export failed";
+        }
+        layer.Reset();
+        conversion->done = true;
+        // Back on the UI thread: shown, unless it was dropped meanwhile.
+        QMetaObject::invokeMethod(qApp, [conversion, view]() {
+            if (view && view->m_conversion == conversion) view->finishConversion();
+        }, Qt::QueuedConnection);
+        {
+            std::lock_guard lock(g_runningMutex);
+            --g_running;
+        }
+        g_runningChanged.notify_all();
+    }).detach();
+}
+
+void UsdaView::finishConversion() {
+    std::shared_ptr<Conversion> conversion = std::move(m_conversion);
+    m_conversionTimer->stop();
+    if (conversion->busy) conversion->busy->finish();
+    if (!conversion->error.empty()) {
+        m_name = tr("Couldn't convert %1: %2").arg(m_name, qs(conversion->error));
+        updateStatus();
+        return;
+    }
+    // What's shown is read from the file; Show All reads the rest of it (§5.2).
+    QFile file(conversion->file);
+    std::string text;
+    std::size_t whole = 0;
+    if (file.open(QIODevice::ReadOnly)) {
+        whole = std::size_t(file.size());
+        const std::size_t read = m_showAll ? whole : std::min(whole, kShowLimitBytes + 1);
+        text.resize(read);
+        text.resize(std::size_t(std::max<qint64>(file.read(text.data(), qint64(read)), 0)));
+    }
+    m_converted = conversion;
+    showText(std::move(text), conversion->timer.elapsed(), whole);
+    // Edits while it ran: it shows the stage as it was then.
+    if (conversion->changedMeanwhile) {
+        m_outOfDate = true;
+        m_staleBar->setVisible(true);
+        updateStatus();
+    }
+}
+
 void UsdaView::scrollToLine(int line) {
     if (m_refreshPending || m_awaitingConvert) {
         m_pendingScrollLine = line;
@@ -526,11 +804,15 @@ void UsdaView::refresh() {
     m_refreshPending = false;
     m_awaitingConvert = false;
     m_askBar->setVisible(false);
+    // What was converting or converted is another refresh's: its result is dropped, and its
+    // worker, which USD can't stop, finishes on its own (docs/PANEL_BUSY.md §5.3).
+    dropConversion();
+    m_converted.reset();
 
-    // A big file isn't converted until Convert says so (§5.1): it would hold up the
-    // whole app for as long as it takes.
+    // A big file isn't converted until Convert says so (§5.1, docs/PANEL_BUSY.md §5.4): not
+    // for the time any more, the app stays usable, but for the disk, memory and CPU it costs.
+    const std::size_t bytes = exportSourceBytes();
     if (!m_convertApproved) {
-        const std::size_t bytes = exportSourceBytes();
         if (bytes > 0 && bytes >= m_askBytes) {
             m_awaitingConvert = true;
             m_text->setText(std::string());
@@ -545,8 +827,8 @@ void UsdaView::refresh() {
             const QString size = locale.formattedDataSize(qint64(bytes));
             if (m_source.kind == Source::Kind::FlattenedLayerStack || m_source.kind == Source::Kind::FlattenedStage) {
                 m_name = m_source.kind == Source::Kind::FlattenedStage ? tr("Flattened Stage") : tr("Flattened Layer Stack");
-                m_askLabel->setText(tr("The stage's layers are %1 on disk. Flattening them to text can take minutes, "
-                                       "and the app waits meanwhile.")
+                m_askLabel->setText(tr("The stage's layers are %1 on disk. Flattening them to text can take minutes "
+                                       "and about as much disk again; the app stays usable meanwhile.")
                                         .arg(size));
             } else {
                 PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(m_source.identifier);
@@ -554,8 +836,8 @@ void UsdaView::refresh() {
                     layer = m_stage->usdStage()->GetRootLayer();
                 }
                 m_name = layer ? qs(layer->GetDisplayName()) : QFileInfo(qs(m_source.identifier)).fileName();
-                m_askLabel->setText(tr("%1 is a %2 binary file. Converting it to text can take minutes, and the "
-                                       "app waits meanwhile.")
+                m_askLabel->setText(tr("%1 is a %2 binary file. Converting it to text can take minutes and about "
+                                       "as much disk again; the app stays usable meanwhile.")
                                         .arg(m_name, size));
             }
             m_askBar->setVisible(true);
@@ -564,6 +846,11 @@ void UsdaView::refresh() {
             updateStatus();
             return;
         }
+    }
+    // Convert was clicked for a big source: in the background (docs/PANEL_BUSY.md §5).
+    if (bytes > 0 && bytes >= m_askBytes) {
+        startConversion(bytes);
+        return;
     }
 
     // All of it on this thread (§5): a big layer takes seconds, so at least say so.
@@ -640,16 +927,23 @@ void UsdaView::refresh() {
                 break;
         }
     }
-    m_timings.exportMs = timer.restart();
+    showText(std::move(text), timer.elapsed());
+    QApplication::restoreOverrideCursor();
+}
 
-    m_textBytes = text.size();
-    std::size_t shown = text.size();
-    m_truncated = !m_showAll && text.size() > kShowLimitBytes;
-    if (m_truncated) {
-        shown = text.rfind('\n', kShowLimitBytes);
-        if (shown == std::string::npos) shown = kShowLimitBytes;
+void UsdaView::showText(std::string text, qint64 exportMs, std::size_t wholeBytes) {
+    QElapsedTimer timer;
+    timer.start();
+    m_timings.exportMs = exportMs;
+    // The whole text's size: a conversion's file may hold more than was read of it.
+    m_textBytes = std::max(wholeBytes, text.size());
+    if (!m_showAll && text.size() > kShowLimitBytes) {
+        std::size_t cut = text.rfind('\n', kShowLimitBytes);
+        if (cut == std::string::npos) cut = kShowLimitBytes;
+        text.resize(cut);
     }
-    if (m_truncated) text.resize(shown);
+    const std::size_t shown = text.size();
+    m_truncated = shown < m_textBytes;
     m_lineStates = usda::lineStates(text);
     m_timings.scanMs = timer.restart();
 
@@ -663,7 +957,6 @@ void UsdaView::refresh() {
     m_pendingScrollLine = -1;
     m_text->viewport()->repaint();  // the first paint, timed with the rest
     m_timings.documentMs = timer.elapsed();
-    QApplication::restoreOverrideCursor();
 
     m_outOfDate = false;
     m_staleBar->setVisible(false);
@@ -699,12 +992,35 @@ void UsdaView::updateStatus() {
 
 void UsdaView::showAll() {
     m_showAll = true;
+    // A conversion's text is all in its file: the rest is read from there, not made again.
+    if (m_converted && !m_conversion) {
+        std::shared_ptr<Conversion> converted = m_converted;
+        const bool outOfDate = m_outOfDate;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        QFile file(converted->file);
+        std::string text;
+        if (file.open(QIODevice::ReadOnly)) {
+            text.resize(std::size_t(file.size()));
+            text.resize(std::size_t(std::max<qint64>(file.read(text.data(), file.size()), 0)));
+        }
+        showText(std::move(text), 0);
+        QApplication::restoreOverrideCursor();
+        m_outOfDate = outOfDate;
+        m_staleBar->setVisible(outOfDate);
+        updateStatus();
+        return;
+    }
     refresh();
 }
 
 void UsdaView::onStageObjectsChanged() {
     // The layer stack may have changed (a sublayer added or muted).
     QTimer::singleShot(0, this, [this]() { refreshShowMenu(); });
+    // A conversion running goes on: what it shows will be out of date (docs/PANEL_BUSY.md §5.1).
+    if (m_conversion) {
+        m_conversion->changedMeanwhile = true;
+        return;
+    }
     m_outOfDate = true;
     if (autoRefreshes()) {
         m_autoRefresh->start();

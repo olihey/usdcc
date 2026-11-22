@@ -21,6 +21,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QFile>
@@ -30,6 +31,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
+#include <QProgressBar>
 #include <QScrollBar>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -793,9 +795,13 @@ USDCC_TEST(usda_view_asks_before_converting) {
     auto* convertButton = panel.findChild<QPushButton*>(QStringLiteral("usdaConvertButton"));
     CHECK(convertButton && convertButton->isVisible(), "with Convert");
     if (convertButton) convertButton->click();
+    // In the background now (docs/PANEL_BUSY.md §5): the panel busy until it's done.
+    CHECK(!view->isAwaitingConvert() && view->isConverting() && panel.isBusy(), "Convert: converting, the panel busy");
+    CHECK(waitFor([&] { return !view->isConverting(); }, 30000), "it finishes");
     CHECK(!view->isAwaitingConvert() && shown(panel).startsWith("#usda") && shown(panel).contains("Statue") &&
               askLabel && !askLabel->isVisible(),
           "Convert: the text, the bar gone");
+    CHECK(waitFor([&] { return !panel.isBusy(); }), "and the panel isn't busy any more");
 
     // Another source asks again: the flattened views start from the same file.
     UsdaView::Source flat;
@@ -803,7 +809,9 @@ USDCC_TEST(usda_view_asks_before_converting) {
     panel.setSource(flat);
     CHECK(view->isAwaitingConvert() && shown(panel).isEmpty(), "the flattened stage asks too");
     view->convert();
-    CHECK(!view->isAwaitingConvert() && shown(panel).contains("Statue"), "and converts when told");
+    CHECK(waitFor([&] { return !view->isConverting(); }, 30000) && !view->isAwaitingConvert() &&
+              shown(panel).contains("Statue"),
+          "and converts when told");
 
     // A text file is read as it is, however big: no question.
     const StageRefPtr textStage = stages.openStage(text);
@@ -811,5 +819,69 @@ USDCC_TEST(usda_view_asks_before_converting) {
     view->setAskBeforeExportBytes(1);
     panel.setStage(textStage);
     CHECK(!view->isAwaitingConvert() && panel.isFromFile() && shown(panel).contains("Statue"), "a text layer never asks");
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+// docs/PANEL_BUSY.md §5: a big conversion in the background. The panel is busy with progress,
+// Cancel goes back to Convert at once, edits meanwhile mark the result out of date, a layer
+// with unsaved changes converts from a copy, and the temporary files go.
+USDCC_TEST(usda_view_converts_in_the_background) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir dir;
+    const std::string binary = dir.filePath(QStringLiteral("statue.usdc")).toStdString();
+    {
+        const SdfLayerRefPtr layer = SdfLayer::CreateAnonymous("statue.usda");
+        layer->ImportFromString(bigLayer(60000));
+        layer->Export(binary);
+    }
+    const auto conversions = []() {
+        return QDir::temp().entryList({QStringLiteral("usdcc-usda-*.usda")}, QDir::Files).size();
+    };
+    const auto before = conversions();
+
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(binary);
+    if (!stage) return;
+    auto panel = std::make_unique<UsdaViewPanel>(&stages, stage);
+    auto* view = panel->findChild<UsdaView*>();
+    view->setAskBeforeExportBytes(1);
+    panel->resize(700, 400);
+    panel->show();
+    CHECK(view->isAwaitingConvert(), "it asks first");
+
+    // Cancel: back to the Convert bar at once; the worker ends on its own and removes its file.
+    view->convert();
+    CHECK(view->isConverting() && panel->isBusy() && conversions() == before + 1, "converting into a temporary file");
+    CHECK(waitFor([&] { return panel->findChild<QWidget*>(QStringLiteral("busyOverlay")) &&
+                               panel->findChild<QWidget*>(QStringLiteral("busyOverlay"))->isVisible(); }),
+          "the panel shows it's busy");
+    auto* cancel = panel->findChild<QPushButton*>(QStringLiteral("busyCancel"));
+    CHECK(cancel && cancel->isVisible(), "with Cancel");
+    if (cancel) cancel->click();
+    CHECK(!view->isConverting() && view->isAwaitingConvert() && shown(*panel).isEmpty(), "Cancel: the Convert bar again");
+    CHECK(UsdaView::waitForConversions(60000) && waitFor([&] { return conversions() == before; }),
+          "the worker finished and its file is gone");
+
+    // Converted, with progress; an edit meanwhile makes it out of date.
+    view->convert();
+    auto* bar = panel->findChild<QProgressBar*>(QStringLiteral("busyProgress"));
+    stage->usdStage()->DefinePrim(SdfPath("/AddedMeanwhile"));
+    CHECK(waitFor([&] { return !view->isConverting(); }, 60000), "it finishes");
+    CHECK(shown(*panel).contains("Mesh_59999") && !shown(*panel).contains("AddedMeanwhile"), "the text as it was");
+    CHECK(view->isOutOfDate(), "marked out of date by the edit");
+    CHECK(bar && bar->maximum() == 1000, "the bar showed progress");
+    CHECK(waitFor([&] { return !panel->isBusy(); }), "not busy any more");
+
+    // The root layer has unsaved changes now: converted from a copy, with them.
+    view->refresh();
+    CHECK(waitFor([&] { return !view->isConverting(); }, 60000) && shown(*panel).contains("AddedMeanwhile"),
+          "a layer with unsaved changes converts with them");
+    CHECK(conversions() == before + 1, "the shown conversion keeps its file, for Show All");
+
+    panel.reset();
+    CHECK(UsdaView::waitForConversions(60000) && conversions() == before, "and it goes with the panel");
     QStandardPaths::setTestModeEnabled(false);
 }
