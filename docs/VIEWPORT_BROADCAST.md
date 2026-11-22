@@ -11,6 +11,7 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 §8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
 **Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
+[REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
 
