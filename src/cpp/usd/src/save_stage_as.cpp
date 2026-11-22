@@ -1,4 +1,6 @@
 #include "usdcc/usd/save_stage_as.h"
+#include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_servers.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
@@ -71,10 +73,17 @@ bool saveStageInteractively(const StageRefPtr& stage, QWidget* parent) {
 
 StageRefPtr saveStageAsInteractively(StageManager& stageManager, const StageRefPtr& stage, QWidget* parent) {
     if (!stage) return {};
-    const std::string real = stage->usdStage()->GetRootLayer()->GetRealPath();
-    QString path = QFileDialog::getSaveFileName(parent, QObject::tr("Save Stage As"),
-                                                real.empty() ? QString() : QFileInfo(QString::fromStdString(real)).absolutePath(),
-                                                QObject::tr("USD Text (*.usda);;USD Binary (*.usdc);;USD (*.usd)"));
+    // On disk or on a server (docs/ASSET_PICKER.md §5): where the stage is, to start with.
+    const PXR_NS::SdfLayerHandle root = stage->usdStage()->GetRootLayer();
+    const std::string real = root->GetRealPath();
+    AssetPickerOptions options;
+    options.title = QObject::tr("Save Stage As");
+    options.filters = {QObject::tr("USD Text (*.usda)"), QObject::tr("USD Binary (*.usdc)"), QObject::tr("USD (*.usd)")};
+    options.start = real.empty()                     ? QString()
+                    : isLocalAssetPath(real)         ? QFileInfo(QString::fromStdString(real)).absolutePath()
+                                                     : QString::fromStdString(displayAssetPath(real));
+    options.context = stage->usdStage()->GetPathResolverContext();
+    QString path = pickSaveAsset(parent, options);
     if (path.isEmpty()) return {};
     // USD needs an extension to know the format.
     if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".usda");

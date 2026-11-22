@@ -32,6 +32,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QMessageBox>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
@@ -293,6 +294,63 @@ QString pickAsset(QWidget* parent, const AssetPickerOptions& options) {
     return dialog.result();
 }
 
+namespace {
+
+// The extension of a filter's first pattern ("USD Layers (*.usda *.usd)" -> "usda"); empty for "*".
+QString firstExtension(const QString& filter) {
+    const int open = filter.lastIndexOf(QLatin1Char('('));
+    const int close = filter.lastIndexOf(QLatin1Char(')'));
+    if (open < 0 || close <= open) return {};
+    const QString first = filter.mid(open + 1, close - open - 1).section(QLatin1Char(' '), 0, 0, QString::SectionSkipEmpty);
+    return first.startsWith(QStringLiteral("*.")) && first.indexOf(QLatin1Char('*'), 1) < 0 ? first.mid(2) : QString();
+}
+
+// `file` with `extension` when its name has none.
+QString suffixedWith(const QString& file, const QString& extension) {
+    const QString name = file.mid(std::max(file.lastIndexOf(QLatin1Char('/')), file.lastIndexOf(QLatin1Char('\\'))) + 1);
+    if (extension.isEmpty() || name.isEmpty() || name.contains(QLatin1Char('.'))) return file;
+    return file + QLatin1Char('.') + extension;
+}
+
+// The server a file saved at `uri` goes to: the first of its stack that isn't read-only
+// (docs/REMOTE_ASSETS.md §5). Empty for a server by its address, and when every one is read-only.
+QString saveTargetOf(const QString& uri, const PXR_NS::ArResolverContext& context) {
+    usdcc::assets::Uri parsed;
+    if (!usdcc::assets::parseUri(uri.toStdString(), &parsed)) return {};
+    std::shared_ptr<const usdcc::assets::Stack> stack;
+    if (!parsed.stackId.empty()) {
+        stack = usdcc::assets::findStack(parsed.stackId);
+    } else {
+        const usdcc::assets::Context* bound = context.Get<usdcc::assets::Context>();
+        const std::shared_ptr<const usdcc::assets::Context> fallback = bound ? nullptr : usdcc::assets::defaultContext();
+        stack = (bound ? *bound : *fallback).stack(parsed.scheme, parsed.name);
+    }
+    if (!stack) return {};
+    for (const usdcc::assets::Endpoint& endpoint : stack->endpoints) {
+        if (!endpoint.readOnly) return QString::fromStdString(endpoint.id);
+    }
+    return {};
+}
+
+}  // namespace
+
+QString pickSaveAsset(QWidget* parent, AssetPickerOptions options) {
+    options.save = true;
+    if (!assetPickerAvailable()) {
+        // Nothing to browse besides the disk: the system's save dialog, which asks before replacing.
+        const QString start = isRemote(options.start) ? QString() : options.start;
+        const QStringList filters = withAllFiles(options.filters);
+        QString selected;
+        const QString file = QFileDialog::getSaveFileName(parent, options.title, start, filters.join(QStringLiteral(";;")),
+                                                          &selected);
+        if (file.isEmpty()) return {};
+        return QDir::cleanPath(suffixedWith(file, firstExtension(selected.isEmpty() ? filters.value(0) : selected)));
+    }
+    AssetPickerDialog dialog(options, parent);
+    if (dialog.exec() != QDialog::Accepted) return {};
+    return dialog.chosenFile();
+}
+
 // ---- The dialog -------------------------------------------------------------------------------
 
 struct AssetPickerDialog::Listed {
@@ -306,7 +364,7 @@ struct AssetPickerDialog::Listed {
 
 AssetPickerDialog::AssetPickerDialog(const AssetPickerOptions& options, QWidget* parent)
     : QDialog(parent), m_options(options) {
-    setWindowTitle(options.title.isEmpty() ? tr("Choose Asset") : options.title);
+    setWindowTitle(options.title.isEmpty() ? (options.save ? tr("Save As") : tr("Choose Asset")) : options.title);
     setObjectName(QStringLiteral("assetPickerDialog"));
     auto* layout = new QVBoxLayout(this);
 
@@ -337,6 +395,19 @@ AssetPickerDialog::AssetPickerDialog(const AssetPickerOptions& options, QWidget*
     bar->addWidget(m_path, 1);
     bar->addWidget(m_favorite);
     bar->addWidget(m_up);
+    if (options.save) {
+        m_newFolder = new QToolButton(this);
+        m_newFolder->setObjectName(QStringLiteral("assetNewFolder"));
+        m_newFolder->setText(tr("New Folder..."));
+        m_newFolder->setToolTip(tr("A folder in the one shown. On a server it's made when a file is saved in it"));
+        bar->addWidget(m_newFolder);
+        connect(m_newFolder, &QToolButton::clicked, this, [this]() {
+            bool ok = false;
+            const QString name =
+                QInputDialog::getText(this, tr("New Folder"), tr("Name:"), QLineEdit::Normal, QString(), &ok).trimmed();
+            if (ok && !name.isEmpty()) newFolder(name);
+        });
+    }
     layout->addLayout(bar);
 
     auto* splitter = new QSplitter(this);
@@ -359,6 +430,11 @@ AssetPickerDialog::AssetPickerDialog(const AssetPickerOptions& options, QWidget*
     m_status->setObjectName(QStringLiteral("assetStatus"));
     m_status->setEnabled(false);
     layout->addWidget(m_status);
+    m_saveNote = new QLabel(this);
+    m_saveNote->setObjectName(QStringLiteral("assetSaveNote"));
+    m_saveNote->setWordWrap(true);
+    m_saveNote->setVisible(false);
+    layout->addWidget(m_saveNote);
 
     auto* nameRow = new QHBoxLayout();
     nameRow->addWidget(new QLabel(tr("File name:"), this));
@@ -390,7 +466,9 @@ AssetPickerDialog::AssetPickerDialog(const AssetPickerOptions& options, QWidget*
     system->setToolTip(tr("Choose a file on disk with the system's own dialog"));
     system->setAutoDefault(false);
     buttonsRow->addWidget(system);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, this);
+    auto* buttons = new QDialogButtonBox((options.save ? QDialogButtonBox::Save : QDialogButtonBox::Open) |
+                                             QDialogButtonBox::Cancel,
+                                         this);
     buttonsRow->addWidget(buttons);
     layout->addLayout(buttonsRow);
 
@@ -434,7 +512,9 @@ AssetPickerDialog::AssetPickerDialog(const AssetPickerOptions& options, QWidget*
                 m_fileName->setText(start.mid(start.lastIndexOf(QLatin1Char('/')) + 1));
                 start = start.left(start.lastIndexOf(QLatin1Char('/')) + 1);
             }
-        } else if (QFileInfo(start).isFile()) {
+        } else if (QFileInfo(start).isFile() ||
+                   (options.save && !QFileInfo(start).isDir() && QFileInfo(QFileInfo(start).absolutePath()).isDir())) {
+            // A file, or for a save one that isn't there yet: its folder, with its name ready.
             m_fileName->setText(QFileInfo(start).fileName());
             start = QFileInfo(start).absolutePath();
         }
@@ -500,6 +580,7 @@ void AssetPickerDialog::navigate(const QString& target) {
     m_path->setText(remote ? restOf(location) : location);
     m_up->setEnabled(!location.isEmpty() && !root);
     updateFavoriteButton();
+    updateSaveNote();
 
     if (!remote && location.isEmpty()) {
         // This PC: its drives, and the home folder.
@@ -654,6 +735,10 @@ void AssetPickerDialog::showEntries(const std::vector<Listed>& entries, const QS
                                     const QString& loginScheme) {
     m_entries->clear();
     m_listedFiles.clear();
+    if (!error.isEmpty() && m_options.save && m_newFolders.contains(m_location)) {
+        setStatus(tr("A new folder: it's made when a file is saved in it"));
+        return;
+    }
     if (!error.isEmpty()) {
         auto* item = new QTreeWidgetItem(m_entries, {error});
         item->setDisabled(true);
@@ -886,6 +971,7 @@ void AssetPickerDialog::pathEntered() {
 }
 
 bool AssetPickerDialog::acceptCandidate(const QString& candidate, bool listed) {
+    if (m_options.save) return acceptSave(candidate);
     QString chosen;
     QString folder;
     if (!isRemote(candidate)) {
@@ -955,8 +1041,125 @@ void AssetPickerDialog::accept() {
     acceptCandidate(candidate, listed);
 }
 
+QString AssetPickerDialog::withDefaultSuffix(const QString& file) const {
+    return suffixedWith(file, firstExtension(m_filter->currentText()));
+}
+
+QString AssetPickerDialog::saveNote() const { return m_saveNote ? m_saveNote->text() : QString(); }
+
+void AssetPickerDialog::updateSaveNote() {
+    if (!m_options.save) return;
+    QString note;
+    if (isRemote(m_location) && !m_location.endsWith(QStringLiteral("://"))) {
+        const PXR_NS::ArResolverContextBinder binder(m_options.context);
+        PXR_NS::ArResolver& resolver = PXR_NS::ArGetResolver();
+        const PXR_NS::ArResolvedPath probe = resolver.ResolveForNewAsset(m_location.toStdString() + "untitled.usda");
+        std::string whyNot;
+        if (probe.empty() || !resolver.CanWriteAssetToPath(probe, &whyNot)) {
+            note = tr("Can't save here: %1")
+                       .arg(whyNot.empty() ? tr("no server of this name takes files") : QString::fromStdString(whyNot));
+        } else {
+            const QString target = saveTargetOf(m_location, m_options.context);
+            note = target.isEmpty() ? tr("Saves to this server") : tr("Saves to %1").arg(target);
+        }
+    }
+    m_saveNote->setText(note);
+    m_saveNote->setVisible(!note.isEmpty());
+}
+
+bool AssetPickerDialog::newFolder(const QString& name) {
+    if (!m_options.save || name.isEmpty() || name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\'))) {
+        return false;
+    }
+    if (m_location.isEmpty() || m_location.endsWith(QStringLiteral("://"))) {
+        setStatus(tr("Go to a folder first"));
+        return false;
+    }
+    const QString folder = childOf(name);
+    if (!isRemote(folder)) {
+        if (!QDir().mkpath(folder)) {
+            setStatus(tr("Couldn't make %1").arg(QDir::toNativeSeparators(folder)));
+            return false;
+        }
+        navigate(folder);
+        return true;
+    }
+    // A server makes the folders a file is written in (WebDAV) or has none (S3): this one
+    // is there once something is saved in it.
+    const QString path = folder + QLatin1Char('/');
+    if (!m_newFolders.contains(path)) m_newFolders << path;
+    navigate(path);
+    return true;
+}
+
+bool AssetPickerDialog::acceptSave(const QString& given) {
+    const QString candidate = withDefaultSuffix(given);
+    QString chosen;
+    QString folder;
+    bool exists = false;
+    if (!isRemote(candidate)) {
+        const QFileInfo info(candidate);
+        if (info.isDir()) {
+            navigate(candidate);
+            return false;
+        }
+        if (!info.absoluteDir().exists()) {
+            setStatus(tr("The folder isn't there: %1").arg(QDir::toNativeSeparators(info.absolutePath())));
+            return false;
+        }
+        chosen = QDir::cleanPath(info.absoluteFilePath());
+        folder = QDir::cleanPath(info.absolutePath());
+        exists = info.exists();
+    } else {
+        const std::string uri = candidate.toStdString();
+        usdcc::assets::allowHostOfUrl(uri);
+        const PXR_NS::ArResolverContextBinder binder(m_options.context);
+        PXR_NS::ArResolver& resolver = PXR_NS::ArGetResolver();
+        const std::string identifier = resolver.CreateIdentifierForNewAsset(uri);
+        const PXR_NS::ArResolvedPath target = resolver.ResolveForNewAsset(identifier);
+        std::string whyNot;
+        if (target.empty() || !resolver.CanWriteAssetToPath(target, &whyNot)) {
+            setStatus(tr("Can't save here: %1")
+                          .arg(whyNot.empty() ? tr("no server of this name takes files") : QString::fromStdString(whyNot)));
+            return false;
+        }
+        chosen = QString::fromStdString(displayAssetPath(identifier));
+        folder = chosen.left(chosen.lastIndexOf(QLatin1Char('/')) + 1);
+        // There already where the save goes, it's replaced. Only on a read-only server below
+        // it (PROD under TEST), the save is a new file on the one it goes to.
+        const PXR_NS::ArResolvedPath existing = resolver.Resolve(identifier);
+        if (!existing.empty()) {
+            const QString origin = QString::fromStdString(assetOrigin(identifier, existing));
+            const QString writesTo = saveTargetOf(chosen, m_options.context);
+            exists = origin.isEmpty() || writesTo.isEmpty() || origin == writesTo;
+        }
+    }
+    if (exists) {
+        const bool replace =
+            m_askReplace ? m_askReplace(chosen)
+                         : QMessageBox::question(this, windowTitle(), tr("%1 exists. Replace it?").arg(displayPath(chosen)),
+                                                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+        if (!replace) return false;
+    }
+    m_chosen = chosen;
+    addRecentFolder(folder);
+    QDialog::accept();
+    return true;
+}
+
 void AssetPickerDialog::systemDialog() {
     const QString start = isRemote(m_location) || m_location.isEmpty() ? QDir::homePath() : m_location;
+    if (m_options.save) {
+        // The system's dialog asks before replacing a file itself.
+        QString selected;
+        const QString file = QFileDialog::getSaveFileName(this, windowTitle(), start,
+                                                          withAllFiles(m_options.filters).join(QStringLiteral(";;")), &selected);
+        if (file.isEmpty()) return;
+        m_chosen = QDir::cleanPath(suffixedWith(file, firstExtension(selected)));
+        addRecentFolder(QFileInfo(m_chosen).absolutePath());
+        QDialog::accept();
+        return;
+    }
     const QString file = QFileDialog::getOpenFileName(this, windowTitle(), start,
                                                       withAllFiles(m_options.filters).join(QStringLiteral(";;")));
     if (!file.isEmpty()) acceptCandidate(file, false);
