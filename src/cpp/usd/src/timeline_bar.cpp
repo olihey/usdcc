@@ -119,9 +119,9 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
         usdcc::ui::scaled::fixedHeight(button, kButtonHeight);
         return button;
     };
-    auto* previousKey = keyButton(QStringLiteral("\xE2\x80\xB9\xE2\x97\x86"), tr("The selection's previous key"));
+    auto* previousKey = keyButton(QString::fromUtf8("\xE2\x80\xB9\xE2\x97\x86"), tr("The selection's previous key"));
     previousKey->setObjectName(QStringLiteral("timelinePreviousKey"));
-    auto* nextKey = keyButton(QStringLiteral("\xE2\x97\x86\xE2\x80\xBA"), tr("The selection's next key"));
+    auto* nextKey = keyButton(QString::fromUtf8("\xE2\x97\x86\xE2\x80\xBA"), tr("The selection's next key"));
     nextKey->setObjectName(QStringLiteral("timelineNextKey"));
     m_autoKey = keyButton(tr("Auto"), QString());
     m_autoKey->setObjectName(QStringLiteral("timelineAutoKey"));

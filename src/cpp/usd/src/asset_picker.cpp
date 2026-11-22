@@ -842,7 +842,7 @@ void AssetPickerDialog::updateFavoriteButton() {
     const bool folder = !m_location.isEmpty() && !m_location.endsWith(QStringLiteral("://"));
     m_favorite->setEnabled(folder);
     const bool favorite = folder && isAssetFavorite(m_location);
-    m_favorite->setText(favorite ? QStringLiteral("\xE2\x98\x85") : QStringLiteral("\xE2\x98\x86"));
+    m_favorite->setText(favorite ? QString::fromUtf8("\xE2\x98\x85") : QString::fromUtf8("\xE2\x98\x86"));
     m_favorite->setToolTip(favorite ? tr("Remove this folder from Favourites") : tr("Add this folder to Favourites"));
 }
 

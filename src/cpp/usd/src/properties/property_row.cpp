@@ -159,7 +159,7 @@ QString PropertyRow::labelText() const { return m_labelText; }
 void PropertyRow::setTargeted(bool targeted) {
     // "◎" marks the op the transform tools act on: what they aim at. Not "◆", which
     // is a key (setKeyState(), docs/ANIMATION.md phase 2).
-    m_label->setText(targeted ? m_labelText + QStringLiteral("  \xE2\x97\x8E") : m_labelText);
+    m_label->setText(targeted ? m_labelText + QStringLiteral("  ") + QChar(0x25CE) : m_labelText);
     m_label->setProperty("target", targeted);
     repolish(m_label);
 }
@@ -253,15 +253,15 @@ void PropertyRow::setKeyState(KeyState state) {
         case KeyState::None:
             break;
         case KeyState::Static:
-            m_keyButton->setText(QStringLiteral("\xE2\x97\x87"));  // ◇
+            m_keyButton->setText(QString(QChar(0x25C7)));  // ◇
             m_keyButton->setToolTip(tr("Set a key at this frame"));
             break;
         case KeyState::Animated:
-            m_keyButton->setText(QStringLiteral("\xE2\x97\x87"));
+            m_keyButton->setText(QString(QChar(0x25C7)));
             m_keyButton->setToolTip(tr("Animated. Set a key at this frame; an edit here sets one too"));
             break;
         case KeyState::KeyedHere:
-            m_keyButton->setText(QStringLiteral("\xE2\x97\x86"));  // ◆
+            m_keyButton->setText(QString(QChar(0x25C6)));  // ◆
             m_keyButton->setToolTip(tr("A key at this frame. Click to remove it"));
             break;
     }
