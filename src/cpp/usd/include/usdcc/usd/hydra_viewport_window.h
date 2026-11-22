@@ -104,6 +104,12 @@ public:
     // whose stage has no timeline. Draws a new frame when it changed.
     void setTime(PXR_NS::UsdTimeCode time);
     PXR_NS::UsdTimeCode time() const { return m_time; }
+    // The time of the last frame drawn with a stage: what grabFrame() shows (a playblast
+    // waits for it, docs/ANIMATION.md phase 5).
+    PXR_NS::UsdTimeCode renderedTime() const { return m_renderedTime; }
+    // Whether the last frame was the renderer's last word: a progressive one has more to do
+    // until it's converged.
+    bool isConverged() const { return !m_converging; }
 
     // Whether firstFrameRendered() has already fired for the current stage —
     // a viewport that was already on screen draws it inside setStage().
@@ -494,6 +500,7 @@ private:
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
     PXR_NS::UsdStageRefPtr m_stage;
     PXR_NS::UsdTimeCode m_time = PXR_NS::UsdTimeCode::Default();
+    PXR_NS::UsdTimeCode m_renderedTime = PXR_NS::UsdTimeCode::Default();
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};
     double m_distance = kDefaultOrbitDistance;

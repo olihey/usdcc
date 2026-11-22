@@ -378,6 +378,20 @@ class Viewport:
     def camera(self, path):
         _app().set_viewport_camera(self._id, "" if path is None else str(path))
 
+    def playblast(self, pattern, start=None, end=None, step=1.0):
+        """Writes the viewport's picture at each frame from `start` to `end` (the
+        stage's playback range by default), `step` apart, to `pattern`: "####" (or
+        "<frame>", "$F4") is the frame number, else it goes before the extension;
+        PNG, JPEG or TIFF by the extension (docs/ANIMATION.md phase 5). Each frame
+        is taken once the renderer has converged. The viewport must be on screen.
+        Returns the files written; raises RuntimeError when it stops."""
+        if start is None or end is None:
+            from usdcc import usd
+            first, last = usd.playback_range(self.stage())
+            start = first if start is None else start
+            end = last if end is None else end
+        return list(_app().viewport_playblast(self._id, str(pattern), float(start), float(end), float(step)))
+
     def renderer(self):
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
         return _app().viewport_renderer(self._id)

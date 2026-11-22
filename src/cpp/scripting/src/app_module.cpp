@@ -8,6 +8,7 @@
 #include "usdcc/scripting/scripted_render_view_panel.h"
 #include "usdcc/scripting/scripted_tool.h"
 #include "usdcc/scripting/scripted_view_panel.h"
+#include "usdcc/usd/playblast.h"
 #include "usdcc/usd/python/bind_usd.h"
 #endif
 
@@ -806,6 +807,24 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "viewport_title", [](int id) { return viewportWithId(id).windowTitle().toStdString(); }, py::arg("id"));
     m.def(
         "viewport_stage", [](int id) { return cacheIdOf(viewportWithId(id).currentStage()); }, py::arg("id"));
+    // A playblast (docs/ANIMATION.md phase 5): the files written.
+    m.def(
+        "viewport_playblast",
+        [](int id, const std::string& pattern, double start, double end, double step) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            if (!viewport.currentStage() || !viewport.hydraWindow()) throw py::value_error("the viewport has no stage");
+            usdcc::usd::PlayblastOptions options;
+            options.frames = {start, end};
+            options.step = step;
+            options.pattern = QString::fromStdString(pattern);
+            QString error;
+            const QStringList files = usdcc::usd::playblast(*viewport.hydraWindow(), *viewport.currentStage(), options, {}, &error);
+            if (!error.isEmpty()) throw std::runtime_error("the playblast stopped: " + error.toStdString());
+            std::vector<std::string> result;
+            for (const QString& file : files) result.push_back(file.toStdString());
+            return result;
+        },
+        py::arg("id"), py::arg("pattern"), py::arg("start"), py::arg("end"), py::arg("step"));
     // The stage camera it looks through, "" for its own (docs/VIEWPORT_CAMERA.md §3).
     m.def(
         "viewport_camera", [](int id) { return viewportWithId(id).hydraWindow()->stageCamera().GetString(); },

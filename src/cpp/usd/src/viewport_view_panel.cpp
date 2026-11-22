@@ -1,6 +1,10 @@
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/toast.h"
+#include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
+#include "usdcc/usd/playblast.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/color_management.h"
@@ -30,6 +34,9 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QSettings>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QGridLayout>
@@ -53,6 +60,9 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QProgressDialog>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -1689,6 +1699,9 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     QMenu* cameraMenu = menu->addMenu(tr("Camera"));
     cameraMenu->setObjectName(QStringLiteral("cameraMenu"));
     addCameraEntries(cameraMenu);
+    QAction* playblastAction = menu->addAction(tr("Playblast..."), this, &ViewportViewPanel::playblastInteractively);
+    playblastAction->setEnabled(bool(currentStage()));
+    playblastAction->setToolTip(tr("The viewport's picture at each frame of a range, as images"));
 
     menu->addSeparator();
     const HydraViewportWindow::DisplayOptions shown = displayOptions();
@@ -1835,6 +1848,81 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     defaults->setEnabled(!m_displayOverrides.isEmpty());
 
     ViewportMenuEntries::instance().populate(menu, this);
+}
+
+void ViewportViewPanel::playblastInteractively() {
+    const StageRefPtr stage = currentStage();
+    if (!stage || !m_viewport) return;
+    QSettings settings = usdcc::ui::appSettings();
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Playblast"));
+    auto* form = new QFormLayout(&dialog);
+    const TimeRange playing = stage->playbackRange();
+    auto* start = new QDoubleSpinBox(&dialog);
+    auto* end = new QDoubleSpinBox(&dialog);
+    for (QDoubleSpinBox* spin : {start, end}) {
+        spin->setRange(-1e6, 1e6);
+        spin->setDecimals(0);
+    }
+    start->setValue(playing.start);
+    end->setValue(playing.end);
+    auto* step = new QDoubleSpinBox(&dialog);
+    step->setRange(0.1, 1000.0);
+    step->setDecimals(1);
+    step->setValue(1.0);
+    auto* file = new QLineEdit(&dialog);
+    file->setText(settings.value(QStringLiteral("Viewport/playblastPattern"),
+                                 QDir(QDir::homePath()).filePath(QStringLiteral("playblast/frame.####.png")))
+                      .toString());
+    file->setToolTip(tr("#### (or <frame>, $F4) is the frame number; PNG, JPEG or TIFF by the extension"));
+    auto* browse = new QPushButton(tr("Browse..."), &dialog);
+    connect(browse, &QPushButton::clicked, &dialog, [&dialog, file]() {
+        const QString chosen = QFileDialog::getSaveFileName(&dialog, tr("Playblast"), file->text(),
+                                                            tr("Images (*.png *.jpg *.tif)"));
+        if (!chosen.isEmpty()) file->setText(chosen);
+    });
+    auto* fileRow = new QHBoxLayout();
+    fileRow->addWidget(file, 1);
+    fileRow->addWidget(browse);
+    form->addRow(tr("First frame:"), start);
+    form->addRow(tr("Last frame:"), end);
+    form->addRow(tr("Step:"), step);
+    form->addRow(tr("Files:"), fileRow);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Playblast"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    dialog.resize(usdcc::ui::scaled::size(520, 10));
+    if (dialog.exec() != QDialog::Accepted || file->text().trimmed().isEmpty()) return;
+    settings.setValue(QStringLiteral("Viewport/playblastPattern"), file->text().trimmed());
+
+    PlayblastOptions options;
+    options.frames = {start->value(), end->value()};
+    options.step = step->value();
+    options.pattern = file->text().trimmed();
+    const int total = int(playblastFrames(options).size());
+    QProgressDialog progress(tr("Playblasting..."), tr("Cancel"), 0, total, this);
+    progress.setWindowTitle(tr("Playblast"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    QString error;
+    const QStringList files = playblast(*m_viewport, *stage, options,
+                                        [&progress](int done, int all) {
+                                            progress.setMaximum(all);
+                                            progress.setValue(done);
+                                            return !progress.wasCanceled();
+                                        },
+                                        &error);
+    progress.close();
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("Playblast"), tr("The playblast stopped: %1").arg(error));
+        return;
+    }
+    if (!files.isEmpty()) {
+        USDCC_LOG_TOAST(usdcc::core::LogLevel::Info, "usdcc.playblast", "Playblast: {} frames written to {}",
+                        files.size(), QDir::toNativeSeparators(QFileInfo(files.front()).absolutePath()).toStdString());
+    }
 }
 
 }  // namespace usdcc::usd
