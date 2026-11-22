@@ -1,7 +1,7 @@
 # Animation — Plan
 
-Status: **phases 1 (playback), 2 (keyframing) and 3 (key editing) built**, §6.1, §6.3 and §6.4;
-phases 4 and 5 are plan.
+Status: **phases 1 (playback), 2 (keyframing), 3 (key editing) and 4 (curves) built**, §6.1, §6.3,
+§6.4 and §6.5; phase 5 is plan.
 The choices are in §4, and §8's questions are answered as recommended.
 
 Before this, usdcc had no notion of time: every read and write was at `UsdTimeCode::Default()`,
@@ -339,6 +339,32 @@ Tests: `anim_edit_move_keys`, `anim_edit_scale_keys`, `anim_edit_copy_paste_remo
 Show All, a click and a drag, a box, scaling by the handle, copy, paste and delete, each one
 undo step; the ruler's mark dragged, copied, pasted and deleted). Seen in the app with
 `test_data/animated.usda`: the rows and keys against the ruler. Not tried by hand: the drags.
+
+### 6.5 Phase 4: what was built
+
+**Try it:** open `test_data/animated.usda`, select Hopper and Pulse, open a Curve Editor (the
+Stages menu). Right-click `xformOp:rotateY` and Convert to Curve; pick a knot and drag it or its
+tangent handles.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Curves | [anim_edit.h](../src/cpp/usd/include/usdcc/usd/anim_edit.h) | `canHaveCurve()` (a scalar float, double or half: what `TsSpline` holds), `hasCurve()`, `convertToCurve()` (a knot per sample, through its value; auto-ease tangents, or held segments when the stage holds; the samples cleared, as they'd win over the spline in one spec, which answers §7's question 2), `bakeToSamples()` (a sample a frame from the first knot to the last, and at each knot; extrapolation and loops past the knots aren't kept), `setKnotInterpolation()`, `setKnotTangents()` (Auto Ease, Flat), `setExtrapolation()`, `setInnerLoop()`, `movedKnots()` |
+| Split | `splitXformOp()` | A translate or scale op becomes its X, Y and Z ops in its place in the op order, its default and samples split, the old op's own opinion removed from the edit target: the same matrix at every time (tested). The Curve Editor asks first, saying readers older than OpenUSD 25.11 don't know single-axis ops |
+| Curve Editor | [curve_editor_view_panel.cpp](../src/cpp/usd/src/curve_editor_view_panel.cpp), panel type `curveEditor` | The selected prims and their animated descendants, each animated scalar attribute a curve in its own colour (in the tree too); others (a translate's `double3`) listed greyed, with Split into X, Y and Z in their menu. `CurveView`: the ruler's time axis and a value axis of its own with a labelled grid; splines drawn with `TsSpline::Sample()` to half a pixel, samples joined as the stage interpolates |
+| Editing | `CurveView` | Click, Ctrl or Shift click, a box picks keys; clicking a row picks its curve's keys. Dragging moves the picked keys, whole frames in time and any value (Shift: value only). A picked knot shows its tangent handles where the segment is a curve; dragging one sets that side's slope and width. The menu: Interpolation (Held, Linear, Curve), Tangents (Auto Ease, Flat), Before the First Knot / After the Last Knot (Held, Linear, Repeat, Reset, Oscillate), Loop Between Picked Knots (an inner loop), No Inner Loop, Convert to Curve, Bake to Samples, Delete Keys. Wheel zooms both axes about the cursor (Ctrl: time, Shift: values), middle drag pans, F frames all. Each gesture is one undo step; a drag is drawn as it goes and written on release |
+
+Not built: sloped extrapolation with a typed slope, Hermite curves, value blocks, and editing the
+pre-value of a dual-valued knot. A vector attribute isn't drawn as three curves until it's split.
+§7's question 3 (a spline's times through the edit target's offset) isn't checked yet: keys are
+moved in stage time on the attribute, as for samples.
+
+Tests: `anim_edit_convert_and_bake` (through every sample, and back to the same values),
+`anim_edit_curve_settings` (interpolation, flat tangents, repeat and held extrapolation, an inner
+loop, moved knots), `anim_edit_split_ops` (the same matrix at three times, a rotate refused), and
+`curve_editor_curves` (usdcc_ui_tests: the curves, Convert to Curve, a knot dragged and a tangent
+dragged, each one undo step, held, repeat, bake, and the split). Seen in the app with
+`test_data/animated.usda`: the Hopper's rotateY and the Pulse's radius as curves, the translate
+listed. Not tried by hand: the drags and the menus.
 
 ### 6.2 The order
 
