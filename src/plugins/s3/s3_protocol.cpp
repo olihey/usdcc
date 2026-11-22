@@ -343,6 +343,44 @@ public:
         return Result<Entry>::success(entryOf(response, path));
     }
 
+    bool canPut() const override { return true; }
+
+    // A signed PUT of the key, only if the object is the version `knownEtag` names, or
+    // isn't there at all: S3's conditional writes (docs/S3_RESOLVER.md §5). S3 has no
+    // folders to make.
+    Result<Entry> put(const Endpoint& endpoint, const std::string& path, const std::filesystem::path& from,
+                      const std::string& knownEtag, Progress& progress, Cancel& cancel) override {
+        Target target;
+        std::string why;
+        if (!targetOf(endpoint, path, &target, &why)) return Result<Entry>::failure(Status::Error, why);
+        if (target.bucket.empty() || target.key.empty() || target.key.back() == '/') {
+            return Result<Entry>::failure(Status::Error, "a file is written to a key in a bucket, and " + path + " names none");
+        }
+        std::vector<std::string> headers;
+        if (knownEtag.empty()) {
+            headers.push_back("If-None-Match: *");
+        } else if (knownEtag != "*") {
+            headers.push_back("If-Match: " + knownEtag);
+        }
+        const HttpResponse response =
+            send(endpoint, target, "PUT", objectPath(target.key), headers, {}, cancel, &progress, from);
+        if (response.status == Status::Ok && statusOfHttpCode(response.code) == Status::Conflict) {
+            // 412 PreconditionFailed, or 409 ConditionalRequestConflict: another write got there first.
+            return Result<Entry>::failure(Status::Conflict, describe(response));
+        }
+        if (response.status != Status::Ok || statusOfHttpCode(response.code) != Status::Ok) {
+            return failureOf<Entry>(response, response.code == 403 ? credentialHint(endpoint) + "; writing needs s3:PutObject"
+                                                                   : std::string());
+        }
+        Entry entry = entryOf(response, path);
+        std::error_code error;
+        entry.size = std::filesystem::file_size(from, error);
+        // S3 answers a PUT with the ETag; its time comes from a HEAD, as a listing has it.
+        const Result<Entry> now = stat(endpoint, path, cancel);
+        if (now.ok()) entry = now.value;
+        return Result<Entry>::success(std::move(entry));
+    }
+
 private:
     static std::string objectPath(const std::string& key) { return "/" + percentEncodeStrict(key, true); }
 
@@ -360,7 +398,7 @@ private:
     // that the bucket is in another region, that region is remembered and asked again.
     static HttpResponse send(const Endpoint& endpoint, Target& target, const std::string& method, const std::string& path,
                              const std::vector<std::string>& headers, const std::filesystem::path& into, Cancel& cancel,
-                             Progress* progress = nullptr) {
+                             Progress* progress = nullptr, const std::filesystem::path& uploadFrom = {}) {
         HttpResponse response;
         for (int attempt = 0; attempt < 3; ++attempt) {
             HttpRequest request;
@@ -368,6 +406,7 @@ private:
             request.url = target.base + path;
             request.headers = headers;
             request.into = into;
+            request.uploadFrom = uploadFrom;
             // A signature gives no secret away over plain http; a session token would go
             // as it is, with a warning in the Log.
             request.credentialOverHttp = true;

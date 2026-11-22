@@ -38,6 +38,7 @@ const char* statusName(Status status) {
         case Status::Unreachable: return "unreachable";
         case Status::NotAllowed: return "not allowed";
         case Status::NotSupported: return "not supported";
+        case Status::Conflict: return "conflict";
         case Status::Cancelled: return "cancelled";
         case Status::Error: return "error";
     }

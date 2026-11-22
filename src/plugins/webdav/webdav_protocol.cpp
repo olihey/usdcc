@@ -137,7 +137,88 @@ public:
         return Result<Entry>::success(std::move(entry));
     }
 
+    bool canPut() const override { return true; }
+
+    // MKCOL for each folder it's in that isn't there, then a PUT only if the file is the
+    // version `knownEtag` names, or isn't there at all (docs/WEBDAV_RESOLVER.md §5).
+    Result<Entry> put(const Endpoint& endpoint, const std::string& path, const std::filesystem::path& from,
+                      const std::string& knownEtag, Progress& progress, Cancel& cancel) override {
+        std::string condition;
+        if (knownEtag.empty()) {
+            condition = "If-None-Match: *";
+        } else if (knownEtag == "*" || knownEtag.rfind("W/", 0) == 0) {
+            // A weak ETag never matches in If-Match (RFC 9110 §13.1.1): it's compared here,
+            // weakly, then the file is replaced whichever version is there by then.
+            if (knownEtag != "*") {
+                const Result<Entry> now = stat(endpoint, path, cancel);
+                if (now.status == Status::Missing) return Result<Entry>::failure(Status::Conflict, "the file is gone");
+                if (!now.ok()) return now;
+                if (weakly(now.value.etag) != weakly(knownEtag)) {
+                    return Result<Entry>::failure(Status::Conflict, "its ETag is " + now.value.etag + ", not " + knownEtag);
+                }
+            }
+            condition = "If-Match: *";
+        } else {
+            condition = "If-Match: " + knownEtag;
+        }
+
+        const Result<bool> folders = makeFolders(endpoint, path, cancel);
+        if (!folders.ok()) return Result<Entry>::failure(folders.status, folders.message);
+        HttpRequest request = requestFor(endpoint, path);
+        request.method = "PUT";
+        request.uploadFrom = from;
+        request.headers.push_back(condition);
+        const HttpResponse response = httpRequest(request, progress, cancel);
+        if (response.status != Status::Ok) return httpFailure<Entry>(response);
+        const Status status = statusOfHttpCode(response.code);
+        if (status == Status::Conflict) {
+            return Result<Entry>::failure(Status::Conflict, "HTTP " + std::to_string(response.code) + ", for " + condition);
+        }
+        if (status != Status::Ok) return httpFailure<Entry>(response);
+        Entry entry;
+        entry.name = percentDecode(path.substr(path.rfind('/') + 1));
+        entry.etag = response.header("etag");
+        entry.modified = parseHttpDate(response.header("last-modified"));
+        std::error_code error;
+        entry.size = std::filesystem::file_size(from, error);
+        // Not every server says what the new version is: it's asked.
+        if (entry.etag.empty() || entry.modified == 0) {
+            const Result<Entry> now = stat(endpoint, path, cancel);
+            if (now.ok()) entry = now.value;
+        }
+        return Result<Entry>::success(std::move(entry));
+    }
+
 private:
+    static std::string weakly(const std::string& etag) { return etag.rfind("W/", 0) == 0 ? etag.substr(2) : etag; }
+
+    // Each folder above `path` that isn't there, top first. A 405 is a folder that is.
+    static Result<bool> makeFolders(const Endpoint& endpoint, const std::string& path, Cancel& cancel) {
+        std::vector<std::string> missing;
+        for (std::string folder = path.substr(0, path.rfind('/')); !folder.empty(); folder = folder.substr(0, folder.rfind('/'))) {
+            std::vector<Response> responses;
+            std::string message;
+            const Status status = propfind(endpoint, folder, "0", cancel, &responses, &message);
+            if (status == Status::Ok) break;
+            if (status != Status::Missing) return Result<bool>::failure(status, "PROPFIND " + folder + ": " + message);
+            missing.push_back(folder);
+        }
+        for (auto folder = missing.rbegin(); folder != missing.rend(); ++folder) {
+            Progress quiet;
+            HttpRequest request = requestFor(endpoint, *folder + "/");
+            request.method = "MKCOL";
+            const HttpResponse response = httpRequest(request, quiet, cancel);
+            if (response.status != Status::Ok) return Result<bool>::failure(response.status, response.message);
+            if (response.code == 405) continue;
+            const Status status = statusOfHttpCode(response.code);
+            if (status != Status::Ok) {
+                // A 409 here is a folder above that isn't there, not a version that changed.
+                return Result<bool>::failure(status == Status::Conflict ? Status::Error : status,
+                                             "MKCOL " + *folder + ": HTTP " + std::to_string(response.code));
+            }
+        }
+        return Result<bool>::success(true);
+    }
     static HttpRequest requestFor(const Endpoint& endpoint, const std::string& path) {
         HttpRequest request;
         request.url = endpoint.url + percentEncodePath(path);

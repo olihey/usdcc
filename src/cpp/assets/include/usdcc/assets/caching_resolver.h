@@ -87,6 +87,13 @@ private:
     // filled whenever the path could be located at all.
     Found _Find(const std::string& assetPath, Location* location, bool warnIfUnlocated) const;
     Lookups* _Scope() const;
+    // The endpoint of the stack that writes go to: the first that isn't read-only (§6,
+    // phase 6). False, with `why`, when there's none, the protocol can't write, or offline.
+    bool _WriteTarget(const Location& location, Endpoint* target, std::string* why) const;
+    // What a write to `path` through `stack` changes: the answers remembered about it.
+    void _Written(const Stack& stack, const std::string& path) const;
+
+    class _WritableAsset;
 
     std::string m_scheme;
     mutable PXR_NS::ArThreadLocalScopedCache<Lookups> m_scopes;
