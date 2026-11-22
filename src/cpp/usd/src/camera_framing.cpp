@@ -222,4 +222,9 @@ PXR_NS::GfFrustum overscanFrustum(const PXR_NS::GfFrustum& frustum, const ViewRe
     return widened;
 }
 
+std::pair<int, int> scaledBufferSize(int width, int height, int percent) {
+    const double f = std::clamp(percent, 1, 100) / 100.0;
+    return {std::max(1, int(std::lround(width * f))), std::max(1, int(std::lround(height * f)))};
+}
+
 }  // namespace usdcc::usd

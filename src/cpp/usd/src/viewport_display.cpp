@@ -74,6 +74,10 @@ constexpr Number kNumbers[] = {
 };
 
 // A resolution as Viewport/resolution has it: "fill", "renderSettings" or "WxH".
+bool validRenderScale(int scale) {
+    return std::find(std::begin(kRenderScales), std::end(kRenderScales), scale) != std::end(kRenderScales);
+}
+
 bool validResolution(const std::string& text) {
     return text == kFillViewport || text == kRenderSettingsResolution || parseResolution(text).has_value();
 }
@@ -94,7 +98,7 @@ std::optional<T> fromName(const QString& name, const T (&values)[N], const char*
 bool isViewportDisplayKey(const std::string& key) {
     for (const char* known : {kViewportShowGridKey, kViewportGridSizeKey, kViewportGridStepKey, kViewportBackgroundKey,
                               kViewportSelectionStyleKey, kViewportSelectionColorKey, kViewportSelectionWidthKey,
-                              kViewportComplexityKey, kViewportResolutionKey}) {
+                              kViewportComplexityKey, kViewportResolutionKey, kViewportRenderScaleKey}) {
         if (key == known) return true;
     }
     for (const Number& number : kNumbers) {
@@ -395,6 +399,18 @@ void defineViewportDisplaySettings() {
         .defaultValue = builtIn.resolution,
     });
     settings.define({
+        .key = kViewportRenderScaleKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Render scale (%)",
+        .description = "Hydra renders at this share of the viewport's pixels, scaled up: faster for a slow renderer "
+                       "or a big screen. The grid, the selection outline and the gizmos stay sharp. A viewport can "
+                       "choose its own (its options menu, Render Scale).",
+        .type = SettingType::Choice,
+        .defaultValue = std::to_string(builtIn.renderScale),
+        .choices = {"100", "75", "50", "25"},
+    });
+    settings.define({
         .key = kViewportGateMaskOpacityKey,
         .category = "Viewport",
         .group = "Camera",
@@ -503,6 +519,11 @@ HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
     }
     const std::string resolution = settings.get<std::string>(kViewportResolutionKey);
     if (validResolution(resolution)) options.resolution = resolution;
+    bool scaleOk = false;
+    if (const int scale = QString::fromStdString(settings.get<std::string>(kViewportRenderScaleKey)).toInt(&scaleOk);
+        scaleOk && validRenderScale(scale)) {
+        options.renderScale = scale;
+    }
     return options;
 }
 
@@ -518,6 +539,7 @@ HydraViewportWindow::DisplayOptions ViewportDisplayOverrides::applyTo(HydraViewp
     if (complexity) defaults.complexity = *complexity;
     if (colorView) defaults.colorView = *colorView;
     if (resolution) defaults.resolution = *resolution;
+    if (renderScale) defaults.renderScale = *renderScale;
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) defaults.*toggle.option = *value;
     }
@@ -540,6 +562,7 @@ QJsonObject ViewportDisplayOverrides::toJson() const {
     if (complexity) json.insert(QStringLiteral("complexity"), QLatin1String(complexityName(*complexity)));
     if (colorView) json.insert(QStringLiteral("colorView"), QString::fromStdString(*colorView));
     if (resolution) json.insert(QStringLiteral("resolution"), QString::fromStdString(*resolution));
+    if (renderScale) json.insert(QStringLiteral("renderScale"), *renderScale);
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) json.insert(QLatin1String(toggle.name), *value);
     }
@@ -595,6 +618,9 @@ ViewportDisplayOverrides ViewportDisplayOverrides::fromJson(const QJsonObject& j
     }
     if (const QJsonValue v = json.value(QStringLiteral("resolution")); v.isString() && validResolution(v.toString().toStdString())) {
         overrides.resolution = v.toString().toStdString();
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("renderScale")); v.isDouble() && validRenderScale(v.toInt())) {
+        overrides.renderScale = v.toInt();
     }
     return overrides;
 }

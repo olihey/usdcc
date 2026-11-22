@@ -551,6 +551,9 @@ USDCC_TEST(viewport_gate_overrides) {
           "a resolution, opacity or percentage that doesn't fit is ignored");
     CHECK(ViewportDisplayOverrides::fromJson(QJsonObject{{"resolution", "renderSettings"}}).resolution == "renderSettings",
           "Render Settings is one");
+    CHECK(ViewportDisplayOverrides::fromJson(QJsonObject{{"renderScale", 50}}).renderScale == 50 &&
+              !ViewportDisplayOverrides::fromJson(QJsonObject{{"renderScale", 60}}).renderScale,
+          "a render scale of 100, 75, 50 or 25");
     usdcc::usd::HydraViewportWindow::DisplayOptions defaults;
     CHECK(defaults.resolution == "fill" && !defaults.safeAction && defaults.safeActionPercent == 93.0 &&
               defaults.safeTitlePercent == 90.0,
