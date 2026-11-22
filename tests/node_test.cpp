@@ -592,7 +592,8 @@ std::unique_ptr<NodeProcess> serveQueue(const QTemporaryDir& dir, const QString&
 }
 
 // The Embree job: the shot's 3 frames at 48 × 32, `tiles`, its frames named <stage>.####.exr.
-RenderJobPtr embreeJob(const QString& stageFile, GfVec2i tiles, double timeLimit, int samples, GfVec2i resolution = GfVec2i(48, 32)) {
+RenderJobPtr embreeJob(const QString& stageFile, GfVec2i tiles, double timeLimit, int samples, GfVec2i resolution = GfVec2i(48, 32),
+                       bool slow = false) {
     RenderArguments arguments;
     arguments.renderer = "HdEmbreeRendererPlugin";
     arguments.frames = FrameRange{1, 3, 1};
@@ -601,6 +602,13 @@ RenderJobPtr embreeJob(const QString& stageFile, GfVec2i tiles, double timeLimit
     arguments.timeLimit = timeLimit;
     arguments.output = "<stage>.####.exr";  // relative: under the queue's root
     arguments.set = {{embreeSamples().attribute, std::to_string(samples)}};
+    // Slow: no adaptive sampling, so each frame takes its time limit however simple the scene.
+    if (slow) {
+        const auto embree = FinalRenderers::instance().find("HdEmbreeRendererPlugin");
+        for (const RenderSettingField& field : embree ? embree->settingsSchema() : std::vector<RenderSettingField>{}) {
+            if (TfStringEndsWith(field.rendererKey.GetString(), "adaptiveThreshold")) arguments.set.push_back({field.attribute, "0"});
+        }
+    }
     std::string error;
     UsdStageRefPtr stage = UsdStage::Open(stageFile.toStdString());
     const auto request = prepareRenderRequest(stage, arguments, &error);
@@ -719,7 +727,7 @@ USDCC_TEST(node_process_queue_restart) {
                      [&queued](const QString&, const QString& id, int) { queued.append(id); });
     CHECK(waitFor([&] { return client->queues().size() == 1; }, 30000), "Anna sees the queue");
     // Each frame takes its time limit: 3 s.
-    RenderJobPtr job = embreeJob(stageFile, GfVec2i(1, 1), 3.0, 1000000, GfVec2i(160, 120));
+    RenderJobPtr job = embreeJob(stageFile, GfVec2i(1, 1), 3.0, 1000000, GfVec2i(160, 120), true);
     if (!job) return;
     client->submit(job, {});
     CHECK(waitFor([&] { return !queued.isEmpty(); }, 60000), "queued");

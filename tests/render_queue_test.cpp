@@ -257,22 +257,26 @@ USDCC_TEST(render_queue_wire_formats) {
           "the spec");
 
     std::string error;
-    const QString root = QStringLiteral("C:/farm/renders");
-    auto pattern = queueOutputPattern(*job, root, QStringLiteral("C:/state/frames/q1"), &error);
-    CHECK(pattern && *pattern == "C:/farm/renders/<stage>", "relative: under the root (%s)", pattern ? pattern->c_str() : error.c_str());
-    job->spec.options.output = "C:/farm/renders/shots/<stage>";
+    // Absolute on every platform (C:/ isn't on Linux).
+    const QString root = QDir::rootPath() + QStringLiteral("farm/renders");
+    const QString keep = QDir::rootPath() + QStringLiteral("state/frames/q1");
+    const std::string mine = (QDir::rootPath() + QStringLiteral("mine/<stage>")).toStdString();
+    const std::string rootText = root.toStdString();
+    auto pattern = queueOutputPattern(*job, root, keep, &error);
+    CHECK(pattern && *pattern == rootText + "/<stage>", "relative: under the root (%s)", pattern ? pattern->c_str() : error.c_str());
+    job->spec.options.output = rootText + "/shots/<stage>";
     pattern = queueOutputPattern(*job, root, {}, &error);
-    CHECK(pattern && *pattern == "C:/farm/renders/shots/<stage>", "absolute inside the root");
-    job->spec.options.output = "D:/mine/<stage>";
+    CHECK(pattern && *pattern == rootText + "/shots/<stage>", "absolute inside the root");
+    job->spec.options.output = mine;
     CHECK(!queueOutputPattern(*job, root, {}, &error) && error.find("root") != std::string::npos, "absolute outside: refused");
     job->spec.options.output = "../escape/<stage>";
     CHECK(!queueOutputPattern(*job, root, {}, &error), "out of the root with ..: refused");
-    job->spec.options.output = "D:/mine/<stage>";
-    pattern = queueOutputPattern(*job, {}, QStringLiteral("C:/state/frames/q1"), &error);
-    CHECK(pattern && *pattern == "C:/state/frames/q1/<stage>", "no root: the file name, kept for the artist");
+    job->spec.options.output = mine;
+    pattern = queueOutputPattern(*job, {}, keep, &error);
+    CHECK(pattern && *pattern == keep.toStdString() + "/<stage>", "no root: the file name, kept for the artist");
     job->spec.options.output.clear();
     pattern = queueOutputPattern(*job, root, {}, &error);
-    CHECK(pattern && *pattern == "C:/farm/renders/<stage>_<settings>", "none authored: the default name");
+    CHECK(pattern && *pattern == rootText + "/<stage>_<settings>", "none authored: the default name");
 }
 
 
