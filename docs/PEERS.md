@@ -535,6 +535,11 @@ Editing one stage together, each seeing the others' edits, selections and camera
 with a page of its own: [SHARED_STAGE.md](SHARED_STAGE.md). It takes an ordered channel with its
 own snapshot for the edits, per-peer state for presence, and a transfer when a peer lacks the files.
 
+### 10.4a Remote support
+
+Showing usdcc's windows to a colleague and, if allowed, letting them work in them: a room with the
+helper as a guest. Off by default and optional in the build: [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md).
+
 ### 10.5 What a plugin could build
 
 Not planned here; listed to check that §7 covers them.
