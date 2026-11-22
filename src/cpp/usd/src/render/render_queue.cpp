@@ -221,6 +221,7 @@ QJsonObject jobToJson(const RenderJob& job, bool status) {
                      {"settings", q(job.settingsName)},
                      {"renderer", q(job.rendererId)},
                      {"rendererName", q(job.rendererName)},
+                     {"jobFolder", q(job.folderName)},
                      {"spec", specToJson(job.spec)},
                      {"frames", frames},
                      {"tasks", tasks}};
@@ -242,6 +243,14 @@ RenderJobPtr jobFromJson(const QJsonObject& json, const UsdStageRefPtr& stage) {
     job->settingsName = s(json["settings"].toString());
     job->rendererId = s(json["renderer"].toString());
     job->rendererName = s(json["rendererName"].toString());
+    // One plain name: it becomes part of a path on whoever reads the job.
+    const QString folder = json["jobFolder"].toString();
+    const bool plain = !folder.isEmpty() && folder.size() <= 200 && folder != u"." && folder != u".." &&
+                       !folder.endsWith(QLatin1Char('.')) && !folder.endsWith(QLatin1Char(' ')) &&
+                       std::none_of(folder.begin(), folder.end(), [](QChar c) {
+                           return c.unicode() < 0x20 || QStringLiteral("/\\:*?\"<>|").contains(c);
+                       });
+    if (plain) job->folderName = s(folder);
     job->spec = specFromJson(json["spec"].toObject());
     for (const QJsonValue& frame : json["frames"].toArray()) job->frames.push_back(frame.toDouble());
     for (const QJsonValue& t : json["tasks"].toArray()) {
@@ -287,8 +296,15 @@ std::optional<std::string> queueOutputPattern(const RenderJob& job, const QStrin
     }
     const QString cleanRoot = QDir::cleanPath(QDir::fromNativeSeparators(root));
     if (QDir::isRelativePath(text)) {
-        const QString path = QDir::cleanPath(QDir(cleanRoot).filePath(text));
-        if (!path.startsWith(cleanRoot + QLatin1Char('/'), Qt::CaseInsensitive)) {
+        // In the job's own folder, as outputPath() would put it under the output folder.
+        const QString inFolder = job.folderName.empty() || text.contains(QStringLiteral("<job>"))
+                                     ? text
+                                     : QStringLiteral("<job>/") + text;
+        const QString path = QDir::cleanPath(QDir(cleanRoot).filePath(inFolder));
+        // The pattern itself stays under the root, whatever folder goes in front.
+        const QString asGiven = QDir::cleanPath(QDir(cleanRoot).filePath(text));
+        if (!path.startsWith(cleanRoot + QLatin1Char('/'), Qt::CaseInsensitive) ||
+            !asGiven.startsWith(cleanRoot + QLatin1Char('/'), Qt::CaseInsensitive)) {
             if (error) *error = "its output " + pattern + " leaves the queue's output root";
             return std::nullopt;
         }

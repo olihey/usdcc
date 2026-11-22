@@ -1172,6 +1172,8 @@ int main(int argc, char** argv) {
     // The Render Queue (docs/FINAL_RENDER.md §5.2): off until a render is queued or the user
     // opens it. Rendering stops when the app quits.
     auto* renderQueuePanel = new usdcc::render::RenderQueueSidePanel(&usdcc::render::RenderScheduler::instance());
+    // A frame's Share sends it to a chat room (docs/PEERS.md §10.1).
+    renderQueuePanel->setPeers(peersController);
     window.addSidePanel(renderQueuePanel, Qt::RightDockWidgetArea);
     renderQueuePanel->hide();
     usdcc::render::setShowRenderQueue([renderQueuePanel]() {
