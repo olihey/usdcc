@@ -1,11 +1,12 @@
-# A Shared Stage (plan)
+# A Shared Stage
 
 Several people editing one stage at once, each seeing the others' edits, selections and cameras.
 One use of [PEERS.md](PEERS.md), and the largest.
 
 **Status:** planned 2026-11-16 as part of PEERS.md, moved here 2026-11-17. The phase 0 spike is
-done (2026-11-21, §10.1); nothing of the feature is built yet. "Checked" means looked at in this
-repository, "Measured" means the spike tried it; everything else is an assumption.
+done (2026-11-21, §10.1), and phases A to C are built (2026-11-22, §10.2), tested in one process;
+not yet tried on two machines. "Checked" means looked at in this repository, "Measured" means the
+spike tried it. Where what was built differs from the plan above, §10.2 says so.
 
 ## 1. What it is, and what it uses
 
@@ -152,9 +153,9 @@ They need [PEERS.md](PEERS.md) phases 1a and 1b, and nothing after them.
 | Phase | Builds | Done when |
 |---|---|---|
 | **0. Spike** (done) | A recorder that replays one layer's ops onto another: `tests/stage_sync_spike_test.cpp` | It answers: whether replaying the recorded ops gives an identical layer; how to serialize an op's value, timed on a mesh of a million points. Answered in §10.1 |
-| **A. Same files** | The live layer, ops, order, the snapshot, undo, view-only members, merge | Two instances move different prims of one stage and each sees both; both move the same prim and end equal; undo on one side undoes only its own step; a third joins late and is equal; Merge and Save write the result |
-| **B. Presence** | Selections, cameras, Follow | A peer's selection and camera show in the other's Outliner and viewport |
-| **C. Sending the stage** | Packing and sending the files to a peer who doesn't have them | A peer with none of the files joins a shared stage |
+| **A. Same files** (built) | The live layer, ops, order, the snapshot, undo, view-only members, merge | Two instances move different prims of one stage and each sees both; both move the same prim and end equal; undo on one side undoes only its own step; a third joins late and is equal; Merge and Save write the result |
+| **B. Presence** (built) | Selections, cameras, Follow | A peer's selection and camera show in the other's Outliner and viewport |
+| **C. Sending the stage** (built) | Packing and sending the files to a peer who doesn't have them | A peer with none of the files joins a shared stage |
 | **Later** | Locks per prim | |
 
 ### 10.1 What the spike found
@@ -200,9 +201,74 @@ two layers are then compared spec by spec, field by field, and as USDA text.
    wins, and the small batches above are a kilobyte either way. Reading USDC from memory needs an
    `ArAsset` of our own instead of the temporary file; that is phase A's work, not a question.
 
+### 10.2 Phases A to C as built
+
+The parts, all in `usdcc_usd_ui` under `share/`:
+
+| Part | What it does |
+|---|---|
+| `layer_ops.h` | The ops, their encoding (a JSON header and USDC scratch layers), and `applyOps()`, which drops an op that no longer fits the layer |
+| `undo_manager.h` | `UndoManager::observeLayer()`: the undo recorder also reports each change as an op. `changeUnrecorded()`: a peer's ops, applied without undo or reporting |
+| `stage_sync.h` | `StageSync`: one live layer kept equal, knowing nothing of rooms (§4–§7) |
+| `shared_stages.h` | `SharedStages`: sharing, opening, leaving, stopping, who may edit, presence and files, over a chat room |
+| `shared_stages_section.h` | The Peers panel's section: Share Current Stage, Open, Leave, Stop Sharing, Who May Edit, Follow |
+| `presence.h` | `PresenceHub`: the others' selections, views and frames, for the Outliner, the viewport and Follow |
+| `live_layers.h` | Which stages are shared, for the rule that only prims made in the live layer move (§2) |
+
+The channels of a share are `stage/<id>` (ordered), `stage/<id>/drag` (latest only),
+`stage/<id>/ask` (direct, a member's requests to the host) and `stage/<id>/files` (transfers),
+with the per-peer state `stage/<id>/presence` and the room's map `stages`, which only the host
+writes.
+
+**Where it differs from the plan:**
+
+1. **Conflicts (§5) by rebuilding, not by applying again.** Each peer keeps a confirmed layer, the
+   live layer in the host's order. When a peer's batch arrives while this peer's own are still on
+   the way, the live layer is rebuilt as the confirmed one plus its own batches. That gives the
+   same result as the plan's rule for one field, and holds for the specs too (created, deleted,
+   moved), which re-applying field by field would not have. With nothing of its own on the way,
+   a peer's batch is applied directly.
+2. **A child list is sent as its changes.** Sdf records a parent's first child as a set of the
+   whole list, which would drop a child another peer added meanwhile. Such a set goes out as the
+   children added or taken out; only a reorder is sent as the list. Undoing one puts back the
+   children it took out where they were, takes out those it added, and keeps a peer's since.
+3. **A batch is numbered by its sender** as well as by the host, and a number seen before is
+   ignored, so a peer can send its unconfirmed batches again after a snapshot without doubling them.
+4. **The snapshot (§7) is USDC,** not USDA. One over 8 MB goes as a file (a transfer) the joiner
+   asks for. A room sends a channel's snapshot only to members who join after the channel opened,
+   so a member opening a stage shared earlier asks the host for one (`stage/<id>/ask`). A member
+   that may only watch can still ask: requests have a channel of their own.
+5. **A batch over 12 MB can't be sent** (the history and queues of a room aren't made for it):
+   the change is taken back, and the user told. A drag's previews are sent only while under 1 MB.
+6. **Presence's viewport outline is a box** around each prim a peer has selected, in its color,
+   drawn as the collider overlay is, not Hydra's outline. Follow takes the peer's view into the
+   orbit camera, and its frame; any move of the view stops it.
+7. **Merge (§9) stitches** the live layer over the target layer (`UsdUtilsStitchLayers`), as one
+   undo step, an unsaved change. Stop Sharing offers Merge into the root layer, Keep Beside the
+   Stage (`<name>.live.usda`, offered again on the next share) and Discard.
+8. **Phase C packs the stage, not a flattened copy:** `UsdUtilsLocalizeAsset` copies every layer
+   and asset the root needs, with paths relative to it, once per share, under
+   `<AppLocalData>/shared/<id>/`. Flattening would have lost the variants and layers that edits
+   in the live layer refer to. The member opens the root from its inbox.
+9. **A stage closed while shared** ends the share: the host's edits are kept beside the stage (or
+   discarded, for a stage only in memory); a member's go with the stage.
+
+**Not done yet:** the Layer Editor doesn't mark the live layer; whether a session
+([SESSIONS.md](SESSIONS.md)) saved while sharing keeps the live layer's name in the session layer
+isn't checked; peers' selections in Hydra's own outline; locks (§12 #2); two machines by hand
+(§11).
+
 ## 11. Testing
 
-`tests/stage_sync_test.cpp`: two stages in one process, their live layers joined by a pipe that
+*As built:* `tests/stage_sync_test.cpp` (usdcc_tests) joins three and four `StageSync`s by a pipe
+that orders like a host and delivers at random: 30 seeds of random edits from every side, with a
+late joiner, end equal; and last writer wins, a large snapshot sent as a file, undo on one side
+only (and after a peer deleted the spec), a watcher refused, a drag's previews and its batch, the
+check. `tests/shared_stages_test.cpp` (usdcc_ui_tests) runs three instances' `SharedStages` in a
+real room on 127.0.0.1: share, open late, edits both ways, the rename rule, presence and Follow,
+files sent to a member who hasn't them, a watcher, and Merge with undo.
+
+The plan: `tests/stage_sync_test.cpp`: two stages in one process, their live layers joined by a pipe that
 delays and reorders. Random edits from both sides must end in identical layers. Also the snapshot,
 undo, an op for a deleted spec, and a view-only member's edit refused. By hand: two instances with
 two test profiles on one machine, then two machines.

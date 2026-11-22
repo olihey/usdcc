@@ -90,6 +90,8 @@
 #include "usdcc/usd/render/render_menu.h"
 #include "usdcc/usd/render/render_network.h"
 #include "usdcc/usd/render/render_queue.h"
+#include "usdcc/usd/share/shared_stages.h"
+#include "usdcc/usd/share/shared_stages_section.h"
 #include "usdcc/usd/render/render_queue_panel.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render/render_settings_view_panel.h"
@@ -1120,6 +1122,40 @@ int main(int argc, char** argv) {
         peersPanel->setCollapsed(false);
         peersPanel->raise();
     };
+    // Shared stages (docs/SHARED_STAGE.md): a section of the Peers panel's room view.
+    usdcc::usd::share::SharedStages::Hooks shareHooks;
+    shareHooks.ask = [&window](const QString& title, const QString& text, const QStringList& buttons) {
+        QMessageBox box(QMessageBox::Question, title, text, QMessageBox::NoButton, &window);
+        QList<QAbstractButton*> added;
+        for (int i = 0; i < buttons.size(); ++i) {
+            added << box.addButton(buttons[i], i == 0 ? QMessageBox::AcceptRole
+                                                      : (i == buttons.size() - 1 ? QMessageBox::RejectRole
+                                                                                  : QMessageBox::ActionRole));
+        }
+        box.exec();
+        return int(added.indexOf(box.clickedButton()));
+    };
+    shareHooks.locate = [&window](const QString& title, const QString&) {
+        return QFileDialog::getOpenFileName(&window, title, QString(),
+                                            QObject::tr("USD files (*.usd *.usda *.usdc *.usdz);;All files (*)"));
+    };
+    shareHooks.notify = [&window](const QString& title, const QString& text,
+                                  const QList<std::pair<QString, std::function<void()>>>& actions) {
+        usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+        request.title = title.toStdString();
+        request.body = text.toStdString();
+        QList<usdcc::ui::ToastAction> toastActions;
+        for (const auto& [label, run] : actions) toastActions.append({label, run});
+        if (window.toasts()) window.toasts()->show(request, toastActions);
+    };
+    auto* sharedStages =
+        new usdcc::usd::share::SharedStages(peersController, stageManager, *undoManager, std::move(shareHooks), &window);
+    usdcc::usd::share::SharedStages::setInstance(sharedStages);
+    auto* sharedStagesSection = new usdcc::usd::share::SharedStagesSection(sharedStages);
+    peersPanel->addRoomSection(sharedStagesSection);
+    QObject::connect(peersPanel, &usdcc::ui::PeersSidePanel::roomShown, sharedStagesSection,
+                     &usdcc::usd::share::SharedStagesSection::setRoom);
+    sharedStagesSection->setRoom(peersPanel->currentRoom());
     // Every room, whatever its type, with its raw data.
     debugMenu->addSeparator();
     QAction* peerRoomsAction = debugMenu->addAction(QObject::tr("Peer &Rooms..."));

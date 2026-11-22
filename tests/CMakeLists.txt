@@ -60,6 +60,7 @@ add_executable(usdcc_tests
     time_imaging_test.cpp
     stage_names_test.cpp
     stage_sync_spike_test.cpp
+    stage_sync_test.cpp
     undo_manager_test.cpp
     usda_syntax_test.cpp
     value_type_info_test.cpp
@@ -140,6 +141,7 @@ add_executable(usdcc_ui_tests
     viewport_delete_test.cpp
     panel_maximizer_test.cpp
     peers_panel_test.cpp
+    shared_stages_test.cpp
     viewport_broadcast_test.cpp
     render_queue_test.cpp
     workspace_test.cpp

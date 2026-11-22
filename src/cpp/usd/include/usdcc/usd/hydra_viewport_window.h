@@ -7,6 +7,7 @@
 #include "usdcc/usd/camera_framing.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/renderer_settings.h"
+#include "usdcc/usd/share/presence.h"
 #include "usdcc/usd/viewport_hud.h"
 
 #include <pxr/base/gf/camera.h>
@@ -483,6 +484,9 @@ private:
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     std::unique_ptr<PhysicsOverlay> m_physicsOverlay;  // made when Show Colliders is first on
+    // A shared stage's Follow (docs/SHARED_STAGE.md §8): the peer's view last taken.
+    std::optional<usdcc::usd::share::PeerView> m_followed;
+    void followPeer();
     PXR_NS::TfToken m_rendererPluginId;  // kept across releaseEngine()
     PXR_NS::TfToken m_rendererSettingsPlugin;  // whose m_rendererSettings are
     RendererSettingValues m_rendererSettings;

@@ -4,6 +4,9 @@
 
 #include <QStyledItemDelegate>
 
+#include <functional>
+#include <vector>
+
 namespace usdcc::usd {
 
 // Draws the Outliner's rows: the prim's icon and name, and its active state
@@ -29,6 +32,10 @@ public:
     // Where the eye (the active toggle) is in a row (public for tests).
     QRect checkRect(const QStyleOptionViewItem& option, const QModelIndex& index) const;
 
+    // Dots by a row's name, in the colors of the peers who have its prim selected on
+    // a shared stage (docs/SHARED_STAGE.md §8). Unset: none.
+    void setPeerMarks(std::function<std::vector<QColor>(const QModelIndex&)> marks) { m_peerMarks = std::move(marks); }
+
 protected:
     bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option,
                      const QModelIndex& index) override;
@@ -38,6 +45,8 @@ private:
     // its name has, up to the eye.
     QStyleOptionViewItem rowOption(const QStyleOptionViewItem& option, const QModelIndex& index) const;
     QRect textRect(const QStyleOptionViewItem& rowOption, const QRect& check) const;
+
+    std::function<std::vector<QColor>(const QModelIndex&)> m_peerMarks;
 };
 
 }  // namespace usdcc::usd

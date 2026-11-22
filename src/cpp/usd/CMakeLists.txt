@@ -346,6 +346,18 @@ add_library(usdcc_usd_ui SHARED
     src/viewport_tool_bars.cpp
     src/viewport_view_panel.cpp
     src/undo_manager.cpp
+    include/usdcc/usd/share/layer_ops.h
+    src/share/layer_ops.cpp
+    include/usdcc/usd/share/stage_sync.h
+    src/share/stage_sync.cpp
+    include/usdcc/usd/share/live_layers.h
+    src/share/live_layers.cpp
+    include/usdcc/usd/share/shared_stages.h
+    src/share/shared_stages.cpp
+    include/usdcc/usd/share/shared_stages_section.h
+    src/share/shared_stages_section.cpp
+    include/usdcc/usd/share/presence.h
+    src/share/presence.cpp
     include/usdcc/usd/render/render_menu.h
     src/render/render_menu.cpp
     include/usdcc/usd/render/render_settings_view_panel.h

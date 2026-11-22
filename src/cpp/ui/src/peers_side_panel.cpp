@@ -155,6 +155,9 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     m_roomTitle->setObjectName(QStringLiteral("peersRoomTitle"));
     m_roomTitle->setWordWrap(true);
     roomLayout->addWidget(m_roomTitle);
+    m_roomSections = new QVBoxLayout;
+    m_roomSections->setContentsMargins(0, 0, 0, 0);
+    roomLayout->addLayout(m_roomSections);
     auto* roomSplit = new QSplitter(Qt::Vertical, m_roomView);
     m_people = new QListWidget(roomSplit);
     m_people->setObjectName(QStringLiteral("peersPeople"));
@@ -316,6 +319,11 @@ void PeersSidePanel::showRoom(Room* room) {
     rebuildPeople();
     rebuildChat();
     rebuildRooms();
+    Q_EMIT roomShown(room);
+}
+
+void PeersSidePanel::addRoomSection(QWidget* section) {
+    m_roomSections->addWidget(section);
 }
 
 void PeersSidePanel::rebuildPeople() {

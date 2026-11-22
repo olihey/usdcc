@@ -84,6 +84,27 @@ void OutlinerItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
         painter->restore();
     }
 
+    if (m_peerMarks) {
+        const std::vector<QColor> colors = m_peerMarks(index);
+        if (!colors.empty()) {
+            // Right after the name, one dot per peer, overlapping a little.
+            const int d = std::max(6, row.fontMetrics.height() / 2);
+            const int nameWidth = row.fontMetrics.horizontalAdvance(name);
+            const int margin = style->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, row.widget) + 1;
+            int x = std::min(text.left() + margin + nameWidth + d / 2, text.right() - int(colors.size()) * d);
+            const int y = text.center().y() - d / 2;
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(QPen(option.palette.base().color(), 1));
+            for (const QColor& color : colors) {
+                painter->setBrush(color);
+                painter->drawEllipse(QRect(x, y, d, d));
+                x += d * 3 / 4;
+            }
+            painter->restore();
+        }
+    }
+
     if (check.isValid()) {
         // An eye while the prim is active, the eye struck through once it's not; white on a
         // selected row, like the prim's icon.

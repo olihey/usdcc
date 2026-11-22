@@ -608,7 +608,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
 | **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
 | **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
-| **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | See there |
+| **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | Phases 0 and A to C built (2026-11-22); see there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
 
 Only phase 4 needs a relay or a decision about one: a hub on a machine the artists reach is

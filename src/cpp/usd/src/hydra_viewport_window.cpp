@@ -4,6 +4,8 @@
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/color_management.h"
+#include "usdcc/usd/share/live_layers.h"
+#include "usdcc/usd/share/presence.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/physics_overlay.h"
 #include "usdcc/usd/scene_bounds.h"
@@ -125,6 +127,19 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
     setToolSet(std::make_shared<usdcc::tools::ToolSet>());
 
     m_clock.start();
+    // Peers on a shared stage: drawn, and followed (docs/SHARED_STAGE.md §8).
+    auto& presence = usdcc::usd::share::PresenceHub::instance();
+    connect(&presence, &usdcc::usd::share::PresenceHub::peersChanged, this, [this](const PXR_NS::UsdStage* stage) {
+        if (stage != get_pointer(m_stage)) return;
+        followPeer();
+        requestUpdate();
+    });
+    connect(&presence, &usdcc::usd::share::PresenceHub::followChanged, this, [this](const PXR_NS::UsdStage* stage) {
+        if (stage != get_pointer(m_stage)) return;
+        m_followed.reset();
+        followPeer();
+        requestUpdate();
+    });
     // The HUD's prim under the cursor, once it has rested there (docs/VIEWPORT_HUD.md §2.5).
     m_rolloverTimer = new QTimer(this);
     m_rolloverTimer->setSingleShot(true);
@@ -887,7 +902,27 @@ void HydraViewportWindow::adoptPose(const OrbitPose& pose) {
     m_view = CameraView::Persp;
 }
 
+void HydraViewportWindow::followPeer() {
+    if (!m_stage || m_previewMode) return;
+    const std::optional<usdcc::usd::share::PeerView> view =
+        usdcc::usd::share::PresenceHub::instance().followedView(get_pointer(m_stage));
+    if (!view || view == m_followed) return;
+    m_followed = view;
+    if (isLookingThroughStageCamera()) {
+        m_stageCamera = PXR_NS::SdfPath();
+        Q_EMIT stageCameraChanged();
+    }
+    adoptPose(orbitPoseFromFrustum(view->frustum(), view->distance, m_yaw, cameraZUp()));
+    cameraMoved();
+}
+
 void HydraViewportWindow::detachFromStageCamera() {
+    // Moving the view stops following a peer (docs/SHARED_STAGE.md §8): a drag, the
+    // wheel, Fit to View and the axis triad all come here first.
+    if (m_stage && !usdcc::usd::share::PresenceHub::instance().following(get_pointer(m_stage)).isEmpty()) {
+        m_followed.reset();
+        usdcc::usd::share::PresenceHub::instance().stopFollowing(get_pointer(m_stage));
+    }
     if (!isLookingThroughStageCamera()) return;
     const std::optional<PXR_NS::GfCamera> camera = stageCameraNow();
     const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, windowAspect()) : m_lastStageFrustum;
@@ -1508,6 +1543,16 @@ void HydraViewportWindow::renderNow() {
         if (m_display.showColliders) {
             if (!m_physicsOverlay) m_physicsOverlay = std::make_unique<PhysicsOverlay>();
             drawGizmo(m_physicsOverlay->geometry(m_stage, toolCtx.time), toolCtx.viewMatrix, toolCtx.projMatrix);
+        }
+        if (m_stage && usdcc::usd::share::liveLayerOf(m_stage)) {
+            auto& presence = usdcc::usd::share::PresenceHub::instance();
+            const PXR_NS::UsdStage* stage = get_pointer(m_stage);
+            presence.reportView(stage, usdcc::usd::share::PeerView::fromFrustum(currentFrustum(), m_distance));
+            const std::vector<usdcc::usd::share::PeerPresence>& peers = presence.peers(stage);
+            if (!peers.empty()) {
+                drawGizmo(usdcc::usd::share::buildPresenceOverlay(m_stage, peers, toolCtx.time, presence.following(stage)),
+                          toolCtx.viewMatrix, toolCtx.projMatrix);
+            }
         }
         if (usdcc::tools::Tool* tool = activeToolInstance()) {
             drawGizmo(tool->buildGizmo(toolCtx), toolCtx.viewMatrix, toolCtx.projMatrix);
