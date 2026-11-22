@@ -1,6 +1,7 @@
 """Source inventory and combined-artifact separation checks."""
 
 import json
+import platform
 import shutil
 import subprocess
 import sys
@@ -82,7 +83,11 @@ class PackageTests(unittest.TestCase):
                         [{"component": component, "path": path}], [], root, root
                     )
 
-    @unittest.skipUnless(sys.platform == "linux", "Linux ELF/RUNPATH verification")
+    # On x86-64 only: the reviewed Linux package is linux-x86_64, and elf_identity
+    # rejects other machines' ELF files, as this runner's own /bin/true on arm64.
+    @unittest.skipUnless(
+        sys.platform == "linux" and platform.machine() == "x86_64", "Linux x86-64 ELF/RUNPATH verification"
+    )
     def test_elf_provenance_allows_runpath_relocation_but_detects_code_changes(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary) / "true"
