@@ -567,6 +567,35 @@ HudInput HydraViewportWindow::hudInput() const {
             input.camera += QStringLiteral(" ") + QChar(0x2190) + QStringLiteral(" ") + QString::fromStdString(m_detachedFrom.GetName());
         }
     }
+    // The gate's size beside the camera: "Shot · 1920 × 1080" (§4).
+    const std::optional<Resolution> resolution = gateResolution();
+    if (resolution) {
+        input.camera += QStringLiteral(" ") + QChar(0x00B7) + QStringLiteral(" %1 ").arg(resolution->width) + QChar(0x00D7) +
+                        QStringLiteral(" %1").arg(resolution->height);
+    }
+    // The gate's mask and the safe frames (§4, §6), whether the HUD's text is on or not.
+    input.hudOn = hudActive();
+    const ViewRect frame = gate();
+    const QRectF gateArea(frame.x, frame.y, frame.width, frame.height);
+    if (resolution) {
+        input.gate = gateArea;
+        input.gateMaskOpacity = m_display.gateMaskOpacity;
+    }
+    if (m_display.safeAction) {
+        const ViewRect safe = safeRect(frame, m_display.safeActionPercent);
+        input.safeFrames.push_back(QRectF(safe.x, safe.y, safe.width, safe.height));
+    }
+    if (m_display.safeTitle) {
+        const ViewRect safe = safeRect(frame, m_display.safeTitlePercent);
+        input.safeFrames.push_back(QRectF(safe.x, safe.y, safe.width, safe.height));
+    }
+    if (m_display.safeAspect > 0.0) {
+        const ViewRect guide = aspectRect(frame, m_display.safeAspect);
+        input.aspectGuide = QRectF(guide.x, guide.y, guide.width, guide.height);
+    }
+    input.centerCross = m_display.safeCenter;
+    input.overlayArea = gateArea;
+
     const PXR_NS::TfToken renderer = currentRendererPlugin();
     input.renderer = rendererDisplayName(renderer);
     input.shading = shadingModeLabel(effectiveShading(m_display, renderer));
@@ -610,7 +639,7 @@ HudInput HydraViewportWindow::hudInput() const {
 }
 
 void HydraViewportWindow::drawHud(int width, int height) {
-    if (!hudActive() || !m_legacyGl) {
+    if ((!hudActive() && !gateOverlaysActive()) || !m_legacyGl) {
         m_hudLayout = {};
         return;
     }
@@ -926,7 +955,7 @@ void HydraViewportWindow::detachFromStageCamera() {
     }
     if (!isLookingThroughStageCamera()) return;
     const std::optional<PXR_NS::GfCamera> camera = stageCameraNow();
-    const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, windowAspect()) : m_lastStageFrustum;
+    const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, gate().aspect()) : m_lastStageFrustum;
     // What's at the centre of the frame on screen, drawn through the camera: still it.
     const double distance = detachDistance(frustum, camera, camera.has_value());
     adoptPose(orbitPoseFromFrustum(frustum, distance, m_yaw, cameraZUp()));
@@ -1000,7 +1029,8 @@ void HydraViewportWindow::setOrthographic(bool orthographic) {
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     detachFromStageCamera();  // fits from where it looks (§3)
-    const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
+    // Fits the gate (docs/VIEWPORT_CAMERA.md §4), which is the whole window without one.
+    const double aspect = gate().aspect();
     if (m_orthographic) {
         const OrthographicFraming framing = frameOrthographic(box, orbitAxes(m_distance), aspect, m_orthoSize);
         m_target = framing.target;
@@ -1123,11 +1153,33 @@ OrbitClipping HydraViewportWindow::clipping() const {
     return {depth * 0.001, depth * 2.0};
 }
 
+std::optional<Resolution> HydraViewportWindow::gateResolution() const {
+    if (m_display.resolution == kRenderSettingsResolution) {
+        return m_stage ? renderSettingsResolution(PXR_NS::UsdStagePtr(m_stage)) : std::nullopt;
+    }
+    return parseResolution(m_display.resolution);
+}
+
+ViewRect HydraViewportWindow::gate() const { return gateRect(width(), height(), gateResolution()); }
+
+bool HydraViewportWindow::gateOverlaysActive() const {
+    if (m_previewMode) return false;
+    return gateResolution().has_value() || m_display.safeAction || m_display.safeTitle || m_display.safeCenter ||
+           m_display.safeAspect > 0.0;
+}
+
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
-    const double aspect = windowAspect();
-    // A stage camera's, fitted in the window (docs/VIEWPORT_CAMERA.md §3). Everything that
-    // draws, picks or places goes by this, so it all agrees with what Hydra draws.
-    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) return stageCameraFrustum(*camera, aspect);
+    // The camera sees the gate (docs/VIEWPORT_CAMERA.md §4), and the window around it more
+    // (overscan). Everything that draws, picks or places goes by this, so it all agrees
+    // with what Hydra draws.
+    const ViewRect frame = gate();
+    const bool overscan = frame.width < width() - 0.5 || frame.height < height() - 0.5;
+    const double aspect = overscan ? frame.aspect() : windowAspect();
+    const auto widened = [&](const PXR_NS::GfFrustum& frustum) {
+        return overscan ? overscanFrustum(frustum, frame, width(), height()) : frustum;
+    };
+    // A stage camera's, fitted in the gate (§3).
+    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) return widened(stageCameraFrustum(*camera, aspect));
 
     const double distance = m_orthographic ? orthographicDepth() : m_distance;
     PXR_NS::GfFrustum frustum;
@@ -1140,7 +1192,7 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     } else {
         frustum.SetPerspective(m_fovY, /*isFovVertical=*/true, aspect, range.nearClip, range.farClip);
     }
-    return frustum;
+    return widened(frustum);
 }
 
 double HydraViewportWindow::panDepthAt(const QPointF& position) {

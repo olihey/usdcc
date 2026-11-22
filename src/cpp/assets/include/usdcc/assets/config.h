@@ -49,9 +49,19 @@ struct Config {
     // environment -> scheme -> name -> endpoint ids, top of the stack first.
     std::map<std::string, std::map<std::string, std::map<std::string, std::vector<std::string>>>> environments;
 
+    // The text it was parsed from, so toJson() keeps the keys this version doesn't know.
+    std::string source;
+
     // Everything wrong with the text is in the failure's message, one problem per line.
     static Result<Config> parse(const std::string& json);
     static Result<Config> load(const std::filesystem::path& file);
+
+    // As the file has it (docs/REMOTE_ASSETS.md §10.1): indented JSON, keys in a fixed
+    // (sorted) order, and every key of `source` this version doesn't know kept as it was,
+    // so a newer usdcc's settings survive an older one's save.
+    std::string toJson() const;
+    // toJson() written to `file`, through a temporary file beside it. Folders are made.
+    Result<bool> save(const std::filesystem::path& file) const;
 
     // USDCC_ASSETS_CONFIG, or else assets.json in userDataFolder().
     static std::filesystem::path defaultPath();
