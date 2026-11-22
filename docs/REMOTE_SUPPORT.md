@@ -16,6 +16,8 @@ repository; everything else is an assumption until it's tried.
 - **Input as Qt events, never as OS input.** What the helper does is replayed as Qt events into the
   app's own windows. Nothing like `SendInput` is used, so the helper can't reach another program or
   the OS, and it works the same on Windows, macOS and Linux, Wayland included (§4).
+- **One helper at a time.** A second person opening the link is refused while a helper is
+  connected. Decided 2026-11-22.
 - **Looking first, controlling second.** A request starts as view-only. Control is a second,
   separate **Allow**, and only when the setting allows control at all (§5).
 - **The user always wins.** Touching the mouse or keyboard pauses the helper's input until the user
@@ -67,8 +69,7 @@ usdcc draws every pixel it shows, so it can build the picture itself:
 - **Composited** at the positions Qt knows, into one picture per top-level window: the main window,
   each floating panel, and each open menu, tooltip or dialog.
 - **The cursor** is drawn in by us.
-- **What it can't capture:** native OS dialogs (file pickers, color pickers when native). During a
-  session the app uses Qt's own dialogs instead, or the page says "A system dialog is open".
+- **What it can't capture:** the OS's own dialogs (§3.3).
 
 No permission prompt on any platform, no Wayland problem, and nothing outside usdcc can end up in
 the picture. The cost is a CPU read-back and compositing. For support (clicking through UI, not
@@ -89,6 +90,31 @@ own API, and they behave differently:
 So OS capture means up to four back ends, a permission flow on macOS, and a poor experience on
 Wayland. It is added behind the same `FrameSource` only where the frame rate turns out to matter:
 Windows Graphics Capture first, ScreenCaptureKit if macOS is a target.
+
+### 3.3 Native dialogs
+
+**The problem.** Most windows usdcc shows are drawn by Qt, so usdcc owns their pixels and their
+input. A few are not: when the app asks for a file or a folder, Qt by default hands the job to the
+OS's own dialog (on Windows the shell's `IFileOpenDialog`, on macOS `NSOpenPanel`, on Linux the
+desktop's portal or GTK dialog). That dialog is a window the OS draws, not a `QWidget` or a
+`QWindow`:
+
+- **It can't be grabbed** by in-app capture: there is no widget to render, so the helper sees the
+  main window with nothing on top while the user looks at a file picker.
+- **It can't be controlled** by Qt events: replay (§4) has no Qt window to send them to. Only OS
+  input would reach it, which this plan rules out.
+- **It is modal.** The app waits for it to close, so the helper is stuck until the user finishes it.
+- **It shows more than usdcc.** A file picker shows the user's folders, recent files and drives,
+  which the user may not expect to share. OS capture (§3.2) could show it, but would then show all
+  of that, and still couldn't control it.
+
+*Checked:* 17 calls use the native file dialog today (`QFileDialog::getOpenFileName` 7,
+`getSaveFileName` 8, `getExistingDirectory` 2, in 14 files). Message boxes (`QMessageBox`) and the
+color pickers already used (`QColorDialog` with `DontUseNativeDialog`) are drawn by Qt and are fine.
+
+**Decided 2026-11-22: not handled.** The helper asks the user, in the chat or on a call, to operate
+an OS dialog, and the user does. Nothing is changed for a session: the dialogs stay native, and the
+page doesn't detect or mark them. This keeps the user's file system out of the picture.
 
 ## 4. Input
 
@@ -142,13 +168,12 @@ can leave out, and no studio-wide setting that a user can't change (§9).
   code, a studio's build can't do remote support even if someone copies the plugin from another
   build.
 - **On:** built and bundled, with the setting off (§5).
-- **The default is on,** so the feature exists in the public build but is off until a user turns it
-  on. A studio that doesn't want it at all builds with `-DUSDCC_BUILD_REMOTE_SUPPORT=OFF`.
-- **About Usdcc lists the options the build was made with,** so anyone can check.
+- **The default is on** (decided 2026-11-22), so the feature exists in the public build but is off
+  until a user turns it on. A studio that doesn't want it at all builds with
+  `-DUSDCC_BUILD_REMOTE_SUPPORT=OFF`.
+- **About usdcc lists the options the build was made with,** so anyone can check.
 
-**A convention for later.** The same pattern (an option per feature, the app refusing the plugin's
-id when off, About listing it) suits other features a studio may want out: Viewport Broadcast, and
-Peers as a whole for a build that never touches the network. Not part of this plan; §9.
+This follows the convention planned in [BUILD_OPTIONS.md](BUILD_OPTIONS.md), and is its first user.
 
 ## 7. Phases
 
@@ -174,9 +199,11 @@ Peers as a whole for a build that never touches the network. Not part of this pl
 ## 9. Open questions
 
 1. **The stop shortcut.** Something no panel uses and hard to hit by accident.
-2. **A studio policy.** Should a studio be able to force a setting off (or lock it) without its own
-   build, for example by a file next to `usdcc.exe` or a machine-wide `usdcc.ini` that the user's
-   can't override? [SETTINGS.md](SETTINGS.md) has no such layer today.
-3. **The build-option convention** (§6) for Viewport Broadcast and Peers: worth a plan of its own.
-4. **Native dialogs** during a session: switch to Qt's dialogs, or show a placeholder?
-5. **More than one helper** at a time, or one only.
+
+**Set aside:** a studio policy that forces or locks settings without a build of its own (a file next
+to `usdcc.exe`, or a machine-wide `usdcc.ini` the user's can't override). A larger topic;
+[SETTINGS.md](SETTINGS.md) has no such layer today. Set aside 2026-11-22.
+
+**Decided 2026-11-22:** one helper at a time (§1); OS dialogs are operated by the user, not the
+helper (§3.3); the build option on by default (§6); the build
+option convention as its own plan ([BUILD_OPTIONS.md](BUILD_OPTIONS.md)).
