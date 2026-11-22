@@ -55,10 +55,18 @@ namespace {
 const SdfPath kChair("/Chair");
 const SdfPath kSeat("/Chair/Seat");
 
+// At least 80 ms, then on until a pass of the event loop finds little to do. A queued call
+// (the + menu's Variant Set...) can run a modal dialog, a loop of its own, and what's posted
+// meanwhile, such as the panel's rebuild, only runs on the next pass: a fixed 80 ms could end
+// before it, as it did on Linux CI after a slow test.
 void settle() {
     QElapsedTimer timer;
     timer.start();
-    while (timer.elapsed() < 80) QApplication::processEvents();
+    QElapsedTimer pass;
+    do {
+        pass.start();
+        QApplication::processEvents();
+    } while ((timer.elapsed() < 80 || pass.elapsed() > 5) && timer.elapsed() < 5000);
 }
 
 // Answers the name dialog that opens next with these names.
