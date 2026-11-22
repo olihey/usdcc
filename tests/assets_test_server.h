@@ -72,6 +72,8 @@ struct FolderServer {
     std::atomic<bool> refuseHead{false};  // 405 on HEAD
     std::atomic<bool> down{false};        // 503 on everything
     std::atomic<int> delayMs{0};
+    std::atomic<bool> allowWrite{true};   // off: 403 on PUT and MKCOL
+    std::atomic<bool> etagOnPut{true};    // off: a PUT's reply has no ETag, as some servers'
     std::string basicAuth;                         // "user:password"; empty for none
     std::map<std::string, std::string> redirects;  // target -> where to
 };
@@ -93,6 +95,7 @@ struct S3Server {
     std::atomic<bool> missingIs403{false};  // a missing key's answer without s3:ListBucket
     std::atomic<bool> refuseList{false};    // 403 on ListObjectsV2
     std::atomic<int> wrongRegion{0};        // requests refused for being signed for another region
+    std::atomic<bool> allowWrite{true};     // off: AccessDenied on PUT
     mutable std::mutex mutex;
     std::vector<std::string> sessionTokens;  // the x-amz-security-token of each request that had one
 };

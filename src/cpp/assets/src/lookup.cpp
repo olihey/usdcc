@@ -111,6 +111,24 @@ void Lookups::clear() {
     m_entries.clear();
 }
 
+void Lookups::forget(const Stack& stack, const std::string& path) {
+    // Its folder, and the folders above: a write may have made them.
+    std::vector<std::string> folders;
+    Uri uri;
+    uri.path = path;
+    while (true) {
+        const std::string folder = uri.folder();
+        folders.push_back(folder);
+        if (folder == "/" || folder.empty()) break;
+        uri.path = folder;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const Endpoint& endpoint : stack.endpoints) {
+        for (const std::string& folder : folders) m_listings.erase(keyOf(endpoint, folder));
+        m_entries.erase(keyOf(endpoint, path));
+    }
+}
+
 Lookups& sharedLookups() {
     static Lookups instance(true);
     return instance;
