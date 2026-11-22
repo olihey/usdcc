@@ -386,3 +386,22 @@ USDCC_TEST(anim_edit_split_ops) {
     CHECK(made[1].GetAttr().GetNumTimeSamples() == 2 && anim::canHaveCurve(made[1].GetAttr()), "each axis keyed, and can be a curve");
     CHECK(anim::splitXformOp(ops[3], &why).empty() && !why.empty(), "a rotate doesn't split: %s", why.c_str());
 }
+
+// A bake's whole animation at once (Physics' Bake Simulation): what was in the edit target
+// goes, nothing is copied from a weaker layer, and the edit target's offset applies.
+USDCC_TEST(anim_edit_set_samples) {
+    const SdfLayerRefPtr sub = SdfLayer::CreateAnonymous("sub.usda");
+    const SdfLayerRefPtr root = SdfLayer::CreateAnonymous("root.usda");
+    root->InsertSubLayerPath(sub->GetIdentifier());
+    root->SetSubLayerOffset(SdfLayerOffset(10.0), 0);
+    const UsdStageRefPtr stage = UsdStage::Open(root);
+    stage->SetEditTarget(stage->GetEditTargetForLocalLayer(sub));
+    const UsdAttribute size = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetSizeAttr();
+    size.Set(7.0, 50.0);  // what was there before
+
+    CHECK(anim::setSamples(size, {11.0, 12.0}, {VtValue(1.0), VtValue(2.0)}), "set");
+    const std::set<double> times = sub->ListTimeSamplesForPath(size.GetPath());
+    CHECK(times == std::set<double>({1.0, 2.0}), "the old sample gone, the new at the sublayer's 1 and 2");
+    CHECK(isClose(at(size, 11.0), 1.0) && isClose(at(size, 12.0), 2.0), "and they read back at stage 11 and 12");
+    CHECK(!anim::setSamples(size, {1.0}, {}), "times and values must pair up");
+}

@@ -49,6 +49,12 @@ bool removeAnimation(const PXR_NS::UsdAttribute& attribute, PXR_NS::UsdTimeCode 
 // Copies the composed time samples into the edit target when it has none of its own but a
 // weaker layer has: true if it copied. Logged.
 bool localizeAnimation(const PXR_NS::UsdAttribute& attribute);
+// Replaces the edit target's animation of `attribute` by these samples, at stage times, as a
+// bake does (Physics' Bake Simulation, phase 4's Bake to Samples): its samples and spline
+// there go, nothing is localized, since nothing of what was there is kept. Through
+// UsdAttribute, so the edit target's offset applies. `times` and `values` pair up.
+bool setSamples(const PXR_NS::UsdAttribute& attribute, const std::vector<double>& times,
+                const std::vector<PXR_NS::VtValue>& values);
 // Every key time of these attributes, in stage time, sorted, each once.
 std::vector<double> keyTimes(const std::vector<PXR_NS::UsdAttribute>& attributes);
 // The animated attributes of a prim: what the timeline marks for a selected prim.

@@ -62,7 +62,28 @@ struct Transfer {
     Progress* progress = nullptr;
     Cancel* cancel = nullptr;
     bool writeFailed = false;
+    FILE* upload = nullptr;  // the body read from it, when uploading
+    bool readFailed = false;
 };
+
+size_t onUpload(char* data, size_t size, size_t count, void* user) {
+    Transfer* transfer = static_cast<Transfer*>(user);
+    if (transfer->cancel->cancelled()) return CURL_READFUNC_ABORT;
+    const size_t read = std::fread(data, 1, size * count, transfer->upload);
+    if (read == 0 && std::ferror(transfer->upload)) {
+        transfer->readFailed = true;
+        return CURL_READFUNC_ABORT;
+    }
+    return read;
+}
+
+FILE* openFile(const std::filesystem::path& file, bool write) {
+#if defined(_WIN32)
+    return _wfopen(file.c_str(), write ? L"wb" : L"rb");
+#else
+    return std::fopen(file.c_str(), write ? "wb" : "rb");
+#endif
+}
 
 size_t onBody(char* data, size_t size, size_t count, void* user) {
     Transfer* transfer = static_cast<Transfer*>(user);
@@ -98,9 +119,14 @@ size_t onHeader(char* data, size_t size, size_t count, void* user) {
     return bytes;
 }
 
-int onProgress(void* user, curl_off_t total, curl_off_t done, curl_off_t, curl_off_t) {
+int onProgress(void* user, curl_off_t total, curl_off_t done, curl_off_t uploadTotal, curl_off_t uploaded) {
     Transfer* transfer = static_cast<Transfer*>(user);
     if (transfer->cancel->cancelled()) return 1;
+    // An upload's progress is what went up; the reply is a few bytes.
+    if (transfer->upload) {
+        total = uploadTotal;
+        done = uploaded;
+    }
     // Also with nothing received yet: whoever listens may cancel while the server is
     // still thinking.
     transfer->progress->advanced(static_cast<uint64_t>(done), total > 0 ? static_cast<uint64_t>(total) : 0);
@@ -156,6 +182,7 @@ Status statusOfHttpCode(long code) {
     if (code == 304) return Status::NotModified;
     if (code == 404 || code == 410) return Status::Missing;
     if (code == 401 || code == 403) return Status::NotAllowed;
+    if (code == 409 || code == 412) return Status::Conflict;
     if (code >= 500) return Status::Unreachable;
     return Status::Error;
 }
@@ -224,13 +251,21 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     transfer.response = &response;
     transfer.progress = &progress;
     transfer.cancel = &cancel;
+    curl_off_t uploadSize = 0;
+    if (!request.uploadFrom.empty()) {
+        std::error_code error;
+        const uintmax_t size = std::filesystem::file_size(request.uploadFrom, error);
+        transfer.upload = error ? nullptr : openFile(request.uploadFrom, false);
+        if (!transfer.upload) {
+            response.message = "can't read the file to upload";
+            return response;
+        }
+        uploadSize = static_cast<curl_off_t>(size);
+    }
     if (!request.into.empty()) {
-#if defined(_WIN32)
-        transfer.file = _wfopen(request.into.c_str(), L"wb");
-#else
-        transfer.file = std::fopen(request.into.c_str(), "wb");
-#endif
+        transfer.file = openFile(request.into, true);
         if (!transfer.file) {
+            if (transfer.upload) std::fclose(transfer.upload);
             response.message = "can't write the downloaded file";
             return response;
         }
@@ -256,7 +291,12 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     } else if (request.method != "GET") {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, request.method.c_str());
     }
-    if (!request.body.empty()) {
+    if (transfer.upload) {
+        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, onUpload);
+        curl_easy_setopt(curl, CURLOPT_READDATA, &transfer);
+        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, uploadSize);
+    } else if (!request.body.empty()) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.body.c_str());
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request.body.size()));
     }
@@ -268,6 +308,10 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
 
     curl_slist* headers = nullptr;
     for (const std::string& header : request.headers) headers = curl_slist_append(headers, header.c_str());
+    if (transfer.upload) {
+        // The body at once, not after a wait for "100 Continue" that not every server sends.
+        headers = curl_slist_append(headers, "Expect:");
+    }
     if (!request.credential.empty() || request.explicitCredential) {
         const bool secure = request.url.rfind("https:", 0) == 0;
         const std::optional<Credential> credential =
@@ -287,6 +331,8 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
                 if (!credential->token.empty()) {
                     headers = curl_slist_append(headers, ("x-amz-security-token: " + credential->token).c_str());
                 }
+                // A streamed body can't be hashed before it goes: S3 takes it unsigned.
+                if (transfer.upload) headers = curl_slist_append(headers, "x-amz-content-sha256: UNSIGNED-PAYLOAD");
             } else if (!credential->token.empty()) {
                 headers = curl_slist_append(headers, ("Authorization: Bearer " + credential->token).c_str());
             } else {
@@ -314,6 +360,7 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.code);
     if (headers) curl_slist_free_all(headers);
     if (transfer.file) std::fclose(transfer.file);
+    if (transfer.upload) std::fclose(transfer.upload);
 
     response.status = statusOfCurlCode(code);
     // Connected, but no TLS came of it: an error in the handshake, or a server that never
@@ -328,6 +375,9 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     if (transfer.writeFailed) {
         response.status = Status::Error;
         response.message = "can't write the downloaded file";
+    } else if (transfer.readFailed) {
+        response.status = Status::Error;
+        response.message = "can't read the file to upload";
     } else if (code != CURLE_OK) {
         response.message = error[0] ? error : curl_easy_strerror(code);
     }
