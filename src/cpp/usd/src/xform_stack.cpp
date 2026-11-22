@@ -179,6 +179,7 @@ bool XformStack::rename(size_t index, const TfToken& newSuffix) const {
     if (oldAttr.Get(&value, UsdTimeCode::Default())) newAttr.Set(value, UsdTimeCode::Default());
     std::vector<double> times;
     oldAttr.GetTimeSamples(&times);
+    if (oldAttr.HasSpline()) newAttr.SetSpline(oldAttr.GetSpline());
     for (double t : times) {
         if (oldAttr.Get(&value, t)) newAttr.Set(value, t);
     }

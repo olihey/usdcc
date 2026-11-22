@@ -69,6 +69,12 @@ void TimeRuler::setTime(double time) {
     update();
 }
 
+void TimeRuler::setKeys(std::vector<double> keys) {
+    if (keys == m_keys) return;
+    m_keys = std::move(keys);
+    update();
+}
+
 const TimeAxis& TimeRuler::axis() const {
     m_axis.setExtent(pixels(kSideMargin), width() - pixels(kSideMargin));
     return m_axis;
@@ -136,6 +142,23 @@ void TimeRuler::paintEvent(QPaintEvent*) {
         band.setAlpha(m_cacheStale ? 140 : 200);
         const double height = pixels(3);
         p.fillRect(QRectF(from, bottom - height, std::max(to - from, 2.0), height), band);
+    }
+
+    // The selection's keys (docs/ANIMATION.md phase 2): a diamond each, along the bottom.
+    if (!m_keys.empty()) {
+        const double size = pixels(4);
+        p.setPen(Qt::NoPen);
+        QColor key = style::accent();
+        key.setAlpha(230);
+        p.setBrush(key);
+        for (const double time : m_keys) {
+            if (!ordered(range).contains(time)) continue;
+            const double x = std::round(shown.pixelAt(time)) + 0.5;
+            const double y = bottom - size - 1.0;
+            const QPointF diamond[] = {{x, y - size}, {x + size, y}, {x, y + size}, {x - size, y}};
+            p.drawPolygon(diamond, 4);
+        }
+        p.setBrush(Qt::NoBrush);
     }
 
     // The playhead: a line the ruler's height, with its frame on a plate at the top.

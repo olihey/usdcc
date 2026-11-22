@@ -1085,6 +1085,53 @@ bool RenderQueueClient::submit(const RenderJobPtr& job, const QString& queueName
     body["folder"] = q(RenderScheduler::outputFolder(*job));
     l->jobs->send(QStringLiteral("submit"), body, {}, queue->peer.id);
     USDCC_LOG_INFO("usdcc.render", "Sent {} to the queue {}", job->title, s(queue->name));
+    SentJobInfo info;
+    info.artistJob = q(job->id);
+    info.title = q(job->title);
+    info.renderer = q(job->rendererId);
+    info.frames = job->frames;
+    info.queuePeer = queue->peer.id;
+    info.queueName = queue->name;
+    info.status = QStringLiteral("sending");
+    m_sent.push_back(std::move(info));
+    Q_EMIT jobsChanged();
+    return true;
+}
+
+SentJobInfo* RenderQueueClient::sent(const QString& queuePeer, const QString& artistJob, const QString& id) {
+    for (SentJobInfo& info : m_sent) {
+        if (info.queuePeer != queuePeer) continue;
+        if ((!artistJob.isEmpty() && info.artistJob == artistJob) || (!id.isEmpty() && info.id == id)) return &info;
+    }
+    return nullptr;
+}
+
+std::vector<SentJobInfo> RenderQueueClient::sentJobs() const {
+    std::vector<SentJobInfo> result = m_sent;
+    for (SentJobInfo& info : result) {
+        if (info.id.isEmpty()) continue;
+        if (const std::optional<QueuedJobInfo> live = job(info.queuePeer + QLatin1Char('|') + info.id)) {
+            info.status = live->status;
+            info.progress = live->progress;
+            info.error = live->error;
+        }
+    }
+    return result;
+}
+
+std::optional<SentJobInfo> RenderQueueClient::sentJob(const QString& artistJob) const {
+    for (SentJobInfo& info : sentJobs()) {
+        if (info.artistJob == artistJob) return info;
+    }
+    return std::nullopt;
+}
+
+bool RenderQueueClient::cancelSent(const QString& artistJob) {
+    const std::optional<SentJobInfo> info = sentJob(artistJob);
+    if (!info || info->id.isEmpty()) return false;
+    RoomLink* l = linkOf(info->queuePeer);
+    if (!l) return false;
+    l->jobs->send(QStringLiteral("cancel"), QJsonObject{{"id", info->id}}, {}, info->queuePeer);
     return true;
 }
 
@@ -1104,6 +1151,10 @@ void RenderQueueClient::onMessage(RoomLink& link, const Message& message) {
     const QJsonObject& body = message.body;
     const QString queueName = link.state->value(message.from).toObject()["name"].toString();
     if (message.type == u"queued") {
+        if (SentJobInfo* info = sent(message.from, body["job"].toString(), {})) {
+            info->id = body["id"].toString();
+            info->status = QStringLiteral("queued");
+        }
         Q_EMIT queued(body["job"].toString(), body["id"].toString(), body["position"].toInt());
     } else if (message.type == u"refused") {
         using usdcc::core::ToastKind;
@@ -1112,6 +1163,10 @@ void RenderQueueClient::onMessage(RoomLink& link, const Message& message) {
         toast.kind = ToastKind::Error;
         toast.title = "The queue refused the job";
         USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.render", toast, "{}: {}", s(queueName), s(body["reason"].toString()));
+        if (SentJobInfo* info = sent(message.from, body["job"].toString(), {})) {
+            info->status = QStringLiteral("refused");
+            info->error = body["reason"].toString();
+        }
         Q_EMIT refused(body["job"].toString(), body["reason"].toString());
     } else if (message.type == u"denied") {
         // A toast, not a question: the panel's button was pressed, and this is the answer.
@@ -1140,6 +1195,12 @@ void RenderQueueClient::onMessage(RoomLink& link, const Message& message) {
             toast.kind = ToastKind::Error;
             toast.title = "Render failed on " + s(queueName);
             USDCC_LOG_TOAST_AS(LogLevel::Error, "usdcc.render", toast, "{}: {}", s(body["title"].toString()), s(body["error"].toString()));
+        }
+        // Kept, for when the queue and its map have gone.
+        if (SentJobInfo* info = sent(message.from, body["job"].toString(), body["id"].toString())) {
+            info->status = status;
+            info->progress = status == u"done" ? 1.0 : info->progress;
+            info->error = body["error"].toString();
         }
         Q_EMIT ended(body["id"].toString(), status);
     } else if (message.type == u"tasks") {
@@ -1173,6 +1234,7 @@ void RenderQueueClient::onFrames(RoomLink& link, const QString& queuePeer, const
     QDir(from).removeRecursively();
     link.jobs->send(QStringLiteral("received"), QJsonObject{{"id", id}}, {}, queuePeer);
     USDCC_LOG_INFO("usdcc.render", "{} frame file(s) from the queue in {}", files.size(), s(target));
+    if (SentJobInfo* info = sent(queuePeer, {}, id)) info->files = files;
     Q_EMIT framesArrived(id, target, files);
 }
 

@@ -152,6 +152,66 @@ def set_current_time(time, stage=None):
     stage_manager().set_time(stage_id(_resolve(stage)), float(time))
 
 
+def _attribute_on_stage(attribute, stage):
+    # A Usd.Attribute, or an attribute path on `stage` (default: the current stage).
+    if isinstance(attribute, Usd.Attribute):
+        return attribute.GetStage(), str(attribute.GetPath())
+    return _resolve(stage), str(attribute)
+
+
+def set_key(attribute, time=None, stage=None):
+    """Sets a key on `attribute` (a Usd.Attribute, or an attribute path on `stage`) at
+    `time` (default: the time shown), with the value it has there (docs/ANIMATION.md
+    phase 2). Animation from a weaker layer is copied into the edit target first. True
+    if it set one."""
+    usd_stage, path = _attribute_on_stage(attribute, stage)
+    at = current_time(usd_stage) if time is None else float(time)
+    return stage_manager().set_key(stage_id(usd_stage), path, at)
+
+
+def remove_key(attribute, time=None, stage=None):
+    """Removes the key of `attribute` at `time` (default: the time shown). The last one
+    gone, the attribute keeps the value it had there. False if there was none."""
+    usd_stage, path = _attribute_on_stage(attribute, stage)
+    at = current_time(usd_stage) if time is None else float(time)
+    return stage_manager().remove_key(stage_id(usd_stage), path, at)
+
+
+def remove_animation(attribute, time=None, stage=None):
+    """Removes the animation the edit target holds for `attribute`: the value at `time`
+    (default: the time shown) stays, as its default. False when the animation comes from
+    another layer."""
+    usd_stage, path = _attribute_on_stage(attribute, stage)
+    at = current_time(usd_stage) if time is None else float(time)
+    return stage_manager().remove_animation(stage_id(usd_stage), path, at)
+
+
+def key_times(items, stage=None):
+    """The key times of `items`, sorted, each once: Usd.Attributes and Usd.Prims (all of a
+    prim's animated attributes), or their paths on `stage` (default: the current stage)."""
+    usd_stage = None
+    paths = []
+    for item in items if isinstance(items, (list, tuple)) else [items]:
+        if isinstance(item, (Usd.Attribute, Usd.Prim)):
+            usd_stage = usd_stage or item.GetStage()
+            paths.append(str(item.GetPath()))
+        else:
+            paths.append(str(item))
+    usd_stage = usd_stage or _resolve(stage)
+    return list(stage_manager().key_times(stage_id(usd_stage), paths))
+
+
+def auto_key():
+    """Whether auto-key is on: an edit to an attribute that isn't animated then sets a key
+    at the time shown rather than its value for all times. App-wide, off at start."""
+    return _native.auto_key()
+
+
+def set_auto_key(on):
+    """Turns auto-key on or off, as the timeline's Auto button does."""
+    _native.set_auto_key(bool(on))
+
+
 def time_range(stage=None):
     """``(start, end)``: the start and end time codes of `stage` (default: the
     current stage), or ``(0.0, 100.0)`` when it doesn't have both."""

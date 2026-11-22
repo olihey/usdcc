@@ -83,6 +83,23 @@ class ViewPanel:
         built again, as a popup menu is each time it opens."""
         _notify_options_changed(self.widget)
 
+    def busy(self, text, cancellable=False):
+        """The panel is busy while the returned context manager is open
+        (docs/PANEL_BUSY.md §6): it dims, and a card shows ``text``, a progress bar
+        and, with ``cancellable``, Cancel::
+
+            with self.busy("Baking lights", cancellable=True) as busy:
+                for i, item in enumerate(items):
+                    if busy.cancelled:
+                        break
+                    bake(item)
+                    busy.progress = (i + 1) / len(items)
+
+        On the UI thread, as a panel's code usually runs, the card shows at once and
+        setting ``progress``, ``text`` or ``detail`` repaints it; from another thread
+        it shows after a moment and follows on its own."""
+        return _busy(self.widget, text, cancellable)
+
     def save_state(self):
         """What a session keeps of this panel (docs/SESSIONS.md §2.4): anything that
         converts to JSON, such as a dict. None keeps nothing."""
@@ -91,6 +108,72 @@ class ViewPanel:
     def restore_state(self, state):
         """Gets back what ``save_state()`` returned, when a session is loaded."""
         pass
+
+
+class Busy:
+    """What ``ViewPanel.busy()`` returns: a context manager. ``progress`` (0 to 1, or
+    None for an indeterminate bar), ``text`` and ``detail`` (a second line) update the
+    card; ``cancelled`` is True once Cancel was clicked, Esc pressed or the panel
+    closed. Leaving the ``with`` block, or ``finish()``, ends it."""
+
+    def __init__(self, native, text):
+        self._native = native
+        self._text = text
+        self._detail = ""
+        self._progress = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.finish()
+        return False
+
+    def finish(self):
+        self._native.finish()
+
+    @property
+    def cancelled(self):
+        return self._native.is_cancelled()
+
+    @property
+    def progress(self):
+        return self._progress
+
+    @progress.setter
+    def progress(self, fraction):
+        self._progress = fraction
+        self._native.set_progress(-1.0 if fraction is None else float(fraction))
+
+    @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, text):
+        self._text = text
+        self._native.set_text(str(text))
+
+    @property
+    def detail(self):
+        return self._detail
+
+    @detail.setter
+    def detail(self, text):
+        self._detail = text
+        self._native.set_detail(str(text))
+
+
+def _busy(widget, text, cancellable):
+    import threading
+
+    import _usdcc_app
+
+    if widget is None:
+        raise RuntimeError("the panel has no widget yet")
+    on_ui_thread = threading.current_thread() is threading.main_thread()
+    native = _usdcc_app.begin_busy(_shiboken.getCppPointer(widget)[0], str(text), bool(cancellable), on_ui_thread)
+    return Busy(native, text)
 
 
 class RenderCamera:

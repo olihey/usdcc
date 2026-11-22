@@ -196,6 +196,22 @@ struct USDCC_RENDER_API RenderQueueInfo {
     bool outputRoot = false;  // writes to a shared path; else the frames come back here
 };
 
+// A job this instance sent to a queue, by the id it had here (RenderJob::id, what
+// submitRender() and usdcc.render return), with what the queue has said of it since.
+struct USDCC_RENDER_API SentJobInfo {
+    QString artistJob;
+    QString title;
+    QString renderer;
+    std::vector<double> frames;
+    QString queuePeer;
+    QString queueName;
+    QString id;          // the queue's job id; empty until it answers queued
+    QString status;      // "sending", "refused", or the queue's (QueuedJobInfo::status)
+    double progress = 0.0;
+    QString error;
+    QStringList files;   // fetched here (none when the queue writes to a shared path)
+};
+
 class USDCC_RENDER_API RenderQueueClient : public QObject {
     Q_OBJECT
 
@@ -224,6 +240,13 @@ public:
     // queue's from then on. False, with `error`, when there's no such queue or the scene
     // can't be packaged.
     bool submit(const RenderJobPtr& job, const QString& queue, QString* error = nullptr);
+    // The jobs submit() sent, oldest first, with the queue's view of each merged in while
+    // the queue is here, and the last one it gave once it's gone.
+    std::vector<SentJobInfo> sentJobs() const;
+    std::optional<SentJobInfo> sentJob(const QString& artistJob) const;
+    // Cancels a sent job on its queue. False when it isn't one, or the queue hasn't
+    // queued it yet (there's no id to name it by).
+    bool cancelSent(const QString& artistJob);
     // A job of the map's; the queue says no (denied()) when it isn't this profile's to touch.
     void cancel(const QString& key);
     void retry(const QString& key);
@@ -260,6 +283,8 @@ private:
     };
     std::vector<Fetch> m_fetches;
     std::map<std::string, QString> m_bundles;  // artist job → bundle folder, until queued or refused
+    std::vector<SentJobInfo> m_sent;           // what submit() sent, oldest first
+    SentJobInfo* sent(const QString& queuePeer, const QString& artistJob, const QString& id);
 };
 
 }  // namespace usdcc::render

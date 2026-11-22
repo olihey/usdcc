@@ -310,6 +310,11 @@ render.cancel(job_id)
 The calls raise RuntimeError with the reason a job can't be made (no camera, a renderer that
 can't render here). The settings themselves are attributes, set with `Usd` as any others.
 
+With Render on set to a queue server ([RENDER_NODE.md](RENDER_NODE.md) §4.4), the job is the
+queue's, but `render.job(job_id)` still finds it by the same id: `job.queue` names the queue,
+`status` is the queue's ("queued" while it's sent, "failed" with the reason when refused),
+`files` are the frames fetched here, and `cancel()` cancels it on the queue once it's queued.
+
 ### 6.1 A renderer in Python
 
 ```python

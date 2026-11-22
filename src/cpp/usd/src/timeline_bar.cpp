@@ -1,9 +1,13 @@
 #include "usdcc/usd/timeline_bar.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/app_settings.h"
+#include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/layer_actions.h"
+#include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/properties/number_field.h"
@@ -13,9 +17,11 @@
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/xformable.h>
 
 #include <QAction>
 #include <QActionGroup>
+#include <QTimer>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
@@ -102,6 +108,43 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
     m_simulate->setObjectName(QStringLiteral("timelineSimulateButton"));
     m_simulate->setCheckable(true);
     layout->addWidget(m_simulate);
+
+    // Keys (docs/ANIMATION.md phase 2): the selection's previous and next, and auto-key.
+    const auto keyButton = [this](const QString& text, const QString& toolTip) {
+        auto* button = new QToolButton(this);
+        button->setText(text);
+        button->setToolTip(toolTip);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        usdcc::ui::scaled::fixedHeight(button, kButtonHeight);
+        return button;
+    };
+    auto* previousKey = keyButton(QStringLiteral("\xE2\x80\xB9\xE2\x97\x86"), tr("The selection's previous key"));
+    previousKey->setObjectName(QStringLiteral("timelinePreviousKey"));
+    auto* nextKey = keyButton(QStringLiteral("\xE2\x97\x86\xE2\x80\xBA"), tr("The selection's next key"));
+    nextKey->setObjectName(QStringLiteral("timelineNextKey"));
+    m_autoKey = keyButton(tr("Auto"), QString());
+    m_autoKey->setObjectName(QStringLiteral("timelineAutoKey"));
+    m_autoKey->setCheckable(true);
+    layout->addWidget(previousKey);
+    layout->addWidget(nextKey);
+    layout->addWidget(m_autoKey);
+    connect(previousKey, &QToolButton::clicked, this, &TimelineBar::goToPreviousKey);
+    connect(nextKey, &QToolButton::clicked, this, &TimelineBar::goToNextKey);
+    connect(m_autoKey, &QToolButton::clicked, this, [](bool on) { anim::setAutoKey(on); });
+    m_autoKeyConnection = anim::autoKeyChanged().connect([this](bool) { refreshAutoKey(); });
+    refreshAutoKey();
+    m_keysTimer = new QTimer(this);
+    m_keysTimer->setSingleShot(true);
+    m_keysTimer->setInterval(100);
+    connect(m_keysTimer, &QTimer::timeout, this, &TimelineBar::refreshKeys);
+    if (StageManager* stages = m_playback->stageManager()) {
+        m_selectionConnection = stages->selectionChanged.connect(
+            [this](StageRefPtr stage, std::vector<PXR_NS::SdfPath>) {
+                if (stage == m_stage) m_keysTimer->start();
+            });
+    }
+
     auto* menuButton = new usdcc::ui::PanelMenuButton(tr("Timeline options"), [this](QMenu* menu) { populateMenu(menu); }, this);
     menuButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/more.png")));
     usdcc::ui::scaled::fixedHeight(menuButton, kButtonHeight);
@@ -187,12 +230,117 @@ void TimelineBar::bindStage() {
             const PXR_NS::UsdStageRefPtr& usd = m_stage->usdStage();
             const std::optional<TimeRange> now = hasAuthoredTimeRange(usd) ? std::optional(stageTimeRange(usd)) : std::nullopt;
             refreshRange(now != m_stageRange);
+            m_keysTimer->start();  // a key set or removed
         });
     }
     for (QWidget* child : findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) child->setEnabled(m_stage != nullptr);
     refreshRange(true);
     refreshTime();
     refreshSimulation();
+    refreshKeys();
+}
+
+std::vector<double> TimelineBar::selectionKeyTimes() const {
+    if (!m_stage) return {};
+    StageManager* stages = m_playback->stageManager();
+    std::vector<PXR_NS::UsdAttribute> attributes;
+    for (const PXR_NS::SdfPath& path : stages ? stages->selectedPaths(m_stage) : std::vector<PXR_NS::SdfPath>()) {
+        const std::vector<PXR_NS::UsdAttribute> animated = anim::animatedAttributes(m_stage->usdStage()->GetPrimAtPath(path));
+        attributes.insert(attributes.end(), animated.begin(), animated.end());
+    }
+    return anim::keyTimes(attributes);
+}
+
+void TimelineBar::refreshKeys() { m_ruler->setKeys(selectionKeyTimes()); }
+
+void TimelineBar::refreshAutoKey() {
+    const bool on = anim::autoKey();
+    m_autoKey->setChecked(on);
+    m_autoKey->setToolTip(on ? tr("Auto-key is on: an edit to any attribute sets a key at the frame shown")
+                             : tr("Auto-key is off: an edit to an attribute that isn't animated sets its value for "
+                                  "all frames; an animated one gets a key either way"));
+}
+
+void TimelineBar::goToNextKey() {
+    if (!m_stage) return;
+    const double now = m_stage->time();
+    for (double key : selectionKeyTimes()) {
+        if (key > now + 1e-6) {
+            m_playback->setTime(key);
+            return;
+        }
+    }
+}
+
+void TimelineBar::goToPreviousKey() {
+    if (!m_stage) return;
+    const double now = m_stage->time();
+    const std::vector<double> keys = selectionKeyTimes();
+    for (auto it = keys.rbegin(); it != keys.rend(); ++it) {
+        if (*it < now - 1e-6) {
+            m_playback->setTime(*it);
+            return;
+        }
+    }
+}
+
+void TimelineBar::setKeyOnSelection() {
+    StageManager* stages = m_playback->stageManager();
+    if (!m_stage || !m_undoManager || !stages) return;
+    const PXR_NS::UsdTimeCode time = m_stage->timeCode();
+    std::vector<PXR_NS::UsdAttribute> attributes;
+    for (const PXR_NS::SdfPath& path : stages->selectedPaths(m_stage)) {
+        const PXR_NS::UsdGeomXformable xformable(m_stage->usdStage()->GetPrimAtPath(path));
+        bool resets = false;
+        for (const PXR_NS::UsdGeomXformOp& op : xformable ? xformable.GetOrderedXformOps(&resets)
+                                                          : std::vector<PXR_NS::UsdGeomXformOp>()) {
+            attributes.push_back(op.GetAttr());
+        }
+    }
+    if (attributes.empty()) return;
+    m_undoManager->apply(m_stage, tr("Set Key"), [&]() {
+        bool any = false;
+        for (const PXR_NS::UsdAttribute& attribute : attributes) any = anim::setKey(attribute, time) || any;
+        return any;
+    });
+    refreshKeys();
+}
+
+void TimelineBar::addActions(QWidget* window) {
+    struct Entry {
+        const char* key;
+        const char* label;
+        const char* description;
+        const char* defaultKey;
+        const char* objectName;
+        QString text;
+        void (TimelineBar::*run)();
+    };
+    const Entry entries[] = {
+        {"Shortcuts/timeline.setKey", "Set key", "Key the selected prims' transforms at the frame shown.", "S",
+         "timelineSetKeyAction", tr("Set Key"), &TimelineBar::setKeyOnSelection},
+        {"Shortcuts/timeline.nextKey", "Next key", "Go to the selection's next key.", "Alt+.", "timelineNextKeyAction",
+         tr("Next Key"), &TimelineBar::goToNextKey},
+        {"Shortcuts/timeline.previousKey", "Previous key", "Go to the selection's previous key.", "Alt+,",
+         "timelinePreviousKeyAction", tr("Previous Key"), &TimelineBar::goToPreviousKey},
+    };
+    for (const Entry& entry : entries) {
+        usdcc::core::Settings::instance().define({
+            .key = entry.key,
+            .category = "Shortcuts",
+            .group = "Timeline",
+            .label = entry.label,
+            .description = entry.description,
+            .type = usdcc::core::SettingType::Shortcut,
+            .defaultValue = std::string(entry.defaultKey),
+        });
+        auto* action = new QAction(entry.text, window);
+        action->setObjectName(QLatin1String(entry.objectName));
+        action->setShortcutContext(Qt::ApplicationShortcut);
+        usdcc::ui::bindShortcut(action, entry.key);
+        window->addAction(action);
+        connect(action, &QAction::triggered, this, entry.run);
+    }
 }
 
 void TimelineBar::refreshSimulation() {
@@ -293,6 +441,20 @@ void TimelineBar::populateMenu(QMenu* menu) {
     physics::PhysicsSession* session = m_stage ? m_stage->physicsIfStarted() : nullptr;
     resetSimulation->setEnabled(session && session->cachedRange());
     connect(resetSimulation, &QAction::triggered, m_playback, &PlaybackController::resetSimulation);
+
+    // How the stage reads between keys: a stage-wide choice in OpenUSD, not saved.
+    menu->addSeparator();
+    QAction* held = menu->addAction(tr("Held Between Keys"));
+    held->setObjectName(QStringLiteral("timelineHeld"));
+    held->setCheckable(true);
+    held->setStatusTip(tr("Each key's value holds until the next, instead of moving linearly to it"));
+    held->setEnabled(m_stage != nullptr);
+    held->setChecked(m_stage && m_stage->usdStage()->GetInterpolationType() == PXR_NS::UsdInterpolationTypeHeld);
+    connect(held, &QAction::triggered, this, [this](bool on) {
+        if (m_stage) {
+            m_stage->usdStage()->SetInterpolationType(on ? PXR_NS::UsdInterpolationTypeHeld : PXR_NS::UsdInterpolationTypeLinear);
+        }
+    });
 
     menu->addSeparator();
     QAction* reset = menu->addAction(tr("Reset Playback Range"));

@@ -461,6 +461,18 @@ Closing the broadcast viewport from its tab's menu showed the warning; Cancel ke
 and the broadcast, and Close and Stop Broadcast closed the viewport, ended the broadcast ("The
 viewport closed") and closed the port.
 
+**Tried 2026-11-22 from WSL 2** (another address behind NAT, through Windows Firewall): the
+broadcast started on `0.0.0.0:47810` with its link on the LAN address, but a watcher in WSL timed
+out in the WebSocket handshake. Windows had made a Block rule for that `usdcc.exe` (its prompt
+cancelled). The app said nothing: no toast, nothing in the log, although §5's table says a denial
+shows in the panel. **With the rule set to Allow, it worked:** a watcher in WSL (a Python
+WebSocket client doing what the page does: the guests' `hello` with the link's secret) connected
+in 0.04 s, got `welcome` and the chat's snapshot, and its "hello from WSL" came back to it as the
+room's `say`. The host logged "WSL watcher is watching". The script changed the stage's time 5
+times a second, and the watcher got **101 pictures in 20 s (5 a second, one per change), 28 KB
+each on average (one sphere, the viewport at its default size), 1.2 Mbit/s**. The first message on the
+view channel was a snapshot with no picture in it (0 bytes), which the page skips.
+
 **Not tried yet:** a browser on another machine, and with it Windows Firewall's question; a tunnel;
 another browser or a phone; a progressive renderer; closing the viewport or its stage in the app
 (the tests cover the source going away). The plugin built outside this tree against the SDK: its

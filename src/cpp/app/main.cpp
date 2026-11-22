@@ -100,7 +100,10 @@
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/selection_menu.h"
 #include "usdcc/usd/usda_preview_dialog.h"
+#include "usdcc/usd/usda_view.h"
 #include "usdcc/usd/usda_view_panel.h"
+
+#include <cstdlib>
 #include "usdcc/usd/variant_editor_dialog.h"
 #include "usdcc/usd/log_test_messages.h"
 #include "usdcc/usd/material_editor_view_panel.h"
@@ -288,7 +291,9 @@ int main(int argc, char** argv) {
     // in a bar under the dock area. Both are the window's.
     auto* playback = new usdcc::usd::PlaybackController(&stageManager, &window);
     playback->addActions(&window);
-    window.setBottomBar(new usdcc::usd::TimelineBar(playback, undoManager, &window), QObject::tr("Timeline"));
+    auto* timelineBar = new usdcc::usd::TimelineBar(playback, undoManager, &window);
+    timelineBar->addActions(&window);  // Set Key, Next Key, Previous Key (docs/ANIMATION.md phase 2)
+    window.setBottomBar(timelineBar, QObject::tr("Timeline"));
     // F: fit the active viewport to the selection, or to the whole stage.
     usdcc::usd::ViewportViewPanel::addFitToViewAction(&window);
     // The active viewport's HUD on or off (no key until one is set).
@@ -1504,7 +1509,20 @@ int main(int argc, char** argv) {
         }
     }, Qt::SingleShotConnection);
 
+    // A crashed instance's USDA conversions left their temporary files (docs/PANEL_BUSY.md §5.3).
+    usdcc::usd::UsdaView::removeLeftoverConversions();
+
     const int result = app.exec();
+    // A USDA conversion still running (docs/PANEL_BUSY.md §5.3): USD can't stop it, and a thread
+    // inside USD as the process ends can crash it. Up to 10 s, then out without static
+    // destructors.
+    if (usdcc::usd::UsdaView::runningConversions() > 0) {
+        USDCC_LOG_INFO("usdcc.app", "Finishing a USDA conversion...");
+        if (!usdcc::usd::UsdaView::waitForConversions(10000)) {
+            USDCC_LOG_WARNING("usdcc.app", "A USDA conversion is still running: quitting without waiting for it");
+            std::quick_exit(result);
+        }
+    }
     usdcc::usd::setOpenStageHandler({});  // it holds main()'s objects
     usdcc::usd::UsdaViewPanel::setNewPanelHandler({});
     // The window is closed (and its layout saved) but its panels still exist.

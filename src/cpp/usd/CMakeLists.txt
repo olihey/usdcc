@@ -43,6 +43,8 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/tf_diagnostic_bridge.h
     include/usdcc/usd/time_range.h
     src/time_range.cpp
+    include/usdcc/usd/anim_edit.h
+    src/anim_edit.cpp
     include/usdcc/usd/playback.h
     src/playback.cpp
     include/usdcc/usd/physics_bake.h

@@ -24,8 +24,8 @@ class PropertyEditor;
 // States, each shown and each making the editor read-only where an edit
 // would be wrong or pointless:
 //   unauthored — the value is a schema fallback, nothing authored (dimmed label)
-//   animated   — the attribute has time samples; with no timeline to pick a
-//                time, editing is disabled
+//   animated   — the attribute has time samples or a spline; an edit sets a key at
+//                the frame shown (docs/ANIMATION.md §4.5), and the key button says so
 //   connected  — the value comes from a connection; shows the source as a link
 // A square, icon-only button the height of a value field (Edit, Remove, Add),
 // with a theme icon (e.g. ":/usdcc/theme/pencil.png") and a tooltip saying
@@ -82,7 +82,17 @@ public:
     void setReadOnly(bool readOnly);                  // forced, independent of the states above
     void setResettable(bool resettable) { m_resettable = resettable; }
 
+    // The key button and the menu's Set Key, Remove Key and Remove Animation (docs/ANIMATION.md
+    // phase 2). None: no button, for what can't be keyed.
+    enum class KeyState { None, Static, Animated, KeyedHere };
+    void setKeyState(KeyState state);
+    KeyState keyState() const { return m_keyState; }
+    QToolButton* keyButton() const { return m_keyButton; }
+
 Q_SIGNALS:
+    void setKeyRequested();
+    void removeKeyRequested();
+    void removeAnimationRequested();
     // "Reset to Default" from the context menu: clear the authored value.
     void resetRequested();
     // The label was clicked.
@@ -104,6 +114,9 @@ private:
     QLabel* m_badge;
     QLabel* m_subLine;
     QToolButton* m_sourceLink;
+    QToolButton* m_keyButton;
+    KeyState m_keyState = KeyState::None;
+    int m_labelWidth = 110;  // as given, before the key button takes its share
     QWidget* m_valueColumn;
     // The row's controls, and under them the second lines (connected
     // source, the editor's subLineWidget()), indented to the value column.

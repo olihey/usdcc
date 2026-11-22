@@ -24,6 +24,7 @@
 #include "usdcc/ui/settings_dialog.h"
 #include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/toast_manager.h"
+#include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/ui/workspace_controller.h"
 #include "usdcc/ui/workspace_library.h"
@@ -34,6 +35,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/render/render_menu.h"
+#include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/stage_manager.h"
@@ -424,6 +426,29 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "remove_side_panel",
         [](std::uintptr_t address) { mainWindow().removeSidePanel(reinterpret_cast<usdcc::ui::SidePanel*>(address)); },
         py::arg("address"));
+    // A view panel busy (docs/PANEL_BUSY.md §6): usdcc.ui.ViewPanel.busy() wraps the handle.
+    py::class_<usdcc::ui::Busy, std::shared_ptr<usdcc::ui::Busy>>(m, "Busy")
+        .def("set_text", [](usdcc::ui::Busy& self, const std::string& text) { self.setText(QString::fromStdString(text)); })
+        .def("set_detail", [](usdcc::ui::Busy& self, const std::string& text) { self.setDetail(QString::fromStdString(text)); })
+        .def("set_progress", &usdcc::ui::Busy::setProgress)
+        .def("is_cancelled", &usdcc::ui::Busy::isCancelled)
+        .def("finish", &usdcc::ui::Busy::finish);
+    m.def(
+        "begin_busy",
+        [](std::uintptr_t widgetAddress, const std::string& text, bool cancellable, bool paintNow) {
+            // The panel is the widget's first ancestor that is one.
+            usdcc::ui::ViewPanel* panel = nullptr;
+            for (QWidget* widget = reinterpret_cast<QWidget*>(widgetAddress); widget && !panel; widget = widget->parentWidget()) {
+                panel = qobject_cast<usdcc::ui::ViewPanel*>(widget);
+            }
+            if (!panel) throw py::value_error("the widget isn't in a view panel");
+            usdcc::ui::BusyOptions options;
+            options.paintNow = paintNow;
+            // Cancel shows; what it does is the handle's is_cancelled(), which the script reads.
+            if (cancellable) options.onCancel = []() {};
+            return panel->beginBusy(QString::fromStdString(text), std::move(options));
+        },
+        py::arg("widget"), py::arg("text"), py::arg("cancellable"), py::arg("paint_now"));
     m.def(
         "unregister_view_panel",
         [](const std::string& id) {
@@ -885,12 +910,33 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         for (const usdcc::render::RenderJobPtr& job : usdcc::render::RenderScheduler::instance().jobs()) {
             static const char* statuses[] = {"queued", "running", "done", "failed", "cancelled"};
             result.append(py::make_tuple(job->id, job->title, job->rendererId, statuses[static_cast<int>(job->status)],
-                                         job->progress(), job->frames, job->files, job->error));
+                                         job->progress(), job->frames, job->files, job->error, std::string()));
+        }
+        // Jobs sent to a queue server are the queue's, not the scheduler's: by the id
+        // submit_render() returned, with the queue's status.
+        if (const usdcc::render::RenderQueueClient* queues = usdcc::render::RenderQueueClient::instance()) {
+            for (const usdcc::render::SentJobInfo& job : queues->sentJobs()) {
+                std::string status = job.status.toStdString();
+                if (status == "sending" || status == "receiving") status = "queued";
+                if (status == "refused") status = "failed";
+                std::vector<std::string> files;
+                for (const QString& file : job.files) files.push_back(file.toStdString());
+                result.append(py::make_tuple(job.artistJob.toStdString(), job.title.toStdString(), job.renderer.toStdString(),
+                                             status, job.progress, job.frames, files, job.error.toStdString(),
+                                             job.queueName.toStdString()));
+            }
         }
         return result;
     });
     m.def(
-        "cancel_render", [](const std::string& id) { usdcc::render::RenderScheduler::instance().cancel(id); }, py::arg("id"));
+        "cancel_render",
+        [](const std::string& id) {
+            usdcc::render::RenderScheduler::instance().cancel(id);
+            if (usdcc::render::RenderQueueClient* queues = usdcc::render::RenderQueueClient::instance()) {
+                queues->cancelSent(QString::fromStdString(id));
+            }
+        },
+        py::arg("id"));
     m.def(
         "viewport_renderer_settings",
         [](int id, const std::string& renderer) {

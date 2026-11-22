@@ -5,8 +5,15 @@ A USD asset resolver plugin for plain `http://` and `https://` URLs, such as
 shared library of [REMOTE_ASSETS.md](REMOTE_ASSETS.md).
 
 **Status:** built 2026-11-17, in [src/plugins/http](../src/plugins/http), tested
-([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and shipped with the app (§13.4). **`https://` has
-never run:** every test and check used `http://` on one machine.
+([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and shipped with the app (§13.4). **`https://` was
+first run on 2026-11-22**, on Windows (curl with Schannel), with `usdcat --flatten` and
+`USDCC_HTTP_ALLOW`: a public asset on `raw.githubusercontent.com` (a root layer, four referenced
+layers and textures by relative path) flattened in 3 s, all five layers anchored on `https://`,
+and a second open took 0.6 s with no new files in the cache. A self-signed certificate
+(`self-signed.badssl.com`) is refused with Schannel's `SEC_E_UNTRUSTED_ROOT` in the message, but
+reported as *unreachable*, like a server that's down (`statusOfCurlCode()` in
+`http_client.cpp`). Not run: `https://` on Linux (OpenSSL), WebDAV over `https://`, a host
+without an allow-list entry other than the refusal.
 
 ## 1. What it is, and isn't
 

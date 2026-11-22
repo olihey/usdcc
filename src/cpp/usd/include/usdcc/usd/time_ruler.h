@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <optional>
+#include <vector>
 
 namespace usdcc::usd {
 
@@ -36,6 +37,10 @@ public:
     void setTime(double time);
     double time() const { return m_time; }
 
+    // Key marks (docs/ANIMATION.md phase 2): the selection's key times, a diamond each.
+    void setKeys(std::vector<double> keys);
+    const std::vector<double>& keys() const { return m_keys; }
+
     // Time to pixels, for the width it has now.
     const TimeAxis& axis() const;
 
@@ -64,6 +69,7 @@ private:
     mutable TimeAxis m_axis;  // its extent follows the width, set when asked for
     TimeRange m_playbackRange{0.0, 1.0};
     std::optional<TimeRange> m_cachedRange;
+    std::vector<double> m_keys;
     bool m_cacheStale = false;
     double m_time = 0.0;
     bool m_scrubbing = false;

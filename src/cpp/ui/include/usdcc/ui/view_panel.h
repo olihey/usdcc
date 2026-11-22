@@ -3,13 +3,16 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
+#include "usdcc/ui/busy.h"
 #include "usdcc/usd/stage.h"
 
 #include <DockWidget.h>
 
+#include <QImage>
 #include <QJsonObject>
 
 #include <functional>
+#include <memory>
 
 class QBoxLayout;
 class QComboBox;
@@ -22,6 +25,7 @@ class StageManager;
 
 namespace usdcc::ui {
 
+class BusyOverlay;
 class OptionsMenuView;
 class PanelMenuButton;
 
@@ -65,6 +69,23 @@ public:
     // asks whether to close such panels or switch them to another stage.
     explicit ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRefPtr stage, const QString& title,
                        QWidget* parent = nullptr);
+    // Cancels any work the panel is busy with (beginBusy()'s onCancel).
+    ~ViewPanel() override;
+
+    // "I'm working on something" (docs/PANEL_BUSY.md §3): while the returned handle lives,
+    // the panel is busy. After options.showAfterMs it dims, the whole panel, toolbar included,
+    // and a card shows `text`, a progress bar, the handle's detail, the time so far and, with
+    // options.onCancel, Cancel (Esc too). The panel takes no input meanwhile; its tab stays
+    // usable. Several handles may live at once: the newest one's card shows. Closing the
+    // panel cancels them all. The work must reach the panel only through the handle or a
+    // QPointer: a handle outliving its panel does nothing. May be called from any thread;
+    // from another than the UI thread, the panel takes the handle up there.
+    std::shared_ptr<Busy> beginBusy(const QString& text, BusyOptions options = {});
+    bool isBusy() const;
+    // A still of `container`, one of the panel's native windows (createWindowContainer()), to
+    // show in its place while the panel is busy: a native window draws over any widget, so it
+    // steps aside (§4). The default grabs it from the screen; a viewport returns its last frame.
+    virtual QImage busySnapshot(QWidget* container);
 
     usdcc::usd::StageManager* stageManager() const { return m_stageManager; }
     const usdcc::usd::StageRefPtr& currentStage() const { return m_stage; }
@@ -145,6 +166,8 @@ Q_SIGNALS:
     // After the panel switched to another stage (or to none): setStage() or
     // the stage dropdown. CurrentStageTracker follows it for the focused panel.
     void stageChanged(const usdcc::usd::StageRefPtr& stage);
+    // The panel started or stopped being busy (beginBusy()).
+    void busyChanged(bool busy);
 
 protected:
     // Extends the context menu shown when right-clicking this panel's tab —
@@ -242,6 +265,7 @@ private:
     bool m_restoredPin = false;
     bool m_followsCurrentStage = false;
     QComboBox* m_stageCombo;
+    BusyOverlay* m_busyOverlay = nullptr;  // made by the first beginBusy()
 
     // Kept alive for as long as this panel should keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

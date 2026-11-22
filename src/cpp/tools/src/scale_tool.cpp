@@ -1,6 +1,7 @@
 #include "usdcc/tools/scale_tool.h"
 
 #include "usdcc/tools/gizmo_shapes.h"
+#include "usdcc/usd/anim_edit.h"
 
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
@@ -107,25 +108,25 @@ PXR_NS::UsdGeomXformOp findScaleOp(const PXR_NS::UsdGeomXformable& xformable) {
     return {};
 }
 
-PXR_NS::GfVec3f readScale(const PXR_NS::UsdGeomXformOp& op) {
+PXR_NS::GfVec3f readScale(const PXR_NS::UsdGeomXformOp& op, PXR_NS::UsdTimeCode time) {
     if (!op) {
         return PXR_NS::GfVec3f(1.0f, 1.0f, 1.0f);
     }
     if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
         PXR_NS::GfVec3f v(1.0f, 1.0f, 1.0f);
-        op.Get(&v);
+        op.Get(&v, time);
         return v;
     }
     PXR_NS::GfVec3d v(1.0, 1.0, 1.0);
-    op.Get(&v);
+    op.Get(&v, time);
     return PXR_NS::GfVec3f(v);
 }
 
-void writeScale(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfVec3f& value) {
+void writeScale(const PXR_NS::UsdGeomXformOp& op, const PXR_NS::GfVec3f& value, PXR_NS::UsdTimeCode time, bool autoKey) {
     if (op.GetPrecision() == PXR_NS::UsdGeomXformOp::PrecisionFloat) {
-        op.Set(value);
+        usdcc::usd::anim::setValue(op.GetAttr(), PXR_NS::VtValue(value), time, autoKey);
     } else {
-        op.Set(PXR_NS::GfVec3d(value));
+        usdcc::usd::anim::setValue(op.GetAttr(), PXR_NS::VtValue(PXR_NS::GfVec3d(value)), time, autoKey);
     }
 }
 }  // namespace
@@ -152,12 +153,12 @@ ToolResult ScaleTool::beginGizmoDrag(const ToolContext& ctx, const PXR_NS::GfVec
     }
     m_dragFrame = frame;
     m_targetOp = target.targeted ? target.op : PXR_NS::UsdGeomXformOp();
-    m_dragStartScale = readScale(findScaleOp(xformable));
+    m_dragStartScale = readScale(findScaleOp(xformable), ctx.time);
     if (isMatrixOp(m_targetOp)) {
-        m_dragStartMatrix = readOpMatrix(m_targetOp);
+        m_dragStartMatrix = readOpMatrix(m_targetOp, ctx.time);
         m_dragStartScale = PXR_NS::GfVec3f(1.0f);
     } else if (m_targetOp) {
-        const std::vector<double> start = readOpNumbers(m_targetOp);  // any precision
+        const std::vector<double> start = readOpNumbers(m_targetOp, ctx.time);  // any precision
         m_dragStartScale = start.size() == 3 ? PXR_NS::GfVec3f(static_cast<float>(start[0]), static_cast<float>(start[1]),
                                                                 static_cast<float>(start[2]))
                                              : PXR_NS::GfVec3f(1.0f);
@@ -273,11 +274,11 @@ ToolResult ScaleTool::mouseMove(const ToolContext& ctx, const PXR_NS::GfVec2d&, 
                 m[r][c] *= newScale[r];
             }
         }
-        writeOpMatrix(scaleOp, m);
+        writeOpMatrix(scaleOp, m, ctx.time, ctx.autoKey);
     } else if (m_targetOp) {
-        writeOpNumbers(scaleOp, {newScale[0], newScale[1], newScale[2]});  // any precision
+        writeOpNumbers(scaleOp, {newScale[0], newScale[1], newScale[2]}, ctx.time, ctx.autoKey);  // any precision
     } else {
-        writeScale(scaleOp, newScale);
+        writeScale(scaleOp, newScale, ctx.time, ctx.autoKey);
     }
 
     ToolResult result;

@@ -21,6 +21,7 @@
 #include <DockManager.h>
 
 #include <QAction>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QElapsedTimer>
@@ -29,6 +30,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QStandardPaths>
 #include <QToolButton>
 
@@ -186,6 +188,8 @@ stage = [s for s in usdcc.usd.stages() if usdcc.usd.stage_id(s) == stage_id][0]
 panel = usdcc.app.open_view_panel("prim_count", stage)
 assert isinstance(panel, PrimCount) and panel.stage == stage, panel
 assert ("prim_count", "Prim Count") in usdcc.app.view_panel_types()
+import builtins
+builtins.usdcc_test_prim_count = panel
 )", "register_view_panel.py"),
               "a Python view panel type is registered and opened");
         const auto* entry = registry.find(QStringLiteral("prim_count"));
@@ -215,6 +219,37 @@ assert ("prim_count", "Prim Count") in usdcc.app.view_panel_types()
               "Duplicate makes another instance on the same stage: [%s]",
               copy ? qPrintable(labelText(copy.get())) : "?");
         copy.reset();
+
+        // Busy (docs/PANEL_BUSY.md §6): on the UI thread it shows at once; Cancel reaches
+        // Python; from a thread it updates and ends on its own.
+        CHECK(app.python.runString("import builtins\n"
+                                   "busy = builtins.usdcc_test_prim_count.busy('Counting', cancellable=True)\n"
+                                   "busy.progress = 0.5\n"
+                                   "busy.detail = 'half way'\n"
+                                   "builtins.usdcc_test_busy = busy\n"),
+              "busy() from Python");
+        const auto* overlay = panel->findChild<QWidget*>(QStringLiteral("busyOverlay"));
+        const auto* busyText = panel->findChild<QLabel*>(QStringLiteral("busyText"));
+        CHECK(panel->isBusy() && overlay && overlay->isVisible() && busyText && busyText->text() == "Counting",
+              "on the UI thread the card shows at once");
+        auto* cancel = panel->findChild<QPushButton*>(QStringLiteral("busyCancel"));
+        if (cancel) cancel->click();
+        const auto cancelled = app.python.evaluate("__import__('builtins').usdcc_test_busy.cancelled");
+        CHECK(cancelled && *cancelled == "True", "Cancel reaches Python: %s", cancelled ? cancelled->c_str() : "?");
+        CHECK(app.python.runString("import builtins, threading\n"
+                                   "builtins.usdcc_test_busy.finish()\n"
+                                   "panel = builtins.usdcc_test_prim_count\n"
+                                   "def work():\n"
+                                   "    with panel.busy('In a thread') as b:\n"
+                                   "        b.progress = 1.0\n"
+                                   "worker = threading.Thread(target=work)\n"
+                                   "worker.start()\n"
+                                   "worker.join()\n"),
+              "busy() from a Python thread");
+        QElapsedTimer busyWait;
+        busyWait.start();
+        while (panel->isBusy() && busyWait.elapsed() < 3000) QApplication::processEvents(QEventLoop::AllEvents, 10);
+        CHECK(!panel->isBusy(), "and ends with its with block");
 
         // What a session keeps of it: what save_state() returns, given back to restore_state().
         CHECK(app.python.runString("import usdcc._plugins\n"

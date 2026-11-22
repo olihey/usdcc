@@ -67,6 +67,7 @@ add_executable(usdcc_tests
     xform_math_test.cpp
     xform_stack_test.cpp
     xform_target_test.cpp
+    anim_edit_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
 # usdcc_node (docs/RENDER_NODE.md): its arguments, trust and keys, and the program itself.
@@ -95,6 +96,7 @@ add_executable(usdcc_ui_tests
     attributes_tab_test.cpp
     attributes_right_edge_test.cpp
     attributes_transform_section_test.cpp
+    busy_panel_test.cpp
     close_stage_test.cpp
     composition_edit_test.cpp
     create_menu_test.cpp
