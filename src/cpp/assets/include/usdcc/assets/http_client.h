@@ -22,6 +22,10 @@ struct HttpRequest {
     std::string url;                   // complete, already percent-encoded
     std::vector<std::string> headers;  // "Depth: 1"
     std::string body;
+    // The body read from this file instead, for a PUT (docs/REMOTE_ASSETS.md §6, phase 6):
+    // streamed, with its size sent ahead, and progress counting what went up. Signed with
+    // SigV4, its hash isn't: "x-amz-content-sha256: UNSIGNED-PAYLOAD" (docs/S3_RESOLVER.md §2).
+    std::filesystem::path uploadFrom;
     // A credential id (credentials.h), or empty for anonymous. Sent to this URL's host
     // only: a redirect to another host goes without it.
     std::string credential;

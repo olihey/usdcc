@@ -1,7 +1,7 @@
 // The protocols of remote assets over a real socket (docs/HTTP_RESOLVER.md,
 // docs/WEBDAV_RESOLVER.md), and what phase 3 added to the shared library
 // (docs/REMOTE_ASSETS.md §13): mirrors, offline mode, the cache's limit and download
-// lock, RefreshContext, progress and cancel. The servers are in this program
+// lock, RefreshContext, progress and cancel; and phase 6's writing. The servers are in this program
 // (assets_test_server.h), on 127.0.0.1; nothing leaves the machine. Runs in
 // usdcc_assets_tests.
 #include "test_harness.h"
@@ -18,6 +18,7 @@
 #include "usdcc/assets/paths.h"
 #include "usdcc/assets/transport.h"
 
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/base/tf/setenv.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/assetInfo.h>
@@ -25,8 +26,10 @@
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/ar/resolverContext.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
+#include <pxr/usd/ar/writableAsset.h>
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/zipFile.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
@@ -37,6 +40,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -1139,4 +1143,340 @@ USDCC_TEST(assets_editor_test_button_asks_a_server) {
     const EndpointTest mirrored = testEndpoint(dead, cancel);
     CHECK(mirrored.status == Status::Ok && mirrored.url == server.url(),
           "its mirror is tried next, as resolving does: %s", mirrored.summary.c_str());
+}
+
+// ---- Writing (docs/REMOTE_ASSETS.md §6, phase 6) -----------------------------------------
+
+namespace {
+
+// TEST over PROD, PROD read-only, for either protocol that writes. A path's file on a
+// server is that path under its root.
+struct WriteServers {
+    std::string scheme;
+    Config config;
+    fs::path prodRoot;
+    fs::path testRoot;
+    std::function<std::vector<ServerRequest>()> prodRequests;
+    std::function<std::vector<ServerRequest>()> testRequests;
+    std::function<void()> forgetRequests;
+
+    ArResolverContext context(const std::string& environment) const { return ArResolverContext(Context(config, environment)); }
+    std::string uri(const std::string& path) const { return scheme + "://studio" + path; }
+};
+
+std::vector<ServerRequest> putsOf(const std::vector<ServerRequest>& requests) {
+    std::vector<ServerRequest> puts;
+    for (const ServerRequest& request : requests) {
+        if (request.method == "PUT") puts.push_back(request);
+    }
+    return puts;
+}
+
+int downloadsOf(const std::vector<ServerRequest>& requests) {
+    int count = 0;
+    for (const ServerRequest& request : requests) count += request.method == "GET" && request.target.find('?') == std::string::npos;
+    return count;
+}
+
+std::string headerOf(const ServerRequest& request, const char* name) {
+    const auto found = request.headers.find(name);
+    return found == request.headers.end() ? std::string() : found->second;
+}
+
+std::string errorsOf(const TfErrorMark& mark) {
+    std::string text;
+    for (auto error = mark.GetBegin(); error != mark.GetEnd(); ++error) text += error->GetCommentary() + "\n";
+    return text;
+}
+
+// `text` written to `assetPath` as Sdf writes a layer, in the context bound: whether
+// Close() said it was.
+bool writeAsset(const std::string& assetPath, const std::string& text) {
+    ArResolver& resolver = ArGetResolver();
+    const ArResolvedPath resolved = resolver.ResolveForNewAsset(resolver.CreateIdentifierForNewAsset(assetPath));
+    const std::shared_ptr<ArWritableAsset> asset = resolver.OpenAssetForWrite(resolved, ArResolver::WriteMode::Replace);
+    if (!asset) return false;
+    if (asset->Write(text.data(), text.size(), 0) != text.size()) return false;
+    return asset->Close();
+}
+
+// What both protocols must do.
+void checkWriting(const WriteServers& servers) {
+    const char* scheme = servers.scheme.c_str();
+    ArResolver& resolver = ArGetResolver();
+    {
+        ArResolverContextBinder binder(servers.context("test"));
+        const std::string note = servers.uri("/new/deep/note.txt");
+        const ArResolvedPath resolved = resolver.ResolveForNewAsset(note);
+        const std::string stackId = Context(servers.config, "test").stack(servers.scheme, "studio")->id;
+        CHECK(resolved.GetPathString() == servers.scheme + "://studio~" + stackId + "/new/deep/note.txt",
+              "%s: a new file resolves to where it would be: %s", scheme, resolved.GetPathString().c_str());
+        CHECK(resolver.Resolve(note).empty(), "%s: and isn't there yet", scheme);
+        std::string why;
+        CHECK(resolver.CanWriteAssetToPath(resolved, &why), "%s: it can be written: %s", scheme, why.c_str());
+        CHECK(writeAsset(note, "first"), "%s: and is", scheme);
+        CHECK(readFile(servers.testRoot / "new/deep/note.txt") == "first" && !fs::exists(servers.prodRoot / "new"),
+              "%s: to TEST, the stack's first endpoint that isn't read-only, not to PROD", scheme);
+        std::vector<ServerRequest> puts = putsOf(servers.testRequests());
+        CHECK(puts.size() == 1 && headerOf(puts[0], "if-none-match") == "*" && headerOf(puts[0], "if-match").empty(),
+              "%s: as a new file: only if none is there (%d PUT)", scheme, int(puts.size()));
+        if (servers.scheme == "webdav") {
+            int folders = 0;
+            for (const ServerRequest& request : servers.testRequests()) folders += request.method == "MKCOL";
+            CHECK(folders == 2 && fs::is_directory(servers.testRoot / "new/deep"), "webdav: its two folders were made first: %d MKCOL",
+                  folders);
+        }
+        servers.forgetRequests();
+        CHECK(deliveredBy(note) == "test" && openedContent(resolver.Resolve(note).GetPathString()) == "first",
+              "%s: it resolves, from TEST, and opens", scheme);
+        CHECK(downloadsOf(servers.testRequests()) == 0, "%s: from the cache: what was written isn't downloaded again", scheme);
+        CHECK(writeAsset(note, "second") && readFile(servers.testRoot / "new/deep/note.txt") == "second",
+              "%s: written again, it replaces the version the first write made", scheme);
+        puts = putsOf(servers.testRequests());
+        CHECK(puts.size() == 1 && !headerOf(puts[0], "if-match").empty() && headerOf(puts[0], "if-match") != "*" &&
+                  headerOf(puts[0], "if-none-match").empty(),
+              "%s: only if it is still that version: If-Match '%s'", scheme,
+              puts.empty() ? "" : headerOf(puts[0], "if-match").c_str());
+    }
+    {
+        // A layer only PROD has, opened and saved in the test environment.
+        ArResolverContextBinder binder(servers.context("test"));
+        const std::string shot = servers.uri("/shots/shot.usda");
+        const std::string prodBefore = readFile(servers.prodRoot / "shots/shot.usda");
+        servers.forgetRequests();
+        SdfLayerRefPtr layer = SdfLayer::FindOrOpen(shot);
+        CHECK(layer && deliveredBy(shot) == "prod", "%s: PROD's shot opens in the test environment", scheme);
+        if (!layer) return;
+        CHECK(layer->PermissionToSave(), "%s: and may be saved", scheme);
+        layer->SetComment("saved in test");
+        CHECK(layer->Save(), "%s: and saves", scheme);
+        CHECK(readFile(servers.testRoot / "shots/shot.usda").find("saved in test") != std::string::npos,
+              "%s: into TEST", scheme);
+        CHECK(readFile(servers.prodRoot / "shots/shot.usda") == prodBefore && putsOf(servers.prodRequests()).empty(),
+              "%s: PROD is untouched", scheme);
+        const std::vector<ServerRequest> puts = putsOf(servers.testRequests());
+        CHECK(puts.size() == 1 && headerOf(puts[0], "if-none-match") == "*",
+              "%s: only if TEST had none: it was opened from PROD", scheme);
+        CHECK(deliveredBy(shot) == "test", "%s: the shot resolves from TEST now", scheme);
+        layer->SetComment("saved again");
+        CHECK(layer->Save() && readFile(servers.testRoot / "shots/shot.usda").find("saved again") != std::string::npos,
+              "%s: saved again, it replaces TEST's version it made", scheme);
+    }
+    {
+        // Someone else's change on the server between opening and saving.
+        ArResolverContextBinder binder(servers.context("test"));
+        SdfLayerRefPtr model = SdfLayer::FindOrOpen(servers.uri("/chars/hero.usda"));
+        CHECK(model, "%s: TEST's model opens", scheme);
+        if (!model) return;
+        const fs::path onTest = servers.testRoot / "chars/hero.usda";
+        writeFile(onTest, readFile(onTest) + "\n# changed meanwhile\n");
+        model->SetComment("mine");
+        TfErrorMark mark;
+        CHECK(!model->Save(), "%s: saving over a file that changed on the server meanwhile fails", scheme);
+        const std::string errors = errorsOf(mark);
+        mark.Clear();
+        CHECK(errors.find("changed on the server 'test' since it was opened") != std::string::npos,
+              "%s: saying the file changed on that server: %s", scheme, errors.c_str());
+        CHECK(readFile(onTest).find("changed meanwhile") != std::string::npos && readFile(onTest).find("mine") == std::string::npos,
+              "%s: and the server keeps the other change", scheme);
+
+        // A file only PROD had, that someone wrote to TEST meanwhile.
+        SdfLayerRefPtr geo = SdfLayer::FindOrOpen(servers.uri("/chars/geo.usda"));
+        CHECK(geo && deliveredBy(servers.uri("/chars/geo.usda")) == "prod", "%s: PROD's sublayer opens", scheme);
+        if (!geo) return;
+        writeFile(servers.testRoot / "chars/geo.usda", "#usda 1.0\n# someone else's\n");
+        geo->SetComment("mine");
+        TfErrorMark again;
+        CHECK(!geo->Save(), "%s: saving it fails too", scheme);
+        const std::string geoErrors = errorsOf(again);
+        again.Clear();
+        CHECK(geoErrors.find("changed on the server 'test' since it was opened") != std::string::npos,
+              "%s: as a conflict: %s", scheme, geoErrors.c_str());
+        CHECK(readFile(servers.testRoot / "chars/geo.usda") == "#usda 1.0\n# someone else's\n", "%s: and TEST keeps its file", scheme);
+    }
+    {
+        // Read-only: PROD by itself, and offline.
+        ArResolverContextBinder binder(servers.context("prod"));
+        const std::string shot = servers.uri("/shots/shot.usda");
+        std::string why;
+        CHECK(!resolver.CanWriteAssetToPath(resolver.Resolve(shot), &why) && why.find("read-only (prod)") != std::string::npos,
+              "%s: a stack of read-only servers can't be written to, and says why: %s", scheme, why.c_str());
+        SdfLayerRefPtr layer = SdfLayer::FindOrOpen(shot);
+        CHECK(layer && !layer->PermissionToSave(), "%s: so a layer from it may not be saved", scheme);
+        servers.forgetRequests();
+        TfErrorMark mark;
+        CHECK(!writeAsset(servers.uri("/refused.txt"), "no"), "%s: nor anything written there", scheme);
+        mark.Clear();
+        CHECK(putsOf(servers.prodRequests()).empty() && !fs::exists(servers.prodRoot / "refused.txt"), "%s: nothing went to PROD", scheme);
+    }
+    {
+        ArResolverContextBinder binder(servers.context("test"));
+        setOffline(true);
+        std::string why;
+        CHECK(!resolver.CanWriteAssetToPath(resolver.ResolveForNewAsset(servers.uri("/offline.txt")), &why) &&
+                  why.find("offline") != std::string::npos,
+              "%s: offline, nothing can be written: %s", scheme, why.c_str());
+        setOffline(false);
+    }
+    {
+        // Export, as .usda and .usdc, and a .usdc saved over itself (it updates its file).
+        ArResolverContextBinder binder(servers.context("test"));
+        SdfLayerRefPtr shot = SdfLayer::FindOrOpen(servers.uri("/shots/shot.usda"));
+        CHECK(shot && shot->Export(servers.uri("/exports/shot copy.usda")), "%s: a layer exports to a new file", scheme);
+        if (!shot) return;
+        CHECK(readFile(servers.testRoot / "exports/shot copy.usda").find("def Xform \"Shot\"") != std::string::npos,
+              "%s: which is on TEST", scheme);
+        CHECK(shot->Export(servers.uri("/exports/shot.usdc")), "%s: and as a .usdc", scheme);
+        SdfLayerRefPtr crate = SdfLayer::FindOrOpen(servers.uri("/exports/shot.usdc"));
+        CHECK(crate && crate->GetPrimAtPath(SdfPath("/Shot")), "%s: which opens again", scheme);
+        if (!crate) return;
+        SdfPrimSpec::New(crate->GetPseudoRoot(), "Added", SdfSpecifierDef);
+        CHECK(crate->Save(), "%s: and saves over itself", scheme);
+        const SdfLayerRefPtr check = SdfLayer::OpenAsAnonymous(servers.uri("/exports/shot.usdc"));
+        CHECK(check && check->GetPrimAtPath(SdfPath("/Shot")) && check->GetPrimAtPath(SdfPath("/Added")),
+              "%s: with what it had and what was added", scheme);
+        const UsdStageRefPtr stage = UsdStage::Open(servers.uri("/exports/shot copy.usda"), servers.context("test"));
+        CHECK(stage && stringAttribute(stage, "/Shot/Hero", "origin") == "test",
+              "%s: the exported copy composes, its reference resolved beside it: %s", scheme,
+              stage ? stringAttribute(stage, "/Shot/Hero", "origin").c_str() : "no stage");
+    }
+}
+
+}  // namespace
+
+USDCC_TEST(assets_webdav_writes) {
+    Net net;
+    TwoServers servers(net);
+    WriteServers write;
+    write.scheme = "webdav";
+    write.config = servers.config;
+    write.prodRoot = servers.prodFolder.root;
+    write.testRoot = servers.testFolder.root;
+    write.prodRequests = [&servers]() { return servers.prod.requests(); };
+    write.testRequests = [&servers]() { return servers.test.requests(); };
+    write.forgetRequests = [&servers]() {
+        servers.prod.forgetRequests();
+        servers.test.forgetRequests();
+    };
+    checkWriting(write);
+
+    // A server that refuses: the reply says so.
+    servers.testFolder.allowWrite = false;
+    ArResolverContextBinder binder(servers.context("test"));
+    TfErrorMark mark;
+    CHECK(!writeAsset("webdav://studio/refused.txt", "no"), "a server refusing the PUT fails the write");
+    const std::string errors = errorsOf(mark);
+    mark.Clear();
+    CHECK(errors.find("'test' is not allowed") != std::string::npos, "naming the server and why: %s", errors.c_str());
+}
+
+USDCC_TEST(assets_webdav_put_compares_a_weak_etag_itself) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "dav";
+    writeFile(folder.root / "a.txt", "one");
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    Endpoint endpoint;
+    endpoint.id = "dav";
+    endpoint.scheme = "webdav";
+    endpoint.url = server.url();
+    const std::shared_ptr<Transport> transport = transportFor("webdav");
+    if (!transport) return;
+    Cancel cancel;
+    Progress progress;
+    const fs::path from = net.root / "upload.txt";
+    writeFile(from, "two");
+    const Result<Entry> now = transport->stat(endpoint, "/a.txt", cancel);
+    const Result<Entry> wrong = transport->put(endpoint, "/a.txt", from, "W/\"other\"", progress, cancel);
+    CHECK(wrong.status == Status::Conflict && readFile(folder.root / "a.txt") == "one", "a weak ETag that isn't the file's is a conflict");
+    server.forgetRequests();
+    const Result<Entry> right = transport->put(endpoint, "/a.txt", from, "W/" + now.value.etag, progress, cancel);
+    CHECK(right.ok() && readFile(folder.root / "a.txt") == "two", "one that is writes: %s", right.message.c_str());
+    const std::vector<ServerRequest> puts = putsOf(server.requests());
+    CHECK(puts.size() == 1 && headerOf(puts[0], "if-match") == "*", "a weak ETag is never sent in If-Match");
+    folder.etagOnPut = false;
+    writeFile(from, "three");
+    const Result<Entry> asked = transport->put(endpoint, "/a.txt", from, right.value.etag, progress, cancel);
+    CHECK(asked.ok() && asked.value.etag == transport->stat(endpoint, "/a.txt", cancel).value.etag,
+          "a reply without an ETag: the new version is asked for");
+}
+
+USDCC_TEST(assets_s3_writes) {
+    Net net;
+    S3 prod(net.root / "prod", "prod-assets", "us-east-1");
+    S3 test(net.root / "test", "test-assets", "us-east-1");
+    prod.bucket.accessKey = "AKIDS3TEST";
+    test.bucket.accessKey = "AKIDS3TEST";
+    const EnvVar user("USDCC_ASSETS_S3TEST_USER", "AKIDS3TEST");
+    const EnvVar password("USDCC_ASSETS_S3TEST_PASSWORD", "secret");
+    writeScene(net.root / "prod", "prod", true);
+    writeScene(net.root / "test", "test", false);
+    WriteServers write;
+    write.scheme = "s3";
+    Endpoint prodEndpoint;
+    prodEndpoint.id = "prod";
+    prodEndpoint.scheme = "s3";
+    prodEndpoint.url = prod.server.url() + "/prod-assets";
+    prodEndpoint.credential = "s3test";
+    prodEndpoint.readOnly = true;
+    Endpoint testEndpoint = prodEndpoint;
+    testEndpoint.id = "test";
+    testEndpoint.url = test.server.url() + "/test-assets";
+    testEndpoint.readOnly = false;
+    write.config.environment = "test";
+    write.config.endpoints["prod"] = prodEndpoint;
+    write.config.endpoints["test"] = testEndpoint;
+    write.config.environments["prod"]["s3"]["studio"] = {"prod"};
+    write.config.environments["test"]["s3"]["studio"] = {"test", "prod"};
+    setDefaultConfig(write.config);
+    write.prodRoot = net.root / "prod";
+    write.testRoot = net.root / "test";
+    write.prodRequests = [&prod]() { return prod.server.requests(); };
+    write.testRequests = [&test]() { return test.server.requests(); };
+    write.forgetRequests = [&prod, &test]() {
+        prod.server.forgetRequests();
+        test.server.forgetRequests();
+    };
+    // Every PUT is signed, its body as UNSIGNED-PAYLOAD: the test server refuses any other.
+    checkWriting(write);
+
+    test.bucket.allowWrite = false;
+    ArResolverContextBinder binder(write.context("test"));
+    TfErrorMark mark;
+    CHECK(!writeAsset("s3://studio/refused.txt", "no"), "a bucket refusing the PUT fails the write");
+    const std::string errors = errorsOf(mark);
+    mark.Clear();
+    CHECK(errors.find("AccessDenied") != std::string::npos && errors.find("s3:PutObject") != std::string::npos,
+          "with S3's code, and the permission it takes: %s", errors.c_str());
+}
+
+USDCC_TEST(assets_http_refuses_to_write) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "web";
+    writeScene(folder.root, "web", true);
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    Config config;
+    config.httpAllow = {TestServer::host()};
+    setDefaultConfig(config);
+    ArResolver& resolver = ArGetResolver();
+
+    std::string why;
+    CHECK(!resolver.CanWriteAssetToPath(resolver.Resolve(server.url() + "/shots/shot.usda"), &why) && !why.empty(),
+          "an http:// URL can't be written to: %s", why.c_str());
+    const std::shared_ptr<Transport> transport = transportFor("http");
+    Cancel cancel;
+    Progress progress;
+    CHECK(transport && !transport->canPut() &&
+              transport->put(Endpoint(), "/a.txt", net.root / "a.txt", std::string(), progress, cancel).status == Status::NotSupported,
+          "plain HTTP has no put()");
+    TfErrorMark mark;
+    const SdfLayerRefPtr layer = SdfLayer::FindOrOpen(server.url() + "/shots/shot.usda");
+    if (layer) {
+        layer->SetComment("mine");
+        CHECK(!layer->PermissionToSave() && !layer->Save(), "a layer from a URL isn't saved");
+    }
+    CHECK(!SdfLayer::CreateNew(server.url() + "/shots/new.usda"), "nor is one made there");
+    mark.Clear();
+    CHECK(server.count("PUT") == 0, "and the server is never asked to write");
 }

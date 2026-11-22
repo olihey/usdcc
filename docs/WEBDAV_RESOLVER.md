@@ -4,8 +4,8 @@ A USD asset resolver plugin that loads assets from WebDAV servers through `webda
 such as `webdav://studio/chars/hero/hero.usd`.
 
 **Status:** reading is built (2026-11-17), in [src/plugins/webdav](../src/plugins/webdav), tested
-([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and in the app and the deploy (§13.4); writing is
-phase 6. The caching, the server names, the environments and the usdcc integration are the shared
+([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3), and in the app and the deploy (§13.4); writing
+(phase 6) is built too (2026-11-22, §13.6). The caching, the server names, the environments and the usdcc integration are the shared
 library's, in [REMOTE_ASSETS.md](REMOTE_ASSETS.md). This document is only what is WebDAV's own.
 
 ## 1. What it is
@@ -87,7 +87,7 @@ Added 2026-11-17, after the first try in the app named a server this way.
 | `list(folder)` | `PROPFIND`, `Depth: 1` | Asks for `resourcetype`, `getetag`, `getlastmodified`, `getcontentlength` only. A 207 reply is parsed with pugixml. 404 means the folder is missing |
 | `stat(path)` | `PROPFIND`, `Depth: 0` | For folders too big to list |
 | `fetch(path, file, knownEtag)` | `GET`, with `If-None-Match` when given an ETag | 304 is "not modified". The resolver gives none: the listing told it which version it wants |
-| `put(path, file, knownEtag)` (phase 6) | `MKCOL` for missing folders, then `PUT` with `If-Match`, or `If-None-Match: *` for a new file | 412 is "someone changed it", reported as such |
+| `put(path, file, knownEtag)` (phase 6, built) | `MKCOL` for missing folders (found with `PROPFIND`, top first; 405 is one that's there), then `PUT` with `If-Match`, or `If-None-Match: *` for a new file | 412 is `Status::Conflict`, "someone changed it", reported as such. A reply without an ETag is followed by a `PROPFIND` for the new version |
 
 A timeout, a refused connection, a TLS failure and any 5xx are "unreachable". 401 and 403 are
 "not allowed", naming the credential id. Everything else that isn't 2xx, 304 or 404 is an error
@@ -98,7 +98,7 @@ with its status.
 - **No ETag.** Some servers send none. The version is then made from the modified time and the
   size.
 - **Weak ETags** (`W/"…"`) are compared as they are; they aren't valid in `If-Match`, so a save
-  against one checks with a `PROPFIND` first.
+  against one checks with a `PROPFIND` first (weakly), then sends `If-Match: *`. Built.
 - **`Depth: infinity` is never used.** Many servers refuse it.
 - **Hrefs in a reply** come absolute or relative, encoded differently from the request, and with
   or without a trailing slash on folders. They are normalized before comparing.
@@ -131,7 +131,10 @@ with its status.
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §13.3).
 - **Not done:** recorded replies from Apache `mod_dav`, nginx, Nextcloud and WsgiDAV; weak ETags;
   Digest.
-- **Phase 6:** saving, saving into TEST a layer read from PROD, and a 412.
+- **With phase 6** (built, `assets_webdav_writes` and `assets_webdav_put_compares_a_weak_etag_itself`):
+  the test server takes `PUT` and `MKCOL` with `If-Match` and `If-None-Match`; a new file and its
+  folders, saving into TEST a layer read from PROD, a 412 both ways, a weak ETag, a reply without
+  an ETag, `SdfLayer::Save()` and `Export()`.
 
 ## 7. Open questions
 

@@ -152,6 +152,17 @@ bool removeAnimation(const UsdAttribute& attribute, UsdTimeCode time) {
     return true;
 }
 
+bool setSamples(const UsdAttribute& attribute, const std::vector<double>& times, const std::vector<VtValue>& values) {
+    if (!attribute || times.size() != values.size()) return false;
+    if (const SdfAttributeSpecHandle spec = editTargetSpec(attribute)) {
+        spec->ClearInfo(SdfFieldKeys->TimeSamples);
+        spec->ClearInfo(SdfFieldKeys->Spline);
+    }
+    bool all = true;
+    for (std::size_t i = 0; i < times.size(); ++i) all = attribute.Set(values[i], UsdTimeCode(times[i])) && all;
+    return all;
+}
+
 std::vector<UsdAttribute> animatedAttributes(const UsdPrim& prim) {
     std::vector<UsdAttribute> result;
     if (!prim) return result;
