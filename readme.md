@@ -9,6 +9,11 @@ Milestone M0 (repository & build bootstrap) is in progress: the app builds and
 launches an empty window on Windows. See [docs/PLAN.md](docs/PLAN.md) for the
 full requirements, architecture guidelines, open questions, and milestone plan.
 
+## Scripting
+
+Scripts and plugins are Python. [Scripting usdcc from VS Code](docs/EDITORS.md) says how to write, run and debug
+them in the running app.
+
 ## Technical Stack
 
 - C++20

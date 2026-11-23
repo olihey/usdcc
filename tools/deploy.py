@@ -85,6 +85,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
 import usd_licenses  # noqa: E402
+import build_vsix  # noqa: E402
 from _common import (  # noqa: E402
     CONFIGURATIONS, MACOS, REPO, VS_ARCH, WINDOWS, cache_on, cache_value, copy_file, copy_tree, fail, remove_tree,
     vcpkg_triplet, warn)
@@ -290,6 +291,8 @@ def main(argv=None):
                         help="the OpenUSD install to take OpenUSD's files from (default: the one the build was "
                              "configured with). usdcc is compiled against that one, so another one gets a "
                              "warning: it may not run with it")
+    parser.add_argument("--require-vsix", action="store_true",
+                        help="fail without the VS Code extension (no npm, say), rather than warn; for releases")
     parser.add_argument("--clean", action="store_true",
                         help="delete the destination folder first, whatever it holds; without it only an earlier "
                              "deploy is replaced, and any other non-empty folder is refused")
@@ -519,6 +522,7 @@ def main(argv=None):
 
     _deploy_debugpy(debugpy_dir, deploy_dir, args)
     _deploy_stubs(deploy_dir, args)
+    _deploy_vsix(deploy_dir, args)
 
     # --- plugins --------------------------------------------------------------
 
@@ -718,6 +722,22 @@ def _deploy_stubs(deploy_dir, args):
             copy_file(metadata, folder)
     else:
         warn(f"No types for editors in the build ('{stubs}'): the deploy works, but Set Up VS Code in it doesn't.")
+
+
+def _deploy_vsix(deploy_dir, args):
+    """tools/vscode/usdcc.vsix, the VS Code extension Set Up VS Code offers. Not with Blender mesh tools, as debugpy."""
+    if args.with_blender_mesh_tools:
+        return
+    try:
+        vsix = build_vsix.build()
+    except build_vsix.VsixError as error:
+        if args.require_vsix:
+            fail(f"No VS Code extension: {error}")
+        warn(f"No VS Code extension ({error}): the deploy works, but Set Up VS Code in it can't offer it.")
+        return
+    print("  VS Code extension", flush=True)
+    (deploy_dir / "tools/vscode").mkdir(parents=True, exist_ok=True)
+    copy_file(vsix, deploy_dir / "tools/vscode")
 
 
 def _pyside_licences(pyside_dir, python_exe, licenses_dir, sources):
@@ -993,6 +1013,7 @@ def deploy_linux(args):
                  f"needs a {name} on PATH.")
     _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), deploy_dir, args)
     _deploy_stubs(deploy_dir, args)
+    _deploy_vsix(deploy_dir, args)
 
     # --- plugins, preview, SDK ------------------------------------------------
 

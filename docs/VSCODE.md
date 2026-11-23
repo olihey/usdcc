@@ -4,8 +4,8 @@ Write usdcc scripts and plugins in VS Code, and run and debug them in the runnin
 server in usdcc, type stubs, `debugpy`, and a thin extension on top.
 
 **Status:** planned 2026-11-16, updated 2026-11-23. Phase 0, the spikes, is done (§9), and
-**phases 1 to 5, all but shipping it,
-are built** (§12 to §16). Facts marked *checked* were
+**phases 1 to 6 are built**
+(§12 to §17). How to use it is in [EDITORS.md](EDITORS.md). Facts marked *checked* were
 looked up on one of those days; everything else is expected, and §9 says what was tried.
 
 **What the update changed:**
@@ -348,7 +348,7 @@ Sizes are estimates: S is about one session, M a few, L several.
 | **3. Debugging (done 2026-11-23, §14)** | M | 0; the test, `debugListen` and Attach need 1 and 2, as does F5 | Bundled `debugpy`, `usdcc.debug`, the menu entry, `debugListen`, Attach, then starting usdcc (F5) | A small debug-protocol client in the tests: attach, set a breakpoint, run a script over the link, see it stop there, continue, and the app still exits with code 0. By hand: a breakpoint in a plugin's menu action, and F5 from nothing |
 | **4. Completion (done 2026-11-23, §15)** | L | 0; Set Up Workspace needs 2 | Type hints in `src/python/usdcc`, `_usdcc_app.pyi` and its test, the `pxr` and PySide6 stubs, **Set Up VS Code…**, **Open in VS Code**, Set Up Workspace | Pyright from the command line over the example plugin and a sample script, with the written settings: no unresolved imports, and `usdcc.usd.current_stage()` is a `Usd.Stage`. By hand: completion in VS Code |
 | **5. Plugin workflow (done 2026-11-23, §16)** | M | 2 | §6.2 except F5: templates, the manifest schema, Problems, the Plugins view, Stop, snippets | Every manifest here passes the schema; a stopped endless loop leaves a "(failed)" step; the extension's tests. By hand: a working panel within five minutes of installing |
-| **6. Shipping** | S | 2; best after 3 to 5 | The `.vsix` in the deploy, **Set Up VS Code…** installing it, user documentation | On a clean machine: install usdcc, set up, run and break, with nothing else done by hand |
+| **6. Shipping (done 2026-11-23, §17)** | S | 2; best after 3 to 5 | The `.vsix` in the deploy, **Set Up VS Code…** installing it, user documentation | On a clean machine: install usdcc, set up, run and break, with nothing else done by hand |
 | **7. Later** | L | 5 | §6.3, chosen one by one | Each with its own plan |
 
 0, 1, 2 in order. 3 and 4 can go alongside 2, apart from what needs it. **The first version worth
@@ -567,3 +567,21 @@ manifest's problems as it's typed. 20 Node tests.
 
 **Not tested:** the Plugins view's buttons, the Stop button and New Plugin's questions by hand, and the app's new dialog; a tool's drag;
 stopping while a debugger is paused; "a working panel within five minutes of installing", which needs phase 6; Linux and macOS.
+
+## 17. Phase 6, as built
+
+- **`tools/build_vsix.py`** makes `build/vscode/usdcc.vsix` with the pinned tools, its version usdcc's release number, so a
+  release's replaces the one before.
+- **The deploy** has it as `tools\vscode\usdcc.vsix`. Without npm it warns; `--require-vsix` fails instead, which `release.yml` uses, with
+  Node set up before. Not with Blender mesh tools, as `debugpy`.
+- **Set Up VS Code…** offers **Install Extension** when VS Code hasn't this version of it. VS Code's own command installs it, in
+  the background, and a toast says how it went.
+- **[EDITORS.md](EDITORS.md)** is the user's guide, linked from the readme.
+
+**Tested on Windows x64:** a deployed usdcc installing the extension from its dialog, into an extensions folder of its own, and not offering
+it again. The whole of `npm run e2e` with that deploy and its `.vsix` installed in a fresh VS Code profile (`VSIX=`), besides Microsoft's
+Python extensions. An update: a whole deploy, packed with Velopack under another id and installed, its types set up, a debugger allowed, and
+VS Code open on a workspace with them. The update finished with exit code 0, and VS Code's processes went on.
+
+**Not tested:** `release.yml`'s new steps, which the next release runs first; a machine that never had usdcc or VS Code; a user making a
+panel within five minutes; Linux and macOS; the update with VS Code's debugger attached as usdcc quits.
