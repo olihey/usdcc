@@ -1,6 +1,7 @@
 #include "usdcc/scripting/editor_setup.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/version.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/startup_scripts.h"
@@ -203,6 +204,50 @@ QString findVsCode() {
     return {};
 #else
     return QStandardPaths::findExecutable(QStringLiteral("code"));
+#endif
+}
+
+QString extensionFile() {
+    const QString file = QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../tools/vscode/usdcc.vsix"));
+    return QFileInfo::exists(file) ? file : QString();
+}
+
+bool isExtensionInstalled() {
+    // VS Code's own way to say where, else where it puts them.
+    const QString set = qEnvironmentVariable("VSCODE_EXTENSIONS");
+    const QDir folder(set.isEmpty() ? QDir::homePath() + QStringLiteral("/.vscode/extensions") : set);
+    return folder.exists(QStringLiteral("usdcc.usdcc-%1").arg(QLatin1String(usdcc::core::releaseNumber())));
+}
+
+void installExtension(QObject* context, const std::function<void(bool, const QString&)>& done) {
+    const QString code = findVsCode();
+    const QString file = extensionFile();
+    if (code.isEmpty() || file.isEmpty()) {
+        done(false, code.isEmpty() ? QCoreApplication::translate("EditorSetup", "VS Code wasn't found.")
+                                   : QCoreApplication::translate("EditorSetup", "This usdcc comes without the extension."));
+        return;
+    }
+    auto* process = new QProcess(context);
+    process->setProcessChannelMode(QProcess::MergedChannels);
+    process->setWorkingDirectory(QDir::homePath());  // not the install, which an update replaces
+    QObject::connect(process, &QProcess::finished, context, [process, done](int exitCode, QProcess::ExitStatus status) {
+        const QString said = QString::fromLocal8Bit(process->readAll()).trimmed();
+        process->deleteLater();
+        done(status == QProcess::NormalExit && exitCode == 0, said);
+    });
+    QObject::connect(process, &QProcess::errorOccurred, context, [process, done](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        process->deleteLater();
+        done(false, process->errorString());
+    });
+#if defined(_WIN32)
+    // Its command is a batch file, which only cmd runs: the outer quotes are cmd's own.
+    const QString command = QDir::toNativeSeparators(QFileInfo(code).absolutePath() + QStringLiteral("/bin/code.cmd"));
+    process->setProgram(qEnvironmentVariable("ComSpec", QStringLiteral("cmd.exe")));
+    process->setNativeArguments(QStringLiteral("/d /s /c \"\"%1\" --install-extension \"%2\" --force\"").arg(command, QDir::toNativeSeparators(file)));
+    process->start();
+#else
+    process->start(code, {QStringLiteral("--install-extension"), file, QStringLiteral("--force")});
 #endif
 }
 
