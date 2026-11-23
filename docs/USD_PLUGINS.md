@@ -509,6 +509,22 @@ Three sets, decided by licence:
      after this one too, and `build.yml` warns that it is missing until then.*
 4. **The OpenUSD flags** of §6, tried locally first, then one `deps-usd.yml` run. Done when
    the new asset and every pack are published and `build.yml` is green.
+   *Tried locally on Windows (2026-11-23); the pin has them, and no workflow has run.*
+   - *The flags: `--onetbb`, `--openvdb`, `--alembic` and `--draco`. `tools/build_usd.py`
+     built the pinned commit with them, with the pin's patches and no new one, into a
+     folder of its own: oneTBB 2021.12 (`tbb12.dll`), OpenVDB 10.1, Alembic 1.8.5 (Ogawa
+     only, no `--hdf5`), Draco 1.5.6, beside what the asset had. `usdAbc`, `usdDraco` and
+     `hioOpenVDB` register; `usdcat` wrote the test scene as `.abc` and read it back.*
+   - *usdcc against it: a clean build, and all twelve test programs pass, the Blender mesh
+     tools' among them. oneTBB changes the ABI of everything built on OpenUSD, which is why
+     every pack is built again after it.*
+   - *Changed with it: `tools/ci/usd_asset.py` no longer adds a second `--onetbb` on Windows
+     ARM64, and `tools/blender_distribution.py` knows oneTBB's `tbb12.dll` and its
+     `oneTBB-<version>` source folder for the notices.*
+   - *Not done: Linux (the same flags, in `deps-usd.yml`'s Linux job), the workflow run, and
+     the packs built again. Until `deps-usd.yml` has published the new asset, `build.yml`
+     fails, saying to run it: so the order is merge, run `deps-usd.yml`, then
+     `deps-usd-plugins.yml`.*
 5. **Cycles**, after phase 4 has given the asset oneTBB and OpenVDB (§3, §6).
    1. A local build on Windows against that asset, CPU only: which Embree it uses, and
       the list of what hdCycles loads from Blender's libraries.
@@ -650,7 +666,7 @@ Three sets, decided by licence:
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Arnold's `EULA.txt` allows shipping even the core inside an application, on conditions (§5); Autodesk's general Terms of Use and the FBX SDK's licence are still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
-| 5 | Switch OpenUSD to oneTBB? | Yes if a local build of usdcc and its tests pass with it, since Cycles and Adobe expect it. Cycles waits for it (§7 phase 5) |
+| 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
 | 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |
 | 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | Unknown; phase 9 step 1 answers it. If Embree or TBB don't fit, MoonRay waits for §6's `--onetbb` and an Embree 4 in the asset |
