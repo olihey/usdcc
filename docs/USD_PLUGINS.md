@@ -523,6 +523,31 @@ Three sets, decided by licence:
 5. **Cycles**, after phase 4 has given the asset oneTBB and OpenVDB (§3, §6).
    1. A local build on Windows against that asset, CPU only: which Embree it uses, and
       the list of what hdCycles loads from Blender's libraries.
+      *Done (2026-11-23), against phase 4's OpenUSD built locally:*
+      - *The build. `blender/cycles` at `3eb35f859`, with Blender's precompiled
+        `lib/windows_x64` already fetched (7.1 GB), configured with `-DPXR_ROOT=<OpenUSD>`
+        and the GPU devices off: OSL and NanoVDB switch themselves off ("not part of the USD
+        package"). One thing was needed: OpenVDB comes from OpenUSD now, and its headers
+        include boost, which Cycles doesn't put on the include path; the build adds
+        OpenUSD's `include/boost-1_86` (here through MSVC's `CL` variable, since Cycles sets
+        `CMAKE_CXX_FLAGS` itself). A pin would pass it as a CMake argument or a patch.*
+      - *What hdCycles loads: TBB (`tbb12.dll`), OpenImageIO, OpenColorIO, OpenVDB and
+        OpenUSD's own libraries from the asset, and from Blender's libraries only
+        `OpenImageDenoise.dll` (with its `_core` and `_device_cpu` DLLs; the CUDA, HIP and
+        SYCL ones load only for those devices). So oneTBB in the asset was the right order.*
+      - *Embree: none. hdCycles links Blender's `embree4.lib`, but nothing defines
+        `WITH_EMBREE`, and Cycles builds its own BVH ("Using BVH2 layout"). That avoids two
+        `embree4.dll`s in one process (OpenUSD's 4.3.3 and Blender's), and costs some CPU
+        speed. Turning it on means one Embree for both, OpenUSD's.*
+      - *Rendering: `cycles.exe` from the same build rendered a test scene through
+        hdCycles on the CPU in 0.1 s at 480×320 (32 samples): the ground mesh and the
+        lights, but **not the Sphere and the Cube**. Gatling had the same gap and
+        `gatling-implicit-surfaces.patch` fills it; Cycles needs the same (OpenUSD's
+        implicit-surface scene index for its delegate). In usdcc, "Cycles" is among the
+        viewport's renderers and switching to it works; the viewport's picture couldn't be
+        read from a script here (its window grab showed other panels), so it isn't checked.*
+      - *Install: 126 MB, of which the GPU kernels' sources and the redistributable
+        runtime DLLs are most; a pack takes `hydra/` and the OpenImageDenoise DLLs.*
    2. `deps/usd-plugins/cycles.json` (`win64` and `linux-x64`, `optional`,
       `"publish": false`). The pack check renders a small scene on the CPU and fails on a
       library the pin doesn't list (§5). The pack builds the Material Editor's
