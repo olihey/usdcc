@@ -33,8 +33,9 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -157,66 +158,126 @@ core::Signal<const std::string&>::Connection& settingsConnection() {
     return connection;
 }
 
-// What the window shows of downloads: the one running now, and how many are.
-class StatusActivity : public usdcc::assets::ActivityListener {
+// What the window shows of downloads: one summary, refreshed a few times a second however
+// many files there are. The downloading threads only count; a timer of the UI's shows it.
+class StatusActivity : public usdcc::assets::ActivityListener, public std::enable_shared_from_this<StatusActivity> {
 public:
-    explicit StatusActivity(QMainWindow* window) : m_window(window) {}
+    // On the UI thread. The timer is the window's, so nothing is shown once that is gone.
+    void attach(QMainWindow* window) {
+        m_timer = new QTimer(window);
+        m_timer->setInterval(kRefresh);
+        QObject::connect(m_timer, &QTimer::timeout, window, [self = weak_from_this(), window]() {
+            if (const auto activity = self.lock()) activity->refresh(window);
+        });
+    }
 
     void started(const std::string& url) override {
-        ++m_running;
-        show(url, 0, 0);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_running.emplace(url, Amount{});
+        m_latest = url;
+        if (m_active) return;
+        // The first of a batch: the only one the UI thread hears of by itself.
+        m_active = true;
+        m_files = 0;
+        m_failed = 0;
+        m_bytes = 0;
+        if (!qApp) return;
+        QMetaObject::invokeMethod(
+            qApp,
+            [self = weak_from_this()]() {
+                const auto activity = self.lock();
+                if (activity && activity->m_timer) activity->m_timer->start();
+            },
+            Qt::QueuedConnection);
     }
     bool advanced(const std::string& url, uint64_t done, uint64_t total) override {
-        // Not every call: they come many times a second.
-        if (done >= m_lastShown + 1024 * 1024 || (total && done == total)) {
-            m_lastShown = done;
-            show(url, done, total);
-        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto found = m_running.find(url);
+        if (found != m_running.end()) found->second = {done, total};
         return true;
     }
     void finished(const std::string& url, usdcc::assets::Status status) override {
-        m_lastShown = 0;
-        const int left = --m_running;
-        QPointer<QMainWindow> window = m_window;
-        const QString name = QFileInfo(QString::fromStdString(url)).fileName();
-        const bool failed = status != usdcc::assets::Status::Ok;
-        QMetaObject::invokeMethod(
-            m_window,
-            [window, name, left, failed]() {
-                if (!window) return;
-                if (failed) {
-                    window->statusBar()->showMessage(QObject::tr("Couldn't download %1").arg(name), 5000);
-                } else if (left <= 0) {
-                    window->statusBar()->showMessage(QObject::tr("Downloaded %1").arg(name), 2000);
-                }
-            },
-            Qt::QueuedConnection);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto found = m_running.find(url);
+        if (found != m_running.end()) {
+            if (status == usdcc::assets::Status::Ok) m_bytes += found->second.done;
+            m_running.erase(found);
+        }
+        if (status == usdcc::assets::Status::Ok) {
+            ++m_files;
+        } else {
+            ++m_failed;
+            m_lastFailed = url;
+        }
+        m_lastFinished = std::chrono::steady_clock::now();
     }
 
 private:
-    void show(const std::string& url, uint64_t done, uint64_t total) {
-        QPointer<QMainWindow> window = m_window;
-        const QString name = QFileInfo(QString::fromStdString(url)).fileName();
-        const int running = m_running.load();
-        QMetaObject::invokeMethod(
-            m_window,
-            [window, name, done, total, running]() {
-                if (!window) return;
-                QString text = QObject::tr("Downloading %1").arg(name);
-                if (total) {
-                    text += QObject::tr(" (%1 of %2 MB)").arg(double(done) / 1048576.0, 0, 'f', 1).arg(double(total) / 1048576.0, 0, 'f', 1);
-                } else if (done) {
-                    text += QObject::tr(" (%1 MB)").arg(double(done) / 1048576.0, 0, 'f', 1);
-                }
-                if (running > 1) text += QObject::tr(", %1 more").arg(running - 1);
-                window->statusBar()->showMessage(text, 10000);
-            },
-            Qt::QueuedConnection);
+    static constexpr std::chrono::milliseconds kRefresh{200};
+    // USD asks for one file after another: a pause shorter than this doesn't end a batch.
+    static constexpr std::chrono::milliseconds kBatchEnds{1000};
+
+    struct Amount {
+        uint64_t done = 0;
+        uint64_t total = 0;
+    };
+
+    static QString nameOf(const std::string& url) { return QFileInfo(QString::fromStdString(url)).fileName(); }
+    static QString megabytes(uint64_t bytes) { return QString::number(double(bytes) / 1048576.0, 'f', 1); }
+
+    void refresh(QMainWindow* window) {
+        QString text;
+        int timeout = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_running.empty() && std::chrono::steady_clock::now() - m_lastFinished >= kBatchEnds) {
+                m_active = false;
+                m_timer->stop();
+                text = endText();
+                timeout = m_failed ? 5000 : 2000;
+            } else {
+                text = runningText();
+            }
+        }
+        window->statusBar()->showMessage(text, timeout);
     }
 
-    QPointer<QMainWindow> m_window;
-    std::atomic<int> m_running{0};
-    std::atomic<uint64_t> m_lastShown{0};
+    // Both with m_mutex held.
+    QString runningText() const {
+        if (m_files + m_failed == 0 && m_running.size() == 1) {
+            const auto& [url, amount] = *m_running.begin();
+            QString text = QObject::tr("Downloading %1").arg(nameOf(url));
+            if (amount.total) {
+                text += QObject::tr(" (%1 of %2 MB)").arg(megabytes(amount.done), megabytes(amount.total));
+            } else if (amount.done) {
+                text += QObject::tr(" (%1 MB)").arg(megabytes(amount.done));
+            }
+            return text;
+        }
+        uint64_t bytes = m_bytes;
+        for (const auto& [url, amount] : m_running) bytes += amount.done;
+        QString text = QObject::tr("Downloading: %1 files done, %2 running (%3 MB)")
+                           .arg(QString::number(m_files), QString::number(m_running.size()), megabytes(bytes));
+        if (m_failed) text += QObject::tr(", %1 failed").arg(m_failed);
+        return text + QStringLiteral(", ") + nameOf(m_latest);
+    }
+    QString endText() const {
+        if (m_failed == 1) return QObject::tr("Couldn't download %1").arg(nameOf(m_lastFailed));
+        if (m_failed) return QObject::tr("Couldn't download %1 files, the last %2").arg(QString::number(m_failed), nameOf(m_lastFailed));
+        if (m_files == 1) return QObject::tr("Downloaded %1").arg(nameOf(m_latest));
+        return QObject::tr("Downloaded %1 files (%2 MB)").arg(QString::number(m_files), megabytes(m_bytes));
+    }
+
+    QPointer<QTimer> m_timer;  // only the UI thread's
+    std::mutex m_mutex;
+    bool m_active = false;  // from a batch's first file until the timer sees its end
+    std::multimap<std::string, Amount> m_running;
+    std::string m_latest;
+    std::string m_lastFailed;
+    int m_files = 0;
+    int m_failed = 0;
+    uint64_t m_bytes = 0;
+    std::chrono::steady_clock::time_point m_lastFinished;
 };
 
 }  // namespace
@@ -297,7 +358,9 @@ void defineAssetSettings(core::Settings& settings) {
 }
 
 void installAssetActivity(QMainWindow* window) {
-    usdcc::assets::setActivityListener(std::make_shared<StatusActivity>(window));
+    const auto activity = std::make_shared<StatusActivity>();
+    activity->attach(window);
+    usdcc::assets::setActivityListener(activity);
     // Asked from whichever thread resolves, which may be one the UI thread waits for:
     // so no question, but a note, once per host, and no.
     usdcc::assets::setHostCallback([](const std::string& host) {
