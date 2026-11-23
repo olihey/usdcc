@@ -96,6 +96,8 @@ BUILD_ONLY_FILES = ["*.pdb", "*.lib", "*.exp", "*.ilk"]
 # The examples sit apart, so they don't load unless asked: usdcc.cmd --plugin-path
 # examples\plugins, or Settings > Plugins.
 SHIPPED_PLUGINS = ["vray_render"]
+# PySide6's headers, typesystems and import libraries, only for building bindings.
+PYSIDE_BUILD_ONLY = ["__pycache__", "include", "typesystems", "glue", "lib", "doc", "scripts"]
 # Built ones, from build/plugins: Jolt Physics, with Jolt's library and licence in its
 # folder (docs/PHYSICS.md section 4.1). MIT, so in every artifact. And the protocols of
 # remote assets, http, webdav and s3 (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
@@ -479,12 +481,10 @@ def main(argv=None):
 
     if has_pyside:
         print("  Python packages: PySide6, shiboken6", flush=True)
-        # Headers, typesystems and import libraries are only for building bindings.
-        pyside_build_only = ["__pycache__", "include", "typesystems", "glue", "lib", "doc", "scripts"]
         copy_tree(Path(pyside_dir) / "PySide6", site_packages / "PySide6",
-                  exclude_files=BUILD_ONLY_FILES + ["rcc.exe", "uic.exe"], exclude_dirs=pyside_build_only)
+                  exclude_files=BUILD_ONLY_FILES + ["rcc.exe", "uic.exe"], exclude_dirs=PYSIDE_BUILD_ONLY)
         copy_tree(Path(pyside_dir) / "shiboken6", site_packages / "shiboken6",
-                  exclude_files=BUILD_ONLY_FILES, exclude_dirs=pyside_build_only)
+                  exclude_files=BUILD_ONLY_FILES, exclude_dirs=PYSIDE_BUILD_ONLY)
     else:
         warn(f"No PySide6 in '{pyside_dir}' (tools/build_pyside.py): the deploy works, but scripts can't make panels.")
 
@@ -607,22 +607,7 @@ def main(argv=None):
         (licenses_dir / "Python").mkdir(parents=True, exist_ok=True)
         copy_file(python_home / "LICENSE.txt", licenses_dir / "Python")
     if has_pyside:
-        # tools/build_pyside.py copies them in; an older PySide build has them in
-        # pyside-setup's checkout.
-        pyside_licenses = [folder for folder in (Path(pyside_dir) / "LICENSES", REPO / "external/pyside-setup/LICENSES")
-                           if folder.is_dir()]
-        if pyside_licenses:
-            copy_tree(pyside_licenses[0], licenses_dir / "PySide6")
-        else:
-            warn(f"No PySide6 licences in '{pyside_dir}\\LICENSES': run tools/build_pyside.py again.")
-        pyside_version = subprocess.run(
-            [python_exe, "-I", "-c",
-             "import sys; sys.path.insert(0, sys.argv[1]); import PySide6; print(PySide6.__version__)", pyside_dir],
-            capture_output=True, text=True).stdout.strip()
-        if pyside_version:
-            sources.append(f"PySide6 and shiboken6 {pyside_version}, built by tools/build_pyside.py "
-                           "(https://github.com/olihey/usdcc)")
-            sources.append(f"  source:     https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v{pyside_version}")
+        _pyside_licences(pyside_dir, python_exe, licenses_dir, sources)
     qwindowkit = REPO / "external/qwindowkit/LICENSE"
     if qwindowkit.is_file():
         (licenses_dir / "QWindowKit").mkdir(parents=True, exist_ok=True)
@@ -695,6 +680,26 @@ def main(argv=None):
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with "
           f"{'usdcc.exe' if has_launcher else 'usdcc.cmd'} or bin\\usdcc.exe.")
+
+
+def _pyside_licences(pyside_dir, python_exe, licenses_dir, sources):
+    """PySide6's licence texts, and its lines in SOURCES.txt."""
+    # tools/build_pyside.py copies them in; an older PySide build has them in
+    # pyside-setup's checkout.
+    pyside_licenses = [folder for folder in (Path(pyside_dir) / "LICENSES", REPO / "external/pyside-setup/LICENSES")
+                       if folder.is_dir()]
+    if pyside_licenses:
+        copy_tree(pyside_licenses[0], licenses_dir / "PySide6")
+    else:
+        warn(f"No PySide6 licences in '{Path(pyside_dir) / 'LICENSES'}': run tools/build_pyside.py again.")
+    pyside_version = subprocess.run(
+        [python_exe, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import PySide6; print(PySide6.__version__)", pyside_dir],
+        capture_output=True, text=True).stdout.strip()
+    if pyside_version:
+        sources.append(f"PySide6 and shiboken6 {pyside_version}, built by tools/build_pyside.py "
+                       "(https://github.com/olihey/usdcc)")
+        sources.append(f"  source:     https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v{pyside_version}")
 
 
 # --- Linux --------------------------------------------------------------------
@@ -839,8 +844,10 @@ def deploy_linux(args):
     uv_exe = cache_value(BUILD_DIR, "USDCC_UV_EXE_PATH")
     pyside_dir = cache_value(BUILD_DIR, "USDCC_PYSIDE_DIR")
     has_pyside = bool(pyside_dir) and os.path.isfile(os.path.join(pyside_dir, "PySide6/__init__.py"))
-    if has_pyside:
-        warn("PySide6 isn't deployed on Linux yet: the deploy works, but scripts can't make panels.")
+    if not has_pyside:
+        warn(f"No PySide6 in '{pyside_dir}' (tools/build_pyside.py): the deploy works, but scripts can't make panels.")
+    elif args.with_blender_mesh_tools:
+        has_pyside = False  # not in that configuration's Linux review (docs/BLENDER_LINUX_DISTRIBUTION_REVIEW.md)
 
     # --- the destination ------------------------------------------------------
 
@@ -912,8 +919,20 @@ def deploy_linux(args):
     os.symlink(f"python{python_version}", bin_dir / "python3")
 
     print("  Python packages: usdcc, pxr", flush=True)
-    _copy_linux_tree(package_dir, site_packages / "usdcc", exclude_dirs=["__pycache__"])
+    # usdcc.ui's module loads PySide6's libraries.
+    _copy_linux_tree(package_dir, site_packages / "usdcc", exclude_files=[] if has_pyside else ["_ui.so"],
+                     exclude_dirs=["__pycache__"])
     _copy_linux_tree(usd_python, site_packages, exclude_dirs=["__pycache__"])
+    if has_pyside:
+        print("  Python packages: PySide6, shiboken6", flush=True)
+        for package in ("PySide6", "shiboken6"):
+            # Their libraries (libpyside6, libshiboken6) go with the others in lib, and
+            # Qt is the one there: a second one in the process would be another Qt.
+            folder = Path(pyside_dir) / package
+            _copy_linux_tree(folder, site_packages / package, exclude_files=LINUX_BUILD_ONLY_FILES + ["lib*.so*"],
+                             exclude_dirs=PYSIDE_BUILD_ONLY)
+            for library in folder.glob("lib*.so*"):
+                shutil.copy2(library, lib_dir / library.name)
 
     # --- tools ----------------------------------------------------------------
 
@@ -932,8 +951,7 @@ def deploy_linux(args):
     # --- plugins, preview, SDK ------------------------------------------------
 
     print("  Shipped and example plugins", flush=True)
-    # V-Ray Render's panel is PySide6, which Linux doesn't deploy yet: shipped, it
-    # would fail at every start. It stays out until then.
+    # V-Ray Render's panel is PySide6: shipped without it, it would fail at every start.
     shipped = _shipped(SHIPPED_PLUGINS) if has_pyside and not args.with_blender_mesh_tools else []
     if not has_pyside and _shipped(SHIPPED_PLUGINS):
         warn(f"Without PySide6, {', '.join(_shipped(SHIPPED_PLUGINS))} isn't shipped: it needs it.")
@@ -998,13 +1016,15 @@ def deploy_linux(args):
         warn(f"No licences of OpenUSD's dependencies in '{usd_install}/licenses' (tools/build_usd.py collects "
              "them): the deploy works, but can't be distributed as it is.")
     sources = [
-        "Where the source of each library in this folder is. The LGPL ones (Qt and Qt Advanced Docking",
-        "System) are separate shared libraries, which you may replace with your own builds of the same",
-        "version.",
+        "Where the source of each library in this folder is. The LGPL ones (Qt, Qt Advanced Docking",
+        "System, PySide6 and shiboken6) are separate shared libraries, which you may replace with your",
+        "own builds of the same version.",
         "",
     ]
     _vcpkg_licences(licenses_dir, sources)
     sources += pack_sources
+    if has_pyside:
+        _pyside_licences(pyside_dir, python_exe, licenses_dir, sources)
     python_licence = next((file for file in (python_stdlib / "LICENSE.txt",
                                              Path(f"/usr/share/doc/python{python_version}/copyright"))
                            if file.is_file()), None)
@@ -1043,6 +1063,8 @@ def deploy_linux(args):
         f"lib/python{python_version}/site-packages/usdcc/_schema_check.py",
         *(f"plugins/{plugin}/usdcc-plugin.json" for plugin in shipped),
         "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
+        *((f"lib/python{python_version}/site-packages/{name}" for name in (
+            "PySide6/__init__.py", "shiboken6/__init__.py", "usdcc/ui.py", "usdcc/_ui.so")) if has_pyside else ()),
         "sdk/UsdccPluginConfig.cmake", "sdk/lib/libusdcc_ui.so", "sdk/include/usdcc/plugin/plugin.h",
         "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
     ]
@@ -1066,8 +1088,9 @@ def deploy_linux(args):
     # site-packages by hand, as the app adds it: Debian's own Python (the build's,
     # when OpenUSD was built with Ubuntu's) only ever puts dist-packages on sys.path.
     python = bin_dir / f"python{python_version}"
+    pyside_import = "import usdcc.ui; " if has_pyside else ""
     check = subprocess.run(
-        [str(python), "-c", f"import sys; sys.path.insert(0, {str(site_packages)!r}); "
+        [str(python), "-c", f"import sys; sys.path.insert(0, {str(site_packages)!r}); {pyside_import}"
                             "import json, math, pxr, usdcc; from pxr import Usd, UsdImagingGL; "
                             "print(json.dumps([sys.prefix, pxr.__file__, usdcc.__file__]))"],
         env=clean, capture_output=True, text=True)

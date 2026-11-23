@@ -341,3 +341,26 @@ usdcc.app.open_view_panel("broken", [s for s in usdcc.usd.stages() if usdcc.usd.
     app.stages.closeStage(stage);
     std::filesystem::remove(file);
 }
+
+// usdcc.ui.set_prim_icon() and prim_icon() (docs/PRIM_ICONS.md phase 2). Here, as usdcc.ui
+// needs PySide6.
+USDCC_TEST(python_prim_icons) {
+    auto& app = pythonTestApp();
+    const auto evaluate = [&app](const std::string& expression) {
+        return app.python.evaluate(expression).value_or("<raised>");
+    };
+    const std::filesystem::path svg = std::filesystem::temp_directory_path() / "usdcc_python_prim_icon.svg";
+    std::ofstream(svg) << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path d=\"M4 4h16v16H4z\" "
+                          "stroke=\"currentColor\" fill=\"none\"/></svg>";
+    const std::string path = svg.generic_string();
+    CHECK(evaluate("__import__('usdcc.ui').ui.prim_icon('Cube')") == "cube", "a built-in icon's name");
+    CHECK(app.python.runString("import usdcc.ui\nusdcc.ui.set_prim_icon('PipelineThing', r'" + path + "')\n"), "set");
+    CHECK(evaluate("__import__('usdcc.ui').ui.prim_icon('PipelineThing')") == "file:" + path, "the file's");
+    CHECK(app.python.runString("import usdcc.ui\nusdcc.ui.set_prim_icon('PipelineThing', None)\n") &&
+              evaluate("__import__('usdcc.ui').ui.prim_icon('PipelineThing')") == "circle-dashed",
+          "and back");
+    CHECK(evaluate("__import__('usdcc.ui').ui.set_prim_icon('X', 'C:/no/such/icon.svg')") == "<raised>",
+          "a file that isn't there raises");
+    std::error_code error;
+    std::filesystem::remove(svg, error);
+}

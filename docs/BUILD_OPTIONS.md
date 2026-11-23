@@ -109,14 +109,15 @@ them.
 | Phase | What | Done when |
 |---|---|---|
 | **1. The mechanism** | `usdcc_feature()`, the generated header and `features.json`, the plugin manager's refusal, About's Features section. Remote support is its first user ([REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) phase 1) | A build with `USDCC_BUILD_REMOTE_SUPPORT=OFF` has no plugin, refuses a copied one, and About says "Left out of this build" |
-| **2. The plugins** | Viewport Broadcast, `http`, `webdav`, `s3`, Jolt, V-Ray, RTX (with the alias), Blender mesh tools; `deploy.py` reads `features.json` | Each one off builds, deploys and starts; CI builds once with all of them off |
+| **2. The plugins** | Viewport Broadcast, `http`, `webdav`, `s3`, Jolt, V-Ray, RTX (with the alias), Blender mesh tools; `deploy.py` reads `features.json` | Each one off builds, deploys and starts; CI builds once with all of them off, after a merge (§8) |
 | **3. Updates** *(done, §11)* | `USDCC_BUILD_UPDATES` | Off: no update check, no Help > Check for Updates |
 | **4. Peers** | A plan of its own first | |
 
 ## 8. Testing
 
-- **A CI job with every optional feature off,** so a feature that's off keeps compiling and
-  starting. It doesn't deploy.
+- **A CI step with every optional feature off,** so a feature that's off keeps compiling and
+  starting. It runs on every platform after a merge into `master`, not for pull requests, and
+  doesn't deploy.
 - **Unit tests** for the refusal: a plugin folder with a refused id isn't loaded and is listed as
   left out.
 - Tests of a feature that's off are not built (they live with the feature's tests).
@@ -143,9 +144,9 @@ them.
 | Python | `usdcc.app.build_features()` | `(name, label, included, plugin ids)` per feature |
 | `build/features.json` | The configure | Name, label, included, plugin ids and folders per feature |
 | Deploy | [tools/deploy.py](../tools/deploy.py) | `SHIPPED_PLUGINS` and `SHIPPED_NATIVE_PLUGINS` stay as the candidates; those whose feature is off aren't copied or required, on Windows and Linux. They're still kept out of `examples/`, so a left-out plugin doesn't come back as an example. RTX follows its feature, and `--omit-rtx` still leaves it out |
-| `tools/build.py --without FEATURE` | [tools/build.py](../tools/build.py) | Repeatable; every run passes each default-on feature as on or off, so a build without `--without` has them all again. Without Blender mesh tools it doesn't fetch their backend |
+| `tools/build.py --without FEATURE` | [tools/build.py](../tools/build.py) | Repeatable, or `--without all`; every run passes each default-on feature as on or off, so a build without `--without` has them all again. Without Blender mesh tools it doesn't fetch their backend |
 | Tests | `tests/CMakeLists.txt` | A feature's tests are built only with it: the physics tests, `physics_timeline_test`, `viewport_broadcast_test`, the V-Ray tests, and each protocol's part of `assets_net_test.cpp` (`#ifdef` on its directory). `python_physics` checks `USDCC_FEATURE_PHYSICS_JOLT` |
-| CI | `build.yml`, Windows x64 | After the usual build and tests, the same build with every default-on feature left out, and `usdcc_node --version` must list seven left out. Not deployed, its tests not run |
+| CI | `build.yml`, Windows and Linux, x64 and arm64 | On pushes to `master` only, not for pull requests: after the usual build and tests, the same build with `--without all --without-rtx`. [check_features_left_out.py](../tools/ci/check_features_left_out.py) then fails if `features.json` has a feature included, or `usdcc_node --version` doesn't list each as left out. Not deployed, its tests not run |
 
 Tests: `plugin_left_out_of_the_build` (`usdcc_python_tests`: the features, a copied plugin of a
 left-out feature refused with its dependent, its code never run, no reload), `about_dialog`
@@ -169,8 +170,8 @@ plugin: it's in the app.
   uses the 7z or `deploy.py` as before.
 - **Not the same as `USDCC_VELOPACK=OFF`**, which leaves Velopack out altogether (no launcher, no
   installer), but keeps Help > Check for Updates, which then opens the releases page.
-- **CI's build with every feature left out** now also leaves out Updates, and expects eight
-  features left out.
+- **CI's build with every feature left out** (`--without all`, after a merge) leaves out Updates
+  too, as it's in `build.py`'s list.
 
 Tests: `plugin_left_out_of_the_build` (Updates is a feature with no plugin ids, included as
 configured). A build without it is CI's, as for §10.

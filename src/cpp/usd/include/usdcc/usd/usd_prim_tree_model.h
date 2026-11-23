@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/signal.h"
 #include "usdcc/core/export.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -109,6 +110,8 @@ Q_SIGNALS:
     void renameRequested(const PXR_NS::SdfPath& path, const std::string& name);
 
 private:
+    // Pipelines' icons changing (prim_icons::setTypeIcon()) redraws them.
+    usdcc::core::Signal<>::Connection m_iconsConnection;
     struct Node {
         PXR_NS::SdfPath path;
         Node* parent = nullptr;

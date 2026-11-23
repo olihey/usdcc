@@ -5,6 +5,7 @@
 
 #include <QEvent>
 #include <QFontMetricsF>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -37,6 +38,8 @@ QString formatFrame(double time) {
 TimeRuler::TimeRuler(QWidget* parent) : QWidget(parent) {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setCursor(Qt::PointingHandCursor);
+    // Focused by a click, for Delete, Ctrl+C and Ctrl+V on the key picked.
+    setFocusPolicy(Qt::ClickFocus);
 }
 
 QSize TimeRuler::sizeHint() const { return usdcc::ui::scaled::size(320, kHeight); }
@@ -72,7 +75,33 @@ void TimeRuler::setTime(double time) {
 void TimeRuler::setKeys(std::vector<double> keys) {
     if (keys == m_keys) return;
     m_keys = std::move(keys);
+    if (m_selectedKey && !m_draggingKey &&
+        std::none_of(m_keys.begin(), m_keys.end(), [this](double key) { return std::abs(key - *m_selectedKey) < 1e-6; })) {
+        m_selectedKey.reset();
+    }
     update();
+}
+
+void TimeRuler::setSelectedKey(std::optional<double> time) {
+    if (time == m_selectedKey) return;
+    m_selectedKey = time;
+    update();
+}
+
+std::optional<double> TimeRuler::keyAt(const QPointF& position) const {
+    // The diamonds sit along the bottom: the lower half, a few pixels either side.
+    if (position.y() < height() / 2.0) return std::nullopt;
+    const TimeAxis& shown = axis();
+    std::optional<double> nearest;
+    double best = pixels(5) + 1.0;
+    for (const double key : m_keys) {
+        const double distance = std::abs(shown.pixelAt(key) - position.x());
+        if (distance <= best) {
+            best = distance;
+            nearest = key;
+        }
+    }
+    return nearest;
 }
 
 const TimeAxis& TimeRuler::axis() const {
@@ -151,13 +180,19 @@ void TimeRuler::paintEvent(QPaintEvent*) {
         QColor key = style::accent();
         key.setAlpha(230);
         p.setBrush(key);
-        for (const double time : m_keys) {
+        const auto picked = [this](double time) { return m_selectedKey && std::abs(time - *m_selectedKey) < 1e-6; };
+        for (const double key : m_keys) {
+            // The one being dragged is drawn where it would go.
+            const double time = m_draggingKey && picked(key) ? m_dragTo : key;
             if (!ordered(range).contains(time)) continue;
             const double x = std::round(shown.pixelAt(time)) + 0.5;
+            const double s = picked(key) ? size + 1.0 : size;
             const double y = bottom - size - 1.0;
-            const QPointF diamond[] = {{x, y - size}, {x + size, y}, {x, y + size}, {x - size, y}};
+            const QPointF diamond[] = {{x, y - s}, {x + s, y}, {x, y + s}, {x - s, y}};
+            p.setPen(picked(key) ? QPen(Qt::white, 1.0) : Qt::NoPen);
             p.drawPolygon(diamond, 4);
         }
+        p.setPen(Qt::NoPen);
         p.setBrush(Qt::NoBrush);
     }
 
@@ -198,6 +233,16 @@ void TimeRuler::mousePressEvent(QMouseEvent* event) {
         QWidget::mousePressEvent(event);
         return;
     }
+    // On a key mark: it's picked, and a drag moves it (phase 3). Elsewhere: a scrub.
+    if (const std::optional<double> key = keyAt(event->position())) {
+        m_selectedKey = key;
+        m_draggingKey = true;
+        m_dragTo = *key;
+        update();
+        event->accept();
+        return;
+    }
+    setSelectedKey(std::nullopt);
     Q_EMIT scrubStarted();
     scrubTo(event->position(), event->modifiers().testFlag(Qt::ShiftModifier));
     m_scrubbing = true;
@@ -205,6 +250,15 @@ void TimeRuler::mousePressEvent(QMouseEvent* event) {
 }
 
 void TimeRuler::mouseMoveEvent(QMouseEvent* event) {
+    if (m_draggingKey) {
+        const double to = clampedTo(axis().frameAt(event->position().x()), axis().range());
+        if (to != m_dragTo) {
+            m_dragTo = to;
+            update();
+        }
+        event->accept();
+        return;
+    }
     if (!m_scrubbing) {
         QWidget::mouseMoveEvent(event);
         return;
@@ -214,6 +268,17 @@ void TimeRuler::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void TimeRuler::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && m_draggingKey) {
+        m_draggingKey = false;
+        const double from = m_selectedKey.value_or(m_dragTo);
+        if (std::abs(m_dragTo - from) > 1e-6) {
+            m_selectedKey = m_dragTo;
+            Q_EMIT keyMoved(from, m_dragTo);
+        }
+        update();
+        event->accept();
+        return;
+    }
     if (event->button() != Qt::LeftButton || !m_scrubbing) {
         QWidget::mouseReleaseEvent(event);
         return;
@@ -221,6 +286,27 @@ void TimeRuler::mouseReleaseEvent(QMouseEvent* event) {
     m_scrubbing = false;
     Q_EMIT scrubFinished();
     event->accept();
+}
+
+void TimeRuler::keyPressEvent(QKeyEvent* event) {
+    if (event->matches(QKeySequence::Paste)) {
+        Q_EMIT keyPasteRequested();
+        event->accept();
+        return;
+    }
+    if (m_selectedKey) {
+        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+            Q_EMIT keyDeleteRequested(*m_selectedKey);
+            event->accept();
+            return;
+        }
+        if (event->matches(QKeySequence::Copy)) {
+            Q_EMIT keyCopyRequested(*m_selectedKey);
+            event->accept();
+            return;
+        }
+    }
+    QWidget::keyPressEvent(event);
 }
 
 }  // namespace usdcc::usd
