@@ -76,6 +76,7 @@ A plugin in your own folder wins over a shipped one with the same id; the other 
 | App events | `usdcc.app.connect(event, callback)`: `selection_changed`, `current_stage_changed`, `stage_opened`, `stage_closed`, `stage_edited`, `viewport_camera_changed` |
 | The viewport's camera | `usdcc.app.active_viewport_camera()`: camera-to-world, field of view, aspect ratio, clipping |
 | Create menu entries | `usdcc.usd.set_create_entry(...)` |
+| Validation rules | `usdcc.validation.rule(...)`, `stage_rule`, `layer_rule` ([VALIDATION.md](VALIDATION.md) §5) |
 | Relationship target rules | `usdcc.usd.set_relationship_targets(...)` |
 | Schemas, render delegates | A folder named in the manifest's `"usd"` |
 | Settings | `plugin.settings.value(key, default)`, `set_value(key, value)`, JSON values, one group per plugin in `usdcc.ini` |

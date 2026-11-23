@@ -1,3 +1,4 @@
+#include <QInputDialog>
 #include <QApplication>
 
 #if USDCC_FEATURE_UPDATES
@@ -69,6 +70,7 @@
 #include "usdcc/scripting/session_controller.h"
 #include "usdcc/scripting/sessions_dialog.h"
 #include "usdcc/scripting/startup_scripts.h"
+#include "usdcc/scripting/validation_rule_files.h"
 #include "usdcc/usd/attributes_view_panel.h"
 #include "usdcc/usd/open_stage_options_dialog.h"
 #include "usdcc/usd/asset_servers_editor.h"
@@ -83,6 +85,7 @@
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/usd/curve_editor_view_panel.h"
 #include "usdcc/usd/dope_sheet_view_panel.h"
+#include "usdcc/usd/validation_view_panel.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
 #include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/schema_library_editor.h"
@@ -418,6 +421,29 @@ int main(int argc, char** argv) {
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::CurveEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
+    // What OpenUSD's validators say about the stage (docs/VALIDATION.md).
+    panelTypes.add(QStringLiteral("validation"), QObject::tr("Validation"),
+                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                   QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::ValidationViewPanel(&stageManager, stage, title, parent);
+                   });
+    usdcc::usd::PrimMenuEntries::instance().add(
+        {"usdcc.validate", QObject::tr("Validate"),
+         [&window, &panelTypes](const usdcc::usd::PrimMenuContext& context) {
+             usdcc::usd::ValidationViewPanel* panel = nullptr;
+             for (auto* each : window.findChildren<usdcc::usd::ValidationViewPanel*>()) {
+                 if (each->currentStage() == context.stage && !each->isClosed()) panel = each;
+             }
+             if (!panel) {
+                 panel = qobject_cast<usdcc::usd::ValidationViewPanel*>(
+                     panelTypes.open(QStringLiteral("validation"), context.stage, window.dockManager(), &window));
+             }
+             if (!panel) return;
+             panel->setAsCurrentTab();
+             panel->raise();
+             panel->run(context.paths);
+         },
+         nullptr});
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -1528,7 +1554,39 @@ int main(int argc, char** argv) {
     // one undo step like Debug > Run Python File. Their output goes to the log.
     const QStringList scripts = commandLine.values(scriptOption);
     const bool runStartup = !commandLine.isSet(noStartupScriptsOption);
-    QObject::connect(&window, &usdcc::ui::MainWindow::layoutSettled, &window, [&python, &scriptRunner, scripts, runStartup]() {
+    // Validation rules in Python files (docs/VALIDATION.md §5.2), before the scripts, which may
+    // run them. --no-plugins leaves them out too: they're the user's code just the same.
+    usdcc::scripting::ValidationRuleFiles ruleFiles(python, usdcc::scripting::ValidationRuleFiles::defaultFolders());
+    const bool loadRules = !commandLine.isSet(noPluginsOption);
+    if (python.isAvailable()) {
+        usdcc::usd::ValidationViewPanel::Hooks hooks;
+        hooks.editRule = [scriptEditor](const QString& file) {
+            scriptEditor->show();
+            scriptEditor->setCollapsed(false);
+            scriptEditor->raise();
+            scriptEditor->openFile(file);
+        };
+        if (loadRules) {
+            hooks.newRule = [&ruleFiles, edit = hooks.editRule](QWidget* parent) {
+                const QString name = QInputDialog::getText(parent, QObject::tr("New Rule"), QObject::tr("Name:"));
+                if (name.trimmed().isEmpty()) return;
+                QString error;
+                const std::filesystem::path file = ruleFiles.create(name, &error);
+                if (file.empty()) {
+                    QMessageBox::warning(parent, QObject::tr("New Rule"), error);
+                } else {
+                    edit(QString::fromStdU16String(file.generic_u16string()));
+                }
+            };
+        }
+        hooks.openFolder = []() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(
+                QString::fromStdU16String(usdcc::scripting::ValidationRuleFiles::userFolder().generic_u16string())));
+        };
+        usdcc::usd::ValidationViewPanel::setHooks(std::move(hooks));
+    }
+    QObject::connect(&window, &usdcc::ui::MainWindow::layoutSettled, &window, [&python, &scriptRunner, &ruleFiles, loadRules, scripts, runStartup]() {
+        if (loadRules) ruleFiles.sync();
         usdcc::scripting::runStartupScripts(python, usdcc::scripting::userScriptsFolder(), runStartup);
         for (const QString& script : scripts) {
             if (!python.isAvailable()) {

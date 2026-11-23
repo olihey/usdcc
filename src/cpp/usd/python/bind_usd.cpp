@@ -13,6 +13,7 @@
 #include "usdcc/usd/schema_info.h"
 #include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/validation_rules.h"
 
 #include <pxr/usd/sdf/path.h>
 
@@ -37,6 +38,36 @@ StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
 
 void bindStageManager(py::module_& m) {
     // Auto-key (docs/ANIMATION.md phase 2): app-wide, off at start.
+    // usdcc/validation.py's rules (docs/VALIDATION.md section 5).
+    m.def(
+        "validation_set_rule",
+        [](const std::string& id, const std::string& registered, const std::string& label, const std::string& doc,
+           const std::vector<std::string>& keywords, const std::vector<std::string>& schemaTypes, const std::string& file,
+           bool mainThread) {
+            validation::Rule rule;
+            rule.name = id;
+            rule.registered = registered;
+            rule.label = label;
+            rule.doc = doc;
+            rule.keywords = keywords;
+            rule.schemaTypes = schemaTypes;
+            rule.file = file;
+            rule.mainThread = mainThread;
+            validation::UserRules::instance().set(std::move(rule));
+        },
+        py::arg("id"), py::arg("registered"), py::arg("label"), py::arg("doc"), py::arg("keywords"),
+        py::arg("schema_types"), py::arg("file"), py::arg("main_thread"));
+    m.def(
+        "validation_remove_rule", [](const std::string& id) { validation::UserRules::instance().remove(id); }, py::arg("id"));
+    m.def(
+        "validation_set_problems",
+        [](const std::vector<std::pair<std::string, std::string>>& problems) {
+            std::vector<validation::UserRules::Problem> list;
+            for (const auto& [file, message] : problems) list.push_back({file, message});
+            validation::UserRules::instance().setProblems(std::move(list));
+        },
+        py::arg("problems"));
+    m.def("validation_run", []() { return validation::UserRules::instance().run(); });
     m.def("auto_key", []() { return anim::autoKey(); });
     m.def("set_auto_key", [](bool on) { anim::setAutoKey(on); }, py::arg("on"));
     py::class_<StageManager>(m, "StageManager")
