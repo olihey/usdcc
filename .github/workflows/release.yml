@@ -1,11 +1,13 @@
 # Builds a GitHub release's Windows 7z and Linux tar.xz and attaches them
 # (docs/RELEASE.md §4): publish a release (or prerelease) with a tag such as
-# 26.12.1, and this builds that tag on each platform, runs the tests, deploys,
-# starts the deploy as a user would, and attaches
-# usdcc-<version>-windows-x64.7z and usdcc-<version>-linux-x64.tar.xz, each
-# with its symbols, and on Windows the installer (usdcc-win-Setup.exe) and the
-# packages installs update from (docs/UPDATES.md). Run it by hand with the tag
-# to rebuild a release whose run failed.
+# 26.12.1, and this builds that tag on each platform, x64 and arm64, runs the
+# tests, deploys, starts the deploy as a user would, and attaches
+# usdcc-<version>-windows-<arch>.7z and usdcc-<version>-linux-<arch>.tar.xz, each
+# with its symbols, and on Windows the installer (usdcc-win-Setup.exe for x64,
+# usdcc-win-arm64-Setup.exe) and the packages installs update from
+# (docs/UPDATES.md). Run it by hand with the tag to rebuild a release whose run
+# failed, or with dry_run to try the branch it's run on: built and packed as for
+# that tag's version, but nothing attached (docs/ARM64_RELEASES.md).
 name: Release
 
 on:
@@ -17,18 +19,40 @@ on:
         description: The release's tag, such as 26.12.1
         required: true
         type: string
+      dry_run:
+        description: Build the branch this runs on, as for the tag's version, and attach nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: write  # attaching the archives
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ github.event.release.tag_name || inputs.tag }}${{ inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: false
 
 jobs:
+  # x64 and arm64, as build.yml's windows job: Visual Studio 2022 on x64, 2026 on
+  # GitHub's windows-11-arm runner, and tools/_common.py picks the triplet and the
+  # assets by the machine. Each is a Velopack channel of its own: x64 keeps win,
+  # the one installs from before arm64 read, and arm64 is win-arm64.
   windows:
-    # Visual Studio 2022, as for build.yml and the deps assets.
-    runs-on: windows-2022
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runner: windows-2022
+            arch: x64
+            triplet: x64-windows
+            channel: ''
+          - name: windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+            triplet: arm64-windows
+            channel: win-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -56,12 +80,13 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=usdcc-$version" >> $env:GITHUB_OUTPUT
-          "archive=usdcc-$version-windows-x64.7z" >> $env:GITHUB_OUTPUT
-          "symbols=usdcc-$version-windows-x64-symbols.7z" >> $env:GITHUB_OUTPUT
+          "archive=usdcc-$version-windows-${{ matrix.arch }}.7z" >> $env:GITHUB_OUTPUT
+          "symbols=usdcc-$version-windows-${{ matrix.arch }}-symbols.7z" >> $env:GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.TAG }}
+          # A dry run builds the branch it was run on.
+          ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
           submodules: recursive
 
       # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
@@ -69,14 +94,53 @@ jobs:
       - name: Fetch vcpkg's full history
         run: git -C external/vcpkg fetch --unshallow --no-tags origin
 
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 assets.
+      # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+
       - name: Name the OpenUSD asset
         id: asset
         run: python tools/ci/usd_asset.py --github-output
 
+      # The Python OpenUSD was built with: its pxrConfig.cmake points at this
+      # exact interpreter, and usdcc embeds the same one.
       - name: Set up Python
+        if: matrix.arch == 'x64'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: x64
+
+      # On the Arm image setup-python can't install the pinned 3.13: the image
+      # ships a newer 3.13, and Python's installer won't put an older one beside
+      # it, even with the image's uninstalled. python.org's NuGet package of the
+      # same version is a plain archive, unpacked where setup-python would put it.
+      - name: Set up Python (arm64, from python.org's NuGet package)
+        if: matrix.arch == 'arm64'
+        run: |
+          $version = '${{ steps.asset.outputs.python }}'
+          $dir = "$env:RUNNER_TOOL_CACHE\Python\$version\arm64"
+          if (-not (Test-Path "$dir\python.exe")) {
+            $zip = "$env:RUNNER_TEMP\pythonarm64.$version.zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/pythonarm64/$version/pythonarm64.$version.nupkg" -OutFile $zip
+            Expand-Archive $zip "$env:RUNNER_TEMP\pythonarm64" -Force
+            New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+            Move-Item "$env:RUNNER_TEMP\pythonarm64\tools" $dir
+            Remove-Item -Recurse -Force $zip, "$env:RUNNER_TEMP\pythonarm64"
+          }
+          & "$dir\python.exe" -m ensurepip --upgrade --default-pip | Select-Object -Last 1
+          if ($LASTEXITCODE) { throw 'ensurepip failed' }
+          # As setup-python does: first on PATH, and where CMake's FindPython looks.
+          Add-Content $env:GITHUB_PATH "$dir\Scripts"
+          Add-Content $env:GITHUB_PATH $dir
+          "pythonLocation=$dir", "Python_ROOT_DIR=$dir", "Python3_ROOT_DIR=$dir" | Add-Content $env:GITHUB_ENV
+          & "$dir\python.exe" -c "import platform, sys; print(sys.version, platform.machine())"
 
       - name: Download OpenUSD
         run: |
@@ -147,7 +211,7 @@ jobs:
         run: |
           python tools/ci/smoke_test.py --deploy "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" `
             --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs `
-            --platform-plugins build\vcpkg_installed\x64-windows\Qt6\plugins\platforms
+            --platform-plugins build\vcpkg_installed\${{ matrix.triplet }}\Qt6\plugins\platforms
 
       # The deploy, in a folder of its own; and the PDBs of usdcc's own
       # programs and libraries, laid out as they are in the deploy, for reading
@@ -193,6 +257,7 @@ jobs:
           }
 
       - name: Attach to the release
+        if: ${{ !inputs.dry_run }}
         run: |
           gh release upload $env:TAG "$env:RUNNER_TEMP\${{ steps.tag.outputs.archive }}" `
             "$env:RUNNER_TEMP\${{ steps.tag.outputs.symbols }}" --clobber --repo $env:GITHUB_REPOSITORY
@@ -204,7 +269,10 @@ jobs:
       # package comes down first, so vpk can make a delta from it: what an install of
       # that version downloads to update. The first release with packages has none.
       # vpk then attaches usdcc-win-Setup.exe, the full and delta packages and the
-      # feed (releases.win.json) to this release, which installs look for. The
+      # feed (releases.win.json) to this release, which installs look for; arm64's
+      # are its channel's (usdcc-win-arm64-Setup.exe, releases.win-arm64.json), and
+      # an install only ever reads its own channel's feed. A dry run attaches
+      # nothing, and keeps the installer with the run for a few days. The
       # package id usdcc installs into %LOCALAPPDATA%\usdcc, which Velopack owns
       # and empties on uninstall; the user's files are in %LOCALAPPDATA%\usdcc_config.
       - name: Make the installer and the update packages
@@ -219,22 +287,42 @@ jobs:
           New-Item -ItemType Directory -Force $releases | Out-Null
           # A prerelease (26.12.1-beta.1) updates from, and is offered to, prereleases too.
           $pre = if ('${{ steps.tag.outputs.version }}' -match '-') { @('--pre') } else { @() }
-          vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases @pre
+          $channel = if ('${{ matrix.channel }}') { @('--channel', '${{ matrix.channel }}') } else { @() }
+          vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases @pre @channel
           if ($LASTEXITCODE) { Write-Host "::notice::No earlier release with update packages, so no delta this time." }
           vpk pack --packId usdcc --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc `
             --packDir "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}" --mainExe usdcc.exe `
-            --runtime win-x64 --icon src/cpp/app/resources/usdcc.ico --noPortable --outputDir $releases
+            --runtime win-${{ matrix.arch }} --icon src/cpp/app/resources/usdcc.ico --noPortable --outputDir $releases @channel
           if ($LASTEXITCODE) { throw 'vpk pack failed' }
           Get-ChildItem $releases | ForEach-Object { Write-Host ("{0}: {1:N0} MB" -f $_.Name, ($_.Length / 1MB)) }
-          vpk upload github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases --tag $env:TAG --merge @pre
+          if ('${{ inputs.dry_run }}' -eq 'true') { exit 0 }
+          vpk upload github --repoUrl $repo --token $env:GH_TOKEN --outputDir $releases --tag $env:TAG --merge @pre @channel
           if ($LASTEXITCODE) { throw 'attaching the installer and update packages failed' }
 
-  # The same on Ubuntu 24.04 (docs/LINUX_WSL.md): a tar.xz, which keeps the
-  # libraries' links and the programs' modes, of a folder that runs from
-  # wherever it is unpacked. No PySide6 yet, so no V-Ray Render and no
-  # Python-made panels on Linux.
+      - name: Keep the installer with the run
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: ${{ runner.temp }}/velopack/*Setup.exe
+          retention-days: 3
+
+  # The same on Ubuntu 24.04 (docs/LINUX_WSL.md), x64 and arm64: a tar.xz, which
+  # keeps the libraries' links and the programs' modes, of a folder that runs
+  # from wherever it is unpacked.
   linux:
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-24.04
+            arch: x64
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     defaults:
       run:
@@ -259,12 +347,13 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "name=usdcc-$version" >> "$GITHUB_OUTPUT"
-          echo "tarball=usdcc-$version-linux-x64.tar.xz" >> "$GITHUB_OUTPUT"
-          echo "symbols=usdcc-$version-linux-x64-symbols.tar.xz" >> "$GITHUB_OUTPUT"
+          echo "tarball=usdcc-$version-linux-${{ matrix.arch }}.tar.xz" >> "$GITHUB_OUTPUT"
+          echo "symbols=usdcc-$version-linux-${{ matrix.arch }}-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.TAG }}
+          # A dry run builds the branch it was run on.
+          ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
           submodules: recursive
 
       # As build.yml: the Blender mesh backend's eigen3 override makes vcpkg
@@ -312,6 +401,18 @@ jobs:
       - name: Download the USD plugin packs
         run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
 
+      # Required, as in the windows job.
+      - name: Download PySide6
+        run: |
+          python tools/ci/pyside_asset.py > "$RUNNER_TEMP/pyside.json"
+          tag=$(jq -r .tag "$RUNNER_TEMP/pyside.json"); zip=$(jq -r .zip "$RUNNER_TEMP/pyside.json")
+          if ! gh release download "$tag" --pattern "$zip" --dir "$RUNNER_TEMP"; then
+            echo "::error::No $zip in release $tag. Run the PySide6 workflow (deps-pyside.yml) first."
+            exit 1
+          fi
+          unzip -q "$RUNNER_TEMP/$zip" -d external
+          rm "$RUNNER_TEMP/$zip"
+
       # build.yml's cache, only read: build.yml keeps it.
       - name: Name the vcpkg cache
         id: vcpkg
@@ -342,7 +443,7 @@ jobs:
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
           python tools/deploy.py "$deploy"
           # A release has to ship every licence (docs/RELEASE.md section 6).
-          for folder in OpenUSD-dependencies vcpkg Python; do
+          for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/licenses/$folder" 2>/dev/null)" ]; then
               echo "::error::No licences in licenses/$folder"; exit 1
             fi
@@ -368,7 +469,17 @@ jobs:
             if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
           done
 
+      - name: Keep the archive with the run
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.tag.outputs.tarball }}
+          path: ${{ runner.temp }}/${{ steps.tag.outputs.tarball }}
+          compression-level: 0
+          retention-days: 3
+
       - name: Attach to the release
+        if: ${{ !inputs.dry_run }}
         run: |
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}" \
             "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" --clobber --repo "$GITHUB_REPOSITORY"

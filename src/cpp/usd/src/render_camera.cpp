@@ -29,10 +29,10 @@ RenderCamera RenderCamera::atAspect(double newAspect) const {
     return camera;
 }
 
-std::optional<RenderCamera> primRenderCamera(const PXR_NS::UsdPrim& prim, double aspect) {
+std::optional<RenderCamera> primRenderCamera(const PXR_NS::UsdPrim& prim, double aspect, PXR_NS::UsdTimeCode time) {
     const PXR_NS::UsdGeomCamera usdCamera(prim);
     if (!usdCamera) return std::nullopt;
-    const PXR_NS::GfCamera gfCamera = usdCamera.GetCamera(PXR_NS::UsdTimeCode::Default());
+    const PXR_NS::GfCamera gfCamera = usdCamera.GetCamera(time);
     RenderCamera camera;
     camera.prim = prim.GetPath();
     camera.cameraToWorld = gfCamera.GetTransform();

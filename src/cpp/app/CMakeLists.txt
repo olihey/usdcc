@@ -9,9 +9,13 @@ if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
 endif()
 
 # usdcc — the application executable.
-add_executable(usdcc main.cpp app_updates.cpp app_updates.h)
-# Updates of an installed usdcc (docs/UPDATES.md): Velopack's DLL, beside the exe.
-if(USDCC_VELOPACK_FOUND)
+add_executable(usdcc main.cpp)
+# Updates of an installed usdcc (docs/UPDATES.md): Velopack's DLL, beside the exe. A build
+# without the Updates feature (docs/BUILD_OPTIONS.md) has none of it.
+if(USDCC_BUILD_UPDATES)
+    target_sources(usdcc PRIVATE app_updates.cpp app_updates.h)
+endif()
+if(USDCC_BUILD_UPDATES AND USDCC_VELOPACK_FOUND)
     target_link_libraries(usdcc PRIVATE usdcc::velopack)
     add_custom_command(
         TARGET usdcc

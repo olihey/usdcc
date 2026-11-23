@@ -62,15 +62,20 @@ class SceneFiles:
         self._numbers = itertools.count(1)
         self._files = []
 
-    def export(self, stage, camera, resolution):
+    def export(self, stage, camera, resolution, time=None):
         """Writes `stage` as it is now, unsaved edits and session layer included,
         flattened into one file, and returns its path. V-Ray shaders' list
         counts are filled in (shaders.fill_list_counts()). It adds a camera at
         `camera` (a Camera) and render settings using it at `resolution`
         (width, height): V-Ray reads a USD file's prims only through its render
         settings, and the camera only seeds the image's framing, which the
-        helper sets anyway."""
+        helper sets anyway. With `time`, the file's start and end time code are
+        that time, so V-Ray renders the stage as it is then (docs/ANIMATION.md
+        phase 5), as a final render pins its frame."""
         layer = stage.Flatten()
+        if time is not None:
+            layer.startTimeCode = time
+            layer.endTimeCode = time
         export = Usd.Stage.Open(layer)
         _add_render_prims(export, camera, resolution)
         shaders.fill_list_counts(export)  # V-Ray reads a list only up to its count

@@ -192,7 +192,7 @@ PXR_NS::UsdGeomCamera definePrivateCamera(const PXR_NS::UsdStageRefPtr& stage, c
 }
 
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
-                                       QSize size, Mode mode, LightMatch light, bool rtxTonemap) {
+                                       QSize size, Mode mode, LightMatch light, bool rtxTonemap, double time) {
     using namespace PXR_NS;
     if (!source) throw std::runtime_error("No stage to render");
     auto result = std::make_shared<Snapshot>();
@@ -202,6 +202,8 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     // under the stage's resolver context before moving to the temporary folder.
     ArResolverContextBinder context(source->usdStage()->GetPathResolverContext());
     auto layer = source->usdStage()->Flatten();
+    layer->SetStartTimeCode(time);
+    layer->SetEndTimeCode(time);
     // Light matching lifts everything by 1/k, and ovrtx's emission has that already.
     if (light.on) result->emission = scaleEmission(layer, kRtxDefaultExposure);
     auto stage = UsdStage::Open(layer);
@@ -241,7 +243,8 @@ std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, co
     return result;
 }
 std::optional<std::map<QString, std::array<double, 16>>> transformEdits(const usdcc::usd::StageRefPtr& source,
-                                                                        const usdcc::usd::StageChanges& changes) {
+                                                                        const usdcc::usd::StageChanges& changes,
+                                                                        double time) {
     using namespace PXR_NS;
     if (!source || !changes.resyncedPaths.empty()) return std::nullopt;
     std::map<QString, std::array<double, 16>> result;
@@ -252,7 +255,7 @@ std::optional<std::map<QString, std::array<double, 16>>> transformEdits(const us
         if (!prim || prim.GetResetXformStack()) return std::nullopt;
         GfMatrix4d matrix(1);
         bool reset = false;
-        if (!prim.GetLocalTransformation(&matrix, &reset, UsdTimeCode::Default())) return std::nullopt;
+        if (!prim.GetLocalTransformation(&matrix, &reset, UsdTimeCode(time))) return std::nullopt;
         auto& values = result[QString::fromStdString(path.GetPrimPath().GetString())];
         std::copy(matrix.GetArray(), matrix.GetArray() + 16, values.begin());
     }

@@ -12,10 +12,13 @@
 
 #include <pxr/base/tf/type.h>
 #include <pxr/usd/usd/schemaRegistry.h>
+#include <pxr/usd/usd/payloads.h>
+#include <pxr/usd/usd/references.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/typed.h>
 
 #include <QApplication>
+#include <QFile>
 #include <QImage>
 #include <QMouseEvent>
 #include <QTemporaryDir>
@@ -185,4 +188,66 @@ USDCC_TEST(outliner_checkbox_on_the_right) {
     click(view.viewport(), check.center());
     CHECK(stage->GetPrimAtPath(SdfPath("/box")).IsActive(), "and another activates it again");
     CHECK(view.viewport()->grab(check).toImage() == activeEye, "and the eye is open again");
+}
+
+// Phase 3's badges: a payload's and an instance's (a prim inside one too), in the lower left,
+// each different from a reference's; an instance's first.
+USDCC_TEST(prim_icons_badges) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    stage->DefinePrim(SdfPath("/Proto"), TfToken("Xform"));
+    stage->DefinePrim(SdfPath("/Proto/part"), TfToken("Cube"));
+    const UsdPrim box = stage->DefinePrim(SdfPath("/box"), TfToken("Cube"));
+    const UsdPrim referenced = stage->DefinePrim(SdfPath("/referenced"), TfToken("Xform"));
+    referenced.GetReferences().AddInternalReference(SdfPath("/Proto"));
+    const UsdPrim loaded = stage->DefinePrim(SdfPath("/loaded"), TfToken("Xform"));
+    loaded.GetPayloads().AddInternalPayload(SdfPath("/Proto"));
+    const UsdPrim instance = stage->DefinePrim(SdfPath("/instance"), TfToken("Xform"));
+    instance.GetReferences().AddInternalReference(SdfPath("/Proto"));
+    instance.SetInstanceable(true);
+    CHECK(prim_icons::badgeFor(box) == prim_icons::Badge::None && prim_icons::badgeFor(referenced) == prim_icons::Badge::Reference &&
+              prim_icons::badgeFor(loaded) == prim_icons::Badge::Payload &&
+              prim_icons::badgeFor(instance) == prim_icons::Badge::Instance,
+          "none, a reference, a payload, an instance (which also has a reference)");
+    const UsdPrim proxy = stage->GetPrimAtPath(SdfPath("/instance/part"));
+    CHECK(proxy && proxy.IsInstanceProxy() && prim_icons::badgeFor(proxy) == prim_icons::Badge::Instance,
+          "a prim inside an instance is badged as one");
+    const auto corner = [](const QIcon& icon) { return icon.pixmap(QSize(16, 16), 2.0).toImage().copy(0, 18, 16, 14); };
+    const QImage reference = corner(prim_icons::icon("xform-axes", false, prim_icons::Badge::Reference));
+    const QImage payload = corner(prim_icons::icon("xform-axes", false, prim_icons::Badge::Payload));
+    const QImage instanced = corner(prim_icons::icon("xform-axes", false, prim_icons::Badge::Instance));
+    const QImage plain = corner(prim_icons::icon("xform-axes"));
+    CHECK(payload != plain && instanced != plain && payload != reference && instanced != reference && payload != instanced,
+          "three badges, each its own");
+}
+
+// Phase 2: a pipeline's icon for a type, inherited by types derived from it, and back.
+USDCC_TEST(prim_icons_from_a_pipeline) {
+    QTemporaryDir folder;
+    const QString svg = folder.filePath(QStringLiteral("studio.svg"));
+    {
+        QFile file(svg);
+        file.open(QIODevice::WriteOnly);
+        file.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" "
+                   "fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 4h16v16h-16z\"/></svg>");
+    }
+    int changes = 0;
+    auto connection = prim_icons::iconsChanged().connect([&changes]() { ++changes; });
+    prim_icons::setTypeIcon("MyStudioThing", svg);
+    CHECK(changes == 1 && prim_icons::typeIcon("MyStudioThing") == svg, "set, and said so");
+    CHECK(prim_icons::iconNameForType(TfToken("MyStudioThing")) == QStringLiteral("file:") + svg,
+          "a type OpenUSD doesn't know gets it");
+    CHECK(draws(prim_icons::icon(prim_icons::iconNameForType(TfToken("MyStudioThing"))), 16), "and it draws");
+
+    // On a base: SphereLight derives from BoundableLightBase.
+    prim_icons::setTypeIcon("BoundableLightBase", svg);
+    CHECK(prim_icons::iconNameForType(TfToken("SphereLight")) == QStringLiteral("sun-high"),
+          "a type with its own icon keeps it: %s", qPrintable(prim_icons::iconNameForType(TfToken("SphereLight"))));
+    prim_icons::setTypeIcon("SphereLight", svg);
+    CHECK(prim_icons::iconNameForType(TfToken("SphereLight")).startsWith(QStringLiteral("file:")), "until it's set itself");
+    prim_icons::setTypeIcon("SphereLight", {});
+    prim_icons::setTypeIcon("BoundableLightBase", {});
+    prim_icons::setTypeIcon("MyStudioThing", {});
+    CHECK(prim_icons::iconNameForType(TfToken("SphereLight")) == QStringLiteral("sun-high") &&
+              prim_icons::iconNameForType(TfToken("MyStudioThing")) == QStringLiteral("circle-dashed"),
+          "and back to the built-in ones");
 }

@@ -282,6 +282,10 @@ usdcc_feature(VRAY_RENDER LABEL "V-Ray Render" DEFAULT ON
 usdcc_feature(BLENDER_MESH_TOOLS LABEL "Blender mesh tools" DEFAULT ON
     DOC "Mesh operations on Blender's BMesh, GPL-linked (docs/BLENDER_MESH_TOOLS.md)"
     PLUGINS org.usdcc.blender-mesh-tools FOLDERS blender_mesh_tools)
+# In the app, not a plugin: off, usdcc has no update check, no Help > Check for Updates and no
+# Settings > Updates, and doesn't link Velopack (the launcher and installer still do).
+usdcc_feature(UPDATES LABEL "Updates" DEFAULT ON
+    DOC "Checking for, downloading and installing new releases (docs/UPDATES.md)")
 usdcc_feature(RTX_RENDER LABEL "RTX Render" DEFAULT OFF
     DOC "The native RTX Render view, Windows with NVIDIA's SDKs (docs/RTX_RENDER.md)"
     PLUGINS org.usdcc.rtx-render FOLDERS rtx_render)

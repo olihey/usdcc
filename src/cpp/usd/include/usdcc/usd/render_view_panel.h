@@ -132,8 +132,15 @@ public:
     // How long after the last edit stageEdited() is called (ms).
     void setEditDelay(int ms);
     int editDelay() const;
-    // What the image is seen through now, at renderSize()'s aspect ratio.
+    // What the image is seen through now, at renderSize()'s aspect ratio. A camera prim is
+    // read at renderTime().
     RenderCamera currentCamera() const;
+    // The time it renders (docs/ANIMATION.md phase 5): the stage's, as the timeline shows
+    // it. A renderer renders the stage as it is then.
+    double renderTime() const;
+    // Whether anything on the stage is animated: when nothing is, a new time changes
+    // nothing to render. Worked out again after an edit.
+    bool stageIsAnimated();
     // Renderer-local viewing camera. Adds/selects Free Camera without authoring
     // a scene camera; normal viewport/prim choices remain available.
     void setLocalCamera(const RenderCamera& camera);
@@ -179,6 +186,11 @@ protected:
     virtual void cameraChanged(const RenderCamera& camera) { (void)camera; }
     // The image's size changed (the camera follows, as its aspect ratio did).
     virtual void sizeChanged(const QSize& size) { (void)size; }
+    // The stage's time changed, coalesced while it plays (phase 5). Here: a camera prim is
+    // sent again where it is now, and, while Update on Edits is on and something is
+    // animated, the stage is sent again (reload()). A renderer that can move to a new
+    // time in place does that instead.
+    virtual void timeChanged(double time);
     // The stage was edited, editDelay() after the last edit, while Update on
     // Edits is on: every change since the last call. Calls reload() here; a
     // renderer that can update in place does that instead.
@@ -256,6 +268,9 @@ private:
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
     usdcc::core::Signal<>::Connection m_viewportConnection;
+    usdcc::core::Signal<double>::Connection m_timeConnection;
+    QTimer* m_timeTimer = nullptr;
+    std::optional<bool> m_animated;  // stageIsAnimated(), until the next edit
 };
 
 }  // namespace usdcc::usd

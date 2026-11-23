@@ -18,8 +18,9 @@ pack of the standard set, which a release has to have.
 On Windows the deploy only has Qt's windows platform plugin; the offscreen one
 comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux deploy
 has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
-LD_LIBRARY_PATH, nothing of the build's. PySide6 is required on Windows; Linux
-doesn't deploy it yet, so there it's only checked when present.
+LD_LIBRARY_PATH, nothing of the build's. PySide6 is required,
+unless --without-pyside: a panel made with usdcc.ui docks, and on Linux the process has
+one Qt, the deploy's.
 
     python tools/ci/smoke_test.py --deploy deploy --expect-version 0.2.0
         --platform-plugins build\\vcpkg_installed\\x64-windows\\Qt6\\plugins\\platforms
@@ -71,6 +72,18 @@ result = {
 }
 if PySide6:
     result["files"]["PySide6"] = PySide6.__file__
+    import usdcc.ui
+
+    class SmokePanel(usdcc.ui.SidePanel):
+        def __init__(self):
+            super().__init__("Smoke Test")
+
+    usdcc.app.add_side_panel(SmokePanel())
+    result["main_window"] = isinstance(usdcc.app.main_window(), QtWidgets.QMainWindow)
+# Each Qt Core the process has mapped: one, or Python's Qt isn't the app's.
+if sys.platform == "linux":
+    with open("/proc/self/maps") as maps:
+        result["qt"] = sorted({line.split(None, 5)[5].strip() for line in maps if "libQt6Core.so" in line})
 
 # OpenUSD's plugins: its own render delegates, and what each USD plugin pack in
 # the deploy is checked for (its pin's "check", docs/USD_PLUGINS.md).
@@ -109,8 +122,7 @@ with open(RESULT, "w") as f:
 if PySide6:
     QtCore.QTimer.singleShot(0, QtWidgets.QApplication.quit)
 else:
-    # No way to ask the app to quit without PySide6 (Linux doesn't deploy it yet):
-    # it has started and run this, which is what is checked.
+    # No way to ask the app to quit without PySide6: it has started and run this, which is what is checked.
     import os
 
     os._exit(0)
@@ -141,6 +153,7 @@ def main(argv=None):
     parser.add_argument("--expect-standard-usd-packs", action="store_true",
                         help="the deploy has to have every USD plugin pack of the standard set for this platform "
                              "(deps/usd-plugins); without it, only the packs it has are checked")
+    parser.add_argument("--without-pyside", action="store_true", help="the deploy may lack PySide6")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     args = parser.parse_args(argv)
 
@@ -176,7 +189,7 @@ def main(argv=None):
     work.mkdir(parents=True, exist_ok=True)
     result = work / "result.json"
     script = work / "check.py"
-    script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {WINDOWS!r}\n"
+    script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {not args.without_pyside!r}\n"
                       f"PLUGINS = {OPENUSD_PLUGINS + sorted(pack_plugins)!r}\nEXTENSIONS = {extensions!r}\n"
                       f"FILES = {sorted(files)!r}\n" + CHECK, encoding="utf-8")
 
@@ -213,6 +226,15 @@ def main(argv=None):
             print(f"  {module}: {file}")
             if not os.path.normcase(file).startswith(os.path.normcase(deploy_dir)):
                 problems.append(f"{module} came from outside the deploy: {file}")
+
+        if checked.get("main_window") is False:
+            problems.append("PySide6 doesn't see the main window as a QMainWindow")
+        for file in checked.get("qt", []):
+            print(f"  Qt: {file}")
+            if not file.startswith(deploy_dir):
+                problems.append(f"Qt came from outside the deploy: {file}")
+        if len(checked.get("qt", [""])) != 1:
+            problems.append(f"the process has {len(checked['qt'])} Qts, not one")
 
         for name, found in checked["plugins"].items():
             what = f"the {pack_plugins[name]} pack's {name}" if name in pack_plugins else f"OpenUSD's {name}"

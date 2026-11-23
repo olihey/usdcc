@@ -13,6 +13,8 @@
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_syntax.h"
 #include "usdcc/usd/usda_view_panel.h"
+#include "usdcc/usd/undo_manager.h"
+#include "usdcc/ui/text_view.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/prim.h>
@@ -36,6 +38,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QToolButton>
+#include <QUndoStack>
 
 #include <cstdio>
 #include <cstdlib>
@@ -46,6 +49,7 @@ using usdcc::usd::StageManager;
 using usdcc::usd::StageRefPtr;
 using usdcc::usd::UsdaView;
 using usdcc::usd::UsdaViewPanel;
+using usdcc::usd::UndoManager;
 PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace {
@@ -884,4 +888,77 @@ USDCC_TEST(usda_view_converts_in_the_background) {
     panel.reset();
     CHECK(UsdaView::waitForConversions(60000) && conversions() == before, "and it goes with the panel");
     QStandardPaths::setTestModeEnabled(false);
+}
+
+// Editing (docs/USDA_VIEW.md phase 3): Apply writes the text to the layer as one undo step;
+// a parse error is shown at its line and leaves the layer untouched; a flattened view can't be
+// edited; a change elsewhere while editing is said; Done shows the layer as it is now.
+USDCC_TEST(usda_view_editing) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    const UsdStageRefPtr& s = stage->usdStage();
+    s->DefinePrim(SdfPath("/World"), TfToken("Xform"));
+    UsdaViewPanel panel(&stages, stage);
+    panel.setUndoManager(undo);
+    panel.resize(700, 500);
+    panel.show();
+    wait(50);
+    UsdaView* view = panel.view();
+    CHECK(view->canEdit() && !view->isEditing(), "the root layer can be edited");
+    CHECK(view->startEditing() && view->isEditing() && view->editor()->isVisible() && !panel.lineView()->isVisible(),
+          "Edit: the text in an editor");
+    CHECK(view->editor()->toPlainText().contains("def Xform \"World\""), "the layer's text");
+
+    // A prim added in the text, applied: in the stage, as one undo step.
+    QString text = view->editor()->toPlainText();
+    text.replace(QStringLiteral("def Xform \"World\""), QStringLiteral("def Xform \"World\"\n{\n}\n\ndef Cube \"Box\""));
+    view->editor()->setPlainText(text);
+    CHECK(view->hasUnappliedEdits(), "edited, not applied yet");
+    QUndoStack* stack = undo->stack(stage);
+    const int index = stack->index();
+    CHECK(view->apply() && s->GetPrimAtPath(SdfPath("/Box")) && stack->index() == index + 1 && !view->hasUnappliedEdits(),
+          "Apply: the Box is on the stage, one undo step: %s", qPrintable(view->editError()));
+    stack->undo();
+    CHECK(!s->GetPrimAtPath(SdfPath("/Box")) && s->GetPrimAtPath(SdfPath("/World")), "undone");
+
+    // A parse error: shown with its line, the layer as it was.
+    view->revert();
+    const std::string before = [&s] {
+        std::string out;
+        s->GetRootLayer()->ExportToString(&out);
+        return out;
+    }();
+    QString broken = view->editor()->toPlainText();
+    broken += QStringLiteral("\ndef Xform \"Bad\" {\n");
+    view->editor()->setPlainText(broken);
+    CHECK(!view->apply() && view->editError().startsWith(QStringLiteral("line ")), "an error, with its line: %s",
+          qPrintable(view->editError()));
+    std::string after;
+    s->GetRootLayer()->ExportToString(&after);
+    CHECK(after == before, "and the layer untouched");
+
+    // A change elsewhere while editing.
+    view->revert();
+    s->DefinePrim(SdfPath("/Elsewhere"));
+    wait(20);
+    CHECK(view->layerChangedWhileEditing(), "a change from elsewhere is noticed");
+    view->revert();
+    CHECK(!view->layerChangedWhileEditing() && view->editor()->toPlainText().contains("Elsewhere"), "Revert shows it");
+
+    // Done: the read-only view, as the layer is now.
+    view->stopEditing();
+    CHECK(!view->isEditing() && panel.lineView()->isVisible() && shown(panel).contains("Elsewhere"), "Done");
+
+    // A flattened view isn't a layer.
+    UsdaViewPanel::Source flat;
+    flat.kind = UsdaViewPanel::Source::Kind::FlattenedStage;
+    panel.setSource(flat);
+    QString why;
+    CHECK(!view->canEdit(&why) && !why.isEmpty() && !view->startEditing(), "a flattened view can't be edited: %s",
+          qPrintable(why));
 }

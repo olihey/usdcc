@@ -1,6 +1,6 @@
 # Viewport Camera
 
-Status: **phases 1 to 3 done** (looking through, Detach; the resolution gate and safe frames; render scale), phase 4 planned. Planned 2026-11-20
+Status: **all four phases done**: looking through and Detach, the resolution gate and safe frames, render scale, Drive and Locked. Planned 2026-11-20
 against master `566fb99`. §2's navigation default (Detach) is decided; §8 lists what is still
 open, with proposed answers. §10 says what was built where, and where it differs from the plan.
 
@@ -310,3 +310,21 @@ Tests: `viewport_render_scale_size` (usdcc_tests) and the override's JSON in
 `viewport_gate_overrides`. In the app (Storm, 25 %): the scene soft, the grid sharp and still
 hidden behind the ground where it should be, with the ground's edge in the grid's depth test
 stepped (nearest-filtered depth), as §5 expected. Not checked: Embree, and the frame time it saves.
+
+### Phase 4: Drive and Locked (2026-11-22)
+
+| Piece | Where |
+|---|---|
+| The mode | `DisplayOptions::cameraNavigation` ("detach", "drive", "locked"); Settings > Viewport > Camera > Through a stage camera; the `cameraNavigation` override, saved in sessions; the Camera menu's **Navigation** submenu; `ViewportViewPanel::setCameraNavigation()` |
+| Where navigation starts | `HydraViewportWindow::startNavigation()`: a tumble, pan, wheel step and Fit to View. Detach as before. Locked: nothing moves, `navigationRefused()` (a toast). Drive: the orbit camera takes the camera's pose as Detach finds it, `driveStarted()`, then every move `driveMoved()` before the frame is drawn, and `driveFinished()` on release (a wheel step or Fit to View is one of its own) |
+| Writing | The panel: `UndoManager::beginEdit()` on start, `setCameraFromView()` (Copy View's, phase 1) with `orbitViewAsCamera()` on each move, `endEdit()` at the end: one undo step a drag. Its ops keep their order, the parent's transform at the frame shown is taken out |
+| Refusals | `whyNotSetCamera()`'s, as Copy View's: an animated transform or lens, ops other than none, one matrix or translate / Euler rotate / scale, an instance proxy, out of the edit target's reach. Then the viewport detaches, with a toast saying why. A stronger layer hiding the edit is found after writing: the drag's edit is cancelled, with a toast |
+| Copy View in the gate | `orbitViewAsCamera()`: Copy View and Drive fit the camera to the gate's shape, not to the overscan around it (phase 2) |
+
+Tests: `viewport_drives_and_locks_a_stage_camera` (usdcc_python_tests: Locked leaves the camera and
+says so; a wheel step drives it under its moved parent, one undo step, the parent untouched, the
+view through it, and undone; an animated camera refused, detached with the reason).
+
+Where it differs from the plan: **Drive on an animated camera** is still refused (§8 question 5),
+though keyframing now exists (ANIMATION.md phase 2): keying a camera's ops as it's driven is a
+follow-up. Not checked in the app by hand: a mouse drag in Drive.

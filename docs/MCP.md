@@ -94,7 +94,7 @@ object out.
 - **Packages are never installed at startup** and need a restart, so the feature wouldn't work
   out of the box.
 - **It needs a second event loop on a Python thread** inside the embedded interpreter, plus a way
-  back to the main thread that today only PySide gives, and Linux has no PySide yet.
+  back to the main thread that today only PySide gives.
 
 The price: the protocol is written by hand and followed by hand when it changes. The official
 conformance suite (§9) is the check.
