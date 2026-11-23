@@ -363,6 +363,18 @@ QImage HydraViewportWindow::grabFrame() {
     return image;
 }
 
+QOpenGLFramebufferObject* HydraViewportWindow::bindHydraFramebuffer(int width, int height) {
+    if (!m_scaledFramebuffer || m_scaledFramebuffer->size() != QSize(width, height)) {
+        m_scaledFramebuffer.reset();
+        QOpenGLFramebufferObjectFormat format;
+        format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        format.setInternalTextureFormat(GL_RGBA8);
+        m_scaledFramebuffer = std::make_unique<QOpenGLFramebufferObject>(QSize(width, height), format);
+    }
+    m_scaledFramebuffer->bind();
+    return m_scaledFramebuffer.get();
+}
+
 void HydraViewportWindow::bindFramebuffer(int width, int height) {
     if (!m_framebuffer || m_framebuffer->size() != QSize(width, height)) {
         m_framebuffer.reset();  // before its replacement exists: one at a time in GPU memory
@@ -567,6 +579,37 @@ HudInput HydraViewportWindow::hudInput() const {
             input.camera += QStringLiteral(" ") + QChar(0x2190) + QStringLiteral(" ") + QString::fromStdString(m_detachedFrom.GetName());
         }
     }
+    // The gate's size beside the camera: "Shot · 1920 × 1080" (§4).
+    const std::optional<Resolution> resolution = gateResolution();
+    if (resolution) {
+        input.camera += QStringLiteral(" ") + QChar(0x00B7) + QStringLiteral(" %1 ").arg(resolution->width) + QChar(0x00D7) +
+                        QStringLiteral(" %1").arg(resolution->height);
+    }
+    // And the render scale below 100 %: "Persp @ 50 %" (§5).
+    if (m_display.renderScale < 100) input.camera += QStringLiteral(" @ %1 %").arg(m_display.renderScale);
+    // The gate's mask and the safe frames (§4, §6), whether the HUD's text is on or not.
+    input.hudOn = hudActive();
+    const ViewRect frame = gate();
+    const QRectF gateArea(frame.x, frame.y, frame.width, frame.height);
+    if (resolution) {
+        input.gate = gateArea;
+        input.gateMaskOpacity = m_display.gateMaskOpacity;
+    }
+    if (m_display.safeAction) {
+        const ViewRect safe = safeRect(frame, m_display.safeActionPercent);
+        input.safeFrames.push_back(QRectF(safe.x, safe.y, safe.width, safe.height));
+    }
+    if (m_display.safeTitle) {
+        const ViewRect safe = safeRect(frame, m_display.safeTitlePercent);
+        input.safeFrames.push_back(QRectF(safe.x, safe.y, safe.width, safe.height));
+    }
+    if (m_display.safeAspect > 0.0) {
+        const ViewRect guide = aspectRect(frame, m_display.safeAspect);
+        input.aspectGuide = QRectF(guide.x, guide.y, guide.width, guide.height);
+    }
+    input.centerCross = m_display.safeCenter;
+    input.overlayArea = gateArea;
+
     const PXR_NS::TfToken renderer = currentRendererPlugin();
     input.renderer = rendererDisplayName(renderer);
     input.shading = shadingModeLabel(effectiveShading(m_display, renderer));
@@ -610,7 +653,7 @@ HudInput HydraViewportWindow::hudInput() const {
 }
 
 void HydraViewportWindow::drawHud(int width, int height) {
-    if (!hudActive() || !m_legacyGl) {
+    if ((!hudActive() && !gateOverlaysActive()) || !m_legacyGl) {
         m_hudLayout = {};
         return;
     }
@@ -926,7 +969,7 @@ void HydraViewportWindow::detachFromStageCamera() {
     }
     if (!isLookingThroughStageCamera()) return;
     const std::optional<PXR_NS::GfCamera> camera = stageCameraNow();
-    const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, windowAspect()) : m_lastStageFrustum;
+    const PXR_NS::GfFrustum frustum = camera ? stageCameraFrustum(*camera, gate().aspect()) : m_lastStageFrustum;
     // What's at the centre of the frame on screen, drawn through the camera: still it.
     const double distance = detachDistance(frustum, camera, camera.has_value());
     adoptPose(orbitPoseFromFrustum(frustum, distance, m_yaw, cameraZUp()));
@@ -1000,7 +1043,8 @@ void HydraViewportWindow::setOrthographic(bool orthographic) {
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
     detachFromStageCamera();  // fits from where it looks (§3)
-    const double aspect = static_cast<double>(std::max(1, width())) / static_cast<double>(std::max(1, height()));
+    // Fits the gate (docs/VIEWPORT_CAMERA.md §4), which is the whole window without one.
+    const double aspect = gate().aspect();
     if (m_orthographic) {
         const OrthographicFraming framing = frameOrthographic(box, orbitAxes(m_distance), aspect, m_orthoSize);
         m_target = framing.target;
@@ -1123,11 +1167,33 @@ OrbitClipping HydraViewportWindow::clipping() const {
     return {depth * 0.001, depth * 2.0};
 }
 
+std::optional<Resolution> HydraViewportWindow::gateResolution() const {
+    if (m_display.resolution == kRenderSettingsResolution) {
+        return m_stage ? renderSettingsResolution(PXR_NS::UsdStagePtr(m_stage)) : std::nullopt;
+    }
+    return parseResolution(m_display.resolution);
+}
+
+ViewRect HydraViewportWindow::gate() const { return gateRect(width(), height(), gateResolution()); }
+
+bool HydraViewportWindow::gateOverlaysActive() const {
+    if (m_previewMode) return false;
+    return gateResolution().has_value() || m_display.safeAction || m_display.safeTitle || m_display.safeCenter ||
+           m_display.safeAspect > 0.0;
+}
+
 PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
-    const double aspect = windowAspect();
-    // A stage camera's, fitted in the window (docs/VIEWPORT_CAMERA.md §3). Everything that
-    // draws, picks or places goes by this, so it all agrees with what Hydra draws.
-    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) return stageCameraFrustum(*camera, aspect);
+    // The camera sees the gate (docs/VIEWPORT_CAMERA.md §4), and the window around it more
+    // (overscan). Everything that draws, picks or places goes by this, so it all agrees
+    // with what Hydra draws.
+    const ViewRect frame = gate();
+    const bool overscan = frame.width < width() - 0.5 || frame.height < height() - 0.5;
+    const double aspect = overscan ? frame.aspect() : windowAspect();
+    const auto widened = [&](const PXR_NS::GfFrustum& frustum) {
+        return overscan ? overscanFrustum(frustum, frame, width(), height()) : frustum;
+    };
+    // A stage camera's, fitted in the gate (§3).
+    if (const std::optional<PXR_NS::GfCamera> camera = stageCameraNow()) return widened(stageCameraFrustum(*camera, aspect));
 
     const double distance = m_orthographic ? orthographicDepth() : m_distance;
     PXR_NS::GfFrustum frustum;
@@ -1140,7 +1206,7 @@ PXR_NS::GfFrustum HydraViewportWindow::currentFrustum() const {
     } else {
         frustum.SetPerspective(m_fovY, /*isFovVertical=*/true, aspect, range.nearClip, range.farClip);
     }
-    return frustum;
+    return widened(frustum);
 }
 
 double HydraViewportWindow::panDepthAt(const QPointF& position) {
@@ -1429,6 +1495,16 @@ void HydraViewportWindow::renderNow() {
     // which is GL_INVALID_ENUM on the default framebuffer. Hydra then reports
     // that leftover error from unrelated places. Copied to the window below.
     bindFramebuffer(w, h);
+    // Render scale (docs/VIEWPORT_CAMERA.md §5): Hydra renders into a smaller framebuffer,
+    // scaled up into ours below; the overlays then draw into ours at full size.
+    const int scale = m_previewMode ? 100 : m_display.renderScale;
+    const auto [hw, hh] = scaledBufferSize(w, h, scale);
+    QOpenGLFramebufferObject* hydraTarget = m_framebuffer.get();
+    if (scale < 100) {
+        hydraTarget = bindHydraFramebuffer(hw, hh);
+    } else {
+        m_scaledFramebuffer.reset();
+    }
 
     // QOpenGLWidget sets this automatically from its FBO size before each
     // paintGL(); a raw QWindow + manually-created QOpenGLContext has no such
@@ -1445,18 +1521,26 @@ void HydraViewportWindow::renderNow() {
     // reject the composite for exactly the pixels covered by geometry
     // (rendering pure black there) while unrelated background-only draws
     // still show through.
-    if (auto* gl = m_context->functions()) {
-        gl->glViewport(0, 0, w, h);
-        gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
-                         static_cast<float>(m_display.background.blueF()), 1.0f);
-        gl->glClearDepthf(1.0f);
-        gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    const auto clearTo = [this](int width, int height) {
+        if (auto* gl = m_context->functions()) {
+            gl->glViewport(0, 0, width, height);
+            gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
+                             static_cast<float>(m_display.background.blueF()), 1.0f);
+            gl->glClearDepthf(1.0f);
+            gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
+    };
+    if (hydraTarget != m_framebuffer.get()) {
+        m_framebuffer->bind();
+        clearTo(w, h);
+        hydraTarget->bind();
     }
+    clearTo(hw, hh);
 
     const usdcc::tools::ToolContext toolCtx = buildToolContext();
 
-    m_engine->SetRenderBufferSize(PXR_NS::GfVec2i(w, h));
-    m_engine->SetRenderViewport(PXR_NS::GfVec4d(0, 0, w, h));
+    m_engine->SetRenderBufferSize(PXR_NS::GfVec2i(hw, hh));
+    m_engine->SetRenderViewport(PXR_NS::GfVec4d(0, 0, hw, hh));
     m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
 
     // The shading this renderer draws: Storm draws them all, any other Smooth Shaded only.
@@ -1521,9 +1605,9 @@ void HydraViewportWindow::renderNow() {
             m_engine->SetCameraState(toolCtx.viewMatrix, pushedBack);
             m_engine->Render(m_stage->GetPseudoRoot(), surfaces);
             m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
-            m_framebuffer->bind();
+            hydraTarget->bind();
             if (auto* gl = m_context->functions()) {
-                gl->glViewport(0, 0, w, h);
+                gl->glViewport(0, 0, hw, hh);
                 gl->glClearColor(static_cast<float>(m_display.background.redF()),
                                  static_cast<float>(m_display.background.greenF()),
                                  static_cast<float>(m_display.background.blueF()), 1.0f);
@@ -1537,6 +1621,16 @@ void HydraViewportWindow::renderNow() {
         QOpenGLFramebufferObject::bindDefault();
         recoverFromEngineError("drawing", error);  // the last frame stays on screen
         return;
+    }
+    if (hydraTarget != m_framebuffer.get()) {
+        // Up to full size: colour smoothly, depth as it is (GL allows nearest only), so the
+        // grid and the gizmos depth-test against the scene where it is.
+        const QRect from(0, 0, hw, hh), to(0, 0, w, h);
+        QOpenGLFramebufferObject::blitFramebuffer(m_framebuffer.get(), to, hydraTarget, from, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        QOpenGLFramebufferObject::blitFramebuffer(m_framebuffer.get(), to, hydraTarget, from,
+                                                  GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+        m_framebuffer->bind();
+        if (auto* gl = m_context->functions()) gl->glViewport(0, 0, w, h);
     }
 
     if (!m_previewMode) {

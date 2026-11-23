@@ -3,6 +3,7 @@
 // usdcc_ui_tests (offscreen).
 #include "test_harness.h"
 
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/version.h"
 #include "usdcc/ui/about_dialog.h"
 #include "usdcc/ui/scale_controller.h"
@@ -68,4 +69,16 @@ USDCC_TEST(about_dialog) {
     CHECK(!labels(release).contains("Development build"), "a release doesn't say it's a development build");
     CHECK(release.text().startsWith("usdcc 0.2.0\nBuilt: "), "nor does its text, and no commit without one: %s",
           qPrintable(release.text()));
+
+    // The features the build has (docs/BUILD_OPTIONS.md §5): rows under the components, and
+    // in the text.
+    CHECK(current.features.size() == int(usdcc::core::buildFeatures().size()) && !current.features.isEmpty(),
+          "the build's features: %d", int(current.features.size()));
+    info.features = {{QStringLiteral("Viewport Broadcast"), true}, {QStringLiteral("Remote support"), false}};
+    AboutDialog withFeatures(info);
+    const QStringList shown = labels(withFeatures);
+    CHECK(shown.contains("Features") && shown.contains("Included") && shown.contains("Left out of this build"),
+          "each feature says whether it's there: %s", qPrintable(shown.join(" | ")));
+    CHECK(withFeatures.text().endsWith("Features:\n  Viewport Broadcast: Included\n  Remote support: Left out of this build"),
+          "and the text says the same: %s", qPrintable(withFeatures.text()));
 }

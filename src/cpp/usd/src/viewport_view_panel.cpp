@@ -25,6 +25,7 @@
 #include <QJsonArray>
 #include <QAction>
 #include <QActionGroup>
+#include <QInputDialog>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -1698,6 +1699,106 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
         change(overrides);
         setDisplayOverrides(overrides);
     };
+
+    // The resolution gate and safe frames (docs/VIEWPORT_CAMERA.md §4, §6).
+    QMenu* resolutionMenu = menu->addMenu(tr("Resolution"));
+    resolutionMenu->setObjectName(QStringLiteral("resolutionMenu"));
+    auto* resolutions = new QActionGroup(resolutionMenu);
+    const auto addResolution = [&](const QString& text, const std::string& value) {
+        QAction* action = resolutionMenu->addAction(text);
+        action->setCheckable(true);
+        action->setChecked(shown.resolution == value);
+        resolutions->addAction(action);
+        connect(action, &QAction::triggered, this, [edit, value]() {
+            edit([value](ViewportDisplayOverrides& o) { o.resolution = value; });
+        });
+        return action;
+    };
+    addResolution(tr("Fill Viewport"), kFillViewport)->setObjectName(QStringLiteral("resolution_fill"));
+    for (const auto& [w, h] : {std::pair{1280, 720}, std::pair{1920, 1080}, std::pair{2048, 858}, std::pair{3840, 2160},
+                               std::pair{1080, 1080}}) {
+        addResolution(QStringLiteral("%1 %2 %3").arg(w).arg(QChar(0x00D7)).arg(h), resolutionName({w, h}));
+    }
+    if (const StageRefPtr stage = currentStage();
+        stage && renderSettingsResolution(PXR_NS::UsdStagePtr(stage->usdStage()))) {
+        const Resolution fromSettings = *renderSettingsResolution(PXR_NS::UsdStagePtr(stage->usdStage()));
+        addResolution(tr("Render Settings (%1 %2 %3)").arg(fromSettings.width).arg(QChar(0x00D7)).arg(fromSettings.height),
+                      kRenderSettingsResolution);
+    }
+    {
+        const std::optional<Resolution> custom = parseResolution(shown.resolution);
+        bool listed = shown.resolution == kFillViewport || shown.resolution == kRenderSettingsResolution;
+        for (QAction* action : resolutions->actions()) listed = listed || action->isChecked();
+        QAction* other = resolutionMenu->addAction(listed || !custom ? tr("Custom...")
+                                                                     : tr("Custom (%1 %2 %3)...").arg(custom->width).arg(QChar(0x00D7)).arg(custom->height));
+        other->setCheckable(true);
+        other->setChecked(!listed && custom);
+        resolutions->addAction(other);
+        connect(other, &QAction::triggered, this, [this, edit, shown]() {
+            const std::optional<Resolution> now = parseResolution(shown.resolution);
+            bool ok = false;
+            const QString text = QInputDialog::getText(this, tr("Resolution"), tr("Width x height (16 to 16384):"),
+                                                       QLineEdit::Normal,
+                                                       now ? QString::fromStdString(resolutionName(*now)) : QStringLiteral("1920x1080"),
+                                                       &ok);
+            const std::optional<Resolution> wanted = parseResolution(text.toStdString());
+            if (ok && wanted) edit([wanted](ViewportDisplayOverrides& o) { o.resolution = resolutionName(*wanted); });
+        });
+    }
+    // Render scale (§5).
+    QMenu* scaleMenu = menu->addMenu(tr("Render Scale"));
+    scaleMenu->setObjectName(QStringLiteral("renderScaleMenu"));
+    auto* scales = new QActionGroup(scaleMenu);
+    for (const int scale : kRenderScales) {
+        QAction* action = scaleMenu->addAction(QStringLiteral("%1 %").arg(scale));
+        action->setObjectName(QStringLiteral("renderScale_%1").arg(scale));
+        action->setCheckable(true);
+        action->setChecked(shown.renderScale == scale);
+        scales->addAction(action);
+        connect(action, &QAction::triggered, this, [edit, scale]() {
+            edit([scale](ViewportDisplayOverrides& o) { o.renderScale = scale; });
+        });
+    }
+    QMenu* safeMenu = menu->addMenu(tr("Safe Frames"));
+    safeMenu->setObjectName(QStringLiteral("safeFramesMenu"));
+    const auto addSafe = [&](const QString& text, bool on, std::optional<bool> ViewportDisplayOverrides::*field) {
+        QAction* action = safeMenu->addAction(text);
+        action->setCheckable(true);
+        action->setChecked(on);
+        connect(action, &QAction::toggled, this, [edit, field](bool checked) {
+            edit([field, checked](ViewportDisplayOverrides& o) { o.*field = checked; });
+        });
+    };
+    addSafe(tr("Action Safe (%1%)").arg(shown.safeActionPercent), shown.safeAction, &ViewportDisplayOverrides::safeAction);
+    addSafe(tr("Title Safe (%1%)").arg(shown.safeTitlePercent), shown.safeTitle, &ViewportDisplayOverrides::safeTitle);
+    addSafe(tr("Centre Cross"), shown.safeCenter, &ViewportDisplayOverrides::safeCenter);
+    QMenu* aspectMenu = safeMenu->addMenu(tr("Aspect Guide"));
+    auto* aspects = new QActionGroup(aspectMenu);
+    for (const auto& [label, ratio] : {std::pair{"None", 0.0}, std::pair{"2.39", 2.39}, std::pair{"1.85", 1.85},
+                                       std::pair{"1.78 (16:9)", 16.0 / 9.0}, std::pair{"1.33 (4:3)", 4.0 / 3.0},
+                                       std::pair{"1 (square)", 1.0}}) {
+        QAction* action = aspectMenu->addAction(tr(label));
+        action->setCheckable(true);
+        action->setChecked(std::abs(shown.safeAspect - ratio) < 1e-3);
+        aspects->addAction(action);
+        const double value = ratio;
+        connect(action, &QAction::triggered, this, [edit, value]() {
+            edit([value](ViewportDisplayOverrides& o) { o.safeAspect = value; });
+        });
+    }
+    safeMenu->addSeparator();
+    safeMenu->addAction(tr("SMPTE (93% / 90%)"), this, [edit]() {
+        edit([](ViewportDisplayOverrides& o) {
+            o.safeActionPercent = 93.0;
+            o.safeTitlePercent = 90.0;
+        });
+    });
+    safeMenu->addAction(tr("Legacy (90% / 80%)"), this, [edit]() {
+        edit([](ViewportDisplayOverrides& o) {
+            o.safeActionPercent = 90.0;
+            o.safeTitlePercent = 80.0;
+        });
+    });
 
     // Shading: only Storm draws the modes; for any other renderer the submenu says so.
     QMenu* shadingMenu = menu->addMenu(tr("Shading"));

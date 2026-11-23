@@ -104,6 +104,11 @@ public:
     // whose stage has no timeline. Draws a new frame when it changed.
     void setTime(PXR_NS::UsdTimeCode time);
     PXR_NS::UsdTimeCode time() const { return m_time; }
+    // The resolution gate (docs/VIEWPORT_CAMERA.md §4): the image's size, nothing for Fill
+    // Viewport (or Render Settings on a stage without them); and where the gate is in the
+    // window, in logical pixels: the whole window without a resolution.
+    std::optional<Resolution> gateResolution() const;
+    ViewRect gate() const;
 
     // Whether firstFrameRendered() has already fired for the current stage —
     // a viewport that was already on screen draws it inside setStage().
@@ -252,6 +257,21 @@ public:
         bool hudRollover = false;    // the prim under the cursor
         // Wireframes of the stage's physics colliders and joint frames (docs/PHYSICS.md §5.1).
         bool showColliders = false;
+        // The resolution gate (docs/VIEWPORT_CAMERA.md §4): "fill", "renderSettings" or
+        // "<width>x<height>"; and how dark the mask outside it is (0-1).
+        std::string resolution = "fill";
+        double gateMaskOpacity = 0.7;
+        // Safe frames over the gate (§6): action and title safe as a percentage of it, a
+        // centre cross, and an aspect guide's width over height (0: none).
+        bool safeAction = false;
+        double safeActionPercent = 93.0;
+        bool safeTitle = false;
+        double safeTitlePercent = 90.0;
+        bool safeCenter = false;
+        double safeAspect = 0.0;
+        // Render scale (§5): Hydra renders at this percentage of the device pixels (100, 75,
+        // 50 or 25), scaled up, and the grid, outline and gizmos are drawn at full size.
+        int renderScale = 100;
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -472,6 +492,9 @@ private:
     // The HUD (docs/VIEWPORT_HUD.md §4): laid out, painted into m_hudImage when the layout
     // changed, and drawn as one textured quad over the default framebuffer.
     bool hudActive() const { return m_display.hud && !m_previewMode; }
+    // The gate's mask or a safe frame is drawn (docs/VIEWPORT_CAMERA.md §4, §6): the HUD's
+    // pass runs for them even with the HUD off.
+    bool gateOverlaysActive() const;
     void drawHud(int width, int height);
     // After a frame: its time, for the performance line.
     void recordFrame(double milliseconds);
@@ -492,6 +515,10 @@ private:
     RendererSettingValues m_rendererSettings;
     // What Storm and the gizmo draw into; copied to the window each frame.
     std::unique_ptr<QOpenGLFramebufferObject> m_framebuffer;
+    // What Hydra renders into at a render scale below 100 %: then scaled up into m_framebuffer.
+    std::unique_ptr<QOpenGLFramebufferObject> m_scaledFramebuffer;
+    // The framebuffer Hydra renders into this frame: m_framebuffer, or the scaled one.
+    QOpenGLFramebufferObject* bindHydraFramebuffer(int width, int height);
     PXR_NS::UsdStageRefPtr m_stage;
     PXR_NS::UsdTimeCode m_time = PXR_NS::UsdTimeCode::Default();
 

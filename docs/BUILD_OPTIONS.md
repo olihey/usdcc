@@ -3,9 +3,10 @@
 One way to leave a feature out of a build. A studio that doesn't want a feature at all, not even
 turned off, builds without it, and the build can show that the feature isn't there.
 
-**Status:** planned 2026-11-22. Nothing is built. Its first user is
-[REMOTE_SUPPORT.md](REMOTE_SUPPORT.md). "Checked" below means looked at in this repository;
-everything else is an assumption until it's tried.
+**Status:** planned 2026-11-22; **phases 1 and 2 built** the same day (§10). Remote Support,
+the plan's first user, doesn't exist yet, so Viewport Broadcast was the first. Phase 3 (Updates)
+and 4 (Peers) are still to do. "Checked" below means looked at in this repository; everything
+else is an assumption until it's tried.
 
 ## 1. What there is today
 
@@ -123,5 +124,29 @@ them.
 ## 9. Open questions
 
 1. **Where About's Features section goes:** its own tab, or rows under the components.
+   *Decided: rows under the components* (§10).
 2. **Whether a left-out feature shows in Settings at all.** Its settings don't exist; should
    Settings say "Remote support: left out of this build" where its group would be?
+   *For now it doesn't:* nothing in Settings mentions a left-out feature.
+
+## 10. Phases 1 and 2 as built
+
+| Piece | Where | Notes |
+|---|---|---|
+| `usdcc_feature()`, `usdcc_write_features()` | [cmake/modules/UsdccFeatures.cmake](../cmake/modules/UsdccFeatures.cmake) | Takes `LABEL` and `FOLDERS` (the plugin folders `deploy.py` copies) besides §2's arguments. `NEEDS` defaults a feature to its base's value and fails the configure when it's asked for with its base off; no feature uses it yet |
+| The features | Top-level [CMakeLists.txt](../CMakeLists.txt), before `usdcc_core` | Viewport Broadcast, HTTP, WebDAV, S3, Jolt Physics, V-Ray Render, Blender mesh tools (default on, no longer forced), RTX Render (default off). Each plugin's `add_subdirectory()` only when its feature is on |
+| `USDCC_BUILD_RTX_PLUGIN` | Same | Still sets `USDCC_BUILD_RTX_RENDER` when it's given or changes, with a deprecation note. `tools/build.py` and `rtx-gpu.yml` use the new name |
+| What the build knows | `usdcc::core::buildFeatures()`, `featureOfPlugin()`, `buildFeaturesText()` ([build_features.h](../src/cpp/core/include/usdcc/core/build_features.h)) | From `build/generated/build_features.cpp`, which the configure writes. `USDCC_FEATURE_<NAME>=0/1` is a public compile definition of `usdcc_core` |
+| The refusal | `PluginManager::readManifests()` | A plugin whose id belongs to a feature that's off is `Refused`, "Left out of this build.", before its USD folders are registered or its code runs. What requires it is refused as any dependent is. `whyNotReloadable()` says the same |
+| About usdcc | [about_dialog.cpp](../src/cpp/ui/src/about_dialog.cpp) | A Features heading under the components, "Included" or "Left out of this build" per feature; Copy has them as `Features:` lines |
+| `usdcc_node --version` | [node/main.cpp](../src/cpp/node/main.cpp) | The version and one line per feature, then exits |
+| Python | `usdcc.app.build_features()` | `(name, label, included, plugin ids)` per feature |
+| `build/features.json` | The configure | Name, label, included, plugin ids and folders per feature |
+| Deploy | [tools/deploy.py](../tools/deploy.py) | `SHIPPED_PLUGINS` and `SHIPPED_NATIVE_PLUGINS` stay as the candidates; those whose feature is off aren't copied or required, on Windows and Linux. They're still kept out of `examples/`, so a left-out plugin doesn't come back as an example. RTX follows its feature, and `--omit-rtx` still leaves it out |
+| `tools/build.py --without FEATURE` | [tools/build.py](../tools/build.py) | Repeatable; every run passes each default-on feature as on or off, so a build without `--without` has them all again. Without Blender mesh tools it doesn't fetch their backend |
+| Tests | `tests/CMakeLists.txt` | A feature's tests are built only with it: the physics tests, `physics_timeline_test`, `viewport_broadcast_test`, the V-Ray tests, and each protocol's part of `assets_net_test.cpp` (`#ifdef` on its directory). `python_physics` checks `USDCC_FEATURE_PHYSICS_JOLT` |
+| CI | `build.yml`, Windows x64 | After the usual build and tests, the same build with every default-on feature left out, and `usdcc_node --version` must list seven left out. Not deployed, its tests not run |
+
+Tests: `plugin_left_out_of_the_build` (`usdcc_python_tests`: the features, a copied plugin of a
+left-out feature refused with its dependent, its code never run, no reload), `about_dialog`
+(the rows and the text), `python_app` (`build_features()`).

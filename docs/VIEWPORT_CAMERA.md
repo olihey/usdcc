@@ -1,6 +1,6 @@
 # Viewport Camera
 
-Status: **phase 1 done** (looking through, Detach), phases 2–4 planned. Planned 2026-11-20
+Status: **phases 1 to 3 done** (looking through, Detach; the resolution gate and safe frames; render scale), phase 4 planned. Planned 2026-11-20
 against master `566fb99`. §2's navigation default (Detach) is decided; §8 lists what is still
 open, with proposed answers. §10 says what was built where, and where it differs from the plan.
 
@@ -269,3 +269,44 @@ Where it differs from the plan:
   centimetres in a millimetre stage), has them scaled in the world, as Hydra draws it
   (`stageCameraScale()`). Copy View writes an orthographic aperture back in the camera's own
   space.
+
+### Phase 2: the resolution gate and safe frames (2026-11-22)
+
+| Piece | Where |
+|---|---|
+| The math | `parseResolution()`, `renderSettingsResolution()`, `gateRect()`, `safeRect()`, `aspectRect()`, `overscanFrustum()` in `usdcc/usd/camera_framing.h` (Qt-free); `ViewRect` (not `FrameRect`: Windows has a function of that name) |
+| The gate | `HydraViewportWindow::gateResolution()`, `gate()`; `currentFrustum()` fits the camera to the gate's shape and widens it to the whole window (overscan), so the engine, grid, overlays, gizmos and picking keep one frustum; Fit to View and Detach use the gate's shape |
+| Mask, safe frames, label | `HudInput` / `HudLayout` (`viewport_hud.h`): the scene outside the gate darkened (`gateMaskOpacity`) with a thin line round it; action and title safe, an aspect guide (dashed) and a centre cross, in the HUD's pass, drawn with the HUD off too; the camera label gets the size, `Persp · 2048 × 858` |
+| Choices | The viewport's options menu: **Resolution** (Fill Viewport, 1280 × 720, 1920 × 1080, 2048 × 858, 3840 × 2160, 1080 × 1080, Render Settings when the stage has some, Custom…) and **Safe Frames** (Action Safe, Title Safe, Centre Cross, Aspect Guide, SMPTE 93 / 90 and Legacy 90 / 80) |
+| Settings, overrides, sessions | Settings > Viewport > Camera and Safe Frames (§7's keys); `ViewportDisplayOverrides` (`resolution`, `gateMaskOpacity`, `safeAction`, `safeActionPercent`, `safeTitle`, `safeTitlePercent`, `safeCenter`, `safeAspect`), saved in sessions and copied by Duplicate as the other display options are |
+
+Tests: `viewport_gate_math` (usdcc_tests: parsing, the gate in wide and tall windows, safe and
+aspect rects, the gate's corner landing on it in the widened frustum), `viewport_gate_overrides`
+(usdcc_ui_tests: JSON, what doesn't fit ignored, the defaults), `viewport_resolution_gate`
+(usdcc_python_tests: the gate in a tall viewport, the frustum covering the window, the field of
+view spanning the gate). In the app (Storm): 2048 × 858 with action and title safe and the centre
+cross, set from Settings, as above.
+
+Where it differs from the plan:
+
+- **No `CameraUtilFraming`**: the frustum is widened past the gate instead (`overscanFrustum()`),
+  as `SetCameraState()` already takes any frustum. The same result for the engine, and the
+  overlays and picking need nothing new.
+- **Safe frames are off by default**, with SMPTE's 93 / 90 % when turned on (§8 question 2).
+- **Not in the Display… dialog** yet: the options menu and Settings have them.
+- **The Render View panel** keeps its own Resolution choice for now (§7's sharing waits for
+  phase 3's render scale).
+
+### Phase 3: render scale (2026-11-22)
+
+| Piece | Where |
+|---|---|
+| The size | `scaledBufferSize()`, `kRenderScales` (100, 75, 50, 25) in `camera_framing.h` |
+| The pass | `HydraViewportWindow::renderNow()`: below 100 % Hydra renders into a framebuffer of its own at the scaled size (`bindHydraFramebuffer()`), then colour is blitted up into the full-size one with linear filtering and depth and stencil with nearest; the grid, selection outline, colliders, peers and gizmos then draw into the full-size one, depth-tested against the scaled-up depth, at full resolution. Hidden Line's two passes use the scaled one. Previews always render at 100 % |
+| What else sees it | `grabFrame()` (session previews, broadcasts, a playblast) gets the full-size picture; picking is its own pass, at full size; the HUD's camera label says `Persp @ 25 %` |
+| Choices | The options menu's **Render Scale**, Settings > Viewport > Camera > Render scale, the `renderScale` override, saved in sessions |
+
+Tests: `viewport_render_scale_size` (usdcc_tests) and the override's JSON in
+`viewport_gate_overrides`. In the app (Storm, 25 %): the scene soft, the grid sharp and still
+hidden behind the ground where it should be, with the ground's edge in the grid's depth test
+stepped (nearest-filtered depth), as §5 expected. Not checked: Embree, and the frame time it saves.

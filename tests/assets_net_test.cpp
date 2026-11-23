@@ -10,6 +10,7 @@
 
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/config.h"
+#include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/http_client.h"
@@ -196,6 +197,8 @@ int cachedFiles(const fs::path& cache, const std::string& extension) {
 
 }  // namespace
 
+// Each protocol's tests are built only with its plugin (docs/BUILD_OPTIONS.md).
+#ifdef USDCC_ASSETS_HTTP_PROTOCOL_DIR
 // ---- http:// ---------------------------------------------------------------------------
 
 USDCC_TEST(assets_http_stage_opens_from_a_url) {
@@ -346,7 +349,9 @@ USDCC_TEST(assets_http_missing_and_unreachable) {
     CHECK(took.count() < 6000, "within the connect timeout: %d ms", int(took.count()));
     CHECK(resolver.Resolve("https://h.example.com/a.usd#frag").empty(), "and a URL with a fragment is refused");
 }
+#endif  // USDCC_ASSETS_HTTP_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 // ---- webdav:// -------------------------------------------------------------------------
 
 USDCC_TEST(assets_webdav_lists_stats_and_fetches) {
@@ -793,7 +798,9 @@ USDCC_TEST(assets_downloads_report_progress_and_can_be_cancelled) {
     CHECK(!opened && listener->lastStatus == int(Status::Cancelled), "cancelDownloads() stops one that is running");
     CHECK(resolver.OpenAsset(three), "and not ones started afterwards");
 }
+#endif  // USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_S3_PROTOCOL_DIR
 // ---- s3:// (docs/S3_RESOLVER.md §10) ----------------------------------------------------
 
 namespace {
@@ -1099,8 +1106,55 @@ USDCC_TEST(assets_s3_bucket_by_itself) {
     CHECK(bucketAllowed("open-bucket") && !bucketAllowed("closed-bucket"), "USDCC_S3_ALLOW allows by pattern");
     TfUnsetenv("USDCC_S3_ALLOW");
 }
+#endif  // USDCC_ASSETS_S3_PROTOCOL_DIR
+
+// ---- The Asset Servers editor's Test button (docs/REMOTE_ASSETS.md §10.1) ----------------
+
+USDCC_TEST(assets_editor_test_button_asks_a_server) {
+    Net net;
+    FolderServer folder;
+    folder.root = net.root / "dav";
+    writeScene(folder.root, "prod", true);
+    TestServer server([&folder](const ServerRequest& request) { return serveFolder(folder, request); });
+    Endpoint endpoint;
+    endpoint.id = "prod";
+    endpoint.scheme = "webdav";
+    endpoint.url = server.url();
+    Cancel cancel;
+
+    const EndpointTest answered = testEndpoint(endpoint, cancel);
+    CHECK(answered.status == Status::Ok && answered.entries == 2,
+          "a server that answers, with its root's entries: %s", answered.summary.c_str());
+    CHECK(answered.summary.find("answered in") != std::string::npos && answered.summary.find("2 entries") != std::string::npos,
+          "said so: %s", answered.summary.c_str());
+
+    folder.basicAuth = "ada:secret";
+    endpoint.credential = "editor-test";
+    const EndpointTest refused = testEndpoint(endpoint, cancel);
+    CHECK(refused.status == Status::NotAllowed && refused.summary.find("'editor-test'") != std::string::npos,
+          "one that wants a login names the credential it refused: %s", refused.summary.c_str());
+    TfSetenv("USDCC_ASSETS_EDITOR_TEST_USER", "ada");
+    TfSetenv("USDCC_ASSETS_EDITOR_TEST_PASSWORD", "secret");
+    CHECK(testEndpoint(endpoint, cancel).status == Status::Ok, "and answers once the login is there");
+    TfUnsetenv("USDCC_ASSETS_EDITOR_TEST_USER");
+    TfUnsetenv("USDCC_ASSETS_EDITOR_TEST_PASSWORD");
+
+    Endpoint dead = endpoint;
+    dead.credential.clear();
+    dead.url = "http://127.0.0.1:" + std::to_string(usdcc::test::unusedPort());
+    const EndpointTest unreachable = testEndpoint(dead, cancel);
+    CHECK(unreachable.status == Status::Unreachable && unreachable.summary.find(dead.url) != std::string::npos,
+          "one that doesn't answer is unreachable, naming the URL: %s", unreachable.summary.c_str());
+    folder.basicAuth.clear();
+    dead.mirrors = {server.url()};
+    const EndpointTest mirrored = testEndpoint(dead, cancel);
+    CHECK(mirrored.status == Status::Ok && mirrored.url == server.url(),
+          "its mirror is tried next, as resolving does: %s", mirrored.summary.c_str());
+}
 
 // ---- Writing (docs/REMOTE_ASSETS.md §6, phase 6) -----------------------------------------
+// The helpers both writing protocols share.
+#if defined(USDCC_ASSETS_WEBDAV_PROTOCOL_DIR) || defined(USDCC_ASSETS_S3_PROTOCOL_DIR)
 
 namespace {
 
@@ -1298,7 +1352,9 @@ void checkWriting(const WriteServers& servers) {
 }
 
 }  // namespace
+#endif  // WebDAV or S3
 
+#ifdef USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 USDCC_TEST(assets_webdav_writes) {
     Net net;
     TwoServers servers(net);
@@ -1355,7 +1411,9 @@ USDCC_TEST(assets_webdav_put_compares_a_weak_etag_itself) {
     CHECK(asked.ok() && asked.value.etag == transport->stat(endpoint, "/a.txt", cancel).value.etag,
           "a reply without an ETag: the new version is asked for");
 }
+#endif  // USDCC_ASSETS_WEBDAV_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_S3_PROTOCOL_DIR
 USDCC_TEST(assets_s3_writes) {
     Net net;
     S3 prod(net.root / "prod", "prod-assets", "us-east-1");
@@ -1404,7 +1462,9 @@ USDCC_TEST(assets_s3_writes) {
     CHECK(errors.find("AccessDenied") != std::string::npos && errors.find("s3:PutObject") != std::string::npos,
           "with S3's code, and the permission it takes: %s", errors.c_str());
 }
+#endif  // USDCC_ASSETS_S3_PROTOCOL_DIR
 
+#ifdef USDCC_ASSETS_HTTP_PROTOCOL_DIR
 USDCC_TEST(assets_http_refuses_to_write) {
     Net net;
     FolderServer folder;
@@ -1435,3 +1495,4 @@ USDCC_TEST(assets_http_refuses_to_write) {
     mark.Clear();
     CHECK(server.count("PUT") == 0, "and the server is never asked to write");
 }
+#endif  // USDCC_ASSETS_HTTP_PROTOCOL_DIR

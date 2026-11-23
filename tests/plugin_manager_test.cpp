@@ -4,6 +4,7 @@
 #include "python_test_app.h"
 #include "test_harness.h"
 
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/scripting/app_module.h"
@@ -165,6 +166,43 @@ USDCC_TEST(plugin_retired_python_rtx_without_native) {
     CHECK(!manager.find("org.usdcc.rtx-render"), "an RTX-free build ignores an old Python RTX user copy");
     CHECK(manager.packageRequests(python(), nullptr).empty(), "a retired copy cannot request Python RTX packages");
     CHECK(evaluated("'usdcc_test_retired_rtx' in __import__('sys').modules") == "False", "the retired module is not imported");
+}
+
+// docs/BUILD_OPTIONS.md §3: the build knows its features, and a plugin of one it left out is
+// refused from any folder, before any of its code runs; what requires it is refused too.
+USDCC_TEST(plugin_left_out_of_the_build) {
+    const auto& features = usdcc::core::buildFeatures();
+    CHECK(features.size() >= 8, "the features the top-level CMakeLists.txt declares: %d", int(features.size()));
+    const usdcc::core::BuildFeature* broadcast = usdcc::core::featureOfPlugin("org.usdcc.viewport-broadcast");
+    CHECK(broadcast && broadcast->name == "VIEWPORT_BROADCAST" && broadcast->label == "Viewport Broadcast",
+          "a plugin id names its feature");
+    CHECK(broadcast && broadcast->included == bool(USDCC_FEATURE_VIEWPORT_BROADCAST), "as the build was configured");
+    CHECK(!usdcc::core::featureOfPlugin("org.example.anything"), "other plugins belong to none");
+    CHECK(contains(usdcc::core::buildFeaturesText(), "Viewport Broadcast: "), "the text lists them");
+
+    const usdcc::core::BuildFeature* leftOut = nullptr;
+    for (const usdcc::core::BuildFeature& feature : features) {
+        if (!feature.included && !feature.pluginIds.empty()) {
+            leftOut = &feature;
+            break;
+        }
+    }
+    if (!leftOut) return;  // every feature is in this build: nothing to refuse
+    const std::string id = leftOut->pluginIds.front();
+    Plugins plugins("left_out");
+    // A copy from another build, with no Python (a retired Python RTX copy is skipped earlier).
+    plugins.write("copy/usdcc-plugin.json", R"({"id": ")" + id + R"(", "name": "A copy", "version": "1", "api": 1})");
+    plugins.plugin("needs.it", "usdcc_test_left_out_dependent", "raise RuntimeError('must not run')\n",
+                   R"(, "requires": [")" + id + R"("])");
+    PluginManager manager(plugins.options());
+    manager.scan();
+    manager.activate(python());
+    CHECK(stateOf(manager, id) == PluginState::Refused && reasonOf(manager, id) == "Left out of this build.",
+          "%s is refused: %s", id.c_str(), reasonOf(manager, id).c_str());
+    CHECK(stateOf(manager, "needs.it") == PluginState::Refused && contains(reasonOf(manager, "needs.it"), "A copy"),
+          "what requires it is refused: %s", reasonOf(manager, "needs.it").c_str());
+    CHECK(evaluated("'usdcc_test_left_out_dependent' in __import__('sys').modules") == "False", "and its code never ran");
+    CHECK(manager.whyNotReloadable(id) == "Left out of this build.", "a reload can't bring it back");
 }
 
 USDCC_TEST(plugin_order_and_failures) {

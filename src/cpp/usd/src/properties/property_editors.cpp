@@ -519,7 +519,7 @@ public:
         // Square, the size of the row's icon buttons.
         m_relative = iconButton(QString(), tr("Switch between a path relative to the layer and an absolute path"), row);
         m_browse = iconButton(QString(), tr("Browse for a file"), row);
-        m_browse->setText(QStringLiteral("\xE2\x80\xA6"));
+        m_browse->setText(QString::fromUtf8("\xE2\x80\xA6"));
         rowLay->addWidget(m_edit, 1);
         rowLay->addWidget(m_relative);
         rowLay->addWidget(m_browse);

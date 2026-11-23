@@ -167,6 +167,13 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
     layout.shadow = dark ? QColor(0, 0, 0, 170) : QColor(255, 255, 255, 170);
     const double width = input.size.width();
     const double height = input.size.height();
+    // The gate and guides first: they're drawn under the rest.
+    layout.gate = input.gate;
+    layout.gateMaskOpacity = input.gate ? input.gateMaskOpacity : 0.0;
+    layout.safeFrames = input.safeFrames;
+    layout.aspectGuide = input.aspectGuide;
+    if (input.centerCross) layout.centerCross = input.overlayArea.center();
+    if (!input.hudOn) return layout;
     if (width < 40.0 * s || height < 40.0 * s) return layout;
 
     const QFontMetricsF metrics(font);
@@ -381,6 +388,39 @@ void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& f
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     painter.setFont(font);
+
+    // The gate: the scene outside it darkened, and a thin line around it.
+    if (layout.gate) {
+        const QRectF all(QPointF(0.0, 0.0), layout.size);
+        const QRectF gate = *layout.gate;
+        QPainterPath outside;
+        outside.addRect(all);
+        outside.addRect(gate);
+        outside.setFillRule(Qt::OddEvenFill);
+        painter.fillPath(outside, QColor(0, 0, 0, int(std::clamp(layout.gateMaskOpacity, 0.0, 1.0) * 255.0)));
+        painter.setPen(QPen(QColor(232, 232, 232, 140), 1.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(gate.adjusted(-0.5, -0.5, 0.5, 0.5));
+    }
+    // Safe frames, an aspect guide and the centre cross: light lines on a dark edge.
+    const auto guideLine = [&painter, s](const QRectF& rect, Qt::PenStyle style) {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor(0, 0, 0, 120), 3.0 * s));
+        painter.drawRect(rect);
+        painter.setPen(QPen(QColor(232, 232, 232, 200), 1.0 * s, style));
+        painter.drawRect(rect);
+    };
+    for (const QRectF& frame : layout.safeFrames) guideLine(frame, Qt::SolidLine);
+    if (layout.aspectGuide) guideLine(*layout.aspectGuide, Qt::DashLine);
+    if (layout.centerCross) {
+        const QPointF c = *layout.centerCross;
+        const double arm = 8.0 * s;
+        for (const auto& [pen, width] : {std::pair{QColor(0, 0, 0, 120), 3.0 * s}, std::pair{QColor(232, 232, 232, 220), 1.0 * s}}) {
+            painter.setPen(QPen(pen, width));
+            painter.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()));
+            painter.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm));
+        }
+    }
 
     // The corners' plates first, the text on them after.
     painter.setPen(Qt::NoPen);

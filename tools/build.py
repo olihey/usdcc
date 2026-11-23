@@ -8,6 +8,7 @@ Mirrors the manual steps documented in readme.md.
     python tools/build.py --usd-install C:\\usd\\install
     python tools/build.py --run --scene test_data/cube_and_sphere.usda
     python tools/build.py --without-tests
+    python tools/build.py --without viewport_broadcast --without s3
 
 On Windows it builds with Visual Studio. On Linux and macOS it uses Ninja when
 there is one on PATH (else CMake's default generator) and vcpkg's dynamic
@@ -33,6 +34,10 @@ from _common import (  # noqa: E402
 
 BUILD_DIR = REPO / "build"
 VCPKG_DIR = REPO / "external/vcpkg"
+# The features on by default that --without can leave out, as the top-level CMakeLists.txt
+# declares them with usdcc_feature() (docs/BUILD_OPTIONS.md). RTX Render, off by
+# default, has --with-rtx and --without-rtx.
+OPTIONAL_FEATURES = ["VIEWPORT_BROADCAST", "HTTP", "WEBDAV", "S3", "PHYSICS_JOLT", "VRAY_RENDER", "BLENDER_MESH_TOOLS"]
 
 
 def parser(description=None):
@@ -57,6 +62,10 @@ def parser(description=None):
     result.add_argument("--ovstage-root", metavar="DIR")
     result.add_argument("--rtx-gpu-tests", action="store_true",
                         help="enable labeled GPU tests; build rtx_gpu_test_bins before running CTest")
+    result.add_argument("--without", action="append", default=[], metavar="FEATURE",
+                        help="leave a feature out of the build, repeatable: "
+                             + ", ".join(name.lower() for name in OPTIONAL_FEATURES)
+                             + " (docs/BUILD_OPTIONS.md). The next build without it has the feature again")
     result.add_argument("--without-tests", action="store_true",
                         help="skip the usdcc_tests executable and CTest registration; the next build "
                              "without this option builds them again")
@@ -105,7 +114,7 @@ def launch(exe, usd_install, scene):
         environment["PXR_PLUGINPATH_NAME"] = os.path.join(usd_install, "plugin", "usd")
 
     arguments = []
-    if cache_on(BUILD_DIR, "USDCC_BUILD_RTX_PLUGIN"):
+    if cache_on(BUILD_DIR, "USDCC_BUILD_RTX_RENDER"):
         arguments += ["--plugin-path", str(BUILD_DIR / "plugins")]
     if scene:
         # Against the caller's folder, whatever the app's own turns out to be: a
@@ -156,10 +165,18 @@ def main(argv=None, description=None):
             # The one the build folder already has, so a second run doesn't clash.
             generator = cache_value(BUILD_DIR, "CMAKE_GENERATOR") or ("Ninja" if shutil.which("ninja") else None)
 
-    # Mesh tools are part of every build. Dependency downloads happen here,
+    # Features to leave out (docs/BUILD_OPTIONS.md): USDCC_BUILD_<NAME>=OFF each. Every
+    # run says so for each feature named or not, so a build without --without has them again.
+    without = {name.upper().replace("-", "_") for name in args.without}
+    unknown = sorted(without - set(OPTIONAL_FEATURES))
+    if unknown:
+        fail(f"--without: no feature {', '.join(unknown)}; there are {', '.join(OPTIONAL_FEATURES)}.")
+    # Mesh tools are in every build unless left out. Dependency downloads happen here,
     # never implicitly during a direct CMake configure.
-    run([sys.executable, REPO / "tools/build_blender_mesh.py", "--fetch", "--jobs", str(args.jobs)])
-    configure = ["cmake", "-S", REPO, "-B", BUILD_DIR, "-DUSDCC_BUILD_BLENDER_MESH_TOOLS=ON"]
+    if "BLENDER_MESH_TOOLS" not in without:
+        run([sys.executable, REPO / "tools/build_blender_mesh.py", "--fetch", "--jobs", str(args.jobs)])
+    configure = ["cmake", "-S", REPO, "-B", BUILD_DIR]
+    configure += [f"-DUSDCC_BUILD_{name}={'OFF' if name in without else 'ON'}" for name in OPTIONAL_FEATURES]
     if generator:
         configure += ["-G", generator]
     if generator and generator.startswith("Visual Studio"):
@@ -177,9 +194,9 @@ def main(argv=None, description=None):
     # and a build without --without-tests should have its tests again.
     configure.append(f"-DUSDCC_BUILD_TESTS={'OFF' if args.without_tests else 'ON'}")
     if rtx_options:
-        configure.append("-DUSDCC_BUILD_RTX_PLUGIN=ON")
+        configure.append("-DUSDCC_BUILD_RTX_RENDER=ON")
     if args.without_rtx:
-        configure += ["-DUSDCC_BUILD_RTX_PLUGIN=OFF", "-DUSDCC_RTX_GPU_TESTS=OFF"]
+        configure += ["-DUSDCC_BUILD_RTX_RENDER=OFF", "-DUSDCC_RTX_GPU_TESTS=OFF"]
     if args.ovrtx_root:
         configure.append(f"-DUSDCC_RTX_OVRTX_ROOT={args.ovrtx_root}")
     if args.ovstage_root:

@@ -1,5 +1,6 @@
 #include "usdcc/ui/about_dialog.h"
 
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/version.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/theme.h"
@@ -46,7 +47,14 @@ AboutDialog::Info AboutDialog::currentBuild() {
     info.commit = QString::fromUtf8(core::commit());
     info.buildDate = QString::fromUtf8(core::buildDate());
     info.components.append({QStringLiteral("Qt"), QString::fromUtf8(qVersion())});
+    for (const core::BuildFeature& feature : core::buildFeatures()) {
+        info.features.append({QString::fromStdString(feature.label), feature.included});
+    }
     return info;
+}
+
+QString AboutDialog::featureState(bool included) {
+    return included ? tr("Included") : tr("Left out of this build");
 }
 
 AboutDialog::AboutDialog(const Info& info, QWidget* parent) : QDialog(parent), m_info(info) {
@@ -78,6 +86,18 @@ AboutDialog::AboutDialog(const Info& info, QWidget* parent) : QDialog(parent), m
     details->addRow(tr("Built"), selectable(info.buildDate, this));
     for (const Component& component : info.components) {
         details->addRow(component.name, selectable(component.version, this));
+    }
+    if (!info.features.isEmpty()) {
+        auto* heading = new QLabel(tr("Features"), this);
+        heading->setObjectName(QStringLiteral("aboutFeaturesHeading"));
+        heading->setStyleSheet(QStringLiteral("font-weight: 600;"));
+        details->addRow(heading);
+        for (const Feature& feature : info.features) {
+            auto* state = new QLabel(featureState(feature.included), this);
+            state->setObjectName(QStringLiteral("aboutFeature"));
+            state->setProperty("included", feature.included);
+            details->addRow(feature.label, state);
+        }
     }
     details->addRow(selectable(link(repository, tr("Repository")) + QStringLiteral(" &middot; ") +
                                    link(repository + QStringLiteral("/releases"), tr("Releases")),
@@ -117,6 +137,12 @@ QString AboutDialog::text() const {
     lines << QStringLiteral("Built: %1").arg(m_info.buildDate);
     for (const Component& component : m_info.components) {
         lines << QStringLiteral("%1: %2").arg(component.name, component.version);
+    }
+    if (!m_info.features.isEmpty()) {
+        lines << QStringLiteral("Features:");
+        for (const Feature& feature : m_info.features) {
+            lines << QStringLiteral("  %1: %2").arg(feature.label, featureState(feature.included));
+        }
     }
     return lines.join(QLatin1Char('\n'));
 }

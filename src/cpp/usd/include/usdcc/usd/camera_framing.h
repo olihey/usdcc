@@ -7,7 +7,11 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
 
+#include <pxr/usd/usd/stage.h>
+
 #include <optional>
+#include <string>
+#include <utility>
 
 namespace usdcc::usd {
 
@@ -62,5 +66,52 @@ struct OrbitView {
     double orthoSize = kDefaultOrbitDistance;  // orthographic
 };
 PXR_NS::GfCamera cameraSeeingView(const PXR_NS::GfCamera& camera, const OrbitView& view, double aspect);
+
+// ---- The resolution gate and safe frames (docs/VIEWPORT_CAMERA.md §4, §6) ----------------
+
+// An image size. A viewport only takes its shape from it: the gate is fitted in the window.
+struct Resolution {
+    int width = 0;
+    int height = 0;
+    bool operator==(const Resolution&) const = default;
+};
+inline constexpr int kMinResolution = 16;
+inline constexpr int kMaxResolution = 16384;
+// Viewport/resolution's values: "fill" (none), "renderSettings", or "<width>x<height>".
+inline constexpr const char* kFillViewport = "fill";
+inline constexpr const char* kRenderSettingsResolution = "renderSettings";
+// "1920x1080" (or "1920 x 1080", "1920×1080"): the size, each side 16-16384. Nothing for
+// "fill", "renderSettings" or anything else.
+std::optional<Resolution> parseResolution(const std::string& text);
+std::string resolutionName(const Resolution& resolution);
+// The stage's render settings' resolution: its renderSettingsPrimPath's, else the first
+// UsdRenderSettings prim's. Nothing without one.
+std::optional<Resolution> renderSettingsResolution(const PXR_NS::UsdStagePtr& stage);
+
+// A rectangle in a window's pixels, from its top left.
+struct ViewRect {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    double aspect() const { return height > 0.0 ? width / height : 1.0; }
+    bool operator==(const ViewRect&) const = default;
+};
+// The gate in a window `width` by `height`: the resolution's shape, as large as fits, centred;
+// the whole window without one.
+ViewRect gateRect(double width, double height, const std::optional<Resolution>& resolution);
+// `rect` shrunk to `percent` of its width and height about its centre: a safe frame.
+ViewRect safeRect(const ViewRect& rect, double percent);
+// The largest rect of `aspect` (width over height) in `rect`, centred: an aspect guide.
+ViewRect aspectRect(const ViewRect& rect, double aspect);
+// Render scale (§5): the size Hydra renders at for a framebuffer `width` by `height` at
+// `percent` of it (25-100), at least a pixel each way.
+std::pair<int, int> scaledBufferSize(int width, int height, int percent);
+// The scales a viewport offers.
+inline constexpr int kRenderScales[] = {100, 75, 50, 25};
+
+// `frustum`, which sees the gate, widened to see the whole window around it (overscan), so
+// the gate shows exactly what it frames and the window more beside it.
+PXR_NS::GfFrustum overscanFrustum(const PXR_NS::GfFrustum& frustum, const ViewRect& gate, double width, double height);
 
 }  // namespace usdcc::usd
