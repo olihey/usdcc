@@ -54,6 +54,14 @@ BroadcastPanel::BroadcastPanel(usdcc::ui::PeersController* peers, QWidget* paren
     m_watchers->setMaximumHeight(110);
     layout->addWidget(m_watchers);
     auto* watcherRow = new QHBoxLayout;
+    m_allow = new QPushButton(tr("Allow Navigating"), content);
+    m_allow->setObjectName(QStringLiteral("broadcastAllow"));
+    m_allow->setToolTip(tr("The selected watcher moves this viewport's camera, instead of whoever did"));
+    m_takeBack = new QPushButton(tr("Take Back"), content);
+    m_takeBack->setObjectName(QStringLiteral("broadcastTakeBack"));
+    m_takeBack->setToolTip(tr("Ends the watcher's navigating"));
+    watcherRow->addWidget(m_allow);
+    watcherRow->addWidget(m_takeBack);
     m_remove = new QPushButton(tr("Remove"), content);
     m_remove->setObjectName(QStringLiteral("broadcastRemove"));
     m_remove->setToolTip(tr("Closes the selected watcher's page: they can come back with the link"));
@@ -78,6 +86,10 @@ BroadcastPanel::BroadcastPanel(usdcc::ui::PeersController* peers, QWidget* paren
     connect(m_copy, &QPushButton::clicked, this, &BroadcastPanel::copyRequested);
     connect(m_stop, &QPushButton::clicked, this, &BroadcastPanel::stopRequested);
     connect(m_remove, &QPushButton::clicked, this, [this] { removeSelectedWatcher(); });
+    connect(m_allow, &QPushButton::clicked, this, [this] { allowSelectedWatcher(); });
+    connect(m_takeBack, &QPushButton::clicked, this, [this] {
+        if (m_broadcast) m_broadcast->takeBack();
+    });
     connect(m_watchers, &QListWidget::itemSelectionChanged, this, &BroadcastPanel::updateState);
     connect(m_say, &QLineEdit::returnPressed, this, [this] {
         if (say(m_say->text())) m_say->clear();
@@ -101,6 +113,7 @@ void BroadcastPanel::setBroadcast(Broadcast* broadcast) {
     m_broadcast = broadcast;
     if (broadcast) {
         m_connections.append(connect(broadcast, &Broadcast::watchersChanged, this, &BroadcastPanel::updateWatchers));
+        m_connections.append(connect(broadcast, &Broadcast::navigatorChanged, this, &BroadcastPanel::updateWatchers));
         m_connections.append(connect(broadcast, &Broadcast::stopped, this, [this](const QString& reason) {
             setBroadcast(nullptr);
             m_status->setText(reason.isEmpty() ? tr("The broadcast ended.") : tr("The broadcast ended: %1").arg(reason));
@@ -121,6 +134,11 @@ bool BroadcastPanel::removeSelectedWatcher() {
     return true;
 }
 
+bool BroadcastPanel::allowSelectedWatcher() {
+    QListWidgetItem* item = m_watchers->currentItem();
+    return m_broadcast && item && m_broadcast->allowNavigating(item->data(kIdRole).toString());
+}
+
 bool BroadcastPanel::say(const QString& text) {
     if (!m_peers || !m_broadcast || !m_broadcast->room() || text.trimmed().isEmpty()) return false;
     m_peers->say(m_broadcast->room(), text);
@@ -132,7 +150,13 @@ void BroadcastPanel::updateWatchers() {
     m_watchers->clear();
     if (m_broadcast) {
         for (const usdcc::peers::Peer& watcher : m_broadcast->watchers()) {
-            auto* item = new QListWidgetItem(watcher.name, m_watchers);
+            QString text = watcher.name;
+            if (watcher.id == m_broadcast->navigator()) {
+                text = tr("%1 (navigating)").arg(watcher.name);
+            } else if (m_broadcast->asking().contains(watcher.id)) {
+                text = tr("%1 (asks to navigate)").arg(watcher.name);
+            }
+            auto* item = new QListWidgetItem(text, m_watchers);
             item->setData(kIdRole, watcher.id);
             if (watcher.id == selected) m_watchers->setCurrentItem(item);
         }
@@ -157,6 +181,9 @@ void BroadcastPanel::updateState() {
     m_copy->setEnabled(live);
     m_stop->setEnabled(live);
     m_remove->setEnabled(live && m_watchers->currentItem());
+    m_allow->setEnabled(live && m_watchers->currentItem() &&
+                        m_watchers->currentItem()->data(kIdRole).toString() != m_broadcast->navigator());
+    m_takeBack->setEnabled(live && !m_broadcast->navigator().isEmpty());
     m_say->setEnabled(live && m_peers);
 }
 

@@ -15,7 +15,11 @@
   #title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
   #live { color: var(--bad); font-weight: 600; font-size: 11px; letter-spacing: .06em; }
   #live[hidden] { display: none; }
-  #status, #watchers { color: var(--text-muted); }
+  #status, #watchers, #navigator { color: var(--text-muted); }
+  #ask { margin-left: auto; }
+  #ask[hidden] { display: none; }
+  canvas.navigating { cursor: grab; outline: 2px solid var(--accent, #3d8bfd); outline-offset: -2px; }
+  canvas.navigating:active { cursor: grabbing; }
   main { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;
          background: var(--gap); }
   canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
@@ -34,6 +38,8 @@
   <span id="title">usdcc broadcast</span>
   <span id="status">Connecting…</span>
   <span id="watchers"></span>
+  <span id="navigator"></span>
+  <button id="ask" hidden>Ask to navigate</button>
 </header>
 <main>
   <canvas id="view" hidden></canvas>
@@ -46,6 +52,7 @@
 <script>
 "use strict";
 const VIEW = "org.usdcc.viewport-broadcast/view";
+const NAV = "org.usdcc.viewport-broadcast/nav";
 const params = new URLSearchParams(location.hash.slice(1));
 const secret = params.get("s") || "";
 let name = (params.get("n") || "").trim();
@@ -63,6 +70,8 @@ const canvas = $("view"), context = canvas.getContext("2d");
 const people = new Map();
 let me = "";
 let ended = false;
+// Navigating (docs/VIEWPORT_BROADCAST.md §6): "idle", "asked" or "navigating".
+let navState = "idle";
 let drawing = Promise.resolve();
 
 function setNote(text) {
@@ -89,8 +98,72 @@ function end(reason) {
   $("live").hidden = true;
   $("status").textContent = reason || "The broadcast ended";
   $("say").disabled = true;
+  $("ask").hidden = true;
+  setNavigating("idle");
   if (canvas.hidden) setNote(reason || "The broadcast ended");
 }
+
+function sendNav(type, body) {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ channel: NAV, type, body: body || {} }));
+}
+function setNavigating(state) {
+  navState = state;
+  canvas.classList.toggle("navigating", state === "navigating");
+  $("ask").textContent = state === "idle" ? "Ask to navigate" : state === "asked" ? "Cancel asking" : "Stop navigating";
+}
+$("ask").addEventListener("click", () => {
+  if (navState === "idle") { sendNav("ask"); setNavigating("asked"); $("navigator").textContent = "Asked the host…"; }
+  else { sendNav("cancel"); setNavigating("idle"); $("navigator").textContent = ""; }
+});
+
+// While navigating: drag to orbit, middle or shift drag to pan, wheel to zoom, F to fit,
+// as in the app. Moves are fractions of the picture as shown, gathered and sent at most
+// once a frame.
+let pending = { orbit: [0, 0], pan: [0, 0], zoom: 0 };
+let flushing = false;
+function flush() {
+  flushing = false;
+  if (navState !== "navigating") return;
+  for (const move of ["orbit", "pan"]) {
+    const [x, y] = pending[move];
+    if (x || y) sendNav(move, { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) });
+  }
+  if (pending.zoom) sendNav("zoom", { steps: Math.max(-10, Math.min(10, pending.zoom)) });
+  pending = { orbit: [0, 0], pan: [0, 0], zoom: 0 };
+}
+function queue() {
+  if (!flushing) { flushing = true; requestAnimationFrame(flush); }
+}
+let drag = null;
+canvas.addEventListener("pointerdown", event => {
+  if (navState !== "navigating") return;
+  drag = { x: event.clientX, y: event.clientY, pan: event.button === 1 || event.shiftKey };
+  canvas.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+canvas.addEventListener("pointermove", event => {
+  if (!drag || navState !== "navigating") return;
+  const rect = canvas.getBoundingClientRect();
+  const dx = (event.clientX - drag.x) / rect.width, dy = (event.clientY - drag.y) / rect.height;
+  drag.x = event.clientX; drag.y = event.clientY;
+  const move = pending[drag.pan ? "pan" : "orbit"];
+  move[0] += dx; move[1] += dy;
+  queue();
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("pointercancel", () => { drag = null; });
+canvas.addEventListener("auxclick", event => event.preventDefault());
+canvas.addEventListener("wheel", event => {
+  if (navState !== "navigating") return;
+  event.preventDefault();
+  pending.zoom += -event.deltaY / 100;
+  queue();
+}, { passive: false });
+document.addEventListener("keydown", event => {
+  if (navState === "navigating" && (event.key === "f" || event.key === "F") && document.activeElement !== $("say")) {
+    sendNav("fit");
+  }
+});
 
 // A frame (docs/PEERS_PROTOCOL.md §2): a big-endian u32 header length, the JSON header,
 // then the raw bytes. Text messages are a header alone.
@@ -150,6 +223,7 @@ socket.onmessage = event => {
       $("status").textContent = "";
       if (canvas.hidden) setNote("Waiting for the picture…");
       $("chat").hidden = !(body.channels || []).some(c => c.name === "chat");
+      $("ask").hidden = !(body.channels || []).some(c => c.name === NAV);
     } else if (message.type === "joined") {
       people.set(body.id, body);
       showPeople();
@@ -158,6 +232,16 @@ socket.onmessage = event => {
       showPeople();
     } else if (["denied", "removed", "closed"].includes(message.type)) {
       end(body.reason || (message.type === "denied" ? "This link doesn't open the broadcast" : "The broadcast ended"));
+    }
+  } else if (message.channel === NAV) {
+    if (message.type === "navigator") {
+      const mine = body.id && body.id === me;
+      setNavigating(mine ? "navigating" : navState === "asked" ? "asked" : "idle");
+      $("navigator").textContent = mine ? "You navigate: drag to orbit, shift or middle drag to pan, wheel to zoom, F to fit"
+        : body.name ? body.name + " navigates" : navState === "asked" ? "Asked the host…" : "";
+    } else if (message.type === "denied") {
+      setNavigating("idle");
+      $("navigator").textContent = "The host said no";
     }
   } else if (message.channel === VIEW && (message.type === "frame" || message.type === "snapshot")) {
     showPicture(message);

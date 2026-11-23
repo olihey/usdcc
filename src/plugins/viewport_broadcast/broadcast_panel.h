@@ -1,8 +1,9 @@
 #pragma once
 
 // The Broadcast side panel (docs/VIEWPORT_BROADCAST.md §2.1, phase 2): the link, the
-// watchers by name, the broadcast's chat, and Stop. Per watcher: Remove. With no
-// broadcast it says how to start one.
+// watchers by name, the broadcast's chat, and Stop. Per watcher: Allow navigating (phase
+// 3) and Remove; Take back ends a watcher's navigating. With no broadcast it says how to
+// start one.
 
 #include "broadcast.h"
 
@@ -36,6 +37,8 @@ public:
 
     // Removes the watcher selected in the list from the broadcast; the page says why.
     bool removeSelectedWatcher();
+    // Lets the watcher selected in the list navigate.
+    bool allowSelectedWatcher();
     // Sends a line to the broadcast's chat, as the host.
     bool say(const QString& text);
 
@@ -60,6 +63,8 @@ private:
     QPushButton* m_stop = nullptr;
     QListWidget* m_watchers = nullptr;
     QPushButton* m_remove = nullptr;
+    QPushButton* m_allow = nullptr;
+    QPushButton* m_takeBack = nullptr;
     QPlainTextEdit* m_chat = nullptr;
     QLineEdit* m_say = nullptr;
 };

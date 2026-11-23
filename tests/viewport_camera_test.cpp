@@ -502,3 +502,33 @@ USDCC_TEST(viewport_resolution_gate) {
     CHECK(std::abs(size[1] / filledHeight - 4.0) < 1e-6, "the field of view spans the gate: %g", size[1] / filledHeight);
     viewport.reset();
 }
+
+// Navigating from elsewhere (docs/VIEWPORT_BROADCAST.md §6): the moves a watcher sends do
+// what the mouse does.
+USDCC_TEST(viewport_navigates_by_moves) {
+    pythonTestApp();
+    OpenStage open("navigate", kFitScene);
+    auto viewport = makeViewport(open.stage);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    const HydraViewportWindow::CameraState start{PXR_NS::GfVec3d(1, 2, 3), 50.0, 30.0, 15.0};
+    window->setCameraState(start);
+    int changes = 0;
+    QObject::connect(window, &HydraViewportWindow::cameraChanged, window, [&changes] { ++changes; });
+    CHECK(!window->isMouseNavigating(), "no mouse on it");
+
+    window->orbitBy(10, -4);
+    HydraViewportWindow::CameraState state = window->cameraState();
+    CHECK(std::abs(state.yaw - 25.0) < 1e-9 && std::abs(state.pitch - 13.0) < 1e-9,
+          "orbit is half a degree a pixel, as a drag: yaw %f pitch %f", state.yaw, state.pitch);
+    CHECK(closeTo(state.target, start.target) && state.distance == start.distance, "orbiting keeps the target");
+
+    window->zoomBy(1);
+    state = window->cameraState();
+    CHECK(std::abs(state.distance - 45.0) < 1e-9, "a notch in is 0.9 of the distance, as the wheel: %f", state.distance);
+
+    window->panBy(40, 0);
+    CHECK(!closeTo(window->cameraState().target, start.target), "panning moves the target");
+    CHECK(window->cameraState().distance == state.distance && window->cameraState().yaw == state.yaw,
+          "panning keeps the distance and the way it looks");
+    CHECK(changes >= 3, "each move says the camera changed (%d)", changes);
+}
