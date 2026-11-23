@@ -1,0 +1,19 @@
+diff --git a/Scripts/installExternals.py b/Scripts/installExternals.py
+index 548cddf..3abc4fc 100644
+--- a/Scripts/installExternals.py
++++ b/Scripts/installExternals.py
+@@ -1238,8 +1238,13 @@ requiredDependencies = [ZLIB,
+ #
+ # On Ubuntu 24.04, you can run the following command to install these libraries:
+ # sudo apt-get -y install zlib1g-dev libjpeg-turbo8-dev libtiff-dev libpng-dev libglm-dev libglew-dev libglfw3-dev libgtest-dev libgmock-dev libxt-dev
++# usdcc (docs/USD_PLUGINS.md phase 6): OpenUSD and the libraries it brings (MaterialX,
++# OpenImageIO, OpenEXR, OpenSubdiv, TBB, boost, the image libraries) are usdcc's, not built here.
++for lib in [ZLIB, JPEG, TIFF, PNG, BOOST, ONETBB, OPENEXR, OPENIMAGEIO, MATERIALX, OPENSUBDIV, USD]:
++    requiredDependencies.remove(lib)
++
+ if Linux():
+-    excludes = [ZLIB, JPEG, TIFF, PNG, GLM, GLEW, GLFW, GTEST]
++    excludes = [GLM, GLEW, GLFW, GTEST]
+     for lib in excludes:
+         requiredDependencies.remove(lib)
+ 
