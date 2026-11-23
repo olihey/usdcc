@@ -27,7 +27,7 @@ Checked against the build the app links (`USD_INSTALL`, which reports 26.08).
 | **Parsing** (`usdPhysics/parseUtils.h`, `parseDesc.h`) | `UsdPhysicsLoadStageFromPrimRange()` walks a stage and reports plain descriptors: scenes, materials, collision groups, shapes (sphere, cube, capsule, cylinder, cone, plane, mesh, sphere points), rigid bodies, joints with limits and drives, articulations. It resolves the rules a solver would otherwise have to re-implement: which collider belongs to which body, nested bodies, simulation owners, filtering. Its output is deterministic. It reads every value at `UsdTimeCode::Default()`, never at a frame (§4.3) |
 | **Mass** | `UsdPhysicsRigidBodyAPI::ComputeMassProperties()`: the precedence rules (explicit mass, then density on the mass API, then the material's density, then 1000 kg/m³) with a callback that supplies each collider's volume and inertia |
 | **Units** | Distance in the stage's `metersPerUnit`, mass in `kilogramsPerUnit` (`metrics.h`), time in seconds, angles in degrees. Gravity defaults to the up axis and Earth's magnitude |
-| **Validators** | `usdPhysicsValidators` is in the build: rules for bodies, colliders and articulations |
+| **Validators** | `usdPhysicsValidators` is in the build: rules for bodies, colliders and articulations. The Validation panel runs all of OpenUSD's ([VALIDATION.md](VALIDATION.md)) |
 
 Two things the schema does **not** say, which §4 has to decide:
 
@@ -216,7 +216,7 @@ bodies ordinary prims for as long as the cache exists and leaves the user's laye
 | `SimCache` | `usdcc_usd`, Qt-free | The cache layer: makes and removes it, pre-creates the world-space ops for every body (§4.6), writes a frame's poses in one `SdfChangeBlock` under the session's guard (§4.4), knows the cached range, clears |
 | `PhysicsSession` | `usdcc_usd`, Qt-free | One per stage that has simulated: the backend's world, the cache, the start frame, stale or not. `start()` clears the cache and then parses (§4.4), `stepTo(frame)`, `reset()`. Reads kinematic bodies' animated transforms and hands them to the backend before each step. Ignores the stage changes its own writes cause |
 | `physics_bake.h` | `usdcc_usd`, Qt-free | §4.5: `cacheRange()` fills the cache over a range, `bakeFromCache()` writes it. Callers wrap it in an `UndoManager` edit and clear the cache |
-| `physics_check.h` | `usdcc_usd`, Qt-free | Check Physics: OpenUSD's `usdPhysicsValidators` through a `UsdValidationContext`, then the parsing's and the backend's reports for a world built and never stepped |
+| `physics_check.h` | `usdcc_usd`, Qt-free | Check Physics: OpenUSD's `usdPhysicsValidators` through a `ValidationRun` ([VALIDATION.md](VALIDATION.md)), then the parsing's and the backend's reports for a world built and never stepped |
 | `Stage::physics()` | `usdcc_usd` | The stage's session, made on first use; `PhysicsSession::changed` for the cached range, the stale mark and the reports. `Stage::setEditTargetLayer()` refuses the cache |
 | `PlaybackController` | `usdcc_usd_ui` | With Simulate on, a tick asks the session for the next frame before setting the time (§4.3) |
 | `TimelineBar`, `TimeRuler` | `usdcc_usd_ui` | The Simulate toggle and Reset; the cached range as a band on the ruler, dimmed when stale |

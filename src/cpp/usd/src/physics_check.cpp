@@ -1,10 +1,9 @@
 #include "usdcc/usd/physics_check.h"
 
 #include "usdcc/usd/physics_backend.h"
+#include "usdcc/usd/validation_run.h"
 
 #include <pxr/usd/usd/stage.h>
-#include <pxr/usdValidation/usdValidation/context.h>
-#include <pxr/usdValidation/usdValidation/error.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -14,23 +13,12 @@ std::vector<CheckFinding> checkPhysics(const UsdStageRefPtr& stage, double frame
     std::vector<CheckFinding> findings;
     if (!stage) return findings;
 
-    const UsdValidationContext validators({TfToken("UsdPhysicsValidators")});
-    for (const UsdValidationError& error : validators.Validate(stage)) {
-        CheckFinding finding;
-        finding.source = CheckFinding::Source::Validator;
-        finding.error = error.GetType() == UsdValidationErrorType::Error;
-        finding.message = error.GetMessage();
-        for (const UsdValidationErrorSite& site : error.GetSites()) {
-            if (site.IsPrim()) {
-                finding.prim = site.GetPrim().GetPath();
-                break;
-            }
-            if (site.IsProperty()) {
-                finding.prim = site.GetProperty().GetPrimPath();
-                break;
-            }
-        }
-        findings.push_back(std::move(finding));
+    validation::ValidationRun run(stage, validation::rulesWithKeyword("UsdPhysicsValidators"));
+    run.runAll();
+    for (const validation::Finding& found : run.findings()) {
+        const SdfPath prim = found.prim();
+        findings.push_back({CheckFinding::Source::Validator, found.severity == validation::Severity::Error,
+                            prim.IsEmpty() ? SdfPath::AbsoluteRootPath() : prim, found.message});
     }
 
     std::vector<PhysicsReport> reports;

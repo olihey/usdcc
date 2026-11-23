@@ -38,6 +38,7 @@ add_executable(usdcc_tests
     move_tool_test.cpp
     orbit_camera_test.cpp
     stage_camera_test.cpp
+    validation_run_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
@@ -106,6 +107,7 @@ add_executable(usdcc_ui_tests
     dope_sheet_test.cpp
     curve_editor_test.cpp
     playblast_test.cpp
+    validation_panel_test.cpp
     dependency_files.h
     layer_editor_test.cpp
     log_panel_test.cpp
@@ -199,6 +201,7 @@ add_executable(usdcc_python_tests
     script_editor_panel_test.cpp
     session_test.cpp
     startup_scripts_test.cpp
+    validation_python_test.cpp
     viewport_camera_test.cpp
     viewport_renderer_python_test.cpp
     python_test_app.h
