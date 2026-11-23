@@ -3,8 +3,17 @@
 Write usdcc scripts and plugins in VS Code, and run and debug them in the running app: a small
 server in usdcc, type stubs, `debugpy`, and a thin extension on top.
 
-**Status:** planned 2026-11-16. Nothing is built yet. Facts marked *checked* were looked up in this
-checkout on that day; everything else is expected, and §9 lists what to try first.
+**Status:** planned 2026-11-16, updated 2026-11-23. Nothing is built yet. Facts marked *checked* were
+looked up on one of those days; everything else is expected, and §9 lists what to try first.
+
+**What the update changed:**
+
+- A small extension comes right after the link, not last, and there are more phases (§7).
+- More features: starting usdcc with F5, templates, manifest checking, Problems, a Plugins view,
+  Stop (§6.2). Later ones are in §6.3.
+- The part shared with [MCP.md](MCP.md) is named (§3.4), and the link has a build option (§3.1).
+- Completion needs stubs of our own for `pxr` and PySide6 (§4).
+- Updating usdcc while VS Code is open is a risk to test (§9 #8).
 
 ## 1. What it is, and isn't
 
@@ -35,13 +44,11 @@ checkout on that day; everything else is expected, and §9 lists what to try fir
 |---|---|---|
 | `EditorLink` | `usdcc_scripting_app` (C++, Qt Network) | The server: a `QLocalServer` taking requests and running them through `ScriptRunner` and `PluginManager` |
 | `usdcc.debug` | `src/python/usdcc/debug.py` | `listen()`, `is_listening()`, `port()`: starts `debugpy` in the app |
-| Type information | `src/python/usdcc/*.py`, `_usdcc_app.pyi` | Type hints on the public functions, and a stub for the module compiled into the exe |
+| Type information | `src/python/usdcc/*.py`, `_usdcc_app.pyi`, generated `pxr` and PySide6 stubs | Type hints on the public functions, and stubs for what is compiled |
 | `tools/usdcc_send.py` | Standard library only | The command-line client: `usdcc_send.py run file.py`. Also what the tests use |
 | The extension | `editors/vscode/` (TypeScript) | Commands, a status bar item and an output channel, over the three above |
 
-Qt Network is new to the build but not to the dependencies: `Qt6Network` is already in the vcpkg
-install as part of `qtbase` (*checked*), so it's one more `find_package` component and one DLL in
-the deploy.
+Qt Network is in the build already: Peers links it (`src/cpp/peers/CMakeLists.txt`; *checked*).
 
 ## 3. The link
 
@@ -72,6 +79,11 @@ with several it asks which, showing each one's current stage.
 **Turning it off:** the setting **Allow editors to connect** (`Python/editorLink`, on by default,
 applies at the next start) on the Python page, and `--no-editor-link` for one start. Off, no pipe
 is made.
+
+**Leaving it out of a build:** `USDCC_BUILD_EDITOR_LINK`, on by default, from phase 1
+([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §6). It's code inside a library, so it's a compile definition:
+off, `EditorLink` and the setting aren't compiled in. If that document's mechanism isn't there yet,
+it's a plain CMake option until it is.
 
 ### 3.2 Protocol
 
@@ -121,6 +133,20 @@ instead of a result: `busy` (a script is running), `dialog` (the app is showing 
 - **The app shows it happened:** the Log panel gets "Run setup.py (from an editor)" and everything
   the run printed. The Script Editor's own output pane doesn't (§8 #3).
 
+### 3.4 What MCP shares
+
+[MCP.md](MCP.md) §4 needs most of what a run over the link needs, and isn't built either. Whichever
+comes first builds it, in `usdcc_scripting_app`, for both:
+
+- **`ScriptRunner` returning what happened:** output, error, undo steps, time.
+- **`RunCapture`, moved out of the Script Editor** (it's in `script_editor_side_panel.cpp`; *checked*).
+- **Whether a script is running or a dialog is open** (§3.3). MCP's reading tools are allowed during a
+  dialog, so it's a question a caller asks, not a refusal inside `ScriptRunner`.
+- **Stopping a script** (§6.2).
+
+The transports stay separate. The pipe is the user's own and needs no token; MCP is HTTP on loopback,
+off by default, with a token and access levels.
+
 ## 4. Completion
 
 What VS Code's Python support needs is the app's `sys.path`, an interpreter to call its own, and
@@ -141,16 +167,21 @@ They go into the workspace's `.vscode/settings.json` as `python.defaultInterpret
 - **`usdcc`'s own functions get type hints.** The modules users import are plain Python
   (`usd.py`, `app.py`, …) with docstrings but no annotations, and each forwards to `_usdcc_app`,
   which no analyzer can read as it's compiled into the exe (*checked*). So `current_stage()` is
-  annotated `-> Usd.Stage | None` and so on. This is most of the work, and it improves the docs too.
+  annotated `-> Usd.Stage | None` and so on. About 280 functions, none annotated
+  (*checked*). This is most of the work, and it improves the docs too. It can be done a module at a
+  time: `usd`, `app` and `ui` first, then `tools`, `render` and the rest.
 - **`_usdcc_app.pyi`,** for the classes that come straight from C++: `StageManager`, `UndoManager`,
   `Viewport`, `ViewportCamera`, `RendererSetting`. Generated with `pybind11-stubgen` run inside
   the app, kept in the repository beside the package, and deployed with it. A test in
   `usdcc_python_tests` generates it again and fails when the two differ.
-- **`pxr` has no stubs in this OpenUSD build** (*checked*: no `.pyi` under `lib/site-packages`).
-  The third-party `types-usd` package provides them. It's installed with the bundled uv into
-  `%LOCALAPPDATA%\usdcc_config\stubs`, when asked for, and that folder goes on `extraPaths` only: never on
-  the app's `sys.path`. Whether a release matches OpenUSD 26.11 is §9 #5.
-- **PySide6** normally carries its own `.pyi` files. Whether the from-source build's do is §9 #6.
+- **`pxr` has no stubs in this OpenUSD build** (*checked*: no `.pyi` in it), and the third-party
+  `types-usd` stops at 24.5.2, from August 2024 (*checked*; usdcc is on 26.11). So they're generated
+  from the OpenUSD usdcc ships, in the job that builds OpenUSD, and can't be of another version.
+  With which tool is §9 #5.
+- **PySide6's `.pyi` files aren't in the deploy** (*checked*: no `Qt*.pyi`). PySide6 comes with
+  a generator for them; running it in the PySide build is §9 #6.
+- **All stubs ship in the deploy,** in `python\stubs`, which goes on `extraPaths` only: never on the
+  app's `sys.path`. Nothing is downloaded.
 
 **Without the extension:** **Set Up VS Code…** in the Script Editor's ☰ menu, and on a plugin's
 right-click menu in View > Plugins, writes the same settings and a debugger configuration (§5) into
@@ -204,6 +235,8 @@ host, port = debugpy.listen(("127.0.0.1", port))
 
 ## 6. The extension
 
+### 6.1 Running, reloading, debugging
+
 ```text
 ┌ shot_setup.py ─────────────────────────────────────────────────────────┐
 │ 1  from pxr import Sdf                                                 │
@@ -224,6 +257,9 @@ host, port = debugpy.listen(("127.0.0.1", port))
 | **usdcc: Reload Plugin** | | The plugin whose folder (the one with `usdcc-plugin.json`) holds the current file. Saves its files first |
 | **usdcc: Attach Debugger** | | `debugListen`, then starts VS Code's debugger on the port it returns |
 | **usdcc: Set Up Workspace** | | Writes the interpreter and paths (§4) |
+| **usdcc: Start usdcc** | | Starts the app, and connects when its pipe answers (§6.2) |
+| **usdcc: Stop Script** | | Interrupts the running script (§6.2) |
+| **usdcc: New Plugin** | | A plugin from a template (§6.2) |
 | **usdcc: Connect** | | Picks the app when several are running |
 | **usdcc: Keep Variables Between Runs**, **Reset Variables** | | `scope: session`, and `resetSession` |
 
@@ -240,21 +276,64 @@ host, port = debugpy.listen(("127.0.0.1", port))
 - **`hello`'s `api` number decides compatibility.** An extension meeting a newer number says to
   update it, and does nothing else.
 
+### 6.2 Making a plugin
+
+- **Starting usdcc (F5).** A `usdcc` launch configuration starts the app with `--plugin-path`, waits
+  for its pipe, calls `debugListen` and attaches. It uses a development profile by default, so a
+  broken plugin can't disturb the user's own settings (§8 #10). Attaching comes after `activate()`
+  has run, so a breakpoint there is hit by a reload.
+- **New Plugin** offers templates: a panel, a tool, a menu action, a prim menu action, a final
+  renderer. The app's own **New Plugin...** can use them too, so there's one set.
+- **A JSON schema for `usdcc-plugin.json`:** completion and errors while typing. It's a file in the
+  deploy, and a test checks every manifest in this repository against it.
+- **Problems.** A failed run marks its line, and a plugin that failed to load marks the line that
+  raised. Both are cleared by the next run or reload. Tracebacks in the output are links.
+- **A Plugins view:** what `plugins` returns, each with its state and reason, and Reload and Open
+  Folder.
+- **Stop.** The pipe has to be read off the main thread, to see a `stop` request while a script runs.
+  It raises `KeyboardInterrupt` in the main thread between two Python instructions
+  (`PyThreadState_SetAsyncExc()`; MCP.md §4 item 5). It can't break a long call into C++. The Script
+  Editor gets a Stop button from it too. Untried (§9 #9).
+- **Snippets** for the common `usdcc` calls. Hover text is the docstrings, through §4.
+
+New in the protocol for these: the `stop` method, and a `plugins-changed` event. `plugins` also
+returns the file and line of a failure.
+
+### 6.3 Later
+
+Not designed yet, each on its own:
+
+- **Plugin tests in the Test Explorer,** perhaps headless: `usdcc_node` starts Python and activates
+  plugins (*checked*), but has no window.
+- **Packaging a plugin** as a zip, with its requirements checked.
+- **C++ plugins:** CMake presets for the SDK, and starting the app under a C++ debugger.
+- **USD helpers:** insert the selected prim's path, select the path under the cursor, show the stage.
+- **AI setup:** write the MCP client's configuration, once MCP exists.
+
+### 6.4 Shipping
+
 **Shipped** as `tools\vscode\usdcc.vsix` in the deploy, installed with
 `code --install-extension`. **Set Up VS Code…** offers to do that. Publishing it to the
 Marketplace is a decision for later (§8 #6).
 
 ## 7. Phases
 
-| Phase | Builds | Verification |
-|---|---|---|
-| **1. The link** | `EditorLink`, the protocol, the setting and `--no-editor-link`, `ScriptRunner`'s first line, `tools/usdcc_send.py` | Tests in `usdcc_python_tests`, over a real pipe: a run is one undo step and its output arrives before its result; a failing run returns its error and leaves a "(failed)" step; a selection's traceback has the file's line numbers; `busy` and `dialog`; two clients; `reloadPlugin` by id and by path; nothing listens when turned off. In the app: `usdcc_send.py` against a deployed usdcc |
-| **2. Completion** | Type hints in `src/python/usdcc`, `_usdcc_app.pyi` and its test, the `pxr` stubs install, **Set Up VS Code…**, **Open in VS Code** | Pyright from the command line over the example plugin and a sample script, with the written settings: no unresolved imports, and `usdcc.usd.current_stage()` is a `Usd.Stage`. By hand: completion in VS Code |
-| **3. Debugging** | Bundled `debugpy`, `usdcc.debug`, the menu entry, `debugListen`, the debugger configuration | A small debug-protocol client in the tests: attach, set a breakpoint, run a script over the link, see it stop there, continue, and the app still exits with code 0. By hand: a breakpoint in a plugin's menu action |
-| **4. The extension** | `editors/vscode`, the `.vsix` in the deploy, a CI job that builds it | Its protocol code against a fake server in Node. By hand in VS Code: every command in §6, with one app and with two |
+Sizes are estimates: S is about one session, M a few, L several.
 
-Phase 1 comes first. 2 and 3 need nothing from it or from each other, and are useful on their own
-through **Set Up VS Code…**. 4 needs 1, and uses 2 and 3 when they're there.
+| Phase | Size | Needs | Builds | Verification |
+|---|---|---|---|---|
+| **0. Spikes** | S | | §9's items | Each has its answer in §9, and this plan is changed where it's wrong |
+| **1. The link** | M | 0 | The shared run core (§3.4) except Stop, `EditorLink`, the protocol without `debugListen`, the setting, `--no-editor-link`, the build option, `ScriptRunner`'s first line, `tools/usdcc_send.py` | Tests in `usdcc_python_tests`, over a real pipe: a run is one undo step and its output arrives before its result; a failing run returns its error and leaves a "(failed)" step; a selection's traceback has the file's line numbers; `busy` and `dialog`; two clients; `reloadPlugin` by id and by path; nothing listens when turned off. A build with the option off compiles and starts. In the app: `usdcc_send.py` against a deployed usdcc |
+| **2. First extension** | M | 1 | `editors/vscode`: Run File and Selection, kept variables, output with traceback links, Reload and reload on save, Connect, status bar, a CI job that builds the `.vsix` | Its protocol code against a fake server in Node. By hand: edit a plugin, save, see it change; with one app and with two |
+| **3. Debugging** | M | 0; the test, `debugListen` and Attach need 1 and 2, as does F5 | Bundled `debugpy`, `usdcc.debug`, the menu entry, `debugListen`, Attach, then starting usdcc (F5) | A small debug-protocol client in the tests: attach, set a breakpoint, run a script over the link, see it stop there, continue, and the app still exits with code 0. By hand: a breakpoint in a plugin's menu action, and F5 from nothing |
+| **4. Completion** | L | 0; Set Up Workspace needs 2 | Type hints in `src/python/usdcc`, `_usdcc_app.pyi` and its test, the `pxr` and PySide6 stubs, **Set Up VS Code…**, **Open in VS Code**, Set Up Workspace | Pyright from the command line over the example plugin and a sample script, with the written settings: no unresolved imports, and `usdcc.usd.current_stage()` is a `Usd.Stage`. By hand: completion in VS Code |
+| **5. Plugin workflow** | M | 2 | §6.2 except F5: templates, the manifest schema, Problems, the Plugins view, Stop, snippets | Every manifest here passes the schema; a stopped endless loop leaves a "(failed)" step; the extension's tests. By hand: a working panel within five minutes of installing |
+| **6. Shipping** | S | 2; best after 3 to 5 | The `.vsix` in the deploy, **Set Up VS Code…** installing it, user documentation | On a clean machine: install usdcc, set up, run and break, with nothing else done by hand |
+| **7. Later** | L | 5 | §6.3, chosen one by one | Each with its own plan |
+
+0, 1, 2 in order. 3 and 4 can go alongside 2, apart from what needs it. **The first version worth
+using is 0 to 3.** 3's debugger and 4 are useful without the extension, through **Allow Debugger to
+Attach** and **Set Up VS Code…**.
 
 ## 8. Decisions taken as defaults
 
@@ -267,14 +346,17 @@ Each can be changed before its phase starts.
 | 3 | Where a remote run's output shows in the app | The Log panel only, not the Script Editor's output pane, which is for runs started there |
 | 4 | Type information | Hints in the Python modules plus one generated stub, rather than stubs for everything |
 | 5 | Where `debugpy` comes from | Bundled and pinned, rather than through **My packages**, so debugging works with nothing installed |
-| 6 | How the extension reaches users | A `.vsix` in the deploy. A Marketplace and Open VSX listing needs a publisher account, and is yours to decide |
+| 6 | How the extension reaches users | A `.vsix` in the deploy first. A Marketplace and Open VSX listing needs a publisher account, and is yours to decide |
 | 7 | Run keys in VS Code | The Script Editor's, only while connected (§6) |
 | 8 | Where the extension's source lives | This repository, `editors/vscode`, so the protocol and its client change together |
+| 9 | `pxr` stubs | Generated from the shipped OpenUSD, rather than `types-usd`, which stopped at 24.5 (§4) |
+| 10 | The profile F5 starts usdcc with | A development one, through `USDCC_TEST_PROFILE`. Its pipe isn't listed to editors (§3.1), so F5 connects to the process it started, by its pid and profile |
+| 11 | C++ plugins | Later (§6.3): Python is the easy path |
 
 ## 9. To try first
 
-Things the plan rests on and that haven't been run. Each is a short spike at the start of its
-phase.
+Things the plan rests on and that haven't been run. Phase 0 does them; the phase named is the one
+that needs the answer.
 
 1. **Writing to the pipe while the main thread is busy** (phase 1). The sink has to push bytes out
    without the event loop (`waitForBytesWritten`). If Qt's pipe writer on Windows needs the loop,
@@ -287,26 +369,27 @@ phase.
    thing that could hold up the exit.
 4. **The cost of an attached debugger** on a tool's gizmo, measured at 0.017 ms per frame without
    one ([PLUGINS.md](PLUGINS.md) §3.8), and on OpenUSD's threads taking the GIL.
-5. **`types-usd` for OpenUSD 26.11** (phase 2): whether a matching release exists, and how wrong
-   the nearest one is if not.
-6. **PySide6's `.pyi` files** in `external/pyside-install` and in the deploy (phase 2).
+5. **Generating `pxr` stubs** (phase 4). `pybind11-stubgen` may not understand OpenUSD's Python
+   bindings, which aren't pybind11; mypy's `stubgen` is the other candidate. How good the result is,
+   and whether it needs corrections by hand.
+6. **PySide6's `.pyi` files** (phase 4): whether its generator runs on our build, in CI.
 7. **The standard library opening the pipe** from `usdcc_send.py`, as a file on Windows and a
    socket elsewhere (phase 1).
+8. **Updating with VS Code open** (phases 3 and 4). Its Python support and debugger may run the
+   installed `python\python.exe`, which an update has to replace ([UPDATES.md](UPDATES.md)). If
+   that blocks it: another interpreter for VS Code, with the app's on `extraPaths` only.
+9. **Stopping a script from another thread** (phase 5), and whether the exception can land after the
+   run has ended.
 
 ## 10. Left out
 
-- **Stopping a running script.** Still open from [SCRIPTING.md](SCRIPTING.md) §10. The link makes it
-  possible later: a thread reading the pipe could raise `KeyboardInterrupt` in the main thread,
-  between two Python instructions. An attached debugger can already pause one.
-- **Starting usdcc from VS Code** (a launch configuration that starts the app, then attaches).
 - **VS Code on another machine, in WSL or in a container.** The pipe is local, and the paths in
   tracebacks and breakpoints are the app's.
 - **Other editors.** The link and `usdcc_send.py` are there for them, and nothing else is built.
 - **Language servers other than Pylance.** Pyright-based ones read the same paths from a
   `pyrightconfig.json`, which **Set Up VS Code…** doesn't write.
-- **Debugging C++ plugins,** which is Visual Studio's job.
-- **Showing the app's state in VS Code:** a stage tree, the selection, a variable viewer outside
-  the debugger.
+- **A stage editor in VS Code:** a stage tree, or a variable viewer outside the debugger.
+- **A USDA language server of our own.**
 
 ## 11. Where the code will be
 
@@ -317,7 +400,8 @@ phase.
 - **`scripting/script_editor_side_panel.h`, `plugin_manager_side_panel.h`:** **Allow Debugger to
   Attach**, **Set Up VS Code…**, **Open in VS Code**.
 - **`src/python/usdcc/debug.py`,** the type hints in its neighbours, and `_usdcc_app.pyi`.
-- **`cmake/modules/UsdccDebugpy.cmake`, `tools/deploy.py`:** `debugpy`, the stubs, the `.vsix`.
+- **`cmake/modules/UsdccDebugpy.cmake`, `tools/deploy.py`:** `debugpy`, the stubs, the manifest schema,
+  the `.vsix`.
 - **`tools/usdcc_send.py`.**
 - **`editors/vscode/`:** the extension.
 - **`tests/editor_link_test.cpp`,** and the debug-protocol client beside it.
