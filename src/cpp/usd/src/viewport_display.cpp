@@ -74,6 +74,13 @@ constexpr Number kNumbers[] = {
 };
 
 // A resolution as Viewport/resolution has it: "fill", "renderSettings" or "WxH".
+std::optional<std::string> cameraNavigationName(const QString& text) {
+    for (const char* name : kCameraNavigations) {
+        if (text.compare(QLatin1String(name), Qt::CaseInsensitive) == 0) return std::string(name);
+    }
+    return std::nullopt;
+}
+
 bool validRenderScale(int scale) {
     return std::find(std::begin(kRenderScales), std::end(kRenderScales), scale) != std::end(kRenderScales);
 }
@@ -95,10 +102,17 @@ std::optional<T> fromName(const QString& name, const T (&values)[N], const char*
 }
 }  // namespace
 
+QString cameraNavigationLabel(const std::string& name) {
+    QString label = QString::fromStdString(name);
+    if (!label.isEmpty()) label[0] = label[0].toUpper();
+    return label;
+}
+
 bool isViewportDisplayKey(const std::string& key) {
     for (const char* known : {kViewportShowGridKey, kViewportGridSizeKey, kViewportGridStepKey, kViewportBackgroundKey,
                               kViewportSelectionStyleKey, kViewportSelectionColorKey, kViewportSelectionWidthKey,
-                              kViewportComplexityKey, kViewportResolutionKey, kViewportRenderScaleKey}) {
+                              kViewportComplexityKey, kViewportResolutionKey, kViewportRenderScaleKey,
+                              kViewportCameraNavigationKey}) {
         if (key == known) return true;
     }
     for (const Number& number : kNumbers) {
@@ -399,6 +413,19 @@ void defineViewportDisplaySettings() {
         .defaultValue = builtIn.resolution,
     });
     settings.define({
+        .key = kViewportCameraNavigationKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Through a stage camera",
+        .description = "What a tumble, pan or dolly does while a viewport looks through one of the stage's cameras: "
+                       "Detach leaves it for the viewport's own camera, starting where it was; Drive moves the camera "
+                       "itself (one undo step a drag, refused with the reason when it can't be moved); Locked does "
+                       "nothing. A viewport can choose its own (its Camera menu).",
+        .type = SettingType::Choice,
+        .defaultValue = std::string("Detach"),
+        .choices = {"Detach", "Drive", "Locked"},
+    });
+    settings.define({
         .key = kViewportRenderScaleKey,
         .category = "Viewport",
         .group = "Camera",
@@ -524,6 +551,9 @@ HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
         scaleOk && validRenderScale(scale)) {
         options.renderScale = scale;
     }
+    if (const auto navigation = cameraNavigationName(QString::fromStdString(settings.get<std::string>(kViewportCameraNavigationKey)))) {
+        options.cameraNavigation = *navigation;
+    }
     return options;
 }
 
@@ -540,6 +570,7 @@ HydraViewportWindow::DisplayOptions ViewportDisplayOverrides::applyTo(HydraViewp
     if (colorView) defaults.colorView = *colorView;
     if (resolution) defaults.resolution = *resolution;
     if (renderScale) defaults.renderScale = *renderScale;
+    if (cameraNavigation) defaults.cameraNavigation = *cameraNavigation;
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) defaults.*toggle.option = *value;
     }
@@ -563,6 +594,7 @@ QJsonObject ViewportDisplayOverrides::toJson() const {
     if (colorView) json.insert(QStringLiteral("colorView"), QString::fromStdString(*colorView));
     if (resolution) json.insert(QStringLiteral("resolution"), QString::fromStdString(*resolution));
     if (renderScale) json.insert(QStringLiteral("renderScale"), *renderScale);
+    if (cameraNavigation) json.insert(QStringLiteral("cameraNavigation"), QString::fromStdString(*cameraNavigation));
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) json.insert(QLatin1String(toggle.name), *value);
     }
@@ -621,6 +653,9 @@ ViewportDisplayOverrides ViewportDisplayOverrides::fromJson(const QJsonObject& j
     }
     if (const QJsonValue v = json.value(QStringLiteral("renderScale")); v.isDouble() && validRenderScale(v.toInt())) {
         overrides.renderScale = v.toInt();
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("cameraNavigation")); v.isString()) {
+        overrides.cameraNavigation = cameraNavigationName(v.toString());
     }
     return overrides;
 }
