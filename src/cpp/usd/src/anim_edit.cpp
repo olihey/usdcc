@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <cmath>
 
 namespace usdcc::usd::anim {
@@ -170,6 +171,157 @@ std::vector<UsdAttribute> animatedAttributes(const UsdPrim& prim) {
         if (isAnimated(attribute)) result.push_back(attribute);
     }
     return result;
+}
+
+// ---- Key editing (phase 3) ----------------------------------------------------------------
+
+std::vector<KeyRef> keysAt(const std::vector<UsdAttribute>& attributes, double time) {
+    std::vector<KeyRef> keys;
+    for (const UsdAttribute& attribute : attributes) {
+        for (const double key : keyTimes({attribute})) {
+            if (sameTime(key, time)) keys.push_back({attribute, key});
+        }
+    }
+    return keys;
+}
+
+bool retimeKeys(const std::vector<KeyRef>& keys, const std::function<double(double)>& retime) {
+    if (!retime) return false;
+    // By attribute, in the order they first come, each time once and only if it's a key.
+    std::vector<std::pair<UsdAttribute, std::vector<double>>> byAttribute;
+    for (const KeyRef& key : keys) {
+        if (!key.attribute) continue;
+        auto found = std::find_if(byAttribute.begin(), byAttribute.end(),
+                                  [&key](const auto& each) { return each.first.GetPath() == key.attribute.GetPath(); });
+        if (found == byAttribute.end()) {
+            byAttribute.push_back({key.attribute, {}});
+            found = std::prev(byAttribute.end());
+        }
+        found->second.push_back(key.time);
+    }
+    bool any = false;
+    for (auto& [attribute, wanted] : byAttribute) {
+        std::vector<double> times;
+        for (const double existing : keyTimes({attribute})) {
+            const bool asked = std::any_of(wanted.begin(), wanted.end(), [existing](double t) { return sameTime(t, existing); });
+            if (asked) times.push_back(existing);
+        }
+        if (times.empty()) continue;
+        localizeAnimation(attribute);
+        if (splineDriven(attribute)) {
+            TsSpline spline = attribute.GetSpline();
+            std::vector<TsKnot> moved;
+            for (const double time : times) {
+                TsKnot knot;
+                if (spline.GetKnot(time, &knot)) moved.push_back(knot);
+            }
+            for (const double time : times) spline.RemoveKnot(time);
+            for (TsKnot& knot : moved) {
+                knot.SetTime(retime(knot.GetTime()));
+                spline.SetKnot(knot);
+            }
+            any = attribute.SetSpline(spline) || any;
+        } else {
+            // All read first: each sample cleared or written changes what the rest read.
+            std::vector<VtValue> values(times.size());
+            for (std::size_t i = 0; i < times.size(); ++i) attribute.Get(&values[i], times[i]);
+            for (const double time : times) attribute.ClearAtTime(time);
+            for (std::size_t i = 0; i < times.size(); ++i) {
+                if (!values[i].IsEmpty()) attribute.Set(values[i], retime(times[i]));
+            }
+            any = true;
+        }
+    }
+    return any;
+}
+
+bool moveKeys(const std::vector<KeyRef>& keys, double offset) {
+    if (offset == 0.0) return false;
+    return retimeKeys(keys, [offset](double time) { return time + offset; });
+}
+
+bool scaleKeys(const std::vector<KeyRef>& keys, double pivot, double factor, bool snap) {
+    if (!(factor > 0.0)) return false;
+    return retimeKeys(keys, [pivot, factor, snap](double time) {
+        const double scaled = pivot + (time - pivot) * factor;
+        return snap ? std::round(scaled) : scaled;
+    });
+}
+
+bool removeKeys(const std::vector<KeyRef>& keys) {
+    bool any = false;
+    for (const KeyRef& key : keys) {
+        if (key.attribute) any = removeKey(key.attribute, UsdTimeCode(key.time)) || any;
+    }
+    return any;
+}
+
+std::vector<SdfPath> CopiedKeys::prims() const {
+    std::vector<SdfPath> result;
+    for (const Attribute& attribute : attributes) {
+        const SdfPath prim = attribute.path.GetPrimPath();
+        if (std::find(result.begin(), result.end(), prim) == result.end()) result.push_back(prim);
+    }
+    return result;
+}
+
+CopiedKeys copyKeys(const std::vector<KeyRef>& keys) {
+    CopiedKeys copied;
+    double earliest = 0.0;
+    bool first = true;
+    for (const KeyRef& key : keys) {
+        if (!key.attribute) continue;
+        earliest = first ? key.time : std::min(earliest, key.time);
+        first = false;
+    }
+    for (const KeyRef& key : keys) {
+        if (!key.attribute) continue;
+        VtValue value;
+        if (!key.attribute.Get(&value, key.time) || value.IsEmpty()) continue;
+        auto found = std::find_if(copied.attributes.begin(), copied.attributes.end(),
+                                  [&key](const CopiedKeys::Attribute& each) { return each.path == key.attribute.GetPath(); });
+        if (found == copied.attributes.end()) {
+            copied.attributes.push_back({key.attribute.GetPath(), {}});
+            found = std::prev(copied.attributes.end());
+        }
+        found->keys.push_back({key.time - earliest, value});
+    }
+    return copied;
+}
+
+int pasteKeys(const CopiedKeys& copied, const UsdStagePtr& stage, double time, const std::vector<SdfPath>& prims) {
+    if (!stage || copied.empty()) return 0;
+    const std::vector<SdfPath> sources = copied.prims();
+    // Onto other prims only from one prim: from several, which attribute goes where is unclear.
+    const bool retarget = !prims.empty() && sources.size() == 1 && prims != sources;
+    std::vector<std::pair<UsdAttribute, const CopiedKeys::Attribute*>> targets;
+    if (retarget) {
+        for (const SdfPath& path : prims) {
+            const UsdPrim prim = stage->GetPrimAtPath(path);
+            if (!prim) continue;
+            for (const CopiedKeys::Attribute& attribute : copied.attributes) {
+                if (const UsdAttribute target = prim.GetAttribute(attribute.path.GetNameToken())) {
+                    targets.push_back({target, &attribute});
+                }
+            }
+        }
+    } else {
+        for (const CopiedKeys::Attribute& attribute : copied.attributes) {
+            if (const UsdAttribute target = stage->GetAttributeAtPath(attribute.path)) targets.push_back({target, &attribute});
+        }
+    }
+    int set = 0;
+    for (const auto& [target, attribute] : targets) {
+        for (const CopiedKeys::Key& key : attribute->keys) {
+            if (setValue(target, key.value, UsdTimeCode(time + key.offset), /*autoKey=*/true)) ++set;
+        }
+    }
+    return set;
+}
+
+CopiedKeys& keyClipboard() {
+    static CopiedKeys clipboard;
+    return clipboard;
 }
 
 namespace {

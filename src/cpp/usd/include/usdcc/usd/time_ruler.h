@@ -40,6 +40,13 @@ public:
     // Key marks (docs/ANIMATION.md phase 2): the selection's key times, a diamond each.
     void setKeys(std::vector<double> keys);
     const std::vector<double>& keys() const { return m_keys; }
+    // The key mark picked (phase 3): pressing one picks it, and dragging it moves it. Delete,
+    // Ctrl+C and Ctrl+V with the ruler focused ask for the rest. Gone when that time isn't
+    // a key any more.
+    std::optional<double> selectedKey() const { return m_selectedKey; }
+    void setSelectedKey(std::optional<double> time);
+    // The key mark at `position`, if there is one there.
+    std::optional<double> keyAt(const QPointF& position) const;
 
     // Time to pixels, for the width it has now.
     const TimeAxis& axis() const;
@@ -55,12 +62,19 @@ Q_SIGNALS:
     // held, any time.
     void timeScrubbed(double time);
     void scrubFinished();
+    // A key mark dragged from `from` to `to`, whole frames, on release.
+    void keyMoved(double from, double to);
+    void keyDeleteRequested(double time);
+    void keyCopyRequested(double time);
+    // Ctrl+V: keys copied before, at the time shown.
+    void keyPasteRequested();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void changeEvent(QEvent* event) override;
 
 private:
@@ -73,6 +87,9 @@ private:
     bool m_cacheStale = false;
     double m_time = 0.0;
     bool m_scrubbing = false;
+    std::optional<double> m_selectedKey;
+    bool m_draggingKey = false;
+    double m_dragTo = 0.0;
     double m_lastScrubbed = 0.0;
 };
 

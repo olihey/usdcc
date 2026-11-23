@@ -79,6 +79,7 @@
 #include "usdcc/usd/physics_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/dope_sheet_view_panel.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
 #include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/schema_library_editor.h"
@@ -397,6 +398,12 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::DependenciesViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    // The keys of animated prims, to move, scale, copy and delete (docs/ANIMATION.md phase 3).
+    panelTypes.add(QStringLiteral("dopeSheet"), QObject::tr("Dope Sheet"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::DopeSheetViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
