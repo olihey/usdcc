@@ -184,8 +184,24 @@ export async function run(): Promise<void> {
         vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(acting.document.uri, new vscode.Position(2, 0)))]);
         await sleep(1000);
         places.length = 0;
-        await open(path.join(workspace, 'click.py'), 'from PySide6.QtCore import QTimer\nfrom PySide6.QtWidgets import QMenu\nimport usdcc.app\nactions = [a for m in usdcc.app.main_window().findChildren(QMenu) for a in m.actions() if a.text().replace("&", "") == "Act"]\nassert actions\nQTimer.singleShot(200, actions[0].trigger)\n');
-        assert.ok((await vscode.commands.executeCommand<any>('usdcc.run'))?.ok, 'the action is there');
+        await open(
+            path.join(workspace, 'click.py'),
+            [
+                'from PySide6.QtCore import QTimer',
+                'from PySide6.QtWidgets import QApplication, QMenu',
+                'found = []',
+                'for menu in [each for each in QApplication.allWidgets() if isinstance(each, QMenu)]:',
+                '    try:',
+                '        found += [action for action in menu.actions() if action.text().replace("&", "") == "Act"]',
+                '    except RuntimeError:',
+                '        pass  # a popup menu that has gone',
+                'assert found, [each.title() for each in QApplication.allWidgets() if isinstance(each, QMenu)]',
+                'QTimer.singleShot(200, found[0].trigger)',
+                '',
+            ].join('\n'),
+        );
+        result = await vscode.commands.executeCommand('usdcc.run');
+        assert.ok(result?.ok, `the action is there: ${JSON.stringify(result)} ${output()?.getText().slice(-900)}`);
         for (let i = 0; i < 40 && !places.length; ++i) await sleep(250);
         assert.ok(places.some((place) => place.startsWith('act:3')), `it stops in the menu action: ${places}`);
         await sleep(1000);

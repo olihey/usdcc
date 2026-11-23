@@ -500,10 +500,10 @@ the dialog is answered in usdcc. VS Code shows it as running, and says nothing a
 written as VS Code writes it, `hello` while stopped, a selection stopping at the file's line, detaching, and
 exit code 0. In a deployed app with a bare `PATH`: the bundled `debugpy` is the one loaded, a breakpoint stops,
 it quits with code 0 while attached and leaves no helper. `npm run e2e`, in VS Code with Microsoft's Python
-extensions: attach, a breakpoint in a script, F5 starting another usdcc with the workspace's plugin.
+extensions: attach, a breakpoint in a script and in a plugin's menu action, F5 starting another usdcc with the
+workspace's plugin.
 
-**Not tested:** a breakpoint in a plugin's menu action (code of a plugin loads from its file like any other);
-the menu entry and the setting by hand; a taken port; Linux, macOS and Windows on ARM, where `debugpy` is the pure
+**Not tested:** the menu entry and the setting by hand; a taken port; Linux, macOS and Windows on ARM, where `debugpy` is the pure
 Python one; an update with the debugger attached (§9 #8).
 
 ## 15. Phase 4, as built
