@@ -62,6 +62,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -290,6 +291,9 @@ def main(argv=None):
     jobs = os.cpu_count() or 1
 
     def setup_build(stage):
+        # Each run makes a build_history folder named after the time, to the second,
+        # and fails if it's there: a stage with nothing left to do takes less than one.
+        time.sleep(1.1)
         run([python, "setup.py", "build", f"--qtpaths={qtpaths}", f"--cmake={cmake}",
              f"--module-subset={args.module_subset}", "--limited-api=yes", "--ignore-git", f"--parallel={jobs}",
              "--skip-docs", "--disable-pyi", "--reuse-build", f"--internal-build-type={stage}",
