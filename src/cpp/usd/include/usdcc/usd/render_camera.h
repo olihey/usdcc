@@ -8,6 +8,7 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/usd/timeCode.h>
 
 #include <optional>
 
@@ -39,8 +40,9 @@ struct USDCC_RENDER_API RenderCamera {
 // times as long on the side wanted (degrees).
 USDCC_RENDER_API double scaledFov(double degrees, double ratio);
 
-// The camera of a UsdGeomCamera prim at `aspect`, at the default time; nothing for
-// a prim that isn't one.
-USDCC_RENDER_API std::optional<RenderCamera> primRenderCamera(const PXR_NS::UsdPrim& prim, double aspect);
+// The camera of a UsdGeomCamera prim at `aspect`, at `time` (an animated camera where it
+// is then); nothing for a prim that isn't one.
+USDCC_RENDER_API std::optional<RenderCamera> primRenderCamera(const PXR_NS::UsdPrim& prim, double aspect,
+                                                              PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default());
 
 }  // namespace usdcc::usd
