@@ -31,6 +31,8 @@ Peers::Peers(Options options, QObject* parent)
         }
     }
     if (m_network) {
+        // The list says what's wrong.
+        connect(m_network.get(), &NetworkDiscovery::problemChanged, this, &Peers::foundRoomsChanged);
         connect(m_network.get(), &NetworkDiscovery::found, this, [this](const FoundRoom& room) {
             m_networkRooms.insert(room.roomId(), room);
             Q_EMIT foundRoomsChanged();
@@ -230,14 +232,17 @@ QList<FoundRoom> Peers::foundRooms(std::optional<RoomType> type) const {
 }
 
 void Peers::setLooking(bool looking) {
+    if (looking == m_looking) {
+        return;
+    }
     m_looking = looking;
     if (m_network) {
         m_network->setLooking(looking);
     }
-    if (!looking && !m_networkRooms.isEmpty()) {
+    if (!looking) {
         m_networkRooms.clear();
-        Q_EMIT foundRoomsChanged();
     }
+    Q_EMIT foundRoomsChanged();  // Also with no room: the list says whether it's looking
 }
 
 }  // namespace usdcc::peers
