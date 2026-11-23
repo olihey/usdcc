@@ -2,9 +2,9 @@
 
 Building and running usdcc on macOS, on Apple Silicon. Intel Macs aren't built or tested.
 
-**Status (2026-11-23): builds, runs and passes its 8 test programs** against OpenUSD as
-`deps/usd.json` pins it, with oneTBB, OpenVDB, Alembic and Draco. Not done yet: PySide6
-(`usdcc.ui`), Blender mesh tools, the USD plugin packs, CI, and a deploy or release (§5).
+**Status (2026-11-23): builds, runs and passes its 13 test programs**, with PySide6, the
+Blender mesh tools and the USD plugin pack of file formats (glTF, OBJ, PLY, STL, SPZ). CI
+has a macOS job ([CI.md](CI.md) §9), which hasn't run yet. Not done yet: a deploy or release (§5).
 
 ## 1. The machine
 
@@ -29,26 +29,32 @@ git submodule update --init --recursive
 ## 2. Building
 
 ```bash
-$(uv python find 3.13.12) tools/build_usd.py ~/deps/usd
-python3 tools/build.py --usd-install ~/deps/usd
+PY=$(uv python find 3.13.12)
+$PY tools/build_usd.py ~/deps/usd
+$PY tools/build_usd_plugin.py adobe-fileformats --usd-install ~/deps/usd --install
+$PY tools/build.py --usd-install ~/deps/usd
+$PY tools/build_pyside.py                     # downloads libclang, 1 GB
+$PY tools/build.py                            # again, with usdcc.ui
 ctest --test-dir build --output-on-failure
-python3 tools/run.py --scene test_data/cube_and_sphere.usda
+$PY tools/run.py --scene test_data/cube_and_sphere.usda
 ```
 
+- **Run the tools with Python 3.12 or later**, as the Blender backend's build needs: macOS'
+  own `python3` is older. `build_usd.py` and `build_usd_plugin.py` need 3.13.
 - **The oldest macOS is 14.0**, in three places that have to agree: `tools/_common.py`
   (OpenUSD, usdcc), `cmake/triplets/arm64-osx-dynamic.cmake` (vcpkg's packages) and the
   top-level `CMakeLists.txt` (a configure by hand). `std::format` needs 13.3.
 - **OpenUSD's patches for macOS alone** are in `deps/patches/macos`, not in `deps/usd.json`,
-  whose hash names every platform's asset. So the macOS asset's name doesn't change with
-  them, which CI has to take care of before it publishes one.
+  whose hash names every platform's asset. The macOS asset's name has a hash of its own for them.
 - **CMake 4** refuses what some of OpenUSD's dependencies ask for:
   `CMAKE_POLICY_VERSION_MINIMUM` (set by `tools/build_usd.py`) for yaml-cpp, and a patch
   for Alembic.
-- **vcpkg's host triplet is the dynamic one** (`tools/build.py`), so Qt is built once. A
-  clean build once failed right after Qt, with `moc` not finding `libpcre2`: vcpkg
-  hard-links its tools from a staging folder, and macOS had looked `moc` up there, most
-  likely as vcpkg was packing Qt into its cache. Running it again works. Should it come
-  back, leave `VCPKG_HOST_TRIPLET` out, for a second Qt.
+- **vcpkg's host tools are static** (`cmake/triplets/arm64-osx.cmake`), so Qt is built twice,
+  for them release-only. With dynamic ones a clean build
+  failed right after Qt, as `moc` didn't find `libpcre2`: vcpkg hard-links what it installs
+  from a staging folder, and while that is read, as when Qt is packed into the binary cache,
+  macOS takes the running `moc` to be there, with no libraries beside it. Reading the staged
+  `moc` in a loop made the installed one fail 4 times in 10, and 3 in 10 right after.
 
 ## 3. What is different
 
@@ -67,6 +73,12 @@ python3 tools/run.py --scene test_data/cube_and_sphere.usda
 - **The window.** The menus are in the system's menu bar, and the title bar leaves room for
   the system's buttons. QWindowKit is only used with real (Cocoa) windows: it takes a window
   id for an `NSView`, and crashed on the tests' offscreen platform.
+- **Rpaths** are `@loader_path`-relative, where Linux has `$ORIGIN`. `tools/_macho.py` rewrites
+  them and signs each file again, ad hoc: Apple Silicon doesn't run code whose signature no
+  longer fits. `tools/ci/relocate_usd.py` uses it too. A prebuilt OpenUSD links
+  `@rpath/libpython3.13.dylib`, which usdcc's programs have an rpath for.
+- **The Blender backend's `*_inline.cc` files** aren't compiled by themselves, as in Blender's
+  own build: Clang ignores `#pragma once` in the file it compiles.
 - **Paths** compare without case, as APFS does by default.
 - **Credentials and Peers' key** are in files, as on Linux: no Keychain yet.
 
@@ -82,9 +94,12 @@ python3 tools/run.py --scene test_data/cube_and_sphere.usda
 
 ## 5. Not done
 
-- PySide6, Blender mesh tools and the USD plugin packs; CI; `tools/deploy.py`, signing and a
-  release.
-- Seen only in frames the app saved, not on the screen: the viewport and the window. The HUD
-  isn't in those, so nobody has looked at it. Not tried: full screen, a second viewport,
-  Embree in the viewport, the Wireframe selection style, dragging a gizmo.
+- `tools/deploy.py`, signing and a release. CI hasn't run. The Gatling (no MDL SDK download) and Arnold
+  packs.
+- Checked in the running app by script: a Python panel, Mesh > Triangulate and its undo, a glTF
+  file, Storm and Embree in the viewport, the Outline and Wireframe selection, full screen and
+  back, quitting. Seen only in frames the app saved, not on the screen, so without the HUD.
+  Not tried: dragging a gizmo, two viewports side by side.
+- The Wireframe selection style draws some edges broken into dashes. Whether it does elsewhere
+  hasn't been looked at.
 - The shader-drawn grid, gizmos and HUD haven't been looked at on Windows and Linux.

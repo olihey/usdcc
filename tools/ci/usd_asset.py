@@ -68,7 +68,10 @@ def describe(pin):
 
     python = spec["python"].split(".")
     base = f"usd-{spec['commit'][:9]}-{short_hash(hashed, 4)}"
-    name = f"{base}-{ASSET_PLATFORM}-py{python[0]}{python[1]}"
+    # The platform's own patches name its asset alone (platform_patches()).
+    own = platform_patches(pin.parent)
+    suffix = "-" + short_hash("".join(normalized_text(file) for file in own), 4) if own else ""
+    name = f"{base}-{ASSET_PLATFORM}{suffix}-py{python[0]}{python[1]}"
     return {
         "name": name,
         "base": base,

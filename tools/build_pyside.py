@@ -24,7 +24,7 @@ This script automates the recipe that was worked out by hand:
   5. Assemble PySide6 + shiboken6 + shiboken6_generator into one directory.
      On Windows, patching in the runtime DLLs pyside-setup's packaging step
      doesn't know to copy for a non-official Qt build (ICU, zstd, etc. — whatever
-     vcpkg's Qt actually links against). On Linux no Qt is copied at all: the
+     vcpkg's Qt actually links against). On Linux and macOS no Qt is copied at all: the
      RUNPATHs lead from external/pyside-install to the Qt in
      build/vcpkg_installed, the one the app itself loads (tools/deploy.py points
      them at the deploy's lib instead).
@@ -49,7 +49,8 @@ encountered while developing this script:
 
     python tools/build_pyside.py
 
-Windows and Linux, x64 and arm64. Linux needs GCC, Ninja, pip and patchelf.
+Windows and Linux, x64 and arm64, and macOS on Apple Silicon. Linux needs GCC, Ninja,
+pip and patchelf; macOS Xcode, Ninja and pip.
 Standard library only.
 """
 
@@ -68,7 +69,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (  # noqa: E402
-    ASSET_PLATFORM, EXE_SUFFIX, REPO, VS_ARCH, WINDOWS, cache_value, copy_file, copy_tree, fail,
+    ASSET_PLATFORM, EXE_SUFFIX, MACOS, REPO, VS_ARCH, WINDOWS, cache_value, copy_file, copy_tree, fail,
     remove_tree, run, vcpkg_triplet)
 
 # tools/ci/pyside_asset.py reads the tag from this line.
@@ -82,6 +83,7 @@ LIBCLANG_BUILDS = {
                   "12921c4313e14bfaa1dedd0385b707fe7d538c8bec5636beea8baf127124d22e"),
     "linux-arm64": ("linux-Debian-11.6-gcc10.2-arm64",
                     "0b74255cddda352435b9e746e25de40a08f15d85cb9da038efea08fab81410ba"),
+    "macos-arm64": ("macos-universal", "8f3bd9462b988abbb359affc26840f655ff1de24e24dd80c18274adc2e6bdb0d"),
 }
 
 BUILD_DIR = REPO / "build"
@@ -226,6 +228,23 @@ def finish_linux(vcpkg_installed):
         set_runpath(file, list(dict.fromkeys(origin_relative(file, folder) for folder in folders)))
 
 
+def finish_macos(vcpkg_installed):
+    """As finish_linux(), with Mach-O's rpaths."""
+    from _macho import edit, loader_relative, macho_files, needed
+    generator = PYSIDE_INSTALL_DIR / "shiboken6_generator"
+    libclang = next((Path(name).name for name in needed(generator / "shiboken6") if "libclang" in name), None)
+    if not libclang:
+        fail(f"{generator / 'shiboken6'} doesn't link libclang")
+    shutil.copy2((LIBCLANG_DIR / "lib" / libclang).resolve(), generator / libclang)
+
+    carried = {file.name for file in PYSIDE_INSTALL_DIR.rglob("libQt6*")}
+    if carried:
+        fail(f"{PYSIDE_INSTALL_DIR} has a Qt of its own: {', '.join(sorted(carried))}")
+    for file in macho_files(PYSIDE_INSTALL_DIR):
+        folders = [file.parent, PYSIDE_INSTALL_DIR / "PySide6", PYSIDE_INSTALL_DIR / "shiboken6", vcpkg_installed / "lib"]
+        edit(file, new_rpaths=list(dict.fromkeys(loader_relative(file, folder) for folder in folders)))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--python", help="the Python to build for (default: OpenUSD's, as found by usdcc's build)")
@@ -239,7 +258,9 @@ def main(argv=None):
 
     # --- prerequisites --------------------------------------------------------
 
-    python = args.python or cache_value(BUILD_DIR, "Python3_EXECUTABLE")
+    # The second is for where pxrConfig.cmake names it as a plain variable (Linux, macOS).
+    python = (args.python or cache_value(BUILD_DIR, "Python3_EXECUTABLE")
+              or cache_value(BUILD_DIR, "USDCC_PYTHON_EXECUTABLE_PATH"))
     if not python:
         fail(f"No Python3_EXECUTABLE in {BUILD_DIR / 'CMakeCache.txt'}. Run tools/build.py first, or pass --python.")
     version = run([python, "-c", "import sys; print(sys.version.split()[0])"], capture_output=True, text=True)
@@ -254,13 +275,13 @@ def main(argv=None):
 
     if not shutil.which("ninja"):
         if not WINDOWS:
-            fail("'ninja' not found; install it (apt install ninja-build).")
+            fail(f"'ninja' not found; install it ({'brew install ninja' if MACOS else 'apt install ninja-build'}).")
         print("Installing ninja (build tool required by pyside-setup)...", flush=True)
         run([python, "-m", "pip", "install", "--user", "ninja"])
         # Where pip put ninja.exe (with --user, not next to the package).
         ninja_bin = run([python, "-c", "import ninja; print(ninja.BIN_DIR)"], capture_output=True, text=True)
         os.environ["PATH"] = ninja_bin.stdout.strip() + os.pathsep + os.environ["PATH"]
-    if not WINDOWS and not shutil.which("patchelf"):
+    if not WINDOWS and not MACOS and not shutil.which("patchelf"):
         fail("'patchelf' not found; install it (apt install patchelf).")
 
     python = install_build_dependencies(python)
@@ -339,6 +360,8 @@ def main(argv=None):
 
     if WINDOWS:
         finish_windows(vcpkg_installed)
+    elif MACOS:
+        finish_macos(vcpkg_installed)
     else:
         finish_linux(vcpkg_installed)
 

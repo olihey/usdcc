@@ -188,6 +188,12 @@ if(USDCC_LINK_RELEASE_QT)
     endforeach()
 endif()
 include(UsdccPython)
+if(APPLE AND USDCC_PYTHON_FOUND)
+    # A prebuilt OpenUSD links @rpath/libpython (tools/ci/relocate_usd.py): found through
+    # the programs' rpaths, wherever this machine's Python is.
+    get_filename_component(_usdcc_python_libdir "${USDCC_PYTHON_LIBRARY}" DIRECTORY)
+    list(APPEND CMAKE_BUILD_RPATH "${_usdcc_python_libdir}")
+endif()
 # Whatever calls find_package(Python) from here on, as Shiboken6's and PySide6's
 # CMake files do (src/cpp/ui/python), gets OpenUSD's Python. Left to itself it
 # takes the newest Python on the machine, and its headers with it.

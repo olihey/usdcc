@@ -181,10 +181,6 @@ def main(argv=None, description=None):
     unknown = sorted(without - set(OPTIONAL_FEATURES))
     if unknown:
         fail(f"--without: no feature {', '.join(unknown)}; there are {', '.join(OPTIONAL_FEATURES)}.")
-    if MACOS and "BLENDER_MESH_TOOLS" not in without:
-        # Its backend doesn't build on macOS yet (docs/MACOS.md).
-        print("Leaving out blender_mesh_tools: not on macOS yet.")
-        without.add("BLENDER_MESH_TOOLS")
     # Mesh tools are in every build unless left out. Dependency downloads happen here,
     # never implicitly during a direct CMake configure.
     if "BLENDER_MESH_TOOLS" not in without:
@@ -199,10 +195,6 @@ def main(argv=None, description=None):
         configure.append(f"-DCMAKE_BUILD_TYPE={args.configuration}")
     if not WINDOWS:
         configure.append(f"-DVCPKG_TARGET_TRIPLET={VCPKG_TRIPLET}")
-    if MACOS:
-        # Qt's own programs (moc, qtpaths) from the same build as its libraries: vcpkg's
-        # host triplet is the static arm64-osx, which would build Qt a second time.
-        configure.append(f"-DVCPKG_HOST_TRIPLET={VCPKG_TRIPLET}")
     if args.usd_install:
         configure.append(f"-DUSD_INSTALL={args.usd_install}")
     # Always, so a release build's version doesn't stay in the CMake cache for

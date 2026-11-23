@@ -21,7 +21,8 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import MACOS, REPO, VCPKG_TRIPLET  # noqa: E402
 
 
 def run(command):
@@ -240,7 +241,10 @@ def main(argv=None):
         # As tools/_common.py's VS_GENERATOR: 2026 on ARM64, 2022 on x64.
         command += ["-G", "Visual Studio 18 2026" if arm else "Visual Studio 17 2022", "-A", "ARM64" if arm else "x64"]
     else:
-        command += [f"-DVCPKG_TARGET_TRIPLET={'arm64' if arm else 'x64'}-linux-dynamic"]
+        command += [f"-DVCPKG_TARGET_TRIPLET={VCPKG_TRIPLET}"]
+    if MACOS:
+        # usdcc's triplets, which name the oldest macOS.
+        command += [f"-DVCPKG_OVERLAY_TRIPLETS={(REPO / 'cmake/triplets').as_posix()}"]
     run(command)
     if args.configure_only:
         return

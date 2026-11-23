@@ -31,9 +31,9 @@ from _common import REPO, VCPKG_TRIPLET, append_line, fail, normalized_text, rep
 def dependencies_hash():
     """A hash of everything in the repo that says which packages vcpkg builds."""
     files = [REPO / name for name in ("vcpkg.json", "vcpkg-configuration.json") if (REPO / name).is_file()]
-    ports = REPO / "cmake/ports"
-    if ports.is_dir():
-        files += [file for file in ports.rglob("*") if file.is_file()]
+    for folder in (REPO / "cmake/ports", REPO / "cmake/triplets"):
+        if folder.is_dir():
+            files += [file for file in folder.rglob("*") if file.is_file()]
     names = sorted("/" + file.relative_to(REPO).as_posix() for file in files)
     hashed = "".join(f"{name}\n{normalized_text(REPO / name[1:])}" for name in names)
     return short_hash(hashed, 8)

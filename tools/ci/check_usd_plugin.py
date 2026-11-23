@@ -44,7 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, WINDOWS, copy_tree, fail  # noqa: E402
+from _common import MACOS, REPO, WINDOWS, copy_tree, fail  # noqa: E402
 import usd_plugin_asset  # noqa: E402
 
 MANIFEST_DIR = "usd-plugins"
@@ -184,7 +184,8 @@ def clean_environment(usd):
         # OpenUSD's libraries link this Python's libpython, which only a Python
         # that is itself linked against it has loaded already.
         library_dir = sysconfig.get_config_var("LIBDIR")
-        if library_dir:
+        # Not on macOS, where they link it by its place.
+        if library_dir and not MACOS:
             environment["LD_LIBRARY_PATH"] = library_dir
     return environment
 
