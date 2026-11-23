@@ -4,17 +4,21 @@
 
 #include <pxr/base/tf/errorMark.h>
 #include <pxr/base/tf/pyLock.h>
+#include <pxr/base/tf/stringUtils.h>
+#include <pxr/base/work/loops.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/schemaRegistry.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usdValidation/usdValidation/context.h>
 #include <pxr/usdValidation/usdValidation/error.h>
+#include <pxr/usdValidation/usdValidation/fixer.h>
 #include <pxr/usdValidation/usdValidation/registry.h>
 #include <pxr/usdValidation/usdValidation/validator.h>
 
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <iterator>
 #include <tuple>
 #include <utility>
 
@@ -61,34 +65,61 @@ struct ValidationRun::Context {
 };
 
 ValidationRun::ValidationRun(UsdStageRefPtr stage, const std::vector<std::string>& ruleNames, std::vector<SdfPath> paths)
-    : m_stage(std::move(stage)), m_wholeStage(paths.empty()) {
+    : ValidationRun(std::move(stage), RunSettings{ruleNames, {}, {}, {}}, std::move(paths)) {}
+
+ValidationRun::ValidationRun(UsdStageRefPtr stage, RunSettings settings, std::vector<SdfPath> paths)
+    : m_stage(std::move(stage)), m_settings(std::move(settings)), m_wholeStage(paths.empty()) {
     if (!m_stage) return;
     // A caller from Python has the GIL, which loading a plugin and rules in Python need.
     TF_PY_ALLOW_THREADS_IN_SCOPE();
-    UserRules::instance().beginRun();
+    m_id = UserRules::instance().newRun();
     UsdValidationRegistry& registry = UsdValidationRegistry::GetInstance();
     std::vector<const UsdValidationValidator*> validators;
-    const std::unordered_set<std::string> wanted(ruleNames.begin(), ruleNames.end());
+    const std::unordered_set<std::string> wanted(m_settings.rules.begin(), m_settings.rules.end());
     for (const Rule& rule : rules()) {
         if (!wanted.count(rule.name)) continue;
         const UsdValidationValidator* validator = registry.GetOrLoadValidatorByName(TfToken(rule.registered));
         if (!validator) continue;
         (rule.mainThread ? m_mainThread : validators).push_back(validator);
         if (rule.registered != rule.name) m_names[rule.registered] = rule.name;
+        if (!rule.fixes.empty()) m_fixes[rule.name] = rule.fixes;
     }
-    if (validators.empty() && m_mainThread.empty()) return;
+    for (const CheckSettings& settings : m_settings.checks) {
+        std::string error;
+        if (auto check = Check::make(settings, &error)) {
+            m_checks.push_back(std::move(check));
+        } else {
+            m_findings.push_back({settings.ruleName(), "RuleFailed", Severity::Error,
+                                  "The check \"" + settings.displayName() + "\" can't run: " + error, {}});
+        }
+    }
+    if (validators.empty() && m_mainThread.empty() && m_checks.empty()) return;
 
     const auto predicate = UsdTraverseInstanceProxies(UsdPrimDefaultPredicate);
+    // All of them, to say what's left out: none under one that's left out is to be checked.
+    const auto everything = UsdTraverseInstanceProxies(UsdPrimAllPrimsPredicate);
+    const auto take = [this, &predicate](const UsdPrim& prim) {
+        if (prim.IsPseudoRoot()) return;
+        if (predicate(prim)) {
+            m_prims.push_back(prim);
+        } else if (!prim.IsActive()) {
+            ++m_skipped.inactive;
+        } else if (prim.IsAbstract()) {
+            ++m_skipped.classes;
+        } else if (!prim.IsDefined()) {
+            ++m_skipped.overs;
+        } else {
+            ++m_skipped.unloaded;
+        }
+    };
     if (m_wholeStage) {
-        for (const UsdPrim& prim : m_stage->Traverse(predicate)) m_prims.push_back(prim);
+        for (const UsdPrim& prim : UsdPrimRange(m_stage->GetPseudoRoot(), everything)) take(prim);
     } else {
         SdfPath::RemoveDescendentPaths(&paths);
         for (const SdfPath& path : paths) {
             const UsdPrim root = m_stage->GetPrimAtPath(path);
             if (!root) continue;
-            for (const UsdPrim& prim : UsdPrimRange(root, predicate)) {
-                if (!prim.IsPseudoRoot()) m_prims.push_back(prim);
-            }
+            for (const UsdPrim& prim : UsdPrimRange(root, everything)) take(prim);
         }
     }
     m_total = m_prims.size();
@@ -100,6 +131,11 @@ ValidationRun::~ValidationRun() = default;
 template <typename Validate>
 void ValidationRun::validate(const Validate& run) {
     TF_PY_ALLOW_THREADS_IN_SCOPE();
+    struct Step {
+        Step(long id, const std::map<std::string, JsObject>* parameters) { UserRules::instance().beginStep(id, parameters); }
+        ~Step() { UserRules::instance().endStep(); }
+    };
+    const Step step(m_id, &m_settings.parameters);
     UsdValidationErrorVector errors;
     const auto failed = [this](const std::string& what) {
         Finding finding{"usdcc", "RuleFailed", Severity::Error, "A rule failed: " + what, {}};
@@ -125,13 +161,63 @@ void ValidationRun::validate(const Validate& run) {
             if (const auto name = m_names.find(finding.rule); name != m_names.end()) finding.rule = name->second;
         }
         finding.name = error.GetName().GetString();
+        // usdcc.validation's rules say which fixes a finding has behind its name.
+        if (const size_t mark = finding.name.find('\x1f'); mark != std::string::npos) {
+            const auto known = m_fixes.find(finding.rule);
+            for (const std::string& wanted : TfStringSplit(finding.name.substr(mark + 1), ",")) {
+                if (known == m_fixes.end()) break;
+                for (const Fix& fix : known->second) {
+                    if (fix.name == wanted) finding.fixes.push_back(fix);
+                }
+            }
+            finding.name.resize(mark);
+        }
+        if (error.GetValidator()) {
+            for (const UsdValidationFixer* fixer : error.GetFixers()) {
+                if (!fixer || !fixer->IsAssociatedWithErrorName(error.GetName())) continue;
+                finding.fixes.push_back({fixer->GetName().GetString(), fixer->GetDescription()});
+                if (!finding.source) finding.source = std::make_shared<const UsdValidationError>(error);
+            }
+        }
         finding.severity = error.GetType() == UsdValidationErrorType::Error  ? Severity::Error
                            : error.GetType() == UsdValidationErrorType::Warn ? Severity::Warning
                                                                              : Severity::Info;
         finding.message = error.GetMessage();
         for (const UsdValidationErrorSite& site : error.GetSites()) finding.sites.push_back(makeSite(site));
-        // A rule with two schema types that fit a prim runs on it twice.
-        if (m_seen.insert(key(finding)).second) m_findings.push_back(std::move(finding));
+        add(std::move(finding));
+    }
+}
+
+void ValidationRun::add(Finding finding) {
+    // A rule's own severity but for its failures.
+    if (const auto it = m_settings.severities.find(finding.rule);
+        it != m_settings.severities.end() && finding.name != "RuleFailed") {
+        finding.severity = it->second;
+    }
+    // A rule with two schema types that fit a prim runs on it twice.
+    if (!m_seen.insert(key(finding)).second) return;
+    if (const SdfPath path = finding.prim(); !path.IsEmpty()) {
+        const auto [it, isNew] = m_ignored.try_emplace(path.GetString());
+        if (isNew) it->second = ignoredRules(m_stage->GetPrimAtPath(path));
+        finding.ignored = std::find(it->second.begin(), it->second.end(), finding.rule) != it->second.end();
+    }
+    m_findings.push_back(std::move(finding));
+}
+
+void ValidationRun::runChecks(const std::vector<UsdPrim>& prims) {
+    if (m_checks.empty()) return;
+    TF_PY_ALLOW_THREADS_IN_SCOPE();
+    std::vector<std::vector<Finding>> found(prims.size());
+    WorkParallelForN(prims.size(), [this, &prims, &found](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            for (const auto& check : m_checks) {
+                std::vector<Finding> more = check->run(prims[i]);
+                found[i].insert(found[i].end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+            }
+        }
+    });
+    for (std::vector<Finding>& each : found) {
+        for (Finding& finding : each) add(std::move(finding));
     }
 }
 
@@ -187,6 +273,7 @@ bool ValidationRun::step(double milliseconds) {
         const auto start = std::chrono::steady_clock::now();
         if (!batch.empty()) {
             validate([&batch](const UsdValidationContext& context) { return context.Validate(batch); });
+            runChecks(batch);
             if (!m_mainThread.empty()) {
                 validate([this, &batch](const UsdValidationContext&) {
                     UsdValidationErrorVector errors;
@@ -220,6 +307,7 @@ void ValidationRun::stop() {
 void ValidationRun::finish() {
     m_context.reset();
     std::vector<UsdPrim>().swap(m_prims);
+    m_ignored.clear();
     m_seen.clear();
     const auto path = [](const Finding& finding) {
         return finding.sites.empty() ? SdfPath() : finding.sites.front().path;

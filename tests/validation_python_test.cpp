@@ -9,8 +9,13 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/validation_rule_files.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/validation_fix.h"
 #include "usdcc/usd/validation_run.h"
 
+#include <pxr/base/js/json.h>
+#include <pxr/usd/sdf/assetPath.h>
+#include <pxr/usd/usd/modelAPI.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/mesh.h>
@@ -20,6 +25,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QTemporaryDir>
+#include <QUndoStack>
 
 #include <algorithm>
 #include <filesystem>
@@ -152,6 +158,29 @@ def times(prim, report, times):
     CHECK(python("import usdcc.validation as v\nv.rules()['test.names'].parameters['prefix'] = 'b'\n"), "can be set");
     found = check(stage, {"test.names"});
     CHECK(found.size() == 1 && found[0].prim() == SdfPath("/geo_a"), "and are used");
+
+    // A profile's, for one run.
+    {
+        RunSettings settings;
+        settings.rules = {"test.names"};
+        settings.severities["test.names"] = Severity::Info;
+        settings.parameters["test.names"] = {{"prefix", JsValue(std::string("geo"))}, {"gone", JsValue(3)}};
+        ValidationRun first(stage, settings);
+        settings.parameters["test.names"] = {{"prefix", JsValue(5)}};
+        ValidationRun second(stage, settings);
+        // One between the other's steps: each has its own.
+        first.step();
+        second.step();
+        first.runAll();
+        second.runAll();
+        CHECK(first.findings().size() == 1 && first.findings()[0].prim() == SdfPath("/b") && first.findings()[0].severity == Severity::Info,
+              "a run's parameters and severity are its profile's (%zu)", first.findings().size());
+        CHECK(second.findings().size() == 1 && second.findings()[0].prim() == SdfPath("/geo_a"),
+              "one of the wrong type isn't used (%zu)", second.findings().size());
+        CHECK(ruleNamed("test.names").parameters.count("prefix") == 1, "the rule's parameters are listed for the profile editor");
+        found = check(stage, {"test.names"});
+        CHECK(found.size() == 1 && found[0].prim() == SdfPath("/geo_a"), "and the next run has the rule's own again");
+    }
 
     CHECK(python("import usdcc.validation as v\nfor id in list(v.rules()): v.remove_rule(id)\n"), "rules are removed");
     CHECK(!has("test.names") && check(stage, {"test.names"}).empty(), "and gone");
@@ -344,6 +373,160 @@ USDCC_TEST(validation_python_files) {
     std::filesystem::remove_all(folder, error);
     files.sync();
     CHECK(UserRules::instance().rules().empty(), "with the folder gone, no rules are left (%zu)", UserRules::instance().rules().size());
+}
+
+USDCC_TEST(validation_python_fixes) {
+    auto& app = pythonTestApp();
+    const std::filesystem::path file = std::filesystem::temp_directory_path() / "usdcc_validation_fix.usda";
+    smallStage()->GetRootLayer()->Export(file.string());
+    const auto stage = app.stages.openStage(file.string());
+    CHECK(stage, "opens");
+    if (!stage) return;
+    const UsdStageRefPtr usd = stage->usdStage();
+    CHECK(python(R"(
+import usdcc.validation as v
+from pxr import Sdf
+
+@v.rule("fix.tag", "Tag", types=["Mesh"])
+def tag(prim, report, value="x"):
+    if prim.GetCustomDataByKey("tag") != value:
+        report.warn(prim, "no tag", fix=["set", "other"])
+
+@tag.fix("set", "Set the tag")
+def set_tag(site, value):
+    site.SetCustomDataByKey("tag", value)
+    if site.GetName() == "b" and site.GetCustomDataByKey("fail"): raise RuntimeError("half way")
+
+@tag.fix("other")
+def other(site, **all):
+    site.SetCustomDataByKey("all", sorted(all)[0])
+
+@v.layer_rule("fix.layer", "Layer")
+def layer_rule(layer, report):
+    if not layer.comment: report.warn(layer, "no comment", fix="comment")
+
+@layer_rule.fix("comment", "Comment")
+def comment(site): site.comment = "there"
+
+@v.rule("fix.bad", "Bad", types=["Mesh"])
+def bad(prim, report): report.warn(prim, "x", fix="nope")
+)"), "rules with fixes");
+    auto findings = check(usd, {"fix.tag"});
+    CHECK(findings.size() == 2 && findings[0].name == "tag" && findings[0].fixes.size() == 2 && findings[0].fixes[0].label == "Set the tag",
+          "findings with their fixes, and a clean name (%zu)", findings.size());
+    RunSettings settings;
+    settings.rules = {"fix.tag"};
+    settings.parameters["fix.tag"] = {{"value", JsValue(std::string("film"))}};
+    FixResult result = applyFixes(app.undo, stage, findings, {}, settings);
+    CHECK(result.fixed == 2 && result.remaining.empty() && usd->GetPrimAtPath(SdfPath("/b")).GetCustomDataByKey(TfToken("tag")) == VtValue(std::string("film")),
+          "fixed, with the profile's parameter (%d) [%s]", result.fixed, qPrintable(result.problems.join("; ")));
+    app.undo.stack(stage)->undo();
+    CHECK(usd->GetPrimAtPath(SdfPath("/b")).GetCustomDataByKey(TfToken("tag")).IsEmpty(), "one undo step");
+    result = applyFixes(app.undo, stage, findings, "other", settings);
+    CHECK(usd->GetPrimAtPath(SdfPath("/b")).GetCustomDataByKey(TfToken("all")) == VtValue(std::string("value")) && result.remaining.size() == 2,
+          "another by name, which leaves the findings (%zu)", result.remaining.size());
+
+    // One fails half way: nothing of it is left, and the other's is.
+    usd->GetPrimAtPath(SdfPath("/b")).SetCustomDataByKey(TfToken("fail"), VtValue(true));
+    findings = check(usd, {"fix.tag"});
+    const int steps = app.undo.stack(stage)->count();
+    result = applyFixes(app.undo, stage, findings, "set", settings);
+    CHECK(result.fixed == 1 && result.problems.size() == 1 && contains(result.problems[0].toStdString(), "half way"), "one of two fails (%d) [%s]",
+          result.fixed, qPrintable(result.problems.join("; ")));
+    CHECK(usd->GetPrimAtPath(SdfPath("/b")).GetCustomDataByKey(TfToken("tag")).IsEmpty() &&
+              !usd->GetPrimAtPath(SdfPath("/geo_a")).GetCustomDataByKey(TfToken("tag")).IsEmpty(),
+          "its half is taken back, the other's fix stays");
+    CHECK(app.undo.stack(stage)->count() == steps + 1, "in one step");
+
+    findings = check(usd, {"fix.layer"});
+    const auto onRoot = std::find_if(findings.begin(), findings.end(), [&](const Finding& f) { return f.layer() == usd->GetRootLayer()->GetIdentifier(); });
+    CHECK(onRoot != findings.end(), "a finding on the root layer");
+    if (onRoot != findings.end()) {
+        usd->SetEditTarget(usd->GetSessionLayer());
+        result = applyFixes(app.undo, stage, {*onRoot}, {}, RunSettings{{"fix.layer"}, {}, {}, {}});
+        CHECK(result.fixed == 1 && usd->GetRootLayer()->GetComment() == "there", "a layer is fixed itself [%s]", qPrintable(result.problems.join("; ")));
+        app.undo.stack(stage)->undo();
+        CHECK(usd->GetRootLayer()->GetComment().empty(), "and undone");
+        usd->SetEditTarget(usd->GetRootLayer());
+    }
+    findings = check(usd, {"fix.bad"});
+    CHECK(!findings.empty() && findings[0].name == "RuleFailed" && contains(findings[0].message, "no fix called nope"), "a fix that isn't there is the rule's failure");
+    // In OpenUSD's own context the name is as it was given.
+    CHECK(python("from pxr import Usd, UsdGeom, UsdValidation as V\n"
+                 "s = Usd.Stage.CreateInMemory(); UsdGeom.Mesh.Define(s, '/m')\n"
+                 "m = V.ValidationRegistry().GetOrLoadValidatorByName('usdcc:fix.tag#1')\n"
+                 "assert [e.GetName() for e in V.ValidationContext(validators=[m]).Validate(s)] == ['tag']\n"),
+          "and clean in OpenUSD's own context");
+    app.stages.closeStage(stage);
+    std::error_code error;
+    std::filesystem::remove(file, error);
+    python("import usdcc.validation as v\nfor id in list(v.rules()): v.remove_rule(id)\n");
+}
+
+USDCC_TEST(validation_python_run) {
+    QTemporaryDir dir;
+    const std::filesystem::path profile = std::filesystem::path(dir.path().toStdU16String()) / "p.json";
+    write(profile, R"({"name": "P", "rules": {"*": {"enabled": false}}, "templates": [{"id": "n", "template": "name_pattern", "pattern": "geo_.*", "types": ["Mesh"], "severity": "error"}]})");
+    CHECK(python("import usdcc.validation as v\nfrom pxr import Usd, UsdGeom, UsdUtils\n"
+                 "s = Usd.Stage.CreateInMemory(); UsdGeom.Mesh.Define(s, '/geo_a'); UsdGeom.Mesh.Define(s, '/b'); UsdGeom.Mesh.Define(s, '/b/c')\n"
+                 "import pathlib\np = pathlib.Path(r'" + profile.string() + "')\n"
+                 "found = v.run(s, profile=p)\n"
+                 "assert [(str(f.path), f.severity, f.rule) for f in found] == [('/b', 'error', 'check.n'), ('/b/c', 'error', 'check.n')], found\n"
+                 "assert not UsdUtils.StageCache.Get().Contains(s), 'it stays out of the cache'\n"
+                 "assert [str(f.path) for f in v.run(s, prims=['/b/c'], profile=p)] == ['/b/c']\n"
+                 "assert v.run(s, prims=[s.GetPrimAtPath('/geo_a')], profile=p) == [] and v.run(s, prims=[]) == []\n"
+                 "assert any(f.name == 'MissingUpAxisMetadata' and f.path == '/' for f in v.run(s, profile='Everything')), v.run(s, profile='Everything')\n"
+                 "assert {'General', 'Everything', 'USDZ', 'Physics'} <= set(v.profiles())\n"
+                 "assert 'usdGeomValidators:StageMetadataChecker' in v.rule_names()\n"
+                 "for bad in ('Nowhere', __file__ if '__file__' in dir() else 'x.json'):\n"
+                 "    try: v.run(s, profile=bad)\n"
+                 "    except ValueError: pass\n"
+                 "    else: raise AssertionError(bad)\n"),
+          "usdcc.validation.run()");
+}
+
+// A check copied as Python finds what the check does.
+USDCC_TEST(validation_python_copied) {
+    UsdStageRefPtr stage = smallStage();
+    UsdGeomMesh mesh(stage->GetPrimAtPath(SdfPath("/b")));
+    mesh.CreateFaceVertexCountsAttr().Set(VtIntArray{3, 3, 3});
+    mesh.CreateSubdivisionSchemeAttr().Set(TfToken("loop"));
+    UsdPrim assets = stage->DefinePrim(SdfPath("/assets"));
+    assets.CreateAttribute(TfToken("one"), SdfValueTypeNames->Asset).Set(SdfAssetPath("C:/a.png"));
+    assets.CreateAttribute(TfToken("two"), SdfValueTypeNames->AssetArray).Set(VtArray<SdfAssetPath>{SdfAssetPath("./b.exr")});
+    UsdModelAPI(stage->GetPrimAtPath(SdfPath("/x"))).SetKind(TfToken("component"));
+    const std::vector<std::pair<std::string, std::string>> checks = {
+        {"name_pattern", R"({"pattern": "geo_.*", "types": ["Mesh"]})"},
+        {"required_property", R"({"property": "extent", "types": ["Mesh"], "authored": true})"},
+        {"value", R"({"attribute": "subdivisionScheme", "values": ["none", "catmullClark"]})"},
+        {"required_schema", R"({"schema": "MaterialBindingAPI", "types": ["Mesh"]})"},
+        {"face_count", R"({"maximum": 2})"},
+        {"asset_path", R"({"pattern": ".*\\.png", "relative": true, "resolves": true})"},
+        {"kind_hierarchy", R"({"kinds": ["component"], "under": ["group"]})"},
+    };
+    for (const auto& [id, values] : checks) {
+        CheckSettings settings;
+        settings.id = id;
+        settings.label = "With \"quotes\"";
+        settings.templateId = id;
+        settings.values = JsParseString(values).GetJsObject();
+        RunSettings run;
+        run.checks = {settings};
+        ValidationRun native(stage, run);
+        native.runAll();
+        const std::string code = checkAsPython(settings);
+        CHECK(python(code), "%s", code.c_str());
+        const auto copied = check(stage, {"my." + id});
+        const auto places = [](const std::vector<Finding>& findings) {
+            std::vector<std::string> result;
+            for (const Finding& finding : findings) result.push_back(finding.sites.at(0).path.GetString() + finding.name.substr(0, 0));
+            std::sort(result.begin(), result.end());
+            return result;
+        };
+        CHECK(!copied.empty() && places(native.findings()) == places(copied), "%s: the same places (%zu, %zu)", id.c_str(),
+              native.findings().size(), copied.size());
+    }
+    python("import usdcc.validation as v\nfor id in list(v.rules()): v.remove_rule(id)\n");
 }
 
 USDCC_TEST(validation_python_plugin) {

@@ -38,6 +38,9 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QProcess>
 #include <QTemporaryDir>
 
@@ -757,6 +760,62 @@ USDCC_TEST(node_process_queue_restart) {
           qPrintable(queue->output.right(400)));
     CHECK(QFileInfo(frame1).lastModified() == written, "frame 1 wasn't rendered again");
     CHECK(QFileInfo::exists(dir.filePath(jobRoot + QStringLiteral("shot.0003.exr"))), "frame 3 is there");
+}
+
+// usdcc_node validate (docs/VALIDATION.md §9): findings, exit codes, JSON, profiles and rules.
+USDCC_TEST(node_validate) {
+    QTemporaryDir dir;
+    const QString stage = dir.filePath(QStringLiteral("s.usda"));
+    const auto write = [&dir](const QString& name, const QByteArray& text) {
+        const QString path = dir.filePath(name);
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) file.write(text);
+        return path;
+    };
+    write(QStringLiteral("s.usda"), "#usda 1.0\n(defaultPrim = \"A\"\n metersPerUnit = 1\n upAxis = \"Y\")\ndef Xform \"A\"\n{\n def Mesh \"bad_one\" {}\n def Mesh \"geo_ok\" {}\n}\n");
+    {
+        NodeProcess node({QStringLiteral("validate"), stage});
+        CHECK(node.exitCode() == 0 && node.output.contains(QStringLiteral("0 errors")), "a good stage: 0 (%d) [%s] %s", node.exitCode(),
+              qPrintable(node.output), qPrintable(node.errors()));
+    }
+    const QString rules = QFileInfo(write(QStringLiteral("rules/r.py"), "import usdcc.validation as v\n@v.rule('t.names', 'Names', types=['Mesh'])\ndef f(prim, report, prefix='zzz'):\n    if not prim.GetName().startswith(prefix): report.warn(prim, 'name')\n")).absolutePath();
+    write(QStringLiteral("rules/film.json"), R"({"name": "Film", "rules": {"t.names": {"severity": "error", "parameters": {"prefix": "geo_"}}}})");
+    {
+        NodeProcess node({QStringLiteral("validate"), stage, QStringLiteral("--rules"), rules, QStringLiteral("--validation-profile"), QStringLiteral("Film"), QStringLiteral("--json")});
+        CHECK(node.exitCode() == 1, "an error: 1 (%d) %s", node.exitCode(), qPrintable(node.errors()));
+        int findings = 0;
+        bool done = false;
+        for (const QString& line : node.output.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+            const QJsonObject object = QJsonDocument::fromJson(line.toUtf8()).object();
+            CHECK(!object.isEmpty(), "a line that isn't JSON: [%s]", qPrintable(line));
+            if (object[QLatin1String("event")] == QLatin1String("finding")) {
+                ++findings;
+                CHECK(object[QLatin1String("rule")] == QLatin1String("t.names") && object[QLatin1String("severity")] == QLatin1String("error") &&
+                          object[QLatin1String("sites")].toArray().at(0).toObject()[QLatin1String("path")] == QLatin1String("/A/bad_one"),
+                      "the finding [%s]", qPrintable(line));
+            }
+            done = done || (object[QLatin1String("event")] == QLatin1String("done") && object[QLatin1String("errors")] == 1 && object[QLatin1String("failed")].toBool());
+        }
+        CHECK(findings == 1 && done, "one finding, then the sum (%d)", findings);
+    }
+    {
+        // Its own severity is a warning.
+        NodeProcess warning({QStringLiteral("validate"), stage, QStringLiteral("--rules"), rules});
+        CHECK(warning.exitCode() == 0 && warning.output.contains(QStringLiteral("2 warnings")), "warnings don't fail it (%d) [%s]", warning.exitCode(), qPrintable(warning.output));
+        NodeProcess strict({QStringLiteral("validate"), stage, QStringLiteral("--rules"), rules, QStringLiteral("--fail-on"), QStringLiteral("warning")});
+        CHECK(strict.exitCode() == 1, "unless asked to (%d)", strict.exitCode());
+        NodeProcess file({QStringLiteral("validate"), stage, QStringLiteral("--rules"), rules, QStringLiteral("--validation-profile"), rules + QStringLiteral("/film.json"), QStringLiteral("--fail-on"), QStringLiteral("never")});
+        CHECK(file.exitCode() == 0 && file.output.contains(QStringLiteral("1 errors")), "a profile's file, never failing (%d)", file.exitCode());
+    }
+    for (const QStringList& wrong : {QStringList{}, QStringList{dir.filePath(QStringLiteral("none.usda"))}, QStringList{stage, QStringLiteral("--validation-profile"), QStringLiteral("Nowhere")},
+                                     QStringList{stage, QStringLiteral("--fail-on"), QStringLiteral("sometimes")}, QStringList{stage, QStringLiteral("--rules"), dir.filePath(QStringLiteral("nowhere"))}}) {
+        NodeProcess node(QStringList{QStringLiteral("validate")} + wrong);
+        CHECK(node.exitCode() == 2, "couldn't run: 2 (%d) [%s]", node.exitCode(), qPrintable(wrong.join(QLatin1Char(' '))));
+    }
+    write(QStringLiteral("rules/broken.py"), "def\n");
+    NodeProcess broken({QStringLiteral("validate"), stage, QStringLiteral("--rules"), rules});
+    CHECK(broken.exitCode() == 2, "a rules file that can't be loaded isn't passed over (%d)", broken.exitCode());
 }
 
 #endif

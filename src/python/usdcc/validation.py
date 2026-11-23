@@ -25,12 +25,13 @@ In a plain python, rules run through OpenUSD's own ``UsdValidation.ValidationCon
 
 import hashlib
 import inspect
+import json
 import os
 import sys
 import threading
 import types as _types
 
-from pxr import Sdf, Tf, Usd
+from pxr import Sdf, Tf, Usd, UsdUtils
 from pxr import UsdValidation as _UsdValidation
 
 from usdcc import _plugins
@@ -49,23 +50,35 @@ _rules_lock = threading.Lock()
 class Report:
     """What a rule tells its findings to. ``site`` is what's wrong: a prim, a property,
     the stage, a layer, a spec in one, or a ``(layer, path)`` pair. ``name`` tells one of
-    the rule's findings from another, such as "TooLong"; it's the rule's own by default."""
+    the rule's findings from another, such as "TooLong"; it's the rule's own by default.
+    ``fix`` names one of the rule's fixes, or several (``Rule.fix()``)."""
 
-    def __init__(self, name):
+    def __init__(self, name, fixes=(), run=0):
         self._name = name
         self._errors = []
+        self._fixes = fixes
+        self._run = run
 
-    def error(self, site, message, name=None):
-        self._add(_UsdValidation.ValidationErrorType.Error, site, message, name)
+    def error(self, site, message, name=None, fix=None):
+        self._add(_UsdValidation.ValidationErrorType.Error, site, message, name, fix)
 
-    def warn(self, site, message, name=None):
-        self._add(_UsdValidation.ValidationErrorType.Warn, site, message, name)
+    def warn(self, site, message, name=None, fix=None):
+        self._add(_UsdValidation.ValidationErrorType.Warn, site, message, name, fix)
 
-    def info(self, site, message, name=None):
-        self._add(_UsdValidation.ValidationErrorType.Info, site, message, name)
+    def info(self, site, message, name=None, fix=None):
+        self._add(_UsdValidation.ValidationErrorType.Info, site, message, name, fix)
 
-    def _add(self, kind, site, message, name):
-        self._errors.append(_UsdValidation.ValidationError(name or self._name, kind, [_site(site)], str(message)))
+    def _add(self, kind, site, message, name, fix):
+        name = name or self._name
+        names = [fix] if isinstance(fix, str) else list(fix or ())
+        for each in names:
+            if each not in self._fixes:
+                raise ValueError("the rule has no fix called %s" % (each,))
+        # Behind the name, as an error can carry nothing else from Python; a run of the
+        # app's takes it off again.
+        if names and self._run:
+            name += "\x1f" + ",".join(names)
+        self._errors.append(_UsdValidation.ValidationError(name, kind, [_site(site)], str(message)))
 
 
 def _site(site):
@@ -100,8 +113,9 @@ class Rule:
         self.main_thread = main_thread
         self.file = _loading or _source_file(function)
         self.parameters = _parameters(function, time_dependent)
-        self._failures = 0
-        self._failed_run = None
+        self.fixes = {}  # name: (label, function)
+        self._failures = {}  # run: how often it failed, for the last few
+        self._given = (0, self.parameters)  # run, and the parameters in it
         self._lock = threading.Lock()
         self.__name__ = getattr(function, "__name__", id)
         self.__doc__ = function.__doc__
@@ -110,40 +124,84 @@ class Rule:
     def __call__(self, *args, **kwargs):
         return self.function(*args, **kwargs)
 
+    def fix(self, name, label=None):
+        """Makes a function a fix for the rule's findings that ask for it::
+
+            @mesh_names.fix("add_prefix", "Add prefix")
+            def add_prefix(site, prefix="geo_"):
+                ...
+
+        It gets what the finding is at (a prim, a property, the stage, a layer or a spec)
+        and those of the rule's parameters it has arguments for. It edits the stage's edit
+        target, on the main thread, as part of an undo step. Raising takes it back."""
+        if not name or not all(c.isalnum() or c in "_-" for c in name):
+            raise ValueError("a fix's name is letters, digits, '_' and '-'")
+
+        def decorate(function):
+            list(inspect.signature(function).parameters.values())[0]  # it takes the site
+            self.fixes[name] = (label or name, function)
+            _tell(self)
+            return function
+
+        return decorate
+
     def __repr__(self):
         return "<usdcc.validation.Rule %s>" % self.id
 
     def _run(self, subject, times):
-        if self._failed_run is not None and self._gave_up():
+        run = _native.validation_run()
+        if run and self._failures.get(run, 0) >= MAX_FAILURES:
             return []
-        report = Report(self.id.rsplit(".", 1)[-1])
-        arguments = dict(self.parameters)
+        report = Report(self.id.rsplit(".", 1)[-1], self.fixes, run)
+        arguments = dict(self._parameters_in(run))
         if self.time_dependent:
             arguments["times"] = times
         try:
             self.function(subject, report, **arguments)
         except (Exception, SystemExit) as error:
             # What it reported before it raised counts.
-            return report._errors + self._failed(subject, error)
+            return report._errors + self._failed(subject, error, run)
         return report._errors
 
-    def _gave_up(self):
-        with self._lock:
-            return self._failed_run == _native.validation_run() and self._failures >= MAX_FAILURES
+    def _parameters_in(self, run):
+        """The profile's in a run of the app's, and outside one its own."""
+        given = self._given
+        if run == 0:
+            return self.parameters
+        if given[0] != run:
+            text = _native.validation_parameters(self.id)
+            given = self._given = (run, self._with(json.loads(text) if text else {}))
+        return given[1]
 
-    def _failed(self, subject, error):
-        run = _native.validation_run()
+    def _with(self, profile):
+        """The parameters, with a profile's in their place."""
+        values = dict(self.parameters)
+        for name, value in profile.items():
+            if name not in values:
+                continue  # one it used to have
+            fitting = _fitting(value, self.parameters[name])
+            if fitting is None:
+                _log.post(
+                    _log.WARNING,
+                    "usdcc.validation",
+                    "The profile's %s for the rule %s isn't used: it should be like %r"
+                    % (name, self.id, self.parameters[name]),
+                )
+            else:
+                values[name] = fitting
+        return values
+
+    def _failed(self, subject, error, run):
         with self._lock:
-            if self._failed_run != run:
-                self._failed_run, self._failures = run, 0
-            self._failures += 1
-            count = self._failures
-        if count > MAX_FAILURES:
+            count = self._failures[run] = self._failures.get(run, 0) + 1
+            while len(self._failures) > 8:
+                del self._failures[min(self._failures)]
+        if run and count > MAX_FAILURES:
             return []  # on other threads when the last one counted
         if count == 1:
             _log.log_exception(type(error), error, error.__traceback__, "usdcc.validation")
         message = "The rule failed: %s: %s" % (type(error).__name__, error)
-        if count == MAX_FAILURES:
+        if run and count == MAX_FAILURES:
             message += " (it isn't run any further)"
         return [
             _UsdValidation.ValidationError(
@@ -170,6 +228,32 @@ def _parameters(function, time_dependent):
             raise TypeError("the rule's argument %s needs a default, as nothing would give it a value" % parameter.name)
         result[parameter.name] = parameter.default
     return result
+
+
+def _fitting(value, default):
+    """`value` as a parameter with that default would have it, or None."""
+    if isinstance(default, bool) or isinstance(value, bool):
+        return value if isinstance(default, bool) and isinstance(value, bool) else None
+    if isinstance(default, float):
+        return float(value) if isinstance(value, (int, float)) else None
+    if isinstance(default, int):
+        return int(value) if isinstance(value, (int, float)) and value == int(value) else None
+    if isinstance(default, str):
+        return value if isinstance(value, str) else None
+    if isinstance(default, (list, tuple)):
+        fits = isinstance(value, list) and all(isinstance(each, str) for each in value)
+        return type(default)(value) if fits else None
+    return None
+
+
+def _editable(parameters):
+    """Those a profile can give: bools, numbers, text and lists of text."""
+    return {
+        name: list(value) if isinstance(value, tuple) else value
+        for name, value in parameters.items()
+        if isinstance(value, (bool, int, float, str))
+        or (isinstance(value, (list, tuple)) and all(isinstance(each, str) for each in value))
+    }
 
 
 def _type_name(type):
@@ -245,22 +329,114 @@ def _add(rule):
             other.rule = None
         slot.rule = rule
         _rules[rule.id] = rule
-    _native.validation_set_rule(
-        rule.id,
-        slot.name,
-        rule.label,
-        rule.doc,
-        list(rule.keywords),
-        list(rule.schema_types),
-        rule.file,
-        rule.main_thread,
-    )
+    rule.registered = slot.name
+    _tell(rule)
     if _loading is not None:
         _files[_loading].rules.append(rule)
     elif _plugins.current() is not None:
         _plugins.note("Validation rule", rule.label)
         _plugins.track(lambda: _remove(rule))
     return rule
+
+
+def _tell(rule):
+    if _rules.get(rule.id) is not rule:
+        return  # replaced by now
+    _native.validation_set_rule(
+        rule.id,
+        rule.registered,
+        rule.label,
+        rule.doc,
+        list(rule.keywords),
+        list(rule.schema_types),
+        rule.file,
+        rule.main_thread,
+        json.dumps(_editable(rule.parameters)),
+        [(name, label) for name, (label, _function) in rule.fixes.items()],
+    )
+
+
+def _run_fix(rule_id, fix, stage_id, path, layer, parameters):
+    """A finding's fix, for the app. Returns why it failed, or ''."""
+    rule = _rules.get(rule_id)
+    if rule is None or fix not in rule.fixes:
+        return "the rule has no such fix any more"
+    function = rule.fixes[fix][1]
+    stage = UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(stage_id))
+    if layer:
+        found = Sdf.Layer.Find(layer)
+        site = found if found is None or path in ("", "/") else found.GetObjectAtPath(path)
+    else:
+        site = stage if path in ("", "/") else stage.GetObjectAtPath(path)
+    if not site:
+        return "what it's about isn't there any more"
+    arguments = inspect.signature(function).parameters
+    takes_any = any(each.kind == each.VAR_KEYWORD for each in arguments.values())
+    values = rule._with(json.loads(parameters or "{}"))
+    try:
+        function(site, **{name: value for name, value in values.items() if takes_any or name in arguments})
+    except (Exception, SystemExit) as error:
+        _log.log_exception(type(error), error, error.__traceback__, "usdcc.validation")
+        return "%s: %s" % (type(error).__name__, error)
+    return ""
+
+
+_native.validation_set_fix_runner(_run_fix)
+
+
+# --- Running -------------------------------------------------------------------
+
+
+class Finding:
+    """What run() found. ``severity`` is "error", "warning" or "info". ``sites`` are
+    ``(path, layer identifier)`` pairs, the layer "" for one on the stage. ``fixes`` are
+    the fixes' names. ``ignored``: its prim says to ignore its rule."""
+
+    def __init__(self, values):
+        self.rule = values["rule"]
+        self.name = values["name"]
+        self.severity = values["severity"]
+        self.message = values["message"]
+        self.sites = [(Sdf.Path(path) if path else Sdf.Path(), layer) for path, layer in values["sites"]]
+        self.fixes = list(values["fixes"])
+        self.ignored = values["ignored"]
+
+    @property
+    def path(self):
+        """The first site's path, or None."""
+        return self.sites[0][0] if self.sites and not self.sites[0][0].isEmpty else None
+
+    def __repr__(self):
+        return "<Finding %s %s at %s: %s>" % (self.severity, self.rule, self.path, self.message)
+
+
+def run(stage=None, prims=None, profile=None):
+    """Checks a stage (by default the app's current one), or `prims` and what's under them,
+    with the rules of a profile: one's name, or a profile's file; by default the chosen
+    one. Returns a list of Finding, errors first. Don't edit the stage from another thread
+    meanwhile. Outside the app too, with a stage given."""
+    if stage is None:
+        from usdcc import usd
+
+        stage = usd.current_stage()
+        if stage is None:
+            raise RuntimeError("no stage is open")
+    paths = [str(each.GetPath()) if hasattr(each, "GetPath") else str(each) for each in prims or []]
+    # An empty selection isn't the whole stage.
+    if prims is not None and not paths:
+        return []
+    found = _native.validation_check(stage, paths, os.fspath(profile) if profile else "")
+    return [Finding(values) for values in found]
+
+
+def profiles():
+    """The names of the profiles there are."""
+    return _native.validation_profiles()
+
+
+def rule_names():
+    """The names of all the rules there are, OpenUSD's and those made with this module."""
+    return _native.validation_rules()
 
 
 def _remove(rule):
