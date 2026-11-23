@@ -8,6 +8,7 @@
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/toast_manager.h"
 
+#include <QAction>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -77,7 +78,8 @@ struct AppUpdates::State {
 
     // The rest on the UI thread only.
     bool busy = false;
-    bool ready = false;  // downloaded, waiting for a restart
+    bool downloading = false;  // busy with the download
+    bool ready = false;        // downloaded, waiting for a restart
     bool restartRequested = false;
 #ifdef USDCC_HAS_VELOPACK
     std::shared_ptr<Velopack::UpdateManager> manager;
@@ -162,6 +164,51 @@ void AppUpdates::start() {
 }
 
 void AppUpdates::checkNow() { check(true); }
+
+void AppUpdates::setMenuAction(QAction* action) {
+    m_menuAction = action;
+    connect(action, &QAction::triggered, this, [this]() { menuActionTriggered(); });
+    updateMenuAction();
+}
+
+void AppUpdates::updateMenuAction() {
+    if (!m_menuAction) return;
+    m_menuAction->setEnabled(!m_state->downloading);
+#ifdef USDCC_HAS_VELOPACK
+    if (m_state->update) {
+        const QString version = QString::fromStdString(m_state->update->TargetFullRelease.Version);
+        if (m_state->ready) {
+            m_menuAction->setText(tr("Restart to &Update to %1").arg(version));
+            m_menuAction->setStatusTip(tr("Close usdcc, install the downloaded update and start usdcc again"));
+        } else if (m_state->downloading) {
+            m_menuAction->setText(tr("Downloading &Update to %1...").arg(version));
+            m_menuAction->setStatusTip(tr("The update downloads in the background"));
+        } else {
+            m_menuAction->setText(tr("Install &Update to %1").arg(version));
+            m_menuAction->setStatusTip(
+                tr("Download the update in the background; then usdcc restarts to install it"));
+        }
+        return;
+    }
+#endif
+    m_menuAction->setText(tr("Check for &Updates..."));
+    m_menuAction->setStatusTip(canUpdate() ? tr("Look for a newer release of usdcc, and install it")
+                                           : tr("Look for a newer release of usdcc on its releases page"));
+}
+
+void AppUpdates::menuActionTriggered() {
+#ifdef USDCC_HAS_VELOPACK
+    if (m_state->ready) {
+        restartNow();
+        return;
+    }
+    if (m_state->update) {
+        download();
+        return;
+    }
+#endif
+    checkNow();
+}
 
 void AppUpdates::check(bool interactive) {
     ui::ToastManager* toasts = m_window->toasts();
@@ -255,6 +302,7 @@ void AppUpdates::check(bool interactive) {
             }
             state->manager = manager;
             state->update = update;
+            self.updateMenuAction();
             const Velopack::VelopackAsset& target = update->TargetFullRelease;
             const QString version = QString::fromStdString(target.Version);
             // A delta is much smaller than the full package, when there is one.
@@ -262,17 +310,18 @@ void AppUpdates::check(bool interactive) {
             for (const Velopack::VelopackAsset& delta : update->DeltasToTarget) size += delta.Size;
             if (size == 0) size = target.Size;
             USDCC_LOG_INFO(kCategory, "usdcc {} is available ({} bytes to download)", target.Version, size);
-            toasts->show({.kind = ToastKind::Info,
-                          .title = tr("usdcc %1 is available").arg(version).toStdString(),
-                          .body = tr("You have %1. The update downloads in the background (%2 MB); then "
-                                     "usdcc restarts to install it.")
-                                      .arg(QString::fromLatin1(core::version()), megabytes(size))
-                                      .toStdString(),
-                          .durationMs = ToastRequest::kSticky},
-                         // The AppUpdates by pointer: `self` is this call's parameter.
-                         {{tr("Download and Install"), [updates = &self]() { updates->download(); }},
-                          {tr("Release Notes"),
-                           [updates = &self]() { QDesktopServices::openUrl(QUrl(updates->releasesUrl())); }}});
+            self.m_availableToast =
+                toasts->show({.kind = ToastKind::Info,
+                              .title = tr("usdcc %1 is available").arg(version).toStdString(),
+                              .body = tr("You have %1. The update downloads in the background (%2 MB); then "
+                                         "usdcc restarts to install it.")
+                                          .arg(QString::fromLatin1(core::version()), megabytes(size))
+                                          .toStdString(),
+                              .durationMs = ToastRequest::kSticky},
+                             // The AppUpdates by pointer: `self` is this call's parameter.
+                             {{tr("Download and Install"), [updates = &self]() { updates->download(); }},
+                              {tr("Release Notes"),
+                               [updates = &self]() { QDesktopServices::openUrl(QUrl(updates->releasesUrl())); }}});
         });
     }).detach();
 #endif
@@ -282,6 +331,11 @@ void AppUpdates::download() {
 #ifdef USDCC_HAS_VELOPACK
     if (m_state->busy || m_state->ready || !m_state->manager || !m_state->update) return;
     m_state->busy = true;
+    m_state->downloading = true;
+    // Started from the menu, the notification would stay with a button that does nothing.
+    if (m_availableToast) m_window->toasts()->dismiss(m_availableToast);
+    m_availableToast = 0;
+    updateMenuAction();
     m_state->lastProgress = -1;
     const QString version = QString::fromStdString(m_state->update->TargetFullRelease.Version);
     m_window->statusBar()->showMessage(tr("Downloading usdcc %1...").arg(version));
@@ -309,6 +363,9 @@ void AppUpdates::download() {
         }
         state->post([state, version, error](AppUpdates& self) {
             state->busy = false;
+            state->downloading = false;
+            state->ready = error.empty();
+            self.updateMenuAction();
             self.m_window->statusBar()->clearMessage();
             if (!error.empty()) {
                 USDCC_LOG_ERROR(kCategory, "Couldn't download usdcc {}: {}", version.toStdString(), error);
@@ -318,7 +375,6 @@ void AppUpdates::download() {
                 return;
             }
             USDCC_LOG_INFO(kCategory, "Downloaded usdcc {}", version.toStdString());
-            state->ready = true;
             self.showReady();
         });
     }).detach();

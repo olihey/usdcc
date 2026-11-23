@@ -1108,12 +1108,9 @@ int main(int argc, char** argv) {
         window.close();
         return !window.isVisible();
     });
-    QAction* checkForUpdatesAction = helpMenu->addAction(QObject::tr("Check for &Updates..."));
+    QAction* checkForUpdatesAction = helpMenu->addAction(QString());
     checkForUpdatesAction->setObjectName(QStringLiteral("checkForUpdatesAction"));
-    checkForUpdatesAction->setStatusTip(updates.canUpdate()
-                                            ? QObject::tr("Look for a newer release of usdcc, and install it")
-                                            : QObject::tr("Look for a newer release of usdcc on its releases page"));
-    QObject::connect(checkForUpdatesAction, &QAction::triggered, &window, [&updates]() { updates.checkNow(); });
+    updates.setMenuAction(checkForUpdatesAction);
 #endif
     QAction* projectHomeAction = helpMenu->addAction(QObject::tr("&Project Home"));
     projectHomeAction->setStatusTip(QObject::tr("Open usdcc's GitHub page in your browser"));
