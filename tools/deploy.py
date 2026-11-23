@@ -115,6 +115,11 @@ def _build_features():
     return json.loads(path.read_text(encoding="utf-8"))["features"]
 
 
+def _has_feature(name):
+    """Whether this build has the feature `name` (docs/BUILD_OPTIONS.md)."""
+    return any(feature["name"] == name and feature["included"] for feature in _build_features())
+
+
 def _left_out_folders():
     """The plugin folders of the features this build was configured without."""
     return {folder for feature in _build_features() if not feature["included"] for folder in feature["folders"]}
@@ -360,6 +365,7 @@ def main(argv=None):
     has_launcher = launcher_exe.is_file()
     velopack_license = cache_value(BUILD_DIR, "USDCC_VELOPACK_LICENSE_PATH")
     has_velopack = has_launcher and bool(velopack_license) and os.path.isfile(velopack_license)
+    has_updates = _has_feature("UPDATES")
     if has_launcher and not has_velopack:
         fail(f"The build has the launcher ({launcher_exe}) but not Velopack's licence ('{velopack_license}'); "
              "configure again.")
@@ -431,7 +437,9 @@ def main(argv=None):
     _openusd_plugins(usd_install / "plugin/usd", deploy_dir / "plugin/usd", copy_tree)
 
     print("  usdcc", flush=True)
-    copy_tree(app_dir, bin_dir, exclude_files=BUILD_ONLY_FILES)
+    # Without the Updates feature the app doesn't use Velopack's DLL: one an earlier build left
+    # in the build folder stays there.
+    copy_tree(app_dir, bin_dir, exclude_files=BUILD_ONLY_FILES + ([] if has_updates else ["velopack_libc.dll"]))
     if has_launcher:
         copy_file(launcher_exe, deploy_dir)
     elif (deploy_dir / "usdcc.exe").is_file():
@@ -611,8 +619,9 @@ def main(argv=None):
         copy_file(velopack_license, licenses_dir / "Velopack")
         version_file = Path(velopack_license).parent / "VERSION"
         velopack_version = version_file.read_text(encoding="utf-8").strip() if version_file.is_file() else ""
-        sources.append(f"Velopack {velopack_version} (bin/velopack_libc.dll, the launcher usdcc.exe, "
-                       "and an install's Update.exe)")
+        sources.append(f"Velopack {velopack_version} ("
+                       + ("bin/velopack_libc.dll, " if has_updates else "")
+                       + "the launcher usdcc.exe, and an install's Update.exe)")
         sources.append(f"  source:     https://github.com/velopack/velopack/tree/{velopack_version}")
     for tool in ("ruff", "uv"):
         tool_dir = deploy_dir / "tools" / tool
@@ -650,7 +659,7 @@ def main(argv=None):
         *[f"plugins/{protocol}/usd/plugInfo.json" for protocol in _shipped(["http", "webdav", "s3"])],
     ]
     if has_velopack:
-        required += ["usdcc.exe", "bin/velopack_libc.dll", "licenses/Velopack/LICENSE"]
+        required += ["usdcc.exe", "licenses/Velopack/LICENSE"] + (["bin/velopack_libc.dll"] if has_updates else [])
     if include_rtx:
         required += ["plugins/rtx_render/usdcc-plugin.json", "plugins/rtx_render/bin/windows-x64/rtx_render_native.dll"]
     missing = [name for name in required if not (deploy_dir / name).exists()]
