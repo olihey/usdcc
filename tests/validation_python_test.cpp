@@ -312,14 +312,23 @@ USDCC_TEST(validation_python_files) {
     CHECK(waitUntil([]() { return has("file.b") && has("file.a2") && UserRules::instance().problems().empty(); }),
           "fixed: loaded, and no problem any more");
 
-    // Replacing the file, as some editors save.
+    // Replacing the file, as some editors save. Tried again while Windows refuses: another
+    // program (a virus scanner) may have the file open just after it was written.
     write(folder / "b.tmp", namedRule("file.b", "swapped"));
     std::error_code error;
-    std::filesystem::rename(folder / "b.tmp", folder / "b.py", error);
-    CHECK(!error && waitUntil([&]() { const auto found = check(stage, {"file.b"}); return !found.empty() && found[0].message == "swapped"; }),
+    CHECK(waitUntil([&]() {
+              std::filesystem::rename(folder / "b.tmp", folder / "b.py", error);
+              return !error;
+          }),
+          "the file is replaced [%s]", error.message().c_str());
+    CHECK(waitUntil([&]() { const auto found = check(stage, {"file.b"}); return !found.empty() && found[0].message == "swapped"; }),
           "a file put in its place");
 
-    std::filesystem::remove(folder / "b.py");
+    CHECK(waitUntil([&]() {
+              std::filesystem::remove(folder / "b.py", error);
+              return !error;
+          }),
+          "the file is deleted [%s]", error.message().c_str());
     CHECK(waitUntil([]() { return !has("file.b"); }) && has("file.a2"), "a deleted file's rules go");
 
     QString why;
