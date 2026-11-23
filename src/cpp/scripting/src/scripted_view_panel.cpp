@@ -37,7 +37,7 @@ ScriptedViewPanel::ScriptedViewPanel(usdcc::usd::StageManager* stageManager, Sta
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     addPanelControls(toolbarLayout);

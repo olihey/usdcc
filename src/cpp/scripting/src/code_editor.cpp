@@ -17,7 +17,7 @@ int leadingSpaces(const QString& line) {
 }  // namespace
 
 CodeEditor::CodeEditor(QWidget* parent) : usdcc::ui::TextView(parent) {
-    setObjectName(QStringLiteral("scriptEditor"));  // monospace, from theme/dark.qss
+    setObjectName(QStringLiteral("scriptEditor"));  // monospace, from theme/app.qss
     setTabChangesFocus(false);
 }
 

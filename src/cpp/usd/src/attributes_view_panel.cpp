@@ -40,7 +40,7 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
 
@@ -60,7 +60,7 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
 
     addPanelControls(toolbarLayout);
     toolbarLayout->addWidget(m_search, 1);
-    // One right edge for the whole panel: the scroll bar's width (theme/dark.qss),
+    // One right edge for the whole panel: the scroll bar's width (theme/app.qss),
     // whose room is always kept, so that nothing moves when it comes and goes.
     usdcc::ui::scaled::margins(toolbarLayout, 4, 4, 10, 4);
 

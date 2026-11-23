@@ -29,7 +29,7 @@ class PropertyEditor;
 //   connected  — the value comes from a connection; shows the source as a link
 // A square, icon-only button the height of a value field (Edit, Remove, Add),
 // with a theme icon (e.g. ":/usdcc/theme/pencil.png") and a tooltip saying
-// what it does. Styled as #propertyIconButton in theme/dark.qss.
+// what it does. Styled as #propertyIconButton in theme/app.qss.
 QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent = nullptr);
 
 class USDCC_USD_UI_API PropertyRow : public QWidget {

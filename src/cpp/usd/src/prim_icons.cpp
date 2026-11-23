@@ -28,9 +28,9 @@ namespace usdcc::usd::prim_icons {
 
 namespace {
 // The theme's icon grey (tools/gen_theme_icons.py LIGHT) and a selected
-// row's white (dark.qss, QTreeView::item:selected).
-constexpr auto kIconColor = "#a0a0a4";
-constexpr auto kSelectedColor = "#ffffff";
+// row's white (app.qss, QTreeView::item:selected).
+QByteArray iconColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Icon).name().toLatin1(); }
+QByteArray selectedIconColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::TextStrong).name().toLatin1(); }
 // The badges' colour, on selected rows too, is the theme's accent
 // (usdcc::ui::theme::accent()), looked up whenever one is drawn.
 // An inactive prim's icon, as faded as its name.
@@ -163,14 +163,14 @@ public:
     }
 
     QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State, qreal scale) override {
-        // The accent is part of the key: a new accent colour draws new badges.
+        // The colours are part of the key: new ones draw new icons and badges.
         const QString badgeColor = m_badge.isEmpty() ? QString() : usdcc::ui::theme::accent().name();
-        const QString key = QStringLiteral("%1x%2@%3/%4/%5")
+        const QString key = QStringLiteral("%1x%2@%3/%4/%5/%6")
                                 .arg(size.width())
                                 .arg(size.height())
                                 .arg(scale)
                                 .arg(mode)
-                                .arg(badgeColor);
+                                .arg(badgeColor, QString::fromLatin1(iconColor() + selectedIconColor()));
         const auto cached = m_pixmaps.constFind(key);
         if (cached != m_pixmaps.constEnd()) return *cached;
         QPixmap pixmap(size * scale);
@@ -192,7 +192,7 @@ public:
 private:
     void draw(QPainter& painter, const QRectF& rect, QIcon::Mode mode, const QByteArray& badgeColor) {
         if (m_inactive || mode == QIcon::Disabled) painter.setOpacity(kInactiveOpacity);
-        renderer(m_svg, m_renderers, mode, kIconColor, kSelectedColor).render(&painter, rect);
+        renderer(m_svg, m_renderers, mode, iconColor(), selectedIconColor()).render(&painter, rect);
         if (m_badge.isEmpty()) return;
         const qreal unit = rect.width() / 24.0;
         const QPointF center(rect.left() + kBadgeCenterX * unit, rect.top() + kBadgeCenterY * unit);

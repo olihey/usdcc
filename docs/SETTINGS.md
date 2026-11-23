@@ -88,7 +88,8 @@ take them for a `bool`.
 
 | Key | Type | Default | Where |
 |---|---|---|---|
-| `Appearance/accentColor` | Color | `#3d8bfd` | `theme.cpp` |
+| `Appearance/theme` | Choice | `usdcc Dark` | `theme.cpp`: System, the built-in themes and your own ([THEMES.md](THEMES.md)) |
+| `Appearance/accentColor` | Color | the theme's (`#3d8bfd` in usdcc Dark) | `theme.cpp` |
 | `Appearance/uiScale` | Int 80–200 | 100 | `UiScaleController` (also View > UI Scale, Ctrl+Numpad+/-) |
 | `Appearance/followCurrentStage.<id>` | Bool | off | `ViewPanelRegistry::add()`, one per panel type (group *Follow Current Stage*): every panel of that type follows the current stage ([WORKSPACES.md](WORKSPACES.md) §3.5.4) |
 | `Shortcuts/tools.select` | Shortcut | `Q` | `ViewportToolBars` |
@@ -142,7 +143,7 @@ do not delay the menu. Entries remain selectable; the normal stage-opening flow
 reports missing or unreachable files when you choose one. Clear Recent also works
 while a listed path is offline.
 
-**Accent color.** `dark.qss` and `dock.qss` use three tokens:
+**Accent color.** `app.qss` and `dock.qss` use three tokens:
 
 | Token | Replaced with |
 |---|---|

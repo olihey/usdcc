@@ -1,4 +1,5 @@
 #include "usdcc/usd/schema_library_editor.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/usd/schema_info.h"
 
@@ -54,8 +55,8 @@ QString stampOf(const QString& path) {
 
 enum PropertyColumn { Name, Type, Uniform, Fallback, Tokens, DisplayName, DisplayGroup, Documentation, ColumnCount };
 
-const QColor kErrorColor(0xff, 0x5f, 0x56);    // as the log's errors
-const QColor kWarningColor(0xff, 0xb3, 0x40);  // as an unregistered schema's pill
+QColor errorColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Error); }  // as the log's errors
+QColor warningColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Warning); }  // as an unregistered schema's pill
 constexpr auto kRelationship = "relationship";
 
 QString joined(const std::vector<std::string>& items) {
@@ -640,7 +641,7 @@ void SchemaLibraryEditor::refreshIssues() {
     m_issues->clear();
     for (const SchemaIssue& issue : issues()) {
         auto* item = new QListWidgetItem(qs(issueText(issue)), m_issues);
-        item->setForeground(issue.severity == SchemaIssue::Severity::Error ? kErrorColor : kWarningColor);
+        item->setForeground(issue.severity == SchemaIssue::Severity::Error ? errorColor() : warningColor());
         item->setData(Qt::UserRole, qs(issue.schema));
     }
     m_issues->setVisible(m_issues->count() > 0);
@@ -729,7 +730,7 @@ void SchemaLibraryEditor::finishGenerate(const SchemaGenerateResult& result) {
     refreshIssues();
     if (!result.ok) {
         auto* item = new QListWidgetItem(tr("Generate: %1").arg(qs(result.error)));
-        item->setForeground(kErrorColor);
+        item->setForeground(errorColor());
         m_issues->insertItem(0, item);
         if (!result.output.empty() && result.output != result.error) {
             m_issues->insertItem(1, new QListWidgetItem(tr("usdGenSchema said: %1").arg(qs(result.output))));

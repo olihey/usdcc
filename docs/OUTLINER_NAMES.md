@@ -40,7 +40,7 @@ part of this.
 ## 2. What the Outliner did before
 
 - Names are the theme's text colour, `rgba(255, 255, 255, 75%)` (about `191, 191, 191`), and
-  white on a selected row (dark.qss).
+  white on a selected row (app.qss).
 - An inactive prim is grey (`Qt::gray`) **and italic** (`UsdPrimTreeModel`, `ForegroundRole`
   and `FontRole`). Italic means "over" in usdview, so this clashes.
 - The tooltip is the prim's path.
@@ -87,7 +87,7 @@ class and an inactive prim; each gets the colour, font and tooltip above.
 
 | Phase | Work |
 |---|---|
-| **1. Colours, fonts, tooltips** *(done)* | §3: `UsdPrimTreeModel::data()`. On a selected row, `OutlinerItemDelegate` draws a coloured name itself, since dark.qss would turn it white |
+| **1. Colours, fonts, tooltips** *(done)* | §3: `UsdPrimTreeModel::data()`. On a selected row, `OutlinerItemDelegate` draws a coloured name itself, since app.qss would turn it white |
 | **2. Instance proxies** *(done)* | An instance's children are its instance proxies (`UsdTraverseInstanceProxies`), in the prototype colour, read-only (no rename, no checkbox, no reorder). They are loaded when the instance is first expanded (`canFetchMore()`/`fetchMore()`), so a heavily instanced stage doesn't build every prototype's subtree under every instance; `fetchPath()` loads them on the way to a selected or expanded path |
 
 Tests: `tests/outliner_names_test.cpp`.

@@ -1,7 +1,7 @@
 /*
  * usdcc's dark theme for the web pages it serves: the render queue's (docs/RENDER_NODE.md §4.5)
  * and the viewport broadcast's (docs/VIEWPORT_BROADCAST.md). The same tokens as the top of
- * dark.qss, as CSS custom properties; tests/theme_css_test.cpp keeps the two equal.
+ * app.qss, as CSS custom properties; tests/theme_css_test.cpp keeps the two equal.
  *
  * The accent is set by the page from what its server says (the profile's
  * Appearance/accentColor), as theme.cpp does for the app; #3d8bfd until then.

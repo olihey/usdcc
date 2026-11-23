@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/schema_pills.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/flow_layout.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -91,7 +92,7 @@ void SchemaPillsEditor::rebuild() {
     }
     for (const AppliedSchema& schema : m_schemas) {
         auto* pill = new QFrame(this);
-        pill->setObjectName(QStringLiteral("schemaPill"));  // styled by theme/dark.qss
+        pill->setObjectName(QStringLiteral("schemaPill"));  // styled by theme/app.qss
         pill->setProperty("state", schema.state == AppliedSchema::State::BuiltIn        ? "builtIn"
                                    : schema.state == AppliedSchema::State::Unregistered ? "unregistered"
                                                                                         : "authored");
@@ -106,7 +107,7 @@ void SchemaPillsEditor::rebuild() {
         if (schema.state != AppliedSchema::State::BuiltIn && !isReadOnly()) {
             auto* remove = new QToolButton(pill);
             remove->setObjectName(QStringLiteral("schemaPillRemove"));
-            remove->setIcon(QIcon(QStringLiteral(":/usdcc/theme/close.png")));
+            remove->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/close.png")));
             usdcc::ui::scaled::iconSize(remove, 10, 10);
             remove->setToolTip(tr("Remove %1").arg(qs(schema.name)));
             const QString name = qs(schema.name);

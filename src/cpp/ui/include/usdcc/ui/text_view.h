@@ -6,7 +6,7 @@
 
 namespace usdcc::ui {
 
-// A monospace QPlainTextEdit for code (font family from theme/dark.qss,
+// A monospace QPlainTextEdit for code (font family from theme/app.qss,
 // #codeView, or a subclass's own object name), without wrapping, with
 //   - a line-number gutter, painting only the lines on screen;
 //   - the cursor's line highlighted.

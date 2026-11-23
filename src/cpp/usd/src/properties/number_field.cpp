@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/number_field.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_style.h"
@@ -281,7 +282,7 @@ void NumberField::beginTextEdit() {
         m_editor = new QLineEdit(this);
         m_editor->setFrame(false);
         m_editor->setStyleSheet(QStringLiteral(
-            "QLineEdit { background: transparent; border: none; padding: 0; min-height: 0; color: rgba(255,255,255,90%); }"));
+            "QLineEdit { background: transparent; border: none; padding: 0; min-height: 0; color: palette(text); }"));
         m_editor->installEventFilter(this);
         connect(m_editor, &QLineEdit::returnPressed, this, [this]() { endTextEdit(true); });
     }

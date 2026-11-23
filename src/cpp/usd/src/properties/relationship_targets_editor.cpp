@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/relationship_targets_editor.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/flow_layout.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -53,7 +54,7 @@ void RelationshipTargetsEditor::rebuild() {
         delete item;
     }
     const bool change = m_replaces && !m_targets.empty();
-    m_add->setIcon(QIcon(change ? QStringLiteral(":/usdcc/theme/pencil.png") : QStringLiteral(":/usdcc/theme/plus.png")));
+    m_add->setIcon(usdcc::ui::theme::icon(change ? QStringLiteral(":/usdcc/theme/pencil.png") : QStringLiteral(":/usdcc/theme/plus.png")));
     m_add->setToolTip(change ? tr("Change the target") : tr("Add a target"));
     if (m_targets.empty()) {
         auto* none = new QLabel(tr("None"), this);
@@ -83,7 +84,7 @@ void RelationshipTargetsEditor::rebuild() {
         if (!isReadOnly()) {
             auto* remove = new QToolButton(pill);
             remove->setObjectName(QStringLiteral("schemaPillRemove"));
-            remove->setIcon(QIcon(QStringLiteral(":/usdcc/theme/close.png")));
+            remove->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/close.png")));
             usdcc::ui::scaled::iconSize(remove, 10, 10);
             remove->setToolTip(tr("Remove this target"));
             connect(remove, &QToolButton::clicked, this, [this, path]() { Q_EMIT removeRequested(path); });
