@@ -88,6 +88,13 @@ USDCC_TEST(peers_panel_rooms_people_and_chat) {
     PeersSidePanel annaPanel(anna.get());
     PeersSidePanel benPanel(ben.get());
     benPanel.show();
+    QTreeWidget* benLooking = benPanel.findChild<QTreeWidget*>("peersRooms");
+    const QString notLooking = "Not looking on the network (Settings > Peers)";
+    // Showing the panel is enough: it looks, and its note goes.
+    CHECK(QTest::qWaitFor([&] { return ben->peers()->isLooking() && !treeTexts(benLooking).contains(notLooking); }),
+          "shown, the panel doesn't look: %s", qPrintable(treeTexts(benLooking).join(" | ")));
+    ben->setPanelShown(false);
+    CHECK(treeTexts(benLooking).contains(notLooking), "the panel doesn't say it isn't looking");
     ben->setPanelShown(true);  // Ben looks on the network
 
     QString error;

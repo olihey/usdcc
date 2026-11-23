@@ -269,10 +269,16 @@ USDCC_TEST(final_render_output_names) {
     CHECK(files.size() == 1 && files.front() == outputPath(job, job.spec.products.front(), "", 7), "a frame's files");
 
     // Each name once, and not one that's taken.
-    const std::string first = newJobFolderName("shot", "Settings");
-    const std::string second = newJobFolderName("shot", "Settings");
-    CHECK(first != second && second.rfind(first, 0) == 0 && second.substr(first.size(), 1) == "-",
-          "a second job in the same second gets -2: %s, %s", first.c_str(), second.c_str());
+    // The clock may reach the next second between the two: then again, with a stem of its own.
+    std::string first;
+    std::string second;
+    const auto numbered = [&] { return second.size() > first.size() && second.rfind(first + "-", 0) == 0; };
+    for (int attempt = 0; attempt < 5 && (attempt == 0 || !numbered()); ++attempt) {
+        const std::string stem = "shot" + std::to_string(attempt);
+        first = newJobFolderName(stem, "Settings");
+        second = newJobFolderName(stem, "Settings");
+    }
+    CHECK(numbered(), "a second job in the same second gets -2: %s, %s", first.c_str(), second.c_str());
     const std::string free = newJobFolderName("other", "Settings", [](const std::string& name) {
         return name.find('-', name.size() - 3) == std::string::npos;  // only the plain name is taken
     });

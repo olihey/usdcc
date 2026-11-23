@@ -60,6 +60,9 @@ public:
     // What the Delete key does: the selection, asking first if need be (docs/PRIM_DELETE.md).
     void deleteSelected();
 
+    // Expands down to the prims and scrolls to the first.
+    void expandToSelection(const std::vector<PXR_NS::SdfPath>& paths);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void populateOptionsMenu(QMenu* menu) override;
@@ -95,7 +98,6 @@ private:
     PXR_NS::SdfPath singleRootPath() const;
     // Expands every ancestor of the selected prims and scrolls the first one
     // into view.
-    void expandToSelection(const std::vector<PXR_NS::SdfPath>& paths);
     // A Shift (expand) or Ctrl (collapse) click on a row's expand arrow:
     // the whole subtree. False for any other click, which the tree handles.
     bool handleSubtreeClick(const QMouseEvent* event);

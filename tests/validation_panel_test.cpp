@@ -5,6 +5,8 @@
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/validation_profile_dialog.h"
 #include "usdcc/usd/validation_view_panel.h"
 
 #include <pxr/usd/sdf/changeBlock.h>
@@ -21,22 +23,32 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QTreeView>
+#include <QTreeWidget>
+#include <QUndoStack>
 
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <thread>
 
 using usdcc::usd::StageManager;
 using usdcc::usd::StageRefPtr;
 using usdcc::usd::ValidationViewPanel;
+namespace validation = usdcc::usd::validation;
+using usdcc::usd::validation::Finding;
+using usdcc::usd::validation::Profile;
+using usdcc::usd::validation::ProfileLibrary;
 using usdcc::usd::validation::Severity;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -79,8 +91,14 @@ USDCC_TEST(validation_panel) {
     CHECK(stage, "the stage opens");
     if (!stage) return;
 
-    for (const auto& rule : usdcc::usd::validation::rules()) ValidationViewPanel::setRunsRulesOf(rule.group(), true);
-    ValidationViewPanel panel(&stages, stage);
+    auto& library = ProfileLibrary::instance();
+    const std::filesystem::path profiles(settings.filePath(QStringLiteral("profiles")).toStdU16String());
+    library.setFolders(profiles, {});
+    auto undo = std::make_shared<usdcc::usd::UndoManager>();
+    undo->stack(stage);
+    ValidationViewPanel panel(&stages, stage, undo);
+    library.setCurrent("Everything");
+    QApplication::processEvents();
     panel.setGroupBy(ValidationViewPanel::GroupBy::Rule);
     panel.resize(900, 500);
     panel.show();
@@ -97,7 +115,8 @@ USDCC_TEST(validation_panel) {
     CHECK(waitForRun(panel), "and ends");
     // Metres per unit, up axis and default prim on the stage; three nested gprims.
     CHECK(panel.findings().size() == 6, "six findings (%zu)", panel.findings().size());
-    CHECK(status->text() == "6 findings in 6 prims.", "[%s]", qPrintable(status->text()));
+    CHECK(status->text().startsWith("6 findings in 6 prims, ") && status->text().endsWith(" s.") && status->toolTip().isEmpty(), "[%s]",
+          qPrintable(status->text()));
     QAbstractItemModel* model = tree->model();
     CHECK(model->rowCount() == 3, "three rules (%d)", model->rowCount());
     auto* errors = panel.findChild<QToolButton*>(QStringLiteral("validationErrors"));
@@ -120,6 +139,10 @@ USDCC_TEST(validation_panel) {
     CHECK(model->rowCount() == 4, "by prim: three, and the stage (%d)", model->rowCount());
     panel.setGroupBy(ValidationViewPanel::GroupBy::Severity);
     CHECK(model->rowCount() == 1 && model->index(0, 0).data().toString() == "Error (6)", "by severity");
+    panel.setGroupBy(ValidationViewPanel::GroupBy::Layer);
+    CHECK(model->rowCount() == 1 && model->index(0, 0).data().toString() == "(the composed stage) (6)", "by layer [%s]",
+          qPrintable(model->index(0, 0).data().toString()));
+    panel.setGroupBy(ValidationViewPanel::GroupBy::Severity);
     auto* filter = panel.findChild<QLineEdit*>(QStringLiteral("validationFilter"));
     filter->setText(QStringLiteral("CUBE2"));
     CHECK(model->rowCount(model->index(0, 0)) == 1 && status->text().contains("5 hidden"), "the filter");
@@ -139,14 +162,159 @@ USDCC_TEST(validation_panel) {
     onSelection->trigger();
     CHECK(waitForRun(panel) && panel.findings().size() == 1, "the selection's only finding (%zu)", panel.findings().size());
 
-    ValidationViewPanel::setRunsRulesOf("usdGeomValidators", false);
+    // What isn't checked is said.
+    stage->usdStage()->OverridePrim(SdfPath("/JustAnOver"));
+    stage->usdStage()->CreateClassPrim(SdfPath("/AClass"));
+    stage->usdStage()->DefinePrim(SdfPath("/Off")).SetActive(false);
+    panel.runAll();
+    CHECK(waitForRun(panel) && status->text().contains("3 prims not checked") && status->toolTip().contains("1 inactive") &&
+              status->toolTip().contains("1 only overs") && status->toolTip().contains("1 in classes"),
+          "[%s] [%s]", qPrintable(status->text()), qPrintable(status->toolTip()));
+    for (const char* each : {"/JustAnOver", "/AClass", "/Off"}) stage->usdStage()->RemovePrim(SdfPath(each));
+
+    // Ignoring one, on its prim.
+    panel.runAll();
+    CHECK(waitForRun(panel) && panel.findings().size() == 5, "five again (%zu)", panel.findings().size());
+    std::vector<Finding> nested;
+    for (const Finding& finding : panel.findings()) {
+        if (finding.prim() == SdfPath("/cube1/nested")) nested.push_back(finding);
+    }
+    const qsizetype rowsBefore = model->rowCount(model->index(0, 0));
+    CHECK(nested.size() == 1 && panel.setIgnored(nested, true) == 1, "a finding is ignored");
+    CHECK(model->rowCount(model->index(0, 0)) == rowsBefore - 1 && status->text().contains("1 ignored") && !panel.isStale() &&
+              errors->text() == "4",
+          "it's gone from the list, which isn't out of date for that [%s]", qPrintable(status->text()));
+    panel.setShowIgnored(true);
+    CHECK(model->rowCount(model->index(0, 0)) == rowsBefore, "but can be shown");
+    panel.setShowIgnored(false);
+    CHECK(undo->stack(stage)->count() >= 1 && undo->stack(stage)->undoText() == "Ignore Finding", "it's an undo step");
+    undo->stack(stage)->undo();
+    panel.runAll();
+    CHECK(waitForRun(panel) && status->text().contains("5 findings in 6") && !status->text().contains("ignored"), "undone [%s]",
+          qPrintable(status->text()));
+    // Not on the stage itself.
+    std::vector<Finding> onStage;
+    for (const Finding& finding : panel.findings()) {
+        if (finding.prim().IsEmpty()) onStage.push_back(finding);
+    }
+    CHECK(!onStage.empty() && panel.setIgnored(onStage, true) == 0, "one about the stage can't be");
+
+    // Profiles: a read-only one, one of one's own with a check, editing it, and turning a rule off.
+    CHECK(!panel.turnOff("usdGeomValidators:EncapsulationChecker"), "a built-in profile can't be changed");
+    Profile mine = library.current();
+    mine.readOnly = false;
+    mine.name = "Mine";
+    mine.rules["not.here"].enabled = false;
+    std::string error;
+    CHECK(library.save(mine, &error), "a profile [%s]", error.c_str());
+    auto* combo = panel.findChild<QComboBox*>(QStringLiteral("validationProfile"));
+    CHECK(combo && combo->findText("Mine") >= 0 && combo->currentText() == "Everything", "is in the list");
+    combo->setCurrentIndex(combo->findText("Mine"));
+    QApplication::processEvents();
+    CHECK(library.current().name == "Mine" && panel.isStale(), "chosen, the findings are out of date");
+    CHECK(panel.turnOff("usdGeomValidators:EncapsulationChecker"), "a rule of it is turned off");
+    QApplication::processEvents();  // the change to the rules, which would end a run
+    panel.runAll();
+    CHECK(waitForRun(panel) && panel.findings().size() == 2, "and doesn't run (%zu)", panel.findings().size());
+    {
+        usdcc::usd::ValidationProfileDialog dialog(library.current());
+        dialog.show();
+        CHECK(dialog.saveButton()->isEnabled(), "nothing is wrong with it");
+        dialog.selectRule("usdGeomValidators:EncapsulationChecker");
+        QTreeWidgetItem* item = dialog.tree()->currentItem();
+        CHECK(item && item->checkState(0) == Qt::Unchecked && item->parent()->checkState(0) == Qt::PartiallyChecked, "shown as off");
+        item->setCheckState(0, Qt::Checked);
+        CHECK(dialog.profile().rules.count("usdGeomValidators:EncapsulationChecker") == 0, "on again, it has no entry of its own");
+        auto* severity = dialog.findChild<QComboBox*>(QStringLiteral("profileSeverity"));
+        severity->setCurrentIndex(3);
+        Q_EMIT severity->activated(3);
+        CHECK(dialog.profile().rules.at("usdGeomValidators:EncapsulationChecker").severity == Severity::Info, "its severity");
+        bool missing = false;
+        for (QTreeWidgetItemIterator it(dialog.tree()); *it; ++it) missing = missing || (*it)->text(0) == "not.here";
+        CHECK(missing, "a rule that isn't here is listed");
+
+        // A number parameter that isn't one.
+        validation::Rule numbered;
+        numbered.name = numbered.registered = "panel.numbered";
+        numbered.parameters = {{"limit", JsValue(3)}};
+        validation::UserRules::instance().set(numbered);
+        {
+            usdcc::usd::ValidationProfileDialog numbers(library.current());
+            numbers.show();
+            numbers.selectRule("panel.numbered");
+            auto* limit = numbers.findChild<QLineEdit*>(QStringLiteral("parameter.limit"));
+            CHECK(limit && limit->text() == "3", "a parameter's field");
+            for (const char* wrong : {"x", "3.5"}) {
+                limit->setText(wrong);
+                Q_EMIT limit->textEdited(limit->text());
+                CHECK(!numbers.saveButton()->isEnabled() && numbers.problem()->text().contains("whole number"), "[%s]",
+                      qPrintable(numbers.problem()->text()));
+            }
+            limit->setText("5");
+            Q_EMIT limit->textEdited(limit->text());
+            CHECK(numbers.saveButton()->isEnabled() && numbers.profile().rules.at("panel.numbered").parameters.at("limit").GetInt64() == 5,
+                  "put right, it can be saved");
+        }
+        validation::UserRules::instance().remove("panel.numbered");
+        dialog.addCheck("name_pattern");
+        CHECK(!dialog.saveButton()->isEnabled() && dialog.problem()->text().contains("Pattern is missing"), "an unfinished check can't be saved [%s]",
+              qPrintable(dialog.problem()->text()));
+        QApplication::processEvents();  // shows its fields
+        const auto type = [&dialog](const char* name, const QString& text) {
+            for (QLineEdit* edit : dialog.findChildren<QLineEdit*>(QLatin1String(name))) {
+                if (!edit->isVisible()) continue;
+                edit->setText(text);
+                Q_EMIT edit->textEdited(text);
+            }
+        };
+        type("check.pattern", "cube[01]");
+        type("check.types", "Cube");
+        type("checkLabel", "Cubes");
+        CHECK(dialog.saveButton()->isEnabled(), "finished, it can [%s]", qPrintable(dialog.problem()->text()));
+        dialog.findChild<QPushButton*>(QStringLiteral("profileCopyPython"))->click();
+        CHECK(QApplication::clipboard()->text().contains("re.fullmatch"), "and copied as Python");
+        dialog.accept();
+    }
+    CHECK(library.find("Mine") && library.find("Mine")->checks.size() == 1, "saved");
+    panel.setGroupBy(ValidationViewPanel::GroupBy::Rule);
+    QApplication::processEvents();
+    panel.runAll();
+    CHECK(waitForRun(panel) && panel.findings().size() == 6, "the check runs, and the rule again (%zu)", panel.findings().size());
+    bool listed = false;
+    for (int row = 0; row < model->rowCount(); ++row) listed = listed || model->index(row, 0).data().toString() == "check: Cubes (1)";
+    CHECK(listed, "under its name");
+
+    // A stage asking for a profile.
+    auto* wishes = panel.findChild<QLabel*>(QStringLiteral("validationProblems"));
+    Profile off = library.current();
+    off.name = "Off";
+    off.file.clear();
+    off.checks.clear();
+    off.rules.clear();
+    off.rules["*"].enabled = false;
+    CHECK(library.save(off, &error), "another profile [%s]", error.c_str());
+    {
+        VtDictionary usdcc, data;
+        usdcc["validationProfile"] = std::string("Off");
+        data["usdcc"] = usdcc;
+        stage->usdStage()->GetRootLayer()->SetCustomLayerData(data);
+    }
+    panel.setStage(nullptr);
+    panel.setStage(stage);
+    CHECK(wishes->text().contains("asks for the profile Off"), "a stage asks for one [%s]", qPrintable(wishes->text()));
+    Q_EMIT wishes->linkActivated(QStringLiteral("profile:Off"));
+    QApplication::processEvents();
+    CHECK(library.current().name == "Off" && !wishes->text().contains("asks for"), "and gets it");
+
     panel.runAll();
     CHECK(waitForRun(panel) && panel.findings().empty(), "rules turned off don't run (%zu)", panel.findings().size());
     CHECK(status->text().startsWith("No findings in"), "[%s]", qPrintable(status->text()));
     stage->usdStage()->DefinePrim(SdfPath("/More"));
     CHECK(panel.isStale() && status->text().contains("The stage changed since"), "no findings goes stale too [%s]",
           qPrintable(status->text()));
-    ValidationViewPanel::setRunsRulesOf("usdGeomValidators", true);
+    stage->usdStage()->GetRootLayer()->SetCustomLayerData({});
+    library.setCurrent("Everything");
+    QApplication::processEvents();
 
     // Rules made with usdcc.validation change; a rules file doesn't load.
     auto& userRules = usdcc::usd::validation::UserRules::instance();
@@ -171,6 +339,7 @@ USDCC_TEST(validation_panel) {
     panel.runAll();
     stages.closeStage(stage);
     CHECK(!panel.isRunning() && panel.findings().empty(), "closing the stage ends a run");
+    library.setFolders({}, {});
     QStandardPaths::setTestModeEnabled(false);
 }
 
@@ -184,7 +353,11 @@ USDCC_TEST(validation_panel_ends_early) {
     const StageRefPtr stage = openStage(stages, dir, 4000);
     CHECK(stage, "the stage opens");
     if (!stage) return;
+    auto& library = ProfileLibrary::instance();
+    library.setFolders(std::filesystem::path(settings.filePath(QStringLiteral("profiles")).toStdU16String()), {});
     auto panel = std::make_unique<ValidationViewPanel>(&stages, stage);
+    library.setCurrent("Everything");
+    QApplication::processEvents();
     panel->resize(900, 500);
     panel->show();
     auto* status = panel->findChild<QLabel*>(QStringLiteral("validationStatus"));
@@ -200,8 +373,6 @@ USDCC_TEST(validation_panel_ends_early) {
     CHECK(!panel->isBusy(), "and no longer busy");
     CHECK(status->text().contains("which ended the run"), "[%s]", qPrintable(status->text()));
 
-    // An earlier run's settings may have it off.
-    ValidationViewPanel::setRunsRulesOf("usdccTestSlow", true);
     // Cancel: Esc on the busy card, which is there after a moment. A slow rule makes sure of it.
     {
         UsdValidationValidatorMetadata metadata;
@@ -229,7 +400,14 @@ USDCC_TEST(validation_panel_ends_early) {
           qPrintable(status->text()));
     CHECK(panel->findings().size() >= 3 && panel->findings().size() < 4003, "with what it had (%zu)",
           panel->findings().size());
-    ValidationViewPanel::setRunsRulesOf("usdccTestSlow", false);
+    Profile quick = library.current();
+    quick.readOnly = false;
+    quick.name = "Quick";
+    quick.rules["group:usdccTestSlow"].enabled = false;
+    std::string error;
+    CHECK(library.save(quick, &error), "a profile without it [%s]", error.c_str());
+    library.setCurrent("Quick");
+    QApplication::processEvents();
 
     // A run that isn't interrupted has them all, whatever it took.
     panel->runAll();
@@ -241,5 +419,7 @@ USDCC_TEST(validation_panel_ends_early) {
     panel.reset();
     QApplication::processEvents();
     CHECK(true, "a panel can go while it runs");
+    library.setCurrent("Everything");
+    library.setFolders({}, {});
     QStandardPaths::setTestModeEnabled(false);
 }

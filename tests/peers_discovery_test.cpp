@@ -180,6 +180,11 @@ USDCC_TEST(peers_mdns) {
               "found as %s at %s", qPrintable(room.announcement.name), qPrintable(room.address));
         std::printf("  found at %s\n", qPrintable(room.address));
     }
+    // Looking again after a pause (the panel hid) tells of the room again.
+    looker->setLooking(false);
+    found.clear();
+    looker->setLooking(true);
+    CHECK(waitUntil([&] { return !found.isEmpty(); }, 10000), "the room wasn't found when looking again");
     bool lost = false;
     QObject::connect(looker.get(), &NetworkDiscovery::lost, looker.get(), [&](const QString& id) {
         lost = lost || id == announcement.roomId();

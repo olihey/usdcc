@@ -4,6 +4,8 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/usd/validation_fix.h"
+#include "usdcc/usd/validation_profile.h"
 
 #include <QDir>
 #include <QFile>
@@ -34,6 +36,22 @@ def %3(prim, report, max_length=32):
 }  // namespace
 
 void defineValidationSettings() {
+    usdcc::core::Settings::instance().define(
+        {.key = usdcc::usd::validation::kBeforeSaveKey,
+         .category = "Validation",
+         .group = "Checks",
+         .label = "Validate before saving",
+         .description = "Run the Validation panel's profile before a stage is saved, and ask if it finds errors.",
+         .type = usdcc::core::SettingType::Bool,
+         .defaultValue = false});
+    usdcc::core::Settings::instance().define(
+        {.key = usdcc::usd::validation::kBeforeRenderKey,
+         .category = "Validation",
+         .group = "Checks",
+         .label = "Validate before a final render",
+         .description = "Run the Validation panel's profile before a final render, and ask if it finds errors.",
+         .type = usdcc::core::SettingType::Bool,
+         .defaultValue = false});
     usdcc::core::Settings::instance().define(
         {.key = kValidationFoldersKey,
          .category = "Validation",
@@ -70,7 +88,11 @@ ValidationRuleFiles::ValidationRuleFiles(PythonRuntime& python, std::vector<std:
     // An editor may write a file in several goes, or put another in its place.
     m_timer.setSingleShot(true);
     m_timer.setInterval(300);
-    QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this]() { sync(); });
+    QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this]() {
+        // Profiles are in the same folders.
+        usdcc::usd::validation::ProfileLibrary::instance().reload();
+        sync();
+    });
     QObject::connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_timer, [this]() { m_timer.start(); });
     QObject::connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_timer, [this]() { m_timer.start(); });
 }
@@ -83,7 +105,6 @@ bool ValidationRuleFiles::anyFiles() const {
 }
 
 void ValidationRuleFiles::sync() {
-    if (!m_python.isAvailable()) return;
     QJsonArray folders;
     QStringList watch;
     for (const std::filesystem::path& folder : m_folders) {
@@ -91,7 +112,9 @@ void ValidationRuleFiles::sync() {
         folders.append(path);
         if (!QFileInfo(path).isDir()) continue;
         watch << path;
-        for (const QFileInfo& file : QDir(path).entryInfoList({QStringLiteral("*.py")}, QDir::Files)) watch << file.filePath();
+        for (const QFileInfo& file : QDir(path).entryInfoList({QStringLiteral("*.py"), QStringLiteral("*.json")}, QDir::Files)) {
+            watch << file.filePath();
+        }
     }
     const QStringList watched = m_watcher.files() + m_watcher.directories();
     QStringList missing;
@@ -101,7 +124,7 @@ void ValidationRuleFiles::sync() {
     if (!missing.isEmpty()) m_watcher.addPaths(missing);
 
     // Without a file there's no need to import OpenUSD's validation at every start.
-    if (!m_loaded && !anyFiles()) return;
+    if (!m_python.isAvailable() || (!m_loaded && !anyFiles())) return;
     m_loaded = true;
     // A JSON array of strings is a Python list.
     const QByteArray list = QJsonDocument(folders).toJson(QJsonDocument::Compact);

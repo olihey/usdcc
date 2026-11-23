@@ -7,12 +7,16 @@
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/validation_run.h"
 
+#include <QElapsedTimer>
+#include <QStringList>
+
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 class QAction;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QTimer;
@@ -22,6 +26,7 @@ class QTreeView;
 namespace usdcc::usd {
 
 class StageManager;
+class UndoManager;
 class ValidationModel;
 
 // What OpenUSD's validators say about the stage (docs/VALIDATION.md §8). Run checks all of
@@ -29,15 +34,18 @@ class ValidationModel;
 // behind the panel's busy card, which can cancel it; an edit meanwhile ends it. Findings are
 // grouped by rule, prim or severity, and filtered by severity and text. Selecting a row
 // selects its prim; a double-click on one in a layer shows the layer's text. They stay, dimmed,
-// after the stage changes, until the next run. The options menu has the grouping and which
-// kinds of rules run (both saved).
+// after the stage changes, until the next run. What runs is the chosen profile's
+// (validation_profile.h), which the toolbar picks and edits. A finding can be ignored on its
+// prim, which is an edit to it; those are hidden unless the options menu shows them.
 class USDCC_USD_UI_API ValidationViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
 public:
-    enum class GroupBy { Rule, Prim, Severity };
+    using usdcc::ui::ViewPanel::show;
+    enum class GroupBy { Rule, Prim, Severity, Layer };
 
-    explicit ValidationViewPanel(StageManager* stageManager, StageRefPtr stage,
+    // `undo` may be null: then nothing can be ignored.
+    explicit ValidationViewPanel(StageManager* stageManager, StageRefPtr stage, std::shared_ptr<UndoManager> undo = nullptr,
                                  const QString& title = QStringLiteral("Validation"), QWidget* parent = nullptr);
     ~ValidationViewPanel() override;
 
@@ -53,10 +61,14 @@ public:
     bool isStale() const;
 
     void setGroupBy(GroupBy groupBy);
-    // Whether a group's rules run ("usdPhysicsValidators", Rule::group()); all do unless
-    // turned off.
-    static bool runsRulesOf(const std::string& group);
-    static void setRunsRulesOf(const std::string& group, bool on);
+    void setShowIgnored(bool show);
+    // Ignores the findings' rules on their prims, or stops to, as one undo step. Returns how
+    // many; those on instance proxies and on no prim can't be.
+    int setIgnored(const std::vector<validation::Finding>& findings, bool ignored);
+    // Turns a rule or check off in the profile; false for a read-only one.
+    bool turnOff(const std::string& rule);
+    // The chosen profile's menu: Edit, Duplicate, Delete.
+    void populateProfileMenu(QMenu* menu);
 
     // Writing rules (docs/VALIDATION.md section 5): the app sets them. Without one its entry isn't
     // there.
@@ -64,8 +76,20 @@ public:
         std::function<void(QWidget* parent)> newRule;
         std::function<void(const QString& file)> editRule;
         std::function<void()> openFolder;
+        // Opens a panel on the stage, or brings one forward.
+        std::function<ValidationViewPanel*(const StageRefPtr&)> show;
+        // Brings an Outliner on the stage forward, with the selection in view.
+        std::function<void(const StageRefPtr&)> showOutliner;
     };
     static void setHooks(Hooks hooks);
+    static bool canShow();
+    // Shows the stage's panel and runs it.
+    static void show(const StageRefPtr& stage);
+
+    // Applies their fixes, as one undo step (validation_fix.h). Returns how many.
+    int fix(const std::vector<validation::Finding>& findings, const std::string& name = {});
+    // What can't be seen otherwise: why some weren't fixed.
+    const QStringList& fixProblems() const { return m_fixProblems; }
 
 public Q_SLOTS:
     void runAll() { run(); }
@@ -83,6 +107,9 @@ private:
     enum class End { Finished, Cancelled, StageChanged, RulesChanged };
     void onRulesChanged();
     void showProblems();
+    void refreshProfiles();
+    void editProfile(const std::string& rule = {});
+    void duplicateProfile();
     void step();
     void endRun(End end);
     void abandonRun();
@@ -94,6 +121,11 @@ private:
 
     ValidationModel* m_model;
     QTreeView* m_tree;
+    std::shared_ptr<UndoManager> m_undo;
+    QComboBox* m_profile;
+    QAction* m_showIgnored;
+    bool m_ignoring = false;
+    usdcc::core::Signal<>::Connection m_profilesConnection;
     QAction* m_runAction;
     QAction* m_runOnSelection;
     QToolButton* m_severity[3];
@@ -106,7 +138,11 @@ private:
     bool m_cancelled = false;
     bool m_stepping = false;
     bool m_changedInStep = false;
+    QStringList m_fixProblems;
+    QString m_fixSummary;  // of the last fix, since the run
+    QElapsedTimer m_elapsed;
     QString m_summary;  // of the last run
+    QString m_skipped;  // what it left out, for the tooltip
     bool m_rulesChanged = false;  // since
     bool m_endedEarly = false;    // the last run, by a change
     usdcc::core::Signal<>::Connection m_rulesConnection;

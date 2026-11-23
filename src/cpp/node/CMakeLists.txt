@@ -14,7 +14,7 @@ if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
     target_link_libraries(usdcc_node_core PUBLIC "${Python3_LIBRARY}")
 endif()
 
-add_executable(usdcc_node main.cpp node.h render_command.cpp serve_command.cpp queue_command.cpp)
+add_executable(usdcc_node main.cpp node.h render_command.cpp serve_command.cpp queue_command.cpp validate_command.cpp)
 target_link_libraries(usdcc_node PRIVATE usdcc_node_core usdcc_app_core usdcc_scripting usdcc_scripting_app Qt6::Gui)
 # Beside usdcc.exe, so it finds the same DLLs, Qt plugins, OpenUSD plugins and Python.
 set_target_properties(usdcc_node PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:usdcc>")

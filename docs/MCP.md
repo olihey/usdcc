@@ -156,6 +156,7 @@ Few on purpose: every tool's description is sent to the model with every convers
 | `screenshot` | The window, a viewport or a panel as an image, scaled down to a longest side | 1 |
 | `python_api` | The signatures and docstrings of a `usdcc` module, read from the running app, so it matches the build and its plugins | 1 |
 | `run_python` | Runs code as one undo step. Returns the output, the last expression's value, the traceback, warnings logged meanwhile, and the undo steps | 2 |
+| `validate_stage` | `usdcc.validation.run()` ([VALIDATION.md](VALIDATION.md) §9): the findings by severity and rule, in pages | 2 |
 | `undo`, `redo` | The current stage's stack | 2 |
 | `list_actions`, `invoke_action` | The main menu's entries by path, with enabled and checked; triggers one. Reaches what has no Python API, such as the Mesh menu | 3 |
 

@@ -3,6 +3,7 @@
 //
 //   usdcc_node render shot.usda [--frames 1-24] [--renderer ...] ...   one render, then exit
 //   usdcc_node renderers [--json]                                      what renders here
+//   usdcc_node validate shot.usda [--validation-profile Film] ...      its findings, then exit
 //   usdcc_node serve --join <link> [--trust abcd-efgh] ...             a node for peers' rooms
 //
 // It starts as usdcc does (startup.h), in a profile of its own (usdcc-node), with a
@@ -123,7 +124,7 @@ int main(int argc, char** argv) {
 #endif
 
     // Storm's OpenGL, unless there's to be none.
-    const bool noGpu = hasArgument(argc, argv, "--no-gpu");
+    const bool noGpu = hasArgument(argc, argv, "--no-gpu") || (argc > 1 && std::strcmp(argv[1], "validate") == 0);
     std::unique_ptr<QCoreApplication> app;
     if (noGpu) {
         app = std::make_unique<QCoreApplication>(argc, argv);
@@ -154,9 +155,9 @@ int main(int argc, char** argv) {
     }
     const QStringList positional = parser.positionalArguments();
     const QString command = positional.value(0);
-    if (command != u"render" && command != u"renderers" && command != u"serve" && command != u"queue") {
-        printError(command.isEmpty() ? QStringLiteral("No command: render, renderers, serve or queue (--help).")
-                                     : QStringLiteral("Unknown command '%1': render, renderers, serve or queue (--help).").arg(command));
+    if (command != u"render" && command != u"renderers" && command != u"validate" && command != u"serve" && command != u"queue") {
+        printError(command.isEmpty() ? QStringLiteral("No command: render, renderers, validate, serve or queue (--help).")
+                                     : QStringLiteral("Unknown command '%1': render, renderers, validate, serve or queue (--help).").arg(command));
         return kExitUsage;
     }
 
@@ -209,6 +210,8 @@ int main(int argc, char** argv) {
             result = runRender(parser);
         } else if (command == u"renderers") {
             result = runRenderers(parser);
+        } else if (command == u"validate") {
+            result = runValidate(parser, plugins, python);
         } else if (command == u"serve") {
             result = runServe(parser);
         } else {

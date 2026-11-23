@@ -1,5 +1,6 @@
 #include "usdcc/usd/validation_rules.h"
 
+#include <pxr/base/js/json.h>
 #include <pxr/usdValidation/usdValidation/registry.h>
 #include <pxr/usdValidation/usdValidation/validator.h>
 
@@ -65,6 +66,22 @@ void UserRules::set(Rule rule) {
 
 void UserRules::remove(const std::string& name) {
     if (std::erase_if(m_rules, [&name](const Rule& rule) { return rule.name == name; }) > 0) changed();
+}
+
+void UserRules::beginStep(long run, const std::map<std::string, JsObject>* parameters) {
+    m_parameters = parameters;
+    m_run = run;
+}
+
+void UserRules::endStep() {
+    m_run = 0;
+    m_parameters = nullptr;
+}
+
+std::string UserRules::parameters(const std::string& rule) const {
+    if (!m_parameters) return {};
+    const auto it = m_parameters->find(rule);
+    return it == m_parameters->end() ? std::string() : JsWriteToString(JsValue(it->second));
 }
 
 void UserRules::setProblems(std::vector<Problem> problems) {

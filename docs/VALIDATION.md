@@ -3,7 +3,8 @@
 Check a stage against OpenUSD's validators and the user's own rules, see what's wrong, go to it, and
 fix what can be fixed. Rules can be written in Python without restarting the app.
 
-**Status:** planned 2026-11-23. Phases 1 and 2 built the same day (§13, §14). "Checked" means run against this
+**Status:** planned 2026-11-23. All five phases built the same day (§13 to §17), but for the MCP
+tool: the server isn't built ([MCP.md](MCP.md)). "Checked" means run against this
 OpenUSD build (26.08) in a plain Python, unless it says in the app; §11 lists the checks. Everything else is an assumption until
 it's tried.
 
@@ -118,7 +119,7 @@ def absolute_paths(layer, report): ...
 ```
 
 - **`report.error()`, `.warn()`, `.info()`** take a prim, property, or layer and path, the message,
-  and optionally `name=`. Phase 4 adds `fix=`, and `@mesh_names.fix(...)`.
+  and optionally `name=` and `fix=`, one or more of the rule's fixes (`@mesh_names.fix(...)`, §16).
 - **Keyword arguments with defaults are parameters.** A profile sets them (§6), and the panel edits
   those that are bool, number, string or list of strings.
 - **The docstring** is the rule's doc, shown in the panel.
@@ -152,7 +153,7 @@ Templates filled in by a form, stored in the profile:
 | Asset path pattern | A regular expression; relative only; must resolve |
 | Kind and hierarchy | Which kinds may be under which |
 
-They're Python rules in usdcc with more than one instance. **Copy as Python** turns one into a rule file.
+They run in the engine, without Python (§15). **Copy as Python** turns one into a rule file.
 
 ## 6. Profiles
 
@@ -172,7 +173,8 @@ template instances.
 }
 ```
 
-- **A rule's own entry wins over a keyword's;** a rule in neither is on.
+- **A rule's own entry wins over its group's (`group:studio`), that over a keyword's, and that over
+  `*`,** setting by setting. A rule in none is on.
 - **Found in** the same folders as rules, and a plugin's `validation/` folder. Those outside the user's
   folder are read-only; Duplicate makes one that isn't.
 - **Shipped:** Everything, General (all but USDZ and physics), USDZ, Physics.
@@ -185,9 +187,9 @@ template instances.
 unrelated unsaved edit in that layer reached the disk. On an anonymous layer the edit is made and the
 save then raises an error. In an editor neither will do.
 
-**So:** patch the save out of our OpenUSD build: one line, in `deps/patches` beside the others, and
-offered upstream as an option. Until the build has the patch, OpenUSD's fixers are shown but off.
-There's no way round it from outside, as the function behind a fixer is private.
+**So:** the layer's permission to save is taken away while a fixer runs (`SdfLayer::
+SetPermissionToSave()`). The edit is made, the save is refused with an error that's taken as the sign
+the fix went well, and nothing is written. The plan was to patch OpenUSD; that isn't needed (§16).
 
 Both kinds then run the same way:
 
@@ -235,8 +237,8 @@ Both kinds then run the same way:
   `usdcc.validation.rules()`, `.profiles()`.
 - **MCP:** `validate_stage`, with severity, rule, and paging, so an agent can check its own work
   ([MCP.md](MCP.md)).
-- **Command line:** `usdcc_node validate <file> --profile <name or path> [--json]
-  [--fail-on error|warning]`. It starts without a window and has the plugins and Python already
+- **Command line:** `usdcc_node validate <file> --validation-profile <name or path> [--rules <folder>]
+  [--json] [--fail-on error|warning|info|never]`. It starts without a window and has the plugins and Python already
   ([RENDER_NODE.md](RENDER_NODE.md)). Exit codes: 0 clean, 1 findings, 2 couldn't run.
 - **Render farm:** a final render's check (§3.3) runs on the artist's side, before tasks go out.
 
@@ -263,7 +265,7 @@ copies whole.
    brings no code. *Proposed:* yes, in phase 3, as a suggestion the panel shows.
 3. **Where ignores are stored.** In the prim travels, but is an edit to the asset. *Proposed:* the prim.
 4. **The save patch.** Our OpenUSD build moves on by rebuilding it, so it's cheap to carry.
-   *Proposed:* patch, and report it upstream.
+   *Not needed:* §16. Worth reporting upstream all the same.
 
 ## 11. Checked
 
@@ -349,3 +351,85 @@ built-in rules, 1.1 s, the longest turn 0.23 s; with another rule failing on eve
 saving and breaking a file while running, New Rule, and the Outliner's Validate.
 
 **Not tried:** Linux; rules in `usdcc_node`, which doesn't load them yet (phase 5).
+
+## 15. As built: phase 3
+
+- **`Profile` and `ProfileLibrary`** (`validation_profile.h`, `usdcc_usd`): reading, writing, precedence,
+  and resolving to `RunSettings`, what a `ValidationRun` takes. Built in: General (the default),
+  Everything, USDZ and Physics. A user's of the same name stands in for one. They are in the rules'
+  folders and each plugin's `validation/`, and are read again when a file changes.
+- **Checks** (`validation_templates.h`): the seven templates, run natively and in parallel beside
+  OpenUSD's validators. Their findings' rule is `check.<id>`.
+- **The panel:** the profile's list and its menu (Edit, Duplicate, Delete), Turn Off Rule and Rule
+  Settings on a row, Ignore Here and Stop Ignoring, Show Ignored. Phase 1's rules by plugin are gone.
+- **The profile editor** (`validation_profile_dialog.h`): rules by group with severity and parameters,
+  checks with a form, problems as they're typed. Save stays off while a check that's on won't do.
+
+What differs from the plan, or wasn't decided in it:
+
+- **Checks aren't Python rules.** In the engine they need no registering and work without Python.
+  Copy as Python writes the rule out; a test has each find the same places as its check.
+- **Parameters belong to a run,** so two panels' runs don't mix. A value that isn't like the default is
+  left out, with a warning in the log. A failing rule keeps its own severity.
+- **Of several keywords,** off and the most severe win.
+- **`usdcc:ignoredRules`** is a list in customData's `usdcc` dictionary, as `:` nests there. Ignoring is
+  an undo step, and doesn't make the findings out of date. A finding on an instance proxy, the stage or
+  a layer can't be ignored.
+- **The stage's wish** (§10 question 2) is read, from `customLayerData["usdcc"]["validationProfile"]`, and
+  shown with a link to follow it. Nothing in the UI writes it.
+- **The chosen profile** is one for the app. Check Physics doesn't use it.
+- **What a profile's file has that isn't known** is kept.
+
+Checked in the app, on 50,000 prims: General 0.44 s; a profile with a Python rule's parameters, a
+severity and a check 1.0 s with 58,892 findings, the longest turn 0.18 s; a profile's file added while
+running, the menu, the editor, and Ignore Here.
+
+**Not tried:** Linux; a profile from a plugin's folder, in the app.
+
+## 16. As built: phase 4
+
+- **`validation_fix.h`** (`usdcc_usd_ui`): `applyFixes()`, for one finding or many, in one undo step
+  over the edit target and the layers findings are in. Then the rules run again on the fixed prims, and
+  what's still there is said to be: a stronger layer may hide the fix.
+- **A fix that fails** leaves nothing. If some of many fail, the step is taken back and done again
+  without them, so a fix may run twice. Not within another open edit, which would go with it.
+- **In Python:** `@rule.fix("name", "Label")` on a function that gets what the finding is at and those of
+  the rule's parameters it has arguments for, the profile's values; `report.warn(..., fix="name")`.
+  A finding in a layer is fixed in that layer. OpenUSD's errors carry nothing else from Python, so the
+  fixes' names travel behind the error's in a run of the app's, and are taken off again.
+- **In the panel:** a Fix column, with Fix All on a rule's row, and every fix in the menu. The findings
+  are brought up to date; undoing makes them out of date.
+- **Checks (§5.3) have no fixes.**
+
+**Nothing is written:** a test compares the file before and after OpenUSD's fixer, with another unsaved
+edit in the layer, and that a layer whose saving was turned off stays so. In the app, Fix All on 5,000
+findings took 0.14 s and its undo 0.01 s, the file as it was.
+
+## 17. As built: phase 5
+
+- **Before saving and before a final render** (Settings > Validation, off): Save Stage, Save Stage As and
+  the Render menu and panel run the chosen profile behind a progress dialog, and on errors that aren't
+  ignored ask Save Anyway, Show Findings or Cancel. A render from Python, and the Layer editor's own
+  saves, aren't asked about.
+- **`usdcc.validation.run(stage=None, prims=None, profile=None)`,** in the app and in a plain Python, with
+  `profiles()` and `rule_names()`. It takes the `Usd.Stage` itself: putting one into USD's stage cache
+  and taking it out again, as the first version did, ends it for the Python that had it.
+- **`usdcc_node validate`** (`validate_command.cpp`): `--profile` was taken, so the profile is
+  `--validation-profile`, General by default. Rules come from `--rules`, the node's own folder, the
+  settings and `USDCC_VALIDATION_PATH`. A rules file that can't be loaded is exit 2: a rule that isn't
+  there isn't checked. It needs no OpenGL.
+- **The MCP tool isn't there,** as the server isn't. `usdcc.validation.run()` is what it would call, and
+  its `run_python` would reach it meanwhile.
+
+**Not tried:** Linux; a render behind the question, from the menu in the app; a production stage.
+
+## 18. Since, and still open
+
+Added after §17: the status line says how long a run took and how many prims it left out (inactive,
+only overs, in classes or not loaded, in its tooltip); Group By > Layer; Show in Outliner; a parameter
+that isn't a number keeps Save off and says why. A finding whose fix failed, among others that went
+well, stays listed.
+
+**Not built:** the MCP tool; jumping to a property's row in the Attribute Editor; scrolling a layer's
+text to the spec; Outliner badges; cancelling the stage and layer rules' step; a choice of time range;
+writing a stage's suggested profile from the UI.

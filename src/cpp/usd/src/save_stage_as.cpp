@@ -1,5 +1,6 @@
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/validation_fix.h"
 #include "usdcc/usd/asset_servers.h"
 
 #include "usdcc/core/log.h"
@@ -46,7 +47,6 @@ bool isSwitchingStage() { return s_switching; }
 bool stageHasUnsavedLayers(const StageRefPtr& stage) { return stage && !layer_actions::unsavedLayers(stage).empty(); }
 
 bool saveStageInteractively(const StageRefPtr& stage, QWidget* parent) {
-    (void)parent;  // it says how it went in a toast, not a message box
     if (!stage) return false;
     const PXR_NS::SdfLayerHandle root = stage->usdStage()->GetRootLayer();
     const std::string name = root->IsAnonymous() ? std::string("The in-memory stage") : root->GetDisplayName();
@@ -56,6 +56,8 @@ bool saveStageInteractively(const StageRefPtr& stage, QWidget* parent) {
                            "{} has no unsaved changes.", name);
         return true;
     }
+    // Validation/beforeSave (docs/VALIDATION.md §3.3).
+    if (!validation::confirmValidated(stage, validation::Gate::Save, parent)) return false;
     QString error;
     if (!layer_actions::saveAll(stage, &error)) {
         usdcc::core::ToastRequest failed = usdcc::core::ToastRequest::sticky();
@@ -83,6 +85,7 @@ StageRefPtr saveStageAsInteractively(StageManager& stageManager, const StageRefP
                     : isLocalAssetPath(real)         ? QFileInfo(QString::fromStdString(real)).absolutePath()
                                                      : QString::fromStdString(displayAssetPath(real));
     options.context = stage->usdStage()->GetPathResolverContext();
+    if (!validation::confirmValidated(stage, validation::Gate::Save, parent)) return {};
     QString path = pickSaveAsset(parent, options);
     if (path.isEmpty()) return {};
     // USD needs an extension to know the format.

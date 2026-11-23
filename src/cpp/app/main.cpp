@@ -432,29 +432,42 @@ int main(int argc, char** argv) {
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::CurveEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
+    // Validation profiles (docs/VALIDATION.md §6), before a panel shows them.
+    {
+        std::vector<std::filesystem::path> folders = usdcc::scripting::ValidationRuleFiles::defaultFolders();
+        const std::filesystem::path user = folders.front();
+        folders.erase(folders.begin());
+        for (const usdcc::scripting::PluginInfo& plugin : plugins.plugins()) {
+            folders.push_back(plugin.manifest.folder / "validation");
+        }
+        usdcc::usd::validation::ProfileLibrary::instance().setFolders(user, std::move(folders));
+    }
     // What OpenUSD's validators say about the stage (docs/VALIDATION.md).
     panelTypes.add(QStringLiteral("validation"), QObject::tr("Validation"),
-                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
-                                   QWidget* parent) -> usdcc::ui::ViewPanel* {
-                       return new usdcc::usd::ValidationViewPanel(&stageManager, stage, title, parent);
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::ValidationViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
-    usdcc::usd::PrimMenuEntries::instance().add(
-        {"usdcc.validate", QObject::tr("Validate"),
-         [&window, &panelTypes](const usdcc::usd::PrimMenuContext& context) {
-             usdcc::usd::ValidationViewPanel* panel = nullptr;
-             for (auto* each : window.findChildren<usdcc::usd::ValidationViewPanel*>()) {
-                 if (each->currentStage() == context.stage && !each->isClosed()) panel = each;
-             }
-             if (!panel) {
-                 panel = qobject_cast<usdcc::usd::ValidationViewPanel*>(
-                     panelTypes.open(QStringLiteral("validation"), context.stage, window.dockManager(), &window));
-             }
-             if (!panel) return;
-             panel->setAsCurrentTab();
-             panel->raise();
-             panel->run(context.paths);
-         },
-         nullptr});
+    const auto showValidation = [&window, &panelTypes](const usdcc::usd::StageRefPtr& stage) {
+        usdcc::usd::ValidationViewPanel* panel = nullptr;
+        for (auto* each : window.findChildren<usdcc::usd::ValidationViewPanel*>()) {
+            if (each->currentStage() == stage && !each->isClosed()) panel = each;
+        }
+        if (!panel) {
+            panel = qobject_cast<usdcc::usd::ValidationViewPanel*>(
+                panelTypes.open(QStringLiteral("validation"), stage, window.dockManager(), &window));
+        }
+        if (panel) {
+            panel->setAsCurrentTab();
+            panel->raise();
+        }
+        return panel;
+    };
+    usdcc::usd::PrimMenuEntries::instance().add({"usdcc.validate", QObject::tr("Validate"),
+                                                 [showValidation](const usdcc::usd::PrimMenuContext& context) {
+                                                     if (auto* panel = showValidation(context.stage)) panel->run(context.paths);
+                                                 },
+                                                 nullptr});
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -1119,12 +1132,9 @@ int main(int argc, char** argv) {
         window.close();
         return !window.isVisible();
     });
-    QAction* checkForUpdatesAction = helpMenu->addAction(QObject::tr("Check for &Updates..."));
+    QAction* checkForUpdatesAction = helpMenu->addAction(QString());
     checkForUpdatesAction->setObjectName(QStringLiteral("checkForUpdatesAction"));
-    checkForUpdatesAction->setStatusTip(updates.canUpdate()
-                                            ? QObject::tr("Look for a newer release of usdcc, and install it")
-                                            : QObject::tr("Look for a newer release of usdcc on its releases page"));
-    QObject::connect(checkForUpdatesAction, &QAction::triggered, &window, [&updates]() { updates.checkNow(); });
+    updates.setMenuAction(checkForUpdatesAction);
 #endif
     QAction* projectHomeAction = helpMenu->addAction(QObject::tr("&Project Home"));
     projectHomeAction->setStatusTip(QObject::tr("Open usdcc's GitHub page in your browser"));
@@ -1591,15 +1601,32 @@ int main(int argc, char** argv) {
     // run them. --no-plugins leaves them out too: they're the user's code just the same.
     usdcc::scripting::ValidationRuleFiles ruleFiles(python, usdcc::scripting::ValidationRuleFiles::defaultFolders());
     const bool loadRules = !commandLine.isSet(noPluginsOption);
-    if (python.isAvailable()) {
+    {
         usdcc::usd::ValidationViewPanel::Hooks hooks;
-        hooks.editRule = [scriptEditor](const QString& file) {
-            scriptEditor->show();
-            scriptEditor->setCollapsed(false);
-            scriptEditor->raise();
-            scriptEditor->openFile(file);
+        hooks.show = showValidation;
+        hooks.showOutliner = [&window, &panelTypes, &stageManager](const usdcc::usd::StageRefPtr& stage) {
+            usdcc::usd::OutlinerViewPanel* panel = nullptr;
+            for (auto* each : window.findChildren<usdcc::usd::OutlinerViewPanel*>()) {
+                if (each->currentStage() == stage && !each->isClosed()) panel = each;
+            }
+            if (!panel) {
+                panel = qobject_cast<usdcc::usd::OutlinerViewPanel*>(
+                    panelTypes.open(QStringLiteral("outliner"), stage, window.dockManager(), &window));
+            }
+            if (!panel) return;
+            panel->setAsCurrentTab();
+            panel->raise();
+            panel->expandToSelection(stageManager.selectedPaths(stage));
         };
-        if (loadRules) {
+        if (python.isAvailable()) {
+            hooks.editRule = [scriptEditor](const QString& file) {
+                scriptEditor->show();
+                scriptEditor->setCollapsed(false);
+                scriptEditor->raise();
+                scriptEditor->openFile(file);
+            };
+        }
+        if (loadRules && python.isAvailable()) {
             hooks.newRule = [&ruleFiles, edit = hooks.editRule](QWidget* parent) {
                 const QString name = QInputDialog::getText(parent, QObject::tr("New Rule"), QObject::tr("Name:"));
                 if (name.trimmed().isEmpty()) return;

@@ -660,6 +660,22 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     showRoom(nullptr);
 }
 
+bool PeersSidePanel::event(QEvent* event) {
+    switch (event->type()) {
+        case QEvent::Show:
+        case QEvent::Hide:
+        case QEvent::Move:
+        case QEvent::Resize:
+            // visibilityChanged can come before the panel has its place in the window, when
+            // nothing of it shows yet: look again once it has.
+            QMetaObject::invokeMethod(this, &PeersSidePanel::updateShown, Qt::QueuedConnection);
+            break;
+        default:
+            break;
+    }
+    return SidePanel::event(event);
+}
+
 void PeersSidePanel::updateShown() {
     m_controller->setPanelShown(isVisible() && !isCollapsed() && !visibleRegion().isEmpty());
 }

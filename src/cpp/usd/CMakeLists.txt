@@ -55,6 +55,11 @@ add_library(usdcc_usd SHARED
     src/validation_run.cpp
     include/usdcc/usd/validation_rules.h
     src/validation_rules.cpp
+    include/usdcc/usd/validation_finding.h
+    include/usdcc/usd/validation_templates.h
+    src/validation_templates.cpp
+    include/usdcc/usd/validation_profile.h
+    src/validation_profile.cpp
     include/usdcc/usd/physics_backend.h
     src/physics_backend.cpp
     include/usdcc/usd/physics_desc.h
@@ -296,6 +301,10 @@ add_library(usdcc_usd_ui SHARED
     src/curve_editor_view_panel.cpp
     include/usdcc/usd/validation_view_panel.h
     src/validation_view_panel.cpp
+    include/usdcc/usd/validation_profile_dialog.h
+    src/validation_profile_dialog.cpp
+    include/usdcc/usd/validation_fix.h
+    src/validation_fix.cpp
     src/schema_explorer_view_panel.cpp
     src/apply_schema_ui.cpp
     src/schema_generator.cpp
