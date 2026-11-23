@@ -1,7 +1,8 @@
 # Render Node
 
 usdcc on a machine with nobody at it: no window, no screen, started by a service or a farm
-manager. It renders final frames ([FINAL_RENDER.md](FINAL_RENDER.md)) in one of two ways:
+manager. It also checks a stage, with `usdcc_node validate` ([VALIDATION.md](VALIDATION.md) §17).
+It renders final frames ([FINAL_RENDER.md](FINAL_RENDER.md)) in one of two ways:
 
 - **One render:** a stage file and a frame range on the command line, done, exit. A farm manager
   (Deadline, OpenCue, Tractor, Flamenco, a script) runs it per frame or per chunk, as it would run

@@ -2,6 +2,8 @@
 
 // Checking a stage with OpenUSD's validators (docs/VALIDATION.md). Qt-free.
 
+#include "usdcc/usd/validation_finding.h"
+#include "usdcc/usd/validation_profile.h"
 #include "usdcc/usd/validation_rules.h"
 
 #include <pxr/usd/sdf/path.h>
@@ -20,27 +22,6 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 namespace usdcc::usd::validation {
 
-enum class Severity { Error, Warning, Info };
-
-// Where a finding is, in plain data: it outlives the prims.
-struct Site {
-    PXR_NS::SdfPath path;  // a prim, a property, or "/" for the stage or layer itself; may be empty
-    std::string layer;     // the layer's identifier, for a site in a layer; else empty
-};
-
-struct Finding {
-    std::string rule;
-    std::string name;
-    Severity severity = Severity::Error;
-    std::string message;
-    std::vector<Site> sites;
-
-    // The first site's prim; empty for a finding about the stage or a layer.
-    PXR_NS::SdfPath prim() const;
-    // The first site's layer, if it names one.
-    std::string layer() const;
-};
-
 // One run of some rules over a stage, or over prims and what's under them, in steps so that
 // the caller can show progress, stop, and notice edits between them. A step is parallel
 // itself, reading the stage from worker threads: nothing may edit the stage meanwhile. Rules
@@ -55,6 +36,7 @@ public:
     // the rules' plugins.
     ValidationRun(PXR_NS::UsdStageRefPtr stage, const std::vector<std::string>& ruleNames,
                   std::vector<PXR_NS::SdfPath> paths = {});
+    ValidationRun(PXR_NS::UsdStageRefPtr stage, RunSettings settings, std::vector<PXR_NS::SdfPath> paths = {});
     ~ValidationRun();
     ValidationRun(const ValidationRun&) = delete;
     ValidationRun& operator=(const ValidationRun&) = delete;
@@ -71,6 +53,12 @@ public:
     double progress() const;
     size_t checkedPrims() const { return m_next; }
     size_t totalPrims() const { return m_total; }
+    // The prims in its scope that aren't checked.
+    struct Skipped {
+        size_t inactive = 0, overs = 0, classes = 0, unloaded = 0;
+        size_t total() const { return inactive + overs + classes + unloaded; }
+    };
+    const Skipped& skipped() const { return m_skipped; }
 
     // Errors first, then by rule and path, once the run is done. What the rules found twice
     // is there once.
@@ -81,17 +69,25 @@ private:
     template <typename Validate>
     void validate(const Validate& run);
     std::vector<const PXR_NS::UsdValidationValidator*> mainThreadRulesFor(const PXR_NS::UsdPrim& prim) const;
+    void add(Finding finding);
+    void runChecks(const std::vector<PXR_NS::UsdPrim>& prims);
     void finish();
 
     PXR_NS::UsdStageRefPtr m_stage;
     std::unique_ptr<Context> m_context;  // null once done
+    RunSettings m_settings;
+    long m_id = 0;
+    std::vector<std::shared_ptr<const Check>> m_checks;
+    std::unordered_map<std::string, std::vector<std::string>> m_ignored;  // by prim
     bool m_wholeStage;
     bool m_stageChecked = false;
     // The rules usdcc.validation made, by the name OpenUSD has them under.
     std::unordered_map<std::string, std::string> m_names;
+    std::unordered_map<std::string, std::vector<Fix>> m_fixes;  // by rule
     // Run here, rather than by the context.
     std::vector<const PXR_NS::UsdValidationValidator*> m_mainThread;
     std::vector<PXR_NS::UsdPrim> m_prims;
+    Skipped m_skipped;
     size_t m_total = 0;
     size_t m_next = 0;
     size_t m_batch = 256;

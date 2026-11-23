@@ -167,6 +167,8 @@ USDCC_TEST(validation_visits) {
                                                      "/World/Other/bad", "/World/Inst", "/World/Inst/bad"};
         CHECK(visited == expected, "each defined, active prim once, instances' contents too (%zu)", visited.size());
         CHECK(run.findings().size() == 3, "a finding on each bad one (%zu)", run.findings().size());
+        CHECK(run.skipped().inactive == 1 && run.skipped().overs == 1 && run.skipped().classes == 1 && run.skipped().unloaded == 0,
+              "and what wasn't visited is counted (%zu)", run.skipped().total());
     }
     {
         visitor({}, "usdccTest:Visitor");

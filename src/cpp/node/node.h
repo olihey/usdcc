@@ -9,6 +9,11 @@
 #include <functional>
 #include <string>
 
+namespace usdcc::scripting {
+class PluginManager;
+class PythonRuntime;
+}  // namespace usdcc::scripting
+
 namespace usdcc::node {
 
 // Exit codes (docs/RENDER_NODE.md §4.1).
@@ -34,6 +39,9 @@ int runRenderers(const QCommandLineParser& parser);
 int runServe(const QCommandLineParser& parser);
 // usdcc_node queue [...]: a render queue server, until stopped (§4.4, §4.5).
 int runQueue(const QCommandLineParser& parser);
+// Checks a stage with a validation profile (docs/VALIDATION.md §9).
+int runValidate(const QCommandLineParser& parser, const usdcc::scripting::PluginManager& plugins,
+                usdcc::scripting::PythonRuntime& python);
 
 // The options of every command, added to `parser` (main.cpp), so each command reads its own.
 struct Options {
