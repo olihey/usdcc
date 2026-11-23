@@ -494,6 +494,8 @@ USDCC_TEST(validation_python_copied) {
     UsdPrim assets = stage->DefinePrim(SdfPath("/assets"));
     assets.CreateAttribute(TfToken("one"), SdfValueTypeNames->Asset).Set(SdfAssetPath("C:/a.png"));
     assets.CreateAttribute(TfToken("two"), SdfValueTypeNames->AssetArray).Set(VtArray<SdfAssetPath>{SdfAssetPath("./b.exr")});
+    assets.CreateAttribute(TfToken("absolute"), SdfValueTypeNames->AssetArray)
+        .Set(VtArray<SdfAssetPath>{SdfAssetPath("/c.png"), SdfAssetPath(R"(\server\d.png)"), SdfAssetPath("https://server/e.png")});
     UsdModelAPI(stage->GetPrimAtPath(SdfPath("/x"))).SetKind(TfToken("component"));
     const std::vector<std::pair<std::string, std::string>> checks = {
         {"name_pattern", R"({"pattern": "geo_.*", "types": ["Mesh"]})"},

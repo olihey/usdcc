@@ -379,7 +379,7 @@ std::string checkAsPython(const CheckSettings& settings) {
                "    if faces > maximum:\n"
                "        " + report + "(prim, \"It has %d faces, more than %d\" % (faces, maximum))\n";
     } else if (id == "asset_path") {
-        imports = "import os\nimport re\n\n" + imports + "from pxr import Sdf, Usd\n";
+        imports = "import re\n\n" + imports + "from pxr import Sdf, Usd\n";
         arguments = ", pattern=" + quoted(pattern);
         body = "    for attribute in prim.GetAuthoredAttributes():\n"
                "        value = attribute.Get(Usd.TimeCode.EarliestTime())\n"
@@ -390,7 +390,8 @@ std::string checkAsPython(const CheckSettings& settings) {
                     "(attribute, path.path + \" doesn't match \" + pattern)\n";
         }
         if (flag(values, "relative")) {
-            body += "            if os.path.isabs(path.path) or \"://\" in path.path:\n                " + report +
+            // Not os.path.isabs(): what it takes for absolute depends on the platform.
+            body += "            if path.path[0] in \"/\\\\\" or path.path[1:2] == \":\" or \"://\" in path.path:\n                " + report +
                     "(attribute, path.path + \" isn't a relative path\")\n";
         }
         if (flag(values, "resolves")) {
