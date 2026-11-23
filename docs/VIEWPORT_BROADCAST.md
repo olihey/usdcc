@@ -12,7 +12,8 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 **Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
 **Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel. **Phase 3 is built** (2026-11-23,
-§11.4): a watcher navigates once the host allows it.
+§11.4): a watcher navigates once the host allows it. **Phase 4a is built** (2026-11-23, §11.5): the
+Public address for a tunnel; 4b waits for the Peers relay.
 [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
@@ -323,7 +324,7 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 | **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port. **Built** (§11.2); all of it checked on this machine, not yet from a second one |
 | **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat. **Built** (§11.3) |
 | **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click. **Built** (§11.4); not yet tried from a browser |
-| **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
+| **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only. **4a built** (§11.5), not yet tried through a real tunnel; **4b waits** for the relay, which `usdcc_peers` doesn't have yet |
 | **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast |
 | **Later** | A watcher's pointer shown to all; drawing on the picture; several broadcasts at once | |
 
@@ -549,6 +550,28 @@ move, one out of range, and one while the host's hand is on it are refused; Take
 watcher and refuses the next move; a message outside the list removes the page.
 `viewport_navigates_by_moves` (`usdcc_python_tests`): orbit, zoom and pan move the camera as the
 mouse does and say so. The page's script parses (`node --check`); **not yet tried in a browser.**
+
+### 11.5 Phase 4a as built
+
+- **Settings > Peers > Viewport Broadcast** (the plugin defines them; the keys are the ones
+  phase 1 read, `PluginSettings/org.usdcc.viewport-broadcast/…`): **Broadcast on the network**,
+  **Port**, and the new **Public address**. `allowedOrigins` stays a key without a page.
+- **Public address:** the address of the user's own tunnel or reverse proxy pointed at the
+  port, such as `https://watch.example.com/`, a path allowed. Only an `http` or `https` address
+  with a host is taken. With it:
+  - the link is the tunnel's: `https://watch.example.com/studio/#s=<secret>` (a path gets its
+    trailing `/`, so the page's files resolve under it). The Broadcast panel and Copy Link give
+    that one; `Broadcast::localLink()` keeps this machine's.
+  - the tunnel's origin may open the WebSocket, as if it were in `allowedOrigins`.
+- **The page** opens its WebSocket beside itself (`ws` relative to the page, `wss:` on an `https`
+  page) rather than at the host's root, so a proxy that serves it under a path carries the
+  pictures too.
+- As §5 says, the tunnel's operator can see the stream; the setting's description says so.
+
+**Tests:** `broadcast_public_address` (`usdcc_ui_tests`): the link is the tunnel's with the
+secret and a trailing `/`, the local link stays this machine's, a page from the tunnel's origin
+connects and one from another origin doesn't, and without the setting the link is as before.
+**Not tried yet:** a real tunnel (cloudflared, Tailscale Funnel) and a watcher on a phone network.
 
 ## 12. Open questions
 

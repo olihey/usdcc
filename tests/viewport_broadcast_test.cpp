@@ -587,3 +587,47 @@ USDCC_TEST(broadcast_navigating) {
     ben.sendText(nav, QStringLiteral("select"), {{"path", "/World"}});
     CHECK(waitUntil([&] { return broadcast->watchers().size() == 1; }), "a page that sends something else stays");
 }
+
+// Phase 4a (VIEWPORT_BROADCAST.md §5): with a public address (the user's own tunnel), the
+// link is the tunnel's, with the secret, and the tunnel's pages may connect; others may not.
+USDCC_TEST(broadcast_public_address) {
+    QTemporaryDir page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers peers{Peers::Options{}};
+    FakeSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: tunnel");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    options.publicAddress = QUrl(QStringLiteral("https://watch.example.com/studio"));
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(&peers, &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+    const QString secret = broadcast->room()->guestSecret();
+
+    CHECK(broadcast->link().toString() == QStringLiteral("https://watch.example.com/studio/#s=") + secret,
+          "the link isn't the tunnel's: %s", qPrintable(broadcast->link().toString(QUrl::RemoveFragment)));
+    CHECK(broadcast->localLink().scheme() == "http" && broadcast->localLink().host() == "127.0.0.1" &&
+              broadcast->localLink().fragment() == QStringLiteral("s=") + secret,
+          "the local link isn't this machine's: %s", qPrintable(broadcast->localLink().toString(QUrl::RemoveFragment)));
+
+    RawMember throughTunnel(QStringLiteral("https://watch.example.com"));
+    CHECK(throughTunnel.hello(*broadcast->room(), secret, QStringLiteral("Remote")) &&
+              throughTunnel.find("room", "welcome"),
+          "a page from the tunnel's origin can't connect");
+    RawMember elsewhere(QStringLiteral("https://evil.example.net"));
+    elsewhere.hello(*broadcast->room(), secret, QStringLiteral("Elsewhere"));
+    CHECK(!elsewhere.find("room", "welcome"), "a page from another origin connected");
+
+    // Without one, the link is this machine's, as before.
+    Fixture plain;
+    if (plain.broadcast) {
+        CHECK(plain.broadcast->link() == plain.broadcast->localLink(), "without a public address the link changed");
+    }
+}
