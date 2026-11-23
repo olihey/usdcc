@@ -1,9 +1,10 @@
 # PySide6 on Linux, and arm64 releases
 
-Plan, 2026-11-23. **Phase 1's Linux x64 part is built and tested locally** (WSL, Python 3.12,
-OpenUSD built there); the arm64 platforms and the workflows wait for a run in CI. Today `release.yml` makes x64 packages only;
-`build.yml` already builds and tests both arm64 platforms ([CI.md](CI.md) §8), and the
-OpenUSD assets `linux-arm64` and `win-arm64` are published.
+Plan, 2026-11-23. **Phase 1 is done** (olihey/usdcc#68): PySide6 for all four platforms.
+**Phases 2 and 3 are written**: `release.yml` builds both architectures on both systems, and
+waits for its first run (a dry run, §4). `build.yml` already builds and tests both arm64
+platforms ([CI.md](CI.md) §8), and the OpenUSD assets `linux-arm64` and `win-arm64` are
+published.
 
 ## 1. Decisions
 
@@ -52,16 +53,17 @@ Left:
   `windows-vs2022_arm64` builds up to 23.1.1; the version in the table is then per platform.
 - V-Ray Render on Linux with a real App SDK.
 
-Done when the four `build.yml` jobs run the `usdcc.ui` tests.
+Done when the four `build.yml` jobs run the `usdcc.ui` tests. *Done: `deps-pyside.yml`
+published all four, and PR 68's builds passed with them.*
 
 ## 3. Phase 2: the Linux arm64 release
 
-1. `linux` becomes a matrix: `linux` (`ubuntu-24.04`, `x64`) and `linux-arm64`
+1. *Written:* `linux` is a matrix: `linux` (`ubuntu-24.04`, `x64`) and `linux-arm64`
    (`ubuntu-24.04-arm`, `arm64`), `fail-fast: false`, with the architecture in
    the archive names: `usdcc-<version>-linux-arm64.tar.xz` and `-symbols`.
-2. Try `deploy.py`, `split_debug.py` and `smoke_test.py` on the Arm runner first, in a
-   branch with the upload left out: they have only run on x64.
-3. Adobe's file formats for `linux-arm64` (§5): add the platform to the pin, and a matrix
+2. Try `deploy.py`, `split_debug.py` and `smoke_test.py` on the Arm runner first, with
+   `release.yml`'s `dry_run` (§4): they have only run on x64.
+3. *Not yet:* Adobe's file formats for `linux-arm64` (§5): add the platform to the pin, and a matrix
    entry in `deps-usd-plugins.yml`, whose jobs are x64 only. `--require-packs` asks only
    for packs pinned for the platform, so this phase can ship without it.
 
@@ -69,6 +71,8 @@ Done when a prerelease has both Linux archives and the arm64 one starts on a mac
 isn't the runner.
 
 ## 4. Phase 3: the Windows arm64 release
+
+*Written:* items 1, 2 and 5; a dry run tries them (below).
 
 1. **Archive first.** A `windows` matrix with `windows-11-arm`, and from `build.yml`: the
    bootstrap Python, the NuGet Python, Visual Studio 2026. `x64` in archive names, in the
@@ -90,10 +94,20 @@ isn't the runner.
      with `if: always()`.
    `UsdccVelopack.cmake` already unpacks the ARM64 library. Whether `dotnet` and `vpk` run
    on the Arm image has to be tried; if not, pack in a small x64 job from the uploaded deploy.
+   x64 keeps the default channel, `win`, so installs made before arm64 keep reading
+   `releases.win.json`.
 6. **Adobe's file formats** for `win-arm64`, as in phase 2.
 
 Done when a prerelease's arm64 installer installs on an Arm PC, starts, and updates itself
 to the next prerelease.
+
+**Trying it: a dry run.** `release.yml` run by hand with an existing release's tag and
+`dry_run` builds the branch it was run on, as for that tag's version, through the smoke
+test, the archives and the installer, and attaches nothing: the Linux archives and the
+Windows installers are kept with the run for three days instead. `vpk download` still reads
+the published feeds, to make a delta.
+
+    gh workflow run release.yml --ref <branch> -f tag=26.11.7 -f dry_run=true
 
 Last, for both: `docs/RELEASE.md`, `CI.md` §8, `LINUX_WSL.md` §6, `UPDATES.md` §5, the
 readme, the changelog. Hosted Arm runners have no GPU, so a viewport check on real Arm

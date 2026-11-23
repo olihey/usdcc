@@ -120,6 +120,12 @@ After the 7z is attached, `release.yml`'s Windows job:
    `usdcc-win-Setup.exe`, `usdcc-<version>-full.nupkg`, the delta when there is
    one, and `releases.win.json`, the feed an install reads.
 
+The `windows-arm64` job does the same with `--runtime win-arm64` and the channel
+`win-arm64` on all three commands: `usdcc-win-arm64-Setup.exe`, and a feed of its own,
+`releases.win-arm64.json`. An install reads the feed of the channel it was packed for, so
+an x64 install is never offered the arm64 package. x64 stays on Velopack's default
+channel, `win`, which installs made before arm64 read.
+
 An install asks GitHub for the releases (prereleases only with the setting) and reads the
 `releases.win.json` of each, so a delta chain can span several releases. The `deps/...`
 prereleases have no feed and are skipped.
