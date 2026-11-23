@@ -2,7 +2,7 @@
   "repository": "https://github.com/adobe/USD-Fileformat-plugins",
   "commit": "6441b97807a59472337f9c3d02df089d45ed1c48",
   "version": "2026.07",
-  "patches": [],
+  "patches": ["patches/adobe-fileformats-arm64.patch"],
   "cmake": [
     "-Dpxr_ROOT={usd}",
     "-DUSD_FILEFORMATS_BUILD_TESTS=OFF",
