@@ -1,13 +1,13 @@
 # Ruff (https://docs.astral.sh/ruff/), which the Script Editor's Ruff Format
 # and Ruff Check run, bundled at a pinned version so formatting is the same
 # for everyone (docs/SCRIPTING.md §7). Downloaded once at configure time from
-# PyPI's wheel for this platform (Windows x64, Linux x86_64 or aarch64), checked
+# PyPI's wheel for this platform (Windows x64 or arm64, Linux x86_64 or aarch64), checked
 # against its SHA-256, and unpacked into build/ruff (ruff[.exe] and its MIT
 # LICENSE); tools/deploy.py copies that into the deploy's tools/ruff. Offline,
 # elsewhere, or with USDCC_BUNDLE_RUFF off, the app falls back to a ruff on PATH.
 #
 # To upgrade: pick a release at least two weeks old, and take the
-# py3-none-win_amd64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
+# py3-none-win_amd64, win_arm64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
 # https://pypi.org/pypi/ruff/<version>/json.
 #
 # Sets:
@@ -17,7 +17,11 @@ option(USDCC_BUNDLE_RUFF "Download the pinned ruff for the Script Editor" ON)
 
 set(USDCC_RUFF_VERSION "0.17.1")
 set(USDCC_RUFF_URL "")
-if(WIN32)
+if(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(USDCC_RUFF_URL
+        "https://files.pythonhosted.org/packages/df/c9/0f2a4dea06a5e12c1191ee3d96b1e1233797d0d5e18f97a2b909a95a9836/ruff-0.17.1-py3-none-win_arm64.whl")
+    set(USDCC_RUFF_SHA256 "42400b9a6ff8515ff27796f07f92e0195be011c86e81e381606f58ea5502fef4")
+elseif(WIN32)
     set(USDCC_RUFF_URL
         "https://files.pythonhosted.org/packages/6a/2e/da3d9589bae8e8b58f3a48bd5bc0b980232fb14a83bf02c3be7660f87c1b/ruff-0.17.1-py3-none-win_amd64.whl")
     set(USDCC_RUFF_SHA256 "5df76f16580fab58d0f6c98a3ac254a4abceb7b2489b8b678335869cff77b3d7")

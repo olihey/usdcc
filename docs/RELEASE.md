@@ -119,11 +119,14 @@ The `windows` job is described here; the `linux` job does the same on `ubuntu-24
 attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it is
 unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
-finds it ([CI.md](CI.md) §8).
+finds it ([CI.md](CI.md) §8). Each job runs twice, x64 and arm64 (`windows-arm64` on
+`windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
+the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
 **Trigger:** `release: published`, when you publish a release (or prerelease) on GitHub.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand
-(`workflow_dispatch`) with a tag, to rebuild a release whose run failed.
+(`workflow_dispatch`) with a tag, to rebuild a release whose run failed, or with `dry_run`
+to try the branch it's run on without attaching anything ([ARM64_RELEASES.md](ARM64_RELEASES.md) §4).
 
 1. **Check the tag.** It has to be a version (`26.12.1`, `v26.12.1`,
    `26.12.1-beta.1`): a two-digit year, a month from 1 to 12, a counter from 1, none

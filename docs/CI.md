@@ -362,7 +362,7 @@ has how Linux was brought up, in WSL 2):
   RUNPATHs relative to `$ORIGIN`, the CPython bundled, the standard USD plugin packs,
   which it requires), moves usdcc's debug info out with
   `tools/ci/split_debug.py`, starts the deploy with `tools/ci/smoke_test.py`, and attaches
-  `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz`.
+  `usdcc-<version>-linux-x64.tar.xz` and `...-symbols.tar.xz` (`linux-arm64` on arm64).
 
 **arm64.** `deps-usd.yml`'s and `build.yml`'s `linux` and `windows` jobs also run on
 GitHub's Arm runners, `ubuntu-24.04-arm` and `windows-11-arm`. `tools/_common.py` picks
@@ -386,8 +386,9 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
   (`tools/_common.py`'s `VS_GENERATOR`); x64 stays on 2022. Its pinned Python comes from
   python.org's `pythonarm64` NuGet package: setup-python can't install an older 3.13
   beside the newer one the image ships.
-- Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`),
-  the Blender distribution checks, and `release.yml` ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
+- `release.yml` builds and attaches the arm64 packages too ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
+- Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`) and
+  the Blender distribution checks.
   A missing pack or PySide6 is a warning, as on x64.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
