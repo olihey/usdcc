@@ -12,7 +12,12 @@
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/timeCode.h>
 
+#include <pxr/base/ts/spline.h>
+#include <pxr/base/ts/types.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/xformOp.h>
+
+#include <string>
 
 #include <functional>
 #include <vector>
@@ -101,6 +106,43 @@ int pasteKeys(const CopiedKeys& copied, const PXR_NS::UsdStagePtr& stage, double
               const std::vector<PXR_NS::SdfPath>& prims = {});
 // The keys copied last, in the ruler or the Dope Sheet: one for the app.
 CopiedKeys& keyClipboard();
+
+// ---- Curves (docs/ANIMATION.md phase 4): splines, opt-in per attribute (§4.4) -------------
+// Like the rest, through UsdAttribute on the edit target, a weaker layer's animation copied
+// in first. Callers wrap each in one undo step.
+
+// A spline can drive it: a scalar float, double or half.
+bool canHaveCurve(const PXR_NS::UsdAttribute& attribute);
+// A spline drives it (and no time samples, which would win over it in one spec).
+bool hasCurve(const PXR_NS::UsdAttribute& attribute);
+// Its time samples as a spline's knots, the samples gone: curved segments with auto-ease
+// tangents, or held ones when the stage holds between keys. It goes through every sample's
+// value at its time. False when it can't have a curve or has no samples.
+bool convertToCurve(const PXR_NS::UsdAttribute& attribute);
+// Back to time samples: one at every whole frame from the first knot to the last, and one at
+// each knot, the spline gone. What the curve does outside its knots (extrapolation, loops)
+// isn't kept past them. False without a spline.
+bool bakeToSamples(const PXR_NS::UsdAttribute& attribute);
+// A translate or scale op split into its X, Y and Z ops, in its place in the op order, with
+// its default and samples split too: the same matrix at every time. So each axis can be a
+// curve. Readers older than OpenUSD 25.11 don't know single-axis translate and scale ops.
+// Empty, with `why`, for any other op.
+std::vector<PXR_NS::UsdGeomXformOp> splitXformOp(const PXR_NS::UsdGeomXformOp& op, std::string* why = nullptr);
+
+// On the knots at `times` of a spline-driven attribute.
+bool setKnotInterpolation(const PXR_NS::UsdAttribute& attribute, const std::vector<double>& times,
+                          PXR_NS::TsInterpMode mode);
+enum class Tangents { AutoEase, Flat };
+bool setKnotTangents(const PXR_NS::UsdAttribute& attribute, const std::vector<double>& times, Tangents tangents);
+// What the curve does before its first knot, or after its last.
+bool setExtrapolation(const PXR_NS::UsdAttribute& attribute, bool after, const PXR_NS::TsExtrapolation& extrapolation);
+// Repeats the knots from `from` up to `to` (an inner loop) `before` times before and `after`
+// times after. `to` at or before `from` stops looping.
+bool setInnerLoop(const PXR_NS::UsdAttribute& attribute, double from, double to, int before, int after);
+// The spline's knots at `times` moved by `offset` in time and `delta` in value: what dragging
+// them in the Curve Editor writes, from the spline as it was when the drag began.
+PXR_NS::TsSpline movedKnots(const PXR_NS::TsSpline& spline, const std::vector<double>& times, double offset,
+                            double delta);
 
 // Auto-key (§8 question 5: app-wide, off at start, not kept).
 bool autoKey();

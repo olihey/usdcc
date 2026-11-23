@@ -104,6 +104,7 @@ add_executable(usdcc_ui_tests
     current_stage_test.cpp
     dependencies_panel_test.cpp
     dope_sheet_test.cpp
+    curve_editor_test.cpp
     dependency_files.h
     layer_editor_test.cpp
     log_panel_test.cpp
