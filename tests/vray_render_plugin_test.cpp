@@ -223,6 +223,12 @@ builtins.vray_folder = vray_test.files.folder
     CHECK(run(R"(
 import builtins, ctypes, os
 def alive(pid):
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
     handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not handle:
         return False

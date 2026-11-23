@@ -39,8 +39,6 @@ constexpr int kSpacing = 4;
 constexpr int kBar = 2;
 
 // Slightly see-through (88%): what is behind shows faintly.
-const QColor kCard(0x23, 0x23, 0x26, 224);
-const QColor kBorder(255, 255, 255, 26);  // 10%
 
 // The kind's symbol, drawn in white on a disc of its colour.
 void paintIcon(QPainter& painter, const QRectF& rect, core::ToastKind kind, const QColor& color) {
@@ -48,7 +46,7 @@ void paintIcon(QPainter& painter, const QRectF& rect, core::ToastKind kind, cons
     painter.setPen(Qt::NoPen);
     painter.setBrush(color);
     painter.drawEllipse(rect);
-    QPen pen(QColor(0x1c, 0x1c, 0x1e));
+    QPen pen(theme::color(theme::Token::SurfacePanel));
     pen.setWidthF(rect.width() * 0.13);
     pen.setCapStyle(Qt::RoundCap);
     pen.setJoinStyle(Qt::RoundJoin);
@@ -107,7 +105,7 @@ ToastWidget::ToastWidget(int id, core::ToastKind kind, const QString& title, con
     m_count->hide();
     auto* close = new QToolButton(this);
     close->setObjectName(QStringLiteral("toastClose"));
-    close->setIcon(QIcon(QStringLiteral(":/usdcc/theme/close.png")));
+    close->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/close.png")));
     close->setToolTip(tr("Dismiss"));
     close->setFocusPolicy(Qt::NoFocus);
     scaled::fixedSize(close, 18, 18);
@@ -310,7 +308,7 @@ void ToastWidget::paintEvent(QPaintEvent*) {
 
     QPainterPath shape;
     shape.addRoundedRect(card, radius, radius);
-    painter.fillPath(shape, kCard);
+    painter.fillPath(shape, theme::color(theme::Token::SurfaceRaised, 224));
     painter.save();
     painter.setClipPath(shape);
     painter.fillRect(QRectF(0, 0, scaled::pixels(kStripe), height()), color);
@@ -323,7 +321,7 @@ void ToastWidget::paintEvent(QPaintEvent*) {
         painter.fillRect(QRectF(0, height() - barHeight, width() * left, barHeight), bar);
     }
     painter.restore();
-    painter.setPen(kBorder);
+    painter.setPen(theme::color(theme::Token::Overlay, 26));
     painter.drawPath(shape);
 
     const qreal icon = scaled::pixels(kIconSize);

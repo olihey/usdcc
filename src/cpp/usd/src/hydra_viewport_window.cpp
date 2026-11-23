@@ -960,6 +960,48 @@ void HydraViewportWindow::followPeer() {
     cameraMoved();
 }
 
+PXR_NS::GfCamera HydraViewportWindow::orbitViewAsCamera(const PXR_NS::GfCamera& like) const {
+    OrbitView view;
+    view.cameraToWorld = orbitCameraToWorld(orbitAxes(m_orthographic ? orthographicDepth() : m_distance));
+    view.orthographic = m_orthographic;
+    view.fovY = m_fovY;
+    view.orthoSize = m_orthoSize;
+    return cameraSeeingView(like, view, gate().aspect());
+}
+
+bool HydraViewportWindow::startNavigation() {
+    if (!isLookingThroughStageCamera() || m_display.cameraNavigation == "detach") {
+        detachFromStageCamera();
+        return true;
+    }
+    if (m_display.cameraNavigation == "locked") {
+        Q_EMIT navigationRefused(tr("%1 is locked: the view stays").arg(QString::fromStdString(m_stageCamera.GetName())), true);
+        return false;
+    }
+    if (m_driving) return true;
+    // Drive (docs/VIEWPORT_CAMERA.md §2.2): refused as Copy View to Camera is.
+    const PXR_NS::UsdPrim prim = m_stage ? m_stage->GetPrimAtPath(m_stageCamera) : PXR_NS::UsdPrim();
+    const std::string why = prim ? whyNotSetCamera(prim) : std::string("It's no longer on the stage.");
+    const std::optional<PXR_NS::GfCamera> camera = stageCameraNow();
+    if (!why.empty() || !camera) {
+        Q_EMIT navigationRefused(QString::fromStdString(why), false);
+        detachFromStageCamera();
+        return true;
+    }
+    // The orbit camera takes the camera's pose, as Detach does, and the camera follows it.
+    const PXR_NS::GfFrustum frustum = stageCameraFrustum(*camera, gate().aspect());
+    adoptPose(orbitPoseFromFrustum(frustum, detachDistance(frustum, camera, true), m_yaw, cameraZUp()));
+    m_driving = true;
+    Q_EMIT driveStarted();
+    return true;
+}
+
+void HydraViewportWindow::finishNavigation() {
+    if (!m_driving) return;
+    m_driving = false;
+    Q_EMIT driveFinished();
+}
+
 void HydraViewportWindow::detachFromStageCamera() {
     // Moving the view stops following a peer (docs/SHARED_STAGE.md §8): a drag, the
     // wheel, Fit to View and the axis triad all come here first.
@@ -1042,7 +1084,11 @@ void HydraViewportWindow::setOrthographic(bool orthographic) {
 }
 
 void HydraViewportWindow::frameBox(const PXR_NS::GfRange3d& box) {
-    detachFromStageCamera();  // fits from where it looks (§3)
+    if (!startNavigation()) return;  // fits from where it looks (§3); Drive moves the camera there
+    struct EndDrive {
+        HydraViewportWindow* window;
+        ~EndDrive() { window->finishNavigation(); }
+    } endDrive{this};
     // Fits the gate (docs/VIEWPORT_CAMERA.md §4), which is the whole window without one.
     const double aspect = gate().aspect();
     if (m_orthographic) {
@@ -1068,6 +1114,8 @@ void HydraViewportWindow::setFieldOfView(double degrees) {
 }
 
 void HydraViewportWindow::cameraMoved() {
+    // Drive: the stage camera is set to the orbit camera before the frame is drawn through it.
+    if (m_driving) Q_EMIT driveMoved();
     renderNow();
     Q_EMIT cameraChanged();
 }
@@ -1657,6 +1705,7 @@ void HydraViewportWindow::renderNow() {
 
     // How far a progressive renderer has got, for the HUD's performance line.
     m_converging = m_stage && !m_engine->IsConverged();
+    if (m_stage) m_renderedTime = m_time;
     m_percentDone.reset();
     if (m_converging && m_display.hudPerformance) {
         const PXR_NS::VtDictionary stats = m_engine->GetRenderStats();
@@ -1752,9 +1801,12 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
-        // Through a stage camera, the drag goes on with the orbit camera from there
-        // (docs/VIEWPORT_CAMERA.md §2.1).
-        detachFromStageCamera();
+        // Through a stage camera, the drag goes on with the orbit camera from there, or
+        // drives the camera, or (Locked) does nothing (docs/VIEWPORT_CAMERA.md §2).
+        if (!startNavigation()) {
+            m_navigationBlocked = true;
+            return;
+        }
         // An orthographic axis view doesn't tumble: a Top view stays a Top view (§3.5.3).
         m_orbiting = cameraViewTumbles(m_view, m_orthographic);
         // For the whole drag, so that crossing a pole during it doesn't reverse it.
@@ -1765,7 +1817,10 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         // the frame on screen, so it's read before a stage camera is left for the orbit
         // camera, which then sees the same.
         const std::optional<double> drawn = drawnDepthAt(event->position());
-        detachFromStageCamera();
+        if (!startNavigation()) {
+            m_navigationBlocked = true;
+            return;
+        }
         if (!m_orthographic) m_panDepth = drawn ? *drawn : panDepthAt(event->position());
     }
 }
@@ -1803,11 +1858,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         const QScreen* onScreen = screen();
         const QRect bounds = onScreen ? onScreen->geometry() : QRect();
         const bool stale = onScreen && (std::abs(delta.x()) > bounds.width() / 2 || std::abs(delta.y()) > bounds.height() / 2);
-        if (!stale) {
-            m_yaw = wrapDegrees(m_yaw - (m_orbitReversed ? -1.0 : 1.0) * delta.x() * 0.5);
-            m_pitch = wrapDegrees(m_pitch + delta.y() * 0.5);
-            m_view = CameraView::Persp;  // no longer looking along an axis
-        }
+        if (!stale) orbitStep(delta.x(), delta.y(), m_orbitReversed);
         // At the screen's edge, on from the other side, so a drag never runs out.
         if (onScreen) {
             const QPoint global = event->globalPosition().toPoint();
@@ -1844,18 +1895,66 @@ void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         m_panning = false;
     }
+    if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
+        m_navigationBlocked = false;
+        if (!m_orbiting && !m_panning) finishNavigation();
+    }
     // Nothing else uses the right button.
     if (event->button() == Qt::RightButton) Q_EMIT contextMenuRequested(event->globalPosition().toPoint());
 }
 
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
-    detachFromStageCamera();  // as a drag does
-    const double factor = std::pow(0.9, event->angleDelta().y() / 120.0);
+    if (!startNavigation()) {  // as a drag does
+        event->accept();
+        return;
+    }
+    // A wheel step is one undo step of its own while driving.
+    struct EndDrive {
+        HydraViewportWindow* window;
+        ~EndDrive() { window->finishNavigation(); }
+    } endDrive{this};
+    zoomStep(event->angleDelta().y() / 120.0);
+    cameraMoved();
+}
+
+void HydraViewportWindow::orbitStep(double dx, double dy, bool reversed) {
+    m_yaw = wrapDegrees(m_yaw - (reversed ? -1.0 : 1.0) * dx * 0.5);
+    m_pitch = wrapDegrees(m_pitch + dy * 0.5);
+    m_view = CameraView::Persp;  // no longer looking along an axis
+}
+
+void HydraViewportWindow::zoomStep(double steps) {
+    const double factor = std::pow(0.9, steps);
     if (m_orthographic) {
         m_orthoSize = std::max(kMinDistance, m_orthoSize * factor);
     } else {
         m_distance = std::max(kMinDistance, m_distance * factor);
     }
+}
+
+void HydraViewportWindow::orbitBy(double dx, double dy) {
+    detachFromStageCamera();
+    if (!cameraViewTumbles(m_view, m_orthographic)) return;  // a Top view stays a Top view
+    orbitStep(dx, dy, orbitIsUpsideDown(m_pitch));
+    cameraMoved();
+}
+
+void HydraViewportWindow::panBy(double dx, double dy) {
+    // What is in the middle of the view follows, as what is under the cursor does in a drag.
+    const QPointF middle(width() / 2.0, height() / 2.0);
+    const std::optional<double> drawn = m_orthographic ? std::nullopt : drawnDepthAt(middle);
+    detachFromStageCamera();
+    const double viewHeight = std::max(1, height());
+    const double unitsPerPixel = m_orthographic
+                                     ? m_orthoSize / viewHeight
+                                     : panUnitsPerPixel(drawn ? *drawn : panDepthAt(middle), m_fovY, viewHeight);
+    m_target = panOrbitTarget(m_target, orbitAxes(m_distance), dx, dy, unitsPerPixel);
+    cameraMoved();
+}
+
+void HydraViewportWindow::zoomBy(double steps) {
+    detachFromStageCamera();
+    zoomStep(steps);
     cameraMoved();
 }
 

@@ -412,7 +412,8 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   ([ASSET_PICKER.md](ASSET_PICKER.md) §9), and lists again once one is saved.
 - **Allowed hosts.** For the same reason a stage asking for an HTTP host that isn't allowed
   doesn't get a question: the host is refused, and a toast says how to allow it.
-- **Downloads** show in the status bar, with their size, while they run.
+- **Downloads** show in the status bar while they run, as one summary (files done and running, their
+  size, the latest name) refreshed five times a second, however many files there are.
 - **Sessions** ([SESSIONS.md](SESSIONS.md)) save a stage's root on a server by its logical path,
   and its environment (`"assetEnvironment"`). One the configuration no longer has opens in the
   default. No secrets.

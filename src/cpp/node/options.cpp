@@ -10,13 +10,14 @@ void Options::add(QCommandLineParser& parser) {
         "Commands:\n"
         "  render <stage>   render a stage's frames, then exit (0 done, 1 failed, 2 bad arguments, 130 cancelled)\n"
         "  renderers        list the renderers, and why one can't render here\n"
+        "  validate <stage> check a stage with a validation profile (0 nothing found, 1 findings, 2 couldn't run)\n"
         "  serve            render for peers in render queue rooms, until stopped\n"
         "  queue            a render queue server: takes artists' jobs and hands them to nodes, until stopped"));
     parser.addHelpOption();
     // Not addVersionOption(): it prints only the version, and this says what the build has too.
     parser.addOption({QStringLiteral("version"), QStringLiteral("Print the version and the features this build has, then exit.")});
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("render, renderers, serve or queue"));
-    parser.addPositionalArgument(QStringLiteral("stage"), QStringLiteral("render: the USD file"), QStringLiteral("[stage]"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("render, renderers, validate, serve or queue"));
+    parser.addPositionalArgument(QStringLiteral("stage"), QStringLiteral("render, validate: the USD file"), QStringLiteral("[stage]"));
     // Every command.
     parser.addOption({QStringLiteral("profile"), QStringLiteral("The profile: its settings, logs and key (default usdcc-node)."),
                       QStringLiteral("name")});
@@ -25,7 +26,7 @@ void Options::add(QCommandLineParser& parser) {
                       QStringLiteral("folder")});
     parser.addOption({QStringLiteral("no-gpu"),
                       QStringLiteral("No OpenGL: a QCoreApplication, and Storm isn't offered.")});
-    parser.addOption({QStringLiteral("json"), QStringLiteral("render, renderers: JSON lines on stdout.")});
+    parser.addOption({QStringLiteral("json"), QStringLiteral("render, renderers, validate: JSON lines on stdout.")});
     // render.
     parser.addOption({QStringLiteral("settings"), QStringLiteral("render: the RenderSettings prim (default: the stage's)."),
                       QStringLiteral("path")});
@@ -46,6 +47,13 @@ void Options::add(QCommandLineParser& parser) {
                       QStringLiteral("render: a renderer's setting, as on the RenderSettings prim (embree:ty:maxBounces=8). "
                                      "Repeatable."),
                       QStringLiteral("attribute=value")});
+    // validate. (--profile is the program's own.)
+    parser.addOption({QStringLiteral("validation-profile"), QStringLiteral("validate: a profile's name or file (default General)."),
+                      QStringLiteral("profile")});
+    parser.addOption({QStringLiteral("rules"), QStringLiteral("validate: also look for rules and profiles in <folder>. Repeatable."),
+                      QStringLiteral("folder")});
+    parser.addOption({QStringLiteral("fail-on"), QStringLiteral("validate: exit 1 for error (default), warning or info, or never."),
+                      QStringLiteral("severity")});
     // serve.
     parser.addOption({QStringLiteral("join"), QStringLiteral("serve: a room's invite link, joined at start and after a lost "
                                                              "connection. Repeatable."),

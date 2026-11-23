@@ -1,4 +1,5 @@
 #include "usdcc/usd/usda_view.h"
+#include "usdcc/ui/theme.h"
 #include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/usd/asset_servers.h"
@@ -9,6 +10,7 @@
 
 #include "usdcc/ui/find_line_edit.h"
 #include "usdcc/ui/line_view.h"
+#include "usdcc/ui/text_view.h"
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/layer_stack.h"
@@ -20,6 +22,7 @@
 
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/sdf/fileFormat.h>
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/usd/prim.h>
@@ -44,6 +47,13 @@
 #include <QMenu>
 #include <QPointer>
 #include <QPushButton>
+#include <QTextDocument>
+#include <QTextCursor>
+#include <QTextBlock>
+#include <QSyntaxHighlighter>
+#include <QSignalBlocker>
+#include <QRegularExpression>
+#include <QMessageBox>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStandardItemModel>
@@ -93,26 +103,58 @@ PXR_NS::SdfPath primPathOf(const QString& text) {
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
+// The editor's highlighting (§7): each block from the state the one before left, as
+// usda::tokenize() goes on from line to line.
+class UsdaHighlighter final : public QSyntaxHighlighter {
+public:
+    explicit UsdaHighlighter(QTextDocument* document) : QSyntaxHighlighter(document) {}
+
+protected:
+    void highlightBlock(const QString& text) override;
+};
+
 QTextCharFormat formatFor(usda::Token kind) {
     // The Script Editor's palette (python_highlighter.cpp), so both read alike.
     QTextCharFormat format;
     switch (kind) {
-        case usda::Token::Keyword: format.setForeground(QColor(0x3d, 0x8b, 0xfd)); break;
-        case usda::Token::Type: format.setForeground(QColor(0x8a, 0xb8, 0xff)); break;
-        case usda::Token::String: format.setForeground(QColor(0x4f, 0xd6, 0x71)); break;
+        case usda::Token::Keyword: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxKeyword)); break;
+        case usda::Token::Type: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxBuiltin)); break;
+        case usda::Token::String: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxString)); break;
         case usda::Token::AssetPath:
-            format.setForeground(QColor(0x4f, 0xd6, 0x71));
+            format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxString));
             format.setFontUnderline(true);
             break;
-        case usda::Token::Path: format.setForeground(QColor(0xe5, 0xc0, 0x7b)); break;
-        case usda::Token::Number: format.setForeground(QColor(0xff, 0xbd, 0x2e)); break;
-        case usda::Token::Key: format.setForeground(QColor(0xc8, 0xc8, 0xcc)); break;
+        case usda::Token::Path: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxPath)); break;
+        case usda::Token::Number: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxNumber)); break;
+        case usda::Token::Key: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxKey)); break;
         case usda::Token::Comment:
-            format.setForeground(QColor(255, 255, 255, 102));
+            format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 102));
             format.setFontItalic(true);
             break;
     }
     return format;
+}
+
+void UsdaHighlighter::highlightBlock(const QString& text) {
+    const int previous = previousBlockState();
+    usda::State state = previous < 0 ? usda::Outside : usda::State(previous);
+    for (const usda::Span& span : usda::tokenize(text, &state)) setFormat(span.start, span.length, formatFor(span.kind));
+    setCurrentBlockState(int(state));
+}
+
+// The line a USDA parse error names, 1-based; 0 when it names none. Sdf's parser says
+// "<file>:<line>:<column>: <what>" (no file for a string), others "... line 12 ...".
+// The "<file>:<line>:<column>:" is taken off `message`.
+int parseErrorLine(QString* message) {
+    static const QRegularExpression located(QStringLiteral("^[^\\n]*?:(\\d+):\\d+:\\s*"));
+    QRegularExpressionMatch match = located.match(*message);
+    if (match.hasMatch()) {
+        message->remove(0, match.capturedLength(0));
+        return match.captured(1).toInt();
+    }
+    static const QRegularExpression line(QStringLiteral("\\bline (\\d+)"));
+    match = line.match(*message);
+    return match.hasMatch() ? match.captured(1).toInt() : 0;
 }
 
 // A text file's content (whatever its extension: .usd can be either), false
@@ -150,7 +192,7 @@ bool readLayerFile(const PXR_NS::SdfLayerHandle& layer, std::string* text) {
 }
 
 // A bar under the text: a message and buttons. Styled as the panel toolbar, or by
-// theme/dark.qss as `objectName`.
+// theme/app.qss as `objectName`.
 QWidget* makeBar(QWidget* parent, QLabel** label, const QString& objectName = QStringLiteral("panelToolbar")) {
     auto* bar = new QWidget(parent);
     bar->setObjectName(objectName);
@@ -177,7 +219,7 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(this);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     if (m_host.addControls) m_host.addControls(toolbarLayout);
@@ -195,6 +237,31 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     toolbarLayout->addWidget(m_backButton);
     toolbarLayout->addWidget(m_forwardButton);
     toolbarLayout->addStretch(1);
+    // Editing (§7): offered by the panel, not the Show USDA dialog.
+    m_editButton = new usdcc::ui::PanelIconButton(QString(), tr("Edit this layer as text"), toolbar);
+    m_editButton->setObjectName(QStringLiteral("usdaEditButton"));
+    m_editButton->setText(tr("Edit"));
+    m_editButton->setCheckable(true);
+    m_editButton->setVisible(m_host.editable);
+    connect(m_editButton, &QToolButton::toggled, this, [this](bool on) {
+        if (on == m_editing) return;
+        if (on) {
+            if (!startEditing()) {
+                QSignalBlocker block(m_editButton);
+                m_editButton->setChecked(false);
+            }
+            return;
+        }
+        if (hasUnappliedEdits() &&
+            QMessageBox::question(this, tr("Stop Editing"), tr("Drop the edits that weren't applied?"),
+                                  QMessageBox::Discard | QMessageBox::Cancel) != QMessageBox::Discard) {
+            QSignalBlocker block(m_editButton);
+            m_editButton->setChecked(true);
+            return;
+        }
+        stopEditing();
+    });
+    toolbarLayout->addWidget(m_editButton);
     auto* refreshButton = new usdcc::ui::PanelIconButton(QString(), tr("Refresh (F5)"), toolbar);
     refreshButton->setText(QString::fromUtf8("\xE2\x9F\xB3"));  // ⟳
     connect(refreshButton, &QToolButton::clicked, this, &UsdaView::refresh);
@@ -296,10 +363,35 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     m_status->setObjectName(QStringLiteral("propertyNote"));
     m_status->setContentsMargins(8, 2, 8, 2);
 
+    // The editor and its bar (§7), made now and hidden until Edit.
+    m_editor = new usdcc::ui::TextView(this);
+    m_editor->setObjectName(QStringLiteral("usdaEditor"));
+    m_editor->setVisible(false);
+    new UsdaHighlighter(m_editor->document());
+    m_editBar = makeBar(this, &m_editLabel, QStringLiteral("usdaEditBar"));
+    m_editLabel->setWordWrap(true);
+    auto* applyButton = barButton(tr("Apply"), m_editBar);
+    applyButton->setObjectName(QStringLiteral("usdaApplyButton"));
+    applyButton->setToolTip(tr("Write the text to the layer (Ctrl+Return): one undo step"));
+    auto* revertButton = barButton(tr("Revert"), m_editBar);
+    revertButton->setToolTip(tr("The layer's text again, dropping the edits"));
+    auto* doneButton = barButton(tr("Done"), m_editBar);
+    doneButton->setToolTip(tr("Back to the read-only view"));
+    m_editBar->layout()->addWidget(applyButton);
+    m_editBar->layout()->addWidget(revertButton);
+    m_editBar->layout()->addWidget(doneButton);
+    m_editBar->setVisible(false);
+    connect(applyButton, &QPushButton::clicked, this, [this]() { apply(); });
+    connect(revertButton, &QPushButton::clicked, this, [this]() { revert(); });
+    connect(doneButton, &QPushButton::clicked, this, [this]() { m_editButton->setChecked(false); });
+    connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this]() { updateEditUi(); });
+
     layout->addWidget(toolbar);
     layout->addWidget(m_findBar);
     layout->addWidget(m_askBar);
     layout->addWidget(m_text, 1);
+    layout->addWidget(m_editor, 1);
+    layout->addWidget(m_editBar);
     layout->addWidget(m_limitBar);
     layout->addWidget(m_staleBar);
     layout->addWidget(m_status);
@@ -313,6 +405,9 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     shortcut(QKeySequence::Refresh, [this]() { refresh(); });
     shortcut(QKeySequence::FindNext, [this]() { findNext(false); });
     shortcut(QKeySequence::FindPrevious, [this]() { findNext(true); });
+    shortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), [this]() {
+        if (m_editing) apply();
+    });
     shortcut(QKeySequence::Back, [this]() { back(); });
     shortcut(QKeySequence::Forward, [this]() { forward(); });
     updateHistoryButtons();
@@ -351,6 +446,7 @@ void UsdaView::watchStage() {
 }
 
 void UsdaView::setStage(const StageRefPtr& stage) {
+    stopEditing();  // another stage: its edits went with the old one
     m_stage = stage;
     watchStage();
     m_source = Source();  // the new stage's root layer
@@ -389,6 +485,7 @@ void UsdaView::setStatusNote(const QString& note) {
 }
 
 void UsdaView::setSource(const Source& source) {
+    stopEditing();
     m_source = source;
     m_showAll = false;
     m_convertApproved = false;
@@ -969,6 +1066,7 @@ void UsdaView::showText(std::string text, qint64 exportMs, std::size_t wholeByte
 }
 
 void UsdaView::updateStatus() {
+    updateEditUi();
     if (m_name.isEmpty()) {
         m_status->setText(m_stage ? QString() : tr("No stage"));
         return;
@@ -1016,6 +1114,14 @@ void UsdaView::showAll() {
 void UsdaView::onStageObjectsChanged() {
     // The layer stack may have changed (a sublayer added or muted).
     QTimer::singleShot(0, this, [this]() { refreshShowMenu(); });
+    // While editing, the text in the editor stays; a change from elsewhere is said (§7).
+    if (m_editing) {
+        if (!m_applying) {
+            m_layerChangedWhileEditing = true;
+            updateEditUi();
+        }
+        return;
+    }
     // A conversion running goes on: what it shows will be out of date (docs/PANEL_BUSY.md §5.1).
     if (m_conversion) {
         m_conversion->changedMeanwhile = true;
@@ -1282,6 +1388,183 @@ void UsdaView::populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& li
     menu->addAction(tr("Copy Resolved Path"), this, [resolved]() {
         QApplication::clipboard()->setText(usdcc::usd::displayPath(resolved));
     })->setEnabled(found);
+}
+
+// ---- Editing (§7, phase 3) ----------------------------------------------------------------
+
+PXR_NS::SdfLayerHandle UsdaView::shownLayer() const {
+    switch (m_source.kind) {
+        case Source::Kind::Layer:
+            if (m_source.identifier.empty()) return m_stage ? m_stage->usdStage()->GetRootLayer() : PXR_NS::SdfLayerHandle();
+            return PXR_NS::SdfLayer::Find(m_source.identifier);
+        case Source::Kind::File:
+            return m_fileLayer ? PXR_NS::SdfLayerHandle(m_fileLayer) : PXR_NS::SdfLayer::Find(m_source.identifier);
+        default:
+            return PXR_NS::SdfLayerHandle();
+    }
+}
+
+bool UsdaView::canEdit(QString* why) const {
+    const auto refuse = [why](const QString& reason) {
+        if (why) *why = reason;
+        return false;
+    };
+    if (!m_host.editable) return refuse(tr("This view is read-only"));
+    const PXR_NS::SdfLayerHandle layer = shownLayer();
+    if (!layer) return refuse(tr("A flattened view has no layer to write to: show one of the stage's layers"));
+    if (!layer->PermissionToEdit()) return refuse(tr("%1 can't be edited").arg(qs(layer->GetDisplayName())));
+    if (m_awaitingConvert || m_conversion) return refuse(tr("Wait for the text first"));
+    if (m_truncated || m_textBytes > kEditLimitBytes) {
+        return refuse(tr("Too big to edit here (more than %1)").arg(QLocale().formattedDataSize(qint64(kEditLimitBytes))));
+    }
+    return true;
+}
+
+std::string UsdaView::layerText(const PXR_NS::SdfLayerHandle& layer) const {
+    std::string text;
+    if (layer) layer->ExportToString(&text);
+    return text;
+}
+
+bool UsdaView::startEditing() {
+    QString why;
+    if (!canEdit(&why)) {
+        if (!why.isEmpty()) setStatusNote(why);
+        return false;
+    }
+    // What the layer says now, as USD writes it: Apply reads it back the same way.
+    m_editBase = QString::fromStdString(layerText(shownLayer()));
+    m_editor->setPlainText(m_editBase);
+    m_editor->document()->setModified(false);
+    const int line = m_text->cursorPosition().line;
+    m_editing = true;
+    m_layerChangedWhileEditing = false;
+    m_editError.clear();
+    m_text->setVisible(false);
+    m_editor->setVisible(true);
+    m_editBar->setVisible(true);
+    m_staleBar->setVisible(false);
+    const QTextBlock block = m_editor->document()->findBlockByNumber(std::max(0, line));
+    if (block.isValid()) m_editor->setTextCursor(QTextCursor(block));
+    m_editor->setFocus();
+    {
+        QSignalBlocker block(m_editButton);
+        m_editButton->setChecked(true);
+    }
+    updateEditUi();
+    return true;
+}
+
+bool UsdaView::hasUnappliedEdits() const { return m_editing && m_editor->toPlainText() != m_editBase; }
+
+bool UsdaView::apply() {
+    if (!m_editing) return false;
+    const PXR_NS::SdfLayerHandle layer = shownLayer();
+    if (!layer) return false;
+    const std::string text = m_editor->toPlainText().toStdString();
+    // Parsed into a layer of its own first: an error leaves the real one untouched.
+    {
+        PXR_NS::TfErrorMark mark;
+        const PXR_NS::SdfLayerRefPtr check = PXR_NS::SdfLayer::CreateAnonymous("usda_edit_check.usda");
+        const bool parses = check && check->ImportFromString(text);
+        QString message;
+        for (auto it = mark.GetBegin(); it != mark.GetEnd(); ++it) {
+            if (message.isEmpty()) message = qs(it->GetCommentary());
+        }
+        mark.Clear();
+        if (!parses) {
+            const int line = parseErrorLine(&message);
+            m_editError = line > 0 ? tr("line %1: %2").arg(line).arg(message) : (message.isEmpty() ? tr("It doesn't parse") : message);
+            if (line > 0) {
+                const QTextBlock block = m_editor->document()->findBlockByNumber(line - 1);
+                if (block.isValid()) m_editor->setTextCursor(QTextCursor(block));
+            }
+            updateEditUi();
+            return false;
+        }
+    }
+    const QString description = tr("Edit %1 as Text").arg(qs(layer->GetDisplayName()));
+    const std::function<bool()> write = [&layer, &text]() { return layer->ImportFromString(text); };
+    m_applying = true;
+    PXR_NS::TfErrorMark mark;
+    const bool written = m_host.applyEdit ? m_host.applyEdit(layer, description, write) : write();
+    m_applying = false;
+    if (!written) {
+        QString message;
+        for (auto it = mark.GetBegin(); it != mark.GetEnd(); ++it) {
+            if (message.isEmpty()) message = qs(it->GetCommentary());
+        }
+        m_editError = message.isEmpty() ? tr("It couldn't be written to the layer") : message;
+        updateEditUi();
+        return false;
+    }
+    mark.Clear();
+    // The editor now says what the layer does; the read-only text follows when editing ends.
+    m_editBase = m_editor->toPlainText();
+    m_editor->document()->setModified(false);
+    m_editError.clear();
+    m_layerChangedWhileEditing = false;
+    m_outOfDate = true;
+    updateEditUi();
+    return true;
+}
+
+void UsdaView::revert() {
+    if (!m_editing) return;
+    const QTextCursor cursor = m_editor->textCursor();
+    const int line = cursor.blockNumber();
+    m_editBase = QString::fromStdString(layerText(shownLayer()));
+    m_editor->setPlainText(m_editBase);
+    m_editor->document()->setModified(false);
+    const QTextBlock block = m_editor->document()->findBlockByNumber(line);
+    if (block.isValid()) m_editor->setTextCursor(QTextCursor(block));
+    m_editError.clear();
+    m_layerChangedWhileEditing = false;
+    updateEditUi();
+}
+
+void UsdaView::stopEditing() {
+    if (!m_editing) return;
+    const int line = m_editor->textCursor().blockNumber();
+    m_editing = false;
+    m_editError.clear();
+    m_editor->setVisible(false);
+    m_editBar->setVisible(false);
+    m_text->setVisible(true);
+    {
+        QSignalBlocker block(m_editButton);
+        m_editButton->setChecked(false);
+    }
+    m_pendingScrollLine = line;
+    refresh();
+    updateEditUi();
+}
+
+void UsdaView::updateEditUi() {
+    // While editing, nothing else may be shown: Show and the history wait until Done.
+    m_show->setEnabled(!m_editing);
+    m_backButton->setEnabled(!m_editing && canGoBack());
+    m_forwardButton->setEnabled(!m_editing && canGoForward());
+    if (m_editButton) {
+        QString why;
+        const bool can = m_editing || canEdit(&why);
+        m_editButton->setEnabled(can);
+        m_editButton->setToolTip(can ? tr("Edit this layer as text") : why);
+    }
+    if (!m_editing) return;
+    const QString name = qs(shownLayer() ? shownLayer()->GetDisplayName() : std::string());
+    QString text;
+    if (!m_editError.isEmpty()) {
+        text = QString::fromUtf8("\xE2\x9A\xA0  ") + tr("Not applied: %1").arg(m_editError);  // ⚠
+    } else if (m_layerChangedWhileEditing) {
+        text = QString::fromUtf8("\xE2\x9A\xA0  ") +
+               tr("%1 changed elsewhere since editing began: Apply replaces those changes, Revert shows them").arg(name);
+    } else if (hasUnappliedEdits()) {
+        text = tr("Editing %1: Apply (Ctrl+Return) writes it to the layer, as one undo step").arg(name);
+    } else {
+        text = tr("Editing %1").arg(name);
+    }
+    m_editLabel->setText(text);
 }
 
 }  // namespace usdcc::usd

@@ -33,27 +33,29 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
-      win64: ${{ steps.packs.outputs.win64 }}
-      linux: ${{ steps.packs.outputs['linux-x64'] }}
+      windows: ${{ steps.packs.outputs.windows }}
+      linux: ${{ steps.packs.outputs.linux }}
     steps:
       - uses: actions/checkout@v4
       - name: List the packs
         id: packs
         run: python3 tools/ci/usd_plugin_asset.py --matrix --github-output
 
+  # A job per pack and platform, x64 and arm64 (tools/ci/usd_plugin_asset.py
+  # --matrix names the runners): Visual Studio 2022 on x64, the toolset OpenUSD
+  # was built with, and 2026 on windows-11-arm, as in deps-usd.yml.
   windows:
     needs: packs
-    if: needs.packs.outputs.win64 != '[]'
+    if: needs.packs.outputs.windows != '[]'
     strategy:
       fail-fast: false
       matrix:
-        pack: ${{ fromJSON(needs.packs.outputs.win64) }}
-    name: ${{ matrix.pack }} (windows)
-    # Pinned, as in deps-usd.yml: the toolset OpenUSD was built with.
-    runs-on: windows-2022
+        include: ${{ fromJSON(needs.packs.outputs.windows) }}
+    name: ${{ matrix.pack }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     concurrency:
-      group: deps-usd-plugins-${{ matrix.pack }}-win64
+      group: deps-usd-plugins-${{ matrix.pack }}-${{ matrix.platform }}
       cancel-in-progress: false
     defaults:
       run:
@@ -63,8 +65,21 @@ jobs:
       WORK: C:\b
       PACK: C:\pack
       GH_TOKEN: ${{ github.token }}
+      # The Arm image's CMake 4 refuses projects that ask for CMake < 3.5, as some
+      # that a plugin fetches do; CMake 3 ignores it (deps-usd.yml).
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
     steps:
       - uses: actions/checkout@v4
+
+      # The tools run on the image's own Python before setup-python; on the Arm
+      # image that has to be an arm64 one, or they'd name the x64 assets.
+      # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
 
       - name: Name the pack
         id: asset
@@ -89,10 +104,36 @@ jobs:
           exit 0
 
       - name: Set up Python
-        if: steps.published.outputs.found != 'true'
+        if: steps.published.outputs.found != 'true' && matrix.arch == 'x64'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+          architecture: x64
+
+      # On the Arm image setup-python can't install the pinned 3.13: the image
+      # ships a newer 3.13, and Python's installer won't put an older one beside
+      # it, even with the image's uninstalled. python.org's NuGet package of the
+      # same version is a plain archive, unpacked where setup-python would put it.
+      - name: Set up Python (arm64, from python.org's NuGet package)
+        if: steps.published.outputs.found != 'true' && matrix.arch == 'arm64'
+        run: |
+          $version = '${{ steps.asset.outputs.python }}'
+          $dir = "$env:RUNNER_TOOL_CACHE\Python\$version\arm64"
+          if (-not (Test-Path "$dir\python.exe")) {
+            $zip = "$env:RUNNER_TEMP\pythonarm64.$version.zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/pythonarm64/$version/pythonarm64.$version.nupkg" -OutFile $zip
+            Expand-Archive $zip "$env:RUNNER_TEMP\pythonarm64" -Force
+            New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+            Move-Item "$env:RUNNER_TEMP\pythonarm64\tools" $dir
+            Remove-Item -Recurse -Force $zip, "$env:RUNNER_TEMP\pythonarm64"
+          }
+          & "$dir\python.exe" -m ensurepip --upgrade --default-pip | Select-Object -Last 1
+          if ($LASTEXITCODE) { throw 'ensurepip failed' }
+          # As setup-python does: first on PATH, and where CMake's FindPython looks.
+          Add-Content $env:GITHUB_PATH "$dir\Scripts"
+          Add-Content $env:GITHUB_PATH $dir
+          "pythonLocation=$dir", "Python_ROOT_DIR=$dir", "Python3_ROOT_DIR=$dir" | Add-Content $env:GITHUB_ENV
+          & "$dir\python.exe" -c "import platform, sys; print(sys.version, platform.machine())"
 
       - name: Fetch OpenUSD
         if: steps.published.outputs.found != 'true'
@@ -151,21 +192,21 @@ jobs:
           gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
           if ($LASTEXITCODE) { throw 'publishing failed' }
 
-  # The same on Ubuntu 24.04 with GCC 13, for the packs whose pins list linux-x64,
-  # against the Linux OpenUSD asset (docs/CI.md section 8). The build gives the
-  # pack's binaries RUNPATHs relative to $ORIGIN.
+  # The same on Ubuntu 24.04 with GCC 13, x64 and arm64, for the packs whose pins
+  # list linux-x64 or linux-arm64, against the Linux OpenUSD asset (docs/CI.md
+  # section 8). The build gives the pack's binaries RUNPATHs relative to $ORIGIN.
   linux:
     needs: packs
     if: needs.packs.outputs.linux != '[]'
     strategy:
       fail-fast: false
       matrix:
-        pack: ${{ fromJSON(needs.packs.outputs.linux) }}
-    name: ${{ matrix.pack }} (linux)
-    runs-on: ubuntu-24.04
+        include: ${{ fromJSON(needs.packs.outputs.linux) }}
+    name: ${{ matrix.pack }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     concurrency:
-      group: deps-usd-plugins-${{ matrix.pack }}-linux-x64
+      group: deps-usd-plugins-${{ matrix.pack }}-${{ matrix.platform }}
       cancel-in-progress: false
     defaults:
       run:

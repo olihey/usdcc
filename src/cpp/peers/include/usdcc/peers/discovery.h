@@ -69,11 +69,13 @@ public:
 Q_SIGNALS:
     void found(const usdcc::peers::FoundRoom& room);  // Also when it changed
     void lost(const QString& roomId);
+    void problemChanged();
 };
 
 // mDNS and DNS-SD, service type `_usdcc._tcp` (PEERS.md §5.2), with the public-domain
 // `mdns` library. A host answers on port 5353 beside the system's own responder; a
-// member that looks asks from a port of its own and gets answers sent to it.
+// member that looks asks from a port of its own and gets answers sent to it. Both use
+// every network adapter, not only the one the system picks for multicast.
 USDCC_PEERS_API std::unique_ptr<NetworkDiscovery> createMdnsDiscovery(QObject* parent = nullptr);
 
 // A network inside the process, for tests: every FakeNetworkDiscovery made with the

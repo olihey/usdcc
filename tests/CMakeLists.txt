@@ -38,6 +38,8 @@ add_executable(usdcc_tests
     move_tool_test.cpp
     orbit_camera_test.cpp
     stage_camera_test.cpp
+    validation_run_test.cpp
+    validation_profile_test.cpp
     viewport_grid_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
@@ -104,6 +106,10 @@ add_executable(usdcc_ui_tests
     current_stage_test.cpp
     dependencies_panel_test.cpp
     dope_sheet_test.cpp
+    curve_editor_test.cpp
+    playblast_test.cpp
+    validation_panel_test.cpp
+    validation_fix_test.cpp
     dependency_files.h
     layer_editor_test.cpp
     log_panel_test.cpp
@@ -118,6 +124,7 @@ add_executable(usdcc_ui_tests
     asset_picker_test.cpp
     assets_test_server.h
     assets_test_server.cpp
+    asset_activity_test.cpp
     asset_servers_editor_test.cpp
     prim_tree_filter_test.cpp
     recent_files_test.cpp
@@ -130,6 +137,7 @@ add_executable(usdcc_ui_tests
     material_editor_test.cpp
     save_stage_shortcut_test.cpp
     settings_ui_test.cpp
+    themes_test.cpp
     shader_connections_ui_test.cpp
     add_shade_input_ui_test.cpp
     session_store_test.cpp
@@ -160,7 +168,7 @@ if(USDCC_BUILD_PHYSICS_JOLT)
 endif()
 if(USDCC_BUILD_VIEWPORT_BROADCAST)
     target_sources(usdcc_ui_tests PRIVATE viewport_broadcast_test.cpp)
-    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_core)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_ui)
 endif()
 # The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)
@@ -197,6 +205,7 @@ add_executable(usdcc_python_tests
     script_editor_panel_test.cpp
     session_test.cpp
     startup_scripts_test.cpp
+    validation_python_test.cpp
     viewport_camera_test.cpp
     viewport_renderer_python_test.cpp
     python_test_app.h

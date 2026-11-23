@@ -1,4 +1,5 @@
 #include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/ui/log_model.h"
@@ -133,7 +134,7 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
 
     // --- Toolbar: filter menu, search, clear, log folder ---------------------
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     usdcc::ui::scaled::margins(toolbarLayout, 4, 4, 4, 4);
@@ -445,7 +446,7 @@ void LogSidePanel::fillFilterMenu(QMenu* menu, bool pinned) {
 void LogSidePanel::updateSearch() {
     m_filter->setSearch(m_search->text(), m_caseButton->isChecked(), m_regexButton->isChecked());
     // An expression that doesn't parse filters nothing; say so on the field.
-    m_search->setStyleSheet(m_filter->isSearchValid() ? QString() : QStringLiteral("border-color: #ff5f56;"));
+    m_search->setStyleSheet(m_filter->isSearchValid() ? QString() : QStringLiteral("border-color: %1;").arg(theme::color(theme::Token::Error).name()));
     m_search->setToolTip(m_filter->isSearchValid() ? QString() : tr("Not a valid regular expression"));
 }
 

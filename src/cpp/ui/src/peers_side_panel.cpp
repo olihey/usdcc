@@ -1,4 +1,5 @@
 #include "usdcc/ui/peers_side_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/log_model.h"
@@ -96,14 +97,14 @@ QString imageHtml(const PeersController* controller, const PeersController::Chat
     if (!mine) {
         // Nothing comes before the receiver says so.
         if (!PeersController::acceptsImages()) {
-            return QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>")
+            return QStringLiteral("<br><i class=\"muted\">%1</i>")
                 .arg(QObject::tr("An image (%1); images shared with you are off in Settings > Peers").arg(what));
         }
         if (controller->isDeclined(image.preview)) {
-            return QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("Declined: %1").arg(what));
+            return QStringLiteral("<br><i class=\"muted\">%1</i>").arg(QObject::tr("Declined: %1").arg(what));
         }
         if (!controller->isAccepted(image.preview)) {
-            html += QStringLiteral("<br><span style=\"color:#8a8d93\">%1</span><br><a href=\"accept:%2\">%3</a>")
+            html += QStringLiteral("<br><span class=\"muted\">%1</span><br><a href=\"accept:%2\">%3</a>")
                         .arg(QObject::tr("Wants to share %1").arg(what), image.preview, QObject::tr("Accept"));
             if (!image.original.isEmpty()) {
                 html += QStringLiteral(" · <a href=\"previewonly:%1\">%2</a>").arg(image.preview, QObject::tr("Preview Only"));
@@ -118,7 +119,7 @@ QString imageHtml(const PeersController* controller, const PeersController::Chat
         // Its size from the header first: one that's unreasonably large isn't decoded.
         QSize size = QImageReader(preview.path).size();
         if (!size.isValid() || size.width() > kMaxPreviewSide || size.height() > kMaxPreviewSide) {
-            html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("The preview can't be shown"));
+            html += QStringLiteral("<br><i class=\"muted\">%1</i>").arg(QObject::tr("The preview can't be shown"));
             break;
         }
         size.scale(std::min(size.width(), kThumbnailWidth), std::min(size.height(), kThumbnailHeight), Qt::KeepAspectRatio);
@@ -130,10 +131,10 @@ QString imageHtml(const PeersController* controller, const PeersController::Chat
     }
     case State::Fetching:
     case State::Missing:
-        html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("The preview is on its way…"));
+        html += QStringLiteral("<br><i class=\"muted\">%1</i>").arg(QObject::tr("The preview is on its way…"));
         break;
     case State::Failed:
-        html += QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>")
+        html += QStringLiteral("<br><i class=\"muted\">%1</i>")
                     .arg(QObject::tr("No preview: %1").arg(preview.error).toHtmlEscaped());
         break;
     }
@@ -166,10 +167,10 @@ QString imageHtml(const PeersController* controller, const PeersController::Chat
     if (mine) {
         html += controller->isSharing(image.preview)
                     ? QStringLiteral("<br><a href=\"stop:%1\">%2</a>").arg(image.preview, QObject::tr("Stop Sharing"))
-                    : QStringLiteral("<br><i style=\"color:#8a8d93\">%1</i>").arg(QObject::tr("No longer shared"));
+                    : QStringLiteral("<br><i class=\"muted\">%1</i>").arg(QObject::tr("No longer shared"));
     }
     if (!image.sharedPath.isEmpty()) {
-        html += QStringLiteral("<br><span style=\"color:#8a8d93\">%1</span> <a href=\"shared:%2\">%3</a>")
+        html += QStringLiteral("<br><span class=\"muted\">%1</span> <a href=\"shared:%2\">%3</a>")
                     .arg(QObject::tr("On a shared drive:"), image.preview,
                          QDir::toNativeSeparators(image.sharedPath).toHtmlEscaped());
     }
@@ -184,13 +185,13 @@ QIcon dot(const QString& color, std::optional<PeersController::Status> status = 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(color.isEmpty() ? QStringLiteral("#8a8d93") : color));
+    painter.setBrush(color.isEmpty() ? theme::color(theme::Token::Muted) : QColor(color));
     painter.drawEllipse(QRectF(1, 1, 10, 10));
     if (status) {
         const QColor mark = *status == PeersController::Status::DoNotDisturb ? QColor(0xe5, 0x48, 0x4d)
                             : *status == PeersController::Status::Away       ? QColor(0xf0, 0xb2, 0x32)
                                                                              : QColor(0x4c, 0xc3, 0x8a);
-        painter.setPen(QPen(QColor(0x1b, 0x1b, 0x1e), 1.5));
+        painter.setPen(QPen(theme::color(theme::Token::SurfacePanel), 1.5));
         painter.setBrush(mark);
         painter.drawEllipse(QRectF(7.5, 7.5, 5.5, 5.5));
     }
@@ -560,7 +561,7 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     auto* sendButton = new SquareButton(m_roomView);
     m_send = sendButton;
     m_send->setObjectName(QStringLiteral("peersSend"));
-    m_send->setIcon(QIcon(QStringLiteral(":/usdcc/theme/send.png")));
+    m_send->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/send.png")));
     scaled::iconSize(m_send, 16, 16);
     m_send->setToolTip(tr("Send (Enter)"));
     // Square, as tall as the message is for one line; they stay at its foot as it grows.
@@ -590,6 +591,12 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     setWidget(container);
 
     connect(controller, &PeersController::roomsChanged, this, &PeersSidePanel::rebuildRooms);
+    theme::onChanged(this, [this]() {
+        rebuildRooms();
+        rebuildPeople();
+        rebuildTabs();
+        rebuildChat();
+    });
     connect(controller, &PeersController::peopleChanged, this, [this](Room* room) {
         if (room == m_room) {
             rebuildPeople();
@@ -651,6 +658,22 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
     connect(this, &SidePanel::collapsedChanged, this, &PeersSidePanel::updateShown);
     rebuildRooms();
     showRoom(nullptr);
+}
+
+bool PeersSidePanel::event(QEvent* event) {
+    switch (event->type()) {
+        case QEvent::Show:
+        case QEvent::Hide:
+        case QEvent::Move:
+        case QEvent::Resize:
+            // visibilityChanged can come before the panel has its place in the window, when
+            // nothing of it shows yet: look again once it has.
+            QMetaObject::invokeMethod(this, &PeersSidePanel::updateShown, Qt::QueuedConnection);
+            break;
+        default:
+            break;
+    }
+    return SidePanel::event(event);
 }
 
 void PeersSidePanel::updateShown() {
@@ -892,6 +915,8 @@ void PeersSidePanel::rebuildPeople() {
 }
 
 void PeersSidePanel::rebuildChat() {
+    // What appendLine()'s class="muted" is, in the theme of the moment.
+    m_chat->document()->setDefaultStyleSheet(QStringLiteral(".muted { color: %1; }").arg(theme::color(theme::Token::Muted).name()));
     // Where it was, unless at the end, which it stays at.
     QScrollBar* bar = m_chat->verticalScrollBar();
     const bool atEnd = bar->value() >= bar->maximum();
@@ -927,9 +952,9 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
     };
     const QString time = line.when.toString(QStringLiteral("HH:mm"));
     const int gap = m_chat->document()->isEmpty() ? 0 : scaled::pixels(8);
-    const QString timeHtml = QStringLiteral("<span style=\"color:#8a8d93; font-size:small\">%1</span>").arg(time);
+    const QString timeHtml = QStringLiteral("<span class=\"muted\" style=\"font-size:small\">%1</span>").arg(time);
     if (!line.from.isValid()) {
-        add(QStringLiteral("<span style=\"color:#8a8d93\"><i>%1</i></span>&nbsp;&nbsp;%2")
+        add(QStringLiteral("<span class=\"muted\"><i>%1</i></span>&nbsp;&nbsp;%2")
                 .arg(line.text.toHtmlEscaped(), timeHtml),
             0, gap);
         m_lastFrom.clear();
@@ -938,7 +963,7 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
     const bool sameGroup = line.from.id == m_lastFrom && m_lastWhen.isValid() &&
                            m_lastWhen.secsTo(line.when) < kChatGroupSeconds;
     if (!sameGroup) {
-        const QString color = line.from.color.isEmpty() ? QStringLiteral("#dfe1e5") : line.from.color;
+        const QString color = line.from.color.isEmpty() ? theme::color(theme::Token::Text).name() : line.from.color;
         add(QStringLiteral("<b style=\"color:%1\">%2</b>&nbsp;&nbsp;%3").arg(color, line.from.name.toHtmlEscaped(), timeHtml),
             0, gap);
     }
@@ -955,21 +980,21 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
         add(html, scaled::pixels(12), sameGroup ? scaled::pixels(3) : scaled::pixels(1));
     } else {
         // Shared log messages: one line each, as the Log panel shows them, details below.
-        add(QStringLiteral("<span style=\"color:#8a8d93\"><i>%1</i></span>")
+        add(QStringLiteral("<span class=\"muted\"><i>%1</i></span>")
                 .arg((line.records.size() == 1 ? tr("shared a log message") : tr("shared %1 log messages").arg(line.records.size()))),
             scaled::pixels(12), sameGroup ? scaled::pixels(3) : scaled::pixels(1));
         const QColor background = m_chat->palette().color(QPalette::Base);
         for (const PeersController::SharedLogRecord& record : line.records) {
             add(QStringLiteral("<span style=\"font-family:Consolas,'Cascadia Mono',monospace; font-size:small\">"
-                               "<span style=\"color:#8a8d93\">%1</span>&nbsp;<b style=\"color:%2\">%3</b>&nbsp;"
-                               "<span style=\"color:#8a8d93\">%4</span>&nbsp;%5</span>")
+                               "<span class=\"muted\">%1</span>&nbsp;<b style=\"color:%2\">%3</b>&nbsp;"
+                               "<span class=\"muted\">%4</span>&nbsp;%5</span>")
                     .arg(record.time.toString(QStringLiteral("HH:mm:ss")), levelColor(record.level, background),
                          record.level.toUpper().toHtmlEscaped(), record.category.toHtmlEscaped(),
                          record.text.toHtmlEscaped().replace(u'\n', QStringLiteral("<br>"))),
                 scaled::pixels(12), scaled::pixels(2));
             if (!record.details.isEmpty()) {
-                add(QStringLiteral("<span style=\"font-family:Consolas,'Cascadia Mono',monospace; font-size:small; "
-                                   "color:#8a8d93\">%1</span>")
+                add(QStringLiteral("<span class=\"muted\" style=\"font-family:Consolas,'Cascadia Mono',monospace; "
+                                   "font-size:small\">%1</span>")
                         .arg(record.details.toHtmlEscaped().replace(u'\n', QStringLiteral("<br>"))),
                     scaled::pixels(28), 0);
             }
@@ -1195,7 +1220,7 @@ void PeersSidePanel::fillEmojiMenu(QMenu* menu) {
         for (qsizetype i = 0; i < emoji.size(); ++i) {
             auto* button = new QToolButton(grid);
             button->setText(emoji[i]);
-            // Styled by the theme (dark.qss): no padding, a larger font.
+            // Styled by the theme (app.qss): no padding, a larger font.
             button->setObjectName(QStringLiteral("peersEmojiCell"));
             button->setAutoRaise(true);
             scaled::fixedSize(button, 32, 32);

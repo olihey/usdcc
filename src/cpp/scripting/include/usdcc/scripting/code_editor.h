@@ -7,7 +7,7 @@
 namespace usdcc::scripting {
 
 // The Script Editor panel's text editor (docs/SCRIPTING.md §7): a monospace
-// QPlainTextEdit (font family from theme/dark.qss, #scriptEditor) with
+// QPlainTextEdit (font family from theme/app.qss, #scriptEditor) with
 //   - a line-number gutter and the cursor's line highlighted;
 //   - indentation in spaces, 4 per level: Tab and Shift+Tab indent and
 //     dedent the selected lines (or insert up to the next tab stop);

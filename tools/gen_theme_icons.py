@@ -23,6 +23,7 @@ WHITE = (255, 255, 255)
 # name -> (stroke width in 16px space, rgb, list of polylines in 16px space)
 ICONS = {
     "chevron-down": (1.4, LIGHT, [[(4.5, 6.5), (8, 10), (11.5, 6.5)]]),
+    "chevron-up": (1.4, LIGHT, [[(4.5, 9.5), (8, 6), (11.5, 9.5)]]),
     # The title bar's workspace button, on the accent fill.
     "chevron-down-white": (1.6, WHITE, [[(4.5, 6.5), (8, 10), (11.5, 6.5)]]),
     "check": (1.8, WHITE, [[(3.5, 8.5), (6.5, 11.5), (12.5, 4.5)]]),

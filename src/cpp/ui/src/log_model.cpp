@@ -1,4 +1,5 @@
 #include "usdcc/ui/log_model.h"
+#include "usdcc/ui/theme.h"
 
 #include <QDateTime>
 
@@ -210,18 +211,15 @@ QString LogModel::detailsHtml(const LogRecord& record) {
 }
 
 QColor LogModel::levelColor(LogLevel level) {
-    // From the dark theme (resources/theme/dark.qss): the axis red for errors,
-    // an amber in the same family for warnings, and the primary and muted
-    // text tints for the rest.
     switch (level) {
         case LogLevel::Fatal:
-        case LogLevel::Error: return QColor(0xff, 0x5f, 0x56);
-        case LogLevel::Warning: return QColor(0xff, 0xbd, 0x2e);
-        case LogLevel::Info: return QColor(255, 255, 255, 191);
+        case LogLevel::Error: return theme::color(theme::Token::Error);
+        case LogLevel::Warning: return theme::color(theme::Token::Attention);
+        case LogLevel::Info: return theme::color(theme::Token::Ink, 191);
         case LogLevel::Debug:
-        case LogLevel::Trace: return QColor(255, 255, 255, 102);
+        case LogLevel::Trace: return theme::color(theme::Token::Ink, 102);
     }
-    return QColor(255, 255, 255, 191);
+    return theme::color(theme::Token::Ink, 191);
 }
 
 QString LogModel::levelName(LogLevel level) {

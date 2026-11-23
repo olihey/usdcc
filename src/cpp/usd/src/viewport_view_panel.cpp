@@ -1,6 +1,11 @@
 #include "usdcc/usd/viewport_view_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/toast.h"
+#include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
+#include "usdcc/usd/playblast.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/usd/color_management.h"
@@ -31,6 +36,9 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QSettings>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QGridLayout>
@@ -54,6 +62,9 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QProgressDialog>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -79,7 +90,7 @@ QIcon colorSwatch(const QColor& color) {
     QPixmap pixmap(28, 14);
     pixmap.fill(color);
     QPainter painter(&pixmap);
-    painter.setPen(QColor(255, 255, 255, 60));
+    painter.setPen(usdcc::ui::theme::color(usdcc::ui::theme::Token::Overlay, 60));
     painter.drawRect(pixmap.rect().adjusted(0, 0, -1, -1));
     return QIcon(pixmap);
 }
@@ -729,7 +740,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
 
@@ -799,6 +810,47 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     // Looking through another camera (docs/VIEWPORT_CAMERA.md): the active camera changed.
     connect(m_viewport, &HydraViewportWindow::stageCameraChanged, this, [this]() {
         if (activeViewport() == this) activeViewportChanged()();
+    });
+    // Drive (docs/VIEWPORT_CAMERA.md §2.2): each drag one undo step at the edit target; the
+    // camera set to the orbit camera as it moves; a stronger layer that hides it ends it.
+    connect(m_viewport, &HydraViewportWindow::driveStarted, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (stage && m_undoManager) {
+            m_undoManager->beginEdit(stage, tr("Move %1").arg(QString::fromStdString(m_viewport->stageCamera().GetName())));
+        }
+        m_driveProblem.clear();
+    });
+    connect(m_viewport, &HydraViewportWindow::driveMoved, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (!stage || !m_driveProblem.empty()) return;
+        const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(m_viewport->stageCamera());
+        const PXR_NS::UsdTimeCode time = stage->timeCode();
+        const std::optional<PXR_NS::GfCamera> camera = stageCameraAt(prim, time);
+        if (!camera) return;
+        m_driveProblem = setCameraFromView(prim, m_viewport->orbitViewAsCamera(*camera), time);
+    });
+    connect(m_viewport, &HydraViewportWindow::driveFinished, this, [this]() {
+        const StageRefPtr stage = currentStage();
+        if (stage && m_undoManager && m_undoManager->isEditing(stage)) {
+            if (m_driveProblem.empty()) {
+                m_undoManager->endEdit(stage);
+            } else {
+                m_undoManager->cancelEdit(stage);  // it wouldn't show: as it was
+            }
+        }
+        if (!m_driveProblem.empty()) {
+            const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning,
+                                                  .title = "Can't drive " + m_viewport->stageCamera().GetName()};
+            USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Warning, "usdcc.viewport", toast, "{}", m_driveProblem);
+            m_driveProblem.clear();
+        }
+    });
+    connect(m_viewport, &HydraViewportWindow::navigationRefused, this, [this](const QString& why, bool locked) {
+        const usdcc::core::ToastRequest toast{
+            .kind = locked ? usdcc::core::ToastKind::Info : usdcc::core::ToastKind::Warning,
+            .title = locked ? std::string("Camera locked") : "Can't drive " + m_viewport->stageCamera().GetName()};
+        USDCC_LOG_TOAST_AS(usdcc::core::LogLevel::Info, "usdcc.viewport", toast, "{}",
+                           locked ? why.toStdString() : why.toStdString() + " Left it for the viewport's own camera instead.");
     });
     connect(m_viewport, &HydraViewportWindow::stageCameraLost, this, [](const PXR_NS::SdfPath& path) {
         const usdcc::core::ToastRequest toast{.kind = usdcc::core::ToastKind::Warning, .title = "Camera gone"};
@@ -937,15 +989,8 @@ bool ViewportViewPanel::backToCamera() {
 }
 
 PXR_NS::GfCamera ViewportViewPanel::viewAsCamera(const PXR_NS::GfCamera& like) const {
-    const HydraViewportWindow::CameraState state = m_viewport->cameraState();
-    const PXR_NS::GfFrustum frustum = m_viewport->frustum();
-    const PXR_NS::GfVec2d window = frustum.GetWindow().GetSize();
-    OrbitView view;
-    view.cameraToWorld = frustum.ComputeViewInverse();
-    view.orthographic = state.orthographic;
-    view.fovY = m_viewport->fieldOfView();
-    view.orthoSize = state.orthoSize;
-    return cameraSeeingView(like, view, window[1] > 0.0 ? window[0] / window[1] : 1.0);
+    // What the orbit camera sees in the gate (docs/VIEWPORT_CAMERA.md §4), not the overscan around it.
+    return m_viewport->orbitViewAsCamera(like);
 }
 
 bool ViewportViewPanel::copyViewToCamera() {
@@ -1615,6 +1660,24 @@ void ViewportViewPanel::addCameraEntries(QMenu* menu) {
         copy->setEnabled(why.empty());
         copy->setToolTip(QString::fromStdString(why));
     }
+    // What a drag does through a stage camera (§2).
+    QMenu* navigation = menu->addMenu(tr("Navigation"));
+    navigation->setObjectName(QStringLiteral("cameraNavigationMenu"));
+    navigation->setToolTipsVisible(true);
+    auto* modes = new QActionGroup(navigation);
+    const std::string mode = displayOptions().cameraNavigation;
+    for (const char* name : kCameraNavigations) {
+        QAction* action = navigation->addAction(cameraNavigationLabel(name));
+        action->setObjectName(QStringLiteral("cameraNavigation_%1").arg(QLatin1String(name)));
+        action->setCheckable(true);
+        action->setChecked(mode == name);
+        modes->addAction(action);
+        const std::string wanted = name;
+        action->setToolTip(wanted == "detach" ? tr("A drag leaves the camera for the viewport's own, where it was")
+                           : wanted == "drive" ? tr("A drag moves the camera: one undo step each")
+                                               : tr("A drag does nothing"));
+        connect(action, &QAction::triggered, this, [this, wanted]() { setCameraNavigation(wanted); });
+    }
     QAction* newCamera = menu->addAction(tr("New Camera from View"), this, [this]() { newCameraFromView(); });
     newCamera->setObjectName(QStringLiteral("newCameraFromViewAction"));
     newCamera->setEnabled(stage && !through);
@@ -1690,6 +1753,9 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     QMenu* cameraMenu = menu->addMenu(tr("Camera"));
     cameraMenu->setObjectName(QStringLiteral("cameraMenu"));
     addCameraEntries(cameraMenu);
+    QAction* playblastAction = menu->addAction(tr("Playblast..."), this, &ViewportViewPanel::playblastInteractively);
+    playblastAction->setEnabled(bool(currentStage()));
+    playblastAction->setToolTip(tr("The viewport's picture at each frame of a range, as images"));
 
     menu->addSeparator();
     const HydraViewportWindow::DisplayOptions shown = displayOptions();
@@ -1936,6 +2002,91 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     defaults->setEnabled(!m_displayOverrides.isEmpty());
 
     ViewportMenuEntries::instance().populate(menu, this);
+}
+
+void ViewportViewPanel::setCameraNavigation(const std::string& mode) {
+    if (std::find_if(std::begin(kCameraNavigations), std::end(kCameraNavigations),
+                     [&mode](const char* name) { return mode == name; }) == std::end(kCameraNavigations)) {
+        return;
+    }
+    ViewportDisplayOverrides overrides = m_displayOverrides;
+    overrides.cameraNavigation = mode;
+    setDisplayOverrides(overrides);
+}
+
+void ViewportViewPanel::playblastInteractively() {
+    const StageRefPtr stage = currentStage();
+    if (!stage || !m_viewport) return;
+    QSettings settings = usdcc::ui::appSettings();
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Playblast"));
+    auto* form = new QFormLayout(&dialog);
+    const TimeRange playing = stage->playbackRange();
+    auto* start = new QDoubleSpinBox(&dialog);
+    auto* end = new QDoubleSpinBox(&dialog);
+    for (QDoubleSpinBox* spin : {start, end}) {
+        spin->setRange(-1e6, 1e6);
+        spin->setDecimals(0);
+    }
+    start->setValue(playing.start);
+    end->setValue(playing.end);
+    auto* step = new QDoubleSpinBox(&dialog);
+    step->setRange(0.1, 1000.0);
+    step->setDecimals(1);
+    step->setValue(1.0);
+    auto* file = new QLineEdit(&dialog);
+    file->setText(settings.value(QStringLiteral("Viewport/playblastPattern"),
+                                 QDir(QDir::homePath()).filePath(QStringLiteral("playblast/frame.####.png")))
+                      .toString());
+    file->setToolTip(tr("#### (or <frame>, $F4) is the frame number; PNG, JPEG or TIFF by the extension"));
+    auto* browse = new QPushButton(tr("Browse..."), &dialog);
+    connect(browse, &QPushButton::clicked, &dialog, [&dialog, file]() {
+        const QString chosen = QFileDialog::getSaveFileName(&dialog, tr("Playblast"), file->text(),
+                                                            tr("Images (*.png *.jpg *.tif)"));
+        if (!chosen.isEmpty()) file->setText(chosen);
+    });
+    auto* fileRow = new QHBoxLayout();
+    fileRow->addWidget(file, 1);
+    fileRow->addWidget(browse);
+    form->addRow(tr("First frame:"), start);
+    form->addRow(tr("Last frame:"), end);
+    form->addRow(tr("Step:"), step);
+    form->addRow(tr("Files:"), fileRow);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Playblast"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    dialog.resize(usdcc::ui::scaled::size(520, 10));
+    if (dialog.exec() != QDialog::Accepted || file->text().trimmed().isEmpty()) return;
+    settings.setValue(QStringLiteral("Viewport/playblastPattern"), file->text().trimmed());
+
+    PlayblastOptions options;
+    options.frames = {start->value(), end->value()};
+    options.step = step->value();
+    options.pattern = file->text().trimmed();
+    const int total = int(playblastFrames(options).size());
+    QProgressDialog progress(tr("Playblasting..."), tr("Cancel"), 0, total, this);
+    progress.setWindowTitle(tr("Playblast"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    QString error;
+    const QStringList files = playblast(*m_viewport, *stage, options,
+                                        [&progress](int done, int all) {
+                                            progress.setMaximum(all);
+                                            progress.setValue(done);
+                                            return !progress.wasCanceled();
+                                        },
+                                        &error);
+    progress.close();
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("Playblast"), tr("The playblast stopped: %1").arg(error));
+        return;
+    }
+    if (!files.isEmpty()) {
+        USDCC_LOG_TOAST(usdcc::core::LogLevel::Info, "usdcc.playblast", "Playblast: {} frames written to {}",
+                        files.size(), QDir::toNativeSeparators(QFileInfo(files.front()).absolutePath()).toStdString());
+    }
 }
 
 }  // namespace usdcc::usd

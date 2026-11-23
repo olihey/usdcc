@@ -11,6 +11,7 @@
 
 #include <pxr/base/ts/knot.h>
 #include <pxr/base/ts/spline.h>
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/editTarget.h>
@@ -299,6 +300,91 @@ USDCC_TEST(anim_edit_move_keys_undo) {
           "one step");
     stack->undo();
     CHECK(anim::keyTimes({size}) == std::vector<double>({0.0, 10.0, 20.0}) && isClose(at(size, 10.0), 2.0), "undone");
+}
+
+// ---- Curves (docs/ANIMATION.md phase 4) ---------------------------------------------------
+
+// Convert to Curve goes through every sample; Bake to Samples comes back to the same values.
+USDCC_TEST(anim_edit_convert_and_bake) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetSizeAttr();
+    size.Set(1.0, 0.0);
+    size.Set(3.0, 10.0);
+    size.Set(2.0, 20.0);
+    CHECK(anim::canHaveCurve(size) && !anim::hasCurve(size), "a double can have a curve");
+    CHECK(anim::convertToCurve(size) && anim::hasCurve(size) && size.GetNumTimeSamples() == 0, "converted, no samples left");
+    CHECK(isClose(at(size, 0.0), 1.0) && isClose(at(size, 10.0), 3.0) && isClose(at(size, 20.0), 2.0),
+          "through every sample's value");
+    CHECK(anim::keyTimes({size}) == std::vector<double>({0.0, 10.0, 20.0}), "its knots are the keys");
+    const double between = at(size, 5.0);
+    CHECK(between > 1.0 && between < 3.0, "a curve between them: %g", between);
+    CHECK(anim::bakeToSamples(size) && !anim::hasCurve(size) && size.GetNumTimeSamples() == 21, "baked: a sample a frame");
+    CHECK(isClose(at(size, 10.0), 3.0) && std::abs(at(size, 5.0) - between) < 1e-9, "the same values: %g", at(size, 5.0));
+
+    const UsdAttribute visibility = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetVisibilityAttr();
+    CHECK(!anim::canHaveCurve(visibility), "a token can't");
+    const UsdAttribute extent = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetExtentAttr();
+    CHECK(!anim::canHaveCurve(extent), "nor an array");
+}
+
+// Interpolation, extrapolation and an inner loop on a curve; knots moved by a drag.
+USDCC_TEST(anim_edit_curve_settings) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdAttribute size = UsdGeomCube::Define(stage, SdfPath("/Cube")).GetSizeAttr();
+    size.Set(1.0, 0.0);
+    size.Set(3.0, 10.0);
+    size.Set(2.0, 20.0);
+    anim::convertToCurve(size);
+    CHECK(anim::setKnotInterpolation(size, {0.0}, TsInterpHeld) && isClose(at(size, 5.0), 1.0), "held after 0");
+    CHECK(anim::setKnotInterpolation(size, {0.0}, TsInterpLinear) && isClose(at(size, 5.0), 2.0), "linear after 0");
+    CHECK(anim::setKnotTangents(size, {10.0}, anim::Tangents::Flat), "flat at 10");
+    TsKnot knot;
+    double slope = 1.0;
+    CHECK(size.GetSpline().GetKnot(10.0, &knot) && knot.GetPostTanSlope(&slope) && isClose(slope, 0.0), "no slope");
+    CHECK(anim::setExtrapolation(size, true, TsExtrapolation(TsExtrapLoopRepeat)) &&
+              std::abs(at(size, 25.0) - (at(size, 5.0) + 1.0)) < 1e-9,
+          "after the last knot it repeats, offset so the ends meet: %g", at(size, 25.0));
+    CHECK(anim::setExtrapolation(size, false, TsExtrapolation(TsExtrapHeld)) && isClose(at(size, -5.0), 1.0), "held before");
+    CHECK(anim::setInnerLoop(size, 0.0, 10.0, 0, 1) && size.GetSpline().HasInnerLoops(), "an inner loop");
+    CHECK(anim::setInnerLoop(size, 0.0, 0.0, 0, 0) && !size.GetSpline().HasInnerLoops(), "and none");
+
+    const TsSpline moved = anim::movedKnots(size.GetSpline(), {10.0}, 2.0, 0.5);
+    TsKnot shifted;
+    double value = 0.0;
+    CHECK(moved.GetKnot(12.0, &shifted) && shifted.GetValue(&value) && isClose(value, 3.5) && !moved.GetKnot(10.0, &knot),
+          "a knot moved 2 frames and half a unit up");
+}
+
+// A translate and a scale split into X, Y and Z: the same matrix at every time.
+USDCC_TEST(anim_edit_split_ops) {
+    const UsdStageRefPtr stage = UsdStage::CreateInMemory();
+    const UsdGeomXformable cube(UsdGeomCube::Define(stage, SdfPath("/Cube")));
+    UsdGeomXformOp translate = cube.AddTranslateOp(UsdGeomXformOp::PrecisionDouble, TfToken("pivot"));
+    translate.Set(GfVec3d(1, 2, 3), 0.0);
+    translate.Set(GfVec3d(4, 5, 6), 10.0);
+    cube.AddRotateYOp().Set(30.0f);
+    UsdGeomXformOp scale = cube.AddScaleOp();
+    scale.Set(GfVec3f(2, 3, 4));
+    const auto matrixAt = [&cube](double time) {
+        GfMatrix4d matrix;
+        bool resets = false;
+        cube.GetLocalTransformation(&matrix, &resets, time);
+        return matrix;
+    };
+    const GfMatrix4d at0 = matrixAt(0.0), at5 = matrixAt(5.0), at10 = matrixAt(10.0);
+
+    std::string why;
+    const std::vector<UsdGeomXformOp> made = anim::splitXformOp(translate, &why);
+    CHECK(made.size() == 3 && made[0].GetOpName() == TfToken("xformOp:translateX:pivot"), "translate split: %s", why.c_str());
+    CHECK(anim::splitXformOp(scale, &why).size() == 3, "scale split: %s", why.c_str());
+    bool resets = false;
+    const std::vector<UsdGeomXformOp> ops = cube.GetOrderedXformOps(&resets);
+    CHECK(ops.size() == 7 && ops[3].GetOpType() == UsdGeomXformOp::TypeRotateY, "in place of the old ops: %zu",
+          ops.size());
+    CHECK(GfIsClose(matrixAt(0.0), at0, 1e-9) && GfIsClose(matrixAt(5.0), at5, 1e-9) && GfIsClose(matrixAt(10.0), at10, 1e-9),
+          "the same matrix at every time");
+    CHECK(made[1].GetAttr().GetNumTimeSamples() == 2 && anim::canHaveCurve(made[1].GetAttr()), "each axis keyed, and can be a curve");
+    CHECK(anim::splitXformOp(ops[3], &why).empty() && !why.empty(), "a rotate doesn't split: %s", why.c_str());
 }
 
 // A bake's whole animation at once (Physics' Bake Simulation): what was in the edit target

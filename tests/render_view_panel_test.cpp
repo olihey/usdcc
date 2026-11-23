@@ -10,6 +10,7 @@
 #include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/view_panel_registry.h"
+#include "usdcc/usd/render_camera.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 
@@ -27,6 +28,7 @@
 #include <QTemporaryDir>
 #include <QToolButton>
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <memory>
@@ -334,4 +336,86 @@ USDCC_TEST(render_view_panel) {
 
     panel.reset();
     CHECK(closings == 2, "closing calls closing() once each: %d", closings);
+}
+
+// For a broadcast of a Render View (docs/VIEWPORT_BROADCAST.md phase 5): each picture shown
+// says so, and currentImage() is it.
+USDCC_TEST(render_view_panel_image_shown) {
+    TestSettings settings;
+    QTemporaryDir dir;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       dir.filePath(QStringLiteral("ui.ini")));
+    const std::string file = dir.filePath(QStringLiteral("render.usda")).toStdString();
+    std::ofstream(file) << kStage;
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(file);
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    int closings = 0;
+    TestRenderPanel panel(&stages, stage, &closings);
+    int shown = 0;
+    QObject::connect(&panel, &RenderViewPanel::imageShown, [&shown] { ++shown; });
+    CHECK(panel.currentImage().isNull(), "a picture before any was shown");
+    QImage image(64, 32, QImage::Format_RGB32);
+    image.fill(Qt::darkGreen);
+    panel.showImage(image);
+    CHECK(shown == 1, "showing a picture doesn't say so (%d)", shown);
+    CHECK(panel.currentImage().size() == QSize(64, 32) && panel.currentImage().pixelColor(3, 3) == QColor(Qt::darkGreen),
+          "currentImage() isn't the picture shown");
+}
+
+// The stage's time (docs/ANIMATION.md phase 5): a camera prim read at it, and a new time
+// sending an animated stage again, coalesced, but not a still one.
+USDCC_TEST(render_view_panel_time) {
+    TestSettings settings;
+    QTemporaryDir folder;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       folder.filePath(QStringLiteral("ui.ini")));
+    StageManager stages;
+    const StageRefPtr stage = stages.createStage();
+    const PXR_NS::UsdStageRefPtr usd = stage->usdStage();
+    const PXR_NS::UsdPrim camera = usd->DefinePrim(PXR_NS::SdfPath("/Shot"), PXR_NS::TfToken("Camera"));
+    PXR_NS::UsdAttribute translate =
+        camera.CreateAttribute(PXR_NS::TfToken("xformOp:translate"), PXR_NS::SdfValueTypeNames->Double3);
+    translate.Set(PXR_NS::GfVec3d(0, 0, 0), 0.0);
+    translate.Set(PXR_NS::GfVec3d(10, 0, 0), 10.0);
+    camera.CreateAttribute(PXR_NS::TfToken("xformOpOrder"), PXR_NS::SdfValueTypeNames->TokenArray, false,
+                           PXR_NS::SdfVariabilityUniform)
+        .Set(PXR_NS::VtTokenArray{PXR_NS::TfToken("xformOp:translate")});
+
+    const std::optional<RenderCamera> at0 = usdcc::usd::primRenderCamera(camera, 1.5, PXR_NS::UsdTimeCode(0.0));
+    const std::optional<RenderCamera> at10 = usdcc::usd::primRenderCamera(camera, 1.5, PXR_NS::UsdTimeCode(10.0));
+    CHECK(at0 && at10 && closeTo(at10->cameraToWorld.ExtractTranslation()[0], 10.0) &&
+              closeTo(at0->cameraToWorld.ExtractTranslation()[0], 0.0),
+          "a camera prim where it is at each time");
+
+    int closings = 0;
+    auto panel = std::make_unique<TestRenderPanel>(&stages, stage, &closings);
+    panel->resize(640, 480);
+    panel->show();
+    settle(50);
+    auto* cameras = panel->findChild<QComboBox*>(QStringLiteral("renderCamera"));
+    if (!cameras) return;
+    cameras->setCurrentIndex(cameras->findText(QStringLiteral("Shot")));
+    settle(50);
+    CHECK(panel->stageIsAnimated(), "the stage is animated");
+    panel->calls.clear();
+    panel->cameras.clear();
+    // Several times quickly, as playing does: one call.
+    for (double time : {3.0, 4.0, 5.0}) stage->setTime(time);
+    settle(400);
+    const auto count = [&panel](const char* name) { return std::count(panel->calls.begin(), panel->calls.end(), name); };
+    CHECK(count("reload") == 1, "the stage sent again once: %d", int(count("reload")));
+    CHECK(!panel->cameras.empty() && closeTo(panel->cameras.back().cameraToWorld.ExtractTranslation()[0], 5.0) &&
+              closeTo(panel->renderTime(), 5.0),
+          "the camera where it is at 5");
+
+    translate.Clear();
+    translate.Set(PXR_NS::GfVec3d(1, 2, 3));
+    settle(50);
+    CHECK(!panel->stageIsAnimated(), "nothing animated any more");
+    panel->calls.clear();
+    stage->setTime(8.0);
+    settle(400);
+    CHECK(count("reload") == 0, "a still stage isn't sent again for a new time");
 }

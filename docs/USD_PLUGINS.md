@@ -9,8 +9,10 @@ Python 3.13 with the Adobe pack for Windows; its Linux pack, and usdcc's Linux b
 deploy with it, are built and checked locally (phase 8). Phase 3, Gatling, is built and checked locally on Windows
 and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
 Phase 7, Arnold, is built locally on Windows and renders in usdcc's viewport when
-Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds. The
-rest is a plan.
+Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds.
+Phase 6, Aurora, was tried locally (2026-11-23): hdAurora **builds against our OpenUSD** with a
+small patch, no Autodesk fork needed, and registers in usdcc, but its renderer fails to start
+there; no pin yet (§7 phase 6). The rest is a plan.
 
 ## 1. Where we are
 
@@ -61,7 +63,7 @@ rest is a plan.
 | `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check, on Windows (§7 phase 1) and on Linux (phase 8), though its README only names USD 23.08–25.11 |
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
-| `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | Not proven. The last commit is from August 2025; an earlier local attempt needed `/WX` turned off |
+| `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
 | `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows**. ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | Not proven. Its own `building/` scripts build their own USD; upstream tests Rocky 9 (GCC 11) and macOS 14–26, not Ubuntu 24.04 |
 
@@ -288,7 +290,10 @@ drive letter back.
 ### Workflow `deps-usd-plugins.yml`
 
 One job per pack and platform (a matrix from the JSON files, `usd_plugin_asset.py
---matrix`). It runs by hand, on a push that changes a pin, a patch or one of the scripts,
+--matrix`, which also names each platform's runner): `win64` and `linux-x64`, and
+`win-arm64` and `linux-arm64` on GitHub's Arm runners, for the pins that list them
+([ARM64_RELEASES.md](ARM64_RELEASES.md)). The Windows Arm jobs set up Python as
+`build.yml`'s do, and set `CMAKE_POLICY_VERSION_MINIMUM=3.5` for that image's CMake 4. It runs by hand, on a push that changes a pin, a patch or one of the scripts,
 and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new name.
 
 1. Name the pack (`tools/ci/usd_plugin_asset.py`) and skip the job if it's published.
@@ -563,6 +568,36 @@ Three sets, decided by licence:
    MoonRay does (phase 10).
 6. **Aurora.** First a local build against our OpenUSD. If it needs Autodesk's fork, stop
    and drop it.
+   *Tried locally on Windows (2026-11-23): it doesn't need the fork, but it doesn't render
+   in usdcc yet, so there is no pin.*
+   - *The externals. v25.08-beta's `installExternals.py`, with
+     `deps/usd-plugins/patches/aurora-externals-from-usd.patch`, leaves out what our OpenUSD
+     install has (OpenUSD itself, MaterialX, OpenImageIO, OpenEXR, OpenSubdiv, TBB, boost,
+     zlib and the image libraries) and builds the rest in a few minutes: DXC, Slang, glm, stb,
+     miniz, uriparser, tinygltf, tinyobjloader, tinyexr, GLEW, GLFW, cxxopts, gtest.*
+   - *The build. Configured with `-Dpxr_ROOT=<OpenUSD> -DCMAKE_PREFIX_PATH=<OpenUSD>`, no
+     usdview, tests or applications. Aurora's own libraries build as they are; hdAurora needed
+     three changes for OpenUSD 26.08 (`aurora-openusd-26.08.patch`): `IsSupported()` takes the
+     create arguments as a schema (`HdRendererCreateArgsSchema`), and
+     `HdMeshUtil::ComputeTriangulatedFaceVaryingPrimvar()` returns `HdMeshComputationResult`,
+     which is `[[nodiscard]]` (with `/WX`, an error) and isn't a `bool`. No `/WX` change was
+     needed.*
+   - *The runtime. hdAurora's install has `hdAurora.dll` and its `plugInfo.json`; beside it
+     it needs `aurora.dll`, DXC's `dxcompiler.dll` and `dxil.dll`, Slang's DLLs and
+     `glew32.dll`. The folder needs a `plugInfo.json` with `"Includes": ["*/resources/"]`, as
+     OpenUSD's `plugin/usd` has. Aurora's CMake copies the Windows SDK's `dxcompiler.dll`
+     (`DXCOMPILER_DLL`), which wouldn't load here (error 193); the one DXC's release has
+     does. A pin would point `DXCOMPILER_DLL` at it.*
+   - *In usdcc (test profile, the RTX 4090 here): "Aurora" is among the viewport's
+     renderers. Switching to it ends the app: Aurora's `Renderer` creation fails, and
+     hdAurora reports that as `TF_FATAL_ERROR("HdAurora fails to create renderer!")`. The
+     cause isn't found; the dump has "D3D12Device2 not supported, cannot import device"
+     among its strings, which suggests the DirectX backend's device or its interop with
+     Storm's GL. That is the next thing to look at, with Aurora's console log
+     (`AU_DEV_ALWAYS_DUMP_LOGS`).*
+   - *Not done: the pin. Aurora's build isn't plain CMake (its externals script first),
+     which needs §4's "small Python hook next to the JSON", not built yet; and there's no
+     point publishing a pack that can't start its renderer.*
 7. **Arnold**, as a `local` pack on the self-hosted runner.
    *Built, and checked locally on Windows; never built by CI (`local`).*
    - *The SDK. 3ds Max 2027's Arnold (MAXtoA) has the core, 7.5.2, but no headers and no
@@ -601,7 +636,12 @@ Three sets, decided by licence:
      plugins in `plugin/usd`, three libraries in `lib`, the licences. Its zip, unzipped
      over a second copy of the asset with the build folder moved away, passes the same
      check as on Windows. zlib is the system's there (`libz.so.1`; the job installs
-     `zlib1g-dev`), since OpenUSD brings none on Linux. The RUNPATH step, tried on
+     `zlib1g-dev`), since OpenUSD brings none on Linux. *Since 2026-11-23 the pin also lists
+     `win-arm64` and `linux-arm64`, built on the Arm runners, so arm64 releases have it too
+     ([ARM64_RELEASES.md](ARM64_RELEASES.md)). Its one patch,
+     `adobe-fileformats-arm64.patch`: Adobe's `cmake/compiler_config.cmake` gives GCC
+     `-msse3 -m64` on every machine, which GCC for arm64 doesn't know; the patch keeps
+     them to x86. Not upstream.* The RUNPATH step, tried on
      Gatling's pack from phase 3, changes nothing in it. The Windows pack wasn't built
      again locally: the edits rename it, so CI builds it again.*
    - *usdcc with the pack (2026-11-20): `tools/deploy.py` takes packs on Linux (§4), and
@@ -650,7 +690,7 @@ Three sets, decided by licence:
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Arnold's `EULA.txt` allows shipping even the core inside an application, on conditions (§5); Autodesk's general Terms of Use and the FBX SDK's licence are still to read |
-| 4 | Does hdAurora build against a stock OpenUSD? | Unknown; phase 6 answers it |
+| 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
 | 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |

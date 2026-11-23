@@ -23,9 +23,6 @@ constexpr int kTextMargin = 6;      // between the gutter and column 0
 constexpr int kMaxLayouts = 4000;   // cached lines before the cache is cleared
 constexpr std::size_t kLongLineBytes = 4096;  // past this, a line is laid out in parts
 constexpr int kWindowMargin = 512;  // columns laid out either side of what's visible
-const QColor kBackground(0x1c, 0x1c, 0x1e);
-const QColor kGutter(0x16, 0x16, 0x18);
-const QColor kCurrentLine(255, 255, 255, 10);
 // The selection: the theme's accent at 35%.
 QColor selectionColor() {
     QColor color = theme::accent();
@@ -39,7 +36,7 @@ bool isWordChar(QChar c) { return c.isLetterOrNumber() || c == u'_' || c == u':'
 }  // namespace
 
 LineView::LineView(QWidget* parent) : QAbstractScrollArea(parent) {
-    setObjectName(QStringLiteral("codeView"));  // monospace, from theme/dark.qss
+    setObjectName(QStringLiteral("codeView"));  // monospace, from theme/app.qss
     setFocusPolicy(Qt::StrongFocus);
     viewport()->setCursor(Qt::IBeamCursor);
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
@@ -231,7 +228,7 @@ void LineView::focusOutEvent(QFocusEvent* event) {
 
 void LineView::paintEvent(QPaintEvent* event) {
     QPainter painter(viewport());
-    painter.fillRect(event->rect(), kBackground);
+    painter.fillRect(event->rect(), theme::color(theme::Token::SurfacePanel));
     const int height = lineHeight();
     const int gutter = gutterWidth();
     const int left = textLeft();
@@ -246,7 +243,7 @@ void LineView::paintEvent(QPaintEvent* event) {
     painter.setClipRect(QRect(gutter, 0, viewport()->width() - gutter, viewport()->height()));
     for (int line = first; line <= last; ++line) {
         const int y = (line - first) * height;
-        if (line == m_cursor.line) painter.fillRect(QRect(gutter, y, viewport()->width(), height), kCurrentLine);
+        if (line == m_cursor.line) painter.fillRect(QRect(gutter, y, viewport()->width(), height), theme::color(theme::Token::Overlay, 10));
         const LaidOutLine& entry = *laidOut(line, firstVisibleColumn(), visibleColumns());
         const int laidOutSize = int(entry.layout->text().size());
         QList<QTextLayout::FormatRange> selections;
@@ -264,16 +261,16 @@ void LineView::paintEvent(QPaintEvent* event) {
         entry.layout->draw(&painter, QPointF(left + qreal(entry.windowStart) * characterWidth(), y), selections);
         if (line == m_cursor.line && hasFocus()) {
             const qreal x = left + columnX(entry, std::min(m_cursor.column, entry.columns));
-            painter.fillRect(QRectF(x, y, 1, height), QColor(255, 255, 255, 191));
+            painter.fillRect(QRectF(x, y, 1, height), theme::color(theme::Token::Ink, 191));
         }
     }
 
     // The gutter, over the text's left edge.
     painter.setClipping(false);
-    painter.fillRect(QRect(0, 0, gutter, viewport()->height()), kGutter);
+    painter.fillRect(QRect(0, 0, gutter, viewport()->height()), theme::color(theme::Token::SurfaceBar));
     const int right = gutter - fontMetrics().horizontalAdvance(u' ');
     for (int line = first; line <= last; ++line) {
-        painter.setPen(line == m_cursor.line ? QColor(255, 255, 255, 191) : QColor(255, 255, 255, 89));
+        painter.setPen(line == m_cursor.line ? theme::color(theme::Token::Ink, 191) : theme::color(theme::Token::Ink, 89));
         painter.drawText(0, (line - first) * height, right, height, Qt::AlignRight | Qt::AlignVCenter,
                          QString::number(line + 1));
     }

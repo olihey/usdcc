@@ -240,7 +240,9 @@ private:
     void updateRunButton();
     // The current tab's look: accent-filled while focus is in the panel.
     void updateFocusHighlight();
-    void appendOutput(const QString& text, const QColor& color);
+    // `color`: an OutputColor (script_editor_side_panel.cpp).
+    void appendOutput(const QString& text, int color);
+    void recolorOutput();
     void saveSession() const;
     void restoreSession();
     // Saves the session shortly after a change (typing, tabs added, closed,

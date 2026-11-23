@@ -1,4 +1,5 @@
 #include "usdcc/ui/settings_dialog.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/category_section.h"
@@ -121,7 +122,7 @@ QIcon swatch(const QColor& color) {
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QColor(255, 255, 255, 60));
+    painter.setPen(theme::color(theme::Token::Overlay, 60));
     painter.setBrush(color);
     painter.drawRoundedRect(QRectF(pixmap.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
     return QIcon(pixmap);

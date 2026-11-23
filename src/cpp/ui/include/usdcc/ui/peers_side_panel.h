@@ -76,6 +76,9 @@ public:
 Q_SIGNALS:
     void roomShown(usdcc::peers::Room* room);
 
+protected:
+    bool event(QEvent* event) override;
+
 private:
     void rebuildRooms();
     void rebuildPeople();

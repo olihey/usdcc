@@ -1,4 +1,5 @@
 #include "usdcc/ui/title_bar.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 
@@ -23,7 +24,7 @@ constexpr int kLogoSize = 16;
 QToolButton* makeCaptionButton(const char* objectName, const QString& iconPath, QWidget* parent) {
     auto* button = new QToolButton(parent);
     button->setObjectName(QLatin1String(objectName));
-    button->setIcon(QIcon(iconPath));
+    button->setIcon(usdcc::ui::theme::icon(iconPath));
     usdcc::ui::scaled::iconSize(button, kIconSize, kIconSize);
     button->setFocusPolicy(Qt::NoFocus);
     button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
@@ -130,9 +131,9 @@ bool TitleBar::eventFilter(QObject* watched, QEvent* event) {
         // The close glyph turns white on its red hover background; a stylesheet
         // can't swap a QToolButton's icon per pseudo-state, so do it here.
         if (event->type() == QEvent::Enter) {
-            m_closeButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/win-close-hover.png")));
+            m_closeButton->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/win-close-hover.png")));
         } else if (event->type() == QEvent::Leave) {
-            m_closeButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/win-close.png")));
+            m_closeButton->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/win-close.png")));
         }
     }
     return QFrame::eventFilter(watched, event);
@@ -147,7 +148,7 @@ void TitleBar::updateLogo() {
 
 void TitleBar::updateWindowState() {
     const bool maximized = m_host->isMaximized();
-    m_maximizeButton->setIcon(QIcon(maximized ? QStringLiteral(":/usdcc/theme/win-restore.png")
+    m_maximizeButton->setIcon(usdcc::ui::theme::icon(maximized ? QStringLiteral(":/usdcc/theme/win-restore.png")
                                               : QStringLiteral(":/usdcc/theme/win-maximize.png")));
 }
 

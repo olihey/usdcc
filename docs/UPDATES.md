@@ -83,6 +83,13 @@ doesn't log Velopack's errors.
   - "Couldn't check for updates", with Velopack's error.
 - Anywhere else: "Updates come with the installer", with **Releases Page**.
 
+Once a check (this one or the one at the start) found an update, the menu item follows it, so
+it can be installed after its notification was closed:
+- **Install Update to 26.12.1**: the same as Download and Install.
+- **Downloading Update to 26.12.1...** (disabled) while it downloads. If that fails, it's
+  Install Update again.
+- **Restart to Update to 26.12.1** once downloaded: the same as Restart Now.
+
 **At the start.** Ten seconds after the window shows, the same check, if **Settings >
 Updates > Check for updates when usdcc starts** is on (the default). It only says something
 when there is an update; a failure goes to the log.
@@ -95,6 +102,10 @@ it the next time usdcc starts (§3).
 cancelled, nothing happens. Once the app has quit, Velopack's updater waits for the process
 to end, installs the update with a progress window, and starts usdcc again, which shows
 "Updated to usdcc 26.12.1" with **Release Notes**.
+
+A build without the Updates feature (`USDCC_BUILD_UPDATES=OFF`,
+[BUILD_OPTIONS.md](BUILD_OPTIONS.md) §11) has none of this section: no menu item, no check,
+no settings.
 
 **Settings > Updates** (only in builds with Velopack):
 
@@ -119,6 +130,12 @@ After the 7z is attached, `release.yml`'s Windows job:
 4. `vpk upload github --tag <tag> --merge`, which attaches to the release:
    `usdcc-win-Setup.exe`, `usdcc-<version>-full.nupkg`, the delta when there is
    one, and `releases.win.json`, the feed an install reads.
+
+The `windows-arm64` job does the same with `--runtime win-arm64` and the channel
+`win-arm64` on all three commands: `usdcc-win-arm64-Setup.exe`, and a feed of its own,
+`releases.win-arm64.json`. An install reads the feed of the channel it was packed for, so
+an x64 install is never offered the arm64 package. x64 stays on Velopack's default
+channel, `win`, which installs made before arm64 read.
 
 An install asks GitHub for the releases (prereleases only with the setting) and reads the
 `releases.win.json` of each, so a delta chain can span several releases. The `deps/...`

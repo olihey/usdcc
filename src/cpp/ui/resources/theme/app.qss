@@ -1,25 +1,25 @@
 /*
- * usdcc dark theme — app-wide Qt stylesheet.
+ * usdcc's app-wide Qt stylesheet, for every theme (docs/THEMES.md).
  *
  * Derived from the "3D DCC with Modern Dark Design" Claude Design project
- * (option 1a, "Classic — Blender-style dense workspace"). Tokens used:
+ * (option 1a, "Classic — Blender-style dense workspace").
  *
- *   surfaces   #161618 menu/status/header   #1a1a1c bars   #1c1c1e panels
- *              #141416 inset (inputs, tracks)   #0e0e10 gaps
- *   hairlines  rgba(255,255,255, 6%) dividers   8% input borders   10% popups
- *   text       #e8e8ea primary   75% / 50% / 40% secondary, muted, section labels
- *   accent     @accent   (selection fill: 18% of accent)
- *   axes       X #ff5f56   Y #4fd671   Z #3d8bfd
+ * No colours here: "@surface-panel" and the like are tokens, replaced by the
+ * theme's colours (theme.cpp's table has them all, with the two built-in
+ * themes' values) before this is applied, and again whenever the theme or the
+ * accent changes. "@token-rgb" is the colour's "r, g, b", for
+ * rgba(@ink-rgb, 50%). What a token is for:
+ *
+ *   surfaces   @surface-bar menu/status/header   @surface-toolbar bars
+ *              @surface-panel panels   @surface-raised buttons, tips
+ *              @surface-hover a hovered button   @inset inputs, tracks   @gap gaps
+ *   hairlines  @overlay-rgb at 6% dividers   8% input borders   10% popups
+ *   text       @text primary   @ink-rgb at 75% / 50% / 40% secondary, muted, labels
+ *              @text-strong on a tinted selection   @on-accent on the solid accent
+ *   accent     @accent fills   @accent-hover   @accent-text as text
  *   radii      3px controls, 4px groups     density: 11px type, 20px controls
  *
- * The accent is the Appearance/accentColor setting (#3d8bfd by default):
- * theme.cpp replaces @accent with it, @accent-rgb with its "r, g, b" (for
- * rgba(@accent-rgb, 25%)) and @accent-hover with a lighter shade before
- * applying this file, and again whenever it changes. The Z axis stays blue.
- *
- * Kept in sync by hand with the palette in theme.cpp and the viewport
- * background in hydra_viewport_window.cpp. Dock-system (ADS) widgets need
- * their own overrides — see dock.qss for why.
+ * Dock-system (ADS) widgets need their own overrides — see dock.qss for why.
  *
  * Qt stylesheets have no letter-spacing or text-transform, so the design's
  * letter-spaced uppercase section labels aren't reproduced.
@@ -32,26 +32,26 @@ QWidget {
 
 QMainWindow,
 QDialog {
-    background: #1c1c1e;
+    background: @surface-panel;
 }
 
 QToolTip {
-    background: #232326;
-    color: #e8e8ea;
-    border: 1px solid rgba(255, 255, 255, 10%);
+    background: @surface-raised;
+    color: @text;
+    border: 1px solid rgba(@overlay-rgb, 10%);
     padding: 3px 6px;
 }
 
 QLabel {
-    color: rgba(255, 255, 255, 55%);
+    color: rgba(@ink-rgb, 55%);
 }
 
 /* ---- Menus ---------------------------------------------------------- */
 
 QMenuBar {
-    background: #161618;
-    color: rgba(255, 255, 255, 65%);
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-bar;
+    color: rgba(@ink-rgb, 65%);
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
     min-height: 26px;
     padding: 0 6px;
 }
@@ -64,14 +64,14 @@ QMenuBar::item {
 }
 
 QMenuBar::item:selected {
-    background: rgba(255, 255, 255, 10%);
-    color: #e8e8ea;
+    background: rgba(@overlay-rgb, 10%);
+    color: @text;
 }
 
 QMenu {
-    background: #1c1c1e;
-    color: rgba(255, 255, 255, 75%);
-    border: 1px solid rgba(255, 255, 255, 10%);
+    background: @surface-panel;
+    color: rgba(@ink-rgb, 75%);
+    border: 1px solid rgba(@overlay-rgb, 10%);
     padding: 4px;
 }
 
@@ -82,16 +82,16 @@ QMenu::item {
 
 QMenu::item:selected {
     background: @accent;
-    color: #ffffff;
+    color: @on-accent;
 }
 
 QMenu::item:disabled {
-    color: rgba(255, 255, 255, 30%);
+    color: rgba(@ink-rgb, 30%);
 }
 
 QMenu::separator {
     height: 1px;
-    background: rgba(255, 255, 255, 8%);
+    background: rgba(@overlay-rgb, 8%);
     margin: 4px 6px;
 }
 
@@ -114,18 +114,18 @@ QLineEdit,
 QAbstractSpinBox {
     min-height: 18px;
     padding: 0 8px;
-    background: #141416;
-    color: rgba(255, 255, 255, 75%);
-    border: 1px solid rgba(255, 255, 255, 8%);
+    background: @inset;
+    color: rgba(@ink-rgb, 75%);
+    border: 1px solid rgba(@overlay-rgb, 8%);
     border-radius: 3px;
     selection-background-color: @accent;
-    selection-color: #ffffff;
+    selection-color: @on-accent;
 }
 
 QComboBox:hover,
 QLineEdit:hover,
 QAbstractSpinBox:hover {
-    border-color: rgba(255, 255, 255, 18%);
+    border-color: rgba(@overlay-rgb, 18%);
 }
 
 QComboBox:focus,
@@ -142,13 +142,47 @@ QAbstractSpinBox:focus {
 QLineEdit:read-only,
 QLineEdit:read-only:hover,
 QLineEdit:read-only:focus {
-    background: #222225;
-    border-color: rgba(255, 255, 255, 5%);
+    background: @surface-readonly;
+    border-color: rgba(@overlay-rgb, 5%);
+}
+
+/* Otherwise the native style's bevels, which are hard lines in a light theme. */
+QAbstractSpinBox::up-button,
+QAbstractSpinBox::down-button {
+    subcontrol-origin: border;
+    width: 16px;
+    border: none;
+    background: transparent;
+}
+
+QAbstractSpinBox::up-button {
+    subcontrol-position: top right;
+}
+
+QAbstractSpinBox::down-button {
+    subcontrol-position: bottom right;
+}
+
+QAbstractSpinBox::up-button:hover,
+QAbstractSpinBox::down-button:hover {
+    background: rgba(@overlay-rgb, 10%);
+}
+
+QAbstractSpinBox::up-arrow {
+    image: url(:/usdcc/theme/chevron-up.png);
+    width: 10px;
+    height: 10px;
+}
+
+QAbstractSpinBox::down-arrow {
+    image: url(:/usdcc/theme/chevron-down.png);
+    width: 10px;
+    height: 10px;
 }
 
 /* e.g. a panel's Stage dropdown while no stage is open */
 QComboBox:disabled {
-    color: rgba(255, 255, 255, 30%);
+    color: rgba(@ink-rgb, 30%);
     background: transparent;
 }
 
@@ -164,11 +198,11 @@ QComboBox::down-arrow {
 }
 
 QComboBox QAbstractItemView {
-    background: #1c1c1e;
-    color: rgba(255, 255, 255, 75%);
-    border: 1px solid rgba(255, 255, 255, 10%);
+    background: @surface-panel;
+    color: rgba(@ink-rgb, 75%);
+    border: 1px solid rgba(@overlay-rgb, 10%);
     selection-background-color: @accent;
-    selection-color: #ffffff;
+    selection-color: @on-accent;
     outline: 0;
 }
 
@@ -176,9 +210,9 @@ QPushButton,
 QToolButton {
     min-height: 18px;
     padding: 0 10px;
-    background: #232326;
-    color: #e8e8ea;
-    border: 1px solid rgba(255, 255, 255, 8%);
+    background: @surface-raised;
+    color: @text;
+    border: 1px solid rgba(@overlay-rgb, 8%);
     border-radius: 3px;
 }
 
@@ -195,7 +229,7 @@ QLineEdit > QToolButton {
 
 QPushButton:hover,
 QToolButton:hover {
-    background: #2c2c30;
+    background: @surface-hover;
 }
 
 QPushButton:pressed,
@@ -204,7 +238,7 @@ QPushButton:default,
 QToolButton:checked {
     background: @accent;
     border-color: @accent;
-    color: #ffffff;
+    color: @on-accent;
 }
 
 /* One look for every button that can't be pressed, a dialog's main one (Add Input, Connect,
@@ -212,14 +246,14 @@ QToolButton:checked {
    :default and :checked, which it overrides. */
 QPushButton:disabled,
 QToolButton:disabled {
-    background: #232326;
-    border-color: rgba(255, 255, 255, 8%);
-    color: rgba(255, 255, 255, 30%);
+    background: @surface-raised;
+    border-color: rgba(@overlay-rgb, 8%);
+    color: rgba(@ink-rgb, 30%);
 }
 
 QCheckBox,
 QRadioButton {
-    color: rgba(255, 255, 255, 75%);
+    color: rgba(@ink-rgb, 75%);
     spacing: 6px;
 }
 
@@ -229,8 +263,8 @@ QTableView::indicator,
 QListView::indicator {
     width: 11px;
     height: 11px;
-    background: #141416;
-    border: 1px solid rgba(255, 255, 255, 18%);
+    background: @inset;
+    border: 1px solid rgba(@overlay-rgb, 18%);
     border-radius: 2px;
 }
 
@@ -255,7 +289,7 @@ QListView::indicator:indeterminate {
 
 QSlider::groove:horizontal {
     height: 4px;
-    background: #141416;
+    background: @inset;
     border-radius: 2px;
 }
 
@@ -268,12 +302,12 @@ QSlider::handle:horizontal {
     width: 10px;
     margin: -3px 0;
     border-radius: 5px;
-    background: #e8e8ea;
+    background: @text;
 }
 
 QProgressBar {
     height: 4px;
-    background: #141416;
+    background: @inset;
     border: none;
     border-radius: 2px;
     text-align: center;
@@ -290,14 +324,14 @@ QProgressBar::chunk {
 QTreeView,
 QTableView,
 QListView {
-    background: #1c1c1e;
-    alternate-background-color: #1c1c1e;
-    color: rgba(255, 255, 255, 75%);
+    background: @surface-panel;
+    alternate-background-color: @surface-panel;
+    color: rgba(@ink-rgb, 75%);
     border: none;
     outline: 0;
-    gridline-color: rgba(255, 255, 255, 6%);
+    gridline-color: rgba(@overlay-rgb, 6%);
     selection-background-color: rgba(@accent-rgb, 18%);
-    selection-color: #ffffff;
+    selection-color: @text-strong;
 }
 
 QTreeView::item,
@@ -312,14 +346,14 @@ QTableView::item {
 
 QTreeView::item:hover,
 QListView::item:hover {
-    background: rgba(255, 255, 255, 5%);
+    background: rgba(@overlay-rgb, 5%);
 }
 
 QTreeView::item:selected,
 QListView::item:selected,
 QTableView::item:selected {
     background: rgba(@accent-rgb, 18%);
-    color: #ffffff;
+    color: @text-strong;
 }
 
 /* Otherwise Fusion also fills a selected row's indent (the branch area) with
@@ -329,26 +363,26 @@ QTreeView {
 }
 
 QHeaderView::section {
-    background: #161618;
-    color: rgba(255, 255, 255, 40%);
+    background: @surface-bar;
+    color: rgba(@ink-rgb, 40%);
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
-    border-right: 1px solid rgba(255, 255, 255, 6%);
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
+    border-right: 1px solid rgba(@overlay-rgb, 6%);
     padding: 4px 8px;
 }
 
 QTableCornerButton::section {
-    background: #161618;
+    background: @surface-bar;
     border: none;
 }
 
 QTextEdit,
 QPlainTextEdit {
-    background: #141416;
-    color: rgba(255, 255, 255, 75%);
+    background: @inset;
+    color: rgba(@ink-rgb, 75%);
     border: none;
     selection-background-color: rgba(@accent-rgb, 45%);
-    selection-color: #ffffff;
+    selection-color: @text-strong;
 }
 
 /* The Script Editor panel's editor and output (docs/SCRIPTING.md section 7),
@@ -360,9 +394,19 @@ QAbstractScrollArea#codeView {
     font-family: "Cascadia Mono", "Consolas", "DejaVu Sans Mono", monospace;
 }
 
+QAbstractScrollArea#codeView,
+QGraphicsView {
+    border: 1px solid rgba(@overlay-rgb, 6%);
+}
+
+QAbstractScrollArea::corner {
+    background: transparent;
+    border: none;
+}
+
 QPlainTextEdit#scriptEditor,
 QPlainTextEdit#codeView {
-    background: #1c1c1e;
+    background: @surface-panel;
 }
 
 /* Its tabs, in its toolbar row, styled like a ViewPanel's tab strip
@@ -374,21 +418,21 @@ QTabBar#scriptTabs {
 
 QTabBar#scriptTabs::tab {
     background: transparent;
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
     padding: 4px 4px 4px 8px;
     border-style: solid;
     border-width: 0 1px 2px 0;
-    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+    border-color: transparent rgba(@overlay-rgb, 6%) transparent transparent;
 }
 
 QTabBar#scriptTabs::tab:hover {
-    background: rgba(255, 255, 255, 5%);
-    color: rgba(255, 255, 255, 75%);
+    background: rgba(@overlay-rgb, 5%);
+    color: rgba(@ink-rgb, 75%);
 }
 
 QTabBar#scriptTabs::tab:selected {
     background: rgba(@accent-rgb, 25%);
-    color: #e8e8ea;
+    color: @text;
 }
 
 QTabBar#scriptTabs::tab:selected:hover {
@@ -397,7 +441,7 @@ QTabBar#scriptTabs::tab:selected:hover {
 
 QTabBar#scriptTabs[focused="true"]::tab:selected {
     background: @accent;
-    color: #ffffff;
+    color: @on-accent;
     border-color: transparent @accent @accent transparent;
 }
 
@@ -427,7 +471,7 @@ QToolButton#peersYou {
 }
 
 QToolButton#peersYou:hover {
-    background: rgba(255, 255, 255, 8%);
+    background: rgba(@overlay-rgb, 8%);
 }
 
 QToolButton#peersYou::menu-indicator {
@@ -440,16 +484,16 @@ QTabBar#peersChatTabs::tab {
     border: none;
     border-bottom: 2px solid transparent;
     padding: 3px 10px;
-    color: #a8aab0;
+    color: @muted-strong;
 }
 
 QTabBar#peersChatTabs::tab:selected {
-    color: #e8e8ea;
+    color: @text;
     border-bottom-color: @accent;
 }
 
 QTabBar#peersChatTabs::tab:hover:!selected {
-    color: #e8e8ea;
+    color: @text;
 }
 
 QTabBar#peersChatTabs::close-button {
@@ -462,11 +506,11 @@ QTabBar#peersChatTabs::close-button {
 
 QTabBar#peersChatTabs::close-button:hover {
     image: url(:/usdcc/theme/close-white.png);
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QLabel#peersTyping {
-    color: #8a8d93;
+    color: @muted;
     font-style: italic;
     padding: 1px 4px;
 }
@@ -481,7 +525,7 @@ QToolButton#peersEmojiCell {
 }
 
 QToolButton#peersEmojiCell:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QToolButton#peersEmojiCell:pressed {
@@ -497,11 +541,11 @@ QToolButton#scriptTabClose {
 }
 
 QToolButton#scriptTabClose:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QToolButton#scriptTabClose:pressed {
-    background: rgba(255, 255, 255, 16%);
+    background: rgba(@overlay-rgb, 16%);
 }
 
 /* White on the focused tab's solid blue, where the grey icon washes out. */
@@ -524,14 +568,14 @@ QScrollBar:horizontal {
 }
 
 QScrollBar::handle:vertical {
-    background: rgba(255, 255, 255, 15%);
+    background: rgba(@overlay-rgb, 15%);
     border-radius: 3px;
     min-height: 24px;
     margin: 2px;
 }
 
 QScrollBar::handle:horizontal {
-    background: rgba(255, 255, 255, 15%);
+    background: rgba(@overlay-rgb, 15%);
     border-radius: 3px;
     min-width: 24px;
     margin: 2px;
@@ -544,7 +588,7 @@ QScrollBar::handle:vertical:disabled {
 
 QScrollBar::handle:vertical:hover,
 QScrollBar::handle:horizontal:hover {
-    background: rgba(255, 255, 255, 28%);
+    background: rgba(@overlay-rgb, 28%);
 }
 
 QScrollBar::add-line,
@@ -563,35 +607,35 @@ QScrollBar::sub-page {
 /* ---- Window furniture ----------------------------------------------- */
 
 QStatusBar {
-    background: #161618;
-    color: rgba(255, 255, 255, 50%);
-    border-top: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-bar;
+    color: rgba(@ink-rgb, 50%);
+    border-top: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 QMainWindow::separator,
 QSplitter::handle {
-    background: #141416;
+    background: @inset;
     width: 1px;
     height: 1px;
 }
 
 /* SidePanel (a plain QDockWidget, outside the ADS container). */
 QDockWidget {
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
 }
 
 QDockWidget::title {
-    background: #161618;
+    background: @surface-bar;
     padding: 5px 8px;
     text-align: left;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 /* ---- Custom title bar (title_bar.cpp) -------------------------------- */
 
 QFrame#titleBar {
-    background: #161618;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-bar;
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 /* The bar supplies the background and divider; the menu bar inside it must
@@ -617,11 +661,11 @@ QLabel#titleBarLogo {
 }
 
 QLabel#titleBarTitle {
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
 }
 
 QLabel#titleBarTitle[active="false"] {
-    color: rgba(255, 255, 255, 28%);
+    color: rgba(@ink-rgb, 28%);
 }
 
 QToolButton#titleBarButton,
@@ -635,11 +679,11 @@ QToolButton#titleBarCloseButton {
 }
 
 QToolButton#titleBarButton:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QToolButton#titleBarButton:pressed {
-    background: rgba(255, 255, 255, 16%);
+    background: rgba(@overlay-rgb, 16%);
 }
 
 QToolButton#titleBarCloseButton:hover {
@@ -659,7 +703,7 @@ QToolButton#titleBarWorkspaceButton {
     background: @accent;
     border: none;
     border-radius: 3px;
-    color: #ffffff;
+    color: @on-accent;
     font-weight: 600;
     padding: 0 22px 0 10px;
     margin-right: 8px;
@@ -687,7 +731,7 @@ QToolButton#titleBarWorkspaceButton::menu-indicator {
 
 /* The workspace menu's group headings: labels, not choices. */
 QLabel#workspaceMenuHeading {
-    color: rgba(255, 255, 255, 40%);
+    color: rgba(@ink-rgb, 40%);
     font-size: 8pt;
     font-weight: 600;
     padding: 6px 12px 2px 12px;
@@ -700,30 +744,30 @@ QLabel#workspaceMenuHeading {
    keeps an "area" property (left/right/top/bottom/floating) up to date so the
    divider line can sit on the edge facing the content. */
 QToolBar {
-    background: #1a1a1c;
+    background: @surface-toolbar;
     border: none;
     padding: 0;
     spacing: 0;
 }
 
 QToolBar[area="left"] {
-    border-right: 1px solid rgba(255, 255, 255, 6%);
+    border-right: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 QToolBar[area="right"] {
-    border-left: 1px solid rgba(255, 255, 255, 6%);
+    border-left: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 QToolBar[area="top"] {
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 QToolBar[area="bottom"] {
-    border-top: 1px solid rgba(255, 255, 255, 6%);
+    border-top: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 QToolBar[area="floating"] {
-    border: 1px solid rgba(255, 255, 255, 12%);
+    border: 1px solid rgba(@overlay-rgb, 12%);
 }
 
 /* The drag handle: a grip of dots, oriented to the bar. */
@@ -752,7 +796,7 @@ QToolBar#toolRail QToolButton {
 }
 
 QToolBar#toolRail QToolButton:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QToolBar#toolRail QToolButton:checked {
@@ -766,12 +810,12 @@ QFrame#toolOptionsBar {
 }
 
 QLabel#toolOptionsTitle {
-    color: #e8e8ea;
+    color: @text;
     font-weight: 600;
 }
 
 QFrame#toolOptionsSeparator {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
     border: none;
     min-width: 1px;
     max-width: 1px;
@@ -780,13 +824,13 @@ QFrame#toolOptionsSeparator {
 }
 
 QLabel:disabled {
-    color: rgba(255, 255, 255, 25%);
+    color: rgba(@ink-rgb, 25%);
 }
 
 /* A row of mutually exclusive choices (the design's "Box / Lasso / Paint"
    pill group). */
 QFrame#segmented {
-    background: #141416;
+    background: @inset;
     border-radius: 4px;
 }
 
@@ -796,30 +840,30 @@ QToolButton#segmentButton {
     border-radius: 3px;
     padding: 3px 8px;
     min-height: 0;
-    color: rgba(255, 255, 255, 55%);
+    color: rgba(@ink-rgb, 55%);
 }
 
 QToolButton#segmentButton:hover {
-    color: #e8e8ea;
+    color: @text;
 }
 
 QToolButton#segmentButton:checked {
     background: @accent;
-    color: #ffffff;
+    color: @on-accent;
 }
 
 /* The Stage/Renderer row at the top of each ViewPanel (the design's
    "tool options bar"). */
 QWidget#panelToolbar {
-    background: #1a1a1c;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-toolbar;
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 /* The timeline, under the dock area (docs/ANIMATION.md §4.3): a bar like the
    panels' toolbars, with its line on top. */
 QWidget#timelineBar {
-    background: #1a1a1c;
-    border-top: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-toolbar;
+    border-top: 1px solid rgba(@overlay-rgb, 6%);
 }
 
 /* Icon-only squares in panel toolbars: the options/filter menu button and
@@ -835,53 +879,53 @@ QToolButton[panelIcon="true"] {
    custom-painted with the same tokens (see properties/property_style.h). */
 
 QLabel#propertyLabel {
-    color: rgba(255, 255, 255, 55%);
+    color: rgba(@ink-rgb, 55%);
 }
 
 /* Showing a schema fallback, nothing authored. */
 QLabel#propertyLabel[unauthored="true"] {
-    color: rgba(255, 255, 255, 35%);
+    color: rgba(@ink-rgb, 35%);
     font-style: italic;
 }
 
 QLabel#propertyNote {
-    color: rgba(255, 255, 255, 35%);
+    color: rgba(@ink-rgb, 35%);
 }
 
 QLabel#propertyBadge {
-    color: @accent;
+    color: @accent-text;
     font-size: 10px;
 }
 
 /* A row's key (docs/ANIMATION.md phase 2): muted when the attribute isn't animated, the
    accent when it is, filled (its glyph) when there's a key at the frame shown. */
 QToolButton#propertyKeyButton {
-    color: #8a8d93;
+    color: @muted;
     border: none;
     background: transparent;
     padding: 0;
 }
 QToolButton#propertyKeyButton[keyState="animated"],
 QToolButton#propertyKeyButton[keyState="keyed"] {
-    color: @accent;
+    color: @accent-text;
 }
 QToolButton#propertyKeyButton:disabled {
-    color: rgba(232, 232, 234, 25%);
+    color: rgba(@text-rgb, 25%);
 }
 
 /* Second line under a value: resolved asset path, connection source. */
 QLabel#propertySubLine {
-    color: @accent;
+    color: @accent-text;
     font-size: 10px;
 }
 
 QLabel#propertySubLine[unresolved="true"] {
-    color: #ff5f56;
+    color: @error;
 }
 
 /* Something to look at, not broken: e.g. a sublayer's up axis not the stage's. */
 QLabel#propertySubLine[caution="true"] {
-    color: #ffb340;
+    color: @warning;
 }
 
 /* A connected input's source, under its value: selects the source prim. */
@@ -890,7 +934,7 @@ QToolButton#subLineLink {
     border: none;
     padding: 0;
     min-height: 0;
-    color: @accent;
+    color: @accent-text;
     font-size: 10px;
 }
 
@@ -904,9 +948,9 @@ QLabel#propertyArraySummary,
 QLabel#propertyReadOnlyText {
     min-height: 18px;
     padding: 0 8px;
-    background: #141416;
-    color: rgba(255, 255, 255, 75%);
-    border: 1px solid rgba(255, 255, 255, 8%);
+    background: @inset;
+    color: rgba(@ink-rgb, 75%);
+    border: 1px solid rgba(@overlay-rgb, 8%);
     border-radius: 3px;
 }
 
@@ -916,8 +960,8 @@ QLabel#propertyReadOnlyText {
 QLabel#propertyReadOnlyText,
 QLabel#propertyArraySummary,
 QLabel#propertyMatrixSummary {
-    background: #222225;
-    border-color: rgba(255, 255, 255, 5%);
+    background: @surface-readonly;
+    border-color: rgba(@overlay-rgb, 5%);
 }
 
 QPushButton#propertyButton,
@@ -944,25 +988,25 @@ QToolButton#propertyIconButton::menu-indicator {
 }
 
 QTabWidget::pane {
-    border: 1px solid rgba(255, 255, 255, 6%);
+    border: 1px solid rgba(@overlay-rgb, 6%);
     border-radius: 4px;
     top: -1px;
 }
 
 QTabBar::tab {
     background: transparent;
-    color: rgba(255, 255, 255, 55%);
+    color: rgba(@ink-rgb, 55%);
     padding: 5px 10px;
     border: none;
     border-bottom: 2px solid transparent;
 }
 
 QTabBar::tab:hover {
-    color: #e8e8ea;
+    color: @text;
 }
 
 QTabBar::tab:selected {
-    color: #e8e8ea;
+    color: @text;
     border-bottom-color: @accent;
 }
 
@@ -979,7 +1023,7 @@ QToolButton#propertyDisclosure:pressed {
 
 /* Attribute editor sections (CategorySection). */
 QFrame#sectionSeparator {
-    background: rgba(255, 255, 255, 6%);
+    background: rgba(@overlay-rgb, 6%);
 }
 
 QToolButton#sectionHeader,
@@ -989,15 +1033,15 @@ QToolButton#sectionHeader:pressed {
     border: none;
     padding: 0 2px;
     min-height: 18px;
-    color: #e8e8ea;
+    color: @text;
     font-weight: 600;
 }
 
 /* An applied schema in the Attribute Editor's Prim section: built in (from the
    prim's type or another schema) is dimmed, not registered is amber. */
 QFrame#schemaPill {
-    background: rgba(255, 255, 255, 8%);
-    border: 1px solid rgba(255, 255, 255, 8%);
+    background: rgba(@overlay-rgb, 8%);
+    border: 1px solid rgba(@overlay-rgb, 8%);
     border-radius: 10px;
 }
 
@@ -1006,15 +1050,15 @@ QFrame#schemaPill[state="builtIn"] {
 }
 
 QFrame#schemaPill[state="builtIn"] QLabel {
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
 }
 
 QFrame#schemaPill[state="unregistered"] {
-    border-color: #ffb340;
+    border-color: @warning;
 }
 
 QFrame#schemaPill[state="unregistered"] QLabel {
-    color: #ffb340;
+    color: @warning;
 }
 
 /* A relationship target's path, in a pill: it selects the prim. */
@@ -1026,11 +1070,11 @@ QToolButton#pillLink {
 }
 
 QToolButton#pillLink:hover {
-    color: @accent;
+    color: @accent-text;
 }
 
 QFrame#schemaPill[state="unregistered"] QToolButton#pillLink {
-    color: #ffb340;
+    color: @warning;
 }
 
 QToolButton#schemaPillRemove {
@@ -1045,44 +1089,44 @@ QToolButton#schemaPillRemove {
 }
 
 QToolButton#schemaPillRemove:hover {
-    background: rgba(255, 255, 255, 15%);
+    background: rgba(@overlay-rgb, 15%);
 }
 
 /* An editable reference or payload in the Attribute Editor's Composition
    section: just a border, on the panel's own background. */
 QFrame#compositionArc {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 8%);
+    border: 1px solid rgba(@overlay-rgb, 8%);
     border-radius: 4px;
 }
 
 /* The namespace of the primvars in a frame. */
 QLabel#propertyFrameTitle {
-    color: rgba(255, 255, 255, 75%);
+    color: rgba(@ink-rgb, 75%);
     font-weight: 600;
 }
 
 /* Edits are going into a variant (docs/VARIANT_EDITOR.md section 5): hard to miss. */
 QFrame#variantEditBanner {
-    background: rgba(255, 179, 64, 14%);
-    border: 1px solid #ffb340;
+    background: rgba(@warning-rgb, 14%);
+    border: 1px solid @warning;
     border-radius: 4px;
 }
 
 QFrame#variantEditBanner QLabel {
-    color: #ffb340;
+    color: @warning;
 }
 
 /* The USDA view's text is older than the stage (docs/USDA_VIEW.md section 4): the
    same amber, as a bar across the panel. */
 QWidget#usdaStaleBar {
-    background: rgba(255, 179, 64, 18%);
-    border-top: 1px solid #ffb340;
-    border-bottom: 1px solid #ffb340;
+    background: rgba(@warning-rgb, 18%);
+    border-top: 1px solid @warning;
+    border-bottom: 1px solid @warning;
 }
 
 QWidget#usdaStaleBar QLabel {
-    color: #ffb340;
+    color: @warning;
     font-weight: 600;
 }
 
@@ -1091,7 +1135,7 @@ QWidget#usdaStaleBar QLabel {
 QWidget#usdaStaleBar QPushButton {
     background: @accent;
     border-color: @accent;
-    color: #ffffff;
+    color: @on-accent;
 }
 
 QWidget#usdaStaleBar QPushButton:hover {
@@ -1101,12 +1145,12 @@ QWidget#usdaStaleBar QPushButton:hover {
 
 /* Transform stack (TransformStackEditor) and the tool target. */
 QLabel#dragHandle {
-    color: rgba(255, 255, 255, 35%);
+    color: rgba(@ink-rgb, 35%);
     font-size: 13px;
 }
 
 QLabel#dragHandle:hover {
-    color: #e8e8ea;
+    color: @text;
 }
 
 QFrame#dropIndicator {
@@ -1115,23 +1159,23 @@ QFrame#dropIndicator {
 
 /* The op the Move/Rotate/Scale tools act on. */
 QLabel#propertyLabel[target="true"] {
-    color: @accent;
+    color: @accent-text;
     font-weight: 600;
 }
 
 QCheckBox#sectionHeaderCheck {
-    color: rgba(255, 255, 255, 55%);
+    color: rgba(@ink-rgb, 55%);
 }
 
 QLabel#targetHint {
-    color: #ffb340;
+    color: @warning;
 }
 
 /* ---- Settings dialog (SettingsDialog, docs/SETTINGS.md) ---------------- */
 
 QTreeWidget#settingsCategories {
-    background: #161618;
-    border: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-bar;
+    border: 1px solid rgba(@overlay-rgb, 6%);
     border-radius: 4px;
     padding: 4px;
 }
@@ -1142,13 +1186,13 @@ QTreeWidget#settingsCategories::item {
 
 QScrollArea#settingsPage,
 QWidget#settingsPageContent {
-    background: #1c1c1e;
+    background: @surface-panel;
 }
 
 /* A group is a CategorySection, as in the attribute editor; its title bar is
    lifted a little off the page, and the bar replaces the separator line. */
 QWidget#settingsPageContent QWidget#sectionHeaderBar {
-    background: rgba(255, 255, 255, 5%);
+    background: rgba(@overlay-rgb, 5%);
     border-radius: 4px;
 }
 
@@ -1157,30 +1201,30 @@ QWidget#settingsPageContent QFrame#sectionSeparator {
 }
 
 QLabel#settingLabel {
-    color: rgba(255, 255, 255, 75%);
+    color: rgba(@ink-rgb, 75%);
 }
 
 QLabel#settingConflict {
-    color: #ff5f56;
+    color: @error;
 }
 
 QToolButton#settingReset {
     background: transparent;
     border: none;
     padding: 0 4px;
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
 }
 
 QToolButton#settingReset:hover {
-    color: @accent;
+    color: @accent-text;
 }
 
 /* A folder list sits on the page in the category tree's well, so it reads as
    a list and not as more of the page. */
 QListWidget#settingFolderList {
-    background: #161618;
-    alternate-background-color: #161618;
-    border: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-bar;
+    alternate-background-color: @surface-bar;
+    border: 1px solid rgba(@overlay-rgb, 6%);
     border-radius: 4px;
 }
 
@@ -1193,12 +1237,12 @@ QToolButton#settingColorButton {
    theme::toastColor()); these are its texts and buttons. */
 
 QLabel#toastTitle {
-    color: #e8e8ea;
+    color: @text;
     font-weight: 600;
 }
 
 QLabel#toastBody {
-    color: rgba(255, 255, 255, 75%);
+    color: rgba(@ink-rgb, 75%);
 }
 
 QScrollArea#toastBodyScroll,
@@ -1209,8 +1253,8 @@ QScrollArea#toastBodyScroll > QWidget > QWidget {
 }
 
 QLabel#toastCount {
-    color: rgba(255, 255, 255, 75%);
-    background: rgba(255, 255, 255, 10%);
+    color: rgba(@ink-rgb, 75%);
+    background: rgba(@overlay-rgb, 10%);
     border-radius: 3px;
     padding: 0 4px;
     font-size: 10px;
@@ -1224,7 +1268,7 @@ QToolButton#toastClose {
 }
 
 QToolButton#toastClose:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 QPushButton#toastAction {
@@ -1233,17 +1277,17 @@ QPushButton#toastAction {
 }
 
 QToolButton#toastDismissAll {
-    background: #232326;
-    color: rgba(255, 255, 255, 75%);
-    border: 1px solid rgba(255, 255, 255, 10%);
+    background: @surface-raised;
+    color: rgba(@ink-rgb, 75%);
+    border: 1px solid rgba(@overlay-rgb, 10%);
     border-radius: 9px;
     padding: 0 10px;
     min-height: 18px;
 }
 
 QToolButton#toastDismissAll:hover {
-    color: #e8e8ea;
-    background: #2c2c30;
+    color: @text;
+    background: @surface-hover;
 }
 
 /* Auto-key on (docs/ANIMATION.md phase 2): red, as the record button of a DCC is. */
