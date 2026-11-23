@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "A usdcc plugin's manifest",
+  "description": "docs/PLUGINS.md",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "api"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "What usdcc knows it by, for good: com.example.notes. Letters, digits, '.', '_' and '-'."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the user sees."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Its version, such as 1.0.0."
+    },
+    "description": {
+      "type": "string",
+      "description": "A sentence for the Plugins panel."
+    },
+    "api": {
+      "const": 1,
+      "description": "The plugin API it was made for."
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The ids of plugins it needs, which start before it."
+    },
+    "usd": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Folders with a plugInfo.json, from its own folder."
+    },
+    "python": {
+      "type": "object",
+      "description": "Its Python part, in python/.",
+      "additionalProperties": false,
+      "required": [
+        "module"
+      ],
+      "dependencies": {
+        "indexes": [
+          "requires"
+        ]
+      },
+      "properties": {
+        "module": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "The package or module in python/ with its activate(plugin)."
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Python packages it needs, as pip writes them: numpy>=2. Names and versions, no URLs."
+        },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https://"
+          },
+          "description": "Package indexes besides the usual one, https only."
+        }
+      }
+    },
+    "native": {
+      "type": "object",
+      "description": "Its C++ part, written by usdcc_add_plugin().",
+      "additionalProperties": false,
+      "required": [
+        "library",
+        "built_for"
+      ],
+      "properties": {
+        "library": {
+          "type": "string",
+          "minLength": 1
+        },
+        "built_for": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

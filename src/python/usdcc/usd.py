@@ -23,11 +23,21 @@ own (from usdcc/_usd.pyd), and the module-level functions below raise
 RuntimeError.
 """
 
+from __future__ import annotations
+
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 from pxr import Usd, UsdUtils
 
 from usdcc import _plugins
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+    import os
+    from _usdcc_app import StageManager as StageManager
+    from _usdcc_app import UndoManager as UndoManager
+    from pxr import Sdf
 
 try:
     import _usdcc_app as _native  # compiled into the app
@@ -47,9 +57,10 @@ except ImportError:
     else:
         from usdcc import _usd as _native
 
-StageManager = _native.StageManager
-if EMBEDDED:
-    UndoManager = _native.UndoManager
+if not TYPE_CHECKING:
+    StageManager = _native.StageManager
+    if EMBEDDED:
+        UndoManager = _native.UndoManager
 
 
 def _app():
@@ -58,23 +69,23 @@ def _app():
     return _native
 
 
-def stage_manager():
+def stage_manager() -> StageManager:
     """The app's StageManager."""
     return _app().stage_manager()
 
 
-def undo_manager():
+def undo_manager() -> UndoManager:
     """The app's UndoManager."""
     return _app().undo_manager()
 
 
-def _stage(cache_id):
+def _stage(cache_id: int) -> Usd.Stage | None:
     if cache_id < 0:
         return None
     return UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(cache_id))
 
 
-def stage_id(stage):
+def stage_id(stage: Usd.Stage) -> int:
     """The id the app knows `stage` by (its UsdUtils.StageCache id)."""
     cache_id = UsdUtils.StageCache.Get().GetId(stage)
     if not cache_id.IsValid():
@@ -82,22 +93,22 @@ def stage_id(stage):
     return cache_id.ToLongInt()
 
 
-def stages():
+def stages() -> list[Usd.Stage]:
     """Every open stage, in the order they were opened."""
     return [_stage(cache_id) for cache_id in stage_manager().stage_cache_ids()]
 
 
-def current_stage():
+def current_stage() -> Usd.Stage | None:
     """The current stage, or None if no stage is open: the stage of the view
     panel last focused (or the one set_current_stage() set since)."""
     return _stage(stage_manager().current_stage_cache_id())
 
 
-def set_current_stage(stage):
+def set_current_stage(stage: Usd.Stage) -> None:
     stage_manager().set_current_stage(stage_id(stage))
 
 
-def open_stage(path):
+def open_stage(path: str | os.PathLike[str]) -> Usd.Stage:
     """Opens `path` in the app, like File > Open Stage. As there, a file that
     is already open is opened again, as a second stage on the same layers;
     use stages() or current_stage() to work on an open one."""
@@ -107,12 +118,12 @@ def open_stage(path):
     return _stage(cache_id)
 
 
-def close_stage(stage):
+def close_stage(stage: Usd.Stage) -> None:
     """Closes `stage` in the app, with every panel showing it."""
     stage_manager().close_stage(stage_id(stage))
 
 
-def _resolve(stage):
+def _resolve(stage: Usd.Stage | None) -> Usd.Stage:
     stage = stage if stage is not None else current_stage()
     if stage is None:
         raise RuntimeError("no stage is open")
@@ -124,7 +135,7 @@ def _path_string(item):
     return str(get_path() if get_path else item)
 
 
-def selected_paths(stage=None):
+def selected_paths(stage: Usd.Stage | None = None) -> list[Sdf.Path]:
     """The selected prims' paths (Sdf.Path) on `stage` (default: the current stage)."""
     from pxr import Sdf
 
@@ -132,21 +143,21 @@ def selected_paths(stage=None):
     return [Sdf.Path(path) for path in stage_manager().selected_paths(stage_id(stage))]
 
 
-def select(items, stage=None):
+def select(items: Iterable[Usd.Prim | Sdf.Path | str], stage: Usd.Stage | None = None) -> None:
     """Selects prims, given as prims, Sdf.Paths or path strings, on `stage`
     (default: the current stage). The Outliner and the Viewport follow."""
     stage = _resolve(stage)
     stage_manager().set_selected_paths(stage_id(stage), [_path_string(item) for item in items])
 
 
-def current_time(stage=None):
+def current_time(stage: Usd.Stage | None = None) -> float:
     """The time code `stage` (default: the current stage) is shown at: where the
     timeline's playhead is, and what the viewport and the panels read values at.
     Use it as ``attribute.Get(usdcc.usd.current_time())``."""
     return stage_manager().time(stage_id(_resolve(stage)))
 
 
-def set_current_time(time, stage=None):
+def set_current_time(time: float, stage: Usd.Stage | None = None) -> None:
     """Shows `stage` (default: the current stage) at the time code `time`, as
     scrubbing the timeline does. Not an undo step: nothing in the stage changes."""
     stage_manager().set_time(stage_id(_resolve(stage)), float(time))
@@ -159,7 +170,7 @@ def _attribute_on_stage(attribute, stage):
     return _resolve(stage), str(attribute)
 
 
-def set_key(attribute, time=None, stage=None):
+def set_key(attribute: Usd.Attribute | Sdf.Path | str, time: float | None = None, stage: Usd.Stage | None = None) -> bool:
     """Sets a key on `attribute` (a Usd.Attribute, or an attribute path on `stage`) at
     `time` (default: the time shown), with the value it has there (docs/ANIMATION.md
     phase 2). Animation from a weaker layer is copied into the edit target first. True
@@ -169,7 +180,7 @@ def set_key(attribute, time=None, stage=None):
     return stage_manager().set_key(stage_id(usd_stage), path, at)
 
 
-def remove_key(attribute, time=None, stage=None):
+def remove_key(attribute: Usd.Attribute | Sdf.Path | str, time: float | None = None, stage: Usd.Stage | None = None) -> bool:
     """Removes the key of `attribute` at `time` (default: the time shown). The last one
     gone, the attribute keeps the value it had there. False if there was none."""
     usd_stage, path = _attribute_on_stage(attribute, stage)
@@ -177,7 +188,7 @@ def remove_key(attribute, time=None, stage=None):
     return stage_manager().remove_key(stage_id(usd_stage), path, at)
 
 
-def remove_animation(attribute, time=None, stage=None):
+def remove_animation(attribute: Usd.Attribute | Sdf.Path | str, time: float | None = None, stage: Usd.Stage | None = None) -> bool:
     """Removes the animation the edit target holds for `attribute`: the value at `time`
     (default: the time shown) stays, as its default. False when the animation comes from
     another layer."""
@@ -186,7 +197,7 @@ def remove_animation(attribute, time=None, stage=None):
     return stage_manager().remove_animation(stage_id(usd_stage), path, at)
 
 
-def key_times(items, stage=None):
+def key_times(items: Usd.Attribute | Usd.Prim | Sdf.Path | str | Iterable[Usd.Attribute | Usd.Prim | Sdf.Path | str], stage: Usd.Stage | None = None) -> list[float]:
     """The key times of `items`, sorted, each once: Usd.Attributes and Usd.Prims (all of a
     prim's animated attributes), or their paths on `stage` (default: the current stage)."""
     usd_stage = None
@@ -201,30 +212,30 @@ def key_times(items, stage=None):
     return list(stage_manager().key_times(stage_id(usd_stage), paths))
 
 
-def auto_key():
+def auto_key() -> bool:
     """Whether auto-key is on: an edit to an attribute that isn't animated then sets a key
     at the time shown rather than its value for all times. App-wide, off at start."""
     return _native.auto_key()
 
 
-def set_auto_key(on):
+def set_auto_key(on: bool) -> None:
     """Turns auto-key on or off, as the timeline's Auto button does."""
     _native.set_auto_key(bool(on))
 
 
-def time_range(stage=None):
+def time_range(stage: Usd.Stage | None = None) -> tuple[float, float]:
     """``(start, end)``: the start and end time codes of `stage` (default: the
     current stage), or ``(0.0, 100.0)`` when it doesn't have both."""
     return stage_manager().time_range(stage_id(_resolve(stage)))
 
 
-def playback_range(stage=None):
+def playback_range(stage: Usd.Stage | None = None) -> tuple[float, float]:
     """``(start, end)``: the range the timeline shows and plays for `stage`
     (default: the current stage). The stage's own, until one is set."""
     return stage_manager().playback_range(stage_id(_resolve(stage)))
 
 
-def set_playback_range(start, end, stage=None):
+def set_playback_range(start: float | None, end: float | None, stage: Usd.Stage | None = None) -> None:
     """Makes the timeline show and play ``start`` to ``end`` for `stage` (default:
     the current stage). Kept with the session, not written to the stage. With both
     None, goes back to the stage's own range."""
@@ -235,13 +246,13 @@ def set_playback_range(start, end, stage=None):
         stage_manager().set_playback_range(cache_id, float(start), float(end))
 
 
-def edit_target(stage=None):
+def edit_target(stage: Usd.Stage | None = None) -> Sdf.Layer:
     """The layer (Sdf.Layer) edits to `stage` (default: the current stage) go to:
     its edit target, which the Layers panel shows and sets."""
     return _resolve(stage).GetEditTarget().GetLayer()
 
 
-def set_edit_target(layer, stage=None):
+def set_edit_target(layer: Sdf.Layer | str, stage: Usd.Stage | None = None) -> None:
     """Makes `layer` (an Sdf.Layer or its identifier) the edit target of `stage`
     (default: the current stage), as the Layers panel does. It must be in the
     stage's layer stack, session layers included, and not muted; ValueError
@@ -257,7 +268,7 @@ def set_edit_target(layer, stage=None):
     stage.SetEditTarget(Usd.EditTarget(found))
 
 
-def set_relationship_targets(relationship, types=(), schemas=(), severity="block", single=False, reason=""):
+def set_relationship_targets(relationship: str, types: Iterable[str] = (), schemas: Iterable[str] = (), severity: str = "block", single: bool = False, reason: str = "") -> None:
     """Says what a relationship expects to target (docs/RELATIONSHIPS.md), for the
     Attribute Editor's target dialog. USD doesn't record it, so this is how a plugin
     adds its own. `relationship` is a name, with at most one * for any text; a rule
@@ -271,22 +282,22 @@ def set_relationship_targets(relationship, types=(), schemas=(), severity="block
     _plugins.track(lambda: remove_relationship_targets(relationship))
 
 
-def remove_relationship_targets(relationship):
+def remove_relationship_targets(relationship: str) -> bool:
     """Removes that rule; False if there was none."""
     return _native.remove_relationship_targets(relationship)
 
 
-def relationship_targets(relationship):
+def relationship_targets(relationship: str) -> dict[str, Any] | None:
     """The rule (a dict) that applies to a relationship's name, or None."""
     return _native.relationship_targets(relationship)
 
 
-def relationship_target_rules():
+def relationship_target_rules() -> list[dict[str, Any]]:
     """Every rule (dicts), the built-in ones included."""
     return _native.relationship_target_rules()
 
 
-def set_create_entry(type, category="Plugins", group=0, order=1000):
+def set_create_entry(type: str, category: str = "Plugins", group: int = 0, order: int = 1000) -> None:
     """Says where the Create menu lists a prim type (docs/CREATE_MENU.md), which a type
     with no entry finds in Plugins. An entry for the same type is replaced, so a script
     can run again, and a built-in one can be overridden. A new `category` becomes a
@@ -299,23 +310,23 @@ def set_create_entry(type, category="Plugins", group=0, order=1000):
     _plugins.track(lambda: remove_create_entry(type))
 
 
-def hide_create_entry(type):
+def hide_create_entry(type: str) -> None:
     """Leaves a prim type out of the Create menu."""
     _native.hide_create_entry(type)
     _plugins.track(lambda: remove_create_entry(type))
 
 
-def remove_create_entry(type):
+def remove_create_entry(type: str) -> bool:
     """Forgets that entry, so the type goes to Plugins; False if there was none."""
     return _native.remove_create_entry(type)
 
 
-def create_entries():
+def create_entries() -> list[dict[str, Any]]:
     """What the Create menu lists now (dicts), in its order, leaving out Prim (no type)."""
     return _native.create_entries()
 
 
-def schemas():
+def schemas() -> list[dict[str, Any]]:
     """Every schema USD has registered (dicts, by name), as the Schemas panel shows
     them (docs/SCHEMAS.md §4): its kind ("Prim type", "API", ...), plugin, whether
     it's codeless, what it inherits, its built-in and auto-applied APIs, and its
@@ -324,14 +335,14 @@ def schemas():
     return _native.schemas()
 
 
-def schema(name):
+def schema(name: str) -> dict[str, Any] | None:
     """One schema as schemas() describes it ("Mesh", or "CollectionAPI:ferns" for
     CollectionAPI), or None if USD doesn't know it."""
     return _native.schema(name)
 
 
 @contextmanager
-def edit(description, stage=None):
+def edit(description: str, stage: Usd.Stage | None = None) -> Iterator[Usd.Stage]:
     """Makes everything done to `stage` (default: the current stage) inside the
     block one undo step named `description`. Nests: inside a script run, or
     another edit(), it becomes part of the outer step. Changes made before an
@@ -345,24 +356,24 @@ def edit(description, stage=None):
         undo_manager().end_edit(cache_id)
 
 
-def undo(stage=None):
+def undo(stage: Usd.Stage | None = None) -> None:
     """Edit > Undo on `stage` (default: the current stage)."""
     undo_manager().undo(stage_id(_resolve(stage)))
 
 
-def redo(stage=None):
+def redo(stage: Usd.Stage | None = None) -> None:
     """Edit > Redo on `stage` (default: the current stage)."""
     undo_manager().redo(stage_id(_resolve(stage)))
 
 
-def can_undo(stage=None):
+def can_undo(stage: Usd.Stage | None = None) -> bool:
     return undo_manager().can_undo(stage_id(_resolve(stage)))
 
 
-def can_redo(stage=None):
+def can_redo(stage: Usd.Stage | None = None) -> bool:
     return undo_manager().can_redo(stage_id(_resolve(stage)))
 
 
-def undo_text(stage=None):
+def undo_text(stage: Usd.Stage | None = None) -> str:
     """What Undo would revert on `stage`, e.g. "Run shot_setup.py" ('' if nothing)."""
     return undo_manager().undo_text(stage_id(_resolve(stage)))

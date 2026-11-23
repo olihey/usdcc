@@ -1,0 +1,34 @@
+"""@TITLE@: a plugin for usdcc (docs/FINAL_RENDER.md section 6.1)."""
+
+from PySide6 import QtCore, QtGui
+
+import usdcc.render as render
+
+
+class Renderer(render.FinalRenderer):
+    id = "@ID@"
+    name = "@TITLE@"
+    namespaces = ("@MODULE@",)
+
+    def settings_schema(self):
+        return [render.setting("@MODULE@:gray", "Gray", "float", 0.5, minimum=0.0, maximum=1.0, key="gray")]
+
+    def start(self, task):
+        """Starts rendering and returns at once. This one is done already: a gray picture."""
+        width, height = task.region[2], task.region[3]
+        gray = float(task.settings.get("gray", 0.5))
+        image = QtGui.QImage(width, height, QtGui.QImage.Format.Format_RGBA32FPx4)
+        image.fill(QtGui.QColor.fromRgbF(gray, gray, gray))
+        # One picture per AOV the render settings ask for.
+        images = {name: image for name, _source, _type in task.aovs} or {"color": image}
+        QtCore.QTimer.singleShot(0, lambda: task.active and task.finished(images))
+
+
+def activate(plugin):
+    """Runs at startup and at each reload."""
+    render.register_renderer(Renderer())
+
+
+def deactivate(plugin):
+    """Runs at quit and before each reload."""
+    render.unregister_renderer("@ID@")

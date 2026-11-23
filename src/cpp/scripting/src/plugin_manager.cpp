@@ -43,6 +43,9 @@
 #include <chrono>
 #include <fstream>
 #include <functional>
+#include <utility>
+#include <tuple>
+#include <optional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -787,6 +790,8 @@ void PluginManager::activateOne(PluginInfo& plugin) {
     if (failure.empty() && !plugin.manifest.pythonModule.empty()) {
         namespace py = pybind11;
         py::gil_scoped_acquire gil;
+        std::optional<PythonRuntime::Stoppable> stoppable;
+        if (PythonRuntime* python = PythonRuntime::instance()) stoppable.emplace(*python);
         try {
             failure = py::module_::import("usdcc._plugins")
                           .attr("activate")(plugin.manifest.id, plugin.manifest.name, plugin.manifest.version,
@@ -798,6 +803,20 @@ void PluginManager::activateOne(PluginInfo& plugin) {
     }
 #endif
     removeCrashMarker();
+    plugin.failureFile.clear();
+    plugin.failureLine = 0;
+#if USDCC_HAS_PYTHON
+    if (!failure.empty() && !plugin.manifest.pythonModule.empty()) {
+        namespace py = pybind11;
+        py::gil_scoped_acquire gil;
+        try {
+            std::tie(plugin.failureFile, plugin.failureLine) =
+                py::module_::import("usdcc._plugins").attr("failure_place")(plugin.manifest.id).cast<std::pair<std::string, int>>();
+        } catch (py::error_already_set&) {
+            // Only where it failed isn't known.
+        }
+    }
+#endif
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     if (failure.empty()) {
         plugin.state = PluginState::Active;
@@ -900,6 +919,8 @@ PluginManager::ReloadResult PluginManager::reload(const std::string& id, PythonR
         plugin->manifest = std::move(fresh);
         plugin->state = PluginState::Ready;
         plugin->reason.clear();
+        plugin->failureFile.clear();
+        plugin->failureLine = 0;
     }
 
     std::vector<PluginInfo*> ready;
@@ -937,6 +958,7 @@ PluginManager::ReloadResult PluginManager::reload(const std::string& id, PythonR
         if (plugin != target && plugin->state != PluginState::Active) result.notes.push_back(plugin->manifest.name + " isn't running: " + plugin->reason);
     }
     m_reloading = false;
+    changed();
 #else
     (void)id;
     (void)python;
@@ -944,7 +966,38 @@ PluginManager::ReloadResult PluginManager::reload(const std::string& id, PythonR
     return result;
 }
 
-std::string PluginManager::createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error) {
+namespace {
+std::filesystem::path templatesFolder(const PythonRuntime& python) {
+    std::error_code error;
+    for (const std::filesystem::path& path : python.settings().paths) {
+        if (std::filesystem::exists(path / "usdcc" / "_templates" / "templates.json", error)) return path / "usdcc" / "_templates";
+    }
+    return {};
+}
+}  // namespace
+
+std::vector<PluginManager::Template> PluginManager::templates(const PythonRuntime& python) {
+    std::vector<Template> result;
+    QFile file(toQString(templatesFolder(python) / "templates.json"));
+    if (!file.open(QIODevice::ReadOnly)) return result;
+    for (const QJsonValue& value : QJsonDocument::fromJson(file.readAll()).array()) {
+        const QJsonObject each = value.toObject();
+        result.push_back({each.value("id").toString().toStdString(), each.value("label").toString().toStdString(),
+                          each.value("description").toString().toStdString()});
+    }
+    return result;
+}
+
+std::string PluginManager::createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error,
+                                        const std::string& templateId) {
+    const std::vector<Template> known = templates(python);
+    QFile sourceFile(toQString(templatesFolder(python) / (templateId + ".py.in")));
+    if (std::none_of(known.begin(), known.end(), [&](const Template& each) { return each.id == templateId; }) ||
+        !sourceFile.open(QIODevice::ReadOnly)) {
+        if (error) *error = "There is no template " + templateId + ".";
+        return {};
+    }
+    const QByteArray source = sourceFile.readAll();
     const QString shown = QString::fromStdString(name).trimmed();
     // What's safe in code and a menu path, as the name goes in both.
     QString title = shown;
@@ -983,19 +1036,8 @@ std::string PluginManager::createPlugin(const std::string& name, const std::file
                                {"python", QJsonObject{{"module", module}, {"requires", QJsonArray()}}}};
     QFile manifestFile(toQString(folder / kManifestName));
     QFile codeFile(toQString(package / "__init__.py"));
-    const QString code = QStringLiteral(
-                             "\"\"\"%1: a plugin for usdcc (docs/PLUGINS.md).\"\"\"\n\n"
-                             "import usdcc.app\n\n\n"
-                             "def say_hello():\n"
-                             "    print(\"Hello from %1\")\n\n\n"
-                             "def activate(plugin):\n"
-                             "    \"\"\"Runs at startup and at each reload. What you register with usdcc is taken\n"
-                             "    back by itself at a reload: menu actions, tools, panels, events.\"\"\"\n"
-                             "    usdcc.app.add_menu_action(\"Tools/%1/Say Hello\", say_hello)\n\n\n"
-                             "def deactivate(plugin):\n"
-                             "    \"\"\"Runs at quit and before each reload. Stop here what you started yourself:\n"
-                             "    a QTimer, a thread, a Qt signal you connected.\"\"\"\n")
-                             .arg(title);
+    QString code = QString::fromUtf8(source);
+    code.replace(QLatin1String("@TITLE@"), title).replace(QLatin1String("@ID@"), id).replace(QLatin1String("@MODULE@"), module);
     if (!manifestFile.open(QIODevice::WriteOnly) || manifestFile.write(QJsonDocument(manifest).toJson()) < 0 ||
         !codeFile.open(QIODevice::WriteOnly) || codeFile.write(code.toUtf8()) < 0) {
         if (error) *error = "Can't write the plugin's files in " + toUtf8(folder) + ".";
@@ -1004,16 +1046,39 @@ std::string PluginManager::createPlugin(const std::string& name, const std::file
     manifestFile.close();
     codeFile.close();
 
+    return addPlugin(folder, python, error);
+}
+
+std::string PluginManager::addPlugin(const std::filesystem::path& folder, PythonRuntime& python, std::string* error) {
     PluginInfo plugin;
     plugin.manifest.folder = folder;
     if (const std::string problem = parseManifest(folder / kManifestName, plugin.manifest); !problem.empty()) {
         if (error) *error = problem;
         return {};
     }
-    const std::string newId = plugin.manifest.id;
-    m_plugins.push_back(std::move(plugin));
-    reload(newId, python);
-    return newId;
+    const std::string id = plugin.manifest.id;
+    if (const PluginInfo* known = find(id)) {
+        std::error_code fileError;
+        if (!std::filesystem::equivalent(known->manifest.folder, folder, fileError)) {
+            if (error) *error = "There is a plugin with the id " + id + " already, in " + toUtf8(known->manifest.folder) + ".";
+            return {};
+        }
+    } else {
+        m_plugins.push_back(std::move(plugin));
+    }
+    if (const std::string why = whyNotReloadable(id); !why.empty()) {
+        // It's listed, for the next start to take in.
+        PluginInfo* added = findMutable(id);
+        if (added->state == PluginState::Ready) {
+            added->state = PluginState::Refused;
+            added->reason = "It can only be started with the app. " + why;
+        }
+        if (error) *error = why;
+        changed();
+        return {};
+    }
+    reload(id, python);
+    return id;
 }
 
 void PluginManager::deactivate(PythonRuntime& python) {
@@ -1060,6 +1125,7 @@ void PluginManager::setEnabled(const std::string& id, bool enabled) {
         crashed.removeAll(qid);
         setSettingList(kCrashedKey, crashed);
     }
+    changed();
 }
 
 bool PluginManager::hasPendingChanges() const {

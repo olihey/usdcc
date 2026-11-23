@@ -1,0 +1,45 @@
+"""@TITLE@: a plugin for usdcc (docs/PLUGINS.md)."""
+
+from pxr import Gf, Usd, UsdGeom
+
+import usdcc.tools
+
+
+class Tool(usdcc.tools.Tool):
+    """One instance, shared by every viewport."""
+
+    def __init__(self):
+        self.length = 1.0
+
+    def options(self):
+        return [usdcc.tools.number("length", "Length", self.length, min=0.1, max=100.0)]
+
+    def set_option(self, id, value):
+        if id == "length":
+            self.length = value
+
+    def build_gizmo(self, ctx):
+        """Called on every frame, so it has to be quick: a line above each selected prim."""
+        gizmo = usdcc.tools.Gizmo()
+        for path in ctx.selection:
+            prim = ctx.stage.GetPrimAtPath(path)
+            if prim.IsA(UsdGeom.Imageable):
+                at = UsdGeom.Imageable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).ExtractTranslation()
+                gizmo.add_line(at, at + Gf.Vec3d(0, self.length, 0), (1.0, 0.7, 0.2, 1.0))
+        return gizmo
+
+    def mouse_press(self, ctx, ndc, ray):
+        """A click selects what's under it."""
+        path = ctx.pick(ndc)
+        return usdcc.tools.ToolResult(handled=True, new_selection=[] if path.isEmpty else [path])
+
+
+def activate(plugin):
+    """Runs at startup and at each reload. What you register with usdcc is taken
+    back by itself at a reload: menu actions, tools, panels, events."""
+    usdcc.tools.register_tool("@ID@.tool", "@TITLE@", Tool)
+
+
+def deactivate(plugin):
+    """Runs at quit and before each reload. Stop here what you started yourself:
+    a QTimer, a thread, a Qt signal you connected."""

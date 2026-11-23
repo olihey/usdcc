@@ -1,6 +1,9 @@
 #include "usdcc/scripting/python_settings.h"
 
 #include "usdcc/core/settings.h"
+#if USDCC_FEATURE_EDITOR_LINK
+#include "usdcc/scripting/editor_link.h"
+#endif
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/settings.h"
 
@@ -78,6 +81,26 @@ void definePythonSettings() {
                      .description = "Install only from the wheels folder and from what has been downloaded before.",
                      .type = SettingType::Bool,
                      .defaultValue = false});
+    settings.define({.key = kDebugPortKey,
+                     .category = kCategory,
+                     .group = "Editors",
+                     .label = "Debugger port",
+                     .description = "Where a debugger attaches, once Allow Debugger to Attach in the Script Editor's menu or an "
+                                    "editor asks for it. A free port is used when this one is taken.",
+                     .type = SettingType::Int,
+                     .defaultValue = 5678,
+                     .minimum = 1024,
+                     .maximum = 65535});
+#if USDCC_FEATURE_EDITOR_LINK
+    settings.define({.key = kEditorLinkKey,
+                     .category = kCategory,
+                     .group = "Editors",
+                     .label = "Allow editors to connect",
+                     .description = "Let editors you run on this machine, such as VS Code, run scripts and reload plugins in usdcc.",
+                     .type = SettingType::Bool,
+                     .defaultValue = true,
+                     .appliesAtNextStart = true});
+#endif
 }
 
 std::filesystem::path packagesFolderSetting() {

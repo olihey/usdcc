@@ -8,7 +8,14 @@ with ``register_renderer_profile()``::
     [node["identifier"] for node in shading.catalog() if node["group"] == "pbr"]
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from usdcc import _plugins
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 try:
     import _usdcc_app as _native  # compiled into the app
@@ -25,16 +32,16 @@ def _app():
     return _native
 
 
-def catalog():
+def catalog() -> list[dict[str, Any]]:
     """Each node's default version, as dicts: identifier, label, shading_system, context,
     group, function, variant and help. The label is the one the palette shows, "Open PBR
     Surface"; function is the name as its renderer writes it, "open_pbr_surface"."""
     return _app().shader_nodes()
 
 
-def register_renderer_profile(shading_system, display_name, terminal_prefix="", default_surface_node="",
-                              terminals=("surface",), hidden_contexts=(), icon="", group_metadata="",
-                              hidden_groups=(), hidden_nodes=(), node_groups=None):
+def register_renderer_profile(shading_system: str, display_name: str, terminal_prefix: str = "", default_surface_node: str = "",
+                              terminals: Iterable[str] = ("surface",), hidden_contexts: Iterable[str] = (), icon: str = "", group_metadata: str = "",
+                              hidden_groups: Iterable[str] = (), hidden_nodes: Iterable[str] = (), node_groups: dict[str, str] | None = None) -> None:
     """Says how the editor treats a shading system: its name in the palette, its Material
     terminals (``outputs:<prefix>:surface``), what "New Material" creates and connects,
     and any contexts to leave out. Registering one again replaces it. A plugin's goes
@@ -52,12 +59,12 @@ def register_renderer_profile(shading_system, display_name, terminal_prefix="", 
     _plugins.track(lambda: remove_renderer_profile(shading_system))
 
 
-def remove_renderer_profile(shading_system):
+def remove_renderer_profile(shading_system: str) -> bool:
     """Removes a profile. True if there was one."""
     return _app().remove_renderer_profile(shading_system)
 
 
-def nodes_changed():
+def nodes_changed() -> None:
     """Tells the palettes to read the catalog again. Call it after registering
     definitions with ``pxr.Sdr``, which can't say so itself; profiles say so
     when they're registered or removed."""

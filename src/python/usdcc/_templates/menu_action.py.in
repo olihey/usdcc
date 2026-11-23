@@ -1,0 +1,21 @@
+"""@TITLE@: a plugin for usdcc (docs/PLUGINS.md)."""
+
+import usdcc.app
+import usdcc.usd
+
+
+def say_hello():
+    """One undo step, whatever it edits."""
+    stage = usdcc.usd.current_stage()
+    print("Hello from @TITLE@:", stage.GetRootLayer().GetDisplayName() if stage else "no stage is open")
+
+
+def activate(plugin):
+    """Runs at startup and at each reload. What you register with usdcc is taken
+    back by itself at a reload: menu actions, tools, panels, events."""
+    usdcc.app.add_menu_action("Tools/@TITLE@/Say Hello", say_hello)
+
+
+def deactivate(plugin):
+    """Runs at quit and before each reload. Stop here what you started yourself:
+    a QTimer, a thread, a Qt signal you connected."""

@@ -9,6 +9,8 @@ end of sys.meta_path, after the app's folders, so they can't replace anything
 the app uses.
 """
 
+from __future__ import annotations
+
 import functools
 import importlib
 import importlib.abc
@@ -21,6 +23,8 @@ import os
 import re
 import shutil
 import sys
+import traceback
+from typing import Any
 
 from usdcc import log as _log
 
@@ -41,6 +45,7 @@ _NEVER_INSTALLED = _PROVIDED_BY_APP | {"pyside2", "pyqt5", "pyqt5-qt5", "pyqt6",
 
 _active = {}
 _current = None
+_failures = {}  # plugin id: where its activate() failed
 # What reloading needs (docs/PLUGIN_DEV.md).
 _undo = {}  # plugin id: what to call to take back what it registered, oldest first
 _owners = {}  # top-level module name: plugin id
@@ -52,17 +57,17 @@ class Settings:
     """A plugin's own settings, kept across sessions in the app's usdcc.ini.
     Values are anything JSON can hold."""
 
-    def __init__(self, plugin_id):
+    def __init__(self, plugin_id: str) -> None:
         self._id = plugin_id
 
-    def value(self, key, default=None):
+    def value(self, key: str, default: Any = None) -> Any:
         text = _native.plugin_setting(self._id, key)
         return default if text is None else json.loads(text)
 
-    def set_value(self, key, value):
+    def set_value(self, key: str, value: Any) -> None:
         _native.set_plugin_setting(self._id, key, json.dumps(value))
 
-    def remove(self, key):
+    def remove(self, key: str) -> None:
         _native.remove_plugin_setting(self._id, key)
 
 
@@ -74,7 +79,7 @@ class Plugin:
     records have the source ``plugin:<id>`` in the Log panel.
     """
 
-    def __init__(self, id, name, version, folder):
+    def __init__(self, id: str, name: str, version: str, folder: str) -> None:
         self.id = id
         self.name = name
         self.version = version
@@ -166,6 +171,7 @@ def activate(id, name, version, module, folder):
     global _current
     plugin = Plugin(id, name, version, folder)
     _current = plugin
+    _failures.pop(id, None)
     _owners[module] = id
     try:
         plugin.module = _load_module(module, folder)
@@ -174,11 +180,28 @@ def activate(id, name, version, module, folder):
             function(plugin)
         _active[id] = plugin
         return ""
-    except (Exception, SystemExit) as error:
+    except (Exception, SystemExit, KeyboardInterrupt) as error:
+        _failures[id] = _place(error, folder)
         _log.log_exception(type(error), error, error.__traceback__, "plugin", "plugin:" + id)
         return "%s: %s" % (type(error).__name__, error)
     finally:
         _current = None
+
+
+def _place(error, folder):
+    """The innermost line of the plugin's own that `error` came through: (file, line), or ("", 0)."""
+    places = [(frame.filename, frame.lineno or 0) for frame in traceback.extract_tb(error.__traceback__)]
+    if isinstance(error, SyntaxError) and error.filename and error.lineno:
+        places.append((error.filename, error.lineno))
+    for file, line in reversed(places):
+        if _is_inside(file, folder):
+            return os.path.abspath(file).replace("\\", "/"), line
+    return "", 0
+
+
+def failure_place(id):
+    """Where a plugin's activate() failed last: (file, line), or ("", 0)."""
+    return _failures.get(id, ("", 0))
 
 
 def deactivate(id):

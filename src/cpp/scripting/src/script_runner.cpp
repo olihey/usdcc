@@ -4,6 +4,8 @@
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QString>
 
 namespace usdcc::scripting {
@@ -20,8 +22,25 @@ bool ScriptRunner::runAsOneStep(const std::string& name, Run&& run) {
     return ok;
 }
 
+ScriptRunner::Result ScriptRunner::execute(const std::string& code, const Options& options) {
+    Result result;
+    const QFileInfo file(QString::fromStdString(options.name));
+    const std::string step = file.isAbsolute() ? file.fileName().toStdString() : options.name;
+    QElapsedTimer timer;
+    timer.start();
+    result.ok = runAsOneStep(step, [&] {
+        return m_runtime.runString(code, options.name, options.scope, options.firstLine, &result.error);
+    });
+    result.ms = timer.elapsed();
+    result.undoSteps = m_lastUndoSteps;
+    return result;
+}
+
 bool ScriptRunner::run(const std::string& code, const std::string& name, PythonRuntime::Namespace scope) {
-    return runAsOneStep(name, [&] { return m_runtime.runString(code, name, scope); });
+    Options options;
+    options.name = name;
+    options.scope = scope;
+    return execute(code, options).ok;
 }
 
 bool ScriptRunner::runFile(const std::filesystem::path& file, PythonRuntime::Namespace scope) {

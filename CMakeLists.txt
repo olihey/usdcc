@@ -198,6 +198,8 @@ else()
 endif()
 include(UsdccRuff)
 include(UsdccUv)
+include(UsdccDebugpy)
+include(UsdccStubs)
 # The installer and updates on Windows (docs/UPDATES.md).
 include(UsdccVelopack)
 
@@ -215,6 +217,9 @@ add_custom_target(
     # with `markupsafe`, for usdGenSchema (docs/SCHEMAS.md §12).
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/python/usdcc/_vendor"
             "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc/_vendor"
+    # What a new plugin starts from (docs/VSCODE.md §6.2).
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/python/usdcc/_templates"
+            "${USDCC_PYTHON_PACKAGE_ROOT}/usdcc/_templates"
     SOURCES ${_usdcc_python_sources}
     VERBATIM)
 
@@ -286,6 +291,9 @@ usdcc_feature(BLENDER_MESH_TOOLS LABEL "Blender mesh tools" DEFAULT ON
 # Settings > Updates, and doesn't link Velopack (the launcher and installer still do).
 usdcc_feature(UPDATES LABEL "Updates" DEFAULT ON
     DOC "Checking for, downloading and installing new releases (docs/UPDATES.md)")
+# In the app too: off, usdcc makes no pipe, and has no Settings > Python > Editors.
+usdcc_feature(EDITOR_LINK LABEL "Editor link" DEFAULT ON
+    DOC "Editors, such as VS Code, running scripts in usdcc through a local pipe (docs/VSCODE.md)")
 usdcc_feature(RTX_RENDER LABEL "RTX Render" DEFAULT OFF
     DOC "The native RTX Render view, Windows with NVIDIA's SDKs (docs/RTX_RENDER.md)"
     PLUGINS org.usdcc.rtx-render FOLDERS rtx_render)

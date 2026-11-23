@@ -1,0 +1,132 @@
+{
+  "name": "usdcc",
+  "displayName": "usdcc",
+  "description": "Run scripts and reload plugins in a running usdcc.",
+  "version": "0.1.0",
+  "publisher": "usdcc",
+  "license": "BSD-3-Clause",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/olihey/usdcc.git", "directory": "editors/vscode" },
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["Other"],
+  "extensionKind": ["ui"],
+  "main": "./out/src/extension.js",
+  "activationEvents": ["onLanguage:python", "workspaceContains:**/usdcc-plugin.json", "onDebug"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false, "description": "It runs code in usdcc." }, "virtualWorkspaces": false },
+  "contributes": {
+    "languages": [{ "id": "usdcc-output" }],
+    "jsonValidation": [{ "fileMatch": "usdcc-plugin.json", "url": "./schemas/usdcc-plugin.schema.json" }],
+    "snippets": [{ "language": "python", "path": "./snippets/usdcc.json" }],
+    "viewsContainers": { "activitybar": [{ "id": "usdcc", "title": "usdcc", "icon": "media/usdcc.svg" }] },
+    "views": { "usdcc": [{ "id": "usdcc.plugins", "name": "Plugins" }] },
+    "viewsWelcome": [
+      { "view": "usdcc.plugins", "contents": "Not connected to a usdcc.\n[Start usdcc](command:usdcc.start)\n[Connect](command:usdcc.connect)", "when": "!usdcc.connected" }
+    ],
+    "commands": [
+      { "command": "usdcc.run", "title": "Run File", "category": "usdcc", "icon": "$(play)" },
+      { "command": "usdcc.runSelection", "title": "Run Selection", "category": "usdcc" },
+      { "command": "usdcc.reloadPlugin", "title": "Reload Plugin", "category": "usdcc" },
+      { "command": "usdcc.stop", "title": "Stop Script", "category": "usdcc", "icon": "$(debug-stop)" },
+      { "command": "usdcc.newPlugin", "title": "New Plugin...", "category": "usdcc", "icon": "$(add)" },
+      { "command": "usdcc.refreshPlugins", "title": "Refresh Plugins", "category": "usdcc", "icon": "$(refresh)" },
+      { "command": "usdcc.plugins.reload", "title": "Reload", "category": "usdcc", "icon": "$(refresh)" },
+      { "command": "usdcc.plugins.openFolder", "title": "Reveal in File Explorer", "category": "usdcc", "icon": "$(folder-opened)" },
+      { "command": "usdcc.start", "title": "Start usdcc", "category": "usdcc" },
+      { "command": "usdcc.attachDebugger", "title": "Attach Debugger", "category": "usdcc" },
+      { "command": "usdcc.setUpWorkspace", "title": "Set Up Workspace", "category": "usdcc" },
+      { "command": "usdcc.connect", "title": "Connect", "category": "usdcc" },
+      { "command": "usdcc.keepVariables", "title": "Keep Variables Between Runs", "category": "usdcc" },
+      { "command": "usdcc.resetVariables", "title": "Reset Variables", "category": "usdcc" },
+      { "command": "usdcc.showOutput", "title": "Show Output", "category": "usdcc" }
+    ],
+    "breakpoints": [{ "language": "python" }],
+    "debuggers": [
+      {
+        "type": "usdcc",
+        "label": "usdcc",
+        "languages": ["python"],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": { "type": "string", "description": "usdcc's program. Empty: the setting usdcc.program, or the installed one." },
+              "stage": { "type": "string", "description": "A USD file to open." },
+              "pluginPath": { "type": "array", "items": { "type": "string" }, "description": "Folders of plugin folders. Left out: those of the plugins in the workspace." },
+              "profile": { "type": "string", "default": "vscode", "description": "usdcc's profile for development (USDCC_TEST_PROFILE): settings, layouts and plugins of its own. Empty: your own profile." },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "More arguments for usdcc." },
+              "env": { "type": "object", "additionalProperties": { "type": ["string", "null"] }, "description": "Environment variables; null removes one." },
+              "justMyCode": { "type": "boolean", "default": true, "description": "Off, step into usdcc's and other packages' Python too." }
+            }
+          },
+          "attach": {
+            "properties": {
+              "justMyCode": { "type": "boolean", "default": true, "description": "Off, step into usdcc's and other packages' Python too." }
+            }
+          }
+        },
+        "initialConfigurations": [
+          { "type": "usdcc", "request": "launch", "name": "Start usdcc" },
+          { "type": "usdcc", "request": "attach", "name": "Attach to usdcc" }
+        ],
+        "configurationSnippets": [
+          { "label": "usdcc: Start", "description": "Start usdcc and debug the Python in it", "body": { "type": "usdcc", "request": "launch", "name": "Start usdcc" } },
+          { "label": "usdcc: Attach", "description": "Debug the Python in a running usdcc", "body": { "type": "usdcc", "request": "attach", "name": "Attach to usdcc" } }
+        ]
+      }
+    ],
+    "keybindings": [
+      { "command": "usdcc.run", "key": "ctrl+enter", "when": "editorTextFocus && editorLangId == python && usdcc.connected" },
+      { "command": "usdcc.runSelection", "key": "ctrl+shift+enter", "when": "editorTextFocus && editorLangId == python && usdcc.connected" }
+    ],
+    "menus": {
+      "editor/title/run": [{ "command": "usdcc.run", "when": "editorLangId == python && usdcc.connected" }],
+      "view/title": [
+        { "command": "usdcc.newPlugin", "when": "view == usdcc.plugins && usdcc.connected", "group": "navigation@1" },
+        { "command": "usdcc.refreshPlugins", "when": "view == usdcc.plugins && usdcc.connected", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "usdcc.plugins.reload", "when": "view == usdcc.plugins && viewItem == reloadable", "group": "inline" },
+        { "command": "usdcc.plugins.openFolder", "when": "view == usdcc.plugins", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "usdcc.plugins.reload", "when": "false" },
+        { "command": "usdcc.plugins.openFolder", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "usdcc",
+      "properties": {
+        "usdcc.reloadPluginOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reload a plugin in usdcc when a file in its folder is saved."
+        },
+        "usdcc.program": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "The usdcc to start: its program, or the folder it's in. Empty: the installed one."
+        },
+        "usdcc.testProfile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Connect to a usdcc started with this `USDCC_TEST_PROFILE`, instead of the usual one."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "e2e": "npm run compile && node out/test/e2e/run.js",
+    "package": "vsce package --no-dependencies -o usdcc.vsix",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "@types/vscode": "1.95.0",
+    "@vscode/vsce": "3.6.0",
+    "ajv": "8.17.1",
+    "typescript": "5.9.2"
+  }
+}

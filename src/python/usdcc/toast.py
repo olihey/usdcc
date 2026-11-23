@@ -13,6 +13,9 @@ usdcc.core.log(..., toast=True) or logging's extra={"usdcc_toast": True}.
 Needs the running app with its window.
 """
 
+from __future__ import annotations
+
+
 try:
     import _usdcc_app as _native  # compiled into the app
 except ImportError:
@@ -27,7 +30,7 @@ def _app():
     return _native
 
 
-def show(title, body="", kind="info", duration=None, sticky=False):
+def show(title: object, body: object = "", kind: str = "info", duration: float | None = None, sticky: bool = False) -> int:
     """Shows a toast and returns its id. `body` may have several lines; the
     text sets the toast's size. `duration` is in seconds (default: the kind's,
     from the settings); `sticky` keeps it until dismissed. Showing the same
@@ -43,16 +46,16 @@ def show(title, body="", kind="info", duration=None, sticky=False):
     return _app().toast_show(str(title), str(body), kind, duration_ms)
 
 
-def dismiss(toast_id):
+def dismiss(toast_id: int) -> None:
     """Closes a toast (or drops one still waiting to be shown)."""
     _app().toast_dismiss(toast_id)
 
 
-def dismiss_all():
+def dismiss_all() -> None:
     """Closes every toast."""
     _app().toast_dismiss_all()
 
 
-def visible():
+def visible() -> list[int]:
     """The ids of the toasts that are up, newest first."""
     return _app().toast_visible()

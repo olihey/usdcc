@@ -5,6 +5,9 @@
 #include "usdcc/scripting/code_editor.h"
 #include "usdcc/scripting/plugin_type_icon.h"
 #include "usdcc/scripting/python_highlighter.h"
+#include "usdcc/scripting/debugger.h"
+#include "usdcc/scripting/editor_setup.h"
+#include "usdcc/scripting/run_capture.h"
 #include "usdcc/scripting/script_runner.h"
 #include "usdcc/scripting/startup_scripts.h"
 #include "usdcc/ui/panel_icon_button.h"
@@ -53,7 +56,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <mutex>
 #include <utility>
 
 // The deploy's tools/ruff holds ruff.exe on Windows, ruff elsewhere; a Python
@@ -99,16 +101,6 @@ QColor outputColor(int color) {
 }
 // A line's OutputColor, in its format: what a theme change recolours it by.
 constexpr int kOutputColorProperty = QTextFormat::UserProperty + 1;
-
-// Collects what is logged while a run is going on, for the output pane.
-struct RunCapture : usdcc::core::LogSink {
-    std::mutex mutex;
-    std::vector<LogRecord> records;
-    void onRecord(const LogRecord& record) override {
-        std::lock_guard lock(mutex);
-        records.push_back(record);
-    }
-};
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
@@ -1115,24 +1107,27 @@ bool ScriptEditorSidePanel::run() {
 
 bool ScriptEditorSidePanel::runSelection() {
     if (!editor()) return false;
-    return runCode(editor()->selectedCode(), tr("%1 (selection)").arg(currentName()));
+    // In the file's own lines, so a traceback points at the right one.
+    return runCode(editor()->selectedCode(), tr("%1 (selection)").arg(currentName()), editor()->selectedFirstLine());
 }
 
-bool ScriptEditorSidePanel::runCode(const QString& code, const QString& name) {
+bool ScriptEditorSidePanel::runCode(const QString& code, const QString& name, int firstLine) {
     appendOutput(QStringLiteral(">>> Run %1").arg(name), kMutedColor);
 
-    QElapsedTimer timer;
-    bool ok = false;
+    ScriptRunner::Result result;
     capturing([&]() {
-        timer.start();
         // Tracebacks name the open file, so its lines are easy to find.
         const QString& file = currentFile();
         const std::string fileName = file.isEmpty() ? name.toStdString() : file.toStdString();
-        ok = m_runner.run(code.toStdString(), fileName.empty() ? "<script>" : fileName,
-                          keepsVariables() ? PythonRuntime::Namespace::Session : PythonRuntime::Namespace::Fresh);
+        ScriptRunner::Options options;
+        if (!fileName.empty()) options.name = fileName;
+        options.firstLine = firstLine;
+        options.scope = keepsVariables() ? PythonRuntime::Namespace::Session : PythonRuntime::Namespace::Fresh;
+        result = m_runner.execute(code.toStdString(), options);
     });
-    const qint64 ms = timer.elapsed();
-    const int steps = m_runner.lastUndoSteps();
+    const bool ok = result.ok;
+    const qint64 ms = result.ms;
+    const int steps = result.undoSteps;
     const QString undo = steps == 0 ? QString() : steps == 1 ? tr(", 1 undo step") : tr(", %1 undo steps").arg(steps);
     appendOutput(ok ? tr("    done in %1 ms%2").arg(ms).arg(undo) : tr("    failed after %1 ms%2").arg(ms).arg(undo),
                  ok ? kMutedColor : kErrorColor);
@@ -1140,18 +1135,15 @@ bool ScriptEditorSidePanel::runCode(const QString& code, const QString& name) {
 }
 
 void ScriptEditorSidePanel::capturing(const std::function<void()>& work) {
-    auto capture = std::make_shared<RunCapture>();
-    usdcc::core::LogHub::instance().addSink(capture, false);
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    work();
-    QApplication::restoreOverrideCursor();
-    usdcc::core::LogHub::instance().removeSink(capture.get());
+    std::vector<LogRecord> records;  // the log's lock guards it, until the capture is gone
+    {
+        const RunCapture capture([&records](const LogRecord& record) { records.push_back(record); });
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        work();
+        QApplication::restoreOverrideCursor();
+    }
 
-    for (const LogRecord& record : capture->records) {
-        // The run's own bookkeeping ("Ran x.py in 3 ms") is in the footer.
-        if (record.source == "usdcc" && record.level < LogLevel::Warning) continue;
-        // A plugin's failure is told by its traceback, and by what's said after.
-        if (record.category == "usdcc.plugins") continue;
+    for (const LogRecord& record : records) {
         const QString message = qs(record.message);
         if (record.category == "python.stdout") {
             appendOutput(message, kTextColor);
@@ -1331,11 +1323,48 @@ void ScriptEditorSidePanel::populateMenu(QMenu* menu) {
     menu->addAction(tr("Reset Variables"), this, [this]() { m_runtime.resetSession(); })->setEnabled(keepsVariables());
     menu->addAction(tr("Clear Output"), this, [this]() { clearOutput(); });
     menu->addSeparator();
+    // Once allowed, it can't be taken back: debugpy has no call to stop.
+    const int debugPort = debugger::port();
+    QAction* debug = menu->addAction(debugPort ? tr("Debugger Can Attach on Port %1").arg(debugPort) : tr("Allow Debugger to Attach"),
+                                     this, [this]() { allowDebugger(); });
+    debug->setEnabled(!debugPort && m_runtime.isAvailable());
+    menu->addAction(tr("Set Up VS Code..."), this, [this]() {
+        const QString folder = folderForVsCode();
+        if (!folder.isEmpty()) Q_EMIT setUpVsCodeRequested(folder);
+    });
+    QAction* openCode = menu->addAction(tr("Open in VS Code"), this, [this]() {
+        const QString folder = folderForVsCode();
+        if (!folder.isEmpty()) editor_setup::openInVsCode(folder);
+    });
+    if (editor_setup::findVsCode().isEmpty()) {
+        openCode->setEnabled(false);
+        openCode->setToolTip(tr("VS Code wasn't found: its command, code, isn't on PATH"));
+    }
+    debug->setToolTip(tr("Until usdcc quits, VS Code's debugger, or any process on this machine, can attach to the Python in it"));
+    menu->addSeparator();
     menu->addAction(tr("Open Startup Scripts Folder"), this, []() {
         const QString folder = QString::fromStdU16String((userScriptsFolder() / "startup").u16string());
         QDir().mkpath(folder);
         QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
     });
+}
+
+QString ScriptEditorSidePanel::folderForVsCode() {
+    if (const Project* plugin = project(currentTab())) return plugin->folder;
+    if (!currentFile().isEmpty()) return QFileInfo(currentFile()).absolutePath();
+    return QFileDialog::getExistingDirectory(this, tr("Folder for VS Code"), QString::fromStdU16String(userScriptsFolder().u16string()));
+}
+
+void ScriptEditorSidePanel::allowDebugger() {
+    std::string error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const int port = debugger::listen(m_runtime, &error);
+    QApplication::restoreOverrideCursor();
+    if (port) {
+        appendOutput(tr("A debugger can attach to 127.0.0.1, port %1, until usdcc quits.").arg(port), kMutedColor);
+    } else {
+        appendOutput(tr("A debugger can't attach: %1").arg(QString::fromStdString(error)), kErrorColor);
+    }
 }
 
 void ScriptEditorSidePanel::populateTabMenu(QMenu* menu, int index) {

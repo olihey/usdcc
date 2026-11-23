@@ -1,0 +1,29 @@
+"""@TITLE@: a plugin for usdcc (docs/PLUGINS.md)."""
+
+from pxr import Usd, UsdGeom
+
+import usdcc.app
+
+
+def hide(stage: Usd.Stage, paths, clicked):
+    """One undo step, for all the selected prims."""
+    for path in paths:
+        imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+        if imageable:
+            imageable.MakeInvisible()
+
+
+def applies(stage: Usd.Stage, paths, clicked):
+    """Whether the entry is in the menu this time."""
+    return any(stage.GetPrimAtPath(path).IsA(UsdGeom.Imageable) for path in paths)
+
+
+def activate(plugin):
+    """Runs at startup and at each reload. What you register with usdcc is taken
+    back by itself at a reload: menu actions, tools, panels, events."""
+    usdcc.app.add_prim_menu_action("@TITLE@", hide, applies, id="@ID@.hide")
+
+
+def deactivate(plugin):
+    """Runs at quit and before each reload. Stop here what you started yourself:
+    a QTimer, a thread, a Qt signal you connected."""
