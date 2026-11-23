@@ -20,6 +20,7 @@
 #include <QFile>
 #include <QImage>
 #include <QImageWriter>
+#include <QComboBox>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -475,6 +476,7 @@ namespace {
 // A picture that records the moves it was asked to do.
 class NavigableSource : public FakeSource {
 public:
+    bool canNavigate() const override { return true; }
     bool navigate(const QString& move, double x, double y) override {
         if (busy) return false;
         moves.append(QStringLiteral("%1 %2 %3").arg(move).arg(x).arg(y));
@@ -630,4 +632,42 @@ USDCC_TEST(broadcast_public_address) {
     if (plain.broadcast) {
         CHECK(plain.broadcast->link() == plain.broadcast->localLink(), "without a public address the link changed");
     }
+}
+
+// Phase 5 (VIEWPORT_BROADCAST.md §8): a source that can't be navigated (a Render View) gets
+// no nav channel, so the page offers nothing; and the panel starts a broadcast of any source.
+USDCC_TEST(broadcast_sources) {
+    Fixture fixture;  // FakeSource: can't be navigated
+    if (!fixture.broadcast) return;
+    RawMember watcher;
+    CHECK(watcher.hello(*fixture.broadcast->room(), fixture.secret(), QStringLiteral("Anna")), "the watcher isn't let in");
+    const Message* welcome = watcher.find("room", "welcome");
+    bool navOpen = false;
+    for (const QJsonValue& value : welcome ? welcome->body.value("channels").toArray() : QJsonArray()) {
+        navOpen = navOpen || value.toObject().value("name").toString() == QLatin1String(Broadcast::kNavChannel);
+    }
+    CHECK(welcome && !navOpen, "a source that can't be navigated offers the nav channel");
+    QString annaId;
+    CHECK(waitUntil([&] { return !fixture.broadcast->watchers().isEmpty(); }), "the watcher isn't listed");
+    if (!fixture.broadcast->watchers().isEmpty()) annaId = fixture.broadcast->watchers().front().id;
+    CHECK(!fixture.broadcast->allowNavigating(annaId), "a watcher was allowed to navigate what can't be");
+
+    TestSettings settings;
+    BroadcastPanel panel(nullptr);
+    QWidget viewport, renderView;
+    panel.setSourceLister([&] {
+        return QList<BroadcastPanel::Source>{{QStringLiteral("Viewport 1"), &viewport},
+                                             {QStringLiteral("V-Ray Render"), &renderView}};
+    });
+    auto* sources = panel.findChild<QComboBox*>("broadcastSource");
+    auto* start = panel.findChild<QPushButton*>("broadcastStart");
+    CHECK(sources && sources->count() == 2 && sources->itemText(1) == "V-Ray Render", "the panel doesn't list the sources");
+    CHECK(start && start->isEnabled(), "Start is off with sources to choose from");
+    QWidget* asked = nullptr;
+    QObject::connect(&panel, &BroadcastPanel::startRequested, [&](QWidget* chosen) { asked = chosen; });
+    sources->setCurrentIndex(1);
+    start->click();
+    CHECK(asked == &renderView, "Start doesn't ask for the source chosen");
+    panel.setBroadcast(fixture.broadcast);
+    CHECK(!sources->isEnabled() && !start->isEnabled(), "a source can be chosen while live");
 }

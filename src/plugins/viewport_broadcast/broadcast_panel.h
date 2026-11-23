@@ -12,6 +12,9 @@
 #include <QMetaObject>
 #include <QPointer>
 
+#include <functional>
+
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -42,11 +45,27 @@ public:
     // Sends a line to the broadcast's chat, as the host.
     bool say(const QString& text);
 
+    // What may be broadcast from the panel (phase 5): each panel's name and the panel, a
+    // viewport or a Render View. Asked when the list is about to be shown.
+    struct Source {
+        QString name;
+        QPointer<QWidget> panel;
+    };
+    void setSourceLister(std::function<QList<Source>()> lister);
+    // Fills the source list again; the one chosen stays chosen when it's still there.
+    void refreshSources();
+
 Q_SIGNALS:
     // Stop was pressed.
     void stopRequested();
     // Copy was pressed (the plugin copies the link and may say so).
     void copyRequested();
+    // Start was pressed with this panel chosen.
+    void startRequested(QWidget* source);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     void updateState();
@@ -57,6 +76,10 @@ private:
     QPointer<usdcc::ui::PeersController> m_peers;
     QPointer<Broadcast> m_broadcast;
     QList<QMetaObject::Connection> m_connections;
+    std::function<QList<Source>()> m_lister;
+    QList<Source> m_sources;
+    QComboBox* m_source = nullptr;
+    QPushButton* m_start = nullptr;
     QLabel* m_status = nullptr;
     QLineEdit* m_link = nullptr;
     QPushButton* m_copy = nullptr;

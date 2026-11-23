@@ -13,7 +13,8 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
 **Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel. **Phase 3 is built** (2026-11-23,
 §11.4): a watcher navigates once the host allows it. **Phase 4a is built** (2026-11-23, §11.5): the
-Public address for a tunnel; 4b waits for the Peers relay.
+Public address for a tunnel; 4b waits for the Peers relay. **Phase 5 is half built** (2026-11-23,
+§11.6): Render Views as sources; H.264 is not built, and §11.6 says what it needs first.
 [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
@@ -325,7 +326,7 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 | **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat. **Built** (§11.3) |
 | **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click. **Built** (§11.4); not yet tried from a browser |
 | **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only. **4a built** (§11.5), not yet tried through a real tunnel; **4b waits** for the relay, which `usdcc_peers` doesn't have yet |
-| **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast |
+| **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast. **Render Views built** (§11.6), except RTX, which has no picture to read; **H.264 not built** (§11.6) |
 | **Later** | A watcher's pointer shown to all; drawing on the picture; several broadcasts at once | |
 
 Phases 0 to 3 need no server and no new codec.
@@ -572,6 +573,52 @@ mouse does and say so. The page's script parses (`node --check`); **not yet trie
 secret and a trailing `/`, the local link stays this machine's, a page from the tunnel's origin
 connects and one from another origin doesn't, and without the setting the link is as before.
 **Not tried yet:** a real tunnel (cloudflared, Tailscale Funnel) and a watcher on a phone network.
+
+### 11.6 Phase 5 as built: Render Views as sources
+
+- **`RenderViewPanel`** says when it shows a new picture (`imageShown()`: `showImage()`, a linear
+  image once it's through the view transform, `showPresentedFrame()`) and gives it
+  (`currentImage()`, virtual: `image()` here). So V-Ray Render and any Python renderer's view
+  can be broadcast, in display colors.
+- **RTX Render presents on its own** (a native window, `showPresentedFrame()`): it has no
+  `QImage`, `currentImage()` is null, and nothing is sent. It needs a read-back of its frame
+  (an override of `currentImage()`), which is RTX's to add. So "an RTX render is broadcast"
+  isn't done.
+- **Starting one:** the Broadcast panel has a source list and **Start**: every open viewport and
+  Render View, read when the list opens. The viewport menus' Broadcast is as before. Render
+  Views have no menu entry of their own: a plugin can't add to their menus yet.
+- **A Render View can't be navigated** (`FrameSource::canNavigate()`, false unless the source
+  says so; a viewport does): the nav channel isn't opened, so the page shows no **Ask to
+  navigate**. It follows a viewport's camera or one of the stage's, which the host moves.
+- No red border and no close guard for a Render View: closing it ends the broadcast ("The
+  Render View closed").
+
+**Tests:** `broadcast_sources` (`usdcc_ui_tests`): a source that can't be navigated offers no
+nav channel and nobody can be allowed; the panel lists the sources it's given and Start asks
+for the one chosen; the list is off while live. `render_view_panel_image_shown`: a picture shown
+says so and is `currentImage()`. **Not tried in the app** with a real renderer.
+
+### 11.7 H.264: not built, and why
+
+The plan (§4.2) assumed the room's latest-only delivery carries video as it carries JPEG. It
+doesn't: a JPEG stands alone, but most H.264 frames are differences from the frame before. Latest
+only drops frames for a slow watcher, and the next difference then decodes into garbage until a
+key frame. So H.264 needs, before an encoder:
+
+1. **Per-watcher delivery that never drops a difference:** an ordered stream per watcher with
+   its own small budget, and when that budget is spent, a request for a key frame instead of
+   dropping. The room has nothing per watcher like that; it is a `usdcc_peers` change.
+2. **Key frames on demand:** for a newcomer (its snapshot must be a key frame), for a watcher
+   that fell behind, and when the size changes. One encoder then serves everyone only if all
+   watchers take the same key frames, which costs the fast ones bandwidth; one encoder per
+   watcher costs the GPU. To decide.
+3. **Two streams at once:** a watcher on a plain `http://` LAN link has no WebCodecs (§4.2) and
+   keeps JPEG, so a broadcast to both sends both.
+4. Then the encoder (Media Foundation's H.264 MFT, NV12 input, Annex B out) and the page's
+   `VideoDecoder`, negotiated as §4.2 says.
+
+This is its own piece of work, best planned with PEERS.md's relay (4b), which is where the
+bandwidth matters.
 
 ## 12. Open questions
 

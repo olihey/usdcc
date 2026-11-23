@@ -94,11 +94,14 @@ Broadcast* Broadcast::start(usdcc::peers::Peers* peers, FrameSource* source, con
     broadcast->m_view = view;
     // The room's chat, which the Peers panel shows: watchers talk there too.
     room->channel(QString::fromLatin1(kChatChannel))->setOpenToGuests(true);
-    // Navigating: watchers ask and move, to the host only.
-    Channel* nav = room->channel(QString::fromLatin1(kNavChannel), Delivery::Direct);
-    nav->setOpenToGuests(true);
-    broadcast->m_nav = nav;
-    connect(nav, &Channel::received, broadcast, &Broadcast::onNav);
+    // Navigating: watchers ask and move, to the host only. Not opened for a source that
+    // can't be navigated, so the page offers nothing (phase 5: a Render View).
+    if (source->canNavigate()) {
+        Channel* nav = room->channel(QString::fromLatin1(kNavChannel), Delivery::Direct);
+        nav->setOpenToGuests(true);
+        broadcast->m_nav = nav;
+        connect(nav, &Channel::received, broadcast, &Broadcast::onNav);
+    }
 
     connect(room, &Room::peerJoined, broadcast, [broadcast](const Peer& peer) {
         if (!isWatcher(peer)) return;
@@ -174,7 +177,7 @@ void Broadcast::stop(const QString& reason) {
 }
 
 bool Broadcast::allowNavigating(const QString& watcher) {
-    if (!isLive() || !m_room->peer(watcher).isValid()) return false;
+    if (!isLive() || !m_nav || !m_room->peer(watcher).isValid()) return false;
     m_asking.removeAll(watcher);
     setNavigator(watcher);
     return true;

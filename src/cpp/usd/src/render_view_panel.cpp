@@ -300,6 +300,7 @@ void RenderViewPanel::showImage(const QImage& image) {
     m_linearImage = QImage();  // display colors: nothing to transform again
     m_view->setMessage(QString());
     m_view->setImage(image.copy());
+    Q_EMIT imageShown();
     showProgress();
 }
 
@@ -347,6 +348,7 @@ void RenderViewPanel::transformLinearImage() {
                     self->m_view->setMessage(QString());
                     self->m_view->setImage(shown);
                     self->showProgress();
+                    Q_EMIT self->imageShown();
                 }
                 if (self->m_transformAgain) {
                     self->m_transformAgain = false;
@@ -365,6 +367,7 @@ void RenderViewPanel::showPresentedFrame(const QSize& size) {
     m_presentedSize = size;
     m_view->setMessage({});
     showProgress();
+    Q_EMIT imageShown();
 }
 
 void RenderViewPanel::setState(const QString& state) {
