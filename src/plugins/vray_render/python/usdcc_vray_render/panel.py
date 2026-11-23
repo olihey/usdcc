@@ -60,7 +60,7 @@ class VRayRenderPanel(usdcc.ui.RenderViewPanel):
         size = self.render_size()
         camera = scene.Camera.from_render(self.camera())
         try:
-            path = self.files.export(self.stage, camera, size)
+            path = self.files.export(self.stage, camera, size, self.time())
         except Exception as error:  # shown; V-Ray keeps rendering the last scene
             LOG.exception("Exporting the stage for V-Ray failed")
             self.report_error("Exporting the stage failed: %s" % error)

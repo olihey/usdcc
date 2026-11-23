@@ -1,7 +1,7 @@
 # Animation — Plan
 
-Status: **phases 1 (playback), 2 (keyframing), 3 (key editing) and 4 (curves) built**, §6.1, §6.3,
-§6.4 and §6.5; phase 5 is plan.
+Status: **all five phases built**: playback, keyframing, key editing, curves and rendered output
+(§6.1, §6.3 to §6.6).
 The choices are in §4, and §8's questions are answered as recommended.
 
 Before this, usdcc had no notion of time: every read and write was at `UsdTimeCode::Default()`,
@@ -365,6 +365,30 @@ loop, moved knots), `anim_edit_split_ops` (the same matrix at three times, a rot
 dragged, each one undo step, held, repeat, bake, and the split). Seen in the app with
 `test_data/animated.usda`: the Hopper's rotateY and the Pulse's radius as curves, the translate
 listed. Not tried by hand: the drags and the menus.
+
+### 6.6 Phase 5: what was built
+
+Final Render already rendered at a time: **Render Frame** at the frame the timeline shows, and
+**Render Animation** over a range, through the render queue, with Hydra, RTX and V-Ray
+([FINAL_RENDER.md](FINAL_RENDER.md) §3, §5.3). So a "Render Sequence" is Render Animation, and
+this phase is the interactive Render View and a viewport playblast.
+
+| Piece | Where | Notes |
+|---|---|---|
+| The Render View's time | [render_view_panel.cpp](../src/cpp/usd/src/render_view_panel.cpp) | `renderTime()` is the stage's time. A new time (coalesced to one per 30 ms while playing) calls the `timeChanged()` hook: a camera prim is sent again where it is then (`primRenderCamera()` takes a time now), and with Update on Edits on and anything animated (`stageIsAnimated()`, worked out again after edits) the stage is sent again. A still stage isn't re-sent for a new time |
+| RTX | [rtx_panel.cpp](../src/plugins/rtx_render_native/rtx_panel.cpp), `stage_bridge.cpp` | The snapshot's start and end time code are the panel's time, as a final render pins its frame, so ovrtx renders the stage as it is then; transform edits are read at it too |
+| V-Ray and Python renderers | `usdcc.ui.RenderViewPanel` | A `time_changed(time)` hook (by default as above), `time()` and `stage_is_animated()`. V-Ray's export pins the file's start and end time code to `time()` |
+| Playblast | [playblast.h](../src/cpp/usd/include/usdcc/usd/playblast.h), the viewport's options menu, `usdcc.app.Viewport.playblast(pattern, start, end, step)` | The stage at each frame of a range, each frame taken once the viewport has drawn it at that time and its renderer has converged (`HydraViewportWindow::renderedTime()`, `isConverged()`), from `grabFrame()`: the scene with the grid and outline, no HUD. PNG, JPEG or TIFF; `####`, `<frame>`, `$F4`, or the frame before the extension. A progress dialog cancels it; the stage's time is put back after |
+
+Not built: a playblast at a size other than the viewport's, and of a camera other than the one the
+viewport looks through (look through it first). §7's question 5 (whether the RTX runtime and V-Ray
+read splines and scalar ops) is still open: neither SDK is on this machine, so the RTX and V-Ray
+changes are built by CI only and not run.
+
+Tests: `render_view_panel_time` (a camera prim at two times; three quick times send an animated
+stage once, with the camera where it is then; a still stage isn't sent again) and
+`playblast_files_and_frames` (usdcc_ui_tests). In the app with `test_data/animated.usda`:
+`Viewport.playblast()` over frames 1 to 6 with Storm wrote six PNGs with the Hopper moving.
 
 ### 6.2 The order
 

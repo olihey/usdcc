@@ -1657,6 +1657,7 @@ void HydraViewportWindow::renderNow() {
 
     // How far a progressive renderer has got, for the HUD's performance line.
     m_converging = m_stage && !m_engine->IsConverged();
+    if (m_stage) m_renderedTime = m_time;
     m_percentDone.reset();
     if (m_converging && m_display.hudPerformance) {
         const PXR_NS::VtDictionary stats = m_engine->GetRenderStats();

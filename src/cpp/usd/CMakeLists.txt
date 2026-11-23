@@ -286,6 +286,8 @@ add_library(usdcc_usd_ui SHARED
     src/dependencies_view_panel.cpp
     include/usdcc/usd/dope_sheet_view_panel.h
     src/dope_sheet_view_panel.cpp
+    include/usdcc/usd/playblast.h
+    src/playblast.cpp
     include/usdcc/usd/curve_editor_view_panel.h
     src/curve_editor_view_panel.cpp
     src/schema_explorer_view_panel.cpp
