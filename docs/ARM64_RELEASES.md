@@ -63,9 +63,10 @@ published all four, and PR 68's builds passed with them.*
    the archive names: `usdcc-<version>-linux-arm64.tar.xz` and `-symbols`.
 2. Try `deploy.py`, `split_debug.py` and `smoke_test.py` on the Arm runner first, with
    `release.yml`'s `dry_run` (§4): they have only run on x64.
-3. *Not yet:* Adobe's file formats for `linux-arm64` (§5): add the platform to the pin, and a matrix
-   entry in `deps-usd-plugins.yml`, whose jobs are x64 only. `--require-packs` asks only
-   for packs pinned for the platform, so this phase can ship without it.
+3. *Written:* Adobe's file formats for `linux-arm64` (§5): the platform is in the pin, and
+   `deps-usd-plugins.yml` has a job per pack and platform, x64 and arm64. The pin's change
+   renames every platform's pack, so the workflow has to publish them all before a release,
+   which requires them.
 
 Done when a prerelease has both Linux archives and the arm64 one starts on a machine that
 isn't the runner.
@@ -96,7 +97,7 @@ isn't the runner.
    on the Arm image has to be tried; if not, pack in a small x64 job from the uploaded deploy.
    x64 keeps the default channel, `win`, so installs made before arm64 keep reading
    `releases.win.json`.
-6. **Adobe's file formats** for `win-arm64`, as in phase 2.
+6. **Adobe's file formats** for `win-arm64`, as in phase 2. *Written, with it.*
 
 Done when a prerelease's arm64 installer installs on an Arm PC, starts, and updates itself
 to the next prerelease.
@@ -134,7 +135,7 @@ who has the SDK.
 
 | Pack | Verdict | Platforms | Why |
 |---|---|---|---|
-| Adobe file formats (glTF, OBJ, PLY, STL, SPZ) | **Ships; add arm64** | x64 now, arm64 in phases 2 and 3 | Apache-2.0, under 3 MB, self-contained. arm64 is only missing from its pin and the workflow; the build is untried |
+| Adobe file formats (glTF, OBJ, PLY, STL, SPZ) | **Ships** | All four | Apache-2.0, under 3 MB, self-contained. arm64 built on the Arm runners since 2026-11-23 |
 | Embree render delegate | **Ships** | All four | In the OpenUSD asset. Apache-2.0. The one CPU path tracer that every package has today |
 | Cycles | **Should ship next, not ready** | x64 first; Windows arm64 plausible; Linux arm64 doubtful | Apache-2.0. Blocked by TBB: x64 assets have TBB 2020 and Cycles wants oneTBB, which only `win-arm64` has (`--onetbb`). Needs the list of Blender libraries it ships read. Blender's prebuilt libraries for Linux arm64 have to be checked for |
 | MoonRay | **Later, Linux only** | Linux x64 | Apache-2.0, but no Windows build. Not proven against our OpenUSD, and its libraries' licences are unread. Upstream supports Linux x64 and macOS arm64, not Linux arm64 |

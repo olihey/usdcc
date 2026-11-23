@@ -22,8 +22,10 @@ $GITHUB_OUTPUT for later workflow steps:
     python tools/ci/usd_plugin_asset.py adobe-fileformats
 
 --matrix prints, instead, the packs CI builds for each platform (those that list
-it and aren't in the "local" set) as JSON lists, for a workflow's matrices:
-  win64, linux-x64
+it and aren't in the "local" set) as JSON lists, and the jobs for a workflow's
+matrices, a pack on a platform each, with the runner that builds it:
+  win64, win-arm64, linux-x64, linux-arm64
+  windows, linux   [{"pack", "platform", "arch", "runner"}, ...]
 """
 
 from __future__ import annotations
@@ -39,6 +41,14 @@ from _common import ASSET_PLATFORM, REPO, fail, normalized_text, report, short_h
 import usd_asset  # noqa: E402
 
 PINS = REPO / "deps/usd-plugins"
+# The platforms CI builds packs for: (system, arch, GitHub's runner). Windows x64 is
+# pinned to the toolset OpenUSD was built with; arm64 has only Visual Studio 2026.
+CI_PLATFORMS = {
+    "win64": ("windows", "x64", "windows-2022"),
+    "win-arm64": ("windows", "arm64", "windows-11-arm"),
+    "linux-x64": ("linux", "x64", "ubuntu-24.04"),
+    "linux-arm64": ("linux", "arm64", "ubuntu-24.04-arm"),
+}
 SETS = ("standard", "optional", "local")
 _KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "sdks", "cmake", "targets",
          "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check"}
@@ -113,12 +123,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("pack", nargs="?", help="the pack to name, as in deps/usd-plugins/<pack>.json")
     parser.add_argument("--matrix", action="store_true",
-                        help="list the packs CI builds instead, per platform: win64=[...], linux-x64=[...]")
+                        help="list the packs CI builds instead, per platform, and the jobs per system")
     parser.add_argument("--github-output", action="store_true", help="also append the result to $GITHUB_OUTPUT")
     args = parser.parse_args(argv)
     if args.matrix:
-        report({platform: json.dumps(ci_packs(platform)) for platform in ("win64", "linux-x64")},
-               github_output=args.github_output)
+        result = {platform: json.dumps(ci_packs(platform)) for platform in CI_PLATFORMS}
+        for system in ("windows", "linux"):
+            result[system] = json.dumps([
+                {"pack": pack, "platform": platform, "arch": arch, "runner": runner}
+                for platform, (system_of, arch, runner) in CI_PLATFORMS.items() if system_of == system
+                for pack in ci_packs(platform)])
+        report(result, github_output=args.github_output)
     elif args.pack:
         report(describe(args.pack), github_output=args.github_output)
     else:

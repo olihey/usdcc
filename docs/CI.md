@@ -387,8 +387,10 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
   python.org's `pythonarm64` NuGet package: setup-python can't install an older 3.13
   beside the newer one the image ships.
 - `release.yml` builds and attaches the arm64 packages too ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
-- Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`) and
-  the Blender distribution checks.
+- USD plugin packs whose pins list `win-arm64` or `linux-arm64` are built on the Arm
+  runners too; Adobe's file formats do ([USD_PLUGINS.md](USD_PLUGINS.md) §4).
+- Not yet for arm64: Gatling's pack (no MDL SDK for Windows arm64; its Linux one is
+  untried) and the Blender distribution checks.
   A missing pack or PySide6 is a warning, as on x64.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.

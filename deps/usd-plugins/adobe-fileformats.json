@@ -12,7 +12,7 @@
     "-DUSD_FILEFORMATS_ENABLE_INSTALL_PLUGINFO_ROOT=OFF",
     "-DUSD_FILEFORMATS_ENABLE_CXX11_ABI=ON"
   ],
-  "platforms": ["win64", "linux-x64"],
+  "platforms": ["win64", "win-arm64", "linux-x64", "linux-arm64"],
   "license": "Apache-2.0",
   "set": "standard",
   "check": {
