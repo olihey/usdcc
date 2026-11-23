@@ -1,6 +1,7 @@
 #include "usdcc/usd/viewport_display.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/usd/camera_framing.h"
 #include "usdcc/ui/app_settings.h"
 
 #include <algorithm>
@@ -51,7 +52,42 @@ constexpr Switch kSwitches[] = {
     {"hudToolReadout", &Overrides::hudToolReadout, &Options::hudToolReadout, kViewportHudToolReadoutKey},
     {"hudRollover", &Overrides::hudRollover, &Options::hudRollover, kViewportHudRolloverKey},
     {"showColliders", &Overrides::showColliders, &Options::showColliders, kViewportShowCollidersKey},
+    {"safeAction", &Overrides::safeAction, &Options::safeAction, kViewportSafeActionKey},
+    {"safeTitle", &Overrides::safeTitle, &Options::safeTitle, kViewportSafeTitleKey},
+    {"safeCenter", &Overrides::safeCenter, &Options::safeCenter, kViewportSafeCenterKey},
 };
+
+// The numbers of the gate and safe frames: their session name, override, value, setting and range.
+struct Number {
+    const char* name;
+    std::optional<double> Overrides::*override;
+    double Options::*option;
+    const char* key;
+    double minimum;
+    double maximum;
+};
+constexpr Number kNumbers[] = {
+    {"gateMaskOpacity", &Overrides::gateMaskOpacity, &Options::gateMaskOpacity, kViewportGateMaskOpacityKey, 0.0, 1.0},
+    {"safeActionPercent", &Overrides::safeActionPercent, &Options::safeActionPercent, kViewportSafeActionPercentKey, 1.0, 100.0},
+    {"safeTitlePercent", &Overrides::safeTitlePercent, &Options::safeTitlePercent, kViewportSafeTitlePercentKey, 1.0, 100.0},
+    {"safeAspect", &Overrides::safeAspect, &Options::safeAspect, kViewportSafeAspectKey, 0.0, 10.0},
+};
+
+// A resolution as Viewport/resolution has it: "fill", "renderSettings" or "WxH".
+std::optional<std::string> cameraNavigationName(const QString& text) {
+    for (const char* name : kCameraNavigations) {
+        if (text.compare(QLatin1String(name), Qt::CaseInsensitive) == 0) return std::string(name);
+    }
+    return std::nullopt;
+}
+
+bool validRenderScale(int scale) {
+    return std::find(std::begin(kRenderScales), std::end(kRenderScales), scale) != std::end(kRenderScales);
+}
+
+bool validResolution(const std::string& text) {
+    return text == kFillViewport || text == kRenderSettingsResolution || parseResolution(text).has_value();
+}
 
 // A name or label back to its value, ignoring case.
 template <typename T, size_t N>
@@ -66,11 +102,21 @@ std::optional<T> fromName(const QString& name, const T (&values)[N], const char*
 }
 }  // namespace
 
+QString cameraNavigationLabel(const std::string& name) {
+    QString label = QString::fromStdString(name);
+    if (!label.isEmpty()) label[0] = label[0].toUpper();
+    return label;
+}
+
 bool isViewportDisplayKey(const std::string& key) {
     for (const char* known : {kViewportShowGridKey, kViewportGridSizeKey, kViewportGridStepKey, kViewportBackgroundKey,
                               kViewportSelectionStyleKey, kViewportSelectionColorKey, kViewportSelectionWidthKey,
-                              kViewportComplexityKey}) {
+                              kViewportComplexityKey, kViewportResolutionKey, kViewportRenderScaleKey,
+                              kViewportCameraNavigationKey}) {
         if (key == known) return true;
+    }
+    for (const Number& number : kNumbers) {
+        if (key == number.key) return true;
     }
     for (const Switch& toggle : kSwitches) {
         if (toggle.key && key == toggle.key) return true;
@@ -354,6 +400,112 @@ void defineViewportDisplaySettings() {
         {kViewportHudRolloverKey, "Prim under cursor",
          "Beside the cursor when it rests: the path and type of the prim under it.", builtIn.hudRollover},
     };
+    // The resolution gate and safe frames (docs/VIEWPORT_CAMERA.md §4, §6, §7).
+    settings.define({
+        .key = kViewportResolutionKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Resolution gate",
+        .description = "The image's shape in a viewport: fill (the viewport's own), renderSettings (the stage's "
+                       "render settings' resolution), or a size such as 1920x1080. The gate is fitted in the viewport, "
+                       "and the scene outside it darkened. A viewport can choose its own (its options menu, Resolution).",
+        .type = SettingType::String,
+        .defaultValue = builtIn.resolution,
+    });
+    settings.define({
+        .key = kViewportCameraNavigationKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Through a stage camera",
+        .description = "What a tumble, pan or dolly does while a viewport looks through one of the stage's cameras: "
+                       "Detach leaves it for the viewport's own camera, starting where it was; Drive moves the camera "
+                       "itself (one undo step a drag, refused with the reason when it can't be moved); Locked does "
+                       "nothing. A viewport can choose its own (its Camera menu).",
+        .type = SettingType::Choice,
+        .defaultValue = std::string("Detach"),
+        .choices = {"Detach", "Drive", "Locked"},
+    });
+    settings.define({
+        .key = kViewportRenderScaleKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Render scale (%)",
+        .description = "Hydra renders at this share of the viewport's pixels, scaled up: faster for a slow renderer "
+                       "or a big screen. The grid, the selection outline and the gizmos stay sharp. A viewport can "
+                       "choose its own (its options menu, Render Scale).",
+        .type = SettingType::Choice,
+        .defaultValue = std::to_string(builtIn.renderScale),
+        .choices = {"100", "75", "50", "25"},
+    });
+    settings.define({
+        .key = kViewportGateMaskOpacityKey,
+        .category = "Viewport",
+        .group = "Camera",
+        .label = "Gate mask opacity",
+        .description = "How dark the scene outside the resolution gate is: 0 not at all, 1 black.",
+        .type = SettingType::Float,
+        .defaultValue = builtIn.gateMaskOpacity,
+        .minimum = 0.0,
+        .maximum = 1.0,
+    });
+    const struct {
+        const char* key;
+        const char* label;
+        const char* description;
+        bool value;
+    } safeSwitches[] = {
+        {kViewportSafeActionKey, "Action safe", "A frame inside the gate: what must be seen on any screen.",
+         builtIn.safeAction},
+        {kViewportSafeTitleKey, "Title safe", "A frame inside the gate for text: inside action safe.", builtIn.safeTitle},
+        {kViewportSafeCenterKey, "Centre cross", "A small cross at the gate's centre.", builtIn.safeCenter},
+    };
+    for (const auto& safeSwitch : safeSwitches) {
+        settings.define({
+            .key = safeSwitch.key,
+            .category = "Viewport",
+            .group = "Safe Frames",
+            .label = safeSwitch.label,
+            .description = safeSwitch.description,
+            .type = SettingType::Bool,
+            .defaultValue = safeSwitch.value,
+        });
+    }
+    settings.define({
+        .key = kViewportSafeActionPercentKey,
+        .category = "Viewport",
+        .group = "Safe Frames",
+        .label = "Action safe (%)",
+        .description = "Action safe's width and height, as a percentage of the gate's: 93 by SMPTE ST 2046-1, 90 "
+                       "in older practice.",
+        .type = SettingType::Float,
+        .defaultValue = builtIn.safeActionPercent,
+        .minimum = 1.0,
+        .maximum = 100.0,
+    });
+    settings.define({
+        .key = kViewportSafeTitlePercentKey,
+        .category = "Viewport",
+        .group = "Safe Frames",
+        .label = "Title safe (%)",
+        .description = "Title safe's width and height, as a percentage of the gate's: 90 by SMPTE ST 2046-1, 80 in "
+                       "older practice.",
+        .type = SettingType::Float,
+        .defaultValue = builtIn.safeTitlePercent,
+        .minimum = 1.0,
+        .maximum = 100.0,
+    });
+    settings.define({
+        .key = kViewportSafeAspectKey,
+        .category = "Viewport",
+        .group = "Safe Frames",
+        .label = "Aspect guide",
+        .description = "Lines showing another shape inside the gate, as width over height (2.39, 1.85, 1.78, 1.33, "
+                       "1); 0 for none.",
+        .type = SettingType::Float,
+        .defaultValue = builtIn.safeAspect,
+        .minimum = 0.0,
+        .maximum = 10.0,
+    });
     for (const auto& hudSwitch : hudSwitches) {
         settings.define({
             .key = hudSwitch.key,
@@ -389,6 +541,19 @@ HydraViewportWindow::DisplayOptions defaultViewportDisplay() {
     for (const Switch& toggle : kSwitches) {
         if (toggle.key) options.*toggle.option = settings.get<bool>(toggle.key);
     }
+    for (const Number& number : kNumbers) {
+        options.*number.option = std::clamp(settings.get<double>(number.key), number.minimum, number.maximum);
+    }
+    const std::string resolution = settings.get<std::string>(kViewportResolutionKey);
+    if (validResolution(resolution)) options.resolution = resolution;
+    bool scaleOk = false;
+    if (const int scale = QString::fromStdString(settings.get<std::string>(kViewportRenderScaleKey)).toInt(&scaleOk);
+        scaleOk && validRenderScale(scale)) {
+        options.renderScale = scale;
+    }
+    if (const auto navigation = cameraNavigationName(QString::fromStdString(settings.get<std::string>(kViewportCameraNavigationKey)))) {
+        options.cameraNavigation = *navigation;
+    }
     return options;
 }
 
@@ -403,8 +568,14 @@ HydraViewportWindow::DisplayOptions ViewportDisplayOverrides::applyTo(HydraViewp
     if (shading) defaults.shading = *shading;
     if (complexity) defaults.complexity = *complexity;
     if (colorView) defaults.colorView = *colorView;
+    if (resolution) defaults.resolution = *resolution;
+    if (renderScale) defaults.renderScale = *renderScale;
+    if (cameraNavigation) defaults.cameraNavigation = *cameraNavigation;
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) defaults.*toggle.option = *value;
+    }
+    for (const Number& number : kNumbers) {
+        if (const std::optional<double>& value = this->*number.override) defaults.*number.option = *value;
     }
     return defaults;
 }
@@ -421,8 +592,14 @@ QJsonObject ViewportDisplayOverrides::toJson() const {
     if (shading) json.insert(QStringLiteral("shading"), QLatin1String(shadingModeName(*shading)));
     if (complexity) json.insert(QStringLiteral("complexity"), QLatin1String(complexityName(*complexity)));
     if (colorView) json.insert(QStringLiteral("colorView"), QString::fromStdString(*colorView));
+    if (resolution) json.insert(QStringLiteral("resolution"), QString::fromStdString(*resolution));
+    if (renderScale) json.insert(QStringLiteral("renderScale"), *renderScale);
+    if (cameraNavigation) json.insert(QStringLiteral("cameraNavigation"), QString::fromStdString(*cameraNavigation));
     for (const Switch& toggle : kSwitches) {
         if (const std::optional<bool>& value = this->*toggle.override) json.insert(QLatin1String(toggle.name), *value);
+    }
+    for (const Number& number : kNumbers) {
+        if (const std::optional<double>& value = this->*number.override) json.insert(QLatin1String(number.name), *value);
     }
     return json;
 }
@@ -464,6 +641,21 @@ ViewportDisplayOverrides ViewportDisplayOverrides::fromJson(const QJsonObject& j
     }
     for (const Switch& toggle : kSwitches) {
         if (const QJsonValue v = json.value(QLatin1String(toggle.name)); v.isBool()) overrides.*toggle.override = v.toBool();
+    }
+    for (const Number& number : kNumbers) {
+        if (const QJsonValue v = json.value(QLatin1String(number.name));
+            v.isDouble() && v.toDouble() >= number.minimum && v.toDouble() <= number.maximum) {
+            overrides.*number.override = v.toDouble();
+        }
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("resolution")); v.isString() && validResolution(v.toString().toStdString())) {
+        overrides.resolution = v.toString().toStdString();
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("renderScale")); v.isDouble() && validRenderScale(v.toInt())) {
+        overrides.renderScale = v.toInt();
+    }
+    if (const QJsonValue v = json.value(QStringLiteral("cameraNavigation")); v.isString()) {
+        overrides.cameraNavigation = cameraNavigationName(v.toString());
     }
     return overrides;
 }

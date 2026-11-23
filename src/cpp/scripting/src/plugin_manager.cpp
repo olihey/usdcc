@@ -7,6 +7,7 @@
 
 #include "usdcc/scripting/plugin_manager.h"
 
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/log.h"
 #include "usdcc/plugin/plugin.h"
 #include "usdcc/core/settings.h"
@@ -53,6 +54,13 @@ namespace {
 constexpr const char* kManifestName = "usdcc-plugin.json";
 constexpr auto kDisabledKey = "Plugins/disabled";
 constexpr auto kCrashedKey = "Plugins/crashed";
+constexpr const char* kLeftOutReason = "Left out of this build.";
+
+// A plugin of a feature this build was configured without (docs/BUILD_OPTIONS.md).
+bool leftOutOfBuild(const std::string& id) {
+    const usdcc::core::BuildFeature* feature = usdcc::core::featureOfPlugin(id);
+    return feature && !feature->included;
+}
 
 // A list from plugInfo.json: an array of strings, or one string.
 std::vector<std::string> jsStrings(const PXR_NS::JsObject& object, const std::string& key) {
@@ -485,6 +493,15 @@ void PluginManager::readManifests() {
                 m_unusable.insert(plugin.manifest.id);
                 USDCC_LOG_WARNING("usdcc.plugins", "{} ({}): {}", plugin.manifest.name, toUtf8(folder), problem);
             }
+            // A feature this build left out (docs/BUILD_OPTIONS.md §3): refused from any
+            // folder, before any of its code or USD files are taken in, so a copy from
+            // another build doesn't bring it back.
+            if (problem.empty() && leftOutOfBuild(plugin.manifest.id)) {
+                plugin.state = PluginState::Refused;
+                plugin.reason = kLeftOutReason;
+                USDCC_LOG_INFO("usdcc.plugins", "{} ({}): left out of this build, so not loaded", plugin.manifest.name,
+                               toUtf8(folder));
+            }
             if (const PluginInfo* first = find(plugin.manifest.id)) {
                 USDCC_LOG_WARNING("usdcc.plugins", "Ignoring plugin {} in {}: {} has the same id", plugin.manifest.id,
                                   toUtf8(folder), toUtf8(first->manifest.folder));
@@ -795,6 +812,7 @@ void PluginManager::activateOne(PluginInfo& plugin) {
 std::string PluginManager::whyNotReloadable(const std::string& id) const {
     const PluginInfo* plugin = find(id);
     if (!plugin) return "There is no such plugin.";
+    if (leftOutOfBuild(id)) return kLeftOutReason;
     if (plugin->state == PluginState::Disabled) return "It's turned off.";
     if (!plugin->manifest.nativeLibrary.empty()) return "It has a C++ part, whose library can't be unloaded. It needs a restart.";
     // A manifest that was broken may be fixed by now, which only reading it will tell.

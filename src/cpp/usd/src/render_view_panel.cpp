@@ -46,12 +46,12 @@ namespace usdcc::usd {
 
 namespace {
 // The Resolution choices: a scale of the panel's size, or a fixed size.
-struct Resolution {
+struct RenderResolution {
     const char* label;
     double scale;  // 0 for a fixed size
     QSize size;
 };
-const Resolution kResolutions[] = {
+const RenderResolution kResolutions[] = {
     {"Fit Panel", 1.0, {}},
     {"Fit Panel ½", 0.5, {}},
     {"Fit Panel ¼", 0.25, {}},
@@ -193,7 +193,7 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     m_resolutionCombo->hide();
     m_resolutionCombo->setObjectName(QStringLiteral("renderResolution"));
     m_resolutionCombo->setToolTip(tr("The image's size"));
-    for (const Resolution& resolution : kResolutions) {
+    for (const RenderResolution& resolution : kResolutions) {
         m_resolutionCombo->addItem(QString::fromUtf8(resolution.label));
     }
     connect(m_resolutionCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() { sendSize(); });
@@ -259,6 +259,13 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     };
     m_editTimer = timer(kDefaultEditDelayMs, &RenderViewPanel::onEditTimeout);
     m_cameraTimer = timer(kCameraIntervalMs, &RenderViewPanel::sendCamera);
+    // A new time, at most this often while the stage plays.
+    m_timeTimer = new QTimer(this);
+    m_timeTimer->setSingleShot(true);
+    m_timeTimer->setInterval(kCameraIntervalMs);
+    connect(m_timeTimer, &QTimer::timeout, this, [this]() {
+        if (!m_closed && currentStage()) timeChanged(renderTime());
+    });
     m_sizeTimer = timer(kResizeDelayMs, &RenderViewPanel::sendSize);
 
     // Closing the tab only hides a panel: a hidden one doesn't keep rendering.
@@ -404,7 +411,7 @@ bool RenderViewPanel::updatesOnEdits() const { return m_liveCheck->isChecked(); 
 
 QSize RenderViewPanel::renderSize() const {
     const int index = std::clamp(m_resolutionCombo->currentIndex(), 0, int(std::size(kResolutions)) - 1);
-    const Resolution& resolution = kResolutions[index];
+    const RenderResolution& resolution = kResolutions[index];
     double width = resolution.size.width();
     double height = resolution.size.height();
     if (resolution.scale > 0.0) {
@@ -425,7 +432,9 @@ RenderCamera RenderViewPanel::currentCamera() const {
     if (source == "local" && m_localCamera) return m_localCamera->atAspect(aspect);
     if (source != kViewportCamera && stage) {
         const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath(source.toStdString()));
-        if (std::optional<RenderCamera> camera = primRenderCamera(prim, aspect)) return *camera;
+        if (std::optional<RenderCamera> camera = primRenderCamera(prim, aspect, PXR_NS::UsdTimeCode(renderTime()))) {
+            return *camera;
+        }
     }
     if (ViewportViewPanel* viewport = ViewportViewPanel::activeViewport(); viewport && stage && viewport->currentStage() == stage) {
         return viewportRenderCamera(*viewport).atAspect(aspect);
@@ -581,15 +590,49 @@ void RenderViewPanel::onRefresh() {
 
 void RenderViewPanel::connectStage() {
     m_stageChangedConnection = {};
+    m_timeConnection = {};
+    m_animated.reset();
     if (const StageRefPtr& stage = currentStage()) {
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
+        m_timeConnection = stage->timeChanged.connect([this](double) {
+            if (!m_closed && !m_timeTimer->isActive()) m_timeTimer->start();
+        });
     }
+}
+
+double RenderViewPanel::renderTime() const {
+    const StageRefPtr& stage = currentStage();
+    return stage ? stage->time() : 0.0;
+}
+
+bool RenderViewPanel::stageIsAnimated() {
+    if (m_animated) return *m_animated;
+    bool animated = false;
+    if (const StageRefPtr& stage = currentStage()) {
+        for (const PXR_NS::UsdPrim& prim : stage->usdStage()->Traverse()) {
+            for (const PXR_NS::UsdAttribute& attribute : prim.GetAttributes()) {
+                if (attribute.ValueMightBeTimeVarying()) {
+                    animated = true;
+                    break;
+                }
+            }
+            if (animated) break;
+        }
+    }
+    m_animated = animated;
+    return animated;
+}
+
+void RenderViewPanel::timeChanged(double) {
+    if (m_cameraCombo->currentData().toString() != kViewportCamera && !usesLocalCamera()) cameraChanged(currentCamera());
+    if (updatesOnEdits() && stageIsAnimated()) reload();
 }
 
 void RenderViewPanel::onStageObjectsChanged(const StageChanges& changes) {
     // Inside USD's change notice: only note it, the timers act afterwards.
     if (m_closed) return;
+    m_animated.reset();
     if (!changes.resyncedPaths.empty()) {
         QTimer::singleShot(0, this, [this]() { fillCameras(); });
     }

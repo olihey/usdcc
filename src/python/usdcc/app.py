@@ -40,6 +40,14 @@ def version():
     return _app().version()
 
 
+def build_features():
+    """The features a build may leave out (docs/BUILD_OPTIONS.md), as this one was built:
+    a list of (name, label, included, plugin ids), such as
+    ("VIEWPORT_BROADCAST", "Viewport Broadcast", True, ["org.usdcc.viewport-broadcast"]).
+    A feature that's not included isn't there at all: its plugins are refused from any folder."""
+    return [(name, label, included, list(plugins)) for name, label, included, plugins in _app().build_features()]
+
+
 def is_release_build():
     """True for a build made from a release, False for a development build."""
     return _app().is_release_build()
@@ -377,6 +385,20 @@ class Viewport:
     @camera.setter
     def camera(self, path):
         _app().set_viewport_camera(self._id, "" if path is None else str(path))
+
+    def playblast(self, pattern, start=None, end=None, step=1.0):
+        """Writes the viewport's picture at each frame from `start` to `end` (the
+        stage's playback range by default), `step` apart, to `pattern`: "####" (or
+        "<frame>", "$F4") is the frame number, else it goes before the extension;
+        PNG, JPEG or TIFF by the extension (docs/ANIMATION.md phase 5). Each frame
+        is taken once the renderer has converged. The viewport must be on screen.
+        Returns the files written; raises RuntimeError when it stops."""
+        if start is None or end is None:
+            from usdcc import usd
+            first, last = usd.playback_range(self.stage())
+            start = first if start is None else start
+            end = last if end is None else end
+        return list(_app().viewport_playblast(self._id, str(pattern), float(start), float(end), float(step)))
 
     def renderer(self):
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""

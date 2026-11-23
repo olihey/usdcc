@@ -5,6 +5,8 @@
 #include <pxr/base/gf/range2d.h>
 #include <pxr/base/gf/vec2d.h>
 #include <pxr/imaging/cameraUtil/conformWindow.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usdRender/settings.h>
 
 #include <algorithm>
 #include <cmath>
@@ -130,6 +132,99 @@ GfCamera cameraSeeingView(const GfCamera& camera, const OrbitView& view, double 
         result.SetFocalLength(static_cast<float>(focal));
     }
     return result;
+}
+
+std::optional<Resolution> parseResolution(const std::string& text) {
+    std::string compact;
+    for (const char c : text) {
+        if (c != ' ') compact += c;
+    }
+    // "×" is two bytes in UTF-8; "x" or "X" one.
+    std::size_t at = compact.find("\xC3\x97");
+    std::size_t skip = 2;
+    if (at == std::string::npos) {
+        at = compact.find_first_of("xX");
+        skip = 1;
+    }
+    if (at == std::string::npos || at == 0) return std::nullopt;
+    try {
+        std::size_t used = 0;
+        const int width = std::stoi(compact.substr(0, at), &used);
+        if (used != at) return std::nullopt;
+        const std::string rest = compact.substr(at + skip);
+        const int height = std::stoi(rest, &used);
+        if (used != rest.size()) return std::nullopt;
+        if (width < kMinResolution || height < kMinResolution || width > kMaxResolution || height > kMaxResolution) {
+            return std::nullopt;
+        }
+        return Resolution{width, height};
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::string resolutionName(const Resolution& resolution) {
+    return std::to_string(resolution.width) + "x" + std::to_string(resolution.height);
+}
+
+std::optional<Resolution> renderSettingsResolution(const PXR_NS::UsdStagePtr& stage) {
+    if (!stage) return std::nullopt;
+    PXR_NS::UsdRenderSettings settings = PXR_NS::UsdRenderSettings::GetStageRenderSettings(stage);
+    if (!settings) {
+        for (const PXR_NS::UsdPrim& prim : stage->Traverse()) {
+            if (prim.IsA<PXR_NS::UsdRenderSettings>()) {
+                settings = PXR_NS::UsdRenderSettings(prim);
+                break;
+            }
+        }
+    }
+    PXR_NS::GfVec2i size(0, 0);
+    if (!settings || !settings.GetResolutionAttr().Get(&size) || size[0] <= 0 || size[1] <= 0) return std::nullopt;
+    return Resolution{size[0], size[1]};
+}
+
+ViewRect gateRect(double width, double height, const std::optional<Resolution>& resolution) {
+    if (!resolution || resolution->width <= 0 || resolution->height <= 0 || width <= 0.0 || height <= 0.0) {
+        return ViewRect{0.0, 0.0, std::max(width, 0.0), std::max(height, 0.0)};
+    }
+    return aspectRect(ViewRect{0.0, 0.0, width, height}, double(resolution->width) / double(resolution->height));
+}
+
+ViewRect safeRect(const ViewRect& rect, double percent) {
+    const double f = std::clamp(percent, 0.0, 100.0) / 100.0;
+    const double w = rect.width * f, h = rect.height * f;
+    return ViewRect{rect.x + (rect.width - w) / 2.0, rect.y + (rect.height - h) / 2.0, w, h};
+}
+
+ViewRect aspectRect(const ViewRect& rect, double aspect) {
+    if (!(aspect > 0.0) || rect.height <= 0.0) return rect;
+    double w = rect.width, h = rect.width / aspect;
+    if (h > rect.height) {
+        h = rect.height;
+        w = h * aspect;
+    }
+    return ViewRect{rect.x + (rect.width - w) / 2.0, rect.y + (rect.height - h) / 2.0, w, h};
+}
+
+PXR_NS::GfFrustum overscanFrustum(const PXR_NS::GfFrustum& frustum, const ViewRect& gate, double width, double height) {
+    if (gate.width <= 0.0 || gate.height <= 0.0) return frustum;
+    PXR_NS::GfFrustum widened = frustum;
+    const PXR_NS::GfRange2d window = frustum.GetWindow();
+    const PXR_NS::GfVec2d size = window.GetSize();
+    // The gate's window spans the gate; the window's pixels outside it carry on at the same scale.
+    const double perPixelX = size[0] / gate.width, perPixelY = size[1] / gate.height;
+    const PXR_NS::GfVec2d min = window.GetMin();
+    const PXR_NS::GfVec2d max = window.GetMax();
+    // Pixel rows count down from the top; the window's y up.
+    widened.SetWindow(PXR_NS::GfRange2d(
+        PXR_NS::GfVec2d(min[0] - gate.x * perPixelX, min[1] - (height - gate.y - gate.height) * perPixelY),
+        PXR_NS::GfVec2d(max[0] + (width - gate.x - gate.width) * perPixelX, max[1] + gate.y * perPixelY)));
+    return widened;
+}
+
+std::pair<int, int> scaledBufferSize(int width, int height, int percent) {
+    const double f = std::clamp(percent, 1, 100) / 100.0;
+    return {std::max(1, int(std::lround(width * f))), std::max(1, int(std::lround(height * f)))};
 }
 
 }  // namespace usdcc::usd

@@ -10,6 +10,7 @@
 #include <pxr/base/gf/camera.h>
 #include <pxr/base/gf/frustum.h>
 #include <pxr/base/gf/math.h>
+#include <pxr/base/gf/ray.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/sdf/layer.h>
@@ -354,4 +355,52 @@ def Camera "Camera" {
     CHECK((stageCameraPaths(stage) == std::vector<PXR_NS::SdfPath>{PXR_NS::SdfPath("/Set/Camera"), PXR_NS::SdfPath("/Camera"),
                                                                     PXR_NS::SdfPath("/Camera1")}),
           "the stage's cameras, in order");
+}
+
+// The resolution gate and safe frames (docs/VIEWPORT_CAMERA.md §4, §6): parsing, where the gate
+// sits in wide and tall windows, safe and aspect rects, and the frustum widened past the gate.
+USDCC_TEST(viewport_gate_math) {
+    const auto same = [](double a, double b) { return std::abs(a - b) < 1e-6; };
+    const Resolution hd{1920, 1080}, small{1280, 720}, scope{2048, 858};
+    CHECK(parseResolution("1920x1080") == hd && parseResolution("1280 x 720") == small &&
+              parseResolution("2048\xC3\x97" "858") == scope,
+          "sizes parse, with spaces or a multiplication sign");
+    CHECK(!parseResolution("fill") && !parseResolution("8x8") && !parseResolution("20000x10") && !parseResolution("12x") &&
+              !parseResolution("x12") && !parseResolution("1920x1080p"),
+          "and nothing else");
+    CHECK((resolutionName({1920, 1080}) == "1920x1080"), "and back");
+
+    const ViewRect wide = gateRect(1000, 400, Resolution{1920, 1080});
+    CHECK(same(wide.height, 400) && same(wide.width, 400 * 16.0 / 9.0) && same(wide.y, 0) &&
+              same(wide.x, (1000 - wide.width) / 2.0),
+          "a wide window: the gate as tall as it, centred");
+    const ViewRect tall = gateRect(400, 900, Resolution{1920, 1080});
+    CHECK(same(tall.width, 400) && same(tall.height, 225) && same(tall.y, (900 - 225) / 2.0), "a tall one: as wide");
+    CHECK((gateRect(640, 480, std::nullopt) == ViewRect{0, 0, 640, 480}), "Fill Viewport: the window");
+    const ViewRect safe = safeRect(ViewRect{0, 0, 200, 100}, 90.0);
+    CHECK(same(safe.x, 10) && same(safe.y, 5) && same(safe.width, 180) && same(safe.height, 90), "90% safe");
+    const ViewRect guide = aspectRect(ViewRect{0, 0, 1920, 1080}, 2.39);
+    CHECK(same(guide.width, 1920) && same(guide.height, 1920 / 2.39) && same(guide.x, 0), "a 2.39 guide in 16:9");
+
+    // A frustum that sees the gate, widened: the gate's corner lands where the gate is.
+    PXR_NS::GfFrustum seen;
+    seen.SetPerspective(40.0, true, tall.aspect(), 0.1, 100.0);
+    const PXR_NS::GfFrustum widened = overscanFrustum(seen, tall, 400, 900);
+    const PXR_NS::GfMatrix4d project = widened.ComputeViewMatrix() * widened.ComputeProjectionMatrix();
+    // A point at the gate's top right corner, through the narrow frustum's own corner ray.
+    const PXR_NS::GfRay corner = seen.ComputeRay(PXR_NS::GfVec2d(1.0, 1.0));
+    const PXR_NS::GfVec3d point = corner.GetPoint(10.0);
+    const PXR_NS::GfVec3d ndc = project.Transform(point);
+    const double px = (ndc[0] + 1.0) / 2.0 * 400.0;
+    const double py = (1.0 - ndc[1]) / 2.0 * 900.0;
+    CHECK(std::abs(px - (tall.x + tall.width)) < 1e-3 && std::abs(py - tall.y) < 1e-3,
+          "the gate's corner in the widened view: %g %g (gate %g %g)", px, py, tall.x + tall.width, tall.y);
+}
+
+// Render scale (docs/VIEWPORT_CAMERA.md §5): the size Hydra renders at.
+USDCC_TEST(viewport_render_scale_size) {
+    CHECK(scaledBufferSize(1920, 1080, 100) == std::make_pair(1920, 1080), "100 %: as it is");
+    CHECK(scaledBufferSize(1920, 1080, 50) == std::make_pair(960, 540), "50 %: half each way");
+    CHECK(scaledBufferSize(1001, 333, 25) == std::make_pair(250, 83), "25 %, rounded");
+    CHECK(scaledBufferSize(2, 2, 25) == std::make_pair(1, 1), "never less than a pixel");
 }

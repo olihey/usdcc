@@ -91,6 +91,17 @@ struct HudInput {
     std::size_t selectedPrims = 0;
     QString selectionType;  // the type of the one selected prim; empty with more
 
+    // Under everything else (docs/VIEWPORT_CAMERA.md §4, §6): the resolution gate, the
+    // scene outside it darkened, and safe frames over it. Drawn whether or not the HUD's
+    // text is (`hudOn`).
+    bool hudOn = true;
+    std::optional<QRectF> gate;
+    double gateMaskOpacity = 0.7;
+    QRectF overlayArea;               // the gate, or the whole window: where the guides go
+    std::vector<QRectF> safeFrames;   // action, title
+    std::optional<QRectF> aspectGuide;
+    bool centerCross = false;
+
     // Bottom right.
     std::optional<double> frame;  // the time code shown; nothing: not said
     bool showPerformance = false;
@@ -145,8 +156,16 @@ struct HudLayout {
     QPointF axesCenter;
     double axesRadius = 0;
     bool centerHovered = false;
+    // The gate and guides (HudInput's).
+    std::optional<QRectF> gate;
+    double gateMaskOpacity = 0.0;
+    std::vector<QRectF> safeFrames;
+    std::optional<QRectF> aspectGuide;
+    std::optional<QPointF> centerCross;
 
-    bool isEmpty() const { return texts.empty() && axes.empty(); }
+    bool isEmpty() const {
+        return texts.empty() && axes.empty() && !gate && safeFrames.empty() && !aspectGuide && !centerCross;
+    }
     bool operator==(const HudLayout&) const = default;
 };
 

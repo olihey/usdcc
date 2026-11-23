@@ -16,6 +16,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -44,6 +45,11 @@ struct AssetPickerOptions {
     PXR_NS::ArResolverContext context;
     // When the result goes into a layer: offers Relative and Absolute, relative to it.
     PXR_NS::SdfLayerHandle anchorLayer;
+    // A file to save to rather than one to open (docs/ASSET_PICKER.md §5): a Save button, New
+    // Folder, a question before replacing a file, and only places that can be written. On a
+    // server the file goes to the first server of the stack that isn't read-only, which the
+    // dialog names. A name without an extension gets the filter's first.
+    bool save = false;
 };
 
 // ---- Favourites (§3.1): folders, the user's own, in usdcc.ini ------------------------------
@@ -79,6 +85,10 @@ USDCC_USD_UI_API bool assetPickerAvailable();
 // the user asked for that and it's possible; else a file's absolute path or a server's
 // logical path. Empty when cancelled.
 USDCC_USD_UI_API QString pickAsset(QWidget* parent, const AssetPickerOptions& options);
+// pickAsset() for a file to save to (AssetPickerOptions::save): a path on disk or a server's
+// logical path, asked about first when it exists. The system's save dialog when nothing can
+// be browsed. Empty when cancelled.
+USDCC_USD_UI_API QString pickSaveAsset(QWidget* parent, AssetPickerOptions options);
 // `chosen` (a file's path or a server's) as written into `anchor`: relative when asked and
 // possible (§4).
 USDCC_USD_UI_API QString assetPathForChoice(const QString& chosen, const PXR_NS::SdfLayerHandle& anchor, bool relative);
@@ -114,6 +124,13 @@ public:
     QComboBox* filterBox() const { return m_filter; }
     QRadioButton* relativeButton() const { return m_relative; }
     QLabel* statusLabel() const { return m_status; }
+    // Save mode: where a file saved in the folder shown goes, or why it can't.
+    QString saveNote() const;
+    // Save mode: a folder named `name` in the one shown, which is then shown. On a server it's
+    // made when a file is saved in it, as a server makes the folders a file is written in.
+    bool newFolder(const QString& name);
+    // Save mode: what asks before a file is replaced; a message box unless set (tests).
+    void setReplaceQuestion(std::function<bool(const QString& file)> ask) { m_askReplace = std::move(ask); }
 
 private:
     struct Listed;
@@ -134,6 +151,9 @@ private:
     void entriesMenu(const QPoint& at);
     void systemDialog();
     bool acceptCandidate(const QString& candidate, bool listed);
+    bool acceptSave(const QString& candidate);
+    void updateSaveNote();
+    QString withDefaultSuffix(const QString& file) const;
     QString childOf(const QString& name) const;
     QStringList patterns() const;
     void setStatus(const QString& text);
@@ -159,6 +179,10 @@ private:
     QRadioButton* m_relative = nullptr;
     QRadioButton* m_absolute = nullptr;
     QLabel* m_status = nullptr;
+    QLabel* m_saveNote = nullptr;
+    QToolButton* m_newFolder = nullptr;
+    QStringList m_newFolders;  // on a server, made when something is saved in them
+    std::function<bool(const QString&)> m_askReplace;
 };
 
 }  // namespace usdcc::usd

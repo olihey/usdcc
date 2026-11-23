@@ -216,6 +216,10 @@ class RenderViewPanel:
       another was picked; at most every 30 ms.
     - ``size_changed(width, height)``: the image's size in pixels; a
       ``camera_changed()`` follows, for the new aspect ratio.
+    - ``time_changed(time)``: the stage's time changed (docs/ANIMATION.md phase 5),
+      coalesced while it plays. ``time()`` is the time to render. Here: a camera prim
+      is sent again where it is then, and with Update on Edits on and anything
+      animated, ``reload()``. A renderer that can move in time in place overrides it.
     - ``stage_edited(resynced, changed)``: the stage was edited (the panel waits
       ``edit_delay()`` after the last edit) while Update on Edits is on, with the
       Sdf.Paths changed since the last call. Calls ``reload()`` here; a renderer that
@@ -272,6 +276,9 @@ class RenderViewPanel:
 
     def size_changed(self, width, height):
         pass
+
+    def time_changed(self, time):
+        self._panel.default_time_changed(time)
 
     def stage_edited(self, resynced, changed):
         self.reload()
@@ -363,6 +370,14 @@ class RenderViewPanel:
     def render_size(self):
         """The image's (width, height) in pixels."""
         return tuple(self._panel.render_size())
+
+    def time(self):
+        """The time to render: the stage's, as the timeline shows it."""
+        return self._panel.time()
+
+    def stage_is_animated(self):
+        """Whether anything on the stage is animated."""
+        return self._panel.stage_is_animated()
 
     def is_open(self):
         """False once the panel is gone; the calls above then raise RuntimeError."""

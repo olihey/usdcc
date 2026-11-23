@@ -13,6 +13,8 @@ void Options::add(QCommandLineParser& parser) {
         "  serve            render for peers in render queue rooms, until stopped\n"
         "  queue            a render queue server: takes artists' jobs and hands them to nodes, until stopped"));
     parser.addHelpOption();
+    // Not addVersionOption(): it prints only the version, and this says what the build has too.
+    parser.addOption({QStringLiteral("version"), QStringLiteral("Print the version and the features this build has, then exit.")});
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("render, renderers, serve or queue"));
     parser.addPositionalArgument(QStringLiteral("stage"), QStringLiteral("render: the USD file"), QStringLiteral("[stage]"));
     // Every command.

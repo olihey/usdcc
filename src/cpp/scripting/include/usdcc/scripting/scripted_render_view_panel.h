@@ -13,8 +13,9 @@ struct PythonObject;
 // (docs/RENDER_VIEW_PANEL.md). The panel (toolbar, image, following the camera
 // and edits) is C++; each panel creates one instance of the class and calls its
 // hooks: setup_problem(), create_toolbar(layout), start(), stop(), reload(),
-// camera_changed(camera), size_changed(width, height), stage_edited(resynced,
-// changed), stage_changed(stage), populate_options_menu(menu) and close(). The
+// camera_changed(camera), size_changed(width, height), time_changed(time),
+// stage_edited(resynced, changed), stage_changed(stage), populate_options_menu(menu)
+// and close(). The
 // instance calls back through a handle (bindRenderViewPanelHandle()) to show
 // images and state. An exception from a hook is logged (python.exception).
 // Main thread only; built only with Python.
@@ -40,6 +41,8 @@ public:
     void restoreSessionState(const QJsonObject& state) override;
     // Public (protected in ViewPanel) so it can be checked without opening it.
     void populateOptionsMenu(QMenu* menu) override;
+    // What RenderViewPanel does on a new time: the Python hook's default.
+    void defaultTimeChanged(double time) { RenderViewPanel::timeChanged(time); }
 
 protected:
     std::optional<QString> setupProblem() override;
@@ -49,6 +52,7 @@ protected:
     void reload() override;
     void cameraChanged(const usdcc::usd::RenderCamera& camera) override;
     void sizeChanged(const QSize& size) override;
+    void timeChanged(double time) override;
     void stageEdited(const usdcc::usd::StageChanges& changes) override;
     void closing() override;
     void onStageChanged(const usdcc::usd::StageRefPtr& stage) override;

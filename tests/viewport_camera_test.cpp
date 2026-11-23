@@ -12,16 +12,20 @@
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/base/gf/frustum.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/camera.h>
+#include <pxr/usd/usdGeom/xformable.h>
 
 #include <QAction>
 #include <QCoreApplication>
 #include <QJsonObject>
 #include <QUndoStack>
+#include <QStringList>
+#include <QWheelEvent>
 #include <QWidget>
 
 #include <cmath>
@@ -473,5 +477,92 @@ USDCC_TEST(viewport_camera_in_sessions_and_workspaces) {
     CHECK(spec->hydraWindow()->stageCamera() == PXR_NS::SdfPath("/Rig/Shot"), "a workspace's \"first\" camera");
     spec.reset();
     restored.reset();
+    viewport.reset();
+}
+
+// The resolution gate (docs/VIEWPORT_CAMERA.md §4): the viewport sees the gate's shape, and
+// the window around it more; the camera's field of view goes to the gate.
+USDCC_TEST(viewport_resolution_gate) {
+    OpenStage open("gate");
+    auto viewport = makeViewport(open.stage);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    window->resize(400, 900);
+    const PXR_NS::GfFrustum filled = window->frustum();
+    CHECK((window->gate() == usdcc::usd::ViewRect{0, 0, 400, 900}) && !window->gateResolution(), "Fill Viewport: the window");
+
+    usdcc::usd::ViewportDisplayOverrides overrides;
+    overrides.resolution = "1920x1080";
+    viewport->setDisplayOverrides(overrides);
+    const usdcc::usd::ViewRect gate = window->gate();
+    CHECK((window->gateResolution() == usdcc::usd::Resolution{1920, 1080}) && std::abs(gate.height - 225.0) < 1e-6 &&
+              std::abs(gate.y - 337.5) < 1e-6,
+          "a 16:9 gate in a tall viewport: as wide, centred");
+    const PXR_NS::GfFrustum gated = window->frustum();
+    const PXR_NS::GfVec2d size = gated.GetWindow().GetSize();
+    CHECK(std::abs(size[0] / size[1] - 400.0 / 900.0) < 1e-6, "the frustum still covers the whole window");
+    // The orbit camera's vertical field of view now spans the gate, so the window sees 4 times as much up and down.
+    const double filledHeight = filled.GetWindow().GetSize()[1];
+    CHECK(std::abs(size[1] / filledHeight - 4.0) < 1e-6, "the field of view spans the gate: %g", size[1] / filledHeight);
+    viewport.reset();
+}
+
+// Drive and Locked (docs/VIEWPORT_CAMERA.md §2.2, phase 4): a wheel step through the camera
+// moves it (under its moved parent), one undo step; Locked leaves it; an animated camera
+// can't be driven, so the viewport detaches, saying why.
+USDCC_TEST(viewport_drives_and_locks_a_stage_camera) {
+    OpenStage open("drive", kCameraScene);
+    auto undo = std::make_shared<usdcc::usd::UndoManager>();
+    auto viewport = std::make_unique<ViewportViewPanel>(&pythonTestApp().stages, open.stage,
+                                                        std::make_shared<usdcc::tools::ToolSet>(), undo);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    window->resize(640, 480);
+    const PXR_NS::SdfPath shot("/Rig/Shot");
+    CHECK(viewport->lookThrough(shot), "looking through the camera");
+    QStringList refusals;
+    QObject::connect(window, &HydraViewportWindow::navigationRefused,
+                     [&refusals](const QString& why, bool) { refusals << why; });
+    const auto wheel = [window](int steps) {
+        QWheelEvent event(QPointF(320, 240), QPointF(320, 240), QPoint(), QPoint(0, 120 * steps), Qt::NoButton,
+                          Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const PXR_NS::GfMatrix4d before = shotWorld(open.stage);
+    const PXR_NS::GfMatrix4d parentBefore =
+        PXR_NS::UsdGeomXformable(open.stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath("/Rig"))).ComputeLocalToWorldTransform(0.0);
+
+    // Locked: nothing moves, and it says so.
+    viewport->setCameraNavigation("locked");
+    wheel(1);
+    CHECK(window->stageCamera() == shot && closeMatrix(shotWorld(open.stage), before) && refusals.size() == 1,
+          "Locked: the camera stays, still looked through, and the viewport says it's locked");
+
+    // Drive: the camera moves toward what it looks at, one undo step; the parent stays.
+    viewport->setCameraNavigation("drive");
+    QUndoStack* stack = undo->stack(open.stage);
+    const int index = stack->index();
+    wheel(2);
+    const PXR_NS::GfMatrix4d driven = shotWorld(open.stage);
+    CHECK(window->stageCamera() == shot && !closeMatrix(driven, before), "Drive: the camera moved, still looked through");
+    CHECK(stack->index() == index + 1, "one undo step: %d", stack->index() - index);
+    CHECK(closeMatrix(PXR_NS::UsdGeomXformable(open.stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath("/Rig")))
+                          .ComputeLocalToWorldTransform(0.0),
+                      parentBefore),
+          "its parent untouched");
+    CHECK(std::abs(driven.ExtractTranslation()[1] - before.ExtractTranslation()[1]) < 1.0 &&
+              (driven.ExtractTranslation() - before.ExtractTranslation()).GetLength() > 0.1,
+          "dollied along its view");
+    CHECK(closeMatrix(window->frustum().ComputeViewInverse(), driven, 1e-4), "and the view is through it");
+    stack->undo();
+    CHECK(closeMatrix(shotWorld(open.stage), before), "undone");
+
+    // An animated camera: Drive refuses, and the viewport detaches, saying why.
+    PXR_NS::UsdAttribute translate = open.stage->usdStage()->GetPrimAtPath(shot).GetAttribute(PXR_NS::TfToken("xformOp:translate"));
+    translate.Set(PXR_NS::GfVec3d(0, 0, 10), 0.0);
+    translate.Set(PXR_NS::GfVec3d(0, 0, 20), 10.0);
+    refusals.clear();
+    wheel(1);
+    CHECK(window->stageCamera().IsEmpty() && refusals.size() == 1 && !refusals.front().isEmpty(),
+          "an animated camera isn't driven: detached, with the reason: %s",
+          refusals.isEmpty() ? "" : refusals.front().toUtf8().constData());
     viewport.reset();
 }
