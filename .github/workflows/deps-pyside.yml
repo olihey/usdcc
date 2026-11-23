@@ -2,7 +2,8 @@
 # publishes them as a prerelease asset, which build.yml downloads to build
 # usdcc.ui and its tests (docs/CI.md section 4.1). It only runs when what the
 # asset is named after changes, or by hand, and skips the build when that asset
-# already exists. With Qt in build.yml's cache it takes about 7 minutes.
+# already exists. With Qt in build.yml's cache it takes about 7 minutes. One asset
+# per platform, Windows and Linux, x64 and arm64, all in one release.
 name: PySide6
 
 on:
@@ -25,9 +26,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pyside:
-    # Visual Studio 2022, as for usdcc and OpenUSD.
-    runs-on: windows-2022
+  windows:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Visual Studio 2022 on x64 and 2026 on arm64, as for usdcc and OpenUSD.
+          - name: windows
+            runner: windows-2022
+            arch: x64
+            triplet: x64-windows
+          - name: windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+            triplet: arm64-windows
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     defaults:
       run:
@@ -39,6 +53,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # See build.yml: an arm64 Python for the tools, which name the asset by it.
+      - name: Set up Python for the tools
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
 
       - name: Name the asset
         id: asset
@@ -56,10 +78,35 @@ jobs:
       # OpenUSD's Python, which usdcc embeds. PySide is built for its limited
       # API, so any patch release of that version runs it.
       - name: Set up Python
-        if: steps.published.outputs.found != 'true'
+        if: steps.published.outputs.found != 'true' && matrix.arch == 'x64'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.asset.outputs.python }}
+
+      # On the Arm image setup-python can't install the pinned 3.13: the image
+      # ships a newer 3.13, and Python's installer won't put an older one beside
+      # it, even with the image's uninstalled. python.org's NuGet package of the
+      # same version is a plain archive, unpacked where setup-python would put it.
+      - name: Set up Python (arm64, from python.org's NuGet package)
+        if: steps.published.outputs.found != 'true' && matrix.arch == 'arm64'
+        run: |
+          $version = '${{ steps.asset.outputs.python }}'
+          $dir = "$env:RUNNER_TOOL_CACHE\Python\$version\arm64"
+          if (-not (Test-Path "$dir\python.exe")) {
+            $zip = "$env:RUNNER_TEMP\pythonarm64.$version.zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/pythonarm64/$version/pythonarm64.$version.nupkg" -OutFile $zip
+            Expand-Archive $zip "$env:RUNNER_TEMP\pythonarm64" -Force
+            New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+            Move-Item "$env:RUNNER_TEMP\pythonarm64\tools" $dir
+            Remove-Item -Recurse -Force $zip, "$env:RUNNER_TEMP\pythonarm64"
+          }
+          & "$dir\python.exe" -m ensurepip --upgrade --default-pip | Select-Object -Last 1
+          if ($LASTEXITCODE) { throw 'ensurepip failed' }
+          # As setup-python does: first on PATH, and where CMake's FindPython looks.
+          Add-Content $env:GITHUB_PATH "$dir\Scripts"
+          Add-Content $env:GITHUB_PATH $dir
+          "pythonLocation=$dir", "Python_ROOT_DIR=$dir", "Python3_ROOT_DIR=$dir" | Add-Content $env:GITHUB_ENV
+          & "$dir\python.exe" -c "import platform, sys; print(sys.version, platform.machine())"
 
       # Qt from build.yml's cache, only read: what vcpkg builds here is what
       # build.yml builds too, and saves.
@@ -85,7 +132,7 @@ jobs:
         run: |
           external/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { throw 'bootstrapping vcpkg failed' }
-          external/vcpkg/vcpkg.exe install --triplet x64-windows --x-install-root=build/vcpkg_installed
+          external/vcpkg/vcpkg.exe install --triplet ${{ matrix.triplet }} --x-install-root=build/vcpkg_installed
           if ($LASTEXITCODE) { throw 'vcpkg install failed' }
 
       - name: Build PySide6
@@ -124,13 +171,151 @@ jobs:
           $notes = @"
           PySide6 and shiboken6 built from source against vcpkg's Qt, for usdcc's CI (docs/CI.md, phase 4). Not a usdcc release.
 
-          - PySide ``${{ steps.asset.outputs.pyside }}``, Qt ``${{ steps.asset.outputs.qt }}`` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} x64 (limited API)
-          - Built by ``tools/build_pyside.py``, Visual Studio 2022 (runner image ``windows-2022``)
-          - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
+          - PySide ``${{ steps.asset.outputs.pyside }}``, Qt ``${{ steps.asset.outputs.qt }}`` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} (limited API)
+          - Built by ``tools/build_pyside.py`` in this repository's PySide6 workflow from ``$env:GITHUB_SHA``, an asset per platform
 
-          Unzip into usdcc's ``external`` folder: it holds ``pyside-install`` and ``libclang/lib/clang``.
+          Unzip a platform's asset into usdcc's ``external`` folder: it holds ``pyside-install`` and ``libclang/lib/clang``.
           "@
-          gh release create '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" `
-            --prerelease --target $env:GITHUB_SHA `
-            --title 'PySide6 ${{ steps.asset.outputs.name }}' --notes $notes
+          # The platforms' jobs share the release: whichever is first makes it. It may
+          # appear between the two commands, so a failed create isn't an error yet.
+          gh release view '${{ steps.asset.outputs.tag }}' --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE) {
+            gh release create '${{ steps.asset.outputs.tag }}' --prerelease --target $env:GITHUB_SHA `
+              --title 'PySide6 ${{ steps.asset.outputs.release }}' --notes $notes
+          }
+          gh release upload '${{ steps.asset.outputs.tag }}' "$env:RUNNER_TEMP\${{ steps.asset.outputs.zip }}" --clobber
           if ($LASTEXITCODE) { throw 'publishing failed' }
+
+  linux:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-24.04
+            triplet: x64-linux-dynamic
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            triplet: arm64-linux-dynamic
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Name the asset
+        id: asset
+        run: python3 tools/ci/pyside_asset.py --github-output
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          names=$(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if grep -qxF '${{ steps.asset.outputs.zip }}' <<< "$names"; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space
+        if: steps.published.outputs.found != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # What vcpkg's Qt needs from the system (X11, xcb, GL, Wayland), Ninja,
+      # and patchelf (docs/LINUX_WSL.md §1). With apt's recommended
+      # packages, as there: vcpkg's libxcrypt needs libltdl-dev, which libtool recommends.
+      - name: Install the build's packages
+        if: steps.published.outputs.found != 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build pkg-config autoconf autoconf-archive automake libltdl-dev \
+            libtool bison flex gperf nasm zip unzip patchelf \
+            libgl-dev libegl-dev libegl1-mesa-dev libglu1-mesa-dev libx11-dev libx11-xcb-dev libxext-dev libxrender-dev \
+            libxi-dev libxt-dev libxtst-dev libxrandr-dev libxcursor-dev libxinerama-dev libsm-dev libice-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev '^libxcb.*-dev' libfontconfig1-dev libfreetype-dev libdbus-1-dev \
+            libwayland-dev wayland-protocols libwayland-bin
+
+      - name: Fetch vcpkg's full history
+        if: steps.published.outputs.found != 'true'
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.asset.outputs.python }}
+
+      - name: Name the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        id: vcpkg
+        run: python tools/ci/vcpkg_cache.py --access read
+
+      - name: Restore the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Install Qt
+        if: steps.published.outputs.found != 'true'
+        run: |
+          external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          external/vcpkg/vcpkg install --triplet ${{ matrix.triplet }} --x-install-root=build/vcpkg_installed
+
+      - name: Build PySide6
+        if: steps.published.outputs.found != 'true'
+        run: python tools/build_pyside.py --python "$(command -v python)"
+
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        working-directory: external
+        run: |
+          zip -qry "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" pyside-install libclang/lib/clang
+          size=$(stat -c %s "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}")
+          echo "$((size / 1048576)) MB"
+          if [ "$size" -ge 2147483648 ]; then echo "::error::Over GitHub's 2 GiB per-asset limit"; exit 1; fi
+
+      # Unzipped elsewhere, with what it was built from out of reach but vcpkg's Qt at the
+      # same place beside it, as it will be in build.yml: the Linux asset has no Qt.
+      - name: Check it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          check="$RUNNER_TEMP/pyside-check"
+          mkdir -p "$check/external" "$check/build"
+          mv build/vcpkg_installed "$check/build/"
+          rm -rf external/pyside-install external/pyside-setup external/libclang
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$check/external"
+          python -I -c "import sys; sys.path.insert(0, sys.argv[1]); import shiboken6, PySide6; from PySide6 import QtCore, QtGui, QtWidgets; print('PySide', PySide6.__version__, 'on Qt', QtCore.qVersion())" "$check/external/pyside-install"
+          "$check/external/pyside-install/shiboken6_generator/shiboken6" --version
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true'
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          PySide6 and shiboken6 built from source against vcpkg's Qt, for usdcc's CI (docs/CI.md, phase 4). Not a usdcc release.
+
+          - PySide `${{ steps.asset.outputs.pyside }}`, Qt `${{ steps.asset.outputs.qt }}` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} (limited API)
+          - Built by `tools/build_pyside.py` in this repository's PySide6 workflow from `${{ github.sha }}`, an asset per platform
+
+          Unzip a platform's asset into usdcc's `external` folder: it holds `pyside-install` and `libclang/lib/clang`.
+          NOTES
+          # See the windows job: the platforms' jobs share the release.
+          gh release view '${{ steps.asset.outputs.tag }}' --json tagName > /dev/null 2>&1 ||
+            gh release create '${{ steps.asset.outputs.tag }}' --prerelease --target "$GITHUB_SHA" \
+              --title 'PySide6 ${{ steps.asset.outputs.release }}' --notes-file "$RUNNER_TEMP/notes.md" || true
+          gh release upload '${{ steps.asset.outputs.tag }}' "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" --clobber

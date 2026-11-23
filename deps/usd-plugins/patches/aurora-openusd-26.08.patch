@@ -1,0 +1,69 @@
+diff --git a/Libraries/HdAurora/HdAuroraMesh.cpp b/Libraries/HdAurora/HdAuroraMesh.cpp
+index 7b4cbb8..9556e8d 100644
+--- a/Libraries/HdAurora/HdAuroraMesh.cpp
++++ b/Libraries/HdAurora/HdAuroraMesh.cpp
+@@ -214,7 +214,7 @@ void HdAuroraMesh::RebuildAuroraInstances(HdSceneDelegate* delegate)
+             HdVtBufferSource buffer(pv.name, triNormals);
+             int count = (int)buffer.GetNumElements();
+             // Triangulate the STs (should produce an ST for each index)
+-            meshUtil.ComputeTriangulatedFaceVaryingPrimvar(
++            (void)meshUtil.ComputeTriangulatedFaceVaryingPrimvar(
+                 buffer.GetData(), count, buffer.GetTupleType().type, &pvNormals);
+ 
+             if (pvNormals.GetArraySize() == _pVertexData->triangulatedIndices.size() * 3)
+@@ -680,8 +680,10 @@ bool HdAuroraMesh::readSTs(VtValue* stOut, HdSceneDelegate* delegate, HdMeshUtil
+     HdVtBufferSource buffer(pv.name, st);
+ 
+     // Triangulate the STs (should produce an ST for each index)
++    // OpenUSD 26.x returns how it went rather than a bool.
+     return meshUtil.ComputeTriangulatedFaceVaryingPrimvar(
+-        buffer.GetData(), (int)buffer.GetNumElements(), buffer.GetTupleType().type, stOut);
++               buffer.GetData(), (int)buffer.GetNumElements(), buffer.GetTupleType().type, stOut) ==
++        pxr::HdMeshComputationResult::Success;
+ }
+ 
+ void HdAuroraMesh::Sync(HdSceneDelegate* delegate, HdRenderParam* /* renderParam */,
+diff --git a/Libraries/HdAurora/HdAuroraPlugin.cpp b/Libraries/HdAurora/HdAuroraPlugin.cpp
+index 52cb091..40a0bfc 100644
+--- a/Libraries/HdAurora/HdAuroraPlugin.cpp
++++ b/Libraries/HdAurora/HdAuroraPlugin.cpp
+@@ -78,7 +78,10 @@ void HdAuroraRendererPlugin::DeleteRenderDelegate(HdRenderDelegate* renderDelega
+ 
+ // The extra arguments to IsSupported were added with Hydra version 46. As we need to support
+ // both USD 24.08 and older versions, make arguments conditional at compile time.
+-#if HD_API_VERSION >= 46
++#if __has_include(<pxr/imaging/hd/rendererCreateArgsSchema.h>)
++bool HdAuroraRendererPlugin::IsSupported(
++    const pxr::HdRendererCreateArgsSchema& /*rendererCreateArgs*/, std::string* /*reasonWhyNot*/) const
++#elif HD_API_VERSION >= 46
+ bool HdAuroraRendererPlugin::IsSupported(bool /*gpuEnabled*/) const
+ #else
+ bool HdAuroraRendererPlugin::IsSupported() const
+diff --git a/Libraries/HdAurora/HdAuroraPlugin.h b/Libraries/HdAurora/HdAuroraPlugin.h
+index 435db87..8a21690 100644
+--- a/Libraries/HdAurora/HdAuroraPlugin.h
++++ b/Libraries/HdAurora/HdAuroraPlugin.h
+@@ -14,6 +14,10 @@
+ 
+ #pragma once
+ 
++#if __has_include(<pxr/imaging/hd/rendererCreateArgsSchema.h>)
++#include <pxr/imaging/hd/rendererCreateArgsSchema.h>
++#endif
++
+ class HdAuroraRendererPlugin : public HdRendererPlugin
+ {
+ public:
+@@ -27,7 +31,11 @@ public:
+ 
+ // The extra arguments to IsSupported were added with Hydra version 46. As we need to support
+ // both USD 24.08 and older versions, make arguments conditional at compile time.
+-#if HD_API_VERSION >= 46
++#if __has_include(<pxr/imaging/hd/rendererCreateArgsSchema.h>)
++    // OpenUSD 26.x: the create arguments as a schema.
++    bool IsSupported(const pxr::HdRendererCreateArgsSchema& rendererCreateArgs,
++        std::string* reasonWhyNot = nullptr) const override;
++#elif HD_API_VERSION >= 46
+     virtual bool IsSupported(bool gpuEnabled = true) const override;
+ #else
+     bool IsSupported() const override;

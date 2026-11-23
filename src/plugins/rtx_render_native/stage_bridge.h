@@ -25,8 +25,12 @@ PXR_NS::UsdGeomCamera definePrivateCamera(const PXR_NS::UsdStageRefPtr& stage, c
                                           const usdcc::usd::RenderCamera& camera, LightMatch light);
 QStringList selectionGeometry(const usdcc::usd::StageRefPtr& source,
                               const std::vector<PXR_NS::SdfPath>& selected);
+// The stage flattened, its start and end time code at `time`: ovrtx renders it as it is
+// then, as a final render's frame (docs/ANIMATION.md phase 5).
 std::shared_ptr<Snapshot> makeSnapshot(const usdcc::usd::StageRefPtr& source, const usdcc::usd::RenderCamera& camera,
-                                       QSize size, Mode mode, LightMatch light = {}, bool rtxTonemap = false);
+                                       QSize size, Mode mode, LightMatch light = {}, bool rtxTonemap = false,
+                                       double time = 0.0);
 std::optional<std::map<QString, std::array<double, 16>>> transformEdits(const usdcc::usd::StageRefPtr& source,
-                                                                        const usdcc::usd::StageChanges& changes);
+                                                                        const usdcc::usd::StageChanges& changes,
+                                                                        double time = 0.0);
 }  // namespace usdcc::rtx

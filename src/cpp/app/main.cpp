@@ -1,6 +1,8 @@
 #include <QApplication>
 
+#if USDCC_FEATURE_UPDATES
 #include "app_updates.h"
+#endif
 #include "startup.h"
 
 #include <filesystem>
@@ -79,6 +81,8 @@
 #include "usdcc/usd/physics_menu.h"
 #include "usdcc/usd/current_stage_ui.h"
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/usd/curve_editor_view_panel.h"
+#include "usdcc/usd/dope_sheet_view_panel.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
 #include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/schema_library_editor.h"
@@ -221,8 +225,10 @@ int main(int argc, char** argv) {
     usdcc::app::installSettings();
     usdcc::ui::theme::apply(app);
     usdcc::scripting::SessionController::defineSettings();
+#if USDCC_FEATURE_UPDATES
     // Settings > Updates (docs/UPDATES.md §4).
     usdcc::app::AppUpdates::defineSettings();
+#endif
     // Settings > Viewport's grid and background, there before any viewport opens.
     usdcc::usd::defineViewportDisplaySettings();
     usdcc::usd::defineMaterialPreviewSettings();
@@ -379,9 +385,11 @@ int main(int argc, char** argv) {
                        return new usdcc::usd::LayerEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     panelTypes.add(QStringLiteral("usda"), QObject::tr("USDA"),
-                   [&stageManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                    QWidget* parent) -> usdcc::ui::ViewPanel* {
-                       return new usdcc::usd::UsdaViewPanel(&stageManager, stage, title, parent);
+                       auto* panel = new usdcc::usd::UsdaViewPanel(&stageManager, stage, title, parent);
+                       panel->setUndoManager(undoManager);  // Edit's Apply is one undo step
+                       return panel;
                    });
     panelTypes.add(QStringLiteral("materialEditor"), QObject::tr("Material Editor"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
@@ -397,6 +405,18 @@ int main(int argc, char** argv) {
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
                                                  QWidget* parent) -> usdcc::ui::ViewPanel* {
                        return new usdcc::usd::DependenciesViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    // The keys of animated prims, to move, scale, copy and delete (docs/ANIMATION.md phase 3).
+    panelTypes.add(QStringLiteral("dopeSheet"), QObject::tr("Dope Sheet"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::DopeSheetViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    // Animated values as curves, with splines to shape them (docs/ANIMATION.md phase 4).
+    panelTypes.add(QStringLiteral("curveEditor"), QObject::tr("Curve Editor"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::CurveEditorViewPanel(&stageManager, stage, undoManager, title, parent);
                    });
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
@@ -1054,18 +1074,21 @@ int main(int argc, char** argv) {
     QObject::connect(usdRuntimeAction, &QAction::triggered, &window,
                      [&window]() { usdcc::usd::UsdRuntimeDialog::showDialog(&window); });
     helpMenu->addSeparator();
+#if USDCC_FEATURE_UPDATES
     // Help > Check for Updates (docs/UPDATES.md §4): an installed usdcc updates itself from the
     // GitHub releases; any other copy is pointed to them. Closing for Restart Now asks what
-    // File > Exit asks.
+    // File > Exit asks. Not in a build without the Updates feature (docs/BUILD_OPTIONS.md).
     usdcc::app::AppUpdates updates(&window, [&window]() {
         window.close();
         return !window.isVisible();
     });
     QAction* checkForUpdatesAction = helpMenu->addAction(QObject::tr("Check for &Updates..."));
+    checkForUpdatesAction->setObjectName(QStringLiteral("checkForUpdatesAction"));
     checkForUpdatesAction->setStatusTip(updates.canUpdate()
                                             ? QObject::tr("Look for a newer release of usdcc, and install it")
                                             : QObject::tr("Look for a newer release of usdcc on its releases page"));
     QObject::connect(checkForUpdatesAction, &QAction::triggered, &window, [&updates]() { updates.checkNow(); });
+#endif
     QAction* projectHomeAction = helpMenu->addAction(QObject::tr("&Project Home"));
     projectHomeAction->setStatusTip(QObject::tr("Open usdcc's GitHub page in your browser"));
     QObject::connect(projectHomeAction, &QAction::triggered, &window, []() {
@@ -1494,8 +1517,10 @@ int main(int argc, char** argv) {
     // Downloads in the status bar, and a note when a stage asks for a host that isn't allowed.
     usdcc::usd::installAssetActivity(&window);
     window.show();
+#if USDCC_FEATURE_UPDATES
     // "Updated to ..." after an update, and the check a few seconds later (docs/UPDATES.md §4).
     updates.start();
+#endif
 
     // Once the window is up and its layout settled (so panels the scripts add
     // stay docked, see MainWindow::layoutSettled()), with the initial stage
@@ -1543,7 +1568,9 @@ int main(int argc, char** argv) {
             USDCC_LOG_ERROR("usdcc.app", "Couldn't start the app again");
         }
     }
+#if USDCC_FEATURE_UPDATES
     // Restart Now on a downloaded update: Velopack's updater takes over once this process ends.
     updates.applyIfRequested();
+#endif
     return result;
 }

@@ -1,6 +1,7 @@
 # Animation — Plan
 
-Status: **phases 1 (playback) and 2 (keyframing) built**, §6.1 and §6.3; phases 3 to 5 are plan.
+Status: **all five phases built**: playback, keyframing, key editing, curves and rendered output
+(§6.1, §6.3 to §6.6).
 The choices are in §4, and §8's questions are answered as recommended.
 
 Before this, usdcc had no notion of time: every read and write was at `UsdTimeCode::Default()`,
@@ -312,6 +313,82 @@ previous key, Set Key, auto-key, a row's key button, an edit keying an animated 
 `prim_move_keeps_the_world_position` (reparenting under an animated parent) and `python_time`.
 Checked in the app with `test_data/animated.usda`: Set Key at 10 from the window's action, the
 ruler's diamonds, the rows' keys.
+
+### 6.4 Phase 3: what was built
+
+**Try it:** open `test_data/animated.usda`, select World, and open a Dope Sheet (the Stages
+menu). Drag a key, box-pick a column of them and drag the handle at the end of the bar above
+them, or press Delete.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Key editing | [anim_edit.h](../src/cpp/usd/include/usdcc/usd/anim_edit.h), `usdcc_usd`, Qt-free | `KeyRef`, `keysAt()`, `retimeKeys()`, `moveKeys()`, `scaleKeys()` (about a pivot, new times rounded to frames), `removeKeys()`, `copyKeys()` / `pasteKeys()` and the app's `keyClipboard()`. In stage time, through `UsdAttribute`, so a sublayer's offset applies; a weaker layer's animation is copied into the edit target first, as keying does; a spline's knots move with their tangents. All values are read before any is written. A key landing on one that stays replaces it |
+| Pasting | `pasteKeys()` | Onto the attributes the keys came from; or, when they came from one prim and other prims are selected, onto those prims' attributes of the same name. Through `setValue()` with auto-key, so a static attribute gets keys |
+| The ruler | [time_ruler.cpp](../src/cpp/usd/src/time_ruler.cpp), [timeline_bar.cpp](../src/cpp/usd/src/timeline_bar.cpp) | Pressing a key mark picks it (outlined in white) instead of scrubbing; dragging moves every key of the selection at that time, whole frames. With the ruler focused: Delete, Ctrl+C, and Ctrl+V at the frame shown, onto the selected prims |
+| Dope Sheet | [dope_sheet_view_panel.cpp](../src/cpp/usd/src/dope_sheet_view_panel.cpp), panel type `dopeSheet` | A tree of prims and their animated attributes beside `DopeSheetView`, which paints the rows against its own `TimeAxis`, with a `TimeRuler` over it showing the same times and the playhead. The tree's header is the ruler's height, and the view finds each row's place from the tree, so they line up as it scrolls and folds |
+| Rows | | The selected prims and their animated descendants, so picking a character's root shows its parts; **Show All Animated** (options menu, kept in sessions) every animated prim of the stage, at most 2,000. A prim row's keys are those of all its attributes; picking one picks them all |
+| Picking and editing | `DopeSheetView` | Click, Ctrl or Shift click to add, a box over rows and times. Dragging a picked key moves them all; the bar over the picked keys' span has a handle at each end, and dragging one scales about the other. Delete, Ctrl+C, Ctrl+V (at the frame shown), Ctrl+A, F frames all keys, a double-click goes to a key's frame. Ctrl+wheel zooms the time, middle drag pans it, the wheel scrolls the rows. Every gesture is one undo step |
+
+Not built, against the plan: dragging a box on the ruler (it picks one mark at a time), and a
+scale on the ruler; both are the Dope Sheet's. The picked keys aren't shared between the ruler
+and the Dope Sheet.
+
+Tests: `anim_edit_move_keys`, `anim_edit_scale_keys`, `anim_edit_copy_paste_remove_keys`,
+`anim_edit_move_knots_and_offsets`, `anim_edit_move_keys_undo` (usdcc_tests), and
+`dope_sheet_rows`, `dope_sheet_edits_keys`, `dope_sheet_ruler_keys` (usdcc_ui_tests: rows,
+Show All, a click and a drag, a box, scaling by the handle, copy, paste and delete, each one
+undo step; the ruler's mark dragged, copied, pasted and deleted). Seen in the app with
+`test_data/animated.usda`: the rows and keys against the ruler. Not tried by hand: the drags.
+
+### 6.5 Phase 4: what was built
+
+**Try it:** open `test_data/animated.usda`, select Hopper and Pulse, open a Curve Editor (the
+Stages menu). Right-click `xformOp:rotateY` and Convert to Curve; pick a knot and drag it or its
+tangent handles.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Curves | [anim_edit.h](../src/cpp/usd/include/usdcc/usd/anim_edit.h) | `canHaveCurve()` (a scalar float, double or half: what `TsSpline` holds), `hasCurve()`, `convertToCurve()` (a knot per sample, through its value; auto-ease tangents, or held segments when the stage holds; the samples cleared, as they'd win over the spline in one spec, which answers §7's question 2), `bakeToSamples()` (a sample a frame from the first knot to the last, and at each knot; extrapolation and loops past the knots aren't kept), `setKnotInterpolation()`, `setKnotTangents()` (Auto Ease, Flat), `setExtrapolation()`, `setInnerLoop()`, `movedKnots()` |
+| Split | `splitXformOp()` | A translate or scale op becomes its X, Y and Z ops in its place in the op order, its default and samples split, the old op's own opinion removed from the edit target: the same matrix at every time (tested). The Curve Editor asks first, saying readers older than OpenUSD 25.11 don't know single-axis ops |
+| Curve Editor | [curve_editor_view_panel.cpp](../src/cpp/usd/src/curve_editor_view_panel.cpp), panel type `curveEditor` | The selected prims and their animated descendants, each animated scalar attribute a curve in its own colour (in the tree too); others (a translate's `double3`) listed greyed, with Split into X, Y and Z in their menu. `CurveView`: the ruler's time axis and a value axis of its own with a labelled grid; splines drawn with `TsSpline::Sample()` to half a pixel, samples joined as the stage interpolates |
+| Editing | `CurveView` | Click, Ctrl or Shift click, a box picks keys; clicking a row picks its curve's keys. Dragging moves the picked keys, whole frames in time and any value (Shift: value only). A picked knot shows its tangent handles where the segment is a curve; dragging one sets that side's slope and width. The menu: Interpolation (Held, Linear, Curve), Tangents (Auto Ease, Flat), Before the First Knot / After the Last Knot (Held, Linear, Repeat, Reset, Oscillate), Loop Between Picked Knots (an inner loop), No Inner Loop, Convert to Curve, Bake to Samples, Delete Keys. Wheel zooms both axes about the cursor (Ctrl: time, Shift: values), middle drag pans, F frames all. Each gesture is one undo step; a drag is drawn as it goes and written on release |
+
+Not built: sloped extrapolation with a typed slope, Hermite curves, value blocks, and editing the
+pre-value of a dual-valued knot. A vector attribute isn't drawn as three curves until it's split.
+§7's question 3 (a spline's times through the edit target's offset) isn't checked yet: keys are
+moved in stage time on the attribute, as for samples.
+
+Tests: `anim_edit_convert_and_bake` (through every sample, and back to the same values),
+`anim_edit_curve_settings` (interpolation, flat tangents, repeat and held extrapolation, an inner
+loop, moved knots), `anim_edit_split_ops` (the same matrix at three times, a rotate refused), and
+`curve_editor_curves` (usdcc_ui_tests: the curves, Convert to Curve, a knot dragged and a tangent
+dragged, each one undo step, held, repeat, bake, and the split). Seen in the app with
+`test_data/animated.usda`: the Hopper's rotateY and the Pulse's radius as curves, the translate
+listed. Not tried by hand: the drags and the menus.
+
+### 6.6 Phase 5: what was built
+
+Final Render already rendered at a time: **Render Frame** at the frame the timeline shows, and
+**Render Animation** over a range, through the render queue, with Hydra, RTX and V-Ray
+([FINAL_RENDER.md](FINAL_RENDER.md) §3, §5.3). So a "Render Sequence" is Render Animation, and
+this phase is the interactive Render View and a viewport playblast.
+
+| Piece | Where | Notes |
+|---|---|---|
+| The Render View's time | [render_view_panel.cpp](../src/cpp/usd/src/render_view_panel.cpp) | `renderTime()` is the stage's time. A new time (coalesced to one per 30 ms while playing) calls the `timeChanged()` hook: a camera prim is sent again where it is then (`primRenderCamera()` takes a time now), and with Update on Edits on and anything animated (`stageIsAnimated()`, worked out again after edits) the stage is sent again. A still stage isn't re-sent for a new time |
+| RTX | [rtx_panel.cpp](../src/plugins/rtx_render_native/rtx_panel.cpp), `stage_bridge.cpp` | The snapshot's start and end time code are the panel's time, as a final render pins its frame, so ovrtx renders the stage as it is then; transform edits are read at it too |
+| V-Ray and Python renderers | `usdcc.ui.RenderViewPanel` | A `time_changed(time)` hook (by default as above), `time()` and `stage_is_animated()`. V-Ray's export pins the file's start and end time code to `time()` |
+| Playblast | [playblast.h](../src/cpp/usd/include/usdcc/usd/playblast.h), the viewport's options menu, `usdcc.app.Viewport.playblast(pattern, start, end, step)` | The stage at each frame of a range, each frame taken once the viewport has drawn it at that time and its renderer has converged (`HydraViewportWindow::renderedTime()`, `isConverged()`), from `grabFrame()`: the scene with the grid and outline, no HUD. PNG, JPEG or TIFF; `####`, `<frame>`, `$F4`, or the frame before the extension. A progress dialog cancels it; the stage's time is put back after |
+
+Not built: a playblast at a size other than the viewport's, and of a camera other than the one the
+viewport looks through (look through it first). §7's question 5 (whether the RTX runtime and V-Ray
+read splines and scalar ops) is still open: neither SDK is on this machine, so the RTX and V-Ray
+changes are built by CI only and not run.
+
+Tests: `render_view_panel_time` (a camera prim at two times; three quick times send an animated
+stage once, with the camera where it is then; a still stage isn't sent again) and
+`playblast_files_and_frames` (usdcc_ui_tests). In the app with `test_data/animated.usda`:
+`Viewport.playblast()` over frames 1 to 6 with Storm wrote six PNGs with the Hopper moving.
 
 ### 6.2 The order
 
