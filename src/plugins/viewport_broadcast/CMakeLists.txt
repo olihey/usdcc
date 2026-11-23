@@ -3,6 +3,7 @@
 #
 #   usdcc_viewport_broadcast_core  the broadcast (Qt and usdcc_peers only), a static
 #                                  library the plugin and the tests share
+#   usdcc_viewport_broadcast_ui    the Broadcast side panel (usdcc_ui), the same
 #   viewport_broadcast             the plugin: the Broadcast entry, the viewport as its
 #                                  picture, toasts; and the page, in web/
 add_library(usdcc_viewport_broadcast_core STATIC broadcast.cpp broadcast.h)
@@ -10,13 +11,17 @@ target_include_directories(usdcc_viewport_broadcast_core PUBLIC "${CMAKE_CURRENT
 target_link_libraries(usdcc_viewport_broadcast_core PUBLIC usdcc_peers Qt6::Gui)
 set_target_properties(usdcc_viewport_broadcast_core PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 
+add_library(usdcc_viewport_broadcast_ui STATIC broadcast_panel.cpp broadcast_panel.h)
+target_link_libraries(usdcc_viewport_broadcast_ui PUBLIC usdcc_viewport_broadcast_core usdcc_ui Qt6::Widgets)
+set_target_properties(usdcc_viewport_broadcast_ui PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+
 usdcc_add_plugin(viewport_broadcast
     ID org.usdcc.viewport-broadcast
     NAME "Viewport Broadcast"
     VERSION 0.1.0
-    DESCRIPTION "Broadcast in a viewport's menu: a web link to watch that viewport live, with its watchers' chat."
+    DESCRIPTION "Broadcast in a viewport's menu: a web link to watch that viewport live, with its watchers' chat and a Broadcast panel."
     SOURCES plugin.cpp)
-target_link_libraries(viewport_broadcast PRIVATE usdcc_viewport_broadcast_core)
+target_link_libraries(viewport_broadcast PRIVATE usdcc_viewport_broadcast_ui)
 
 # The page, which the room serves at / (PEERS_PROTOCOL.md §1).
 set(_folder "${CMAKE_BINARY_DIR}/plugins/viewport_broadcast")

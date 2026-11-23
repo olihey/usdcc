@@ -1,7 +1,9 @@
-// Viewport Broadcast (docs/VIEWPORT_BROADCAST.md, phase 1): Broadcast in a viewport's
-// menus hosts a room of usdcc_peers that serves a web page, copies the page's link,
-// and sends the viewport's picture to everyone who opens it, whenever it changes.
+// Viewport Broadcast (docs/VIEWPORT_BROADCAST.md): Broadcast in a viewport's menus hosts
+// a room of usdcc_peers that serves a web page, copies the page's link, and sends the
+// viewport's picture to everyone who opens it, whenever it changes. The Broadcast panel
+// (phase 2) has the link, the watchers and their chat.
 #include "broadcast.h"
+#include "broadcast_panel.h"
 
 #include "usdcc/plugin/plugin.h"
 
@@ -77,6 +79,7 @@ struct State {
     int closeGuard = 0;
     QPointer<Broadcast> broadcast;
     QPointer<ViewportSource> source;
+    QPointer<usdcc::broadcast::BroadcastPanel> panel;
 };
 State* g_state = nullptr;
 
@@ -105,6 +108,12 @@ void copyLink() {
 
 void stopBroadcast(const QString& reason = {}) {
     if (g_state && g_state->broadcast) g_state->broadcast->stop(reason);
+}
+
+void showPanel() {
+    if (!g_state || !g_state->panel) return;
+    g_state->panel->show();
+    g_state->panel->raise();
 }
 
 // Before a viewport that's broadcast closes: close it and end the broadcast, or keep both.
@@ -173,15 +182,11 @@ void startBroadcast(ViewportViewPanel* panel) {
         broadcast->deleteLater();
     });
 
+    if (g_state->panel) g_state->panel->setBroadcast(broadcast);
     copyLink();
-    QList<usdcc::ui::ToastAction> actions{{QObject::tr("Copy Link"), [] { copyLink(); }}};
-    if (host.peers->showPanel) {
-        usdcc::ui::PeersController* peers = host.peers;
-        actions.append({QObject::tr("Watchers"), [peers] {
-                            if (peers->showPanel) peers->showPanel();
-                        }});
-    }
-    actions.append({QObject::tr("Stop"), [] { stopBroadcast(); }});
+    QList<usdcc::ui::ToastAction> actions{{QObject::tr("Copy Link"), [] { copyLink(); }},
+                                          {QObject::tr("Watchers"), [] { showPanel(); }},
+                                          {QObject::tr("Stop"), [] { stopBroadcast(); }}};
     toast(QObject::tr("Broadcasting %1").arg(source->title()),
           QObject::tr("The link is copied: whoever opens it in a browser watches this viewport.\n%1")
               .arg(broadcast->link().toString(QUrl::RemoveFragment)),
@@ -194,6 +199,16 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
     g_state = new State;
     g_state->host = &host;
     g_state->closeGuard = ViewportViewPanel::addCloseGuard(&mayClose);
+    // The Broadcast panel, hidden until asked for (View menu, the toast's Watchers); a saved
+    // layout shows it where it was.
+    if (host.mainWindow) {
+        auto* panel = new usdcc::broadcast::BroadcastPanel(host.peers);
+        QObject::connect(panel, &usdcc::broadcast::BroadcastPanel::stopRequested, panel, [] { stopBroadcast(); });
+        QObject::connect(panel, &usdcc::broadcast::BroadcastPanel::copyRequested, panel, [] { copyLink(); });
+        host.addSidePanel(panel, Qt::RightDockWidgetArea);
+        panel->hide();
+        g_state->panel = panel;
+    }
     // A Broadcast submenu in every viewport's tab menu and options menu: what doesn't
     // apply to this viewport is greyed out. Start on another viewport ends this one's.
     const auto live = [](ViewportViewPanel* panel) { return isBroadcasting(panel); };
@@ -213,6 +228,7 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host&) {
         QObject::disconnect(g_state->broadcast, nullptr, nullptr, nullptr);
         delete g_state->broadcast.data();  // Closes the room
     }
+    delete g_state->panel.data();
     delete g_state;
     g_state = nullptr;
 }

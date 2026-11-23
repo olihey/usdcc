@@ -4,10 +4,13 @@
 #include "test_harness.h"
 
 #include "broadcast.h"
+#include "broadcast_panel.h"
+#include "test_settings.h"
 #include "peers_test_support.h"
 
 #include "usdcc/peers/peers.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/ui/peers_controller.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -18,6 +21,11 @@
 #include <QImage>
 #include <QImageWriter>
 #include <QJsonArray>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QLayout>
 #include <QMenu>
 #include <QNetworkAccessManager>
@@ -30,10 +38,12 @@
 #include <memory>
 
 using usdcc::broadcast::Broadcast;
+using usdcc::broadcast::BroadcastPanel;
 using usdcc::peers::Message;
 using usdcc::peers::Peers;
 using usdcc::peers::test::RawMember;
 using usdcc::peers::test::waitUntil;
+using usdcc::ui::PeersController;
 
 namespace {
 
@@ -388,4 +398,74 @@ USDCC_TEST(viewport_close_guards) {
     allow = false;
     asked = nullptr;
     CHECK(viewport.canClose() && !asked, "a removed guard is still asked");
+}
+
+// Phase 2 (VIEWPORT_BROADCAST.md §2.1): the Broadcast panel lists the watchers, has the
+// broadcast's chat both ways, removes a watcher, and says when the broadcast ended.
+USDCC_TEST(broadcast_panel_watchers_and_chat) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir rooms, page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers::Options peersOptions;
+    peersOptions.profile.name = QStringLiteral("Host");
+    peersOptions.roomsFolder = rooms.path();
+    PeersController controller(std::make_unique<Peers>(std::move(peersOptions)), nullptr, {});
+    FakeSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: panel test");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(controller.peers(), &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+
+    BroadcastPanel panel(&controller);
+    auto* status = panel.findChild<QLabel*>("broadcastStatus");
+    CHECK(status && status->text().startsWith("Not broadcasting"), "with no broadcast, the panel doesn't say how to start");
+    panel.setBroadcast(broadcast.get());
+    auto* link = panel.findChild<QLineEdit*>("broadcastLink");
+    auto* watchers = panel.findChild<QListWidget*>("broadcastWatchers");
+    auto* chat = panel.findChild<QPlainTextEdit*>("broadcastChat");
+    auto* stop = panel.findChild<QPushButton*>("broadcastStop");
+    CHECK(link && link->text() == broadcast->link().toString(), "the panel doesn't show the link");
+    CHECK(status->text().contains("Nobody is watching"), "the status isn't the broadcast's: %s", qPrintable(status->text()));
+
+    RawMember anna;
+    CHECK(anna.hello(*broadcast->room(), broadcast->room()->guestSecret(), QStringLiteral("Anna")), "Anna isn't let in");
+    CHECK(waitUntil([&] { return watchers->count() == 1 && watchers->item(0)->text() == "Anna"; }),
+          "the panel doesn't list the watcher");
+    CHECK(status->text().contains("1 watcher"), "the status doesn't count the watcher: %s", qPrintable(status->text()));
+
+    anna.sendText(QStringLiteral("chat"), QStringLiteral("say"), {{"text", "Can you orbit left?"}});
+    CHECK(waitUntil([&] { return chat->toPlainText().contains("Anna: Can you orbit left?"); }),
+          "the watcher's chat isn't in the panel: %s", qPrintable(chat->toPlainText()));
+    CHECK(panel.say(QStringLiteral("Sure")), "the panel can't send");
+    CHECK(waitUntil([&] {
+              for (const Message& message : anna.frames) {
+                  if (message.channel == "chat" && message.type == "say" && message.body.value("text").toString() == "Sure") return true;
+              }
+              return false;
+          }),
+          "the host's line from the panel doesn't reach the watcher");
+
+    watchers->setCurrentRow(0);
+    CHECK(panel.removeSelectedWatcher(), "Remove does nothing");
+    CHECK(waitUntil([&] { return anna.find("room", "removed") != nullptr || anna.disconnected; }), "the watcher isn't removed");
+    CHECK(waitUntil([&] { return watchers->count() == 0; }), "the removed watcher is still listed");
+
+    bool stopAsked = false;
+    QObject::connect(&panel, &BroadcastPanel::stopRequested, [&] { stopAsked = true; });
+    stop->click();
+    CHECK(stopAsked, "Stop doesn't ask to stop");
+    broadcast->stop(QStringLiteral("Stopped by the host"));
+    CHECK(waitUntil([&] { return !panel.broadcast(); }), "the panel keeps an ended broadcast");
+    CHECK(status->text().contains("ended") && link->text().isEmpty() && !stop->isEnabled(),
+          "the panel doesn't say the broadcast ended: %s", qPrintable(status->text()));
 }
