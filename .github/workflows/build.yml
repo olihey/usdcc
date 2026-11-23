@@ -276,9 +276,7 @@ jobs:
             build/vcpkg-manifest-install.log
           if-no-files-found: ignore
 
-  # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). No PySide6 yet
-  # (tools/build_pyside.py is Windows only), so usdcc.ui and the Python panel
-  # tests aren't built here. The tests run headless: Xvfb, with Mesa's llvmpipe.
+  # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). The tests run headless: Xvfb, with Mesa's llvmpipe.
   # Twice: x64, whose check keeps the name linux (master's required check), and
   # arm64 on GitHub's Arm runner, checked as linux-arm64, which isn't required.
   # tools/_common.py picks the vcpkg triplet and the OpenUSD asset by the machine.
@@ -354,6 +352,18 @@ jobs:
       # One that isn't published is a warning, and usdcc builds without it.
       - name: Download the USD plugin packs
         run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only
+
+      # As the windows job: PySide6 for this Qt, into external/; missing is a warning.
+      - name: Download PySide6
+        run: |
+          python tools/ci/pyside_asset.py > "$RUNNER_TEMP/pyside.json"
+          tag=$(jq -r .tag "$RUNNER_TEMP/pyside.json"); zip=$(jq -r .zip "$RUNNER_TEMP/pyside.json")
+          if gh release download "$tag" --pattern "$zip" --dir "$RUNNER_TEMP"; then
+            unzip -q "$RUNNER_TEMP/$zip" -d external
+            rm "$RUNNER_TEMP/$zip"
+          else
+            echo "::warning::No $zip in release $tag, so usdcc.ui and the Python panel tests aren't built. Run the PySide6 workflow (deps-pyside.yml)."
+          fi
 
       - name: Name the vcpkg cache
         id: vcpkg

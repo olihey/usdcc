@@ -244,8 +244,9 @@ two Qts in one process fail at random (`src/cpp/ui/python/CMakeLists.txt`). So t
 built from source against vcpkg's Qt, as `tools/build_pyside.py` does locally, and
 published like OpenUSD.
 
-- **Name.** `tools/ci/pyside_asset.py`: `pyside-<tag>-qt<version>-<hash>-win64-py313`,
-  tag `deps/pyside-<tag>-qt<version>-<hash>`. The hash covers the PySide tag, qtbase's
+- **Name.** `tools/ci/pyside_asset.py`: `pyside-<tag>-qt<version>-<hash>-<platform>-py313`,
+  tag `deps/pyside-<tag>-qt<version>-<hash>`, which holds an asset per platform (`win64`,
+  `win-arm64`, `linux-x64`, `linux-arm64`). The hash covers the PySide tag, qtbase's
   vcpkg version and port version (an overlay port in `cmake/ports` wins), the Python
   version from `deps/usd.json`, `build_pyside.py` and the naming script itself. Other
   `vcpkg.json` changes, such as adding QtNodes, don't need a new build.
@@ -258,7 +259,9 @@ published like OpenUSD.
   header with); check the zip from another folder with vcpkg's Qt deleted (PySide6
   imports, `shiboken6 --version` runs); publish as a prerelease.
 - **Contents.** `pyside-install/` holds PySide6 (Core, Gui and Widgets, with the Qt DLLs
-  it was built with), shiboken6 and the shiboken6 generator with its `libclang.dll`. The
+  it was built with), shiboken6 and the shiboken6 generator with its `libclang.dll`. On
+  Linux it has no Qt: the RUNPATHs lead to the one in `build/vcpkg_installed`, beside the
+  `external` it's unzipped into, so the process can't have two. The
   generator's CMake files name the build machine's libclang and Qt folders, but only as
   information; it runs from its own folder.
 
@@ -321,8 +324,6 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 ## 7. Later
 
 - **macOS.** Hosted `macos-latest`, with its own OpenUSD asset, as the Linux ones (§8).
-  Still Windows only: `tools/build_pyside.py`,
-  so Linux has no PySide6 (no `usdcc.ui`, no Python-made panels, no V-Ray Render).
 
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
@@ -380,8 +381,8 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
   python.org's `pythonarm64` NuGet package: setup-python can't install an older 3.13
   beside the newer one the image ships.
 - Not yet for arm64: the USD plugin packs (their pins list `win64` and `linux-x64`),
-  PySide6 (`deps-pyside.yml`, so `windows-arm64` has no `usdcc.ui`), the Blender
-  distribution checks, and `release.yml`. A missing pack or PySide6 is a warning, as on x64.
+  the Blender distribution checks, and `release.yml` ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
+  A missing pack or PySide6 is a warning, as on x64.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.
