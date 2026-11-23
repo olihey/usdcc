@@ -215,6 +215,10 @@ int main(int argc, char** argv) {
             result = runQueue(parser);
         }
         plugins.deactivate(python);
+        // A call a plugin queued (QTimer.singleShot(0, ...)) that no event loop got to, as
+        // renderers has none: it holds a Python callable, which PySide lets go of through
+        // Python. Left queued, ~QCoreApplication would do that after Python has ended, and crash.
+        QCoreApplication::removePostedEvents(nullptr, QEvent::MetaCall);
     }
     return result;
 }

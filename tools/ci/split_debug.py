@@ -3,7 +3,7 @@
 The Linux counterpart of release.yml's PDB zip on Windows (docs/RELEASE.md §4):
 a RelWithDebInfo build carries its debug info inside the binaries, which would
 make the release several times bigger. For each of usdcc's own ELF files in the
-deploy (bin/usdcc, lib/libusdcc_*.so, the usdcc Python package's modules, the
+deploy (bin/usdcc, bin/usdcc_node, lib/libusdcc_*.so, the usdcc Python package's modules, the
 example plugins' libraries) this writes <symbols>/<path in the deploy>.debug,
 strips the debug info from the deployed file (its symbol table stays), and leaves
 a .gnu_debuglink in it naming the .debug file. gdb finds that next to the binary,
@@ -29,7 +29,7 @@ from _common import fail  # noqa: E402
 from _elf import is_elf  # noqa: E402
 
 # usdcc's own, by path in the deploy.
-OWN = ["bin/usdcc", "lib/libusdcc_*.so", "lib/python*/site-packages/usdcc/*.so", "examples/plugins/*/bin/*/*.so",
+OWN = ["bin/usdcc", "bin/usdcc_node", "lib/libusdcc_*.so", "lib/python*/site-packages/usdcc/*.so", "examples/plugins/*/bin/*/*.so",
        "plugins/*/bin/*/*.so"]
 
 
