@@ -259,9 +259,15 @@ USDCC_TEST(node_storm_opengl_check) {
     OpenGlInfo old;
     old.context = true;
     old.major = 4;
+#ifdef __APPLE__
+    old.minor = 0;  // Storm is on Metal there: macOS's newest OpenGL, 4.1, will do
+    const char* const oldVersion = "4.0";
+#else
     old.minor = 1;
+    const char* const oldVersion = "context is 4.1";
+#endif
     old.renderer = "Some GPU";
-    CHECK(stormOpenGlProblem(old).find("4.1") != std::string::npos, "below 4.5");
+    CHECK(stormOpenGlProblem(old).find(oldVersion) != std::string::npos, "below what Storm needs here");
     OpenGlInfo good = old;
     good.minor = 6;
     CHECK(stormOpenGlProblem(good).empty(), "4.6 on a GPU is fine");

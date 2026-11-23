@@ -37,7 +37,6 @@
 class QOpenGLContext;
 class QTimer;
 class QOpenGLFramebufferObject;
-class QOpenGLFunctions_1_1;
 
 // A plain `namespace PXR_NS { class UsdImagingGLEngine; }` here would declare
 // a phantom, unrelated class: PXR_NS (aliased to `pxr`) merely re-exposes the
@@ -52,6 +51,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 namespace usdcc::usd {
 
 class SelectionOverlay;
+class ViewportOverlayRenderer;
 class PhysicsOverlay;
 
 // How the viewport draws what's selected (docs/VIEWPORT_SELECTION.md).
@@ -548,8 +548,9 @@ private:
     void showRollover();
 
     QOpenGLContext* m_context = nullptr;
-    QOpenGLFunctions_1_1* m_legacyGl = nullptr;
     std::unique_ptr<PXR_NS::UsdImagingGLEngine> m_engine;
+    // Draws the grid, the gizmos and the HUD's image; made and freed with the engine.
+    std::unique_ptr<ViewportOverlayRenderer> m_overlayRenderer;
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     std::unique_ptr<PhysicsOverlay> m_physicsOverlay;  // made when Show Colliders is first on

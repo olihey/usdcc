@@ -65,8 +65,7 @@ QString WorkspaceLibrary::defaultUserFolder() {
 
 QString WorkspaceLibrary::shippedFolder() {
     // Deployed, bin/usdcc.exe has resources/ next to it.
-    const QString deployed =
-        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../resources/workspaces"));
+    const QString deployed = QDir(installFolder()).absoluteFilePath(QStringLiteral("resources/workspaces"));
     if (QFileInfo(deployed).isDir()) return QDir::cleanPath(deployed);
 #ifdef USDCC_WORKSPACES_DIR
     const QString source = QStringLiteral(USDCC_WORKSPACES_DIR);

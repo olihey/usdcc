@@ -1,0 +1,19 @@
+diff --git a/pxr/imaging/plugin/hdEmbree/renderer/materials/BSDL/include/BSDL/tools.h b/pxr/imaging/plugin/hdEmbree/renderer/materials/BSDL/include/BSDL/tools.h
+index 3418ef1..4f2d8ee 100644
+--- a/pxr/imaging/plugin/hdEmbree/renderer/materials/BSDL/include/BSDL/tools.h
++++ b/pxr/imaging/plugin/hdEmbree/renderer/materials/BSDL/include/BSDL/tools.h
+@@ -11,6 +11,14 @@
+ #include <algorithm>
+ #include <tuple>
+ 
++// macOS's <sys/param.h> defines MAX and MIN as macros, and system headers include
++// it. Included here first, so that its include guard keeps them from coming back.
++#if defined(__APPLE__)
++#    include <sys/param.h>
++#    undef MAX
++#    undef MIN
++#endif
++
+ BSDL_ENTER_NAMESPACE
+ 
+ BSDL_INLINE float

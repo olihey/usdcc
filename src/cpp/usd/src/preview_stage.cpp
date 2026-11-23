@@ -68,7 +68,7 @@ QWidget* previewOwner(QWidget* parent) {
 QString previewFileKey(const QString& path) {
     const QFileInfo info(path);
     const QString canonical = info.exists() ? info.canonicalFilePath() : path;
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)  // case-insensitive file systems, by default
     return canonical.toLower();
 #else
     return canonical;

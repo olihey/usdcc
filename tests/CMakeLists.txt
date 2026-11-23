@@ -65,6 +65,7 @@ add_executable(usdcc_tests
     value_type_info_test.cpp
     variant_actions_test.cpp
     version_test.cpp
+    install_paths_test.cpp
     view_panel_registry_test.cpp
     xform_math_test.cpp
     xform_stack_test.cpp
@@ -328,17 +329,15 @@ if(WIN32)
             "PATH=${USD_INSTALL}/bin;${USD_INSTALL}/lib;%PATH%\nPXR_PLUGINPATH_NAME=${USD_INSTALL}/plugin/usd")
 else()
     # USD's plugins, and its libraries for whatever the executables' rpath
-    # doesn't reach. Run on Linux (docs/LINUX_WSL.md), not yet on macOS.
-    if(APPLE)
-        set(_usdcc_library_path DYLD_LIBRARY_PATH)
-    else()
-        set(_usdcc_library_path LD_LIBRARY_PATH)
+    # doesn't reach (docs/LINUX_WSL.md). Not the libraries on macOS, where the rpaths
+    # reach them all: DYLD_LIBRARY_PATH replaces the system's own libraries by name
+    # too, and ImageIO with OpenUSD's libpng crashes drawing an emoji (docs/MACOS.md).
+    set(_usdcc_test_env "PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
+    if(NOT APPLE)
+        list(APPEND _usdcc_test_env "LD_LIBRARY_PATH=path_list_prepend:${USD_INSTALL}/lib")
     endif()
-    set_tests_properties(
-        usdcc_tests usdcc_ui_tests usdcc_python_tests
-        PROPERTIES
-            ENVIRONMENT_MODIFICATION
-            "${_usdcc_library_path}=path_list_prepend:${USD_INSTALL}/lib;PXR_PLUGINPATH_NAME=set:${USD_INSTALL}/plugin/usd")
+    set_tests_properties(usdcc_tests usdcc_ui_tests usdcc_python_tests
+                         PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_test_env}")
 endif()
 
 # The schema tests again, with a codeless schema library registered at startup

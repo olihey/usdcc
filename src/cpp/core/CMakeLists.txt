@@ -10,6 +10,7 @@ add_library(usdcc_core SHARED
     include/usdcc/core/core.h
     include/usdcc/core/export.h
     include/usdcc/core/file_log_sink.h
+    include/usdcc/core/install_paths.h
     include/usdcc/core/log.h
     include/usdcc/core/native_stream_capture.h
     include/usdcc/core/settings.h
@@ -19,6 +20,7 @@ add_library(usdcc_core SHARED
     src/build_features.cpp
     src/console_log_sink.cpp
     src/file_log_sink.cpp
+    src/install_paths.cpp
     src/log.cpp
     src/native_stream_capture.cpp
     src/settings.cpp

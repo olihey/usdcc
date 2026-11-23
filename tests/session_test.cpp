@@ -135,7 +135,9 @@ SessionController::LoadOptions quiet(bool discard = true) {
 QStringList stageFiles(const usdcc::usd::StageManager& stages) {
     QStringList files;
     for (const StageRefPtr& stage : stages.stages()) {
-        files << QDir::fromNativeSeparators(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetRealPath()));
+        files << QDir::fromNativeSeparators(
+            // Canonical, as what it's compared with: macOS's temporary folder is a symbolic link.
+            QFileInfo(QString::fromStdString(stage->usdStage()->GetRootLayer()->GetRealPath())).canonicalFilePath());
     }
     return files;
 }

@@ -315,6 +315,8 @@ add_library(usdcc_usd_ui SHARED
     src/hydra_viewport_window.cpp
     src/selection_overlay.cpp
     src/selection_overlay.h
+    src/viewport_overlay_renderer.cpp
+    src/viewport_overlay_renderer.h
     src/viewport_display.cpp
     src/viewport_hud.cpp
     src/viewport_render_params.cpp

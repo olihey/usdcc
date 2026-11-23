@@ -1,13 +1,13 @@
 # uv (https://docs.astral.sh/uv/), which installs the Python packages plugins and
 # scripts ask for (docs/PYTHON_PACKAGES.md), bundled at a pinned version.
 # Downloaded once at configure time from PyPI's wheel for this platform (Windows
-# x64 or arm64, Linux x86_64 or aarch64), checked against its SHA-256, and unpacked into
+# x64 or arm64, Linux x86_64 or aarch64, macOS arm64), checked against its SHA-256, and unpacked into
 # build/uv (uv[.exe] and its licenses); tools/deploy.py copies that into the
 # deploy's tools/uv. Offline, elsewhere, or with USDCC_BUNDLE_UV off, the app
 # falls back to a uv on PATH.
 #
 # To upgrade: pick a release at least two weeks old, and take the
-# py3-none-win_amd64, win_arm64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
+# py3-none-win_amd64, win_arm64, manylinux x86_64/aarch64 and macosx arm64 wheels' URLs and sha256s from
 # https://pypi.org/pypi/uv/<version>/json.
 #
 # Sets:
@@ -33,6 +33,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(
     set(USDCC_UV_URL
         "https://files.pythonhosted.org/packages/4c/92/d83d019c63c1ccc6ff17df2bfe76270412f9766e7e71aa4d4ccbf018683f/uv-0.13.5-py3-none-manylinux_2_28_aarch64.whl")
     set(USDCC_UV_SHA256 "91e58e304b63b6c91bac5561459ab0c3ea24f17bc01ea9359d69fed72142978f")
+elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    set(USDCC_UV_URL
+        "https://files.pythonhosted.org/packages/d2/26/9ac45211123244ea68be852775093af487a64debc13621a2de239f8ebe73/uv-0.13.5-py3-none-macosx_11_0_arm64.whl")
+    set(USDCC_UV_SHA256 "a42c85fa8156e1e5e2cecdbc77bb818ea1dcf5f78b8e2a8f84c7fe4f16f0702e")
 endif()
 
 set(_usdcc_uv_name "uv${CMAKE_EXECUTABLE_SUFFIX}")

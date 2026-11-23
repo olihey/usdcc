@@ -86,25 +86,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // set up before the window is first shown, and it requires this attribute
     // so the window's native handle isn't forced onto its ancestors.
     setAttribute(Qt::WA_DontCreateNativeAncestors);
-    m_windowAgent = new QWK::WidgetWindowAgent(this);
-    m_windowAgent->setup(this);
-
-    m_titleBar = new TitleBar(this);
-    m_windowAgent->setTitleBar(m_titleBar);  // the bar's empty space drags / double-click-maximizes
-    // Interactive widgets inside the bar must opt out of that dragging. The
-    // caption buttons are registered as the window's system buttons instead,
-    // which also gives the maximize button Windows 11's snap-layout flyout.
-    m_windowAgent->setHitTestVisible(m_titleBar->menuBar(), true);
-    m_windowAgent->setSystemButton(QWK::WindowAgentBase::WindowIcon, m_titleBar->logoWidget());
-    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Minimize, m_titleBar->minimizeButton());
-    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Maximize, m_titleBar->maximizeButton());
-    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Close, m_titleBar->closeButton());
-#ifdef Q_OS_MAC
-    // macOS keeps its native traffic-light buttons (untested here).
-    m_titleBar->minimizeButton()->hide();
-    m_titleBar->maximizeButton()->hide();
-    m_titleBar->closeButton()->hide();
+#ifdef Q_OS_MACOS
+    // Our title bar lies where the system's would be, which Qt counts as outside the
+    // safe area: the layout would leave an empty strip there, above our bar.
+    setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea, false);
 #endif
+    m_titleBar = new TitleBar(this);
+#ifdef Q_OS_MACOS
+    // QWindowKit takes a window's id for an NSView there, which it only is on Cocoa: the
+    // offscreen platform (the tests') numbers its windows.
+    const bool frameless = QGuiApplication::platformName() == QLatin1String("cocoa");
+#else
+    const bool frameless = true;
+#endif
+    if (frameless) setUpWindowAgent();
     setMenuWidget(m_titleBar);
 
     ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
@@ -230,12 +225,32 @@ QMenu* MainWindow::createPopupMenu() {
     return menu;
 }
 
+void MainWindow::setUpWindowAgent() {
+    m_windowAgent = new QWK::WidgetWindowAgent(this);
+    m_windowAgent->setup(this);
+    m_windowAgent->setTitleBar(m_titleBar);  // the bar's empty space drags / double-click-maximizes
+    // Interactive widgets inside the bar must opt out of that dragging. The
+    // caption buttons are registered as the window's system buttons instead,
+    // which also gives the maximize button Windows 11's snap-layout flyout.
+    m_windowAgent->setHitTestVisible(m_titleBar->menuBar(), true);
+#ifdef Q_OS_MACOS
+    // macOS keeps its own close, minimize and zoom buttons, which QWindowKit places in
+    // the room the bar leaves for them; the bar's own are hidden (TitleBar).
+    m_windowAgent->setSystemButtonArea(m_titleBar->systemButtonArea());
+#else
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::WindowIcon, m_titleBar->logoWidget());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Minimize, m_titleBar->minimizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Maximize, m_titleBar->maximizeButton());
+    m_windowAgent->setSystemButton(QWK::WindowAgentBase::Close, m_titleBar->closeButton());
+#endif
+}
+
 QMenuBar* MainWindow::mainMenuBar() const { return m_titleBar->menuBar(); }
 
 void MainWindow::addTitleBarWidget(QWidget* widget) {
     if (!widget) return;
     m_titleBar->addTrailingWidget(widget);
-    m_windowAgent->setHitTestVisible(widget, true);
+    if (m_windowAgent) m_windowAgent->setHitTestVisible(widget, true);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

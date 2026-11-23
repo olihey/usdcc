@@ -29,7 +29,7 @@ endif()
 if(TARGET usdcc)
     # Where PluginManager::shippedFolder() looks, so a build loads it as a deployed app does.
     add_custom_target(physics_jolt_app_plugin
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${_folder}" "$<TARGET_FILE_DIR:usdcc>/../plugins/physics_jolt"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${_folder}" "${USDCC_APP_INSTALL_ROOT}/plugins/physics_jolt"
         DEPENDS physics_jolt VERBATIM)
     add_dependencies(usdcc physics_jolt_app_plugin)
 endif()

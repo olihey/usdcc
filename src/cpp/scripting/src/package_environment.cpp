@@ -1,6 +1,7 @@
 #include "usdcc/scripting/package_environment.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/ui/settings.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -209,7 +210,7 @@ void PackageEnvironment::removeUnused() const {
 // --- PackageInstaller ------------------------------------------------------
 
 std::filesystem::path PackageInstaller::findUv() {
-    const QString bundled = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/uv/uv" USDCC_EXE_SUFFIX));
+    const QString bundled = QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("tools/uv/uv" USDCC_EXE_SUFFIX));
     if (QFileInfo(bundled).isExecutable()) return toPath(QDir::cleanPath(bundled));
 #ifdef USDCC_UV_EXE
     if (QFileInfo(QStringLiteral(USDCC_UV_EXE)).isExecutable()) return toPath(QStringLiteral(USDCC_UV_EXE));

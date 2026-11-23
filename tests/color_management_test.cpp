@@ -205,7 +205,8 @@ USDCC_TEST(color_management_pickers) {
         CHECK(false, "the built-in config loads: %s", color.error().c_str());
         return;
     }
-    CHECK(color.pickingSpace() == "sRGB - Texture", "the CG config's color_picking role: %s", color.pickingSpace().c_str());
+    // One space, two names: OpenUSD builds OpenColorIO 2.2 (2.4 on macOS), which renamed it.
+    CHECK(color.pickingSpace() == "sRGB - Texture" || color.pickingSpace() == "sRGB Encoded Rec.709 (sRGB)", "the CG config's color_picking role: %s", color.pickingSpace().c_str());
     CHECK(closeTo(color.toPicker(grey, settings)[0], 0.4845f), "through the color picking space");
     const auto back = color.fromPicker(color.toPicker({0.7f, 0.05f, 0.3f}, settings), settings);
     CHECK(closeTo(back[0], 0.7f) && closeTo(back[1], 0.05f) && closeTo(back[2], 0.3f), "a round trip");

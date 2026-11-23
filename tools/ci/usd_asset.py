@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import ASSET_PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import ASSET_PLATFORM, PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
 
 
 def platform_flags(flags):
@@ -45,6 +45,13 @@ def platform_flags(flags):
     if WINDOWS:
         return list(flags)
     return [flag for flag in flags if not flag.startswith("--generator")]
+
+
+def platform_patches(pin_dir):
+    """The patches only this platform needs, deps/patches/<platform>/*.patch, applied after
+    the pin's own. Not in the pin: its hash names every platform's asset, so a fix for
+    macOS alone would have Windows' and Linux' built again under a new name."""
+    return sorted((Path(pin_dir) / "patches" / PLATFORM).glob("*.patch"))
 
 
 def describe(pin):

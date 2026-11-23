@@ -824,7 +824,7 @@ int main(int argc, char** argv) {
 
     usdcc::usd::setOpenStageHandler([&stageManager, &window, &panelTypes, stageOpener](const QString& path) {
         const QString wanted = QFileInfo(path).canonicalFilePath();
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)  // case-insensitive file systems, by default
         constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
 #else
         constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;

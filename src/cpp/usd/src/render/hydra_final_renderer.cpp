@@ -391,15 +391,23 @@ OpenGlInfo probeOpenGl() {
 }
 
 std::string stormOpenGlProblem(const OpenGlInfo& info) {
-    if (!info.context) return "Storm needs OpenGL 4.5, and there's no OpenGL here: " + info.why;
+#ifdef __APPLE__
+    // Storm itself renders with Metal there (HgiMetal); 4.1, the newest macOS has, is
+    // enough for the context it is given (docs/MACOS.md).
+    constexpr int kNeededMinor = 1;
+#else
+    constexpr int kNeededMinor = 5;
+#endif
+    const std::string needs = "Storm needs OpenGL 4." + std::to_string(kNeededMinor);
+    if (!info.context) return needs + ", and there's no OpenGL here: " + info.why;
     // Windows' own software OpenGL, all a service in session 0 gets.
     if (info.renderer.find("GDI Generic") != std::string::npos) {
-        return "Storm needs OpenGL 4.5 on a GPU, and this session only has Microsoft's GDI renderer (OpenGL " +
+        return needs + " on a GPU, and this session only has Microsoft's GDI renderer (OpenGL " +
                std::to_string(info.major) + "." + std::to_string(info.minor) +
                "); run it in a logged-on session (docs/RENDER_NODE.md §5)";
     }
-    if (info.major < 4 || (info.major == 4 && info.minor < 5)) {
-        return "Storm needs OpenGL 4.5, and this context is " + std::to_string(info.major) + "." +
+    if (info.major < 4 || (info.major == 4 && info.minor < kNeededMinor)) {
+        return needs + ", and this context is " + std::to_string(info.major) + "." +
                std::to_string(info.minor) + " (" + info.renderer + ")";
     }
     return {};

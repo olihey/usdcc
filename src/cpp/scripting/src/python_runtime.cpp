@@ -18,6 +18,7 @@
 
 #include "usdcc/scripting/python_runtime.h"
 
+#include "usdcc/core/install_paths.h"
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
 
@@ -99,7 +100,7 @@ std::filesystem::path executableDir() {
     }
     return std::filesystem::path(buffer).parent_path();
 #elif defined(__APPLE__)
-    // macOS has no /proc. Not yet run there.
+    // macOS has no /proc.
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);  // fails, and says how long the path is
     std::string buffer(size, '\0');
@@ -122,12 +123,12 @@ PythonSettings PythonSettings::defaults() {
     // A deployed usdcc (tools/deploy.py) brings its own Python. On Windows,
     // bin/usdcc.exe next to python/, whose Lib/site-packages holds usdcc, pxr and
     // PySide6; elsewhere the deploy is the Python's prefix itself: bin/usdcc next
-    // to lib/python3.XY/site-packages.
+    // to lib/python3.XY/site-packages (in a macOS bundle, Contents/Resources/lib).
 #if defined(_WIN32)
     const std::filesystem::path bundled = executableDir().parent_path() / "python";
     const std::filesystem::path bundledSite = bundled / "Lib" / "site-packages";
 #else
-    const std::filesystem::path bundled = executableDir().parent_path();
+    const std::filesystem::path bundled = usdcc::core::installRoot(executableDir());
     std::filesystem::path bundledSite;
     std::error_code error;
     for (const auto& entry : std::filesystem::directory_iterator(bundled / "lib", error)) {

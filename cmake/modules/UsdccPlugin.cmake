@@ -102,7 +102,7 @@ function(usdcc_add_asset_protocol target)
         # app does. The folder's name is the output folder's.
         get_filename_component(_name "${ARG_OUTPUT_DIR}" NAME)
         add_custom_target(${target}_app_plugin
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ARG_OUTPUT_DIR}" "$<TARGET_FILE_DIR:usdcc>/../plugins/${_name}"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ARG_OUTPUT_DIR}" "${USDCC_APP_INSTALL_ROOT}/plugins/${_name}"
             DEPENDS ${target} VERBATIM)
         add_dependencies(usdcc ${target}_app_plugin)
     endif()
@@ -149,9 +149,15 @@ function(usdcc_add_plugin target)
                    RUNTIME_OUTPUT_DIRECTORY "$<1:${_bin}>")
     if(NOT WIN32)
         # A plugin's own libraries are found next to it, as Windows does for DLLs
-        # (docs/PLUGIN_SDK.md): $ORIGIN on the rpath, built and installed.
-        set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "$ORIGIN")
-        set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
+        # (docs/PLUGIN_SDK.md): $ORIGIN on the rpath, built and installed, which
+        # macOS spells @loader_path.
+        if(APPLE)
+            set(_origin "@loader_path")
+        else()
+            set(_origin "$ORIGIN")
+        endif()
+        set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${_origin}")
+        set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "${_origin}")
     endif()
 
     set(_json "{\n  \"id\": \"${ARG_ID}\",\n  \"name\": \"${ARG_NAME}\",\n  \"version\": \"${ARG_VERSION}\",\n")

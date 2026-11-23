@@ -208,7 +208,9 @@ private:
     QWidget* m_bottomBar = nullptr;
     QAction* m_bottomBarAction = nullptr;
     PanelMaximizer* m_panelMaximizer = nullptr;
-    QWK::WidgetWindowAgent* m_windowAgent = nullptr;
+    void setUpWindowAgent();
+
+    QWK::WidgetWindowAgent* m_windowAgent = nullptr;  // null where there's no native window to adapt
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
     std::vector<std::function<bool()>> m_closeChecks;

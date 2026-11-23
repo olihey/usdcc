@@ -13,8 +13,8 @@ Mirrors the manual steps documented in readme.md.
 
 On Windows it builds with Visual Studio. On Linux and macOS it uses Ninja when
 there is one on PATH (else CMake's default generator) and vcpkg's dynamic
-triplet. Linux is built and tested in WSL 2 (docs/LINUX_WSL.md, tools/wsl.py);
-macOS hasn't been built yet.
+triplet. Linux is built and tested in WSL 2 (docs/LINUX_WSL.md, tools/wsl.py),
+macOS on Apple Silicon (docs/MACOS.md).
 
 Standard library only. `python tools/build.py --help` lists the options.
 """
@@ -73,7 +73,10 @@ def parser(description=None):
                              "without this option builds them again")
     result.add_argument("--clean", action="store_true", help="remove the build directory before configuring")
     result.add_argument("--run", action="store_true", help="launch usdcc after a successful build")
-    result.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 4), help="maximum parallel build jobs (default: up to 4)")
+    # Visual Studio compiles each project's files in parallel by itself, so few projects at
+    # a time is enough. Ninja's jobs are compilers: all the cores.
+    result.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 4) if not MACOS else (os.cpu_count() or 2),
+                        help="maximum parallel build jobs (default: up to 4; on macOS the core count)")
     return result
 
 
@@ -106,13 +109,16 @@ def launch(exe, usd_install, scene):
         # USD's libraries (split across bin/ and lib/ on Windows) and Hydra
         # render-delegate plugins (e.g. hdEmbree) aren't copied next to usdcc;
         # point the launched process at the USD install instead.
+        # On macOS only at the plugins: the rpaths reach the libraries, and
+        # DYLD_LIBRARY_PATH would replace the system's own by name (docs/MACOS.md).
         if WINDOWS:
             folders = [os.path.join(usd_install, "bin"), os.path.join(usd_install, "lib")]
             variable = "PATH"
         else:
             folders = [os.path.join(usd_install, "lib")]
-            variable = "DYLD_LIBRARY_PATH" if MACOS else "LD_LIBRARY_PATH"
-        environment[variable] = os.pathsep.join(folders + [environment.get(variable, "")]).rstrip(os.pathsep)
+            variable = "LD_LIBRARY_PATH"
+        if not MACOS:
+            environment[variable] = os.pathsep.join(folders + [environment.get(variable, "")]).rstrip(os.pathsep)
         environment["PXR_PLUGINPATH_NAME"] = os.path.join(usd_install, "plugin", "usd")
 
     arguments = []
@@ -175,6 +181,10 @@ def main(argv=None, description=None):
     unknown = sorted(without - set(OPTIONAL_FEATURES))
     if unknown:
         fail(f"--without: no feature {', '.join(unknown)}; there are {', '.join(OPTIONAL_FEATURES)}.")
+    if MACOS and "BLENDER_MESH_TOOLS" not in without:
+        # Its backend doesn't build on macOS yet (docs/MACOS.md).
+        print("Leaving out blender_mesh_tools: not on macOS yet.")
+        without.add("BLENDER_MESH_TOOLS")
     # Mesh tools are in every build unless left out. Dependency downloads happen here,
     # never implicitly during a direct CMake configure.
     if "BLENDER_MESH_TOOLS" not in without:
@@ -189,6 +199,10 @@ def main(argv=None, description=None):
         configure.append(f"-DCMAKE_BUILD_TYPE={args.configuration}")
     if not WINDOWS:
         configure.append(f"-DVCPKG_TARGET_TRIPLET={VCPKG_TRIPLET}")
+    if MACOS:
+        # Qt's own programs (moc, qtpaths) from the same build as its libraries: vcpkg's
+        # host triplet is the static arm64-osx, which would build Qt a second time.
+        configure.append(f"-DVCPKG_HOST_TRIPLET={VCPKG_TRIPLET}")
     if args.usd_install:
         configure.append(f"-DUSD_INSTALL={args.usd_install}")
     # Always, so a release build's version doesn't stay in the CMake cache for

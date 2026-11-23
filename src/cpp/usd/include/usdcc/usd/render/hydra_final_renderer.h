@@ -61,7 +61,8 @@ struct USDCC_RENDER_API OpenGlInfo {
 // Makes that context (once; it's kept for Storm's renders) and reads what it is. Needs a
 // QGuiApplication, on the UI thread; without one, no context.
 USDCC_RENDER_API OpenGlInfo probeOpenGl();
-// Why Storm can't render with such a context, or empty: none at all, a version below 4.5, or
+// Why Storm can't render with such a context, or empty: none at all, a version below 4.5
+// (4.1 on macOS, where Storm renders with Metal), or
 // Microsoft's GDI renderer (Windows' software OpenGL 1.1, which a service in session 0 gets).
 USDCC_RENDER_API std::string stormOpenGlProblem(const OpenGlInfo& info);
 // What Storm's setupProblem() says from now on (empty: none), so a node neither offers nor
