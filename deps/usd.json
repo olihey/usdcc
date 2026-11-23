@@ -4,7 +4,8 @@
   "patches": ["patches/build_usd-glm.patch", "patches/build_usd-boost-vs2026.patch",
               "patches/build_usd-embree-windows-arm64.patch"],
   "flags": ["--no-examples", "--no-tutorials", "--no-usdview", "--materialx",
-            "--openimageio", "--opencolorio", "--embree", "--build-variant=release",
+            "--openimageio", "--opencolorio", "--embree", "--onetbb", "--openvdb",
+            "--alembic", "--draco", "--build-variant=release",
             "--generator=Visual Studio 17 2022"],
   "python": "3.13.12",
   "platform": "win64"

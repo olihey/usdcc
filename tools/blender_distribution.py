@@ -259,6 +259,7 @@ def check_binary_closure(rows, package, build):
                 "turbojpeg.dll",
                 "tiff.dll",
                 "tbb.dll",
+                "tbb12.dll",  # oneTBB, which OpenUSD has been built with since deps/usd.json's --onetbb
                 "tbbmalloc.dll",
                 "tbbmalloc_proxy.dll",
             )
@@ -481,7 +482,8 @@ def install_notices(
         encoding="utf-8",
     )
     usd_sources = usd_src or Path(cache_value(build, "USD_INSTALL")) / "src"
-    tbb = "oneTBB-2020.3.1" if (usd_sources / "oneTBB-2020.3.1").is_dir() else "tbb"
+    # OpenUSD's TBB sources: oneTBB (--onetbb) or TBB 2020, under their versioned folder.
+    tbb = next((path.name for path in sorted(usd_sources.glob("oneTBB-*")) if path.is_dir()), "tbb")
     for relative in (
         "libjpeg-turbo-3.1.4.1/README.ijg",
         tbb + "/third-party-programs.txt",
