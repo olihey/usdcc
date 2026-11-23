@@ -18,8 +18,10 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/core/build_features.h"
 #include "usdcc/core/version.h"
+#include "usdcc/scripting/debugger.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/scripting/python_settings.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/settings.h"
@@ -398,6 +400,16 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         return result;
     });
     m.def("user_data_folder", []() { return usdcc::ui::userDataFolder().toStdString(); });
+    // usdcc.debug: debugpy's folder, the program for its helper process, and the port to use.
+    m.def("debug_info", []() {
+        const PythonRuntime* python = PythonRuntime::instance();
+        if (!python) throw std::runtime_error("Python isn't available");
+        const auto text = [](const std::filesystem::path& path) { return QString::fromStdU16String(path.generic_u16string()).toStdString(); };
+        return std::make_tuple(text(debugger::folder()), text(python->executable()),
+                               usdcc::core::Settings::instance().get<int>(kDebugPortKey, 5678));
+    });
+    m.def("debug_port", []() { return debugger::port(); });
+    m.def("set_debug_port", [](int port) { debugger::setPort(port); });
     m.def(
         "stage_manager", []() { return context().stageManager; }, py::return_value_policy::reference,
         "The app's StageManager.");

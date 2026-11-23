@@ -44,6 +44,8 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QProcess>
+#include <QTimer>
+#include <QPushButton>
 #include <QStandardPaths>
 #include <QRegularExpression>
 #include <QStatusBar>
@@ -61,6 +63,10 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
+#if USDCC_FEATURE_EDITOR_LINK
+#include "usdcc/scripting/editor_link.h"
+#endif
+#include "usdcc/scripting/editor_setup.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -215,6 +221,11 @@ int main(int argc, char** argv) {
         QStringLiteral("install-plugin-packages"),
         QObject::tr("Install the Python packages the plugins ask for, and exit. Exit code: 0 done, 2 some left out, 1 failed."));
     commandLine.addOption(installPackagesOption);
+#if USDCC_FEATURE_EDITOR_LINK
+    const QCommandLineOption noEditorLinkOption(QStringLiteral("no-editor-link"),
+                                                QObject::tr("Don't let editors connect this time (docs/VSCODE.md)."));
+    commandLine.addOption(noEditorLinkOption);
+#endif
     commandLine.addPositionalArgument(QStringLiteral("stage"), QObject::tr("A USD file to open."),
                                       QStringLiteral("[stage]"));
     // Shows a message box and exits for --help and unknown options.
@@ -1367,6 +1378,28 @@ int main(int argc, char** argv) {
     auto presenceOnCurrentStage = stageManager.currentStageChanged.connect(
         [peersController](const usdcc::usd::StageRefPtr&) { peersController->updatePresence(); });
 
+    // Set Up VS Code... (docs/VSCODE.md §4), from the Script Editor and the Plugins panel.
+    const auto setUpVsCode = [&window, &python, &plugins](const QString& folder) {
+        namespace setup = usdcc::scripting::editor_setup;
+        QString error;
+        const int port = usdcc::core::Settings::instance().get<int>(usdcc::scripting::kDebugPortKey, 5678);
+        if (!setup::updateTypes(python, &error) ||
+            !setup::setUpFolder(folder, setup::paths(python, plugins), setup::interpreter(python), port, &error)) {
+            QMessageBox::warning(&window, QObject::tr("Set Up VS Code"), error);
+            return;
+        }
+        QMessageBox box(QMessageBox::Information, QObject::tr("Set Up VS Code"),
+                        QObject::tr("%1 is set up: VS Code completes usdcc, pxr and PySide6 there, and can attach its debugger.")
+                            .arg(QDir::toNativeSeparators(folder)),
+                        QMessageBox::Close, &window);
+        QPushButton* open = setup::findVsCode().isEmpty() ? nullptr : box.addButton(QObject::tr("Open in VS Code"), QMessageBox::AcceptRole);
+        box.exec();
+        if (open && box.clickedButton() == open) setup::openInVsCode(folder);
+    };
+    QObject::connect(scriptEditor, &usdcc::scripting::ScriptEditorSidePanel::setUpVsCodeRequested, &window, setUpVsCode);
+    QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::setUpVsCodeRequested, &window, setUpVsCode);
+    // Those set up before: up to date with this usdcc, once it's up.
+    QTimer::singleShot(3000, &window, [&python]() { usdcc::scripting::editor_setup::refreshTypes(python); });
     // Developing a plugin from inside the app (docs/PLUGIN_DEV.md).
     scriptEditor->setPluginHooks({[&plugins](const std::string& id) { return plugins.whyNotReloadable(id); },
                                   [&plugins, &python](const std::string& id) { return plugins.reload(id, python); }});
@@ -1585,6 +1618,20 @@ int main(int argc, char** argv) {
         };
         usdcc::usd::ValidationViewPanel::setHooks(std::move(hooks));
     }
+#if USDCC_FEATURE_EDITOR_LINK
+    // Before the scripts, so an editor can connect while one is running.
+    usdcc::scripting::EditorLink editorLink(python, scriptRunner, plugins, stageManager);
+    if (!commandLine.isSet(noEditorLinkOption) && usdcc::core::Settings::instance().get<bool>(usdcc::scripting::kEditorLinkKey, true)) {
+        QObject::connect(&window, &usdcc::ui::MainWindow::layoutSettled, &window, [&editorLink]() {
+            QString error;
+            if (editorLink.listen(usdcc::scripting::EditorLink::defaultName(), &error)) {
+                USDCC_LOG_INFO("usdcc.editor", "Editors can connect at {}", editorLink.address().toStdString());
+            } else {
+                USDCC_LOG_WARNING("usdcc.editor", "Editors can't connect: {}", error.toStdString());
+            }
+        }, Qt::SingleShotConnection);
+    }
+#endif
     QObject::connect(&window, &usdcc::ui::MainWindow::layoutSettled, &window, [&python, &scriptRunner, &ruleFiles, loadRules, scripts, runStartup]() {
         if (loadRules) ruleFiles.sync();
         usdcc::scripting::runStartupScripts(python, usdcc::scripting::userScriptsFolder(), runStartup);
@@ -1601,6 +1648,9 @@ int main(int argc, char** argv) {
     usdcc::usd::UsdaView::removeLeftoverConversions();
 
     const int result = app.exec();
+#if USDCC_FEATURE_EDITOR_LINK
+    editorLink.close();  // before what it works on goes
+#endif
     // A USDA conversion still running (docs/PANEL_BUSY.md §5.3): USD can't stop it, and a thread
     // inside USD as the process ends can crash it. Up to 10 s, then out without static
     // destructors.
@@ -1621,6 +1671,9 @@ int main(int argc, char** argv) {
         QStringList arguments = restartArguments;
         for (const QString& folder : commandLine.values(pluginPathOption)) arguments << QStringLiteral("--plugin-path") << folder;
         if (commandLine.isSet(noStartupScriptsOption)) arguments << QStringLiteral("--no-startup-scripts");
+#if USDCC_FEATURE_EDITOR_LINK
+        if (commandLine.isSet(noEditorLinkOption)) arguments << QStringLiteral("--no-editor-link");
+#endif
         USDCC_LOG_INFO("usdcc.app", "Restarting: {}", arguments.join(QLatin1Char(' ')).toStdString());
         if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments)) {
             USDCC_LOG_ERROR("usdcc.app", "Couldn't start the app again");

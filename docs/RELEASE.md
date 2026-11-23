@@ -241,7 +241,7 @@ What the release has to do, whatever usdcc's own licence:
     `SOURCES.txt` names each pack's version, repository and commit.
   - `PySide6/`: pyside-setup's `LICENSES`, which `tools/build_pyside.py` copies into its
     install.
-  - `Python/`, `QWindowKit/`, `ruff/`, `uv/`.
+  - `Python/`, `QWindowKit/`, `ruff/`, `uv/`, `debugpy/`, `types-usd/`.
 - **Make the LGPL libraries' sources available.** `licenses/SOURCES.txt` names, for every
   vcpkg package, its version, the vcpkg port it was built with and its upstream source
   (from the SPDX file vcpkg writes), and PySide6's tag.

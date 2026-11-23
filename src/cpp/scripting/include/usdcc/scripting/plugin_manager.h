@@ -1,5 +1,6 @@
 #pragma once
 
+#include "usdcc/core/signal.h"
 #include "usdcc/scripting/package_environment.h"
 
 #include <filesystem>
@@ -75,6 +76,9 @@ struct PluginInfo {
     PluginManifest manifest;
     PluginState state = PluginState::Ready;
     std::string reason;
+    // Where in its Python it failed, when it did and that's known.
+    std::string failureFile;
+    int failureLine = 0;
     std::vector<PluginContribution> contributions;
     // What its USD folders added, from their plugInfo.json as USD read it: kinds
     // such as "Asset resolver", "File format", "Prim type", "Render delegate"
@@ -145,6 +149,8 @@ public:
 
     // Why reload() wouldn't do anything for it; empty if it would.
     std::string whyNotReloadable(const std::string& id) const;
+    // Whether reload() is going on.
+    bool isReloading() const { return m_reloading; }
     struct ReloadResult {
         bool ok = false;                 // the plugin is running again
         std::vector<std::string> names;  // what was reloaded, it and those requiring it
@@ -159,9 +165,24 @@ public:
     // (usdcc.app.reload_plugin() waits for it to finish).
     ReloadResult reload(const std::string& id, PythonRuntime& python);
 
-    // Writes a new Python plugin called `name` into a folder of its own in `parent`, and
-    // starts it with no restart. Its id, or empty with `error` saying why.
-    std::string createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error);
+    // A start for a new plugin: a file in the usdcc package's _templates.
+    struct Template {
+        std::string id;
+        std::string label;
+        std::string description;
+    };
+    // In the order to list them.
+    static std::vector<Template> templates(const PythonRuntime& python);
+    // Writes a new Python plugin called `name` into a folder of its own in `parent`, from a
+    // template, and starts it with no restart. Its id, or empty with `error` saying why.
+    std::string createPlugin(const std::string& name, const std::filesystem::path& parent, PythonRuntime& python, std::string* error,
+                             const std::string& templateId = "menu_action");
+    // Starts the plugin in `folder`, made since the app started, with no restart. Its id, or
+    // empty with `error` saying why; one that was there already is reloaded.
+    std::string addPlugin(const std::filesystem::path& folder, PythonRuntime& python, std::string* error);
+
+    // After reload(), createPlugin() and addPlugin(), and when one is turned on or off.
+    usdcc::core::Signal<> changed;
 
     // What should be in the shared packages folder, in the order to resolve it,
     // for the enabled plugins and My packages; and what must never be installed.

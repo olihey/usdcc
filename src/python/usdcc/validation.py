@@ -23,12 +23,15 @@ A rule that raises doesn't end the run. Each failure is a finding, and after
 In a plain python, rules run through OpenUSD's own ``UsdValidation.ValidationContext``.
 """
 
+from __future__ import annotations
+
 import hashlib
 import inspect
 import os
 import sys
 import threading
 import types as _types
+from typing import TYPE_CHECKING, Any
 
 from pxr import Sdf, Tf, Usd
 from pxr import UsdValidation as _UsdValidation
@@ -36,6 +39,9 @@ from pxr import UsdValidation as _UsdValidation
 from usdcc import _plugins
 from usdcc import log as _log
 from usdcc.usd import _native
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 MAX_FAILURES = 10
 
@@ -51,17 +57,17 @@ class Report:
     the stage, a layer, a spec in one, or a ``(layer, path)`` pair. ``name`` tells one of
     the rule's findings from another, such as "TooLong"; it's the rule's own by default."""
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self._name = name
         self._errors = []
 
-    def error(self, site, message, name=None):
+    def error(self, site: Any, message: str, name: str | None = None) -> None:
         self._add(_UsdValidation.ValidationErrorType.Error, site, message, name)
 
-    def warn(self, site, message, name=None):
+    def warn(self, site: Any, message: str, name: str | None = None) -> None:
         self._add(_UsdValidation.ValidationErrorType.Warn, site, message, name)
 
-    def info(self, site, message, name=None):
+    def info(self, site: Any, message: str, name: str | None = None) -> None:
         self._add(_UsdValidation.ValidationErrorType.Info, site, message, name)
 
     def _add(self, kind, site, message, name):
@@ -292,7 +298,7 @@ def _decorator(kind, id, label, types, keywords, time_dependent, main_thread):
     return decorate
 
 
-def rule(id, label=None, types=(), keywords=(), time_dependent=False, main_thread=False):
+def rule(id: str, label: str | None = None, types: Iterable[str | type] = (), keywords: Iterable[str] = (), time_dependent: bool = False, main_thread: bool = False) -> Callable[[Callable[..., Any]], Rule]:
     """Makes a function a rule on prims: ``function(prim, report)``, or on those of
     `types` (schemas, by name or class: "Mesh", "MaterialBindingAPI", UsdGeom.Mesh; none
     means every prim). Its other arguments need defaults and are its parameters. A rule
@@ -301,23 +307,23 @@ def rule(id, label=None, types=(), keywords=(), time_dependent=False, main_threa
     return _decorator("prim", id, label, types, keywords, time_dependent, main_thread)
 
 
-def stage_rule(id, label=None, keywords=(), time_dependent=False, main_thread=False):
+def stage_rule(id: str, label: str | None = None, keywords: Iterable[str] = (), time_dependent: bool = False, main_thread: bool = False) -> Callable[[Callable[..., Any]], Rule]:
     """Makes a function a rule on the stage: ``function(stage, report)``."""
     return _decorator("stage", id, label, (), keywords, time_dependent, main_thread)
 
 
-def layer_rule(id, label=None, keywords=(), main_thread=False):
+def layer_rule(id: str, label: str | None = None, keywords: Iterable[str] = (), main_thread: bool = False) -> Callable[[Callable[..., Any]], Rule]:
     """Makes a function a rule on each layer the stage uses: ``function(layer, report)``."""
     return _decorator("layer", id, label, (), keywords, False, main_thread)
 
 
-def rules():
+def rules() -> dict[str, Rule]:
     """The rules made with this module that are there now, by id."""
     with _rules_lock:
         return dict(sorted(_rules.items()))
 
 
-def remove_rule(id):
+def remove_rule(id: str) -> bool:
     """Removes a rule made with this module; False if there's none."""
     found = rules().get(id)
     return found is not None and _remove(found)

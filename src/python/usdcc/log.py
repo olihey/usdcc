@@ -20,11 +20,17 @@ Outside the app there is no _usdcc_log module: install() does nothing and the
 user's own logging setup applies.
 """
 
+from __future__ import annotations
+
 import io
 import logging
 import sys
 import threading
 import traceback
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import types
 
 try:
     import _usdcc_log as _hub
@@ -65,8 +71,8 @@ def _toast_mode(toast):
     raise ValueError("toast must be True, False, 'timed' or 'sticky'")
 
 
-def post(level, category, message, details="", file="", line=0, function="", source=SOURCE, toast=False,
-         toast_title="", toast_kind=""):
+def post(level: int, category: str, message: str, details: str = "", file: str = "", line: int = 0, function: str = "", source: str = SOURCE, toast: bool | str | None = False,
+         toast_title: str = "", toast_kind: str = "") -> None:
     """Posts one record to the log (no-op outside the app). `toast` True or
     "sticky" also shows it as a toast notification."""
     mode = _toast_mode(toast)
@@ -75,7 +81,7 @@ def post(level, category, message, details="", file="", line=0, function="", sou
                   mode, toast_title or "", toast_kind or "")
 
 
-def log_exception(exc_type, exc_value, exc_traceback, category="python.exception", source=SOURCE):
+def log_exception(exc_type: type[BaseException] | None, exc_value: BaseException | None, exc_traceback: types.TracebackType | None, category: str = "python.exception", source: str = SOURCE) -> None:
     """Logs an exception as an Error: its last line as the message, the full
     traceback as details, and the innermost frame as the location."""
     if exc_type is None:
@@ -158,7 +164,7 @@ class _HubStream(io.TextIOBase):
             post(self._level, self._category, line)
 
 
-def install():
+def install() -> bool:
     """Routes logging, warnings, stdout, stderr and uncaught exceptions to the
     usdcc log. Returns False outside the app, where it does nothing."""
     if _hub is None:

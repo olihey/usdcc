@@ -31,6 +31,7 @@ into a self-contained folder that runs on a machine without the dev environment:
       sdk\\          headers, import libraries and CMake files for C++ plugins
       tools\\ruff\\   ruff.exe and its LICENSE, for the Script Editor's Ruff
                     Format and Ruff Check (the build's pinned version)
+      tools\\debugpy\\  debugpy, for attaching a debugger to its Python
       tools\\uv\\     uv.exe and its licenses, which install the Python packages
                     plugins ask for (the build's pinned version)
 
@@ -360,6 +361,9 @@ def main(argv=None):
     uv_exe = cache_value(BUILD_DIR, "USDCC_UV_EXE_PATH")
     has_uv = bool(uv_exe) and os.path.isfile(uv_exe)
 
+    # The pinned debugpy cmake/modules/UsdccDebugpy.cmake downloaded into build/debugpy.
+    debugpy_dir = cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH")
+
     # The launcher at the top, built with Velopack (cmake/modules/UsdccVelopack.cmake),
     # and Velopack's licence, which that module downloaded beside its library.
     launcher_exe = BUILD_DIR / "src/cpp/launcher" / configuration / "usdcc.exe"
@@ -513,6 +517,9 @@ def main(argv=None):
         warn(f"No uv in the build ('{uv_exe}'; reconfigure with USDCC_BUNDLE_UV=ON while online): the deploy "
              "works, but installing Python packages needs a uv on PATH.")
 
+    _deploy_debugpy(debugpy_dir, deploy_dir, args)
+    _deploy_stubs(deploy_dir, args)
+
     # --- plugins --------------------------------------------------------------
 
     print("  Shipped plugins", flush=True)
@@ -624,11 +631,11 @@ def main(argv=None):
                        + ("bin/velopack_libc.dll, " if has_updates else "")
                        + "the launcher usdcc.exe, and an install's Update.exe)")
         sources.append(f"  source:     https://github.com/velopack/velopack/tree/{velopack_version}")
-    for tool in ("ruff", "uv"):
+    for tool in ("ruff", "uv", "debugpy"):
         tool_dir = deploy_dir / "tools" / tool
         if tool_dir.is_dir():
             (licenses_dir / tool).mkdir(parents=True, exist_ok=True)
-            for name in _names(tool_dir, "LICENSE*"):
+            for name in [*_names(tool_dir, "LICENSE*"), *_names(tool_dir, "ThirdPartyNotices*")]:
                 copy_file(tool_dir / name, licenses_dir / tool)
     (licenses_dir / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8")
 
@@ -681,6 +688,36 @@ def main(argv=None):
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with "
           f"{'usdcc.exe' if has_launcher else 'usdcc.cmd'} or bin\\usdcc.exe.")
+
+
+def _deploy_debugpy(debugpy_dir, deploy_dir, args):
+    """tools/debugpy, for attaching a debugger (docs/VSCODE.md section 5). Not with Blender mesh
+    tools, whose configuration's review it isn't in (docs/BLENDER_DISTRIBUTION_REVIEW.md)."""
+    if args.with_blender_mesh_tools:
+        return
+    if debugpy_dir and (Path(debugpy_dir) / "debugpy/__init__.py").is_file():
+        print("  debugpy", flush=True)
+        copy_tree(debugpy_dir, deploy_dir / "tools/debugpy", exclude_dirs=["__pycache__"])
+    else:
+        warn(f"No debugpy in the build ('{debugpy_dir}'; reconfigure with USDCC_BUNDLE_DEBUGPY=ON while online): "
+             "the deploy works, but debugging Python in it needs a debugpy among the Python packages.")
+
+
+def _deploy_stubs(deploy_dir, args):
+    """python/stubs, the types editors get (docs/VSCODE.md section 4). Not with Blender mesh tools, as debugpy."""
+    if args.with_blender_mesh_tools:
+        return
+    stubs = cache_value(BUILD_DIR, "USDCC_STUBS_PATH")
+    if stubs and (Path(stubs) / "_usdcc_app.pyi").is_file():
+        print("  Types for editors", flush=True)
+        copy_tree(stubs, deploy_dir / "python/stubs", exclude_files=["*-METADATA.txt"])
+        metadata = Path(stubs) / "pxr/types-usd-METADATA.txt"
+        if metadata.is_file():
+            folder = deploy_dir / "licenses/types-usd"
+            folder.mkdir(parents=True, exist_ok=True)
+            copy_file(metadata, folder)
+    else:
+        warn(f"No types for editors in the build ('{stubs}'): the deploy works, but Set Up VS Code in it doesn't.")
 
 
 def _pyside_licences(pyside_dir, python_exe, licenses_dir, sources):
@@ -954,6 +991,8 @@ def deploy_linux(args):
         else:
             warn(f"No {name} in the build ('{program}'; reconfigure while online): the deploy works, but it "
                  f"needs a {name} on PATH.")
+    _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), deploy_dir, args)
+    _deploy_stubs(deploy_dir, args)
 
     # --- plugins, preview, SDK ------------------------------------------------
 
@@ -1043,11 +1082,11 @@ def deploy_linux(args):
     if (REPO / "external/qwindowkit/LICENSE").is_file():
         (licenses_dir / "QWindowKit").mkdir(parents=True, exist_ok=True)
         copy_file(REPO / "external/qwindowkit/LICENSE", licenses_dir / "QWindowKit")
-    for tool in ("ruff", "uv"):
+    for tool in ("ruff", "uv", "debugpy"):
         tool_dir = deploy_dir / "tools" / tool
         if tool_dir.is_dir():
             (licenses_dir / tool).mkdir(parents=True, exist_ok=True)
-            for name in _names(tool_dir, "LICENSE*"):
+            for name in [*_names(tool_dir, "LICENSE*"), *_names(tool_dir, "ThirdPartyNotices*")]:
                 copy_file(tool_dir / name, licenses_dir / tool)
     (licenses_dir / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8")
 

@@ -20,7 +20,7 @@ Write a Python plugin without leaving the app, and see a change in one click rat
 
 ## 1. Using it
 
-**To start a plugin:** **New Plugin...** in View > Plugins asks for a name, writes a folder in the user's plugins folder with a manifest and an `__init__.py` to start from, runs it with no restart, and opens it in the Script Editor.
+**To start a plugin:** **New Plugin...** in View > Plugins asks for a name and what to start with (a menu action, a panel, a tool, ...), writes a folder in the user's plugins folder with a manifest and an `__init__.py` to start from, runs it with no restart, and opens it in the Script Editor.
 
 **To work on one:** right-click it in View > Plugins:
 

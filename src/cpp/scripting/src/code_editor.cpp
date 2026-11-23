@@ -33,6 +33,8 @@ std::pair<int, int> CodeEditor::selectedLines() const {
     return {start.blockNumber(), last};
 }
 
+int CodeEditor::selectedFirstLine() const { return selectedLines().first + 1; }
+
 QString CodeEditor::selectedCode() const {
     const auto [first, last] = selectedLines();
     QStringList lines;

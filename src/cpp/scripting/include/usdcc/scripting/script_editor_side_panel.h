@@ -191,6 +191,8 @@ public:
 Q_SIGNALS:
     // A reload has run, whichever way it went.
     void pluginReloaded(const QString& id);
+    // Set Up VS Code... for this folder.
+    void setUpVsCodeRequested(const QString& folder);
 
 private:
     struct TopTab;
@@ -225,7 +227,10 @@ private:
     void populateScriptMenu(QMenu* menu, Script* script);
     QString untitledName() const;
     QString displayName(const Script& script) const;
-    bool runCode(const QString& code, const QString& name);
+    void allowDebugger();
+    // The current plugin's or file's folder, or one asked for; empty when cancelled.
+    QString folderForVsCode();
+    bool runCode(const QString& code, const QString& name, int firstLine = 1);
     // Records what's logged during `work`, and prints it to the output afterwards.
     void capturing(const std::function<void()>& work);
     // Unsaved changes: ask whether to save them first. False to cancel.

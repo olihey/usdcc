@@ -22,6 +22,13 @@ Types: "bool", "int", "float", "string", "choice" (one of `choices`),
 Needs the running app.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 try:
     import _usdcc_app as _native  # compiled into the app
 except ImportError:
@@ -34,12 +41,12 @@ def _app():
     return _native
 
 
-def get(key):
+def get(key: str) -> Any:
     """The current value of setting `key`. KeyError for an unknown key."""
     return _app().settings_get(key)
 
 
-def set(key, value):  # noqa: A001 - the module's verb, as in settings.set()
+def set(key: str, value: Any) -> None:  # noqa: A001 - the module's verb, as in settings.set()
     """Changes setting `key`; applies and saves at once.
 
     ValueError if `value` doesn't fit the setting (its type, range or choices),
@@ -48,41 +55,41 @@ def set(key, value):  # noqa: A001 - the module's verb, as in settings.set()
     _app().settings_set(key, value)
 
 
-def reset(key):
+def reset(key: str) -> None:
     """Puts setting `key` back to its default."""
     _app().settings_reset(key)
 
 
-def is_default(key):
+def is_default(key: str) -> bool:
     """Whether setting `key` has its default value."""
     return _app().settings_is_default(key)
 
 
-def keys(category=""):
+def keys(category: str = "") -> list[str]:
     """The settings' keys, in definition order; only `category`'s if given."""
     return _app().settings_keys(category)
 
 
-def categories():
+def categories() -> list[str]:
     """The categories (the Settings dialog's pages) that have settings."""
     return _app().settings_categories()
 
 
-def show(category=""):
+def show(category: str = "") -> None:
     """Opens the Settings dialog (or brings it to the front), on `category`'s page
     if given. Needs the main window."""
     _app().settings_show(category)
 
 
-def info(key):
+def info(key: str) -> dict[str, Any]:
     """A dict describing setting `key`: key, type, category, group, label,
     description, default, value and applies_at_next_start, plus minimum/maximum
     and choices where the setting has them."""
     return _app().settings_info(key)
 
 
-def define(key, type, default, label="", category="Python", group="", description="",  # noqa: A002
-           minimum=None, maximum=None, choices=None, applies_at_next_start=False):
+def define(key: str, type: str, default: Any, label: str = "", category: str = "Python", group: str = "", description: str = "",  # noqa: A002
+           minimum: float | None = None, maximum: float | None = None, choices: Sequence[Any] | None = None, applies_at_next_start: bool = False) -> None:
     """Adds a setting (or updates its description if `key` exists, keeping
     its value). Its saved value, if any, is loaded at once.
 

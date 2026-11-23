@@ -12,9 +12,20 @@ and ``connect()`` are how plugins add to the app (docs/PLUGINS.md).
 renderer settings a script can read and change. ``version()`` is usdcc's version.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING, Any
 
 from usdcc import _plugins
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    import os
+    from _usdcc_app import StageManager, UndoManager
+    from pxr import Gf, Sdf, Usd
+    from PySide6 import QtWidgets
+    from usdcc.ui import RenderViewPanel, SidePanel, ViewPanel
 
 try:
     import _usdcc_app as _native  # compiled into the app
@@ -22,7 +33,7 @@ except ImportError:
     _native = None
 
 
-def is_embedded():
+def is_embedded() -> bool:
     """True when running inside usdcc (and the app is up)."""
     return _native is not None and _native.is_available()
 
@@ -33,14 +44,14 @@ def _app():
     return _native
 
 
-def version():
+def version() -> str:
     """usdcc's version: "0.2.0" for a release, and for a development build the
     last release, the commits since it and the commit, as in "0.2.0+5.3b70ef2"
     (docs/RELEASE.md section 2)."""
     return _app().version()
 
 
-def build_features():
+def build_features() -> list[tuple[str, str, bool, list[str]]]:
     """The features a build may leave out (docs/BUILD_OPTIONS.md), as this one was built:
     a list of (name, label, included, plugin ids), such as
     ("VIEWPORT_BROADCAST", "Viewport Broadcast", True, ["org.usdcc.viewport-broadcast"]).
@@ -48,24 +59,24 @@ def build_features():
     return [(name, label, included, list(plugins)) for name, label, included, plugins in _app().build_features()]
 
 
-def is_release_build():
+def is_release_build() -> bool:
     """True for a build made from a release, False for a development build."""
     return _app().is_release_build()
 
 
-def user_data_folder():
+def user_data_folder() -> str:
     """The folder usdcc keeps the user's files in: logs, sessions, workspaces,
     plugins. %LOCALAPPDATA%/usdcc_config on Windows, another under a test profile
     (USDCC_TEST_PROFILE). It may not exist yet. Plugins keep theirs in a subfolder."""
     return _app().user_data_folder()
 
 
-def stage_manager():
+def stage_manager() -> StageManager:
     """The app's StageManager (see usdcc.usd for working with its stages)."""
     return _app().stage_manager()
 
 
-def undo_manager():
+def undo_manager() -> UndoManager:
     """The app's UndoManager (see usdcc.usd.edit/undo/redo)."""
     return _app().undo_manager()
 
@@ -73,7 +84,7 @@ def undo_manager():
 _AREAS = ("left", "right", "top", "bottom")
 
 
-def main_window():
+def main_window() -> QtWidgets.QMainWindow:
     """The app's main window, as a PySide6 ``QMainWindow``. Needs PySide6."""
     import shiboken6
     from PySide6 import QtWidgets
@@ -81,7 +92,7 @@ def main_window():
     return shiboken6.wrapInstance(_app().main_window_address(), QtWidgets.QMainWindow)
 
 
-def add_side_panel(panel, area="right", id=None):
+def add_side_panel(panel: SidePanel, area: str = "right", id: str | None = None) -> None:
     """Docks ``panel``, a ``usdcc.ui.SidePanel``, at the window's ``area`` edge
     ("left", "right", "top" or "bottom") and lists it in the View menu.
 
@@ -115,7 +126,7 @@ def _remove_side_panel(panel):
         _app().remove_side_panel(shiboken6.getCppPointer(panel)[0])
 
 
-def register_view_panel(id, name, cls):
+def register_view_panel(id: str, name: str, cls: type[ViewPanel] | type[RenderViewPanel]) -> None:
     """Makes ``cls`` a view panel type named ``name`` (as the Stages menu shows
     it) with the stable ``id``. ``cls`` is a ``usdcc.ui.ViewPanel`` subclass, or a
     ``usdcc.ui.RenderViewPanel`` subclass for a renderer (docs/RENDER_VIEW_PANEL.md).
@@ -139,14 +150,14 @@ def register_view_panel(id, name, cls):
     _plugins.track(lambda: unregister_view_panel(id))
 
 
-def unregister_view_panel(id):
+def unregister_view_panel(id: str) -> bool:
     """Removes a view panel type made in Python. Panels of it that are open stay, and
     say the type is gone. True if there was one."""
     _plugins.forget_panel_class(id)
     return _app().unregister_view_panel(id)
 
 
-def open_view_panel(id, stage=None):
+def open_view_panel(id: str, stage: Usd.Stage | None = None) -> Any:
     """Opens a new view panel of type ``id`` showing ``stage`` (a ``Usd.Stage``
     open in the app; by default the current one), tabbed like one opened from
     the Stages menu. Raises RuntimeError if no stage is open.
@@ -163,17 +174,17 @@ def open_view_panel(id, stage=None):
     return _app().open_view_panel(id, usd.stage_id(stage))
 
 
-def view_panel_types():
+def view_panel_types() -> list[tuple[str, str]]:
     """The view panel types as (id, name) pairs, built-in ones first."""
     return _app().view_panel_types()
 
 
-def current_plugin():
+def current_plugin() -> _plugins.Plugin | None:
     """The ``Plugin`` whose ``activate()`` is running, or None."""
     return _plugins.current()
 
 
-def add_menu_action(path, callback, shortcut="", tip=""):
+def add_menu_action(path: str, callback: Callable[[], Any], shortcut: str = "", tip: str = "") -> None:
     """Adds an entry to the main menu. ``path`` is "Menu/Action", or
     "Menu/Submenu/Action"; menus that don't exist yet are made, after Create.
 
@@ -187,12 +198,12 @@ def add_menu_action(path, callback, shortcut="", tip=""):
     _plugins.track(lambda: remove_menu_action(path))
 
 
-def remove_menu_action(path):
+def remove_menu_action(path: str) -> bool:
     """Removes an entry added with ``add_menu_action()``. True if there was one."""
     return _app().remove_menu_action(path)
 
 
-def add_prim_menu_action(label, callback, applies=None, id=None):
+def add_prim_menu_action(label: str, callback: Callable[[Usd.Stage, list[Sdf.Path], Sdf.Path], Any], applies: Callable[[Usd.Stage, list[Sdf.Path], Sdf.Path], bool] | None = None, id: str | None = None) -> None:
     """Adds an entry to the end of the Outliner's prim menu. "Group/Action" in
     ``label`` makes a submenu. ``id`` says what to replace or remove later (by
     default, the label).
@@ -217,12 +228,12 @@ def add_prim_menu_action(label, callback, applies=None, id=None):
     _plugins.track(lambda: remove_prim_menu_action(id or label))
 
 
-def remove_prim_menu_action(id):
+def remove_prim_menu_action(id: str) -> None:
     """Removes an entry added with ``add_prim_menu_action()``, by its id or label."""
     _app().remove_prim_menu_action(id)
 
 
-def add_viewport_menu_action(label, callback, checked=None, applies=None, id=None, enabled=None):
+def add_viewport_menu_action(label: str, callback: Callable[[Viewport], Any], checked: Callable[[Viewport], bool] | None = None, applies: Callable[[Viewport], bool] | None = None, id: str | None = None, enabled: Callable[[Viewport], bool] | None = None) -> None:
     """Adds an entry to the end of every viewport's options menu and tab menu.
     "Group/Action" in ``label`` makes a submenu. ``id`` says what to replace or remove
     later (by default, the label).
@@ -244,7 +255,7 @@ def add_viewport_menu_action(label, callback, checked=None, applies=None, id=Non
     _plugins.track(lambda: remove_viewport_menu_action(id or label))
 
 
-def remove_viewport_menu_action(id):
+def remove_viewport_menu_action(id: str) -> None:
     """Removes an entry added with ``add_viewport_menu_action()``, by its id or label."""
     _app().remove_viewport_menu_action(id)
 
@@ -262,7 +273,14 @@ class ViewportCamera:
 
     __slots__ = ("stage", "transform", "fov_y", "aspect", "near", "far")
 
-    def fov_x(self):
+    stage: Usd.Stage | None
+    transform: Gf.Matrix4d
+    fov_y: float
+    aspect: float
+    near: float
+    far: float
+
+    def fov_x(self) -> float:
         """The horizontal field of view in degrees."""
         return math.degrees(2.0 * math.atan(math.tan(math.radians(self.fov_y) / 2.0) * self.aspect))
 
@@ -271,7 +289,7 @@ class ViewportCamera:
         return f"ViewportCamera(position={tuple(position)}, fov_y={self.fov_y:.1f}, aspect={self.aspect:.3f})"
 
 
-def active_viewport_camera():
+def active_viewport_camera() -> ViewportCamera | None:
     """The camera of the viewport the user last worked in (the last one clicked, or
     else the oldest one open), as a ``ViewportCamera``. None with no viewport open.
     "viewport_camera_changed" (see ``connect()``) says when it changes."""
@@ -305,16 +323,22 @@ class RendererSetting:
 
     __slots__ = ("key", "label", "type", "default", "settings_key")
 
+    key: str
+    label: str
+    type: str
+    default: Any
+    settings_key: str
+
     def __repr__(self):
         return f"RendererSetting({self.key!r}, {self.type}, default={self.default!r})"
 
 
-def renderers():
+def renderers() -> dict[str, str]:
     """Every Hydra renderer, as {id: display name}: {"HdStormRendererPlugin": "GL", ...}."""
     return dict(_app().renderers())
 
 
-def renderer_settings_info(renderer):
+def renderer_settings_info(renderer: str) -> list[RendererSetting]:
     """The settings of a renderer (an id from ``renderers()``), as ``RendererSetting``s in its
     order. Their app-wide defaults are on Settings > Renderers; after this call
     ``usdcc.settings`` can read and change them by ``settings_key``. Raises ValueError for an
@@ -341,13 +365,13 @@ class Viewport:
 
     __slots__ = ("_id",)
 
-    def __init__(self, id):
+    def __init__(self, id: int) -> None:
         self._id = id
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, Viewport) and other._id == self._id
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self._id)
 
     def __repr__(self):
@@ -356,25 +380,25 @@ class Viewport:
         return f"Viewport({self._id}, {self.title()!r}, renderer={self.renderer()!r})"
 
     @property
-    def id(self):
+    def id(self) -> int:
         """A number for this viewport, never given to another while the app runs."""
         return self._id
 
-    def is_open(self):
+    def is_open(self) -> bool:
         return _app().viewport_exists(self._id)
 
-    def title(self):
+    def title(self) -> str:
         """Its panel's title ("Viewport")."""
         return _app().viewport_title(self._id)
 
-    def stage(self):
+    def stage(self) -> Usd.Stage | None:
         """The Usd.Stage it shows, or None."""
         from usdcc import usd
 
         return usd._stage(_app().viewport_stage(self._id))
 
     @property
-    def camera(self):
+    def camera(self) -> str | None:
         """The path of the stage camera (a UsdGeom.Camera) it looks through, as a string, or
         None for its own camera (docs/VIEWPORT_CAMERA.md). Setting a path looks through that
         camera, as its Camera menu does; None goes back to its own camera, where it was.
@@ -383,10 +407,10 @@ class Viewport:
         return _app().viewport_camera(self._id) or None
 
     @camera.setter
-    def camera(self, path):
+    def camera(self, path: Sdf.Path | str | None) -> None:
         _app().set_viewport_camera(self._id, "" if path is None else str(path))
 
-    def playblast(self, pattern, start=None, end=None, step=1.0):
+    def playblast(self, pattern: str | os.PathLike[str], start: float | None = None, end: float | None = None, step: float = 1.0) -> list[str]:
         """Writes the viewport's picture at each frame from `start` to `end` (the
         stage's playback range by default), `step` apart, to `pattern`: "####" (or
         "<frame>", "$F4") is the frame number, else it goes before the extension;
@@ -400,65 +424,65 @@ class Viewport:
             end = last if end is None else end
         return list(_app().viewport_playblast(self._id, str(pattern), float(start), float(end), float(step)))
 
-    def renderer(self):
+    def renderer(self) -> str:
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
         return _app().viewport_renderer(self._id)
 
-    def renderers(self):
+    def renderers(self) -> list[str]:
         """The renderers it can switch to: once it has drawn, those that can render here;
         before, every one Hydra knows."""
         return list(_app().viewport_renderers(self._id))
 
-    def set_renderer(self, renderer):
+    def set_renderer(self, renderer: str) -> bool:
         """Switches it to ``renderer`` (an id), as its Renderer menu does. Before it has
         drawn, the renderer it starts with. Returns whether it uses it now; raises
         ValueError for an unknown renderer."""
         return _app().set_viewport_renderer(self._id, renderer)
 
-    def renderer_settings(self, renderer=None):
+    def renderer_settings(self, renderer: str | None = None) -> dict[str, Any]:
         """What the renderer gets here, as {key: value}: the defaults with this viewport's
         overrides applied."""
         return dict(_app().viewport_renderer_settings(self._id, renderer or ""))
 
-    def renderer_setting(self, key, renderer=None):
+    def renderer_setting(self, key: str, renderer: str | None = None) -> Any:
         """One of ``renderer_settings()``; KeyError if the renderer hasn't it."""
         values = self.renderer_settings(renderer)
         if key not in values:
             raise KeyError(f"{renderer or self.renderer()} has no setting {key!r}")
         return values[key]
 
-    def renderer_setting_overrides(self, renderer=None):
+    def renderer_setting_overrides(self, renderer: str | None = None) -> dict[str, Any]:
         """Only what this viewport overrides, as {key: value}."""
         return dict(_app().viewport_renderer_overrides(self._id, renderer or ""))
 
-    def set_renderer_setting(self, key, value, renderer=None):
+    def set_renderer_setting(self, key: str, value: bool | int | float | str, renderer: str | None = None) -> None:
         """Overrides one setting in this viewport, as its Renderer Settings dialog does. The
         value is a bool, int, float or str as the setting's type takes it (an int does for a
         float); KeyError for a setting the renderer hasn't, TypeError for a value that
         doesn't fit."""
         _app().set_viewport_renderer_setting(self._id, renderer or "", key, value)
 
-    def reset_renderer_setting(self, key=None, renderer=None):
+    def reset_renderer_setting(self, key: str | None = None, renderer: str | None = None) -> None:
         """Drops this viewport's override of ``key``, so it follows Settings > Renderers again;
         with no key, all of the renderer's."""
         _app().reset_viewport_renderer_setting(self._id, renderer or "", key or "")
 
-    def renderer_commands(self):
+    def renderer_commands(self) -> dict[str, str]:
         """Its renderer's commands, as {name: description}; none before it has drawn."""
         return dict(_app().viewport_renderer_commands(self._id))
 
-    def run_renderer_command(self, name):
+    def run_renderer_command(self, name: str) -> bool:
         """Runs one of ``renderer_commands()`` with its arguments' defaults, as the Renderer
         menu does. Returns whether the renderer ran it."""
         return _app().run_viewport_renderer_command(self._id, name)
 
 
-def viewports():
+def viewports() -> list[Viewport]:
     """Every open viewport, oldest first, as ``Viewport``s."""
     return [Viewport(id) for id in _app().viewports()]
 
 
-def active_viewport():
+def active_viewport() -> Viewport | None:
     """The viewport the user last worked in (the last one clicked, or else the oldest one
     open), as a ``Viewport``; None with no viewport open."""
     id = _app().active_viewport()
@@ -468,16 +492,16 @@ def active_viewport():
 class Connection:
     """What ``connect()`` returns. Connections end by themselves when the app quits."""
 
-    def __init__(self, id):
+    def __init__(self, id: int) -> None:
         self._id = id
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         if self._id is not None:
             _app().disconnect_event(self._id)
             self._id = None
 
 
-def connect(event, callback):
+def connect(event: str, callback: Callable[..., Any]) -> Connection:
     """Calls ``callback`` when something happens in the app, until the returned
     ``Connection`` is disconnected. Exceptions are logged.
 
@@ -528,35 +552,35 @@ def connect(event, callback):
     return connection
 
 
-def play():
+def play() -> None:
     """Starts playing the current stage, as the timeline's Play button does: from the
     time shown, over its playback range (``usdcc.usd.playback_range()``). Returns at
     once; the "time_changed" event (``connect()``) follows it."""
     _app().play()
 
 
-def stop():
+def stop() -> None:
     """Stops playing."""
     _app().stop_playing()
 
 
-def is_playing():
+def is_playing() -> bool:
     return _app().is_playing()
 
 
-def is_simulating():
+def is_simulating() -> bool:
     """Whether playing solves the stage's physics (the timeline's Simulate)."""
     return _app().is_simulating()
 
 
-def set_simulating(on):
+def set_simulating(on: bool) -> None:
     """Turns the timeline's Simulate on or off (docs/PHYSICS.md): with it on, playing
     past the cached frames solves the next ones first. ``usdcc.physics`` solves
     without playing."""
     _app().set_simulating(bool(on))
 
 
-def reload_plugin(id):
+def reload_plugin(id: str) -> None:
     """Reloads a plugin, once what's running now has finished, so a plugin's own menu
     action can ask for it (docs/PLUGIN_DEV.md). The Plugins panel shows how it went."""
     _app().reload_plugin(id)
@@ -565,58 +589,58 @@ def reload_plugin(id):
 # --- Sessions (docs/SESSIONS.md) ----------------------------------------------
 
 
-def workspaces():
+def workspaces() -> list[dict[str, Any]]:
     """The workspaces (docs/WORKSPACES.md), in menu order: a dict each with ``id``,
     ``name``, ``group``, ``description``, ``file``, ``source`` (the folder's label) and
     ``missing`` (panel types it names that aren't loaded)."""
     return list(_app().workspaces())
 
 
-def current_workspace():
+def current_workspace() -> str:
     """The active workspace's id."""
     return _app().current_workspace()
 
 
-def set_workspace(id):
+def set_workspace(id: str) -> bool:
     """Switches to the workspace ``id``: KeyError if there's none; False if a panel
     refused to close, and then nothing changed."""
     return _app().set_workspace(id)
 
 
-def save_workspace(name, side_panels=True):
+def save_workspace(name: str, side_panels: bool = True) -> str:
     """Saves the window's layout as the workspace ``name`` in your workspaces folder,
     replacing one of that name, and makes it the active one. Returns its id."""
     return _app().save_workspace(name, side_panels)
 
 
-def reload_workspaces():
+def reload_workspaces() -> None:
     """Reads the workspace folders again."""
     _app().reload_workspaces()
 
 
-def fit_all_views(selection=True):
+def fit_all_views(selection: bool = True) -> None:
     """Fits every viewport on screen to the selection (else the stage), or with
     ``selection=False`` to the whole stage."""
     _app().fit_all_views(selection)
 
 
-def sessions():
+def sessions() -> list[str]:
     """The saved sessions' names, newest first."""
     return list(_app().sessions())
 
 
-def current_session():
+def current_session() -> str | None:
     """The name of the session last loaded or saved, or None."""
     return _app().current_session() or None
 
 
-def save_session(name):
+def save_session(name: str) -> None:
     """Saves the app as it is now as the session ``name``, replacing one of that name.
     Unsaved edits to layers aren't in it."""
     _app().save_session(name)
 
 
-def load_session(name, discard_unsaved=False):
+def load_session(name: str | os.PathLike[str], discard_unsaved: bool = False) -> None:
     """Loads a session by name, or a session file by path, replacing the stages, panels
     and Script Editor tabs open now. Raises RuntimeError while layers have unsaved edits
     (unless ``discard_unsaved``), and when the session needs other plugins, which takes
@@ -624,18 +648,18 @@ def load_session(name, discard_unsaved=False):
     _app().load_session(name, discard_unsaved)
 
 
-def delete_session(name):
+def delete_session(name: str) -> None:
     """Moves the session's file to the recycle bin."""
     _app().delete_session(name)
 
 
-def import_session(path, replace=False):
+def import_session(path: str | os.PathLike[str], replace: bool = False) -> str:
     """Copies a session file (one someone sent) into the sessions folder and returns
     its name. Raises if one of that name exists, unless ``replace``."""
     return _app().import_session(path, replace)
 
 
-def export_session(name, path):
+def export_session(name: str, path: str | os.PathLike[str]) -> None:
     """Writes a copy of the session's file to ``path``, to send to someone."""
     _app().export_session(name, path)
 
@@ -651,7 +675,7 @@ def _session_key(callback, key):
     return key
 
 
-def on_session_save(callback, key=None):
+def on_session_save(callback: Callable[[], Any], key: str | None = None) -> None:
     """Calls ``callback()`` when a session is saved; what it returns (anything that
     converts to JSON) is stored in the session under ``key``, by default the id of the
     plugin the callback is from."""
@@ -660,7 +684,7 @@ def on_session_save(callback, key=None):
     _plugins.track(lambda: _session_savers.pop(key, None), callback)
 
 
-def on_session_load(callback, key=None):
+def on_session_load(callback: Callable[[Any], Any], key: str | None = None) -> None:
     """Calls ``callback(data)`` when a session is loaded, with what ``on_session_save``'s
     callback returned for that key, or ``{}`` when the session has nothing for it."""
     key = _session_key(callback, key)

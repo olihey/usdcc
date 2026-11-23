@@ -1,0 +1,48 @@
+# The VS Code extension (docs/VSCODE.md): its tests, against a server that plays usdcc, and
+# the .vsix as an artifact. Not a required check, as it only runs when the extension changes.
+name: VS Code extension
+
+on:
+  push:
+    branches: [master]
+    paths: [editors/vscode/**, .github/workflows/vscode.yml]
+  pull_request:
+    paths: [editors/vscode/**, .github/workflows/vscode.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  extension:
+    name: vscode-${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pipes on Windows, Unix domain sockets on Linux.
+        runner: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run package
+      - if: matrix.runner == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: usdcc-vscode
+          path: editors/vscode/usdcc.vsix

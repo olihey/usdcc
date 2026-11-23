@@ -9,6 +9,10 @@ view panel that renders its stage with a renderer of a plugin's own
 for usdcc (tools/build_pyside.py); without it, importing this raises ImportError.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 # PySide6 first: importing it adds its folder (Qt, shiboken6 and pyside6
 # DLLs) to the DLL search path that _ui.pyd needs.
 import shiboken6 as _shiboken
@@ -16,6 +20,10 @@ from PySide6 import QtCore as _QtCore
 from PySide6 import QtGui as _QtGui
 from PySide6 import QtWidgets as _QtWidgets
 from pxr import Tf as _Tf
+
+if TYPE_CHECKING:
+    import os
+    from pxr import Gf, Sdf, Usd
 
 # _ui.pyd also links OpenUSD's DLLs (through usdcc_ui), which Python 3.8+ only
 # finds in folders added with os.add_dll_directory; pxr's own import helper
@@ -30,7 +38,22 @@ else:
 # Shiboken6 puts the class at _ui.usdcc.ui.SidePanel: it needs the C++
 # namespaces spelled out in the typesystem (src/cpp/ui/python/typesystem.xml),
 # and flattening them hits a Shiboken6 codegen bug.
-SidePanel = _ui.usdcc.ui.SidePanel
+if TYPE_CHECKING:
+
+    class SidePanel(_QtWidgets.QDockWidget):
+        """A panel docked at an edge of the main window (``usdcc.app.add_side_panel()``)."""
+
+        collapsedChanged: _QtCore.Signal
+
+        def __init__(self, title: str, parent: _QtWidgets.QWidget | None = None) -> None: ...
+        def isCollapsed(self) -> bool: ...
+        def setCollapsed(self, collapsed: bool, expandedSize: int = -1) -> None: ...
+        def toggleCollapsed(self) -> None: ...
+        def expandedSize(self) -> int: ...
+        def canClose(self) -> bool: ...
+
+else:
+    SidePanel = _ui.usdcc.ui.SidePanel
 
 del _wrapper, _Tf
 
@@ -63,27 +86,27 @@ class ViewPanel:
     Exceptions raised from these methods are logged (python.exception).
     """
 
-    stage = None
-    widget = None
+    stage: Usd.Stage | None = None
+    widget: _QtWidgets.QWidget | None = None
 
-    def create_widget(self):
+    def create_widget(self) -> _QtWidgets.QWidget:
         raise NotImplementedError("%s must implement create_widget()" % type(self).__name__)
 
-    def stage_changed(self, stage):
+    def stage_changed(self, stage: Usd.Stage | None) -> None:
         pass
 
-    def populate_options_menu(self, menu):
+    def populate_options_menu(self, menu: _QtWidgets.QMenu) -> None:
         pass
 
-    def create_options_panel(self):
+    def create_options_panel(self) -> _QtWidgets.QWidget | None:
         return None
 
-    def options_changed(self):
+    def options_changed(self) -> None:
         """Says what the options show has changed, outside them: a pinned menu is
         built again, as a popup menu is each time it opens."""
         _notify_options_changed(self.widget)
 
-    def busy(self, text, cancellable=False):
+    def busy(self, text: str, cancellable: bool = False) -> Busy:
         """The panel is busy while the returned context manager is open
         (docs/PANEL_BUSY.md §6): it dims, and a card shows ``text``, a progress bar
         and, with ``cancellable``, Cancel::
@@ -100,12 +123,12 @@ class ViewPanel:
         it shows after a moment and follows on its own."""
         return _busy(self.widget, text, cancellable)
 
-    def save_state(self):
+    def save_state(self) -> Any:
         """What a session keeps of this panel (docs/SESSIONS.md §2.4): anything that
         converts to JSON, such as a dict. None keeps nothing."""
         return None
 
-    def restore_state(self, state):
+    def restore_state(self, state: Any) -> None:
         """Gets back what ``save_state()`` returned, when a session is loaded."""
         pass
 
@@ -116,50 +139,50 @@ class Busy:
     card; ``cancelled`` is True once Cancel was clicked, Esc pressed or the panel
     closed. Leaving the ``with`` block, or ``finish()``, ends it."""
 
-    def __init__(self, native, text):
+    def __init__(self, native: Any, text: str) -> None:
         self._native = native
         self._text = text
         self._detail = ""
         self._progress = None
 
-    def __enter__(self):
+    def __enter__(self) -> Busy:
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> bool:
         self.finish()
         return False
 
-    def finish(self):
+    def finish(self) -> None:
         self._native.finish()
 
     @property
-    def cancelled(self):
+    def cancelled(self) -> bool:
         return self._native.is_cancelled()
 
     @property
-    def progress(self):
+    def progress(self) -> float | None:
         return self._progress
 
     @progress.setter
-    def progress(self, fraction):
+    def progress(self, fraction: float | None) -> None:
         self._progress = fraction
         self._native.set_progress(-1.0 if fraction is None else float(fraction))
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self._text
 
     @text.setter
-    def text(self, text):
+    def text(self, text: str) -> None:
         self._text = text
         self._native.set_text(str(text))
 
     @property
-    def detail(self):
+    def detail(self) -> str:
         return self._detail
 
     @detail.setter
-    def detail(self, text):
+    def detail(self, text: str) -> None:
         self._detail = text
         self._native.set_detail(str(text))
 
@@ -190,6 +213,16 @@ class RenderCamera:
     """
 
     __slots__ = ("aspect", "far", "fov_x", "fov_y", "near", "ortho_width", "orthographic", "prim", "transform")
+
+    aspect: float
+    far: float
+    fov_x: float
+    fov_y: float
+    near: float
+    ortho_width: float
+    orthographic: bool
+    prim: Sdf.Path | None
+    transform: Gf.Matrix4d
 
     def __repr__(self):
         position = tuple(self.transform.ExtractTranslation())
@@ -237,9 +270,9 @@ class RenderViewPanel:
     """
 
     # In "Press Render to render the stage with ...", and the error toast's title.
-    renderer_name = None
+    renderer_name: str | None = None
     # The Settings dialog's category that Settings… opens; None hides the button.
-    settings_category = None
+    settings_category: str | None = None
 
     stage = None
     _panel = None  # the app's side, set before any hook is called
@@ -250,70 +283,70 @@ class RenderViewPanel:
     _toolbar = None
 
     @property
-    def widget(self):
+    def widget(self) -> _QtWidgets.QWidget | None:
         """The panel's content widget, or None once the panel is gone."""
         return self._widget if self.is_open() else None
 
     # Hooks.
 
-    def setup_problem(self):
+    def setup_problem(self) -> str | None:
         return None
 
-    def create_toolbar(self, layout):
+    def create_toolbar(self, layout: _QtWidgets.QHBoxLayout) -> None:
         pass
 
-    def start(self):
+    def start(self) -> None:
         pass
 
-    def stop(self):
+    def stop(self) -> None:
         pass
 
-    def reload(self):
+    def reload(self) -> None:
         pass
 
-    def camera_changed(self, camera):
+    def camera_changed(self, camera: RenderCamera) -> None:
         pass
 
-    def size_changed(self, width, height):
+    def size_changed(self, width: int, height: int) -> None:
         pass
 
-    def time_changed(self, time):
+    def time_changed(self, time: float) -> None:
         self._panel.default_time_changed(time)
 
-    def stage_edited(self, resynced, changed):
+    def stage_edited(self, resynced: list[Sdf.Path], changed: list[Sdf.Path]) -> None:
         self.reload()
 
-    def stage_changed(self, stage):
+    def stage_changed(self, stage: Usd.Stage | None) -> None:
         pass
 
-    def populate_options_menu(self, menu):
+    def populate_options_menu(self, menu: _QtWidgets.QMenu) -> None:
         pass
 
-    def options_changed(self):
+    def options_changed(self) -> None:
         """Says what the options show has changed: a pinned menu is built again."""
         _notify_options_changed(self._widget)
 
-    def save_state(self):
+    def save_state(self) -> Any:
         """What a session keeps of this panel (docs/SESSIONS.md §2.4): anything that
         converts to JSON, such as a dict. None keeps nothing."""
         return None
 
-    def restore_state(self, state):
+    def restore_state(self, state: Any) -> None:
         """Gets back what ``save_state()`` returned, when a session is loaded."""
         pass
 
-    def close(self):
+    def close(self) -> None:
         pass
 
     # Calls.
 
-    def show_image(self, image):
+    def show_image(self, image: _QtGui.QImage) -> None:
         """Shows a QImage (copied)."""
         if not isinstance(image, _QtGui.QImage):
             raise TypeError("show_image() needs a QImage, not %s" % type(image).__name__)
         self._panel.show_image(_shiboken.getCppPointer(image)[0])
 
-    def show_linear_image(self, image):
+    def show_linear_image(self, image: _QtGui.QImage) -> None:
         """Shows a float QImage (Format_RGBA32FPx4 or RGBA16FPx4) of linear values in
         the working space (docs/COLOR_MANAGEMENT.md §6): the panel shows it through
         the view transform, Settings' or the panel's own (View Transform in its
@@ -322,19 +355,19 @@ class RenderViewPanel:
             raise TypeError("show_linear_image() needs a QImage, not %s" % type(image).__name__)
         self._panel.show_linear_image(_shiboken.getCppPointer(image)[0])
 
-    def image_size(self):
+    def image_size(self) -> tuple[int, int] | None:
         """The (width, height) of the image shown, or None."""
         return self._panel.image_size()
 
-    def set_state(self, state):
+    def set_state(self, state: str) -> None:
         """What the renderer is doing, for the status line: "Rendering", "Done", ..."""
         self._panel.set_state(state)
 
-    def show_message(self, message):
+    def show_message(self, message: str) -> None:
         """A message in the image area; "" shows the image again."""
         self._panel.show_message(message)
 
-    def report_error(self, message, fatal=False):
+    def report_error(self, message: str, fatal: bool = False) -> None:
         """Shows an error in the status line. A fatal one also stops rendering, says
         so in the image area and in a toast. Logging it is the caller's."""
         self._panel.report_error(message, fatal)
@@ -344,42 +377,42 @@ class RenderViewPanel:
             title = "%s Render" % self.renderer_name if self.renderer_name else "Render"
             toast.show(title, message + " The Log panel has more.", kind="error", sticky=True)
 
-    def set_rendering(self, on):
+    def set_rendering(self, on: bool) -> None:
         """Checks or unchecks Render without calling ``start()`` or ``stop()``, for
         when the renderer stopped by itself."""
         self._panel.set_rendering(on)
 
-    def is_rendering(self):
+    def is_rendering(self) -> bool:
         return self._panel.is_rendering()
 
-    def set_edit_delay(self, ms):
+    def set_edit_delay(self, ms: int) -> None:
         """How long after the last edit ``stage_edited()`` is called (500 ms at first)."""
         self._panel.set_edit_delay(int(ms))
 
-    def edit_delay(self):
+    def edit_delay(self) -> int:
         return self._panel.edit_delay()
 
-    def updates_on_edits(self):
+    def updates_on_edits(self) -> bool:
         """Whether Update on Edits is checked."""
         return self._panel.updates_on_edits()
 
-    def camera(self):
+    def camera(self) -> RenderCamera:
         """The ``RenderCamera`` the image is seen through now."""
         return _render_camera(self._panel.camera())
 
-    def render_size(self):
+    def render_size(self) -> tuple[int, int]:
         """The image's (width, height) in pixels."""
         return tuple(self._panel.render_size())
 
-    def time(self):
+    def time(self) -> float:
         """The time to render: the stage's, as the timeline shows it."""
         return self._panel.time()
 
-    def stage_is_animated(self):
+    def stage_is_animated(self) -> bool:
         """Whether anything on the stage is animated."""
         return self._panel.stage_is_animated()
 
-    def is_open(self):
+    def is_open(self) -> bool:
         """False once the panel is gone; the calls above then raise RuntimeError."""
         return self._panel is not None and self._panel.alive()
 
@@ -509,7 +542,7 @@ def _render_stage_edited(panel, resynced, changed):
     panel.stage_edited([Sdf.Path(p) for p in resynced], [Sdf.Path(p) for p in changed])
 
 
-def set_prim_icon(type_name, path):
+def set_prim_icon(type_name: str, path: str | os.PathLike[str]) -> None:
     """Gives prims of `type_name` (a schema's name, "MyStudioLight") the icon in the
     file at `path`, in the Outliner, the Attributes panel and wherever prims show
     their icons (docs/PRIM_ICONS.md phase 2). An SVG is drawn as the built-in icons
@@ -525,7 +558,7 @@ def set_prim_icon(type_name, path):
     _usdcc_app.set_prim_icon(str(type_name), "" if path is None else os.fspath(path))
 
 
-def prim_icon(type_name):
+def prim_icon(type_name: str) -> str:
     """The icon prims of `type_name` get: a built-in icon's name ("cube", "bulb"), or
     "file:" and the path set with ``set_prim_icon()``."""
     import _usdcc_app

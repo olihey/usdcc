@@ -1,0 +1,43 @@
+"""@TITLE@: a plugin for usdcc (docs/PLUGINS.md)."""
+
+from PySide6 import QtWidgets
+
+import usdcc.app
+import usdcc.ui
+
+
+class Panel(usdcc.ui.ViewPanel):
+    """One per open panel. ``self.stage`` is the one it shows, or None."""
+
+    def create_widget(self):
+        self.label = QtWidgets.QLabel()
+        self.label.setMargin(12)
+        self.changes = usdcc.app.connect("stage_edited", self.edited)
+        self.label.destroyed.connect(self.changes.disconnect)
+        self.show_stage()
+        return self.label
+
+    def stage_changed(self, stage):
+        self.show_stage()
+
+    def edited(self, stage, resynced, changed):
+        if stage == self.stage:
+            self.show_stage()
+
+    def show_stage(self):
+        if self.stage is None:
+            self.label.setText("No stage")
+        else:
+            self.label.setText("%d prims" % sum(1 for prim in self.stage.Traverse()))
+
+
+def activate(plugin):
+    """Runs at startup and at each reload. What you register with usdcc is taken
+    back by itself at a reload: menu actions, tools, panels, events."""
+    # Its id stays the same, so an open panel comes back after a reload and a restart.
+    usdcc.app.register_view_panel("@ID@.panel", "@TITLE@", Panel)
+
+
+def deactivate(plugin):
+    """Runs at quit and before each reload. Stop here what you started yourself:
+    a QTimer, a thread, a Qt signal you connected."""

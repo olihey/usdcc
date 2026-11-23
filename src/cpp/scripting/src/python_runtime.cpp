@@ -22,16 +22,31 @@
 #include "usdcc/core/settings.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 namespace usdcc::scripting {
 
 namespace {
 PythonRuntime* s_instance = nullptr;
+// The run on the main thread that can be stopped, the outermost one; 0 for none. Each has
+// its own number, so a request to stop one that has ended does nothing.
+std::atomic<std::intptr_t> s_stoppableRun = 0;
+
+#if USDCC_HAS_PYTHON
+// Called by Python itself, on the main thread, between two instructions.
+int raiseIfRunning(void* run) {
+    if (s_stoppableRun != reinterpret_cast<std::intptr_t>(run)) return 0;
+    PyErr_SetString(PyExc_KeyboardInterrupt, "stopped");
+    return -1;
+}
+#endif
 
 std::string toUtf8(const std::filesystem::path& path) {
     const std::u8string text = path.generic_u8string();
@@ -125,6 +140,7 @@ PythonSettings PythonSettings::defaults() {
 #endif
     if (!bundledSite.empty() && hasStandardLibrary(bundled) && std::filesystem::is_directory(bundledSite)) {
         settings.home = bundled;
+        settings.bundled = true;
         settings.paths = {bundledSite};
     } else {
         settings.home = std::filesystem::u8path(USDCC_PYTHON_HOME);
@@ -145,6 +161,10 @@ struct PythonRuntime::Impl {
     bool pxr = false;
     std::string reason;
     std::string version;
+    std::atomic<int> running = 0;
+    std::thread::id mainThread = std::this_thread::get_id();
+    int stoppableDepth = 0;  // main thread only
+    std::intptr_t lastRun = 0;
 #if USDCC_HAS_PYTHON
     PyThreadState* mainThreadState = nullptr;  // while the main thread doesn't hold the GIL
     std::optional<py::dict> session;            // Namespace::Session; only touched with the GIL
@@ -154,7 +174,8 @@ struct PythonRuntime::Impl {
     void logException(py::error_already_set& error);
     void flushStreams();
     bool run(const std::string& code, const std::string& fileName, const std::filesystem::path* file,
-             Namespace scope);
+             Namespace scope, int firstLine = 1, ScriptError* error = nullptr);
+    static void describe(py::error_already_set& raised, ScriptError& error);
     static py::dict freshNamespace();
 #endif
 };
@@ -289,6 +310,29 @@ void PythonRuntime::Impl::logException(py::error_already_set& error) {
     }
 }
 
+void PythonRuntime::Impl::describe(py::error_already_set& raised, ScriptError& error) {
+    try {
+        error.type = py::str(raised.type().attr("__name__"));
+        error.message = py::str(raised.value());
+        if (raised.trace()) {
+            const py::object frames = py::module_::import("traceback").attr("extract_tb")(raised.trace());
+            for (const py::handle frame : frames) {
+                const py::object line = frame.attr("lineno");
+                error.frames.push_back({py::str(frame.attr("filename")), line.is_none() ? 0 : line.cast<int>(),
+                                        py::str(frame.attr("name"))});
+            }
+        }
+        // Raised by compile(), so there's no frame in the file itself.
+        if (raised.matches(PyExc_SyntaxError)) {
+            const py::object file = raised.value().attr("filename");
+            const py::object line = raised.value().attr("lineno");
+            if (!file.is_none() && !line.is_none()) error.frames.push_back({py::str(file), line.cast<int>(), "<module>"});
+        }
+    } catch (py::error_already_set&) {
+        // An exception whose own __str__ raises: what was read so far will do.
+    }
+}
+
 void PythonRuntime::Impl::flushStreams() {
     try {
         py::module_ sys = py::module_::import("sys");
@@ -307,7 +351,7 @@ py::dict PythonRuntime::Impl::freshNamespace() {
 }
 
 bool PythonRuntime::Impl::run(const std::string& code, const std::string& fileName,
-                              const std::filesystem::path* file, Namespace scope) {
+                              const std::filesystem::path* file, Namespace scope, int firstLine, ScriptError* error) {
     if (!available) return false;
     py::gil_scoped_acquire gil;
     bool ok = true;
@@ -325,11 +369,14 @@ bool PythonRuntime::Impl::run(const std::string& code, const std::string& fileNa
         } else if (globals.contains("__file__")) {
             PyDict_DelItemString(globals.ptr(), "__file__");
         }
-        py::object compiled = builtins.attr("compile")(code, fileName, "exec");
+        // Empty lines before it, so its first line has the number asked for.
+        py::object compiled = firstLine > 1 ? builtins.attr("compile")(std::string(std::size_t(firstLine - 1), '\n') + code, fileName, "exec")
+                                            : builtins.attr("compile")(code, fileName, "exec");
         builtins.attr("exec")(compiled, globals);
-    } catch (py::error_already_set& error) {
-        if (!error.matches(PyExc_SystemExit)) {
-            logException(error);
+    } catch (py::error_already_set& raised) {
+        if (!raised.matches(PyExc_SystemExit)) {
+            if (error) describe(raised, *error);
+            logException(raised);
             ok = false;
         }
     }
@@ -400,13 +447,40 @@ std::filesystem::path PythonRuntime::executable() const {
 #endif
 }
 
-bool PythonRuntime::runString(const std::string& code, const std::string& fileName, Namespace scope) {
+bool PythonRuntime::runString(const std::string& code, const std::string& fileName, Namespace scope, int firstLine,
+                              ScriptError* error) {
 #if USDCC_HAS_PYTHON
-    return m_impl->run(code, fileName, nullptr, scope);
+    const Stoppable stoppable(*this);
+    return m_impl->run(code, fileName, nullptr, scope, firstLine, error);
 #else
     (void)code;
     (void)fileName;
     (void)scope;
+    (void)firstLine;
+    (void)error;
+    return false;
+#endif
+}
+
+bool PythonRuntime::isRunning() const { return m_impl->running > 0; }
+
+PythonRuntime::Stoppable::Stoppable(PythonRuntime& runtime) : m_runtime(runtime) {
+    Impl& impl = *m_runtime.m_impl;
+    ++impl.running;
+    if (std::this_thread::get_id() == impl.mainThread && ++impl.stoppableDepth == 1) s_stoppableRun = ++impl.lastRun;
+}
+
+PythonRuntime::Stoppable::~Stoppable() {
+    Impl& impl = *m_runtime.m_impl;
+    if (std::this_thread::get_id() == impl.mainThread && --impl.stoppableDepth == 0) s_stoppableRun = 0;
+    --impl.running;
+}
+
+bool PythonRuntime::stop() {
+#if USDCC_HAS_PYTHON
+    const std::intptr_t run = s_stoppableRun;
+    return run != 0 && Py_AddPendingCall(&raiseIfRunning, reinterpret_cast<void*>(run)) == 0;
+#else
     return false;
 #endif
 }
@@ -445,6 +519,7 @@ bool PythonRuntime::runFile(const std::filesystem::path& file, Namespace scope) 
     if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
 #if USDCC_HAS_PYTHON
     const auto start = std::chrono::steady_clock::now();
+    const Stoppable stoppable(*this);
     const bool ok = m_impl->run(text, toUtf8(file), &file, scope);
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();

@@ -1,0 +1,27 @@
+[
+  {
+    "id": "menu_action",
+    "label": "A menu action",
+    "description": "An entry in the main menu that edits the stage, as one undo step."
+  },
+  {
+    "id": "prim_menu_action",
+    "label": "A prim menu action",
+    "description": "An entry in the Outliner's menu, for the selected prims."
+  },
+  {
+    "id": "panel",
+    "label": "A panel",
+    "description": "A view panel: a tab that shows something of one stage, with PySide6."
+  },
+  {
+    "id": "tool",
+    "label": "A viewport tool",
+    "description": "A tool in the tool rail, with a gizmo and an option."
+  },
+  {
+    "id": "final_renderer",
+    "label": "A final renderer",
+    "description": "A renderer for Render > Render Frame, to fill in."
+  }
+]

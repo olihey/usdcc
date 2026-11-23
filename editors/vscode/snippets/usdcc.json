@@ -1,0 +1,69 @@
+{
+  "usdcc: current stage": {
+    "prefix": "usdcc-stage",
+    "description": "The current stage",
+    "body": [
+      "stage = usdcc.usd.current_stage()",
+      "if stage is None:",
+      "    raise RuntimeError(\"No stage is open\")",
+      "$0"
+    ]
+  },
+  "usdcc: one undo step": {
+    "prefix": "usdcc-edit",
+    "description": "Edits as one undo step",
+    "body": [
+      "with usdcc.usd.edit(\"${1:Edit}\") as stage:",
+      "    ${0:pass}"
+    ]
+  },
+  "usdcc: selected prims": {
+    "prefix": "usdcc-selected",
+    "description": "The selected prims",
+    "body": [
+      "for path in usdcc.usd.selected_paths():",
+      "    prim = stage.GetPrimAtPath(path)",
+      "    ${0:pass}"
+    ]
+  },
+  "usdcc: plugin activate": {
+    "prefix": "usdcc-activate",
+    "description": "A plugin's activate() and deactivate()",
+    "body": [
+      "def activate(plugin):",
+      "    ${1:pass}",
+      "",
+      "",
+      "def deactivate(plugin):",
+      "    ${0:pass}"
+    ]
+  },
+  "usdcc: menu action": {
+    "prefix": "usdcc-menu",
+    "description": "A main menu entry",
+    "body": [
+      "usdcc.app.add_menu_action(\"${1:Tools}/${2:Action}\", ${3:callback})$0"
+    ]
+  },
+  "usdcc: prim menu action": {
+    "prefix": "usdcc-prim-menu",
+    "description": "An entry in the Outliner's prim menu",
+    "body": [
+      "usdcc.app.add_prim_menu_action(\"${1:Action}\", ${2:callback}, id=\"${3:com.example.action}\")$0"
+    ]
+  },
+  "usdcc: app event": {
+    "prefix": "usdcc-connect",
+    "description": "Follow something in the app",
+    "body": [
+      "connection = usdcc.app.connect(\"${1|selection_changed,current_stage_changed,stage_opened,stage_closed,stage_edited,time_changed,viewport_camera_changed|}\", ${2:callback})$0"
+    ]
+  },
+  "usdcc: setting": {
+    "prefix": "usdcc-setting",
+    "description": "A setting of the plugin's own",
+    "body": [
+      "usdcc.settings.define(\"${1:MyPlugin}/${2:name}\", \"${3|bool,int,float,string,choice,color,folder|}\", ${4:True}, label=\"${5:Label}\", category=\"${6:My Plugin}\")$0"
+    ]
+  }
+}
