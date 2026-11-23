@@ -207,7 +207,7 @@ protected:
         if (!m_engine || !currentStage()) return;
         try {
             const auto camera = currentCamera();
-            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch(), m_tonemap);
+            auto scene = makeSnapshot(currentStage(), camera, renderSize(), mode(), lightMatch(), m_tonemap, renderTime());
             if (!scene->emission.skipped.empty())
                 m_host.log(usdcc::core::LogLevel::Warning,
                            QStringLiteral("Matching Storm's lights: %1 emissive input(s) not scaled, as they feed "
@@ -244,7 +244,7 @@ protected:
             m_dirty = true;
             return;
         }
-        auto edits = transformEdits(currentStage(), changes);
+        auto edits = transformEdits(currentStage(), changes, renderTime());
         if (!edits || currentCamera().orthographic != m_orthographic) {
             reload();
             return;

@@ -28,6 +28,10 @@ class QMenu;
 class QTimer;
 class QToolButton;
 
+namespace usdcc::ui {
+class TextView;
+}
+
 namespace usdcc::usd {
 
 // A stage as USDA text (docs/USDA_VIEW.md), shared by the USDA view panel and
@@ -96,6 +100,11 @@ public:
         // The panel says it's busy while a big conversion runs (docs/PANEL_BUSY.md §5): its
         // ViewPanel::beginBusy(). None: the status line says so instead.
         std::function<std::shared_ptr<usdcc::ui::Busy>(const QString& text, usdcc::ui::BusyOptions options)> beginBusy;
+        // Editing (§7, phase 3): whether the view offers it, and how an Apply is made one
+        // undo step: `edit` changes `layer`. None: Apply edits the layer directly.
+        bool editable = false;
+        std::function<bool(const PXR_NS::SdfLayerHandle& layer, const QString& description, const std::function<bool()>& edit)>
+            applyEdit;
     };
 
     explicit UsdaView(Host host, QWidget* parent = nullptr);
@@ -161,6 +170,31 @@ public:
     void cancelConversion();
     // Scrolls to `line` once the text is there: now, or after a pending refresh.
     void scrollToLine(int line);
+
+    // ---- Editing (§7, phase 3) ------------------------------------------------------------
+    // Layers up to this size can be edited: the editor holds the whole text as a document.
+    static constexpr std::size_t kEditLimitBytes = std::size_t(32) << 20;  // 32 MB
+    // The layer shown: a layer of the stack or a linked file's; null for a flattened view.
+    PXR_NS::SdfLayerHandle shownLayer() const;
+    // Whether Edit is offered now, and if not, why.
+    bool canEdit(QString* why = nullptr) const;
+    bool isEditing() const { return m_editing; }
+    // The text into an editor, highlighted as here. Show and Back/Forward wait until Done.
+    bool startEditing();
+    // Parses the text, and when it parses writes it to the layer: one undo step. A parse error
+    // is shown at its line, the layer untouched. False then.
+    bool apply();
+    // The layer's text in the editor again, the edits dropped.
+    void revert();
+    // Back to the read-only view; unapplied edits are dropped.
+    void stopEditing();
+    usdcc::ui::TextView* editor() const { return m_editor; }
+    // The last Apply's parse error, with its line ("line 12: ..."); empty after one that worked.
+    QString editError() const { return m_editError; }
+    // The editor's text differs from what the layer had when it was put there.
+    bool hasUnappliedEdits() const;
+    // The layer changed elsewhere since the text was put in the editor.
+    bool layerChangedWhileEditing() const { return m_layerChangedWhileEditing; }
     // Closes the Find bar if it's open; false if it wasn't.
     bool closeFind();
 
@@ -224,6 +258,8 @@ private:
                          Qt::KeyboardModifiers modifiers);
     void populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& link);
     QString linkToolTip(const usdcc::ui::LineView::Link& link);
+    void updateEditUi();
+    std::string layerText(const PXR_NS::SdfLayerHandle& layer) const;
     const std::unordered_map<std::string, int>& primLines();
 
     Host m_host;
@@ -280,6 +316,17 @@ private:
     QTimer* m_conversionTimer = nullptr;
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChangedConnection;
+
+    // Editing.
+    QToolButton* m_editButton = nullptr;
+    usdcc::ui::TextView* m_editor = nullptr;
+    QWidget* m_editBar = nullptr;
+    QLabel* m_editLabel = nullptr;
+    bool m_editing = false;
+    bool m_applying = false;  // the layer's change notices are our own Apply's
+    bool m_layerChangedWhileEditing = false;
+    QString m_editError;
+    QString m_editBase;  // the text put in the editor, to tell edits from it
 };
 
 }  // namespace usdcc::usd

@@ -119,7 +119,7 @@ The `windows` job is described here; the `linux` job does the same on `ubuntu-24
 attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it is
 unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
-finds it ([CI.md](CI.md) §8). No PySide6 on Linux yet.
+finds it ([CI.md](CI.md) §8).
 
 **Trigger:** `release: published`, when you publish a release (or prerelease) on GitHub.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand

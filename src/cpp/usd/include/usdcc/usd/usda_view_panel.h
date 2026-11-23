@@ -18,6 +18,7 @@ class QAction;
 namespace usdcc::usd {
 
 class StageManager;
+class UndoManager;
 
 // A dock panel around a UsdaView (docs/USDA_VIEW.md), showing an app stage: a
 // prim path selects that prim, Ctrl+click on an asset path opens a new USDA
@@ -45,6 +46,9 @@ public:
     // How Open in New Panel makes the panel (main.cpp sets it: the panel
     // registry, docked next to this one). Without one, links open here.
     static void setNewPanelHandler(std::function<UsdaViewPanel*(const StageRefPtr& stage)> handler);
+    // Editing (docs/USDA_VIEW.md phase 3): an Apply is one step on the stage's undo stack.
+    // Without one, it edits the layer directly.
+    void setUndoManager(std::shared_ptr<UndoManager> undoManager) { m_undoManager = std::move(undoManager); }
 
     UsdaView* view() const { return m_view; }
     void setFollowSelection(bool on);
@@ -79,6 +83,7 @@ private:
 
     UsdaView* m_view;
     QAction* m_followSelection;
+    std::shared_ptr<UndoManager> m_undoManager;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionConnection;
 };
 
