@@ -5,6 +5,8 @@
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/peers_controller.h"
 
+#include <QComboBox>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -32,6 +34,18 @@ BroadcastPanel::BroadcastPanel(usdcc::ui::PeersController* peers, QWidget* paren
     m_status->setObjectName(QStringLiteral("broadcastStatus"));
     m_status->setWordWrap(true);
     layout->addWidget(m_status);
+
+    // Starting from here: any viewport or Render View (phase 5), not only from a viewport's menu.
+    auto* sourceRow = new QHBoxLayout;
+    m_source = new QComboBox(content);
+    m_source->setObjectName(QStringLiteral("broadcastSource"));
+    m_source->setToolTip(tr("What to broadcast: a viewport, or a Render View's picture"));
+    m_source->installEventFilter(this);
+    m_start = new QPushButton(tr("Start"), content);
+    m_start->setObjectName(QStringLiteral("broadcastStart"));
+    sourceRow->addWidget(m_source, 1);
+    sourceRow->addWidget(m_start);
+    layout->addLayout(sourceRow);
 
     auto* linkRow = new QHBoxLayout;
     m_link = new QLineEdit(content);
@@ -83,6 +97,10 @@ BroadcastPanel::BroadcastPanel(usdcc::ui::PeersController* peers, QWidget* paren
     layout->addWidget(m_say);
     setWidget(content);
 
+    connect(m_start, &QPushButton::clicked, this, [this] {
+        const int index = m_source->currentIndex();
+        if (index >= 0 && index < m_sources.size() && m_sources[index].panel) Q_EMIT startRequested(m_sources[index].panel);
+    });
     connect(m_copy, &QPushButton::clicked, this, &BroadcastPanel::copyRequested);
     connect(m_stop, &QPushButton::clicked, this, &BroadcastPanel::stopRequested);
     connect(m_remove, &QPushButton::clicked, this, [this] { removeSelectedWatcher(); });
@@ -125,6 +143,35 @@ void BroadcastPanel::setBroadcast(Broadcast* broadcast) {
     }
     reloadChat();
     updateWatchers();
+}
+
+void BroadcastPanel::setSourceLister(std::function<QList<Source>()> lister) {
+    m_lister = std::move(lister);
+    refreshSources();
+}
+
+void BroadcastPanel::refreshSources() {
+    const QWidget* chosen = m_source->currentIndex() >= 0 && m_source->currentIndex() < m_sources.size()
+                                ? m_sources[m_source->currentIndex()].panel.data()
+                                : nullptr;
+    m_sources = m_lister ? m_lister() : QList<Source>();
+    m_source->clear();
+    for (const Source& source : std::as_const(m_sources)) {
+        m_source->addItem(source.name);
+        if (source.panel == chosen) m_source->setCurrentIndex(m_source->count() - 1);
+    }
+    updateState();
+}
+
+bool BroadcastPanel::eventFilter(QObject* watched, QEvent* event) {
+    // The panels open now, just before the list shows.
+    if (watched == m_source && event->type() == QEvent::MouseButtonPress) refreshSources();
+    return SidePanel::eventFilter(watched, event);
+}
+
+void BroadcastPanel::showEvent(QShowEvent* event) {
+    SidePanel::showEvent(event);
+    refreshSources();
 }
 
 bool BroadcastPanel::removeSelectedWatcher() {
@@ -174,10 +221,13 @@ void BroadcastPanel::updateState() {
         m_link->setText(m_broadcast->link().toString());
     } else {
         if (!m_broadcast && m_status->text().isEmpty()) {
-            m_status->setText(tr("Not broadcasting. Start Broadcast is in a viewport's menu, under Broadcast."));
+            m_status->setText(tr("Not broadcasting. Choose a viewport or a Render View and Start, or use Broadcast "
+                                 "in a viewport's menu."));
         }
         m_link->clear();
     }
+    m_source->setEnabled(!live);
+    m_start->setEnabled(!live && m_source->count() > 0);
     m_copy->setEnabled(live);
     m_stop->setEnabled(live);
     m_remove->setEnabled(live && m_watchers->currentItem());

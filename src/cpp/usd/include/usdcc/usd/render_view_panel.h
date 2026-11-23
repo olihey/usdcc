@@ -159,10 +159,17 @@ public:
     // Whether this renders again after edits (the Update on Edits check box).
     bool updatesOnEdits() const;
 
+    // The picture shown now, in display colors, for those who send it elsewhere (a viewport
+    // broadcast, docs/VIEWPORT_BROADCAST.md phase 5). image() here; a renderer that presents
+    // on its own (RTX) has none unless it reads its frame back, and returns a null image.
+    virtual QImage currentImage() const { return image(); }
+
 Q_SIGNALS:
     // The view transform changed: the panel's view, or Settings > Color Management. A
     // renderer that presents on its own (RTX) applies it again.
     void colorTransformChanged();
+    // A new picture is shown: currentImage() has it.
+    void imageShown();
 
 protected:
     // --- Hooks, for the subclass; all do nothing here.

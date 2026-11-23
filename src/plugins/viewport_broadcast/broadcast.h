@@ -40,6 +40,9 @@ public:
     // by `x`, `y` as fractions of the picture's width and height, "zoom" by `x` wheel
     // notches (positive: closer), "fit". False when it isn't done now: the host's own hand
     // is on the camera, or the source can't move.
+    // Whether watchers may ask to navigate it at all: a viewport may; a Render View, which
+    // follows a viewport's camera or one of the stage's, doesn't. Fixed for a broadcast.
+    virtual bool canNavigate() const { return false; }
     virtual bool navigate(const QString& move, double x, double y) {
         Q_UNUSED(move);
         Q_UNUSED(x);

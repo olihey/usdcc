@@ -338,6 +338,32 @@ USDCC_TEST(render_view_panel) {
     CHECK(closings == 2, "closing calls closing() once each: %d", closings);
 }
 
+// For a broadcast of a Render View (docs/VIEWPORT_BROADCAST.md phase 5): each picture shown
+// says so, and currentImage() is it.
+USDCC_TEST(render_view_panel_image_shown) {
+    TestSettings settings;
+    QTemporaryDir dir;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       dir.filePath(QStringLiteral("ui.ini")));
+    const std::string file = dir.filePath(QStringLiteral("render.usda")).toStdString();
+    std::ofstream(file) << kStage;
+    StageManager stages;
+    const StageRefPtr stage = stages.openStage(file);
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    int closings = 0;
+    TestRenderPanel panel(&stages, stage, &closings);
+    int shown = 0;
+    QObject::connect(&panel, &RenderViewPanel::imageShown, [&shown] { ++shown; });
+    CHECK(panel.currentImage().isNull(), "a picture before any was shown");
+    QImage image(64, 32, QImage::Format_RGB32);
+    image.fill(Qt::darkGreen);
+    panel.showImage(image);
+    CHECK(shown == 1, "showing a picture doesn't say so (%d)", shown);
+    CHECK(panel.currentImage().size() == QSize(64, 32) && panel.currentImage().pixelColor(3, 3) == QColor(Qt::darkGreen),
+          "currentImage() isn't the picture shown");
+}
+
 // The stage's time (docs/ANIMATION.md phase 5): a camera prim read at it, and a new time
 // sending an animated stage again, coalesced, but not a still one.
 USDCC_TEST(render_view_panel_time) {
