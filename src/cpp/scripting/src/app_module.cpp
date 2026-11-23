@@ -8,12 +8,14 @@
 #include "usdcc/scripting/scripted_render_view_panel.h"
 #include "usdcc/scripting/scripted_tool.h"
 #include "usdcc/scripting/scripted_view_panel.h"
+#include "usdcc/usd/playblast.h"
 #include "usdcc/usd/python/bind_usd.h"
 #endif
 
 #include "usdcc/scripting/app_module.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -385,6 +387,14 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def("is_available", []() { return s_context != nullptr; });
     m.def("version", []() { return std::string(usdcc::core::version()); }, "usdcc's version (docs/RELEASE.md).");
     m.def("is_release_build", []() { return usdcc::core::isReleaseBuild(); });
+    // (name, label, included, plugin ids) per feature (docs/BUILD_OPTIONS.md §5).
+    m.def("build_features", []() {
+        py::list result;
+        for (const usdcc::core::BuildFeature& feature : usdcc::core::buildFeatures()) {
+            result.append(py::make_tuple(feature.name, feature.label, feature.included, feature.pluginIds));
+        }
+        return result;
+    });
     m.def("user_data_folder", []() { return usdcc::ui::userDataFolder().toStdString(); });
     m.def(
         "stage_manager", []() { return context().stageManager; }, py::return_value_policy::reference,
@@ -806,6 +816,24 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         "viewport_title", [](int id) { return viewportWithId(id).windowTitle().toStdString(); }, py::arg("id"));
     m.def(
         "viewport_stage", [](int id) { return cacheIdOf(viewportWithId(id).currentStage()); }, py::arg("id"));
+    // A playblast (docs/ANIMATION.md phase 5): the files written.
+    m.def(
+        "viewport_playblast",
+        [](int id, const std::string& pattern, double start, double end, double step) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            if (!viewport.currentStage() || !viewport.hydraWindow()) throw py::value_error("the viewport has no stage");
+            usdcc::usd::PlayblastOptions options;
+            options.frames = {start, end};
+            options.step = step;
+            options.pattern = QString::fromStdString(pattern);
+            QString error;
+            const QStringList files = usdcc::usd::playblast(*viewport.hydraWindow(), *viewport.currentStage(), options, {}, &error);
+            if (!error.isEmpty()) throw std::runtime_error("the playblast stopped: " + error.toStdString());
+            std::vector<std::string> result;
+            for (const QString& file : files) result.push_back(file.toStdString());
+            return result;
+        },
+        py::arg("id"), py::arg("pattern"), py::arg("start"), py::arg("end"), py::arg("step"));
     // The stage camera it looks through, "" for its own (docs/VIEWPORT_CAMERA.md §3).
     m.def(
         "viewport_camera", [](int id) { return viewportWithId(id).hydraWindow()->stageCamera().GetString(); },

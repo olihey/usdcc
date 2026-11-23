@@ -37,7 +37,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 // What a type is, for its tooltip: the C++ type and the role, as the data-type gallery says it.
 QString describe(const ValueTypeInfo& info) {
     QString text = qs(info.typeName.GetType().GetTypeName());
-    if (!info.role.IsEmpty()) text += QStringLiteral(" \xC2\xB7 ") + qs(info.role.GetString());
+    if (!info.role.IsEmpty()) text += QString::fromUtf8(" \xC2\xB7 ") + qs(info.role.GetString());
     return text;
 }
 

@@ -670,7 +670,7 @@ is not an `ArResolver` written in Python.
 | **4. usdcc** | Everything in §10 but the picker | **Done** (§13.4), with gaps marked in §10. A stage opened from WebDAV shows correct resolved paths and origins in the Attribute Editor, Dependencies panel and USDA view, renders in Storm, and comes back from a session |
 | **5. Asset picker** | [ASSET_PICKER.md](ASSET_PICKER.md), with favourites and the scheme dropdown | **Done** (ASSET_PICKER.md §9), but for dragging, completion and Python. A reference to a file on the server is added by browsing to it |
 | **5.1 Asset Servers editor** | §10.1 | **Done** (§10.2). A test environment is made from production in the dialog (Duplicate, a test server dragged on top), Test answers for both servers, and a stage opened in it takes a file from TEST, with no JSON edited by hand |
-| **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | **Built** (§13.6) for WebDAV and S3, but for Save in the picker, which comes next. Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
+| **6. Writing** | `put`, `_CanWriteAssetToPath`, `_OpenAssetForWrite`, Save in the picker | **Built** (§13.6) for WebDAV and S3, with Save in the picker (ASSET_PICKER.md §9.1). Save on a layer from PROD, in the test environment, writes it to TEST; saving over a file changed meanwhile is a clear error |
 | **S3** | An S3 plugin, [S3_RESOLVER.md](S3_RESOLVER.md) §8 (phases S3.0 to S3.4) | **Built** (S3_RESOLVER.md §8.2), reading, but for a run against AWS itself. It needed no change to `usdcc_assets` beyond what S3 itself forces (S3_RESOLVER.md §6) |
 | **Later** | More storage backends through Apache OpenDAL (§13.5): one plugin, one transport per scheme | A stage opens from a second backend (Azure Blob or SFTP, say) through the same plugin, and the deploy ships the full notice list for its Rust dependencies |
 | **Later** | A transport in Python (§11.1): `PythonTransport`, `usdcc.assets.register_transport()`, the GIL timeout | A Python transport over a folder serves a stage in the tests; a script opening that stage while holding the GIL fails the resolve after the timeout instead of hanging |
@@ -909,7 +909,9 @@ environment landing in TEST, PROD untouched and the path resolving from TEST aft
 save; a conflict both ways (changed on TEST, and made on TEST meanwhile); a read-only stack and
 offline refusing, with their reasons; `SdfLayer::Save()`, `Export()` to `.usda` and
 `.usdc`, and a `.usdc` saved over itself; a refused `PUT`; HTTP refusing. **Not checked:** a
-real WebDAV server or S3 bucket, and the app (no Save there until the picker's save mode).
+real WebDAV server or S3 bucket. The picker's save mode (ASSET_PICKER.md §9.1) brings it to the
+app's Save Stage As, New Layer File, Save Layer As and Flatten to File, tested offscreen in
+`usdcc_ui_tests`.
 ## 14. Testing
 
 - **`usdcc_assets`** ([assets_test.cpp](../tests/assets_test.cpp), 18 tests, in a program of its

@@ -152,11 +152,11 @@ Defined by the plugin, so a build without it (§6) has none of them. Settings > 
 
 ## 6. Leaving it out of the build
 
-**What exists today.** *Checked* in [CMakeLists.txt](../CMakeLists.txt): a few CMake options
-choose what is built, `USDCC_BUILD_RTX_PLUGIN` (off by default), `USDCC_BUILD_TESTS` and
-`USDCC_USE_PCH`, plus `USDCC_BUILD_BLENDER_MESH_TOOLS`, which is forced on. Viewport Broadcast,
-Peers and the other plugins are always built. There is no general convention for features a build
-can leave out, and no studio-wide setting that a user can't change (§9).
+**What exists today.** Since 2026-11-22 a build can leave features out with
+`USDCC_BUILD_<FEATURE>` ([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §10): the plugins are optional
+(Viewport Broadcast, the asset protocols, Jolt, V-Ray, Blender mesh tools, RTX), and Remote
+Support gets its option the same way. Peers is still always built. There is no studio-wide
+setting that a user can't change (§9).
 
 **For Remote Support:** a CMake option, `USDCC_BUILD_REMOTE_SUPPORT`.
 

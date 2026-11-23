@@ -1306,8 +1306,11 @@ void PeersController::expireTypists() {
 
 QList<Peer> PeersController::typingIn(Room* room, const PeerId& with) const {
     QList<Peer> result;
+    // One whose time is up isn't typing, though the timer that removes it may not have
+    // ticked yet (it ticks every second).
+    const QDateTime now = QDateTime::currentDateTimeUtc();
     for (const Typist& t : m_typists) {
-        if (t.room == room && t.with == with) {
+        if (t.room == room && t.with == with && t.until > now) {
             result.append(t.peer);
         }
     }

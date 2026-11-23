@@ -25,15 +25,22 @@ public:
         QString name;
         QString version;
     };
+    // A feature the build may leave out (docs/BUILD_OPTIONS.md §5).
+    struct Feature {
+        QString label;
+        bool included = true;
+    };
     struct Info {
         QString version;     // usdcc::core::version()
         bool release = false;
         QString commit;      // abbreviated; empty outside git
         QString buildDate;
         QList<Component> components;
+        QList<Feature> features;  // "Included" or "Left out of this build", under the components
     };
 
-    // usdcc's version, commit and build date, and the Qt actually loaded.
+    // usdcc's version, commit and build date, the Qt actually loaded, and the
+    // features it was built with (usdcc::core::buildFeatures()).
     static Info currentBuild();
 
     static constexpr auto kRepositoryUrl = "https://github.com/olihey/usdcc";
@@ -42,6 +49,9 @@ public:
 
     // What Copy puts on the clipboard: one "name: value" line each.
     QString text() const;
+
+    // "Included" or "Left out of this build".
+    static QString featureState(bool included);
 
     // Copies text() to the clipboard.
     void copy();

@@ -100,6 +100,9 @@ public:
     // Through a stage camera, what a drag does (docs/VIEWPORT_CAMERA.md §2): "detach", "drive"
     // or "locked". This viewport's own choice, over Settings' default.
     void setCameraNavigation(const std::string& mode);
+    // Playblast... (docs/ANIMATION.md phase 5): asks for the frames and the file, then
+    // writes the viewport's picture at each frame, with a progress dialog to cancel it.
+    void playblastInteractively();
 
     // A border in `color` around the 3D view, to set this viewport apart: a broadcast
     // marks the one it sends (docs/VIEWPORT_BROADCAST.md §2.1). The view shrinks by the
