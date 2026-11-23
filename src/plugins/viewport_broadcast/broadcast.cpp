@@ -5,12 +5,15 @@
 #include "usdcc/peers/room.h"
 
 #include <QBuffer>
+#include <QJsonArray>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QImageWriter>
 #include <QLoggingCategory>
 #include <QThreadPool>
+
+#include <cmath>
 
 namespace usdcc::broadcast {
 
@@ -62,6 +65,13 @@ Broadcast* Broadcast::start(usdcc::peers::Peers* peers, FrameSource* source, con
     host.guests = true;
     host.pageDirectory = options.pageDirectory;
     host.allowedOrigins = options.allowedOrigins;
+    // The tunnel's pages come from its origin: they may open the WebSocket.
+    if (options.publicAddress.isValid() && !options.publicAddress.host().isEmpty()) {
+        const QString origin = options.publicAddress.adjusted(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment |
+                                                              QUrl::RemoveUserInfo | QUrl::StripTrailingSlash)
+                                   .toString();
+        if (!host.allowedOrigins.contains(origin)) host.allowedOrigins.append(origin);
+    }
     host.limits.maxGuests = options.maxGuests;
     Room* room = peers->host(host, error);
     if (!room) return nullptr;
@@ -84,18 +94,29 @@ Broadcast* Broadcast::start(usdcc::peers::Peers* peers, FrameSource* source, con
     broadcast->m_view = view;
     // The room's chat, which the Peers panel shows: watchers talk there too.
     room->channel(QString::fromLatin1(kChatChannel))->setOpenToGuests(true);
+    // Navigating: watchers ask and move, to the host only.
+    Channel* nav = room->channel(QString::fromLatin1(kNavChannel), Delivery::Direct);
+    nav->setOpenToGuests(true);
+    broadcast->m_nav = nav;
+    connect(nav, &Channel::received, broadcast, &Broadcast::onNav);
 
     connect(room, &Room::peerJoined, broadcast, [broadcast](const Peer& peer) {
         if (!isWatcher(peer)) return;
         qCInfo(lcBroadcast).noquote() << peer.name << "is watching";
         Q_EMIT broadcast->watcherJoined(peer);
         Q_EMIT broadcast->watchersChanged();
+        broadcast->tellNavigator(peer.id);
         // Nothing is grabbed while nobody watches: the newcomer's snapshot may be old,
         // and a change since then is sent now.
         broadcast->sendNext();
     });
     connect(room, &Room::peerLeft, broadcast, [broadcast](const Peer& peer, const QString&) {
-        if (isWatcher(peer)) Q_EMIT broadcast->watchersChanged();
+        if (!isWatcher(peer)) return;
+        if (broadcast->m_asking.removeAll(peer.id) > 0 && peer.id != broadcast->m_navigator) {
+            Q_EMIT broadcast->navigatorChanged();
+        }
+        if (peer.id == broadcast->m_navigator) broadcast->setNavigator({});
+        Q_EMIT broadcast->watchersChanged();
     });
     connect(room, &Room::closed, broadcast, [broadcast](const QString& reason) {
         if (broadcast->m_stopped) return;
@@ -123,7 +144,18 @@ Broadcast::~Broadcast() {
 
 usdcc::peers::Room* Broadcast::room() const { return m_room; }
 
-QUrl Broadcast::link() const { return m_room ? m_room->guestLink() : QUrl(); }
+QUrl Broadcast::localLink() const { return m_room ? m_room->guestLink() : QUrl(); }
+
+QUrl Broadcast::link() const {
+    const QUrl local = localLink();
+    const QUrl& address = m_options.publicAddress;
+    if (local.isEmpty() || !address.isValid() || address.host().isEmpty()) return local;
+    // The tunnel's address, its path ending in "/" so the page's own files resolve under it.
+    QUrl url = address.adjusted(QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::RemoveUserInfo);
+    if (!url.path().endsWith(u'/')) url.setPath(url.path() + u'/');
+    url.setFragment(local.fragment());
+    return url;
+}
 
 QList<Peer> Broadcast::watchers() const {
     QList<Peer> result;
@@ -139,6 +171,79 @@ bool Broadcast::isLive() const { return !m_stopped && m_room && m_room->state() 
 void Broadcast::stop(const QString& reason) {
     if (!isLive()) return;
     m_room->close(reason.isEmpty() ? QStringLiteral("The broadcast ended") : reason);
+}
+
+bool Broadcast::allowNavigating(const QString& watcher) {
+    if (!isLive() || !m_room->peer(watcher).isValid()) return false;
+    m_asking.removeAll(watcher);
+    setNavigator(watcher);
+    return true;
+}
+
+void Broadcast::denyNavigating(const QString& watcher) {
+    if (m_asking.removeAll(watcher) == 0) return;
+    if (m_nav && isLive()) m_nav->send(QStringLiteral("denied"), {}, {}, watcher);
+    Q_EMIT navigatorChanged();
+}
+
+void Broadcast::takeBack() { setNavigator({}); }
+
+void Broadcast::setNavigator(const QString& id) {
+    if (id == m_navigator) return;
+    m_navigator = id;
+    qCInfo(lcBroadcast).noquote() << (id.isEmpty() ? QStringLiteral("Nobody navigates")
+                                                   : QStringLiteral("%1 navigates").arg(m_room->peer(id).name));
+    tellNavigator();
+    Q_EMIT navigatorChanged();
+}
+
+// Who navigates, to each watcher (or to `to` alone): the page shows it, and the one
+// named moves the camera.
+void Broadcast::tellNavigator(const QString& to) {
+    if (!m_nav || !isLive()) return;
+    const QJsonObject body{{QStringLiteral("id"), m_navigator},
+                           {QStringLiteral("name"), m_navigator.isEmpty() ? QString() : m_room->peer(m_navigator).name}};
+    for (const Peer& watcher : watchers()) {
+        if (to.isEmpty() || watcher.id == to) m_nav->send(QStringLiteral("navigator"), body, {}, watcher.id);
+    }
+}
+
+// What a watcher sends on the nav channel: a closed list (§9), each checked.
+void Broadcast::onNav(const usdcc::peers::Message& message) {
+    if (!isLive() || !m_room) return;
+    const Peer from = m_room->peer(message.from);
+    if (!isWatcher(from)) return;
+    const QString& type = message.type;
+    if (type == QLatin1String("ask")) {
+        if (from.id == m_navigator || m_asking.contains(from.id)) return;
+        m_asking.append(from.id);
+        qCInfo(lcBroadcast).noquote() << from.name << "asks to navigate";
+        Q_EMIT navigateAsked(from);
+        Q_EMIT navigatorChanged();
+        return;
+    }
+    if (type == QLatin1String("cancel")) {
+        // Asked and changed their mind, or navigated and stopped.
+        if (m_asking.removeAll(from.id) > 0) Q_EMIT navigatorChanged();
+        if (from.id == m_navigator) setNavigator({});
+        return;
+    }
+    static const QStringList moves{QStringLiteral("orbit"), QStringLiteral("pan"), QStringLiteral("zoom"),
+                                   QStringLiteral("fit")};
+    if (!moves.contains(type)) {
+        m_room->remove(from.id, QStringLiteral("The page sent something a watcher can't"));
+        return;
+    }
+    // Fractions of the picture, at most a whole one a move; zoom in notches.
+    const double x = message.body.value(type == QLatin1String("zoom") ? QStringLiteral("steps") : QStringLiteral("x")).toDouble();
+    const double y = message.body.value(QStringLiteral("y")).toDouble();
+    const double limit = type == QLatin1String("zoom") ? 10.0 : 1.0;
+    if (from.id != m_navigator || !std::isfinite(x) || !std::isfinite(y) || std::abs(x) > limit || std::abs(y) > limit ||
+        !m_source || !m_source->navigate(type, x, y)) {
+        ++m_stats.movesRefused;
+        return;
+    }
+    ++m_stats.moves;
 }
 
 QJsonObject Broadcast::frameBody() const {

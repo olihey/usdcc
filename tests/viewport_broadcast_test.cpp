@@ -4,10 +4,13 @@
 #include "test_harness.h"
 
 #include "broadcast.h"
+#include "broadcast_panel.h"
+#include "test_settings.h"
 #include "peers_test_support.h"
 
 #include "usdcc/peers/peers.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/ui/peers_controller.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
@@ -18,6 +21,11 @@
 #include <QImage>
 #include <QImageWriter>
 #include <QJsonArray>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QLayout>
 #include <QMenu>
 #include <QNetworkAccessManager>
@@ -30,10 +38,12 @@
 #include <memory>
 
 using usdcc::broadcast::Broadcast;
+using usdcc::broadcast::BroadcastPanel;
 using usdcc::peers::Message;
 using usdcc::peers::Peers;
 using usdcc::peers::test::RawMember;
 using usdcc::peers::test::waitUntil;
+using usdcc::ui::PeersController;
 
 namespace {
 
@@ -388,4 +398,236 @@ USDCC_TEST(viewport_close_guards) {
     allow = false;
     asked = nullptr;
     CHECK(viewport.canClose() && !asked, "a removed guard is still asked");
+}
+
+// Phase 2 (VIEWPORT_BROADCAST.md §2.1): the Broadcast panel lists the watchers, has the
+// broadcast's chat both ways, removes a watcher, and says when the broadcast ended.
+USDCC_TEST(broadcast_panel_watchers_and_chat) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir rooms, page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers::Options peersOptions;
+    peersOptions.profile.name = QStringLiteral("Host");
+    peersOptions.roomsFolder = rooms.path();
+    PeersController controller(std::make_unique<Peers>(std::move(peersOptions)), nullptr, {});
+    FakeSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: panel test");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(controller.peers(), &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+
+    BroadcastPanel panel(&controller);
+    auto* status = panel.findChild<QLabel*>("broadcastStatus");
+    CHECK(status && status->text().startsWith("Not broadcasting"), "with no broadcast, the panel doesn't say how to start");
+    panel.setBroadcast(broadcast.get());
+    auto* link = panel.findChild<QLineEdit*>("broadcastLink");
+    auto* watchers = panel.findChild<QListWidget*>("broadcastWatchers");
+    auto* chat = panel.findChild<QPlainTextEdit*>("broadcastChat");
+    auto* stop = panel.findChild<QPushButton*>("broadcastStop");
+    CHECK(link && link->text() == broadcast->link().toString(), "the panel doesn't show the link");
+    CHECK(status->text().contains("Nobody is watching"), "the status isn't the broadcast's: %s", qPrintable(status->text()));
+
+    RawMember anna;
+    CHECK(anna.hello(*broadcast->room(), broadcast->room()->guestSecret(), QStringLiteral("Anna")), "Anna isn't let in");
+    CHECK(waitUntil([&] { return watchers->count() == 1 && watchers->item(0)->text() == "Anna"; }),
+          "the panel doesn't list the watcher");
+    CHECK(status->text().contains("1 watcher"), "the status doesn't count the watcher: %s", qPrintable(status->text()));
+
+    anna.sendText(QStringLiteral("chat"), QStringLiteral("say"), {{"text", "Can you orbit left?"}});
+    CHECK(waitUntil([&] { return chat->toPlainText().contains("Anna: Can you orbit left?"); }),
+          "the watcher's chat isn't in the panel: %s", qPrintable(chat->toPlainText()));
+    CHECK(panel.say(QStringLiteral("Sure")), "the panel can't send");
+    CHECK(waitUntil([&] {
+              for (const Message& message : anna.frames) {
+                  if (message.channel == "chat" && message.type == "say" && message.body.value("text").toString() == "Sure") return true;
+              }
+              return false;
+          }),
+          "the host's line from the panel doesn't reach the watcher");
+
+    watchers->setCurrentRow(0);
+    CHECK(panel.removeSelectedWatcher(), "Remove does nothing");
+    CHECK(waitUntil([&] { return anna.find("room", "removed") != nullptr || anna.disconnected; }), "the watcher isn't removed");
+    CHECK(waitUntil([&] { return watchers->count() == 0; }), "the removed watcher is still listed");
+
+    bool stopAsked = false;
+    QObject::connect(&panel, &BroadcastPanel::stopRequested, [&] { stopAsked = true; });
+    stop->click();
+    CHECK(stopAsked, "Stop doesn't ask to stop");
+    broadcast->stop(QStringLiteral("Stopped by the host"));
+    CHECK(waitUntil([&] { return !panel.broadcast(); }), "the panel keeps an ended broadcast");
+    CHECK(status->text().contains("ended") && link->text().isEmpty() && !stop->isEnabled(),
+          "the panel doesn't say the broadcast ended: %s", qPrintable(status->text()));
+}
+
+namespace {
+
+// A picture that records the moves it was asked to do.
+class NavigableSource : public FakeSource {
+public:
+    bool navigate(const QString& move, double x, double y) override {
+        if (busy) return false;
+        moves.append(QStringLiteral("%1 %2 %3").arg(move).arg(x).arg(y));
+        return true;
+    }
+    QStringList moves;
+    bool busy = false;
+};
+
+const Message* lastOf(const RawMember& member, const QString& channel, const QString& type) {
+    const Message* found = nullptr;
+    for (const Message& message : member.frames) {
+        if (message.channel == channel && message.type == type) found = &message;
+    }
+    return found;
+}
+
+}  // namespace
+
+// Phase 3 (VIEWPORT_BROADCAST.md §6): a watcher asks, the host allows or denies, only the
+// navigator's moves reach the picture, the host's own hand wins, and Take back ends it.
+USDCC_TEST(broadcast_navigating) {
+    QTemporaryDir page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers peers{Peers::Options{}};
+    NavigableSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: navigate");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(&peers, &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+    const QString nav = QLatin1String(Broadcast::kNavChannel);
+    const QString secret = broadcast->room()->guestSecret();
+
+    RawMember anna, ben;
+    CHECK(anna.hello(*broadcast->room(), secret, QStringLiteral("Anna")) &&
+              ben.hello(*broadcast->room(), secret, QStringLiteral("Ben")),
+          "the watchers aren't let in");
+    const Message* welcome = anna.find("room", "welcome");
+    bool navOpen = false;
+    for (const QJsonValue& value : welcome ? welcome->body.value("channels").toArray() : QJsonArray()) {
+        navOpen = navOpen || value.toObject().value("name").toString() == nav;
+    }
+    CHECK(navOpen, "the watcher doesn't reach the nav channel");
+    CHECK(waitUntil([&] { return broadcast->watchers().size() == 2; }), "both aren't watching");
+    QString annaId;
+    for (const usdcc::peers::Peer& watcher : broadcast->watchers()) {
+        if (watcher.name == "Anna") annaId = watcher.id;
+    }
+
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == 1; }), "a move before being allowed isn't refused");
+    CHECK(source.moves.isEmpty(), "a move before being allowed reached the picture");
+
+    QStringList asked;
+    QObject::connect(broadcast.get(), &Broadcast::navigateAsked, [&](const usdcc::peers::Peer& who) { asked.append(who.name); });
+    anna.sendText(nav, QStringLiteral("ask"));
+    CHECK(waitUntil([&] { return asked == QStringList{"Anna"}; }), "the host isn't asked");
+    CHECK(broadcast->asking() == QStringList{annaId}, "Anna isn't listed as asking");
+    broadcast->denyNavigating(annaId);
+    CHECK(waitUntil([&] { return lastOf(anna, nav, "denied") != nullptr; }), "Anna isn't told no");
+    CHECK(broadcast->asking().isEmpty() && broadcast->navigator().isEmpty(), "a denied ask stays");
+
+    anna.sendText(nav, QStringLiteral("ask"));
+    CHECK(waitUntil([&] { return broadcast->asking().size() == 1; }), "Anna can't ask again");
+    CHECK(broadcast->allowNavigating(annaId) && broadcast->navigator() == annaId, "allowing doesn't make Anna the navigator");
+    CHECK(waitUntil([&] {
+              const Message* told = lastOf(ben, nav, "navigator");
+              return told && told->body.value("id").toString() == annaId && told->body.value("name").toString() == "Anna";
+          }),
+          "the other watchers aren't told who navigates");
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", -0.2}});
+    anna.sendText(nav, QStringLiteral("zoom"), {{"steps", 2}});
+    anna.sendText(nav, QStringLiteral("fit"));
+    CHECK(waitUntil([&] { return source.moves.size() == 3; }), "the navigator's moves don't reach the picture: %s",
+          qPrintable(source.moves.join(", ")));
+    CHECK(source.moves == QStringList({"orbit 0.1 -0.2", "zoom 2 0", "fit 0 0"}), "the moves aren't as sent: %s",
+          qPrintable(source.moves.join(", ")));
+
+    const int refused = broadcast->stats().movesRefused;
+    ben.sendText(nav, QStringLiteral("pan"), {{"x", 0.1}, {"y", 0.1}});
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 5.0}, {"y", 0.0}});
+    source.busy = true;  // the host's hand on the camera
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == refused + 3; }),
+          "another watcher's move, one too big, or one while the host navigates isn't refused (%d)",
+          broadcast->stats().movesRefused - refused);
+    CHECK(source.moves.size() == 3, "a refused move reached the picture");
+    source.busy = false;
+
+    broadcast->takeBack();
+    CHECK(broadcast->navigator().isEmpty(), "Take back leaves a navigator");
+    CHECK(waitUntil([&] {
+              const Message* told = lastOf(anna, nav, "navigator");
+              return told && told->body.value("id").toString().isEmpty();
+          }),
+          "Anna isn't told the host took it back");
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == refused + 4; }), "a move after Take back isn't refused");
+
+    // A closed list: anything else removes the page.
+    ben.sendText(nav, QStringLiteral("select"), {{"path", "/World"}});
+    CHECK(waitUntil([&] { return broadcast->watchers().size() == 1; }), "a page that sends something else stays");
+}
+
+// Phase 4a (VIEWPORT_BROADCAST.md §5): with a public address (the user's own tunnel), the
+// link is the tunnel's, with the secret, and the tunnel's pages may connect; others may not.
+USDCC_TEST(broadcast_public_address) {
+    QTemporaryDir page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers peers{Peers::Options{}};
+    FakeSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: tunnel");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    options.publicAddress = QUrl(QStringLiteral("https://watch.example.com/studio"));
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(&peers, &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+    const QString secret = broadcast->room()->guestSecret();
+
+    CHECK(broadcast->link().toString() == QStringLiteral("https://watch.example.com/studio/#s=") + secret,
+          "the link isn't the tunnel's: %s", qPrintable(broadcast->link().toString(QUrl::RemoveFragment)));
+    CHECK(broadcast->localLink().scheme() == "http" && broadcast->localLink().host() == "127.0.0.1" &&
+              broadcast->localLink().fragment() == QStringLiteral("s=") + secret,
+          "the local link isn't this machine's: %s", qPrintable(broadcast->localLink().toString(QUrl::RemoveFragment)));
+
+    RawMember throughTunnel(QStringLiteral("https://watch.example.com"));
+    CHECK(throughTunnel.hello(*broadcast->room(), secret, QStringLiteral("Remote")) &&
+              throughTunnel.find("room", "welcome"),
+          "a page from the tunnel's origin can't connect");
+    RawMember elsewhere(QStringLiteral("https://evil.example.net"));
+    elsewhere.hello(*broadcast->room(), secret, QStringLiteral("Elsewhere"));
+    CHECK(!elsewhere.find("room", "welcome"), "a page from another origin connected");
+
+    // Without one, the link is this machine's, as before.
+    Fixture plain;
+    if (plain.broadcast) {
+        CHECK(plain.broadcast->link() == plain.broadcast->localLink(), "without a public address the link changed");
+    }
 }

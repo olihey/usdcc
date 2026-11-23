@@ -211,6 +211,18 @@ public:
     // space) fills the view. See frameOrbitCamera().
     void frameBox(const PXR_NS::GfRange3d& box);
 
+    // Navigating from elsewhere (a broadcast's watcher, docs/VIEWPORT_BROADCAST.md §6) as
+    // the mouse does it, so a Z-up stage, an upside-down orbit and an orthographic view
+    // behave the same. Distances are in this window's pixels; `steps` are wheel notches,
+    // positive towards the scene. A stage camera is left for the orbit camera first, as a
+    // drag does; an orthographic axis view doesn't orbit. Each says cameraChanged().
+    void orbitBy(double dx, double dy);
+    void panBy(double dx, double dy);
+    void zoomBy(double steps);
+    // A mouse button is down on the window for the camera or a tool: the host's own hand,
+    // which a watcher's moves wait for (§2.1, "the host always wins").
+    bool isMouseNavigating() const { return m_orbiting || m_panning || m_dragging; }
+
     // The camera this viewport renders with, as a frustum: position and
     // orientation (ComputeViewInverse() is the camera-to-world matrix), the
     // vertical field of view, the window's aspect ratio and the clipping range.
@@ -463,6 +475,9 @@ private:
     void watchTopLevel();
     // After the camera changed: redraw and tell cameraChanged()'s listeners.
     void cameraMoved();
+    // The orbit and the zoom both the mouse and orbitBy()/zoomBy() do.
+    void orbitStep(double dx, double dy, bool reversed);
+    void zoomStep(double steps);
     PXR_NS::GfVec3d cameraPosition() const;
     // The up axis the camera orbits about: the stage's. A preview's stays Y, as its
     // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3).
