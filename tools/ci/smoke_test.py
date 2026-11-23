@@ -15,6 +15,9 @@ sample files open
 (docs/USD_PLUGINS.md). --expect-standard-usd-packs fails a deploy that lacks a
 pack of the standard set, which a release has to have.
 
+The deploy's render node, usdcc_node, has to start too, say the same version, and list
+Embree among its renderers with the plugins loaded, and end without a crash.
+
 On Windows the deploy only has Qt's windows platform plugin; the offscreen one
 comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux deploy
 has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
@@ -204,6 +207,31 @@ def main(argv=None):
     else:
         environment = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}
     environment["QT_QPA_PLATFORM"] = "offscreen"
+
+    # The render node (docs/RENDER_NODE.md), which the app never starts itself.
+    node = os.path.join(deploy_dir, "bin", "usdcc_node.exe" if WINDOWS else "usdcc_node")
+    if not os.path.isfile(node):
+        problems.append(f"the deploy has no {os.path.basename(node)}")
+    else:
+        try:
+            found = subprocess.run([node, "--version", "--no-gpu"], env=environment, timeout=args.timeout_seconds,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            output = found.stdout.decode("utf-8", "replace")
+            first = next((line for line in output.splitlines() if line.startswith("usdcc_node ")), "")
+            print(first)
+            if found.returncode != 0 or not first:
+                problems.append(f"usdcc_node --version exited with {found.returncode}: {output.strip()[-500:]}")
+            elif args.expect_version and first.split()[1] != args.expect_version:
+                problems.append(f"usdcc_node's version is {first.split()[1]}, not {args.expect_version}")
+            found = subprocess.run([node, "renderers", "--no-gpu"], env=environment, timeout=args.timeout_seconds,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            output = found.stdout.decode("utf-8", "replace")
+            if found.returncode != 0 or "HdEmbreeRendererPlugin" not in output:
+                problems.append(f"usdcc_node renderers exited with {found.returncode}: {output.strip()[-500:]}")
+            else:
+                print("  usdcc_node renderers: Embree among them")
+        except subprocess.TimeoutExpired:
+            problems.append(f"usdcc_node didn't finish within {args.timeout_seconds} s")
 
     started = time.time()
     process = subprocess.Popen([exe, "--no-startup-scripts", "--script", str(script)], env=environment)
