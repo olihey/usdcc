@@ -3,9 +3,9 @@
 One way to leave a feature out of a build. A studio that doesn't want a feature at all, not even
 turned off, builds without it, and the build can show that the feature isn't there.
 
-**Status:** planned 2026-11-22; **phases 1 and 2 built** the same day (§10). Remote Support,
-the plan's first user, doesn't exist yet, so Viewport Broadcast was the first. Phase 3 (Updates)
-and 4 (Peers) are still to do. "Checked" below means looked at in this repository; everything
+**Status:** planned 2026-11-22; **phases 1 and 2 built** the same day (§10), **phase 3
+(Updates)** on 2026-11-23 (§11). Remote Support, the plan's first user, doesn't exist yet, so
+Viewport Broadcast was the first. Phase 4 (Peers) is still to do. "Checked" below means looked at in this repository; everything
 else is an assumption until it's tried.
 
 ## 1. What there is today
@@ -97,7 +97,7 @@ was built with.
 | V-Ray Render | `USDCC_BUILD_VRAY_RENDER` | Python plugin, deploy only | On | Not licensed | Small: deploy and the id |
 | RTX Render | `USDCC_BUILD_RTX_RENDER` | Plugin | Off (as today) | | Rename with an alias |
 | Blender mesh tools | `USDCC_BUILD_BLENDER_MESH_TOOLS` | Plugin | On | GPL | Small: stop forcing it |
-| Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On, when Velopack is found | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
+| Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On (without Velopack it only opens the releases page) | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
 | Peers | `USDCC_BUILD_PEERS` | A library (`usdcc_peers`), linked by `usdcc_usd`, `usdcc_ui`, `usdcc_app` and `usdcc_node` (*checked*) | On | A build that never opens a connection | **Large:** the shared stage, rendering with peers, the render queue and the Peers panel all build on it. Its own plan when it's wanted |
 | MCP, VS Code | to come with them | | | | Have an option from their first phase |
 
@@ -110,7 +110,7 @@ them.
 |---|---|---|
 | **1. The mechanism** | `usdcc_feature()`, the generated header and `features.json`, the plugin manager's refusal, About's Features section. Remote support is its first user ([REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) phase 1) | A build with `USDCC_BUILD_REMOTE_SUPPORT=OFF` has no plugin, refuses a copied one, and About says "Left out of this build" |
 | **2. The plugins** | Viewport Broadcast, `http`, `webdav`, `s3`, Jolt, V-Ray, RTX (with the alias), Blender mesh tools; `deploy.py` reads `features.json` | Each one off builds, deploys and starts; CI builds once with all of them off, after a merge (§8) |
-| **3. Updates** | `USDCC_BUILD_UPDATES` | Off: no update check, no Help > Check for Updates |
+| **3. Updates** *(done, §11)* | `USDCC_BUILD_UPDATES` | Off: no update check, no Help > Check for Updates |
 | **4. Peers** | A plan of its own first | |
 
 ## 8. Testing
@@ -151,3 +151,27 @@ them.
 Tests: `plugin_left_out_of_the_build` (`usdcc_python_tests`: the features, a copied plugin of a
 left-out feature refused with its dependent, its code never run, no reload), `about_dialog`
 (the rows and the text), `python_app` (`build_features()`).
+
+## 11. Phase 3 as built: Updates
+
+`USDCC_BUILD_UPDATES` (default on; `tools/build.py --without updates`) is a feature with no
+plugin: it's in the app.
+
+| Off means | Where |
+|---|---|
+| `app_updates.cpp` isn't compiled and usdcc doesn't link Velopack's DLL | [src/cpp/app/CMakeLists.txt](../src/cpp/app/CMakeLists.txt) |
+| No Help > Check for Updates, no check a few seconds after the start, no "Updated to" note, no Settings > Updates | `#if USDCC_FEATURE_UPDATES` in [main.cpp](../src/cpp/app/main.cpp) |
+| `deploy.py` doesn't copy or require `bin/velopack_libc.dll` (not even one an earlier build left in the build folder) | [tools/deploy.py](../tools/deploy.py) |
+| About usdcc and `usdcc_node --version` say "Updates: Left out of this build" | §10's mechanism |
+
+- **The launcher and the installer stay.** The launcher (`usdcc.exe` at the top of a deploy) links
+  Velopack for the installer's hooks, which never go online. A studio that installs such a build
+  with the installer gets an install that doesn't update itself; one that deploys its own way
+  uses the 7z or `deploy.py` as before.
+- **Not the same as `USDCC_VELOPACK=OFF`**, which leaves Velopack out altogether (no launcher, no
+  installer), but keeps Help > Check for Updates, which then opens the releases page.
+- **CI's build with every feature left out** (`--without all`, after a merge) leaves out Updates
+  too, as it's in `build.py`'s list.
+
+Tests: `plugin_left_out_of_the_build` (Updates is a feature with no plugin ids, included as
+configured). A build without it is CI's, as for §10.

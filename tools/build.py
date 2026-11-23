@@ -38,7 +38,8 @@ VCPKG_DIR = REPO / "external/vcpkg"
 # The features on by default that --without can leave out, as the top-level CMakeLists.txt
 # declares them with usdcc_feature() (docs/BUILD_OPTIONS.md). RTX Render, off by
 # default, has --with-rtx and --without-rtx.
-OPTIONAL_FEATURES = ["VIEWPORT_BROADCAST", "HTTP", "WEBDAV", "S3", "PHYSICS_JOLT", "VRAY_RENDER", "BLENDER_MESH_TOOLS"]
+OPTIONAL_FEATURES = ["VIEWPORT_BROADCAST", "HTTP", "WEBDAV", "S3", "PHYSICS_JOLT", "VRAY_RENDER", "BLENDER_MESH_TOOLS",
+                     "UPDATES"]
 
 
 def parser(description=None):
