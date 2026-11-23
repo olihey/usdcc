@@ -4,6 +4,7 @@
 
 #include "usdcc/ui/settings.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/undo_manager.h"
 
 #include <QAction>
 #include <QFileInfo>
@@ -41,6 +42,13 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
     host.selectPrim = [this](const PXR_NS::SdfPath& path) {
         this->stageManager()->setSelectedPaths(currentStage(), {path});
     };
+    // Editing a layer as text (docs/USDA_VIEW.md phase 3): one undo step an Apply.
+    host.editable = true;
+    host.applyEdit = [this](const PXR_NS::SdfLayerHandle& layer, const QString& description, const std::function<bool()>& edit) {
+        const StageRefPtr stage = currentStage();
+        if (stage && m_undoManager) return m_undoManager->apply(stage, layer, description, edit);
+        return edit();
+    };
     m_view = new UsdaView(std::move(host), this);
     setContentWidget(m_view);
 
@@ -65,6 +73,7 @@ UsdaViewPanel::UsdaViewPanel(StageManager* stageManager, StageRefPtr stage, cons
 
 usdcc::ui::ViewPanel* UsdaViewPanel::duplicate(QWidget* parent) const {
     auto* copy = new UsdaViewPanel(stageManager(), currentStage(), windowTitle(), parent);
+    copy->setUndoManager(m_undoManager);
     copy->setSource(m_view->source());
     return copy;
 }

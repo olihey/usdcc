@@ -1,10 +1,13 @@
-// Viewport Broadcast (docs/VIEWPORT_BROADCAST.md, phase 1): Broadcast in a viewport's
-// menus hosts a room of usdcc_peers that serves a web page, copies the page's link,
-// and sends the viewport's picture to everyone who opens it, whenever it changes.
+// Viewport Broadcast (docs/VIEWPORT_BROADCAST.md): Broadcast in a viewport's menus hosts
+// a room of usdcc_peers that serves a web page, copies the page's link, and sends the
+// viewport's picture to everyone who opens it, whenever it changes. The Broadcast panel
+// (phase 2) has the link, the watchers and their chat.
 #include "broadcast.h"
+#include "broadcast_panel.h"
 
 #include "usdcc/plugin/plugin.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/core/toast.h"
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
@@ -14,12 +17,14 @@
 #include "usdcc/ui/toast.h"
 #include "usdcc/ui/toast_manager.h"
 #include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <QApplication>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMessageBox>
@@ -55,6 +60,28 @@ public:
 
     QImage grab() override { return m_panel ? m_panel->hydraWindow()->grabFrame() : QImage(); }
 
+    bool canNavigate() const override { return true; }
+
+    // A watcher's move (VIEWPORT_BROADCAST.md §6), in this viewport's pixels. Not while the
+    // host's own mouse is on the camera: the host always wins (§2.1).
+    bool navigate(const QString& move, double x, double y) override {
+        if (!m_panel) return false;
+        usdcc::usd::HydraViewportWindow* window = m_panel->hydraWindow();
+        if (window->isMouseNavigating()) return false;
+        if (move == QLatin1String("orbit")) {
+            window->orbitBy(x * window->width(), y * window->height());
+        } else if (move == QLatin1String("pan")) {
+            window->panBy(x * window->width(), y * window->height());
+        } else if (move == QLatin1String("zoom")) {
+            window->zoomBy(x);
+        } else if (move == QLatin1String("fit")) {
+            m_panel->fitView(QStringLiteral("selection"));
+        } else {
+            return false;
+        }
+        return true;
+    }
+
     QString title() const override {
         if (!m_panel) return {};
         const usdcc::usd::StageRefPtr& stage = m_panel->currentStage();
@@ -68,6 +95,38 @@ private:
     QPointer<ViewportViewPanel> m_panel;
 };
 
+// A Render View's picture (phase 5): what the renderer showed last, in display colors.
+// Watchers can't navigate it: it follows a viewport's camera or one of the stage's.
+class RenderViewSource : public usdcc::broadcast::FrameSource {
+public:
+    explicit RenderViewSource(usdcc::usd::RenderViewPanel* panel) : m_panel(panel) {
+        connect(panel, &usdcc::usd::RenderViewPanel::imageShown, this, &FrameSource::frameChanged);
+        connect(panel, &usdcc::ui::ViewPanel::stageChanged, this, [this](const usdcc::usd::StageRefPtr& stage) {
+            if (!stage) {
+                Q_EMIT gone(tr("The stage closed"));
+                return;
+            }
+            Q_EMIT titleChanged();
+        });
+        connect(panel, &QObject::destroyed, this, [this] { Q_EMIT gone(tr("The Render View closed")); });
+        connect(panel, &ads::CDockWidget::closed, this, [this] { Q_EMIT gone(tr("The Render View closed")); });
+    }
+
+    QImage grab() override { return m_panel ? m_panel->currentImage() : QImage(); }
+
+    QString title() const override {
+        if (!m_panel) return {};
+        const usdcc::usd::StageRefPtr& stage = m_panel->currentStage();
+        const QString stageName =
+            stage ? QString::fromStdString(stage->usdStage()->GetRootLayer()->GetDisplayName()) : QString();
+        return stageName.isEmpty() ? m_panel->windowTitle()
+                                   : QStringLiteral("%1 · %2").arg(m_panel->windowTitle(), stageName);
+    }
+
+private:
+    QPointer<usdcc::usd::RenderViewPanel> m_panel;
+};
+
 // The border around a viewport while it's broadcast, the page's LIVE red.
 const QColor kLiveRed(229, 83, 75);
 
@@ -76,11 +135,46 @@ struct State {
     usdcc::plugin::Host* host = nullptr;
     int closeGuard = 0;
     QPointer<Broadcast> broadcast;
-    QPointer<ViewportSource> source;
+    QPointer<usdcc::broadcast::FrameSource> source;
+    QPointer<ViewportViewPanel> viewport;  // When the source is a viewport, for its border
+    QPointer<usdcc::broadcast::BroadcastPanel> panel;
 };
 State* g_state = nullptr;
 
 QString setting(const QString& key) { return g_state->host->settingKey(key); }
+
+// Settings > Peers > Viewport Broadcast. The keys are the plugin's own, as before there
+// was a page for them.
+void defineSettings() {
+    auto& settings = usdcc::core::Settings::instance();
+    settings.define({.key = setting(QStringLiteral("onNetwork")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Broadcast on the network",
+                     .description = "Watchers on other machines can open the link. Off, only this machine can "
+                                    "(and a tunnel running on it). Windows asks once whether to let usdcc through.",
+                     .type = usdcc::core::SettingType::Bool,
+                     .defaultValue = true});
+    settings.define({.key = setting(QStringLiteral("port")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Port",
+                     .description = "The port the broadcast's page and pictures use. Taken: any free one.",
+                     .type = usdcc::core::SettingType::Int,
+                     .defaultValue = 47810,
+                     .minimum = 1024,
+                     .maximum = 65535});
+    settings.define({.key = setting(QStringLiteral("publicAddress")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Public address",
+                     .description = "For watchers outside this network: the address of your own tunnel or reverse "
+                                    "proxy (cloudflared, Tailscale Funnel, ngrok, ...) pointed at the port, such as "
+                                    "https://watch.example.com/. The link uses it. The tunnel's operator can see "
+                                    "the pictures. Empty: the link is this machine's.",
+                     .type = usdcc::core::SettingType::String,
+                     .defaultValue = std::string()});
+}
 
 void toast(const QString& title, const QString& body, const QList<usdcc::ui::ToastAction>& actions = {},
            usdcc::core::ToastKind kind = usdcc::core::ToastKind::Info) {
@@ -95,7 +189,7 @@ void toast(const QString& title, const QString& body, const QList<usdcc::ui::Toa
 }
 
 bool isBroadcasting(const ViewportViewPanel* panel) {
-    return g_state->broadcast && g_state->broadcast->isLive() && g_state->source && g_state->source->panel() == panel;
+    return g_state->broadcast && g_state->broadcast->isLive() && g_state->source && g_state->viewport == panel;
 }
 
 // From toasts too, which may outlive the plugin's state at quit.
@@ -105,6 +199,12 @@ void copyLink() {
 
 void stopBroadcast(const QString& reason = {}) {
     if (g_state && g_state->broadcast) g_state->broadcast->stop(reason);
+}
+
+void showPanel() {
+    if (!g_state || !g_state->panel) return;
+    g_state->panel->show();
+    g_state->panel->raise();
 }
 
 // Before a viewport that's broadcast closes: close it and end the broadcast, or keep both.
@@ -126,10 +226,12 @@ bool mayClose(ViewportViewPanel* panel) {
     return true;
 }
 
-void startBroadcast(ViewportViewPanel* panel) {
+// Broadcasts `source` (owned from here on); `panel` is the viewport it shows, if it is one.
+void startBroadcast(usdcc::broadcast::FrameSource* source, ViewportViewPanel* panel) {
     stopBroadcast();  // One at a time: another viewport's ends
     usdcc::plugin::Host& host = *g_state->host;
     if (!host.peers || !host.peers->peers()) {
+        delete source;
         toast(QObject::tr("Can't broadcast"), QObject::tr("This app has no Peers."), {}, usdcc::core::ToastKind::Error);
         return;
     }
@@ -143,8 +245,14 @@ void startBroadcast(ViewportViewPanel* panel) {
     options.port = static_cast<quint16>(settings.value(setting(QStringLiteral("port")), 47810).toUInt());
     options.pageDirectory = QString::fromStdWString((host.folder / "web").wstring());
     options.allowedOrigins = settings.value(setting(QStringLiteral("allowedOrigins"))).toStringList();
+    // A tunnel's address (phase 4a): only an http(s) one with a host is taken.
+    const QUrl publicAddress =
+        QUrl::fromUserInput(settings.value(setting(QStringLiteral("publicAddress"))).toString().trimmed());
+    if (publicAddress.isValid() && !publicAddress.host().isEmpty() &&
+        (publicAddress.scheme() == QLatin1String("https") || publicAddress.scheme() == QLatin1String("http"))) {
+        options.publicAddress = publicAddress;
+    }
 
-    auto* source = new ViewportSource(panel);
     options.name = QObject::tr("Broadcast: %1").arg(source->title());
     QString error;
     Broadcast* broadcast = Broadcast::start(host.peers->peers(), source, options, &error);
@@ -156,13 +264,33 @@ void startBroadcast(ViewportViewPanel* panel) {
     source->setParent(broadcast);
     g_state->broadcast = broadcast;
     g_state->source = source;
+    g_state->viewport = panel;
     // Which viewport is sent, at a glance.
-    panel->setBorderColor(kLiveRed);
+    if (panel) panel->setBorderColor(kLiveRed);
     host.log(usdcc::core::LogLevel::Info, "Broadcasting " + source->title().toStdString() + " on port " +
                                               std::to_string(broadcast->room()->port()));
 
     QObject::connect(broadcast, &Broadcast::watcherJoined, broadcast, [](const usdcc::peers::Peer& watcher) {
         toast(QObject::tr("%1 is watching").arg(watcher.name), {});
+    });
+    // A watcher asks to navigate (§2.1): Allow or Deny, on a toast that stays.
+    QPointer<Broadcast> asked(broadcast);
+    QObject::connect(broadcast, &Broadcast::navigateAsked, broadcast, [asked](const usdcc::peers::Peer& watcher) {
+        if (!g_state) return;
+        usdcc::ui::MainWindow* window = g_state->host->mainWindow;
+        if (!window || !window->toasts() || !asked) return;
+        usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+        request.title = QObject::tr("%1 asks to navigate %2")
+                            .arg(watcher.name, asked->source() ? asked->source()->title() : QString())
+                            .toStdString();
+        request.body = QObject::tr("They move this viewport's camera until you take it back.").toStdString();
+        const QString id = watcher.id;
+        window->toasts()->show(request, {{QObject::tr("Allow"), [asked, id] {
+                                              if (asked) asked->allowNavigating(id);
+                                          }},
+                                         {QObject::tr("Deny"), [asked, id] {
+                                              if (asked) asked->denyNavigating(id);
+                                          }}});
     });
     QPointer<ViewportViewPanel> broadcastPanel(panel);
     QObject::connect(broadcast, &Broadcast::stopped, broadcast, [broadcast, broadcastPanel](const QString& reason) {
@@ -173,15 +301,11 @@ void startBroadcast(ViewportViewPanel* panel) {
         broadcast->deleteLater();
     });
 
+    if (g_state->panel) g_state->panel->setBroadcast(broadcast);
     copyLink();
-    QList<usdcc::ui::ToastAction> actions{{QObject::tr("Copy Link"), [] { copyLink(); }}};
-    if (host.peers->showPanel) {
-        usdcc::ui::PeersController* peers = host.peers;
-        actions.append({QObject::tr("Watchers"), [peers] {
-                            if (peers->showPanel) peers->showPanel();
-                        }});
-    }
-    actions.append({QObject::tr("Stop"), [] { stopBroadcast(); }});
+    QList<usdcc::ui::ToastAction> actions{{QObject::tr("Copy Link"), [] { copyLink(); }},
+                                          {QObject::tr("Watchers"), [] { showPanel(); }},
+                                          {QObject::tr("Stop"), [] { stopBroadcast(); }}};
     toast(QObject::tr("Broadcasting %1").arg(source->title()),
           QObject::tr("The link is copied: whoever opens it in a browser watches this viewport.\n%1")
               .arg(broadcast->link().toString(QUrl::RemoveFragment)),
@@ -194,12 +318,43 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
     g_state = new State;
     g_state->host = &host;
     g_state->closeGuard = ViewportViewPanel::addCloseGuard(&mayClose);
+    defineSettings();
+    // The Broadcast panel, hidden until asked for (View menu, the toast's Watchers); a saved
+    // layout shows it where it was.
+    if (host.mainWindow) {
+        auto* panel = new usdcc::broadcast::BroadcastPanel(host.peers);
+        QObject::connect(panel, &usdcc::broadcast::BroadcastPanel::stopRequested, panel, [] { stopBroadcast(); });
+        QObject::connect(panel, &usdcc::broadcast::BroadcastPanel::copyRequested, panel, [] { copyLink(); });
+        // Starting from the panel: any viewport or Render View open now (phase 5).
+        panel->setSourceLister([] {
+            QList<usdcc::broadcast::BroadcastPanel::Source> sources;
+            for (ViewportViewPanel* viewport : ViewportViewPanel::openViewports()) {
+                if (!viewport->isClosed()) sources.append({viewport->windowTitle(), viewport});
+            }
+            for (QWidget* widget : QApplication::allWidgets()) {
+                auto* view = qobject_cast<usdcc::usd::RenderViewPanel*>(widget);
+                if (view && !view->isClosed()) sources.append({view->windowTitle(), view});
+            }
+            return sources;
+        });
+        QObject::connect(panel, &usdcc::broadcast::BroadcastPanel::startRequested, panel, [](QWidget* chosen) {
+            if (auto* viewport = qobject_cast<ViewportViewPanel*>(chosen)) {
+                startBroadcast(new ViewportSource(viewport), viewport);
+            } else if (auto* view = qobject_cast<usdcc::usd::RenderViewPanel*>(chosen)) {
+                startBroadcast(new RenderViewSource(view), nullptr);
+            }
+        });
+        host.addSidePanel(panel, Qt::RightDockWidgetArea);
+        panel->hide();
+        g_state->panel = panel;
+    }
     // A Broadcast submenu in every viewport's tab menu and options menu: what doesn't
     // apply to this viewport is greyed out. Start on another viewport ends this one's.
     const auto live = [](ViewportViewPanel* panel) { return isBroadcasting(panel); };
     const auto notLive = [](ViewportViewPanel* panel) { return !isBroadcasting(panel); };
     host.addViewportMenuAction(QStringLiteral("Broadcast/Start Broadcast"),
-                               [](ViewportViewPanel* panel) { startBroadcast(panel); }, {}, {}, notLive);
+                               [](ViewportViewPanel* panel) { startBroadcast(new ViewportSource(panel), panel); }, {}, {},
+                               notLive);
     host.addViewportMenuAction(QStringLiteral("Broadcast/Stop Broadcast"),
                                [](ViewportViewPanel*) { stopBroadcast(); }, {}, {}, live);
     host.addViewportMenuAction(QStringLiteral("Broadcast/Copy Link"),
@@ -209,10 +364,11 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
 USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host&) {
     ViewportViewPanel::removeCloseGuard(g_state->closeGuard);
     if (g_state->broadcast) {
-        if (g_state->source && g_state->source->panel()) g_state->source->panel()->setBorderColor({});
+        if (g_state->viewport) g_state->viewport->setBorderColor({});
         QObject::disconnect(g_state->broadcast, nullptr, nullptr, nullptr);
         delete g_state->broadcast.data();  // Closes the room
     }
+    delete g_state->panel.data();
     delete g_state;
     g_state = nullptr;
 }

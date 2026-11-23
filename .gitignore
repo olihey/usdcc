@@ -20,6 +20,9 @@ external/pyside-setup/
 external/pyside-setup-src/
 external/pyside-build/
 external/pyside-install/
+external/pyside-pip/
+external/pyside-qtpaths/
+external/pyside-venv/
 external/blender-work/
 external/blender-mesh-install/
 __pycache__/

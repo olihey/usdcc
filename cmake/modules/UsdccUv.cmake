@@ -1,13 +1,13 @@
 # uv (https://docs.astral.sh/uv/), which installs the Python packages plugins and
 # scripts ask for (docs/PYTHON_PACKAGES.md), bundled at a pinned version.
 # Downloaded once at configure time from PyPI's wheel for this platform (Windows
-# x64, Linux x86_64 or aarch64), checked against its SHA-256, and unpacked into
+# x64 or arm64, Linux x86_64 or aarch64), checked against its SHA-256, and unpacked into
 # build/uv (uv[.exe] and its licenses); tools/deploy.py copies that into the
 # deploy's tools/uv. Offline, elsewhere, or with USDCC_BUNDLE_UV off, the app
 # falls back to a uv on PATH.
 #
 # To upgrade: pick a release at least two weeks old, and take the
-# py3-none-win_amd64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
+# py3-none-win_amd64, win_arm64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
 # https://pypi.org/pypi/uv/<version>/json.
 #
 # Sets:
@@ -17,7 +17,11 @@ option(USDCC_BUNDLE_UV "Download the pinned uv, which installs Python packages" 
 
 set(USDCC_UV_VERSION "0.13.5")
 set(USDCC_UV_URL "")
-if(WIN32)
+if(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(USDCC_UV_URL
+        "https://files.pythonhosted.org/packages/52/67/1f31243f75ece410f2db1afdfc9a9f9722fdee2385e4a347c3ca1dee6d13/uv-0.13.5-py3-none-win_arm64.whl")
+    set(USDCC_UV_SHA256 "0548460d46c8667488b1f089e936f29f0edfb1cc753f9152ffbd8bc84a46aa20")
+elseif(WIN32)
     set(USDCC_UV_URL
         "https://files.pythonhosted.org/packages/32/ea/771744a784b16aa21d195cb5d5d5a2878d72fa00fc26f11ea3f9646994fe/uv-0.13.5-py3-none-win_amd64.whl")
     set(USDCC_UV_SHA256 "1fb29fc46ba12033e2ef95a95ac79d649e71bbb1358419bbbcbd19d86026ef2f")

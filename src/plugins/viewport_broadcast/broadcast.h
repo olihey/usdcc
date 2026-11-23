@@ -19,6 +19,7 @@ namespace usdcc::peers {
 class Channel;
 class Peers;
 class Room;
+struct Message;
 struct Peer;
 }  // namespace usdcc::peers
 
@@ -34,6 +35,20 @@ public:
     virtual QImage grab() = 0;
     // What the page calls it: "Viewport 1 · shot.usda".
     virtual QString title() const = 0;
+
+    // A move from the watcher who navigates (VIEWPORT_BROADCAST.md §6): "orbit" and "pan"
+    // by `x`, `y` as fractions of the picture's width and height, "zoom" by `x` wheel
+    // notches (positive: closer), "fit". False when it isn't done now: the host's own hand
+    // is on the camera, or the source can't move.
+    // Whether watchers may ask to navigate it at all: a viewport may; a Render View, which
+    // follows a viewport's camera or one of the stage's, doesn't. Fixed for a broadcast.
+    virtual bool canNavigate() const { return false; }
+    virtual bool navigate(const QString& move, double x, double y) {
+        Q_UNUSED(move);
+        Q_UNUSED(x);
+        Q_UNUSED(y);
+        return false;
+    }
 
 Q_SIGNALS:
     // There is a new picture to grab().
@@ -51,6 +66,11 @@ public:
     // "snapshot" for the picture a newcomer gets first. The body has the picture's size
     // and the title; the raw bytes are a JPEG.
     static constexpr char kViewChannel[] = "org.usdcc.viewport-broadcast/view";
+    // Navigating (§6): direct, open to guests. A watcher sends "ask" and "cancel", and
+    // while it navigates "orbit" {x, y}, "pan" {x, y}, "zoom" {steps} and "fit"; anything
+    // else, or a move from someone who doesn't navigate, is refused. The host sends each
+    // watcher "navigator" {id, name} (empty when nobody), and the one who asked "denied".
+    static constexpr char kNavChannel[] = "org.usdcc.viewport-broadcast/nav";
 
     struct Options {
         QString name;  // The room's
@@ -58,6 +78,10 @@ public:
         quint16 port = 47810;  // Taken: any free one
         QString pageDirectory;  // The page: its index.html and the files beside it
         QStringList allowedOrigins;  // A tunnel's address, for its pages to connect
+        // Where watchers outside reach it (phase 4a): the address of the user's own tunnel or
+        // reverse proxy pointed at the port ("https://watch.example.com/", a path allowed).
+        // The link uses it, and its origin may connect. Empty: the link is this machine's.
+        QUrl publicAddress;
         int maxGuests = 8;
         int maxWidth = 1920;  // Wider pictures are scaled down
         int movingQuality = 60;
@@ -73,12 +97,25 @@ public:
 
     usdcc::peers::Room* room() const;
     FrameSource* source() const { return m_source; }
-    // The web link for watchers: http://<address>:<port>/#s=<guests' secret>.
+    // The web link for watchers: the public address when there is one, else
+    // http://<address>:<port>/; and #s=<guests' secret>.
     QUrl link() const;
+    // The link on this machine's own address, whether or not there is a public one.
+    QUrl localLink() const;
     QList<usdcc::peers::Peer> watchers() const;
     bool isLive() const;
     // Closes the room; the page says why. stopped() follows.
     void stop(const QString& reason = {});
+
+    // Navigating (§2.1, §6): one watcher at a time, allowed by the host.
+    QString navigator() const { return m_navigator; }
+    QStringList asking() const { return m_asking; }
+    // Lets `watcher` navigate, taking it from whoever did. False for someone who isn't watching.
+    bool allowNavigating(const QString& watcher);
+    // Says no to a watcher who asked.
+    void denyNavigating(const QString& watcher);
+    // Ends the watcher's navigating.
+    void takeBack();
 
     struct Stats {
         int sent = 0;           // Pictures sent, snapshots aside
@@ -86,12 +123,18 @@ public:
         qint64 bytes = 0;       // JPEG bytes of the pictures sent
         double encodeMs = 0.0;  // The last picture's
         QSize size;             // The last picture's
+        int moves = 0;          // Navigating moves done
+        int movesRefused = 0;   // From someone who didn't navigate, or while the host's hand was on it
     };
     Stats stats() const { return m_stats; }
 
 Q_SIGNALS:
     void watchersChanged();
     void watcherJoined(const usdcc::peers::Peer& watcher);
+    // A watcher asks to navigate; the host answers with allowNavigating() or denyNavigating().
+    void navigateAsked(const usdcc::peers::Peer& watcher);
+    // Someone else navigates now, or nobody; and who's asking changed.
+    void navigatorChanged();
     // The room closed: stop(), the source gone, or the room itself.
     void stopped(const QString& reason);
 
@@ -102,9 +145,15 @@ private:
     void encode(const QImage& image, int quality);
     void encoded(const QByteArray& jpeg, QSize size, size_t hash, int quality, bool unchanged, double ms);
     QJsonObject frameBody() const;
+    void onNav(const usdcc::peers::Message& message);
+    void setNavigator(const QString& id);
+    void tellNavigator(const QString& to = {});
 
     QPointer<usdcc::peers::Room> m_room;
     QPointer<usdcc::peers::Channel> m_view;
+    QPointer<usdcc::peers::Channel> m_nav;
+    QString m_navigator;
+    QStringList m_asking;
     QPointer<FrameSource> m_source;
     Options m_options;
     QTimer m_still;

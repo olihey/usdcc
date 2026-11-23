@@ -104,6 +104,8 @@ add_executable(usdcc_ui_tests
     current_stage_test.cpp
     dependencies_panel_test.cpp
     dope_sheet_test.cpp
+    curve_editor_test.cpp
+    playblast_test.cpp
     dependency_files.h
     layer_editor_test.cpp
     log_panel_test.cpp
@@ -160,7 +162,7 @@ if(USDCC_BUILD_PHYSICS_JOLT)
 endif()
 if(USDCC_BUILD_VIEWPORT_BROADCAST)
     target_sources(usdcc_ui_tests PRIVATE viewport_broadcast_test.cpp)
-    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_core)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_ui)
 endif()
 # The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)

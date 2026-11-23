@@ -11,6 +11,10 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 §8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
 **Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
+**Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel. **Phase 3 is built** (2026-11-23,
+§11.4): a watcher navigates once the host allows it. **Phase 4a is built** (2026-11-23, §11.5): the
+Public address for a tunnel; 4b waits for the Peers relay. **Phase 5 is half built** (2026-11-23,
+§11.6): Render Views as sources; H.264 is not built, and §11.6 says what it needs first.
 [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
@@ -254,7 +258,7 @@ Small and general, so other plugins gain from them too:
    viewport then costs 60 reads a second only to find nothing new, and the wait for the next poll
    was most of the delay between a move and its picture (§11.1). **Built** (phase 1): after every
    frame that reached the screen.
-2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6).
+2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6). **Built** (phase 3, §11.4).
 3. **Entries in a viewport's menus from a plugin:** `Host::addViewportMenuAction()` and
    `usdcc.app.add_viewport_menu_action()`, like the Outliner's prim menu
    ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point. **Built** (phase 1):
@@ -319,10 +323,10 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 |---|---|---|
 | **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks. **On this machine: done** (§11.1); the LAN, the tunnel and the firewall remain |
 | **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port. **Built** (§11.2); all of it checked on this machine, not yet from a second one |
-| **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat |
-| **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click |
-| **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
-| **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast |
+| **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat. **Built** (§11.3) |
+| **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click. **Built** (§11.4); not yet tried from a browser |
+| **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only. **4a built** (§11.5), not yet tried through a real tunnel; **4b waits** for the relay, which `usdcc_peers` doesn't have yet |
+| **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast. **Render Views built** (§11.6), except RTX, which has no picture to read; **H.264 not built** (§11.6) |
 | **Later** | A watcher's pointer shown to all; drawing on the picture; several broadcasts at once | |
 
 Phases 0 to 3 need no server and no new codec.
@@ -482,6 +486,139 @@ need.
 **Found on the way, for Peers:** the host's chat snapshot sends a newcomer the lines of the host's
 own panel ("You host …", "Anna joined"), worded for the host. The page filters them; a peer joining
 a room sees them in its Peers panel.
+
+### 11.3 Phase 2 as built
+
+Most of phase 2 came with phase 1: the page asks for a name (kept by the browser), the chat goes
+both ways through the room's `chat` channel, the host has it in the Peers panel, and Peers' chat
+toasts (Settings > Peers) show a watcher's line while the Peers panel is hidden. What phase 2
+added is **the Broadcast side panel** (`broadcast_panel.h`, `.cpp`, in a static library of its own,
+`usdcc_viewport_broadcast_ui`, which the plugin and the tests link):
+
+- **What it shows:** what is broadcast and to how many ("Broadcasting Viewport 1 · shot.usda to 2
+  watchers"), the link with **Copy**, **Stop**, the watchers by name, and the broadcast's chat with
+  a line to type in. With no broadcast: "Not broadcasting", and where Start Broadcast is. After
+  one ends: why.
+- **Per watcher: Remove** (select, then Remove): the room removes them, and their page says "The
+  host removed you from the broadcast". They can come back with the link; a new broadcast has a
+  new one.
+- **The chat is the Peers panel's,** from `PeersController::chat()` and `chatAdded`; the host's line
+  goes out through `say()`, so both panels show the same lines. Text only.
+- **Where it is:** a side panel on the right, hidden until asked for: the View menu, or **Watchers**
+  on the "Broadcasting …" toast (which opened the Peers panel before). A saved layout shows it
+  where it was.
+- Not in it yet: **Allow navigating** and **Take back** (phase 3).
+
+**Tests:** `broadcast_panel_watchers_and_chat` (`usdcc_ui_tests`): the idle text, the link, a
+watcher listed and counted, their chat line in the panel, the host's line from the panel reaching
+the watcher, Remove, Stop asking to stop, and the panel saying the broadcast ended. **Checked in
+the app** (test profile): the panel exists, starts hidden, is in the View menu, and says "Not
+broadcasting" when shown. Starting a broadcast from a script wasn't reached (the viewport menus
+are rebuilt each time they open); the test covers the panel while live.
+
+### 11.4 Phase 3 as built
+
+- **In the viewport** (`HydraViewportWindow`, §8 item 2): `orbitBy(dx, dy)`, `panBy(dx, dy)` and
+  `zoomBy(steps)`, in the window's pixels and wheel notches. The mouse handlers and these share
+  `orbitStep()` and `zoomStep()`, so half a degree a pixel, the upside-down orbit, a Z-up stage and
+  0.9 a notch are the same either way. Each leaves a stage camera for the orbit camera first, as a
+  drag does; an orthographic axis view doesn't orbit. `panBy()` keeps what's in the middle of the
+  view under the same spot, as a drag does with what's under the cursor.
+  `isMouseNavigating()` says the host's own mouse is on the camera or a tool.
+- **The channel** `org.usdcc.viewport-broadcast/nav`: direct, open to guests. A watcher sends
+  `ask` and `cancel`, and while it navigates `orbit {x, y}` and `pan {x, y}` (fractions of the
+  picture, at most 1), `zoom {steps}` (at most 10) and `fit`. The host sends every watcher
+  `navigator {id, name}` (empty when nobody), when it changes and to a newcomer, and the one it
+  turned down `denied`.
+- **The rules** (`Broadcast`): one navigator; allowing another takes it from the first. A move
+  from anyone else, out of range, or while the host's mouse is down on the viewport is dropped
+  and counted (`Stats::movesRefused`): the host always wins. Any other message type on the
+  channel removes the page (§9's closed list). A navigator who leaves, or sends `cancel`, ends
+  it. Nothing is recorded for undo.
+- **The host:** "Anna asks to navigate Viewport 1" as a toast that stays, with **Allow** and
+  **Deny**. In the Broadcast panel the watchers show "(navigating)" or "(asks to navigate)", with
+  **Allow Navigating** for the one selected and **Take Back**.
+- **The page:** **Ask to navigate** in the bar (then **Cancel asking**, then **Stop
+  navigating**), and who navigates. While it's the watcher: drag to orbit, shift or middle drag
+  to pan, wheel to zoom, F to fit; the picture gets an accent outline and a grab cursor. Moves
+  are added up and sent at most once a frame.
+- **Fit** is the viewport's Fit to View (the host's selection, or the stage).
+
+**Tests:** `broadcast_navigating` (`usdcc_ui_tests`): the nav channel is open to watchers; a move
+before being allowed is refused; ask reaches the host, deny tells the watcher, ask again and allow
+make them the navigator and tell the others; orbit, zoom and fit arrive as sent; another watcher's
+move, one out of range, and one while the host's hand is on it are refused; Take back tells the
+watcher and refuses the next move; a message outside the list removes the page.
+`viewport_navigates_by_moves` (`usdcc_python_tests`): orbit, zoom and pan move the camera as the
+mouse does and say so. The page's script parses (`node --check`); **not yet tried in a browser.**
+
+### 11.5 Phase 4a as built
+
+- **Settings > Peers > Viewport Broadcast** (the plugin defines them; the keys are the ones
+  phase 1 read, `PluginSettings/org.usdcc.viewport-broadcast/…`): **Broadcast on the network**,
+  **Port**, and the new **Public address**. `allowedOrigins` stays a key without a page.
+- **Public address:** the address of the user's own tunnel or reverse proxy pointed at the
+  port, such as `https://watch.example.com/`, a path allowed. Only an `http` or `https` address
+  with a host is taken. With it:
+  - the link is the tunnel's: `https://watch.example.com/studio/#s=<secret>` (a path gets its
+    trailing `/`, so the page's files resolve under it). The Broadcast panel and Copy Link give
+    that one; `Broadcast::localLink()` keeps this machine's.
+  - the tunnel's origin may open the WebSocket, as if it were in `allowedOrigins`.
+- **The page** opens its WebSocket beside itself (`ws` relative to the page, `wss:` on an `https`
+  page) rather than at the host's root, so a proxy that serves it under a path carries the
+  pictures too.
+- As §5 says, the tunnel's operator can see the stream; the setting's description says so.
+
+**Tests:** `broadcast_public_address` (`usdcc_ui_tests`): the link is the tunnel's with the
+secret and a trailing `/`, the local link stays this machine's, a page from the tunnel's origin
+connects and one from another origin doesn't, and without the setting the link is as before.
+**Not tried yet:** a real tunnel (cloudflared, Tailscale Funnel) and a watcher on a phone network.
+
+### 11.6 Phase 5 as built: Render Views as sources
+
+- **`RenderViewPanel`** says when it shows a new picture (`imageShown()`: `showImage()`, a linear
+  image once it's through the view transform, `showPresentedFrame()`) and gives it
+  (`currentImage()`, virtual: `image()` here). So V-Ray Render and any Python renderer's view
+  can be broadcast, in display colors.
+- **RTX Render presents on its own** (a native window, `showPresentedFrame()`): it has no
+  `QImage`, `currentImage()` is null, and nothing is sent. It needs a read-back of its frame
+  (an override of `currentImage()`), which is RTX's to add. So "an RTX render is broadcast"
+  isn't done.
+- **Starting one:** the Broadcast panel has a source list and **Start**: every open viewport and
+  Render View, read when the list opens. The viewport menus' Broadcast is as before. Render
+  Views have no menu entry of their own: a plugin can't add to their menus yet.
+- **A Render View can't be navigated** (`FrameSource::canNavigate()`, false unless the source
+  says so; a viewport does): the nav channel isn't opened, so the page shows no **Ask to
+  navigate**. It follows a viewport's camera or one of the stage's, which the host moves.
+- No red border and no close guard for a Render View: closing it ends the broadcast ("The
+  Render View closed").
+
+**Tests:** `broadcast_sources` (`usdcc_ui_tests`): a source that can't be navigated offers no
+nav channel and nobody can be allowed; the panel lists the sources it's given and Start asks
+for the one chosen; the list is off while live. `render_view_panel_image_shown`: a picture shown
+says so and is `currentImage()`. **Not tried in the app** with a real renderer.
+
+### 11.7 H.264: not built, and why
+
+The plan (§4.2) assumed the room's latest-only delivery carries video as it carries JPEG. It
+doesn't: a JPEG stands alone, but most H.264 frames are differences from the frame before. Latest
+only drops frames for a slow watcher, and the next difference then decodes into garbage until a
+key frame. So H.264 needs, before an encoder:
+
+1. **Per-watcher delivery that never drops a difference:** an ordered stream per watcher with
+   its own small budget, and when that budget is spent, a request for a key frame instead of
+   dropping. The room has nothing per watcher like that; it is a `usdcc_peers` change.
+2. **Key frames on demand:** for a newcomer (its snapshot must be a key frame), for a watcher
+   that fell behind, and when the size changes. One encoder then serves everyone only if all
+   watchers take the same key frames, which costs the fast ones bandwidth; one encoder per
+   watcher costs the GPU. To decide.
+3. **Two streams at once:** a watcher on a plain `http://` LAN link has no WebCodecs (§4.2) and
+   keeps JPEG, so a broadcast to both sends both.
+4. Then the encoder (Media Foundation's H.264 MFT, NV12 input, Annex B out) and the page's
+   `VideoDecoder`, negotiated as §4.2 says.
+
+This is its own piece of work, best planned with PEERS.md's relay (4b), which is where the
+bandwidth matters.
 
 ## 12. Open questions
 

@@ -104,10 +104,21 @@ public:
     // whose stage has no timeline. Draws a new frame when it changed.
     void setTime(PXR_NS::UsdTimeCode time);
     PXR_NS::UsdTimeCode time() const { return m_time; }
+    // The time of the last frame drawn with a stage: what grabFrame() shows (a playblast
+    // waits for it, docs/ANIMATION.md phase 5).
+    PXR_NS::UsdTimeCode renderedTime() const { return m_renderedTime; }
+    // Whether the last frame was the renderer's last word: a progressive one has more to do
+    // until it's converged.
+    bool isConverged() const { return !m_converging; }
     // The resolution gate (docs/VIEWPORT_CAMERA.md §4): the image's size, nothing for Fill
     // Viewport (or Render Settings on a stage without them); and where the gate is in the
     // window, in logical pixels: the whole window without a resolution.
     std::optional<Resolution> gateResolution() const;
+    // `like` (its clipping, apertures' shape and the rest) set to see what the orbit camera
+    // sees in the gate: what Copy View to Camera and Drive write.
+    PXR_NS::GfCamera orbitViewAsCamera(const PXR_NS::GfCamera& like) const;
+    // Drive or Locked: done with a drag now (for a drag that ends some other way).
+    bool isDriving() const { return m_driving; }
     ViewRect gate() const;
 
     // Whether firstFrameRendered() has already fired for the current stage —
@@ -200,6 +211,18 @@ public:
     // space) fills the view. See frameOrbitCamera().
     void frameBox(const PXR_NS::GfRange3d& box);
 
+    // Navigating from elsewhere (a broadcast's watcher, docs/VIEWPORT_BROADCAST.md §6) as
+    // the mouse does it, so a Z-up stage, an upside-down orbit and an orthographic view
+    // behave the same. Distances are in this window's pixels; `steps` are wheel notches,
+    // positive towards the scene. A stage camera is left for the orbit camera first, as a
+    // drag does; an orthographic axis view doesn't orbit. Each says cameraChanged().
+    void orbitBy(double dx, double dy);
+    void panBy(double dx, double dy);
+    void zoomBy(double steps);
+    // A mouse button is down on the window for the camera or a tool: the host's own hand,
+    // which a watcher's moves wait for (§2.1, "the host always wins").
+    bool isMouseNavigating() const { return m_orbiting || m_panning || m_dragging; }
+
     // The camera this viewport renders with, as a frustum: position and
     // orientation (ComputeViewInverse() is the camera-to-world matrix), the
     // vertical field of view, the window's aspect ratio and the clipping range.
@@ -272,6 +295,9 @@ public:
         // Render scale (§5): Hydra renders at this percentage of the device pixels (100, 75,
         // 50 or 25), scaled up, and the grid, outline and gizmos are drawn at full size.
         int renderScale = 100;
+        // What a tumble, pan or dolly does through a stage camera (§2): "detach" leaves it for
+        // the orbit camera, "drive" moves it (one undo step a drag), "locked" does nothing.
+        std::string cameraNavigation = "detach";
         bool operator==(const DisplayOptions&) const = default;
     };
     // What a renderer that isn't Storm can draw of `shading`: Smooth Shaded only.
@@ -337,6 +363,15 @@ public:
     void snapToAxis(HudItem item);
 
 Q_SIGNALS:
+    // Drive (docs/VIEWPORT_CAMERA.md §2.2): a drag through a stage camera began; the orbit
+    // camera moved, so the stage camera is to be set to it (orbitViewAsCamera()); the drag
+    // ended. The panel makes them one undo step.
+    void driveStarted();
+    void driveMoved();
+    void driveFinished();
+    // A drag through a stage camera did nothing (Locked), or Drive couldn't move the camera
+    // and detached instead: why.
+    void navigationRefused(const QString& why, bool locked);
     // A HUD label was clicked (Camera, Renderer, Shading, EditTarget): its menu belongs
     // under `globalPos`.
     void hudMenuRequested(usdcc::usd::HudItem item, QPoint globalPos);
@@ -440,6 +475,9 @@ private:
     void watchTopLevel();
     // After the camera changed: redraw and tell cameraChanged()'s listeners.
     void cameraMoved();
+    // The orbit and the zoom both the mouse and orbitBy()/zoomBy() do.
+    void orbitStep(double dx, double dy, bool reversed);
+    void zoomStep(double steps);
     PXR_NS::GfVec3d cameraPosition() const;
     // The up axis the camera orbits about: the stage's. A preview's stays Y, as its
     // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3).
@@ -492,6 +530,14 @@ private:
     // The HUD (docs/VIEWPORT_HUD.md §4): laid out, painted into m_hudImage when the layout
     // changed, and drawn as one textured quad over the default framebuffer.
     bool hudActive() const { return m_display.hud && !m_previewMode; }
+    // Where a tumble, pan, dolly or Fit to View starts (§2): false when it's to do nothing
+    // (Locked). Through a stage camera in Drive, the orbit camera takes its pose and the
+    // camera follows it (driveStarted(), driveMoved()); otherwise it detaches.
+    bool startNavigation();
+    // Ends a Drive (driveFinished()).
+    void finishNavigation();
+    bool m_driving = false;
+    bool m_navigationBlocked = false;  // a drag Locked refused: its moves do nothing
     // The gate's mask or a safe frame is drawn (docs/VIEWPORT_CAMERA.md §4, §6): the HUD's
     // pass runs for them even with the HUD off.
     bool gateOverlaysActive() const;
@@ -521,6 +567,7 @@ private:
     QOpenGLFramebufferObject* bindHydraFramebuffer(int width, int height);
     PXR_NS::UsdStageRefPtr m_stage;
     PXR_NS::UsdTimeCode m_time = PXR_NS::UsdTimeCode::Default();
+    PXR_NS::UsdTimeCode m_renderedTime = PXR_NS::UsdTimeCode::Default();
 
     PXR_NS::GfVec3d m_target{0.0, 0.0, 0.0};
     double m_distance = kDefaultOrbitDistance;
