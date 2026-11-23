@@ -200,7 +200,8 @@ def _vcpkg_licences(licenses_dir, sources):
 # OpenUSD's own plugins in plugin/usd, with deps/usd.json's build_usd.py flags.
 # Reviewed against the pinned OpenUSD source, not read off the install: a local
 # one can hold a third-party renderer someone installed into it by hand.
-OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdShaders")
+OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdAbc", "usdDraco",
+                   "usdShaders")
 
 # Where the USD plugin packs' own files are, in an OpenUSD install and in a deploy.
 USD_PACKS_DIR = "usd-plugins"
@@ -834,9 +835,10 @@ def _python_layout(python_exe):
     return Path(home), version, Path(stdlib), Path(executable)
 
 
-def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False):
+def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False, also=()):
     """Points the RUNPATH of every ELF file under `folders` at the deploy's lib/
-    (and, for plugins, at their own folder first, as Windows finds a DLL's DLLs)."""
+    (and, for plugins, at their own folder first, as Windows finds a DLL's DLLs),
+    then at the `also` folders."""
     from _elf import elf_files, origin_relative, set_runpath
     lib = deploy_dir / "lib"
     changed = []
@@ -847,6 +849,7 @@ def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False):
             entries = [origin_relative(file, lib)]
             if own_folder_first and entries[0] != "$ORIGIN":
                 entries.insert(0, "$ORIGIN")
+            entries += [origin_relative(file, other) for other in also]
             set_runpath(file, entries)
             changed.append(file)
     return changed
@@ -1061,7 +1064,8 @@ def deploy_linux(args):
 
     print("  RUNPATHs relative to $ORIGIN", flush=True)
     elves = _set_deploy_runpaths(deploy_dir, [bin_dir, deploy_dir / "plugin/usd", deploy_dir / "Qt6/plugins"])
-    elves += _set_deploy_runpaths(deploy_dir, [site_packages])
+    # pxr.UsdAbc and pxr.UsdDraco link their plugins, usdAbc.so and usdDraco.so, which aren't in lib/.
+    elves += _set_deploy_runpaths(deploy_dir, [site_packages], also=[deploy_dir / "plugin/usd"])
     elves += _set_deploy_runpaths(deploy_dir, [deploy_dir / "plugins", deploy_dir / "examples/plugins"],
                                   own_folder_first=True)
     from _elf import is_elf, set_runpath

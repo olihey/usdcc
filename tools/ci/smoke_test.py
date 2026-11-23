@@ -8,10 +8,10 @@ outside the deploy: a DLL or Python file the build's own folders were hiding
 (docs/RELEASE.md section 4).
 
 The same script asks OpenUSD for its own render delegates (Storm, Embree) and
-for the plugins of each USD plugin pack the deploy has (its usd-plugins/*.json),
-and does what the pack's pin asks under "check": the plugins load from the
-deploy, the extensions have file formats, the render delegates are listed, the
-sample files open
+file formats (Alembic, Draco), and for the plugins of each USD plugin pack the
+deploy has (its usd-plugins/*.json), and does what the pack's pin asks under
+"check": the plugins load from the deploy, the extensions have file formats, the
+render delegates are listed, the sample files open
 (docs/USD_PLUGINS.md). --expect-standard-usd-packs fails a deploy that lacks a
 pack of the standard set, which a release has to have.
 
@@ -46,8 +46,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import ASSET_PLATFORM, REPO, WINDOWS, fail, remove_tree  # noqa: E402
 import usd_plugin_asset  # noqa: E402
 
-# OpenUSD's own render delegates, which every deploy has (tools/deploy.py).
-OPENUSD_PLUGINS = ["hdStorm", "hdEmbree"]
+# OpenUSD's own render delegates and file formats, which every deploy has (tools/deploy.py).
+OPENUSD_PLUGINS = ["hdStorm", "hdEmbree", "usdAbc", "usdDraco"]
 
 CHECK = """\
 import json
