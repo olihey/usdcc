@@ -806,8 +806,10 @@ path as a link, and a late joiner gets the chat so far.
 - **This network** (§5.2): the `mdns` library. **Measured, one machine:** a room announced on
   port 5353 beside Windows' own mDNS was found at the machine's LAN address within a few seconds.
   A host announces only rooms on a network address that don't need an invitation. A member asks
-  only while the Peers panel shows and "Look for rooms on this network" is on. Not tried:
-  another machine, subnets and VPNs. Multicast goes out on the default interface only.
+  only while the Peers panel shows and "Look for rooms on this network" is on. Rooms are
+  asked for and announced on every adapter that is up: left to itself the system multicasts on
+  one, and with a VPN or virtual adapters that needn't be the LAN (*seen:* Windows, OpenVPN and
+  WSL: a question on the default adapter got no answer, on Ethernet the room). Not tried: subnets.
 - **Public rooms:** **Host Room…** offers "Only those with the invite link", "Anyone on this
   network, once I allow them" (the default) and "Anyone on this network (a public room)".
 - **Hosting** listens on every address, on the port of Settings > Peers or any free one, so
