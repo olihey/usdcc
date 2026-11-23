@@ -13,6 +13,7 @@ inline constexpr auto kUserPackagesKey = "Python/userPackages";
 inline constexpr auto kPackageIndexKey = "Python/packageIndex";
 inline constexpr auto kWheelsFolderKey = "Python/wheelsFolder";
 inline constexpr auto kPackagesOfflineKey = "Python/offline";
+inline constexpr auto kDebugPortKey = "Python/debugPort";
 
 // Defines them. Before PluginManager::defaultOptions() and PythonRuntime, which
 // read them, and after usdcc::ui::installAppSettings(), so they load saved values.

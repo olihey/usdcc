@@ -25,6 +25,8 @@ public:
     // What Run Selection runs: the selected lines, or the cursor's line when
     // nothing is selected, with their common indentation removed.
     QString selectedCode() const;
+    // The line number of its first line, from 1.
+    int selectedFirstLine() const;
 
     void indentSelection();
     void dedentSelection();

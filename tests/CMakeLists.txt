@@ -204,6 +204,7 @@ add_executable(usdcc_python_tests
     python_runtime_test.cpp
     script_editor_panel_test.cpp
     session_test.cpp
+    app_stub_test.cpp
     startup_scripts_test.cpp
     validation_python_test.cpp
     viewport_camera_test.cpp
@@ -211,7 +212,7 @@ add_executable(usdcc_python_tests
     python_test_app.h
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
-target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data")
+target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data" USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # A C++ plugin for plugin_native_test.cpp, with a DLL of its own beside it.
 set(_usdcc_test_plugins "${CMAKE_CURRENT_BINARY_DIR}/plugins")
@@ -235,6 +236,10 @@ if(USDCC_BUILD_PHYSICS_JOLT)
     target_link_libraries(usdcc_python_tests PRIVATE usdcc_physics_jolt_backend)
 endif()
 target_link_libraries(usdcc_python_tests PRIVATE Qt6::Test)
+if(USDCC_BUILD_EDITOR_LINK)
+    target_sources(usdcc_python_tests PRIVATE editor_link_test.cpp editor_debug_test.cpp)
+    target_link_libraries(usdcc_python_tests PRIVATE Qt6::Network)
+endif()
 if(TARGET blender_mesh_tools)
     add_executable(usdcc_blender_mesh_benchmark blender_mesh_benchmark.cpp)
     target_link_libraries(usdcc_blender_mesh_benchmark PRIVATE usdcc_blender_mesh_conversion)
@@ -398,6 +403,19 @@ if(TARGET blender_mesh_tools)
         COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_build_test.py")
     add_test(NAME usdcc_blender_mesh_package_tools
         COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_package_test.py")
+endif()
+
+# A debugger attached to the app (editor_debug_test.cpp): its own run, as debugpy stays
+# loaded, and the exit code is part of it.
+if(USDCC_BUILD_EDITOR_LINK AND USDCC_DEBUGPY_DIR)
+    add_test(NAME usdcc_editor_debug COMMAND usdcc_python_tests editor_debug)
+    get_test_property(usdcc_python_tests ENVIRONMENT_MODIFICATION _usdcc_editor_debug_environment)
+    set_tests_properties(usdcc_editor_debug PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;USDCC_TEST_DEBUGGER=1"
+        TIMEOUT 300)
+    if(_usdcc_editor_debug_environment)
+        set_tests_properties(usdcc_editor_debug PROPERTIES ENVIRONMENT_MODIFICATION "${_usdcc_editor_debug_environment}")
+    endif()
 endif()
 
 # Jolt's DLL beside every test program that links the physics backend, wherever Jolt was

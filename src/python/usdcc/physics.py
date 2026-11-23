@@ -22,14 +22,22 @@ solves anew. The "physics_changed" event (``usdcc.app.connect()``) follows every
 change to the cache.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from usdcc import usd as _usd
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pxr import Sdf, Usd
 
 
 def _manager_and_id(stage):
     return _usd.stage_manager(), _usd.stage_id(_usd._resolve(stage))
 
 
-def simulate(start=None, end=None, stage=None):
+def simulate(start: float | None = None, end: float | None = None, stage: Usd.Stage | None = None) -> bool:
     """Solves `stage` (default: the current stage) anew from the frame `start` to
     `end` (default: its playback range's first and last), into the cache. Returns
     False if it couldn't start: ``reports()`` says why."""
@@ -40,32 +48,32 @@ def simulate(start=None, end=None, stage=None):
     return manager.physics_simulate(cache_id, start, end)
 
 
-def reset(stage=None):
+def reset(stage: Usd.Stage | None = None) -> None:
     """Clears the cache of `stage` (default: the current stage)."""
     manager, cache_id = _manager_and_id(stage)
     manager.physics_reset(cache_id)
 
 
-def cached_range(stage=None):
+def cached_range(stage: Usd.Stage | None = None) -> tuple[float, float] | None:
     """``(first, last)``: the frames the cache holds, or None when it's empty."""
     manager, cache_id = _manager_and_id(stage)
     return manager.physics_cached_range(cache_id)
 
 
-def is_stale(stage=None):
+def is_stale(stage: Usd.Stage | None = None) -> bool:
     """True when the stage changed after the cache was made."""
     manager, cache_id = _manager_and_id(stage)
     return manager.physics_is_stale(cache_id)
 
 
-def reports(stage=None):
+def reports(stage: Usd.Stage | None = None) -> list[tuple[str, str]]:
     """``[(path, message), ...]``: what the last simulation left out or changed,
     with the prim it's about."""
     manager, cache_id = _manager_and_id(stage)
     return manager.physics_reports(cache_id)
 
 
-def bake(prims=None, mark_kinematic=False, stage=None):
+def bake(prims: Iterable[Usd.Prim | Sdf.Path | str] | None = None, mark_kinematic: bool = False, stage: Usd.Stage | None = None) -> list[str]:
     """Keeps the simulation of `stage` (default: the current stage): solves its playback
     range where the cache lacks frames, writes the frames of the rigid bodies at or under
     `prims` (default: all) into the edit target as time samples on their transforms, and
@@ -78,7 +86,7 @@ def bake(prims=None, mark_kinematic=False, stage=None):
     return manager.physics_bake(cache_id, paths, bool(mark_kinematic))
 
 
-def check(stage=None):
+def check(stage: Usd.Stage | None = None) -> list[tuple[str, str, str]]:
     """``[(path, message, source), ...]``: what OpenUSD's physics validators say about
     `stage` (default: the current stage), source "validator" or "validator error", and
     what a simulation of it would leave out or change, source "simulation"."""

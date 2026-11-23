@@ -12,6 +12,19 @@ namespace usdcc::scripting {
 // %APPDATA%\Python\PythonXY\site-packages, are on sys.path.
 inline constexpr auto kPythonUserSiteKey = "Python/userSite";
 
+// What a script raised, for showing where it stopped (docs/VSCODE.md §3.2).
+struct ScriptError {
+    std::string type;     // "ValueError"; empty when nothing was raised
+    std::string message;  // str() of the exception
+    struct Frame {
+        std::string file;
+        int line = 0;
+        std::string function;
+    };
+    // Outermost first. A SyntaxError's last one is the line it's in.
+    std::vector<Frame> frames;
+};
+
 // Where the embedded interpreter finds Python and the usdcc/pxr packages.
 struct PythonSettings {
     // The Python's prefix (holds Lib/ and python3XY.dll): the one OpenUSD was
@@ -22,6 +35,8 @@ struct PythonSettings {
     // Off, a plugin can't run here on a package it never asked for and fail
     // elsewhere. Can't change once Python has started.
     bool userSite = false;
+    // Whether `home` is a Python deployed beside the app.
+    bool bundled = false;
 
     // A deployed usdcc's own Python (../python from the executable, with
     // usdcc, pxr and PySide6 in its Lib/site-packages; tools/deploy.py) if
@@ -76,11 +91,31 @@ public:
     // Runs `code` as a script in a fresh namespace (__name__ == "__main__";
     // `fileName` names it in tracebacks). Returns false if it raised: the
     // exception and its traceback are logged (category python.exception).
-    // SystemExit just ends the script and counts as success.
+    // SystemExit just ends the script and counts as success. `firstLine` is the line of
+    // `fileName` that `code` starts on, for a part of a file: tracebacks and breakpoints
+    // then have the file's own line numbers. `error`, if given, gets what was raised.
     bool runString(const std::string& code, const std::string& fileName = "<string>",
-                   Namespace scope = Namespace::Fresh);
+                   Namespace scope = Namespace::Fresh, int firstLine = 1, ScriptError* error = nullptr);
     // runString() with the file's contents; __file__ is set.
     bool runFile(const std::filesystem::path& file, Namespace scope = Namespace::Fresh);
+    // Whether a runString() or runFile() is going on, or a plugin is starting. Any thread.
+    bool isRunning() const;
+    // Stops what the main thread is running (isRunning()), as soon as it's between two Python
+    // instructions: KeyboardInterrupt is raised in it. One inside a long call into C++ stops
+    // when that returns. False when nothing is. Any thread, and without the GIL. It never
+    // reaches what runs after it, however late.
+    bool stop();
+    // Makes what the main thread runs while it exists something stop() can stop.
+    class Stoppable {
+    public:
+        explicit Stoppable(PythonRuntime& runtime);
+        ~Stoppable();
+        Stoppable(const Stoppable&) = delete;
+        Stoppable& operator=(const Stoppable&) = delete;
+
+    private:
+        PythonRuntime& m_runtime;
+    };
     // Forgets the session namespace's names.
     void resetSession();
     // Appends `folder` to sys.path, if it isn't there yet, so scripts can

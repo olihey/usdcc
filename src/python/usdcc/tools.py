@@ -7,7 +7,15 @@ A tool made in Python subclasses ``Tool`` and is added with ``register_tool()``.
 Needs the running app.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from usdcc import _plugins
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+    from pxr import Gf, Sdf, Usd
 
 try:
     import _usdcc_app as _native  # compiled into the app
@@ -21,18 +29,18 @@ def _app():
     return _native
 
 
-def tool_names():
+def tool_names() -> list[str]:
     """The tools' ids, in the tool rail's order: select, move, rotate, scale,
     then any others."""
     return _app().tool_names()
 
 
-def active_tool():
+def active_tool() -> str:
     """The active tool's id."""
     return _app().active_tool()
 
 
-def set_active_tool(name):
+def set_active_tool(name: str) -> None:
     """Activates the tool with the id `name` (see tool_names())."""
     _app().set_active_tool(name)
 
@@ -49,7 +57,7 @@ class ToolResult:
     mouse_release(). A press saying this must not have edited anything itself yet.
     """
 
-    def __init__(self, handled=True, new_selection=None, starts_edit=False):
+    def __init__(self, handled: bool = True, new_selection: Iterable[Sdf.Path | str] | None = None, starts_edit: bool = False) -> None:
         self.handled = handled
         self.new_selection = new_selection
         self.starts_edit = starts_edit
@@ -58,14 +66,14 @@ class ToolResult:
 class Gizmo:
     """World-space lines and triangles for the viewport to draw on top."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.lines = []
         self.triangles = []
 
-    def add_line(self, a, b, color=(1, 1, 1, 1)):
+    def add_line(self, a: Sequence[float] | Gf.Vec3d, b: Sequence[float] | Gf.Vec3d, color: Sequence[float] = (1, 1, 1, 1)) -> None:
         self.lines.append((*a, *b, *_rgba(color)))
 
-    def add_triangle(self, a, b, c, color=(1, 1, 1, 1)):
+    def add_triangle(self, a: Sequence[float] | Gf.Vec3d, b: Sequence[float] | Gf.Vec3d, c: Sequence[float] | Gf.Vec3d, color: Sequence[float] = (1, 1, 1, 1)) -> None:
         self.triangles.append((*a, *b, *c, *_rgba(color)))
 
 
@@ -84,7 +92,14 @@ class ToolContext:
 
     __slots__ = ("stage", "selection", "view_matrix", "projection_matrix", "camera_position", "target_op", "_pick")
 
-    def pick(self, ndc):
+    stage: Usd.Stage
+    selection: list[Sdf.Path]
+    view_matrix: Gf.Matrix4d
+    projection_matrix: Gf.Matrix4d
+    camera_position: Gf.Vec3d
+    target_op: str
+
+    def pick(self, ndc: Gf.Vec2d | Sequence[float]) -> Sdf.Path:
         from pxr import Sdf
 
         return Sdf.Path(self._pick(ndc[0], ndc[1]))
@@ -107,42 +122,42 @@ class Tool:
     - ``mouse_release()`` ends a drag.
     """
 
-    def options(self):
+    def options(self) -> list[dict[str, Any]]:
         return []
 
-    def set_option(self, id, value):
+    def set_option(self, id: str, value: Any) -> None:
         pass
 
-    def build_gizmo(self, ctx):
+    def build_gizmo(self, ctx: ToolContext) -> Gizmo | None:
         return None
 
-    def mouse_press(self, ctx, ndc, ray):
+    def mouse_press(self, ctx: ToolContext, ndc: Gf.Vec2d, ray: Gf.Ray) -> ToolResult | None:
         return None
 
-    def mouse_move(self, ctx, ndc, ray):
+    def mouse_move(self, ctx: ToolContext, ndc: Gf.Vec2d, ray: Gf.Ray) -> ToolResult | None:
         return None
 
-    def mouse_release(self):
+    def mouse_release(self) -> None:
         pass
 
 
-def toggle(id, label, value):
+def toggle(id: str, label: str, value: bool) -> dict[str, Any]:
     """An on/off option, for Tool.options()."""
     return {"type": "toggle", "id": id, "label": label, "value": bool(value)}
 
 
-def number(id, label, value, min=0.0, max=1.0, step=0.1, decimals=2, suffix="", enabled_by=""):
+def number(id: str, label: str, value: float, min: float = 0.0, max: float = 1.0, step: float = 0.1, decimals: int = 2, suffix: str = "", enabled_by: str = "") -> dict[str, Any]:
     """A number option. `enabled_by` is a toggle's id that must be on for it."""
     return {"type": "number", "id": id, "label": label, "value": float(value), "min": float(min), "max": float(max),
             "step": float(step), "decimals": int(decimals), "suffix": suffix, "enabled_by": enabled_by}
 
 
-def choice(id, label, value, choices):
+def choice(id: str, label: str, value: str, choices: Iterable[tuple[str, str]]) -> dict[str, Any]:
     """One of `choices`, a list of (id, label) pairs. `value` is the chosen id."""
     return {"type": "choice", "id": id, "label": label, "value": value, "choices": list(choices)}
 
 
-def register_tool(id, label, cls, icon=""):
+def register_tool(id: str, label: str, cls: type[Tool], icon: str = "") -> None:
     """Adds a tool to the tool rail: an instance of ``cls``, a ``Tool`` subclass,
     with the stable ``id`` and the tooltip ``label``.
 
@@ -157,7 +172,7 @@ def register_tool(id, label, cls, icon=""):
     _plugins.track(lambda: unregister_tool(id))
 
 
-def unregister_tool(id):
+def unregister_tool(id: str) -> bool:
     """Removes a tool made in Python. True if there was one."""
     return _app().unregister_tool(id)
 

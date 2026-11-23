@@ -100,7 +100,8 @@ was built with.
 | Blender mesh tools | `USDCC_BUILD_BLENDER_MESH_TOOLS` | Plugin | On | GPL | Small: stop forcing it |
 | Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On (without Velopack it only opens the releases page) | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
 | Peers | `USDCC_BUILD_PEERS` | A library (`usdcc_peers`), linked by `usdcc_usd`, `usdcc_ui`, `usdcc_app` and `usdcc_node` (*checked*) | On | A build that never opens a connection | **Large:** the shared stage, rendering with peers, the render queue and the Peers panel all build on it. Its own plan when it's wanted |
-| MCP, VS Code | to come with them | | | | Have an option from their first phase |
+| Editor link | `USDCC_BUILD_EDITOR_LINK` | In a library (`usdcc_scripting_app`) | On | Other programs running scripts in the app ([VSCODE.md](VSCODE.md)) | Done with its first phase |
+| MCP | to come with it | | | | Has an option from its first phase |
 
 Not candidates: Python scripting and the plugin SDK. Plugins, settings and much of the UI rely on
 them.

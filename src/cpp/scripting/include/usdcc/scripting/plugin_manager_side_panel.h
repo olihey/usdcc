@@ -32,12 +32,14 @@ public:
     // Fills the right-click menu for a plugin (public for tests).
     void populatePluginMenu(QMenu* menu, const QString& id);
     // Makes a new plugin in the user's folder and opens it. False, logged, if it can't.
-    bool createPlugin(const QString& name);
+    bool createPlugin(const QString& name, const QString& templateId = QStringLiteral("menu_action"));
 
 Q_SIGNALS:
     // The app connects these to the Script Editor (docs/PLUGIN_DEV.md).
     void editPluginRequested(const QString& id, const QString& name, const QString& folder, const QString& mainFile);
     void reloadPluginRequested(const QString& id);
+    // Set Up VS Code... for this folder.
+    void setUpVsCodeRequested(const QString& folder);
 
 protected:
     void showEvent(QShowEvent* event) override;

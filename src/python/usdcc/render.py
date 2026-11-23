@@ -31,6 +31,15 @@ A plugin adds a renderer of its own by subclassing ``FinalRenderer`` and calling
 Needs the running app.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pxr import Sdf, Usd
+    from PySide6 import QtGui
+
 try:
     import _usdcc_app as _native  # compiled into the app
 except ImportError:
@@ -49,6 +58,11 @@ class Renderer:
 
     __slots__ = ("id", "name", "problem", "tiles")
 
+    id: str
+    name: str
+    problem: str
+    tiles: bool
+
     def __repr__(self):
         return f"Renderer({self.id!r}, {self.name!r})"
 
@@ -63,11 +77,21 @@ class Job:
 
     __slots__ = ("id", "title", "renderer", "status", "progress", "frames", "files", "error", "queue")
 
+    id: str
+    title: str
+    renderer: str
+    status: str
+    progress: float
+    frames: list[float]
+    files: list[str]
+    error: str
+    queue: str
+
     def __repr__(self):
         return f"Job({self.id!r}, {self.status!r}, {self.progress:.0%})"
 
 
-def renderers():
+def renderers() -> list[Renderer]:
     """The final renderers there are: every Hydra delegate, and those plugins add."""
     result = []
     for id, name, problem, tiles in _app().final_renderers():
@@ -87,7 +111,7 @@ def _submit(stage, settings, animation, renderer):
     return _app().submit_render(usd.stage_id(stage), str(settings or ""), animation, renderer or "")
 
 
-def render_frame(stage=None, settings=None, renderer=None):
+def render_frame(stage: Usd.Stage | None = None, settings: Sdf.Path | str | None = None, renderer: str | None = None) -> str:
     """Queues the frame ``stage`` (a ``Usd.Stage`` open in the app; the current one by default)
     shows, with its RenderSettings prim ``settings`` (a path; its default by default), and
     returns the job's id. ``renderer`` renders with another renderer than the prim's. Raises
@@ -95,12 +119,12 @@ def render_frame(stage=None, settings=None, renderer=None):
     return _submit(stage, settings, False, renderer)
 
 
-def render_animation(stage=None, settings=None, renderer=None):
+def render_animation(stage: Usd.Stage | None = None, settings: Sdf.Path | str | None = None, renderer: str | None = None) -> str:
     """As ``render_frame()``, for the render settings' frame range (the stage's without one)."""
     return _submit(stage, settings, True, renderer)
 
 
-def jobs():
+def jobs() -> list[Job]:
     """The Render Queue's jobs, oldest first, then those sent to render queue servers."""
     result = []
     for id, title, renderer, status, progress, frames, files, error, queue in _app().render_jobs():
@@ -112,12 +136,12 @@ def jobs():
     return result
 
 
-def job(id):
+def job(id: str) -> Job | None:
     """The job with ``id``, or None."""
     return next((j for j in jobs() if j.id == id), None)
 
 
-def cancel(id):
+def cancel(id: str) -> None:
     """Stops a queued or running job; frames already written stay. A job sent to a queue
     server is cancelled there, once the queue has queued it."""
     _app().cancel_render(id)
@@ -126,8 +150,8 @@ def cancel(id):
 # --- Renderers from Python (docs/FINAL_RENDER.md section 6.1).
 
 
-def setting(attribute, label, type="float", default=None, group="", help="", minimum=None, maximum=None,
-            choices=None, key=None):
+def setting(attribute: str, label: str, type: str = "float", default: Any = None, group: str = "", help: str = "", minimum: float | None = None, maximum: float | None = None,
+            choices: Iterable[Any] | None = None, key: str | None = None) -> dict[str, Any]:
     """One entry of ``FinalRenderer.settings_schema()``: the attribute on the RenderSettings prim
     ("my:samples"), its label, its type ("bool", "int", "float", "string", "choice" or "color", an
     (r, g, b) tuple), its default, and what ``task.settings`` has it by (``key``, the attribute by
@@ -141,6 +165,11 @@ class Scene:
     ``product`` and ``camera`` prims."""
 
     __slots__ = ("file", "settings", "product", "camera")
+
+    file: str
+    settings: str
+    product: str
+    camera: str
 
     def __repr__(self):
         return f"Scene({self.file!r})"
@@ -160,13 +189,24 @@ class Task:
     Report with ``progress()``, then ``finished()`` or ``failed()``, once, on the UI thread.
     ``active`` is False once it has ended or was cancelled."""
 
-    def __init__(self, native):
+    frame: float
+    resolution: tuple[int, int]
+    pixel_aspect: float
+    region: tuple[int, int, int, int]
+    camera: str
+    render_settings: str
+    aovs: list[tuple[str, str, str]]
+    settings: dict[str, Any]
+    time_limit: float
+    active: bool
+
+    def __init__(self, native: Any) -> None:
         self._native = native
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._native, name)
 
-    def export_scene(self):
+    def export_scene(self) -> Scene:
         """Writes the task's scene, a .usdc in a folder that goes with the task: the job's stage
         with its RenderSettings prim, and the task's camera, resolution, tile (dataWindowNDC) and
         frame (the start and end time code) on it. Returns a ``Scene``."""
@@ -174,18 +214,18 @@ class Task:
         scene.file, scene.settings, scene.product, scene.camera = self._native.export_scene()
         return scene
 
-    def progress(self, fraction, state=""):
+    def progress(self, fraction: float, state: str = "") -> None:
         """How far it is, 0 to 1 (negative when it can't tell), and what it's doing."""
         self._native.progress(float(fraction), str(state))
 
-    def finished(self, images):
+    def finished(self, images: dict[str, QtGui.QImage]) -> None:
         """Done: ``images`` maps each AOV's name to a float QImage (Format_RGBA32FPx4 or
         RGBA16FPx4, linear), of the region's size or of the whole image."""
         import shiboken6
 
         self._native.finished({name: shiboken6.getCppPointer(image)[0] for name, image in images.items()})
 
-    def failed(self, error):
+    def failed(self, error: object) -> None:
         self._native.failed(str(error))
 
 
@@ -196,22 +236,22 @@ class FinalRenderer:
 
     id = ""
     name = ""
-    namespaces = ()
+    namespaces: tuple[str, ...] = ()
     tiles = False
 
-    def setup_problem(self):
+    def setup_problem(self) -> str | None:
         """Why it can't render here, or None."""
         return None
 
-    def settings_schema(self):
+    def settings_schema(self) -> list[dict[str, Any]]:
         """Its settings, as ``setting()`` makes them, for the Render Settings panel."""
         return []
 
-    def start(self, task):
+    def start(self, task: Task) -> None:
         """Renders ``task`` (a ``Task``), reporting on it as it goes. Return at once."""
         raise NotImplementedError
 
-    def cancel(self, task):
+    def cancel(self, task: Task) -> None:
         """Stops ``task``. Nothing it reports afterwards is used."""
 
 
@@ -243,7 +283,7 @@ class _Adapter:
             self._renderer.cancel(task)
 
 
-def register_renderer(renderer):
+def register_renderer(renderer: FinalRenderer) -> None:
     """Adds ``renderer`` (a ``FinalRenderer``) to the app's final renderers, replacing one with
     its id. Remove it in the plugin's ``deactivate()``."""
     if not isinstance(renderer, FinalRenderer):
@@ -251,6 +291,6 @@ def register_renderer(renderer):
     return _app().register_final_renderer(_Adapter(renderer))
 
 
-def unregister_renderer(id):
+def unregister_renderer(id: str) -> None:
     """Removes the final renderer with ``id``."""
     _app().unregister_final_renderer(id)

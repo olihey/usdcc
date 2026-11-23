@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022"], "module": "commonjs", "moduleResolution": "node", "strict": true,
+    "noUnusedLocals": true, "noImplicitOverride": true, "esModuleInterop": true, "skipLibCheck": true,
+    "sourceMap": true, "rootDir": ".", "outDir": "out", "types": ["node", "vscode"]
+  },
+  "include": ["src", "test"]
+}

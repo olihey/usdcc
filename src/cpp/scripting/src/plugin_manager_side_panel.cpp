@@ -1,6 +1,7 @@
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/scripting/editor_setup.h"
 #include "usdcc/scripting/package_install_dialog.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_type_icon.h"
@@ -22,7 +23,11 @@
 #include <QFont>
 #include <QFileInfo>
 #include <QIcon>
-#include <QInputDialog>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLineEdit>
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
@@ -256,8 +261,27 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     newPlugin->setToolTip(tr("Make a Python plugin to start from, and open it in the Script Editor"));
     buttons->addWidget(newPlugin);
     connect(newPlugin, &QPushButton::clicked, this, [this]() {
-        const QString name = QInputDialog::getText(this, tr("New Plugin"), tr("Name:")).trimmed();
-        if (!name.isEmpty()) createPlugin(name);
+        const PythonRuntime* python = PythonRuntime::instance();
+        if (!python) return;
+        QDialog dialog(this);
+        dialog.setWindowTitle(tr("New Plugin"));
+        auto* form = new QFormLayout(&dialog);
+        auto* name = new QLineEdit(&dialog);
+        name->setObjectName(QStringLiteral("pluginNewName"));
+        form->addRow(tr("Name:"), name);
+        auto* start = new QComboBox(&dialog);
+        start->setObjectName(QStringLiteral("pluginNewTemplate"));
+        for (const PluginManager::Template& each : PluginManager::templates(*python)) {
+            start->addItem(qs(each.label), qs(each.id));
+            start->setItemData(start->count() - 1, qs(each.description), Qt::ToolTipRole);
+        }
+        form->addRow(tr("Starts with:"), start);
+        auto* box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        form->addRow(box);
+        connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted || name->text().trimmed().isEmpty()) return;
+        createPlugin(name->text().trimmed(), start->currentData().toString());
     });
     buttons->addStretch(1);
     m_install = new usdcc::ui::PanelIconButton(
@@ -380,14 +404,20 @@ void PluginManagerSidePanel::populatePluginMenu(QMenu* menu, const QString& id) 
     reload->setToolTip(qs(why));
     menu->addSeparator();
     menu->addAction(tr("Open Folder"), this, [folder]() { QDesktopServices::openUrl(QUrl::fromLocalFile(folder)); });
+    menu->addAction(tr("Set Up VS Code..."), this, [this, folder]() { Q_EMIT setUpVsCodeRequested(folder); });
+    QAction* openCode = menu->addAction(tr("Open in VS Code"), this, [folder]() { editor_setup::openInVsCode(folder); });
+    if (editor_setup::findVsCode().isEmpty()) {
+        openCode->setEnabled(false);
+        openCode->setToolTip(tr("VS Code wasn't found: its command, code, isn't on PATH"));
+    }
     menu->setToolTipsVisible(true);
 }
 
-bool PluginManagerSidePanel::createPlugin(const QString& name) {
+bool PluginManagerSidePanel::createPlugin(const QString& name, const QString& templateId) {
     PythonRuntime* python = PythonRuntime::instance();
     if (!python) return false;
     std::string error;
-    const std::string id = m_plugins.createPlugin(name.toStdString(), PluginManager::userFolder(), *python, &error);
+    const std::string id = m_plugins.createPlugin(name.toStdString(), PluginManager::userFolder(), *python, &error, templateId.toStdString());
     if (id.empty()) {
         USDCC_LOG_ERROR("usdcc.plugins", "Can't make the plugin {}: {}", name.toStdString(), error);
         return false;
