@@ -207,7 +207,11 @@ function showPicture(message) {
   });
 }
 
-const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+// Beside the page, so a tunnel or reverse proxy that serves it under a path carries it too.
+const socketUrl = new URL("ws", location.href);
+socketUrl.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+socketUrl.hash = "";
+const socket = new WebSocket(socketUrl.href);
 socket.binaryType = "arraybuffer";
 socket.onopen = () => socket.send(JSON.stringify({ channel: "room", type: "hello", body: { protocol: 1, secret, name } }));
 socket.onclose = () => { if (!ended) end("The connection was lost"); };

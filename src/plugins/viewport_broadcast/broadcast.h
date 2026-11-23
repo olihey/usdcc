@@ -75,6 +75,10 @@ public:
         quint16 port = 47810;  // Taken: any free one
         QString pageDirectory;  // The page: its index.html and the files beside it
         QStringList allowedOrigins;  // A tunnel's address, for its pages to connect
+        // Where watchers outside reach it (phase 4a): the address of the user's own tunnel or
+        // reverse proxy pointed at the port ("https://watch.example.com/", a path allowed).
+        // The link uses it, and its origin may connect. Empty: the link is this machine's.
+        QUrl publicAddress;
         int maxGuests = 8;
         int maxWidth = 1920;  // Wider pictures are scaled down
         int movingQuality = 60;
@@ -90,8 +94,11 @@ public:
 
     usdcc::peers::Room* room() const;
     FrameSource* source() const { return m_source; }
-    // The web link for watchers: http://<address>:<port>/#s=<guests' secret>.
+    // The web link for watchers: the public address when there is one, else
+    // http://<address>:<port>/; and #s=<guests' secret>.
     QUrl link() const;
+    // The link on this machine's own address, whether or not there is a public one.
+    QUrl localLink() const;
     QList<usdcc::peers::Peer> watchers() const;
     bool isLive() const;
     // Closes the room; the page says why. stopped() follows.

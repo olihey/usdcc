@@ -65,6 +65,13 @@ Broadcast* Broadcast::start(usdcc::peers::Peers* peers, FrameSource* source, con
     host.guests = true;
     host.pageDirectory = options.pageDirectory;
     host.allowedOrigins = options.allowedOrigins;
+    // The tunnel's pages come from its origin: they may open the WebSocket.
+    if (options.publicAddress.isValid() && !options.publicAddress.host().isEmpty()) {
+        const QString origin = options.publicAddress.adjusted(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment |
+                                                              QUrl::RemoveUserInfo | QUrl::StripTrailingSlash)
+                                   .toString();
+        if (!host.allowedOrigins.contains(origin)) host.allowedOrigins.append(origin);
+    }
     host.limits.maxGuests = options.maxGuests;
     Room* room = peers->host(host, error);
     if (!room) return nullptr;
@@ -137,7 +144,18 @@ Broadcast::~Broadcast() {
 
 usdcc::peers::Room* Broadcast::room() const { return m_room; }
 
-QUrl Broadcast::link() const { return m_room ? m_room->guestLink() : QUrl(); }
+QUrl Broadcast::localLink() const { return m_room ? m_room->guestLink() : QUrl(); }
+
+QUrl Broadcast::link() const {
+    const QUrl local = localLink();
+    const QUrl& address = m_options.publicAddress;
+    if (local.isEmpty() || !address.isValid() || address.host().isEmpty()) return local;
+    // The tunnel's address, its path ending in "/" so the page's own files resolve under it.
+    QUrl url = address.adjusted(QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::RemoveUserInfo);
+    if (!url.path().endsWith(u'/')) url.setPath(url.path() + u'/');
+    url.setFragment(local.fragment());
+    return url;
+}
 
 QList<Peer> Broadcast::watchers() const {
     QList<Peer> result;

@@ -7,6 +7,7 @@
 
 #include "usdcc/plugin/plugin.h"
 
+#include "usdcc/core/settings.h"
 #include "usdcc/core/toast.h"
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
@@ -105,6 +106,39 @@ State* g_state = nullptr;
 
 QString setting(const QString& key) { return g_state->host->settingKey(key); }
 
+// Settings > Peers > Viewport Broadcast. The keys are the plugin's own, as before there
+// was a page for them.
+void defineSettings() {
+    auto& settings = usdcc::core::Settings::instance();
+    settings.define({.key = setting(QStringLiteral("onNetwork")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Broadcast on the network",
+                     .description = "Watchers on other machines can open the link. Off, only this machine can "
+                                    "(and a tunnel running on it). Windows asks once whether to let usdcc through.",
+                     .type = usdcc::core::SettingType::Bool,
+                     .defaultValue = true});
+    settings.define({.key = setting(QStringLiteral("port")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Port",
+                     .description = "The port the broadcast's page and pictures use. Taken: any free one.",
+                     .type = usdcc::core::SettingType::Int,
+                     .defaultValue = 47810,
+                     .minimum = 1024,
+                     .maximum = 65535});
+    settings.define({.key = setting(QStringLiteral("publicAddress")).toStdString(),
+                     .category = "Peers",
+                     .group = "Viewport Broadcast",
+                     .label = "Public address",
+                     .description = "For watchers outside this network: the address of your own tunnel or reverse "
+                                    "proxy (cloudflared, Tailscale Funnel, ngrok, ...) pointed at the port, such as "
+                                    "https://watch.example.com/. The link uses it. The tunnel's operator can see "
+                                    "the pictures. Empty: the link is this machine's.",
+                     .type = usdcc::core::SettingType::String,
+                     .defaultValue = std::string()});
+}
+
 void toast(const QString& title, const QString& body, const QList<usdcc::ui::ToastAction>& actions = {},
            usdcc::core::ToastKind kind = usdcc::core::ToastKind::Info) {
     if (!g_state) return;
@@ -172,6 +206,13 @@ void startBroadcast(ViewportViewPanel* panel) {
     options.port = static_cast<quint16>(settings.value(setting(QStringLiteral("port")), 47810).toUInt());
     options.pageDirectory = QString::fromStdWString((host.folder / "web").wstring());
     options.allowedOrigins = settings.value(setting(QStringLiteral("allowedOrigins"))).toStringList();
+    // A tunnel's address (phase 4a): only an http(s) one with a host is taken.
+    const QUrl publicAddress =
+        QUrl::fromUserInput(settings.value(setting(QStringLiteral("publicAddress"))).toString().trimmed());
+    if (publicAddress.isValid() && !publicAddress.host().isEmpty() &&
+        (publicAddress.scheme() == QLatin1String("https") || publicAddress.scheme() == QLatin1String("http"))) {
+        options.publicAddress = publicAddress;
+    }
 
     auto* source = new ViewportSource(panel);
     options.name = QObject::tr("Broadcast: %1").arg(source->title());
@@ -238,6 +279,7 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_activate(usdcc::plugin::Host& host) {
     g_state = new State;
     g_state->host = &host;
     g_state->closeGuard = ViewportViewPanel::addCloseGuard(&mayClose);
+    defineSettings();
     // The Broadcast panel, hidden until asked for (View menu, the toast's Watchers); a saved
     // layout shows it where it was.
     if (host.mainWindow) {
