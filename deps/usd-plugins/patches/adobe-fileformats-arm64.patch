@@ -1,0 +1,25 @@
+diff --git a/cmake/compiler_config.cmake b/cmake/compiler_config.cmake
+index fb30474..3e6072c 100644
+--- a/cmake/compiler_config.cmake
++++ b/cmake/compiler_config.cmake
+@@ -73,16 +73,18 @@ function(usd_plugin_compile_config TARGET)
+         target_compile_options(${TARGET} PRIVATE
+             -Wall
+             $<$<BOOL:${BUILD_STRICT_MODE}>:-Werror>
+-            -msse3
+             -Wno-deprecated
+             -Wno-deprecated-declarations
+             -Wno-unused-local-typedefs
+-            -m64
+             -fstack-protector-strong
+             # _FORTIFY_SOURCE=2 is a no-op without optimization and warns at -O0; gate to
+             # Release/RelWithDebInfo where -O2 or higher is guaranteed.
+             $<$<CONFIG:Release,RelWithDebInfo>:-D_FORTIFY_SOURCE=2>
+         )
++        # x86 only: GCC for arm64 (aarch64) has neither option.
++        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
++            target_compile_options(${TARGET} PRIVATE -msse3 -m64)
++        endif()
+         target_compile_definitions(${TARGET} PRIVATE
+             NOMINMAX
+             TBB_USE_ASSERT

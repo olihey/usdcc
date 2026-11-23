@@ -290,7 +290,10 @@ drive letter back.
 ### Workflow `deps-usd-plugins.yml`
 
 One job per pack and platform (a matrix from the JSON files, `usd_plugin_asset.py
---matrix`). It runs by hand, on a push that changes a pin, a patch or one of the scripts,
+--matrix`, which also names each platform's runner): `win64` and `linux-x64`, and
+`win-arm64` and `linux-arm64` on GitHub's Arm runners, for the pins that list them
+([ARM64_RELEASES.md](ARM64_RELEASES.md)). The Windows Arm jobs set up Python as
+`build.yml`'s do, and set `CMAKE_POLICY_VERSION_MINIMUM=3.5` for that image's CMake 4. It runs by hand, on a push that changes a pin, a patch or one of the scripts,
 and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new name.
 
 1. Name the pack (`tools/ci/usd_plugin_asset.py`) and skip the job if it's published.
@@ -592,7 +595,12 @@ Three sets, decided by licence:
      plugins in `plugin/usd`, three libraries in `lib`, the licences. Its zip, unzipped
      over a second copy of the asset with the build folder moved away, passes the same
      check as on Windows. zlib is the system's there (`libz.so.1`; the job installs
-     `zlib1g-dev`), since OpenUSD brings none on Linux. The RUNPATH step, tried on
+     `zlib1g-dev`), since OpenUSD brings none on Linux. *Since 2026-11-23 the pin also lists
+     `win-arm64` and `linux-arm64`, built on the Arm runners, so arm64 releases have it too
+     ([ARM64_RELEASES.md](ARM64_RELEASES.md)). Its one patch,
+     `adobe-fileformats-arm64.patch`: Adobe's `cmake/compiler_config.cmake` gives GCC
+     `-msse3 -m64` on every machine, which GCC for arm64 doesn't know; the patch keeps
+     them to x86. Not upstream.* The RUNPATH step, tried on
      Gatling's pack from phase 3, changes nothing in it. The Windows pack wasn't built
      again locally: the edits rename it, so CI builds it again.*
    - *usdcc with the pack (2026-11-20): `tools/deploy.py` takes packs on Linux (§4), and
