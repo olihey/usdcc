@@ -9,6 +9,7 @@ Mirrors the manual steps documented in readme.md.
     python tools/build.py --run --scene test_data/cube_and_sphere.usda
     python tools/build.py --without-tests
     python tools/build.py --without viewport_broadcast --without s3
+    python tools/build.py --without all
 
 On Windows it builds with Visual Studio. On Linux and macOS it uses Ninja when
 there is one on PATH (else CMake's default generator) and vcpkg's dynamic
@@ -64,7 +65,7 @@ def parser(description=None):
                         help="enable labeled GPU tests; build rtx_gpu_test_bins before running CTest")
     result.add_argument("--without", action="append", default=[], metavar="FEATURE",
                         help="leave a feature out of the build, repeatable: "
-                             + ", ".join(name.lower() for name in OPTIONAL_FEATURES)
+                             + ", ".join(name.lower() for name in OPTIONAL_FEATURES) + ", or all"
                              + " (docs/BUILD_OPTIONS.md). The next build without it has the feature again")
     result.add_argument("--without-tests", action="store_true",
                         help="skip the usdcc_tests executable and CTest registration; the next build "
@@ -168,6 +169,8 @@ def main(argv=None, description=None):
     # Features to leave out (docs/BUILD_OPTIONS.md): USDCC_BUILD_<NAME>=OFF each. Every
     # run says so for each feature named or not, so a build without --without has them again.
     without = {name.upper().replace("-", "_") for name in args.without}
+    if "ALL" in without:
+        without = without - {"ALL"} | set(OPTIONAL_FEATURES)
     unknown = sorted(without - set(OPTIONAL_FEATURES))
     if unknown:
         fail(f"--without: no feature {', '.join(unknown)}; there are {', '.join(OPTIONAL_FEATURES)}.")

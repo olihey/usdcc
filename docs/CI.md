@@ -236,6 +236,12 @@ pull requests merged in the meantime together.
    `RelWithDebInfo` like local builds.
 7. Run the tests: `ctest --verbose --timeout 900`, so the log shows every test case and
    the check counts, and a crash waiting behind an error dialog ends after 15 minutes.
+8. Only on a push to `master`, on all four platforms: build again with every optional
+   feature left out, and check it ([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §8). Pull requests
+   don't wait for it, so a failure shows on `master` after the merge.
+
+A new push to a pull request cancels its running build. On `master` the running build
+finishes, and the newest of the pushes made meanwhile is built next.
 
 ### 4.1 Workflow `deps-pyside.yml`
 
