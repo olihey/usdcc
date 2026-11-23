@@ -1,4 +1,5 @@
 #include "usdcc/scripting/script_editor_side_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/code_editor.h"
@@ -85,12 +86,19 @@ constexpr int kSaveRetries = 5;
 constexpr int kSaveRetryDelayMs = 100;
 constexpr qint64 kMaxTextFileBytes = 5 * 1024 * 1024;
 
-// Output colors, from the dark theme (resources/theme/dark.qss) and the Log
+// Output colors, from the dark theme (resources/theme/app.qss) and the Log
 // panel's level colors.
-const QColor kTextColor(255, 255, 255, 191);
-const QColor kMutedColor(255, 255, 255, 102);
-const QColor kWarningColor(0xff, 0xbd, 0x2e);
-const QColor kErrorColor(0xff, 0x5f, 0x56);
+enum OutputColor { kTextColor, kMutedColor, kWarningColor, kErrorColor };
+QColor outputColor(int color) {
+    switch (color) {
+        case kMutedColor: return usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 102);
+        case kWarningColor: return usdcc::ui::theme::color(usdcc::ui::theme::Token::Attention);
+        case kErrorColor: return usdcc::ui::theme::color(usdcc::ui::theme::Token::Error);
+        default: return usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 191);
+    }
+}
+// A line's OutputColor, in its format: what a theme change recolours it by.
+constexpr int kOutputColorProperty = QTextFormat::UserProperty + 1;
 
 // Collects what is logged while a run is going on, for the output pane.
 struct RunCapture : usdcc::core::LogSink {
@@ -241,7 +249,7 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     // One row: the tabs reach its bottom edge like a ViewPanel's tab strip;
     // the buttons keep the toolbar's 4px inset.
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     usdcc::ui::scaled::margins(toolbarLayout, 4, 0, 4, 0);
@@ -290,7 +298,8 @@ ScriptEditorSidePanel::ScriptEditorSidePanel(PythonRuntime& runtime, ScriptRunne
     m_editors = new QStackedWidget(container);
 
     m_output = new QPlainTextEdit(container);
-    m_output->setObjectName(QStringLiteral("scriptOutput"));  // monospace, from theme/dark.qss
+    m_output->setObjectName(QStringLiteral("scriptOutput"));  // monospace, from theme/app.qss
+    usdcc::ui::theme::onChanged(this, [this]() { recolorOutput(); });
     m_output->setReadOnly(true);
     m_output->setMaximumBlockCount(kMaxOutputLines);
     m_output->setLineWrapMode(QPlainTextEdit::WidgetWidth);
@@ -522,7 +531,7 @@ ScriptEditorSidePanel::Script* ScriptEditorSidePanel::addScript(const QString& f
     m_scripts.push_back(added);
 
     added->closeButton = new QToolButton(bar);
-    added->closeButton->setObjectName(QStringLiteral("scriptTabClose"));  // styled by theme/dark.qss
+    added->closeButton->setObjectName(QStringLiteral("scriptTabClose"));  // styled by theme/app.qss
     added->closeButton->setToolTip(tr("Close (Ctrl+W)"));
     added->closeButton->setAutoRaise(true);
     usdcc::ui::scaled::fixedSize(added->closeButton, 16, 16);
@@ -581,7 +590,7 @@ QIcon ScriptEditorSidePanel::tabIcon(const TopTab* tab) const {
     }
     const auto* file = dynamic_cast<const Script*>(tab);
     const bool isPython = file && (file->file.isEmpty() || isPythonFile(file->file));
-    return isPython ? QIcon(QStringLiteral(":/usdcc/theme/python-file.png")) : QIcon();
+    return isPython ? usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/python-file.png")) : QIcon();
 }
 
 void ScriptEditorSidePanel::updateTabIcons() {
@@ -638,7 +647,7 @@ void ScriptEditorSidePanel::scheduleSave() {
 
 void ScriptEditorSidePanel::updateFocusHighlight() {
     // The current tab of the focused panel is solid accent blue; its close
-    // button turns white to stay visible on it (theme/dark.qss).
+    // button turns white to stay visible on it (theme/app.qss).
     const auto update = [](QToolButton* button, bool onAccent) {
         if (!button || button->property("onAccent").toBool() == onAccent) return;
         button->setProperty("onAccent", onAccent);
@@ -1149,10 +1158,10 @@ void ScriptEditorSidePanel::capturing(const std::function<void()>& work) {
         } else if (record.category == "python.stderr") {
             appendOutput(message, kWarningColor);
         } else if (record.category == "python.exception" || record.category == "python.thread" || record.category == "plugin") {
-            const QColor color = record.level >= LogLevel::Error ? kErrorColor : kTextColor;
+            const OutputColor color = record.level >= LogLevel::Error ? kErrorColor : kTextColor;
             appendOutput(record.details.empty() ? message : qs(record.details), color);
         } else {
-            const QColor color = record.level >= LogLevel::Error     ? kErrorColor
+            const OutputColor color = record.level >= LogLevel::Error     ? kErrorColor
                                  : record.level >= LogLevel::Warning ? kWarningColor
                                                                      : kTextColor;
             appendOutput(QStringLiteral("%1: %2").arg(qs(record.category), message), color);
@@ -1160,14 +1169,32 @@ void ScriptEditorSidePanel::capturing(const std::function<void()>& work) {
     }
 }
 
-void ScriptEditorSidePanel::appendOutput(const QString& text, const QColor& color) {
+void ScriptEditorSidePanel::appendOutput(const QString& text, int color) {
     QTextCharFormat format;
-    format.setForeground(color);
+    format.setForeground(outputColor(color));
+    format.setProperty(kOutputColorProperty, color);
     QTextCursor cursor(m_output->document());
     cursor.movePosition(QTextCursor::End);
     if (!m_output->document()->isEmpty()) cursor.insertBlock();
     cursor.insertText(text, format);
     m_output->verticalScrollBar()->setValue(m_output->verticalScrollBar()->maximum());
+}
+
+void ScriptEditorSidePanel::recolorOutput() {
+    if (!m_output) return;
+    QTextCursor cursor(m_output->document());
+    for (QTextBlock block = m_output->document()->begin(); block.isValid(); block = block.next()) {
+        // One format a block (appendOutput).
+        const QTextBlock::iterator first = block.begin();
+        if (first.atEnd()) continue;
+        const QVariant color = first.fragment().charFormat().property(kOutputColorProperty);
+        if (!color.isValid()) continue;
+        QTextCharFormat format;
+        format.setForeground(outputColor(color.toInt()));
+        cursor.setPosition(block.position());
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        cursor.mergeCharFormat(format);
+    }
 }
 
 void ScriptEditorSidePanel::clearOutput() {
@@ -1366,14 +1393,14 @@ void ScriptEditorSidePanel::updateRunButton() {
     if (!m_runButton) return;
     const Project* plugin = project(currentTab());
     if (!plugin) {
-        m_runButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/play.png")));
+        m_runButton->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/play.png")));
         m_runButton->setToolTip(tr("Run the script (Ctrl+Enter)"));
         m_runButton->setEnabled(true);
         return;
     }
     const std::string why = !m_pluginHooks.whyNotReloadable ? std::string("Plugins aren't available here.")
                                                             : m_pluginHooks.whyNotReloadable(plugin->id.toStdString());
-    m_runButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/reload.png")));
+    m_runButton->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/reload.png")));
     m_runButton->setToolTip(why.empty() ? tr("Save and reload %1 (Ctrl+Enter, F5)").arg(plugin->name)
                                         : tr("Can't reload: %1").arg(qs(why)));
     m_runButton->setEnabled(why.empty());
@@ -1486,7 +1513,7 @@ ScriptEditorSidePanel::Project* ScriptEditorSidePanel::addProject(const QString&
     m_projects.push_back(plugin);
 
     plugin->closeButton = new QToolButton(m_tabBar);
-    plugin->closeButton->setObjectName(QStringLiteral("scriptTabClose"));  // styled by theme/dark.qss
+    plugin->closeButton->setObjectName(QStringLiteral("scriptTabClose"));  // styled by theme/app.qss
     plugin->closeButton->setToolTip(tr("Close the plugin's tab"));
     plugin->closeButton->setAutoRaise(true);
     usdcc::ui::scaled::fixedSize(plugin->closeButton, 16, 16);

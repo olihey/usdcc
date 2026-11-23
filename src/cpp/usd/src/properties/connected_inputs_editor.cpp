@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/connected_inputs_editor.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/flow_layout.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -78,7 +79,7 @@ void ConnectedInputsEditor::rebuild() {
         if (!isReadOnly()) {
             auto* remove = new QToolButton(pill);
             remove->setObjectName(QStringLiteral("schemaPillRemove"));
-            remove->setIcon(QIcon(QStringLiteral(":/usdcc/theme/close.png")));
+            remove->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/close.png")));
             usdcc::ui::scaled::iconSize(remove, 10, 10);
             remove->setToolTip(tr("Disconnect %1").arg(QString::fromStdString(path.GetString())));
             connect(remove, &QToolButton::clicked, this, [this, path]() { Q_EMIT disconnectRequested(path); });

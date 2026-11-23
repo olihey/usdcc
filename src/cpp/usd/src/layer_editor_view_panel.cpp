@@ -60,8 +60,8 @@
 namespace usdcc::usd {
 
 namespace {
-const QColor kMissingColor(0xff, 0x5f, 0x56);   // as the log's errors
-const QColor kMutedColor(255, 255, 255, 89);     // 35%, as a note
+QColor missingColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Error); }  // as the log's errors
+QColor mutedColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 89); }  // 35%, as a note
 constexpr int kIdentifierRole = Qt::UserRole;
 constexpr int kMutedRole = Qt::UserRole + 1;  // on the Mute column of a layer that can be muted
 
@@ -170,7 +170,7 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     addPanelControls(toolbarLayout);
@@ -306,7 +306,7 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
     connect(m_refreshTimer, &QTimer::timeout, this, &LayerEditorViewPanel::refresh);
 
     // The edit target's name is drawn in the accent colour.
-    usdcc::ui::onSettingChanged(this, usdcc::ui::theme::accentColorKey, [this]() { m_refreshTimer->start(); });
+    usdcc::ui::theme::onChanged(this, [this]() { m_refreshTimer->start(); });
 
     refreshStageCombo();
     // See ViewportViewPanel's constructor for why this is explicit.
@@ -465,15 +465,15 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     font.setBold(entry.editTarget);
     item->setFont(Name, font);
     if (entry.missing) {
-        item->setForeground(Name, kMissingColor);
+        item->setForeground(Name, missingColor());
     } else if (entry.muted) {
-        item->setForeground(Name, kMutedColor);
+        item->setForeground(Name, mutedColor());
     } else if (entry.editTarget) {
         item->setForeground(Name, usdcc::ui::theme::accent());
     }
 
     if (entry.editTarget) {
-        item->setIcon(Target, QIcon(QStringLiteral(":/usdcc/theme/pencil.png")));
+        item->setIcon(Target, usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/pencil.png")));
         const QString variant = currentStage() ? variantEditText(*currentStage()) : QString();
         item->setToolTip(Target, variant.isEmpty() ? tr("Edits go to this layer")
                                                    : tr("%1, in this layer. Click to edit the layer itself.").arg(variant));

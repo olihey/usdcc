@@ -1,4 +1,5 @@
 #include "usdcc/usd/variant_editor_dialog.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
@@ -415,7 +416,7 @@ void VariantEditorDialog::addOpinions(QTreeWidgetItem* parent, const std::vector
         m_rows.push_back({opinion, layer, removable});
         item->setData(Name, Qt::UserRole, int(m_rows.size()) - 1);
         if (removable) {
-            item->setIcon(Remove, QIcon(QStringLiteral(":/usdcc/theme/close.png")));
+            item->setIcon(Remove, usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/close.png")));
             item->setToolTip(Remove, tr("Remove this from the variant"));
         }
         addOpinions(item, opinion.children, layer, removable);

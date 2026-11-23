@@ -209,7 +209,7 @@ elements.
 - **`SliderField`:** a filled bar showing the value (e.g. "0.420"). Click-drag sets the
   value; double-click types it.
 - **Other widgets:** `ColorSwatch`, the array summary, the token combo and the asset
-  field reuse the existing theme tokens in `dark.qss`. New selectors are scoped by
+  field reuse the existing theme tokens in `app.qss`. New selectors are scoped by
   object name, the same way the existing `panelToolbar` and `titleBar` selectors are.
 - **Section headers:** a chevron plus a bold title with a full-width separator, as in
   the mockup. Collapsed state is remembered per category name in `QSettings`.
@@ -632,7 +632,7 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
   - The groups are a **sidebar list instead of tabs**, since ten groups overflowed a tab
     bar.
   - Result: **112 types, 0 without a dedicated editor.**
-- **Theme:** `dark.qss` has a property-widget section.
+- **Theme:** `app.qss` has a property-widget section.
 - **Verified live:**
   - every group page and the preview toggles
   - scrubbing with the edit-signal log
@@ -830,5 +830,5 @@ decompose/recompose step, so nothing the user didn't touch can drift.
   editable field's recessed `#141416` and without its hover highlight. That's
   `QLineEdit:read-only`, `#propertyReadOnlyText`, `#propertyArraySummary` (an array's
   values, edited only through its Edit button) and `#propertyMatrixSummary` (a matrix, such as
-  a Transform op's, edited in the grid it opens) in dark.qss, and `style::readOnlyFill()` for
+  a Transform op's, edited in the grid it opens) in app.qss, and `style::readOnlyFill()` for
   the self-painted number fields.

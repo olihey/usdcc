@@ -1,4 +1,5 @@
 #include "usdcc/usd/asset_servers_editor.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
@@ -541,7 +542,7 @@ void AssetServersDialog::build() {
     m_problems = new QLabel(this);
     m_problems->setObjectName(QStringLiteral("assetServersProblems"));
     m_problems->setWordWrap(true);
-    m_problems->setStyleSheet(QStringLiteral("color: #d9534f;"));
+    m_problems->setStyleSheet(QStringLiteral("color: %1;").arg(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error).name()));
     layout->addWidget(m_problems);
 
     auto* bottom = new QHBoxLayout();
@@ -897,7 +898,7 @@ void AssetServersDialog::refreshProblems() {
         for (int column = 0; column < kServerColumns; ++column) {
             QTableWidgetItem* item = m_servers->item(row, column);
             if (!item) continue;
-            item->setBackground(mine.isEmpty() ? QBrush() : QBrush(QColor(217, 83, 79, 70)));
+            item->setBackground(mine.isEmpty() ? QBrush() : QBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error, 70)));
             item->setToolTip(mine.join(QStringLiteral("\n")));
         }
     }
@@ -908,7 +909,7 @@ void AssetServersDialog::refreshProblems() {
         for (const std::string& problem : problems) {
             if (problem.find(quoted) != std::string::npos) mine << qs(problem);
         }
-        item->setBackground(mine.isEmpty() ? QBrush() : QBrush(QColor(217, 83, 79, 70)));
+        item->setBackground(mine.isEmpty() ? QBrush() : QBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error, 70)));
         item->setToolTip(mine.join(QStringLiteral("\n")));
     }
     const bool canEdit = !m_readOnly && m_editor->loadProblem().empty();

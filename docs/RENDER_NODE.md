@@ -347,12 +347,12 @@ usdcc_node queue ... --web 8080 [--web-token-file web.token]
 so the page reads as part of usdcc and not as a separate tool.
 
 - **One set of tokens for both.** The colors, radii and sizes listed at the top of
-  `src/cpp/ui/resources/theme/dark.qss` (surfaces `#161618`, `#1a1a1c`, `#1c1c1e`, `#141416`,
+  `src/cpp/ui/resources/theme/app.qss` (surfaces `#161618`, `#1a1a1c`, `#1c1c1e`, `#141416`,
   `#0e0e10`; hairlines at 6, 8 and 10 % white; text `#e8e8ea` and 75 / 50 / 40 %; 3 px and 4 px
   radii; 11 px type, 20 px controls; the font "Inter", "Segoe UI", sans-serif) become CSS custom
   properties in `src/cpp/ui/resources/theme/usdcc.css`:
   `--surface-bar`, `--surface-panel`, `--inset`, `--line`, `--text`, `--text-muted`, `--accent`,
-  `--radius`, ... Kept in sync with `dark.qss` by a test (§8), as `dark.qss` is with `theme.cpp`
+  `--radius`, ... Kept in sync with `app.qss` by a test (§8), as `app.qss` is with `theme.cpp`
   by hand now.
 - **The accent** is the queue profile's Appearance/accentColor, put into `--accent` (and
   `--accent-rgb`, `--accent-hover`) when the page is served, as `theme::resolveTokens()` does for
@@ -477,7 +477,7 @@ Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. 
 - **`render_queue_server`:** §7 phases 6 and 7, the artist in-process, the queue and two nodes
   as processes, each with a test profile; a queue killed and started again.
 - **`render_queue_panel_remote`** (usdcc_ui_tests): §7 phase 8.
-- **`web_theme_tokens`:** every token in `dark.qss`'s header has its custom property in
+- **`web_theme_tokens`:** every token in `app.qss`'s header has its custom property in
   `usdcc.css` with the same value, and the served page has the profile's accent in it.
 - **`render_queue_web`:** §7 phase 9 without a browser: the page and `usdcc.css` are served on
   the guest link only, the WebSocket gets a job's changes, an action without the token is refused.
@@ -525,5 +525,5 @@ Phase 2 is useful on its own: with it, any farm manager renders usdcc's stages. 
 | 9 | In what order does a queue serve several artists? | First come, first served to start with; priorities and a limit of nodes per artist when someone waits too long |
 | 10 | Does an artist's instance still render a job it sent to a queue? | No: the job is the queue's. *This instance and peers* stays for rendering without a queue |
 | 11 | Can there be several queues in one room? | Yes, each listed by name in Render on. A node renders for every queue it trusts, one task at a time |
-| 12 | The web page's theme: copied tokens with a test, or `dark.qss` and `usdcc.css` both generated from one tokens file? | Copied with a test, to start with: `dark.qss` stays the file people edit, and only its header's tokens are shared. Generate both if a third consumer appears |
+| 12 | The web page's theme: copied tokens with a test, or `app.qss` and `usdcc.css` both generated from one tokens file? | Copied with a test, to start with: `app.qss` stays the file people edit, and only its header's tokens are shared. Generate both if a third consumer appears |
 | 13 | Who may act from the web page? | One admin token to start with. Per-person logins only if a studio needs to know who cancelled what |

@@ -182,13 +182,13 @@ void WorkspaceController::fitAllViews(const QString& what) {
 
 QToolButton* WorkspaceController::createButton(QWidget* parent) {
     // A push button in the accent colour, the workspace's name and a down arrow on its
-    // right (dark.qss), as tall as a control rather than the title bar.
+    // right (app.qss), as tall as a control rather than the title bar.
     auto* button = new QToolButton(parent);
     button->setObjectName(QStringLiteral("titleBarWorkspaceButton"));
     button->setToolButtonStyle(Qt::ToolButtonTextOnly);
     button->setPopupMode(QToolButton::InstantPopup);
     button->setFocusPolicy(Qt::NoFocus);
-    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);  // 22 px tall (dark.qss)
+    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);  // 22 px tall (app.qss)
     button->setMenu(createMenu(QString(), button));
     m_button = button;
     updateButton();

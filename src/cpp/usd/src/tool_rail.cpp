@@ -1,4 +1,5 @@
 #include "usdcc/usd/tool_rail.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -32,6 +33,13 @@ QPixmap letterIcon(const QString& text, const QColor& color) {
     painter.drawText(pixmap.rect(), Qt::AlignCenter, text.left(1).toUpper());
     return pixmap;
 }
+
+QIcon letterIcons(const QString& text) {
+    QIcon icon;
+    icon.addPixmap(letterIcon(text, usdcc::ui::theme::color(usdcc::ui::theme::Token::Icon)), QIcon::Normal, QIcon::Off);
+    icon.addPixmap(letterIcon(text, usdcc::ui::theme::color(usdcc::ui::theme::Token::OnAccent)), QIcon::Normal, QIcon::On);
+    return icon;
+}
 }  // namespace
 
 ToolRail::ToolRail(QWidget* parent) : QToolBar(parent), m_group(new QActionGroup(this)) {
@@ -55,17 +63,19 @@ void ToolRail::addTool(const QString& id, const QString& toolTip, const QString&
                        const std::string& shortcutKey) {
     QIcon icon;
     if (iconName.isEmpty()) {
-        icon.addPixmap(letterIcon(toolTip, QColor(0xc8, 0xc8, 0xcc)), QIcon::Normal, QIcon::Off);
-        icon.addPixmap(letterIcon(toolTip, Qt::white), QIcon::Normal, QIcon::On);
+        icon = letterIcons(toolTip);
     } else if (iconName.contains(QLatin1Char('/')) || iconName.contains(QLatin1Char('\\'))) {
         icon.addFile(iconName);
     } else {
         // Off = idle glyph, On = the white glyph drawn on the checked accent fill.
-        icon.addFile(QStringLiteral(":/usdcc/theme/%1.png").arg(iconName), QSize(), QIcon::Normal, QIcon::Off);
-        icon.addFile(QStringLiteral(":/usdcc/theme/%1-active.png").arg(iconName), QSize(), QIcon::Normal, QIcon::On);
+        icon = usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/%1.png").arg(iconName),
+                                        QStringLiteral(":/usdcc/theme/%1-active.png").arg(iconName));
     }
 
     QAction* action = QToolBar::addAction(icon, toolTip);
+    if (iconName.isEmpty()) {
+        usdcc::ui::theme::onChanged(action, [action, toolTip]() { action->setIcon(letterIcons(toolTip)); });
+    }
     action->setToolTip(toolTip);
     action->setCheckable(true);
     action->setData(id);

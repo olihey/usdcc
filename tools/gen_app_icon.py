@@ -49,7 +49,7 @@ ICNS_TYPES = [
 ]
 
 # The SVG left these as template placeholders; chosen from the dark theme's
-# tokens (see ui/resources/theme/dark.qss): ground = panel surface, front =
+# tokens (see ui/resources/theme/app.qss): ground = panel surface, front =
 # accent, back = the design's deep material blue.
 GROUND = (0x1C, 0x1C, 0x1E)
 BACK = (0x1D, 0x4F, 0x96)

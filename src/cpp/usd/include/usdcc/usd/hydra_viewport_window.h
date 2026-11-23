@@ -243,7 +243,7 @@ public:
         bool showGrid = true;
         double gridSize = 20.0;  // the grid's width, in scene units, centred on the origin
         double gridStep = 1.0;   // between neighbouring lines
-        // The dark theme's panel surface, #1c1c1e (see ui/resources/theme/dark.qss): the
+        // The dark theme's panel surface, #1c1c1e (see ui/resources/theme/app.qss): the
         // design's viewports sit on the same colour as the panels around them.
         QColor background = QColor(0x1c, 0x1c, 0x1e);
         // How the selection is drawn (docs/VIEWPORT_SELECTION.md): the style, its color

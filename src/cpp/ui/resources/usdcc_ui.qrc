@@ -1,6 +1,12 @@
 <RCC>
+    <qresource prefix="/usdcc/themes">
+        <file alias="neutral-grey.json">themes/neutral-grey.json</file>
+        <file alias="nord.json">themes/nord.json</file>
+        <file alias="catppuccin-mocha.json">themes/catppuccin-mocha.json</file>
+        <file alias="catppuccin-latte.json">themes/catppuccin-latte.json</file>
+    </qresource>
     <qresource prefix="/usdcc/theme">
-        <file alias="dark.qss">theme/dark.qss</file>
+        <file alias="app.qss">theme/app.qss</file>
         <file alias="dock.qss">theme/dock.qss</file>
         <file alias="check.png">theme/check.png</file>
         <file alias="check@2x.png">theme/check@2x.png</file>
@@ -8,6 +14,8 @@
         <file alias="check-partial@2x.png">theme/check-partial@2x.png</file>
         <file alias="chevron-down.png">theme/chevron-down.png</file>
         <file alias="chevron-down@2x.png">theme/chevron-down@2x.png</file>
+        <file alias="chevron-up.png">theme/chevron-up.png</file>
+        <file alias="chevron-up@2x.png">theme/chevron-up@2x.png</file>
         <file alias="chevron-down-white.png">theme/chevron-down-white.png</file>
         <file alias="chevron-down-white@2x.png">theme/chevron-down-white@2x.png</file>
         <file alias="close.png">theme/close.png</file>

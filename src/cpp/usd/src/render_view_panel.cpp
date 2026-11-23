@@ -1,4 +1,5 @@
 #include "usdcc/usd/render_view_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/app_settings.h"
@@ -162,7 +163,7 @@ RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, 
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* row = new QHBoxLayout(toolbar);
     addPanelControls(row);
@@ -399,7 +400,7 @@ void RenderViewPanel::setRendering(bool on) {
 }
 
 void RenderViewPanel::showRenderButton(bool rendering) {
-    m_renderButton->setIcon(QIcon(rendering ? QStringLiteral(":/usdcc/theme/stop.png") : QStringLiteral(":/usdcc/theme/play.png")));
+    m_renderButton->setIcon(usdcc::ui::theme::icon(rendering ? QStringLiteral(":/usdcc/theme/stop.png") : QStringLiteral(":/usdcc/theme/play.png")));
     m_renderButton->setText(rendering ? tr("Stop") : tr("Render"));
     m_renderButton->setToolTip(rendering ? tr("Stop rendering") : tr("Render"));
 }

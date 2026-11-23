@@ -1,4 +1,5 @@
 #include "usdcc/usd/render/render_settings_view_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/usd/render/render_job.h"
 #include "usdcc/usd/render/render_menu.h"
@@ -113,7 +114,11 @@ RenderSettingsViewPanel::RenderSettingsViewPanel(usdcc::usd::StageManager* stage
     m_rendererProblem = new QLabel(content);
     m_rendererProblem->setWordWrap(true);
     m_rendererProblem->setContentsMargins(6, 0, 6, 0);
-    m_rendererProblem->setStyleSheet(QStringLiteral("color: #e0a040;"));
+    const auto recolor = [this]() {
+        m_rendererProblem->setStyleSheet(QStringLiteral("color: %1;").arg(usdcc::ui::theme::color(usdcc::ui::theme::Token::Warning).name()));
+    };
+    recolor();
+    usdcc::ui::theme::onChanged(m_rendererProblem, recolor);
     m_rendererProblem->hide();
     layout->addWidget(m_rendererProblem);
 

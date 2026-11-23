@@ -1,4 +1,5 @@
 #include "usdcc/usd/timeline_bar.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/panel_icon_button.h"
@@ -60,7 +61,7 @@ NumberField* makeFrameField(const QString& toolTip, QWidget* parent) {
 
 TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManager> undoManager, QWidget* parent)
     : QWidget(parent), m_playback(playback), m_undoManager(std::move(undoManager)) {
-    setObjectName(QStringLiteral("timelineBar"));  // styled by theme/dark.qss
+    setObjectName(QStringLiteral("timelineBar"));  // styled by theme/app.qss
     setAttribute(Qt::WA_StyledBackground);
     auto* layout = new QHBoxLayout(this);
     usdcc::ui::scaled::margins(layout, 6, 3, 6, 3);
@@ -146,7 +147,7 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
     }
 
     auto* menuButton = new usdcc::ui::PanelMenuButton(tr("Timeline options"), [this](QMenu* menu) { populateMenu(menu); }, this);
-    menuButton->setIcon(QIcon(QStringLiteral(":/usdcc/theme/more.png")));
+    menuButton->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/more.png")));
     usdcc::ui::scaled::fixedHeight(menuButton, kButtonHeight);
     menuButton->setFocusPolicy(Qt::NoFocus);
     layout->addWidget(menuButton);
@@ -439,7 +440,7 @@ void TimelineBar::refreshRange(bool fit) {
 
 void TimelineBar::refreshPlaying() {
     const bool playing = m_playback->isPlaying();
-    m_play->setIcon(QIcon(playing ? QStringLiteral(":/usdcc/theme/pause.png") : QStringLiteral(":/usdcc/theme/play.png")));
+    m_play->setIcon(usdcc::ui::theme::icon(playing ? QStringLiteral(":/usdcc/theme/pause.png") : QStringLiteral(":/usdcc/theme/play.png")));
     m_play->setToolTip(playing ? tr("Stop") : tr("Play"));
 }
 

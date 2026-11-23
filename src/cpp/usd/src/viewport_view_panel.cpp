@@ -1,4 +1,5 @@
 #include "usdcc/usd/viewport_view_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/core/toast.h"
@@ -89,7 +90,7 @@ QIcon colorSwatch(const QColor& color) {
     QPixmap pixmap(28, 14);
     pixmap.fill(color);
     QPainter painter(&pixmap);
-    painter.setPen(QColor(255, 255, 255, 60));
+    painter.setPen(usdcc::ui::theme::color(usdcc::ui::theme::Token::Overlay, 60));
     painter.drawRect(pixmap.rect().adjusted(0, 0, -1, -1));
     return QIcon(pixmap);
 }
@@ -739,7 +740,7 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
 

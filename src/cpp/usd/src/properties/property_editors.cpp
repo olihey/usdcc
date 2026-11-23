@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/property_editor.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -313,7 +314,7 @@ public:
         m_toggle->setArrowType(Qt::RightArrow);
         m_toggle->setToolTip(tr("Show all %1 values").arg(info.numberCount()));
         m_summary = valueLabel(header);
-        // The read-only look (theme/dark.qss): it's edited in the grid below.
+        // The read-only look (theme/app.qss): it's edited in the grid below.
         m_summary->setObjectName(QStringLiteral("propertyMatrixSummary"));
         headerLayout->addWidget(m_toggle);
         headerLayout->addWidget(m_summary, 1);
@@ -450,7 +451,7 @@ private:
         emitSingleEdit(v);
     }
     void setInvalid(bool invalid) {
-        m_edit->setStyleSheet(invalid ? QStringLiteral("QLineEdit { border-color: #ff5f56; }") : QString());
+        m_edit->setStyleSheet(invalid ? QStringLiteral("QLineEdit { border-color: %1; }").arg(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error).name()) : QString());
         m_edit->setToolTip(invalid ? tr("Not a valid path expression") : QString());
     }
 
@@ -691,7 +692,7 @@ public:
     VtValue value() const override { return m_value; }
     void setReadOnly(bool readOnly) override {
         PropertyEditor::setReadOnly(readOnly);
-        m_edit->setIcon(QIcon(readOnly ? QStringLiteral(":/usdcc/theme/eye.png") : QStringLiteral(":/usdcc/theme/pencil.png")));
+        m_edit->setIcon(usdcc::ui::theme::icon(readOnly ? QStringLiteral(":/usdcc/theme/eye.png") : QStringLiteral(":/usdcc/theme/pencil.png")));
         m_edit->setToolTip(readOnly ? tr("View the values") : tr("Edit the values"));
     }
     QWidget* rowButton() const override { return m_edit; }
@@ -724,7 +725,7 @@ public:
         : PropertyEditor(info, parent), m_fallback(fallback) {
         auto* layout = rowLayout(this);
         m_label = valueLabel(this);
-        m_label->setObjectName(QStringLiteral("propertyReadOnlyText"));  // read-only look, theme/dark.qss
+        m_label->setObjectName(QStringLiteral("propertyReadOnlyText"));  // read-only look, theme/app.qss
         m_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
         layout->addWidget(m_label, 1);
         if (fallback) {

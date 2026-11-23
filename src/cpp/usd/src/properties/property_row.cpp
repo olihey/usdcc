@@ -1,4 +1,5 @@
 #include "usdcc/usd/properties/property_row.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_editor.h"
@@ -30,8 +31,8 @@ void repolish(QWidget* widget) {
 
 QToolButton* iconButton(const QString& iconPath, const QString& toolTip, QWidget* parent) {
     auto* button = new QToolButton(parent);
-    button->setObjectName(QStringLiteral("propertyIconButton"));  // styled by theme/dark.qss
-    if (!iconPath.isEmpty()) button->setIcon(QIcon(iconPath));
+    button->setObjectName(QStringLiteral("propertyIconButton"));  // styled by theme/app.qss
+    if (!iconPath.isEmpty()) button->setIcon(usdcc::ui::theme::icon(iconPath, iconPath));
     button->setToolTip(toolTip);
     usdcc::ui::scaled::fixedSize(button, style::kFieldHeight, style::kFieldHeight);
     usdcc::ui::scaled::iconSize(button, 12, 12);
@@ -71,7 +72,7 @@ PropertyRow::PropertyRow(const QString& label, PropertyEditor* editor, QWidget* 
     valueColumn->installEventFilter(this);
 
     m_sourceLink = new QToolButton(this);
-    m_sourceLink->setObjectName(QStringLiteral("subLineLink"));  // styled by theme/dark.qss
+    m_sourceLink->setObjectName(QStringLiteral("subLineLink"));  // styled by theme/app.qss
     m_sourceLink->setCursor(Qt::PointingHandCursor);
     m_sourceLink->setMinimumWidth(1);  // a long path is cut short rather than widening the row
     m_sourceLink->setVisible(false);
@@ -191,7 +192,7 @@ void PropertyRow::setNote(const QString& note, int fixedWidth, const QString& to
 void PropertyRow::setSubLine(const QString& text, const QString& toolTip, SubLineTone tone) {
     m_subLine->setText(text);
     m_subLine->setToolTip(toolTip.isEmpty() ? text : toolTip);
-    // The asset field's red, or the app's amber (theme/dark.qss).
+    // The asset field's red, or the app's amber (theme/app.qss).
     m_subLine->setProperty("unresolved", tone == SubLineTone::Error);
     m_subLine->setProperty("caution", tone == SubLineTone::Caution);
     repolish(m_subLine);

@@ -1,4 +1,5 @@
 #include "usdcc/usd/property_sheet.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -106,7 +107,7 @@ struct GroupFrame {
 };
 
 // A small frame in the section for rows that belong together (QFrame#compositionArc
-// in theme/dark.qss).
+// in theme/app.qss).
 GroupFrame addRowFrame(properties::CategorySection* section) {
     auto* frame = new QFrame();
     frame->setObjectName(QStringLiteral("compositionArc"));
@@ -607,8 +608,13 @@ void PropertySheet::buildShadingTitle(const UsdPrim& prim, QVBoxLayout* layout) 
     auto* title = new QLabel(m_content);
     title->setObjectName(QStringLiteral("propertySheetTitle"));
     title->setTextFormat(Qt::RichText);
-    title->setText(QStringLiteral("<b>%1</b>&nbsp;&nbsp;<span style='color:#8e8e93'>%2</span>")
-                       .arg(qs(prim.GetName().GetString()).toHtmlEscaped(), what.toHtmlEscaped()));
+    const QString name = qs(prim.GetName().GetString());
+    const auto showTitle = [title, name, what]() {
+        title->setText(QStringLiteral("<b>%1</b>&nbsp;&nbsp;<span style='color:%3'>%2</span>")
+                       .arg(name.toHtmlEscaped(), what.toHtmlEscaped(), usdcc::ui::theme::color(usdcc::ui::theme::Token::Muted).name()));
+    };
+    showTitle();
+    usdcc::ui::theme::onChanged(title, showTitle);
     title->setToolTip(qs(prim.GetPath().GetString()));
     usdcc::ui::scaled::margins(title, 10, 8, 10, 6);
     layout->addWidget(title);
@@ -1385,7 +1391,7 @@ void PropertySheet::updateRowState(Row& row) {
         const QString label = source.IsEmpty() ? QString() : qs(relativeLabel(source, connectionScope(attr.GetPrim())));
         row.row->setConnectedSource(label, qs(source.GetString()));
         if (row.connectButton) {
-            row.connectButton->setIcon(QIcon(source.IsEmpty() ? QStringLiteral(":/usdcc/theme/link.png")
+            row.connectButton->setIcon(usdcc::ui::theme::icon(source.IsEmpty() ? QStringLiteral(":/usdcc/theme/link.png")
                                                               : QStringLiteral(":/usdcc/theme/unlink.png")));
             row.connectButton->setToolTip(source.IsEmpty() ? tr("Connect\xE2\x80\xA6") : tr("Disconnect from %1").arg(label));
             row.connectButton->setProperty("connected", !source.IsEmpty());

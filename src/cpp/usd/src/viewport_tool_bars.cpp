@@ -87,7 +87,7 @@ ViewportToolBars::ViewportToolBars(QMainWindow* window, std::shared_ptr<usdcc::t
 
     // Both bars are draggable and floatable (QToolBar's defaults). Track which
     // edge each one is docked to, so the stylesheet can draw its divider on the
-    // side facing the content (see dark.qss, QToolBar[area=...]).
+    // side facing the content (see app.qss, QToolBar[area=...]).
     for (QToolBar* bar : {static_cast<QToolBar*>(m_rail), optionsToolBar}) {
         bar->installEventFilter(this);
         updateArea(bar);

@@ -35,7 +35,7 @@ PrimTreeWidget::PrimTreeWidget(QWidget* parent) : QWidget(parent) {
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
 
     auto* filterBar = new QWidget(this);
-    filterBar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    filterBar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     filterBar->setAttribute(Qt::WA_StyledBackground);
     auto* filterLayout = new QHBoxLayout(filterBar);
     usdcc::ui::scaled::margins(filterLayout, 4, 4, 4, 4);

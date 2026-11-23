@@ -1,4 +1,5 @@
 #include "usdcc/usd/shading_preview_widget.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/core/settings.h"
 #include "usdcc/ui/panel_icon_button.h"
@@ -181,7 +182,7 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     auto* more = new usdcc::ui::PanelMenuButton(tr("Preview options: what's shown, the shape, the light"),
                                                 [this](QMenu* menu) { populateOptionsMenu(menu); }, toolbar);
     more->setObjectName(QStringLiteral("previewMore"));
-    more->setIcon(QIcon(QStringLiteral(":/usdcc/theme/more.png")));
+    more->setIcon(usdcc::ui::theme::icon(QStringLiteral(":/usdcc/theme/more.png")));
     m_more = more;
     bar->addWidget(m_more);
     updatePauseButton();
@@ -213,7 +214,11 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
     m_problem = new QLabel(this);
     m_problem->setObjectName(QStringLiteral("previewProblem"));
     m_problem->setWordWrap(true);
-    m_problem->setStyleSheet(QStringLiteral("color: #ffbd2e;"));
+    const auto recolor = [this]() {
+        m_problem->setStyleSheet(QStringLiteral("color: %1;").arg(usdcc::ui::theme::color(usdcc::ui::theme::Token::Attention).name()));
+    };
+    recolor();
+    usdcc::ui::theme::onChanged(m_problem, recolor);
     usdcc::ui::scaled::margins(m_problem, 6, 3, 6, 3);
     m_problem->hide();
 
@@ -246,7 +251,7 @@ ShadingPreviewWidget::ShadingPreviewWidget(QWidget* parent) : QWidget(parent) {
 
 void ShadingPreviewWidget::updatePauseButton() {
     const bool paused = m_pause->isChecked();
-    m_pause->setIcon(QIcon(paused ? QStringLiteral(":/usdcc/theme/play.png") : QStringLiteral(":/usdcc/theme/pause.png")));
+    m_pause->setIcon(usdcc::ui::theme::icon(paused ? QStringLiteral(":/usdcc/theme/play.png") : QStringLiteral(":/usdcc/theme/pause.png")));
     m_pause->setText(paused ? tr("Play") : tr("Pause"));  // not shown; for accessibility and tests
     m_pause->setToolTip(paused ? tr("Render the preview again") : tr("Stop rendering the preview; the last frame stays"));
 }
