@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace usdcc::usd {
 
@@ -103,6 +104,12 @@ ViewRect gateRect(double width, double height, const std::optional<Resolution>& 
 ViewRect safeRect(const ViewRect& rect, double percent);
 // The largest rect of `aspect` (width over height) in `rect`, centred: an aspect guide.
 ViewRect aspectRect(const ViewRect& rect, double aspect);
+// Render scale (§5): the size Hydra renders at for a framebuffer `width` by `height` at
+// `percent` of it (25-100), at least a pixel each way.
+std::pair<int, int> scaledBufferSize(int width, int height, int percent);
+// The scales a viewport offers.
+inline constexpr int kRenderScales[] = {100, 75, 50, 25};
+
 // `frustum`, which sees the gate, widened to see the whole window around it (overscan), so
 // the gate shows exactly what it frames and the window more beside it.
 PXR_NS::GfFrustum overscanFrustum(const PXR_NS::GfFrustum& frustum, const ViewRect& gate, double width, double height);

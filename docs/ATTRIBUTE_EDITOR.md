@@ -360,7 +360,7 @@ Transform                                   [Reset XForm Stack ☐]  [+]
   ≡  Translate (pivot)      X 0.00   Y 0.50   Z 0.00            [×]
   ≡  Rotate XYZ             X 0°     Y 35°    Z 0°              [×]
   ≡  Scale                  X 1.00   Y 1.00   Z 1.00            [×]
-  ≡  Scale (second)  ◆      X 2.00   Y 2.00   Z 2.00            [×]   ← tool target
+  ≡  Scale (second)  ◎      X 2.00   Y 2.00   Z 2.00            [×]   ← tool target
   ≡  Translate (pivot) ⁻¹   (inverse of "pivot", no value)      [×]
 ```
 
@@ -401,7 +401,7 @@ Transform                                   [Reset XForm Stack ☐]  [+]
   - "Convert to common TRS" (`UsdGeomXformCommonAPI`), enabled only when the stack is
     compatible.
 
-**Selecting a row** sets the **tool target op** (§7), shown with the ◆ marker.
+**Selecting a row** sets the **tool target op** (§7), shown with the ◎ marker (it was a ◆, which now also marks keys).
 
 ## 7. Tools acting on a specific xformOp
 
@@ -764,7 +764,7 @@ All under `src/cpp/usd/{include/usdcc/usd,src}/properties/`, in `usdcc_usd_ui`.
   - **A target the active tool can't drive** gives a grey gizmo; a press on it is
     swallowed with no edit.
 - **UI:**
-  - Clicking an op label in the stack toggles the target; the row turns blue with "◆".
+  - Clicking an op label in the stack toggles the target; the row turns blue with "◎" (it was "◆", which now marks keys).
   - The tool options bar has a **Target** dropdown (Auto plus the ops the active tool can
     drive) that follows the *current* stage. Picking a stack row whose op the active tool
     can't drive switches to the tool that can.

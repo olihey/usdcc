@@ -40,6 +40,14 @@ def version():
     return _app().version()
 
 
+def build_features():
+    """The features a build may leave out (docs/BUILD_OPTIONS.md), as this one was built:
+    a list of (name, label, included, plugin ids), such as
+    ("VIEWPORT_BROADCAST", "Viewport Broadcast", True, ["org.usdcc.viewport-broadcast"]).
+    A feature that's not included isn't there at all: its plugins are refused from any folder."""
+    return [(name, label, included, list(plugins)) for name, label, included, plugins in _app().build_features()]
+
+
 def is_release_build():
     """True for a build made from a release, False for a development build."""
     return _app().is_release_build()

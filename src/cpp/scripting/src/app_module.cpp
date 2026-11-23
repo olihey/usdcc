@@ -15,6 +15,7 @@
 #include "usdcc/scripting/app_module.h"
 
 #include "usdcc/core/settings.h"
+#include "usdcc/core/build_features.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -386,6 +387,14 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def("is_available", []() { return s_context != nullptr; });
     m.def("version", []() { return std::string(usdcc::core::version()); }, "usdcc's version (docs/RELEASE.md).");
     m.def("is_release_build", []() { return usdcc::core::isReleaseBuild(); });
+    // (name, label, included, plugin ids) per feature (docs/BUILD_OPTIONS.md §5).
+    m.def("build_features", []() {
+        py::list result;
+        for (const usdcc::core::BuildFeature& feature : usdcc::core::buildFeatures()) {
+            result.append(py::make_tuple(feature.name, feature.label, feature.included, feature.pluginIds));
+        }
+        return result;
+    });
     m.def("user_data_folder", []() { return usdcc::ui::userDataFolder().toStdString(); });
     m.def(
         "stage_manager", []() { return context().stageManager; }, py::return_value_policy::reference,

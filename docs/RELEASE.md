@@ -251,7 +251,7 @@ folder.
 
 The [Blender mesh tools plan](BLENDER_MESH_TOOLS.md) adds an optional native plugin.
 Its six editing commands, jobs and conversion are implemented and built with every
-app (`USDCC_BUILD_BLENDER_MESH_TOOLS=ON` is enforced).
+app (`USDCC_BUILD_BLENDER_MESH_TOOLS`, on by default; [BUILD_OPTIONS.md](BUILD_OPTIONS.md)).
 Standard deploy explicitly excludes its source and any stale built
 plugin from the examples folders on Windows and Linux.
 `--with-blender-mesh-tools` creates a separate combined candidate, excludes RTX/V-Ray

@@ -120,7 +120,7 @@ void PrimTreeDialog::updateStatus() {
         ++prims;
     }
     const QLocale locale;
-    const QString dot = QStringLiteral("  \xC2\xB7  ");
+    const QString dot = QString::fromUtf8("  \xC2\xB7  ");
     QString status = prims == 1 ? tr("1 prim") : tr("%1 prims").arg(locale.toString(prims));
     const std::size_t loadable = stage->FindLoadable().size();
     const std::size_t loaded = stage->GetLoadSet().size();

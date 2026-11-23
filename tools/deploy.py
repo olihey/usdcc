@@ -104,6 +104,26 @@ SHIPPED_PLUGINS = ["vray_render"]
 SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "s3", "viewport_broadcast"]
 
 
+def _build_features():
+    """build/features.json, which the configure writes (docs/BUILD_OPTIONS.md section 4):
+    each feature, whether this build has it, and its plugin folders."""
+    path = BUILD_DIR / "features.json"
+    if not path.is_file():
+        fail(f"No {path}: configure the build again (docs/BUILD_OPTIONS.md).")
+    return json.loads(path.read_text(encoding="utf-8"))["features"]
+
+
+def _left_out_folders():
+    """The plugin folders of the features this build was configured without."""
+    return {folder for feature in _build_features() if not feature["included"] for folder in feature["folders"]}
+
+
+def _shipped(plugins):
+    """Those of `plugins` this build has: a feature left out isn't deployed."""
+    left_out = _left_out_folders()
+    return [plugin for plugin in plugins if plugin not in left_out]
+
+
 def _full(path):
     return os.path.abspath(path).rstrip("\\/")
 
@@ -348,7 +368,7 @@ def main(argv=None):
 
     # --- the destination ------------------------------------------------------
 
-    include_rtx = not args.omit_rtx and cache_on(BUILD_DIR, "USDCC_BUILD_RTX_PLUGIN")
+    include_rtx = not args.omit_rtx and "rtx_render" not in _left_out_folders()
     native_rtx = BUILD_DIR / "plugins/rtx_render_native"
     if args.bundle_rtx_runtime and not include_rtx:
         fail("--bundle-rtx-runtime requires an enabled native RTX build without --omit-rtx.")
@@ -487,9 +507,9 @@ def main(argv=None):
     # --- plugins --------------------------------------------------------------
 
     print("  Shipped plugins", flush=True)
-    for plugin in ([] if args.with_blender_mesh_tools else SHIPPED_PLUGINS):
+    for plugin in ([] if args.with_blender_mesh_tools else _shipped(SHIPPED_PLUGINS)):
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
-    for plugin in SHIPPED_NATIVE_PLUGINS:
+    for plugin in _shipped(SHIPPED_NATIVE_PLUGINS):
         if not (BUILD_DIR / "plugins" / plugin / "usdcc-plugin.json").is_file():
             fail(f"The {plugin} plugin isn't built; build the usdcc target first.")
         copy_tree(BUILD_DIR / "plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_files=BUILD_ONLY_FILES)
@@ -634,13 +654,15 @@ def main(argv=None):
         "python/Lib/site-packages/usdcc/_vendor/jinja2/__init__.py",
         "python/Lib/site-packages/usdcc/_vendor/markupsafe/__init__.py",
         "python/Lib/site-packages/usdcc/_schema_check.py",
-        *([] if args.with_blender_mesh_tools else ["plugins/vray_render/usdcc-plugin.json"]),
+        *([f"plugins/{plugin}/usdcc-plugin.json" for plugin in _shipped(SHIPPED_PLUGINS)]
+          if not args.with_blender_mesh_tools else []),
         "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
         "sdk/UsdccPluginConfig.cmake", "sdk/lib/usdcc_ui.lib", "sdk/include/usdcc/plugin/plugin.h",
         "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt", "licenses/SOURCES.txt",
         "bin/usdcc_assets.dll", "bin/libcurl.dll", "licenses/vcpkg/curl.txt", "licenses/vcpkg/pugixml.txt",
-        "bin/pugixml.dll", "plugins/http/usd/plugInfo.json", "plugins/webdav/usd/plugInfo.json",
-        "plugins/s3/usd/plugInfo.json",
+        "bin/pugixml.dll",
+        # The remote asset protocols this build has: a usd/ folder each.
+        *[f"plugins/{protocol}/usd/plugInfo.json" for protocol in _shipped(["http", "webdav", "s3"])],
     ]
     if has_velopack:
         required += ["usdcc.exe", "bin/velopack_libc.dll", "licenses/Velopack/LICENSE"]
@@ -903,12 +925,12 @@ def deploy_linux(args):
     print("  Shipped and example plugins", flush=True)
     # V-Ray Render's panel is PySide6, which Linux doesn't deploy yet: shipped, it
     # would fail at every start. It stays out until then.
-    shipped = SHIPPED_PLUGINS if has_pyside and not args.with_blender_mesh_tools else []
-    if not has_pyside:
-        warn(f"Without PySide6, {', '.join(SHIPPED_PLUGINS)} isn't shipped: it needs it.")
+    shipped = _shipped(SHIPPED_PLUGINS) if has_pyside and not args.with_blender_mesh_tools else []
+    if not has_pyside and _shipped(SHIPPED_PLUGINS):
+        warn(f"Without PySide6, {', '.join(_shipped(SHIPPED_PLUGINS))} isn't shipped: it needs it.")
     for plugin in shipped:
         copy_tree(REPO / "src/plugins" / plugin, deploy_dir / "plugins" / plugin, exclude_dirs=["__pycache__"])
-    for plugin in SHIPPED_NATIVE_PLUGINS:
+    for plugin in _shipped(SHIPPED_NATIVE_PLUGINS):
         if not (BUILD_DIR / "plugins" / plugin / "usdcc-plugin.json").is_file():
             fail(f"The {plugin} plugin isn't built; build the usdcc target first.")
         _copy_linux_tree(BUILD_DIR / "plugins" / plugin, deploy_dir / "plugins" / plugin,

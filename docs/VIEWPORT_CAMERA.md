@@ -1,6 +1,6 @@
 # Viewport Camera
 
-Status: **phases 1 and 2 done** (looking through, Detach; the resolution gate and safe frames), phases 3–4 planned. Planned 2026-11-20
+Status: **phases 1 to 3 done** (looking through, Detach; the resolution gate and safe frames; render scale), phase 4 planned. Planned 2026-11-20
 against master `566fb99`. §2's navigation default (Detach) is decided; §8 lists what is still
 open, with proposed answers. §10 says what was built where, and where it differs from the plan.
 
@@ -296,3 +296,17 @@ Where it differs from the plan:
 - **Not in the Display… dialog** yet: the options menu and Settings have them.
 - **The Render View panel** keeps its own Resolution choice for now (§7's sharing waits for
   phase 3's render scale).
+
+### Phase 3: render scale (2026-11-22)
+
+| Piece | Where |
+|---|---|
+| The size | `scaledBufferSize()`, `kRenderScales` (100, 75, 50, 25) in `camera_framing.h` |
+| The pass | `HydraViewportWindow::renderNow()`: below 100 % Hydra renders into a framebuffer of its own at the scaled size (`bindHydraFramebuffer()`), then colour is blitted up into the full-size one with linear filtering and depth and stencil with nearest; the grid, selection outline, colliders, peers and gizmos then draw into the full-size one, depth-tested against the scaled-up depth, at full resolution. Hidden Line's two passes use the scaled one. Previews always render at 100 % |
+| What else sees it | `grabFrame()` (session previews, broadcasts, a playblast) gets the full-size picture; picking is its own pass, at full size; the HUD's camera label says `Persp @ 25 %` |
+| Choices | The options menu's **Render Scale**, Settings > Viewport > Camera > Render scale, the `renderScale` override, saved in sessions |
+
+Tests: `viewport_render_scale_size` (usdcc_tests) and the override's JSON in
+`viewport_gate_overrides`. In the app (Storm, 25 %): the scene soft, the grid sharp and still
+hidden behind the ground where it should be, with the ground's edge in the grid's depth test
+stepped (nearest-filtered depth), as §5 expected. Not checked: Embree, and the frame time it saves.

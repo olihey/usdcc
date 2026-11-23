@@ -363,6 +363,18 @@ QImage HydraViewportWindow::grabFrame() {
     return image;
 }
 
+QOpenGLFramebufferObject* HydraViewportWindow::bindHydraFramebuffer(int width, int height) {
+    if (!m_scaledFramebuffer || m_scaledFramebuffer->size() != QSize(width, height)) {
+        m_scaledFramebuffer.reset();
+        QOpenGLFramebufferObjectFormat format;
+        format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        format.setInternalTextureFormat(GL_RGBA8);
+        m_scaledFramebuffer = std::make_unique<QOpenGLFramebufferObject>(QSize(width, height), format);
+    }
+    m_scaledFramebuffer->bind();
+    return m_scaledFramebuffer.get();
+}
+
 void HydraViewportWindow::bindFramebuffer(int width, int height) {
     if (!m_framebuffer || m_framebuffer->size() != QSize(width, height)) {
         m_framebuffer.reset();  // before its replacement exists: one at a time in GPU memory
@@ -573,6 +585,8 @@ HudInput HydraViewportWindow::hudInput() const {
         input.camera += QStringLiteral(" ") + QChar(0x00B7) + QStringLiteral(" %1 ").arg(resolution->width) + QChar(0x00D7) +
                         QStringLiteral(" %1").arg(resolution->height);
     }
+    // And the render scale below 100 %: "Persp @ 50 %" (§5).
+    if (m_display.renderScale < 100) input.camera += QStringLiteral(" @ %1 %").arg(m_display.renderScale);
     // The gate's mask and the safe frames (§4, §6), whether the HUD's text is on or not.
     input.hudOn = hudActive();
     const ViewRect frame = gate();
@@ -1481,6 +1495,16 @@ void HydraViewportWindow::renderNow() {
     // which is GL_INVALID_ENUM on the default framebuffer. Hydra then reports
     // that leftover error from unrelated places. Copied to the window below.
     bindFramebuffer(w, h);
+    // Render scale (docs/VIEWPORT_CAMERA.md §5): Hydra renders into a smaller framebuffer,
+    // scaled up into ours below; the overlays then draw into ours at full size.
+    const int scale = m_previewMode ? 100 : m_display.renderScale;
+    const auto [hw, hh] = scaledBufferSize(w, h, scale);
+    QOpenGLFramebufferObject* hydraTarget = m_framebuffer.get();
+    if (scale < 100) {
+        hydraTarget = bindHydraFramebuffer(hw, hh);
+    } else {
+        m_scaledFramebuffer.reset();
+    }
 
     // QOpenGLWidget sets this automatically from its FBO size before each
     // paintGL(); a raw QWindow + manually-created QOpenGLContext has no such
@@ -1497,18 +1521,26 @@ void HydraViewportWindow::renderNow() {
     // reject the composite for exactly the pixels covered by geometry
     // (rendering pure black there) while unrelated background-only draws
     // still show through.
-    if (auto* gl = m_context->functions()) {
-        gl->glViewport(0, 0, w, h);
-        gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
-                         static_cast<float>(m_display.background.blueF()), 1.0f);
-        gl->glClearDepthf(1.0f);
-        gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    const auto clearTo = [this](int width, int height) {
+        if (auto* gl = m_context->functions()) {
+            gl->glViewport(0, 0, width, height);
+            gl->glClearColor(static_cast<float>(m_display.background.redF()), static_cast<float>(m_display.background.greenF()),
+                             static_cast<float>(m_display.background.blueF()), 1.0f);
+            gl->glClearDepthf(1.0f);
+            gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
+    };
+    if (hydraTarget != m_framebuffer.get()) {
+        m_framebuffer->bind();
+        clearTo(w, h);
+        hydraTarget->bind();
     }
+    clearTo(hw, hh);
 
     const usdcc::tools::ToolContext toolCtx = buildToolContext();
 
-    m_engine->SetRenderBufferSize(PXR_NS::GfVec2i(w, h));
-    m_engine->SetRenderViewport(PXR_NS::GfVec4d(0, 0, w, h));
+    m_engine->SetRenderBufferSize(PXR_NS::GfVec2i(hw, hh));
+    m_engine->SetRenderViewport(PXR_NS::GfVec4d(0, 0, hw, hh));
     m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
 
     // The shading this renderer draws: Storm draws them all, any other Smooth Shaded only.
@@ -1573,9 +1605,9 @@ void HydraViewportWindow::renderNow() {
             m_engine->SetCameraState(toolCtx.viewMatrix, pushedBack);
             m_engine->Render(m_stage->GetPseudoRoot(), surfaces);
             m_engine->SetCameraState(toolCtx.viewMatrix, toolCtx.projMatrix);
-            m_framebuffer->bind();
+            hydraTarget->bind();
             if (auto* gl = m_context->functions()) {
-                gl->glViewport(0, 0, w, h);
+                gl->glViewport(0, 0, hw, hh);
                 gl->glClearColor(static_cast<float>(m_display.background.redF()),
                                  static_cast<float>(m_display.background.greenF()),
                                  static_cast<float>(m_display.background.blueF()), 1.0f);
@@ -1589,6 +1621,16 @@ void HydraViewportWindow::renderNow() {
         QOpenGLFramebufferObject::bindDefault();
         recoverFromEngineError("drawing", error);  // the last frame stays on screen
         return;
+    }
+    if (hydraTarget != m_framebuffer.get()) {
+        // Up to full size: colour smoothly, depth as it is (GL allows nearest only), so the
+        // grid and the gizmos depth-test against the scene where it is.
+        const QRect from(0, 0, hw, hh), to(0, 0, w, h);
+        QOpenGLFramebufferObject::blitFramebuffer(m_framebuffer.get(), to, hydraTarget, from, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        QOpenGLFramebufferObject::blitFramebuffer(m_framebuffer.get(), to, hydraTarget, from,
+                                                  GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+        m_framebuffer->bind();
+        if (auto* gl = m_context->functions()) gl->glViewport(0, 0, w, h);
     }
 
     if (!m_previewMode) {
