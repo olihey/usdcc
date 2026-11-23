@@ -1,6 +1,6 @@
 # USDA View — Plan
 
-Status: **phases 1 and 2 done** (§9), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export. Since 2026-11-22 a big one, after Convert, exports in the background while the panel shows it's busy, and the app stays usable ([PANEL_BUSY.md](PANEL_BUSY.md) §5, §9).
+Status: **phases 1, 2 and 3 done** (§9; editing since 2026-11-23, §9.4), with the recommended choices in §8, except the big-file limit (§9.2). A saved 82 MB layer shows in about 0.1 s (§9.2); one that must be exported takes as long as USD's export. Since 2026-11-22 a big one, after Convert, exports in the background while the panel shows it's busy, and the app stays usable ([PANEL_BUSY.md](PANEL_BUSY.md) §5, §9).
 
 A view panel that shows a stage as USDA text: any layer of it as authored, or the stage
 flattened. It has syntax highlighting, and asset paths work as links that open the file in this
@@ -168,7 +168,7 @@ holds for text-sized layers, not for big binary ones.
 
 ## 7. Built for editing later
 
-Read-only now, but nothing should block making it editable:
+Written before phase 3 (§9.4 has it as built):
 
 - **The source of truth stays the layer.** An edit would be "Apply": `SdfLayer::ImportFromString()`
   into the layer. USD applies that spec by spec, through the undo recorder, as it does for Reload
@@ -313,11 +313,38 @@ offscreen, a generated layer of meshes with arrays and references:
     0.3 s for the 82 MB file's 190,000 prims.
   - Prims inside variants are found by their path without the variant selection.
 
+### 9.4 Phase 3 as built
+
+- **Edit** (a checkable toolbar button, in the USDA panel only; the Show USDA dialog stays
+  read-only) swaps the read-only `LineView` for a `usdcc::ui::TextView` (`QPlainTextEdit`) with
+  the same USDA colours (`UsdaHighlighter`, a `QSyntaxHighlighter` over `usda::tokenize()`
+  that carries `"""` strings from block to block). The text is the layer as USD writes it
+  (`ExportToString()`), so what Apply reads back matches; a file's own comments and formatting
+  aren't kept, as with any save from USD.
+- **What can be edited:** one of the stack's layers or a linked file's layer, when USD allows it
+  (`PermissionToEdit()`) and its text is under 32 MB (`kEditLimitBytes`), past which
+  `QPlainTextEdit` gets slow (§9.1). A flattened view can't: it has no layer to write to. The
+  button's tooltip says why when it's off.
+- **The edit bar** under the editor: Apply (Ctrl+Return), Revert, Done, and a line that says
+  what's going on:
+  - **Apply** parses the text into an anonymous layer first. A parse error leaves the real layer
+    untouched, says "Not applied: line N: …" and puts the cursor on that line (Sdf reports
+    `<file>:<line>:<column>:`). Otherwise `SdfLayer::ImportFromString()` writes it through
+    `UndoManager::apply()`, so Apply is **one undo step** ("Edit <layer> as Text") on the
+    stage's undo stack, and Edit > Undo takes it back.
+  - **A change from elsewhere** while editing (the Attribute Editor, an undo, Python) isn't
+    merged in: the bar warns that Apply replaces it and Revert shows it.
+  - **Revert** goes back to what the layer says now; **Done** returns to the read-only view and
+    asks first if there are edits not applied. Switching stage or Show stops editing the same
+    way.
+- **Links** stay in the read-only view; while editing, a click places the cursor (§8,
+  question 4). Show and Back/Forward are off until Done.
+
 | Phase | Work | Tests |
 |---|---|---|
 | **1. Show it fast** *(done, §9.2)* | `UsdaViewPanel` (Show menu: the stack's layers, Flattened Layer Stack, Flattened Stage); a read-only text view sharing `CodeEditor`'s gutter and current line (moved to usdcc_ui); the viewport highlighter with the background `"""` scan; Find and Go to Line; refresh (auto under the limit, else the Out of date bar, keeping the position); Flattened Stage off the UI thread with Cancel; the big-file limit | Highlighting of each token kind, including a `"""` string across lines; only visible blocks highlighted; the three Show modes' text; refresh after an edit; a generated 100 MB layer within the budget (times written to this file) |
 | **2. Links** *(done, §9.3)* | Link hit-testing and hover; click, Ctrl/middle-click, the link menu; Back/Forward with scroll positions; non-layer files opened by the system; prim-path clicks selecting; Follow Selection with the prim index | Resolving relative links per layer; a missing file's link; history; the prim index (nested prims, variants); a prim-path click selecting |
-| **3. Editing** (later) | Editable layers with Apply and Revert, parse errors at their line, Apply as one undo step | Apply and undo; a parse error leaves the layer untouched |
+| **3. Editing** *(done, §9.4)* | Editable layers with Apply and Revert, parse errors at their line, Apply as one undo step | Apply and undo; a parse error leaves the layer untouched |
 
 ## 10. Show USDA: a preview dialog
 

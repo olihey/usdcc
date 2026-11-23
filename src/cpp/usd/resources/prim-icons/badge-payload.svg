@@ -1,0 +1,8 @@
+<!-- usdcc: the payload badge drawn over a prim icon's lower-left corner (docs/PRIM_ICONS.md §7):
+     an arrow down into a tray, loaded on demand, in the style of Tabler Icons. prim_icons.cpp
+     clears a circle under it first. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M6.5 13.5v5" />
+  <path d="M4.5 16.5l2 2l2 -2" />
+  <path d="M3 20.5h7" />
+</svg>

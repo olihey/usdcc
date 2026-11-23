@@ -93,6 +93,11 @@ QString describe(const PXR_NS::UsdPrim& prim) {
 UsdPrimTreeModel::UsdPrimTreeModel(QObject* parent) : QAbstractItemModel(parent) {
     m_root = std::make_unique<Node>();
     m_root->path = PXR_NS::SdfPath::AbsoluteRootPath();
+    m_iconsConnection = prim_icons::iconsChanged().connect([this]() {
+        // Every row's decoration: the views ask again.
+        Q_EMIT layoutAboutToBeChanged();
+        Q_EMIT layoutChanged();
+    });
 }
 
 void UsdPrimTreeModel::setStage(const PXR_NS::UsdStageRefPtr& stage) {

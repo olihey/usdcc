@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+class QLabel;
 class QAction;
 class QLineEdit;
 
@@ -67,6 +68,13 @@ private:
     // Kept alive for as long as this panel wants to keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChangedConnection;
+    // Under the toolbar: the prim shown, its icon, name and type, its path as the tooltip
+    // (docs/PRIM_ICONS.md phase 2).
+    QWidget* m_primHeader = nullptr;
+    QLabel* m_primIcon = nullptr;
+    QLabel* m_primName = nullptr;
+    usdcc::core::Signal<>::Connection m_iconsConnection;
+    void updatePrimHeader();
 };
 
 }  // namespace usdcc::usd
