@@ -231,8 +231,7 @@ jobs:
 
   # The same on Ubuntu 24.04 (docs/LINUX_WSL.md): a tar.xz, which keeps the
   # libraries' links and the programs' modes, of a folder that runs from
-  # wherever it is unpacked. No PySide6 yet, so no V-Ray Render and no
-  # Python-made panels on Linux.
+  # wherever it is unpacked.
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
@@ -312,6 +311,18 @@ jobs:
       - name: Download the USD plugin packs
         run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
 
+      # Required, as in the windows job.
+      - name: Download PySide6
+        run: |
+          python tools/ci/pyside_asset.py > "$RUNNER_TEMP/pyside.json"
+          tag=$(jq -r .tag "$RUNNER_TEMP/pyside.json"); zip=$(jq -r .zip "$RUNNER_TEMP/pyside.json")
+          if ! gh release download "$tag" --pattern "$zip" --dir "$RUNNER_TEMP"; then
+            echo "::error::No $zip in release $tag. Run the PySide6 workflow (deps-pyside.yml) first."
+            exit 1
+          fi
+          unzip -q "$RUNNER_TEMP/$zip" -d external
+          rm "$RUNNER_TEMP/$zip"
+
       # build.yml's cache, only read: build.yml keeps it.
       - name: Name the vcpkg cache
         id: vcpkg
@@ -342,7 +353,7 @@ jobs:
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
           python tools/deploy.py "$deploy"
           # A release has to ship every licence (docs/RELEASE.md section 6).
-          for folder in OpenUSD-dependencies vcpkg Python; do
+          for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/licenses/$folder" 2>/dev/null)" ]; then
               echo "::error::No licences in licenses/$folder"; exit 1
             fi

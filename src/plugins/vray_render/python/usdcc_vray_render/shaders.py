@@ -371,7 +371,7 @@ def build_key(sdk):
     if os.path.isfile(git_hash):
         with open(git_hash, "rb") as stream:
             digest.update(stream.read())
-    files = [os.path.join(sdk, "bin", "VRaySDKLibrary.dll")]
+    files = [os.path.join(sdk, "bin", name) for name in ("VRaySDKLibrary.dll", "libVRaySDKLibrary.so")]
     plugins = os.path.join(sdk, "bin", "plugins")
     if os.path.isdir(plugins):
         files += [os.path.join(plugins, name) for name in sorted(os.listdir(plugins))]
