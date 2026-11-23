@@ -10,8 +10,9 @@ normalised before hashing.
 
 Prints the result as JSON, and with --github-output also appends it to
 $GITHUB_OUTPUT for later workflow steps:
-  name    pyside-<tag>-qt<qt version>-<hash>-win64-py313
+  name    pyside-<tag>-qt<qt version>-<hash>-<platform>-py313
   tag     deps/pyside-<tag>-qt<qt version>-<hash>
+  release <name> without the platform and Python: what the platforms' assets share
   zip     <name>.zip
   pyside, qt, python
 
@@ -60,6 +61,7 @@ def describe():
     return {
         "name": name,
         "tag": f"deps/{base}",
+        "release": base,
         "zip": f"{name}.zip",
         "pyside": pyside_tag,
         "qt": qt,

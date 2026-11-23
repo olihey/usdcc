@@ -216,6 +216,10 @@ class RenderViewPanel:
       another was picked; at most every 30 ms.
     - ``size_changed(width, height)``: the image's size in pixels; a
       ``camera_changed()`` follows, for the new aspect ratio.
+    - ``time_changed(time)``: the stage's time changed (docs/ANIMATION.md phase 5),
+      coalesced while it plays. ``time()`` is the time to render. Here: a camera prim
+      is sent again where it is then, and with Update on Edits on and anything
+      animated, ``reload()``. A renderer that can move in time in place overrides it.
     - ``stage_edited(resynced, changed)``: the stage was edited (the panel waits
       ``edit_delay()`` after the last edit) while Update on Edits is on, with the
       Sdf.Paths changed since the last call. Calls ``reload()`` here; a renderer that
@@ -272,6 +276,9 @@ class RenderViewPanel:
 
     def size_changed(self, width, height):
         pass
+
+    def time_changed(self, time):
+        self._panel.default_time_changed(time)
 
     def stage_edited(self, resynced, changed):
         self.reload()
@@ -363,6 +370,14 @@ class RenderViewPanel:
     def render_size(self):
         """The image's (width, height) in pixels."""
         return tuple(self._panel.render_size())
+
+    def time(self):
+        """The time to render: the stage's, as the timeline shows it."""
+        return self._panel.time()
+
+    def stage_is_animated(self):
+        """Whether anything on the stage is animated."""
+        return self._panel.stage_is_animated()
 
     def is_open(self):
         """False once the panel is gone; the calls above then raise RuntimeError."""
@@ -492,3 +507,27 @@ def _render_stage_edited(panel, resynced, changed):
     from pxr import Sdf
 
     panel.stage_edited([Sdf.Path(p) for p in resynced], [Sdf.Path(p) for p in changed])
+
+
+def set_prim_icon(type_name, path):
+    """Gives prims of `type_name` (a schema's name, "MyStudioLight") the icon in the
+    file at `path`, in the Outliner, the Attributes panel and wherever prims show
+    their icons (docs/PRIM_ICONS.md phase 2). An SVG is drawn as the built-in icons
+    are: ``currentColor`` in the theme's grey, white on a selected row, faded for an
+    inactive prim, badged for references, payloads and instances. Other images are
+    drawn as they are. Types derived from `type_name` without an icon of their own
+    get it too. ``None`` (or "") goes back to the built-in icon. For a startup
+    script, so a pipeline's schemas have their icons."""
+    import os
+
+    import _usdcc_app
+
+    _usdcc_app.set_prim_icon(str(type_name), "" if path is None else os.fspath(path))
+
+
+def prim_icon(type_name):
+    """The icon prims of `type_name` get: a built-in icon's name ("cube", "bulb"), or
+    "file:" and the path set with ``set_prim_icon()``."""
+    import _usdcc_app
+
+    return _usdcc_app.prim_icon(str(type_name))

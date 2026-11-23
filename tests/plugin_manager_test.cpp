@@ -179,6 +179,12 @@ USDCC_TEST(plugin_left_out_of_the_build) {
     CHECK(broadcast && broadcast->included == bool(USDCC_FEATURE_VIEWPORT_BROADCAST), "as the build was configured");
     CHECK(!usdcc::core::featureOfPlugin("org.example.anything"), "other plugins belong to none");
     CHECK(contains(usdcc::core::buildFeaturesText(), "Viewport Broadcast: "), "the text lists them");
+    // Updates (phase 3) is in the app, not a plugin: no ids to refuse.
+    const auto updates = std::find_if(features.begin(), features.end(),
+                                      [](const usdcc::core::BuildFeature& feature) { return feature.name == "UPDATES"; });
+    CHECK(updates != features.end() && updates->label == "Updates" && updates->pluginIds.empty() &&
+              updates->included == bool(USDCC_FEATURE_UPDATES),
+          "Updates is a feature with no plugin, as the build was configured");
 
     const usdcc::core::BuildFeature* leftOut = nullptr;
     for (const usdcc::core::BuildFeature& feature : features) {

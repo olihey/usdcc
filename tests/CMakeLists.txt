@@ -103,6 +103,9 @@ add_executable(usdcc_ui_tests
     selection_menu_test.cpp
     current_stage_test.cpp
     dependencies_panel_test.cpp
+    dope_sheet_test.cpp
+    curve_editor_test.cpp
+    playblast_test.cpp
     dependency_files.h
     layer_editor_test.cpp
     log_panel_test.cpp
@@ -115,7 +118,6 @@ add_executable(usdcc_ui_tests
     property_row_test.cpp
     asset_path_test.cpp
     asset_picker_test.cpp
-    asset_picker_save_test.cpp
     assets_test_server.h
     assets_test_server.cpp
     asset_servers_editor_test.cpp
@@ -167,8 +169,12 @@ target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # Saving through the asset picker to WebDAV servers inside the test program
 # (asset_picker_save_test.cpp): the protocol plugin, registered at start, and the server's sockets.
-target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_UI_TESTS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
-add_dependencies(usdcc_ui_tests usdccWebDavProtocol)
+# Only with WebDAV in the build (docs/BUILD_OPTIONS.md).
+if(USDCC_BUILD_WEBDAV)
+    target_sources(usdcc_ui_tests PRIVATE asset_picker_save_test.cpp)
+    target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_UI_TESTS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
+    add_dependencies(usdcc_ui_tests usdccWebDavProtocol)
+endif()
 if(WIN32)
     target_link_libraries(usdcc_ui_tests PRIVATE ws2_32)
 endif()

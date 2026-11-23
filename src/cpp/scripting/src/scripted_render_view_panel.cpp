@@ -113,6 +113,11 @@ void bindRenderViewPanelHandle(py::module_& m) {
         .def("edit_delay", [](const RenderViewPanelHandle& self) { return self.get().editDelay(); })
         .def("updates_on_edits", [](const RenderViewPanelHandle& self) { return self.get().updatesOnEdits(); })
         .def("camera", [](const RenderViewPanelHandle& self) { return cameraValues(self.get().currentCamera()); })
+        .def("time", [](const RenderViewPanelHandle& self) { return self.get().renderTime(); })
+        .def("stage_is_animated", [](const RenderViewPanelHandle& self) { return self.get().stageIsAnimated(); })
+        .def(
+            "default_time_changed", [](const RenderViewPanelHandle& self, double time) { self.get().defaultTimeChanged(time); },
+            py::arg("time"))
         .def("render_size", [](const RenderViewPanelHandle& self) {
             const QSize size = self.get().renderSize();
             return py::make_tuple(size.width(), size.height());
@@ -259,6 +264,8 @@ void ScriptedRenderViewPanel::cameraChanged(const RenderCamera& camera) {
 void ScriptedRenderViewPanel::sizeChanged(const QSize& size) {
     callHook(m_instance, "size_changed", size.width(), size.height());
 }
+
+void ScriptedRenderViewPanel::timeChanged(double time) { callHook(m_instance, "time_changed", time); }
 
 void ScriptedRenderViewPanel::stageEdited(const usdcc::usd::StageChanges& changes) {
     if (!m_instance) return;
