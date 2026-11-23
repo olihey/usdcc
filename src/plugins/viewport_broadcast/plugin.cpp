@@ -57,6 +57,26 @@ public:
 
     QImage grab() override { return m_panel ? m_panel->hydraWindow()->grabFrame() : QImage(); }
 
+    // A watcher's move (VIEWPORT_BROADCAST.md §6), in this viewport's pixels. Not while the
+    // host's own mouse is on the camera: the host always wins (§2.1).
+    bool navigate(const QString& move, double x, double y) override {
+        if (!m_panel) return false;
+        usdcc::usd::HydraViewportWindow* window = m_panel->hydraWindow();
+        if (window->isMouseNavigating()) return false;
+        if (move == QLatin1String("orbit")) {
+            window->orbitBy(x * window->width(), y * window->height());
+        } else if (move == QLatin1String("pan")) {
+            window->panBy(x * window->width(), y * window->height());
+        } else if (move == QLatin1String("zoom")) {
+            window->zoomBy(x);
+        } else if (move == QLatin1String("fit")) {
+            m_panel->fitView(QStringLiteral("selection"));
+        } else {
+            return false;
+        }
+        return true;
+    }
+
     QString title() const override {
         if (!m_panel) return {};
         const usdcc::usd::StageRefPtr& stage = m_panel->currentStage();
@@ -172,6 +192,25 @@ void startBroadcast(ViewportViewPanel* panel) {
 
     QObject::connect(broadcast, &Broadcast::watcherJoined, broadcast, [](const usdcc::peers::Peer& watcher) {
         toast(QObject::tr("%1 is watching").arg(watcher.name), {});
+    });
+    // A watcher asks to navigate (§2.1): Allow or Deny, on a toast that stays.
+    QPointer<Broadcast> asked(broadcast);
+    QObject::connect(broadcast, &Broadcast::navigateAsked, broadcast, [asked](const usdcc::peers::Peer& watcher) {
+        if (!g_state) return;
+        usdcc::ui::MainWindow* window = g_state->host->mainWindow;
+        if (!window || !window->toasts() || !asked) return;
+        usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+        request.title = QObject::tr("%1 asks to navigate %2")
+                            .arg(watcher.name, asked->source() ? asked->source()->title() : QString())
+                            .toStdString();
+        request.body = QObject::tr("They move this viewport's camera until you take it back.").toStdString();
+        const QString id = watcher.id;
+        window->toasts()->show(request, {{QObject::tr("Allow"), [asked, id] {
+                                              if (asked) asked->allowNavigating(id);
+                                          }},
+                                         {QObject::tr("Deny"), [asked, id] {
+                                              if (asked) asked->denyNavigating(id);
+                                          }}});
     });
     QPointer<ViewportViewPanel> broadcastPanel(panel);
     QObject::connect(broadcast, &Broadcast::stopped, broadcast, [broadcast, broadcastPanel](const QString& reason) {

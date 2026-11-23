@@ -11,7 +11,8 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 §8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
 **Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
-**Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel.
+**Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel. **Phase 3 is built** (2026-11-23,
+§11.4): a watcher navigates once the host allows it.
 [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
@@ -255,7 +256,7 @@ Small and general, so other plugins gain from them too:
    viewport then costs 60 reads a second only to find nothing new, and the wait for the next poll
    was most of the delay between a move and its picture (§11.1). **Built** (phase 1): after every
    frame that reached the screen.
-2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6).
+2. **`orbitBy()`, `panBy()`, `zoomBy()`** (§6). **Built** (phase 3, §11.4).
 3. **Entries in a viewport's menus from a plugin:** `Host::addViewportMenuAction()` and
    `usdcc.app.add_viewport_menu_action()`, like the Outliner's prim menu
    ([PLUGINS.md](PLUGINS.md) §1). *Checked:* there is no such extension point. **Built** (phase 1):
@@ -321,7 +322,7 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 | **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks. **On this machine: done** (§11.1); the LAN, the tunnel and the firewall remain |
 | **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port. **Built** (§11.2); all of it checked on this machine, not yet from a second one |
 | **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat. **Built** (§11.3) |
-| **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click |
+| **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click. **Built** (§11.4); not yet tried from a browser |
 | **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
 | **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast |
 | **Later** | A watcher's pointer shown to all; drawing on the picture; several broadcasts at once | |
@@ -512,6 +513,42 @@ the watcher, Remove, Stop asking to stop, and the panel saying the broadcast end
 the app** (test profile): the panel exists, starts hidden, is in the View menu, and says "Not
 broadcasting" when shown. Starting a broadcast from a script wasn't reached (the viewport menus
 are rebuilt each time they open); the test covers the panel while live.
+
+### 11.4 Phase 3 as built
+
+- **In the viewport** (`HydraViewportWindow`, §8 item 2): `orbitBy(dx, dy)`, `panBy(dx, dy)` and
+  `zoomBy(steps)`, in the window's pixels and wheel notches. The mouse handlers and these share
+  `orbitStep()` and `zoomStep()`, so half a degree a pixel, the upside-down orbit, a Z-up stage and
+  0.9 a notch are the same either way. Each leaves a stage camera for the orbit camera first, as a
+  drag does; an orthographic axis view doesn't orbit. `panBy()` keeps what's in the middle of the
+  view under the same spot, as a drag does with what's under the cursor.
+  `isMouseNavigating()` says the host's own mouse is on the camera or a tool.
+- **The channel** `org.usdcc.viewport-broadcast/nav`: direct, open to guests. A watcher sends
+  `ask` and `cancel`, and while it navigates `orbit {x, y}` and `pan {x, y}` (fractions of the
+  picture, at most 1), `zoom {steps}` (at most 10) and `fit`. The host sends every watcher
+  `navigator {id, name}` (empty when nobody), when it changes and to a newcomer, and the one it
+  turned down `denied`.
+- **The rules** (`Broadcast`): one navigator; allowing another takes it from the first. A move
+  from anyone else, out of range, or while the host's mouse is down on the viewport is dropped
+  and counted (`Stats::movesRefused`): the host always wins. Any other message type on the
+  channel removes the page (§9's closed list). A navigator who leaves, or sends `cancel`, ends
+  it. Nothing is recorded for undo.
+- **The host:** "Anna asks to navigate Viewport 1" as a toast that stays, with **Allow** and
+  **Deny**. In the Broadcast panel the watchers show "(navigating)" or "(asks to navigate)", with
+  **Allow Navigating** for the one selected and **Take Back**.
+- **The page:** **Ask to navigate** in the bar (then **Cancel asking**, then **Stop
+  navigating**), and who navigates. While it's the watcher: drag to orbit, shift or middle drag
+  to pan, wheel to zoom, F to fit; the picture gets an accent outline and a grab cursor. Moves
+  are added up and sent at most once a frame.
+- **Fit** is the viewport's Fit to View (the host's selection, or the stage).
+
+**Tests:** `broadcast_navigating` (`usdcc_ui_tests`): the nav channel is open to watchers; a move
+before being allowed is refused; ask reaches the host, deny tells the watcher, ask again and allow
+make them the navigator and tell the others; orbit, zoom and fit arrive as sent; another watcher's
+move, one out of range, and one while the host's hand is on it are refused; Take back tells the
+watcher and refuses the next move; a message outside the list removes the page.
+`viewport_navigates_by_moves` (`usdcc_python_tests`): orbit, zoom and pan move the camera as the
+mouse does and say so. The page's script parses (`node --check`); **not yet tried in a browser.**
 
 ## 12. Open questions
 

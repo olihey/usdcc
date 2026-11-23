@@ -1858,11 +1858,7 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
         const QScreen* onScreen = screen();
         const QRect bounds = onScreen ? onScreen->geometry() : QRect();
         const bool stale = onScreen && (std::abs(delta.x()) > bounds.width() / 2 || std::abs(delta.y()) > bounds.height() / 2);
-        if (!stale) {
-            m_yaw = wrapDegrees(m_yaw - (m_orbitReversed ? -1.0 : 1.0) * delta.x() * 0.5);
-            m_pitch = wrapDegrees(m_pitch + delta.y() * 0.5);
-            m_view = CameraView::Persp;  // no longer looking along an axis
-        }
+        if (!stale) orbitStep(delta.x(), delta.y(), m_orbitReversed);
         // At the screen's edge, on from the other side, so a drag never runs out.
         if (onScreen) {
             const QPoint global = event->globalPosition().toPoint();
@@ -1917,12 +1913,48 @@ void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
         HydraViewportWindow* window;
         ~EndDrive() { window->finishNavigation(); }
     } endDrive{this};
-    const double factor = std::pow(0.9, event->angleDelta().y() / 120.0);
+    zoomStep(event->angleDelta().y() / 120.0);
+    cameraMoved();
+}
+
+void HydraViewportWindow::orbitStep(double dx, double dy, bool reversed) {
+    m_yaw = wrapDegrees(m_yaw - (reversed ? -1.0 : 1.0) * dx * 0.5);
+    m_pitch = wrapDegrees(m_pitch + dy * 0.5);
+    m_view = CameraView::Persp;  // no longer looking along an axis
+}
+
+void HydraViewportWindow::zoomStep(double steps) {
+    const double factor = std::pow(0.9, steps);
     if (m_orthographic) {
         m_orthoSize = std::max(kMinDistance, m_orthoSize * factor);
     } else {
         m_distance = std::max(kMinDistance, m_distance * factor);
     }
+}
+
+void HydraViewportWindow::orbitBy(double dx, double dy) {
+    detachFromStageCamera();
+    if (!cameraViewTumbles(m_view, m_orthographic)) return;  // a Top view stays a Top view
+    orbitStep(dx, dy, orbitIsUpsideDown(m_pitch));
+    cameraMoved();
+}
+
+void HydraViewportWindow::panBy(double dx, double dy) {
+    // What is in the middle of the view follows, as what is under the cursor does in a drag.
+    const QPointF middle(width() / 2.0, height() / 2.0);
+    const std::optional<double> drawn = m_orthographic ? std::nullopt : drawnDepthAt(middle);
+    detachFromStageCamera();
+    const double viewHeight = std::max(1, height());
+    const double unitsPerPixel = m_orthographic
+                                     ? m_orthoSize / viewHeight
+                                     : panUnitsPerPixel(drawn ? *drawn : panDepthAt(middle), m_fovY, viewHeight);
+    m_target = panOrbitTarget(m_target, orbitAxes(m_distance), dx, dy, unitsPerPixel);
+    cameraMoved();
+}
+
+void HydraViewportWindow::zoomBy(double steps) {
+    detachFromStageCamera();
+    zoomStep(steps);
     cameraMoved();
 }
 

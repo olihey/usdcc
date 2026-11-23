@@ -469,3 +469,121 @@ USDCC_TEST(broadcast_panel_watchers_and_chat) {
     CHECK(status->text().contains("ended") && link->text().isEmpty() && !stop->isEnabled(),
           "the panel doesn't say the broadcast ended: %s", qPrintable(status->text()));
 }
+
+namespace {
+
+// A picture that records the moves it was asked to do.
+class NavigableSource : public FakeSource {
+public:
+    bool navigate(const QString& move, double x, double y) override {
+        if (busy) return false;
+        moves.append(QStringLiteral("%1 %2 %3").arg(move).arg(x).arg(y));
+        return true;
+    }
+    QStringList moves;
+    bool busy = false;
+};
+
+const Message* lastOf(const RawMember& member, const QString& channel, const QString& type) {
+    const Message* found = nullptr;
+    for (const Message& message : member.frames) {
+        if (message.channel == channel && message.type == type) found = &message;
+    }
+    return found;
+}
+
+}  // namespace
+
+// Phase 3 (VIEWPORT_BROADCAST.md §6): a watcher asks, the host allows or denies, only the
+// navigator's moves reach the picture, the host's own hand wins, and Take back ends it.
+USDCC_TEST(broadcast_navigating) {
+    QTemporaryDir page;
+    QFile index(page.filePath(QStringLiteral("index.html")));
+    CHECK(index.open(QIODevice::WriteOnly), "can't write the test page");
+    index.write("<!doctype html><title>broadcast test page</title>");
+    index.close();
+    Peers peers{Peers::Options{}};
+    NavigableSource source;
+    source.draw(Qt::darkCyan);
+    Broadcast::Options options;
+    options.name = QStringLiteral("Broadcast: navigate");
+    options.address = QHostAddress(QHostAddress::LocalHost);
+    options.port = 0;
+    options.pageDirectory = page.path();
+    QString error;
+    std::unique_ptr<Broadcast> broadcast(Broadcast::start(&peers, &source, options, &error));
+    CHECK(broadcast, "the broadcast didn't start: %s", qPrintable(error));
+    if (!broadcast) return;
+    const QString nav = QLatin1String(Broadcast::kNavChannel);
+    const QString secret = broadcast->room()->guestSecret();
+
+    RawMember anna, ben;
+    CHECK(anna.hello(*broadcast->room(), secret, QStringLiteral("Anna")) &&
+              ben.hello(*broadcast->room(), secret, QStringLiteral("Ben")),
+          "the watchers aren't let in");
+    const Message* welcome = anna.find("room", "welcome");
+    bool navOpen = false;
+    for (const QJsonValue& value : welcome ? welcome->body.value("channels").toArray() : QJsonArray()) {
+        navOpen = navOpen || value.toObject().value("name").toString() == nav;
+    }
+    CHECK(navOpen, "the watcher doesn't reach the nav channel");
+    CHECK(waitUntil([&] { return broadcast->watchers().size() == 2; }), "both aren't watching");
+    QString annaId;
+    for (const usdcc::peers::Peer& watcher : broadcast->watchers()) {
+        if (watcher.name == "Anna") annaId = watcher.id;
+    }
+
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == 1; }), "a move before being allowed isn't refused");
+    CHECK(source.moves.isEmpty(), "a move before being allowed reached the picture");
+
+    QStringList asked;
+    QObject::connect(broadcast.get(), &Broadcast::navigateAsked, [&](const usdcc::peers::Peer& who) { asked.append(who.name); });
+    anna.sendText(nav, QStringLiteral("ask"));
+    CHECK(waitUntil([&] { return asked == QStringList{"Anna"}; }), "the host isn't asked");
+    CHECK(broadcast->asking() == QStringList{annaId}, "Anna isn't listed as asking");
+    broadcast->denyNavigating(annaId);
+    CHECK(waitUntil([&] { return lastOf(anna, nav, "denied") != nullptr; }), "Anna isn't told no");
+    CHECK(broadcast->asking().isEmpty() && broadcast->navigator().isEmpty(), "a denied ask stays");
+
+    anna.sendText(nav, QStringLiteral("ask"));
+    CHECK(waitUntil([&] { return broadcast->asking().size() == 1; }), "Anna can't ask again");
+    CHECK(broadcast->allowNavigating(annaId) && broadcast->navigator() == annaId, "allowing doesn't make Anna the navigator");
+    CHECK(waitUntil([&] {
+              const Message* told = lastOf(ben, nav, "navigator");
+              return told && told->body.value("id").toString() == annaId && told->body.value("name").toString() == "Anna";
+          }),
+          "the other watchers aren't told who navigates");
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", -0.2}});
+    anna.sendText(nav, QStringLiteral("zoom"), {{"steps", 2}});
+    anna.sendText(nav, QStringLiteral("fit"));
+    CHECK(waitUntil([&] { return source.moves.size() == 3; }), "the navigator's moves don't reach the picture: %s",
+          qPrintable(source.moves.join(", ")));
+    CHECK(source.moves == QStringList({"orbit 0.1 -0.2", "zoom 2 0", "fit 0 0"}), "the moves aren't as sent: %s",
+          qPrintable(source.moves.join(", ")));
+
+    const int refused = broadcast->stats().movesRefused;
+    ben.sendText(nav, QStringLiteral("pan"), {{"x", 0.1}, {"y", 0.1}});
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 5.0}, {"y", 0.0}});
+    source.busy = true;  // the host's hand on the camera
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == refused + 3; }),
+          "another watcher's move, one too big, or one while the host navigates isn't refused (%d)",
+          broadcast->stats().movesRefused - refused);
+    CHECK(source.moves.size() == 3, "a refused move reached the picture");
+    source.busy = false;
+
+    broadcast->takeBack();
+    CHECK(broadcast->navigator().isEmpty(), "Take back leaves a navigator");
+    CHECK(waitUntil([&] {
+              const Message* told = lastOf(anna, nav, "navigator");
+              return told && told->body.value("id").toString().isEmpty();
+          }),
+          "Anna isn't told the host took it back");
+    anna.sendText(nav, QStringLiteral("orbit"), {{"x", 0.1}, {"y", 0.0}});
+    CHECK(waitUntil([&] { return broadcast->stats().movesRefused == refused + 4; }), "a move after Take back isn't refused");
+
+    // A closed list: anything else removes the page.
+    ben.sendText(nav, QStringLiteral("select"), {{"path", "/World"}});
+    CHECK(waitUntil([&] { return broadcast->watchers().size() == 1; }), "a page that sends something else stays");
+}
