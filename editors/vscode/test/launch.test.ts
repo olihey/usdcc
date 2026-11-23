@@ -22,7 +22,8 @@ test('the program, past the launcher', () => {
     fs.writeFileSync(bin, '');
     const top = path.join(root, 'usdcc', 'current', name);
     fs.writeFileSync(top, '');
-    const build = path.join(root, name);
+    const build = path.join(root, 'build', name);
+    fs.mkdirSync(path.dirname(build));
     fs.writeFileSync(build, '');
     assert.equal(findProgram('', { LOCALAPPDATA: root }), bin);
     assert.equal(findProgram('', {}), undefined);
