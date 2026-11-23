@@ -83,23 +83,26 @@ constexpr int kSideWidth = 320;
 // What the Parameters keep below the preview, however wide the pane on the right.
 constexpr int kMinParametersHeight = 120;
 
-// The app's dark theme, for what QtNodes draws itself. Its styles are process-wide.
+// The app's theme, for what QtNodes draws itself. Its styles are process-wide.
 void applyTheme() {
+    using usdcc::ui::theme::Token;
+    const auto name = [](Token token) { return usdcc::ui::theme::color(token).name(); };
     const QString accent = usdcc::ui::theme::accent().name();
     QtNodes::GraphicsViewStyle::setStyle(QStringLiteral(R"({"GraphicsViewStyle": {
-        "BackgroundColor": [28, 28, 30], "FineGridColor": [36, 36, 38], "CoarseGridColor": [46, 46, 49]}})"));
+        "BackgroundColor": "%1", "FineGridColor": "%2", "CoarseGridColor": "%3"}})")
+                                              .arg(name(Token::SurfacePanel), name(Token::GraphGridFine), name(Token::GraphGridCoarse)));
     // ShaderNodePainter draws the nodes: these are what QtNodes still reads, such as the opacity.
     QtNodes::NodeStyle::setNodeStyle(QStringLiteral(R"({"NodeStyle": {
         "NormalBoundaryColor": [70, 70, 74], "SelectedBoundaryColor": "%1",
         "GradientColor0": [50, 50, 54], "GradientColor1": [46, 46, 50], "GradientColor2": [44, 44, 48], "GradientColor3": [42, 42, 46],
-        "ShadowColor": [10, 10, 10], "ShadowEnabled": false, "FontColor": [225, 225, 228], "FontColorFaded": [140, 140, 145],
+        "ShadowColor": [10, 10, 10], "ShadowEnabled": false, "FontColor": "%2", "FontColorFaded": "%3",
         "ConnectionPointColor": [160, 160, 164], "FilledConnectionPointColor": "%1", "ErrorColor": [255, 95, 86], "WarningColor": [255, 189, 46],
         "ToolTipIconColor": "white", "PenWidth": 1.0, "HoveredPenWidth": 1.5, "ConnectionPointDiameter": 9.0, "Opacity": 1.0}})")
-                                      .arg(accent));
+                                      .arg(accent, name(Token::NodeText), name(Token::NodeTextMuted)));
     QtNodes::ConnectionStyle::setConnectionStyle(QStringLiteral(R"({"ConnectionStyle": {
-        "ConstructionColor": [160, 160, 164], "NormalColor": [130, 130, 136], "SelectedColor": "%1", "SelectedHaloColor": "%1", "HoveredColor": "%1",
+        "ConstructionColor": "%2", "NormalColor": "%3", "SelectedColor": "%1", "SelectedHaloColor": "%1", "HoveredColor": "%1",
         "LineWidth": 2.0, "ConstructionLineWidth": 2.0, "PointDiameter": 8.0, "UseDataDefinedColors": false}})")
-                                                     .arg(accent));
+                                                     .arg(accent, name(Token::Icon), name(Token::GraphConnection)));
 }
 
 QtNodes::NodeGraphicsObject* nodeAt(QtNodes::GraphicsView* view, QPoint viewportPoint) {
@@ -173,6 +176,16 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     m_empty = new QLabel(tr("Select a Material, or a prim with one bound."), m_stack);
     m_empty->setAlignment(Qt::AlignCenter);
     m_stack->addWidget(m_view);
+    const auto recolor = [this]() {
+        applyTheme();
+        m_view->setBackgroundBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::SurfacePanel));
+        m_view->resetCachedContent();
+        if (m_scene) {
+            for (QGraphicsItem* item : m_scene->items()) item->update();  // they are cached
+        }
+        m_view->viewport()->update();
+    };
+    usdcc::ui::theme::onChanged(this, recolor);
     m_stack->addWidget(m_empty);
     m_side = new QSplitter(Qt::Vertical, m_split);
     m_side->setObjectName(QStringLiteral("materialEditorSide"));

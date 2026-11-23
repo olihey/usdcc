@@ -45,7 +45,8 @@ On Linux the folder is a prefix of its own, which is also the Python's
 
     <destination>/
       usdcc         starts bin/usdcc
-      bin/          usdcc, and python3.XY (with a python3 link), which uv needs
+      bin/          usdcc, usdcc_node with its web page (node-web), and python3.XY
+                    (with a python3 link), which uv needs
       lib/          usdcc's, Qt's, vcpkg's and OpenUSD's libraries, libpython
       lib/usd/      OpenUSD's built-in plugins
       lib/python3.XY/   the standard library, and in site-packages: usdcc, pxr
@@ -906,6 +907,12 @@ def deploy_linux(args):
     print("  usdcc", flush=True)
     bin_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(exe, bin_dir / "usdcc")
+    # The render node (docs/RENDER_NODE.md), and its queue's page, which it looks for beside it.
+    node = app_dir / "usdcc_node"
+    if not node.is_file():
+        fail(f"No usdcc_node in {app_dir}; build it with tools/build.py.")
+    shutil.copy2(node, bin_dir / "usdcc_node")
+    copy_tree(app_dir / "node-web", bin_dir / "node-web")
     for library in own_libraries:
         shutil.copy2(library, lib_dir / library.name)
     shutil.copy2(libpython, lib_dir / libpython.name)
@@ -1052,7 +1059,8 @@ def deploy_linux(args):
     launcher.chmod(0o755)
 
     required = [
-        "bin/usdcc", f"bin/python{python_version}", "lib/libusd_plug.so", "lib/libQt6Core.so.6", "lib/libusdcc_core.so",
+        "bin/usdcc", "bin/usdcc_node", "bin/node-web/index.html", "bin/node-web/usdcc.css",
+        f"bin/python{python_version}", "lib/libusd_plug.so", "lib/libQt6Core.so.6", "lib/libusdcc_core.so",
         f"lib/{libpython.name}", "lib/usd/plugInfo.json", "plugin/usd/hdStorm.so",
         "Qt6/plugins/platforms/libqxcb.so", "Qt6/plugins/platforms/libqoffscreen.so",
         f"lib/python{python_version}/encodings/__init__.py", f"lib/python{python_version}/site-packages/usdcc/__init__.py",

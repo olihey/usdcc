@@ -1,4 +1,5 @@
 #include "usdcc/usd/time_ruler.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/usd/properties/property_style.h"
@@ -209,7 +210,7 @@ void TimeRuler::paintEvent(QPaintEvent*) {
         p.setPen(Qt::NoPen);
         p.setBrush(accent);
         p.drawRoundedRect(plate, pixels(2), pixels(2));
-        p.setPen(Qt::white);
+        p.setPen(usdcc::ui::theme::color(usdcc::ui::theme::Token::OnAccent));
         p.drawText(plate, Qt::AlignCenter, label);
     }
 }

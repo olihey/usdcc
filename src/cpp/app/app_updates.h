@@ -17,6 +17,8 @@
 #include <functional>
 #include <memory>
 
+class QAction;
+
 namespace usdcc::ui {
 class MainWindow;
 }
@@ -43,6 +45,10 @@ public:
     // Help > Check for Updates: as the startup check, and also says when there's
     // nothing newer or the check failed.
     void checkNow();
+    // Makes `action` the Help menu's item: Check for Updates, or once an update
+    // was found, Install Update to <version>, then its download's progress, then
+    // Restart to Update to <version>. `action` outlives the AppUpdates.
+    void setMenuAction(QAction* action);
 
     // At the end of main(), once the app has quit: when Restart Now closed it,
     // hands the downloaded update to Velopack's updater, which waits for this
@@ -55,10 +61,14 @@ private:
     void download();
     void restartNow();
     void showReady();
+    void updateMenuAction();
+    void menuActionTriggered();
     QString releasesUrl() const;
 
     ui::MainWindow* m_window;
     std::function<bool()> m_closeWindow;
+    QAction* m_menuAction = nullptr;
+    int m_availableToast = 0;  // "usdcc <version> is available"; 0 is none
     std::shared_ptr<State> m_state;
 };
 

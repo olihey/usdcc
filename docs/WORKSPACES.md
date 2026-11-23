@@ -473,7 +473,7 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
 - A `QToolButton#titleBarWorkspaceButton`, right of the title and left of the minimize button: **a push
   button** with the workspace's name and a down arrow on its right, `Qt::ToolButtonTextOnly`, popup mode
   `InstantPopup`, 22 pixels high (scaled) rather than the title bar's height.
-- **On the accent fill**, as a dialog's main button. In `dark.qss`: `background: @accent`, white bold text,
+- **On the accent fill**, as a dialog's main button. In `app.qss`: `background: @accent`, white bold text,
   3px corners, hover `@accent-hover`, pressed or open 75% of the accent; the arrow is the menu indicator,
   `chevron-down-white.png` (`tools/gen_theme_icons.py`).
 - The name is elided past about 160 pixels (scaled); below a narrow window width only the icon shows,
@@ -526,7 +526,7 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
   workspace that has a group stays in that group, where the one it replaces was; a file that names the
   group `Personal` itself joins the heading.
 - Headings are section labels, not submenus: every workspace stays one click away. They're
-  `QWidgetAction` labels (`#workspaceMenuHeading` in `dark.qss`, small caps in the dimmed text color),
+  `QWidgetAction` labels (`#workspaceMenuHeading` in `app.qss`, small caps in the dimmed text color),
   since `QMenu::addSection()` draws its text or not depending on the style.
 - The Workspace list of Open Stage with Options (§8.2) groups the same way, with the headings as
   disabled items.
@@ -713,7 +713,7 @@ First the usual file dialog. Then, for the chosen file:
 | `SessionController` | `"workspace"` in `layout` |
 | Python (`usdcc.app`) | §9.1 |
 | `resources/workspaces/` | The eight files (§4) and `workspace.schema.json`; the deploy copies them |
-| `dark.qss` | `#titleBarWorkspaceButton` |
+| `app.qss` | `#titleBarWorkspaceButton` |
 
 ### 9.1 Python
 

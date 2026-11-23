@@ -239,7 +239,7 @@ void ShadeBackdropItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*
     painter->setPen(border);
     painter->setBrush(fill);
     painter->drawRoundedRect(boundingRect(), 6, 6);
-    painter->setPen(QColor(225, 225, 228));
+    painter->setPen(usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeText));
     painter->setFont(captionFont());
     painter->drawText(QRectF(10, 0, m_size.width() - 20, kBackdropTitleHeight), Qt::AlignLeft | Qt::AlignVCenter, m_description);
     // The corner to resize it by.
@@ -297,7 +297,7 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
     QPainterPath outline;
     outline.addRoundedRect(body, kRadius, kRadius);
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(44, 44, 48));
+    painter->setBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeBody));
     painter->drawPath(outline);
     painter->save();
     painter->setClipPath(outline, Qt::IntersectClip);
@@ -306,7 +306,7 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
     painter->restore();
 
     const bool hovered = ngo.nodeState().hovered();
-    QPen border(ngo.isSelected() ? usdcc::ui::theme::accent() : (hovered ? QColor(110, 110, 116) : QColor(70, 70, 74)));
+    QPen border(ngo.isSelected() ? usdcc::ui::theme::accent() : (hovered ? usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeBorderHover) : usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeBorder)));
     border.setWidthF(ngo.isSelected() ? 2.0 : 1.0);
     painter->setPen(border);
     painter->setBrush(Qt::NoBrush);
@@ -336,9 +336,9 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
         painter->setFont(text);
         if (row.kind == ShadeGraphRow::Kind::Page) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(54, 54, 58));
+            painter->setBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::NodePage));
             painter->drawRect(rect.adjusted(1, 1, -1, -1));
-            painter->setBrush(QColor(170, 170, 175));
+            painter->setBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::Icon));
             const QPointF mid(rect.left() + kTextInset, rect.center().y());
             QPolygonF arrow;
             if (row.open) {
@@ -347,7 +347,7 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
                 arrow << mid + QPointF(-2, -4) << mid + QPointF(3, 0) << mid + QPointF(-2, 4);
             }
             painter->drawPolygon(arrow);
-            painter->setPen(QColor(205, 205, 210));
+            painter->setPen(usdcc::ui::theme::color(usdcc::ui::theme::Token::NodePageText));
             painter->drawText(rect.adjusted(kTextInset + 10, 0, -kTextInset, 0), Qt::AlignLeft | Qt::AlignVCenter, pageTitle(row.page));
             continue;
         }
@@ -356,9 +356,9 @@ void ShaderNodePainter::paint(QPainter* painter, QtNodes::NodeGraphicsObject& ng
         const QPointF dot(input ? 0.0 : rect.width(), rect.center().y());
         const QColor color = portColor(port.type);
         painter->setPen(QPen(color, 1.5));
-        painter->setBrush(port.connected ? QBrush(color) : QBrush(QColor(44, 44, 48)));
+        painter->setBrush(port.connected ? QBrush(color) : QBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeBody)));
         painter->drawEllipse(dot, kDotDiameter / 2.0, kDotDiameter / 2.0);
-        painter->setPen(port.authored || port.connected ? QColor(225, 225, 228) : QColor(150, 150, 155));
+        painter->setPen(port.authored || port.connected ? usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeText) : usdcc::ui::theme::color(usdcc::ui::theme::Token::NodeTextMuted));
         painter->drawText(rect.adjusted(kTextInset, 0, -kTextInset, 0), (input ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter, rowText(*node, row));
     }
     painter->restore();

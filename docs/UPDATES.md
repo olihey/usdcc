@@ -83,6 +83,13 @@ doesn't log Velopack's errors.
   - "Couldn't check for updates", with Velopack's error.
 - Anywhere else: "Updates come with the installer", with **Releases Page**.
 
+Once a check (this one or the one at the start) found an update, the menu item follows it, so
+it can be installed after its notification was closed:
+- **Install Update to 26.12.1**: the same as Download and Install.
+- **Downloading Update to 26.12.1...** (disabled) while it downloads. If that fails, it's
+  Install Update again.
+- **Restart to Update to 26.12.1** once downloaded: the same as Restart Now.
+
 **At the start.** Ten seconds after the window shows, the same check, if **Settings >
 Updates > Check for updates when usdcc starts** is on (the default). It only says something
 when there is an update; a failure goes to the log.

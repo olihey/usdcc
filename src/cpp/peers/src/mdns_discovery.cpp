@@ -10,6 +10,7 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QNetworkInterface>
+#include <QSet>
 #include <QSocketNotifier>
 #include <QTimer>
 
@@ -122,6 +123,34 @@ RoomRecords recordsOf(const Announcement& announcement) {
     return records;
 }
 
+// This machine's address on each adapter that is up and does multicast. Left to itself the
+// system sends multicast through one adapter of its choosing, which may be a VPN's or a
+// virtual one rather than the network the others are on.
+QList<quint32> adapterAddresses() {
+    QList<quint32> result;
+    constexpr auto needed = QNetworkInterface::IsUp | QNetworkInterface::IsRunning | QNetworkInterface::CanMulticast;
+    for (const QNetworkInterface& adapter : QNetworkInterface::allInterfaces()) {
+        if ((adapter.flags() & needed) != needed || (adapter.flags() & QNetworkInterface::IsLoopBack)) {
+            continue;
+        }
+        for (const QNetworkAddressEntry& entry : adapter.addressEntries()) {
+            if (entry.ip().protocol() == QAbstractSocket::IPv4Protocol) {
+                result.append(entry.ip().toIPv4Address());
+                break;  // One per adapter: a second one would ask the same network twice
+            }
+        }
+    }
+    return result;
+}
+
+sockaddr_in socketAddress(quint32 address, quint16 port) {
+    sockaddr_in in{};
+    in.sin_family = AF_INET;
+    in.sin_addr.s_addr = htonl(address);
+    in.sin_port = htons(port);
+    return in;
+}
+
 class MdnsDiscovery : public NetworkDiscovery {
 public:
     explicit MdnsDiscovery(QObject* parent) : NetworkDiscovery(parent), m_buffer(kBufferBytes / 4) {
@@ -131,6 +160,7 @@ public:
 #endif
         m_queryTimer.setInterval(kQueryIntervalMs);
         connect(&m_queryTimer, &QTimer::timeout, this, [this] {
+            openQueries();  // Adapters come and go
             query();
             forgetUnanswered();
         });
@@ -141,7 +171,7 @@ public:
             goodbye(announcement);
         }
         closeSocket(m_service, m_serviceNotifier);
-        closeSocket(m_query, m_queryNotifier);
+        closeQueries();
 #ifdef _WIN32
         WSACleanup();
 #endif
@@ -179,17 +209,18 @@ public:
         }
         if (!looking) {
             m_queryTimer.stop();
-            closeSocket(m_query, m_queryNotifier);
+            closeQueries();
+            // Looking again tells of every room again.
+            m_seen.clear();
+            m_published.clear();
             return;
         }
-        if (!openQuery()) {
-            return;
-        }
-        m_queryTimer.start();
+        m_queryTimer.start();  // Also if no socket opens: a later try may
+        openQueries();
         query();
     }
 
-    QString problem() const override { return m_problem; }
+    QString problem() const override { return m_queryProblem.isEmpty() ? m_serviceProblem : m_queryProblem; }
 
 private:
     enum class Send { Announce, Goodbye };
@@ -198,8 +229,25 @@ private:
         FoundRoom room;
         bool hasPort = false;
         bool hasTxt = false;
+        QElapsedTimer hostSeen;  // When room.address' host last answered
         QElapsedTimer lastSeen;
     };
+
+    struct Query {
+        int socket = -1;
+        QSocketNotifier* notifier = nullptr;
+    };
+
+    void setProblem(QString& which, const QString& problem) {
+        if (which == problem) {
+            return;
+        }
+        which = problem;
+        if (!problem.isEmpty()) {
+            qCWarning(lcPeers).noquote() << problem;
+        }
+        Q_EMIT problemChanged();
+    }
 
     void* buffer() { return m_buffer.data(); }
 
@@ -207,16 +255,15 @@ private:
         if (m_service >= 0) {
             return true;
         }
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(MDNS_PORT);
+        const sockaddr_in address = socketAddress(0, MDNS_PORT);
         m_service = mdns_socket_open_ipv4(&address);
         if (m_service < 0) {
-            m_problem = QStringLiteral("Couldn't listen for mDNS on port 5353");
-            qCWarning(lcPeers).noquote() << m_problem;
+            setProblem(m_serviceProblem, QStringLiteral("Couldn't listen for mDNS on port 5353"));
             return false;
         }
+        setProblem(m_serviceProblem, {});
+        m_joined.clear();
+        joinAdapters();
         m_serviceNotifier = new QSocketNotifier(qintptr(m_service), QSocketNotifier::Read, this);
         connect(m_serviceNotifier, &QSocketNotifier::activated, this, [this] {
             mdns_socket_listen(m_service, buffer(), kBufferBytes, &MdnsDiscovery::onQuestion, this);
@@ -224,22 +271,90 @@ private:
         return true;
     }
 
-    bool openQuery() {
-        if (m_query >= 0) {
-            return true;
+    // The questions asked on every adapter reach the service socket; also on those that
+    // came up since.
+    QList<quint32> joinAdapters() {
+        const QList<quint32> adapters = adapterAddresses();
+        for (auto it = m_joined.begin(); it != m_joined.end();) {
+            it = adapters.contains(*it) ? std::next(it) : m_joined.erase(it);
         }
-        m_query = mdns_socket_open_ipv4(nullptr);  // A port of its own: answers come to it alone
-        if (m_query < 0) {
-            m_problem = QStringLiteral("Couldn't open a socket to ask for rooms");
-            qCWarning(lcPeers).noquote() << m_problem;
-            return false;
+        for (const quint32 adapter : adapters) {
+            if (m_joined.contains(adapter)) {
+                continue;
+            }
+            ip_mreq request{};
+            request.imr_multiaddr.s_addr = htonl(0xE00000FBu);  // 224.0.0.251
+            request.imr_interface.s_addr = htonl(adapter);
+            // Fails for the default adapter, which opening the socket joined.
+            setsockopt(m_service, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&request),
+                       sizeof(request));
+            m_joined.insert(adapter);
         }
-        m_queryNotifier = new QSocketNotifier(qintptr(m_query), QSocketNotifier::Read, this);
-        connect(m_queryNotifier, &QSocketNotifier::activated, this, [this] {
-            mdns_query_recv(m_query, buffer(), kBufferBytes, &MdnsDiscovery::onAnswer, this, 0);
-            publishSeen();
-        });
-        return true;
+        return adapters;
+    }
+
+    // Calls `send` once per adapter, with what the service socket multicasts going there.
+    template <typename Function>
+    void onEachAdapter(const Function& send) {
+        const QList<quint32> adapters = joinAdapters();
+        for (const quint32 adapter : adapters) {
+            in_addr address{};
+            address.s_addr = htonl(adapter);
+            if (setsockopt(m_service, IPPROTO_IP, IP_MULTICAST_IF, reinterpret_cast<const char*>(&address),
+                           sizeof(address)) == 0) {
+                send();
+            }
+        }
+        if (adapters.isEmpty()) {
+            in_addr any{};
+            setsockopt(m_service, IPPROTO_IP, IP_MULTICAST_IF, reinterpret_cast<const char*>(&any), sizeof(any));
+            send();
+        }
+    }
+
+    // One socket per adapter, each with a port of its own: answers come to it alone. Without
+    // an adapter, one the system places (address 0).
+    void openQueries() {
+        QList<quint32> adapters = adapterAddresses();
+        if (adapters.isEmpty()) {
+            adapters.append(0);
+        }
+        const QList<quint32> open = m_queries.keys();
+        for (const quint32 adapter : open) {
+            if (!adapters.contains(adapter)) {
+                closeQuery(adapter);
+            }
+        }
+        for (const quint32 adapter : std::as_const(adapters)) {
+            if (m_queries.contains(adapter)) {
+                continue;
+            }
+            const sockaddr_in address = socketAddress(adapter, 0);
+            const int socket = mdns_socket_open_ipv4(&address);
+            if (socket < 0) {
+                continue;
+            }
+            auto* notifier = new QSocketNotifier(qintptr(socket), QSocketNotifier::Read, this);
+            connect(notifier, &QSocketNotifier::activated, this, [this, socket] {
+                mdns_query_recv(socket, buffer(), kBufferBytes, &MdnsDiscovery::onAnswer, this, 0);
+                publishSeen();
+            });
+            m_queries.insert(adapter, {socket, notifier});
+        }
+        setProblem(m_queryProblem,
+                   m_queries.isEmpty() ? QStringLiteral("Couldn't open a socket to ask for rooms") : QString());
+    }
+
+    void closeQuery(quint32 adapter) {
+        Query query = m_queries.take(adapter);
+        closeSocket(query.socket, query.notifier);
+    }
+
+    void closeQueries() {
+        const QList<quint32> open = m_queries.keys();
+        for (const quint32 adapter : open) {
+            closeQuery(adapter);
+        }
     }
 
     void closeSocket(int& socket, QSocketNotifier*& notifier) {
@@ -255,8 +370,13 @@ private:
     }
 
     void query() {
-        if (m_query >= 0) {
-            mdns_query_send(m_query, MDNS_RECORDTYPE_PTR, kService, sizeof(kService) - 1, buffer(), kBufferBytes, 0);
+        // A socket that can't send (its adapter was reset) is opened again in the next round.
+        const QList<quint32> open = m_queries.keys();
+        for (const quint32 adapter : open) {
+            if (mdns_query_send(m_queries.value(adapter).socket, MDNS_RECORDTYPE_PTR, kService, sizeof(kService) - 1,
+                                buffer(), kBufferBytes, 0) < 0) {
+                closeQuery(adapter);
+            }
         }
     }
 
@@ -266,13 +386,15 @@ private:
         }
         const RoomRecords records = recordsOf(announcement);
         const std::vector<mdns_record_t> additional = records.additional(true);
-        if (how == Send::Announce) {
-            mdns_announce_multicast(m_service, buffer(), kBufferBytes, records.ptr(), nullptr, 0, additional.data(),
-                                    additional.size());
-        } else {
-            mdns_goodbye_multicast(m_service, buffer(), kBufferBytes, records.ptr(), nullptr, 0, additional.data(),
-                                   additional.size());
-        }
+        onEachAdapter([&] {
+            if (how == Send::Announce) {
+                mdns_announce_multicast(m_service, buffer(), kBufferBytes, records.ptr(), nullptr, 0,
+                                        additional.data(), additional.size());
+            } else {
+                mdns_goodbye_multicast(m_service, buffer(), kBufferBytes, records.ptr(), nullptr, 0,
+                                       additional.data(), additional.size());
+            }
+        });
     }
 
     void goodbye(const Announcement& announcement) { send(announcement, Send::Goodbye); }
@@ -295,8 +417,10 @@ private:
                                           mdns_record_type_t(recordType), name.str, name.length, record, nullptr, 0,
                                           additional.data(), additional.size());
             } else {
-                mdns_query_answer_multicast(sock, self->buffer(), kBufferBytes, record, nullptr, 0, additional.data(),
-                                            additional.size());
+                self->onEachAdapter([&] {
+                    mdns_query_answer_multicast(sock, self->buffer(), kBufferBytes, record, nullptr, 0,
+                                                additional.data(), additional.size());
+                });
             }
         };
         const bool ptr = recordType == MDNS_RECORDTYPE_PTR || recordType == MDNS_RECORDTYPE_ANY;
@@ -348,9 +472,7 @@ private:
             Seen& seen = self->m_seen[instance];
             seen.room.where = FoundRoom::Where::Network;
             seen.lastSeen.start();
-            if (!address.isEmpty()) {
-                seen.room.address = address;
-            }
+            answeredFrom(seen, address);
         } else if (recordType == MDNS_RECORDTYPE_SRV && name.endsWith(QLatin1String(kService))) {
             char target[256];
             const mdns_record_srv_t srv = mdns_record_parse_srv(data, size, recordOffset, recordLength, target,
@@ -359,9 +481,7 @@ private:
             seen.room.announcement.port = srv.port;
             seen.hasPort = true;
             seen.lastSeen.start();
-            if (!address.isEmpty() && seen.room.address.isEmpty()) {
-                seen.room.address = address;
-            }
+            answeredFrom(seen, address);
         } else if (recordType == MDNS_RECORDTYPE_TXT && name.endsWith(QLatin1String(kService))) {
             mdns_record_txt_t entries[16];
             const size_t count = mdns_record_parse_txt(data, size, recordOffset, recordLength, entries, 16);
@@ -392,6 +512,19 @@ private:
             seen.lastSeen.start();
         }
         return 0;
+    }
+
+    // A host on two networks with us answers from both: the first one stays its address for
+    // as long as it answers.
+    static void answeredFrom(Seen& seen, const QString& host) {
+        if (host.isEmpty()) {
+            return;
+        }
+        const QString now = seen.room.address.section(u':', 0, 0);
+        if (now == host || now.isEmpty() || !seen.hostSeen.isValid() || seen.hostSeen.elapsed() > kForgetAfterMs) {
+            seen.room.address = host;
+            seen.hostSeen.start();
+        }
     }
 
     void publishSeen() {
@@ -441,14 +574,15 @@ private:
 
     std::vector<uint32_t> m_buffer;  // mdns wants it 32-bit aligned
     int m_service = -1;
-    int m_query = -1;
     QSocketNotifier* m_serviceNotifier = nullptr;
-    QSocketNotifier* m_queryNotifier = nullptr;
+    QSet<quint32> m_joined;           // Adapters the service socket hears questions on
+    QHash<quint32, Query> m_queries;  // adapter's address ->
     QTimer m_queryTimer;
     QHash<QString, Announcement> m_announced;  // room id ->
     QHash<QString, Seen> m_seen;               // instance name in DNS-SD ->
     QHash<QString, FoundRoom> m_published;     // room id -> what found() last said
-    QString m_problem;
+    QString m_serviceProblem;
+    QString m_queryProblem;
 };
 
 }  // namespace

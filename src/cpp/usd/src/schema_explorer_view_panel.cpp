@@ -1,4 +1,5 @@
 #include "usdcc/usd/schema_explorer_view_panel.h"
+#include "usdcc/ui/theme.h"
 
 #include "usdcc/usd/apply_schema_ui.h"
 #include "usdcc/usd/prim_actions.h"
@@ -53,8 +54,8 @@ constexpr int kNameRole = Qt::UserRole;  // a schema's name; empty on a category
 constexpr int kUnregisteredRole = Qt::UserRole + 1;  // This stage: a name USD doesn't know
 constexpr int kStageRowRole = Qt::UserRole + 2;      // This stage: a schema it uses
 constexpr int kLibraryRole = Qt::UserRole + 3;       // Schema Libraries: a library's name
-// As the Applied Schemas pill of an unregistered schema (theme/dark.qss).
-const QColor kUnregisteredColor(0xff, 0xb3, 0x40);
+// As the Applied Schemas pill of an unregistered schema (theme/app.qss).
+QColor unregisteredColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Warning); }
 constexpr std::size_t kMaxPrimsListed = 20;
 
 enum Column { Name, Kind, ColumnCount };
@@ -126,7 +127,7 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     addPanelControls(toolbarLayout);
@@ -236,6 +237,7 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     m_stageTimer->setSingleShot(true);
     m_stageTimer->setInterval(150);
     connect(m_stageTimer, &QTimer::timeout, this, &SchemaExplorerViewPanel::refreshStageUse);
+    usdcc::ui::theme::onChanged(this, [this]() { refresh(); });
     // Hidden behind another tab, edits are only noted, and counted when it shows.
     m_tree->installEventFilter(this);
     // Create and Apply to Selection say what they'd do with the selection.
@@ -670,14 +672,14 @@ void SchemaExplorerViewPanel::rebuildStageGroup() {
     if (!m_use.unregistered.empty()) {
         auto* group = new QTreeWidgetItem(m_stageGroup, {tr("Not registered")});
         group->setFlags(group->flags() & ~Qt::ItemIsSelectable);
-        group->setForeground(Name, kUnregisteredColor);
+        group->setForeground(Name, unregisteredColor());
         group->setText(Kind, QString::number(m_use.unregistered.size()));
         group->setToolTip(Name, tr("Types and API schemas the stage names that USD doesn't know: their plugin may not be "
                                    "loaded, or the name is misspelt"));
         for (const auto& [name, prims] : m_use.unregistered) {
             auto* item = new QTreeWidgetItem(group, {qs(name), primCount(prims.size())});
             item->setData(Name, kUnregisteredRole, qs(name));
-            item->setForeground(Name, kUnregisteredColor);
+            item->setForeground(Name, unregisteredColor());
             item->setToolTip(Name, tr("Not registered: its plugin may not be loaded, or the name is misspelt"));
         }
         group->setExpanded(true);

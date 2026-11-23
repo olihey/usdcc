@@ -319,7 +319,7 @@ From a prim: **Make Schema from Attributes...** in the Attribute Editor's Custom
   deploy.
 - **Checking a stage against its schemas:** a token outside its allowed list, a value of the wrong
   type, an API on a type it can't apply to. OpenUSD's validators (`usdValidation`) are the place to
-  start.
+  start (the Validation panel runs them, [VALIDATION.md](VALIDATION.md)).
 - **Icons and Create menu entries from the editor:** a new prim type gets its base type's icon and
   lands in Create > Plugins. Both have Python calls today (`set_create_entry()`,
   [PRIM_ICONS.md](PRIM_ICONS.md) phase 2); the editor could write them into the plugin.

@@ -1,4 +1,5 @@
 #include "usdcc/usd/dependencies_view_panel.h"
+#include "usdcc/ui/theme.h"
 #include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/settings.h"
@@ -34,7 +35,7 @@ namespace usdcc::usd {
 
 namespace {
 constexpr auto kShowAssetAttributesKey = "Dependencies/showAssetAttributes";
-const QColor kMissingColor(0xff, 0x5f, 0x56);  // as the log's errors
+QColor missingColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Error); }  // as the log's errors
 // Top-level rows: the file's index into dependencies(). Their children: the prim path.
 constexpr int kIndexRole = Qt::UserRole;
 constexpr int kPrimRole = Qt::UserRole + 1;
@@ -62,7 +63,7 @@ DependenciesViewPanel::DependenciesViewPanel(StageManager* stageManager, StageRe
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(container);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     addPanelControls(toolbarLayout);
@@ -100,6 +101,7 @@ DependenciesViewPanel::DependenciesViewPanel(StageManager* stageManager, StageRe
     m_refreshTimer->setSingleShot(true);
     m_refreshTimer->setInterval(100);
     connect(m_refreshTimer, &QTimer::timeout, this, &DependenciesViewPanel::refresh);
+    usdcc::ui::theme::onChanged(this, [this]() { m_refreshTimer->start(); });
 
     refreshStageCombo();
     // See ViewportViewPanel's constructor for why this is explicit.
@@ -170,7 +172,7 @@ void DependenciesViewPanel::refresh() {
                                         authoredIn.join(QStringLiteral(", "))));
         if (file.missing) {
             ++missing;
-            for (int column = 0; column < ColumnCount; ++column) item->setForeground(column, kMissingColor);
+            for (int column = 0; column < ColumnCount; ++column) item->setForeground(column, missingColor());
         }
 
         if (sublayerOnly) {

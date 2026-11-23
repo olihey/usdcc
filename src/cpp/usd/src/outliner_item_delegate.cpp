@@ -14,8 +14,8 @@
 namespace usdcc::usd {
 
 namespace {
-constexpr int kItemRadius = 3;  // dark.qss, QTreeView::item border-radius
-constexpr int kCheckMargin = 6;  // from the row's right edge: dark.qss, QTreeView::item padding
+constexpr int kItemRadius = 3;  // app.qss, QTreeView::item border-radius
+constexpr int kCheckMargin = 6;  // from the row's right edge: app.qss, QTreeView::item padding
 constexpr int kCheckGap = 6;     // between the name and the eye
 constexpr int kEyeSize = 16;     // the prim icons' size (docs/PRIM_ICONS.md §4)
 
@@ -65,7 +65,7 @@ void OutlinerItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     const QRect text = textRect(row, check);
     // Cut the name short of the eye; the style lays it out to the row's end.
     const QString name = row.fontMetrics.elidedText(row.text, row.textElideMode, text.width());
-    // A selected row's name is white (dark.qss), but a coloured one (an
+    // A selected row's name is white (app.qss), but a coloured one (an
     // instance, a prim with arcs) keeps its colour, so selecting it doesn't
     // hide what it is: the style draws the row without it, and the name is
     // drawn here.

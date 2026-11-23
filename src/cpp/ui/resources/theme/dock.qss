@@ -1,10 +1,10 @@
 /*
- * usdcc dark theme — overrides for the Qt Advanced Docking System (ADS).
+ * usdcc themes — overrides for the Qt Advanced Docking System (ADS).
  *
  * ADS sets its own stylesheet on its CDockManager when it is constructed
  * (focus_highlighting.css, since MainWindow enables FocusHighlighting). A
  * widget-level stylesheet beats the app-wide one for any property both
- * set, so the app-wide dark.qss alone leaves the tabs, title bars and
+ * set, so the app-wide app.qss alone leaves the tabs, title bars and
  * splitter handles in ADS's palette-derived look. theme.cpp therefore
  * appends this file to the manager's existing sheet: same selectors (and
  * specificity) as ADS's rules, placed later, so these win while ADS's
@@ -12,18 +12,18 @@
  *
  * Icons are the generated PNGs in this directory — the Qt SVG plugins
  * ADS's own icons need are not deployed with the app.
- * Colours: see dark.qss.
+ * Colours: see app.qss.
  */
 
 ads--CDockContainerWidget {
-    background: #1c1c1e;
+    background: @surface-panel;
 }
 
 ads--CDockSplitter::handle {
-    background-color: #0e0e10;
+    background-color: @gap;
 }
 
-/* dark.qss makes every QSplitter handle 1px, which leaves the panel
+/* app.qss makes every QSplitter handle 1px, which leaves the panel
    dividers a ~5px grab strip (Qt pads handles under 5px out to that).
    These are 7px to grab with a 3px line painted down the middle: a
    hard-stopped gradient, transparent either side. Not margins or
@@ -34,7 +34,7 @@ ads--CDockSplitter::handle:horizontal {
     width: 7px;
     background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
         stop: 0 transparent, stop: 0.25 transparent,
-        stop: 0.251 #0e0e10, stop: 0.66 #0e0e10,
+        stop: 0.251 @gap, stop: 0.66 @gap,
         stop: 0.661 transparent, stop: 1 transparent);
 }
 
@@ -42,23 +42,23 @@ ads--CDockSplitter::handle:vertical {
     height: 7px;
     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
         stop: 0 transparent, stop: 0.25 transparent,
-        stop: 0.251 #0e0e10, stop: 0.66 #0e0e10,
+        stop: 0.251 @gap, stop: 0.66 @gap,
         stop: 0.661 transparent, stop: 1 transparent);
 }
 
 ads--CDockAreaWidget {
-    background: #1c1c1e;
+    background: @surface-panel;
 }
 
 ads--CDockWidget {
-    background: #1c1c1e;
+    background: @surface-panel;
     border: none;
 }
 
 /* Tab strip = the design's 26px viewport header. */
 ads--CDockAreaTitleBar {
-    background: #1a1a1c;
-    border-bottom: 1px solid rgba(255, 255, 255, 6%);
+    background: @surface-toolbar;
+    border-bottom: 1px solid rgba(@overlay-rgb, 6%);
     padding-bottom: 0px;
 }
 
@@ -70,12 +70,12 @@ ads--CDockWidgetTab {
     background: transparent;
     border-style: solid;
     border-width: 0 1px 2px 0;
-    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+    border-color: transparent rgba(@overlay-rgb, 6%) transparent transparent;
     padding: 0 4px;
 }
 
 ads--CDockWidgetTab:hover {
-    background: rgba(255, 255, 255, 5%);
+    background: rgba(@overlay-rgb, 5%);
 }
 
 /* The current tab is filled with the accent blue: solid in the dock area
@@ -83,7 +83,7 @@ ads--CDockWidgetTab:hover {
    while every area still shows which tab is current. */
 ads--CDockWidgetTab[activeTab="true"] {
     background: rgba(@accent-rgb, 25%);
-    border-color: transparent rgba(255, 255, 255, 6%) transparent transparent;
+    border-color: transparent rgba(@overlay-rgb, 6%) transparent transparent;
 }
 
 ads--CDockWidgetTab[activeTab="true"]:hover {
@@ -100,19 +100,19 @@ ads--CDockWidgetTab[focused="true"]:hover {
 }
 
 ads--CDockWidgetTab QLabel {
-    color: rgba(255, 255, 255, 50%);
+    color: rgba(@ink-rgb, 50%);
 }
 
 ads--CDockWidgetTab:hover QLabel {
-    color: rgba(255, 255, 255, 75%);
+    color: rgba(@ink-rgb, 75%);
 }
 
 ads--CDockWidgetTab[activeTab="true"] QLabel {
-    color: #e8e8ea;
+    color: @text;
 }
 
 ads--CDockWidgetTab[focused="true"] QLabel {
-    color: #ffffff;
+    color: @on-accent;
 }
 
 /* Title-bar / tab buttons. */
@@ -129,14 +129,14 @@ ads--CDockWidgetTab[focused="true"] QLabel {
 #dockAreaCloseButton:hover,
 #detachGroupButton:hover,
 #tabCloseButton:hover {
-    background: rgba(255, 255, 255, 10%);
+    background: rgba(@overlay-rgb, 10%);
 }
 
 #tabsMenuButton:pressed,
 #dockAreaCloseButton:pressed,
 #detachGroupButton:pressed,
 #tabCloseButton:pressed {
-    background: rgba(255, 255, 255, 16%);
+    background: rgba(@overlay-rgb, 16%);
 }
 
 #tabsMenuButton {

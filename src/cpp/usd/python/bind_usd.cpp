@@ -13,10 +13,19 @@
 #include "usdcc/usd/schema_info.h"
 #include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/validation_profile.h"
+#include "usdcc/usd/validation_rules.h"
+#include "usdcc/usd/validation_run.h"
 
+#include <pxr/base/js/json.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/usd/stage.h>
+#include <pxr/external/boost/python/extract.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -37,6 +46,114 @@ StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
 
 void bindStageManager(py::module_& m) {
     // Auto-key (docs/ANIMATION.md phase 2): app-wide, off at start.
+    // usdcc/validation.py's rules (docs/VALIDATION.md section 5).
+    m.def(
+        "validation_set_rule",
+        [](const std::string& id, const std::string& registered, const std::string& label, const std::string& doc,
+           const std::vector<std::string>& keywords, const std::vector<std::string>& schemaTypes, const std::string& file,
+           bool mainThread, const std::string& parameters,
+           const std::vector<std::pair<std::string, std::string>>& fixes) {
+            validation::Rule rule;
+            rule.name = id;
+            rule.registered = registered;
+            rule.label = label;
+            rule.doc = doc;
+            rule.keywords = keywords;
+            rule.schemaTypes = schemaTypes;
+            rule.file = file;
+            rule.mainThread = mainThread;
+            const PXR_NS::JsValue json = PXR_NS::JsParseString(parameters);
+            if (json.IsObject()) rule.parameters = json.GetJsObject();
+            for (const auto& [name, label] : fixes) rule.fixes.push_back({name, label});
+            validation::UserRules::instance().set(std::move(rule));
+        },
+        py::arg("id"), py::arg("registered"), py::arg("label"), py::arg("doc"), py::arg("keywords"),
+        py::arg("schema_types"), py::arg("file"), py::arg("main_thread"), py::arg("parameters"), py::arg("fixes"));
+    // Kept for the life of the process: there's no moment before Python ends to drop it.
+    m.def(
+        "validation_set_fix_runner",
+        [](py::object runner) {
+            auto* held = new py::object(std::move(runner));
+            validation::UserRules::instance().setFixRunner([held](const validation::UserRules::FixCall& call) -> std::string {
+                const py::gil_scoped_acquire gil;
+                try {
+                    return (*held)(call.rule, call.fix, call.stageId, call.path, call.layer, call.parameters).cast<std::string>();
+                } catch (const std::exception& error) {
+                    return error.what();
+                }
+            });
+        },
+        py::arg("runner"));
+    // usdcc.validation.run(): on any stage. Not by its id in UsdUtilsStageCache, as elsewhere: one
+    // that isn't in it would have to be put there, which takes it from Python, and taken out
+    // again, which ends it.
+    m.def(
+        "validation_check",
+        [](py::object pythonStage, const std::vector<std::string>& paths, const std::string& wanted) {
+            const PXR_NS::pxr_boost::python::extract<PXR_NS::UsdStagePtr> extracted(pythonStage.ptr());
+            if (!extracted.check()) throw py::type_error("it isn't a Usd.Stage");
+            const PXR_NS::UsdStageRefPtr stage(extracted());
+            if (!stage) throw py::value_error("the stage is closed");
+            const auto& library = validation::ProfileLibrary::instance();
+            const validation::Profile* profile = wanted.empty() ? &library.current() : library.find(wanted);
+            std::optional<validation::Profile> parsed;
+            if (!profile) {
+                std::ifstream stream(std::filesystem::u8path(wanted), std::ios::binary);
+                if (!stream) throw py::value_error("there's no profile " + wanted);
+                std::stringstream text;
+                text << stream.rdbuf();
+                std::string error;
+                parsed = validation::Profile::parse(text.str(), &error);
+                if (!parsed) throw py::value_error(wanted + " isn't a profile: " + error);
+                profile = &*parsed;
+            }
+            std::vector<PXR_NS::SdfPath> prims;
+            for (const std::string& path : paths) prims.emplace_back(path);
+            validation::ValidationRun run(stage, profile->resolve(validation::rules()), std::move(prims));
+            run.runAll();
+            py::list findings;
+            for (const validation::Finding& finding : run.findings()) {
+                py::list sites;
+                for (const validation::Site& site : finding.sites) sites.append(py::make_tuple(site.path.GetString(), site.layer));
+                py::list fixes;
+                for (const validation::Fix& fix : finding.fixes) fixes.append(fix.name);
+                py::dict each;
+                each["rule"] = finding.rule;
+                each["name"] = finding.name;
+                each["severity"] = validation::severityId(finding.severity);
+                each["message"] = finding.message;
+                each["sites"] = sites;
+                each["fixes"] = fixes;
+                each["ignored"] = finding.ignored;
+                findings.append(each);
+            }
+            return findings;
+        },
+        py::arg("stage"), py::arg("paths"), py::arg("profile"));
+    m.def("validation_profiles", []() {
+        std::vector<std::string> names;
+        for (const validation::Profile& profile : validation::ProfileLibrary::instance().profiles()) names.push_back(profile.name);
+        return names;
+    });
+    m.def("validation_rules", []() {
+        std::vector<std::string> names;
+        for (const validation::Rule& rule : validation::rules()) names.push_back(rule.name);
+        return names;
+    });
+    m.def(
+        "validation_parameters", [](const std::string& id) { return validation::UserRules::instance().parameters(id); },
+        py::arg("id"));
+    m.def(
+        "validation_remove_rule", [](const std::string& id) { validation::UserRules::instance().remove(id); }, py::arg("id"));
+    m.def(
+        "validation_set_problems",
+        [](const std::vector<std::pair<std::string, std::string>>& problems) {
+            std::vector<validation::UserRules::Problem> list;
+            for (const auto& [file, message] : problems) list.push_back({file, message});
+            validation::UserRules::instance().setProblems(std::move(list));
+        },
+        py::arg("problems"));
+    m.def("validation_run", []() { return validation::UserRules::instance().run(); });
     m.def("auto_key", []() { return anim::autoKey(); });
     m.def("set_auto_key", [](bool on) { anim::setAutoKey(on); }, py::arg("on"));
     py::class_<StageManager>(m, "StageManager")

@@ -535,7 +535,7 @@ one change. Whether opening should return the open stage instead is a decision f
   and `selectedCode()`.
   **[PythonHighlighter](../src/cpp/scripting/include/usdcc/scripting/python_highlighter.h)**:
   a regex pass plus a string/comment scan, which keeps `#` inside strings and carries
-  triple-quoted strings across lines. The editor and output fonts come from `dark.qss`.
+  triple-quoted strings across lines. The editor and output fonts come from `app.qss`.
 - **The output pane** is fed by a log sink attached for the run, so it shows exactly what the
   Log panel gets for that run.
 - **`PythonRuntime::Namespace::Session`** and `resetSession()`, for Keep Variables;

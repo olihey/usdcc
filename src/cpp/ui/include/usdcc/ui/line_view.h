@@ -23,7 +23,7 @@ namespace usdcc::ui {
 // setting 80 MB takes as long as finding its line ends, where
 // QPlainTextEdit builds a block per line up front (seconds).
 //
-// Monospace, without wrapping (#codeView in theme/dark.qss), with a
+// Monospace, without wrapping (#codeView in theme/app.qss), with a
 // line-number gutter and the cursor's line highlighted, like TextView. It
 // selects with the mouse (drag, double-click a word, Shift+click) and the
 // keyboard (arrows, Page Up/Down, Home/End, with Ctrl for the whole text,

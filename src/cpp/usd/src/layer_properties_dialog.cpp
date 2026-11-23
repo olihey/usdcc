@@ -256,7 +256,7 @@ void LayerPropertiesDialog::check() {
     m_ok->setEnabled(errors.isEmpty());
     const QString shown = errors.isEmpty() ? warning : errors.join(QLatin1Char(' '));
     m_problem->setText(shown);
-    m_problem->setProperty("unresolved", !errors.isEmpty());  // red (theme/dark.qss)
+    m_problem->setProperty("unresolved", !errors.isEmpty());  // red (theme/app.qss)
     m_problem->setProperty("caution", errors.isEmpty() && !warning.isEmpty());  // amber
     m_problem->style()->unpolish(m_problem);
     m_problem->style()->polish(m_problem);

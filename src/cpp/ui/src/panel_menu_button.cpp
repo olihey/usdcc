@@ -8,7 +8,7 @@ namespace usdcc::ui {
 
 PanelMenuButton::PanelMenuButton(const QString& toolTip, std::function<void(QMenu*)> populate, QWidget* parent)
     : PanelIconButton(QStringLiteral(":/usdcc/theme/menu.png"), toolTip, parent), m_populate(std::move(populate)) {
-    setObjectName(QStringLiteral("panelMenuButton"));  // styled by theme/dark.qss
+    setObjectName(QStringLiteral("panelMenuButton"));  // styled by theme/app.qss
     connect(this, &QToolButton::clicked, this, &PanelMenuButton::showMenu);
 }
 

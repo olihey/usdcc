@@ -4,6 +4,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/plugin_manager.h"
+#include "usdcc/scripting/validation_rule_files.h"
 #include "usdcc/scripting/python_settings.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/peers_controller.h"
@@ -107,6 +108,7 @@ void installSettings() {
     // Read by the plugin manager and Python.
     usdcc::scripting::definePythonSettings();
     usdcc::scripting::definePluginSettings();
+    usdcc::scripting::defineValidationSettings();
 }
 
 std::vector<std::filesystem::path> pluginFolders(const QStringList& values) {

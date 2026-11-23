@@ -6,6 +6,7 @@
 #include "usdcc/usd/render/render_scheduler.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/usd/validation_fix.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <QAction>
@@ -29,6 +30,11 @@ void setShowSwarm(std::function<void()> show) { showSwarm() = std::move(show); }
 
 RenderJobPtr submitRender(const usdcc::usd::StageRefPtr& stage, const PXR_NS::SdfPath& settings, bool animation,
                           QWidget* parent, std::string* error, const std::string& rendererOverride) {
+    // Validation/beforeRender (docs/VALIDATION.md §3.3): only where there's someone to ask.
+    if (parent && !usdcc::usd::validation::confirmValidated(stage, usdcc::usd::validation::Gate::Render, parent)) {
+        if (error) *error = "Not rendered, for the stage's validation errors.";
+        return nullptr;
+    }
     std::string why;
     RenderJobPtr job;
     if (!stage) {

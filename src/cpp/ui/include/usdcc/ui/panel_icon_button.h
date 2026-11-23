@@ -9,7 +9,7 @@ namespace usdcc::ui {
 // A square, icon-only button for a panel's toolbar: as tall as the toolbar
 // row and as wide as it is tall, at any UI scale, with a 16px icon from the
 // theme (`iconPath`, e.g. ":/usdcc/theme/trash.png") and a tooltip saying
-// what it does. Styled as #panelIconButton in theme/dark.qss. With an empty
+// what it does. Styled as #panelIconButton in theme/app.qss. With an empty
 // `iconPath` it shows its text instead (keep it to a glyph or two, e.g. "Aa").
 class USDCC_UI_API PanelIconButton : public QToolButton {
     Q_OBJECT

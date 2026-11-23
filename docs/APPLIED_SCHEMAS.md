@@ -178,7 +178,7 @@ weaker layer is removed by a delete in the edit target's list op, and that works
 | Phase | Work | Tests |
 |---|---|---|
 | **1. The logic** *(done)* | `applied_schemas.h` (Qt-free, usdcc_usd): `appliedSchemas(prim)` with each one's state and what brings it; `schemaCatalog(prim)` by category, with why each is unavailable; `orphanedProperties(prim, schema)` split by layer. `prim_actions::applySchema()` and `removeSchema()` (with or without cleanup), each one undo step | A type's schema, a nested one, an unregistered one; categories, including an unknown plugin's; not applied ones left out; orphans with a shared property, nested schemas, instances, another layer; each edit and its undo |
-| **2. The pills** *(done)* | `FlowLayout` (usdcc_ui); the pills in the Prim section, styled in `dark.qss`; × and the question | Pills per state, × only where it works; wrapping; the question appears only when needed, and each answer; read-only on an instance proxy |
+| **2. The pills** *(done)* | `FlowLayout` (usdcc_ui); the pills in the Prim section, styled in `app.qss`; × and the question | Pills per state, × only where it works; wrapping; the question appears only when needed, and each answer; read-only on an instance proxy |
 | **3. The menu** *(done)* | The + menu by category, greyed entries with reasons, the instance name dialog | Greyed for applied and can't-apply; multiple-apply never greyed; an invalid or used name refused; applying adds its pill and its attributes' sections |
 
 ## 8. As built

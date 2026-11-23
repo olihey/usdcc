@@ -30,7 +30,7 @@ std::vector<PXR_NS::SdfPath> draggedPaths(const QMimeData* data) {
 }  // namespace
 
 namespace {
-// Ancestors of the selection: the selection's own colour (dark.qss, QTreeView
+// Ancestors of the selection: the selection's own colour (app.qss, QTreeView
 // selection-background-color: the accent at 18%) at half the opacity.
 QColor ancestorBackground() {
     QColor color = usdcc::ui::theme::accent();
@@ -39,15 +39,17 @@ QColor ancestorBackground() {
 }
 
 // usdview's prim name colours (usdviewq/common.py UIPrimTypeColors). Other
-// prims keep the theme's text colour (dark.qss, QTreeView color).
-const QColor kInstanceColor(135, 206, 250);  // LIGHT_SKY_BLUE
-const QColor kArcsColor(222, 158, 46);       // DARK_YELLOW
-const QColor kPrototypeColor(118, 136, 217);
-const QColor kTextColor(255, 255, 255, 191);
-const QColor kUnusableColor(255, 255, 255, 64);
-const QColor kWarningColor(0xff, 0xb3, 0x40);
-// An inactive prim's colour, darker (usdviewq/primViewItem.py HALF_DARKER).
+// prims keep the theme's text colour (app.qss, QTreeView color).
+// The dark themes' are usdview's own.
+QColor themed(usdcc::ui::theme::Token token, int alpha = 255) { return usdcc::ui::theme::color(token, alpha); }
+// An inactive prim's colour, darker (usdviewq/primViewItem.py HALF_DARKER); on a
+// light background, where that would stand out, fainter.
 constexpr int kInactiveDarker = 150;
+QColor inactive(QColor color) {
+    if (usdcc::ui::theme::isDark()) return color.darker(kInactiveDarker);
+    color.setAlpha(color.alpha() * 55 / 100);
+    return color;
+}
 
 // The prims an instance's children are: its instance proxies.
 const PXR_NS::Usd_PrimFlagsPredicate kChildren = PXR_NS::UsdTraverseInstanceProxies(PXR_NS::UsdPrimAllPrimsPredicate);
@@ -63,9 +65,9 @@ bool inPrototype(const PXR_NS::UsdPrim& prim) { return prim.IsInPrototype() || p
 // usdview's colour for the name, the first that applies; invalid for the
 // theme's.
 QColor nameColor(const PXR_NS::UsdPrim& prim) {
-    if (prim.IsInstance()) return kInstanceColor;
-    if (hasCompositionArcs(prim)) return kArcsColor;
-    if (inPrototype(prim)) return kPrototypeColor;
+    if (prim.IsInstance()) return themed(usdcc::ui::theme::Token::PrimInstance);
+    if (hasCompositionArcs(prim)) return themed(usdcc::ui::theme::Token::PrimArcs);
+    if (inPrototype(prim)) return themed(usdcc::ui::theme::Token::PrimPrototype);
     return {};
 }
 
@@ -292,11 +294,11 @@ QVariant UsdPrimTreeModel::data(const QModelIndex& index, int role) const {
         case Qt::ForegroundRole: {
             if (m_rowStatus) {
                 const RowStatus status = m_rowStatus(prim);
-                if (!status.usable) return kUnusableColor;
-                if (status.warning) return kWarningColor;
+                if (!status.usable) return themed(usdcc::ui::theme::Token::Ink, 64);
+                if (status.warning) return themed(usdcc::ui::theme::Token::Warning);
             }
             const QColor color = nameColor(prim);
-            if (!prim.IsActive()) return (color.isValid() ? color : kTextColor).darker(kInactiveDarker);
+            if (!prim.IsActive()) return inactive(color.isValid() ? color : themed(usdcc::ui::theme::Token::Ink, 191));
             if (color.isValid()) return color;
             break;  // the theme's
         }

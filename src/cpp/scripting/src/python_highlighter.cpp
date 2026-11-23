@@ -1,4 +1,5 @@
 #include "usdcc/scripting/python_highlighter.h"
+#include "usdcc/ui/theme.h"
 
 #include <QColor>
 #include <QRegularExpression>
@@ -49,21 +50,21 @@ const QRegularExpression& definitions() {
 }
 }  // namespace
 
-PythonHighlighter::PythonHighlighter(QTextDocument* document) : QSyntaxHighlighter(document) {}
+PythonHighlighter::PythonHighlighter(QTextDocument* document) : QSyntaxHighlighter(document) {
+    usdcc::ui::theme::onChanged(this, [this]() { rehighlight(); });
+}
 
 QTextCharFormat PythonHighlighter::format(Kind kind) const {
-    // The dark theme's tokens (resources/theme/dark.qss): accent blue for
-    // keywords, its lighter tint for builtins, the axis green for strings, the
-    // log's amber for numbers and decorators, muted text for comments.
+    // The theme's, looked up whenever a block is highlighted.
     switch (kind) {
-        case Kind::Keyword: return makeFormat(QColor(0x3d, 0x8b, 0xfd));
-        case Kind::Builtin: return makeFormat(QColor(0x8a, 0xb8, 0xff));
-        case Kind::Number: return makeFormat(QColor(0xff, 0xbd, 0x2e));
-        case Kind::String: return makeFormat(QColor(0x4f, 0xd6, 0x71));
-        case Kind::Comment: return makeFormat(QColor(255, 255, 255, 102), true);
-        case Kind::Decorator: return makeFormat(QColor(0xff, 0xbd, 0x2e));
+        case Kind::Keyword: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxKeyword));
+        case Kind::Builtin: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxBuiltin));
+        case Kind::Number: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxNumber));
+        case Kind::String: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxString));
+        case Kind::Comment: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 102), true);
+        case Kind::Decorator: return makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxNumber));
         case Kind::Definition: {
-            QTextCharFormat definition = makeFormat(QColor(0xe8, 0xe8, 0xea));
+            QTextCharFormat definition = makeFormat(usdcc::ui::theme::color(usdcc::ui::theme::Token::Text));
             definition.setFontWeight(QFont::Bold);
             return definition;
         }

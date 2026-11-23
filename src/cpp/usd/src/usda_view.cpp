@@ -1,4 +1,5 @@
 #include "usdcc/usd/usda_view.h"
+#include "usdcc/ui/theme.h"
 #include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/usd/asset_servers.h"
@@ -116,18 +117,18 @@ QTextCharFormat formatFor(usda::Token kind) {
     // The Script Editor's palette (python_highlighter.cpp), so both read alike.
     QTextCharFormat format;
     switch (kind) {
-        case usda::Token::Keyword: format.setForeground(QColor(0x3d, 0x8b, 0xfd)); break;
-        case usda::Token::Type: format.setForeground(QColor(0x8a, 0xb8, 0xff)); break;
-        case usda::Token::String: format.setForeground(QColor(0x4f, 0xd6, 0x71)); break;
+        case usda::Token::Keyword: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxKeyword)); break;
+        case usda::Token::Type: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxBuiltin)); break;
+        case usda::Token::String: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxString)); break;
         case usda::Token::AssetPath:
-            format.setForeground(QColor(0x4f, 0xd6, 0x71));
+            format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxString));
             format.setFontUnderline(true);
             break;
-        case usda::Token::Path: format.setForeground(QColor(0xe5, 0xc0, 0x7b)); break;
-        case usda::Token::Number: format.setForeground(QColor(0xff, 0xbd, 0x2e)); break;
-        case usda::Token::Key: format.setForeground(QColor(0xc8, 0xc8, 0xcc)); break;
+        case usda::Token::Path: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxPath)); break;
+        case usda::Token::Number: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxNumber)); break;
+        case usda::Token::Key: format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::SyntaxKey)); break;
         case usda::Token::Comment:
-            format.setForeground(QColor(255, 255, 255, 102));
+            format.setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::Ink, 102));
             format.setFontItalic(true);
             break;
     }
@@ -191,7 +192,7 @@ bool readLayerFile(const PXR_NS::SdfLayerHandle& layer, std::string* text) {
 }
 
 // A bar under the text: a message and buttons. Styled as the panel toolbar, or by
-// theme/dark.qss as `objectName`.
+// theme/app.qss as `objectName`.
 QWidget* makeBar(QWidget* parent, QLabel** label, const QString& objectName = QStringLiteral("panelToolbar")) {
     auto* bar = new QWidget(parent);
     bar->setObjectName(objectName);
@@ -218,7 +219,7 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
     layout->setSpacing(0);
 
     auto* toolbar = new QWidget(this);
-    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/dark.qss
+    toolbar->setObjectName(QStringLiteral("panelToolbar"));  // styled by theme/app.qss
     toolbar->setAttribute(Qt::WA_StyledBackground);
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     if (m_host.addControls) m_host.addControls(toolbarLayout);
