@@ -275,6 +275,7 @@ if(TARGET rtx_render_native)
         USDCC_NATIVE_RTX_PLUGIN="${CMAKE_BINARY_DIR}/plugins/rtx_render_native")
     add_dependencies(usdcc_python_tests rtx_render_native)
 endif()
+target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_HAS_PYSIDE=$<BOOL:${USDCC_PYSIDE_FOUND}>)
 # Python-made panels need the usdcc.ui module, which needs PySide6.
 if(TARGET usdcc_ui_python)
     target_sources(usdcc_python_tests PRIVATE plugin_extensions_test.cpp plugin_reload_test.cpp python_panels_test.cpp

@@ -1,0 +1,15 @@
+diff --git a/build_scripts/build_usd.py b/build_scripts/build_usd.py
+--- a/build_scripts/build_usd.py
++++ b/build_scripts/build_usd.py
+@@ -1681,6 +1681,11 @@
+ 
+ def InstallAlembic(context, force, buildArgs):
+     with CurrentWorkingDirectory(DownloadURL(ALEMBIC_URL, context, force)):
++        # CMake 4 no longer has this policy's old behavior (install names without @rpath).
++        PatchFile("CMakeLists.txt",
++                  [("CMAKE_POLICY(SET CMP0042 OLD)",
++                    "CMAKE_POLICY(SET CMP0042 NEW)")])
++
+         cmakeOptions = ['-DUSE_BINARIES=OFF', '-DUSE_TESTS=OFF', '-DUSE_HDF5=OFF']
+         cmakeOptions += buildArgs
+ 

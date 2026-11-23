@@ -48,7 +48,9 @@ if(USDCC_PYTHON_FOUND)
         list(APPEND _usdcc_stubs_arguments --dlls "${USD_INSTALL}/lib" "${USD_INSTALL}/bin")
         set(_usdcc_stubs_environment "PYTHONUTF8=1")
     elseif(APPLE)
-        set(_usdcc_stubs_environment "DYLD_LIBRARY_PATH=${USD_INSTALL}/lib")
+        # The rpaths reach the libraries, and DYLD_LIBRARY_PATH would replace the system's
+        # own by name (docs/MACOS.md).
+        set(_usdcc_stubs_environment "PYTHONUTF8=1")
     else()
         set(_usdcc_stubs_environment "LD_LIBRARY_PATH=${USD_INSTALL}/lib:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
     endif()

@@ -21,7 +21,7 @@ constexpr int kBarHeight = 26;  // the design's menu-bar height
 constexpr int kIconSize = 16;
 constexpr int kLogoSize = 16;
 #ifdef Q_OS_MACOS
-constexpr int kSystemButtonAreaWidth = 68;  // the three round buttons and their margins
+constexpr int kSystemButtonAreaWidth = 78;  // the three round buttons and their margins
 #endif
 
 QToolButton* makeCaptionButton(const char* objectName, const QString& iconPath, QWidget* parent) {

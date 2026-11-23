@@ -7,6 +7,7 @@
 #include <pxr/base/gf/vec4f.h>
 #include <pxr/imaging/glf/simpleLight.h>
 #include <pxr/imaging/glf/simpleMaterial.h>
+#include <pxr/imaging/hd/tokens.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/timeCode.h>
@@ -274,6 +275,11 @@ void SelectionOverlay::renderMask(const Frame& frame) {
         // A new stage needs a new engine: it populates from one stage only.
         m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
         m_engine->SetRendererPlugin(PXR_NS::TfToken("HdStormRendererPlugin"));
+#ifdef __APPLE__
+        // Without an AOV Storm draws straight to the framebuffer, which Metal can't do with
+        // OpenGL's: with one, Hydra composites its color and depth into it (docs/MACOS.md).
+        m_engine->SetRendererAov(PXR_NS::HdAovTokens->color);
+#endif
         // Selected white, over everything else drawn black (renderParams.overrideColor).
         m_engine->SetSelectionColor(PXR_NS::GfVec4f(1.0f, 1.0f, 1.0f, 1.0f));
         m_stage = frame.stage;
@@ -383,7 +389,7 @@ void SelectionOverlay::composite(const Frame& frame) {
     m_compositeProgram->setUniformValue("color", frame.color);
     f->glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    // Back to what the fixed-function drawing after this (the gizmo) expects.
+    // Back to what the drawing after this (the gizmo) expects.
     m_compositeProgram->release();
     m_vao->release();
     for (GLenum unit : {GL_TEXTURE2, GL_TEXTURE1, GL_TEXTURE0}) {
