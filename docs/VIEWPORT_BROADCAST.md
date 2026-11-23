@@ -11,6 +11,7 @@ else is an assumption. The room it builds on, [PEERS.md](PEERS.md) phase 1a, is 
 §8 items 5 and 6 (the ports, `find_package` and the deploy); [PEERS.md](PEERS.md) §14.1 says how.
 **Phase 1 is built** (2026-11-17, §11.2): Broadcast in a viewport's menus, the page, the watchers,
 Stop, and the room's chat. Checked on this machine; a browser on a second machine isn't tried yet.
+**Phase 2 is built** (2026-11-23, §11.3): the Broadcast side panel.
 [REMOTE_SUPPORT.md](REMOTE_SUPPORT.md) plans the same for all of usdcc's windows, with control.
 
 ## 1. Decisions
@@ -319,7 +320,7 @@ shows `QImage`s and follows the viewport's camera, so it is a natural second (ph
 |---|---|---|
 | **0. Spike** | A throwaway plugin: the server, `grabFrame()` on a timer, a bare page | It answers: does Qt HttpServer pass upgrades to Qt WebSockets here; milliseconds to read back and compress 1920×1080; bytes per frame; how an orbit feels on the LAN and through a tunnel; what Windows Firewall asks. **On this machine: done** (§11.1); the LAN, the tunnel and the firewall remain |
 | **1. Watch** | The room and channels in `usdcc_peers` (§7); §8 items 1, 3, 5 and 6; the plugin with Broadcast, the link, the page, the watcher list, Stop | A browser on a second machine follows an orbit and an edit, a still viewport sends nothing, and Stop closes the port. **Built** (§11.2); all of it checked on this machine, not yet from a second one |
-| **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat |
+| **2. Chat** | Names, the chat on both sides, the side panel, toasts | A watcher and the host chat. **Built** (§11.3) |
 | **3. Navigate** | §8 item 2; ask, allow, deny, take back; the moves | A watcher orbits the host's viewport; the host takes it back with a click |
 | **4. Beyond the LAN** | a: the **Public address** setting. b: the relay and encryption, with [PEERS.md](PEERS.md) phase 4 | a: a watcher on a phone network watches through a tunnel. b: the relay's log shows sizes only |
 | **5. Sharper and wider** | H.264 where the page allows it; Render View panels as sources | A 1080p orbit over the internet stays under 5 Mbit/s; an RTX render is broadcast |
@@ -482,6 +483,35 @@ need.
 **Found on the way, for Peers:** the host's chat snapshot sends a newcomer the lines of the host's
 own panel ("You host …", "Anna joined"), worded for the host. The page filters them; a peer joining
 a room sees them in its Peers panel.
+
+### 11.3 Phase 2 as built
+
+Most of phase 2 came with phase 1: the page asks for a name (kept by the browser), the chat goes
+both ways through the room's `chat` channel, the host has it in the Peers panel, and Peers' chat
+toasts (Settings > Peers) show a watcher's line while the Peers panel is hidden. What phase 2
+added is **the Broadcast side panel** (`broadcast_panel.h`, `.cpp`, in a static library of its own,
+`usdcc_viewport_broadcast_ui`, which the plugin and the tests link):
+
+- **What it shows:** what is broadcast and to how many ("Broadcasting Viewport 1 · shot.usda to 2
+  watchers"), the link with **Copy**, **Stop**, the watchers by name, and the broadcast's chat with
+  a line to type in. With no broadcast: "Not broadcasting", and where Start Broadcast is. After
+  one ends: why.
+- **Per watcher: Remove** (select, then Remove): the room removes them, and their page says "The
+  host removed you from the broadcast". They can come back with the link; a new broadcast has a
+  new one.
+- **The chat is the Peers panel's,** from `PeersController::chat()` and `chatAdded`; the host's line
+  goes out through `say()`, so both panels show the same lines. Text only.
+- **Where it is:** a side panel on the right, hidden until asked for: the View menu, or **Watchers**
+  on the "Broadcasting …" toast (which opened the Peers panel before). A saved layout shows it
+  where it was.
+- Not in it yet: **Allow navigating** and **Take back** (phase 3).
+
+**Tests:** `broadcast_panel_watchers_and_chat` (`usdcc_ui_tests`): the idle text, the link, a
+watcher listed and counted, their chat line in the panel, the host's line from the panel reaching
+the watcher, Remove, Stop asking to stop, and the panel saying the broadcast ended. **Checked in
+the app** (test profile): the panel exists, starts hidden, is in the View menu, and says "Not
+broadcasting" when shown. Starting a broadcast from a script wasn't reached (the viewport menus
+are rebuilt each time they open); the test covers the panel while live.
 
 ## 12. Open questions
 
