@@ -65,7 +65,7 @@ there; no pin yet (§7 phase 6). The rest is a plan.
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
-| `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Renderer proven** on Ubuntu 24.04 against the OpenUSD before oneTBB; hdMoonRay and the current asset not yet ([MOONRAY.md](MOONRAY.md) §7.1) |
+| `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Proven** on Ubuntu 24.04: `deps/usd-plugins/moonray.json` builds a pack against the published asset that passes its check, rendering included, and renders in usdcc's viewport ([MOONRAY.md](MOONRAY.md) §7.4); CI hasn't built it ([MOONRAY.md](MOONRAY.md) §7.1) |
 
 Notes:
 
@@ -364,8 +364,24 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` and `moonray` (Linux, later macOS), each `optional` and unpublished until its licences are read; `aurora` |
-| `optional` | Its own zip on the usdcc release, unzipped over the usdcc folder by the user | `gatling` |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` |
+| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`), `gatling` (unpublished) |
+
+How an optional pack ships (Linux; no Windows one is published yet):
+
+- `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
+  says `"publish": true`.
+- `release.yml`'s Linux job fetches it too (`tools/fetch_usd.py --optional`, required as the
+  standard ones are), and `tools/deploy.py --optional-packs DIR` deploys it with the rest,
+  checks it with them (every library loads from the deploy or the system), then moves its
+  files out to `DIR/<pack>/<deploy's name>/`, laid out as the deploy is. Its files under
+  `plugin/` keep the RUNPATHs the pack's build gave them, which are relative to an OpenUSD
+  install, laid out as the deploy is. The deploy's `licenses/SOURCES.txt` doesn't name it; the
+  pack carries its own in `licenses/OpenUSD-plugins/<pack>/`.
+- After the usdcc archive is made, the job unpacks the pack over the deploy, runs the smoke
+  test again (its plugins load from the deploy, its renderers are listed), and attaches
+  `usdcc-<version>-linux-<arch>-<pack>.tar.xz`. Its top folder is the deploy's name, so
+  `tar -xf` where usdcc was unpacked puts it in place.
 | `local` | Built on a machine that has the SDK; never published | `arnold`, `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,
@@ -424,10 +440,9 @@ Three sets, decided by licence:
   - NVIDIA's OptiX SDK and CUDA runtime, GPU mode only: their own licences, read before
     the GPU build ships. The OptiX headers are build-time; the runtime is in the driver.
 
-  Until step 6 of the build has collected that list and it has been read, the pin says
-  `"set": "optional"` with `"publish": false`, as Gatling's does. Not `standard` yet:
-  `release.yml` fetches the standard packs with `--require-packs`, so an unpublished
-  standard pack would fail every Linux release.
+  The list has been read ([MOONRAY.md](MOONRAY.md) §3.1): the pin says `"set": "optional"`
+  with `"publish": true`, a download of its own at about 214 MB, against usdcc's 154 MB
+  (decided 2026-11-24).
 
 ## 6. Changes to the OpenUSD build itself
 
@@ -669,13 +684,11 @@ Three sets, decided by licence:
       check renders a small scene with HdMoonRay on the CPU.
    3. `moonray_runtime` in usdcc, and MoonRay in the viewport's renderer list and renders
       on Linux.
-   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and only
-      then `"set": "standard"`, so `release.yml`'s Linux job requires it and the smoke
-      test expects it. Note the pack's size against the
-      release's 2 GiB limit; if it makes the standard archive too big, it moves to
-      `optional`.
+   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and
+      `release.yml`'s Linux job attaches it as a download of its own (`optional`, §5).
 
    Done when a Linux release has MoonRay and renders with it in the viewport.
+   *Steps 1 to 4 done ([MOONRAY.md](MOONRAY.md) §7); left: the first release with it.*
 10. **MoonRay on macOS**, after usdcc itself builds and releases on macOS (CI.md §7): an
     OpenUSD asset for `macos-arm64`, a usdcc build and release job on a macOS runner,
     PySide6 for macOS, the app bundle, and signing and notarisation, which need an Apple
@@ -695,8 +708,8 @@ Three sets, decided by licence:
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
 | 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |
-| 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | MoonRay itself did, against the asset before oneTBB ([MOONRAY.md](MOONRAY.md) §7.1); HdMoonRay and oneTBB are open. If Embree or TBB don't fit, MoonRay waits for §6's `--onetbb` and an Embree 4 in the asset |
-| 9 | Does HdMoonRay render in-process without Arras? | Yes by its source: `hd_moonray_debug` does, `hd_moonray` doesn't. The plan is to ship both ([MOONRAY.md](MOONRAY.md) §2.1). Not built yet |
+| 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | MoonRay itself does, oneTBB, OpenVDB and Embree included ([MOONRAY.md](MOONRAY.md) §7.1); HdMoonRay too, with a patch (§7.2) |
+| 9 | Does HdMoonRay render in-process without Arras? | Yes by its source: `hd_moonray_debug` does, `hd_moonray` doesn't. Both render in usdcc's viewport; Arras is the safer one ([MOONRAY.md](MOONRAY.md) §7.2, §7.3) |
 | 10 | MoonRay on macOS before usdcc runs there? | No: phase 10 follows the macOS build, not the other way round |
 
 ## 9. Later

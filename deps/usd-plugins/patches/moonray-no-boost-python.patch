@@ -1,0 +1,13 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2ad96a4..833b99c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -106,7 +106,7 @@ include(SConscriptStub)
+ # ================================================
+ add_subdirectory(lib)
+ add_subdirectory(cmd)
+-add_subdirectory(mod)
++# add_subdirectory(mod)
+ if(GLD STREQUAL "$ENV{STUDIO}")
+     add_subdirectory(bart_tools)
+     if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)

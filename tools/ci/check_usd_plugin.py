@@ -17,7 +17,10 @@ this machine's environment, does what the pin's "check" asks:
   - "extensions": each has a file format;
   - "renderers": OpenUSD lists each as a render delegate. It isn't created: a
     path tracer's needs a GPU, which a hosted runner doesn't have;
-  - "open": each file opens as a stage with that many prims of each type.
+  - "open": each file opens as a stage with that many prims of each type;
+  - "render": each file renders with that delegate, through UsdImaging without a
+    GPU, into a picture whose mean (0 to 1) is at least "min_mean". For a CPU
+    renderer, which a hosted runner can run.
 
 A pack that is off unless the user turns it on (Arnold's, in plugin/arnold)
 names its folder in "plugin_folders", which the check puts on
@@ -101,6 +104,48 @@ for entry in spec.get("open", []):
     for type_name, wanted in entry.get("prims", {}).items():
         check(counts.get(type_name, 0) == wanted,
               f"{os.path.basename(entry['file'])} has {wanted} {type_name} (found {counts.get(type_name, 0)})")
+for entry in spec.get("render", []):
+    import struct, tempfile, time, zlib
+    from pxr import UsdAppUtils, UsdGeom
+    name = f"{os.path.basename(entry['file'])} with {entry['renderer']}"
+    picture = os.path.join(tempfile.mkdtemp(), "render.png")
+    try:
+        stage = Usd.Stage.Open(entry["file"])
+        camera = next(UsdGeom.Camera(prim) for prim in stage.Traverse() if prim.IsA(UsdGeom.Camera))
+        recorder = UsdAppUtils.FrameRecorder(entry["renderer"], False)
+        recorder.SetImageWidth(320)
+        started = time.time()
+        recorder.Record(stage, camera, Usd.TimeCode.Default(), picture)
+        seconds = time.time() - started
+        # The PNG's mean, read here: the check has nothing but OpenUSD.
+        data = open(picture, "rb").read()
+        offset, chunks, header = 8, b"", None
+        while offset < len(data):
+            length, kind = struct.unpack(">I4s", data[offset:offset + 8])
+            body = data[offset + 8:offset + 8 + length]
+            header = body if kind == b"IHDR" else header
+            chunks += body if kind == b"IDAT" else b""
+            offset += 12 + length
+        width, height, depth, colour = struct.unpack(">IIBB", header[:10])
+        channels = {0: 1, 2: 3, 4: 2, 6: 4}[colour]
+        raw, stride, rows, previous = zlib.decompress(chunks), width * channels, [], bytearray(width * channels)
+        for row in range(height):
+            kind, line = raw[row * (stride + 1)], bytearray(raw[row * (stride + 1) + 1:(row + 1) * (stride + 1)])
+            for i in range(stride):
+                left = line[i - channels] if i >= channels else 0
+                up, corner = previous[i], previous[i - channels] if i >= channels else 0
+                guess = (left if abs(up - corner) <= min(abs(left - corner), abs(left + up - 2 * corner)) and
+                         abs(left + up - corner - left) <= abs(left + up - corner - up) else
+                         up if abs(left + up - corner - up) <= abs(left + up - corner - corner) else corner)
+                line[i] = (line[i] + (0, left, up, (left + up) // 2, guess)[kind]) & 255
+            rows.append(line)
+            previous = line
+        colour_channels = min(channels, 3)
+        total = sum(line[i] for line in rows for i in range(stride) if i % channels < colour_channels)
+        mean = total / (width * height * colour_channels * 255.0)
+        check(mean >= entry.get("min_mean", 0.0), f"{name} renders ({width}x{height}, mean {mean:.3f}, {seconds:.1f} s)")
+    except Exception as error:
+        check(False, f"{name} renders ({error})")
 sys.exit(1 if failed else 0)
 """
 
@@ -226,7 +271,8 @@ def main(argv=None):
 
     check = dict(spec.get("check", {}))
     check["open"] = [{**entry, "file": str(REPO / entry["file"])} for entry in check.get("open", [])]
-    for entry in check["open"]:
+    check["render"] = [{**entry, "file": str(REPO / entry["file"])} for entry in check.get("render", [])]
+    for entry in check["open"] + check["render"]:
         if not Path(entry["file"]).is_file():
             fail(f"deps/usd-plugins/{pack}.json: no such file {entry['file']}")
     for name in spec.get("sdks", {}):

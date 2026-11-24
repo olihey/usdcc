@@ -16,7 +16,8 @@ that is out of date is refused, since nothing lists its files; pass a new folder
 --packs-only leaves OpenUSD alone, for a folder that already holds the asset
 (build.yml and release.yml unzip it themselves). A pack that isn't published is
 a warning, as deps-usd-plugins.yml may still be building it, and an error with
---require-packs. --zips names a folder to look for the zips in before
+--require-packs. --optional also puts the published packs of the optional set
+over it, which release.yml ships as downloads of their own. --zips names a folder to look for the zips in before
 downloading, such as one a local tools/build_usd_plugin.py build was zipped into.
 
 They are release assets of a public repository, so this needs no login.
@@ -47,12 +48,15 @@ MANIFEST_DIR = "usd-plugins"
 USD_MARKER = "usd-asset.txt"
 
 
-def standard_packs():
-    """The packs a usdcc release ships on this platform."""
+def standard_packs(optional=False):
+    """The packs a usdcc release ships on this platform; with `optional`, also the
+    published packs of the optional set, which a release attaches as downloads of their own."""
     packs = []
     for file in sorted(usd_plugin_asset.PINS.glob("*.json")):
         spec = usd_plugin_asset.load(file.stem)
-        if spec["set"] == "standard" and ASSET_PLATFORM in spec["platforms"]:
+        if ASSET_PLATFORM not in spec["platforms"]:
+            continue
+        if spec["set"] == "standard" or (optional and spec["set"] == "optional" and spec.get("publish", True)):
             packs.append(file.stem)
     return packs
 
@@ -145,10 +149,11 @@ def fetch_openusd(folder, repository, zips, work):
     marker.write_text(asset["name"] + "\n", encoding="utf-8", newline="\n")
 
 
-def fetch_packs(folder, repository, zips, work, required):
-    """Puts every standard pack over the OpenUSD in `folder`; the packs that aren't published."""
+def fetch_packs(folder, repository, zips, work, required, optional=False):
+    """Puts every standard pack over the OpenUSD in `folder`, and with `optional` the
+    published optional ones; returns the packs that aren't published."""
     missing = []
-    for pack in standard_packs():
+    for pack in standard_packs(optional):
         asset = usd_plugin_asset.describe(pack)
         installed = installed_pack(folder, pack)
         if installed and installed.get("asset") == asset["name"]:
@@ -181,6 +186,9 @@ def main(argv=None):
                         help="the folder already holds the OpenUSD asset: only put the packs over it")
     parser.add_argument("--require-packs", action="store_true",
                         help="a pack that isn't published is an error, not a warning")
+    parser.add_argument("--optional", action="store_true",
+                        help="also the published packs of the optional set (MoonRay), which a release ships as "
+                             "downloads of their own (tools/deploy.py --optional-packs)")
     parser.add_argument("--zips", type=Path, help="look for the zips in this folder before downloading")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY") or DEFAULT_REPOSITORY,
                         help=f"the GitHub repository whose releases hold them (default: {DEFAULT_REPOSITORY})")
@@ -196,7 +204,7 @@ def main(argv=None):
                 fail(f"No OpenUSD in {folder} (no pxrConfig.cmake); run this without --packs-only to download it")
         else:
             fetch_openusd(folder, args.repository, zips, Path(work))
-        missing = fetch_packs(folder, args.repository, zips, Path(work), args.require_packs)
+        missing = fetch_packs(folder, args.repository, zips, Path(work), args.require_packs, args.optional)
     without = f", without {', '.join(missing)}" if missing else ""
     print(f"{folder} is ready{without}. Build usdcc against it with: python tools/build.py --usd-install {folder}")
 
