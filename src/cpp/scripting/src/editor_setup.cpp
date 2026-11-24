@@ -208,7 +208,7 @@ QString findVsCode() {
 }
 
 QString extensionFile() {
-    const QString file = QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../tools/vscode/usdcc.vsix"));
+    const QString file = QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("tools/vscode/usdcc.vsix"));
     return QFileInfo::exists(file) ? file : QString();
 }
 

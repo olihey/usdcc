@@ -23,7 +23,7 @@ updates usdcc downloads itself, carry no mark.
   keeps one folder per app, and its library checks, downloads and applies updates, with
   delta packages so an update downloads only what changed.
 - **Windows only.** Linux keeps its `tar.xz`; Velopack's Linux packages are AppImages,
-  which the Linux deploy isn't.
+  which the Linux deploy isn't. macOS has a disk image and no updates either.
 - **The GitHub releases are the update server.** The release workflow attaches the
   installer, the packages and the feed Velopack reads (§5); nothing else to host.
 - **Package id `usdcc`, the user's files in `usdcc_config`.** Velopack installs into

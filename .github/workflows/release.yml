@@ -1,9 +1,9 @@
-# Builds a GitHub release's Windows 7z and Linux tar.xz and attaches them
+# Builds a GitHub release's Windows 7z, Linux tar.xz and macOS dmg and attaches them
 # (docs/RELEASE.md §4): publish a release (or prerelease) with a tag such as
 # 26.12.1, and this builds that tag on each platform, x64 and arm64, runs the
 # tests, deploys, starts the deploy as a user would, and attaches
-# usdcc-<version>-windows-<arch>.7z and usdcc-<version>-linux-<arch>.tar.xz, each
-# with its symbols, and on Windows the installer (usdcc-win-Setup.exe for x64,
+# usdcc-<version>-windows-<arch>.7z, usdcc-<version>-linux-<arch>.tar.xz and
+# usdcc-<version>-macos-arm64.dmg, each with its symbols, and on Windows the installer (usdcc-win-Setup.exe for x64,
 # usdcc-win-arm64-Setup.exe) and the packages installs update from
 # (docs/UPDATES.md). Run it by hand with the tag to rebuild a release whose run
 # failed, or with dry_run to try the branch it's run on: built and packed as for
@@ -525,3 +525,169 @@ jobs:
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}" \
             "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-archives/*.tar.xz \
             --clobber --repo "$GITHUB_REPOSITORY"
+
+  # macOS on Apple Silicon (docs/MACOS.md): usdcc.app in a disk image. Signed ad hoc, so
+  # macOS asks whoever downloads it (docs/RELEASE.md section 4), unless the secret
+  # MACOS_SIGN_IDENTITY names an identity. That also needs its certificate imported into a
+  # keychain and the disk image notarized, which aren't here yet.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      SIGN: ${{ secrets.MACOS_SIGN_IDENTITY || '-' }}
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the tag
+        id: tag
+        run: |
+          # YY.MM.N, as the windows job checks it.
+          if ! [[ "$TAG" =~ ^v?([0-9][0-9]\.([1-9]|1[0-2])\.[1-9][0-9]*(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::The tag '$TAG' isn't a version (YY.MM.N), such as 26.12.1, v26.12.1 or 26.12.1-beta.1."
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null; then
+            echo "::error::There's no release with the tag $TAG to attach the archives to."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=usdcc-$version" >> "$GITHUB_OUTPUT"
+          echo "dmg=usdcc-$version-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
+          echo "symbols=usdcc-$version-macos-arm64-symbols.tar.xz" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          # A dry run builds the branch it was run on.
+          ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
+          submodules: recursive
+
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
+      - name: Install the build's packages
+        run: brew install --quiet ninja pkg-config autoconf autoconf-archive automake libtool uv xz
+
+      - name: Name the OpenUSD asset
+        id: asset
+        run: python3 tools/ci/usd_asset.py --github-output
+
+      # uv's Python, as in build.yml's macos job: the same path in every workflow.
+      - name: Set up Python
+        run: |
+          uv python install '${{ steps.asset.outputs.python }}'
+          python=$(uv python find --no-project --managed-python '${{ steps.asset.outputs.python }}')
+          dirname "$python" >> "$GITHUB_PATH"
+          "$python" -c "import platform, sys; print(sys.version, platform.machine(), sys.prefix)"
+
+      - name: Download OpenUSD
+        run: |
+          if ! gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.zip }}' --dir "$RUNNER_TEMP"; then
+            echo "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) first."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/deps"  # unzip makes only the last folder
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
+          echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
+
+      # Required, as in the windows job.
+      - name: Download the USD plugin packs
+        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
+
+      - name: Download PySide6
+        run: |
+          python tools/ci/pyside_asset.py > "$RUNNER_TEMP/pyside.json"
+          tag=$(jq -r .tag "$RUNNER_TEMP/pyside.json"); zip=$(jq -r .zip "$RUNNER_TEMP/pyside.json")
+          if ! gh release download "$tag" --pattern "$zip" --dir "$RUNNER_TEMP"; then
+            echo "::error::No $zip in release $tag. Run the PySide6 workflow (deps-pyside.yml) first."
+            exit 1
+          fi
+          unzip -q "$RUNNER_TEMP/$zip" -d external
+
+      # build.yml's cache, only read: build.yml keeps it.
+      - name: Name the vcpkg cache
+        id: vcpkg
+        run: python tools/ci/vcpkg_cache.py --access read
+
+      - name: Restore the vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Build
+        run: python tools/build.py --usd-install "$USD_INSTALL" --without-rtx --usdcc-version ${{ steps.tag.outputs.version }}
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 900
+
+      # For the VS Code extension, which the deploy has (docs/VSCODE.md).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      # The deploy checks itself, as on Linux. The symbols come out before anything is
+      # made of it: the binaries are signed again without them.
+      - name: Deploy
+        run: |
+          deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
+          python tools/deploy.py "$deploy" --sign "$SIGN" --require-vsix
+          # A release has to ship every licence (docs/RELEASE.md section 6).
+          for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
+            if [ -z "$(ls -A "$deploy/usdcc.app/Contents/Resources/licenses/$folder" 2>/dev/null)" ]; then
+              echo "::error::No licences in licenses/$folder"; exit 1
+            fi
+          done
+          python tools/ci/split_dsym.py --deploy "$deploy" --symbols "$RUNNER_TEMP/symbols/${{ steps.tag.outputs.name }}" --sign "$SIGN"
+
+      - name: Make the disk image
+        run: |
+          image="$RUNNER_TEMP/image"
+          mkdir "$image"
+          ditto "$RUNNER_TEMP/${{ steps.tag.outputs.name }}/usdcc.app" "$image/usdcc.app"
+          ln -s /Applications "$image/Applications"
+          hdiutil create -volname 'usdcc ${{ steps.tag.outputs.version }}' -srcfolder "$image" -format ULMO -ov "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
+          tar -C "$RUNNER_TEMP/symbols" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}"
+          for file in '${{ steps.tag.outputs.dmg }}' '${{ steps.tag.outputs.symbols }}'; do
+            size=$(stat -f %z "$RUNNER_TEMP/$file")
+            echo "$file: $((size / 1048576)) MB"
+            if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
+          done
+
+      # As whoever downloads it: copied out of the image, with the build, the deploy and
+      # OpenUSD moved out of reach.
+      - name: Start it from the disk image
+        run: |
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
+          mkdir "$RUNNER_TEMP/installed" "$RUNNER_TEMP/away"
+          ditto "$RUNNER_TEMP/mounted/usdcc.app" "$RUNNER_TEMP/installed/usdcc.app"
+          hdiutil detach "$RUNNER_TEMP/mounted"
+          mv build external/pyside-install "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" "$USD_INSTALL" "$RUNNER_TEMP/away/"
+          python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/installed" \
+            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
+          codesign --verify --deep --strict "$RUNNER_TEMP/installed/usdcc.app"
+
+      - name: Keep the disk image with the run
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.tag.outputs.dmg }}
+          path: ${{ runner.temp }}/${{ steps.tag.outputs.dmg }}
+          compression-level: 0
+          retention-days: 3
+
+      - name: Attach to the release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" \
+            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" --clobber --repo "$GITHUB_REPOSITORY"

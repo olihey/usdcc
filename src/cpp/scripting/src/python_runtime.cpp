@@ -278,6 +278,13 @@ void PythonRuntime::Impl::start() {
     config.install_signal_handlers = 0;  // Ctrl+C and friends stay the app's
     config.parse_argv = 0;
     config.user_site_directory = settings.userSite ? 1 : 0;
+#if defined(__APPLE__)
+    // Nothing is written into a signed bundle: a __pycache__ there would break its
+    // signature. Its own modules are compiled already (tools/deploy.py).
+    if (settings.home == usdcc::core::installRoot(executableDir()) && usdcc::core::isMacBundleDir(executableDir())) {
+        config.write_bytecode = 0;
+    }
+#endif
     PyConfig_SetString(&config, &config.program_name, L"usdcc");
     PyConfig_SetString(&config, &config.home, settings.home.wstring().c_str());
     const PyStatus status = Py_InitializeFromConfig(&config);

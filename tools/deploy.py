@@ -73,7 +73,21 @@ relative to an OpenUSD install laid out as the deploy is.
     python tools/deploy.py D:\\dist\\usdcc --clean
     python tools/deploy.py --usd-install C:\\usd\\install
 
-Windows and Linux. Standard library only, and patchelf on Linux.
+On macOS the folder holds usdcc.app (docs/MACOS.md):
+
+    <destination>/usdcc.app/Contents/
+      Info.plist
+      MacOS/        usdcc and usdcc_node
+      Resources/    what a Linux deploy's folder has (lib/, bin/ with the Python,
+                    Qt6/plugins/, plugin/usd/, plugins/, sdk/, licenses/, ...), usdcc.icns,
+                    node-web/, and the qt.conf that says where Qt's plugins are
+
+Everything is in Resources, not Frameworks: OpenUSD and Python find their data beside their
+libraries, and codesign takes only signed code in Frameworks. The Mach-O files' rpaths are
+relative to @loader_path, the Python is compiled (a __pycache__ written later would break
+the signature), and everything is signed, ad hoc unless --sign names an identity.
+
+Windows, Linux and macOS. Standard library only, patchelf on Linux and Xcode on macOS.
 """
 
 from __future__ import annotations
@@ -207,7 +221,7 @@ def _vcpkg_licences(licenses_dir, sources):
 # OpenUSD's own plugins in plugin/usd, with deps/usd.json's build_usd.py flags.
 # Reviewed against the pinned OpenUSD source, not read off the install: a local
 # one can hold a third-party renderer someone installed into it by hand.
-OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdAbc", "usdDraco",
+OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioImageIO", "hioOiio", "hioOpenEXR", "sdrGlslfx", "usdAbc", "usdDraco",
                    "usdShaders")
 
 # Where the USD plugin packs' own files are, in an OpenUSD install and in a deploy.
@@ -320,6 +334,8 @@ def main(argv=None):
                         help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
     parser.add_argument("--blender-source-bundle", metavar="FILE",
                         help="source candidate from tools/blender_mesh_package.py, copied beside the combined artifact")
+    parser.add_argument("--sign", default="-", metavar="IDENTITY",
+                        help="macOS: the signing identity, a Developer ID (default: an ad-hoc signature)")
     args = parser.parse_args(argv)
     if args.with_blender_mesh_tools:
         if args.bundle_rtx_runtime:
@@ -328,7 +344,10 @@ def main(argv=None):
     elif args.blender_source_bundle:
         fail("--blender-source-bundle requires --with-blender-mesh-tools")
     if MACOS:
-        fail("tools/deploy.py doesn't support macOS yet: it knows Windows' and Linux' layouts.")
+        deploy_macos(args)
+        return
+    if args.sign != "-":
+        fail("--sign is macOS's.")
     if not WINDOWS:
         deploy_linux(args)
         return
@@ -1232,6 +1251,384 @@ def deploy_linux(args):
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with ./usdcc or bin/usdcc.")
+
+
+# --- macOS --------------------------------------------------------------------
+
+def _macos_links(contents, lib_dir):
+    """Every Mach-O file's links and rpaths, from what the build had to what the bundle
+    has; the files. Signed afterwards, as a whole."""
+    from _macho import edit, install_id, is_system, loader_relative, macho_files, needed
+    plugin_folders = [contents / "Resources/plugins", contents / "Resources/examples/plugins"]
+    files = macho_files(contents)
+    for file in files:
+        links = {name: "@rpath/" + Path(name).name for name in needed(file)
+                 if not name.startswith("@") and not is_system(name)}
+        entries = [loader_relative(file, lib_dir)]
+        if any(name.startswith("@rpath/usd") for name in needed(file)):
+            # pxr's modules of plugins (usdAbc, usdDraco), which link the plugin itself.
+            entries.append(loader_relative(file, contents / "Resources/plugin/usd"))
+        if any(folder in file.parents for folder in plugin_folders) and entries[0] != "@loader_path":
+            entries.insert(0, "@loader_path")
+        own = install_id(file)
+        edit(file, new_rpaths=entries, new_id="@rpath/" + file.name if own and own.startswith("/") else None, changes=links)
+    # By the library's own name, not a link's to it (libjpeg.62.dylib, whose name is
+    # libjpeg.62.4.0.dylib where vcpkg's is in place of OpenUSD's): the hardened runtime
+    # refuses a library whose name isn't the one asked for.
+    own_names = {library.name: Path(install_id(library.resolve()) or library.name).name
+                 for library in lib_dir.iterdir() if library.name.endswith(".dylib") and library.is_file()}
+    for file in files:
+        edit(file, changes={name: "@rpath/" + own_names[Path(name).name] for name in needed(file)
+                            if name.startswith("@rpath/") and own_names.get(Path(name).name, Path(name).name) != Path(name).name})
+    return files
+
+
+def _macos_problems(contents, files):
+    """What a bundle's Mach-O files link that the bundle (through their rpaths) and the
+    system don't have, or have in an older version than they were linked with."""
+    from _macho import install_id, is_system, library_versions, rpaths
+    problems = []
+    for file in files:
+        own = install_id(file)
+        folders = [Path(os.path.normpath(entry.replace("@loader_path", str(file.parent)))) for entry in rpaths(file)]
+        for folder in folders:
+            if contents not in folder.parents:
+                problems.append(f"{file.relative_to(contents)}: rpath {folder}")
+        for name, version in library_versions(file).items():
+            if name == own or is_system(name):
+                continue
+            if not name.startswith("@rpath/"):
+                problems.append(f"{file.relative_to(contents)}: links {name}")
+                continue
+            found = next((folder / name[len("@rpath/"):] for folder in folders if (folder / name[len("@rpath/"):]).is_file()), None)
+            if not found:
+                problems.append(f"{file.relative_to(contents)}: {name} not found")
+                continue
+            if Path(install_id(found.resolve()) or name).name != Path(name).name:
+                problems.append(f"{file.relative_to(contents)}: {name} is {install_id(found.resolve())}")
+            has = library_versions(found.resolve()).get(install_id(found.resolve()), version)
+            if has < version:
+                problems.append(f"{file.relative_to(contents)}: {name} {'.'.join(map(str, has))} is older than "
+                                f"{'.'.join(map(str, version))}, which it links")
+    return problems
+
+
+def deploy_macos(args):
+    """tools/deploy.py on macOS: the layout in the docstring at the top."""
+    from _macho import needed, sign, sign_app
+    if args.with_blender_mesh_tools:
+        fail("--with-blender-mesh-tools isn't set up for macOS: its distribution review is Windows' and Linux'.")
+    if args.optional_packs:
+        fail("--optional-packs is for Linux only so far: no optional pack is published for macOS.")
+    configuration = args.configuration
+    build_type = cache_value(BUILD_DIR, "CMAKE_BUILD_TYPE")
+    app_dir = BUILD_DIR / "src/cpp/app"
+    if (app_dir / configuration / "usdcc.app").is_dir():  # a multi-config generator
+        app_dir = app_dir / configuration
+    elif build_type and build_type != configuration:
+        fail(f"The build is {build_type}, not {configuration}; build it with tools/build.py --configuration "
+             f"{configuration}, or pass --configuration {build_type}.")
+    built = app_dir / "usdcc.app/Contents"
+    exe = built / "MacOS/usdcc"
+    if not exe.is_file():
+        fail(f"No {configuration} build at {app_dir}; run tools/build.py --configuration {configuration} first.")
+    deploy_dir = _full(args.destination)
+
+    built_usd_install = cache_value(BUILD_DIR, "USD_INSTALL")
+    usd_install = args.usd_install or built_usd_install
+    if not usd_install or not os.path.isfile(os.path.join(usd_install, "lib/libusd_plug.dylib")):
+        fail(f"No OpenUSD in '{usd_install}' (no lib/libusd_plug.dylib); pass --usd-install.")
+    if args.usd_install and built_usd_install and not _same(_full(args.usd_install), _full(built_usd_install)):
+        warn(f"usdcc was built against the OpenUSD in '{built_usd_install}', not '{usd_install}'; the deploy "
+             f"may not run with it.")
+    usd_install = Path(_full(usd_install))
+    usd_python = next((folder for folder in (usd_install / "lib/site-packages", *sorted(usd_install.glob("lib/python3*/site-packages")),
+                                             usd_install / "lib/python") if (folder / "pxr/__init__.py").is_file()), None)
+    if not usd_python:
+        fail(f"No pxr package in {usd_install}/lib.")
+
+    python_exe = cache_value(BUILD_DIR, "USDCC_PYTHON_EXECUTABLE_PATH") or cache_value(BUILD_DIR, "Python3_EXECUTABLE")
+    if not python_exe or not os.path.isfile(python_exe):
+        fail(f"OpenUSD's Python not found (USDCC_PYTHON_EXECUTABLE_PATH in build/CMakeCache.txt: '{python_exe}'); "
+             "configure again.")
+    python_home, python_version, python_stdlib, python_binary = _python_layout(python_exe)
+    libpython = python_home / "lib" / f"libpython{python_version}.dylib"
+    if not libpython.is_file():
+        fail(f"No {libpython}: usdcc needs a Python with a shared library, as uv's (docs/MACOS.md).")
+    if not any(Path(name).name == libpython.name for name in needed(exe)):
+        fail(f"{exe} doesn't link {libpython.name}.")
+
+    vcpkg_dir = _vcpkg_installed() / vcpkg_triplet(BUILD_DIR)
+    own_libraries = sorted(file for file in (BUILD_DIR / "src/cpp").rglob("libusdcc_*.dylib")
+                           if "CMakeFiles" not in file.parts and "plugins" not in file.parts)
+    package_dir = BUILD_DIR / "python/usdcc"
+    if not (package_dir / "__init__.py").is_file():
+        fail(f"The usdcc Python package is missing from {package_dir}; build first.")
+    ruff_exe = cache_value(BUILD_DIR, "USDCC_RUFF_EXE_PATH")
+    uv_exe = cache_value(BUILD_DIR, "USDCC_UV_EXE_PATH")
+    pyside_dir = cache_value(BUILD_DIR, "USDCC_PYSIDE_DIR")
+    has_pyside = bool(pyside_dir) and os.path.isfile(os.path.join(pyside_dir, "PySide6/__init__.py"))
+    if not has_pyside:
+        warn(f"No PySide6 in '{pyside_dir}' (tools/build_pyside.py): the deploy works, but scripts can't make panels.")
+
+    # --- the destination ------------------------------------------------------
+
+    for protected in (REPO, BUILD_DIR, usd_install, python_home, Path.home()):
+        absolute = _full(protected)
+        if absolute == deploy_dir or absolute.startswith(deploy_dir + os.sep):
+            fail(f"Unsafe deploy destination '{deploy_dir}' contains '{absolute}'.")
+    deploy_dir = Path(deploy_dir)
+    app = deploy_dir / "usdcc.app"
+    if deploy_dir.exists():
+        if not deploy_dir.is_dir():
+            fail(f"{deploy_dir} is a file, not a folder.")
+        # Finder leaves a .DS_Store in any folder it has shown.
+        others = [entry.name for entry in deploy_dir.iterdir() if entry.name not in ("usdcc.app", ".DS_Store")]
+        if args.clean:
+            print(f"Deleting {deploy_dir}")
+            remove_tree(deploy_dir)
+        elif (app / "Contents/MacOS/usdcc").is_file() and not others:
+            print(f"Replacing the earlier deploy in {deploy_dir}")
+            remove_tree(deploy_dir)
+        elif others or app.exists():
+            fail(f"{deploy_dir} exists and isn't an earlier deploy (usdcc.app alone); pick an empty or new folder, "
+                 "or pass --clean to delete it first.")
+    contents = app / "Contents"
+    root = contents / "Resources"  # installRoot() in usdcc/core/install_paths.h
+    programs = contents / "MacOS"
+    lib_dir = root / "lib"
+    python_lib = lib_dir / f"python{python_version}"
+    site_packages = python_lib / "site-packages"
+    print(f"Deploying usdcc ({configuration}) to {app}", flush=True)
+
+    # --- lib: OpenUSD first, then vcpkg's and the app's, as on Linux -----------
+
+    usd_packs = _usd_packs(usd_install)
+    shipped_packs = {pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
+    print(f"  OpenUSD libraries and plugins ({usd_install})", flush=True)
+    _copy_linux_tree(usd_install / "lib", lib_dir, top_level_only=True,
+                     exclude_files=LINUX_BUILD_ONLY_FILES + ["*_debug.dylib"] + _pack_dlls(usd_packs))
+    _copy_linux_tree(usd_install / "lib/usd", lib_dir / "usd", exclude_files=LINUX_BUILD_ONLY_FILES)
+    _openusd_plugins(usd_install / "plugin/usd", root / "plugin/usd", _copy_linux_tree)
+    pack_sources = []
+    for pack, manifest in shipped_packs.items():
+        print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        _deploy_usd_pack(pack, manifest, usd_install, root, pack_sources, libraries="lib")
+    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+        print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
+
+    print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
+    replaced = _copy_linux_tree(vcpkg_dir / "lib", lib_dir, exclude_files=LINUX_BUILD_ONLY_FILES, top_level_only=True)
+    if replaced:
+        print(f"    in place of OpenUSD's: {', '.join(sorted(set(replaced)))}")
+    _copy_linux_tree(vcpkg_dir / "Qt6/plugins", root / "Qt6/plugins", exclude_files=LINUX_BUILD_ONLY_FILES)
+    (root / "qt.conf").write_text("[Paths]\nPlugins = Resources/Qt6/plugins\n", encoding="ascii")
+
+    print("  usdcc", flush=True)
+    programs.mkdir(parents=True, exist_ok=True)
+    for name in ("usdcc", "usdcc_node"):
+        if not (built / "MacOS" / name).is_file():
+            fail(f"No {name} in {built / 'MacOS'}; build it with tools/build.py.")
+        shutil.copy2(built / "MacOS" / name, programs / name)
+    copy_file(built / "Info.plist", contents)
+    copy_file(built / "Resources/usdcc.icns", root)
+    copy_tree(built / "Resources/node-web", root / "node-web")
+    for library in own_libraries:
+        shutil.copy2(library, lib_dir / library.name)
+    shutil.copy2(libpython, lib_dir / libpython.name)
+
+    # --- the Python: its program, standard library and packages ---------------
+
+    print(f"  Python {python_version} ({python_home})", flush=True)
+    # Tk isn't shipped, nor what links it.
+    _copy_linux_tree(python_stdlib, python_lib, exclude_dirs=PYTHON_LEFT_OUT, exclude_files=["_tkinter*"])
+    (root / "bin").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(python_binary, root / "bin" / f"python{python_version}")
+    os.symlink(f"python{python_version}", root / "bin/python3")
+
+    print("  Python packages: usdcc, pxr", flush=True)
+    _copy_linux_tree(package_dir, site_packages / "usdcc", exclude_files=[] if has_pyside else ["_ui.so"],
+                     exclude_dirs=["__pycache__"])
+    _copy_linux_tree(usd_python, site_packages, exclude_dirs=["__pycache__"])
+    if has_pyside:
+        print("  Python packages: PySide6, shiboken6", flush=True)
+        for package in ("PySide6", "shiboken6"):
+            # As on Linux: their libraries with the others, and no Qt of their own.
+            folder = Path(pyside_dir) / package
+            _copy_linux_tree(folder, site_packages / package, exclude_files=LINUX_BUILD_ONLY_FILES + ["lib*.dylib"],
+                             exclude_dirs=PYSIDE_BUILD_ONLY)
+            for library in folder.glob("lib*.dylib"):
+                shutil.copy2(library, lib_dir / library.name)
+
+    # --- tools ----------------------------------------------------------------
+
+    for name, program in (("ruff", ruff_exe), ("uv", uv_exe)):
+        if program and os.path.isfile(program):
+            print(f"  {name}", flush=True)
+            folder = root / "tools" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(program, folder)
+            for licence in _names(Path(program).parent, "LICENSE*"):
+                copy_file(Path(program).parent / licence, folder)
+        else:
+            warn(f"No {name} in the build ('{program}'; reconfigure while online): the deploy works, but it "
+                 f"needs a {name} on PATH.")
+    _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), root, args)
+    _deploy_stubs(root, args)
+    _deploy_vsix(root, args)
+
+    # --- plugins, preview, SDK ------------------------------------------------
+
+    print("  Shipped and example plugins", flush=True)
+    shipped = _shipped(SHIPPED_PLUGINS) if has_pyside else []
+    if not has_pyside and _shipped(SHIPPED_PLUGINS):
+        warn(f"Without PySide6, {', '.join(_shipped(SHIPPED_PLUGINS))} isn't shipped: it needs it.")
+    for plugin in shipped:
+        copy_tree(REPO / "src/plugins" / plugin, root / "plugins" / plugin, exclude_dirs=["__pycache__"])
+    for plugin in _shipped(SHIPPED_NATIVE_PLUGINS):
+        if not (BUILD_DIR / "plugins" / plugin / "usdcc-plugin.json").is_file():
+            fail(f"The {plugin} plugin isn't built; build the usdcc target first.")
+        _copy_linux_tree(BUILD_DIR / "plugins" / plugin, root / "plugins" / plugin,
+                         exclude_files=LINUX_BUILD_ONLY_FILES, exclude_dirs=["CMakeFiles"])
+    copy_tree(REPO / "src/plugins", root / "examples/plugins",
+              exclude_dirs=["__pycache__", "cpp_example", "rtx_render", "rtx_render_native", "blender_mesh_tools"]
+              + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS, exclude_files=[".DS_Store"])
+    _copy_linux_tree(BUILD_DIR / "plugins", root / "examples/plugins", exclude_files=LINUX_BUILD_ONLY_FILES,
+                     exclude_dirs=["rtx_render", "rtx_render_native", "blender_mesh_tools", "CMakeFiles"]
+                     + SHIPPED_PLUGINS + SHIPPED_NATIVE_PLUGINS)
+    print("  Material preview shapes and HDRIs", flush=True)
+    copy_tree(REPO / "resources/preview", root / "resources/preview", exclude_files=[".DS_Store"])
+    print("  Workspaces", flush=True)
+    copy_tree(REPO / "resources/workspaces", root / "resources/workspaces", exclude_files=[".DS_Store"])
+
+    print("  Plugin SDK", flush=True)
+    sdk_dir = root / "sdk"
+    for library in ("core", "tools", "ui", "usd", "plugin_sdk"):
+        copy_tree(REPO / "src/cpp" / library / "include", sdk_dir / "include")
+    (sdk_dir / "lib").mkdir(parents=True, exist_ok=True)
+    for library in own_libraries:
+        os.symlink(f"../../lib/{library.name}", sdk_dir / "lib" / library.name)
+    (sdk_dir / "cmake").mkdir(parents=True, exist_ok=True)
+    copy_file(BUILD_DIR / "sdk/UsdccPluginConfig.cmake", sdk_dir)
+    for module in ("UsdccPlugin.cmake", "FindUSD.cmake"):
+        copy_file(REPO / "cmake/modules" / module, sdk_dir / "cmake")
+    copy_tree(REPO / "src/plugins/cpp_example", sdk_dir / "example", exclude_files=[".DS_Store"])
+
+    # --- licences (docs/RELEASE.md section 6) ---------------------------------
+
+    print("  Licences", flush=True)
+    licenses_dir = root / "licenses"
+    licenses_dir.mkdir(parents=True, exist_ok=True)
+    copy_file(REPO / "LICENSE", root / "LICENSE.txt")
+    _usd_notices(usd_install, licenses_dir)
+    if (usd_install / "licenses").is_dir():
+        copy_tree(usd_install / "licenses", licenses_dir / "OpenUSD-dependencies", exclude_dirs=[USD_PACKS_DIR])
+    else:
+        warn(f"No licences of OpenUSD's dependencies in '{usd_install}/licenses' (tools/build_usd.py collects "
+             "them): the deploy works, but can't be distributed as it is.")
+    sources = [
+        "Where the source of each library in this bundle is. The LGPL ones (Qt, Qt Advanced Docking",
+        "System, PySide6 and shiboken6) are separate shared libraries in Contents/Resources/lib, which you",
+        "may replace with your own builds of the same version; sign the bundle again afterwards",
+        "(codesign --force --deep --sign - usdcc.app).",
+        "",
+    ]
+    _vcpkg_licences(licenses_dir, sources)
+    sources += pack_sources
+    if has_pyside:
+        _pyside_licences(pyside_dir, python_exe, licenses_dir, sources)
+    python_licence = next((file for file in (python_stdlib / "LICENSE.txt", python_home / "LICENSE.txt",
+                                             python_home / "LICENSE") if file.is_file()), None)
+    if python_licence:
+        (licenses_dir / "Python").mkdir(parents=True, exist_ok=True)
+        copy_file(python_licence, licenses_dir / "Python" / "LICENSE.txt")
+    else:
+        warn("No licence of the Python found.")
+    if (REPO / "external/qwindowkit/LICENSE").is_file():
+        (licenses_dir / "QWindowKit").mkdir(parents=True, exist_ok=True)
+        copy_file(REPO / "external/qwindowkit/LICENSE", licenses_dir / "QWindowKit")
+    for tool in ("ruff", "uv", "debugpy"):
+        tool_dir = root / "tools" / tool
+        if tool_dir.is_dir():
+            (licenses_dir / tool).mkdir(parents=True, exist_ok=True)
+            for name in [*_names(tool_dir, "LICENSE*"), *_names(tool_dir, "ThirdPartyNotices*")]:
+                copy_file(tool_dir / name, licenses_dir / tool)
+    (licenses_dir / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8")
+
+    # --- links, compiled Python, signatures -----------------------------------
+
+    print("  Links and rpaths relative to @loader_path", flush=True)
+    files = _macos_links(contents, lib_dir)
+
+    required = [
+        "Info.plist", "MacOS/usdcc", "MacOS/usdcc_node",
+        *(f"Resources/{name}" for name in (
+            "usdcc.icns", "qt.conf", "node-web/index.html", "node-web/usdcc.css", f"bin/python{python_version}",
+            "lib/libusd_plug.dylib", "lib/libusd_hgiMetal.dylib", "lib/libQt6Core.6.dylib", "lib/libusdcc_core.dylib",
+            f"lib/{libpython.name}", "lib/usd/plugInfo.json", "plugin/usd/hdStorm.dylib",
+            "Qt6/plugins/platforms/libqcocoa.dylib", "Qt6/plugins/platforms/libqoffscreen.dylib",
+            f"lib/python{python_version}/encodings/__init__.py",
+            *(f"lib/python{python_version}/site-packages/{name}" for name in (
+                "usdcc/__init__.py", "pxr/__init__.py", "usdcc/_vendor/packaging/version.py",
+                "usdcc/_vendor/jinja2/__init__.py", "usdcc/_vendor/markupsafe/__init__.py", "usdcc/_schema_check.py",
+                *(("PySide6/__init__.py", "shiboken6/__init__.py", "usdcc/ui.py", "usdcc/_ui.so") if has_pyside else ()))),
+            *(f"plugins/{plugin}/usdcc-plugin.json" for plugin in shipped),
+            "examples/plugins/measure_example/usdcc-plugin.json", "examples/plugins/cpp_example/usdcc-plugin.json",
+            "sdk/UsdccPluginConfig.cmake", "sdk/lib/libusdcc_ui.dylib", "sdk/include/usdcc/plugin/plugin.h",
+            "LICENSE.txt", "licenses/OpenUSD/LICENSE.txt", "licenses/OpenUSD/NOTICE.txt", "licenses/vcpkg/qtbase.txt",
+            "licenses/SOURCES.txt")),
+    ]
+    missing = [name for name in required if not (contents / name).exists()]
+    if missing:
+        fail(f"The deploy is incomplete; missing: {', '.join(missing)}")
+    # Every link from the bundle or the system: nothing from the build, OpenUSD's install or the Python's.
+    problems = _macos_problems(contents, files)
+    if problems:
+        fail("Libraries the deploy doesn't load from itself or the system:\n  " + "\n  ".join(sorted(set(problems))[:40]))
+
+    # Compiled now: written later, next to the signed files, the __pycache__ would break the
+    # bundle's signature. Without timestamps, which a copy of the bundle may change. Templates
+    # and vendored Python 2 code don't compile, and don't matter.
+    print("  Compiling the Python", flush=True)
+    python = root / "bin" / f"python{python_version}"
+    sign(python, args.sign)
+    clean = {"PATH": "/usr/bin:/bin"}
+    subprocess.run([str(python), "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "unchecked-hash",
+                    "-s", str(deploy_dir) + "/", str(python_lib), str(root / "plugins"), str(root / "examples"), str(root / "tools")],
+                   env=clean, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not any((python_lib / "encodings/__pycache__").glob("*.pyc")):
+        fail("The deploy's Python compiled nothing.")
+
+    print(f"  Signing {'ad hoc' if args.sign == '-' else 'as ' + args.sign}", flush=True)
+    for file in files:
+        sign(file, args.sign)
+    sign_app(app, args.sign)
+
+    # --- checks, on the signed bundle -----------------------------------------
+
+    pyside_import = "import usdcc.ui; " if has_pyside else ""
+    check = subprocess.run(
+        [str(python), "-B", "-c", f"import sys; {pyside_import}"
+                                  "import json, math, ssl, sqlite3, pxr, usdcc; from pxr import Usd, UsdImagingGL; "
+                                  "print(json.dumps([sys.prefix, pxr.__file__, usdcc.__file__]))"],
+        env=clean, capture_output=True, text=True)
+    if check.returncode != 0:
+        fail(f"The deploy's Python can't import pxr and usdcc: {check.stderr.strip()}")
+    for path in json.loads(check.stdout.splitlines()[-1]):
+        if not os.path.realpath(path).startswith(str(deploy_dir.resolve())):
+            fail(f"The deploy's Python took {path} from outside the deploy.")
+    if uv_exe and (root / "tools/uv/uv").is_file():
+        found = subprocess.run([str(root / "tools/uv/uv"), "python", "find", "--no-config",
+                                "--no-python-downloads", str(python)], env={**clean, "HOME": str(Path.home())},
+                               capture_output=True, text=True)
+        if found.returncode != 0:
+            fail(f"uv can't use the deploy's Python: {(found.stdout + found.stderr).strip()}")
+    sign_check = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
+    if sign_check.returncode != 0:
+        fail(f"Checking the deploy broke its signature: {sign_check.stderr.strip()}")
+
+    size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
+    print(f"Done: {app} ({size / 2**20:,.0f} MB). Start it with: open {app}")
 
 
 if __name__ == "__main__":

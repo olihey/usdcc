@@ -125,6 +125,19 @@ usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each j
 `windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
+The `macos` job attaches `usdcc-<version>-macos-arm64.dmg`, with `usdcc.app` and a link to
+Applications, and the dSYMs of usdcc's own binaries. It has not run yet (2026-11-23).
+`tools/deploy.py` makes the bundle and checks it, `tools/ci/split_dsym.py` takes the symbols
+out, and the smoke test runs a copy from the disk image.
+
+**The app is signed ad hoc, not by a Developer ID**, so macOS refuses a downloaded one at
+first. Say so in the release's section of the changelog: open it once, then System Settings >
+Privacy & Security > Open Anyway. With a Developer ID the secret `MACOS_SIGN_IDENTITY` names
+it (`tools/deploy.py --sign`, with the hardened runtime and
+`src/cpp/app/resources/macos/entitlements.plist`); importing its certificate and notarizing
+the disk image have to be added. The hardened runtime has been tried with an ad-hoc
+signature: the smoke test passes.
+
 **Trigger:** `release: published`, when you publish a release (or prerelease) on GitHub.
 Drafts don't trigger it, so you can prepare one first. It also runs by hand
 (`workflow_dispatch`) with a tag, to rebuild a release whose run failed, or with `dry_run`

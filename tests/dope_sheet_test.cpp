@@ -115,7 +115,7 @@ USDCC_TEST(dope_sheet_rows) {
           "the keys are framed, and the ruler shows the same times (%g to %g)", shown.start, shown.end);
 
     scene.stages.setSelectedPaths(scene.stage, {});
-    QTest::qWait(200);
+    QTest::qWaitFor([&] { return panel.rows().empty(); });  // the panel's timer may be late
     CHECK(panel.rows().empty(), "nothing selected: no rows");
     panel.setShowAll(true);
     CHECK(panel.rows().size() == 3, "Show All Animated: every animated prim");

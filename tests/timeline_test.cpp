@@ -630,16 +630,20 @@ USDCC_TEST(timeline_loops_in_a_shortened_range) {
         for (int i = 1; i <= 10; ++i) drag(slider, from + (to - from) * i / 10.0);
         release(slider, to);
     };
+    const auto wrapsShown = [&] {
+        int wraps = 0;
+        for (size_t i = 1; i < shown.size(); ++i) wraps += shown[i] < shown[i - 1] ? 1 : 0;
+        return wraps;
+    };
+    // Twice round, however few frames a second a slow machine shows.
+    const auto waitForWraps = [&] { QTest::qWaitFor([&] { return wrapsShown() >= 2; }, 20000); };
     // What was shown since `shown` was last cleared: all of it inside the range, and at
     // least once back at an earlier frame.
     const auto check = [&](const char* what) {
         const TimeRange range = stage->playbackRange();
         bool inside = !shown.empty();
-        int wraps = 0;
-        for (size_t i = 0; i < shown.size(); ++i) {
-            inside = inside && range.contains(shown[i]);
-            if (i > 0 && shown[i] < shown[i - 1]) ++wraps;
-        }
+        for (const double time : shown) inside = inside && range.contains(time);
+        const int wraps = wrapsShown();
         CHECK(inside, "%s: every frame shown is inside %g to %g (%zu frames, from %g to %g)", what, range.start, range.end,
               shown.size(), shown.empty() ? 0.0 : shown.front(), shown.empty() ? 0.0 : shown.back());
         CHECK(wraps >= 1, "%s: it went round (%d times in %zu frames)", what, wraps, shown.size());
@@ -666,7 +670,7 @@ USDCC_TEST(timeline_loops_in_a_shortened_range) {
         stage->setTime(stage->playbackRange().start + 5.0);
         shown.clear();
         bar.playButton()->click();
-        QTest::qWait(900);
+        waitForWraps();
         check(name);
         playback.stop();
 
@@ -679,7 +683,7 @@ USDCC_TEST(timeline_loops_in_a_shortened_range) {
         dragEnd(true, 1280.0);
         QTest::qWait(50);
         shown.clear();
-        QTest::qWait(900);
+        waitForWraps();
         check(name);
         playback.stop();
     }

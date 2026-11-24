@@ -4,6 +4,7 @@
 #if USDCC_FEATURE_UPDATES
 #include "app_updates.h"
 #endif
+#include "file_open_events.h"
 #include "startup.h"
 
 #include <filesystem>
@@ -188,6 +189,8 @@ int main(int argc, char** argv) {
     QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
 
     QApplication app(argc, argv);
+    // At once, so that none is missed; opened once the app runs (below).
+    auto* fileOpenEvents = new usdcc::app::FileOpenEvents(&app);
 
     // Integration tests need isolation before settings, plugins, Python and layouts load.
     usdcc::app::applyTestProfile(app, QStringLiteral("usdcc"));
@@ -1692,6 +1695,8 @@ int main(int argc, char** argv) {
 
     // A crashed instance's USDA conversions left their temporary files (docs/PANEL_BUSY.md §5.3).
     usdcc::usd::UsdaView::removeLeftoverConversions();
+
+    QTimer::singleShot(0, &window, [fileOpenEvents]() { fileOpenEvents->open(); });
 
     const int result = app.exec();
 #if USDCC_FEATURE_EDITOR_LINK

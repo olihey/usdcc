@@ -77,6 +77,8 @@ private:
     QWidget* content; // owned by the actual RenderViewPanel
     std::shared_ptr<GpuFrame> frame;
 };
+// For what a timer of the panel does next: a slow machine's may be late, so not a fixed time.
+template <typename Done> void waitFor(Done done) { QTest::qWaitFor(done, 10000); }
 void file(const QString& path) { QFile f(path); CHECK(f.open(QIODevice::WriteOnly), "fake runtime locator file"); }
 }
 
@@ -128,7 +130,8 @@ USDCC_TEST(rtx_native_panel_controller_without_sdk) {
     panel->resize(600, 400); panel->show(); QTest::qWait(180);
     CHECK(engines.empty() && surface->initialized == 0, "panel creation never initializes an engine or GPU");
     auto* render = panel->findChild<QToolButton*>("renderButton");
-    render->click(); QTest::qWait(80);
+    render->click();
+    waitFor([&] { return engines.size() == 1 && engines.back()->schedule.active && surface->initialized == 1; });
     CHECK(engines.size() == 1 && surface->initialized == 1, "Render creates the injected engine once");
     auto first = engines.back();
     CHECK(first->schedule.active && first->schedule.desired.selection == QStringList({"/Group/Cube"}),
@@ -165,22 +168,28 @@ USDCC_TEST(rtx_native_panel_controller_without_sdk) {
     auto local = panel->currentCamera();
     local.cameraToWorld.SetTranslateOnly(PXR_NS::GfVec3d(2, 3, 12));
     const int updates = first->updates;
-    panel->setLocalCamera(local); panel->setLocalCamera(local); QTest::qWait(80);
+    panel->setLocalCamera(local); panel->setLocalCamera(local);
+    waitFor([&] { return first->updates > updates; });
+    QTest::qWait(80); // for a second one, which mustn't come
     CHECK(first->updates == updates + 1, "the controller coalesces camera moves before submitting them");
     first->output.frame = std::make_shared<Frame>(); first->output.status = "Done"; first->output.done = true;
-    QTest::qWait(60);
+    waitFor([&] { return surface->frames == 1 && panel->property("nativeRtxImageSize").toSize().isValid(); });
     CHECK(surface->frames == 1 && panel->property("nativeRtxImageSize").toSize() == QSize(64,36),
           "completed engine output reaches the presentation and shared controls");
-    first->output.saveError = "disk full"; QTest::qWait(50);
+    first->output.saveError = "disk full";
+    waitFor([&] { return first->output.saveError.isEmpty(); });
     CHECK(render->isChecked(), "a Save Image failure does not stop rendering");
     const int replacements = first->replacements;
-    first->output.reloadNeeded = true; QTest::qWait(60);
+    first->output.reloadNeeded = true;
+    waitFor([&] { return first->replacements > replacements; });
     CHECK(first->replacements == replacements + 1, "a failed incremental update requests a fresh snapshot");
     auto other = stages.createStage();
-    panel->setStage(other); QTest::qWait(80);
+    panel->setStage(other);
+    waitFor([&] { return first->schedule.closed && engines.size() == 2; });
     CHECK(first->schedule.closed && engines.size() == 2, "switching stages closes the old client and creates a new one");
     CHECK(!panel->property("nativeRtxImageSize").toSize().isValid(), "stage switching clears the old displayed image");
-    auto second = engines.back(); second->output.error = "renderer unavailable"; QTest::qWait(60);
+    auto second = engines.back(); second->output.error = "renderer unavailable";
+    waitFor([&] { return !render->isChecked() && !second->schedule.active; });
     CHECK(!render->isChecked() && !second->schedule.active, "an engine failure stops the panel and reports it");
     panel.reset();
     CHECK(second->schedule.closed && surface->closed, "deletion closes the client and detaches presentation callbacks");

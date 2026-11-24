@@ -99,7 +99,9 @@ struct Net {
         setDefaultConfig(Config());
         DiskCache::setSharedRoot(root / "cache");
         setLookupLifetime(std::chrono::milliseconds(0));
-        setHttpTimeouts(std::chrono::milliseconds(2000), std::chrono::milliseconds(10000));
+        // Long enough for a busy machine: on macOS libcurl has the system resolve 127.0.0.1
+        // too, which has taken over 2 seconds. No test here waits for it to run out.
+        setHttpTimeouts(std::chrono::milliseconds(30000), std::chrono::milliseconds(10000));
         setHostCallback({});
         forgetHostAnswers();
         setActivityListener(nullptr);
