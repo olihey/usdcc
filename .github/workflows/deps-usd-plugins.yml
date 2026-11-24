@@ -11,6 +11,10 @@ on:
         description: Build again and replace the packs that are already published
         type: boolean
         default: false
+      pack:
+        description: Build only this pack (its deps/usd-plugins name, e.g. moonray); empty builds them all
+        type: string
+        default: ''
   push:
     branches: [master]
     paths:
@@ -20,6 +24,7 @@ on:
       - tools/_macho.py
       - tools/ci/usd_plugin_asset.py
       - tools/ci/check_usd_plugin.py
+      - test_data/moonray/**
       - .github/workflows/deps-usd-plugins.yml
   # A new OpenUSD asset gives every pack a new name: build them against it.
   workflow_run:
@@ -40,9 +45,28 @@ jobs:
       macos: ${{ steps.packs.outputs.macos }}
     steps:
       - uses: actions/checkout@v4
+      # A run started by hand may name one pack, to try it on a branch without
+      # building, and publishing, the others.
       - name: List the packs
         id: packs
-        run: python3 tools/ci/usd_plugin_asset.py --matrix --github-output
+        env:
+          ONLY: ${{ inputs.pack }}
+        run: |
+          python3 tools/ci/usd_plugin_asset.py --matrix > "$RUNNER_TEMP/matrix.json"
+          python3 - "$RUNNER_TEMP/matrix.json" "$ONLY" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, sys
+          matrix, only = json.load(open(sys.argv[1])), sys.argv[2]
+          found = False
+          # Each platform's pack names, and each system's jobs ({"pack": ...}).
+          for key, items in matrix.items():
+              items = [item for item in json.loads(items)
+                       if not only or (item if isinstance(item, str) else item["pack"]) == only]
+              found = found or bool(items)
+              print(f"{key}={json.dumps(items)}")
+          if only and not found:
+              sys.exit(f"::error::No pack '{only}' that CI builds (deps/usd-plugins/{only}.json, not in the local set).")
+          EOF
+          cat "$GITHUB_OUTPUT"
 
   # A job per pack and platform, x64 and arm64 (tools/ci/usd_plugin_asset.py
   # --matrix names the runners): Visual Studio 2022 on x64, the toolset OpenUSD
@@ -249,6 +273,12 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends cmake ninja-build nasm patchelf zip unzip             libgl-dev libegl-dev libglu1-mesa-dev libx11-dev libxt-dev libxrandr-dev libxcursor-dev libxinerama-dev libxi-dev zlib1g-dev
+
+      # MoonRay's build (docs/MOONRAY.md section 7.4) uses the system's libuuid and
+      # FreeType, and bison and flex for its expression parsers.
+      - name: Install MoonRay's packages
+        if: steps.published.outputs.found != 'true' && matrix.pack == 'moonray'
+        run: sudo apt-get install -y -q --no-install-recommends uuid-dev libfreetype-dev bison flex
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true'

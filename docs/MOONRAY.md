@@ -353,9 +353,14 @@ renders with each, through Arras in 1.1 s. No `execComp` was left.
 **Size:** 310 MB installed, 246 MB zipped, 214 MB as `tar.xz`. Open Image Denoise is 51 MB of it, for the
 Arras client only (§2.1).
 
+**In CI:** the USD plugins workflow (`deps-usd-plugins.yml`) builds and checks the pack on `ubuntu-24.04`
+like the other packs, with `uuid-dev`, `libfreetype-dev`, `bison` and `flex` installed for it. It isn't
+published (`"publish": false`): the zip is kept with the run for two weeks. A run started by hand can
+name one pack (`gh workflow run deps-usd-plugins.yml --ref <branch> -f pack=moonray`), to try it on a
+branch without building the others.
+
 **Not done:**
 
-- A CI run. The Linux job needs `libuuid-dev`, `libfreetype-dev`, `bison`, `flex` and `patchelf`.
 - The deploy and the release, which take `standard` packs only.
 - The licence list read (§3).
 - Boost's headers came from the Boost download's install, not the asset's (same version, 1.80).
