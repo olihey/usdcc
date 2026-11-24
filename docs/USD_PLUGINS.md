@@ -65,7 +65,7 @@ there; no pin yet (§7 phase 6). The rest is a plan.
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
-| `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows**. ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | Not proven. Its own `building/` scripts build their own USD; upstream tests Rocky 9 (GCC 11) and macOS 14–26, not Ubuntu 24.04 |
+| `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Renderer proven** on Ubuntu 24.04 against the OpenUSD before oneTBB; hdMoonRay and the current asset not yet ([MOONRAY.md](MOONRAY.md) §7.1) |
 
 Notes:
 
@@ -168,7 +168,8 @@ Notes:
     (`unitX` throughout).
   - **Licence.** Without an Arnold licence every render has an "arnold" watermark. The
     3ds Max and Maya entitlement only covers rendering inside those programs.
-- **MoonRay.** A production CPU path tracer with a hybrid GPU mode (XPU: CUDA/OptiX on
+- **MoonRay.** [MOONRAY.md](MOONRAY.md) is the newer plan (size, nodes, MaterialX) and wins where
+  the two differ. A production CPU path tracer with a hybrid GPU mode (XPU: CUDA/OptiX on
   Linux, Metal on macOS) and a Hydra render delegate, HdMoonRay. It doesn't build on
   Windows, so it is the first pack that is Linux and macOS only; on Windows the renderer
   is simply not in the list.
@@ -694,8 +695,8 @@ Three sets, decided by licence:
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
 | 7 | Should usdcc set `USD_FILEFORMATS_WRITE_USDPREVIEWSURFACE=0`? It ends the warning at the first file read, but then an imported material is only an OpenPBR MaterialX network, which a delegate without MaterialX can't show | No: keep Adobe's default and the one warning in the log. A setting in Settings > USD when someone wants it |
-| 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | Unknown; phase 9 step 1 answers it. If Embree or TBB don't fit, MoonRay waits for §6's `--onetbb` and an Embree 4 in the asset |
-| 9 | Does HdMoonRay render in-process without Arras? | Assume yes, and leave Arras out of the pack; if not, ship it, with libmicrohttpd as a replaceable shared library (§5) |
+| 8 | Does HdMoonRay build against 26.08 from `typhoon/main`, with the asset's Boost, TBB, Embree and OpenImageIO? | MoonRay itself did, against the asset before oneTBB ([MOONRAY.md](MOONRAY.md) §7.1); HdMoonRay and oneTBB are open. If Embree or TBB don't fit, MoonRay waits for §6's `--onetbb` and an Embree 4 in the asset |
+| 9 | Does HdMoonRay render in-process without Arras? | Yes by its source: `hd_moonray_debug` does, `hd_moonray` doesn't. The plan is to ship both ([MOONRAY.md](MOONRAY.md) §2.1). Not built yet |
 | 10 | MoonRay on macOS before usdcc runs there? | No: phase 10 follows the macOS build, not the other way round |
 
 ## 9. Later
