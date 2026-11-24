@@ -1,0 +1,58 @@
+diff --git a/lib/common/grid_util/PackTiles.cc b/lib/common/grid_util/PackTiles.cc
+index 2f49b2d..d363926 100644
+--- a/lib/common/grid_util/PackTiles.cc
++++ b/lib/common/grid_util/PackTiles.cc
+@@ -4,6 +4,7 @@
+ #include "PackTiles.h"
+ #include "PackActiveTiles.h"
+ 
++#include <cstring>
+ #include <scene_rdl2/common/fb_util/ActivePixels.h>
+ #include <scene_rdl2/common/fb_util/GammaF2C.h>
+ #include <scene_rdl2/common/fb_util/ReGammaC2F.h>
+@@ -608,10 +609,12 @@ private:
+ 
+     inline static unsigned short ftoh(const float f)
+     {
+-#if defined(__ARM_NEON__)   // TODO: Verify this
+-	__fp16 output;
+-	vst1_f16(&output, vcvt_f16_f32(vld1q_f32(&f)));
+-	return output;
++#if defined(__ARM_NEON__)
++        // Changed by usdcc: the half's bits, not its value as an integer.
++        const __fp16 half = f;
++        unsigned short bits;
++        std::memcpy(&bits, &half, sizeof(bits));
++        return bits;
+ #else
+         return _cvtss_sh(f, 0); // Convert full 32bit float to half 16bit float
+                                 // An immediate value controlling rounding using bits : 0=Nearest
+@@ -620,10 +623,11 @@ private:
+ 
+     inline static float htof(const unsigned short h)
+     {
+-#if defined(__ARM_NEON__)   // TODO: Verify this
+-	float output;
+-	vst1q_f32(&output, vcvt_f32_f16(vld1_u16(&h)));
+-	return output;
++#if defined(__ARM_NEON__)
++        // Changed by usdcc: it read and wrote past the one value.
++        __fp16 half;
++        std::memcpy(&half, &h, sizeof(half));
++        return half;
+ #else
+         return _cvtsh_ss(h); // Convert half 16bit float to full 32bit float
+ #endif
+diff --git a/lib/scene/rdl2/CMakeLists.txt b/lib/scene/rdl2/CMakeLists.txt
+index 31aeaef..9758a80 100644
+--- a/lib/scene/rdl2/CMakeLists.txt
++++ b/lib/scene/rdl2/CMakeLists.txt
+@@ -202,7 +202,7 @@ add_executable(rdl2_ispc_util)
+ target_sources(rdl2_ispc_util PRIVATE rdl2_ispc_util/rdl2_ispc_util.cc)
+ target_link_libraries(rdl2_ispc_util PRIVATE scene_rdl2_tmp)
+ if (IsDarwinPlatform)
+-    add_custom_command(TARGET rdl2_ispc_util POST_BUILD COMMAND /usr/bin/codesign -s - -f -o linker-signed */rdl2_ispc_util)
++    add_custom_command(TARGET rdl2_ispc_util POST_BUILD COMMAND /usr/bin/codesign -s - -f -o linker-signed $<TARGET_FILE:rdl2_ispc_util>)
+ endif()
+ 
+ # Set standard compile/link options

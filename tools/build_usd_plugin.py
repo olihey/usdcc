@@ -27,7 +27,8 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
                       installs into the pack instead of "cmake" and the rest, for
                       what isn't one CMake project (MoonRay); it returns the licences
                       of what it put in, {name: folder}
-  downloads           {name: {platform: {url, sha256}}}: an archive each, unpacked
+  downloads           {name: {platform: {url, sha256}}}: an archive each, unpacked;
+                      null for a platform that doesn't need it
   sdks                {name: {description, files}}: an SDK that can't be downloaded
                       (it needs a login, as the Arnold SDK does), passed as
                       --sdk <name>=<folder>, which must have the files listed
@@ -354,6 +355,8 @@ def main(argv=None):
     for name, platforms in spec.get("downloads", {}).items():
         if ASSET_PLATFORM not in platforms:
             fail(f"deps/usd-plugins/{pack}.json: the download '{name}' has no entry for {ASSET_PLATFORM}")
+        if platforms[ASSET_PLATFORM] is None:  # not needed on this platform
+            continue
         downloads[name] = platforms[ASSET_PLATFORM]
         places[name] = _download(name, downloads[name], work / "downloads").as_posix()
 

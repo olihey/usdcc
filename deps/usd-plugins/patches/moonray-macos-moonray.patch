@@ -1,0 +1,79 @@
+diff --git a/lib/rendering/pbr/CMakeLists.txt b/lib/rendering/pbr/CMakeLists.txt
+index 3101e16..911d100 100644
+--- a/lib/rendering/pbr/CMakeLists.txt
++++ b/lib/rendering/pbr/CMakeLists.txt
+@@ -267,13 +267,27 @@ writeSamplingDefinitionsHeader("${headerDefs}") # passing a list requires quotes
+ foreach(binFile ${binFiles})
+     get_filename_component(baseName ${binFile} NAME_WLE)
+     set(objFile sampler/${baseName}.o)
+-    set(srcFile sampler/${baseName}.c)
++    set(srcFile ${CMAKE_CURRENT_BINARY_DIR}/sampler/${baseName}.s)
+ 
+     if(IsDarwinPlatform)
++        # Changed by usdcc: by the assembler, as a C compiler takes gigabytes for the
++        # same file written out as an array (xxd -i). Sampler.cc takes the second symbol's
++        # address as the table's end, so it has to be right after it.
++        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/sampler)
++        file(WRITE ${srcFile}
++"    .section __TEXT,__const
++    .globl __binary_${baseName}
++    .globl __binary_${baseName}_len
++    .p2align 6
++__binary_${baseName}:
++    .incbin \"${binFile}\"
++__binary_${baseName}_len:
++    .long 0
++")
+         add_custom_command(
+             OUTPUT  ${objFile}
+             DEPENDS ${binFile}
+-            COMMAND xxd -i -n _binary_${baseName} "${binFile}" "${srcFile}" && cc -c "${srcFile}" -o "${objFile}")
++            COMMAND cc -arch arm64 -c "${srcFile}" -o "${objFile}")
+     else()
+         add_custom_command(
+             OUTPUT  ${objFile}
+diff --git a/lib/rendering/rndr/RenderOutputWriter.cc b/lib/rendering/rndr/RenderOutputWriter.cc
+index 092ba21..feec119 100644
+--- a/lib/rendering/rndr/RenderOutputWriter.cc
++++ b/lib/rendering/rndr/RenderOutputWriter.cc
+@@ -6,6 +6,7 @@
+ #include "RenderOutputDriverImpl.h"
+ #include "RenderOutputWriter.h"
+ 
++#include <cstring>
+ #include <moonray/rendering/mcrt_common/Clock.h>
+ #include <moonray/rendering/pbr/core/Cryptomatte.h>
+ #include <scene_rdl2/common/fb_util/VariablePixelBuffer.h>
+@@ -1568,10 +1569,11 @@ float
+ RenderOutputWriter::htof(const unsigned short h)
+ {
+ 
+-#if defined(__ARM_NEON__)   // TODO: Verify this
+-	float output;
+-	vst1q_f32(&output, vcvt_f32_f16(vld1_u16(&h)));
+-	return output;
++#if defined(__ARM_NEON__)
++        // Changed by usdcc: it read and wrote past the one value.
++        __fp16 half;
++        std::memcpy(&half, &h, sizeof(half));
++        return half;
+ #else
+     return _cvtsh_ss(h); // Convert half 16bit float to full 32bit float
+ #endif
+@@ -1583,10 +1585,12 @@ unsigned short
+ RenderOutputWriter::ftoh(const float f)
+ {
+ 
+-#if defined(__ARM_NEON__)   // TODO: Verify this
+-	__fp16 output;
+-	vst1_f16(&output, vcvt_f16_f32(vld1q_f32(&f)));
+-	return output;
++#if defined(__ARM_NEON__)
++        // Changed by usdcc: the half's bits, not its value as an integer.
++        const __fp16 half = f;
++        unsigned short bits;
++        std::memcpy(&bits, &half, sizeof(bits));
++        return bits;
+ #else
+     return _cvtss_sh(f, 0); // Convert full 32bit float to half 16bit float
+                             // An immediate value controlling rounding using bits : 0=Nearest 
