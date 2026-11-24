@@ -88,6 +88,7 @@ PrimCreateMenu::PrimCreateMenu(StageManager* stageManager, std::shared_ptr<UndoM
       m_undo(std::move(undo)) {
     setToolTipsVisible(true);
     connect(this, &QMenu::aboutToShow, this, &PrimCreateMenu::rebuild);
+    rebuild();  // not only then: macOS leaves an empty menu out of its menu bar
 }
 
 void PrimCreateMenu::rebuild() {

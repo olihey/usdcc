@@ -88,6 +88,8 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
   Python is compiled already, and usdcc's Python writes no `__pycache__` in a bundle.
   Libraries are linked by their own names, not a link's: the hardened runtime refuses
   `libjpeg.62.dylib` when the library calls itself `libjpeg.62.4.0.dylib`.
+- **An empty menu isn't in the menu bar.** Qt hides it, so a menu filled only as it opens
+  (`aboutToShow`) never does: it needs an entry from the start (Stages, Create).
 - **Files** opened from Finder come as an event (`FileOpenEvents`), not an argument.
 
 ## 4. Found in the tests
