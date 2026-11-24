@@ -52,7 +52,7 @@ public:
     AssetEnvironmentButton(StageManager* stageManager, QWidget* parent = nullptr);
 
     // Picks `environment` for `stages`: asks whether to reload them now, once for all. Those
-    // already in it lose what was pending. Without stages it becomes the default.
+    // already in it lose what was pending, and one that can't be reopened stays as it is. Without stages it becomes the default.
     void pick(const std::string& environment, const std::vector<StageRefPtr>& stages);
     // Reopens `stages` in the environments they're to be in. False when one wasn't.
     bool reload(const std::vector<StageRefPtr>& stages);

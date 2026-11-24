@@ -13,6 +13,7 @@
 #include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/open_stage_options_dialog.h"
 #include <QTabWidget>
 
 #include <QApplication>
@@ -400,6 +401,22 @@ USDCC_TEST(asset_folders_remember_their_environment) {
           "and what a stage there opens in");
     usdcc::usd::rememberFolderEnvironment("C:/proj/shots", "gone");
     CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda").empty(), "one that's gone isn't used");
+    usdcc::usd::rememberFolderEnvironment("C:/proj", "prod");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda") == "prod", "its parent's is");
+    usdcc::usd::rememberFolderEnvironment("C:/proj/shots", "test");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda") == "test", "a folder's own wins");
+    {
+        OpenStageOptionsDialog options(QStringLiteral("C:/proj/shots/x.usda"), nullptr);
+        CHECK(options.options().assetEnvironment == "test", "Open Stage with Options starts with it");
+    }
+    CHECK(usdcc::usd::forgetFolderEnvironment("C:/proj/shots/x.usda") &&
+              usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda") == "prod",
+          "forgotten, the parent's is back");
+    CHECK(usdcc::usd::forgetFolderEnvironment("C:/proj/shots/x.usda") &&
+              !usdcc::usd::forgetFolderEnvironment("C:/proj/shots/x.usda"),
+          "and that can be forgotten too");
+    usdcc::usd::setAssetFolderFile(folder.filePath(QStringLiteral("profile/asset-folders.json")).toStdString());
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda").empty(), "in its file as well");
     usdcc::usd::setAssetFolderFile({});
     assets::useDefaultConfigFile();
 }

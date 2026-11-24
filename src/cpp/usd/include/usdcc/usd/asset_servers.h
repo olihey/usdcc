@@ -34,9 +34,11 @@ void setPreferredAssetEnvironment(const std::string& environment);
 // (JSON). Without a file, as in tools and tests, nothing is remembered.
 void setAssetFolderFile(const std::string& file);
 void rememberFolderEnvironment(const std::string& folder, const std::string& environment);
-// The one remembered for the folder of `identifier` or one above it; empty for none, or
-// one the configuration doesn't have any more.
+// The one remembered for the folder of `identifier`, else for the nearest above it; empty for
+// none. One the configuration doesn't have any more doesn't count.
 std::string rememberedEnvironment(const std::string& identifier);
+// Forgets that one. False when there was none.
+bool forgetFolderEnvironment(const std::string& identifier);
 // The folder of a stage's root, as rememberFolderEnvironment() takes it.
 std::string folderOf(const std::string& identifier);
 

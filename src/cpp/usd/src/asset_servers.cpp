@@ -117,12 +117,10 @@ std::string folderOf(const std::string& identifier) {
     return slash == std::string::npos ? std::string() : path.substr(0, slash);
 }
 
-void rememberFolderEnvironment(const std::string& folder, const std::string& environment) {
-    Folders& all = folders();
-    std::lock_guard<std::mutex> lock(all.mutex);
-    if (all.file.empty() || folder.empty()) return;
-    loadFolders(all);
-    all.environments[normalFolder(folder)] = environment;
+namespace {
+
+// With the lock held, both.
+void saveFolders(Folders& all) {
     PXR_NS::JsObject object;
     for (const auto& [each, chosen] : all.environments) object[each] = PXR_NS::JsValue(chosen);
     const std::filesystem::path file = usdcc::assets::fromUtf8(all.file);
@@ -133,26 +131,46 @@ void rememberFolderEnvironment(const std::string& folder, const std::string& env
     PXR_NS::JsWriteValue(&writer, PXR_NS::JsValue(object));
 }
 
-std::string rememberedEnvironment(const std::string& identifier) {
+// A project's own choice wins over its parent's; one that isn't configured is passed over.
+std::map<std::string, std::string>::iterator nearestFolder(Folders& all, const std::string& identifier) {
+    loadFolders(all);
     std::string folder = normalFolder(folderOf(identifier));
-    std::string found;
-    {
-        Folders& all = folders();
-        std::lock_guard<std::mutex> lock(all.mutex);
-        loadFolders(all);
-        // The nearest folder: a project's own choice wins over its parent's.
-        while (!folder.empty()) {
-            const auto it = all.environments.find(folder);
-            if (it != all.environments.end()) {
-                found = it->second;
-                break;
-            }
-            const size_t slash = folder.find_last_of('/');
-            if (slash == std::string::npos || slash == 0) break;
-            folder.erase(slash);
-        }
+    while (!folder.empty()) {
+        const auto it = all.environments.find(folder);
+        if (it != all.environments.end() && hasAssetEnvironment(it->second)) return it;
+        const size_t slash = folder.find_last_of('/');
+        if (slash == std::string::npos || slash == 0) break;
+        folder.erase(slash);
     }
-    return !found.empty() && hasAssetEnvironment(found) ? found : std::string();
+    return all.environments.end();
+}
+
+}  // namespace
+
+void rememberFolderEnvironment(const std::string& folder, const std::string& environment) {
+    Folders& all = folders();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    if (all.file.empty() || folder.empty()) return;
+    loadFolders(all);
+    all.environments[normalFolder(folder)] = environment;
+    saveFolders(all);
+}
+
+std::string rememberedEnvironment(const std::string& identifier) {
+    Folders& all = folders();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    const auto found = nearestFolder(all, identifier);
+    return found == all.environments.end() ? std::string() : found->second;
+}
+
+bool forgetFolderEnvironment(const std::string& identifier) {
+    Folders& all = folders();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    const auto found = nearestFolder(all, identifier);
+    if (found == all.environments.end()) return false;
+    all.environments.erase(found);
+    saveFolders(all);
+    return true;
 }
 
 PXR_NS::ArResolverContext stageResolverContext(const std::string& identifier, const std::string& environment) {

@@ -211,8 +211,8 @@ have the named environment fails the job, naming it, rather than render other fi
 one whose alias for the same studio differs.
 
 **Peers.** Joining a shared stage uses the host's environment when the participant has one of that
-name; otherwise their default, with a warning naming both. The host's switch asks the others to
-reload too, as §9 does. An equal name is taken as equal; the stacks' ids could check it later.
+name; otherwise their default, with a warning naming both. A shared stage isn't switched (§10.2).
+An equal name is taken as equal; the stacks' ids could check it later.
 
 ## 9. The status bar
 
@@ -316,9 +316,9 @@ and the status bar's `AssetEnvironmentButton`.
   only this environment has. The edit target is found in the stage's own context.
 - **New stages** in memory and new files open in the default environment too (before, in the
   library's, without Settings > Assets' choice).
-- **A shared stage isn't reopened:** reopening would end the share. Picking another environment for
-  it still offers Later, and the question says why Reload won't work.
-  *Changed from §8:* the host's switch doesn't ask the others to reload.
+- **A shared stage isn't switched:** reopening would end the share. Its environments are off in the
+  menu, with the reason, and **Use for All Open Stages** leaves it as it is. Decided by the user
+  2026-11-24; what §8 has the host's switch do isn't built.
 - **Peers:** the shared stage's info carries the host's `assetEnvironment`. Joining opens the root,
   and looks up its layers, in it when it's configured here. A stage opened in another one gets a
   toast naming both, unless no environment is configured here.
@@ -370,10 +370,12 @@ Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The libr
   it has the name, else each of its environments that has, and personal ones. With none, it says
   so and offers the Asset Servers editor; without any environment configured, only the Log says.
   Set up before the stage named on the command line opens, so it's offered for that one too.
-- **Remembered per folder:** reopening a stage in an environment, by the offer or the status bar,
-  makes it the one stages in that folder and below open in (`asset-folders.json` in the app's
-  local data; a tool or test without one remembers nothing). An environment no longer configured
-  isn't used.
+- **Remembered per folder** (`asset-folders.json` in the app's local data; a tool or test without one
+  remembers nothing): what the offer reopened a stage in, or **Use <environment> for This Folder** in
+  the status bar's menu. Switching by itself remembers nothing. Stages in that folder and below
+  open in it, the nearest folder's first, also in Open Stage with Options; one no longer configured
+  is passed over. The button's tooltip says so, and **Forget <environment> for This Folder** takes
+  it back.
 - **The status bar's menu** groups environments by source: yours, then each source's under its
   alias.
 - **Tests:** `assets_sources_are_named_with_their_aliases` ([assets_test.cpp](../tests/assets_test.cpp)),
@@ -471,7 +473,7 @@ Decided by the user 2026-11-24, but for 8.
 | 2 | Who chooses the alias? | The studio suggests it; the user can change it (§3) |
 | 3 | How far are studios' files trusted? | Adding one trusts it with its own logins; no approval per host (§5) |
 | 4 | Reopening when the environment is switched? | Ask: reload now or later. Later applies on the next reload (§9) |
-| 5 | Different environments in a shared stage? | Follow the host's, else warn (§8) |
+| 5 | Different environments in a shared stage? | Follow the host's when joining, else warn; no switching while it's shared (§8) |
 | 6 | May `USDCC_ASSETS_CONFIG`'s file have sources? | Yes (§3) |
 | 7 | A job's environment is unknown on a machine? | The job fails (§8) |
 | 8 | Where does `extends` go, so that an older usdcc still reads the file? | Under a new top-level key, `"mixed"` (§4). A technical choice, not asked |

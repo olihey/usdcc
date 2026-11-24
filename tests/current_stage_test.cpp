@@ -513,12 +513,34 @@ USDCC_TEST(asset_environment_switches_by_reopening) {
           "the one in memory with what's in it");
 
     QString error;
+    usdcc::usd::setAssetFolderFile(dir.filePath(QStringLiteral("folders.json")).toStdString());
+    const std::string root = now->usdStage()->GetRootLayer()->GetIdentifier();
+    const auto item = [&button](const QString& text) -> QAction* {
+        button.fillMenu();
+        for (QAction* action : button.environmentMenu()->actions()) {
+            if (action->text() == text) return action;
+        }
+        return nullptr;
+    };
+    CHECK(usdcc::usd::rememberedEnvironment(root).empty(), "switching remembers nothing by itself");
+    CHECK(item(QStringLiteral("Use test for This Folder")), "it's offered");
+    item(QStringLiteral("Use test for This Folder"))->trigger();
+    CHECK(usdcc::usd::rememberedEnvironment(root) == "test" && button.toolTip().contains(QStringLiteral("folder")),
+          "remembered when asked, and said");
+    CHECK(item(QStringLiteral("Forget test for This Folder")) && !item(QStringLiteral("Use test for This Folder")), "and to be forgotten");
+    item(QStringLiteral("Forget test for This Folder"))->trigger();
+    CHECK(usdcc::usd::rememberedEnvironment(root).empty(), "which it is");
+    usdcc::usd::setAssetFolderFile({});
     CHECK(!usdcc::usd::reopenInEnvironment(stages, now, "nowhere", nullptr, &error) && !error.isEmpty() &&
               stages.currentStage() == now,
           "an unknown environment leaves it alone");
     usdcc::usd::setReopenGuard([](const StageRefPtr&) { return QStringLiteral("shared"); });
     CHECK(!usdcc::usd::reopenInEnvironment(stages, now, "prod", nullptr, &error) && error == QStringLiteral("shared"),
           "nor is one that's shared reopened");
+    CHECK(!item(QStringLiteral("prod"))->isEnabled() && item(QStringLiteral("shared")), "its menu says why, and switches nothing");
+    const int before = asked;
+    button.pick("prod", {now});
+    CHECK(asked == before && now->pendingAssetEnvironment().empty(), "nor is it asked about, or kept for later");
     usdcc::usd::setReopenGuard({});
 
     // Save As goes on in the environment it's in; what's pending stays to come.

@@ -51,6 +51,8 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 
 QString nameOf(const StageRefPtr& stage) { return qs(stage->usdStage()->GetRootLayer()->GetDisplayName()); }
 
+std::string rootOf(const StageRefPtr& stage) { return stage->usdStage()->GetRootLayer()->GetIdentifier(); }
+
 QString environmentText(const std::string& environment) {
     return environment.empty() ? QObject::tr("(none)") : qs(environment);
 }
@@ -108,8 +110,11 @@ void installAssetEnvironmentOffer(usdcc::ui::MainWindow* window, StageManager* s
                         const std::string chosen = offered[i];
                         actions.append({QObject::tr("Reopen in %1").arg(qs(chosen)), [target, stageManager, stage, chosen]() {
                                             QString error;
-                                            if (!reopenInEnvironment(*stageManager, stage, chosen, target, &error) &&
-                                                !error.isEmpty()) {
+                                            if (reopenInEnvironment(*stageManager, stage, chosen, target, &error)) {
+                                                // One question per project (docs/ASSET_SOURCES.md §4).
+                                                rememberFolderEnvironment(folderOf(rootOf(stage)), chosen);
+                                                assetConfigChanged()();  // the status bar says so
+                                            } else if (!error.isEmpty()) {
                                                 QMessageBox::warning(target, QObject::tr("Asset Environment"), error);
                                             }
                                         }});
@@ -178,8 +183,6 @@ StageRefPtr reopenInEnvironment(StageManager& stageManager, const StageRefPtr& s
     }
     // A server's layer is another layer in the other environment: its edits stay behind.
     if (!confirmUnsavedLayers(&stageManager, {stage}, parent, result->stage)) return fail(QString());
-    // Its folder's stages open in it from now on (docs/ASSET_SOURCES.md §4).
-    rememberFolderEnvironment(folderOf(stage->usdStage()->GetRootLayer()->GetIdentifier()), environment);
     return replaceStage(stageManager, stage, result->stage, state);
 }
 
@@ -240,10 +243,13 @@ void AssetEnvironmentButton::refresh() {
         style()->unpolish(this);
         style()->polish(this);
     }
-    setToolTip(!stage            ? tr("The asset environment stages open in")
+    QString tip = !stage            ? tr("The asset environment stages open in")
                : pending.empty() ? tr("The asset environment %1 is in").arg(nameOf(stage))
                                  : tr("%1 is in the asset environment %2, and in %3 once it's reopened")
-                                       .arg(nameOf(stage), environmentText(actual), qs(pending)));
+                                       .arg(nameOf(stage), environmentText(actual), qs(pending));
+    const std::string remembered = stage ? rememberedEnvironment(rootOf(stage)) : std::string();
+    if (!remembered.empty()) tip += QLatin1Char('\n') + tr("Stages in its folder open in %1").arg(qs(remembered));
+    setToolTip(tip);
 }
 
 void AssetEnvironmentButton::fillMenu() {
@@ -251,9 +257,19 @@ void AssetEnvironmentButton::fillMenu() {
     list->clear();
     const StageRefPtr stage = m_stageManager->currentStage();
     const std::string wanted = stage ? wantedEnvironment(stage) : defaultAssetEnvironment();
+    // A shared stage stays in its environment: reopening would end the share.
+    const QString why = stage ? whyNotReopen(stage) : QString();
+    if (!why.isEmpty()) {
+        list->addAction(why)->setEnabled(false);
+        list->addSeparator();
+    }
     // Grouped by source (docs/ASSET_SOURCES.md §9): yours first, then each source's under its alias.
+    std::vector<std::string> environments = assetEnvironments();
+    std::stable_sort(environments.begin(), environments.end(), [](const std::string& a, const std::string& b) {
+        return usdcc::assets::aliasOf(a) < usdcc::assets::aliasOf(b);
+    });
     std::string group;
-    for (const std::string& environment : assetEnvironments()) {
+    for (const std::string& environment : environments) {
         const std::string alias = usdcc::assets::aliasOf(environment);
         if (alias != group) {
             // A heading of its own: this style draws a section without its text.
@@ -267,6 +283,7 @@ void AssetEnvironmentButton::fillMenu() {
         action->setData(qs(environment));
         action->setCheckable(true);
         action->setChecked(environment == wanted);
+        action->setEnabled(why.isEmpty());
         connect(action, &QAction::triggered, this, [this, environment, stage]() {
             pick(environment, stage ? std::vector<StageRefPtr>{stage} : std::vector<StageRefPtr>{});
         });
@@ -275,7 +292,8 @@ void AssetEnvironmentButton::fillMenu() {
     if (stage) {
         if (!stage->pendingAssetEnvironment().empty()) {
             list->addAction(tr("Reload in %1 Now").arg(qs(stage->pendingAssetEnvironment())), this,
-                            [this, stage]() { reload({stage}); });
+                            [this, stage]() { reload({stage}); })
+                ->setEnabled(why.isEmpty());
         }
         QAction* all = list->addAction(tr("Use %1 for All Open Stages").arg(environmentText(wanted)), this,
                                        [this, wanted]() { pick(wanted, m_stageManager->stages()); });
@@ -283,6 +301,21 @@ void AssetEnvironmentButton::fillMenu() {
         QAction* fresh = list->addAction(tr("Use %1 for New Stages").arg(environmentText(wanted)), this,
                                          [this, wanted]() { useForNewStages(wanted); });
         fresh->setEnabled(!wanted.empty() && wanted != defaultAssetEnvironment());
+        // The folder's own choice, which wins over that: shown, set and taken back here.
+        const std::string root = rootOf(stage);
+        const std::string remembered = rememberedEnvironment(root);
+        if (!folderOf(root).empty() && !wanted.empty() && hasAssetEnvironment(wanted) && wanted != remembered) {
+            list->addAction(tr("Use %1 for This Folder").arg(environmentText(wanted)), this, [this, root, wanted]() {
+                rememberFolderEnvironment(folderOf(root), wanted);
+                refresh();
+            });
+        }
+        if (!remembered.empty()) {
+            list->addAction(tr("Forget %1 for This Folder").arg(qs(remembered)), this, [this, root]() {
+                forgetFolderEnvironment(root);
+                refresh();
+            });
+        }
         list->addSeparator();
     }
     list->addAction(tr("Asset Servers..."), this, [this]() { showAssetServersEditor(window()); });
@@ -295,24 +328,23 @@ void AssetEnvironmentButton::useForNewStages(const std::string& environment) {
 void AssetEnvironmentButton::pick(const std::string& environment, const std::vector<StageRefPtr>& stages) {
     if (stages.empty()) return useForNewStages(environment);
     std::vector<StageRefPtr> changing;
-    bool canReload = true;
-    QString why;
+    QStringList staying;
     for (const StageRefPtr& stage : stages) {
         if (stageAssetEnvironment(stage->usdStage()) == environment) {
             stage->setPendingAssetEnvironment({});
             continue;
         }
-        changing.push_back(stage);
         if (const QString reason = whyNotReopen(stage); !reason.isEmpty()) {
-            canReload = false;
-            why = reason;
+            staying << tr("%1 stays in its environment. %2").arg(nameOf(stage), reason);
+            continue;
         }
+        changing.push_back(stage);
     }
     if (changing.empty()) return;
     QString text = changing.size() == 1
                        ? tr("Reload %1 in the asset environment %2?").arg(nameOf(changing.front()), qs(environment))
                        : tr("Reload %1 stages in the asset environment %2?").arg(changing.size()).arg(qs(environment));
-    if (!canReload) text += QStringLiteral("\n\n") + why;
+    if (!staying.isEmpty()) text += QStringLiteral("\n\n") + staying.join(QLatin1Char('\n'));
     const Answer answer = ask(text);
     if (answer == Answer::Cancel) return;
     for (const StageRefPtr& stage : changing) stage->setPendingAssetEnvironment(environment);

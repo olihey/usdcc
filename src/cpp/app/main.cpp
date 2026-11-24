@@ -1258,7 +1258,7 @@ int main(int argc, char** argv) {
     usdcc::usd::setReopenGuard([](const usdcc::usd::StageRefPtr& stage) {
         const auto* shared = usdcc::usd::share::SharedStages::instance();
         return shared && shared->isShared(stage)
-                   ? QObject::tr("It's shared with others. Stop sharing it, or leave the share, to reload it.")
+                   ? QObject::tr("Shared with others: it can't change environment until that ends.")
                    : QString();
     });
     auto* sharedStagesSection = new usdcc::usd::share::SharedStagesSection(sharedStages);
