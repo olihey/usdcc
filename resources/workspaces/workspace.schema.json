@@ -39,6 +39,16 @@
         ]
       }
     },
+    "collapsed": {
+      "type": "array",
+      "description": "View panels collapsed to a tab at a window edge, besides the layout's. Viewports can't be.",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/panel" },
+          { "type": "object", "properties": { "area": { "enum": ["left", "right", "top", "bottom"], "default": "left" } } }
+        ]
+      }
+    },
     "layout": { "$ref": "#/$defs/node" }
   },
   "$defs": {

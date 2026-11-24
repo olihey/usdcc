@@ -8,7 +8,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/flow_layout.h
     include/usdcc/ui/line_view.h
     include/usdcc/ui/log_model.h
-    include/usdcc/ui/log_side_panel.h
+    include/usdcc/ui/log_panel.h
     include/usdcc/ui/main_window.h
     include/usdcc/ui/panel_icon_button.h
     include/usdcc/ui/options_menu_view.h
@@ -31,6 +31,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/toast_manager.h
     include/usdcc/ui/panel_maximizer.h
     include/usdcc/ui/busy.h
+    include/usdcc/ui/dock_panel.h
     include/usdcc/ui/view_panel.h
     include/usdcc/ui/view_panel_registry.h
     include/usdcc/ui/workspace.h
@@ -44,7 +45,7 @@ add_library(usdcc_ui SHARED
     src/flow_layout.cpp
     src/line_view.cpp
     src/log_model.cpp
-    src/log_side_panel.cpp
+    src/log_panel.cpp
     src/main_window.cpp
     src/panel_icon_button.cpp
     src/options_menu_view.cpp
@@ -58,6 +59,7 @@ add_library(usdcc_ui SHARED
     src/settings.cpp
     src/settings_dialog.cpp
     src/side_panel.cpp
+    src/dock_panel.cpp
     src/text_view.cpp
     src/theme.cpp
     src/title_bar.cpp

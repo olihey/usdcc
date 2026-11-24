@@ -9,6 +9,7 @@
 #include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
@@ -177,8 +178,8 @@ USDCC_TEST(plugin_reload_takes_everything_with_it) {
     CHECK(!panel->isClosed(), "and is still there");
     CHECK(evaluated("__import__('builtins').usdcc_reload_deactivated") == "1", "the old code's deactivate() ran");
     int sides = 0;
-    for (QObject* child : window.children()) {
-        if (child->objectName() == "reload.side") ++sides;
+    for (const usdcc::ui::SidePanel* side : window.sidePanels()) {
+        if (side->objectName() == "reload.side") ++sides;
     }
     CHECK(sides == 1, "one side panel, not two: %d", sides);
 

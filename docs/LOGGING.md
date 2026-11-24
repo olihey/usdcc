@@ -20,7 +20,7 @@ One log, in one panel, that shows every message the app produces, whoever produc
 **thread** it came from, and **no message lost** — not the ones from before the panel
 exists, not the ones from worker threads, not the last ones before a crash.
 
-The `LogSidePanel` replaces today's stand-in and has level/source filters and search.
+The `LogPanel` replaces today's stand-in and has level/source filters and search.
 Everything is also written to a log file on disk.
 
 ### Where we start from
@@ -51,7 +51,7 @@ These facts constrain the plan:
 |---|---|
 | `LogRecord`, `LogHub` (ring buffer, sinks, repeat collapsing) | `QtMessageBridge` (`qInstallMessageHandler`) |
 | The C++ logging API (`USDCC_LOG_*`) | `LogModel` (a `QAbstractTableModel` over the hub's records) |
-| `FileLogSink` (rotating log file) | `LogSidePanel` (view, filters, search, details) |
+| `FileLogSink` (rotating log file) | `LogPanel` (view, filters, search, details) |
 | `TfDiagnosticBridge` (in `usdcc_usd`: a `TfDiagnosticMgr::Delegate`) | Status-bar / tab badge for new errors |
 | `NativeStreamCapture` (fd 1/2 redirected into the hub) | |
 | `PythonLogBridge` (embedded module `_usdcc_log` + handler and stream objects) | `ToastLogSink`: records marked as toasts (§3.6) |
@@ -259,12 +259,12 @@ logging.getLogger("my.tool").warning("Disk almost full", extra={"usdcc_toast": T
   - its body is the message, plus the details.
 - **Who shows it:** `ToastLogSink` (in `usdcc_ui`, added by `MainWindow`, without backlog
   replay) queues it to the UI thread. Warning and error toasts get a **Show Log** button,
-  which calls `LogSidePanel::showLatest()`.
+  which calls `LogPanel::showLatest()`.
 - **Before the window:** records logged before the window exists show no toast.
 
 ## 4. The panel
 
-`LogSidePanel` (in `usdcc_ui`) replaces the stand-in, keeping objectName `"Log"` so saved
+`LogPanel` (in `usdcc_ui`) replaces the stand-in, keeping objectName `"Log"` so saved
 layouts still find it.
 
 ```
@@ -330,7 +330,7 @@ In `main()`:
 1. `LogHub` exists (static in `usdcc_core.dll`), with `FileLogSink` attached.
 2. `NativeStreamCapture` (phase 4), `QtMessageBridge`, `TfDiagnosticBridge`.
 3. `QApplication`, `StageManager`, the command-line stage, the window.
-4. `LogSidePanel` subscribes and pulls the backlog.
+4. `LogPanel` subscribes and pulls the backlog.
 5. The Python interpreter (M7) starts and runs `usdcc.log.install()` before any user script.
 
 Shutdown runs it in reverse: Python, panel, bridges, then the file sink is flushed last.
@@ -375,7 +375,7 @@ Each phase ends with something usable and verified.
 |---|---|---|
 | **1. Hub and C++ API** *(done)* | `usdcc_core` as a shared library; `LogRecord`, `LogHub`, collapsing, re-entrancy guard; `USDCC_LOG_*`; `FileLogSink`; first log calls in `StageManager`/`StageOpener`/`HydraViewportWindow`/`UndoManager`/`MainWindow` | Hub and file-sink unit tests. A run writes a readable log file with the stage open/close lines |
 | **2. Qt and OpenUSD bridges** *(done)* | `QtMessageBridge`, `TfDiagnosticBridge`, start-up order (§6); the `StageOpener` error mark and better failure dialog | Tf and Qt mapping tests, including worker threads. Opening a broken `.usda` names the error. No console needed to see Tf messages |
-| **3. Log panel** *(done)* | `LogModel`, `LogSidePanel` replacing the stand-in, filters, search, details tooltip, follow mode, error badge; Debug > Emit Test Messages (C++/Qt/Tf part) | Every test message shows correctly. A 10 000-message burst does not freeze the UI. Saved layouts still restore the panel |
+| **3. Log panel** *(done)* | `LogModel`, `LogPanel` replacing the stand-in, filters, search, details tooltip, follow mode, error badge; Debug > Emit Test Messages (C++/Qt/Tf part) | Every test message shows correctly. A 10 000-message burst does not freeze the UI. Saved layouts still restore the panel |
 | **4. Native stream capture** *(done)* | `NativeStreamCapture`, off-switch, Debug-build tee | `printf` and `TF_DEBUG` output show in the panel. No hang with a flood of output or at shutdown |
 | **5. Python** *(done, as SCRIPTING.md phase 1)* | `PYBIND11_EMBEDDED_MODULE(_usdcc_log)`, `usdcc/log.py`, install at interpreter start; Python part of Emit Test Messages | Python bridge tests. `logging`, `warnings`, `print`, `sys.stderr`, uncaught exceptions and `Tf.Warn` all show up correctly. Needs M7's interpreter (§10 #1) |
 
@@ -454,7 +454,7 @@ the viewport never drew during the test runs. Both are on the phase 3 checklist 
   only queues; the UI thread takes records in at most every 50 ms, in one insertion. Repeats
   update their row ("×500"). Levels, hidden sources and categories, "only this category", and
   plain or regular-expression search in either case.
-- **[LogSidePanel](../src/cpp/ui/include/usdcc/ui/log_side_panel.h)** replaces the stand-in in
+- **[LogPanel](../src/cpp/ui/include/usdcc/ui/log_panel.h)** replaces the stand-in in
   `MainWindow` (objectName still "Log"). Toolbar: the three-lines filter menu (levels with
   counts, sources, a checkable category tree split at '.', Show All Categories), search with Aa and .* toggles, and Clear (bin icon) and Log Folder (folder icon) as square icon buttons (`PanelIconButton`). The
   button is [PanelMenuButton](../src/cpp/ui/include/usdcc/ui/panel_menu_button.h), now shared
@@ -467,7 +467,7 @@ the viewport never drew during the test runs. Both are on the phase 3 checklist 
   another row current and scrolls to it. Model changes are bracketed, so that scroll doesn't
   switch following off, and the view returns to the bottom afterwards.
 - **Show Log** in the open-stage failure dialog (`StageOpener::showLogRequested()` →
-  `LogSidePanel::showLatest()`).
+  `LogPanel::showLatest()`).
 - **Fixed in passing (`StageOpener`)**: the "Opening…" progress dialog was only hidden and
   `deleteLater`'d. The failure dialog's event loop doesn't run deferred deletes, and
   `QProgressDialog`'s force-show timer brought it back over the failure dialog after about 4 s,

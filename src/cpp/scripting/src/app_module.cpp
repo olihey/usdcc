@@ -1196,13 +1196,9 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         usdcc::ui::WorkspaceController& controller = workspaces();
         std::vector<std::map<std::string, py::object>> list;
         for (const usdcc::ui::workspace::Definition& definition : controller.library()->workspaces()) {
-            QStringList missing;
-            usdcc::ui::workspace::pruned(
-                definition.layout,
-                [&controller](const QString& type) {
-                    return controller.context().registry && controller.context().registry->find(type);
-                },
-                &missing);
+            const QStringList missing = definition.missingTypes([&controller](const QString& type) {
+                return controller.context().registry && controller.context().registry->find(type);
+            });
             std::vector<std::string> missingTypes;
             for (const QString& type : missing) missingTypes.push_back(type.toStdString());
             list.push_back({{"id", py::str(definition.id.toStdString())},

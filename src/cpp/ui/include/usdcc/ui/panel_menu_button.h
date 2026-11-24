@@ -13,7 +13,7 @@ namespace usdcc::ui {
 // The square three-lines button that starts a panel's toolbar (styled as
 // #panelMenuButton in theme/app.qss). A click opens a menu below it, built
 // afresh by `populate` each time so it reflects the current state. Used by
-// every ViewPanel for its options and by the LogSidePanel for its filters.
+// every ViewPanel for its options and by the LogPanel for its filters.
 class USDCC_UI_API PanelMenuButton : public PanelIconButton {
     Q_OBJECT
 

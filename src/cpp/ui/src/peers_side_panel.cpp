@@ -654,8 +654,7 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
             showRoom(rooms.isEmpty() ? nullptr : rooms.first());
         }
     });
-    connect(this, &QDockWidget::visibilityChanged, this, &PeersSidePanel::updateShown);
-    connect(this, &SidePanel::collapsedChanged, this, &PeersSidePanel::updateShown);
+    connect(this, &ads::CDockWidget::visibilityChanged, this, &PeersSidePanel::updateShown);
     rebuildRooms();
     showRoom(nullptr);
 }
@@ -677,7 +676,7 @@ bool PeersSidePanel::event(QEvent* event) {
 }
 
 void PeersSidePanel::updateShown() {
-    m_controller->setPanelShown(isVisible() && !isCollapsed() && !visibleRegion().isEmpty());
+    m_controller->setPanelShown(isVisible() && !visibleRegion().isEmpty());
 }
 
 void PeersSidePanel::rebuildRooms() {

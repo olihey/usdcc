@@ -3,12 +3,9 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
-#include "usdcc/ui/busy.h"
+#include "usdcc/ui/dock_panel.h"
 #include "usdcc/usd/stage.h"
 
-#include <DockWidget.h>
-
-#include <QImage>
 #include <QJsonObject>
 
 #include <functional>
@@ -16,7 +13,6 @@
 
 class QBoxLayout;
 class QComboBox;
-class QSplitter;
 class QMenu;
 
 namespace usdcc::usd {
@@ -25,12 +21,7 @@ class StageManager;
 
 namespace usdcc::ui {
 
-class BusyOverlay;
-class OptionsMenuView;
-class PanelMenuButton;
-
-// Base class for panels living inside the Qt Advanced Docking System
-// container (ViewportViewPanel, OutlinerViewPanel, AttributesViewPanel —
+// Base class for dock panels that show a stage (ViewportViewPanel, OutlinerViewPanel, AttributesViewPanel —
 // see docs/PLAN.md section 4). Every ViewPanel has an associated
 // usdcc::usd::Stage and a "Stage:" dropdown to switch which one it shows,
 // both owned here rather than duplicated per-subclass — see docs/PLAN.md §6
@@ -46,20 +37,7 @@ class PanelMenuButton;
 // Left of the dropdown sits an options button (three horizontal lines) whose
 // menu each panel type fills with its own view options — populateOptionsMenu(),
 // which every subclass implements; ViewPanel itself is therefore abstract.
-//
-// Uses ADS's deprecated (title, parent) CDockWidget constructor rather than
-// the (manager, title, parent) one: the manager association still happens
-// when the panel is added via CDockManager::addDockWidget(), and avoiding
-// ads::CDockManager* in the public constructor keeps ViewPanel constructible
-// from Python without generating Shiboken6 bindings for all of ADS (that
-// base class is intentionally not exposed to Python — see setContentWidget
-// below for why that's fine in practice).
-//
-// setContentWidget()/contentWidget() re-expose CDockWidget::setWidget()/
-// widget() in terms of QWidget alone, which IS known to Shiboken6 (it's part
-// of Qt's own typesystem), so Python code gets a working content API without
-// needing bindings for ads::CDockWidget itself.
-class USDCC_UI_API ViewPanel : public ads::CDockWidget {
+class USDCC_UI_API ViewPanel : public DockPanel {
     Q_OBJECT
 
 public:
@@ -69,24 +47,6 @@ public:
     // asks whether to close such panels or switch them to another stage.
     explicit ViewPanel(usdcc::usd::StageManager* stageManager, usdcc::usd::StageRefPtr stage, const QString& title,
                        QWidget* parent = nullptr);
-    // Cancels any work the panel is busy with (beginBusy()'s onCancel).
-    ~ViewPanel() override;
-
-    // "I'm working on something" (docs/PANEL_BUSY.md §3): while the returned handle lives,
-    // the panel is busy. After options.showAfterMs it dims, the whole panel, toolbar included,
-    // and a card shows `text`, a progress bar, the handle's detail, the time so far and, with
-    // options.onCancel, Cancel (Esc too). The panel takes no input meanwhile; its tab stays
-    // usable. Several handles may live at once: the newest one's card shows. Closing the
-    // panel cancels them all. The work must reach the panel only through the handle or a
-    // QPointer: a handle outliving its panel does nothing. May be called from any thread;
-    // from another than the UI thread, the panel takes the handle up there.
-    std::shared_ptr<Busy> beginBusy(const QString& text, BusyOptions options = {});
-    bool isBusy() const;
-    // A still of `container`, one of the panel's native windows (createWindowContainer()), to
-    // show in its place while the panel is busy: a native window draws over any widget, so it
-    // steps aside (§4). The default grabs it from the screen; a viewport returns its last frame.
-    virtual QImage busySnapshot(QWidget* container);
-
     usdcc::usd::StageManager* stageManager() const { return m_stageManager; }
     const usdcc::usd::StageRefPtr& currentStage() const { return m_stage; }
 
@@ -94,30 +54,6 @@ public:
     // if `stage` is already the current one. Calls onStageChanged() so
     // subclasses can refresh their displayed content.
     void setStage(usdcc::usd::StageRefPtr stage);
-
-    void setContentWidget(QWidget* widget);
-    QWidget* contentWidget() const;
-
-    // The options: the menu, or the panel's own options panel when it has one
-    // (createOptionsPanel()). Unpinned, the options button opens them in a popup. Pinned, they
-    // stay in a column on the panel's left, a pinned menu as widgets (OptionsMenuView), and the
-    // button unpins them. Pinning is remembered for the panel across a restart.
-    bool hasOptionsPanel();
-    bool isOptionsPinned() const { return m_pinned; }
-    // An options panel's popup, while unpinned: null until first opened.
-    QWidget* optionsPopup() const { return m_popup; }
-    void showOptionsPopup();
-    // The pinned column's menu, for tests: null unless a menu is pinned.
-    OptionsMenuView* pinnedMenu() const { return m_menuView; }
-
-public Q_SLOTS:
-    void setOptionsPinned(bool pinned);
-    // What the options show may have changed, outside them: a renderer switched by a script,
-    // say. A pinned menu is built again; a popup menu is anyway, each time it opens. Python
-    // panels call it as options_changed().
-    void notifyOptionsChanged();
-
-public:
 
     // Creates a copy of this panel, showing the same stage. Subclasses
     // construct their own type (passing currentStage(), not
@@ -129,14 +65,6 @@ public:
     // Tab > Duplicate: a copy in a tab beside it, with the same title and a name of its own.
     ViewPanel* duplicateBeside();
 
-    // What a session keeps of the panel besides its type, stage and place
-    // (docs/SESSIONS.md §2.4): the camera, the expanded rows, ... Empty by default,
-    // and then the panel comes back as it starts. restoreSessionState() gets what
-    // saveSessionState() returned, after the panel has its stage and the layout is
-    // restored; it skips what no longer fits (a prim that's gone).
-    virtual QJsonObject saveSessionState() const { return {}; }
-    virtual void restoreSessionState(const QJsonObject& state) { Q_UNUSED(state); }
-
     // Following the current stage (docs/WORKSPACES.md §3.5.4): the panel shows
     // whatever stage is current, and switches when it changes. The Stage dropdown's
     // first entry, Follow Current Stage, starts it; picking a stage there stops it.
@@ -147,10 +75,6 @@ public:
     bool followsCurrentStage() const { return m_followsCurrentStage; }
     void setFollowsCurrentStage(bool follows);
 
-    // Workspaces (docs/WORKSPACES.md). Asked before a workspace switch closes the
-    // panel: false keeps everything as it is (a panel holding something not yet
-    // applied asks the user first).
-    virtual bool canClose() { return true; }
     // A workspace's "camera" for the panel (§3.5.1); only viewports have one.
     virtual void applyWorkspaceCamera(const QJsonObject& camera) { Q_UNUSED(camera); }
     // What the panel looks at, to match it to a workspace entry's camera ("persp",
@@ -166,8 +90,6 @@ Q_SIGNALS:
     // After the panel switched to another stage (or to none): setStage() or
     // the stage dropdown. CurrentStageTracker follows it for the focused panel.
     void stageChanged(const usdcc::usd::StageRefPtr& stage);
-    // The panel started or stopped being busy (beginBusy()).
-    void busyChanged(bool busy);
 
 protected:
     // Extends the context menu shown when right-clicking this panel's tab —
@@ -180,7 +102,7 @@ protected:
     // ViewPanel::populateContextMenu(menu) first to keep the base entries,
     // then add their own — see ViewportViewPanel::populateContextMenu() for
     // an example.
-    virtual void populateContextMenu(QMenu* menu);
+    void populateContextMenu(QMenu* menu) override;
 
 public:
     // What the app adds to every panel's tab menu, after the panel's own entries:
@@ -188,27 +110,17 @@ public:
     // empty one adds nothing.
     using TabMenuExtension = std::function<void(ViewPanel* panel, QMenu* menu)>;
     static void setTabMenuExtension(TabMenuExtension extension);
-    // The submenu a panel's tab menu has right after ADS's Close (and Close Others):
-    // main.cpp's View > Workspace (WorkspaceController::createMenu()), made with the
-    // tab menu as its parent. Empty or returning null, there is none.
-    using TabWorkspaceMenu = std::function<QMenu*(QWidget* parent)>;
-    static void setTabWorkspaceMenu(TabWorkspaceMenu factory);
 
 protected:
 
     // Fills the options button's menu, built afresh each time it opens so it
     // reflects the current state (e.g. the available renderers).
-    virtual void populateOptionsMenu(QMenu* menu) = 0;
-    // A widget for the options instead of the menu, or null (the default) for the menu.
-    // Asked once, when first needed; the panel owns what it returns.
-    virtual QWidget* createOptionsPanel() { return nullptr; }
-
-    void showEvent(QShowEvent* event) override;
+    void populateOptionsMenu(QMenu* menu) override = 0;
     // Its type set (ViewPanelRegistry::kTypeProperty): it follows the current stage
     // if that type's setting says so.
     bool event(QEvent* event) override;
 
-    bool eventFilter(QObject* watched, QEvent* event) override;
+    void extendTabMenu(QMenu* menu) override;
 
     // Called whenever the stage this panel shows changes, including to null
     // (via setStage(), or the user picking a different entry in
@@ -252,20 +164,8 @@ private:
 
     usdcc::usd::StageManager* m_stageManager;
     usdcc::usd::StageRefPtr m_stage;
-    PanelMenuButton* m_optionsButton;
-    QSplitter* m_split = nullptr;  // the options panel, then the content
-    QWidget* m_content = nullptr;
-    QWidget* m_optionsHost = nullptr;    // the pinned column
-    QWidget* m_optionsBody = nullptr;    // in it, below its header
-    QWidget* m_popup = nullptr;          // an unpinned options panel's
-    QWidget* m_optionsWidget = nullptr;  // from createOptionsPanel()
-    OptionsMenuView* m_menuView = nullptr;  // a pinned menu
-    enum class OptionsPanel { NotAsked, None, Made } m_optionsPanel = OptionsPanel::NotAsked;
-    bool m_pinned = false;
-    bool m_restoredPin = false;
     bool m_followsCurrentStage = false;
     QComboBox* m_stageCombo;
-    BusyOverlay* m_busyOverlay = nullptr;  // made by the first beginBusy()
 
     // Kept alive for as long as this panel should keep receiving
     // StageManager's (Qt-free) notifications — see usdcc::core::Signal.

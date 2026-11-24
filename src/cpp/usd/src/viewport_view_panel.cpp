@@ -734,6 +734,8 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
       m_id(++s_lastViewportId),
       m_toolSet(std::move(toolSet)),
       m_undoManager(std::move(undoManager)) {
+    // Not collapsible to a window edge: its picture is, or may be, a native window.
+    setFeature(ads::CDockWidget::DockWidgetPinnable, false);
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);

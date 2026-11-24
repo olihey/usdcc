@@ -157,6 +157,8 @@ void RenderImageView::resizeEvent(QResizeEvent* event) {
 
 RenderViewPanel::RenderViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& title, QWidget* parent)
     : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent) {
+    // Not collapsible to a window edge: its picture is, or may be, a native window.
+    setFeature(ads::CDockWidget::DockWidgetPinnable, false);
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);

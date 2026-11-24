@@ -1,200 +1,283 @@
 #include "usdcc/ui/side_panel.h"
 
-#include <QApplication>
-#include <QCursor>
-#include <QList>
-#include <QMainWindow>
-#include <QMouseEvent>
-#include <QPointer>
-#include <QTabBar>
+#include "usdcc/ui/main_window.h"
+
+#include <DockAreaWidget.h>
+#include <DockManager.h>
+
+#include <QSplitter>
 #include <QTimer>
+
+#include <algorithm>
+#include <utility>
 
 namespace usdcc::ui {
 
 namespace {
-// The tab bar of the spot `dock` shares with other panels (QMainWindow keeps
-// each tab's dock widget's address as the tab's data).
-const QTabBar* tabBarOf(const QMainWindow* window, const QDockWidget* dock) {
-    for (const QTabBar* tabBar : window->findChildren<QTabBar*>(Qt::FindDirectChildrenOnly)) {
-        if (!tabBar->isVisible()) continue;
-        for (int i = 0; i < tabBar->count(); ++i) {
-            if (tabBar->tabData(i).value<quintptr>() == reinterpret_cast<quintptr>(dock)) return tabBar;
-        }
+
+// Of the window, until the user says otherwise.
+constexpr double kDefaultShare = 0.25;
+
+bool isVerticalEdge(Qt::DockWidgetArea area) { return area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea; }
+
+ads::DockWidgetArea adsArea(Qt::DockWidgetArea area) {
+    switch (area) {
+        case Qt::LeftDockWidgetArea:
+            return ads::LeftDockWidgetArea;
+        case Qt::RightDockWidgetArea:
+            return ads::RightDockWidgetArea;
+        case Qt::TopDockWidgetArea:
+            return ads::TopDockWidgetArea;
+        default:
+            return ads::BottomDockWidgetArea;
     }
-    return nullptr;
 }
+
+constexpr std::pair<Qt::DockWidgetArea, const char*> kAreaNames[] = {{Qt::LeftDockWidgetArea, "left"},
+                                                                     {Qt::RightDockWidgetArea, "right"},
+                                                                     {Qt::TopDockWidgetArea, "top"},
+                                                                     {Qt::BottomDockWidgetArea, "bottom"}};
+
+// Whether ADS shows anything in it: also right before the window is shown, when nothing in it
+// counts as visible yet.
+bool showsPanels(const QWidget* widget) {
+    if (auto* area = qobject_cast<const ads::CDockAreaWidget*>(widget)) return area->openDockWidgetsCount() > 0;
+    auto* splitter = qobject_cast<const QSplitter*>(widget);
+    if (!splitter) return false;
+    for (int i = 0; i < splitter->count(); ++i) {
+        if (showsPanels(splitter->widget(i))) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
-SidePanel::SidePanel(const QString& title, QWidget* parent) : QDockWidget(title, parent) {
-    setObjectName(title);
-    // A floating panel has no spot to collapse into: it shows all of itself.
-    connect(this, &QDockWidget::topLevelChanged, this, [this](bool floating) {
-        if (floating && expand()) Q_EMIT collapsedChanged(false);
-    });
+SidePanel::SidePanel(const QString& title, QWidget* parent) : DockPanel(title, parent) { setObjectName(title); }
+
+SidePanel::~SidePanel() {
+    if (m_window) m_window->forgetSidePanel(this);
 }
 
-QMainWindow* SidePanel::dockedIn() const {
-    auto* window = qobject_cast<QMainWindow*>(parentWidget());
-    if (!window || isFloating()) return nullptr;
-    return window->dockWidgetArea(const_cast<SidePanel*>(this)) != Qt::NoDockWidgetArea ? window : nullptr;
+void SidePanel::setWidget(QWidget* widget) { CDockWidget::setWidget(widget, ads::CDockWidget::ForceNoScrollArea); }
+
+void SidePanel::show() {
+    if (!dockManager()) {
+        QWidget::show();
+    } else if (!dockAreaWidget()) {
+        collapseAt(edge());
+    } else if (isClosed()) {
+        toggleView(true);
+    }
 }
 
-void SidePanel::setCollapsed(bool collapsed, int expandedSize) {
-    QMainWindow* window = dockedIn();
-    if (!window || collapsed == m_collapsed) return;
-
-    // The panels sharing this spot, and the one on show: its size is theirs.
-    // The spot is what QMainWindow::resizeDocks() takes on expanding: the
-    // panel and, when tabbed, its tab bar.
-    QList<SidePanel*> group{this};
-    for (QDockWidget* dock : window->tabifiedDockWidgets(this)) {
-        if (auto* panel = qobject_cast<SidePanel*>(dock)) group.append(panel);
+void SidePanel::hide() {
+    if (!dockManager()) {
+        QWidget::hide();
+    } else if (!isClosed()) {
+        toggleView(false);
     }
-    SidePanel* shown = this;
-    QRect spot = geometry();
-    if (const QTabBar* tabBar = group.size() > 1 ? tabBarOf(window, this) : nullptr) {
-        // The current tab's: Qt leaves the other tabs' panels visible, out of
-        // the way, with whatever size they had.
-        const auto current = tabBar->tabData(tabBar->currentIndex()).value<quintptr>();
-        for (SidePanel* panel : group) {
-            if (reinterpret_cast<quintptr>(panel) == current) shown = panel;
-        }
-        spot = shown->geometry() | tabBar->geometry();
-    }
-
-    QList<SidePanel*> changed;
-    if (collapsed) {
-        // To a title bar's height, which at the left or right edge frees
-        // space only for panels stacked above or below. Alone there, to a
-        // vertical title bar's width instead, which gives it to the
-        // viewports.
-        Qt::Orientation along = Qt::Vertical;
-        const Qt::DockWidgetArea area = window->dockWidgetArea(this);
-        if ((area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) && group.size() == 1) {
-            along = Qt::Horizontal;
-            for (QDockWidget* dock : window->findChildren<QDockWidget*>(Qt::FindDirectChildrenOnly)) {
-                // isHidden(), not isVisible(): a saved layout is restored
-                // before the window is shown.
-                if (dock != this && !dock->isHidden() && !dock->isFloating() && window->dockWidgetArea(dock) == area) {
-                    along = Qt::Vertical;
-                }
-            }
-        }
-        const int size = expandedSize >= 0 ? expandedSize : along == Qt::Vertical ? spot.height() : spot.width();
-        for (SidePanel* panel : group) {
-            if (panel->m_collapsed) continue;
-            panel->collapse(along, size);
-            changed.append(panel);
-        }
-    } else {
-        const Qt::Orientation along = shown->m_collapsed ? shown->m_collapsedAlong : m_collapsedAlong;
-        const int size = shown->m_collapsed ? shown->m_expandedSize : m_expandedSize;
-        for (SidePanel* panel : group) {
-            if (panel->expand()) changed.append(panel);
-        }
-        // The dock area keeps its collapsed size until told otherwise, which
-        // works once the layout has seen the content's limits lifted.
-        QTimer::singleShot(0, window, [panel = QPointer<SidePanel>(shown), along, size]() {
-            QMainWindow* window = panel ? panel->dockedIn() : nullptr;
-            if (window && size > 0) window->resizeDocks({panel.data()}, {size}, along);
-        });
-    }
-    for (SidePanel* panel : changed) Q_EMIT panel->collapsedChanged(collapsed);
 }
 
-void SidePanel::collapse(Qt::Orientation orientation, int expandedSize) {
-    m_collapsed = true;
-    m_collapsedAlong = orientation;
-    m_expandedSize = expandedSize;
-    // The content stays, squeezed to nothing: hidden, it would also take the
-    // panel's width (or height) down to the title's.
-    if (QWidget* content = widget()) {
-        m_contentMinimum = content->minimumSize();
-        m_contentMaximum = content->maximumSize();
-        if (orientation == Qt::Vertical) {
-            content->setMinimumHeight(0);
-            content->setMaximumHeight(0);
-        } else {
-            content->setMinimumWidth(0);
-            content->setMaximumWidth(0);
-        }
-        // Typing would go on into a field nobody can see.
-        if (QWidget* focus = QApplication::focusWidget(); focus && content->isAncestorOf(focus)) focus->clearFocus();
-    }
-    m_addedVerticalTitleBar = orientation == Qt::Horizontal && !features().testFlag(DockWidgetVerticalTitleBar);
-    if (m_addedVerticalTitleBar) setFeatures(features() | DockWidgetVerticalTitleBar);
+bool SidePanel::isHidden() const { return dockManager() ? isClosed() : QWidget::isHidden(); }
+
+void SidePanel::reveal() {
+    show();
+    raise();
 }
 
-bool SidePanel::expand() {
-    if (!m_collapsed) return false;
-    m_collapsed = false;
-    if (QWidget* content = widget()) {
-        content->setMinimumSize(m_contentMinimum);
-        content->setMaximumSize(m_contentMaximum);
+bool SidePanel::holdsOnlySidePanels(const QWidget* widget) {
+    if (!showsPanels(widget)) return false;
+    if (auto* area = qobject_cast<const ads::CDockAreaWidget*>(widget)) {
+        const QList<ads::CDockWidget*> open = area->openedDockWidgets();
+        return std::all_of(open.begin(), open.end(), [](ads::CDockWidget* dock) { return qobject_cast<SidePanel*>(dock); });
     }
-    if (m_addedVerticalTitleBar) setFeatures(features() & ~DockWidgetVerticalTitleBar);
-    m_addedVerticalTitleBar = false;
+    auto* splitter = qobject_cast<const QSplitter*>(widget);
+    for (int i = 0; splitter && i < splitter->count(); ++i) {
+        if (showsPanels(splitter->widget(i)) && !holdsOnlySidePanels(splitter->widget(i))) return false;
+    }
     return true;
 }
 
-bool SidePanel::event(QEvent* event) {
-    // Anywhere outside the content is the title bar (or the frame around
-    // it). Docked, double-clicking it collapses instead of floating the panel
-    // (its float button still does that).
-    if (event->type() == QEvent::MouseButtonDblClick && dockedIn()) {
-        const auto* mouse = static_cast<QMouseEvent*>(event);
-        const QWidget* content = widget();
-        if (mouse->button() == Qt::LeftButton &&
-            !(content && content->geometry().contains(mouse->position().toPoint()))) {
-            toggleCollapsed();
-            m_ignoreDrag = true;
-            return true;
-        }
+SidePanel::Edge SidePanel::dockedEdge() const {
+    if (isClosed() || isAutoHide() || !dockAreaWidget() || dockContainer() != dockManager()) return {};
+    // The splitters around it, the outermost first.
+    QList<QSplitter*> around;
+    QWidget* parent = dockAreaWidget()->parentWidget();
+    while (auto* splitter = qobject_cast<QSplitter*>(parent)) {
+        around.prepend(splitter);
+        parent = splitter->parentWidget();
     }
-    // The double-click's second press is still held, and the title bar has
-    // just moved away from under the cursor: Qt would take the next mouse
-    // move for a drag of the title bar, unplug the panel and drop it
-    // elsewhere. The release goes through, to end Qt's drag-to-be.
-    if (m_ignoreDrag) {
-        if (event->type() == QEvent::MouseMove) return true;
-        if (event->type() == QEvent::MouseButtonRelease) m_ignoreDrag = false;
+    for (int level = 0; level < around.size(); ++level) {
+        QSplitter* splitter = around[level];
+        QWidget* mine = level + 1 < around.size() ? static_cast<QWidget*>(around[level + 1]) : dockAreaWidget();
+        // Where it is among the children, and the first and last that aren't side panels.
+        int index = -1;
+        int first = -1;
+        int last = -1;
+        int shown = 0;
+        for (int i = 0; i < splitter->count(); ++i) {
+            QWidget* child = splitter->widget(i);
+            if (!showsPanels(child)) continue;
+            ++shown;
+            if (child == mine) index = i;
+            if (holdsOnlySidePanels(child)) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        if (shown < 2) continue;
+        if (!holdsOnlySidePanels(mine)) {
+            // Further in: at an edge still, if all that's beside it out here are side panels.
+            if (first != last) return {};
+            continue;
+        }
+        const bool horizontal = splitter->orientation() == Qt::Horizontal;
+        if (index < first || (first < 0 && index == 0)) {
+            return {horizontal ? Qt::LeftDockWidgetArea : Qt::TopDockWidgetArea, mine};
+        }
+        if (index > last) return {horizontal ? Qt::RightDockWidgetArea : Qt::BottomDockWidgetArea, mine};
+        return {};  // between view panels
+    }
+    return {m_lastArea, nullptr};  // alone: nothing to be at an edge of
+}
+
+Qt::DockWidgetArea SidePanel::area() const {
+    if (isClosed()) return Qt::NoDockWidgetArea;
+    return isCollapsed() ? collapsedArea() : dockedEdge().area;
+}
+
+Qt::DockWidgetArea SidePanel::edge() const {
+    const Qt::DockWidgetArea at = area();
+    return at != Qt::NoDockWidgetArea ? at : m_lastArea;
+}
+
+void SidePanel::setCollapsed(bool collapsed) {
+    if (collapsed) {
+        collapseAt(edge());
+    } else if (isAutoHide()) {
+        dockAt(edge());
+    }
+}
+
+void SidePanel::collapseAt(Qt::DockWidgetArea area) {
+    if (!dockManager() || isFloating()) return;
+    m_lastArea = area;
+    DockPanel::collapseAt(area, dockManager());
+}
+
+void SidePanel::dockAt(Qt::DockWidgetArea area) {
+    ads::CDockManager* manager = dockManager();
+    if (!manager) return;
+    m_lastArea = area;
+    if (!dockAreaWidget()) collapseAt(area);  // it has no place to open in
+    if (isClosed()) toggleView(true);
+    if (!isAutoHide() && !isFloating() && this->area() == area) return;
+    leavingTabBar();
+    if (isAutoHide()) {
+        setAutoHide(false);
+        leavingTabBar();
     }
 
-    // A floating panel dragged by its window's title bar: Qt docks it where its
-    // position plus the point pressed puts the cursor. But with screens scaled, Qt
-    // gives each screen coordinates of its own, and once most of the panel is over
-    // the next screen its position is in that screen's, hundreds of pixels off: the
-    // main window's edge beside that screen never takes it (a wide panel, grabbed
-    // far from the edge it's dragged to). The point pressed stays under the cursor,
-    // so Qt is told the position that puts it there.
-    switch (event->type()) {
-        case QEvent::NonClientAreaMouseButtonPress:
-            m_titleDrag = isFloating();
-            m_titlePress = static_cast<QMouseEvent*>(event)->position().toPoint();
-            break;
-        case QEvent::Resize:
-            // As Qt keeps its point pressed in a panel resized on the way.
-            if (const auto* resize = static_cast<QResizeEvent*>(event);
-                m_titleDrag && resize->oldSize().width() > 0 && resize->size().width() > 0) {
-                m_titlePress.setX(m_titlePress.x() * resize->size().width() / resize->oldSize().width());
-            }
-            break;
-        case QEvent::Move:
-            if (m_titleDrag && isFloating()) {
-                QMoveEvent underCursor(QCursor::pos() - m_titlePress, static_cast<QMoveEvent*>(event)->oldPos());
-                return QDockWidget::event(&underCursor);
-            }
-            break;
-        default:
-            break;
+    ads::CDockAreaWidget* with = nullptr;
+    if (m_window) {
+        for (SidePanel* other : m_window->sidePanels()) {
+            if (other == this || other->isClosed() || other->isAutoHide() || other->area() != area) continue;
+            if (other->dockAreaWidget() != dockAreaWidget()) with = other->dockAreaWidget();
+        }
     }
-    // Qt ends the drag on the mouse moving after the release, or the release.
-    const bool dragEnds = event->type() == QEvent::NonClientAreaMouseButtonRelease ||
-                          event->type() == QEvent::NonClientAreaMouseMove ||
-                          event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::Hide;
-    const bool handled = QDockWidget::event(event);
-    if (dragEnds) m_titleDrag = false;
-    return handled;
+    if (with) {
+        manager->addDockWidgetTabToArea(this, with);
+    } else {
+        manager->addDockWidget(adsArea(area), this);
+    }
+    leavingTabBar(true);
+    if (isClosed()) toggleView(true);
+    if (!with) resizeToShare(kDefaultShare);
+}
+
+void SidePanel::resizeToShare(double share) {
+    const Edge at = dockedEdge();
+    QSplitter* splitter = at.child ? qobject_cast<QSplitter*>(at.child->parentWidget()) : nullptr;
+    if (!splitter || share <= 0.0 || share >= 1.0) return;
+    const QSize window = dockManager()->window()->size();
+    const QList<int> current = splitter->sizes();
+    int total = 0;
+    int others = 0;
+    for (int i = 0; i < splitter->count(); ++i) {
+        if (!showsPanels(splitter->widget(i))) continue;
+        total += current[i];
+        if (splitter->widget(i) != at.child) others += current[i];
+    }
+    const bool laidOut = total >= 100;
+    const int want = laidOut ? std::min(total - 1, int(share * (isVerticalEdge(at.area) ? window.width() : window.height())))
+                             : int(share * 10000);
+    if (!laidOut) total = 10000;
+    QList<int> sizes;
+    for (int i = 0; i < splitter->count(); ++i) {
+        QWidget* child = splitter->widget(i);
+        // Only the view panels grow and shrink with the window.
+        splitter->setStretchFactor(i, !showsPanels(child) || holdsOnlySidePanels(child) ? 0 : 1);
+        if (!showsPanels(child)) {
+            sizes << 0;
+        } else if (child == at.child) {
+            sizes << want;
+        } else {
+            sizes << std::max(1, others > 0 ? int(double(total - want) * current[i] / others) : total - want);
+        }
+    }
+    splitter->setSizes(sizes);
+}
+
+QVariantMap SidePanel::place() const {
+    QVariantMap place;
+    place.insert(QStringLiteral("state"), isClosed()      ? QStringLiteral("hidden")
+                                          : isCollapsed() ? QStringLiteral("collapsed")
+                                                          : QStringLiteral("shown"));
+    const Edge at = dockedEdge();
+    const Qt::DockWidgetArea where = isClosed() ? m_lastArea : area();
+    for (const auto& [area, name] : kAreaNames) {
+        if (area == where) place.insert(QStringLiteral("area"), QString::fromLatin1(name));
+    }
+    if (at.child && dockManager()) {
+        const QSize window = dockManager()->window()->size();
+        const double share = isVerticalEdge(at.area) ? double(at.child->width()) / std::max(1, window.width())
+                                                     : double(at.child->height()) / std::max(1, window.height());
+        if (share > 0.0 && share < 1.0) place.insert(QStringLiteral("size"), share);
+    }
+    return place;
+}
+
+void SidePanel::setPlace(const QVariantMap& place) {
+    const QString state = place.value(QStringLiteral("state"), QStringLiteral("shown")).toString();
+    const bool collapsed = state == QLatin1String("collapsed");
+    const QString name = place.value(QStringLiteral("area")).toString();
+    const bool floating = isFloating();
+    for (const auto& [area, areaName] : kAreaNames) {
+        if (name == QLatin1String(areaName)) m_lastArea = area;
+    }
+    if (state == QLatin1String("hidden")) {
+        hide();
+        return;
+    }
+    if (floating) {
+        show();
+        return;
+    }
+    if (!name.isEmpty()) {
+        const Qt::DockWidgetArea area = m_lastArea;
+        if (collapsed) {
+            collapseAt(area);
+        } else {
+            dockAt(area);
+        }
+    } else {
+        show();
+        setCollapsed(collapsed);
+    }
+    const double size = place.value(QStringLiteral("size")).toDouble();
+    if (size <= 0.0 || isCollapsed()) return;
+    // Now, and once the window has laid it out.
+    resizeToShare(size);
+    QTimer::singleShot(0, this, [this, size]() { resizeToShare(size); });
 }
 
 }  // namespace usdcc::ui

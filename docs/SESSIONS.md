@@ -15,9 +15,9 @@ Some of this already survives a restart, spread over `usdcc.ini` (`appSettings()
 | State | Where | Key |
 |---|---|---|
 | Window geometry | `MainWindow::saveLayout()` | `MainWindow/geometry` |
-| Toolbars and side panels (docked, floating, hidden) | same | `MainWindow/windowState` |
-| Collapsed side panels | same | `MainWindow/collapsedSidePanels` |
-| View panels' dock layout (ADS XML, compressed) | same | `MainWindow/dockLayout` |
+| Toolbars | same | `MainWindow/windowState` |
+| Side panels' places (state, edge, share), for those added after the layout is restored | same | `MainWindow/sidePanelPlaces` |
+| View and side panels' dock layout (ADS XML, compressed) | same | `MainWindow/dockLayout` |
 | View panels opened from the Stages menu or duplicated: type, name, stage file | `ViewPanelRegistry::savePanels()` | `ViewPanels/opened` |
 | A panel's pinned options | `ViewPanel::setOptionsPinned()` | `ViewPanel/optionsPinned/<objectName>` |
 | Which plugins are on | `PluginManager::setEnabled()` | plugin keys |
@@ -185,9 +185,7 @@ sessions/
     "geometry": "AdnQywADAAAAAAA...",
     "maximized": true,
     "windowState": "AAAA/wAAAAD9AAAA...",
-    "collapsedSidePanels": {"Log": 220},
-    "windowSize": [2560, 1400],
-    "sidePanelShares": {"ScriptEditor": 0.25, "Log": 0.18},
+    "sidePanelPlaces": {"Log": {"state": "collapsed", "area": "bottom"}},
     "dockLayout": "<?xml version=\"1.0\"?><QtAdvancedDockingSystem ...>"
   },
   "panels": [
@@ -359,12 +357,7 @@ quarters the width.
   `CFloatingDockContainer`, or a floating side panel) that isn't fully on a screen is moved onto the
   nearest one, and shrunk to fit its available area if it's bigger. The same check runs at start for the
   layout from `usdcc.ini`, which has the same problem after unplugging a monitor.
-- **Side panels** (Log, Script Editor, Plugins) keep their width in pixels in `QMainWindow::saveState()`,
-  so only the middle area shrinks: a Script Editor a quarter of a 2560-wide window is a third of a
-  1920-wide one. The session also stores each docked side panel's width or height as a share of the
-  window (`sidePanelShares` in `layout`, §3.2). After restoring, if the window differs from the saved one
-  by more than 10%, each side panel is resized to its share (`QMainWindow::resizeDocks()`). Within 10%
-  pixel sizes are kept, so a session loaded on the same screen comes back exactly as saved.
+- **Side panels** are in the ADS layout since they moved into the dock manager, and scale with it.
 
 ## 6. The dialog
 

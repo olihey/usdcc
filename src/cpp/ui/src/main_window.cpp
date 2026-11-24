@@ -1,6 +1,7 @@
 #include "usdcc/ui/main_window.h"
 
 #include <DockAreaWidget.h>
+#include <AutoHideDockContainer.h>
 #include <DockManager.h>
 #include <DockWidget.h>
 #include <QAbstractButton>
@@ -15,7 +16,6 @@
 #include <QSignalBlocker>
 #include <QWindow>
 #include <QStandardPaths>
-#include <QTabBar>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QXmlStreamReader>
@@ -29,11 +29,12 @@
 #include <cstdlib>
 
 #include "usdcc/core/log.h"
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/panel_maximizer.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/ui/theme.h"
 #include "usdcc/ui/title_bar.h"
 #include "usdcc/ui/toast_log_sink.h"
@@ -57,9 +58,9 @@ constexpr auto kDockLayoutKey = "MainWindow/dockLayout";
 // old saved state would mishandle (restoreState() then ignores it).
 constexpr auto kWindowStateKey = "MainWindow/windowState";
 constexpr int kWindowStateVersion = 1;
-// The collapsed side panels (SidePanel::setCollapsed()): objectName -> the
-// size to expand to. The window state above has them at their collapsed size.
-constexpr auto kCollapsedPanelsKey = "MainWindow/collapsedSidePanels";
+// Where the side panels are (SidePanel::place()), by objectName: for those the dock layout
+// can't place, as they're added after it was restored.
+constexpr auto kSidePanelPlacesKey = "MainWindow/sidePanelPlaces";
 // Whether the bottom bar (the timeline) shows.
 constexpr auto kBottomBarKey = "MainWindow/bottomBarVisible";
 
@@ -107,6 +108,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Background tabs show their close button too, so a panel can be closed
     // without bringing it to the front first.
     ads::CDockManager::setConfigFlag(ads::CDockManager::AllTabsHaveCloseButton, true);
+    // Panels collapse to the window's edge (DockPanel::collapseAt()), but not viewports and
+    // render views.
+    ads::CDockManager::setConfigFlag(ads::CDockManager::DockAreaHideDisabledButtons, true);
+    ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::DefaultAutoHideConfig);
     // The dock manager shares the centre with the bottom bar (setBottomBar()).
     m_center = new QWidget(this);
     auto* centerLayout = new QVBoxLayout(m_center);
@@ -116,15 +121,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     theme::applyToDockManager(m_dockManager);
     centerLayout->addWidget(m_dockManager, 1);
     setCentralWidget(m_center);
+    // A collapsed panel slides out over the others, viewports too, which are native windows
+    // and draw over any widget that isn't one: so it's one, and on top (eventFilter()).
+    connect(m_dockManager, &ads::CDockContainerWidget::autoHideWidgetCreated, this,
+            [this](ads::CAutoHideDockContainer* container) {
+                container->installEventFilter(this);
+                // Qt's offscreen platform (the tests') crashes taking native children down.
+                if (QGuiApplication::platformName() == QLatin1String("offscreen")) return;
+                container->setAttribute(Qt::WA_DontCreateNativeAncestors);
+                container->setAttribute(Qt::WA_NativeWindow);
+            });
     m_panelMaximizer = new PanelMaximizer(this, m_dockManager);
 
     // The application log (docs/LOGGING.md). Its objectName stays "Log", the
     // name the stand-in it replaced was saved under, so existing layouts
     // still place it. The composition root (main.cpp) establishes the center
     // dock area itself once USD is available.
-    m_logPanel = new LogSidePanel(this);
-    addDockWidget(Qt::BottomDockWidgetArea, m_logPanel);
-    m_sidePanels.append(m_logPanel);
+    m_logPanel = new LogPanel(this);
+    addSidePanel(m_logPanel, Qt::BottomDockWidgetArea);
 
     // Toasts, and the log records marked to show as one. Not the records
     // logged before the window existed (no backlog replay): they'd pop up
@@ -145,51 +159,63 @@ PanelMaximizer* MainWindow::panelMaximizer() const { return m_panelMaximizer; }
 MainWindow::~MainWindow() {
     // Before m_toasts goes: the sink posts to it from any thread.
     usdcc::core::LogHub::instance().removeSink(m_toastSink.get());
-    // ~QWidget deletes the side panels after m_sidePanels is gone, and Qt only drops
-    // the connections to this window in ~QObject, later still: without this, each
-    // panel's destroyed() would erase from a destroyed list (a crash on Linux).
-    for (SidePanel* panel : std::as_const(m_sidePanels)) disconnect(panel, &QObject::destroyed, this, nullptr);
+    // ~QWidget deletes the side panels after m_sidePanels is gone.
+    for (SidePanel* panel : std::as_const(m_sidePanels)) panel->m_window = nullptr;
 }
 
-LogSidePanel* MainWindow::logPanel() const { return m_logPanel; }
+LogPanel* MainWindow::logPanel() const { return m_logPanel; }
 
 ToastManager* MainWindow::toasts() const { return m_toasts; }
 
 void MainWindow::addSidePanel(SidePanel* panel, Qt::DockWidgetArea area) {
     if (!panel || m_sidePanels.contains(panel)) return;
-    // Restoring the side panels' state later would drop one it doesn't know.
     m_panelMaximizer->restore();
-    for (const SidePanel* existing : std::as_const(m_sidePanels)) {
-        if (existing->objectName() == panel->objectName()) {
-            USDCC_LOG_WARNING("usdcc.layout",
-                              "Two side panels are named \"{}\"; the saved layout can only place one of them",
-                              panel->objectName().toStdString());
-        }
-    }
-    panel->setParent(this);
-    // After restoreLayout(), restoreDockWidget() is what puts a late panel
-    // where the saved state had it; it returns false for one it never saw.
-    if (!m_layoutRestored || !restoreDockWidget(panel)) {
-        addDockWidget(area, panel);
-        // setParent() hid it; a window that is already up doesn't show it
-        // again (one added before the window is shown appears with it).
-        if (isVisible()) panel->show();
-    } else {
-        restoreCollapsed(panel);
+    // ADS knows its panels by name, and a second of one would replace the first.
+    if (const QString name = panel->objectName(); m_dockManager->findDockWidget(name)) {
+        USDCC_LOG_WARNING("usdcc.layout", "Two panels are named \"{}\"; the saved layout can only place one of them",
+                          name.toStdString());
+        panel->setObjectName(
+            uniqueName(name, [this](const QString& taken) { return m_dockManager->findDockWidget(taken) != nullptr; }));
     }
     m_sidePanels.append(panel);
-    connect(panel, &QObject::destroyed, this, [this, panel]() { m_sidePanels.removeOne(panel); });
-    if (m_viewMenu) {
-        m_viewMenu->insertAction(m_viewMenuPanelsEnd, panel->toggleViewAction());
+    panel->m_window = this;
+    panel->m_lastArea = area;
+    const ads::SideBarLocation bar = area == Qt::LeftDockWidgetArea    ? ads::SideBarLeft
+                                     : area == Qt::RightDockWidgetArea ? ads::SideBarRight
+                                     : area == Qt::TopDockWidgetArea   ? ads::SideBarTop
+                                                                       : ads::SideBarBottom;
+    m_dockManager->addAutoHideDockWidget(bar, panel)->setSize(
+        (bar == ads::SideBarLeft || bar == ads::SideBarRight ? width() : height()) / 4);
+    const auto known = m_places.constFind(panel->objectName());
+    if (m_layoutRestored && known != m_places.cend()) {
+        panel->setPlace(known->toMap());
+    } else if (isVisible()) {
+        panel->dockAt(area);
     }
+    if (m_viewMenu) m_viewMenu->insertAction(m_viewMenuPanelsEnd, panel->toggleViewAction());
 }
 
 void MainWindow::removeSidePanel(SidePanel* panel) {
-    if (!panel || !m_sidePanels.removeOne(panel)) return;
-    m_panelMaximizer->restore();
-    if (m_viewMenu) m_viewMenu->removeAction(panel->toggleViewAction());
-    removeDockWidget(panel);
+    if (!panel || !m_sidePanels.contains(panel)) return;
+    forgetSidePanel(panel);
     panel->deleteLater();
+}
+
+void MainWindow::forgetSidePanel(SidePanel* panel) {
+    if (!m_sidePanels.removeOne(panel)) return;
+    panel->m_window = nullptr;
+    m_panelMaximizer->restore();
+    m_places.insert(panel->objectName(), panel->place());
+    if (m_viewMenu) m_viewMenu->removeAction(panel->toggleViewAction());
+    panel->leavingTabBar();
+    m_dockManager->removeDockWidget(panel);
+    panel->leavingTabBar(true);
+}
+
+QVariantMap MainWindow::sidePanelPlaces() const {
+    QVariantMap places = m_places;
+    for (const SidePanel* panel : m_sidePanels) places.insert(panel->objectName(), panel->place());
+    return places;
 }
 
 void MainWindow::setBottomBar(QWidget* bar, const QString& name) {
@@ -288,42 +314,17 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     if (!m_layoutSettled && isVisible()) m_settleTimer.start();
 }
 
-void MainWindow::childEvent(QChildEvent* event) {
-    QMainWindow::childEvent(event);
-    // Qt makes a tab bar for each spot where side panels are tabbed together
-    // as it needs one (polished: by then it is a whole QTabBar).
-    if (event->polished()) {
-        if (auto* tabBar = qobject_cast<QTabBar*>(event->child())) tabBar->installEventFilter(this);
-    }
-}
-
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    if (event->type() == QEvent::MouseButtonDblClick) {
-        if (auto* tabBar = qobject_cast<QTabBar*>(watched)) {
-            const auto* mouse = static_cast<QMouseEvent*>(event);
-            SidePanel* panel = sidePanelOfTab(tabBar, tabBar->tabAt(mouse->position().toPoint()));
-            if (panel && mouse->button() == Qt::LeftButton) {
-                panel->toggleCollapsed();
-                return true;
+    if (event->type() == QEvent::Show) {
+        if (auto* container = qobject_cast<ads::CAutoHideDockContainer*>(watched)) {
+            container->raise();
+            // One at a time: they'd cover each other.
+            for (ads::CAutoHideDockContainer* other : m_dockManager->autoHideWidgets()) {
+                if (other != container && other->isVisible()) other->collapseView(true);
             }
         }
     }
     return QMainWindow::eventFilter(watched, event);
-}
-
-SidePanel* MainWindow::sidePanelOfTab(const QTabBar* tabBar, int index) const {
-    if (index < 0) return nullptr;
-    // QMainWindow keeps each tab's dock widget's address as the tab's data.
-    const auto id = tabBar->tabData(index).value<quintptr>();
-    for (SidePanel* panel : m_sidePanels) {
-        if (reinterpret_cast<quintptr>(panel) == id) return panel;
-    }
-    return nullptr;
-}
-
-void MainWindow::restoreCollapsed(SidePanel* panel) {
-    const auto saved = m_savedCollapsed.constFind(panel->objectName());
-    if (saved != m_savedCollapsed.cend() && !panel->isCollapsed()) panel->setCollapsed(true, saved->toInt());
 }
 
 void MainWindow::restoreLayout() {
@@ -331,29 +332,27 @@ void MainWindow::restoreLayout() {
     if (settings.contains(kGeometryKey)) {
         restoreGeometry(settings.value(kGeometryKey).toByteArray());
     }
-    applyLayout(settings.value(kWindowStateKey).toByteArray(), settings.value(kCollapsedPanelsKey).toMap(),
+    applyLayout(settings.value(kWindowStateKey).toByteArray(), settings.value(kSidePanelPlacesKey).toMap(),
                 settings.value(kDockLayoutKey).toByteArray());
     if (m_bottomBarAction) m_bottomBarAction->setChecked(settings.value(kBottomBarKey, true).toBool());
     keepFloatingPanelsOnScreen();
     USDCC_LOG_DEBUG("usdcc.layout", "Restored the window layout from {}", settings.fileName().toStdString());
 }
 
-void MainWindow::applyLayout(const QByteArray& windowState, const QVariantMap& collapsed, const QByteArray& dockLayout) {
-    // Toolbars and side panels, which are all created by now (see
-    // restoreLayout()'s declaration), keyed by their objectNames.
+void MainWindow::applyLayout(const QByteArray& windowState, const QVariantMap& places, const QByteArray& dockLayout) {
+    // Toolbars, which are all created by now (see restoreLayout()'s declaration), keyed
+    // by their objectNames.
     if (!windowState.isEmpty() && !restoreState(windowState, kWindowStateVersion)) {
-        USDCC_LOG_WARNING("usdcc.layout", "Ignored the saved toolbar and side panel layout (older version)");
+        USDCC_LOG_WARNING("usdcc.layout", "Ignored the saved toolbar layout (older version)");
     }
-    m_savedCollapsed = collapsed;
+    m_places = places;
+    QSet<SidePanel*> closed;
     for (SidePanel* panel : std::as_const(m_sidePanels)) {
-        if (m_layoutRestored && panel->isCollapsed() && !m_savedCollapsed.contains(panel->objectName())) {
-            panel->setCollapsed(false);  // a later restore: one that isn't collapsed there opens
-        }
-        restoreCollapsed(panel);
+        if (panel->isClosed()) closed.insert(panel);
     }
     if (!dockLayout.isEmpty()) {
         if (m_dockManager->restoreState(dockLayout)) {
-            showPanelsMissingFrom(dockLayout);
+            showPanelsMissingFrom(dockLayout, closed);
         } else {
             USDCC_LOG_WARNING("usdcc.layout", "Could not restore the saved panel layout");
         }
@@ -366,25 +365,7 @@ QJsonObject MainWindow::layoutState() const {
     state.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
     state.insert(QStringLiteral("maximized"), isMaximized());
     state.insert(QStringLiteral("windowState"), QString::fromLatin1(saveState(kWindowStateVersion).toBase64()));
-    QJsonObject collapsed;
-    QJsonObject shares;
-    const QSize window = size();
-    for (SidePanel* panel : m_sidePanels) {
-        if (panel->isCollapsed()) {
-            collapsed.insert(panel->objectName(), panel->expandedSize());
-            continue;
-        }
-        if (panel->isFloating() || !panel->isVisible() || window.isEmpty()) continue;
-        const Qt::DockWidgetArea area = dockWidgetArea(panel);
-        if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
-            shares.insert(panel->objectName(), double(panel->width()) / window.width());
-        } else if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
-            shares.insert(panel->objectName(), double(panel->height()) / window.height());
-        }
-    }
-    state.insert(QStringLiteral("collapsedSidePanels"), collapsed);
-    state.insert(QStringLiteral("windowSize"), QJsonArray{window.width(), window.height()});
-    state.insert(QStringLiteral("sidePanelShares"), shares);
+    state.insert(QStringLiteral("sidePanelPlaces"), QJsonObject::fromVariantMap(sidePanelPlaces()));
     if (m_bottomBarAction) state.insert(QStringLiteral("bottomBarVisible"), m_bottomBarAction->isChecked());
     // As XML, readable in the session file; ADS compresses it by default.
     const QByteArray dock = m_dockManager->saveState();
@@ -400,54 +381,13 @@ void MainWindow::restoreLayoutState(const QJsonObject& state, bool withGeometry)
         showMaximized();
     }
     applyLayout(QByteArray::fromBase64(state.value(QStringLiteral("windowState")).toString().toLatin1()),
-                state.value(QStringLiteral("collapsedSidePanels")).toObject().toVariantMap(),
+                state.value(QStringLiteral("sidePanelPlaces")).toObject().toVariantMap(),
                 state.value(QStringLiteral("dockLayout")).toString().toUtf8());
     // A session from before there was one says nothing: the bar stays as it is.
     if (m_bottomBarAction && state.contains(QStringLiteral("bottomBarVisible"))) {
         m_bottomBarAction->setChecked(state.value(QStringLiteral("bottomBarVisible")).toBool());
     }
     keepFloatingPanelsOnScreen();
-
-    // Side panels keep their size in pixels; in a window much smaller or larger than
-    // the one saved, they're given their share of it instead (§5.2). Once the window
-    // has its size: at start, after it's shown and settled.
-    const QJsonArray saved = state.value(QStringLiteral("windowSize")).toArray();
-    const QSize savedSize(saved.at(0).toInt(), saved.at(1).toInt());
-    const QVariantMap shares = state.value(QStringLiteral("sidePanelShares")).toObject().toVariantMap();
-    if (savedSize.isEmpty() || shares.isEmpty()) return;
-    auto scale = [this, savedSize, shares]() {
-        const QSize now = size();
-        const auto differs = [](int a, int b) { return std::abs(a - b) > b / 10; };
-        if (differs(now.width(), savedSize.width()) || differs(now.height(), savedSize.height())) {
-            applySidePanelShares(shares);
-        }
-    };
-    if (m_layoutSettled) {
-        scale();
-    } else {
-        connect(this, &MainWindow::layoutSettled, this, scale, Qt::SingleShotConnection);
-    }
-}
-
-void MainWindow::applySidePanelShares(const QVariantMap& shares) {
-    QList<QDockWidget*> horizontal;
-    QList<int> widths;
-    QList<QDockWidget*> vertical;
-    QList<int> heights;
-    for (SidePanel* panel : std::as_const(m_sidePanels)) {
-        const auto share = shares.constFind(panel->objectName());
-        if (share == shares.cend() || panel->isFloating() || panel->isCollapsed() || !panel->isVisible()) continue;
-        const Qt::DockWidgetArea area = dockWidgetArea(panel);
-        if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
-            horizontal << panel;
-            widths << qRound(share->toDouble() * width());
-        } else if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
-            vertical << panel;
-            heights << qRound(share->toDouble() * height());
-        }
-    }
-    if (!horizontal.isEmpty()) resizeDocks(horizontal, widths, Qt::Horizontal);
-    if (!vertical.isEmpty()) resizeDocks(vertical, heights, Qt::Vertical);
 }
 
 void MainWindow::keepFloatingPanelsOnScreen() {
@@ -456,9 +396,6 @@ void MainWindow::keepFloatingPanelsOnScreen() {
     if (screens.isEmpty()) return;
     QList<QWidget*> floating;
     for (ads::CFloatingDockContainer* container : m_dockManager->floatingWidgets()) floating << container;
-    for (SidePanel* panel : std::as_const(m_sidePanels)) {
-        if (panel->isFloating()) floating << panel;
-    }
     for (QWidget* widget : floating) {
         const QRect frame = widget->frameGeometry();
         const QRect fitted = fitOnScreens(frame, screens);
@@ -502,7 +439,7 @@ QRect fitOnScreens(const QRect& rect, const QList<QRect>& screens) {
     return fitted;
 }
 
-void MainWindow::showPanelsMissingFrom(const QByteArray& dockLayout) {
+void MainWindow::showPanelsMissingFrom(const QByteArray& dockLayout, const QSet<SidePanel*>& closed) {
     // ADS saves its layout as XML, compressed by default: one <Widget Name=..>
     // per panel, open or closed.
     const QByteArray xml = dockLayout.startsWith("<?xml") ? dockLayout : qUncompress(dockLayout);
@@ -515,18 +452,27 @@ void MainWindow::showPanelsMissingFrom(const QByteArray& dockLayout) {
     }
     if (reader.hasError() || saved.isEmpty()) return;  // can't tell: leave the layout as restored
 
+    // A side panel goes to its edge; collapsed, it takes no room. Closed before, it stays so.
+    for (SidePanel* panel : std::as_const(m_sidePanels)) {
+        if (saved.contains(panel->objectName())) continue;
+        panel->setCollapsed(true);
+        if (closed.contains(panel)) panel->hide();
+    }
+
     // ADS hides the panels its saved layout doesn't name. One the user closed
     // is named (as closed); one that isn't was gone when the layout was saved
     // (deleted by Close Stage, or new), so it opens beside the others.
     ads::CDockAreaWidget* nextTo = nullptr;
     for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
-        if (saved.contains(dockWidget->objectName()) && !dockWidget->isClosed() && dockWidget->dockAreaWidget()) {
+        if (saved.contains(dockWidget->objectName()) && !dockWidget->isClosed() && dockWidget->dockAreaWidget() &&
+            !dockWidget->isAutoHide()) {
             nextTo = dockWidget->dockAreaWidget();
             break;
         }
     }
     for (ads::CDockWidget* dockWidget : m_dockManager->dockWidgetsMap()) {
         if (saved.contains(dockWidget->objectName()) || !dockWidget->isClosed()) continue;
+        if (qobject_cast<SidePanel*>(dockWidget)) continue;
         if (nextTo) {
             m_dockManager->addDockWidgetTabToArea(dockWidget, nextTo);
         } else {
@@ -544,12 +490,8 @@ void MainWindow::saveLayout() const {
     settings.setValue(kWindowStateKey, saveState(kWindowStateVersion));
     settings.setValue(kDockLayoutKey, m_dockManager->saveState());
     QStringList panels;
-    QVariantMap collapsed;
-    for (const SidePanel* panel : m_sidePanels) {
-        panels << panel->objectName();
-        if (panel->isCollapsed()) collapsed.insert(panel->objectName(), panel->expandedSize());
-    }
-    settings.setValue(kCollapsedPanelsKey, collapsed);
+    for (const SidePanel* panel : m_sidePanels) panels << panel->objectName();
+    settings.setValue(kSidePanelPlacesKey, sidePanelPlaces());
     if (m_bottomBarAction) settings.setValue(kBottomBarKey, m_bottomBarAction->isChecked());
     USDCC_LOG_DEBUG("usdcc.layout", "Saved the window layout to {} (side panels: {})", settings.fileName().toStdString(),
                     panels.join(QStringLiteral(", ")).toStdString());
@@ -558,7 +500,7 @@ void MainWindow::saveLayout() const {
 void MainWindow::buildViewMenu() {
     QMenu* viewMenu = mainMenuBar()->addMenu(tr("&View"));
     m_viewMenu = viewMenu;
-    // QDockWidget already provides a checkable show/hide QAction, kept in
+    // ADS already provides a checkable show/hide QAction, kept in
     // sync with the dock widget's actual visibility — no custom toggle slot
     // needed.
     for (SidePanel* panel : m_sidePanels) {

@@ -46,7 +46,7 @@ else()
     return()
 endif()
 
-# Bindings only cover SidePanel today (see typesystem.xml) — ViewPanel is
+# Bindings only cover SidePanel and its bases (see typesystem.xml) — ViewPanel is
 # deliberately excluded (see bindings.h) — so the include list only needs to
 # satisfy that one header. Extend this if bindings.h grows to include headers
 # from other usdcc_* libraries.
@@ -85,6 +85,9 @@ set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_generated_sources
     "${_gen_dir}/usdcc/_ui/usdcc_wrapper.cpp"
     "${_gen_dir}/usdcc/_ui/usdcc_ui_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/ads_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/ads_cdockwidget_wrapper.cpp"
+    "${_gen_dir}/usdcc/_ui/usdcc_ui_dockpanel_wrapper.cpp"
     "${_gen_dir}/usdcc/_ui/usdcc_ui_sidepanel_wrapper.cpp"
     "${_gen_dir}/usdcc/_ui/_ui_module_wrapper.cpp")
 
@@ -114,6 +117,7 @@ add_custom_command(
     DEPENDS
         ${_bindings_header} ${_typesystem_file}
         "${CMAKE_SOURCE_DIR}/src/cpp/ui/include/usdcc/ui/side_panel.h"
+        "${CMAKE_SOURCE_DIR}/src/cpp/ui/include/usdcc/ui/dock_panel.h"
     COMMENT "Generating usdcc.ui Python bindings (Shiboken6)"
     VERBATIM)
 
@@ -135,7 +139,7 @@ target_include_directories(usdcc_ui_python PRIVATE ${_shiboken_include_dirs} "${
 # trick to reach protected members of the wrapped classes. MSVC's STL treats
 # redefining access-specifier keywords as a hard error unless this is set.
 target_compile_definitions(usdcc_ui_python PRIVATE _ALLOW_KEYWORD_MACROS)
-target_link_libraries(usdcc_ui_python PRIVATE usdcc_ui Shiboken6::libshiboken PySide6::pyside6)
+target_link_libraries(usdcc_ui_python PRIVATE usdcc_ui ads::qtadvanceddocking-qt6 Shiboken6::libshiboken PySide6::pyside6)
 usdcc_deploy_core_library(usdcc_ui_python usdcc_usd usdcc_ui)
 # Debug-config-only fixup: the generated wrapper .cpp files include
 # shiboken6's sbkpython.h, which #includes <Python.h> with no protection

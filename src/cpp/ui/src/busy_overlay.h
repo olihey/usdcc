@@ -1,6 +1,6 @@
 #pragma once
 
-// The overlay ViewPanel::beginBusy() shows (docs/PANEL_BUSY.md §3, §4). Private to usdcc_ui.
+// The overlay DockPanel::beginBusy() shows (docs/PANEL_BUSY.md §3, §4). Private to usdcc_ui.
 
 #include "usdcc/ui/busy.h"
 
@@ -24,7 +24,7 @@ class QVariantAnimation;
 namespace usdcc::ui {
 
 class BusyOverlay;
-class ViewPanel;
+class DockPanel;
 
 // What a Busy handle and the overlay share. The setters write under the mutex from any
 // thread; the overlay reads on the UI thread, on its timer.
@@ -45,7 +45,7 @@ struct Busy::State {
 class BusyOverlay : public QWidget {
     Q_OBJECT
 public:
-    explicit BusyOverlay(ViewPanel* panel);
+    explicit BusyOverlay(DockPanel* panel);
     ~BusyOverlay() override;
 
     void add(const std::shared_ptr<Busy::State>& state);
@@ -74,7 +74,7 @@ private:
     std::shared_ptr<Busy::State> shown() const;  // the newest still running
     bool small() const;
 
-    ViewPanel* m_panel;
+    DockPanel* m_panel;
     std::vector<std::shared_ptr<Busy::State>> m_states;
     QTimer* m_timer;
     QVariantAnimation* m_fade;

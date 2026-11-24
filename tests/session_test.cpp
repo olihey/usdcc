@@ -452,7 +452,8 @@ USDCC_TEST(session_window_layout) {
     window.show();
     settle();
     const QJsonObject state = window.layoutState();
-    CHECK(state.value("windowSize").toArray().at(0).toInt() == 1200, "the window's size is kept");
+    CHECK(state.value("sidePanelPlaces").toObject().value("Log").toObject().value("state").toString() == "collapsed",
+          "the side panels' places are kept");
     CHECK(state.value("dockLayout").toString().startsWith("<?xml"), "the dock layout as XML");
     window.restoreLayoutState(state, false);
     CHECK(window.size() == QSize(1200, 800), "restoring into the running window keeps its size");

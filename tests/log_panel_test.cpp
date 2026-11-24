@@ -1,9 +1,9 @@
-// LogModel, LogFilterModel and LogSidePanel — docs/LOGGING.md phase 3.
+// LogModel, LogFilterModel and LogPanel — docs/LOGGING.md phase 3.
 #include "test_harness.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/ui/log_model.h"
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scale_controller.h"
@@ -33,7 +33,7 @@ using usdcc::core::LogLevel;
 using usdcc::core::LogRecord;
 using usdcc::ui::LogFilterModel;
 using usdcc::ui::LogModel;
-using usdcc::ui::LogSidePanel;
+using usdcc::ui::LogPanel;
 
 namespace {
 // Runs the event loop until `done` or `timeoutMs`; returns whether `done`.
@@ -226,7 +226,7 @@ USDCC_TEST(log_side_panel_clear_search) {
     ScratchSettings settings;
     usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
     LogHub hub;
-    LogSidePanel panel(nullptr, hub, settings.path);
+    LogPanel panel(nullptr, hub, settings.path);
     panel.resize(800, 300);
     panel.show();
     for (int i = 0; i < 40; ++i) post(hub, LogLevel::Info, "usdcc", "test", "message " + std::to_string(i));
@@ -282,7 +282,7 @@ USDCC_TEST(log_side_panel) {
     usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
     LogHub hub;
     {
-        LogSidePanel panel(nullptr, hub, settings.path);
+        LogPanel panel(nullptr, hub, settings.path);
         CHECK(panel.objectName() == "Log", "saved layouts find it as \"Log\"");
         CHECK(panel.windowTitle() == "Log", "plain title");
 
@@ -394,7 +394,7 @@ USDCC_TEST(log_side_panel) {
         CHECK(panel.filterModel()->isLevelShown(LogLevel::Debug) && panel.filterModel()->isLevelShown(LogLevel::Trace),
               "the Debug entry shows Debug and Trace");
     }
-    LogSidePanel reopened(nullptr, hub, settings.path);
+    LogPanel reopened(nullptr, hub, settings.path);
     CHECK(reopened.filterModel()->isLevelShown(LogLevel::Debug), "filters persist");
     CHECK(reopened.model()->rowCount() == static_cast<int>(hub.snapshot().size()),
           "a new panel starts with the hub's backlog: %d", reopened.model()->rowCount());
@@ -406,7 +406,7 @@ USDCC_TEST(log_side_panel_pinned_filters) {
     LogHub hub;
     auto settle = [] { for (int i = 0; i < 5; ++i) QApplication::processEvents(); };
     // The pinned column's checkbox whose text is `name` or starts with "name (".
-    auto checkBox = [](LogSidePanel& panel, const QString& name) -> QCheckBox* {
+    auto checkBox = [](LogPanel& panel, const QString& name) -> QCheckBox* {
         if (!panel.pinnedFilters()) return nullptr;
         for (QCheckBox* box : panel.pinnedFilters()->findChildren<QCheckBox*>()) {
             if (box->isVisible() && (box->text() == name || box->text().startsWith(name + " ("))) return box;
@@ -416,7 +416,7 @@ USDCC_TEST(log_side_panel_pinned_filters) {
     post(hub, LogLevel::Error, "usd", "TF_DIAGNOSTIC_RUNTIME_ERROR_TYPE", "an error");
     post(hub, LogLevel::Info, "usdcc", "usdcc.viewport", "a");
     {
-        LogSidePanel panel(nullptr, hub, settings.path);
+        LogPanel panel(nullptr, hub, settings.path);
         panel.resize(900, 400);
         panel.show();
         settle();
@@ -479,7 +479,7 @@ USDCC_TEST(log_side_panel_pinned_filters) {
         panel.setFiltersPinned(true);
     }
     {
-        LogSidePanel panel(nullptr, hub, settings.path);
+        LogPanel panel(nullptr, hub, settings.path);
         panel.resize(900, 400);
         panel.show();
         settle();
@@ -492,7 +492,7 @@ USDCC_TEST(log_side_panel_pinned_filters) {
         CHECK(!panel.isFiltersPinned(), "which does");
     }
     {
-        LogSidePanel panel(nullptr, hub, settings.path);
+        LogPanel panel(nullptr, hub, settings.path);
         panel.show();
         settle();
         CHECK(!panel.isFiltersPinned(), "and they stay unpinned after a restart");
@@ -505,7 +505,7 @@ USDCC_TEST(log_side_panel_share) {
     ScratchSettings settings;
     usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()), settings.path);
     LogHub hub;
-    LogSidePanel panel(nullptr, hub, settings.path);
+    LogPanel panel(nullptr, hub, settings.path);
     panel.resize(800, 300);
     panel.show();
     post(hub, LogLevel::Info, "usdcc", "usdcc.stage", "first");
