@@ -10,6 +10,9 @@
 #include <windows.h>
 #include <wincred.h>
 #endif
+#if defined(__linux__)
+#include "secret_service.h"
+#endif
 
 namespace usdcc::assets {
 
@@ -95,6 +98,8 @@ public:
         return true;
     }
 
+    std::string name() const override { return "Windows Credential Manager"; }
+
     bool remove(const std::string& id) override { return CredDeleteW(targetOf(id).c_str(), CRED_TYPE_GENERIC, 0); }
 
     std::vector<StoredCredential> list() override {
@@ -115,8 +120,8 @@ public:
         return all;
     }
 };
-#else
-// None yet (docs/ASSET_SOURCES.md §11, phase 5).
+#elif !defined(__linux__)
+// None on this platform: macOS's Keychain isn't built (docs/ASSET_SOURCES.md §10.5).
 class SystemStore : public CredentialStore {
 public:
     std::optional<Credential> read(const std::string&) override { return std::nullopt; }
@@ -130,9 +135,17 @@ public:
 };
 #endif
 
+std::shared_ptr<CredentialStore> systemStore() {
+#if defined(__linux__)
+    return makeSecretServiceStore();
+#else
+    return std::make_shared<SystemStore>();
+#endif
+}
+
 struct Store {
     std::mutex mutex;
-    std::shared_ptr<CredentialStore> store = std::make_shared<SystemStore>();
+    std::shared_ptr<CredentialStore> store = systemStore();
 };
 
 Store& storeHolder() {
@@ -149,7 +162,7 @@ std::shared_ptr<CredentialStore> currentStore() {
 }  // namespace
 
 void setCredentialStore(std::shared_ptr<CredentialStore> store) {
-    if (!store) store = std::make_shared<SystemStore>();
+    if (!store) store = systemStore();
     Store& holder = storeHolder();
     std::lock_guard<std::mutex> lock(holder.mutex);
     holder.store = std::move(store);
@@ -178,6 +191,8 @@ std::vector<StoredCredential> storedCredentials() {
 }
 
 bool canStoreCredentials() { return currentStore()->canWrite(); }
+
+std::string credentialStoreName() { return currentStore()->name(); }
 
 bool isAwsCredential(const std::string& id) { return id == "aws" || id.rfind("aws:", 0) == 0; }
 

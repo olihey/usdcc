@@ -438,11 +438,12 @@ bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QStr
     dialog.setWindowTitle(QObject::tr("Asset Server Login"));
     dialog.setObjectName(QStringLiteral("assetLoginDialog"));
     auto* layout = new QVBoxLayout(&dialog);
-    auto* intro = new QLabel(QObject::tr("Saved in Windows Credential Manager, under the credential id the asset "
+    auto* intro = new QLabel(QObject::tr("Saved in %1, under the credential id the asset "
                                          "configuration names for a server. For a server opened by its address "
                                          "(webdav://192.168.1.5:5000/...), the address: 192.168.1.5, or "
                                          "192.168.1.5:5000 for that port only. For S3, an access key; the ids aws "
-                                         "and aws:<profile> come from AWS's own files instead."),
+                                         "and aws:<profile> come from AWS's own files instead.")
+                                 .arg(QString::fromStdString(usdcc::assets::credentialStoreName())),
                              &dialog);
     intro->setWordWrap(true);
     layout->addWidget(intro);

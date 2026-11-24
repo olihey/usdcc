@@ -46,7 +46,7 @@ USDCC_USD_UI_API bool forgetAssetLogin(QWidget* parent, const QString& credentia
                                        const usdcc::assets::Config* config = nullptr);
 
 // The login form: a credential id's user and password, or token, into
-// the system's credential store (Windows Credential Manager). With `credential`, that
+// the system's credential store (Windows Credential Manager, or a Linux keyring). With `credential`, that
 // one is filled in; with `scheme` "s3", it's an access key and its secret. The ids it
 // offers are the saved ones and those of `config` (null: the default configuration), as
 // is which are S3's. An empty password keeps the saved one. True when one was saved.

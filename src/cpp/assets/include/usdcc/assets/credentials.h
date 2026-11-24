@@ -36,8 +36,8 @@ std::optional<Credential> credentialFor(const std::string& id);
 
 // The OS credential store: Windows Credential Manager, as a generic credential named
 // "usdcc-assets:<id>". A user and password are stored as they are; a token as the
-// password of an empty user. Elsewhere there is none yet: nothing is found, and
-// storing fails.
+// password of an empty user. On Linux the desktop's keyring, when there is one
+// (libsecret). Elsewhere there is none: nothing is found, and storing fails.
 std::optional<Credential> storedCredential(const std::string& id);
 bool storeCredential(const std::string& id, const Credential& credential, std::string* error = nullptr);
 bool forgetStoredCredential(const std::string& id);
@@ -52,6 +52,8 @@ struct StoredCredential {
 std::vector<StoredCredential> storedCredentials();
 // Whether storeCredential() can work on this platform.
 bool canStoreCredentials();
+// "Windows Credential Manager", "your keyring".
+std::string credentialStoreName();
 
 // Where the functions above keep logins. The operating system's store unless replaced,
 // as tests do: theirs mustn't reach the user's logins.
@@ -63,6 +65,8 @@ public:
     virtual bool remove(const std::string& id) = 0;
     virtual std::vector<StoredCredential> list() = 0;
     virtual bool canWrite() const { return true; }
+    // As the UI names it.
+    virtual std::string name() const { return "the credential store"; }
 };
 
 // Null goes back to the system's.

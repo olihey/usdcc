@@ -43,6 +43,11 @@ target_link_libraries(usdcc_assets PUBLIC ar plug js vt tf arch)
 # HTTP, for the protocols that speak it (http_client.h). Private: a protocol plugin
 # goes through that header and never sees libcurl.
 target_link_libraries(usdcc_assets PRIVATE CURL::libcurl)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The desktop's keyring, through libsecret once it's needed (credentials.h).
+    target_sources(usdcc_assets PRIVATE src/secret_service.h src/secret_service.cpp)
+    target_link_libraries(usdcc_assets PRIVATE ${CMAKE_DL_LIBS})
+endif()
 if(WIN32)
     # Windows Credential Manager (credentials.h).
     target_link_libraries(usdcc_assets PRIVATE advapi32)

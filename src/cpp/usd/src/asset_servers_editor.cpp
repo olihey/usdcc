@@ -745,7 +745,7 @@ void AssetServersDialog::build() {
             ? tr("Your logins, saved on this computer and never in the configuration. A server or a web host uses the "
                  "one its Credential names; a server opened by its address uses the one named like the address. "
                  "Changes here apply at once, without Save.")
-            : tr("Logins can't be saved on this platform yet. They come from the environment variables "
+            : tr("There's no place to save logins here: no keyring was found. They come from the environment variables "
                  "USDCC_ASSETS_<ID>_USER, _PASSWORD and _TOKEN."),
         m_loginsPage);
     loginsIntro->setWordWrap(true);

@@ -17,6 +17,7 @@
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
+#include <pxr/base/tf/getenv.h>
 #include <pxr/base/tf/setenv.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/assetInfo.h>
@@ -619,6 +620,42 @@ USDCC_TEST(assets_credentials_in_the_system_store) {
     CHECK(stored && stored->token == "t0ken" && stored->user.empty() && stored->password.empty(), "and is read back as a token");
 
     CHECK(forgetStoredCredential(id) && !storedCredential(id), "forgotten, it's gone");
+#elif defined(__linux__)
+    // A keyring of its own only: run by hand with one (docs/ASSET_SOURCES.md §10.5), never the user's.
+    if (PXR_NS::TfGetenv("USDCC_TEST_KEYRING").empty()) return;
+    CHECK(canStoreCredentials() && credentialStoreName() == "your keyring", "there is a keyring");
+    std::string error;
+    CHECK(!storedCredential("studio-a/dav"), "nothing in it");
+    CHECK(storeCredential("studio-a/dav", {"ada", "s\xc3\xa9"
+                                                  "cret"},
+                          &error),
+          "a user and password are stored: %s", error.c_str());
+    std::optional<Credential> stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->user == "ada" && stored->password == "s\xc3\xa9"
+                                                                 "cret" && stored->token.empty(),
+          "and read back");
+    CHECK(storeCredential("other", {"bob", "pw"}, &error) && storedCredentials().size() == 2 &&
+              storedCredentials()[1].user == "ada",
+          "listed with their users");
+    CHECK(storeCredential("studio-a/dav", {"eve", "pw2"}, &error), "another user replaces it");
+    stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->user == "eve" && stored->password == "pw2" && storedCredentials().size() == 2, "with one left");
+    Credential token;
+    token.token = "t0ken";
+    CHECK(storeCredential("studio-a/dav", token, &error), "a token too");
+    stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->token == "t0ken" && stored->user.empty(), "read back as a token");
+    std::vector<std::thread> threads;
+    std::atomic<int> read{0};
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&read]() {
+            for (int n = 0; n < 50; ++n) read += credentialFor("other") ? 1 : 0;
+        });
+    }
+    for (std::thread& thread : threads) thread.join();
+    CHECK(read == 400, "from any thread (%d)", read.load());
+    CHECK(forgetStoredCredential("studio-a/dav") && !storedCredential("studio-a/dav"), "forgotten, it's gone");
+    CHECK(forgetStoredCredential("other") && !forgetStoredCredential("other") && storedCredentials().empty(), "and the other");
 #else
     CHECK(!storedCredential("anything"), "no system store on this platform yet");
 #endif
