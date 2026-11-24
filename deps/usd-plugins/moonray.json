@@ -8,6 +8,7 @@
                  "moonray/hydra/hdMoonray"],
   "patches": [
     {"patch": "patches/moonray-no-boost-python.patch", "in": "moonray/scene_rdl2"},
+    {"patch": "patches/moonray-own-transpose.patch", "in": "moonray/scene_rdl2"},
     {"patch": "patches/moonray-plain-textures.patch", "in": "moonray/moonray"},
     {"patch": "patches/moonray-hdmoonray-26.08.patch", "in": "moonray/hydra/hdMoonray"}
   ],

@@ -48,6 +48,30 @@ SHIPPED = ["jsoncpp", "log4cplus", "lua", "random123", "openssl", "oidn", "curl"
 ROOT = "plugin/usd/moonray"
 TO_PACK_LIB = "$ORIGIN/../../../../lib"  # from <root>/<folder>/ to the install's lib
 
+# https://github.com/xoolive/geodesy/blob/master/license.txt
+GEODESY = """The MIT License (MIT)
+
+Copyright (c) 2015 Xavier Olive
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 
 def build(ctx):
     run, places, work, usd = ctx.run, ctx.places, ctx.work, ctx.usd
@@ -242,5 +266,15 @@ def build(ctx):
     licences["lua"] = notices / "lua"
     (notices / "moonray").mkdir(parents=True, exist_ok=True)
     shutil.copy2(ctx.source / "THIRD-PARTY.md", notices / "moonray" / "LICENSE-THIRD-PARTY.md")
+    # Two that THIRD-PARTY.md leaves out (docs/MOONRAY.md section 3.1): the notice of the
+    # OSL release its light path expressions are from, at the top of those sources, and
+    # xoolive/geodesy's, whose atan ssef.h and avxf.h have.
+    osl = ctx.source / "moonray/moonray/lib/rendering/lpe/osl"
+    found = {notice.group(1) for file in sorted(osl.iterdir()) if file.suffix in (".cc", ".h")
+             if (notice := re.search(r"/\*\n(Copyright [^\n]*Sony Pictures Imageworks.*?)\n\*/", file.read_text(), re.S))}
+    if len(found) != 1:
+        raise SystemExit(f"{len(found)} different Sony Pictures Imageworks notices in {osl}, not one")
+    (notices / "moonray" / "LICENSE-OSL-LPE").write_text(found.pop() + "\n")
+    (notices / "moonray" / "LICENSE-xoolive-geodesy").write_text(GEODESY)
     licences["moonray"] = notices / "moonray"
     return licences

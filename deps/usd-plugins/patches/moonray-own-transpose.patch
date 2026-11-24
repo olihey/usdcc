@@ -1,0 +1,158 @@
+diff --git a/lib/common/math/MathUtil.h b/lib/common/math/MathUtil.h
+index 7d76e54..8881407 100644
+--- a/lib/common/math/MathUtil.h
++++ b/lib/common/math/MathUtil.h
+@@ -561,6 +561,33 @@ transposeSOAToAOS_16x16(const uint32_t * __restrict src, uint32_t * __restrict d
+ #endif // VLEN == 16u
+ }
+ 
++#if !defined(__aarch64__)
++// Changed by usdcc: the 8x8 transposes' shared step, written for usdcc.
++// Transposes the 8x8 matrix whose rows are in 'm', in place. The 128-bit halves
++// go to their places first: after that m[0..3] and m[4..7] are two independent
++// sets of 4x4 matrices, one per lane, and interleaving rows two apart twice
++// transposes each.
++__forceinline void
++transposeRows_8x8(__m256 (&m)[8])
++{
++    __m256 halves[8];
++    for (unsigned i = 0; i < 4; ++i) {
++        halves[i]     = _mm256_permute2f128_ps(m[i], m[i + 4], 0x20);
++        halves[i + 4] = _mm256_permute2f128_ps(m[i], m[i + 4], 0x31);
++    }
++    for (unsigned k = 0; k < 8; k += 4) {
++        const __m256 evenLo = _mm256_unpacklo_ps(halves[k],     halves[k + 2]);
++        const __m256 evenHi = _mm256_unpackhi_ps(halves[k],     halves[k + 2]);
++        const __m256 oddLo  = _mm256_unpacklo_ps(halves[k + 1], halves[k + 3]);
++        const __m256 oddHi  = _mm256_unpackhi_ps(halves[k + 1], halves[k + 3]);
++        m[k]     = _mm256_unpacklo_ps(evenLo, oddLo);
++        m[k + 1] = _mm256_unpackhi_ps(evenLo, oddLo);
++        m[k + 2] = _mm256_unpacklo_ps(evenHi, oddHi);
++        m[k + 3] = _mm256_unpackhi_ps(evenHi, oddHi);
++    }
++}
++#endif
++
+ //
+ // - Performs a full 8x8 transposition using AXV intrinsics, gathering from
+ //   randomly scattered rows (to facilitate the abililty to sort data).
+@@ -592,52 +619,14 @@ transposeAOSToSOA_8x8(const uint32_t *__restrict srcRows[8], uint32_t *__restric
+ 
+ #else 
+ 
+-    // http://stackoverflow.com/questions/25622745/transpose-an-8x8-float-using-avx-avx2
+-
+-    __m256 a0 = _mm256_load_ps((const float *)srcRows[0]);
+-    __m256 a1 = _mm256_load_ps((const float *)srcRows[1]);
+-    __m256 a2 = _mm256_load_ps((const float *)srcRows[2]);
+-    __m256 a3 = _mm256_load_ps((const float *)srcRows[3]);
+-    __m256 a4 = _mm256_load_ps((const float *)srcRows[4]);
+-    __m256 a5 = _mm256_load_ps((const float *)srcRows[5]);
+-    __m256 a6 = _mm256_load_ps((const float *)srcRows[6]);
+-    __m256 a7 = _mm256_load_ps((const float *)srcRows[7]);
+-
+-    __m256 b0 = _mm256_unpacklo_ps(a0, a1);
+-    __m256 b1 = _mm256_unpackhi_ps(a0, a1);
+-    __m256 b2 = _mm256_unpacklo_ps(a2, a3);
+-    __m256 b3 = _mm256_unpackhi_ps(a2, a3);
+-    __m256 b4 = _mm256_unpacklo_ps(a4, a5);
+-    __m256 b5 = _mm256_unpackhi_ps(a4, a5);
+-    __m256 b6 = _mm256_unpacklo_ps(a6, a7);
+-    __m256 b7 = _mm256_unpackhi_ps(a6, a7);
+-
+-    a0 = _mm256_shuffle_ps(b0, b2,_MM_SHUFFLE(1, 0, 1, 0));
+-    a1 = _mm256_shuffle_ps(b0, b2,_MM_SHUFFLE(3, 2, 3, 2));
+-    a2 = _mm256_shuffle_ps(b1, b3,_MM_SHUFFLE(1, 0, 1, 0));
+-    a3 = _mm256_shuffle_ps(b1, b3,_MM_SHUFFLE(3, 2, 3, 2));
+-    a4 = _mm256_shuffle_ps(b4, b6,_MM_SHUFFLE(1, 0, 1, 0));
+-    a5 = _mm256_shuffle_ps(b4, b6,_MM_SHUFFLE(3, 2, 3, 2));
+-    a6 = _mm256_shuffle_ps(b5, b7,_MM_SHUFFLE(1, 0, 1, 0));
+-    a7 = _mm256_shuffle_ps(b5, b7,_MM_SHUFFLE(3, 2, 3, 2));
+-
+-    b0 = _mm256_permute2f128_ps(a0, a4, 0x20);
+-    b1 = _mm256_permute2f128_ps(a1, a5, 0x20);
+-    b2 = _mm256_permute2f128_ps(a2, a6, 0x20);
+-    b3 = _mm256_permute2f128_ps(a3, a7, 0x20);
+-    b4 = _mm256_permute2f128_ps(a0, a4, 0x31);
+-    b5 = _mm256_permute2f128_ps(a1, a5, 0x31);
+-    b6 = _mm256_permute2f128_ps(a2, a6, 0x31);
+-    b7 = _mm256_permute2f128_ps(a3, a7, 0x31);
+-
+-    _mm256_store_ps((float *)(dst +  0), b0);
+-    _mm256_store_ps((float *)(dst +  8), b1);
+-    _mm256_store_ps((float *)(dst + 16), b2);
+-    _mm256_store_ps((float *)(dst + 24), b3);
+-    _mm256_store_ps((float *)(dst + 32), b4);
+-    _mm256_store_ps((float *)(dst + 40), b5);
+-    _mm256_store_ps((float *)(dst + 48), b6);
+-    _mm256_store_ps((float *)(dst + 56), b7);
++    __m256 rows[8];
++    for (unsigned i = 0; i < 8; ++i) {
++        rows[i] = _mm256_load_ps(reinterpret_cast<const float *>(srcRows[i]));
++    }
++    transposeRows_8x8(rows);
++    for (unsigned i = 0; i < 8; ++i) {
++        _mm256_store_ps(reinterpret_cast<float *>(dst + 8 * i), rows[i]);
++    }
+ 
+ #endif
+ }
+@@ -667,50 +656,14 @@ transposeSOAToAOS_8x8(const uint32_t *__restrict src, uint32_t *__restrict dstRo
+ 
+ #else
+ 
+-    __m256 a0 = _mm256_load_ps((const float *)(src +  0));
+-    __m256 a1 = _mm256_load_ps((const float *)(src +  8));
+-    __m256 a2 = _mm256_load_ps((const float *)(src + 16));
+-    __m256 a3 = _mm256_load_ps((const float *)(src + 24));
+-    __m256 a4 = _mm256_load_ps((const float *)(src + 32));
+-    __m256 a5 = _mm256_load_ps((const float *)(src + 40));
+-    __m256 a6 = _mm256_load_ps((const float *)(src + 48));
+-    __m256 a7 = _mm256_load_ps((const float *)(src + 56));
+-
+-    __m256 b0 = _mm256_unpacklo_ps(a0, a1);
+-    __m256 b1 = _mm256_unpackhi_ps(a0, a1);
+-    __m256 b2 = _mm256_unpacklo_ps(a2, a3);
+-    __m256 b3 = _mm256_unpackhi_ps(a2, a3);
+-    __m256 b4 = _mm256_unpacklo_ps(a4, a5);
+-    __m256 b5 = _mm256_unpackhi_ps(a4, a5);
+-    __m256 b6 = _mm256_unpacklo_ps(a6, a7);
+-    __m256 b7 = _mm256_unpackhi_ps(a6, a7);
+-
+-    a0 = _mm256_shuffle_ps(b0, b2,_MM_SHUFFLE(1, 0, 1, 0));
+-    a1 = _mm256_shuffle_ps(b0, b2,_MM_SHUFFLE(3, 2, 3, 2));
+-    a2 = _mm256_shuffle_ps(b1, b3,_MM_SHUFFLE(1, 0, 1, 0));
+-    a3 = _mm256_shuffle_ps(b1, b3,_MM_SHUFFLE(3, 2, 3, 2));
+-    a4 = _mm256_shuffle_ps(b4, b6,_MM_SHUFFLE(1, 0, 1, 0));
+-    a5 = _mm256_shuffle_ps(b4, b6,_MM_SHUFFLE(3, 2, 3, 2));
+-    a6 = _mm256_shuffle_ps(b5, b7,_MM_SHUFFLE(1, 0, 1, 0));
+-    a7 = _mm256_shuffle_ps(b5, b7,_MM_SHUFFLE(3, 2, 3, 2));
+-
+-    b0 = _mm256_permute2f128_ps(a0, a4, 0x20);
+-    b1 = _mm256_permute2f128_ps(a1, a5, 0x20);
+-    b2 = _mm256_permute2f128_ps(a2, a6, 0x20);
+-    b3 = _mm256_permute2f128_ps(a3, a7, 0x20);
+-    b4 = _mm256_permute2f128_ps(a0, a4, 0x31);
+-    b5 = _mm256_permute2f128_ps(a1, a5, 0x31);
+-    b6 = _mm256_permute2f128_ps(a2, a6, 0x31);
+-    b7 = _mm256_permute2f128_ps(a3, a7, 0x31);
+-
+-    _mm256_store_ps((float *)(dstRows[0]), b0);
+-    _mm256_store_ps((float *)(dstRows[1]), b1);
+-    _mm256_store_ps((float *)(dstRows[2]), b2);
+-    _mm256_store_ps((float *)(dstRows[3]), b3);
+-    _mm256_store_ps((float *)(dstRows[4]), b4);
+-    _mm256_store_ps((float *)(dstRows[5]), b5);
+-    _mm256_store_ps((float *)(dstRows[6]), b6);
+-    _mm256_store_ps((float *)(dstRows[7]), b7);
++    __m256 rows[8];
++    for (unsigned i = 0; i < 8; ++i) {
++        rows[i] = _mm256_load_ps(reinterpret_cast<const float *>(src + 8 * i));
++    }
++    transposeRows_8x8(rows);
++    for (unsigned i = 0; i < 8; ++i) {
++        _mm256_store_ps(reinterpret_cast<float *>(dstRows[i]), rows[i]);
++    }
+ 
+ #endif
+ }
