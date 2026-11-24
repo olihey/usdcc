@@ -6,7 +6,7 @@ Material Editor. The pack framework is [USD_PLUGINS.md](USD_PLUGINS.md).
 **Status (2026-11-24):** phases 1 to 4 passed (§7.1 to §7.4): MoonRay and both of its render delegates,
 in-process and through a local Arras session, build against the published OpenUSD asset as a pack,
 `deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
-Its licences are read, and a Linux release attaches it as a download of its own (§7.5), once CI
+Its licences are read (§3.1), and a Linux release attaches it as a download of its own (§7.5), once CI
 has published the pack. **Linux x64 only: no Windows, by decision.**
 
 ## 1. Short answers
@@ -101,7 +101,7 @@ renderer stays hidden on an older CPU. Linux on Arm is out of scope.
 - All of it is Apache-2.0: the release needs `LICENSE`, upstream's `THIRD-PARTY.md` and our
   changed files marked as changed. There is no `NOTICE` file in the top repository.
 - `THIRD-PARTY.md` names one text once under GPL or MIT, now public domain, and the JSON
-  License ("good, not evil"). Which shipped code that second one covers has to be checked.
+  License ("good, not evil"). §3.1 has which code that second one covers: none that ships.
 - Shipped libraries are permissive (Apache-2.0, MIT, BSD, zlib, MPL-2.0 for older OpenVDB
   versions). libmicrohttpd (LGPL) is for Arras's HTTP server, which a local session shouldn't need (§2.1); if it is needed, it ships as a replaceable shared library.
 - GPU mode later: CUDA runtime and OptiX terms are read first.
@@ -110,34 +110,59 @@ renderer stays hidden on an older CPU. Linux on Arm is out of scope.
 
 ### 3.1 The pack's licences, read (2026-11-24)
 
-What `licenses/usd-plugins/moonray/` holds, and what it covers. All of it is permissive; nothing
-asks for source to be offered.
+What `licenses/usd-plugins/moonray/` holds, what it covers, and what it lacks. Read: the texts, and
+MoonRay's and Arras's C++ and ISPC sources searched for other owners, licences and web addresses. A search, not
+a legal review. No copyleft library ships. The three points it found are fixed in the
+hook and a patch, below; the first pack published (from PR #85) predates that.
 
 | Folder | Licence | Covers |
 |---|---|---|
-| `moonray`, `moonray-*`, `arras-arras4_core`, `cmake_modules` | Apache-2.0 | MoonRay, Arras, hdMoonray. No `NOTICE` file in any of them |
-| `moonray/LICENSE-THIRD-PARTY.md` | Apache-2.0, BSD-3/2-Clause, public domain | Code MoonRay took from Embree, OpenImageIO, OSL (LPE), pbrt, Gustavson's noise, Kensler's sampling, OpenUSD |
+| `moonray`, `moonray-*`, `arras-arras4_core`, `cmake_modules` | Apache-2.0, one text in all 11 | MoonRay, Arras, hdMoonray. No `NOTICE` file in any of them |
+| `moonray/LICENSE-THIRD-PARTY.md` | Apache-2.0, BSD-3/2-Clause, public domain; Kensler's has no licence text | Code MoonRay took from Embree, OpenImageIO, OSL (LPE), pbrt, Gustavson's noise, Kensler's sampling, OpenUSD |
+| `moonray/LICENSE-OSL-LPE` | BSD-3-Clause | The OSL release the LPE sources are from |
+| `moonray/LICENSE-xoolive-geodesy` | MIT | `atan` in scene_rdl2's `ssef.h` and `avxf.h` |
 | `jsoncpp` | MIT, or public domain | JsonCpp |
-| `log4cplus` | Apache-2.0 and BSD-2-Clause, by file | log4cplus |
+| `log4cplus` | Apache-2.0 or BSD-2-Clause, by file; its thread pool zlib-style | log4cplus |
 | `lua` | MIT (from the end of `lua.h`: Lua has no licence file) | Lua, linked into scene_rdl2 |
 | `random123` | BSD-3-Clause | Random123, headers |
-| `openssl` | Apache-2.0 | OpenSSL 3, linked into libcurl |
+| `openssl` | Apache-2.0 | OpenSSL 3, static, for libcurl |
 | `curl` | curl licence (MIT-style) | libcurl |
-| `oidn` | Apache-2.0; its notices: oneDNN (Apache-2.0, BSD-3-Clause, MIT), the weights' PyTorch code (BSD-3-Clause) | Open Image Denoise, CPU only |
+| `oidn` | Apache-2.0, the same text as its weights' | Open Image Denoise, CPU only, and its weights |
 | `boost` | Boost Software License 1.0 | Boost.ProgramOptions |
 
-- **The JSON License** in `THIRD-PARTY.md` is inside its OpenUSD part: it's OpenUSD's own
-  NOTICE, about RapidJSON's JSON_checker test files. usdcc already ships that NOTICE with
-  OpenUSD, and no MoonRay code is under it.
+Fixed (the first pack published lacks these):
+
+- **Sony Pictures Imageworks' BSD-3-Clause notice**, at the top of the LPE sources from OSL
+  (`rendering/lpe/osl`): `THIRD-PARTY.md` has only OSL's newer notice, with another copyright line. The hook
+  takes it from those sources into `moonray/LICENSE-OSL-LPE`, and stops if they don't all carry the same one.
+- **xoolive/geodesy, MIT:** the `atan` of `scene_rdl2/lib/common/math/ssef.h` and `avxf.h` is from it, says each.
+  Its notice, in neither the sources nor `THIRD-PARTY.md`, is `moonray/LICENSE-xoolive-geodesy`.
+- **Stack Overflow 25622745:** `MathUtil.h` cited it at one 8x8 transpose, and its inverse had the same
+  instructions. Posts there are under CC BY-SA, a share-alike licence, so
+  `patches/moonray-own-transpose.patch` replaces both with our own.
+
+Less clear-cut, left as it is: Kensler's `randfloat` (from a Pixar paper) has no licence text, and geodesy's
+`sse2_math.h` says it is inspired by Cephes, whose terms haven't been looked up.
+
+Settled:
+
+- **skeeto/hash-prospector**, where the sampler's hash functions are from, is under the Unlicense (public domain).
+- **`sse_special.h`** has Cephes-named logarithm constants and no origin. Nothing compiled includes it.
+- **oneDNN isn't in the pack:** no object of it was compiled and no `dnnl` or `xbyak` string is in the three
+  libraries. Open Image Denoise's own third-party texts ship all the same; what else they name (PyTorch, Catch2,
+  CUTLASS, composable_kernel, DPC++) is for training, tests and other devices.
+- **The JSON License** in `THIRD-PARTY.md` is inside its OpenUSD part, which repeats OpenUSD's
+  `LICENSE.txt` (not its `NOTICE.txt`). RapidJSON says there that only its `bin/jsonchecker` is under it.
+  usdcc ships that `LICENSE.txt`, and no RapidJSON was found in MoonRay's sources.
 - **libmicrohttpd (LGPL-2.1) isn't shipped:** only Arras's HTTP server, `libhttpserver.so`, links
   it, and nothing in a local session loads that. The hook ships only what the plugins, `execComp`,
-  the shaders and the sessions' computations load, which also leaves out CppUnit's test library
-  and Arras's test computations (8 of MoonRay's 72 libraries, and the 14 `Test*` shaders).
-- **From the system, not shipped:** libuuid (BSD-3-Clause, in every distribution's base),
-  libatomic and the GCC runtime (GCC Runtime Library Exception), libfreetype (see §7.4).
-- **Apache-2.0 §4(b)**, changed files marked: the three patches change upstream files, and the
-  pack's `SOURCES.txt` names each patch and where it applies. The new files the hdMoonray patch adds
-  carry their own header.
+  the shaders and the sessions' computations load, which also leaves out the library linked with CppUnit
+  and Arras's test computations (8 of MoonRay's 72 libraries, and the 13 `Test*` shaders).
+- **From the system, not shipped:** libuuid, libatomic and the GCC runtime, zlib; libfreetype (§7.5).
+  libatomic isn't on every install.
+- **Apache-2.0 §4(b)**, changed files marked: the pack's `SOURCES.txt` names each patch and where it
+  applies. Of the files the patches change only `MathUtil.h`
+  says so itself.
 
 ## 4. Size
 
@@ -347,7 +372,7 @@ The blank picture says nothing about why; usdcc's log didn't show a reason that 
 ### 7.4 Results of phase 4, the pack (2026-11-24)
 
 `deps/usd-plugins/moonray.json` pins OpenMoonRay v2026.29.1, the ten submodules it needs (not rats' test
-images, the GUIs or the DCC plugins), the three patches, each in its submodule, and the dependencies'
+images, the GUIs or the DCC plugins), the four patches, each in its submodule, and the dependencies'
 archives with their SHA-256. `"set": "optional"`, `"publish": false`, `linux-x64` only.
 
 **What changed in the tools:**
@@ -397,9 +422,9 @@ without building the others.
   beside usdcc's 154 MB, unpacked over the usdcc folder. `release.yml`'s Linux job makes it with
   `tools/deploy.py --optional-packs` (USD_PLUGINS.md §5).
 - **Licences read** (§3.1). The pack now ships only the MoonRay libraries something loads: 64 of 72,
-  without Arras's HTTP server (and so without libmicrohttpd), the test libraries and the 14 test
+  without Arras's HTTP server (and so without libmicrohttpd), the test libraries and the 13 test
   shaders. It also carries Lua's notice, MoonRay's `THIRD-PARTY.md` and Open Image Denoise's
-  third-party notices. 274 files.
+  third-party notices, and the two of §3.1. 276 files.
 - **FreeType:** only Arras's client (`libclient_receiver.so`, its telemetry overlay) links
   libfreetype. In a deploy, the pack's RUNPATH finds the deploy's, which is Qt's. Checked: the
   process maps one libfreetype, the deploy's `lib/libfreetype.so.6.20.6`.
@@ -412,11 +437,12 @@ without building the others.
     1.3 s through Arras);
   - nothing outside the deploy and `/usr/lib` is mapped, and no `execComp` is left.
 
-  The WSL build had no PySide6 module, so the release's smoke test itself (which needs it) didn't
+  The WSL build was an older usdcc and had no PySide6 module, so the release's smoke test itself (which needs it) didn't
   run there.
 
 **Not done:**
 
+- Publishing the pack with §3.1's fixes: it gets a new name, so a release takes it once CI has built it.
 - A release with it: the pack has to be published first (`deps-usd-plugins.yml`, after the merge).
   Until then `release.yml`'s Linux job fails, as it does for a missing standard pack.
 - Boost's headers came from the Boost download's install, not the asset's (same version, 1.80).
