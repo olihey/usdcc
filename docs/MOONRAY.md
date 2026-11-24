@@ -3,10 +3,9 @@
 Building DreamWorks' MoonRay as a USD plugin pack, shipping it, and its nodes in the
 Material Editor. The pack framework is [USD_PLUGINS.md](USD_PLUGINS.md).
 
-**Status (2026-11-24):** phase 1 passed (§7.1) **against the OpenUSD before phase 4 of USD_PLUGINS.md**:
-the renderer and its shaders build and render on Ubuntu 24.04. It has to be repeated against the
-current one, with oneTBB and OpenVDB. hdMoonray and the rest are a plan. **Linux x64 only:
-no Windows, by decision.**
+**Status (2026-11-24):** phases 1 to 3 passed (§7.1 to §7.3): MoonRay and both of its render delegates,
+in-process and through a local Arras session, build against the published OpenUSD asset and render in usdcc's viewport
+on Ubuntu 24.04 in WSL. There is no pack yet. **Linux x64 only: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -14,7 +13,7 @@ no Windows, by decision.**
 |---|---|
 | Can a release have it? | Yes by licence, on Linux. As a **separate download** (`optional` set), because of its size |
 | Licence | Apache-2.0, as is every MoonRay repository it needs. usdcc stays BSD-3-Clause (§3) |
-| Size | CPU only, 255 MB installed and 166 MB as `tar.xz`, measured without hdMoonray and Arras (§7.1). The Linux release is a 166 MB `tar.xz` (26.11.8), so the release would about double. Open Image Denoise adds 46 MB |
+| Size | CPU only, 245 MB installed and 165 MB as `tar.xz`, measured without hdMoonray and Arras (§7.1). The Linux release is a 166 MB `tar.xz` (26.11.8), so the release would about double. Open Image Denoise adds 46 MB |
 | Nodes in the Material Editor | Yes, about 100 materials, maps, displacements, volumes and normal maps, after a port of MoonRay's Sdr plugins (§5) |
 | MaterialX | **Only its pattern nodes, so not usable yet.** No BSDF or surface shader; `standard_surface` and `open_pbr_surface` don't render (§6). UsdPreviewSurface does |
 
@@ -28,11 +27,7 @@ aren't used. macOS follows usdcc's own macOS build.
 
 ### What we write ourselves
 
-1. **hdMoonray on OpenUSD 26.08.** Its code has version checks up to 23.11;
-   upstream's superbuild pins USD 23.08, with later fixes for 25.5.
-   `IsSupported()`'s signature and scene index emulation are known changes. usdcc feeds delegates
-   through scene indices, so implicit shapes (Sphere, Cube) may need the small plugin Gatling
-   needed (`gatling-implicit-surfaces.patch`).
+1. **hdMoonray on OpenUSD 26.08.** Done for the in-process plugin (§7.2).
 2. **Both render delegates** (§2.1), sharing `hydramoonray` and one MoonRay. In-process first
    (phase 2), Arras, local only, after it (phase 3). `hd_moonray_debug` is shown as "MoonRay
    (in-process)", `hd_moonray` as "MoonRay".
@@ -63,7 +58,8 @@ names, and the MoonRay libraries and shaders, almost all of the size, are there 
 - **In-process** has the fewest parts, and is how Storm and Embree run. Upstream's README warns that its
   Restart setting does not work and that it **locked up Houdini 19 until the render finished**.
 - **Arras, local** starts MoonRay as a child program, `execComp`, with no server or node
-  service. It is what upstream uses, and should be the default if it works as well as expected.
+  service. It is what upstream uses. **It is the one to recommend:** two of the crash tests
+  (§7.3) take usdcc down in-process and not through Arras.
 - Either can be dropped if it fails its phase, without changing the other.
 
 Arras adds:
@@ -79,20 +75,20 @@ Arras adds:
 Remote hosts and the farm stay out: they need Arras's coordinator and node services. The
 "Use Remote Hosts" settings are hidden.
 
-Both plugins say `priority` 99. Check which renderer USD then picks as its default, and lower it, so
-that installing the pack doesn't change usdcc's.
+Both plugins say `priority` 100. The order is ascending (Storm 0, Embree 99): with 0, or less, MoonRay
+became the default renderer of a fresh profile.
 
 ### Dependencies
 
 | Library | OpenUSD asset | MoonRay | Plan |
 |---|---|---|---|
-| TBB | oneTBB 2021.12 since phase 4; 2020.3 in the one tried | 2020.3.3 on Rocky 9 | **Open.** Three source files outside the tests include TBB headers that oneTBB removed, so patches are needed |
+| TBB | oneTBB 2021.12 | 2020.3.3 on Rocky 9 | The asset's. MoonRay's CMake sees the version and defines `TBB_ONEAPI`; no patch |
 | Embree | 4.3.3: ray masks on, AVX-512 on, ISPC support off | 4.2.0 with ISPC support, ignore-invalid-rays, AVX-512 | **The asset's, no rebuild** (§7.1): it has the ISPC headers, and exports `rtcIntersect4/8/16`, all that MoonRay's own ISPC code calls |
 | OpenImageIO, OpenEXR, OpenColorIO | 2.5, 3.1, 2.2 | 2.4.8, 3.1.8, 2.2.1 | The asset's |
 | OpenSubdiv | 3.6.1 | 3.5.0 | The asset's |
 | Boost | 1.80, without program_options | program_options too | The asset's, and `libboost_program_options` 1.80 in the pack |
 | Lua, JsonCpp, log4cplus, Random123 | none | needed | Upstream's `building/` scripts, static where possible |
-| OpenVDB | 10.1 since phase 4; none in the one tried | 9.1 on Rocky 9 | The asset's, untested; the trial built 10.0.1 |
+| OpenVDB | 10.1 | 9.1 on Rocky 9 | The asset's, blosc included |
 | Open Image Denoise | none | 2.3.3 | Needed to build. Only `libdenoiser.so` and the `denoise` tool link it; the renderer didn't load it. Whether hdMoonray or Arras needs `libdenoiser` is phase 2 and 3 |
 
 CPU only (`-DMOONRAY_USE_OPTIX=NO`), no Qt apps. The compile options ask for AVX2, so the
@@ -186,7 +182,6 @@ Work:
 | Phase | Does | Done when |
 |---|---|---|
 | **1. Go or no-go** (Ubuntu 24.04 in WSL) | scene_rdl2, moonray and moonshine against the Linux asset's TBB, Embree and OpenImageIO | `moonray` renders `rectangle.rdla`, loading none of its own copies of the asset's libraries |
-| **1b. Again with the current asset** | The same with oneTBB and the asset's OpenVDB, with patches for the removed TBB headers | As phase 1 |
 | **2. hdMoonray** | Port to 26.08, in-process renderer, scene index plugin | Renders in usdcc's viewport on Linux: meshes, implicit shapes, lights, UsdPreviewSurface, responsive while rendering, camera moves, edits, resize, switching away and back, exit |
 | **3. Arras, local** | Its libraries, `execComp`, the session files, the environment | The same list of checks; killing `execComp` leaves usdcc running; none left after quitting |
 | **3b. Crash test of both** | Bad textures, huge meshes, rapid edits, quitting mid-render | The default is chosen; one that fails is left out |
@@ -200,32 +195,121 @@ Phase 1 decides the rest and is the cheapest. Phase 2 is the largest risk.
 
 ### 7.1 Results of phase 1 (2026-11-24)
 
-WSL, Ubuntu 24.04, GCC 13.3, OpenMoonRay v2026.29.1, against a Linux OpenUSD 26.08 for
-Python 3.13 **from before phase 4** (TBB 2020.3, no OpenVDB); CPU only. Under `~/mr` there.
+WSL, Ubuntu 24.04, GCC 13.3, OpenMoonRay v2026.29.1, CPU only, against
+`usd-70c45e83b-76ce049f-linux-x64-py313` (oneTBB 2021.12, OpenVDB 10.1). Under `~/mr` there:
+`env2.sh`, `b2`, `inst2`. A first try against an OpenUSD from before oneTBB passed too.
 
-- **Passed.** `moonray` renders `rectangle.rdla` and a scene with DwaBaseMaterial,
-  UsdPreviewSurface, a map, an EnvLight and a RectLight, in scalar and vector mode, with means
-  within 0.1 % of each other and no NaNs.
-- **No duplicates.** It loads the asset's TBB 2020.3, Embree, OpenImageIO, OpenEXR, OpenColorIO,
-  OpenSubdiv and Boost. No library name is loaded twice, and none of the pack's is in the asset.
-- **Time.** About 5 minutes for MoonRay on 32 threads, dependencies apart.
-- **Size**, stripped: 255 MB (`librendering_pbr.so` alone 199 MB), 166 MB as `tar.xz`.
+- **Passed.** `rectangle.rdla` and a scene with DwaBaseMaterial, UsdPreviewSurface, a map, an EnvLight
+  and a RectLight, in scalar and vector mode: no NaNs, and vector mode the same as against the
+  earlier OpenUSD (mean error 0.00001 at most). A textured sphere and a blosc-compressed
+  VDB fog render.
+- **No conflicts.** It loads the asset's TBB, Embree, OpenVDB, OpenImageIO, OpenEXR, OpenColorIO,
+  OpenSubdiv and Boost. No library is loaded twice, and no library of the pack has the name of one
+  in the asset.
+- **Embree as it is:** the asset has its ISPC headers and exports `rtcIntersect4/8/16`.
+- **Time.** About 5 minutes on 32 threads, dependencies apart.
+- **Size**, stripped: 245 MB (`librendering_pbr.so` alone 199 MB), 165 MB as `tar.xz`.
   Open Image Denoise: 51 MB, 46 MB as `tar.xz`.
+- **Two source changes**, to carry as patches:
+  - scene_rdl2 without its Python module (`add_subdirectory(mod)`), which wants Boost.Python.
+  - **Plain textures.** As released, MoonRay accepts only tiled, mip-mapped textures
+    (`.tx`): a PNG shades black, with "unknown oiio sample failure". `TextureSampler.cc` has the
+    other choice in an `#else`; with it a PNG renders exactly as its `.tx`. USD scenes have PNG and JPEG, so we
+    need it. The texture system is OpenImageIO's shared one, so in-process these settings apply to
+    anything else in usdcc that uses it: check in phase 2.
 - **What the build needs:**
   - Unix Makefiles: Ninja stops at the ISPC headers.
   - `-include functional -include cstdint -include memory -include string`: headers GCC 13 no longer
     includes indirectly.
   - `-Wl,--no-as-needed`: MoonRay's libraries depend on each other in circles and Ubuntu's GCC drops
     the "unused" ones.
-  - scene_rdl2's Python module off (`add_subdirectory(mod)`): it wants Boost.Python. The only
-    source change.
-  - `luac` on `PATH`: without it the build goes on with an empty embedded Lua library.
+  - `luac` on `PATH`: without it the build goes on with an empty embedded Lua library. The build
+    script checks that `rdlalib.cc` isn't empty (32 KB).
   - `rdl2_json_exporter` on `PATH` for moonray and moonshine; the 174 DSOs come with 186 files
     in `coredata/`, for §5.
+  - Boost.program_options 1.80, which the asset lacks. The trial put it into a copy of it; the pack
+    brings it.
 - **Dependencies** at upstream's versions (Lua 5.4.4, JsonCpp 1.9.5, log4cplus 2.0.5, Random123 1.14.0,
-  ISPC 1.21, Open Image Denoise 2.3.3), OpenVDB 10.0.1 (blosc off), and static OpenSSL 3.0.15.
-- **Not covered: the current OpenUSD asset** (oneTBB, its own OpenVDB, whose copy the pack must then not
-  bring); the MoonRay build is redone against it first. Also hdMoonray, moonshine_usd, Arras, textures and VDB files, the unit tests.
+  ISPC 1.21, Open Image Denoise 2.3.3), and static OpenSSL 3.0.15.
+- **For the in-process delegate:** MoonRay sets a `tbb::global_control` for its thread count, which is
+  for the whole process: it can limit OpenUSD's own threads while a MoonRay renderer exists.
+- **Open:** the VDB's left edge looks cut off in the picture; not looked into.
+- **Not covered:** hdMoonray, moonshine_usd, Arras, the unit tests.
+
+### 7.2 Results of phase 2 (2026-11-24)
+
+hdMoonray of v2026.29.1 with `deps/usd-plugins/patches/moonray-hdmoonray-26.08.patch`, beside the
+two small patches of §7.1 (`moonray-plain-textures.patch`, `moonray-no-boost-python.patch`). usdcc
+was built in WSL from this branch against the same asset and driven by a script under Xvfb, with the
+plugin and its folders given through the environment.
+
+**What the patch does:**
+
+- `IsSupported()` with 26.08's arguments, the only compile error.
+- CMake: `HDMOONRAY_ARRAS` (off here) for the Arras plugin and the command line tools; no Vulkan then, and no Boost.Python.
+- A scene index plugin (`plugin/common`): implicit shapes to meshes, as Gatling needed, and
+  OpenUSD's light linking scene index, without which light linking was ignored.
+- Light link categories that aren't there are read as empty, not as an error.
+- The "requires emulation" coding errors of the change tracker are held back where hdMoonray marks prims
+  dirty itself. OpenUSD still marks them, so a light added later lights the scene.
+- A subdivision surface drawn at refine level 0 gets smooth normals, as in Storm.
+- Names "MoonRay" and "MoonRay (in-process)", `priority` 100.
+
+**In usdcc's viewport,** each looked at in a picture: meshes, implicit shapes, UsdPreviewSurface with a PNG texture,
+dome and rect lights; editing a transform and a material, adding a light and a
+shape, deleting prims, moving the camera, 40 camera moves as in a drag, resizing, to Storm and back, and six quick
+switches. Grid and axes are hidden by objects as with Storm, to within a pixel or two. Quitting: exit
+code 0 in the long run and three times while MoonRay was rendering.
+
+**Responsive.** The longest pause of the UI thread was 0.42 s with the final build (0.54 s in
+an earlier run), most under 0.2 s. Houdini's lock-up (§2.1) wasn't seen.
+
+**Through UsdImaging without the app:** light linking, a point instancer, native instances and
+curves.
+
+**Different from Storm, or open:**
+
+- The dome light isn't drawn in the background, only its light.
+- Curves at refine level 0 are polylines.
+- Not tried: scenes of real size, animation and motion blur, an orthographic view, geom subsets,
+  displacement, volumes through Hydra, AOVs and selection picking, `doubleSided` and transparency, a GPU other than
+  the one here, native Linux outside WSL.
+- The process-wide thread limit and shared texture system (§7.1): no effect seen, not measured.
+
+### 7.3 Results of phase 3 (2026-11-24)
+
+The Arras libraries of v2026.29.1 (arras4_core, mcrt_messages, mcrt_dataio, mcrt_computation) build against
+the same asset unchanged. The hdMoonray patch adds `HDMOONRAY_TOOLS` (off) beside `HDMOONRAY_ARRAS` (on),
+so that only the plugin and the session files are built, and an `IsSupported()` for `hd_moonray` that says no, with the
+reason, when `ARRAS_SESSION_PATH` has no MoonRay session definitions or `execComp` isn't on `PATH`.
+Without that the first broke the renderer's creation with an exception and the second left it
+retrying to connect.
+
+**What it needs:** libcurl (8.11.1 here, with static OpenSSL), libuuid (the system's), FreeType
+(the system's, for mcrt_dataio; to check against the copy usdcc's Qt has), Boost headers the asset leaves out
+(`boost/algorithm`). libmicrohttpd is needed to build arras4_core but nothing shipped links it. The
+session files are 40 KB, the plugin, `execComp` and the computation library under 1 MB together.
+
+**In usdcc's viewport,** the whole run of §7.2 again, through `MoonRay`: same pictures, longest UI pause 0.32 s.
+Its settings are 24, the 14 of the in-process one and Arras's own (hosts, denoising, ...).
+
+**Its process:**
+
+- Killed with SIGKILL while rendering: usdcc goes on, the picture stays, and the next edit starts a new
+  one. Killed five times in a row: the same.
+- None is left after quitting, after switching to Storm, nor when usdcc ends with `os._exit()` while
+  it renders. It goes within a second, once its socket closes.
+
+**Crash tests,** 19 scenes, each opened with both delegates (`~/mr/bad`):
+
+| Scene | In-process | Arras |
+|---|---|---|
+| A face with 2 points (`faceVertexCounts` 2) | **usdcc aborts** | usdcc goes on; picture blank |
+| Two shaders connected to each other in a loop | **usdcc crashes** (SIGSEGV) | usdcc goes on; picture blank |
+| Missing, broken and wrong-format textures; indices out of range or negative; counts that don't add up; an empty mesh; NaN and infinite points; primvars too short; an unknown shader; a MaterialX-only material; zero scale; a 2-point cubic curve; an orthographic camera | fine | fine |
+| 4 million quads; 5,000 prims | renders | renders |
+
+The blank picture says nothing about why; usdcc's log didn't show a reason that I found.
 
 ## 8. Decisions
 

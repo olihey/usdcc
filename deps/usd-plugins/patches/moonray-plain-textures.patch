@@ -1,0 +1,13 @@
+diff --git a/lib/rendering/texturing/sampler/TextureSampler.cc b/lib/rendering/texturing/sampler/TextureSampler.cc
+index 3961fd0..14b8226 100644
+--- a/lib/rendering/texturing/sampler/TextureSampler.cc
++++ b/lib/rendering/texturing/sampler/TextureSampler.cc
+@@ -55,7 +55,7 @@ TextureSampler::TextureSampler()
+ 
+     mTextureSystem = OIIO::TextureSystem::create(true);
+ 
+-#if 1
++#if 0
+     // Specifically disable auto-mipping and auto-tiling
+     mTextureSystem->attribute("automip", int(false));
+     mTextureSystem->attribute("autotile", int(0));
