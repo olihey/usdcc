@@ -81,6 +81,20 @@ USDCC_TEST(python_runtime_starts) {
     CHECK(PythonRuntime::instance() != &second, "the first stays the instance");
 }
 
+// pxr.UsdAbc and pxr.UsdDraco link their plugins, which aren't with OpenUSD's other
+// libraries. Not every OpenUSD has them (tools/build_usd.py's --alembic and --draco).
+USDCC_TEST(python_imports_the_modules_of_usd_plugins) {
+    for (const char* name : {"pxr.UsdAbc", "pxr.UsdDraco"}) {
+        ScopedCollect collect;
+        const bool ok = python().runString(std::string("import importlib, importlib.util\n"
+                                                       "if importlib.util.find_spec('") +
+                                               name + "'):\n    importlib.import_module('" + name + "')\n",
+                                           "<plugin modules test>");
+        const auto errors = collect.sink->where("python.exception");
+        CHECK(ok, "%s imports: %s", name, errors.empty() ? "?" : errors[0].message.c_str());
+    }
+}
+
 USDCC_TEST(python_output_reaches_the_log) {
     ScopedCollect collect;
     const bool ok = python().runString(
