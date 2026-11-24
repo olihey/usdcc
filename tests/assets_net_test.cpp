@@ -1675,3 +1675,24 @@ USDCC_TEST(assets_source_logins_stay_with_their_server) {
     CHECK(refreshSource(entry, kPatience).what == Refreshed::Failed, "and nothing larger than a configuration is");
     CHECK(loadSource(entry, {}).config.endpoints.at("nas").url == "https://moved.invalid", "the last good copy stays");
 }
+
+USDCC_TEST(assets_http_threads_end) {
+    // A thread whose request died in a name lookup has to end: cleaning libcurl up as it did
+    // could wait for ever, with the loader lock held.
+    Net net;
+    for (int round = 0; round < 5; ++round) {
+        std::vector<std::thread> threads;
+        for (int i = 0; i < 8; ++i) {
+            threads.emplace_back([round, i]() {
+                HttpRequest request;
+                request.url = "https://host-" + std::to_string(round) + "-" + std::to_string(i) + ".invalid/a.json";
+                request.connectTimeout = std::chrono::milliseconds(i % 2 ? 1 : 200);
+                Progress progress;
+                Cancel cancel;
+                httpRequest(request, progress, cancel);
+            });
+        }
+        for (std::thread& thread : threads) thread.join();
+    }
+    CHECK(true, "they did");
+}

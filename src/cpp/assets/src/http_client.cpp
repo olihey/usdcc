@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <ctime>
 #include <mutex>
+#include <vector>
 #include <set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -36,11 +37,27 @@ void initCurl() {
     std::call_once(once, []() { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
-// One handle per thread, so that a thread's requests reuse its connections.
+// The handles of threads that have ended, for the next ones. Never destroyed.
+struct IdleHandles {
+    std::mutex mutex;
+    std::vector<CURL*> handles;
+};
+
+IdleHandles& idleHandles() {
+    static IdleHandles* instance = new IdleHandles;
+    return *instance;
+}
+
+// One handle per thread, so that a thread's requests reuse its connections. It isn't cleaned
+// up with the thread: Windows runs this destructor with the loader lock held, and libcurl
+// would wait there for its name lookup's thread, which needs that lock to end.
 struct ThreadHandle {
     CURL* handle = nullptr;
     ~ThreadHandle() {
-        if (handle) curl_easy_cleanup(handle);
+        if (!handle) return;
+        IdleHandles& idle = idleHandles();
+        std::lock_guard<std::mutex> lock(idle.mutex);
+        idle.handles.push_back(handle);
     }
 };
 
@@ -48,6 +65,14 @@ CURL* threadHandle() {
     thread_local ThreadHandle mine;
     if (!mine.handle) {
         initCurl();
+        IdleHandles& idle = idleHandles();
+        std::lock_guard<std::mutex> lock(idle.mutex);
+        if (!idle.handles.empty()) {
+            mine.handle = idle.handles.back();
+            idle.handles.pop_back();
+        }
+    }
+    if (!mine.handle) {
         mine.handle = curl_easy_init();
     } else {
         // Options go, connections stay.

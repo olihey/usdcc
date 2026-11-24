@@ -332,7 +332,9 @@ A new version is a new file, never an overwrite:
 **libcurl,** with Windows' own TLS (Schannel) there and OpenSSL elsewhere. Schannel trusts the
 Windows certificate store, company CAs included, with nothing to configure, and brings no second
 OpenSSL into a process that already has PySide6's (§12). One handle per thread, which keeps its
-connections between requests.
+connections between requests. A thread that ends leaves its handle to the next (2026-11-24): cleaned
+up as the thread ended, with Windows' loader lock held, it could wait for ever for libcurl's name
+lookup.
 Timeouts: 5 s to connect, 60 s with no data, both configurable. Redirects only on the same host,
 unless the protocol says otherwise, as plain HTTP does; credentials never follow one to another host.
 Proxies come from the system or the usual environment variables. No Qt Network: resolver calls come
