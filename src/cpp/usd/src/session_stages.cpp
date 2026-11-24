@@ -11,8 +11,10 @@
 #include "usdcc/usd/undo_manager.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/core/toast.h"
 
 #include <pxr/base/tf/errorMark.h>
+#include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stageLoadRules.h>
@@ -46,6 +48,14 @@ std::optional<PXR_NS::UsdStageLoadRules::Rule> ruleFromName(const QString& name)
 }
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
+
+// A layer by what finds it again: its file, or the path that names it. Not a server's resolved
+// path, which holds a stack id only this process and this environment know
+// (docs/REMOTE_ASSETS.md §5).
+QString layerName(const PXR_NS::SdfLayerHandle& layer) {
+    const std::string real = layer->GetRealPath();
+    return qs(real.empty() || !isLocalAssetPath(real) ? layer->GetIdentifier() : real);
+}
 }  // namespace
 
 bool hasFile(const StageRefPtr& stage) {
@@ -56,18 +66,17 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
     QJsonObject state;
     const PXR_NS::UsdStageRefPtr& usdStage = stage->usdStage();
     if (hasFile(stage)) {
-        // A root on a server by the path that names it, not the resolved one: that holds
-        // a stack id only this process knows (docs/REMOTE_ASSETS.md §5).
-        const std::string real = usdStage->GetRootLayer()->GetRealPath();
-        state.insert(QStringLiteral("file"), qs(real.empty() || !isLocalAssetPath(real)
-                                                    ? usdStage->GetRootLayer()->GetIdentifier()
-                                                    : real));
-        const std::string environment = stageAssetEnvironment(usdStage);
-        if (!environment.empty()) state.insert(QStringLiteral("assetEnvironment"), qs(environment));
+        state.insert(QStringLiteral("file"), layerName(usdStage->GetRootLayer()));
     } else {
         // In memory only: what's in it is all there is of it.
         std::string text;
         if (usdStage->GetRootLayer()->ExportToString(&text)) state.insert(QStringLiteral("inMemory"), qs(text));
+    }
+
+    const std::string environment = stageAssetEnvironment(usdStage);
+    if (!environment.empty()) state.insert(QStringLiteral("assetEnvironment"), qs(environment));
+    if (!stage->pendingAssetEnvironment().empty()) {
+        state.insert(QStringLiteral("pendingAssetEnvironment"), qs(stage->pendingAssetEnvironment()));
     }
 
     QJsonArray selection;
@@ -78,8 +87,7 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
     if (target && target == usdStage->GetSessionLayer()) {
         state.insert(QStringLiteral("editTarget"), QStringLiteral("session"));
     } else if (target && target != usdStage->GetRootLayer()) {
-        state.insert(QStringLiteral("editTarget"), qs(target->GetRealPath().empty() ? target->GetIdentifier()
-                                                                                       : target->GetRealPath()));
+        state.insert(QStringLiteral("editTarget"), layerName(target));
     }
     if (const auto& variant = stage->variantEdit()) {
         QJsonObject edit;
@@ -129,8 +137,26 @@ QJsonObject capture(const StageManager& stageManager, const StageRefPtr& stage) 
 }
 
 PXR_NS::UsdStageRefPtr open(const QJsonObject& state, std::vector<std::string>* errors) {
+    // In the environment it was in, or was to be in once reopened.
+    std::string environment;
+    for (const char* key : {"pendingAssetEnvironment", "assetEnvironment"}) {
+        const std::string wanted = state.value(QLatin1String(key)).toString().toStdString();
+        if (wanted.empty()) continue;
+        if (hasAssetEnvironment(wanted)) {
+            environment = wanted;
+            break;
+        }
+        // Other servers than it was saved with may give other files: said, never silent.
+        const QString what = state.contains(QStringLiteral("inMemory"))
+                                 ? QObject::tr("A stage in memory")
+                                 : QFileInfo(state.value(QStringLiteral("file")).toString()).fileName();
+        USDCC_LOG_TOAST(usdcc::core::LogLevel::Warning, "usdcc.session",
+                        "{} was in the asset environment {}, which isn't configured here any more.", what.toStdString(),
+                        wanted);
+    }
     if (state.contains(QStringLiteral("inMemory"))) {
-        PXR_NS::UsdStageRefPtr stage = PXR_NS::UsdStage::CreateInMemory();
+        PXR_NS::UsdStageRefPtr stage =
+            PXR_NS::UsdStage::CreateInMemory("tmp.usda", stageResolverContext(std::string(), environment));
         if (!stage->GetRootLayer()->ImportFromString(state.value(QStringLiteral("inMemory")).toString().toStdString())) {
             if (errors) errors->push_back("its text isn't valid USD any more");
             return nullptr;
@@ -145,10 +171,6 @@ PXR_NS::UsdStageRefPtr open(const QJsonObject& state, std::vector<std::string>* 
     const QString sessionText = state.value(QStringLiteral("sessionLayer")).toString();
     // Only when something has to go in before loading; otherwise the usual way.
     const bool deferLoad = hasRules || !muted.isEmpty() || !sessionText.isEmpty();
-    // In the environment it was in. One the configuration no longer has opens in the default.
-    std::string environment = state.value(QStringLiteral("assetEnvironment")).toString().toStdString();
-    const std::vector<std::string> known = assetEnvironments();
-    if (std::find(known.begin(), known.end(), environment) == known.end()) environment.clear();
     // A stage of the user's own session: as when they opened it, its server may be contacted.
     usdcc::assets::allowHostOfUrl(file);
     PXR_NS::UsdStageRefPtr stage = StageManager::loadUsdStage(
@@ -195,6 +217,8 @@ void apply(StageManager& stageManager, const StageRefPtr& stage, const QJsonObje
     if (target == QLatin1String("session")) {
         stage->setEditTargetLayer(usdStage->GetSessionLayer());
     } else if (!target.isEmpty()) {
+        // Two environments can each have a layer of that name: this stage's.
+        const PXR_NS::ArResolverContextBinder binder(usdStage->GetPathResolverContext());
         const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(target.toStdString());
         if (!layer || !stage->setEditTargetLayer(layer)) {
             warn(QObject::tr("%1: the layer edits went to, %2, isn't in it any more; edits go to its root layer.")

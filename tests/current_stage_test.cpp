@@ -3,6 +3,11 @@
 // (CurrentStageUndoGroup), and the window title says which it is. Runs in
 // usdcc_ui_tests (Qt's offscreen platform).
 #include "test_harness.h"
+#include "usdcc/assets/config.h"
+#include "usdcc/assets/context.h"
+#include "usdcc/usd/asset_environment.h"
+#include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/session_stages.h"
 
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/main_window.h"
@@ -432,4 +437,95 @@ USDCC_TEST(save_stage_as_switches_to_the_file) {
     CHECK(usdcc::usd::saveStageAsAndSwitch(stages, saved, path.toStdString(), &error) == saved &&
               !saved->usdStage()->GetRootLayer()->IsDirty(),
           "its own file: saved in place");
+}
+
+USDCC_TEST(asset_environment_switches_by_reopening) {
+    using usdcc::usd::AssetEnvironmentButton;
+    QTemporaryDir dir;
+    {
+        QFile anim(dir.filePath(QStringLiteral("anim.usda")));
+        if (anim.open(QIODevice::WriteOnly)) anim.write("#usda 1.0\n");
+        QFile shot(dir.filePath(QStringLiteral("shot.usda")));
+        if (shot.open(QIODevice::WriteOnly)) shot.write("#usda 1.0\n(\n    subLayers = [@./anim.usda@]\n)\ndef \"Chair\" {}\n");
+    }
+    usdcc::assets::setDefaultConfig(usdcc::assets::Config::parse(R"({
+        "environment": "prod",
+        "endpoints": { "a": { "scheme": "webdav", "url": "https://a.invalid" } },
+        "environments": { "prod": { "webdav": { "studio": ["a"] } }, "test": { "webdav": { "studio": ["a"] } } }
+    })").value);
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.openStage(dir.filePath(QStringLiteral("shot.usda")).toStdString());
+    const StageRefPtr memory = stages.createStage();
+    CHECK(stage && memory, "the stages open");
+    if (!stage || !memory) return;
+    CHECK(usdcc::usd::stageAssetEnvironment(stage->usdStage()) == "prod" &&
+              usdcc::usd::stageAssetEnvironment(memory->usdStage()) == "prod",
+          "in the default environment, one in memory too");
+    memory->usdStage()->DefinePrim(SdfPath("/Made"));
+    const SdfLayerHandle anim = SdfLayer::Find(dir.filePath(QStringLiteral("anim.usda")).toStdString());
+    stage->setEditTargetLayer(anim);
+    stage->usdStage()->DefinePrim(SdfPath("/Walk"));
+    stages.setSelectedPaths(stage, {SdfPath("/Chair")});
+    stages.setCurrentStage(stage);
+
+    // Not a MainWindow: one made here leaves the UI scale's later tests failing.
+    QWidget window;
+    ads::CDockManager docks(&window);
+    AssetEnvironmentButton button(&stages, &window);
+    CHECK(button.text() == QStringLiteral("prod") && !button.property("attention").toBool(), "the button says which");
+
+    int asked = 0;
+    auto answer = AssetEnvironmentButton::Answer::Cancel;
+    button.ask = [&](const QString&) {
+        ++asked;
+        return answer;
+    };
+    button.pick("test", {stage});
+    CHECK(asked == 1 && stage->pendingAssetEnvironment().empty(), "Cancel changes nothing");
+    answer = AssetEnvironmentButton::Answer::Later;
+    button.pick("test", {stage});
+    CHECK(stage->pendingAssetEnvironment() == "test" && usdcc::usd::stageAssetEnvironment(stage->usdStage()) == "prod",
+          "Later keeps it in the one it has");
+    CHECK(button.text() == QStringLiteral("prod \u2192 test") && button.property("attention").toBool(), "which the button shows: %s",
+          qPrintable(button.text()));
+    const QJsonObject session = usdcc::usd::session_stages::capture(stages, stage);
+    {
+        const UsdStageRefPtr restored = usdcc::usd::session_stages::open(session);
+        CHECK(restored && usdcc::usd::stageAssetEnvironment(restored) == "test", "a session restores it in the pending one");
+    }
+    button.pick("prod", {stage});
+    CHECK(asked == 2 && stage->pendingAssetEnvironment().empty(), "picking its own undoes it, with no question");
+
+    answer = AssetEnvironmentButton::Answer::Reload;
+    button.pick("test", {stage, memory});
+    CHECK(asked == 3, "asked once for both");
+    CHECK(stages.stages().size() == 2, "each in the old one's place");
+    const StageRefPtr now = stages.currentStage();
+    CHECK(now && now != stage && usdcc::usd::stageAssetEnvironment(now->usdStage()) == "test" &&
+              now->pendingAssetEnvironment().empty(),
+          "reopened in it, and current");
+    CHECK(stages.selectedPaths(now) == std::vector<SdfPath>({SdfPath("/Chair")}), "with its selection");
+    CHECK(now->editTargetLayer() == anim && anim->IsDirty() && now->usdStage()->GetPrimAtPath(SdfPath("/Walk")),
+          "its edit target, and the unsaved edit in the same layer");
+    const StageRefPtr other = stages.stages()[0] == now ? stages.stages()[1] : stages.stages()[0];
+    CHECK(usdcc::usd::stageAssetEnvironment(other->usdStage()) == "test" && other->usdStage()->GetPrimAtPath(SdfPath("/Made")),
+          "the one in memory with what's in it");
+
+    QString error;
+    CHECK(!usdcc::usd::reopenInEnvironment(stages, now, "nowhere", nullptr, &error) && !error.isEmpty() &&
+              stages.currentStage() == now,
+          "an unknown environment leaves it alone");
+    usdcc::usd::setReopenGuard([](const StageRefPtr&) { return QStringLiteral("shared"); });
+    CHECK(!usdcc::usd::reopenInEnvironment(stages, now, "prod", nullptr, &error) && error == QStringLiteral("shared"),
+          "nor is one that's shared reopened");
+    usdcc::usd::setReopenGuard({});
+
+    // Save As goes on in the environment it's in; what's pending stays to come.
+    now->setPendingAssetEnvironment("prod");
+    const StageRefPtr saved =
+        usdcc::usd::saveStageAsAndSwitch(stages, now, dir.filePath(QStringLiteral("v2.usda")).toStdString(), &error);
+    CHECK(saved && usdcc::usd::stageAssetEnvironment(saved->usdStage()) == "test" && saved->pendingAssetEnvironment() == "prod",
+          "Save Stage As doesn't switch it");
+    usdcc::assets::useDefaultConfigFile();
 }

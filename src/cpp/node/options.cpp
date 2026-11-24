@@ -27,6 +27,9 @@ void Options::add(QCommandLineParser& parser) {
     parser.addOption({QStringLiteral("no-gpu"),
                       QStringLiteral("No OpenGL: a QCoreApplication, and Storm isn't offered.")});
     parser.addOption({QStringLiteral("json"), QStringLiteral("render, renderers, validate: JSON lines on stdout.")});
+    parser.addOption({QStringLiteral("asset-env"),
+                      QStringLiteral("render, validate: the asset environment (default: USDCC_ASSET_ENV, or the configuration's)."),
+                      QStringLiteral("name")});
     // render.
     parser.addOption({QStringLiteral("settings"), QStringLiteral("render: the RenderSettings prim (default: the stage's)."),
                       QStringLiteral("path")});

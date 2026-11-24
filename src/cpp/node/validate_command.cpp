@@ -94,9 +94,13 @@ int runValidate(const QCommandLineParser& parser, const usdcc::scripting::Plugin
         profile = *found;
     }
 
+    const std::string assetEnvironment = parser.value(QStringLiteral("asset-env")).toStdString();
+    if (parser.isSet(QStringLiteral("asset-env")) && !usdcc::usd::hasAssetEnvironment(assetEnvironment)) {
+        return usage(QStringLiteral("the configuration has no asset environment '%1'.").arg(q(assetEnvironment)));
+    }
     const std::string identifier = QFileInfo::exists(stagePath) ? QFileInfo(stagePath).absoluteFilePath().toStdString()
                                                                 : stagePath.toStdString();
-    const UsdStageRefPtr stage = UsdStage::Open(identifier, usdcc::usd::stageResolverContext(identifier));
+    const UsdStageRefPtr stage = UsdStage::Open(identifier, usdcc::usd::stageResolverContext(identifier, assetEnvironment));
     if (!stage) return usage(QStringLiteral("couldn't open the stage %1.").arg(stagePath));
 
     ValidationRun run(stage, profile->resolve(rules()));

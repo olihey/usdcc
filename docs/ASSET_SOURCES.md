@@ -5,9 +5,9 @@ them, logins that can't go to the wrong studio, configurations from a web servic
 Asset Servers dialog, and the environment in the status bar. Builds on
 [REMOTE_ASSETS.md](REMOTE_ASSETS.md) (the configuration, §4; the dialog, §10.1).
 
-**Status:** planned and its questions decided 2026-11-24 (§13). **Phase 1
-is built** (§10.1). "Checked" means read
-in this repository's code; everything else is an assumption or a proposal.
+**Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 and 2 are built**
+(§10.1, §10.2). "Checked" means read in this repository's code; everything else is an assumption
+or a proposal.
 
 ## 1. Decisions
 
@@ -196,7 +196,9 @@ sources that could be another studio's: it should say so in a toast that offers 
 
 **Renders and validation.** *Checked:*
 
-| Path | Environment today |
+Phase 2 changed this (§10.2). Before it:
+
+| Path | Environment |
 |---|---|
 | Render from the app, on this machine | The stage's: the job flattens and opens its copy with its context |
 | A scene bundle sent to another machine | The stage's: assets are gathered with it bound |
@@ -292,12 +294,50 @@ Built 2026-11-24, for the one configuration there is:
 - **A login nothing uses** says so; its tooltip says a server opened by that address would use it.
 - **Add Login…** starts with an empty id. A user is required: one without is stored as a token.
 
+### 10.2 Phase 2 as built
+
+Built 2026-11-24, as §8 and §9 have it, but for what follows. The code is in
+[asset_environment.h](../src/cpp/usd/include/usdcc/usd/asset_environment.h): `reopenInEnvironment()`
+and the status bar's `AssetEnvironmentButton`.
+
+- **What's pending** is the stage's (`Stage::pendingAssetEnvironment()`). The menu gets **Reload in
+  <environment> Now** while there is one. Nothing else reloads a whole stage, so that's where Later
+  is applied, besides a session.
+- **Sessions** save `"pendingAssetEnvironment"` beside `"assetEnvironment"`, and restore in the
+  pending one. One that isn't configured any more says so in a toast, and the stage opens in the
+  default.
+- **Reopening** opens the new stage on a worker, behind a modal progress dialog, while the old one
+  stays open. Only then does it ask about unsaved layers, and only those the new stage doesn't use:
+  a file both use keeps its edits. Cancel keeps the old stage. The new stage takes the old one's
+  place as Save Stage As does (`replaceStage()`, which both use now).
+- **Save Stage As** keeps the stage in its environment, and what's pending stays pending.
+- **A layer is saved in a session by its path,** not by a server's resolved path, whose stack id
+  only this environment has. The edit target is found in the stage's own context.
+- **New stages** in memory and new files open in the default environment too (before, in the
+  library's, without Settings > Assets' choice).
+- **A shared stage isn't reopened:** reopening would end the share. Picking another environment for
+  it still offers Later, and the question says why Reload won't work.
+  *Changed from §8:* the host's switch doesn't ask the others to reload.
+- **Peers:** the shared stage's info carries the host's `assetEnvironment`. Joining opens the root,
+  and looks up its layers, in it when it's configured here. A stage opened in another one gets a
+  toast naming both, unless no environment is configured here.
+- **Shared scenes** (renders on peers) carry `assetEnvironment` only when a dependency is on a named
+  server; dependencies are listed by their logical path. A peer without that environment lists it
+  as a problem, so the job goes by bundle instead. *Changed from §8:* it isn't failed, since the
+  bundle has the files.
+- **`usdcc_node render` and `validate`** take `--asset-env <name>`; one that isn't configured is a
+  usage error (exit 2).
+- **Tests:** `asset_environment_switches_by_reopening` ([current_stage_test.cpp](../tests/current_stage_test.cpp))
+  and a shared scene with an unknown environment in `render_network_bundle_and_shared`. The reopening
+  test has no panel: an Outliner made and destroyed without being shown makes the UI scale tests
+  that run later fail (*not looked into*).
+
 ## 11. Phases
 
 | # | What | Needs |
 |---|---|---|
 | 1 | (built) Logins: the list of saved ones, the tab, the dropdown and the empty-password fix | |
-| 2 | The status bar, switching by reopening, the environment in shared scenes and `--asset-env` | |
+| 2 | (built) The status bar, switching by reopening, the environment in shared scenes and `--asset-env` | |
 | 3 | Sources from local files: aliases, read-only, `extends`, logins per source, the offer for an unknown name | 1 |
 | 4 | Sources from a URL | 3 |
 | 5 | Credential stores on Linux and macOS | 1 |

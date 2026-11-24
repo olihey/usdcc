@@ -1,5 +1,7 @@
 #include "usdcc/usd/render/render_bundle.h"
 
+#include "usdcc/usd/asset_servers.h"
+
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/assetPath.h>
@@ -60,6 +62,7 @@ QJsonObject SharedScene::toJson() const {
     QJsonObject json;
     json["root"] = QString::fromStdString(rootLayer);
     json["session"] = QString::fromStdString(sessionLayer);
+    if (!assetEnvironment.empty()) json["assetEnvironment"] = QString::fromStdString(assetEnvironment);
     QJsonObject dirty;
     for (const auto& [id, text] : dirtyLayers) dirty[QString::fromStdString(id)] = QString::fromStdString(text);
     json["dirty"] = dirty;
@@ -73,6 +76,7 @@ SharedScene SharedScene::fromJson(const QJsonObject& json) {
     SharedScene scene;
     scene.rootLayer = json["root"].toString().toStdString();
     scene.sessionLayer = json["session"].toString().toStdString();
+    scene.assetEnvironment = json["assetEnvironment"].toString().toStdString();
     const QJsonObject dirty = json["dirty"].toObject();
     for (auto it = dirty.begin(); it != dirty.end(); ++it) scene.dirtyLayers[it.key().toStdString()] = it.value().toString().toStdString();
     for (const QJsonValue& d : json["dependencies"].toArray()) {
@@ -117,11 +121,21 @@ SharedScene captureSharedScene(const UsdStageRefPtr& stage) {
     std::set<std::string> seen;
     for (const SdfLayerRefPtr& layer : layers) {
         if (!layer || layer->IsAnonymous()) continue;
-        const std::string path = layer->GetRealPath().empty() ? layer->GetIdentifier() : layer->GetRealPath();
+        // As it's named, without the stack id of a server's resolved path: the peer's own
+        // environment says where that is.
+        const std::string path = usdcc::usd::displayAssetPath(layer->GetRealPath().empty() ? layer->GetIdentifier()
+                                                                                           : layer->GetRealPath());
         if (seen.insert(path).second) scene.dependencies.push_back({path, fileSize(path)});
     }
-    for (const std::string& asset : assets) {
+    for (const std::string& resolved : assets) {
+        const std::string asset = usdcc::usd::displayAssetPath(resolved);
         if (seen.insert(asset).second) scene.dependencies.push_back({asset, fileSize(asset)});
+    }
+    for (const SharedScene::Dependency& d : scene.dependencies) {
+        const std::string scheme = schemeOf(d.path);
+        if (scheme.empty() || scheme == "http" || scheme == "https") continue;
+        scene.assetEnvironment = usdcc::usd::stageAssetEnvironment(stage);
+        break;
     }
     return scene;
 }
@@ -129,6 +143,10 @@ SharedScene captureSharedScene(const UsdStageRefPtr& stage) {
 QStringList sharedSceneProblems(const SharedScene& scene, int limit) {
     QStringList problems;
     if (!scene.whyNot.empty()) return {QString::fromStdString(scene.whyNot)};
+    if (!scene.assetEnvironment.empty() && !usdcc::usd::hasAssetEnvironment(scene.assetEnvironment)) {
+        return {QStringLiteral("no asset environment %1").arg(QString::fromStdString(scene.assetEnvironment))};
+    }
+    const ArResolverContextBinder binder(usdcc::usd::stageResolverContext(scene.rootLayer, scene.assetEnvironment));
     const std::vector<std::string> known = ArGetRegisteredURISchemes();
     std::set<std::string> missingSchemes;
     for (const SharedScene::Dependency& d : scene.dependencies) {
@@ -158,6 +176,12 @@ UsdStageRefPtr openSharedScene(const SharedScene& scene, QString* error) {
         return nullptr;
     };
     if (!scene.whyNot.empty()) return fail(QString::fromStdString(scene.whyNot));
+    if (!scene.assetEnvironment.empty() && !usdcc::usd::hasAssetEnvironment(scene.assetEnvironment)) {
+        return fail(QStringLiteral("no asset environment %1").arg(QString::fromStdString(scene.assetEnvironment)));
+    }
+    // The sender's environment, for the layers as well as for the stage.
+    const ArResolverContext context = usdcc::usd::stageResolverContext(scene.rootLayer, scene.assetEnvironment);
+    const ArResolverContextBinder bound(context);
     // The unsaved layers' text, into layers of their own names. One open here already is
     // someone's document: it isn't overwritten.
     std::vector<SdfLayerRefPtr> held;
@@ -174,7 +198,6 @@ UsdStageRefPtr openSharedScene(const SharedScene& scene, QString* error) {
     if (!root) return fail(QStringLiteral("couldn't open %1").arg(QString::fromStdString(scene.rootLayer)));
     SdfLayerRefPtr session = SdfLayer::CreateAnonymous("session.usda");
     if (!scene.sessionLayer.empty()) session->ImportFromString(scene.sessionLayer);
-    const ArResolverContext context = ArGetResolver().CreateDefaultContextForAsset(scene.rootLayer);
     UsdStageRefPtr stage = UsdStage::Open(root, session, context);
     if (!stage) return fail(QStringLiteral("couldn't open the stage"));
     UsdStageRefPtr snapshot;

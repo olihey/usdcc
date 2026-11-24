@@ -170,6 +170,16 @@ public:
     // their unsaved-changes marks change without a change notice.
     usdcc::core::Signal<> layersSaved;
 
+    // The asset environment the stage is to be in once it's reopened (docs/ASSET_SOURCES.md
+    // §9): picked with Later. Empty for none; until then it stays in the one it has.
+    const std::string& pendingAssetEnvironment() const { return m_pendingAssetEnvironment; }
+    void setPendingAssetEnvironment(const std::string& environment) {
+        if (environment == m_pendingAssetEnvironment) return;
+        m_pendingAssetEnvironment = environment;
+        assetEnvironmentChanged();
+    }
+    usdcc::core::Signal<> assetEnvironmentChanged;
+
     // The stage's simulation (docs/PHYSICS.md §5.1), made on first use.
     physics::PhysicsSession& physics();
     // Null until physics() was asked for.
@@ -191,6 +201,7 @@ private:
     bool m_changingVariantTarget = false;
     double m_time = 0.0;
     std::optional<TimeRange> m_playbackRange;
+    std::string m_pendingAssetEnvironment;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
     // Last: it listens to `changed`, so it goes first.
     std::unique_ptr<physics::PhysicsSession> m_physics;

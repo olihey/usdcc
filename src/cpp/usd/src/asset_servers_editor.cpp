@@ -1244,6 +1244,7 @@ bool AssetServersDialog::save(bool overwriteChanged) {
     m_problems->setVisible(false);
     m_testResult->setText(message);
     refreshProblems();
+    assetConfigChanged()();
     Q_EMIT saved();
     return true;
 }
@@ -1263,6 +1264,7 @@ bool AssetServersDialog::saveCopyAsMine(const std::filesystem::path& file) {
     }
     assets::reloadDefaultConfig();
     refreshAll();
+    assetConfigChanged()();
     Q_EMIT saved();
     return true;
 }

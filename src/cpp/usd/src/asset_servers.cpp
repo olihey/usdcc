@@ -34,6 +34,15 @@ std::vector<std::string> assetEnvironments() {
     return names;
 }
 
+bool hasAssetEnvironment(const std::string& environment) {
+    return usdcc::assets::defaultConfig().environments.count(environment) > 0;
+}
+
+usdcc::core::Signal<>& assetConfigChanged() {
+    static usdcc::core::Signal<> signal;
+    return signal;
+}
+
 std::string defaultAssetEnvironment() {
     {
         std::lock_guard<std::mutex> lock(preferredMutex());

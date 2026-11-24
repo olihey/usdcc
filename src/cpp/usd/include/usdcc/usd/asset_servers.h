@@ -4,6 +4,8 @@
 // stage is opened with, and what the UI shows of a path on a server. Qt-free, like the
 // rest of usdcc_usd. The library underneath is usdcc_assets.
 
+#include "usdcc/core/signal.h"
+
 #include <pxr/pxr.h>
 #include <pxr/usd/ar/resolverContext.h>
 #include <pxr/usd/usd/stage.h>
@@ -15,6 +17,11 @@ namespace usdcc::usd {
 
 // The environments the asset configuration names (docs/REMOTE_ASSETS.md §4), sorted.
 std::vector<std::string> assetEnvironments();
+
+// Whether the configuration has it.
+bool hasAssetEnvironment(const std::string& environment);
+// After the Asset Servers editor wrote the configuration. On the UI thread.
+usdcc::core::Signal<>& assetConfigChanged();
 
 // The environment a stage opens in when none is asked for: Settings > Assets, else the
 // configuration's own choice (USDCC_ASSET_ENV, or its "environment"). Empty when there

@@ -7,12 +7,14 @@
 #include "usdcc/peers/state.h"
 #include "usdcc/peers/transfer.h"
 #include "usdcc/ui/peers_controller.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/share/live_layers.h"
 #include "usdcc/usd/share/presence.h"
 #include "usdcc/usd/share/stage_sync.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdUtils/localizeAsset.h>
@@ -71,6 +73,24 @@ QList<SharedStageInfo::Layer> stageLayers(const UsdStageRefPtr& stage, const Sdf
     return layers;
 }
 
+// The host's asset environment, when it's known here; empty (the default) otherwise
+// (docs/ASSET_SOURCES.md §8).
+std::string environmentFor(const SharedStageInfo& info) {
+    const std::string environment = info.assetEnvironment.toStdString();
+    return hasAssetEnvironment(environment) ? environment : std::string();
+}
+
+// Says so when the stage here isn't in the host's environment. Nothing to say to someone
+// without any: their paths on named servers don't resolve, which the Log says.
+void warnOtherEnvironment(const SharedStageInfo& info, const StageRefPtr& stage) {
+    const std::string mine = stageAssetEnvironment(stage->usdStage());
+    if (info.assetEnvironment.isEmpty() || info.assetEnvironment.toStdString() == mine || assetEnvironments().empty()) return;
+    USDCC_LOG_TOAST(usdcc::core::LogLevel::Warning, kLog,
+                    "{} has {} in the asset environment {}, and you have it in {}: files on servers may differ.",
+                    info.hostName.toStdString(), info.name.toStdString(), info.assetEnvironment.toStdString(),
+                    mine.empty() ? std::string("none") : mine);
+}
+
 int subLayerIndex(const SdfLayerHandle& parent, const SdfLayerHandle& layer) {
     const std::vector<std::string> paths = parent->GetSubLayerPaths();
     for (size_t i = 0; i < paths.size(); ++i) {
@@ -95,6 +115,7 @@ QJsonObject SharedStageInfo::toJson() const {
                      {QStringLiteral("hostName"), hostName},
                      {QStringLiteral("layers"), layerArray},
                      {QStringLiteral("watchers"), QJsonArray::fromStringList(watchers)}};
+    if (!assetEnvironment.isEmpty()) json.insert(QStringLiteral("assetEnvironment"), assetEnvironment);
     if (inMemory) {
         json.insert(QStringLiteral("inMemory"), true);
         json.insert(QStringLiteral("rootText"), rootText);
@@ -109,6 +130,7 @@ SharedStageInfo SharedStageInfo::fromJson(const QString& id, const QJsonObject& 
     info.root = json.value(QLatin1String("root")).toString();
     info.host = json.value(QLatin1String("host")).toString();
     info.hostName = json.value(QLatin1String("hostName")).toString();
+    info.assetEnvironment = json.value(QLatin1String("assetEnvironment")).toString();
     info.inMemory = json.value(QLatin1String("inMemory")).toBool();
     info.rootText = json.value(QLatin1String("rootText")).toString();
     for (const QJsonValue& value : json.value(QLatin1String("layers")).toArray()) {
@@ -380,6 +402,7 @@ bool SharedStages::share(Room* room, const StageRefPtr& stage, QString* error) {
     info.root = qs(root->GetIdentifier());
     info.host = room->me().id;
     info.hostName = room->me().name;
+    info.assetEnvironment = qs(stageAssetEnvironment(usdStage));
     info.inMemory = root->IsAnonymous();
     if (info.inMemory) {
         std::string text;
@@ -415,8 +438,12 @@ bool SharedStages::share(Room* room, const StageRefPtr& stage, QString* error) {
 }
 
 StageRefPtr SharedStages::findOrOpenStage(const SharedStageInfo& info, QString* error, bool* fetch) {
+    // The layers are looked up in it too.
+    const std::string environment = environmentFor(info);
+    const ArResolverContextBinder binder(stageResolverContext(info.root.toStdString(), environment));
     if (info.inMemory) {
-        StageRefPtr stage = m_stages.createStage();
+        StageRefPtr stage = m_stages.adoptStage(
+            UsdStage::CreateInMemory("tmp.usda", stageResolverContext(std::string(), environment)));
         if (stage && !stage->usdStage()->GetRootLayer()->ImportFromString(info.rootText.toStdString())) {
             m_stages.closeStage(stage);
             if (error) *error = tr("Couldn't read the shared stage's root layer");
@@ -504,7 +531,8 @@ StageRefPtr SharedStages::findOrOpenStage(const SharedStageInfo& info, QString* 
             return {};
         }
     }
-    StageRefPtr stage = m_stages.openStage(rootPath.toStdString());
+    StageRefPtr stage =
+        m_stages.adoptStage(StageManager::loadUsdStage(rootPath.toStdString(), nullptr, UsdStage::LoadAll, environment));
     if (!stage && error) *error = tr("Couldn't open %1").arg(rootPath);
     return stage;
 }
@@ -533,6 +561,7 @@ bool SharedStages::open(Room* room, const QString& id, QString* error) {
         return false;
     }
     m_stages.setCurrentStage(stage);
+    warnOtherEnvironment(*found, stage);
     Q_EMIT changed(room);
     return true;
 }
@@ -961,7 +990,8 @@ void SharedStages::onFilesArrived(Fetch* fetch, const QString& directory) {
     Room* room = fetch->room;
     const SharedStageInfo info = fetch->info;
     if (!room) return;
-    StageRefPtr stage = m_stages.openStage(rootPath.toStdString());
+    StageRefPtr stage = m_stages.adoptStage(
+        StageManager::loadUsdStage(rootPath.toStdString(), nullptr, UsdStage::LoadAll, environmentFor(info)));
     if (!stage) {
         if (m_hooks.notify) m_hooks.notify(tr("Couldn't open %1").arg(info.name), rootPath, {});
         return;
@@ -971,6 +1001,7 @@ void SharedStages::onFilesArrived(Fetch* fetch, const QString& directory) {
         return;
     }
     m_stages.setCurrentStage(stage);
+    warnOtherEnvironment(info, stage);
     Q_EMIT changed(room);
 }
 

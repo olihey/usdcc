@@ -78,9 +78,13 @@ int runRender(const QCommandLineParser& parser) {
     }
 
     // The stage from its file, with its resolver context: what's on disk is what renders.
+    const std::string assetEnvironment = parser.value(QStringLiteral("asset-env")).toStdString();
+    if (parser.isSet(QStringLiteral("asset-env")) && !usdcc::usd::hasAssetEnvironment(assetEnvironment)) {
+        return usage(QStringLiteral("render: the configuration has no asset environment '%1'.").arg(q(assetEnvironment)));
+    }
     const std::string identifier = QFileInfo(stagePath).exists() ? QFileInfo(stagePath).absoluteFilePath().toStdString()
                                                                   : stagePath.toStdString();
-    const UsdStageRefPtr stage = UsdStage::Open(identifier, usdcc::usd::stageResolverContext(identifier));
+    const UsdStageRefPtr stage = UsdStage::Open(identifier, usdcc::usd::stageResolverContext(identifier, assetEnvironment));
     if (!stage) return usage(QStringLiteral("render: couldn't open the stage %1.").arg(stagePath));
 
     std::string error;

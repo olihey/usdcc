@@ -102,7 +102,9 @@ endpoints make up its stack, top first.
 page writes that file, so tools outside usdcc see the same servers.
 
 **Which environment is used:** `USDCC_ASSET_ENV`, or else the file's `"environment"`. usdcc can
-also pick one per stage (§10).
+also pick one per stage (§10), and switch it from the status bar
+([ASSET_SOURCES.md](ASSET_SOURCES.md) §10.2). `usdcc_node render` and `validate` take
+`--asset-env`.
 
 A direct protocol (§5.1) has no endpoints or environments here. Plain HTTP keeps its hosts'
 credentials and its allow list in an `"http"` section of the same file
@@ -416,8 +418,9 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
 - **Downloads** show in the status bar while they run, as one summary (files done and running, their
   size, the latest name) refreshed five times a second, however many files there are.
 - **Sessions** ([SESSIONS.md](SESSIONS.md)) save a stage's root on a server by its logical path,
-  and its environment (`"assetEnvironment"`). One the configuration no longer has opens in the
-  default. No secrets.
+  and its environment (`"assetEnvironment"`), and one it's to be reopened in
+  (`"pendingAssetEnvironment"`). One the configuration no longer has opens in the default, with a
+  toast. No secrets.
 - **Opening:** **File > Open Stage from URL...** takes a typed or pasted `webdav://`, `http://` or
   `https://` path. Browsing is [ASSET_PICKER.md](ASSET_PICKER.md).
 - **Renderers.** *Checked:* Storm renders a texture from a server, through the resolver on

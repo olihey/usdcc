@@ -83,6 +83,7 @@
 #include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_environment.h"
 #include "usdcc/usd/asset_servers.h"
 #include "usdcc/assets/activity.h"
 #include "usdcc/usd/close_stage_dialog.h"
@@ -1242,6 +1243,13 @@ int main(int argc, char** argv) {
     auto* sharedStages =
         new usdcc::usd::share::SharedStages(peersController, stageManager, *undoManager, std::move(shareHooks), &window);
     usdcc::usd::share::SharedStages::setInstance(sharedStages);
+    // Reopening a shared stage would end the share.
+    usdcc::usd::setReopenGuard([](const usdcc::usd::StageRefPtr& stage) {
+        const auto* shared = usdcc::usd::share::SharedStages::instance();
+        return shared && shared->isShared(stage)
+                   ? QObject::tr("It's shared with others. Stop sharing it, or leave the share, to reload it.")
+                   : QString();
+    });
     auto* sharedStagesSection = new usdcc::usd::share::SharedStagesSection(sharedStages);
     peersPanel->addRoomSection(sharedStagesSection);
     QObject::connect(peersPanel, &usdcc::ui::PeersSidePanel::roomShown, sharedStagesSection,
@@ -1573,6 +1581,8 @@ int main(int argc, char** argv) {
     // edit target.
     auto* editingLabel = new QLabel(&window);
     window.statusBar()->addPermanentWidget(editingLabel);
+    // And which asset environment it's in (docs/ASSET_SOURCES.md §9).
+    window.statusBar()->addPermanentWidget(new usdcc::usd::AssetEnvironmentButton(&stageManager, &window));
     usdcc::core::Signal<>::Connection editTargetOfCurrent;
     std::function<void()> updateEditing = [editingLabel, &stageManager]() {
         const usdcc::usd::StageRefPtr stage = stageManager.currentStage();

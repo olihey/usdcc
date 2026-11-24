@@ -104,7 +104,8 @@ bool closeStagesInteractively(StageManager* stageManager, const std::vector<Stag
     return true;
 }
 
-bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRefPtr>& closing, QWidget* dialogParent) {
+bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRefPtr>& closing, QWidget* dialogParent,
+                          const PXR_NS::UsdStageRefPtr& replacement) {
     // Which unsaved layers would be lost, and through which closing stage to save each.
     std::vector<std::pair<StageRefPtr, PXR_NS::SdfLayerHandle>> unsaved;
     for (const StageRefPtr& stage : closing) {
@@ -114,6 +115,10 @@ bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRef
             for (const StageRefPtr& other : stageManager->stages()) {
                 if (std::find(closing.begin(), closing.end(), other) != closing.end()) continue;
                 const PXR_NS::SdfLayerHandleVector used = other->usdStage()->GetUsedLayers();
+                if (std::find(used.begin(), used.end(), layer) != used.end()) kept = true;
+            }
+            if (replacement) {
+                const PXR_NS::SdfLayerHandleVector used = replacement->GetUsedLayers();
                 if (std::find(used.begin(), used.end(), layer) != used.end()) kept = true;
             }
             if (!listed && !kept) unsaved.emplace_back(stage, layer);
