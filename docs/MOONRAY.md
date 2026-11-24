@@ -3,9 +3,10 @@
 Building DreamWorks' MoonRay as a USD plugin pack, shipping it, and its nodes in the
 Material Editor. The pack framework is [USD_PLUGINS.md](USD_PLUGINS.md).
 
-**Status (2026-11-24):** phases 1 to 3 passed (§7.1 to §7.3): MoonRay and both of its render delegates,
-in-process and through a local Arras session, build against the published OpenUSD asset and render in usdcc's viewport
-on Ubuntu 24.04 in WSL. There is no pack yet. **Linux x64 only: no Windows, by decision.**
+**Status (2026-11-24):** phases 1 to 4 passed (§7.1 to §7.4): MoonRay and both of its render delegates,
+in-process and through a local Arras session, build against the published OpenUSD asset as a pack,
+`deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
+CI hasn't built it yet. **Linux x64 only: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -310,6 +311,55 @@ Its settings are 24, the 14 of the in-process one and Arras's own (hosts, denois
 | 4 million quads; 5,000 prims | renders | renders |
 
 The blank picture says nothing about why; usdcc's log didn't show a reason that I found.
+
+### 7.4 Results of phase 4, the pack (2026-11-24)
+
+`deps/usd-plugins/moonray.json` pins OpenMoonRay v2026.29.1, the ten submodules it needs (not rats' test
+images, the GUIs or the DCC plugins), the three patches, each in its submodule, and the dependencies'
+archives with their SHA-256. `"set": "optional"`, `"publish": false`, `linux-x64` only.
+
+**What changed in the tools:**
+
+- `tools/build_usd_plugin.py`: a pin's `"hook"`, a Python file beside it
+  (`deps/usd-plugins/moonray.py`), builds instead of its one CMake project and returns the licences of
+  what it put in; `"submodules"` can list the folders to check out, without Git LFS files; a patch can
+  name the submodule it applies in (`{"patch": ..., "in": ...}`). The hook and those patches are in the
+  pack's name hash. Editing this script renames every pack, as before.
+- `tools/ci/check_usd_plugin.py`: `"render"` renders a file with a delegate through UsdImaging without
+  a GPU and checks the picture's mean, read with the standard library.
+
+**Layout,** found by OpenUSD with nothing set:
+
+- `plugin/usd/moonray/`: `bin/execComp`, `lib/` (MoonRay, Arras, and JsonCpp, log4cplus, libcurl,
+  Open Image Denoise, Boost.ProgramOptions), `rdl2dso/` (the shaders, without their `.proxy` files), `sessions/`
+  and `plugin/` (the three plugin libraries).
+- `plugin/usd/hd_moonray`, `hd_moonray_debug` and `hdMoonrayAdapters`: a `resources/plugInfo.json` each.
+  One file with all three registered only the first.
+- RUNPATHs relative to `$ORIGIN`, to its own `lib` and the install's.
+- The plugins set `RDL2_DSO_PATH`, `ARRAS_SESSION_PATH` and `PATH` (for `execComp`) from where they are, when
+  they aren't set (`plugin/common/Environment.cc` in the hdMoonray patch). So `moonray_runtime` in usdcc
+  isn't needed. It does this with `setenv()` when the plugin library loads, which isn't thread-safe
+  against another thread reading the environment at that moment.
+
+**Built from scratch** in WSL in 9.5 minutes on 32 threads, the archives already downloaded.
+
+**The check,** over a fresh copy of the asset in a bare environment: 291 files, none in the asset and
+no library name twice; the three plugins load; both delegates are listed; `test_data/moonray/check.usda`
+renders with each, through Arras in 1.1 s. No `execComp` was left.
+
+**In usdcc,** the pack copied over a clean asset and no MoonRay variable set: "MoonRay" and "MoonRay
+(in-process)" are listed and render. usdcc was the development build, not a deploy.
+
+**Size:** 310 MB installed, 246 MB zipped, 214 MB as `tar.xz`. Open Image Denoise is 51 MB of it, for the
+Arras client only (§2.1).
+
+**Not done:**
+
+- A CI run. The Linux job needs `libuuid-dev`, `libfreetype-dev`, `bison`, `flex` and `patchelf`.
+- The deploy and the release, which take `standard` packs only.
+- The licence list read (§3).
+- Boost's headers came from the Boost download's install, not the asset's (same version, 1.80).
+- The pack depends on the system's libfreetype (§7.3).
 
 ## 8. Decisions
 

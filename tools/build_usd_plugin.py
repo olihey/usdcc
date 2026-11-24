@@ -19,8 +19,14 @@ and writes usd-plugins/<pack>.json, which names the build and lists the pack's
 files (tools/fetch_usd.py and tools/deploy.py go by it).
 
 What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section 4):
-  submodules          true: the checkout's submodules too, and their licences
-  patches             applied to the checkout, relative to deps/usd-plugins
+  submodules          true: the checkout's submodules too, and their licences;
+                      or a list of the submodules' folders: only those
+  patches             applied to the checkout, relative to deps/usd-plugins; an
+                      entry {"patch": <file>, "in": <folder>} applies to a submodule
+  hook                a Python file in deps/usd-plugins whose build(ctx) builds and
+                      installs into the pack instead of "cmake" and the rest, for
+                      what isn't one CMake project (MoonRay); it returns the licences
+                      of what it put in, {name: folder}
   downloads           {name: {platform: {url, sha256}}}: an archive each, unpacked
   sdks                {name: {description, files}}: an SDK that can't be downloaded
                       (it needs a login, as the Arnold SDK does), passed as
@@ -194,15 +200,45 @@ def _pristine(source):
         run(["git", "-C", source, "clean", "-q", "-fd"])
 
 
-def _submodules(source):
-    """Checks out the checkout's submodules, at the commits it names; their paths."""
+def _submodules(source, only=None):
+    """Checks out the checkout's submodules, at the commits it names, or only the
+    folders `only` lists, without their Git LFS files; their paths."""
     update = ["git", "-C", str(source), "submodule", "update", "--init", "--recursive"]
+    paths = []
+    if only:
+        update = ["git", "-C", str(source), "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=",
+                  "-c", "filter.lfs.required=false", "submodule", "update", "--init"]
+        paths = ["--", *only]
     sys.stdout.flush()
-    if subprocess.run(update + ["--depth", "1"]).returncode != 0:
+    if subprocess.run(update + ["--depth", "1"] + paths).returncode != 0:
         # A server that doesn't hand out a commit by itself: the whole history then.
-        run(update)
+        run(update + paths)
     status = run(["git", "-C", source, "submodule", "status", "--recursive"], capture_output=True, text=True)
-    return [line.split()[1] for line in status.stdout.splitlines() if len(line.split()) > 1]
+    # An entry that isn't checked out starts with "-".
+    return [line.split()[1] for line in status.stdout.splitlines()
+            if len(line.split()) > 1 and not line.startswith("-")]
+
+
+def _submodule_patches(spec, source):
+    """Applies the pin's patches that name a submodule, once."""
+    for entry in spec.get("patches", []):
+        if not isinstance(entry, dict):
+            continue
+        patch, folder = (usd_plugin_asset.PINS / entry["patch"]).resolve(), source / entry["in"]
+        if subprocess.run(["git", "-C", folder, "apply", "--reverse", "--check", patch], capture_output=True).returncode == 0:
+            print(f"{patch.name}: already applied")
+        else:
+            run(["git", "-C", folder, "apply", "--verbose", patch])
+
+
+def _hook(spec):
+    """The pin's build hook, as a module."""
+    import importlib.util
+    file = usd_plugin_asset.PINS / spec["hook"]
+    loader = importlib.util.spec_from_file_location(f"usd_plugin_hook_{file.stem}", file)
+    module = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(module)
+    return module
 
 
 def _sha256(file):
@@ -303,8 +339,14 @@ def main(argv=None):
 
     _git_long_paths()
     _pristine(source)
-    fetch(spec, usd_plugin_asset.PINS, source)
-    submodules = _submodules(source) if spec.get("submodules") else []
+    # The submodules' patches are applied below, in their own checkouts.
+    fetch({**spec, "patches": [patch for patch in spec.get("patches", []) if not isinstance(patch, dict)]},
+          usd_plugin_asset.PINS, source)
+    only = spec["submodules"] if isinstance(spec.get("submodules"), list) else None
+    submodules = _submodules(source, only) if spec.get("submodules") else []
+    for folder in submodules:
+        _pristine(source / folder)
+    _submodule_patches(spec, source)
     _empty_pack_dir(pack_dir, pack)
 
     places = {"usd": usd.as_posix(), "pack": pack_dir.as_posix(), **{name: folder.as_posix() for name, folder in sdks.items()}}
@@ -316,6 +358,20 @@ def main(argv=None):
         places[name] = _download(name, downloads[name], work / "downloads").as_posix()
 
     prefix = pack_dir / spec.get("install_prefix", "")
+    hook_licences = {}
+    if spec.get("hook"):
+        from types import SimpleNamespace
+        hook_licences = _hook(spec).build(SimpleNamespace(
+            source=source, work=work, usd=usd, prefix=prefix, jobs=args.jobs, run=run,
+            places={name: Path(folder) for name, folder in places.items()},
+            python_root=Path(sys.base_prefix).as_posix())) or {}
+    else:
+        _cmake_build(spec, pack, source, build, prefix, places, args.jobs)
+    _finish(spec, pack, args, usd, work, pack_dir, source, build, submodules, places, downloads, hook_licences)
+
+
+def _cmake_build(spec, pack, source, build, prefix, places, jobs):
+    """Configures, builds and installs the pin's one CMake project into `prefix`."""
     command = ["cmake", "-S", source, "-B", build]
     if WINDOWS:
         # The toolset OpenUSD and usdcc are built with (docs/CI.md section 2).
@@ -337,18 +393,21 @@ def main(argv=None):
     ]
     print(f"Configuring {pack}:", " ".join(str(part) for part in command), flush=True)
     run(command)
-    run(["cmake", "--build", build, "--config", "Release", "--parallel", *([str(args.jobs)] if args.jobs else []),
+    run(["cmake", "--build", build, "--config", "Release", "--parallel", *([str(jobs)] if jobs else []),
          *(["--target", *spec["targets"]] if spec.get("targets") else [])])
     for component in spec.get("install_components") or [None]:
         run(["cmake", "--install", build, "--config", "Release", "--prefix", prefix,
              *(["--component", component] if component else [])])
 
+
+def _finish(spec, pack, args, usd, work, pack_dir, source, build, submodules, places, downloads, hook_licences):
+    """Prunes the pack, makes it relocatable, collects its licences and writes its record."""
     _prune(pack_dir)
     if not pack_files(pack_dir):
         fail(f"The {pack} build installed nothing that runs into {pack_dir}")
     if MACOS:
         print(f"rpaths relative to @loader_path: {', '.join(_relative_rpaths(pack_dir, usd)) or 'none to change'}", flush=True)
-    if LINUX:
+    if LINUX and not spec.get("hook"):  # a hook sets its binaries' own
         print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir, usd)) or 'none to change'}", flush=True)
 
     # The licences: the plugin's own and what CMake fetched into it, its
@@ -361,6 +420,9 @@ def main(argv=None):
         name = path.replace("/", "-")
         if usd_licenses._copy_licences(source / path, licences / name):
             found.append(name)
+    for name, folder in hook_licences.items():
+        if usd_licenses._copy_licences(Path(folder), licences / name):
+            found.append(name)
     for name, files in spec.get("licenses", {}).items():
         (licences / name).mkdir(parents=True, exist_ok=True)
         for file in files:
@@ -372,7 +434,10 @@ def main(argv=None):
     sources = [f"{pack} {spec.get('version', '')}".rstrip() + f" ({spec['license']}), built by tools/build_usd_plugin.py",
                "of https://github.com/olihey/usdcc as its deps/usd-plugins/" + pack + ".json pins it.",
                "", f"source:  {spec['repository']} at {spec['commit']}" + (", with its submodules" if submodules else "")]
-    sources += [f"patch:   deps/usd-plugins/{patch}" for patch in spec.get("patches", [])]
+    sources += [f"patch:   deps/usd-plugins/{usd_plugin_asset.patch_file(patch)}"
+                + (f" (in {patch['in']})" if isinstance(patch, dict) else "") for patch in spec.get("patches", [])]
+    if spec.get("hook"):
+        sources.append(f"built by: deps/usd-plugins/{spec['hook']}")
     sources += [f"{name}: {entry['url']} (SHA-256 {entry['sha256']})" for name, entry in downloads.items()]
     # Not the folder: it's this machine's, and the SDK isn't in the pack.
     sources += [f"{name}: the {sdk['description']}, given to the build; not in the pack"

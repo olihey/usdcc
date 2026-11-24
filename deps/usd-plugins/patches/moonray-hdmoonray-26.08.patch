@@ -200,6 +200,77 @@ index d4e8f48..a4af4b5 100644
 +    add_subdirectory(houdini)
 +endif()
  add_subdirectory(adapters)
+diff --git a/plugin/common/Environment.cc b/plugin/common/Environment.cc
+new file mode 100644
+index 0000000..3a91be7
+--- /dev/null
++++ b/plugin/common/Environment.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 usdcc contributors
++// SPDX-License-Identifier: Apache-2.0
++//
++// Lets a MoonRay install find its own parts when the plugin is loaded from it,
++// without a setup script: the shader DSOs, Arras's session definitions and
++// its program. Each is set only when the environment doesn't set it already.
++// The install is laid out as
++//
++//     <root>/plugin/<this plugin>.so
++//     <root>/rdl2dso, <root>/sessions, <root>/bin/execComp
++//
++// It runs when the plugin library is loaded, before any renderer is created.
++
++#include <cstdlib>
++#include <dlfcn.h>
++#include <string>
++#include <sys/stat.h>
++
++namespace {
++
++bool isDir(const std::string& path)
++{
++    struct stat info;
++    return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
++}
++
++std::string parent(const std::string& path)
++{
++    const std::string::size_type slash = path.rfind('/');
++    return slash == std::string::npos ? std::string() : path.substr(0, slash);
++}
++
++void setDefault(const char* name, const std::string& folder)
++{
++    const char* current = std::getenv(name);
++    if ((!current || !*current) && isDir(folder)) setenv(name, folder.c_str(), 1);
++}
++
++struct MoonrayEnvironment
++{
++    MoonrayEnvironment()
++    {
++        Dl_info info;
++        if (!dladdr(reinterpret_cast<void*>(&isDir), &info) || !info.dli_fname) return;
++        char* resolved = realpath(info.dli_fname, nullptr);
++        if (!resolved) return;
++        const std::string root = parent(parent(resolved));
++        std::free(resolved);
++        if (root.empty()) return;
++
++        setDefault("RDL2_DSO_PATH", root + "/rdl2dso");
++        setDefault("ARRAS_SESSION_PATH", root + "/sessions");
++        // execComp is looked for on PATH, by this process and by the session it starts.
++        const std::string bin = root + "/bin";
++        const char* path = std::getenv("PATH");
++        const std::string current = path ? path : "";
++        if (isDir(bin) && (":" + current + ":").find(":" + bin + ":") == std::string::npos) {
++            setenv("PATH", current.empty() ? bin.c_str() : (bin + ":" + current).c_str(), 1);
++        }
++    }
++};
++
++const MoonrayEnvironment environment;
++
++} // namespace
 diff --git a/plugin/common/ImplicitSurfaceSceneIndexPlugin.cc b/plugin/common/ImplicitSurfaceSceneIndexPlugin.cc
 new file mode 100644
 index 0000000..b316fa0
@@ -272,14 +343,15 @@ index 0000000..b316fa0
 +
 +PXR_NAMESPACE_CLOSE_SCOPE
 diff --git a/plugin/hd_moonray/CMakeLists.txt b/plugin/hd_moonray/CMakeLists.txt
-index 1aa3088..bf129d3 100644
+index 1aa3088..ef0f00e 100644
 --- a/plugin/hd_moonray/CMakeLists.txt
 +++ b/plugin/hd_moonray/CMakeLists.txt
-@@ -17,8 +17,12 @@ target_sources(${component}
+@@ -17,8 +17,13 @@ target_sources(${component}
          ArrasRenderer.cc
          ArrasSettings.cc
          RendererPlugin.cc
 +        ../common/ImplicitSurfaceSceneIndexPlugin.cc
++        ../common/Environment.cc
  )
  
 +set_source_files_properties(../common/ImplicitSurfaceSceneIndexPlugin.cc PROPERTIES COMPILE_DEFINITIONS
@@ -288,7 +360,7 @@ index 1aa3088..bf129d3 100644
  target_include_directories(${component}
      PUBLIC
          $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-@@ -41,6 +45,7 @@ target_link_libraries(${component}
+@@ -41,9 +46,11 @@ target_link_libraries(${component}
          McrtMessages::mcrt_messages
          TBB::tbb
          hd   # pxr imaging
@@ -296,6 +368,10 @@ index 1aa3088..bf129d3 100644
          usdImaging
          Python::Module
          ${PlatformSpecificLibs}
++        ${CMAKE_DL_LIBS}
+ )
+ 
+ # If at Dreamworks add a SConscript stub file so others can use this library.
 diff --git a/plugin/hd_moonray/RendererPlugin.cc b/plugin/hd_moonray/RendererPlugin.cc
 index b470c5d..4263ca4 100644
 --- a/plugin/hd_moonray/RendererPlugin.cc
@@ -387,14 +463,15 @@ index 3177cea..c2314e9 100644
                  }
              },
 diff --git a/plugin/hd_moonray_debug/CMakeLists.txt b/plugin/hd_moonray_debug/CMakeLists.txt
-index 50300e8..ae54f36 100644
+index 50300e8..e93b814 100644
 --- a/plugin/hd_moonray_debug/CMakeLists.txt
 +++ b/plugin/hd_moonray_debug/CMakeLists.txt
-@@ -16,8 +16,12 @@ target_sources(${component}
+@@ -16,8 +16,13 @@ target_sources(${component}
      PRIVATE
          RndrRenderer.cc
          RendererPlugin.cc
 +        ../common/ImplicitSurfaceSceneIndexPlugin.cc
++        ../common/Environment.cc
  )
  
 +set_source_files_properties(../common/ImplicitSurfaceSceneIndexPlugin.cc PROPERTIES COMPILE_DEFINITIONS
@@ -403,7 +480,7 @@ index 50300e8..ae54f36 100644
  target_include_directories(${component}
      PUBLIC
          $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-@@ -37,6 +41,7 @@ target_link_libraries(${component}
+@@ -37,9 +42,11 @@ target_link_libraries(${component}
          SceneRdl2::scene_rdl2
          TBB::tbb
          hd   # pxr imaging
@@ -411,6 +488,10 @@ index 50300e8..ae54f36 100644
          usdImaging
          Python::Module
          ${PlatformSpecificLibs}
++        ${CMAKE_DL_LIBS}
+ )
+ 
+ # If at Dreamworks add a SConscript stub file so others can use this library.
 diff --git a/plugin/hd_moonray_debug/RendererPlugin.cc b/plugin/hd_moonray_debug/RendererPlugin.cc
 index 36f713d..985af81 100644
 --- a/plugin/hd_moonray_debug/RendererPlugin.cc

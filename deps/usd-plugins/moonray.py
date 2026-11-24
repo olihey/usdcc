@@ -1,0 +1,210 @@
+"""The build of the moonray pack, which isn't one CMake project (docs/MOONRAY.md).
+
+tools/build_usd_plugin.py calls build() instead of its own configure, build and
+install when deps/usd-plugins/moonray.json says "hook": "moonray.py". By then the
+openmoonray checkout has the submodules the pin lists, with their patches, and
+the pin's downloads are unpacked.
+
+1. The dependencies the OpenUSD asset doesn't have, from the downloads, into
+   <work>/deps: JsonCpp, log4cplus, Lua, Random123, ISPC, OpenSSL (static),
+   CppUnit (only because scene_rdl2's CMake asks for it), Open Image Denoise,
+   libcurl, libmicrohttpd (only to build arras4_core; nothing shipped links it)
+   and Boost.ProgramOptions, which the asset's Boost lacks. Everything the asset
+   has (TBB, Embree, OpenImageIO, OpenEXR, OpenVDB, OpenSubdiv, Boost) is the
+   asset's.
+2. MoonRay's own projects, one after the other, into <work>/install.
+3. What runs, into the pack: plugin/usd/moonray/{bin,lib,rdl2dso,sessions,plugin},
+   and a plugInfo.json per plugin in plugin/usd/<plugin>/resources, where OpenUSD's
+   plugin/usd/plugInfo.json finds it.
+   The plugins set the variables MoonRay reads from where they are
+   (moonray-hdmoonray-26.08.patch, plugin/common/Environment.cc).
+
+Linux only. Returns the licences of the dependencies that ship, as {name: folder}.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from pathlib import Path
+
+# MoonRay's projects, in build order: (folder in the checkout, extra CMake arguments).
+PROJECTS = [
+    ("moonray/scene_rdl2", []),
+    ("moonray/mcrt_denoise", []),
+    ("moonray/moonray", []),
+    ("moonray/moonshine", []),
+    ("arras/arras4_core", []),
+    ("moonray/moonray_arras/mcrt_messages", []),
+    ("moonray/moonray_arras/mcrt_dataio", []),
+    ("moonray/moonray_arras/mcrt_computation", []),
+    ("moonray/hydra/hdMoonray", ["-DHDMOONRAY_ARRAS=ON", "-DHDMOONRAY_TOOLS=OFF"]),
+]
+# The dependencies whose code is in the pack, as a library or linked in.
+SHIPPED = ["jsoncpp", "log4cplus", "lua", "random123", "openssl", "oidn", "curl", "boost"]
+# Where the pack's MoonRay goes, and the relative RUNPATHs its binaries get.
+ROOT = "plugin/usd/moonray"
+TO_PACK_LIB = "$ORIGIN/../../../../lib"  # from <root>/<folder>/ to the install's lib
+
+
+def build(ctx):
+    run, places, work, usd = ctx.run, ctx.places, ctx.work, ctx.usd
+    deps = work / "deps"
+    install = work / "install"
+    jobs = str(ctx.jobs or os.cpu_count() or 4)
+    for folder in (deps / "bin", deps / "lib", deps / "include"):
+        folder.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, PATH=f"{deps / 'bin'}:{install / 'bin'}:{os.environ['PATH']}",
+               LD_LIBRARY_PATH=f"{usd / 'lib'}:{deps / 'lib'}:{install / 'lib'}")
+
+    def cmake(name, source, *arguments, generator="Ninja", build_dir=None):
+        build_dir = build_dir or work / "build" / name
+        run(["cmake", "-S", source, "-B", build_dir, "-G", generator, "-DCMAKE_BUILD_TYPE=Release",
+             "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_INSTALL_LIBDIR=lib", *arguments], env=env)
+        run(["cmake", "--build", build_dir, "--parallel", jobs], env=env)
+        run(["cmake", "--install", build_dir], env=env)
+
+    def done(name):
+        return (work / "build" / f".{name}-done").is_file()
+
+    def mark(name):
+        (work / "build").mkdir(parents=True, exist_ok=True)
+        (work / "build" / f".{name}-done").touch()
+
+    prefix = f"-DCMAKE_INSTALL_PREFIX={deps}"
+    if not done("jsoncpp"):
+        cmake("jsoncpp", places["jsoncpp"], prefix, "-DJSONCPP_WITH_TESTS=OFF", "-DBUILD_SHARED_LIBS=ON",
+              "-DBUILD_STATIC_LIBS=OFF", "-DBUILD_OBJECT_LIBS=OFF", "-DJSONCPP_WITH_PKGCONFIG_SUPPORT=OFF")
+        mark("jsoncpp")
+    if not done("log4cplus"):
+        cmake("log4cplus", places["log4cplus"], prefix, "-DLOG4CPLUS_BUILD_TESTING=OFF",
+              "-DLOG4CPLUS_BUILD_LOGGINGSERVER=OFF", "-DWITH_UNIT_TESTS=OFF", "-DUNICODE=OFF")
+        mark("log4cplus")
+    if not done("lua"):
+        # luac too: scene_rdl2 compiles its Lua library with it, and without it the
+        # build goes on with an empty one (docs/MOONRAY.md section 7.1).
+        lua = Path(places["lua"])
+        run(["make", "-C", lua, "linux", "MYCFLAGS=-fPIC", f"-j{jobs}"], env=env)
+        for name in ("lua", "luac"):
+            shutil.copy2(lua / "src" / name, deps / "bin")
+        shutil.copy2(lua / "src" / "liblua.a", deps / "lib")
+        for name in ("lua.h", "luaconf.h", "lualib.h", "lauxlib.h", "lua.hpp"):
+            shutil.copy2(lua / "src" / name, deps / "include")
+        mark("lua")
+    if not done("random123"):
+        run(["make", "-C", places["random123"], "install-include", f"prefix={deps}"], env=env)
+        mark("random123")
+    if not done("ispc"):
+        shutil.copy2(Path(places["ispc"]) / "bin" / "ispc", deps / "bin")
+        mark("ispc")
+    if not done("openssl"):
+        openssl = Path(places["openssl"])
+        run(["./Configure", "no-shared", "no-tests", "-fPIC", f"--prefix={deps}", "--libdir=lib"], cwd=openssl, env=env)
+        run(["make", f"-j{jobs}"], cwd=openssl, env=env)
+        run(["make", "install_dev"], cwd=openssl, env=env)
+        mark("openssl")
+    if not done("cppunit"):
+        cppunit = Path(places["cppunit"])
+        run(["./configure", f"--prefix={deps}", "--disable-static", "--disable-doxygen"], cwd=cppunit, env=env)
+        run(["make", f"-j{jobs}", "install"], cwd=cppunit, env=env)
+        mark("cppunit")
+    if not done("oidn"):
+        cmake("oidn", places["oidn"], prefix, f"-DISPC_EXECUTABLE={deps / 'bin' / 'ispc'}", f"-DTBB_ROOT={usd}",
+              f"-DTBB_DIR={usd / 'lib' / 'cmake' / 'TBB'}", "-DOIDN_APPS=OFF")
+        mark("oidn")
+    if not done("curl"):
+        cmake("curl", places["curl"], prefix, f"-DOPENSSL_ROOT_DIR={deps}", "-DOPENSSL_USE_STATIC_LIBS=ON",
+              "-DBUILD_CURL_EXE=OFF", "-DBUILD_TESTING=OFF", "-DHTTP_ONLY=ON", "-DCURL_USE_LIBPSL=OFF",
+              "-DCURL_USE_LIBSSH2=OFF", "-DUSE_LIBIDN2=OFF", "-DCURL_BROTLI=OFF", "-DCURL_ZSTD=OFF",
+              "-DUSE_NGHTTP2=OFF", "-DBUILD_LIBCURL_DOCS=OFF", "-DBUILD_MISC_DOCS=OFF", "-DENABLE_CURL_MANUAL=OFF")
+        mark("curl")
+    if not done("microhttpd"):
+        mhd = Path(places["microhttpd"])
+        run(["./configure", f"--prefix={deps}", "--disable-https", "--disable-doc", "--disable-examples"], cwd=mhd, env=env)
+        run(["make", f"-j{jobs}", "install"], cwd=mhd, env=env)
+        mark("microhttpd")
+    boost = Path(places["boost"])
+    if not done("boost"):
+        # The asset's Boost 1.80 without ProgramOptions, which scene_rdl2 links.
+        run(["./bootstrap.sh", "--with-libraries=program_options"], cwd=boost, env=env)
+        run(["./b2", f"-j{jobs}", "link=shared", "variant=release", "threading=multi",
+             f"--prefix={deps}", "--libdir=" + str(deps / "lib"), "install"], cwd=boost, env=env)
+        mark("boost")
+
+    # MoonRay.
+    flags = " ".join([
+        # Headers GCC 13 no longer includes on the way (docs/MOONRAY.md section 7.1).
+        "-include functional", "-include cstdint", "-include memory", "-include string",
+        # Boost headers the asset leaves out (boost/algorithm), after its own.
+        f"-idirafter {boost}", f"-idirafter {deps / 'include'}"])
+    no_as_needed = "-Wl,--no-as-needed"  # MoonRay's libraries need each other in circles
+    common = [
+        f"-DCMAKE_INSTALL_PREFIX={install}", f"-DCMAKE_PREFIX_PATH={install};{deps};{usd}",
+        f"-DCMAKE_MODULE_PATH={ctx.source / 'cmake_modules' / 'cmake'}",
+        f"-Dboost_program_options_DIR={deps / 'lib' / 'cmake' / 'boost_program_options-1.80.0'}",
+        f"-DPython_ROOT_DIR={ctx.python_root}", f"-DPython3_ROOT_DIR={ctx.python_root}",
+        "-DMOONRAY_USE_OPTIX=NO", "-DBUILD_TESTING=OFF", "-DABI_VERSION=0", "-DBUILD_QT_APPS=NO",
+        f"-DCMAKE_CXX_FLAGS={flags}", f"-DCMAKE_SHARED_LINKER_FLAGS={no_as_needed}",
+        f"-DCMAKE_EXE_LINKER_FLAGS={no_as_needed}", f"-DCMAKE_MODULE_LINKER_FLAGS={no_as_needed}",
+        f"-DLibcurl_INCLUDE_DIR={deps / 'include'}", f"-DLibcurl_LIBRARY={deps / 'lib' / 'libcurl.so.4'}",
+        f"-DLUA_DIR={deps}",
+    ]
+    env.update({name: str(deps) for name in (
+        "JsonCpp_ROOT", "JSONCPP_ROOT", "Log4cplus_ROOT", "LOG4CPLUS_ROOT", "CppUnit_ROOT", "CPPUNIT_ROOT",
+        "Random123_ROOT", "RANDOM123_ROOT", "LIBMICROHTTPD_ROOT", "LIBCURL_ROOT", "Libcurl_ROOT",
+        "OPENSSL_ROOT_DIR", "LUA_DIR")})
+    env.update({"OpenVDB_ROOT": str(usd), "OPENVDB_ROOT": str(usd), "OpenSubDiv_ROOT": str(usd),
+                "OPENSUBDIV_ROOT": str(usd), "TBB_ROOT": str(usd), "ISPC": str(deps / "bin" / "ispc"),
+                "CMAKE_MODULES_ROOT": str(ctx.source / "cmake_modules")})
+    for folder, extra in PROJECTS:
+        name = folder.rsplit("/", 1)[-1]
+        if done(name):
+            continue
+        # Unix Makefiles: with Ninja their ISPC headers aren't made before what includes them.
+        cmake(name, ctx.source / folder, *common, *extra, generator="Unix Makefiles")
+        mark(name)
+    rdlalib = work / "build" / "scene_rdl2" / "lib" / "scene" / "rdl2" / "rdlalib.cc"
+    if rdlalib.stat().st_size < 10000:
+        raise SystemExit(f"{rdlalib} is nearly empty: scene_rdl2 was built without luac")
+
+    # What runs, into the pack.
+    root = ctx.prefix / ROOT
+    for folder in ("bin", "lib", "rdl2dso", "sessions", "plugin"):
+        (root / folder).mkdir(parents=True, exist_ok=True)
+    shutil.copy2(install / "bin" / "execComp", root / "bin")
+    for file in sorted((install / "lib").iterdir()):
+        if file.name.endswith(".so") and not file.is_symlink():
+            shutil.copy2(file, root / "lib")
+    for pattern in ("libjsoncpp.so*", "liblog4cplus*.so*", "libOpenImageDenoise*.so*", "libcurl.so*",
+                    "libboost_program_options.so*"):
+        for file in sorted((deps / "lib").glob(pattern)):
+            target = root / "lib" / file.name
+            if file.is_symlink():
+                target.symlink_to(os.readlink(file))
+            else:
+                shutil.copy2(file, target)
+    for file in sorted((install / "rdl2dso").iterdir()):
+        if file.name.endswith(".so"):  # not the .so.proxy files, which only MoonRay's tools read
+            shutil.copy2(file, root / "rdl2dso")
+    for name in ("hd_single.sessiondef", "hd_multi.sessiondef"):
+        shutil.copy2(install / "sessions" / name, root / "sessions")
+    # A plugInfo.json each, in plugin/usd/<plugin>/resources: OpenUSD registers only the
+    # first plugin of a file that lists several.
+    for info in sorted((install / "plugin" / "pxr").glob("*/plugInfo.json")):
+        plugins = json.loads(info.read_text())["Plugins"]
+        library = (info.parent / plugins[0]["LibraryPath"]).resolve()
+        shutil.copy2(library, root / "plugin")
+        for plugin in plugins:
+            plugin["LibraryPath"] = f"../../moonray/plugin/{library.name}"
+        resources = ctx.prefix / "plugin" / "usd" / plugins[0]["Name"] / "resources"
+        resources.mkdir(parents=True, exist_ok=True)
+        (resources / "plugInfo.json").write_text(json.dumps({"Plugins": plugins}, indent=4) + "\n")
+
+    from _elf import elf_files, set_runpath
+    for file in elf_files(root):
+        folder = file.parent.name
+        set_runpath(file, ["$ORIGIN", TO_PACK_LIB] if folder == "lib" else ["$ORIGIN/../lib", TO_PACK_LIB])
+        run(["strip", "--strip-unneeded", file])
+    licences = {name: Path(places[name]) for name in SHIPPED}
+    return licences
