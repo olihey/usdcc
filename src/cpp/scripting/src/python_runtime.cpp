@@ -84,12 +84,12 @@ bool hasStandardLibrary(const std::filesystem::path& home) {
     return false;
 }
 
-// The folder of the running executable.
-std::filesystem::path executableDir() {
 #if defined(_WIN32)
+// The folder of a loaded module; of the running executable for null.
+std::filesystem::path moduleDir(HMODULE module) {
     std::wstring buffer(MAX_PATH, L'\0');
     for (;;) {
-        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        const DWORD length = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
         if (length == 0) return {};
         if (length < buffer.size()) {
             buffer.resize(length);
@@ -98,6 +98,29 @@ std::filesystem::path executableDir() {
         buffer.resize(buffer.size() * 2);  // truncated: try a bigger buffer
     }
     return std::filesystem::path(buffer).parent_path();
+}
+
+// pxr.UsdAbc and pxr.UsdDraco link their plugins, usdAbc.dll and usdDraco.dll, and
+// Windows doesn't look for a module's DLLs in plugin/usd, beside OpenUSD's DLLs' folder.
+// On Linux the modules' RUNPATH names it (tools/deploy.py).
+void addUsdPluginsDllDirectory() {
+    const HMODULE plug = GetModuleHandleW(L"usd_plug.dll");
+    if (!plug) return;
+    std::filesystem::path folder = moduleDir(plug).parent_path() / "plugin" / "usd";
+    folder.make_preferred();  // AddDllDirectory takes no forward slashes
+    std::error_code error;
+    if (!std::filesystem::is_directory(folder, error)) return;
+    if (AddDllDirectory(folder.c_str())) return;
+    const DWORD code = GetLastError();
+    USDCC_LOG_WARNING("usdcc.python", "{} can't be added to the DLL search path (error {}), so pxr.UsdAbc and pxr.UsdDraco may not import",
+                      toUtf8(folder), code);
+}
+#endif
+
+// The folder of the running executable.
+std::filesystem::path executableDir() {
+#if defined(_WIN32)
+    return moduleDir(nullptr);
 #elif defined(__APPLE__)
     // macOS has no /proc. Not yet run there.
     uint32_t size = 0;
@@ -283,6 +306,9 @@ void PythonRuntime::Impl::start() {
         try {
             py::module_::import("pxr.Usd");
             pxr = true;
+#if defined(_WIN32)
+            addUsdPluginsDllDirectory();  // now that OpenUSD's DLLs are loaded
+#endif
         } catch (py::error_already_set& error) {
             logException(error);
             USDCC_LOG_ERROR("usdcc.python", "OpenUSD's Python modules (pxr) can't be imported from {}",
