@@ -281,10 +281,8 @@ void WorkspaceController::addWorkspaceActions(QMenu* menu, const std::function<v
             action->setChecked(markCurrent && definition->id == m_currentId);
             QStringList tip;
             if (!definition->description.isEmpty()) tip << definition->description;
-            QStringList missing;
-            workspace::pruned(definition->layout,
-                              [this](const QString& type) { return m_context.registry && m_context.registry->find(type); },
-                              &missing);
+            const QStringList missing = definition->missingTypes(
+                [this](const QString& type) { return m_context.registry && m_context.registry->find(type); });
             if (!missing.isEmpty()) {
                 tip << tr("Needs %1, which isn't loaded: left out.").arg(missing.join(QStringLiteral(", ")));
             }

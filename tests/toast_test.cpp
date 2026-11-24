@@ -9,7 +9,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/theme.h"
@@ -224,7 +224,7 @@ USDCC_TEST(toast_repeats_and_queue) {
 USDCC_TEST(toast_from_the_log) {
     Window w;
     ToastManager& toasts = w.toasts();
-    w.window.logPanel()->hide();
+    w.window.logPanel()->toggleView(false);
 
     // From another thread, as any code may log.
     std::thread worker([]() {

@@ -94,7 +94,8 @@ def main_window() -> QtWidgets.QMainWindow:
 
 def add_side_panel(panel: SidePanel, area: str = "right", id: str | None = None) -> None:
     """Docks ``panel``, a ``usdcc.ui.SidePanel``, at the window's ``area`` edge
-    ("left", "right", "top" or "bottom") and lists it in the View menu.
+    ("left", "right", "top" or "bottom"), as a tab of a side panel already there,
+    and lists it in the View menu.
 
     The window takes ownership of it. Its object name (the title it was made
     with) is how the saved layout knows it: a panel shown in an earlier session

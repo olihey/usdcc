@@ -619,7 +619,7 @@ QSplitter::handle {
     height: 1px;
 }
 
-/* SidePanel (a plain QDockWidget, outside the ADS container). */
+/* A plain QDockWidget, as a script may add one. */
 QDockWidget {
     color: rgba(@ink-rgb, 50%);
 }

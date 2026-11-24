@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QMainWindow>
+#include <QSet>
 #include <QRect>
 #include <QTimer>
 #include <QVariantMap>
@@ -28,7 +29,7 @@ class WidgetWindowAgent;
 
 namespace usdcc::ui {
 
-class LogSidePanel;
+class LogPanel;
 class PanelMaximizer;
 class ToastLogSink;
 class ToastManager;
@@ -36,7 +37,7 @@ class SidePanel;
 class TitleBar;
 
 // QMainWindow shell hosting the Qt Advanced Docking System, with the side
-// panels (so far the LogSidePanel) docked around it. The composition root (main.cpp) adds the real, USD-dependent
+// panels (so far the LogPanel) docked around it. The composition root (main.cpp) adds the real, USD-dependent
 // ViewPanel subclasses (Viewport/Outliner/Attributes — see docs/PLAN.md
 // section 4 and section 7) directly via dockManager(), including
 // establishing the central dock area itself.
@@ -66,32 +67,28 @@ public:
     PanelMaximizer* panelMaximizer() const;
 
     // The Log side panel; always exists.
-    LogSidePanel* logPanel() const;
+    LogPanel* logPanel() const;
 
     // The window's toast notifications (docs/NOTIFICATIONS.md). Log records
     // marked as toasts (USDCC_LOG_TOAST) show here too, from the moment the
     // window exists; warnings and errors with a Show Log button.
     ToastManager* toasts() const;
 
-    // Docks a side panel from outside usdcc_ui (the Script Editor panel, panels
-    // made in Python) in `area`, lists it in the View menu, and takes
-    // ownership of it. A saved layout places it by its objectName, like the
-    // built-in ones: either through restoreLayout(), for a panel added before
-    // it, or, for one added later (from a script), by putting it back where
-    // the layout last had it instead of in `area`. A panel that is deleted
-    // leaves the menu. Adding the same panel again does nothing.
-    //
-    // Between show() and layoutSettled(), don't add one: see there.
+    // Adds a side panel from outside usdcc_ui (the Script Editor panel, panels made in
+    // Python), lists it in the View menu, and takes ownership of it. `area` is the window
+    // edge it's at until moved: collapsed there when the window isn't up yet, docked along
+    // it otherwise. A saved layout places it by its objectName, like the built-in ones:
+    // either through restoreLayout(), for a panel added before it, or, for one added later
+    // (from a script), by putting it back where the layout last had it instead of in
+    // `area`. A panel that is deleted leaves the menu. Adding the same panel again does
+    // nothing.
     void addSidePanel(SidePanel* panel, Qt::DockWidgetArea area);
     // Takes it out, View menu entry included, and deletes it later. Adding another
     // with the same object name puts that one where this one was.
     void removeSidePanel(SidePanel* panel);
 
-    // The side panels docked around the dock area, in the order added.
+    // The side panels, in the order added.
     const QList<SidePanel*>& sidePanels() const { return m_sidePanels; }
-    // Gives docked, shown side panels their share of the window: `shares` is objectName ->
-    // a share of its width (left, right) or height (top, bottom). Workspaces use it.
-    void resizeSidePanels(const QVariantMap& shares) { applySidePanelShares(shares); }
 
     // Puts `widget` in the title bar, right of the title (TitleBar::addTrailingWidget()),
     // clickable rather than dragging the window.
@@ -135,13 +132,12 @@ public:
     void restoreLayout();
 
     // The same layout as a session holds it (docs/SESSIONS.md §2.3): geometry and
-    // window state as base64, the dock layout as XML, collapsed side panels, and the
-    // side panels' sizes as a share of the window.
+    // window state as base64, the dock layout as XML, and the side panels' places.
     QJsonObject layoutState() const;
     // Restores one from layoutState(), the panels having been made first (as for
     // restoreLayout()). `withGeometry`: the window's size and position too (at start);
     // otherwise only whether it's maximised. Then floating panels are put back on a
-    // screen, and side panels scaled when the window differs in size (§5.2).
+    // screen (§5.2).
     void restoreLayoutState(const QJsonObject& state, bool withGeometry);
 
     // Moves every floating panel (view or side panel) that isn't wholly on a screen
@@ -149,7 +145,7 @@ public:
     void keepFloatingPanelsOnScreen();
 
     // Builds the "View" menu from m_sidePanels, one entry per instance —
-    // a future LogSidePanel/ScriptEditorSidePanel/USDASidePanel just needs to
+    // a future LogPanel/ScriptEditorSidePanel/USDASidePanel just needs to
     // be appended to m_sidePanels before this runs. Public (rather than
     // called from the constructor) so the composition root (main.cpp)
     // controls menu-bar ordering — it calls this after adding its own
@@ -180,9 +176,6 @@ protected:
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void changeEvent(QEvent* event) override;
-    // Watches the tab bars of side panels sharing a spot: double-clicking a
-    // tab collapses the panels (SidePanel::setCollapsed()).
-    void childEvent(QChildEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -192,15 +185,16 @@ private:
     // After restoring `dockLayout`: opens the panels it doesn't name, which
     // ADS would otherwise leave hidden for good (one deleted when the layout
     // was saved, then made again by the app at startup).
-    void showPanelsMissingFrom(const QByteArray& dockLayout);
-    SidePanel* sidePanelOfTab(const QTabBar* tabBar, int index) const;
-    // Collapses `panel` if the saved layout had it collapsed.
-    void restoreCollapsed(SidePanel* panel);
-    // The dock layout, window state and collapsed panels, shared by restoreLayout()
-    // and restoreLayoutState().
-    void applyLayout(const QByteArray& windowState, const QVariantMap& collapsed, const QByteArray& dockLayout);
-    // Side panels to their share of the window (`shares`: objectName -> share).
-    void applySidePanelShares(const QVariantMap& shares);
+    // `closed`: the side panels that were closed before.
+    void showPanelsMissingFrom(const QByteArray& dockLayout, const QSet<SidePanel*>& closed);
+    // The dock layout, window state and places (below), shared by restoreLayout() and
+    // restoreLayoutState().
+    void applyLayout(const QByteArray& windowState, const QVariantMap& places, const QByteArray& dockLayout);
+    // The places of the side panels there are, and the ones known of the rest.
+    QVariantMap sidePanelPlaces() const;
+    friend class SidePanel;
+    // It's being deleted, or removed.
+    void forgetSidePanel(SidePanel* panel);
 
     ads::CDockManager* m_dockManager = nullptr;
     // The central widget: the dock manager, with the bottom bar under it.
@@ -214,13 +208,13 @@ private:
     TitleBar* m_titleBar = nullptr;
     QList<SidePanel*> m_sidePanels;
     std::vector<std::function<bool()>> m_closeChecks;
-    LogSidePanel* m_logPanel = nullptr;
+    LogPanel* m_logPanel = nullptr;
     ToastManager* m_toasts = nullptr;
     std::shared_ptr<ToastLogSink> m_toastSink;
     bool m_layoutRestored = false;
-    // objectName -> the size to expand to, of the side panels the saved
-    // layout had collapsed.
-    QVariantMap m_savedCollapsed;
+    // objectName -> SidePanel::place(), of side panels gone or not added yet: the saved
+    // layout's, and the removed ones'.
+    QVariantMap m_places;
     bool m_layoutSettled = false;
     QTimer m_settleTimer;
     // Set by buildViewMenu(); panels added later go in before

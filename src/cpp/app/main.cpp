@@ -15,7 +15,7 @@
 #include "usdcc/ui/about_dialog.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/current_stage_tracker.h"
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/peer_rooms_debug_dialog.h"
 #include "usdcc/ui/peers_controller.h"
@@ -625,7 +625,7 @@ int main(int argc, char** argv) {
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::busyChanged, openStageAction,
                      [openStageAction](bool busy) { openStageAction->setEnabled(!busy); });
     QObject::connect(stageOpener, &usdcc::usd::StageOpener::showLogRequested, window.logPanel(),
-                     &usdcc::ui::LogSidePanel::showLatest);
+                     &usdcc::ui::LogPanel::showLatest);
     // The asset picker (docs/ASSET_PICKER.md): a stage on disk or on a server.
     const auto pickStage = [&window](const QString& title) {
         usdcc::usd::AssetPickerOptions options;
@@ -1201,9 +1201,7 @@ int main(int argc, char** argv) {
     window.addSidePanel(peersPanel, Qt::RightDockWidgetArea);
     peersPanel->hide();
     peersController->showPanel = [peersPanel]() {
-        peersPanel->show();
-        peersPanel->setCollapsed(false);
-        peersPanel->raise();
+        peersPanel->reveal();
     };
     peersController->showConversation = [peersController, peersPanel](usdcc::peers::Room* room, const QString& with) {
         peersController->showPanel();
@@ -1273,9 +1271,7 @@ int main(int argc, char** argv) {
     window.addSidePanel(renderQueuePanel, Qt::RightDockWidgetArea);
     renderQueuePanel->hide();
     usdcc::render::setShowRenderQueue([renderQueuePanel]() {
-        renderQueuePanel->show();
-        renderQueuePanel->setCollapsed(false);
-        renderQueuePanel->raise();
+        renderQueuePanel->reveal();
     });
     QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
         auto& scheduler = usdcc::render::RenderScheduler::instance();
@@ -1378,9 +1374,7 @@ int main(int argc, char** argv) {
     window.addSidePanel(swarmPanel, Qt::RightDockWidgetArea);
     swarmPanel->hide();
     usdcc::render::setShowSwarm([swarmPanel]() {
-        swarmPanel->show();
-        swarmPanel->setCollapsed(false);
-        swarmPanel->raise();
+        swarmPanel->reveal();
     });
     auto renderersAdvertised = usdcc::render::FinalRenderers::instance().changed.connect([renderNetwork]() { renderNetwork->advertise(); });
     auto renderNodeSetting = usdcc::core::Settings::instance().changed.connect([renderNetwork](const std::string& key) {
@@ -1437,9 +1431,7 @@ int main(int argc, char** argv) {
                                   [&plugins, &python](const std::string& id) { return plugins.reload(id, python); }});
     QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::editPluginRequested, scriptEditor,
                      [scriptEditor](const QString& id, const QString& name, const QString& folder, const QString& mainFile) {
-                         scriptEditor->show();
-                         scriptEditor->setCollapsed(false);
-                         scriptEditor->raise();
+                         scriptEditor->reveal();
                          scriptEditor->openPlugin(id, name, folder, mainFile);
                      });
     // The Schema Editor (docs/SCHEMAS.md §5): usdGenSchema with the app's own Python;
@@ -1461,9 +1453,7 @@ int main(int argc, char** argv) {
             return restartRequested;
         };
         schemaHooks.editText = [scriptEditor](const QString& path) {
-            scriptEditor->show();
-            scriptEditor->setCollapsed(false);
-            scriptEditor->raise();
+            scriptEditor->reveal();
             scriptEditor->openFile(path);
         };
         schemaHooks.showSchemasPanel = [&window, &panelTypes, &stageManager]() -> usdcc::usd::SchemaExplorerViewPanel* {
@@ -1515,7 +1505,7 @@ int main(int argc, char** argv) {
         request.body = QObject::tr("Some plugins or your own settings ask for packages that aren't installed.").toStdString();
         request.kind = usdcc::core::ToastKind::Warning;
         window.toasts()->show(request, {{QObject::tr("Install..."), [pluginPanel]() {
-                                             pluginPanel->show();
+                                             pluginPanel->reveal();
                                              pluginPanel->installPackages();
                                          }}});
     }
@@ -1642,9 +1632,7 @@ int main(int argc, char** argv) {
         };
         if (python.isAvailable()) {
             hooks.editRule = [scriptEditor](const QString& file) {
-                scriptEditor->show();
-                scriptEditor->setCollapsed(false);
-                scriptEditor->raise();
+                scriptEditor->reveal();
                 scriptEditor->openFile(file);
             };
         }

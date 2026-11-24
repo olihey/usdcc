@@ -339,8 +339,26 @@ QJsonObject Definition::toJson() const {
         for (auto it = sidePanels.begin(); it != sidePanels.end(); ++it) panels.insert(it.key(), it.value().toJson());
         object.insert(QStringLiteral("sidePanels"), panels);
     }
+    if (!collapsed.empty()) {
+        QJsonArray list;
+        for (const CollapsedEntry& panel : collapsed) {
+            QJsonObject entry = panel.entry.toJson();
+            entry.insert(QStringLiteral("area"), panel.area);
+            list.append(entry);
+        }
+        object.insert(QStringLiteral("collapsed"), list);
+    }
     object.insert(QStringLiteral("layout"), layout.toJson());
     return object;
+}
+
+QStringList Definition::missingTypes(const std::function<bool(const QString&)>& isKnown) const {
+    QStringList missing;
+    pruned(layout, isKnown, &missing);
+    for (const CollapsedEntry& panel : collapsed) {
+        if (!isKnown(panel.entry.panel) && !missing.contains(panel.entry.panel)) missing << panel.entry.panel;
+    }
+    return missing;
 }
 
 std::optional<Definition> fromJson(const QJsonObject& json, const QString& fallbackId, QString* error) {
@@ -382,6 +400,19 @@ std::optional<Definition> fromJson(const QJsonObject& json, const QString& fallb
         SidePanelEntry entry;
         if (!parseSidePanel(it.key(), it.value(), &entry, &why)) return fail(why);
         definition.sidePanels.insert(it.key(), entry);
+    }
+
+    for (const QJsonValue& value : json.value(QStringLiteral("collapsed")).toArray()) {
+        CollapsedEntry panel;
+        if (!parseEntry(value, &panel.entry, &why)) return fail(QStringLiteral("\"collapsed\": %1").arg(why));
+        if (panel.entry.isViewport()) return fail(QStringLiteral("\"collapsed\" names a viewport, which can't be"));
+        panel.area = value.toObject().value(QStringLiteral("area")).toString(panel.area);
+        if (!sidePanelAreas().contains(panel.area)) {
+            return fail(QStringLiteral("the collapsed panel \"%1\" has the area \"%2\", not \"left\", \"right\", "
+                                       "\"top\" or \"bottom\"")
+                            .arg(panel.entry.panel, panel.area));
+        }
+        definition.collapsed.push_back(std::move(panel));
     }
 
     if (!json.contains(QStringLiteral("layout"))) return fail(QStringLiteral("it has no \"layout\""));

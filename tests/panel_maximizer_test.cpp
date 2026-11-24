@@ -4,7 +4,8 @@
 #include "test_harness.h"
 #include "test_settings.h"
 
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/panel_maximizer.h"
 #include "usdcc/usd/outliner_view_panel.h"
@@ -41,7 +42,7 @@ public:
 
 // Left over right, beside a third:  | left  | side |
 //                                   | right |      |
-// with the Log side panel below.
+// with a side panel below.
 struct Fixture {
     TestSettings settings;
     StageManager stages;
@@ -52,11 +53,14 @@ struct Fixture {
     TestPanel* left = make("Left");
     TestPanel* right = make("Right");
     TestPanel* side = make("Side");
+    usdcc::ui::SidePanel* notes = new usdcc::ui::SidePanel(QStringLiteral("Notes"));
 
     Fixture() {
         ads::CDockAreaWidget* leftArea = manager->addDockWidget(ads::CenterDockWidgetArea, left);
         manager->addDockWidget(ads::RightDockWidgetArea, side, leftArea);
         manager->addDockWidget(ads::BottomDockWidgetArea, right, leftArea);
+        window.addSidePanel(notes, Qt::BottomDockWidgetArea);
+        notes->dockAt(Qt::BottomDockWidgetArea);
         window.resize(1000, 700);
         window.show();
         QElapsedTimer timer;
@@ -75,7 +79,7 @@ struct Fixture {
     QList<QList<int>> layoutSizes() const {
         QList<QList<int>> sizes;
         for (const auto* splitter : manager->findChildren<QSplitter*>()) sizes.append(splitter->sizes());
-        sizes.append({window.logPanel()->height(), manager->height()});
+        sizes.append({notes->height(), manager->height()});
         return sizes;
     }
 
@@ -105,20 +109,35 @@ USDCC_TEST(panel_maximize_gives_the_area_all_the_room_and_restore_puts_it_back) 
     Fixture f;
     const QList<QList<int>> before = f.layoutSizes();
     CHECK(!f.fillsDockManager(f.left), "the panels share the room to begin with");
-    CHECK(f.window.logPanel()->isVisible(), "and the side panel is showing");
+    CHECK(f.notes->isVisible(), "and the side panel is showing");
 
     f.maximizer->maximize(f.left);
     Fixture::settle();
     CHECK(f.fillsDockManager(f.left), "the area fills the dock manager");
     CHECK(!f.right->isVisible() && !f.side->isVisible(), "the other panels are out of sight");
     CHECK(!f.right->isClosed() && !f.side->isClosed(), "but not closed");
-    CHECK(!f.window.logPanel()->isVisible(), "the docked side panel is hidden too");
-    CHECK(f.manager->height() > before.last().last(), "which gives the dock manager its room");
+    CHECK(!f.notes->isVisible(), "the docked side panel is hidden too");
 
     f.maximizer->restore();
     Fixture::settle();
-    CHECK(f.right->isVisible() && f.side->isVisible() && f.window.logPanel()->isVisible(), "everything is back");
+    CHECK(f.right->isVisible() && f.side->isVisible() && f.notes->isVisible(), "everything is back");
     CHECK(f.layoutSizes() == before, "at the sizes it had");
+}
+
+USDCC_TEST(panel_maximize_hides_a_docked_side_panel) {
+    Fixture f;
+    usdcc::ui::LogPanel* log = f.window.logPanel();
+    CHECK(!f.maximizer->canMaximize(log), "a collapsed one can't be maximized");
+    log->dockAt(Qt::TopDockWidgetArea);
+    Fixture::settle();
+    CHECK(log->isVisible() && log->area() == Qt::TopDockWidgetArea, "the Log docked along the top");
+    const QList<QList<int>> before = f.layoutSizes();
+    f.maximizer->maximize(f.left);
+    Fixture::settle();
+    CHECK(!log->isVisible() && f.fillsDockManager(f.left), "maximizing another panel hides it");
+    f.maximizer->restore();
+    Fixture::settle();
+    CHECK(log->isVisible() && f.layoutSizes() == before, "and it comes back");
 }
 
 USDCC_TEST(panel_maximize_nested_and_outer_areas) {

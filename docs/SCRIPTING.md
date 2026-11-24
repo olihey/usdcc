@@ -306,9 +306,9 @@ Only once `tools/build_pyside.py` has run, and CMake then finds it in `USDCC_PYS
 - A Python `usdcc.ui.SidePanel` subclass is docked with `usdcc.app.add_side_panel(panel,
   area="right")`. It appears in the View menu, and the window takes ownership of it.
   `MainWindow::addSidePanel()` handles panels added after start-up:
-  - the panel goes back where the saved layout last had it (`QMainWindow::restoreDockWidget`,
+  - the panel goes back where the saved layout last had it (`MainWindow/sidePanelPlaces`,
     by its object name, which is the title it was made with), or to `area` if the layout
-    doesn't know it;
+    doesn't know it: as a tab of a side panel docked there, else along the whole edge;
   - it's added to the View menu above the toolbars;
   - it leaves the menu when it's deleted.
 - PySide is built for the same Python as §3.1 (OpenUSD's, which `build_pyside.py` reads from

@@ -1,5 +1,7 @@
 #include "usdcc/ui/panel_maximizer.h"
 
+#include <AutoHideDockContainer.h>
+#include <AutoHideSideBar.h>
 #include <DockAreaWidget.h>
 #include <DockContainerWidget.h>
 #include <DockManager.h>
@@ -24,6 +26,7 @@ bool hasOpenPanels(const QWidget* widget) {
     if (auto* splitter = qobject_cast<const ads::CDockSplitter*>(widget)) return splitter->hasVisibleContent();
     return true;
 }
+constexpr ads::SideBarLocation kSideBars[] = {ads::SideBarTop, ads::SideBarLeft, ads::SideBarRight, ads::SideBarBottom};
 }  // namespace
 
 PanelMaximizer::PanelMaximizer(QMainWindow* window, ads::CDockManager* dockManager)
@@ -53,11 +56,17 @@ void PanelMaximizer::maximize(ads::CDockWidget* panel) {
     m_area = panel->dockAreaWidget();
     m_active = true;
 
-    // QDockWidgets only: ADS's panels are plain widgets further down.
+    // Plain QDockWidgets, as a script may add; usdcc's own panels are all in the dock manager.
     m_windowState = m_window->saveState();
     const QList<QDockWidget*> sidePanels = m_window->findChildren<QDockWidget*>(QString(), Qt::FindDirectChildrenOnly);
     for (QDockWidget* sidePanel : sidePanels) {
         if (!sidePanel->isFloating()) sidePanel->hide();
+    }
+
+    // The bars of collapsed side panels, and one slid out.
+    for (ads::CAutoHideDockContainer* container : m_dockManager->autoHideWidgets()) container->collapseView(true);
+    for (const ads::SideBarLocation location : kSideBars) {
+        if (ads::CAutoHideSideBar* bar = m_dockManager->autoHideSideBar(location)) bar->hide();
     }
 
     QWidget* keep = m_area;
@@ -91,6 +100,11 @@ void PanelMaximizer::restore() {
     m_window->restoreState(std::exchange(m_windowState, {}));
     if (QLayout* layout = m_window->layout()) layout->activate();
 
+    for (const ads::CAutoHideDockContainer* container : m_dockManager->autoHideWidgets()) {
+        ads::CAutoHideSideBar* bar = container->autoHideSideBar();
+        if (bar && container->dockWidget() && !container->dockWidget()->isClosed()) bar->show();
+    }
+    if (QLayout* layout = m_dockManager->layout()) layout->activate();  // the room the bars leave
     for (const QPointer<QWidget>& widget : hidden) {
         if (widget && hasOpenPanels(widget)) widget->show();
     }

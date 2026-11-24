@@ -3,8 +3,9 @@
   Shiboken6 typesystem for usdcc._ui, the compiled part of the usdcc.ui
   Python module (src/python/usdcc/ui.py).
 
-  usdcc::ui::SidePanel derives from Qt (QDockWidget), already known via
-  PySide6's own QtWidgets typesystem, loaded below.
+  usdcc::ui::SidePanel derives from Qt (QFrame), already known via PySide6's own
+  QtWidgets typesystem, loaded below, through two classes of which Python needs
+  nothing but that: ads::CDockWidget (the docking system's) and DockPanel.
 
   ViewPanel is NOT bound here (see bindings.h's comment): its constructor now
   requires usdcc::usd::StageManager*/StageRefPtr, pybind11 types this
@@ -19,6 +20,25 @@
          works around the same thing for its own classes); qt_metacall isn't
          meant to be Python-overridden anyway, so drop it like PySide does. -->
     <rejection class="*" function-name="qt_metacall"/>
+
+    <!-- Only the way from SidePanel to QFrame. -->
+    <rejection class="ads::CDockWidget" function-name="*"/>
+    <rejection class="ads::CDockWidget" enum-name="*"/>
+    <rejection class="usdcc::ui::DockPanel" function-name="beginBusy"/>
+    <rejection class="usdcc::ui::DockPanel" function-name="busySnapshot"/>
+    <rejection class="usdcc::ui::DockPanel" function-name="optionsButton"/>
+    <rejection class="usdcc::ui::DockPanel" function-name="pinnedMenu"/>
+    <rejection class="usdcc::ui::DockPanel" function-name="setTabWorkspaceMenu"/>
+    <rejection class="usdcc::ui::SidePanel" function-name="holdsOnlySidePanels"/>
+    <rejection class="usdcc::ui::DockPanel" field-name="*"/>
+
+    <namespace-type name="ads">
+        <object-type name="CDockWidget">
+            <extra-includes>
+                <include file-name="pysideproperty.h" location="global"/>
+            </extra-includes>
+        </object-type>
+    </namespace-type>
 
     <!-- This namespace only exists so shiboken can resolve
          usdcc::ui::SidePanel's qualified C++ name (a bare, unqualified
@@ -37,10 +57,22 @@
                  free because they bind QObject itself. Without this each
                  wrapper fails to compile with "'PySide': is not a class or
                  namespace name". -->
+            <object-type name="DockPanel">
+                <extra-includes>
+                    <include file-name="pysideproperty.h" location="global"/>
+                </extra-includes>
+            </object-type>
             <object-type name="SidePanel">
                 <extra-includes>
                     <include file-name="pysideproperty.h" location="global"/>
                 </extra-includes>
+                <!-- The panel owns its content, as a QDockWidget does. -->
+                <modify-function signature="setWidget(QWidget*)">
+                    <modify-argument index="1">
+                        <parent index="this" action="add"/>
+                    </modify-argument>
+                </modify-function>
+                <modify-function signature="raise()" rename="raise_"/>
             </object-type>
         </namespace-type>
     </namespace-type>

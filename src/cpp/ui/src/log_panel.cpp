@@ -1,4 +1,4 @@
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/theme.h"
 
 #include "usdcc/core/file_log_sink.h"
@@ -79,8 +79,10 @@ QStringList toStringList(const QSet<QString>& set) {
 }
 }  // namespace
 
-LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QString& settingsFile)
+LogPanel::LogPanel(QWidget* parent, usdcc::core::LogHub& hub, const QString& settingsFile)
     : SidePanel(tr("Log"), parent) {
+    // What layouts and workspaces know it by; its title counts errors.
+    setObjectName(QStringLiteral("Log"));
     // Its own file handle, like UiScaleController: QSettings shares one cache
     // per file within the process.
     m_settings = new QSettings(settingsFile.isEmpty() ? appSettings().fileName() : settingsFile, QSettings::IniFormat,
@@ -90,14 +92,8 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     m_filter = new LogFilterModel(this);
     m_filter->setSourceModel(m_model);
 
-    // The pinned filters' column, hidden until they are, then the toolbar and table. In a
-    // plain widget: collapsing (SidePanel) squeezes the panel's widget to nothing, which a
-    // splitter, holding on to its children's minimum sizes, wouldn't be.
-    auto* outer = new QWidget(this);
-    auto* outerLayout = new QVBoxLayout(outer);
-    outerLayout->setContentsMargins(0, 0, 0, 0);
-    m_split = new QSplitter(Qt::Horizontal, outer);
-    outerLayout->addWidget(m_split);
+    // The pinned filters' column, hidden until they are, then the toolbar and table.
+    m_split = new QSplitter(Qt::Horizontal, this);
     m_split->setObjectName(QStringLiteral("logPanelSplit"));
     m_split->setChildrenCollapsible(false);
     m_filtersHost = new QWidget(m_split);
@@ -226,7 +222,7 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     layout->addWidget(m_view, 1);
     m_split->addWidget(container);
     m_split->setStretchFactor(1, 1);
-    setWidget(outer);
+    setWidget(m_split);
 
     // --- Filters ------------------------------------------------------------
     for (const LevelGroup& group : levelGroups()) {
@@ -239,7 +235,7 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
         m_filter->setCategoryHidden(category, true);
     }
     updateSearch();
-    connect(m_search, &QLineEdit::textChanged, this, &LogSidePanel::updateSearch);
+    connect(m_search, &QLineEdit::textChanged, this, &LogPanel::updateSearch);
     for (QToolButton* button : {m_caseButton, m_regexButton}) {
         connect(button, &QToolButton::toggled, this, [this]() {
             updateSearch();
@@ -255,7 +251,7 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     connect(m_folderButton, &QToolButton::clicked, this, [this]() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_logFile).absolutePath()));
     });
-    connect(m_model, &LogModel::recordsAdded, this, &LogSidePanel::onRecordsAdded);
+    connect(m_model, &LogModel::recordsAdded, this, &LogPanel::onRecordsAdded);
     // The pinned column's counts, sources and categories; at most twice a second while
     // messages pour in, and not while a button is down (it may be on an entry).
     m_pinnedRefresh = new QTimer(this);
@@ -272,7 +268,7 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     connect(m_model, &LogModel::countsChanged, this, [this]() {
         if (m_pinnedView && !m_pinnedRefresh->isActive()) m_pinnedRefresh->start();
     });
-    connect(m_view, &QTableView::customContextMenuRequested, this, &LogSidePanel::showContextMenu);
+    connect(m_view, &QTableView::customContextMenuRequested, this, &LogPanel::showContextMenu);
 
     auto* copy = new QShortcut(QKeySequence::Copy, m_view, nullptr, nullptr, Qt::WidgetShortcut);
     connect(copy, &QShortcut::activated, this, [this]() { copySelection(false); });
@@ -285,39 +281,34 @@ LogSidePanel::LogSidePanel(QWidget* parent, usdcc::core::LogHub& hub, const QStr
     connect(scrollBar, &QScrollBar::valueChanged, this, [this, scrollBar](int value) {
         if (m_adjusting) return;
         m_follow = value >= scrollBar->maximum() - kFollowSlack;
-        if (m_follow && isVisible() && !isCollapsed()) markSeen();
+        if (m_follow && isVisible()) markSeen();
     });
-    connect(this, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (visible && !isCollapsed() && m_follow) markSeen();
-    });
-    connect(this, &SidePanel::collapsedChanged, this, [this](bool collapsed) {
-        if (!collapsed && isVisible() && m_follow) markSeen();
+    connect(this, &ads::CDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (visible && m_follow) markSeen();
     });
 
     m_model->drainNow();  // the backlog, so the panel isn't empty for a moment
     updateTitle();
 }
 
-LogSidePanel::~LogSidePanel() {
+LogPanel::~LogPanel() {
     m_settings->setValue(kHeaderKey, m_view->horizontalHeader()->saveState());
 }
 
-void LogSidePanel::setLogFile(const QString& path) {
+void LogPanel::setLogFile(const QString& path) {
     m_logFile = path;
     m_folderButton->setVisible(!path.isEmpty());
     m_folderButton->setToolTip(tr("Open the log folder (this session's log is %1)").arg(QFileInfo(path).fileName()));
 }
 
-void LogSidePanel::showLatest() {
-    show();
-    raise();
-    setCollapsed(false);
+void LogPanel::showLatest() {
+    reveal();
     m_follow = true;
     m_view->scrollToBottom();
     markSeen();
 }
 
-QToolButton* LogSidePanel::addToggle(const QString& toolTip) {
+QToolButton* LogPanel::addToggle(const QString& toolTip) {
     // The same square as the icon buttons beside it, with short text instead
     // of an icon ("Aa", ".*").
     auto* button = new PanelIconButton(QString(), toolTip, this);
@@ -325,14 +316,14 @@ QToolButton* LogSidePanel::addToggle(const QString& toolTip) {
     return button;
 }
 
-void LogSidePanel::onRecordsAdded(int, int errors) {
-    if (errors > 0 && (!isVisible() || isCollapsed() || !m_follow)) {
+void LogPanel::onRecordsAdded(int, int errors) {
+    if (errors > 0 && (!isVisible() || !m_follow)) {
         m_unseenErrors += errors;
         updateTitle();
     }
 }
 
-const std::vector<LogSidePanel::LevelGroup>& LogSidePanel::levelGroups() {
+const std::vector<LogPanel::LevelGroup>& LogPanel::levelGroups() {
     static const std::vector<LevelGroup> groups = {
         {QT_TR_NOOP("Errors"), {LogLevel::Error, LogLevel::Fatal}, kShowErrorsKey, true, nullptr},
         {QT_TR_NOOP("Warnings"), {LogLevel::Warning}, kShowWarningsKey, true, nullptr},
@@ -343,11 +334,11 @@ const std::vector<LogSidePanel::LevelGroup>& LogSidePanel::levelGroups() {
     return groups;
 }
 
-void LogSidePanel::setLevelGroupShown(const LevelGroup& group, bool shown) {
+void LogPanel::setLevelGroupShown(const LevelGroup& group, bool shown) {
     for (LogLevel level : group.levels) m_filter->setLevelShown(level, shown);
 }
 
-void LogSidePanel::setFiltersPinned(bool pinned) {
+void LogPanel::setFiltersPinned(bool pinned) {
     if (pinned == m_pinned) return;
     m_pinned = pinned;
     if (pinned) {
@@ -369,7 +360,7 @@ void LogSidePanel::setFiltersPinned(bool pinned) {
     m_settings->setValue(kPinnedKey, pinned);
 }
 
-void LogSidePanel::showEvent(QShowEvent* event) {
+void LogPanel::showEvent(QShowEvent* event) {
     SidePanel::showEvent(event);
     // Once, when it first shows: the column takes its width from the panel's.
     if (m_restoredPin) return;
@@ -377,13 +368,13 @@ void LogSidePanel::showEvent(QShowEvent* event) {
     if (m_settings->value(kPinnedKey, false).toBool()) setFiltersPinned(true);
 }
 
-void LogSidePanel::refreshPinnedFilters() {
+void LogPanel::refreshPinnedFilters() {
     if (m_pinnedView) m_pinnedView->scheduleRebuild();
 }
 
-void LogSidePanel::populateFilterMenu(QMenu* menu) { fillFilterMenu(menu, false); }
+void LogPanel::populateFilterMenu(QMenu* menu) { fillFilterMenu(menu, false); }
 
-void LogSidePanel::fillFilterMenu(QMenu* menu, bool pinned) {
+void LogPanel::fillFilterMenu(QMenu* menu, bool pinned) {
     menu->setToolTipsVisible(true);
     auto heading = [menu](const QString& text) { OptionsMenuView::addHeading(menu, text); };
     heading(tr("Levels"));
@@ -443,14 +434,14 @@ void LogSidePanel::fillFilterMenu(QMenu* menu, bool pinned) {
     }
 }
 
-void LogSidePanel::updateSearch() {
+void LogPanel::updateSearch() {
     m_filter->setSearch(m_search->text(), m_caseButton->isChecked(), m_regexButton->isChecked());
     // An expression that doesn't parse filters nothing; say so on the field.
     m_search->setStyleSheet(m_filter->isSearchValid() ? QString() : QStringLiteral("border-color: %1;").arg(theme::color(theme::Token::Error).name()));
     m_search->setToolTip(m_filter->isSearchValid() ? QString() : tr("Not a valid regular expression"));
 }
 
-void LogSidePanel::updateTitle() {
+void LogPanel::updateTitle() {
     // Plain text rather than tr()'s %n plurals: those need a translation file.
     if (m_unseenErrors == 0) {
         setWindowTitle(tr("Log"));
@@ -462,13 +453,13 @@ void LogSidePanel::updateTitle() {
     toggleViewAction()->setIcon(m_unseenErrors > 0 ? errorDot() : QIcon());
 }
 
-void LogSidePanel::markSeen() {
+void LogPanel::markSeen() {
     if (m_unseenErrors == 0) return;
     m_unseenErrors = 0;
     updateTitle();
 }
 
-QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent, bool pinned) {
+QTreeWidget* LogPanel::createCategoryTree(QWidget* parent, bool pinned) {
     auto* tree = new QTreeWidget(parent);
     tree->setObjectName(QStringLiteral("logCategoryTree"));
     tree->setHeaderHidden(true);
@@ -554,7 +545,7 @@ QTreeWidget* LogSidePanel::createCategoryTree(QWidget* parent, bool pinned) {
     return tree;
 }
 
-void LogSidePanel::showContextMenu(const QPoint& position) {
+void LogPanel::showContextMenu(const QPoint& position) {
     const QModelIndex index = m_view->indexAt(position);
     QMenu menu(this);
     QAction* copy = menu.addAction(tr("Copy"), this, [this]() { copySelection(false); });
@@ -597,7 +588,7 @@ void LogSidePanel::showContextMenu(const QPoint& position) {
     menu.exec(m_view->viewport()->mapToGlobal(position));
 }
 
-QList<LogRecord> LogSidePanel::selectedRecords() const {
+QList<LogRecord> LogPanel::selectedRecords() const {
     QModelIndexList rows = m_view->selectionModel()->selectedRows();
     std::sort(rows.begin(), rows.end(), [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
     QList<LogRecord> records;
@@ -605,7 +596,7 @@ QList<LogRecord> LogSidePanel::selectedRecords() const {
     return records;
 }
 
-void LogSidePanel::copySelection(bool withDetails) const {
+void LogPanel::copySelection(bool withDetails) const {
     std::string text;
     for (LogRecord record : selectedRecords()) {
         if (!withDetails) record.details.clear();
@@ -614,7 +605,7 @@ void LogSidePanel::copySelection(bool withDetails) const {
     if (!text.empty()) QApplication::clipboard()->setText(qs(text));
 }
 
-void LogSidePanel::saveFilters() const {
+void LogPanel::saveFilters() const {
     for (const LevelGroup& group : levelGroups()) {
         m_settings->setValue(group.settingsKey, m_filter->isLevelShown(group.levels.front()));
     }

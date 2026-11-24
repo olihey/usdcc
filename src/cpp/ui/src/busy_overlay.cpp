@@ -1,7 +1,7 @@
 #include "busy_overlay.h"
 
 #include "usdcc/ui/scaled_metrics.h"
-#include "usdcc/ui/view_panel.h"
+#include "usdcc/ui/dock_panel.h"
 
 #include <QApplication>
 #include <QFrame>
@@ -80,7 +80,7 @@ void Busy::finish() {
 
 // --- BusyOverlay ----------------------------------------------------------------------
 
-BusyOverlay::BusyOverlay(ViewPanel* panel) : QWidget(panel), m_panel(panel) {
+BusyOverlay::BusyOverlay(DockPanel* panel) : QWidget(panel), m_panel(panel) {
     setObjectName(QStringLiteral("busyOverlay"));
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_NoSystemBackground);

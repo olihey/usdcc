@@ -7,7 +7,7 @@
 #include "test_settings.h"
 
 #include "usdcc/tools/tool_set.h"
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
@@ -28,6 +28,7 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <AutoHideTab.h>
 #include <DockAreaWidget.h>
 #include <DockManager.h>
 #include <DockWidgetTab.h>
@@ -443,7 +444,7 @@ USDCC_TEST(workspace_switching) {
     CHECK(attributes && attributes->isClosed() && docks->findDockWidget(QStringLiteral("Attributes")) == attributes,
           "the fixed Attributes is closed, not deleted");
     CHECK(!topGuard || !docks->dockWidgetsMap().values().contains(topGuard.data()), "the made Top view is gone");
-    CHECK(app.window.logPanel()->isHidden(), "the Log hidden, as it says");
+    CHECK(app.window.logPanel()->isClosed(), "the Log hidden, as it says");
     CHECK(openPanels(docks).size() == 3 && !outliner->isClosed(), "the Outliner and two viewports open: %d",
           int(openPanels(docks).size()));
 
@@ -513,7 +514,10 @@ USDCC_TEST(workspace_limits_and_side_panels) {
     QSplitter* columns = outliner ? qobject_cast<QSplitter*>(outliner->dockAreaWidget()->parentWidget()) : nullptr;
     QList<int> sizes;
     for (int i = 0; columns && i < columns->count(); ++i) {
-        if (!columns->widget(i)->isHidden()) sizes << columns->sizes()[i];
+        // The Log, docked at the right, is a column of its own.
+        if (columns->widget(i) != app.window.logPanel()->dockAreaWidget() && !columns->widget(i)->isHidden()) {
+            sizes << columns->sizes()[i];
+        }
     }
     CHECK(sizes.size() == 4, "four columns: %d", int(sizes.size()));
     if (sizes.size() == 4) {
@@ -535,7 +539,9 @@ USDCC_TEST(workspace_limits_and_side_panels) {
         waitFor([&] { return columns->sizes() != before; }, 1000);
         QList<int> after;
         for (int i = 0; i < columns->count(); ++i) {
-            if (!columns->widget(i)->isHidden()) after << columns->sizes()[i];
+            if (columns->widget(i) != app.window.logPanel()->dockAreaWidget() && !columns->widget(i)->isHidden()) {
+                after << columns->sizes()[i];
+            }
         }
         CHECK(after.size() == 4 && std::abs(after[0] - sizes[0]) <= 2 && std::abs(after[3] - sizes[3]) <= 2 &&
                   after[1] > sizes[1] && after[2] > sizes[2],
@@ -543,8 +549,8 @@ USDCC_TEST(workspace_limits_and_side_panels) {
               after.value(3));
     }
 
-    usdcc::ui::SidePanel* logPanel = app.window.logPanel();
-    CHECK(!logPanel->isHidden() && !logPanel->isCollapsed() && app.window.dockWidgetArea(logPanel) == Qt::RightDockWidgetArea,
+    usdcc::ui::LogPanel* logPanel = app.window.logPanel();
+    CHECK(!logPanel->isClosed() && !logPanel->isCollapsed() && logPanel->area() == Qt::RightDockWidgetArea,
           "the Log shown, moved to the right as it says");
     const workspace::Definition captured = workspace::capture(&app.window, QStringLiteral("c"), QStringLiteral("C"), true);
     const workspace::SidePanelEntry log = captured.sidePanels.value(QStringLiteral("Log"));
@@ -556,7 +562,7 @@ USDCC_TEST(workspace_limits_and_side_panels) {
         parse(R"({"format": "usdcc-workspace", "version": 1, "name": "Bare", "layout": {"tabs": [{"panel": "viewport"}]}})"),
         QStringLiteral("bare"));
     CHECK(bare && workspace::apply(*bare, app.context()).applied, "bare applied");
-    CHECK(logPanel->isHidden(), "the Log, not named, hidden");
+    CHECK(logPanel->isClosed(), "the Log, not named, hidden");
     // Named by its title works too.
     std::optional<workspace::Definition> titled = workspace::fromJson(
         parse(R"({"format": "usdcc-workspace", "version": 1, "name": "T", "sidePanels": {"Log": "collapsed"},
@@ -564,7 +570,7 @@ USDCC_TEST(workspace_limits_and_side_panels) {
         QStringLiteral("titled"));
     logPanel->setObjectName(QStringLiteral("logByAnotherName"));
     CHECK(titled && workspace::apply(*titled, app.context()).applied, "titled applied");
-    CHECK(!logPanel->isHidden() && logPanel->isCollapsed(), "found by its title, collapsed");
+    CHECK(!logPanel->isClosed() && logPanel->isCollapsed(), "found by its title, collapsed");
     logPanel->setObjectName(QStringLiteral("Log"));
 }
 
@@ -916,4 +922,202 @@ USDCC_TEST(workspace_brings_a_closed_viewport_back_with_its_tab) {
     CHECK(!viewport->isClosed(), "the closed viewport isn't used and opened again");
     CHECK(!viewport->tabWidget()->isHidden(), "the viewport is back without its tab");
     CHECK(viewport->toggleViewAction()->isChecked(), "its View menu entry still says it's closed");
+}
+
+// The workspaces usdcc ships, each applied twice over the others (docs/WORKSPACES.md §3.2):
+// the side panels where it says, and the layout's tree as the file has it, whatever docked
+// side panels surround it.
+USDCC_TEST(workspace_shipped_files_place_the_side_panels) {
+    App app;
+    // The types the files name that this test app lacks: any panel will do.
+    for (const char* type : {"layers", "materialEditor", "usda", "schemas", "dependencies"}) {
+        app.registry.add(QString::fromLatin1(type), QString::fromLatin1(type),
+                         [&app](const StageRefPtr& stage, const QString& title, QWidget* parent) -> ViewPanel* {
+                             return new usdcc::usd::OutlinerViewPanel(&app.stages, stage, app.undo, title, parent);
+                         });
+    }
+    app.stages.createStage();
+    QApplication::processEvents();
+    usdcc::ui::LogPanel* log = app.window.logPanel();
+    for (const char* name : {"Script Editor", "pluginManagerPanel", "Peers"}) {
+        auto* panel = new usdcc::ui::SidePanel(QString::fromLatin1(name));
+        panel->setWidget(new QLabel(QString::fromLatin1(name)));
+        app.window.addSidePanel(panel, Qt::RightDockWidgetArea);
+    }
+    const QDir folder(QStringLiteral(USDCC_SOURCE_DIR "/resources/workspaces"));
+    QStringList files = folder.entryList({QStringLiteral("*.json")}, QDir::Files);
+    files.removeAll(QStringLiteral("workspace.schema.json"));
+    CHECK(files.size() == 8, "eight shipped workspaces: %d", int(files.size()));
+    for (int round = 0; round < 2; ++round) {
+        for (const QString& file : files) {
+            const QByteArray name = file.toUtf8();
+            QFile json(folder.filePath(file));
+            CHECK(json.open(QIODevice::ReadOnly), "%s opens", name.constData());
+            std::optional<workspace::Definition> definition = workspace::fromJson(parse(json.readAll()), file);
+            CHECK(definition.has_value(), "%s reads", name.constData());
+            if (!definition) continue;
+            const workspace::ApplyResult result = workspace::apply(*definition, app.context());
+            CHECK(result.applied && result.missingTypes.isEmpty(), "%s applies (missing: %s)", name.constData(),
+                  qPrintable(result.missingTypes.join(' ')));
+            waitFor([] { return false; }, 100);
+
+            const workspace::Definition captured = workspace::capture(&app.window, QStringLiteral("c"), QStringLiteral("C"), true);
+            for (usdcc::ui::SidePanel* panel : app.window.sidePanels()) {
+                const QByteArray who = panel->objectName().toUtf8();
+                const auto entry = definition->sidePanels.find(panel->objectName());
+                const bool named = entry != definition->sidePanels.end();
+                const QString wanted = named ? entry->state : QStringLiteral("hidden");
+                const workspace::SidePanelEntry got = captured.sidePanels.value(panel->objectName());
+                CHECK(got.state == wanted, "%s: %s %s, not %s", name.constData(), who.constData(), qPrintable(wanted),
+                      qPrintable(got.state));
+                CHECK(panel->isVisible() == (wanted == QLatin1String("shown")), "%s: %s in view when shown only",
+                      name.constData(), who.constData());
+                if (!named) continue;
+                if (!entry->area.isEmpty()) {
+                    CHECK(got.area == entry->area, "%s: %s at the %s, not %s", name.constData(), who.constData(),
+                          qPrintable(entry->area), qPrintable(got.area));
+                }
+                if (entry->size > 0.0) {
+                    CHECK(std::abs(got.size - entry->size) < 0.03, "%s: %s with its share %.2f: %.3f", name.constData(),
+                          who.constData(), entry->size, got.size);
+                }
+            }
+
+            // The same tree, and the same shares where no maxWidth or maxHeight says otherwise.
+            std::function<void(const workspace::Node&, const workspace::Node&)> same =
+                [&](const workspace::Node& want, const workspace::Node& have) {
+                    CHECK(want.isSplit() == have.isSplit(), "%s: a split where it says", name.constData());
+                    if (want.isSplit() != have.isSplit()) return;
+                    if (!want.isSplit()) {
+                        CHECK(want.tabs.size() == have.tabs.size(), "%s: %d tabs, not %d", name.constData(),
+                              int(want.tabs.size()), int(have.tabs.size()));
+                        for (std::size_t i = 0; i < std::min(want.tabs.size(), have.tabs.size()); ++i) {
+                            CHECK(want.tabs[i].panel == have.tabs[i].panel, "%s: %s in place", name.constData(),
+                                  qPrintable(want.tabs[i].panel));
+                        }
+                        return;
+                    }
+                    CHECK(want.orientation == have.orientation && want.items.size() == have.items.size(),
+                          "%s: split the same way: %d, not %d", name.constData(), int(want.items.size()),
+                          int(have.items.size()));
+                    for (std::size_t i = 0; i < std::min(want.items.size(), have.items.size()); ++i) {
+                        same(want.items[i], have.items[i]);
+                    }
+                };
+            same(definition->layout, captured.layout);
+        }
+    }
+
+    // Saved and restored with the window's layout: docked by the last ones, then collapsed.
+    for (const bool collapsed : {false, true}) {
+        collapsed ? log->collapseAt(Qt::LeftDockWidgetArea) : log->dockAt(Qt::BottomDockWidgetArea);
+        QApplication::processEvents();
+        const QJsonObject state = app.window.layoutState();
+        log->toggleView(false);
+        app.window.restoreLayoutState(state, false);
+        QApplication::processEvents();
+        CHECK(!log->isClosed() && log->isCollapsed() == collapsed &&
+                  log->area() == (collapsed ? Qt::LeftDockWidgetArea : Qt::BottomDockWidgetArea),
+              "%s again after a restore", collapsed ? "collapsed" : "docked");
+    }
+    // Slid out, and tucked away again by collapsing.
+    log->reveal();
+    QApplication::processEvents();
+    CHECK(log->isVisible() && log->isCollapsed(), "a collapsed Log slides out");
+    log->setCollapsed(true);
+    QApplication::processEvents();
+    CHECK(!log->isVisible() && !log->isClosed(), "and goes back to its tab");
+}
+
+// A layout saved before the Log was in the dock manager doesn't name it: it comes as a tab at the
+// window's edge, not floating and not lost.
+USDCC_TEST(workspace_layout_without_the_log) {
+    App app;
+    usdcc::ui::LogPanel* log = app.window.logPanel();
+    QJsonObject state = app.window.layoutState();
+    QString layout = state.value(QStringLiteral("dockLayout")).toString();
+    layout.replace(QStringLiteral("\"Log\""), QStringLiteral("\"Gone\""));
+    state.insert(QStringLiteral("dockLayout"), layout);
+    for (const bool docked : {false, true}) {
+        if (docked) log->dockAt(Qt::BottomDockWidgetArea);
+        app.window.restoreLayoutState(state, false);
+        QApplication::processEvents();
+        CHECK(!log->isClosed() && !log->isFloating() && log->isCollapsed() && log->area() == Qt::BottomDockWidgetArea,
+              "a tab at the bottom: closed %d floating %d collapsed %d", log->isClosed(), log->isFloating(),
+              log->isCollapsed());
+        CHECK(log->sideTabWidget() && log->sideTabWidget()->isVisible(), "which shows");
+    }
+}
+
+// View panels collapsed at an edge: a workspace has them there, one without takes them back
+// into its layout or closes them, and the layout saved has them.
+USDCC_TEST(workspace_collapsed_view_panels) {
+    App app;
+    ads::CDockManager* docks = app.window.dockManager();
+    const StageRefPtr stage = app.stages.createStage();
+    const auto apply = [&app](const char* json) {
+        std::optional<workspace::Definition> definition = workspace::fromJson(parse(json), QStringLiteral("w"));
+        CHECK(definition.has_value(), "reads");
+        if (!definition) return;
+        CHECK(workspace::apply(*definition, app.context()).applied, "applies");
+        waitFor([] { return false; }, 100);
+    };
+    const char* kCollapsed = R"({"format": "usdcc-workspace", "version": 1, "name": "C",
+        "collapsed": [{"panel": "outliner", "area": "left"}, {"panel": "attributes", "area": "right"}],
+        "layout": {"tabs": [{"panel": "viewport"}]}})";
+    const char* kDocked = R"({"format": "usdcc-workspace", "version": 1, "name": "D",
+        "layout": {"split": "horizontal", "items": [{"tabs": [{"panel": "outliner"}]}, {"tabs": [{"panel": "viewport"}]}]}})";
+    auto* outliner = qobject_cast<ViewPanel*>(docks->findDockWidget(QStringLiteral("Outliner")));
+    auto* attributes = qobject_cast<ViewPanel*>(docks->findDockWidget(QStringLiteral("Attributes")));
+    for (int round = 0; round < 2; ++round) {
+        apply(kCollapsed);
+        CHECK(docks->findDockWidget(QStringLiteral("Outliner")) == outliner, "the same Outliner");
+        CHECK(outliner->collapsedArea() == Qt::LeftDockWidgetArea && attributes->collapsedArea() == Qt::RightDockWidgetArea,
+              "both collapsed, each at its edge");
+        CHECK(outliner->sideTabWidget()->isVisible() && !outliner->isVisible(), "as a tab");
+        CHECK(outliner->currentStage() == stage, "showing the current stage");
+        const workspace::Definition captured = workspace::capture(&app.window, QStringLiteral("c"), QStringLiteral("C"), false);
+        CHECK(captured.collapsed.size() == 2 && !captured.layout.isSplit(), "read back collapsed, not in the layout: %d",
+              int(captured.collapsed.size()));
+        const auto again = workspace::fromJson(captured.toJson(), QString());
+        CHECK(again && again->collapsed.size() == 2 && again->collapsed[0].area == captured.collapsed[0].area, "and written");
+
+        apply(kDocked);
+        CHECK(!outliner->isCollapsed() && outliner->isVisible(), "docked where the next workspace has it");
+        CHECK(attributes->isClosed() && !attributes->isCollapsed(), "the other closed, off the bar");
+    }
+
+    // Saved and restored, and closing its stage's panels.
+    apply(kCollapsed);
+    const QJsonObject state = app.window.layoutState();
+    apply(kDocked);
+    app.window.restoreLayoutState(state, false);
+    QApplication::processEvents();
+    CHECK(outliner->collapsedArea() == Qt::LeftDockWidgetArea && !outliner->isClosed(), "a restored layout collapses it again");
+    outliner->raise();
+    waitFor([&] { return outliner->isVisible(); }, 500);
+    CHECK(outliner->isVisible(), "raise() slides it out");
+    ViewPanel* copy = outliner->duplicateBeside();
+    waitFor([] { return false; }, 50);
+    CHECK(copy->collapsedArea() == Qt::LeftDockWidgetArea && copy->isVisible(), "a copy is collapsed beside it, slid out");
+    ViewPanel* opened = app.registry.open(QStringLiteral("outliner"), stage, docks, &app.window);
+    waitFor([] { return false; }, 50);
+    CHECK(opened && !opened->isCollapsed() && opened->isVisible(), "one opened from the Stages menu is docked");
+    copy->deleteDockWidget();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QApplication::processEvents();
+    app.stages.closeStage(stage);
+    CHECK(!outliner->currentStage() && outliner->isCollapsed(), "closing the stage empties it where it is");
+
+    for (ViewPanel* panel : openPanels(docks)) {
+        CHECK(panel->features().testFlag(ads::CDockWidget::DockWidgetPinnable) != (typeOf(panel) == "viewport"),
+              "all but viewports can be collapsed: %s", qPrintable(typeOf(panel)));
+    }
+    QString why;
+    CHECK(!workspace::fromJson(parse(R"({"format": "usdcc-workspace", "version": 1, "id": "v", "name": "V", "collapsed": [{"panel": "viewport"}],
+              "layout": {"tabs": [{"panel": "viewport"}]}})"), QString(), &why) && why.contains("viewport"),
+          "a collapsed viewport is refused: %s", qPrintable(why));
+    CHECK(!workspace::fromJson(parse(R"({"format": "usdcc-workspace", "version": 1, "id": "v", "name": "V", "collapsed": [{"panel": "outliner",
+              "area": "middle"}], "layout": {"tabs": [{"panel": "viewport"}]}})"), QString(), &why),
+          "and so is an unknown edge");
 }

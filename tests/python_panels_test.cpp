@@ -14,6 +14,7 @@
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/scripted_view_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/side_panel.h"
 #include "usdcc/ui/options_menu_view.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/stage_manager.h"
@@ -23,7 +24,6 @@
 #include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
-#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonObject>
@@ -102,11 +102,11 @@ USDCC_TEST(python_side_panel) {
               title ? title->c_str() : "?");
 
         CHECK(addNotesPanel("left"), "a Python panel is added");
-        auto* notes = window.findChild<QDockWidget*>(QStringLiteral("Notes"));
+        auto* notes = window.findChild<usdcc::ui::SidePanel*>(QStringLiteral("Notes"));
         CHECK(notes, "it's in the window, and still there after the script's namespace went");
         if (!notes) return;
         QCoreApplication::processEvents();
-        CHECK(window.dockWidgetArea(notes) == Qt::LeftDockWidgetArea && notes->isVisible(),
+        CHECK(notes->area() == Qt::LeftDockWidgetArea && notes->isVisible(),
               "docked on the left and shown, also once the window has handled its events");
         CHECK(inViewMenu(window, QStringLiteral("Notes")), "listed in the View menu");
 
@@ -127,9 +127,9 @@ USDCC_TEST(python_side_panel) {
         window.buildViewMenu();
         window.restoreLayout();
         CHECK(addNotesPanel("bottom"), "added again in the next session");
-        auto* notes = window.findChild<QDockWidget*>(QStringLiteral("Notes"));
-        CHECK(notes && window.dockWidgetArea(notes) == Qt::LeftDockWidgetArea,
-              "back where the saved layout had it: area %d", notes ? int(window.dockWidgetArea(notes)) : -1);
+        auto* notes = window.findChild<usdcc::ui::SidePanel*>(QStringLiteral("Notes"));
+        CHECK(notes && notes->area() == Qt::LeftDockWidgetArea,
+              "back where the saved layout had it: area %d", notes ? int(notes->area()) : -1);
 
         delete notes;
         CHECK(!inViewMenu(window, QStringLiteral("Notes")), "a deleted panel leaves the View menu");

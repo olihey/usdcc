@@ -90,7 +90,8 @@ ViewPanel* ViewPanelRegistry::open(const QString& id, const usdcc::usd::StageRef
 
     ads::CDockAreaWidget* nextTo = nullptr;
     for (ads::CDockWidget* existing : dockManager->dockWidgetsMap()) {
-        if (existing->metaObject() == panel->metaObject() && !existing->isClosed() && existing->dockAreaWidget()) {
+        if (existing->metaObject() == panel->metaObject() && !existing->isClosed() && existing->dockAreaWidget() &&
+            !existing->isAutoHide()) {
             nextTo = existing->dockAreaWidget();
             break;
         }

@@ -1,26 +1,24 @@
-// Collapsing side panels (SidePanel::setCollapsed()): double-clicking a tab
-// collapses every panel sharing that spot to its title bar, double-clicking
-// a title bar expands them again to the height they had, a panel alone at
-// the right edge collapses to a vertical title bar's width instead, the
-// collapsed state is saved with the layout, and floating a panel expands it.
-// Runs in usdcc_ui_tests (Qt's offscreen platform); the layout is saved in
-// Qt's test-mode config folder, never in the user's usdcc.ini.
+// Side panels (SidePanel): collapsing to a tab at an edge and docking again, several at one
+// edge, the edges they're found at however they nest, closing, the places kept for panels
+// added later, and deleting one. Runs in usdcc_ui_tests (Qt's offscreen platform); the layout
+// is saved in Qt's test-mode config folder, never in the user's usdcc.ini.
 #include "test_harness.h"
 #include "test_settings.h"
 
-#include "usdcc/ui/log_side_panel.h"
+#include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/side_panel.h"
 
+#include <AutoHideTab.h>
+#include <DockAreaWidget.h>
+#include <DockManager.h>
+#include <DockWidget.h>
+
 #include <QApplication>
-#include <QCursor>
 #include <QElapsedTimer>
-#include <QFile>
 #include <QLabel>
 #include <QMenu>
-#include <QMouseEvent>
-#include <QStandardPaths>
-#include <QTabBar>
+#include <QPointer>
 #include <QTextEdit>
 
 #include <cstdlib>
@@ -34,227 +32,176 @@ void settle(MainWindow& window) {
     QElapsedTimer timer;
     timer.start();
     while (!window.isLayoutSettled() && timer.elapsed() < 5000) QApplication::processEvents(QEventLoop::AllEvents, 50);
-    QApplication::processEvents();
+    for (int i = 0; i < 3; ++i) QApplication::processEvents();
 }
 
-void send(QWidget* widget, QEvent::Type type, QPoint globalPos, Qt::MouseButtons held) {
-    const QPoint pos = widget->mapFromGlobal(globalPos);
-    QMouseEvent event(type, pos, globalPos, type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton, held,
-                      Qt::NoModifier);
-    QApplication::sendEvent(widget, &event);
+bool inViewMenu(MainWindow& window, const SidePanel* panel) {
+    return window.viewMenu()->actions().contains(panel->toggleViewAction());
 }
 
-// As a real double-click: press, release, press, double-click, release, with
-// the mouse move Windows sends once the panel has moved under the cursor.
-void doubleClick(QWidget* widget, QPoint pos) {
-    const QPoint at = widget->mapToGlobal(pos);
-    send(widget, QEvent::MouseButtonPress, at, Qt::LeftButton);
-    send(widget, QEvent::MouseButtonRelease, at, Qt::NoButton);
-    send(widget, QEvent::MouseButtonPress, at, Qt::LeftButton);
-    send(widget, QEvent::MouseButtonDblClick, at, Qt::LeftButton);
-    QApplication::processEvents();  // expanding resizes the dock area a moment later
-    QApplication::processEvents();
-    send(widget, QEvent::MouseMove, at, Qt::LeftButton);
-    send(widget, QEvent::MouseButtonRelease, at, Qt::NoButton);
-    QApplication::processEvents();
-}
-
-QTabBar* shownTabBar(MainWindow& window) {
-    for (QTabBar* tabBar : window.findChildren<QTabBar*>(Qt::FindDirectChildrenOnly)) {
-        if (tabBar->isVisible()) return tabBar;
-    }
-    return nullptr;
-}
-
-// The Log panel is the window's own; these are added like the app's.
+// Two view panels' worth of layout, side by side, and panels added like the app's.
 struct Panels {
+    ads::CDockWidget* left = new ads::CDockWidget(QStringLiteral("Left"));
+    ads::CDockWidget* right = new ads::CDockWidget(QStringLiteral("Right"));
     SidePanel* notes = new SidePanel(QStringLiteral("Notes"));
     SidePanel* scripts = new SidePanel(QStringLiteral("Scripts"));
     explicit Panels(MainWindow& window) {
+        left->setWidget(new QTextEdit);
+        right->setWidget(new QTextEdit);
+        auto* area = window.dockManager()->addDockWidget(ads::CenterDockWidgetArea, left);
+        window.dockManager()->addDockWidget(ads::RightDockWidgetArea, right, area);
         notes->setWidget(new QLabel(QStringLiteral("notes")));
         scripts->setWidget(new QTextEdit);
         window.addSidePanel(notes, Qt::BottomDockWidgetArea);
         window.addSidePanel(scripts, Qt::RightDockWidgetArea);
+        window.buildViewMenu();
+        window.resize(1200, 800);
     }
 };
 
 }  // namespace
 
-USDCC_TEST(side_panel_collapse) {
+USDCC_TEST(side_panel_collapse_and_dock) {
     TestSettings settings;
-    int scriptsWidth = 0;
     {
         MainWindow window;
         Panels panels(window);
-        SidePanel* log = window.logPanel();
-        window.tabifyDockWidget(log, panels.notes);
-        window.buildViewMenu();
         window.restoreLayout();
-        window.resize(1200, 800);
         window.show();
         settle(window);
-        window.resizeDocks({log}, {300}, Qt::Vertical);
+        SidePanel* log = window.logPanel();
+        CHECK(panels.notes->isCollapsed() && !panels.notes->isVisible() && panels.notes->area() == Qt::BottomDockWidgetArea,
+              "added before the window is up, it starts as a tab at its edge");
+        CHECK(panels.notes->sideTabWidget()->isVisible(), "which shows");
+        CHECK(inViewMenu(window, panels.notes) && inViewMenu(window, log), "listed in the View menu");
+
+        panels.scripts->dockAt(Qt::RightDockWidgetArea);
+        log->dockAt(Qt::BottomDockWidgetArea);
+        settle(window);
+        CHECK(panels.scripts->isVisible() && panels.scripts->area() == Qt::RightDockWidgetArea, "docked on the right");
+        CHECK(log->isVisible() && log->area() == Qt::BottomDockWidgetArea, "and along the bottom, under it");
+        CHECK(panels.scripts->area() == Qt::RightDockWidgetArea, "the right one is at the right still");
+        panels.scripts->resizeToShare(0.3);
+        settle(window);
+        CHECK(std::abs(panels.scripts->place().value("size").toDouble() - 0.3) < 0.02, "with the share asked for: %f",
+              panels.scripts->place().value("size").toDouble());
+
+        panels.notes->dockAt(Qt::BottomDockWidgetArea);
+        settle(window);
+        CHECK(panels.notes->dockAreaWidget() == log->dockAreaWidget(), "a second one at an edge is a tab of the first");
+        CHECK(panels.notes->isVisible() && !log->isVisible(), "in front");
         log->raise();
-        QApplication::processEvents();
-        const int expandedHeight = log->height();
-        CHECK(expandedHeight > 200, "the bottom panels start out tall: %d", expandedHeight);
+        settle(window);
+        CHECK(log->isVisible(), "raise() brings the other's tab in front");
 
-        QTabBar* tabs = shownTabBar(window);
-        CHECK(tabs && tabs->count() == 2, "Log and Notes share a spot, with tabs");
-        if (!tabs) return;
-        doubleClick(tabs, tabs->tabRect(1).center());
-        CHECK(log->isCollapsed() && panels.notes->isCollapsed(), "a tab double-click collapses both panels");
-        CHECK(log->height() < 50, "to the title bar: %d", log->height());
-        panels.notes->raise();
-        QApplication::processEvents();
-        CHECK(panels.notes->height() < 50, "the other tab is collapsed too: %d", panels.notes->height());
-        CHECK(!panels.scripts->isCollapsed(), "panels elsewhere aren't");
+        log->setCollapsed(true);
+        settle(window);
+        CHECK(log->isCollapsed() && !log->isVisible() && panels.notes->isVisible(), "collapsing one leaves the other");
+        log->reveal();
+        settle(window);
+        CHECK(log->isVisible() && log->isCollapsed(), "revealed, it slides out");
+        panels.scripts->setCollapsed(true);
+        panels.scripts->reveal();
+        settle(window);
+        CHECK(panels.scripts->isVisible() && !log->isVisible(), "one at a time");
+        panels.scripts->dockAt(Qt::RightDockWidgetArea);
+        panels.scripts->resizeToShare(0.3);
+        log->setCollapsed(false);
+        settle(window);
+        CHECK(!log->isCollapsed() && log->area() == Qt::BottomDockWidgetArea, "and docks where it was");
 
-        doubleClick(panels.notes, QPoint(20, 5));
-        CHECK(!log->isCollapsed() && !panels.notes->isCollapsed(), "a title bar double-click expands both");
-        CHECK(std::abs(panels.notes->height() - expandedHeight) <= 2, "to the height they had: %d, was %d",
-              panels.notes->height(), expandedHeight);
-        CHECK(window.dockWidgetArea(panels.notes) == Qt::BottomDockWidgetArea && !panels.notes->isFloating() &&
-                  window.tabifiedDockWidgets(log).contains(panels.notes),
-              "and stay where they were: the double-clicks' last mouse move isn't a drag of the title bar");
+        panels.notes->hide();
+        settle(window);
+        CHECK(panels.notes->isHidden() && panels.notes->area() == Qt::NoDockWidgetArea, "hidden");
+        panels.notes->show();
+        settle(window);
+        CHECK(!panels.notes->isHidden() && panels.notes->isVisible() && !panels.notes->isCollapsed(), "and back where it was");
 
-        scriptsWidth = panels.scripts->width();
-        doubleClick(panels.scripts, QPoint(20, 5));
-        CHECK(panels.scripts->isCollapsed() && panels.scripts->width() < 50,
-              "alone at the right edge, a panel collapses to a narrow strip: %d", panels.scripts->width());
-        CHECK(panels.scripts->features().testFlag(QDockWidget::DockWidgetVerticalTitleBar),
-              "with its title bar turned on its side");
-        CHECK(panels.scripts->height() > 400, "and keeps its height: %d", panels.scripts->height());
+        window.dockManager()->addDockWidget(ads::LeftDockWidgetArea, panels.notes, panels.right->dockAreaWidget());
+        settle(window);
+        CHECK(panels.notes->area() == Qt::NoDockWidgetArea, "between the view panels it's at no edge");
+        panels.notes->setCollapsed(true);
+        CHECK(panels.notes->area() == Qt::BottomDockWidgetArea, "and collapses to the last one it was at");
         window.close();  // saves the layout
     }
     {
-        // The next session restores the collapsed panel, which expands to the
-        // width it had before collapsing.
         MainWindow window;
         Panels panels(window);
-        window.buildViewMenu();
         window.restoreLayout();
         window.show();
         settle(window);
-        CHECK(panels.scripts->isCollapsed() && panels.scripts->width() < 50,
-              "a collapsed panel is collapsed in the next session: %d", panels.scripts->width());
-        CHECK(!window.logPanel()->isCollapsed(), "an expanded one isn't");
-        doubleClick(panels.scripts, QPoint(5, 20));  // the vertical title bar
-        CHECK(!panels.scripts->isCollapsed() && std::abs(panels.scripts->width() - scriptsWidth) <= 2,
-              "and expands to its old width: %d, was %d", panels.scripts->width(), scriptsWidth);
-        CHECK(!panels.scripts->features().testFlag(QDockWidget::DockWidgetVerticalTitleBar),
-              "with its title bar upright again");
-        CHECK(window.dockWidgetArea(panels.scripts) == Qt::RightDockWidgetArea && !panels.scripts->isFloating(),
-              "still docked at the right edge");
-
-        SidePanel* log = window.logPanel();
-        log->setCollapsed(true);
-        CHECK(log->isCollapsed(), "collapsed in code");
-        log->setFloating(true);
-        CHECK(!log->isCollapsed(), "floating a collapsed panel expands it");
-        log->setCollapsed(true);
-        CHECK(!log->isCollapsed(), "a floating panel doesn't collapse");
+        CHECK(panels.scripts->isVisible() && panels.scripts->area() == Qt::RightDockWidgetArea, "docked in the next session too");
+        CHECK(window.logPanel()->area() == Qt::BottomDockWidgetArea && !window.logPanel()->isCollapsed(), "the Log as well");
+        CHECK(panels.notes->isCollapsed() && panels.notes->area() == Qt::BottomDockWidgetArea, "and the collapsed one collapsed");
     }
 }
 
-namespace {
-// Keeps the positions its moves are seen with.
-class MovesKept : public SidePanel {
-public:
-    using SidePanel::SidePanel;
-    QList<QPoint> moves;
-
-protected:
-    void moveEvent(QMoveEvent* event) override {
-        moves.append(event->pos());
-        SidePanel::moveEvent(event);
-    }
-};
-}  // namespace
-
-// A floating panel dragged by its window's title bar: Qt docks it where its position
-// puts the point pressed, and is told the position that puts that point under the
-// cursor. With screens scaled, the one Qt has jumps by hundreds of pixels once most of
-// the panel is over the next screen, and the main window's edge beside it never took
-// the panel. (Qt starts no drag on the offscreen platform, whose windows have no title
-// bar: this checks what Qt is told, not the docking.)
-USDCC_TEST(side_panel_title_drag_follows_cursor) {
-    // The offscreen platform's cursor is make-believe; any other's is the user's.
-    if (QGuiApplication::platformName() != QLatin1String("offscreen")) return;
+USDCC_TEST(side_panel_added_later_and_removed) {
     TestSettings settings;
+    {
+        MainWindow window;
+        Panels panels(window);
+        window.restoreLayout();
+        window.show();
+        settle(window);
+        auto* late = new SidePanel(QStringLiteral("Late"));
+        late->setWidget(new QLabel(QStringLiteral("late")));
+        window.addSidePanel(late, Qt::LeftDockWidgetArea);
+        settle(window);
+        CHECK(late->isVisible() && late->area() == Qt::LeftDockWidgetArea, "added to a window that's up, it's docked");
+
+        late->dockAt(Qt::TopDockWidgetArea);
+        QPointer<SidePanel> gone(late);
+        QPointer<QAction> action(late->toggleViewAction());
+        window.removeSidePanel(late);
+        CHECK(!window.sidePanels().contains(late) && !window.viewMenu()->actions().contains(action.data()),
+              "removed, it's off the View menu");
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        settle(window);
+        CHECK(!gone, "and deleted");
+        CHECK(!window.dockManager()->findDockWidget(QStringLiteral("Late")), "the dock manager doesn't know it");
+
+        auto* again = new SidePanel(QStringLiteral("Late"));
+        window.addSidePanel(again, Qt::LeftDockWidgetArea);
+        settle(window);
+        CHECK(again->area() == Qt::TopDockWidgetArea, "another of its name goes where it was");
+        delete again;
+        settle(window);
+        CHECK(window.sidePanels().size() == 3, "one deleted outright is gone too");
+        window.close();
+    }
+    {
+        MainWindow window;
+        Panels panels(window);
+        window.restoreLayout();
+        window.show();
+        settle(window);
+        auto* late = new SidePanel(QStringLiteral("Late"));
+        window.addSidePanel(late, Qt::LeftDockWidgetArea);
+        settle(window);
+        CHECK(late->isVisible() && late->area() == Qt::TopDockWidgetArea, "and in the next session");
+        auto* twin = new SidePanel(QStringLiteral("Late"));
+        window.addSidePanel(twin, Qt::LeftDockWidgetArea);
+        settle(window);
+        CHECK(twin->objectName() != late->objectName() &&
+                  window.dockManager()->findDockWidget(QStringLiteral("Late")) == late,
+              "a second of the same name gets another and replaces nothing");
+    }
+}
+
+USDCC_TEST(side_panel_can_close) {
+    TestSettings settings;
+    struct Busy : SidePanel {
+        using SidePanel::SidePanel;
+        bool allow = false;
+        bool canClose() override { return allow; }
+    };
     MainWindow window;
-    auto* panel = new MovesKept(QStringLiteral("Wide"));
-    panel->setWidget(new QLabel(QStringLiteral("wide")));
-    window.addSidePanel(panel, Qt::RightDockWidgetArea);
-    window.resize(1200, 800);
+    auto* busy = new Busy(QStringLiteral("Busy"));
+    window.addSidePanel(busy, Qt::RightDockWidgetArea);
     window.show();
     settle(window);
-    const QPoint pressed(300, -12);  // on the title bar, above the panel's inside
-    const auto titleBar = [panel, pressed](QEvent::Type type, Qt::MouseButtons held) {
-        QMouseEvent event(type, QPointF(pressed), QPointF(panel->mapToGlobal(pressed)), Qt::LeftButton, held,
-                          Qt::NoModifier);
-        QApplication::sendEvent(panel, &event);
-    };
-    const auto moveTo = [panel](QPoint position) {
-        QMoveEvent event(position, panel->pos());
-        QApplication::sendEvent(panel, &event);
-    };
-
-    // Docked, its title bar is the panel's own: nothing to do.
-    panel->moves.clear();
-    titleBar(QEvent::NonClientAreaMouseButtonPress, Qt::LeftButton);
-    QCursor::setPos(QPoint(900, 400));
-    moveTo(QPoint(1668, 412));
-    CHECK(panel->moves.value(0) == QPoint(1668, 412), "a docked panel's move was changed");
-    titleBar(QEvent::NonClientAreaMouseButtonRelease, Qt::NoButton);
-
-    panel->setFloating(true);
-    QApplication::processEvents();
-    panel->moves.clear();
-    titleBar(QEvent::NonClientAreaMouseButtonPress, Qt::LeftButton);
-    moveTo(QPoint(1668, 412));  // as on the next screen
-    CHECK(panel->moves.value(0) == QPoint(900, 400) - pressed, "dragged, Qt is told (%d, %d), not where the cursor puts it",
-          panel->moves.value(0).x(), panel->moves.value(0).y());
-    // Let go: Qt sees moves as they are again.
-    titleBar(QEvent::NonClientAreaMouseButtonRelease, Qt::NoButton);
-    moveTo(QPoint(1668, 412));
-    CHECK(panel->moves.value(1) == QPoint(1668, 412), "after the drag, a move was changed");
-}
-
-// View > Full Screen, under UI Scale: toggles the window and follows its state.
-USDCC_TEST(main_window_full_screen) {
-    TestSettings settings;
-    MainWindow window;
-    window.buildViewMenu();
-    window.resize(900, 600);
-    window.show();
-    QApplication::processEvents();
-    QAction* action = window.fullScreenAction();
-    CHECK(action && action->isCheckable() && !action->isChecked(), "a toggle, off to begin with");
-    if (!action) return;
-    QMenu* viewMenu = nullptr;
-    for (QObject* object : action->associatedObjects()) {
-        if (auto* menu = qobject_cast<QMenu*>(object)) viewMenu = menu;
-    }
-    CHECK(viewMenu, "in the View menu");
-    if (!viewMenu) return;
-    const QList<QAction*> actions = viewMenu->actions();
-    const qsizetype at = actions.indexOf(action);
-    CHECK(at > 0 && actions[at - 1]->menu() && actions[at - 1]->menu()->title().startsWith(QStringLiteral("UI Scale")),
-          "right under UI Scale");
-    CHECK(action->shortcuts() == QKeySequence::keyBindings(QKeySequence::FullScreen), "the platform's shortcut");
-
-    action->trigger();
-    QApplication::processEvents();
-    CHECK(window.isFullScreen() && action->isChecked(), "on: full screen");
-    action->trigger();
-    QApplication::processEvents();
-    CHECK(!window.isFullScreen() && !action->isChecked(), "off: back as it was");
-
-    window.showFullScreen();
-    QApplication::processEvents();
-    CHECK(action->isChecked(), "full screen some other way: checked too");
-    window.showNormal();
-    QApplication::processEvents();
-    CHECK(!action->isChecked(), "and unchecked when it leaves");
+    CHECK(!window.close() && window.isVisible(), "a panel can keep the window open");
+    busy->allow = true;
+    CHECK(window.close(), "and let it close");
 }

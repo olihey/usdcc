@@ -203,8 +203,7 @@ void stopBroadcast(const QString& reason = {}) {
 
 void showPanel() {
     if (!g_state || !g_state->panel) return;
-    g_state->panel->show();
-    g_state->panel->raise();
+    g_state->panel->reveal();
 }
 
 // Before a viewport that's broadcast closes: close it and end the broadcast, or keep both.

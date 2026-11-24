@@ -46,14 +46,14 @@ class PanelMenuButton;
 //   never opens the panel by itself.
 // - Filters and column widths persist; Clear empties the table
 //   only (the hub and the log file keep everything).
-class USDCC_UI_API LogSidePanel : public SidePanel {
+class USDCC_UI_API LogPanel : public SidePanel {
     Q_OBJECT
 
 public:
     // `settingsFile` is for tests; empty means the app's settings.
-    explicit LogSidePanel(QWidget* parent = nullptr, usdcc::core::LogHub& hub = usdcc::core::LogHub::instance(),
+    explicit LogPanel(QWidget* parent = nullptr, usdcc::core::LogHub& hub = usdcc::core::LogHub::instance(),
                           const QString& settingsFile = {});
-    ~LogSidePanel() override;
+    ~LogPanel() override;
 
     LogModel* model() const { return m_model; }
     LogFilterModel* filterModel() const { return m_filter; }

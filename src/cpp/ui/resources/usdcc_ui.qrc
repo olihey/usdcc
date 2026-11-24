@@ -106,6 +106,12 @@
         <file alias="grip-horizontal@2x.png">theme/grip-horizontal@2x.png</file>
         <file alias="grip-vertical.png">theme/grip-vertical.png</file>
         <file alias="grip-vertical@2x.png">theme/grip-vertical@2x.png</file>
+        <file alias="pin.png">theme/pin.png</file>
+        <file alias="pin@2x.png">theme/pin@2x.png</file>
+        <file alias="pin-disabled.png">theme/pin-disabled.png</file>
+        <file alias="pin-disabled@2x.png">theme/pin-disabled@2x.png</file>
+        <file alias="minimize.png">theme/minimize.png</file>
+        <file alias="minimize@2x.png">theme/minimize@2x.png</file>
         <file alias="detach.png">theme/detach.png</file>
         <file alias="detach@2x.png">theme/detach@2x.png</file>
         <file alias="detach-disabled.png">theme/detach-disabled.png</file>

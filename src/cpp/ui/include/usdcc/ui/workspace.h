@@ -93,6 +93,12 @@ struct USDCC_UI_API SidePanelEntry {
     bool operator==(const SidePanelEntry&) const = default;
 };
 
+// A view panel collapsed to a window edge (§3.2): "panel" as in a tab, and the edge.
+struct USDCC_UI_API CollapsedEntry {
+    PanelEntry entry;
+    QString area = QStringLiteral("left");  // "left", "right", "top" or "bottom"
+};
+
 struct USDCC_UI_API Definition {
     QString id;
     QString name;
@@ -102,6 +108,8 @@ struct USDCC_UI_API Definition {
     Node layout;
     // Side panel objectName -> its place (§3.2). A side panel not named is hidden.
     QMap<QString, SidePanelEntry> sidePanels;
+    // View panels collapsed to a window edge, besides the layout's. Never viewports.
+    std::vector<CollapsedEntry> collapsed;
     // Fit every viewport placed when switching (§3.5.7): "", "stage" or "selection".
     QString fitOnSwitch;
 
@@ -109,6 +117,9 @@ struct USDCC_UI_API Definition {
     // ("Your workspaces", "Shipped with usdcc", ...).
     QString file;
     QString source;
+
+    // The panel types it names that `isKnown` rejects, each once.
+    QStringList missingTypes(const std::function<bool(const QString& type)>& isKnown) const;
 
     // The JSON (§3), without file/source.
     QJsonObject toJson() const;
