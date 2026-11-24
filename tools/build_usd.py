@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
-from _common import REPO, fail, run  # noqa: E402
+from _common import MACOS, REPO, fail, run  # noqa: E402
 from usd_asset import platform_flags, platform_patches  # noqa: E402
 
 
@@ -85,6 +85,9 @@ def main(argv=None):
     # dependencies' own dependencies do (yaml-cpp in OpenColorIO); this lets it try.
     environment = dict(os.environ)
     environment.setdefault("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
+    if MACOS:
+        # Nor through pkg-config: --ignore-homebrew (usd_asset.MACOS_FLAGS) is CMake's only.
+        environment["PKG_CONFIG_LIBDIR"] = str(install / "lib/pkgconfig")
     result = subprocess.run([str(part) for part in command], env=environment)
     if result.returncode != 0:
         log = work / "src" / "log.txt"

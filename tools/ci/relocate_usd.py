@@ -25,7 +25,9 @@ itself does, finds its own there.
 
 Then it checks that no CMake file still names the install folder, and that the
 Python folder is left only in pxrConfig.cmake's guarded lines, and on Linux and macOS that
-no RUNPATH, rpath or install name names the install folder. Any leftover fails the script.
+no RUNPATH, rpath or install name names the install folder; on macOS also that every
+library the install links is in it or the system's, but for libpython: one from Homebrew
+would only be found on the machine it was built on. Any leftover fails the script.
 
 Running it twice is harmless: the second run finds nothing to change.
 
@@ -46,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import MACOS, WINDOWS, fail  # noqa: E402
 
 if MACOS:
-    from _macho import edit, install_id, loader_relative, macho_files, needed, rpaths  # noqa: E402
+    from _macho import edit, install_id, is_system, loader_relative, macho_files, needed, rpaths  # noqa: E402
 elif not WINDOWS:
     from _elf import elf_files, origin_relative, runpath, set_runpath  # noqa: E402
 
@@ -106,6 +108,27 @@ def relocate_runpaths(install, built_at, leftovers):
     print(f"Rewrote the RUNPATH of {rewritten} of {len(files)} ELF file(s).")
 
 
+def outside_links(file, install):
+    """macOS: what `file` links that isn't the system's, libpython, or found in `install`
+    through its rpaths inside `install`."""
+    folder = os.path.dirname(os.path.abspath(file))
+    inside = [path for path in (os.path.normpath(entry.replace("@loader_path", folder, 1)) for entry in rpaths(file))
+              if path == install or path.startswith(install + os.sep)]
+    found = []
+    for name in needed(file):
+        if is_system(name) or PYTHON_LIBRARY.search(name) or name == install_id(file):
+            continue
+        if name.startswith("@rpath/"):
+            places = [os.path.join(path, name[len("@rpath/"):]) for path in inside]
+        elif name.startswith("@loader_path/"):
+            places = [os.path.join(folder, name[len("@loader_path/"):])]
+        else:
+            places = []
+        if not any(os.path.isfile(place) for place in places):
+            found.append(name)
+    return found
+
+
 def relocate_rpaths(install, built_at, leftovers):
     """macOS: rpaths in the install folder become @loader_path-relative, and install names
     and links in it @rpath ones."""
@@ -138,6 +161,9 @@ def relocate_rpaths(install, built_at, leftovers):
         for entry in [*rpaths(file), *needed(file), install_id(file) or ""]:
             if inside(entry):
                 leftovers.append(f"{os.path.relpath(file, install)}: {entry}")
+    for file in files:
+        for name in outside_links(file, install):
+            leftovers.append(f"{os.path.relpath(file, install)}: links {name}, which isn't in the install")
     print(f"Rewrote the paths of {rewritten} of {len(files)} Mach-O file(s).")
 
 
@@ -222,10 +248,10 @@ def main(argv=None):
     for name in changed:
         print(f"  {name}")
     if leftovers:
-        print("Absolute paths left:")
+        print("Paths left:")
         for leftover in leftovers:
             print(f"  {leftover}")
-        fail(f"{len(leftovers)} absolute path(s) left in the install's CMake files")
+        fail(f"{len(leftovers)} path(s) left in the install that only work where it was built")
     print("No absolute build paths left.")
 
 

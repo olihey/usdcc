@@ -29,7 +29,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import ASSET_PLATFORM, PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import ASSET_PLATFORM, MACOS, PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+
+
+# macOS' own build_usd.py flags, which name its asset alone, as its own patches do. Homebrew's
+# libraries (GitHub's Macs have libwebp, giflib and FreeType) would otherwise be linked by
+# OpenImageIO and libtiff, and not be in the install.
+MACOS_FLAGS = ["--ignore-homebrew"]
 
 
 def platform_flags(flags):
@@ -37,14 +43,15 @@ def platform_flags(flags):
     --generator elsewhere, where build_usd.py picks the platform's own. On Windows
     ARM64 the generator is VS_GENERATOR's (Visual Studio 2026), --onetbb is
     added if the pin hasn't it (build_usd.py refuses classic TBB there), and Boost's
-    b2 is told to build for arm64, which build_usd.py doesn't ask for."""
+    b2 is told to build for arm64, which build_usd.py doesn't ask for. On macOS they
+    are the pin's and MACOS_FLAGS."""
     if WINDOWS and VS_ARCH == "ARM64":
         return [flag for flag in flags if not flag.startswith("--generator")] + [
             f"--generator={VS_GENERATOR}"] + ([] if "--onetbb" in flags else ["--onetbb"]) + [
             "--build-args", "boost,architecture=arm"]
     if WINDOWS:
         return list(flags)
-    return [flag for flag in flags if not flag.startswith("--generator")]
+    return [flag for flag in flags if not flag.startswith("--generator")] + (MACOS_FLAGS if MACOS else [])
 
 
 def platform_patches(pin_dir):
@@ -68,9 +75,9 @@ def describe(pin):
 
     python = spec["python"].split(".")
     base = f"usd-{spec['commit'][:9]}-{short_hash(hashed, 4)}"
-    # The platform's own patches name its asset alone (platform_patches()).
-    own = platform_patches(pin.parent)
-    suffix = "-" + short_hash("".join(normalized_text(file) for file in own), 4) if own else ""
+    # The platform's own patches and flags name its asset alone (platform_patches()).
+    own = "".join(normalized_text(file) for file in platform_patches(pin.parent)) + "".join(MACOS_FLAGS if MACOS else [])
+    suffix = "-" + short_hash(own, 4) if own else ""
     name = f"{base}-{ASSET_PLATFORM}{suffix}-py{python[0]}{python[1]}"
     return {
         "name": name,
