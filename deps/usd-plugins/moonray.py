@@ -8,8 +8,8 @@ the pin's downloads are unpacked.
 1. The dependencies the OpenUSD asset doesn't have, from the downloads, into
    <work>/deps: JsonCpp, log4cplus, Lua, Random123, ISPC, OpenSSL (static),
    CppUnit (only because scene_rdl2's CMake asks for it), Open Image Denoise,
-   libcurl, libmicrohttpd (only to build arras4_core; nothing shipped links it)
-   and Boost.ProgramOptions, which the asset's Boost lacks. Everything the asset
+   libcurl, libmicrohttpd (only to build arras4_core; the one library that links
+   it, its HTTP server, is left out of the pack) and Boost.ProgramOptions, which the asset's Boost lacks. Everything the asset
    has (TBB, Embree, OpenImageIO, OpenEXR, OpenVDB, OpenSubdiv, Boost) is the
    asset's.
 2. MoonRay's own projects, one after the other, into <work>/install.
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -173,9 +174,6 @@ def build(ctx):
     for folder in ("bin", "lib", "rdl2dso", "sessions", "plugin"):
         (root / folder).mkdir(parents=True, exist_ok=True)
     shutil.copy2(install / "bin" / "execComp", root / "bin")
-    for file in sorted((install / "lib").iterdir()):
-        if file.name.endswith(".so") and not file.is_symlink():
-            shutil.copy2(file, root / "lib")
     for pattern in ("libjsoncpp.so*", "liblog4cplus*.so*", "libOpenImageDenoise*.so*", "libcurl.so*",
                     "libboost_program_options.so*"):
         for file in sorted((deps / "lib").glob(pattern)):
@@ -185,10 +183,13 @@ def build(ctx):
             else:
                 shutil.copy2(file, target)
     for file in sorted((install / "rdl2dso").iterdir()):
-        if file.name.endswith(".so"):  # not the .so.proxy files, which only MoonRay's tools read
+        # Not the .so.proxy files, which only MoonRay's tools read, nor its test shaders.
+        if file.name.endswith(".so") and not file.name.startswith("Test"):
             shutil.copy2(file, root / "rdl2dso")
+    loaded = []  # the computations Arras opens by name, from the sessions
     for name in ("hd_single.sessiondef", "hd_multi.sessiondef"):
         shutil.copy2(install / "sessions" / name, root / "sessions")
+        loaded += re.findall(r'"dso"\s*:\s*"([^"]+)"', (install / "sessions" / name).read_text())
     # A plugInfo.json each, in plugin/usd/<plugin>/resources: OpenUSD registers only the
     # first plugin of a file that lists several.
     for info in sorted((install / "plugin" / "pxr").glob("*/plugInfo.json")):
@@ -201,10 +202,45 @@ def build(ctx):
         resources.mkdir(parents=True, exist_ok=True)
         (resources / "plugInfo.json").write_text(json.dumps({"Plugins": plugins}, indent=4) + "\n")
 
-    from _elf import elf_files, set_runpath
+    from _elf import elf_files, needed, set_runpath
+    # Of MoonRay's own libraries only those something above loads: what the plugins,
+    # execComp, the shaders and the sessions' computations link, and so on. That leaves
+    # out its tests' libraries and Arras's HTTP server, libhttpserver, which links
+    # libmicrohttpd (LGPL-2.1), not in the pack.
+    available = {file.name: file for file in (install / "lib").iterdir()
+                 if file.name.endswith(".so") and not file.is_symlink()}
+    missing = [name for name in loaded if name not in available]
+    if missing:
+        raise SystemExit(f"the sessions name libraries the build didn't make: {', '.join(missing)}")
+    kept = set(loaded)
+    todo = [*elf_files(root), *(available[name] for name in loaded)]
+    while todo:
+        for name in needed(todo.pop()):
+            if name in available and name not in kept:
+                kept.add(name)
+                todo.append(available[name])
+    for name in sorted(kept):
+        shutil.copy2(available[name], root / "lib")
+    print(f"moonray: {len(kept)} of MoonRay's {len(available)} libraries ship; left out: "
+          + ", ".join(sorted(set(available) - kept)))
+
     for file in elf_files(root):
         folder = file.parent.name
         set_runpath(file, ["$ORIGIN", TO_PACK_LIB] if folder == "lib" else ["$ORIGIN/../lib", TO_PACK_LIB])
         run(["strip", "--strip-unneeded", file])
     licences = {name: Path(places[name]) for name in SHIPPED}
+    # Two that have no file of their own the build would find by its name: Lua's
+    # notice is at the end of lua.h, and MoonRay's THIRD-PARTY.md reproduces the
+    # licences of the code it took from Embree, OpenImageIO, OSL, pbrt and others.
+    notices = work / "notices"
+    lua_h = next(Path(places["lua"]).glob("**/src/lua.h"))
+    notice = re.search(r"\* (Copyright \(C\) 1994-.*?SOFTWARE\.)\n\*{10}", lua_h.read_text(), re.S)
+    if not notice:
+        raise SystemExit(f"no copyright notice at the end of {lua_h}")
+    (notices / "lua").mkdir(parents=True, exist_ok=True)
+    (notices / "lua" / "LICENSE").write_text(re.sub(r"(?m)^\*( |$)", "", notice.group(1)) + "\n")
+    licences["lua"] = notices / "lua"
+    (notices / "moonray").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ctx.source / "THIRD-PARTY.md", notices / "moonray" / "LICENSE-THIRD-PARTY.md")
+    licences["moonray"] = notices / "moonray"
     return licences

@@ -119,7 +119,9 @@ The `windows` job is described here; the `linux` job does the same on `ubuntu-24
 attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it is
 unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
-finds it ([CI.md](CI.md) §8). Each job runs twice, x64 and arm64 (`windows-arm64` on
+finds it ([CI.md](CI.md) §8). On x64 it also attaches each USD plugin pack of the optional
+set as `usdcc-<version>-linux-x64-<pack>.tar.xz` (MoonRay's, about 214 MB), unpacked over the
+usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each job runs twice, x64 and arm64 (`windows-arm64` on
 `windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 

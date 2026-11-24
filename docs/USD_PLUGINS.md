@@ -364,8 +364,24 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` and `moonray` (Linux, later macOS), each `optional` and unpublished until its licences are read; `aurora` |
-| `optional` | Its own zip on the usdcc release, unzipped over the usdcc folder by the user | `gatling` |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` |
+| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`), `gatling` (unpublished) |
+
+How an optional pack ships (Linux; no Windows one is published yet):
+
+- `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
+  says `"publish": true`.
+- `release.yml`'s Linux job fetches it too (`tools/fetch_usd.py --optional`, required as the
+  standard ones are), and `tools/deploy.py --optional-packs DIR` deploys it with the rest,
+  checks it with them (every library loads from the deploy or the system), then moves its
+  files out to `DIR/<pack>/<deploy's name>/`, laid out as the deploy is. Its files under
+  `plugin/` keep the RUNPATHs the pack's build gave them, which are relative to an OpenUSD
+  install, laid out as the deploy is. The deploy's `licenses/SOURCES.txt` doesn't name it; the
+  pack carries its own in `licenses/OpenUSD-plugins/<pack>/`.
+- After the usdcc archive is made, the job unpacks the pack over the deploy, runs the smoke
+  test again (its plugins load from the deploy, its renderers are listed), and attaches
+  `usdcc-<version>-linux-<arch>-<pack>.tar.xz`. Its top folder is the deploy's name, so
+  `tar -xf` where usdcc was unpacked puts it in place.
 | `local` | Built on a machine that has the SDK; never published | `arnold`, `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,
@@ -424,10 +440,9 @@ Three sets, decided by licence:
   - NVIDIA's OptiX SDK and CUDA runtime, GPU mode only: their own licences, read before
     the GPU build ships. The OptiX headers are build-time; the runtime is in the driver.
 
-  Until step 6 of the build has collected that list and it has been read, the pin says
-  `"set": "optional"` with `"publish": false`, as Gatling's does. Not `standard` yet:
-  `release.yml` fetches the standard packs with `--require-packs`, so an unpublished
-  standard pack would fail every Linux release.
+  The list has been read ([MOONRAY.md](MOONRAY.md) §3.1): the pin says `"set": "optional"`
+  with `"publish": true`, a download of its own at about 214 MB, against usdcc's 154 MB
+  (decided 2026-11-24).
 
 ## 6. Changes to the OpenUSD build itself
 
@@ -669,13 +684,11 @@ Three sets, decided by licence:
       check renders a small scene with HdMoonRay on the CPU.
    3. `moonray_runtime` in usdcc, and MoonRay in the viewport's renderer list and renders
       on Linux.
-   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and only
-      then `"set": "standard"`, so `release.yml`'s Linux job requires it and the smoke
-      test expects it. Note the pack's size against the
-      release's 2 GiB limit; if it makes the standard archive too big, it moves to
-      `optional`.
+   4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and
+      `release.yml`'s Linux job attaches it as a download of its own (`optional`, §5).
 
    Done when a Linux release has MoonRay and renders with it in the viewport.
+   *Steps 1 to 4 done ([MOONRAY.md](MOONRAY.md) §7); left: the first release with it.*
 10. **MoonRay on macOS**, after usdcc itself builds and releases on macOS (CI.md §7): an
     OpenUSD asset for `macos-arm64`, a usdcc build and release job on a macOS runner,
     PySide6 for macOS, the app bundle, and signing and notarisation, which need an Apple

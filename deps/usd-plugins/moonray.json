@@ -36,10 +36,13 @@
     "boost": {"linux-x64": {"url": "https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.bz2",
                             "sha256": "1e19565d82e43bc59209a168f5ac899d3ba471d55c7610c677d4ccf2c9c500c0"}}
   },
+  "licenses": {
+    "oidn": ["{oidn}/third-party-programs.txt", "{oidn}/third-party-programs-oneDNN.txt"]
+  },
   "platforms": ["linux-x64"],
   "license": "Apache-2.0",
   "set": "optional",
-  "publish": false,
+  "publish": true,
   "check": {
     "plugins": ["hd_moonray", "hd_moonray_debug", "hdMoonrayAdapters"],
     "renderers": ["HdMoonrayRendererPlugin", "HdMoonrayRendererDebugPlugin"],

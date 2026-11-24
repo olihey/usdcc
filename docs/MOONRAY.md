@@ -6,7 +6,8 @@ Material Editor. The pack framework is [USD_PLUGINS.md](USD_PLUGINS.md).
 **Status (2026-11-24):** phases 1 to 4 passed (§7.1 to §7.4): MoonRay and both of its render delegates,
 in-process and through a local Arras session, build against the published OpenUSD asset as a pack,
 `deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
-CI hasn't built it yet. **Linux x64 only: no Windows, by decision.**
+Its licences are read, and a Linux release attaches it as a download of its own (§7.5), once CI
+has published the pack. **Linux x64 only: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -106,6 +107,37 @@ renderer stays hidden on an older CPU. Linux on Arm is out of scope.
 - GPU mode later: CUDA runtime and OptiX terms are read first.
 - Gate: the pack check fails on a library the pin doesn't list (USD_PLUGINS.md §5), and
   nothing is published until the collected list is read.
+
+### 3.1 The pack's licences, read (2026-11-24)
+
+What `licenses/usd-plugins/moonray/` holds, and what it covers. All of it is permissive; nothing
+asks for source to be offered.
+
+| Folder | Licence | Covers |
+|---|---|---|
+| `moonray`, `moonray-*`, `arras-arras4_core`, `cmake_modules` | Apache-2.0 | MoonRay, Arras, hdMoonray. No `NOTICE` file in any of them |
+| `moonray/LICENSE-THIRD-PARTY.md` | Apache-2.0, BSD-3/2-Clause, public domain | Code MoonRay took from Embree, OpenImageIO, OSL (LPE), pbrt, Gustavson's noise, Kensler's sampling, OpenUSD |
+| `jsoncpp` | MIT, or public domain | JsonCpp |
+| `log4cplus` | Apache-2.0 and BSD-2-Clause, by file | log4cplus |
+| `lua` | MIT (from the end of `lua.h`: Lua has no licence file) | Lua, linked into scene_rdl2 |
+| `random123` | BSD-3-Clause | Random123, headers |
+| `openssl` | Apache-2.0 | OpenSSL 3, linked into libcurl |
+| `curl` | curl licence (MIT-style) | libcurl |
+| `oidn` | Apache-2.0; its notices: oneDNN (Apache-2.0, BSD-3-Clause, MIT), the weights' PyTorch code (BSD-3-Clause) | Open Image Denoise, CPU only |
+| `boost` | Boost Software License 1.0 | Boost.ProgramOptions |
+
+- **The JSON License** in `THIRD-PARTY.md` is inside its OpenUSD part: it's OpenUSD's own
+  NOTICE, about RapidJSON's JSON_checker test files. usdcc already ships that NOTICE with
+  OpenUSD, and no MoonRay code is under it.
+- **libmicrohttpd (LGPL-2.1) isn't shipped:** only Arras's HTTP server, `libhttpserver.so`, links
+  it, and nothing in a local session loads that. The hook ships only what the plugins, `execComp`,
+  the shaders and the sessions' computations load, which also leaves out CppUnit's test library
+  and Arras's test computations (8 of MoonRay's 72 libraries, and the 14 `Test*` shaders).
+- **From the system, not shipped:** libuuid (BSD-3-Clause, in every distribution's base),
+  libatomic and the GCC runtime (GCC Runtime Library Exception), libfreetype (see §7.4).
+- **Apache-2.0 §4(b)**, changed files marked: the three patches change upstream files, and the
+  pack's `SOURCES.txt` names each patch and where it applies. The new files the hdMoonray patch adds
+  carry their own header.
 
 ## 4. Size
 
@@ -354,23 +386,47 @@ renders with each, through Arras in 1.1 s. No `execComp` was left.
 Arras client only (§2.1).
 
 **In CI:** the USD plugins workflow (`deps-usd-plugins.yml`) builds and checks the pack on `ubuntu-24.04`
-like the other packs, with `uuid-dev`, `libfreetype-dev`, `bison` and `flex` installed for it. It isn't
-published (`"publish": false`): the zip is kept with the run for two weeks. A run started by hand can
-name one pack (`gh workflow run deps-usd-plugins.yml --ref <branch> -f pack=moonray`), to try it on a
-branch without building the others.
+like the other packs, with `uuid-dev`, `libfreetype-dev`, `bison` and `flex` installed for it, and
+publishes it beside the OpenUSD asset (`"publish": true`). A run started by hand can name one pack
+(`gh workflow run deps-usd-plugins.yml --ref <branch> -f pack=moonray`), to try it on a branch
+without building the others.
+
+### 7.5 Shipping it (2026-11-24)
+
+- **A download of its own** (§8 item 2): `usdcc-<version>-linux-x64-moonray.tar.xz`, about 214 MB,
+  beside usdcc's 154 MB, unpacked over the usdcc folder. `release.yml`'s Linux job makes it with
+  `tools/deploy.py --optional-packs` (USD_PLUGINS.md §5).
+- **Licences read** (§3.1). The pack now ships only the MoonRay libraries something loads: 64 of 72,
+  without Arras's HTTP server (and so without libmicrohttpd), the test libraries and the 14 test
+  shaders. It also carries Lua's notice, MoonRay's `THIRD-PARTY.md` and Open Image Denoise's
+  third-party notices. 274 files.
+- **FreeType:** only Arras's client (`libclient_receiver.so`, its telemetry overlay) links
+  libfreetype. In a deploy, the pack's RUNPATH finds the deploy's, which is Qt's. Checked: the
+  process maps one libfreetype, the deploy's `lib/libfreetype.so.6.20.6`.
+- **Checked in WSL:** a deploy with `--optional-packs` passes its own checks with the pack in it,
+  so every MoonRay library loads from the deploy or the system. Afterwards none of its files is
+  left in the deploy, and the separate folder keeps the library links. Unpacked over the deploy,
+  inside the started usdcc:
+  - the three plugins load from it;
+  - both delegates are listed, and both render `test_data/moonray/check.usda` (0.8 s in-process,
+    1.3 s through Arras);
+  - nothing outside the deploy and `/usr/lib` is mapped, and no `execComp` is left.
+
+  The WSL build had no PySide6 module, so the release's smoke test itself (which needs it) didn't
+  run there.
 
 **Not done:**
 
-- The deploy and the release, which take `standard` packs only.
-- The licence list read (§3).
+- A release with it: the pack has to be published first (`deps-usd-plugins.yml`, after the merge).
+  Until then `release.yml`'s Linux job fails, as it does for a missing standard pack.
 - Boost's headers came from the Boost download's install, not the asset's (same version, 1.80).
-- The pack depends on the system's libfreetype (§7.3).
+- Install notes for users beyond the release notes, and a way to get the pack from inside usdcc.
 
 ## 8. Decisions
 
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | Platform | **Decided:** Linux x64 only |
-| 2 | Standard or separate download? | Separate, at this size |
+| 2 | Standard or separate download? | **Decided:** separate, `usdcc-<version>-linux-x64-moonray.tar.xz` (§7.5) |
 | 3 | Rebuild the OpenUSD asset's Embree | **Not needed** (§7.1) |
 | 4 | Before or after Cycles? | Cycles first if one renderer with MaterialX on every platform is the goal |
