@@ -27,3 +27,6 @@ external/blender-work/
 external/blender-mesh-install/
 __pycache__/
 *.pyc
+
+# macOS Finder's.
+.DS_Store
