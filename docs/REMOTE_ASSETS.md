@@ -4,7 +4,8 @@ Loading USD assets from servers instead of the local disk: a shared library that
 the server names and the TEST-over-PROD overlays, and one small resolver plugin per protocol on top
 of it. The first two protocols are plain HTTP ([HTTP_RESOLVER.md](HTTP_RESOLVER.md)) and WebDAV
 ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md)); the asset picker that browses servers is in
-[ASSET_PICKER.md](ASSET_PICKER.md).
+[ASSET_PICKER.md](ASSET_PICKER.md). Several configurations at once are planned in
+[ASSET_SOURCES.md](ASSET_SOURCES.md).
 
 **Status:** planned 2026-11-16. **Phases 0 to 4 are done:** the spike (§13.1), the shared library
 `usdcc_assets` (§13.2), the HTTP and WebDAV protocols with mirrors, offline mode, the cache's
@@ -403,7 +404,7 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   Clear Cache button (§7). The settings dialog builds its pages from typed settings and has no
   tables, so **the servers and environments are edited in the Asset Servers editor** (§10.1),
   which an **Edit Asset Servers...** button on the page opens; the page names the file.
-- **Login.** **Edit > Asset Server Login...** saves a credential id's user and password, or a token,
+- **Login.** The **Logins** tab of Edit > Asset Servers (§10.2) saves a credential id's user and password, or a token,
   in Windows Credential Manager (`usdcc-assets:<id>`), which the library reads (§8). A 401 says
   in the Log which credential the server refused. *Changed from the plan:* no dialog pops up on a
   401. The library asks for credentials on whichever thread resolves, which may be one the UI
@@ -464,7 +465,7 @@ dialog builds its pages from typed values, and has no tables or buttons.
   and how many entries), not allowed (naming the credential, with **Login...** beside it), missing,
   or unreachable (and which of its URLs, mirrors included). Nothing is saved first: it tests what
   the table says.
-- **Login...** opens Edit > Asset Server Login on the row's credential id.
+- **Login...** opens the login form on the row's credential id.
 - **An id that's in use** by an environment can't be removed without saying where; renaming one
   renames it in the stacks too.
 
@@ -543,6 +544,13 @@ Built 2026-11-22, as §10.1 has it but for what follows.
 - **Test** tries the URL, then each mirror in turn while one is unreachable, without marking any down
   (resolving's own marks are left alone). A protocol that can't list is asked for the root's stat.
   **Login...** is off for `aws` and `aws:<profile>` credentials, which come from AWS's own files.
+- **Logins** (2026-11-24, [ASSET_SOURCES.md](ASSET_SOURCES.md) phase 1) is a fourth tab: every saved
+  login and every credential id the configuration names, with its user, status and uses, never a
+  secret. **Add Login...**, **Change...** and **Forget...** (which asks) apply at once. Servers have
+  a Login column, and the credential cells offer the known ids. It replaced the menu's Asset Server
+  Login. In the form, an empty password or token keeps the saved one, and is refused for a new
+  login. `knownLogins()` ([logins.h](../src/cpp/assets/include/usdcc/assets/logins.h)) lists them;
+  the store behind is replaceable (`CredentialStore`), which tests use.
 - **Saving applies at once** with `reloadDefaultConfig()`, which also forgets what servers answered.
   No `ResolverChanged` notice is sent: open stages keep their stacks, so nothing of theirs resolves
   differently. The dialog says how many open stages are in an environment the save changed
@@ -939,7 +947,7 @@ app's Save Stage As, New Layer File, Save Layer As and Flatten to File, tested o
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | One configuration file, or a studio's file with the user's on top? | Start with one. A studio sets `USDCC_ASSETS_CONFIG`; layering can come when someone needs it |
+| 1 | One configuration file, or a studio's file with the user's on top? | Start with one. A studio sets `USDCC_ASSETS_CONFIG`; layering can come when someone needs it. Planned now: [ASSET_SOURCES.md](ASSET_SOURCES.md) |
 | 2 | Should an unreachable overlay endpoint fail the resolve, or warn and carry on? | Fail, unless the endpoint is `optional` (§5) |
 | 3 | Can an upper endpoint hide a lower one's file? | Not in the first version. A marker file could do it later |
 | 4 | How big may a folder be before resolve stops listing it? | Measure in phase 2 against a folder of 10,000 files |

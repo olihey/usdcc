@@ -3,6 +3,8 @@
 
 #include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
+#include "usdcc/assets/credentials.h"
+#include "usdcc/assets/logins.h"
 #include "usdcc/assets/paths.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
@@ -29,6 +31,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QStyledItemDelegate>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QThreadPool>
@@ -36,7 +39,9 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <functional>
 #include <set>
+#include <utility>
 
 namespace usdcc::usd {
 
@@ -44,8 +49,9 @@ namespace {
 
 namespace assets = usdcc::assets;
 
-enum ServerColumn { kId, kProtocol, kUrl, kCredential, kReadOnly, kOptional, kServerColumns };
+enum ServerColumn { kId, kProtocol, kUrl, kCredential, kLogin, kReadOnly, kOptional, kServerColumns };
 enum WebHostColumn { kHost, kHostCredential, kInsecure, kWebHostColumns };
+enum LoginColumn { kLoginId, kLoginKind, kLoginUser, kLoginStatus, kLoginUses, kLoginColumns };
 
 // Sets a flag for its scope and puts back what it was: a refresh inside a refresh (a
 // protocol box changing while its row is made) doesn't clear the outer one's.
@@ -93,6 +99,37 @@ QStringList serverProtocols(const QString& current) {
 }
 
 QTableWidgetItem* textItem(const QString& text) { return new QTableWidgetItem(text); }
+
+QTableWidgetItem* fixedItem(const QString& text) {
+    auto* item = new QTableWidgetItem(text);
+    item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+    return item;
+}
+
+// A credential cell: the known ids to pick from, or one typed.
+class CredentialDelegate : public QStyledItemDelegate {
+public:
+    CredentialDelegate(std::function<QStringList()> ids, QObject* parent)
+        : QStyledItemDelegate(parent), m_ids(std::move(ids)) {}
+
+    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem&, const QModelIndex&) const override {
+        auto* box = new QComboBox(parent);
+        box->setEditable(true);
+        box->setInsertPolicy(QComboBox::NoInsert);
+        box->addItem(QString());
+        box->addItems(m_ids());
+        return box;
+    }
+    void setEditorData(QWidget* editor, const QModelIndex& index) const override {
+        if (auto* box = qobject_cast<QComboBox*>(editor)) box->setCurrentText(index.data(Qt::EditRole).toString());
+    }
+    void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override {
+        if (auto* box = qobject_cast<QComboBox*>(editor)) model->setData(index, box->currentText().trimmed());
+    }
+
+private:
+    std::function<QStringList()> m_ids;
+};
 
 QTableWidgetItem* flagItem(bool on) {
     auto* item = new QTableWidgetItem();
@@ -161,11 +198,17 @@ void AssetServersDialog::build() {
     m_servers = new QTableWidget(0, kServerColumns, serversPage);
     m_servers->setObjectName(QStringLiteral("assetServersTable"));
     m_servers->setHorizontalHeaderLabels(
-        {tr("Id"), tr("Protocol"), tr("URL"), tr("Credential"), tr("Read-only"), tr("Optional")});
+        {tr("Id"), tr("Protocol"), tr("URL"), tr("Credential"), tr("Login"), tr("Read-only"), tr("Optional")});
     m_servers->horizontalHeader()->setSectionResizeMode(kUrl, QHeaderView::Stretch);
     m_servers->verticalHeader()->hide();
     m_servers->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_servers->setSelectionMode(QAbstractItemView::SingleSelection);
+    const auto credentialIds = [this]() {
+        QStringList ids;
+        for (const assets::KnownLogin& login : assets::knownLogins(m_editor->config())) ids << qs(login.id);
+        return ids;
+    };
+    m_servers->setItemDelegateForColumn(kCredential, new CredentialDelegate(credentialIds, m_servers));
     serversLayout->addWidget(m_servers, 1);
     connect(m_servers, &QTableWidget::cellChanged, this, &AssetServersDialog::serverCellChanged);
     connect(m_servers, &QTableWidget::itemSelectionChanged, this, &AssetServersDialog::refreshServerDetails);
@@ -298,7 +341,7 @@ void AssetServersDialog::build() {
     connect(m_login, &QPushButton::clicked, this, [this]() {
         const auto found = m_editor->config().endpoints.find(selectedServer().toStdString());
         if (found == m_editor->config().endpoints.end()) return;
-        showAssetLoginDialog(this, qs(found->second.credential), qs(found->second.scheme));
+        changeLogin(qs(found->second.credential), qs(found->second.scheme));
     });
 
     // ---- Environments --------------------------------------------------------------------
@@ -491,6 +534,7 @@ void AssetServersDialog::build() {
     m_webHosts->horizontalHeader()->setSectionResizeMode(kHost, QHeaderView::Stretch);
     m_webHosts->verticalHeader()->hide();
     m_webHosts->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_webHosts->setItemDelegateForColumn(kHostCredential, new CredentialDelegate(credentialIds, m_webHosts));
     webLayout->addWidget(m_webHosts, 1);
     connect(m_webHosts, &QTableWidget::cellChanged, this, &AssetServersDialog::webHostCellChanged);
     auto* webButtons = new QHBoxLayout();
@@ -536,6 +580,62 @@ void AssetServersDialog::build() {
     connect(m_s3Allow, &QLineEdit::textEdited, this, [this](const QString& text) {
         m_editor->config().s3Allow = splitList(text);
         refreshProblems();
+    });
+
+    // ---- Logins --------------------------------------------------------------------------
+    m_loginsPage = new QWidget(m_tabs);
+    auto* loginsLayout = new QVBoxLayout(m_loginsPage);
+    auto* loginsIntro = new QLabel(
+        assets::canStoreCredentials()
+            ? tr("Your logins, saved on this computer and never in the configuration. A server or a web host uses the "
+                 "one its Credential names; a server opened by its address uses the one named like the address. "
+                 "Changes here apply at once, without Save.")
+            : tr("Logins can't be saved on this platform yet. They come from the environment variables "
+                 "USDCC_ASSETS_<ID>_USER, _PASSWORD and _TOKEN."),
+        m_loginsPage);
+    loginsIntro->setWordWrap(true);
+    loginsLayout->addWidget(loginsIntro);
+    m_logins = new QTableWidget(0, kLoginColumns, m_loginsPage);
+    m_logins->setObjectName(QStringLiteral("assetServersLogins"));
+    m_logins->setHorizontalHeaderLabels({tr("Credential"), tr("Kind"), tr("User"), tr("Status"), tr("Used by")});
+    m_logins->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_logins->horizontalHeader()->setSectionResizeMode(kLoginUses, QHeaderView::Stretch);
+    m_logins->verticalHeader()->hide();
+    m_logins->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_logins->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_logins->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    loginsLayout->addWidget(m_logins, 1);
+    auto* loginButtons = new QHBoxLayout();
+    m_addLogin = new QPushButton(tr("Add Login..."), m_loginsPage);
+    m_addLogin->setObjectName(QStringLiteral("assetServersAddLogin"));
+    m_addLogin->setEnabled(assets::canStoreCredentials());
+    m_changeLogin = new QPushButton(tr("Change..."), m_loginsPage);
+    m_changeLogin->setObjectName(QStringLiteral("assetServersChangeLogin"));
+    m_forgetLogin = new QPushButton(tr("Forget..."), m_loginsPage);
+    m_forgetLogin->setObjectName(QStringLiteral("assetServersForgetLogin"));
+    loginButtons->addWidget(m_addLogin);
+    loginButtons->addWidget(m_changeLogin);
+    loginButtons->addWidget(m_forgetLogin);
+    loginButtons->addStretch(1);
+    loginsLayout->addLayout(loginButtons);
+    m_tabs->addTab(m_loginsPage, tr("Logins"));
+
+    connect(m_addLogin, &QPushButton::clicked, this, [this]() { changeLogin(QString()); });
+    connect(m_changeLogin, &QPushButton::clicked, this, [this]() { changeLogin(selectedLogin()); });
+    connect(m_logins, &QTableWidget::cellDoubleClicked, this, [this]() {
+        if (m_changeLogin->isEnabled()) changeLogin(selectedLogin());
+    });
+    connect(m_forgetLogin, &QPushButton::clicked, this, [this]() {
+        if (forgetAssetLogin(this, selectedLogin(), &m_editor->config())) refreshLogins();
+    });
+    connect(m_logins, &QTableWidget::itemSelectionChanged, this, [this]() {
+        const int row = m_logins->currentRow();
+        QTableWidgetItem* item = row < 0 ? nullptr : m_logins->item(row, kLoginId);
+        const bool can = item && assets::canStoreCredentials() && !assets::isAwsCredential(item->text().toStdString());
+        const bool saved = can && item->data(Qt::UserRole).toBool();
+        m_changeLogin->setEnabled(can);
+        m_changeLogin->setText(can && !saved ? tr("Log In...") : tr("Change..."));
+        m_forgetLogin->setEnabled(saved);
     });
 
     // ---- Bottom --------------------------------------------------------------------------
@@ -676,6 +776,7 @@ void AssetServersDialog::refreshServers() {
         m_servers->setCellWidget(row, kProtocol, protocol);
         m_servers->setItem(row, kUrl, textItem(qs(endpoint.url)));
         m_servers->setItem(row, kCredential, textItem(qs(endpoint.credential)));
+        m_servers->setItem(row, kLogin, fixedItem(QString()));
         m_servers->setItem(row, kReadOnly, flagItem(endpoint.readOnly));
         m_servers->setItem(row, kOptional, flagItem(endpoint.optional));
     }
@@ -724,7 +825,10 @@ void AssetServersDialog::serverCellChanged(int row, int column) {
         endpoint.url = url;
         break;
     }
-    case kCredential: endpoint.credential = item->text().trimmed().toStdString(); break;
+    case kCredential:
+        endpoint.credential = item->text().trimmed().toStdString();
+        refreshServerDetails();
+        break;
     case kReadOnly: endpoint.readOnly = item->checkState() == Qt::Checked; break;
     case kOptional: endpoint.optional = item->checkState() == Qt::Checked; break;
     default: break;
@@ -749,8 +853,8 @@ void AssetServersDialog::refreshServerDetails() {
         m_s3BucketInHost->setChecked(inHost != found->second.options.end() && inHost->second == "true");
     }
     m_test->setEnabled(any);
-    m_login->setEnabled(any && !found->second.credential.empty() && found->second.credential != "aws" &&
-                        found->second.credential.rfind("aws:", 0) != 0);
+    m_login->setEnabled(any && assets::canStoreCredentials() && !found->second.credential.empty() &&
+                        !assets::isAwsCredential(found->second.credential));
 }
 
 void AssetServersDialog::refreshEnvironments() {
@@ -862,6 +966,98 @@ void AssetServersDialog::webHostCellChanged(int row, int column) {
     refreshProblems();
 }
 
+QString AssetServersDialog::selectedLogin() const {
+    const int row = m_logins->currentRow();
+    return row < 0 || !m_logins->item(row, kLoginId) ? QString() : m_logins->item(row, kLoginId)->text();
+}
+
+void AssetServersDialog::changeLogin(const QString& credential, const QString& scheme) {
+    if (!showAssetLoginDialog(this, credential, scheme, &m_editor->config())) {
+        // The form can forget one too.
+        refreshLogins();
+        return;
+    }
+    // Whatever was refused was refused with the login before.
+    m_refused.clear();
+    refreshLogins();
+}
+
+void AssetServersDialog::showLogins(const QString& credential) {
+    m_tabs->setCurrentWidget(m_loginsPage);
+    for (int row = 0; row < m_logins->rowCount(); ++row) {
+        if (m_logins->item(row, kLoginId)->text() == credential) m_logins->selectRow(row);
+    }
+}
+
+void AssetServersDialog::refreshLogins() {
+    const std::vector<assets::KnownLogin> logins = assets::knownLogins(m_editor->config());
+    const QString selected = selectedLogin();
+    {
+        const RefreshGuard guard(m_refreshing);
+        m_logins->clearSelection();
+        m_logins->setRowCount(0);
+        for (const assets::KnownLogin& login : logins) {
+            const int row = m_logins->rowCount();
+            m_logins->insertRow(row);
+            QTableWidgetItem* idItem = fixedItem(qs(login.id));
+            idItem->setData(Qt::UserRole, login.saved);
+            m_logins->setItem(row, kLoginId, idItem);
+            m_logins->setItem(row, kLoginKind,
+                              fixedItem(login.aws      ? tr("AWS")
+                                        : login.s3     ? tr("S3 key")
+                                        : !login.saved ? QString()
+                                        : login.user.empty() ? tr("Token")
+                                                             : tr("Password")));
+            m_logins->setItem(row, kLoginUser, fixedItem(qs(login.user)));
+            QTableWidgetItem* status = fixedItem(login.aws         ? tr("From AWS's own files")
+                                                 : login.saved     ? tr("Saved")
+                                                 : login.variables ? tr("From environment variables")
+                                                                   : tr("No login"));
+            if (login.variables && !login.aws) {
+                status->setToolTip(tr("Environment variables: %1_USER, _PASSWORD or _TOKEN. A saved login wins over them.")
+                                       .arg(qs(assets::credentialVariablePrefix(login.id))));
+            }
+            m_logins->setItem(row, kLoginStatus, status);
+            QStringList uses;
+            for (const std::string& use : login.uses) uses << qs(use);
+            QTableWidgetItem* usesItem =
+                fixedItem(uses.isEmpty() ? tr("Nothing configured") : uses.join(QStringLiteral(", ")));
+            usesItem->setToolTip(uses.isEmpty() ? tr("Only a server opened by the address '%1' would use it.").arg(qs(login.id))
+                                                : uses.join(QStringLiteral("\n")));
+            m_logins->setItem(row, kLoginUses, usesItem);
+            if (idItem->text() == selected) m_logins->selectRow(row);
+        }
+        if (m_logins->currentRow() < 0 && m_logins->rowCount() > 0) m_logins->selectRow(0);
+    }
+    if (m_logins->rowCount() == 0) {
+        m_changeLogin->setEnabled(false);
+        m_forgetLogin->setEnabled(false);
+    }
+
+    // The servers' own column.
+    const RefreshGuard guard(m_refreshing);
+    for (int row = 0; row < m_servers->rowCount(); ++row) {
+        QTableWidgetItem* item = m_servers->item(row, kLogin);
+        if (!item) continue;
+        const std::string id = m_servers->item(row, kId)->data(Qt::UserRole).toString().toStdString();
+        const auto endpoint = m_editor->config().endpoints.find(id);
+        if (endpoint == m_editor->config().endpoints.end()) continue;
+        const std::string& credential = endpoint->second.credential;
+        const auto login = std::find_if(logins.begin(), logins.end(),
+                                        [&credential](const assets::KnownLogin& each) { return each.id == credential; });
+        const auto refused = m_refused.find(id);
+        QString text;
+        if (refused != m_refused.end() && refused->second == credential) {
+            text = tr("Refused");
+        } else if (credential.empty() || login == logins.end()) {
+            text = QString();
+        } else {
+            text = login->aws ? tr("AWS") : login->saved ? tr("Saved") : login->variables ? tr("Variables") : tr("No login");
+        }
+        item->setText(text);
+    }
+}
+
 void AssetServersDialog::refreshDefaultEnvironment() {
     const RefreshGuard guard(m_refreshing);
     m_defaultEnvironment->clear();
@@ -880,6 +1076,8 @@ void AssetServersDialog::refreshDefaultEnvironment() {
 }
 
 void AssetServersDialog::refreshProblems() {
+    // Any change may be to a credential, or to what uses one.
+    refreshLogins();
     const std::vector<std::string> problems = m_editor->problems();
     QStringList lines;
     for (const std::string& problem : problems) lines << qs(problem);
@@ -981,11 +1179,16 @@ void AssetServersDialog::testServer(const QString& id) {
         assets::Cancel cancel;
         const assets::EndpointTest test = assets::testEndpoint(endpoint, cancel);
         const QString summary = qs(test.summary);
+        const bool refused = test.status == assets::Status::NotAllowed;
+        const bool answered = test.status == assets::Status::Ok || test.status == assets::Status::NotModified;
         QMetaObject::invokeMethod(
             qApp,
-            [self, summary, generation]() {
+            [self, summary, refused, answered, endpoint, generation]() {
                 if (!self || generation != self->m_testGeneration) return;
                 self->m_testResult->setText(summary);
+                if (refused) self->m_refused[endpoint.id] = endpoint.credential;
+                if (answered) self->m_refused.erase(endpoint.id);
+                self->refreshLogins();
             },
             Qt::QueuedConnection);
     });

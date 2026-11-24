@@ -11,6 +11,10 @@
 class QMainWindow;
 class QWidget;
 
+namespace usdcc::assets {
+struct Config;
+}
+
 namespace usdcc::usd {
 
 inline constexpr const char* kAssetEnvironmentKey = "Assets/environment";
@@ -37,10 +41,16 @@ USDCC_USD_UI_API QString askForAssetUrl(QWidget* parent);
 // https://) as it is, and without the stack id a resolved one carries.
 USDCC_USD_UI_API QString displayPath(const QString& path);
 
-// Edit > Asset Server Login...: a credential id's user and password, or token, into
+// Removes a saved login, after asking, with what uses it. True when it's gone.
+USDCC_USD_UI_API bool forgetAssetLogin(QWidget* parent, const QString& credential,
+                                       const usdcc::assets::Config* config = nullptr);
+
+// The login form: a credential id's user and password, or token, into
 // the system's credential store (Windows Credential Manager). With `credential`, that
-// one is filled in; with `scheme` "s3", it's an access key and its secret. True when
-// one was saved.
-USDCC_USD_UI_API bool showAssetLoginDialog(QWidget* parent, const QString& credential = {}, const QString& scheme = {});
+// one is filled in; with `scheme` "s3", it's an access key and its secret. The ids it
+// offers are the saved ones and those of `config` (null: the default configuration), as
+// is which are S3's. An empty password keeps the saved one. True when one was saved.
+USDCC_USD_UI_API bool showAssetLoginDialog(QWidget* parent, const QString& credential = {}, const QString& scheme = {},
+                                           const usdcc::assets::Config* config = nullptr);
 
 }  // namespace usdcc::usd

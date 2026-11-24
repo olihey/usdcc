@@ -3,11 +3,13 @@
 // OpenUSD itself, on the fake:// protocol (assets_fake_protocol.cpp) with a
 // transport over folders on disk. No network. Runs in usdcc_assets_tests.
 #include "test_harness.h"
+#include "assets_memory_store.h"
 
 #include "usdcc/assets/config.h"
 #include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
+#include "usdcc/assets/logins.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
@@ -563,6 +565,33 @@ USDCC_TEST(assets_credentials_come_from_the_callback_then_the_environment) {
     PXR_NS::TfUnsetenv("USDCC_ASSETS_OTHER_TOKEN");
 }
 
+USDCC_TEST(assets_known_logins_are_the_saved_and_the_named_ones) {
+    ScopedMemoryStore store;
+    store->logins["test"] = {"ada", "secret"};
+    store->logins["dav"] = {"bob", "secret"};
+    store->logins["host.example"] = {"", "", "t0ken"};
+    const Result<Config> config = Config::parse(R"({
+        "endpoints": {
+            "prod": { "scheme": "webdav", "url": "https://a", "credential": "dav" },
+            "bucket": { "scheme": "s3", "url": "s3://b", "credential": "keys" },
+            "amazon": { "scheme": "s3", "url": "s3://c", "credential": "aws:studio" }
+        },
+        "http": { "hosts": { "host.example": {}, "open.example": {}, "in.example": { "credential": "dav" } } }
+    })");
+    CHECK(config.ok(), "the configuration parses");
+    PXR_NS::TfSetenv("USDCC_ASSETS_KEYS_USER", "key");
+    const std::vector<KnownLogin> logins = knownLogins(config.value);
+    PXR_NS::TfUnsetenv("USDCC_ASSETS_KEYS_USER");
+    CHECK(logins.size() == 5, "aws:studio, dav, host.example, keys, test; not the anonymous open.example: %zu", logins.size());
+    if (logins.size() != 5) return;
+    CHECK(logins[0].id == "aws:studio" && logins[0].aws && !logins[0].saved, "AWS's own");
+    CHECK(logins[1].id == "dav" && logins[1].saved && logins[1].user == "bob" && logins[1].uses.size() == 2,
+          "one a server and a host share");
+    CHECK(logins[2].id == "host.example" && logins[2].uses.size() == 1, "one a host uses by its address");
+    CHECK(logins[3].id == "keys" && !logins[3].saved && logins[3].variables && logins[3].s3, "one only in variables, an S3 key");
+    CHECK(logins[4].id == "test" && logins[4].saved && logins[4].uses.empty(), "and a saved one nothing uses");
+}
+
 USDCC_TEST(assets_credentials_in_the_system_store) {
 #if defined(_WIN32)
     // A name no one else uses, gone again at the end: this is the user's own Credential Manager.
@@ -574,6 +603,9 @@ USDCC_TEST(assets_credentials_in_the_system_store) {
     login.password = "sÃ©cret";  // not ASCII
     std::string error;
     CHECK(storeCredential(id, login, &error), "a user and password are stored: %s", error.c_str());
+    bool listed = false;
+    for (const StoredCredential& each : storedCredentials()) listed = listed || (each.id == id && each.user == "ada");
+    CHECK(listed, "it's in the list, with its user");
     std::optional<Credential> stored = storedCredential(id);
     CHECK(stored && stored->user == "ada" && stored->password == login.password && stored->token.empty(), "and read back as they were");
     stored = credentialFor(id);

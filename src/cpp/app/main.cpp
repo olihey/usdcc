@@ -1006,10 +1006,7 @@ int main(int argc, char** argv) {
     // Edit > Selection: None, All, Invert, By Type, By Schema, By Name (docs/SELECTION_MENU.md).
     editMenu->addMenu(new usdcc::usd::SelectionMenu(&stageManager, &window));
     editMenu->addSeparator();
-    // A login for an asset server, kept in the system's credential store (docs/REMOTE_ASSETS.md §8).
-    editMenu->addAction(QObject::tr("Asset Server &Login..."), &window,
-                        [&window]() { usdcc::usd::showAssetLoginDialog(&window); });
-    // The servers, environments and web hosts of the asset configuration (docs/REMOTE_ASSETS.md §10.1).
+    // The servers, environments, web hosts and logins of the asset configuration (docs/REMOTE_ASSETS.md §10.1).
     usdcc::usd::AssetServersDialog::setStageManager(&stageManager);
     editMenu->addAction(QObject::tr("Asset Ser&vers..."), &window,
                         [&window]() { usdcc::usd::showAssetServersEditor(&window); });

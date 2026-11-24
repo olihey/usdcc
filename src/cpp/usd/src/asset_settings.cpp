@@ -1,9 +1,12 @@
 #include "usdcc/usd/asset_settings.h"
 
+#include "usdcc/ui/theme.h"
+
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/config.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
+#include "usdcc/assets/logins.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
@@ -410,7 +413,27 @@ QString askForAssetUrl(QWidget* parent) {
     return ok ? url : QString();
 }
 
-bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QString& scheme) {
+bool forgetAssetLogin(QWidget* parent, const QString& credential, const usdcc::assets::Config* config) {
+    QStringList uses;
+    for (const usdcc::assets::KnownLogin& login :
+         usdcc::assets::knownLogins(config ? *config : usdcc::assets::defaultConfig())) {
+        if (login.id != credential.toStdString()) continue;
+        for (const std::string& use : login.uses) uses << QString::fromStdString(use);
+    }
+    QString question = QObject::tr("Forget the login saved as '%1'? This can't be undone.").arg(credential);
+    if (!uses.isEmpty()) question += QObject::tr("\n\nUsed by %1.").arg(uses.join(QStringLiteral(", ")));
+    if (QMessageBox::question(parent, QObject::tr("Forget Login"), question) != QMessageBox::Yes) return false;
+    if (!usdcc::assets::forgetStoredCredential(credential.toStdString())) {
+        QMessageBox::warning(parent, QObject::tr("Forget Login"),
+                             QObject::tr("The login '%1' couldn't be removed.").arg(credential));
+        return false;
+    }
+    usdcc::assets::forgetLookups();
+    return true;
+}
+
+bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QString& scheme,
+                          const usdcc::assets::Config* config) {
     QDialog dialog(parent);
     dialog.setWindowTitle(QObject::tr("Asset Server Login"));
     dialog.setObjectName(QStringLiteral("assetLoginDialog"));
@@ -431,23 +454,20 @@ bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QStr
     std::set<std::string> ids;
     // An S3 server's: an access key ID and its secret, not a user and password.
     auto s3Ids = std::make_shared<std::set<std::string>>();
-    const usdcc::assets::Config config = usdcc::assets::defaultConfig();
-    for (const auto& [name, endpoint] : config.endpoints) {
-        if (endpoint.credential.empty()) continue;
+    for (const usdcc::assets::KnownLogin& login :
+         usdcc::assets::knownLogins(config ? *config : usdcc::assets::defaultConfig())) {
         // AWS's own lookup (docs/S3_RESOLVER.md §4.2): nothing to save here.
-        if (endpoint.credential == "aws" || endpoint.credential.rfind("aws:", 0) == 0) continue;
-        ids.insert(endpoint.credential);
-        if (endpoint.scheme == "s3") s3Ids->insert(endpoint.credential);
-    }
-    for (const auto& [host, entry] : config.httpHosts) {
-        if (!entry.credential.empty()) ids.insert(entry.credential);
+        if (login.aws) continue;
+        ids.insert(login.id);
+        if (login.s3) s3Ids->insert(login.id);
     }
     if (!credential.isEmpty()) {
         ids.insert(credential.toStdString());
         if (scheme == QLatin1String("s3")) s3Ids->insert(credential.toStdString());
     }
     for (const std::string& each : ids) id->addItem(QString::fromStdString(each));
-    if (!credential.isEmpty()) id->setCurrentText(credential);
+    // Without one, a new login: the first of the list would be overwritten by accident.
+    id->setCurrentText(credential);
     form->addRow(QObject::tr("Credential:"), id);
 
     auto* userMode = new QRadioButton(QObject::tr("User and password"), &dialog);
@@ -463,9 +483,16 @@ bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QStr
     form->addRow(tokenMode);
     form->addRow(QObject::tr("Password or token:"), secret);
     layout->addLayout(form);
+    auto* problem = new QLabel(&dialog);
+    problem->setObjectName(QStringLiteral("credentialProblem"));
+    problem->setWordWrap(true);
+    problem->setStyleSheet(
+        QStringLiteral("color: %1;").arg(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error).name()));
+    problem->hide();
+    layout->addWidget(problem);
     QObject::connect(tokenMode, &QRadioButton::toggled, user, [user](bool token) { user->setEnabled(!token); });
     const auto showStored = [id, user, secret, form, userMode, tokenMode, s3Ids]() {
-        const std::string credentialId = id->currentText().toStdString();
+        const std::string credentialId = id->currentText().trimmed().toStdString();
         const bool s3 = s3Ids->count(credentialId) > 0;
         if (auto* label = qobject_cast<QLabel*>(form->labelForField(user))) {
             label->setText(s3 ? QObject::tr("Access key ID:") : QObject::tr("User:"));
@@ -476,6 +503,8 @@ bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QStr
         userMode->setVisible(!s3);
         tokenMode->setVisible(!s3);
         const std::optional<usdcc::assets::Credential> stored = usdcc::assets::storedCredential(credentialId);
+        secret->clear();
+        secret->setPlaceholderText(stored ? QObject::tr("saved; leave empty to keep it") : QString());
         user->setText(stored ? QString::fromStdString(stored->user) : QString());
         (!s3 && stored && !stored->token.empty() ? tokenMode : userMode)->setChecked(true);
     };
@@ -486,25 +515,42 @@ bool showAssetLoginDialog(QWidget* parent, const QString& credential, const QStr
     QPushButton* forget = buttons->addButton(QObject::tr("Forget"), QDialogButtonBox::DestructiveRole);
     layout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    QObject::connect(forget, &QPushButton::clicked, &dialog, [&dialog, id]() {
-        usdcc::assets::forgetStoredCredential(id->currentText().toStdString());
-        dialog.reject();
+    const auto updateForget = [id, forget]() {
+        forget->setEnabled(usdcc::assets::storedCredential(id->currentText().trimmed().toStdString()).has_value());
+    };
+    QObject::connect(id, &QComboBox::currentTextChanged, forget, updateForget);
+    updateForget();
+    QObject::connect(forget, &QPushButton::clicked, &dialog, [&dialog, id, config]() {
+        if (forgetAssetLogin(&dialog, id->currentText().trimmed(), config)) dialog.reject();
     });
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, id, user, secret, tokenMode]() {
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, id, user, secret, tokenMode, problem]() {
+        const auto refuse = [problem](const QString& why) {
+            problem->setText(why);
+            problem->show();
+        };
         const std::string credentialId = id->currentText().trimmed().toStdString();
-        if (credentialId.empty()) return;
+        if (credentialId.empty()) return refuse(QObject::tr("Which credential? It needs an id."));
+        if (usdcc::assets::isAwsCredential(credentialId)) {
+            return refuse(QObject::tr("The ids aws and aws:<profile> come from AWS's own files."));
+        }
+        const std::optional<usdcc::assets::Credential> stored = usdcc::assets::storedCredential(credentialId);
         usdcc::assets::Credential credential;
         if (tokenMode->isChecked()) {
             credential.token = secret->text().toStdString();
+            // The field starts empty: left so, what is saved stays.
+            if (credential.token.empty() && stored) credential.token = stored->token;
+            if (credential.token.empty()) return refuse(QObject::tr("The token is missing."));
         } else {
-            credential.user = user->text().toStdString();
+            credential.user = user->text().trimmed().toStdString();
             credential.password = secret->text().toStdString();
+            if (credential.password.empty() && stored) credential.password = stored->password;
+            // Without a user it would be read back as a token.
+            if (credential.user.empty()) return refuse(QObject::tr("The user is missing."));
+            if (credential.password.empty()) return refuse(QObject::tr("The password is missing."));
         }
         std::string error;
         if (!usdcc::assets::storeCredential(credentialId, credential, &error)) {
-            QMessageBox::warning(&dialog, QObject::tr("Asset Server Login"),
-                                 QObject::tr("It couldn't be saved: %1").arg(QString::fromStdString(error)));
-            return;
+            return refuse(QObject::tr("It couldn't be saved: %1").arg(QString::fromStdString(error)));
         }
         // What servers answered without it is forgotten, so the next resolve asks again.
         usdcc::assets::forgetLookups();

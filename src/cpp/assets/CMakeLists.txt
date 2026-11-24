@@ -29,6 +29,7 @@ add_library(usdcc_assets SHARED
     src/credentials.cpp
     src/disk_cache.cpp
     src/http_client.cpp
+    src/logins.cpp
     src/lookup.cpp
     src/transport.cpp
     src/uri.cpp

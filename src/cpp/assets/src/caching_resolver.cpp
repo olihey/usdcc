@@ -268,7 +268,7 @@ Found CachingResolver::_Find(const std::string& assetPath, Location* location, b
             why = "refused to answer without a login, and its endpoint names no credential";
         } else if (!credentialFor(credential)) {
             why = "wants a login, and none is saved under the credential '" + credential +
-                  "' (Edit > Asset Server Login in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
+                  "' (Edit > Asset Servers > Logins in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
         } else {
             why = "refused the login saved under the credential '" + credential + "'";
         }

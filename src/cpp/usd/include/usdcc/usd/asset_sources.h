@@ -42,7 +42,7 @@ struct AssetListPage {
 };
 
 // What list() throws when a server refused for want of a login the user can save
-// (Edit > Asset Server Login): the picker offers to log in, then lists again.
+// (Edit > Asset Servers > Logins): the picker offers to log in, then lists again.
 class AssetLoginNeeded : public std::runtime_error {
 public:
     AssetLoginNeeded(const std::string& message, std::string credential, std::string scheme)

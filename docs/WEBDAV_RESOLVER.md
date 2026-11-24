@@ -72,7 +72,7 @@ webdavs://dav.example.com/shots/s010.usda   https://dav.example.com/shots/s010.u
   as a stage can name any address. One the user opens (File > Open, Open Stage from URL, Open
   Recent, the command line, a session's stage) is allowed for the rest of the session.
 - **Its login** is saved under the address: `192.168.178.53:5000` when one is saved for that port,
-  else `192.168.178.53` (Edit > Asset Server Login, or `USDCC_ASSETS_192_168_178_53_USER` and
+  else `192.168.178.53` (Edit > Asset Servers > Logins, or `USDCC_ASSETS_192_168_178_53_USER` and
   `_PASSWORD`). A `"hosts"` entry in the configuration's `"http"` section can name another
   credential instead. It is sent over plain `webdav://` too, with a warning in the Log once.
 - **It writes the address into what is saved,** which names avoid. Fine for a file of your own;

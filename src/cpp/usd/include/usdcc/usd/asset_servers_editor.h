@@ -2,7 +2,7 @@
 
 // The Asset Servers editor (docs/REMOTE_ASSETS.md §10.1): a dialog for what the asset
 // configuration file holds (the servers, the environments and their stacks, the hosts of
-// plain HTTP and the buckets of S3) so nobody has to edit its JSON by hand. The editing
+// plain HTTP and the buckets of S3) and the saved logins, so nobody has to edit its JSON by hand. The editing
 // itself is usdcc::assets::ConfigEditor; this is its face.
 
 #include "usdcc/core/export.h"
@@ -11,6 +11,7 @@
 #include <QString>
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -55,6 +56,8 @@ public:
     bool saveCopyAsMine(const std::filesystem::path& file = {});
     // Tests the selected server (or `id`) on a worker thread; the result shows when it answers.
     void testServer(const QString& id = {});
+    // Shows the Logins tab, with `credential` selected.
+    void showLogins(const QString& credential = {});
     // Selects a server row, an environment, or one of its names.
     void selectServer(const QString& id);
     void selectEnvironment(const QString& environment);
@@ -83,6 +86,9 @@ private:
     void refreshNames();
     void refreshStack();
     void refreshWebHosts();
+    void refreshLogins();
+    void changeLogin(const QString& credential, const QString& scheme = {});
+    QString selectedLogin() const;
     void refreshDefaultEnvironment();
     void refreshProblems();
     void serverCellChanged(int row, int column);
@@ -98,6 +104,8 @@ private:
     bool m_refreshing = false;
     int m_keptStages = 0;
     int m_testGeneration = 0;
+    // Servers whose last Test was refused, with the credential it was refused for.
+    std::map<std::string, std::string> m_refused;
 
     QLabel* m_fileLabel = nullptr;
     QLabel* m_notice = nullptr;
@@ -131,6 +139,11 @@ private:
     QPushButton* m_removeWebHost = nullptr;
     QLineEdit* m_httpAllow = nullptr;
     QLineEdit* m_s3Allow = nullptr;
+    QWidget* m_loginsPage = nullptr;
+    QTableWidget* m_logins = nullptr;
+    QPushButton* m_addLogin = nullptr;
+    QPushButton* m_changeLogin = nullptr;
+    QPushButton* m_forgetLogin = nullptr;
     QComboBox* m_defaultEnvironment = nullptr;
     QLabel* m_problems = nullptr;
     QPushButton* m_save = nullptr;

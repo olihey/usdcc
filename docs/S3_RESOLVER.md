@@ -124,7 +124,7 @@ picker went to a bucket of that name on AWS.
   none) is asked over `http://` from then on, with a warning in the Log once. A server whose TLS
   fails for another reason, such as a certificate Windows doesn't trust, isn't.
 - **Its login** is saved under the address, as WebDAV's: `nas1:9000` when one is saved for that
-  port, else `nas1` (Edit > Asset Server Login, or `USDCC_ASSETS_NAS1_USER` and `_PASSWORD`): the
+  port, else `nas1` (Edit > Asset Servers > Logins, or `USDCC_ASSETS_NAS1_USER` and `_PASSWORD`): the
   access key ID and the secret. A `"hosts"` entry in the configuration's `"http"` section can name
   another credential.
 - **A host like plain HTTP's** ([HTTP_RESOLVER.md](HTTP_RESOLVER.md) §4): allowed, as a stage can
@@ -145,7 +145,7 @@ Manager (`usdcc-assets:<id>`), or `USDCC_ASSETS_<ID>_USER`, `_PASSWORD` and `_TO
 | `password` | the secret access key |
 | `token` | a session token, for temporary credentials (sent as `x-amz-security-token`) |
 
-Edit > Asset Server Login labels them so for a credential id that an S3 endpoint uses.
+The login form labels them so for a credential id that an S3 endpoint uses.
 
 ### 4.2 AWS's own lookup
 
@@ -219,7 +219,7 @@ forces". This is what it forces:
 
 - **The asset picker** browses buckets with no change: it uses any transport that can list, and
   its scheme dropdown lists every registered scheme ([ASSET_PICKER.md](ASSET_PICKER.md)).
-- **Edit > Asset Server Login** labels the fields Access key ID, Secret access key and Session
+- **The login form** labels the fields Access key ID, Secret access key and Session
   token for an S3 credential id (§4.1).
 - **Settings > Assets > Allowed buckets** (§3.2), beside Allowed hosts.
 - **The Asset Servers editor** ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1) gains S3's fields:
@@ -338,7 +338,7 @@ and the shared library's part (§6).
   permission a 403 needs.
 
 **In usdcc** (§7): Settings > Assets > S3 > Allowed buckets; a sticky toast once per bucket a stage
-was refused; Edit > Asset Server Login labels an S3 server's credential Access key ID and Secret
+was refused; The login form labels an S3 server's credential Access key ID and Secret
 access key, without the token choice, and leaves out `aws` and `aws:<profile>`; Open Stage from URL
 names `s3://` as an example. The picker browses buckets with nothing added, and lists a bucket by
 itself only when it's allowed.
