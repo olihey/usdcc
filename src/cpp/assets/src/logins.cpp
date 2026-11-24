@@ -27,6 +27,10 @@ std::vector<KnownLogin> knownLogins(const Config& config) {
         if (entry.credential.empty() && !all.count(id)) continue;
         all[id].uses.push_back("web host " + host);
     }
+    for (const auto& [id, alias] : config.sourceLogins) {
+        // Most are anonymous: not listed as missing either.
+        if (all.count(id)) all[id].uses.push_back("source '" + alias + "'");
+    }
     std::vector<KnownLogin> logins;
     for (auto& [id, login] : all) {
         login.id = id;

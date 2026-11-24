@@ -85,6 +85,8 @@
 #include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/asset_environment.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_source_refresh.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/activity.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
@@ -490,6 +492,8 @@ int main(int argc, char** argv) {
         usdcc::ui::SessionStore().contains(QLatin1String(usdcc::ui::session::kLastSessionName))) {
         startSession = QLatin1String(usdcc::ui::session::kLastSessionName);
     }
+    // Configurations from a URL are fetched in the background (docs/ASSET_SOURCES.md §7).
+    usdcc::assets::setFetchSourcesAtLoad(false);
     // Before the stage named on the command line opens: a server its environment doesn't
     // have, which another has, is offered (docs/ASSET_SOURCES.md §4), and the environment
     // remembered for its folder is used. Per folder in this profile's data.
@@ -1611,6 +1615,7 @@ int main(int argc, char** argv) {
 
     // Downloads in the status bar, and a note when a stage asks for a host that isn't allowed.
     usdcc::usd::installAssetActivity(&window);
+    (new usdcc::usd::AssetSourceRefresher(&window))->start();
     window.show();
 #if USDCC_FEATURE_UPDATES
     // "Updated to ..." after an update, and the check a few seconds later (docs/UPDATES.md §4).

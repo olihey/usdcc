@@ -9,6 +9,7 @@
 #include "usdcc/assets/transport.h"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -45,6 +46,9 @@ struct HttpRequest {
     // In place of setHttpTimeouts()' connect timeout when set: EC2's metadata service,
     // which off EC2 never answers (docs/S3_RESOLVER.md §4.2).
     std::chrono::milliseconds connectTimeout{0};
+    // For the whole request, and for the size of its body; none when 0.
+    std::chrono::milliseconds totalTimeout{0};
+    uint64_t maxBytes = 0;
 };
 
 struct HttpResponse {

@@ -5,8 +5,8 @@ them, logins that can't go to the wrong studio, configurations from a web servic
 Asset Servers dialog, and the environment in the status bar. Builds on
 [REMOTE_ASSETS.md](REMOTE_ASSETS.md) (the configuration, §4; the dialog, §10.1).
 
-**Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 to 3 are built**
-(§10.1 to §10.3). "Checked" means read in this repository's code; everything else is an assumption
+**Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 to 4 are built**
+(§10.1 to §10.4). "Checked" means read in this repository's code; everything else is an assumption
 or a proposal.
 
 ## 1. Decisions
@@ -363,7 +363,6 @@ Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The libr
   environment, which becomes a mixed one on the source's servers. A mixed environment's extended
   environments are under its name in Environments. Logins are the merged configuration's.
   *Not built:* renaming an alias (remove it and add it again), and turning a source off.
-- **A source's URL** (§7) is read into the file but said to be unread until phase 4.
 - **The offer** (`installAssetEnvironmentOffer()`): the resolver tells the app (`setUnknownNameCallback()`,
   from any thread) about a name its environment lacks. The app shows a sticky toast once per name
   and environment, with a button per environment to reopen the stage in it: a source's default when
@@ -382,6 +381,37 @@ Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The libr
   checked by hand: a stage naming a studio's server opens in the personal environment, and the
   toast reopens it in the studio's.
 
+### 10.4 Phase 4 as built
+
+Built 2026-11-24, as §7 has it, but for what follows. The library's part is `refreshSource()` and
+`loadSource()` in [sources.h](../src/cpp/assets/include/usdcc/assets/sources.h), the app's is
+[asset_source_refresh.h](../src/cpp/usd/include/usdcc/usd/asset_source_refresh.h).
+
+- **The URL** is `https://` with no login in it. Redirects are followed five times at most, on the
+  same scheme, host and port. 30 seconds for the whole request, 8 MB at most.
+- **The copy** is one file per alias and URL, with the text, its ETag and when it was checked and
+  changed, in `asset-sources` in the user's usdcc data folder, or the folder `USDCC_ASSET_SOURCES`
+  names. Written through a temporary file. A server may answer each login differently, so two
+  aliases of one URL have two.
+- **Taken only if it parses and has something in it:** any JSON object parses, and a server's error
+  message as JSON would have replaced the copy with nothing.
+- **Loading reads the copy.** Tools fetch one that has none, once, for 5 seconds at most, and not
+  when offline. The app turns that off (`setFetchSourcesAtLoad()`): a stage opened at the first start
+  with a new source may not find its names until the fetch is done and the stage is reopened.
+- **The app** refreshes at start and hourly, not while offline, on a worker. A change reads the
+  configuration again and fires `assetConfigChanged()`. Failures go to the Log.
+- **The dialog:** **Add...** asks for a file or a URL. A URL is first asked without any login, under an
+  alias made from its host, as one saved under that alias may be another server's. A refusal opens
+  the login form, and the login moves to the alias the file suggests. **Refresh** asks the servers,
+  behind a progress dialog. A source's page says when it was checked and changed and why a check
+  failed; **Source Login...** is its own login. Removing one removes its copy once that's saved.
+- **In the Logins tab** `<alias>/@source` is listed when it's saved, with the source as its use.
+- **Save** works whichever configuration is shown. In phase 3 it did nothing while a source was.
+- **Tests:** `assets_source_urls_are_https`, `assets_source_from_a_url_is_kept` and
+  `assets_source_logins_stay_with_their_server` ([assets_net_test.cpp](../tests/assets_net_test.cpp)),
+  and `asset_servers_editor_adds_a_source_from_a_url`. They use the tests' plain HTTP server, which
+  `allowLoopbackSources()` lets through on 127.0.0.1. HTTPS was checked by hand.
+
 ## 11. Phases
 
 | # | What | Needs |
@@ -389,7 +419,7 @@ Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The libr
 | 1 | (built) Logins: the list of saved ones, the tab, the dropdown and the empty-password fix | |
 | 2 | (built) The status bar, switching by reopening, the environment in shared scenes and `--asset-env` | |
 | 3 | (built) Sources from local files: aliases, read-only, `extends`, logins per source, the offer for an unknown name | 1 |
-| 4 | Sources from a URL | 3 |
+| 4 | (built) Sources from a URL | 3 |
 | 5 | Credential stores on Linux and macOS | 1 |
 | 6 | Credential descriptions, then the token service, then single sign-on | 3 |
 

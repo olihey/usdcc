@@ -30,6 +30,7 @@ class QTreeWidget;
 namespace usdcc::assets {
 class ConfigEditor;
 struct Config;
+struct SourceEntry;
 }
 
 namespace usdcc::usd {
@@ -67,12 +68,18 @@ public:
     // Adds the configuration at `file` as a source, asking for an alias only when its own is
     // taken, and saying what it brings. False when cancelled or it can't be read.
     bool addSource(const std::filesystem::path& file);
+    // The same for one at an https:// URL: fetched first, with a login when it wants one.
+    bool addSourceUrl(const QString& url);
+    // Asks the servers of the sources from a URL what they have now.
+    void refreshFetched();
     // Removes a source; offers to forget the logins saved for it.
     bool removeSource(const QString& alias);
     // Copies the selected server, or environment, of the viewed source into the personal file.
     void copyToPersonal();
     // A mixed environment's extended environments.
     void setExtends(const QString& environment, const QStringList& extended);
+    // Asks for the login saved as a credential id; replaced by tests. True when one was saved.
+    std::function<bool(const QString& credential)> askLogin;
     // Asks before adding a source, removing its logins and the like; replaced by tests.
     std::function<bool(const QString& text)> confirm;
     // Selects a server row, an environment, or one of its names.
@@ -104,6 +111,10 @@ private:
     void refreshStack();
     void refreshWebHosts();
     void refreshSources();
+    // An alias no source has, `wanted` unless it's taken; empty when cancelled.
+    QString freeAlias(const QString& wanted);
+    // What adding `theirs` as `alias` brings; false when that isn't wanted.
+    bool confirmSource(const usdcc::assets::Config& theirs, const QString& alias, const QString& where);
     void refreshExtends();
     // The servers a stack of the viewed configuration can name: the personal file's with its
     // sources' (qualified), or a source's own.
@@ -128,7 +139,8 @@ private:
     std::unique_ptr<usdcc::assets::ConfigEditor> m_viewed;
     usdcc::assets::ConfigEditor* m_editor = nullptr;
     QString m_viewedAlias;
-    std::filesystem::path m_viewedFile;
+    QString m_viewedWhere;
+    std::vector<usdcc::assets::SourceEntry> m_removed;
     bool m_readOnly = false;
     bool m_refreshing = false;
     int m_keptStages = 0;
@@ -142,6 +154,7 @@ private:
     QPushButton* m_removeSource = nullptr;
     QPushButton* m_refreshSources = nullptr;
     QPushButton* m_copyToPersonal = nullptr;
+    QPushButton* m_sourceLogin = nullptr;
     QListWidget* m_extends = nullptr;
     QPushButton* m_addExtends = nullptr;
     QPushButton* m_removeExtends = nullptr;

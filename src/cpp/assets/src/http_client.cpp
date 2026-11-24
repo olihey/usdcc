@@ -280,6 +280,8 @@ HttpResponse httpRequest(const HttpRequest& request, Progress& progress, Cancel&
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
                      request.connectTimeout.count() > 0 ? static_cast<long>(request.connectTimeout.count()) : connectMs().load());
+    if (request.totalTimeout.count() > 0) curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request.totalTimeout.count()));
+    if (request.maxBytes > 0) curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(request.maxBytes));
     // "Stalled" is under one byte a second for that long, not a limit on the whole transfer.
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, std::max(1L, stalledMs().load() / 1000));

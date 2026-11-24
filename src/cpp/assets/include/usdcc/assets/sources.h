@@ -8,6 +8,7 @@
 
 #include "usdcc/assets/config.h"
 
+#include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -19,6 +20,11 @@ struct LoadedSource {
     std::filesystem::path file;  // where it was read from
     Config config;               // as its file has it, unqualified
     std::string problem;         // why it isn't used; empty when it is
+    // From a URL: what its copy on this machine is. Seconds since the epoch, 0 for never.
+    double checked = 0;          // when the server last said what it has
+    double changed = 0;          // when the copy was fetched
+    std::string fetchProblem;    // why the last try failed; the copy is used meanwhile
+    bool wantsLogin = false;     // it was refused: sourceCredentialId()'s login is missing or wrong
 };
 
 struct MergeProblems {
@@ -40,6 +46,29 @@ std::string aliasOf(const std::string& id);
 // can't be read, or isn't a configuration, has its problem said and is left out.
 std::vector<LoadedSource> loadSources(const Config& personal, const std::filesystem::path& personalFile);
 LoadedSource loadSource(const SourceEntry& entry, const std::filesystem::path& personalFile);
+
+// The credential id a source's URL is fetched with: "<alias>/@source".
+std::string sourceCredentialId(const std::string& alias);
+// Why `url` can't be a source's: not https://, no host, or a login in it. Empty when it can.
+std::string badSourceUrl(const std::string& url);
+
+enum class Refreshed { Unchanged, Changed, Failed };
+struct SourceRefresh {
+    Refreshed what = Refreshed::Failed;
+    bool wantsLogin = false;
+    std::string problem;
+};
+// Asks the server of a source's URL for its configuration, and keeps it when it's a valid one
+// that changed. Blocks, for `timeout` at most: not on the UI's thread. Redirects are followed
+// on the same host only. `anonymous` sends no login.
+SourceRefresh refreshSource(const SourceEntry& entry, std::chrono::milliseconds timeout, bool anonymous = false);
+// Removes its copy.
+void forgetSourceCopy(const SourceEntry& entry);
+// Whether loadSource() fetches a source that has no copy (once, with a short timeout). On by
+// default, for tools; the app turns it off, and fetches in the background.
+void setFetchSourcesAtLoad(bool fetch);
+// Tests: http:// on 127.0.0.1 is let through.
+void allowLoopbackSources(bool allow);
 
 // One configuration of the personal file and its sources: what Context and the resolver use.
 Config mergeSources(const Config& personal, const std::vector<LoadedSource>& sources, MergeProblems* problems = nullptr);

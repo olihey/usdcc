@@ -4,6 +4,7 @@
 // against a real WebDAV server in assets_net_test.cpp. Runs in usdcc_ui_tests (offscreen).
 #include "test_harness.h"
 #include "assets_memory_store.h"
+#include "assets_test_server.h"
 
 #include "usdcc/assets/config.h"
 #include "usdcc/assets/config_editor.h"
@@ -24,6 +25,7 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -32,6 +34,7 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -398,5 +401,57 @@ USDCC_TEST(asset_folders_remember_their_environment) {
     usdcc::usd::rememberFolderEnvironment("C:/proj/shots", "gone");
     CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda").empty(), "one that's gone isn't used");
     usdcc::usd::setAssetFolderFile({});
+    assets::useDefaultConfigFile();
+}
+
+USDCC_TEST(asset_servers_editor_adds_a_source_from_a_url) {
+    ScopedMemoryStore store;
+    QTemporaryDir folder;
+    qputenv("USDCC_ASSET_SOURCES", folder.filePath(QStringLiteral("copies")).toUtf8());
+    assets::allowLoopbackSources(true);
+    assets::setFetchSourcesAtLoad(false);
+    std::atomic<bool> wantsLogin{true};
+    usdcc::test::TestServer server([&wantsLogin](const usdcc::test::ServerRequest& request) {
+        usdcc::test::ServerResponse response;
+        if (wantsLogin && !request.headers.count("authorization")) {
+            response.code = 401;
+            return response;
+        }
+        response.body = R"({ "name": "studio-a", "endpoints": { "nas": { "scheme": "edittest", "url": "https://prod.example" } },
+                             "environments": { "prod": { "edittest": { "server1": ["nas"] } } } })";
+        return response;
+    });
+    const std::filesystem::path mine = pathOf(folder.filePath(QStringLiteral("assets.json")));
+    writeFile(mine, "{}");
+    // Of another server, under the alias this one gets before its file is read.
+    store->logins["127-0-0-1/@source"] = {"other", "secret"};
+    {
+        AssetServersDialog dialog(nullptr, mine);
+        dialog.confirm = [](const QString&) { return true; };
+        int asked = 0;
+        QString askedFor;
+        dialog.askLogin = [&](const QString& credential) {
+            ++asked;
+            askedFor = credential;
+            store->logins[credential.toStdString()] = {"ada", "pw"};
+            return true;
+        };
+        CHECK(dialog.addSourceUrl(QString::fromStdString(server.url()) + QStringLiteral("/assets.json")), "added");
+        CHECK(!server.requests().front().headers.count("authorization"), "asked without a login first");
+        CHECK(asked == 1 && dialog.viewedSource() == QStringLiteral("studio-a"), "then with one, under the alias its file suggests");
+        CHECK(store->logins.count("studio-a/@source") && store->logins["studio-a/@source"].user == "ada",
+              "which is that source's login now");
+        CHECK(dialog.findChild<QPushButton*>(QStringLiteral("assetServersSourceLogin"))->isVisibleTo(&dialog) &&
+                  dialog.findChild<QLabel*>(QStringLiteral("assetServersNotice"))->text().contains(QStringLiteral("just now")),
+              "its state is shown, with its login's button");
+        CHECK(dialog.save() && readFile(mine).find("\"url\"") != std::string::npos, "saved with its URL: %s %s",
+              qPrintable(dialog.problems().join(QStringLiteral(" / "))), readFile(mine).c_str());
+        wantsLogin = false;
+        CHECK(dialog.removeSource(QStringLiteral("studio-a")) && dialog.save(), "removed");
+    }
+    CHECK(QDir(folder.filePath(QStringLiteral("copies"))).entryList(QDir::Files).isEmpty(), "with its copy, once that's saved");
+    assets::allowLoopbackSources(false);
+    assets::setFetchSourcesAtLoad(true);
+    qunsetenv("USDCC_ASSET_SOURCES");
     assets::useDefaultConfigFile();
 }

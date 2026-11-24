@@ -37,7 +37,7 @@ struct HttpHost {
 struct SourceEntry {
     std::string alias;  // a name (isValidName())
     std::string path;   // its file; relative to the file that lists it
-    std::string url;    // or where it's served (not read yet: docs/ASSET_SOURCES.md §7)
+    std::string url;    // or where it's served, https:// (docs/ASSET_SOURCES.md §7)
 };
 
 struct Config {
@@ -54,6 +54,9 @@ struct Config {
     std::map<std::string, std::vector<std::string>> extends;
     // Of a merged configuration (mergeSources()): each source's default environment, qualified.
     std::vector<std::string> sourceDefaults;
+    // Of a merged configuration: the credential ids sources from a URL are fetched with, and
+    // which source.
+    std::map<std::string, std::string> sourceLogins;
     // "http": { "hosts": { "<host>": { "credential": "...", "insecure": false } }, "allow": ["*.studio.local"] }
     std::map<std::string, HttpHost> httpHosts;
     std::vector<std::string> httpAllow;
