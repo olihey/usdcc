@@ -33,6 +33,8 @@ StagesMenu::StagesMenu(StageManager* stageManager, const usdcc::ui::ViewPanelReg
       m_window(window) {
     setToolTipsVisible(true);
     connect(this, &QMenu::aboutToShow, this, &StagesMenu::rebuild);
+    // Until then: macOS leaves an empty menu out of its menu bar.
+    addAction(tr("No stages open"))->setEnabled(false);
 }
 
 void StagesMenu::rebuild() {
