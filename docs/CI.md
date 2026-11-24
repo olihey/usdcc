@@ -397,8 +397,8 @@ Each job first deletes the image's unused SDKs for disk space.
 ## 9. macOS
 
 The `macos` jobs mirror the `linux` ones on `macos-15` (Apple Silicon;
-[MACOS.md](MACOS.md) has how macOS was brought up). **Not run yet (2026-11-23)**: what their
-steps do has been done on a Mac, by hand.
+[MACOS.md](MACOS.md) has how macOS was brought up).
+`release.yml`'s has only been run dry.
 
 - **Python** is uv's, at the same path in every workflow: `actions/setup-python`'s is a
   framework build on macOS, which usdcc doesn't embed.
@@ -407,7 +407,11 @@ steps do has been done on a Mac, by hand.
   `@rpath/libpython3.13.dylib`, found through the rpaths of whatever program runs it. The
   macOS patches aren't in `deps/usd.json`'s hash, which is every platform's, but have one of
   their own in the macOS asset's name: `usd-<commit>-<hash>-macos-arm64-<hash>-py313.zip`. A
-  change to them gives a new asset in the same release, and new packs for macOS.
+  change to them gives a new asset in the same release, and new packs for macOS. So do
+  `usd_asset.py`'s `MACOS_FLAGS`, but for the packs. `--ignore-homebrew` is there because the
+  first asset linked libwebp, giflib and FreeType, which it didn't hold: most likely
+  Homebrew's, which GitHub's Macs have. `relocate_usd.py` now refuses an install that links
+  anything but itself, the system and libpython. The SDK check can't: it runs on the same Mac.
 - **`deps-pyside.yml`** and **`deps-usd-plugins.yml`** as on Linux. `macos-arm64` is in
   Adobe's file formats' pin only.
 - **`build.yml`**'s check is `macos`, which isn't one of master's required checks. It fails

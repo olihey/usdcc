@@ -45,7 +45,11 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
   (OpenUSD, usdcc), `cmake/triplets/arm64-osx-dynamic.cmake` (vcpkg's packages) and the
   top-level `CMakeLists.txt` (a configure by hand). `std::format` needs 13.3.
 - **OpenUSD's patches for macOS alone** are in `deps/patches/macos`, not in `deps/usd.json`,
-  whose hash names every platform's asset. The macOS asset's name has a hash of its own for them.
+  whose hash names every platform's asset. The macOS asset's name has a hash of its own for them
+  and for the flags only macOS has.
+- **No Homebrew libraries in OpenUSD**: `--ignore-homebrew` keeps CMake from them, and
+  `PKG_CONFIG_LIBDIR` (`tools/build_usd.py`) pkg-config. A Mac without them couldn't load what
+  links them.
 - **CMake 4** refuses what some of OpenUSD's dependencies ask for:
   `CMAKE_POLICY_VERSION_MINIMUM` (set by `tools/build_usd.py`) for yaml-cpp, and a patch
   for Alembic.
