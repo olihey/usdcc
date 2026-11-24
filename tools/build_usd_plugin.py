@@ -59,7 +59,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
-from _common import ASSET_PLATFORM, LINUX, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, copy_file, copy_tree, fail, remove_tree, run  # noqa: E402
+from _common import ASSET_PLATFORM, LINUX, MACOS, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, copy_file, copy_tree, fail, remove_tree, run  # noqa: E402
 from build_usd import fetch  # noqa: E402
 import usd_asset  # noqa: E402
 import usd_licenses  # noqa: E402
@@ -144,6 +144,37 @@ def _relative_runpaths(pack_dir, usd):
                 reached.add(folder_of(entry, file))
         set_runpath(file, kept)
         changed.append(file.relative_to(pack_dir).as_posix())
+    return changed
+
+
+def _relative_rpaths(pack_dir, usd):
+    """macOS: as _relative_runpaths(), and what the pack links by an absolute path in the
+    OpenUSD install or the pack (a library without an @rpath name) becomes @rpath too."""
+    from _macho import edit, install_id, is_system, loader_relative, macho_files, needed, rpaths
+    lib = pack_dir / "lib"
+    in_lib = {file.name for folder in (lib, usd / "lib") if folder.is_dir() for file in folder.iterdir()}
+
+    def folder_of(entry, file):
+        return os.path.normpath(entry.replace("@loader_path", str(file.parent)))
+
+    changed = []
+    for file in macho_files(pack_dir):
+        # And libpython, which is found as OpenUSD's own libraries find it (relocate_usd.py).
+        links = {name: "@rpath/" + Path(name).name for name in needed(file)
+                 if name.startswith("/") and not is_system(name)
+                 and (Path(name).name in in_lib or Path(name).name.startswith("libpython3"))}
+        own = install_id(file)
+        entries = rpaths(file)
+        kept = [entry for entry in entries if not entry.startswith("/")]
+        reached = {folder_of(entry, file) for entry in kept}
+        wants_lib = any(Path(name).name in in_lib for name in needed(file) if not is_system(name))
+        if len(kept) != len(entries) or (wants_lib and os.path.normpath(lib) not in reached):
+            for entry in ("@loader_path", loader_relative(file, lib)):
+                if folder_of(entry, file) not in reached:
+                    kept.append(entry)
+                    reached.add(folder_of(entry, file))
+        if edit(file, new_rpaths=kept, new_id="@rpath/" + file.name if own and own.startswith("/") else None, changes=links):
+            changed.append(file.relative_to(pack_dir).as_posix())
     return changed
 
 
@@ -315,6 +346,8 @@ def main(argv=None):
     _prune(pack_dir)
     if not pack_files(pack_dir):
         fail(f"The {pack} build installed nothing that runs into {pack_dir}")
+    if MACOS:
+        print(f"rpaths relative to @loader_path: {', '.join(_relative_rpaths(pack_dir, usd)) or 'none to change'}", flush=True)
     if LINUX:
         print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir, usd)) or 'none to change'}", flush=True)
 

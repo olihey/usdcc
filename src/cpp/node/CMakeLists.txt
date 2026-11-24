@@ -31,8 +31,8 @@ endif()
 # The queue's web page (docs/RENDER_NODE.md §4.5), beside the program: web/ and the app's
 # theme as CSS, which the page shares with the broadcast's.
 add_custom_command(TARGET usdcc_node POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc_node>/node-web"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/web" "$<TARGET_FILE_DIR:usdcc_node>/node-web"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${USDCC_APP_PROGRAM_DATA_DIR}/node-web"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/web" "${USDCC_APP_PROGRAM_DATA_DIR}/node-web"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/cpp/ui/resources/theme/usdcc.css"
-            "$<TARGET_FILE_DIR:usdcc_node>/node-web/usdcc.css"
+            "${USDCC_APP_PROGRAM_DATA_DIR}/node-web/usdcc.css"
     VERBATIM)

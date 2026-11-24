@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import ASSET_PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import ASSET_PLATFORM, PLATFORM, REPO, VS_ARCH, VS_GENERATOR, WINDOWS, fail, normalized_text, report, short_hash  # noqa: E402
 
 
 def platform_flags(flags):
@@ -47,6 +47,13 @@ def platform_flags(flags):
     return [flag for flag in flags if not flag.startswith("--generator")]
 
 
+def platform_patches(pin_dir):
+    """The patches only this platform needs, deps/patches/<platform>/*.patch, applied after
+    the pin's own. Not in the pin: its hash names every platform's asset, so a fix for
+    macOS alone would have Windows' and Linux' built again under a new name."""
+    return sorted((Path(pin_dir) / "patches" / PLATFORM).glob("*.patch"))
+
+
 def describe(pin):
     """The asset `pin` (a deps/usd.json) describes, as report() takes it."""
     pin = Path(pin).resolve()
@@ -61,7 +68,10 @@ def describe(pin):
 
     python = spec["python"].split(".")
     base = f"usd-{spec['commit'][:9]}-{short_hash(hashed, 4)}"
-    name = f"{base}-{ASSET_PLATFORM}-py{python[0]}{python[1]}"
+    # The platform's own patches name its asset alone (platform_patches()).
+    own = platform_patches(pin.parent)
+    suffix = "-" + short_hash("".join(normalized_text(file) for file in own), 4) if own else ""
+    name = f"{base}-{ASSET_PLATFORM}{suffix}-py{python[0]}{python[1]}"
     return {
         "name": name,
         "base": base,

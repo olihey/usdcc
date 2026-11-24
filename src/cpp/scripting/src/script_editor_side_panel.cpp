@@ -1198,8 +1198,7 @@ void ScriptEditorSidePanel::clearOutput() {
 QString ScriptEditorSidePanel::ruffProgram() const {
     // The pinned ruff first, so formatting doesn't depend on what is installed:
     // a deploy's tools/ruff next to bin/ (tools/deploy.py), then the build's.
-    const QString deployed =
-        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/ruff/ruff" USDCC_EXE_SUFFIX));
+    const QString deployed = QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("tools/ruff/ruff" USDCC_EXE_SUFFIX));
     if (QFileInfo(deployed).isExecutable()) return QDir::cleanPath(deployed);
 #ifdef USDCC_RUFF_EXE
     if (QFileInfo(QStringLiteral(USDCC_RUFF_EXE)).isExecutable()) return QStringLiteral(USDCC_RUFF_EXE);

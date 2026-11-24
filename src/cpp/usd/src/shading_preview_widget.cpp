@@ -5,6 +5,7 @@
 #include "usdcc/ui/panel_icon_button.h"
 #include "usdcc/ui/panel_menu_button.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/shader_node_catalog.h"
@@ -136,7 +137,7 @@ void defineMaterialPreviewSettings() {
 
 QString shippedPreviewFolder() {
     // Deployed, bin/usdcc.exe has resources/ next to it.
-    const QString deployed = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../resources/preview"));
+    const QString deployed = QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("resources/preview"));
     if (QFileInfo(deployed).isDir()) return QDir::cleanPath(deployed);
 #ifdef USDCC_PREVIEW_ASSETS_DIR
     const QString source = QStringLiteral(USDCC_PREVIEW_ASSETS_DIR);

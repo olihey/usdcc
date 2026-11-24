@@ -27,7 +27,7 @@ constexpr int kDefaultCount = 10;
 
 int maximumCount() { return std::max(0, usdcc::core::Settings::instance().get<int>(kRecentFilesCountKey, kDefaultCount)); }
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)  // case-insensitive file systems, by default
 constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
 #else
 constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;

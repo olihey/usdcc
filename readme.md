@@ -143,8 +143,8 @@ later `--run`/`run.py` invocations automatically. See each script's help
 
 The scripts in `tools/` are Python (3.9 or later, standard library only), so they
 aren't tied to Windows. `build.py` and `run.py` pick Ninja and vcpkg's dynamic
-triplet on Linux and macOS (macOS hasn't been built yet); `deploy.py` and
-`build_pyside.py` know Windows and Linux.
+triplet on Linux and macOS ([docs/MACOS.md](docs/MACOS.md)); `deploy.py` and
+`build_pyside.py` know Windows and Linux, and the latter macOS.
 
 ### Linux (and WSL 2)
 

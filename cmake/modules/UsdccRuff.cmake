@@ -1,13 +1,13 @@
 # Ruff (https://docs.astral.sh/ruff/), which the Script Editor's Ruff Format
 # and Ruff Check run, bundled at a pinned version so formatting is the same
 # for everyone (docs/SCRIPTING.md §7). Downloaded once at configure time from
-# PyPI's wheel for this platform (Windows x64 or arm64, Linux x86_64 or aarch64), checked
+# PyPI's wheel for this platform (Windows x64 or arm64, Linux x86_64 or aarch64, macOS arm64), checked
 # against its SHA-256, and unpacked into build/ruff (ruff[.exe] and its MIT
 # LICENSE); tools/deploy.py copies that into the deploy's tools/ruff. Offline,
 # elsewhere, or with USDCC_BUNDLE_RUFF off, the app falls back to a ruff on PATH.
 #
 # To upgrade: pick a release at least two weeks old, and take the
-# py3-none-win_amd64, win_arm64 and manylinux x86_64/aarch64 wheels' URLs and sha256s from
+# py3-none-win_amd64, win_arm64, manylinux x86_64/aarch64 and macosx arm64 wheels' URLs and sha256s from
 # https://pypi.org/pypi/ruff/<version>/json.
 #
 # Sets:
@@ -33,6 +33,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(
     set(USDCC_RUFF_URL
         "https://files.pythonhosted.org/packages/c0/8c/e075e9c917cb0575297880c96768304e881240171c870cbd8d9b7b54bec2/ruff-0.17.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl")
     set(USDCC_RUFF_SHA256 "872e03dd231744d6c5ec5c8af6be52b71323fc6ee096e4c8b34d9f844ee3b978")
+elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    set(USDCC_RUFF_URL
+        "https://files.pythonhosted.org/packages/8e/71/7a9029a81c8206ee01a98f6cfeeb56e6c095af86857581a37045c46d7e94/ruff-0.17.1-py3-none-macosx_11_0_arm64.whl")
+    set(USDCC_RUFF_SHA256 "29b454f18ca3eeaf37fbf140841dcf27d36109e29dee9aae8acecb68c26c6f74")
 endif()
 
 set(_usdcc_ruff_name "ruff${CMAKE_EXECUTABLE_SUFFIX}")

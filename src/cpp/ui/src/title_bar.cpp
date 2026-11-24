@@ -20,6 +20,9 @@ namespace {
 constexpr int kBarHeight = 26;  // the design's menu-bar height
 constexpr int kIconSize = 16;
 constexpr int kLogoSize = 16;
+#ifdef Q_OS_MACOS
+constexpr int kSystemButtonAreaWidth = 78;  // the three round buttons and their margins
+#endif
 
 QToolButton* makeCaptionButton(const char* objectName, const QString& iconPath, QWidget* parent) {
     auto* button = new QToolButton(parent);
@@ -52,6 +55,13 @@ TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
+#ifdef Q_OS_MACOS
+    // Not scaled with the UI: the system draws its buttons at its own size.
+    m_systemButtonArea = new QWidget(this);
+    m_systemButtonArea->setFixedWidth(kSystemButtonAreaWidth);
+    layout->addWidget(m_systemButtonArea);
+#endif
+
     m_logo = new QLabel(this);
     m_logo->setObjectName(QStringLiteral("titleBarLogo"));
     layout->addWidget(m_logo, 0, Qt::AlignVCenter);
@@ -71,6 +81,14 @@ TitleBar::TitleBar(QWidget* hostWindow) : QFrame(hostWindow), m_host(hostWindow)
     layout->addWidget(m_minimizeButton);
     layout->addWidget(m_maximizeButton);
     layout->addWidget(m_closeButton);
+#ifdef Q_OS_MACOS
+    // The system's buttons are at the left (systemButtonArea()), and a Mac window's
+    // title bar has no application icon.
+    m_logo->hide();
+    m_minimizeButton->hide();
+    m_maximizeButton->hide();
+    m_closeButton->hide();
+#endif
 
     connect(m_minimizeButton, &QAbstractButton::clicked, m_host, &QWidget::showMinimized);
     connect(m_maximizeButton, &QAbstractButton::clicked, this, [this]() {

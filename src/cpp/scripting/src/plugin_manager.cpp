@@ -367,8 +367,8 @@ std::filesystem::path PluginManager::userFolder() {
 }
 
 std::filesystem::path PluginManager::shippedFolder() {
-    // A deployed usdcc has bin/usdcc.exe next to plugins/.
-    return toPath(QCoreApplication::applicationDirPath()).parent_path() / "plugins";
+    // A deployed usdcc has bin/usdcc.exe next to plugins/ (in a macOS bundle, Contents/Resources).
+    return toPath(usdcc::ui::installFolder()) / "plugins";
 }
 
 std::vector<std::filesystem::path> PluginManager::addedFolders() {

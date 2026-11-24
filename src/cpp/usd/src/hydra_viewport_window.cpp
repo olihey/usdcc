@@ -2,6 +2,7 @@
 #include "usdcc/usd/anim_edit.h"
 
 #include "selection_overlay.h"
+#include "viewport_overlay_renderer.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/color_management.h"
@@ -57,8 +58,6 @@
 #include <QOpenGLDebugLogger>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions>
-#include <QOpenGLFunctions_1_1>
-#include <QOpenGLVersionFunctionsFactory>
 #include <QPointer>
 #include <QResizeEvent>
 #include <QWheelEvent>
@@ -75,6 +74,8 @@ constexpr double kMinDistance = 0.01;
 // Hidden Line's depth pass is drawn this much farther, in NDC depth (-1 to 1), so the
 // wires in front of a surface win over it.
 constexpr double kHiddenLineDepthBias = 0.0005;
+// The gizmos' lines, in device pixels.
+constexpr float kGizmoLineWidth = 2.5f;
 
 // The grid's colours: light lines on a dark background, dark ones on a light one, so the
 // grid shows whatever the background color is. The axes take the gizmo's axis colours.
@@ -187,6 +188,7 @@ void HydraViewportWindow::releaseEngine() {
     }
     m_rendererPluginId = m_engine->GetCurrentRendererId();
     m_selectionOverlay.reset();
+    m_overlayRenderer.reset();
     m_engine.reset();
     forgetRendererHalt();
     m_framebuffer.reset();
@@ -338,19 +340,10 @@ void HydraViewportWindow::ensureEngine() {
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}",
                        m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()));
 
-        // Legacy (fixed-function) GL, used only to draw M5's gizmo overlays
-        // via simple immediate-mode glBegin/glVertex calls — Storm itself
-        // renders through modern, shader-based GL, so this doesn't need to
-        // integrate with its pipeline at all, just draw into the same
-        // already-cleared/composited framebuffer afterward. Requires the
-        // CompatibilityProfile context M3 already established for Storm's
-        // own sake (see docs/PLAN.md §6 item 12). Tied to the GL context
-        // (not the engine), so unlike configureEngine() this only ever runs
-        // once per window, not every time the engine gets recreated.
-        m_legacyGl = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_1_1>(m_context);
-        if (m_legacyGl) {
-            m_legacyGl->initializeOpenGLFunctions();
-        }
+        // What the viewport draws itself over Hydra's frame: the grid, the gizmos and
+        // the HUD, through shaders of its own that a Core profile runs too (macOS has
+        // no compatibility profile, docs/MACOS.md).
+        m_overlayRenderer = std::make_unique<ViewportOverlayRenderer>();
 
         Q_EMIT rendererPluginsChanged();
     }
@@ -653,7 +646,7 @@ HudInput HydraViewportWindow::hudInput() const {
 }
 
 void HydraViewportWindow::drawHud(int width, int height) {
-    if ((!hudActive() && !gateOverlaysActive()) || !m_legacyGl) {
+    if ((!hudActive() && !gateOverlaysActive()) || !m_overlayRenderer) {
         m_hudLayout = {};
         return;
     }
@@ -703,27 +696,10 @@ void HydraViewportWindow::drawHud(int width, int height) {
     }
 
     // The image, premultiplied, over the whole window: its first row is the top.
-    m_legacyGl->glMatrixMode(GL_PROJECTION);
-    m_legacyGl->glLoadIdentity();
-    m_legacyGl->glMatrixMode(GL_MODELVIEW);
-    m_legacyGl->glLoadIdentity();
-    m_legacyGl->glEnable(GL_TEXTURE_2D);
-    m_legacyGl->glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
     gl->glEnable(GL_BLEND);
     gl->glBlendEquation(GL_FUNC_ADD);
     gl->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    m_legacyGl->glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    m_legacyGl->glBegin(GL_QUADS);
-    m_legacyGl->glTexCoord2f(0.0f, 1.0f);
-    m_legacyGl->glVertex2f(-1.0f, -1.0f);
-    m_legacyGl->glTexCoord2f(1.0f, 1.0f);
-    m_legacyGl->glVertex2f(1.0f, -1.0f);
-    m_legacyGl->glTexCoord2f(1.0f, 0.0f);
-    m_legacyGl->glVertex2f(1.0f, 1.0f);
-    m_legacyGl->glTexCoord2f(0.0f, 0.0f);
-    m_legacyGl->glVertex2f(-1.0f, 1.0f);
-    m_legacyGl->glEnd();
-    m_legacyGl->glDisable(GL_TEXTURE_2D);
+    m_overlayRenderer->drawImage(m_hudTexture);
     gl->glDisable(GL_BLEND);
     gl->glBindTexture(GL_TEXTURE_2D, 0);
     gl->glEnable(GL_DEPTH_TEST);
@@ -1397,86 +1373,54 @@ void HydraViewportWindow::drawSelectionOverlay(const usdcc::tools::ToolContext& 
 
 void HydraViewportWindow::drawGrid(const PXR_NS::GfMatrix4d& viewMatrix, const PXR_NS::GfMatrix4d& projMatrix) {
     // No stage, no ground: an empty viewport shows only its background.
-    if (!m_legacyGl || !m_display.showGrid || !m_stage) return;
+    if (!m_overlayRenderer || !m_framebuffer || !m_display.showGrid || !m_stage) return;
     // On the stage's ground: XY for a Z-up stage, as the camera's orbit is about its up axis.
     const bool zUp = PXR_NS::UsdGeomGetStageUpAxis(m_stage) == PXR_NS::UsdGeomTokens->z;
     const std::vector<GridLine> lines = buildViewportGrid(m_display.gridSize, m_display.gridStep, zUp);
     if (lines.empty()) return;
     const GridColors colors = gridColors(m_display.background, zUp);
 
-    // As drawGizmo() explains, GfMatrix4d's array is already what GL expects.
-    m_legacyGl->glMatrixMode(GL_PROJECTION);
-    m_legacyGl->glLoadMatrixd(projMatrix.GetArray());
-    m_legacyGl->glMatrixMode(GL_MODELVIEW);
-    m_legacyGl->glLoadMatrixd(viewMatrix.GetArray());
-
-    // Behind the stage's geometry: Hydra's composite left its depth in our framebuffer
-    // (HgiInteropOpenGL writes it), so a depth test hides the grid where something is
-    // in front of it. The grid itself writes no depth, so its lines don't fight.
-    m_legacyGl->glEnable(GL_DEPTH_TEST);
-    m_legacyGl->glDepthFunc(GL_LEQUAL);
-    m_legacyGl->glDepthMask(GL_FALSE);
-    m_legacyGl->glEnable(GL_BLEND);
-    m_legacyGl->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    m_legacyGl->glLineWidth(1.0f);
-
-    m_legacyGl->glBegin(GL_LINES);
+    m_overlayRenderer->begin(viewMatrix);
     for (const GridLine& line : lines) {
         const PXR_NS::GfVec4f& c = line.kind == GridLineKind::Minor   ? colors.minor
                                    : line.kind == GridLineKind::Major ? colors.major
                                    : line.kind == GridLineKind::AxisX ? colors.axisX
                                                                        : colors.axisOther;
-        m_legacyGl->glColor4f(c[0], c[1], c[2], c[3]);
-        m_legacyGl->glVertex3d(line.a[0], line.a[1], line.a[2]);
-        m_legacyGl->glVertex3d(line.b[0], line.b[1], line.b[2]);
+        m_overlayRenderer->line(line.a, line.b, c);
     }
-    m_legacyGl->glEnd();
 
-    m_legacyGl->glDisable(GL_BLEND);
-    m_legacyGl->glDepthMask(GL_TRUE);
-    m_legacyGl->glDepthFunc(GL_LESS);
-    m_legacyGl->glMatrixMode(GL_MODELVIEW);
-    m_legacyGl->glLoadIdentity();
+    // Behind the stage's geometry: Hydra's composite left its depth in our framebuffer
+    // (HgiInterop writes it), so a depth test hides the grid where something is in
+    // front of it. The grid itself writes no depth, so its lines don't fight.
+    auto* gl = m_context->extraFunctions();
+    gl->glEnable(GL_DEPTH_TEST);
+    gl->glDepthFunc(GL_LEQUAL);
+    gl->glDepthMask(GL_FALSE);
+    gl->glEnable(GL_BLEND);
+    // The colors only: the frame stays opaque. With the lines' alpha in it, grabFrame()'s
+    // image (premultiplied) came out with wrong colors where a line crosses something bright.
+    gl->glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    m_overlayRenderer->end(projMatrix, m_framebuffer->size(), 1.0f);
+    gl->glDisable(GL_BLEND);
+    gl->glDepthMask(GL_TRUE);
+    gl->glDepthFunc(GL_LESS);
 }
 
 void HydraViewportWindow::drawGizmo(const usdcc::tools::GizmoGeometry& geo, const PXR_NS::GfMatrix4d& viewMatrix,
                                      const PXR_NS::GfMatrix4d& projMatrix) {
-    if (!m_legacyGl || (geo.lines.empty() && geo.triangles.empty())) {
+    if (!m_overlayRenderer || !m_framebuffer || (geo.lines.empty() && geo.triangles.empty())) {
         return;
     }
 
-    // GfMatrix4d is row-major, row-vector convention (p' = p * M); reading
-    // its raw array as OpenGL's column-major, column-vector convention
-    // (v' = M * v) is exactly the transpose of that — which represents the
-    // identical transform, so no manual transpose is needed here.
-    m_legacyGl->glMatrixMode(GL_PROJECTION);
-    m_legacyGl->glLoadMatrixd(projMatrix.GetArray());
-    m_legacyGl->glMatrixMode(GL_MODELVIEW);
-    m_legacyGl->glLoadMatrixd(viewMatrix.GetArray());
+    m_overlayRenderer->begin(viewMatrix);
+    for (const auto& line : geo.lines) m_overlayRenderer->line(line.a, line.b, line.color);
+    for (const auto& tri : geo.triangles) m_overlayRenderer->triangle(tri.a, tri.b, tri.c, tri.color);
 
-    m_legacyGl->glDisable(GL_DEPTH_TEST);
-    m_legacyGl->glLineWidth(2.5f);
-
-    m_legacyGl->glBegin(GL_LINES);
-    for (const auto& line : geo.lines) {
-        m_legacyGl->glColor4f(line.color[0], line.color[1], line.color[2], line.color[3]);
-        m_legacyGl->glVertex3d(line.a[0], line.a[1], line.a[2]);
-        m_legacyGl->glVertex3d(line.b[0], line.b[1], line.b[2]);
-    }
-    m_legacyGl->glEnd();
-
-    m_legacyGl->glBegin(GL_TRIANGLES);
-    for (const auto& tri : geo.triangles) {
-        m_legacyGl->glColor4f(tri.color[0], tri.color[1], tri.color[2], tri.color[3]);
-        m_legacyGl->glVertex3d(tri.a[0], tri.a[1], tri.a[2]);
-        m_legacyGl->glVertex3d(tri.b[0], tri.b[1], tri.b[2]);
-        m_legacyGl->glVertex3d(tri.c[0], tri.c[1], tri.c[2]);
-    }
-    m_legacyGl->glEnd();
-
-    m_legacyGl->glEnable(GL_DEPTH_TEST);
-    m_legacyGl->glMatrixMode(GL_MODELVIEW);
-    m_legacyGl->glLoadIdentity();
+    // Over everything, the scene's geometry included: the lines first, then the triangles.
+    auto* gl = m_context->extraFunctions();
+    gl->glDisable(GL_DEPTH_TEST);
+    m_overlayRenderer->end(projMatrix, m_framebuffer->size(), kGizmoLineWidth);
+    gl->glEnable(GL_DEPTH_TEST);
 }
 
 void HydraViewportWindow::exposeEvent(QExposeEvent*) {

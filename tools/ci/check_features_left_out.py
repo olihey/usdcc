@@ -36,10 +36,13 @@ def main():
     folder = BUILD_DIR / "src/cpp/app"
     if cache_value(BUILD_DIR, "CMAKE_CONFIGURATION_TYPES"):
         folder = folder / args.configuration
+    if MACOS:
+        folder = folder / "usdcc.app/Contents/MacOS"
     environment = dict(os.environ)
-    variable = "PATH" if WINDOWS else "DYLD_LIBRARY_PATH" if MACOS else "LD_LIBRARY_PATH"
+    variable = "PATH" if WINDOWS else "LD_LIBRARY_PATH"
     folders = [os.path.join(args.usd_install, name) for name in (("bin", "lib") if WINDOWS else ("lib",))]
-    environment[variable] = os.pathsep.join(folders + [environment.get(variable, "")]).rstrip(os.pathsep)
+    if not MACOS:  # its rpaths reach them (docs/MACOS.md)
+        environment[variable] = os.pathsep.join(folders + [environment.get(variable, "")]).rstrip(os.pathsep)
 
     try:
         node = subprocess.run([str(folder / f"usdcc_node{EXE_SUFFIX}"), "--version", "--no-gpu"], env=environment,

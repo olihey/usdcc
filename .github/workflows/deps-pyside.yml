@@ -3,7 +3,7 @@
 # usdcc.ui and its tests (docs/CI.md section 4.1). It only runs when what the
 # asset is named after changes, or by hand, and skips the build when that asset
 # already exists. With Qt in build.yml's cache it takes about 7 minutes. One asset
-# per platform, Windows and Linux, x64 and arm64, all in one release.
+# per platform, Windows and Linux, x64 and arm64, and macOS arm64, all in one release.
 name: PySide6
 
 on:
@@ -14,7 +14,9 @@ on:
       - external/vcpkg
       - cmake/ports/qtbase/**
       - deps/usd.json
+      - cmake/triplets/**
       - tools/build_pyside.py
+      - tools/_macho.py
       - tools/ci/pyside_asset.py
       - .github/workflows/deps-pyside.yml
 
@@ -292,6 +294,118 @@ jobs:
 
       # Unzipped elsewhere, with what it was built from out of reach but vcpkg's Qt at the
       # same place beside it, as it will be in build.yml: the Linux asset has no Qt.
+      - name: Check it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          check="$RUNNER_TEMP/pyside-check"
+          mkdir -p "$check/external" "$check/build"
+          mv build/vcpkg_installed "$check/build/"
+          rm -rf external/pyside-install external/pyside-setup external/libclang
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$check/external"
+          python -I -c "import sys; sys.path.insert(0, sys.argv[1]); import shiboken6, PySide6; from PySide6 import QtCore, QtGui, QtWidgets; print('PySide', PySide6.__version__, 'on Qt', QtCore.qVersion())" "$check/external/pyside-install"
+          "$check/external/pyside-install/shiboken6_generator/shiboken6" --version
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true'
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          PySide6 and shiboken6 built from source against vcpkg's Qt, for usdcc's CI (docs/CI.md, phase 4). Not a usdcc release.
+
+          - PySide `${{ steps.asset.outputs.pyside }}`, Qt `${{ steps.asset.outputs.qt }}` (vcpkg's qtbase port), Python ${{ steps.asset.outputs.python }} (limited API)
+          - Built by `tools/build_pyside.py` in this repository's PySide6 workflow from `${{ github.sha }}`, an asset per platform
+
+          Unzip a platform's asset into usdcc's `external` folder: it holds `pyside-install` and `libclang/lib/clang`.
+          NOTES
+          # See the windows job: the platforms' jobs share the release.
+          gh release view '${{ steps.asset.outputs.tag }}' --json tagName > /dev/null 2>&1 ||
+            gh release create '${{ steps.asset.outputs.tag }}' --prerelease --target "$GITHUB_SHA" \
+              --title 'PySide6 ${{ steps.asset.outputs.release }}' --notes-file "$RUNNER_TEMP/notes.md" || true
+          gh release upload '${{ steps.asset.outputs.tag }}' "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" --clobber
+
+  # The same on macOS (docs/MACOS.md); the asset has no Qt either, as Linux's.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_DISABLE_METRICS: 1
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Name the asset
+        id: asset
+        run: python3 tools/ci/pyside_asset.py --github-output
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          names=$(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if grep -qxF '${{ steps.asset.outputs.zip }}' <<< "$names"; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the build's packages
+        if: steps.published.outputs.found != 'true'
+        run: brew install --quiet ninja pkg-config autoconf autoconf-archive automake libtool uv
+
+      - name: Fetch vcpkg's full history
+        if: steps.published.outputs.found != 'true'
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
+      # uv's Python, not actions/setup-python's: that one is a framework build on macOS,
+      # which usdcc doesn't embed (docs/MACOS.md). The same path in every workflow.
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        run: |
+          uv python install '${{ steps.asset.outputs.python }}'
+          python=$(uv python find --no-project --managed-python '${{ steps.asset.outputs.python }}')
+          dirname "$python" >> "$GITHUB_PATH"
+          "$python" -c "import platform, sys; print(sys.version, platform.machine(), sys.prefix)"
+
+      - name: Name the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        id: vcpkg
+        run: python tools/ci/vcpkg_cache.py --access read
+
+      - name: Restore the vcpkg cache
+        if: steps.published.outputs.found != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      - name: Install Qt
+        if: steps.published.outputs.found != 'true'
+        run: |
+          external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          external/vcpkg/vcpkg install --triplet arm64-osx-dynamic --x-install-root=build/vcpkg_installed
+
+      - name: Build PySide6
+        if: steps.published.outputs.found != 'true'
+        run: python tools/build_pyside.py --python "$(command -v python)"
+
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        working-directory: external
+        run: |
+          zip -qry "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" pyside-install libclang/lib/clang
+          size=$(stat -f %z "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}")
+          echo "$((size / 1048576)) MB"
+          if [ "$size" -ge 2147483648 ]; then echo "::error::Over GitHub's 2 GiB per-asset limit"; exit 1; fi
+
+      # As the linux job: elsewhere, with vcpkg's Qt at the same place beside it.
       - name: Check it
         if: steps.published.outputs.found != 'true'
         run: |

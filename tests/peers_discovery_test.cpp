@@ -111,7 +111,8 @@ USDCC_TEST(peers_public_rooms_on_the_network) {
     CHECK(waitUntil([&] { return findNamed(ben->foundRooms(), "Dailies"); }), "Ben doesn't find the public room");
     QTest::qWait(50);
     CHECK(other->foundRooms().isEmpty(), "another network sees the room");
-    const FoundRoom* dailies = findNamed(ben->foundRooms(), "Dailies");
+    const QList<FoundRoom> rooms = ben->foundRooms();  // kept: `dailies` points into it
+    const FoundRoom* dailies = findNamed(rooms, "Dailies");
     if (!dailies) {
         return;
     }

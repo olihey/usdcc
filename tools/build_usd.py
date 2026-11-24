@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
 from _common import REPO, fail, run  # noqa: E402
-from usd_asset import platform_flags  # noqa: E402
+from usd_asset import platform_flags, platform_patches  # noqa: E402
 
 
 def fetch(spec, pin_dir, source):
@@ -42,8 +43,7 @@ def fetch(spec, pin_dir, source):
     if head != spec["commit"]:
         run(["git", "-C", source, "fetch", "--depth", "1", "origin", spec["commit"]])
         run(["git", "-C", source, "checkout", "-q", "--force", "FETCH_HEAD"])
-    for patch in spec.get("patches", []):
-        patch = (pin_dir / patch).resolve()
+    for patch in [(pin_dir / name).resolve() for name in spec.get("patches", [])] + platform_patches(pin_dir):
         applied = subprocess.run(["git", "-C", source, "apply", "--reverse", "--check", patch],
                                  capture_output=True).returncode == 0
         if applied:
@@ -81,7 +81,11 @@ def main(argv=None):
         command += ["--jobs", str(args.jobs)]
     command.append(install)
     print("Building OpenUSD:", " ".join(str(part) for part in command), flush=True)
-    result = subprocess.run([str(part) for part in command])
+    # CMake 4 refuses projects that ask for a CMake older than 3.5, as some of the
+    # dependencies' own dependencies do (yaml-cpp in OpenColorIO); this lets it try.
+    environment = dict(os.environ)
+    environment.setdefault("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
+    result = subprocess.run([str(part) for part in command], env=environment)
     if result.returncode != 0:
         log = work / "src" / "log.txt"
         fail(f"build_usd.py failed ({result.returncode}); its log: {log}")

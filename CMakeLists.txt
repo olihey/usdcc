@@ -8,6 +8,13 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
+# The oldest macOS a build runs on (docs/MACOS.md), before project() reads it. The same
+# as tools/_common.py's MACOS_DEPLOYMENT_TARGET, which OpenUSD is built with, and
+# cmake/triplets', which vcpkg's packages are.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
+endif()
+
 # The version comes from the release's tag (docs/RELEASE.md §2).
 include("${CMAKE_SOURCE_DIR}/cmake/modules/UsdccVersion.cmake")
 project(usdcc VERSION ${USDCC_VERSION_NUMBER} LANGUAGES CXX)
@@ -79,6 +86,12 @@ if(WIN32)
     # std::min/std::max usage in headers compiled afterward — including
     # OpenUSD's — with cryptic syntax errors. NOMINMAX suppresses them.
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
+if(APPLE)
+    # Apple deprecated OpenGL in macOS 10.14 and warns at every call. The viewport
+    # still presents through it there (docs/MACOS.md).
+    add_compile_definitions(GL_SILENCE_DEPRECATION)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
@@ -175,6 +188,12 @@ if(USDCC_LINK_RELEASE_QT)
     endforeach()
 endif()
 include(UsdccPython)
+if(APPLE AND USDCC_PYTHON_FOUND)
+    # A prebuilt OpenUSD links @rpath/libpython (tools/ci/relocate_usd.py): found through
+    # the programs' rpaths, wherever this machine's Python is.
+    get_filename_component(_usdcc_python_libdir "${USDCC_PYTHON_LIBRARY}" DIRECTORY)
+    list(APPEND CMAKE_BUILD_RPATH "${_usdcc_python_libdir}")
+endif()
 # Whatever calls find_package(Python) from here on, as Shiboken6's and PySide6's
 # CMake files do (src/cpp/ui/python), gets OpenUSD's Python. Left to itself it
 # takes the newest Python on the machine, and its headers with it.
@@ -298,6 +317,18 @@ usdcc_feature(RTX_RENDER LABEL "RTX Render" DEFAULT OFF
     DOC "The native RTX Render view, Windows with NVIDIA's SDKs (docs/RTX_RENDER.md)"
     PLUGINS org.usdcc.rtx-render FOLDERS rtx_render)
 usdcc_write_features()
+
+# Where a build puts what the app finds beside bin/ when deployed (plugins/, as
+# usdcc::core::installRoot() looks for them) and what a program has beside it
+# (node-web): in the macOS bundle both are Contents/Resources, since only programs
+# belong in Contents/MacOS. Generator expressions: the usdcc target comes later.
+if(APPLE)
+    set(USDCC_APP_INSTALL_ROOT "$<TARGET_BUNDLE_CONTENT_DIR:usdcc>/Resources")
+    set(USDCC_APP_PROGRAM_DATA_DIR "$<TARGET_BUNDLE_CONTENT_DIR:usdcc>/Resources")
+else()
+    set(USDCC_APP_INSTALL_ROOT "$<TARGET_FILE_DIR:usdcc>/..")
+    set(USDCC_APP_PROGRAM_DATA_DIR "$<TARGET_FILE_DIR:usdcc>")
+endif()
 
 add_subdirectory(src/cpp/core)
 add_subdirectory(src/cpp/assets)

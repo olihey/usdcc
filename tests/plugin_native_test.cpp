@@ -267,7 +267,12 @@ USDCC_TEST(native_plugin_refused_and_failing) {
     // A real DLL with no entry point.
     scratch.manifest("no_entry", "dll.noentry", "usdcc_test_plugin_helper");
     std::filesystem::create_directories(scratch.root / "no_entry/bin" / platform());
-    std::filesystem::copy_file(testPluginFolder() / "bin" / platform() / libraryFile("usdcc_test_plugin_helper"),
+#ifdef __APPLE__
+    const std::string helper = "usdcc_test_plugin_helper.dylib";  // a shared library, where plugins are modules (.so)
+#else
+    const std::string helper = libraryFile("usdcc_test_plugin_helper");
+#endif
+    std::filesystem::copy_file(testPluginFolder() / "bin" / platform() / helper,
                                scratch.root / "no_entry/bin" / platform() / libraryFile("usdcc_test_plugin_helper"));
     scratch.manifest("dependent", "dll.dependent", "not_built", {}, {}, R"(, "requires": ["dll.missing"])");
 

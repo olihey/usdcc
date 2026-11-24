@@ -40,12 +40,21 @@ void setDefaultSurfaceFormat() {
     // context: "GL error: invalid enum" from HgiGLPostPendingGLErrors when a Core
     // profile was asked for. A compatibility profile is what it expects.
     QSurfaceFormat format;
+#ifdef Q_OS_MACOS
+    // macOS has no compatibility profile: 4.1 Core is all there is beyond OpenGL 2.1.
+    // Nor does it need one: Storm renders with Metal there (HgiMetal), and Hydra only
+    // composites its result into our framebuffer through OpenGL (HgiInteropMetal),
+    // which a Core profile does (docs/MACOS.md).
+    format.setVersion(4, 1);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+#else
     format.setVersion(4, 5);
     format.setProfile(QSurfaceFormat::CompatibilityProfile);
     // Without it Qt asks for a forward-compatible context (no deprecated functions),
     // which Mesa answers with a Core profile despite the profile above
     // (docs/LINUX_WSL.md). NVIDIA's Windows driver ignores the flag.
     format.setOption(QSurfaceFormat::DeprecatedFunctions);
+#endif
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
     // USDCC_GL_DEBUG=1 asks for a debug context: the viewport then logs each GL

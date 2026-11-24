@@ -24,8 +24,8 @@ $GITHUB_OUTPUT for later workflow steps:
 --matrix prints, instead, the packs CI builds for each platform (those that list
 it and aren't in the "local" set) as JSON lists, and the jobs for a workflow's
 matrices, a pack on a platform each, with the runner that builds it:
-  win64, win-arm64, linux-x64, linux-arm64
-  windows, linux   [{"pack", "platform", "arch", "runner"}, ...]
+  win64, win-arm64, linux-x64, linux-arm64, macos-arm64
+  windows, linux, macos   [{"pack", "platform", "arch", "runner"}, ...]
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ CI_PLATFORMS = {
     "win-arm64": ("windows", "arm64", "windows-11-arm"),
     "linux-x64": ("linux", "x64", "ubuntu-24.04"),
     "linux-arm64": ("linux", "arm64", "ubuntu-24.04-arm"),
+    "macos-arm64": ("macos", "arm64", "macos-15"),
 }
 SETS = ("standard", "optional", "local")
 _KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "sdks", "cmake", "targets",
@@ -85,6 +86,8 @@ def describe(pack):
     patches = [PINS / patch for patch in spec.get("patches", [])]
 
     hashed = f"usd={usd['base']}\n"
+    for file in usd_asset.platform_patches(REPO / "deps"):
+        hashed += normalized_text(file)
     for file in [pin_file(pack), *patches, REPO / "tools/build_usd_plugin.py", Path(__file__)]:
         if not file.is_file():
             fail(f"{pin_file(pack)} lists a patch that doesn't exist: {file}")
@@ -128,7 +131,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.matrix:
         result = {platform: json.dumps(ci_packs(platform)) for platform in CI_PLATFORMS}
-        for system in ("windows", "linux"):
+        for system in ("windows", "linux", "macos"):
             result[system] = json.dumps([
                 {"pack": pack, "platform": platform, "arch": arch, "runner": runner}
                 for platform, (system_of, arch, runner) in CI_PLATFORMS.items() if system_of == system

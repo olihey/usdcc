@@ -15,7 +15,9 @@ on:
     branches: [master]
     paths:
       - deps/usd-plugins/**
+      - deps/patches/macos/**
       - tools/build_usd_plugin.py
+      - tools/_macho.py
       - tools/ci/usd_plugin_asset.py
       - tools/ci/check_usd_plugin.py
       - .github/workflows/deps-usd-plugins.yml
@@ -35,6 +37,7 @@ jobs:
     outputs:
       windows: ${{ steps.packs.outputs.windows }}
       linux: ${{ steps.packs.outputs.linux }}
+      macos: ${{ steps.packs.outputs.macos }}
     steps:
       - uses: actions/checkout@v4
       - name: List the packs
@@ -283,6 +286,114 @@ jobs:
           rm -rf "$RUNNER_TEMP/b" "$RUNNER_TEMP/pack"
           unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/pack-check"
           python tools/ci/check_usd_plugin.py '${{ matrix.pack }}' --usd "$RUNNER_TEMP/deps/usd"             --pack-dir "$RUNNER_TEMP/pack-check" --forbid "$RUNNER_TEMP/b" --forbid "$RUNNER_TEMP/pack"
+
+      - name: Keep it with the run
+        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.asset.outputs.name }}
+          path: ${{ runner.temp }}/${{ steps.asset.outputs.zip }}
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true'
+        run: gh release upload '${{ steps.asset.outputs.tag }}' "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" --clobber
+
+  # The same on macOS on Apple Silicon, for the packs whose pins list macos-arm64
+  # (docs/MACOS.md). The build gives the binaries rpaths relative to @loader_path.
+  macos:
+    needs: packs
+    if: needs.packs.outputs.macos != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.packs.outputs.macos) }}
+    name: ${{ matrix.pack }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    concurrency:
+      group: deps-usd-plugins-${{ matrix.pack }}-${{ matrix.platform }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      # The image's CMake 4, as on Windows arm64 above.
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the pack
+        id: asset
+        run: python3 tools/ci/usd_plugin_asset.py '${{ matrix.pack }}' --github-output
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          names=$(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>/dev/null) || names=
+          if ! grep -qx '${{ steps.asset.outputs.usd_zip }}' <<< "$names"; then
+            echo "::error::No ${{ steps.asset.outputs.usd_zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json first."
+            exit 1
+          fi
+          # A pack that isn't published is never there: it's built on every run.
+          found=false
+          if grep -qx '${{ steps.asset.outputs.zip }}' <<< "$names"; then found=true; fi
+          if $found && [ '${{ inputs.replace }}' = true ]; then
+            echo "::notice::${{ steps.asset.outputs.zip }} is published; building it again to replace it."
+            found=false
+          fi
+          if $found; then echo "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build."; fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Install the build's packages
+        if: steps.published.outputs.found != 'true'
+        run: brew install --quiet ninja nasm uv
+
+      # uv's Python, not actions/setup-python's: that one is a framework build on macOS,
+      # which usdcc doesn't embed (docs/MACOS.md). The same path in every workflow.
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        run: |
+          uv python install '${{ steps.asset.outputs.python }}'
+          python=$(uv python find --no-project --managed-python '${{ steps.asset.outputs.python }}')
+          dirname "$python" >> "$GITHUB_PATH"
+          "$python" -c "import platform, sys; print(sys.version, platform.machine(), sys.prefix)"
+
+      - name: Fetch OpenUSD
+        if: steps.published.outputs.found != 'true'
+        run: |
+          gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.usd_zip }}' --dir "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/deps"  # unzip makes only the last folder
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.usd_zip }}" -d "$RUNNER_TEMP/deps/usd"
+          rm "$RUNNER_TEMP/${{ steps.asset.outputs.usd_zip }}"
+
+      - name: Build the pack
+        if: steps.published.outputs.found != 'true'
+        run: |
+          python tools/build_usd_plugin.py '${{ matrix.pack }}' --usd-install "$RUNNER_TEMP/deps/usd" \
+            --work "$RUNNER_TEMP/b" --pack-dir "$RUNNER_TEMP/pack"
+
+      # --symlinks: a library's libfoo.dylib -> libfoo.1.dylib stays a link.
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          zip_file="$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
+          (cd "$RUNNER_TEMP/pack" && zip -q -r -y -6 "$zip_file" .)
+          size=$(stat -f %z "$zip_file")
+          echo "$((size / 1048576)) MB"
+          if [ "$size" -ge 2147483648 ]; then echo "::error::Over GitHub's 2 GiB per-asset limit"; exit 1; fi
+
+      # The zip, unzipped somewhere else, over the OpenUSD asset, with the build gone.
+      - name: Check it over OpenUSD
+        if: steps.published.outputs.found != 'true'
+        run: |
+          rm -rf "${RUNNER_TEMP:?}/b" "${RUNNER_TEMP:?}/pack"
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/pack-check"
+          python tools/ci/check_usd_plugin.py '${{ matrix.pack }}' --usd "$RUNNER_TEMP/deps/usd" \
+            --pack-dir "$RUNNER_TEMP/pack-check" --forbid "$RUNNER_TEMP/b" --forbid "$RUNNER_TEMP/pack"
 
       - name: Keep it with the run
         if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish != 'true'

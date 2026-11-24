@@ -31,6 +31,11 @@ public:
 
     QWidget* logoWidget() const;
 
+    // On macOS, the room at the bar's left end that the system's own close, minimize
+    // and zoom buttons are shown in; the bar's own buttons and logo are hidden there,
+    // and the menus are in the system's menu bar (docs/MACOS.md). Null elsewhere.
+    QWidget* systemButtonArea() const { return m_systemButtonArea; }
+
     // Adds `widget` right of the title, left of the caption buttons (the
     // workspace button, docs/WORKSPACES.md §6). The bar takes it over. Whoever
     // adds it must also make it clickable for the window agent
@@ -48,6 +53,7 @@ private:
     void updateLogo();
 
     QWidget* m_host;
+    QWidget* m_systemButtonArea = nullptr;
     QLabel* m_logo = nullptr;
     QMenuBar* m_menuBar = nullptr;
     QLabel* m_titleLabel = nullptr;

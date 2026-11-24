@@ -69,7 +69,7 @@ if(TARGET usdcc)
     # without requiring an extra command-line plugin path.
     add_custom_target(blender_mesh_app_plugin
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${_folder}"
-            "$<TARGET_FILE_DIR:usdcc>/../plugins/blender_mesh_tools"
+            "${USDCC_APP_INSTALL_ROOT}/plugins/blender_mesh_tools"
         DEPENDS blender_mesh_tools VERBATIM)
     add_dependencies(usdcc blender_mesh_app_plugin)
 endif()

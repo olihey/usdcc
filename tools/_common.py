@@ -64,6 +64,28 @@ else:
 
 CONFIGURATIONS = ("Debug", "RelWithDebInfo", "Release", "MinSizeRel")
 
+# The oldest macOS a build runs on (docs/MACOS.md): OpenUSD, PySide6 and usdcc take it
+# from MACOSX_DEPLOYMENT_TARGET, vcpkg's packages from cmake/triplets. Without it each
+# would target the SDK's own version, the newest there is.
+MACOS_DEPLOYMENT_TARGET = "14.0"
+_XCODE_DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
+
+
+def _set_macos_environment():
+    """For every command a tool runs: the deployment target, and Xcode where
+    xcode-select still names the Command Line Tools, which have no xcodebuild for Qt's
+    build to ask."""
+    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", MACOS_DEPLOYMENT_TARGET)
+    if "DEVELOPER_DIR" in os.environ or not os.path.isdir(_XCODE_DEVELOPER_DIR):
+        return
+    selected = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True).stdout.strip()
+    if "CommandLineTools" in selected:
+        os.environ["DEVELOPER_DIR"] = _XCODE_DEVELOPER_DIR
+
+
+if MACOS:
+    _set_macos_environment()
+
 
 def fail(message):
     """Stops the script with `message` on stderr and exit code 1."""

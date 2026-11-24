@@ -34,7 +34,7 @@ add_custom_command(TARGET viewport_broadcast POST_BUILD
 if(TARGET usdcc)
     # Where PluginManager::shippedFolder() looks, so a build loads it as a deployed app does.
     add_custom_target(viewport_broadcast_app_plugin
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${_folder}" "$<TARGET_FILE_DIR:usdcc>/../plugins/viewport_broadcast"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${_folder}" "${USDCC_APP_INSTALL_ROOT}/plugins/viewport_broadcast"
         DEPENDS viewport_broadcast VERBATIM)
     add_dependencies(usdcc viewport_broadcast_app_plugin)
 endif()

@@ -1,5 +1,8 @@
 #include "usdcc/ui/settings.h"
 
+#include "usdcc/core/install_paths.h"
+
+#include <QCoreApplication>
 #include <QDir>
 #include <QStandardPaths>
 
@@ -27,5 +30,19 @@ QSettings appSettings() {
 QString userConfigFolder() { return userFolder(QStandardPaths::AppConfigLocation); }
 
 QString userDataFolder() { return userFolder(QStandardPaths::AppLocalDataLocation); }
+
+namespace {
+
+std::filesystem::path programFolder() {
+    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdU16String());
+}
+
+QString toQString(const std::filesystem::path& path) { return QDir::cleanPath(QString::fromStdU16String(path.u16string())); }
+
+}  // namespace
+
+QString installFolder() { return toQString(usdcc::core::installRoot(programFolder())); }
+
+QString programDataFolder() { return toQString(usdcc::core::programDataDir(programFolder())); }
 
 }  // namespace usdcc::ui

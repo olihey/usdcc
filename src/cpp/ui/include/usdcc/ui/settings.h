@@ -22,4 +22,11 @@ QSettings appSettings();
 QString userConfigFolder();
 QString userDataFolder();
 
+// Where this usdcc's own parts are (usdcc/core/install_paths.h), from the running
+// program's folder: installFolder() holds plugins/, resources/ and tools/, and
+// programDataFolder() what a program has beside it. Both are Contents/Resources in a
+// macOS bundle.
+QString installFolder();
+QString programDataFolder();
+
 }  // namespace usdcc::ui

@@ -390,6 +390,8 @@ bool openStageFile(const QString& path) {
 void revealFile(const QString& path) {
 #ifdef _WIN32
     QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,") + QDir::toNativeSeparators(path)});
+#elif defined(__APPLE__)
+    QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-R"), path});
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
 #endif

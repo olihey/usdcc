@@ -2,8 +2,8 @@
 # prerelease asset, which usdcc's CI downloads and plugin authors build against
 # (docs/CI.md). Slow (hours), so it only runs when the pin changes or by hand,
 # and each job skips the build when its asset for the current pin already
-# exists. One zip per platform (win64, win-arm64, linux-x64, linux-arm64), in the
-# same release.
+# exists. One zip per platform (win64, win-arm64, linux-x64, linux-arm64, macos-arm64), in
+# the same release.
 name: OpenUSD
 
 on:
@@ -22,6 +22,7 @@ on:
       - tools/ci/relocate_usd.py
       - tools/build_usd.py
       - tools/_elf.py
+      - tools/_macho.py
       - tools/ci/usd_licenses.py
       - tools/ci/usd-sdk-check/**
       - .github/workflows/deps-usd.yml
@@ -248,6 +249,7 @@ jobs:
           - ``win-arm64``: Python $($spec.python) arm64 (python.org's NuGet package), Visual Studio 2026, with ``--onetbb``, in an ARM64 developer shell, with Boost 1.91 and Embree 4.5.0 (runner image ``windows-11-arm``)
           - ``linux-x64``: Python $($spec.python) from actions/setup-python, GCC 13 (runner image ``ubuntu-24.04``)
           - ``linux-arm64``: the same on aarch64 (runner image ``ubuntu-24.04-arm``)
+          - ``macos-arm64``: Python $($spec.python) from uv, Apple Clang, for macOS 14 or later, with the patches in ``deps/patches/macos`` too, whose hash is in its name (runner image ``macos-15``)
           - Built by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID from ``$env:GITHUB_SHA``
 
           Includes the licences of OpenUSD's dependencies in ``licenses/``.
@@ -390,6 +392,110 @@ jobs:
           zip_file="$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
           # The windows job writes the release's notes; this only adds its zip,
           # making the release if it isn't there yet.
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" "$zip_file" --prerelease --target "$GITHUB_SHA" \
+              --title 'OpenUSD ${{ steps.asset.outputs.base }}' \
+              --notes "Prebuilt OpenUSD for usdcc's CI and for usdcc plugin authors (docs/CI.md). Not a usdcc release." && exit 0
+          fi
+          gh release upload "$tag" "$zip_file" --clobber
+
+  # The same for macOS on Apple Silicon (docs/MACOS.md), with tools/build_usd.py and
+  # deps/patches/macos, whose hash is in the asset's name.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the asset
+        id: asset
+        run: python3 tools/ci/usd_asset.py --github-output
+
+      - name: Check whether it's already published
+        id: published
+        run: |
+          names=$(gh release view '${{ steps.asset.outputs.tag }}' --json assets --jq '.assets[].name' 2>/dev/null) && exists=true || exists=false
+          found=false
+          if $exists && grep -qx '${{ steps.asset.outputs.zip }}' <<< "$names"; then found=true; fi
+          if $found && [ '${{ inputs.replace }}' = true ]; then
+            echo "::notice::${{ steps.asset.outputs.zip }} is published; building it again to replace it."
+            found=false
+          fi
+          if $found; then echo "::notice::${{ steps.asset.outputs.zip }} is already published; nothing to build."; fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Install the build's packages
+        if: steps.published.outputs.found != 'true'
+        run: brew install --quiet ninja nasm uv
+
+      # uv's Python, not actions/setup-python's: that one is a framework build on macOS,
+      # which usdcc doesn't embed (docs/MACOS.md). The same path in every workflow.
+      - name: Set up Python
+        if: steps.published.outputs.found != 'true'
+        run: |
+          uv python install '${{ steps.asset.outputs.python }}'
+          python=$(uv python find --no-project --managed-python '${{ steps.asset.outputs.python }}')
+          dirname "$python" >> "$GITHUB_PATH"
+          "$python" -c "import platform, sys; print(sys.version, platform.machine(), sys.prefix)"
+
+      - name: Build OpenUSD
+        if: steps.published.outputs.found != 'true'
+        run: |
+          echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
+          python tools/build_usd.py "$RUNNER_TEMP/deps/usd" --work "$RUNNER_TEMP/b"
+          if [ "$(ls "$RUNNER_TEMP/deps/usd/licenses" | wc -l)" -lt 10 ]; then
+            echo "::error::Fewer licences than expected"; exit 1
+          fi
+
+      - name: Upload the build log
+        if: failure() && steps.published.outputs.found != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_usd-log-macos
+          path: |
+            ${{ runner.temp }}/b/src/log.txt
+            ${{ runner.temp }}/b/build/**/log.txt
+          if-no-files-found: ignore
+
+      # The CMake files and the Mach-O files' rpaths (docs/CI.md section 2).
+      - name: Make it relocatable
+        if: steps.published.outputs.found != 'true'
+        run: python tools/ci/relocate_usd.py --install "$USD_INSTALL"
+
+      # --symlinks: libfoo.dylib -> libfoo.1.dylib stay links, which unzip restores.
+      - name: Zip it
+        if: steps.published.outputs.found != 'true'
+        run: |
+          zip_file="$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
+          (cd "$USD_INSTALL" && zip -q -r -y -6 "$zip_file" .)
+          size=$(stat -f %z "$zip_file")
+          echo "$((size / 1048576)) MB"
+          if [ "$size" -ge 2147483648 ]; then echo "::error::Over GitHub's 2 GiB per-asset limit"; exit 1; fi
+
+      # From a different folder than it was built in, with the original gone.
+      - name: Check it as an SDK
+        if: steps.published.outputs.found != 'true'
+        run: |
+          rm -rf "${USD_INSTALL:?}" "${RUNNER_TEMP:?}/b"
+          sdk="$RUNNER_TEMP/usd-sdk"
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$sdk"
+          build="$RUNNER_TEMP/usd-sdk-check"
+          cmake -S tools/ci/usd-sdk-check -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release "-DUSD_INSTALL=$sdk"
+          cmake --build "$build"
+          # Nothing of the build machine's: no DYLD_LIBRARY_PATH, no PYTHONPATH.
+          env -i PATH=/usr/bin:/bin HOME="$HOME" "$(command -v ctest)" --test-dir "$build" --output-on-failure -V
+
+      - name: Publish
+        if: steps.published.outputs.found != 'true'
+        run: |
+          tag='${{ steps.asset.outputs.tag }}'
+          zip_file="$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
+          # As the linux job: the windows job writes the release's notes.
           if ! gh release view "$tag" > /dev/null 2>&1; then
             gh release create "$tag" "$zip_file" --prerelease --target "$GITHUB_SHA" \
               --title 'OpenUSD ${{ steps.asset.outputs.base }}' \

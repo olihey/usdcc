@@ -12,6 +12,7 @@
 #include "usdcc/core/settings.h"
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/usd/render/render_network.h"
 #include "usdcc/usd/render/render_queue.h"
 #include "usdcc/usd/render/render_scheduler.h"
@@ -201,7 +202,7 @@ int runQueue(const QCommandLineParser& parser) {
         webOptions.name = name;
         webOptions.port = static_cast<quint16>(parser.value(QStringLiteral("web")).toUInt());
         if (parser.isSet(QStringLiteral("local"))) webOptions.address = QHostAddress(QHostAddress::LocalHost);
-        webOptions.pageDirectory = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("node-web"));
+        webOptions.pageDirectory = QDir(usdcc::ui::programDataFolder()).filePath(QStringLiteral("node-web"));
         webOptions.accent = QString::fromStdString(
             usdcc::core::Settings::instance().get<std::string>("Appearance/accentColor", std::string("#3d8bfd")));
         if (parser.isSet(QStringLiteral("web-token-file"))) {

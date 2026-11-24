@@ -40,10 +40,10 @@ std::string locate(const PXR_NS::SdfLayerHandle& anchor, const std::string& asse
     return *found ? resolved : anchored;
 }
 
-// One spelling per file: forward slashes, and no case on Windows.
+// One spelling per file: forward slashes, and no case on Windows and macOS.
 std::string fileKey(std::string path) {
     std::replace(path.begin(), path.end(), '\\', '/');
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     std::transform(path.begin(), path.end(), path.begin(), [](unsigned char c) { return char(std::tolower(c)); });
 #endif
     return path;

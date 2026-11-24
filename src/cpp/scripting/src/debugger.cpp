@@ -7,6 +7,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/python_runtime.h"
+#include "usdcc/ui/settings.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -21,7 +22,7 @@ std::atomic<int> s_port = 0;
 }
 
 std::filesystem::path folder() {
-    const QString bundled = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../tools/debugpy"));
+    const QString bundled = QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("tools/debugpy"));
     for (const QString& candidate : {QDir::cleanPath(bundled),
 #ifdef USDCC_DEBUGPY_DIR
                                      QStringLiteral(USDCC_DEBUGPY_DIR)

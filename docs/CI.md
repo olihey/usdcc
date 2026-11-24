@@ -1,8 +1,8 @@
 # CI
 
 usdcc's continuous integration on GitHub Actions. Part of M0 (docs/PLAN.md §6 item 2,
-§8). **Windows and Linux.** Each workflow has a `windows` job and a `linux` job
-(`ubuntu-24.04`, GCC 13): §8. macOS, USD plugins (file formats, render delegates) and
+§8). **Windows, Linux and macOS.** Each workflow has a `windows` job, a `linux` job
+(`ubuntu-24.04`, GCC 13): §8, and, but for `release.yml`, a `macos` job: §9. USD plugins (file formats, render delegates) and
 self-hosted runners come later (§7).
 
 ## 1. Decisions
@@ -329,8 +329,7 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 7. Later
 
-- **macOS.** Hosted `macos-latest`, with its own OpenUSD asset, as the Linux ones (§8).
-
+- **macOS releases** ([MACOS.md](MACOS.md) §5).
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
@@ -395,3 +394,23 @@ master's required checks; the x64 ones keep the names `linux` and `windows`.
 
 The hosted runner has 4 cores: OpenUSD takes hours, Qt's first build in vcpkg one or two.
 Each job first deletes the image's unused SDKs for disk space.
+
+## 9. macOS
+
+The `macos` jobs mirror the `linux` ones on `macos-15` (Apple Silicon;
+[MACOS.md](MACOS.md) has how macOS was brought up). **Not run yet (2026-11-23)**: what their
+steps do has been done on a Mac, by hand.
+
+- **Python** is uv's, at the same path in every workflow: `actions/setup-python`'s is a
+  framework build on macOS, which usdcc doesn't embed.
+- **`deps-usd.yml`** builds OpenUSD with `tools/build_usd.py` and `deps/patches/macos`.
+  `tools/ci/relocate_usd.py` makes the rpaths relative to `@loader_path` and links
+  `@rpath/libpython3.13.dylib`, found through the rpaths of whatever program runs it. The
+  macOS patches aren't in `deps/usd.json`'s hash, which is every platform's, but have one of
+  their own in the macOS asset's name: `usd-<commit>-<hash>-macos-arm64-<hash>-py313.zip`. A
+  change to them gives a new asset in the same release, and new packs for macOS.
+- **`deps-pyside.yml`** and **`deps-usd-plugins.yml`** as on Linux. `macos-arm64` is in
+  Adobe's file formats' pin only.
+- **`build.yml`**'s check is `macos`, which isn't one of master's required checks. It fails
+  until the OpenUSD asset for macOS is published; a missing pack or PySide6 is a warning.
+- **vcpkg's host tools** are built static, for the triplet `arm64-osx`: [MACOS.md](MACOS.md) §2.

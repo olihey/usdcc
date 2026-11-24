@@ -1,4 +1,4 @@
-# Builds usdcc on Windows and Linux, x64 and arm64, against the prebuilt OpenUSD that
+# Builds usdcc on Windows and Linux, x64 and arm64, and macOS on Apple Silicon, against the prebuilt OpenUSD that
 # deps-usd.yml publishes, and runs the tests (docs/CI.md §4): for a pull
 # request, whose merge it gates, and for each push to master. vcpkg's packages
 # (Qt above all) are kept between runs in vcpkg's files binary cache, saved with
@@ -26,8 +26,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # windows and linux (x64) are master's required checks; windows-arm64 and
-  # linux-arm64 aren't. A pull request is merged, by GitHub's auto-merge, once
+  # windows and linux (x64) are master's required checks; windows-arm64,
+  # linux-arm64 and macos aren't. A pull request is merged, by GitHub's auto-merge, once
   # the required ones pass, and stays open when one fails (docs/RELEASE.md §8).
   # A job that is renamed has to be renamed in master's protection too.
   #
@@ -452,6 +452,138 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vcpkg-logs-${{ matrix.name }}
+          path: |
+            external/vcpkg/buildtrees/**/*.log
+            build/vcpkg-manifest-install.log
+          if-no-files-found: ignore
+
+  # The same on macOS on Apple Silicon (docs/MACOS.md). The tests run on Qt's offscreen
+  # platform where they have windows.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_DISABLE_METRICS: 1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # See the Windows job: vcpkg's overrides need its full history.
+      - name: Fetch vcpkg's full history
+        run: git -C external/vcpkg fetch --unshallow --no-tags origin
+
+      - name: Install the build's packages
+        run: brew install --quiet ninja pkg-config autoconf autoconf-archive automake libtool uv
+
+      - name: Name the OpenUSD asset
+        id: asset
+        run: python3 tools/ci/usd_asset.py --github-output
+
+      # uv's Python, not actions/setup-python's: that one is a framework build on macOS,
+      # which usdcc doesn't embed (docs/MACOS.md). The same path in every workflow.
+      - name: Set up Python
+        run: |
+          uv python install '${{ steps.asset.outputs.python }}'
+          python=$(uv python find --no-project --managed-python '${{ steps.asset.outputs.python }}')
+          dirname "$python" >> "$GITHUB_PATH"
+          "$python" -c "import platform, sys; print(sys.version, platform.machine(), sys.prefix)"
+
+      - name: Download OpenUSD
+        run: |
+          if ! gh release download '${{ steps.asset.outputs.tag }}' --pattern '${{ steps.asset.outputs.zip }}' --dir "$RUNNER_TEMP"; then
+            echo "::error::No ${{ steps.asset.outputs.zip }} in release ${{ steps.asset.outputs.tag }}. Run the OpenUSD workflow (deps-usd.yml) for the current deps/usd.json and deps/patches/macos first."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/deps"  # unzip makes only the last folder
+          unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
+          rm "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}"
+          echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
+
+      # As the linux job: missing packs and a missing PySide6 are warnings.
+      - name: Download the USD plugin packs
+        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only
+
+      - name: Download PySide6
+        run: |
+          python tools/ci/pyside_asset.py > "$RUNNER_TEMP/pyside.json"
+          tag=$(jq -r .tag "$RUNNER_TEMP/pyside.json"); zip=$(jq -r .zip "$RUNNER_TEMP/pyside.json")
+          if gh release download "$tag" --pattern "$zip" --dir "$RUNNER_TEMP"; then
+            unzip -q "$RUNNER_TEMP/$zip" -d external
+            rm "$RUNNER_TEMP/$zip"
+          else
+            echo "::warning::No $zip in release $tag, so usdcc.ui and the Python panel tests aren't built. Run the PySide6 workflow (deps-pyside.yml)."
+          fi
+
+      - name: Name the vcpkg cache
+        id: vcpkg
+        run: python tools/ci/vcpkg_cache.py
+
+      - name: Restore the vcpkg cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg.outputs.deps }}
+            ${{ steps.vcpkg.outputs.any }}
+
+      # macOS's find has no -printf.
+      - name: Note the cached packages
+        run: |
+          find '${{ steps.vcpkg.outputs.dir }}' -name '*.zip' -exec basename {} \; | sort > "$RUNNER_TEMP/vcpkg-cache-before.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/vcpkg-cache-before.txt") package(s) in the cache"
+
+      - name: Build
+        id: build
+        run: python tools/build.py --usd-install "$USD_INSTALL" --without-rtx
+
+      - name: Test
+        run: ctest --test-dir build --verbose --timeout 900
+
+      # As the linux job.
+      - name: Prune the vcpkg cache
+        id: vcpkg-prune
+        if: always() && steps.vcpkg.outputs.key != ''
+        run: |
+          dir='${{ steps.vcpkg.outputs.dir }}'
+          installed=$(ls -d build/vcpkg_installed/*/share external/blender-work/build/vcpkg_installed/*/share 2>/dev/null || true)
+          if [ '${{ steps.build.outcome }}' = success ] && [ -n "$installed" ]; then
+            find $installed -name vcpkg_abi_info.txt -exec shasum -a 256 {} + | awk '{print $1 ".zip"}' | sort -u > "$RUNNER_TEMP/used.txt"
+            unused=0
+            while IFS= read -r zip; do
+              if ! grep -qxF "$(basename "$zip")" "$RUNNER_TEMP/used.txt"; then rm "$zip"; unused=$((unused + 1)); fi
+            done < <(find "$dir" -name '*.zip')
+            echo "$(wc -l < "$RUNNER_TEMP/used.txt") package(s) used, $unused unused one(s) dropped"
+          fi
+          find "$dir" -name '*.zip' -exec basename {} \; | sort > "$RUNNER_TEMP/vcpkg-cache-after.txt"
+          added=$(comm -13 "$RUNNER_TEMP/vcpkg-cache-before.txt" "$RUNNER_TEMP/vcpkg-cache-after.txt" | wc -l)
+          echo "$added package(s) built and added"
+          if [ "$added" -gt 0 ]; then echo "added=true" >> "$GITHUB_OUTPUT"; else echo "added=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save the vcpkg cache
+        if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.dir }}
+          key: ${{ steps.vcpkg.outputs.key }}
+
+      # As the windows job's: after a merge only.
+      - name: Build with every optional feature left out
+        if: github.event_name == 'push'
+        run: |
+          python tools/build.py --usd-install "$USD_INSTALL" --without-rtx --without all
+          python tools/ci/check_features_left_out.py --usd-install "$USD_INSTALL"
+
+      - name: Upload vcpkg's logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-macos
           path: |
             external/vcpkg/buildtrees/**/*.log
             build/vcpkg-manifest-install.log

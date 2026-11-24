@@ -464,7 +464,13 @@ USDCC_TEST(editor_link_plugins_made_and_failing) {
             if (object.value("event") == QLatin1String("plugins-changed")) ++events;
         }
     });
+#if USDCC_TEST_HAS_PYSIDE
     CHECK(templates.size() == 5 && made.size() == 5, "every template starts as it is: %s", qPrintable(made.join(' ')));
+#else
+    // The panel and the final renderer import PySide6, which this build has none of.
+    CHECK(templates.size() == 5 && made.size() == 3 && !made.contains("panel") && !made.contains("final_renderer"),
+          "every template that doesn't need PySide6 starts as it is: %s", qPrintable(made.join(' ')));
+#endif
     CHECK(!resultOf(bad).value("ok").toBool(true), "only those: %s", qPrintable(shown(bad)));
     const QJsonObject plugin = failed.value("plugin").toObject();
     CHECK(!failed.value("ok").toBool() && plugin.value("state") == QLatin1String("failed"), "one that raises: %s", qPrintable(shown(failed)));

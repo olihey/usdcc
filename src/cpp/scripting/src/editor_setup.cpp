@@ -30,7 +30,7 @@ QString qs(const std::filesystem::path& path) { return QString::fromStdU16String
 QString typesFolder() { return usdcc::ui::userDataFolder() + QStringLiteral("/types"); }
 
 // A deploy's stubs: python/stubs beside the Python on Windows, lib/../python/stubs elsewhere.
-QString deployedStubs() { return QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../python/stubs")); }
+QString deployedStubs() { return QDir(usdcc::ui::installFolder()).absoluteFilePath(QStringLiteral("python/stubs")); }
 
 QString buildStubs() {
 #ifdef USDCC_STUBS_DIR

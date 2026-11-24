@@ -17,11 +17,15 @@ install only works where it was built. This rewrites them (docs/CI.md section 2)
 On Linux the libraries, plugins and Python modules have RUNPATHs naming the
 install folder too (OpenImageIO's has nothing else). Those entries become
 $ORIGIN-relative, and each library in lib/ gets $ORIGIN itself, so they find each
-other wherever the install is unpacked. That needs patchelf.
+other wherever the install is unpacked. That needs patchelf. On macOS the same goes for
+their rpaths, with @loader_path, and for install names in the install folder, which
+become @rpath ones. So does libpython's, outside the install, with the folder it was built
+with as the last rpath: any program that names its Python's folder in an rpath, as Python
+itself does, finds its own there.
 
 Then it checks that no CMake file still names the install folder, and that the
-Python folder is left only in pxrConfig.cmake's guarded lines, and on Linux that no
-RUNPATH names the install folder. Any leftover fails the script.
+Python folder is left only in pxrConfig.cmake's guarded lines, and on Linux and macOS that
+no RUNPATH, rpath or install name names the install folder. Any leftover fails the script.
 
 Running it twice is harmless: the second run finds nothing to change.
 
@@ -39,14 +43,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import WINDOWS, fail  # noqa: E402
+from _common import MACOS, WINDOWS, fail  # noqa: E402
 
-if not WINDOWS:
+if MACOS:
+    from _macho import edit, install_id, loader_relative, macho_files, needed, rpaths  # noqa: E402
+elif not WINDOWS:
     from _elf import elf_files, origin_relative, runpath, set_runpath  # noqa: E402
 
 MARKER = "# Made relocatable by usdcc tools/ci/relocate_usd.py"
 # What this script wrote while it was relocate-usd.ps1.
 MARKERS = (MARKER, "# Made relocatable by usdcc tools/ci/relocate-usd.ps1")
+# libpython as macOS names it.
+PYTHON_LIBRARY = re.compile(r"/libpython3[.0-9]*[.]dylib$")
 PREFIX = "${_usdcc_usd_prefix}"
 
 # Windows' file names don't tell upper case from lower.
@@ -96,6 +104,41 @@ def relocate_runpaths(install, built_at, leftovers):
             if entry == built_at or entry.startswith(built_at + "/"):
                 leftovers.append(f"{os.path.relpath(file, install)}: RUNPATH {entry}")
     print(f"Rewrote the RUNPATH of {rewritten} of {len(files)} ELF file(s).")
+
+
+def relocate_rpaths(install, built_at, leftovers):
+    """macOS: rpaths in the install folder become @loader_path-relative, and install names
+    and links in it @rpath ones."""
+    def inside(entry):
+        return entry == built_at or entry.startswith(built_at + "/")
+
+    rewritten = 0
+    files = [file for top in ("lib", "plugin", "bin") if os.path.isdir(os.path.join(install, top))
+             for file in macho_files(os.path.join(install, top))]
+    lib = os.path.join(install, "lib")
+    for file in files:
+        entries = []
+        for entry in rpaths(file):
+            entry = loader_relative(file, install + entry[len(built_at):]) if inside(entry) else entry
+            entry = "@loader_path" if entry in ("@loader_path/", "@loader_path/.") else entry
+            if entry not in entries:
+                entries.append(entry)
+        links = {name: "@rpath/" + os.path.basename(name) for name in needed(file) if inside(name)}
+        # libpython, wherever this machine has it.
+        pythons = [name for name in needed(file) if PYTHON_LIBRARY.search(name) and name.startswith("/")]
+        links.update({name: "@rpath/" + os.path.basename(name) for name in pythons})
+        own = install_id(file)
+        if links or any(name.startswith("@rpath/") for name in needed(file)):
+            for folder in (os.path.dirname(file), lib):
+                if loader_relative(file, folder) not in entries:
+                    entries.append(loader_relative(file, folder))
+        entries += [folder for folder in map(os.path.dirname, pythons) if folder not in entries]
+        if edit(file, new_rpaths=entries, new_id="@rpath/" + os.path.basename(own) if own and inside(own) else None, changes=links):
+            rewritten += 1
+        for entry in [*rpaths(file), *needed(file), install_id(file) or ""]:
+            if inside(entry):
+                leftovers.append(f"{os.path.relpath(file, install)}: {entry}")
+    print(f"Rewrote the paths of {rewritten} of {len(files)} Mach-O file(s).")
 
 
 def main(argv=None):
@@ -170,7 +213,9 @@ def main(argv=None):
             if bad:
                 leftovers.append(f"{os.path.relpath(file, install)}:{number}: {line.strip()}")
 
-    if not WINDOWS:
+    if MACOS:
+        relocate_rpaths(install, built_at, leftovers)
+    elif not WINDOWS:
         relocate_runpaths(install, built_at, leftovers)
 
     print(f"Rewrote {len(changed)} file(s):")
