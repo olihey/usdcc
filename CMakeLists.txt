@@ -8,6 +8,12 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
         CACHE STRING "Vcpkg toolchain file")
 endif()
 
+# Ports only macOS needs a changed build of (a patched Qt, docs/MACOS.md), beside
+# vcpkg-configuration.json's cmake/ports, whose files are in every platform's build.
+if(CMAKE_HOST_APPLE)
+    list(APPEND VCPKG_OVERLAY_PORTS "${CMAKE_SOURCE_DIR}/cmake/ports-macos")
+endif()
+
 # The oldest macOS a build runs on (docs/MACOS.md), before project() reads it. The same
 # as tools/_common.py's MACOS_DEPLOYMENT_TARGET, which OpenUSD is built with, and
 # cmake/triplets', which vcpkg's packages are.
