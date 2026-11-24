@@ -52,12 +52,18 @@ CI_PLATFORMS = {
 }
 SETS = ("standard", "optional", "local")
 _KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "sdks", "cmake", "targets",
-         "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check"}
-_REQUIRED = {"repository", "commit", "cmake", "platforms", "license", "set"}
+         "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check",
+         "hook"}
+_REQUIRED = {"repository", "commit", "platforms", "license", "set"}
 
 
 def pin_file(pack):
     return PINS / f"{pack}.json"
+
+
+def patch_file(patch):
+    """A pin's patch: a path, or {"patch": path, "in": a submodule's folder}."""
+    return patch["patch"] if isinstance(patch, dict) else patch
 
 
 def load(pack):
@@ -74,6 +80,8 @@ def load(pack):
     missing = sorted(_REQUIRED - set(spec))
     if missing:
         fail(f"{file}: missing {', '.join(missing)}")
+    if "cmake" not in spec and "hook" not in spec:
+        fail(f"{file}: needs \"cmake\", or a \"hook\" that builds it")
     if spec["set"] not in SETS:
         fail(f"{file}: \"set\" is '{spec['set']}', not one of {', '.join(SETS)}")
     return spec
@@ -83,7 +91,9 @@ def describe(pack):
     """The asset the pack's pin describes, as report() takes it."""
     spec = load(pack)
     usd = usd_asset.describe(REPO / "deps/usd.json")
-    patches = [PINS / patch for patch in spec.get("patches", [])]
+    patches = [PINS / patch_file(patch) for patch in spec.get("patches", [])]
+    if spec.get("hook"):
+        patches.append(PINS / spec["hook"])
 
     hashed = f"usd={usd['base']}\n"
     for file in usd_asset.platform_patches(REPO / "deps"):

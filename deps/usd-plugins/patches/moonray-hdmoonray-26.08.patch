@@ -1,0 +1,539 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b5cc674..51a656a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -37,8 +37,11 @@ endif()
+ # See:
+ # * https://github.com/PixarAnimationStudios/OpenUSD/issues/3310
+ # * https://github.com/PixarAnimationStudios/OpenUSD/pull/3205
++option(HDMOONRAY_ARRAS "Build the hd_moonray plugin, which renders through Arras" ON)
++option(HDMOONRAY_TOOLS "Build the command line tools and their tests, and the Houdini files" ON)
++
+ find_package(OpenGL REQUIRED)
+-if(PXR_VERSION VERSION_GREATER_EQUAL 2505)
++if(PXR_VERSION VERSION_GREATER_EQUAL 2505 AND HDMOONRAY_TOOLS)
+     find_package(Vulkan REQUIRED)
+ endif()
+ 
+@@ -55,11 +58,13 @@ if (NOT DEFINED BOOST_PYTHON_COMPONENT_NAME)
+ endif()
+ 
+ set(BUILD_SHARED_LIBS ON)
+-find_package(Boost REQUIRED COMPONENTS "${BOOST_PYTHON_COMPONENT_NAME}")
++find_package(Boost REQUIRED)
+ 
+ if("${PROJECT_NAME}" STREQUAL "${CMAKE_PROJECT_NAME}")
++    if(HDMOONRAY_ARRAS)
+     find_package(ArrasCore REQUIRED)
+     find_package(McrtDataio REQUIRED)
++    endif()
+     find_package(Moonshine REQUIRED)
+     find_package(Moonray REQUIRED)
+     find_package(SceneRdl2 REQUIRED)
+@@ -100,9 +105,13 @@ include(SConscriptStub)
+ # ================================================
+ add_subdirectory(lib)
+ add_subdirectory(plugin)
+-add_subdirectory(cmd)
+-add_subdirectory(sessions)
+-add_subdirectory(hats)
++if(HDMOONRAY_TOOLS)
++    add_subdirectory(cmd)
++    add_subdirectory(hats)
++endif()
++if(HDMOONRAY_ARRAS)
++    add_subdirectory(sessions)
++endif()
+ 
+ # ================================================
+ # Install
+diff --git a/lib/hydramoonray/Light.cc b/lib/hydramoonray/Light.cc
+index 65409e4..b9908ee 100644
+--- a/lib/hydramoonray/Light.cc
++++ b/lib/hydramoonray/Light.cc
+@@ -405,7 +405,7 @@ Light::Sync(pxr::HdSceneDelegate *sceneDelegate,
+         // Currently Finalize() is called when value changes, but this may be a bug.
+         bool categoriesChanged = false;
+         pxr::TfToken t =
+-            sceneDelegate->GetLightParamValue(id, pxr::HdTokens->lightLink).Get<pxr::TfToken>();
++            sceneDelegate->GetLightParamValue(id, pxr::HdTokens->lightLink).GetWithDefault<pxr::TfToken>();
+         // registering the category id token with RenderDelegate will enable geometry
+         // to look up mLight as the rdl2 scene object corresponding to this category id
+         if (initialize || t != mLightLinkCategory) {
+@@ -417,7 +417,7 @@ Light::Sync(pxr::HdSceneDelegate *sceneDelegate,
+             categoriesChanged = true;
+         }
+         // "shadowLink" is much the same
+-        t = sceneDelegate->GetLightParamValue(id, pxr::HdTokens->shadowLink).Get<pxr::TfToken>();
++        t = sceneDelegate->GetLightParamValue(id, pxr::HdTokens->shadowLink).GetWithDefault<pxr::TfToken>();
+         if (initialize || t != mShadowLinkCategory) {
+             if (!initialize) {
+                 renderDelegate.releaseCategory(mLight, RenderDelegate::CategoryType::ShadowLink, mShadowLinkCategory);
+@@ -430,7 +430,7 @@ Light::Sync(pxr::HdSceneDelegate *sceneDelegate,
+         if (categoriesChanged) {
+             // in 0.22.5, DirtyCategories seems to be ignored. We can force a sync using
+             // DirtyMaterialId even though it isn't strict;y right...
+-            sceneDelegate->GetRenderIndex().GetChangeTracker().MarkAllRprimsDirty(
++            renderDelegate.markAllRprimsDirty(sceneDelegate->GetRenderIndex(),
+                 pxr::HdChangeTracker::DirtyCategories | pxr::HdChangeTracker::DirtyMaterialId);
+         }
+     }
+diff --git a/lib/hydramoonray/Mesh.cc b/lib/hydramoonray/Mesh.cc
+index 5360642..1f19f61 100644
+--- a/lib/hydramoonray/Mesh.cc
++++ b/lib/hydramoonray/Mesh.cc
+@@ -235,9 +235,13 @@ Mesh::syncSubdivScheme(const HdMeshTopology& topology,
+     }
+ 
+     if (not isPrimvarUsed(smoothNormalToken)) {
+-        // polygons should not autogenerate smooth normals, per UsdGeomMesh doc
++        // polygons should not autogenerate smooth normals, per UsdGeomMesh doc. A subdivision
++        // surface drawn as its cage (refine level 0) gets them, as in Storm.
+         if (disableSubd)
+-            geometry()->set(rdlAttrSmoothNormal, false);
++            geometry()->set(rdlAttrSmoothNormal,
++                            !_GetReprDesc(reprToken)[0].flatShadingEnabled &&
++                            (subdScheme == PxOsdOpenSubdivTokens->catmullClark ||
++                             subdScheme == PxOsdOpenSubdivTokens->loop));
+     }
+ }
+ 
+diff --git a/lib/hydramoonray/RenderDelegate.cc b/lib/hydramoonray/RenderDelegate.cc
+index 0d21114..0274ec0 100644
+--- a/lib/hydramoonray/RenderDelegate.cc
++++ b/lib/hydramoonray/RenderDelegate.cc
+@@ -17,6 +17,7 @@
+ #include "RenderPass.h"
+ #include "Volume.h"
+ 
++#include <pxr/base/tf/errorMark.h>
+ #include <pxr/imaging/hd/extComputation.h>
+ #include <pxr/base/gf/vec2f.h>
+ #include <pxr/usdImaging/usdImaging/delegate.h>
+@@ -721,7 +722,11 @@ void RenderDelegate::setDisableLighting(bool v)
+         // dirty all the lights, which will cause them to call add/removeLight and
+         // that will turn the default light on/off
+         for (auto& p : mLights)
++        {
++            pxr::TfErrorMark mark; // see markAllRprimsDirty()
+             mRenderIndex->GetChangeTracker().MarkSprimDirty(p->GetId(), pxr::HdLight::DirtyBits::AllDirty);
++            mark.Clear();
++        }
+     }
+ }
+ 
+@@ -731,10 +736,13 @@ void RenderDelegate::setPruneProcedural(const std::string& name, bool prune)
+         if (prune) mPrunedProcedurals.insert(name);
+         else mPrunedProcedurals.erase(name);
+         for (auto& p : mProcedurals){
+-            if (mRenderIndex)
++            if (mRenderIndex) {
++                pxr::TfErrorMark mark; // see markAllRprimsDirty()
+                 mRenderIndex->GetChangeTracker().MarkRprimDirty(
+                             p->GetId(),
+                             pxr::HdChangeTracker::DirtyVisibility);
++                mark.Clear();
++            }
+         }
+     }
+ }
+@@ -744,10 +752,13 @@ void RenderDelegate::setPruneVolume(bool v)
+     if (v != mPruneVolume) {
+         mPruneVolume = v;
+         for (auto& p : mVolumes){
+-            if (mRenderIndex)
++            if (mRenderIndex) {
++                pxr::TfErrorMark mark; // see markAllRprimsDirty()
+                 mRenderIndex->GetChangeTracker().MarkRprimDirty(
+                             p->GetId(),
+                             pxr::HdChangeTracker::DirtyVisibility);
++                mark.Clear();
++            }
+         }
+     }
+ }
+@@ -780,7 +791,16 @@ void RenderDelegate::setForcePolygon(bool v)
+ 
+ void RenderDelegate::markAllRprimsDirty(pxr::HdDirtyBits bits)
+ {
+-    if (mRenderIndex) mRenderIndex->GetChangeTracker().MarkAllRprimsDirty(bits);
++    if (mRenderIndex) markAllRprimsDirty(*mRenderIndex, bits);
++}
++
++void RenderDelegate::markAllRprimsDirty(pxr::HdRenderIndex& renderIndex, pxr::HdDirtyBits bits)
++{
++    // When the scene comes through scene indices, the change tracker of OpenUSD 26.08
++    // marks the prims and posts a coding error ("requires emulation") all the same.
++    pxr::TfErrorMark mark;
++    renderIndex.GetChangeTracker().MarkAllRprimsDirty(bits);
++    mark.Clear();
+ }
+ 
+ }
+diff --git a/lib/hydramoonray/RenderDelegate.h b/lib/hydramoonray/RenderDelegate.h
+index 568aa68..174ff7e 100644
+--- a/lib/hydramoonray/RenderDelegate.h
++++ b/lib/hydramoonray/RenderDelegate.h
+@@ -296,6 +296,7 @@ public:
+     const RenderSettings& renderSettings() const { return mRenderSettings; }
+ 
+     void markAllRprimsDirty(pxr::HdDirtyBits bits);
++    void markAllRprimsDirty(pxr::HdRenderIndex& renderIndex, pxr::HdDirtyBits bits);
+ 
+     void setSceneDelegate(pxr::HdSceneDelegate*);
+     pxr::UsdImagingDelegate* usdImagingDelegate() const { return mUsdImagingDelegate; }
+diff --git a/plugin/CMakeLists.txt b/plugin/CMakeLists.txt
+index d4e8f48..a4af4b5 100644
+--- a/plugin/CMakeLists.txt
++++ b/plugin/CMakeLists.txt
+@@ -4,7 +4,11 @@
+ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugInfo.json
+         DESTINATION plugin/pxr)
+ 
+-add_subdirectory(hd_moonray)
++if(HDMOONRAY_ARRAS)
++    add_subdirectory(hd_moonray)
++endif()
+ add_subdirectory(hd_moonray_debug)
+-add_subdirectory(houdini)
++if(HDMOONRAY_TOOLS)
++    add_subdirectory(houdini)
++endif()
+ add_subdirectory(adapters)
+diff --git a/plugin/common/Environment.cc b/plugin/common/Environment.cc
+new file mode 100644
+index 0000000..3a91be7
+--- /dev/null
++++ b/plugin/common/Environment.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 usdcc contributors
++// SPDX-License-Identifier: Apache-2.0
++//
++// Lets a MoonRay install find its own parts when the plugin is loaded from it,
++// without a setup script: the shader DSOs, Arras's session definitions and
++// its program. Each is set only when the environment doesn't set it already.
++// The install is laid out as
++//
++//     <root>/plugin/<this plugin>.so
++//     <root>/rdl2dso, <root>/sessions, <root>/bin/execComp
++//
++// It runs when the plugin library is loaded, before any renderer is created.
++
++#include <cstdlib>
++#include <dlfcn.h>
++#include <string>
++#include <sys/stat.h>
++
++namespace {
++
++bool isDir(const std::string& path)
++{
++    struct stat info;
++    return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
++}
++
++std::string parent(const std::string& path)
++{
++    const std::string::size_type slash = path.rfind('/');
++    return slash == std::string::npos ? std::string() : path.substr(0, slash);
++}
++
++void setDefault(const char* name, const std::string& folder)
++{
++    const char* current = std::getenv(name);
++    if ((!current || !*current) && isDir(folder)) setenv(name, folder.c_str(), 1);
++}
++
++struct MoonrayEnvironment
++{
++    MoonrayEnvironment()
++    {
++        Dl_info info;
++        if (!dladdr(reinterpret_cast<void*>(&isDir), &info) || !info.dli_fname) return;
++        char* resolved = realpath(info.dli_fname, nullptr);
++        if (!resolved) return;
++        const std::string root = parent(parent(resolved));
++        std::free(resolved);
++        if (root.empty()) return;
++
++        setDefault("RDL2_DSO_PATH", root + "/rdl2dso");
++        setDefault("ARRAS_SESSION_PATH", root + "/sessions");
++        // execComp is looked for on PATH, by this process and by the session it starts.
++        const std::string bin = root + "/bin";
++        const char* path = std::getenv("PATH");
++        const std::string current = path ? path : "";
++        if (isDir(bin) && (":" + current + ":").find(":" + bin + ":") == std::string::npos) {
++            setenv("PATH", current.empty() ? bin.c_str() : (bin + ":" + current).c_str(), 1);
++        }
++    }
++};
++
++const MoonrayEnvironment environment;
++
++} // namespace
+diff --git a/plugin/common/ImplicitSurfaceSceneIndexPlugin.cc b/plugin/common/ImplicitSurfaceSceneIndexPlugin.cc
+new file mode 100644
+index 0000000..b316fa0
+--- /dev/null
++++ b/plugin/common/ImplicitSurfaceSceneIndexPlugin.cc
+@@ -0,0 +1,65 @@
++//
++// Copyright 2022 Pixar
++//
++// Licensed under the terms set forth in the LICENSE.txt file available at
++// https://openusd.org/license.
++//
++// Adapted for hdMoonray from OpenUSD's hdEmbree
++// (pxr/imaging/plugin/hdEmbree/delegate/implicitSurfaceSceneIndexPlugin.cpp).
++//
++// Turns USD's implicit shapes (sphere, cube, cone, cylinder, capsule, plane) into meshes
++// for MoonRay. A Hydra host that feeds the renderer through scene indices, as
++// UsdImagingGLEngine does, hands them over as they are; without this they are not drawn.
++//
++// HDM_PLUGIN_CLASS and HDM_PLUGIN_DISPLAY_NAME come from the plugin's CMakeLists.txt: the
++// class, and the render delegate's displayName in plugInfo.json.
++
++#include <pxr/imaging/hd/retainedDataSource.h>
++#include <pxr/imaging/hd/sceneIndexPlugin.h>
++#include <pxr/imaging/hd/sceneIndexPluginRegistry.h>
++#include <pxr/imaging/hd/tokens.h>
++#include <pxr/imaging/hdsi/implicitSurfaceSceneIndex.h>
++#include <pxr/imaging/hdsi/lightLinkingSceneIndex.h>
++
++#define HDM_STR2(x) #x
++#define HDM_STR(x) HDM_STR2(x)
++
++PXR_NAMESPACE_OPEN_SCOPE
++
++class HDM_PLUGIN_CLASS : public HdSceneIndexPlugin
++{
++public:
++    HDM_PLUGIN_CLASS() = default;
++
++protected:
++    HdSceneIndexBaseRefPtr _AppendSceneIndex(const HdSceneIndexBaseRefPtr& inputScene,
++                                             const HdContainerDataSourceHandle& inputArgs) override
++    {
++        HdDataSourceBaseHandle const toMesh =
++            HdRetainedTypedSampledDataSource<TfToken>::New(HdsiImplicitSurfaceSceneIndexTokens->toMesh);
++        HdSceneIndexBaseRefPtr const meshes = HdsiImplicitSurfaceSceneIndex::New(inputScene, HdRetainedContainerDataSource::New(
++            HdPrimTypeTokens->sphere, toMesh,
++            HdPrimTypeTokens->cube, toMesh,
++            HdPrimTypeTokens->cone, toMesh,
++            HdPrimTypeTokens->cylinder, toMesh,
++            HdPrimTypeTokens->capsule, toMesh,
++            HdPrimTypeTokens->plane, toMesh));
++        // Turns light link collections into the categories that hdMoonray reads.
++        return HdsiLightLinkingSceneIndex::New(meshes, inputArgs);
++    }
++};
++
++TF_REGISTRY_FUNCTION(TfType)
++{
++    HdSceneIndexPluginRegistry::Define<HDM_PLUGIN_CLASS>();
++}
++
++TF_REGISTRY_FUNCTION(HdSceneIndexPlugin)
++{
++    const HdSceneIndexPluginRegistry::InsertionPhase insertionPhase = 0;
++    HdSceneIndexPluginRegistry::GetInstance().RegisterSceneIndexForRenderer(
++        HDM_PLUGIN_DISPLAY_NAME, TfToken(HDM_STR(HDM_PLUGIN_CLASS)), nullptr,
++        insertionPhase, HdSceneIndexPluginRegistry::InsertionOrderAtStart);
++}
++
++PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/plugin/hd_moonray/CMakeLists.txt b/plugin/hd_moonray/CMakeLists.txt
+index 1aa3088..ef0f00e 100644
+--- a/plugin/hd_moonray/CMakeLists.txt
++++ b/plugin/hd_moonray/CMakeLists.txt
+@@ -17,8 +17,13 @@ target_sources(${component}
+         ArrasRenderer.cc
+         ArrasSettings.cc
+         RendererPlugin.cc
++        ../common/ImplicitSurfaceSceneIndexPlugin.cc
++        ../common/Environment.cc
+ )
+ 
++set_source_files_properties(../common/ImplicitSurfaceSceneIndexPlugin.cc PROPERTIES COMPILE_DEFINITIONS
++    "HDM_PLUGIN_CLASS=HdMoonray_ImplicitSurfaceSceneIndexPlugin;HDM_PLUGIN_DISPLAY_NAME=\"MoonRay\"")
++
+ target_include_directories(${component}
+     PUBLIC
+         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+@@ -41,9 +46,11 @@ target_link_libraries(${component}
+         McrtMessages::mcrt_messages
+         TBB::tbb
+         hd   # pxr imaging
++        hdsi
+         usdImaging
+         Python::Module
+         ${PlatformSpecificLibs}
++        ${CMAKE_DL_LIBS}
+ )
+ 
+ # If at Dreamworks add a SConscript stub file so others can use this library.
+diff --git a/plugin/hd_moonray/RendererPlugin.cc b/plugin/hd_moonray/RendererPlugin.cc
+index b470c5d..4263ca4 100644
+--- a/plugin/hd_moonray/RendererPlugin.cc
++++ b/plugin/hd_moonray/RendererPlugin.cc
+@@ -7,10 +7,44 @@
+ #include <pxr/imaging/hd/rendererPlugin.h>
+ #include <pxr/imaging/hd/rendererPluginRegistry.h>
+ 
++#include <cstdlib>
+ #include <iostream>
++#include <sstream>
++#include <string>
++#include <unistd.h>
+ 
+ PXR_NAMESPACE_OPEN_SCOPE // this does not work unless inside the pxr namespace
+ 
++namespace {
++
++// Whether one of a search path's folders has the file.
++bool isInPath(const char* variable, const char* file, int mode)
++{
++    const char* value = std::getenv(variable);
++    std::istringstream folders(value ? value : "");
++    for (std::string folder; std::getline(folders, folder, ':');) {
++        if (!folder.empty() && access((folder + "/" + file).c_str(), mode) == 0) return true;
++    }
++    return false;
++}
++
++// A session needs its definition, without which ArrasSettings' constructor throws, and the
++// program that runs MoonRay, without which connecting is tried again and again.
++bool arrasIsThere(std::string* reasonWhyNot)
++{
++    const char* reason = nullptr;
++    if (!isInPath("ARRAS_SESSION_PATH", "hd_single.sessiondef", R_OK) ||
++        !isInPath("ARRAS_SESSION_PATH", "hd_multi.sessiondef", R_OK)) {
++        reason = "ARRAS_SESSION_PATH has no folder with MoonRay's session definitions";
++    } else if (!isInPath("PATH", "execComp", X_OK)) {
++        reason = "Arras's program execComp isn't on PATH";
++    }
++    if (reason && reasonWhyNot) *reasonWhyNot = reason;
++    return !reason;
++}
++
++} // namespace
++
+ class HdMoonrayRendererPlugin final : public pxr::HdRendererPlugin {
+ public:
+     HdMoonrayRendererPlugin() {}
+@@ -34,7 +68,12 @@ public:
+     void DeleteRenderDelegate(pxr::HdRenderDelegate *renderDelegate) override {
+         delete renderDelegate;
+     }
+-#if PXR_VERSION >= 2302
++#if PXR_VERSION >= 2608
++    bool IsSupported(const pxr::HdRendererCreateArgsSchema &rendererCreateArgs,
++                     std::string *reasonWhyNot = nullptr) const override {
++        return arrasIsThere(reasonWhyNot);
++    }
++#elif PXR_VERSION >= 2302
+     bool IsSupported(bool gpuEnabled = true) const override {
+         return true;
+     }
+diff --git a/plugin/hd_moonray/plugInfo.json.in b/plugin/hd_moonray/plugInfo.json.in
+index 3177cea..c2314e9 100644
+--- a/plugin/hd_moonray/plugInfo.json.in
++++ b/plugin/hd_moonray/plugInfo.json.in
+@@ -3,12 +3,20 @@
+         {
+             "Info": {
+                 "Types": {
++                    "HdMoonray_ImplicitSurfaceSceneIndexPlugin": {
++                        "bases": [
++                            "HdSceneIndexPlugin"
++                        ],
++                        "loadWithRenderer": "MoonRay",
++                        "priority": 0,
++                        "displayName": "Implicit shapes to meshes for MoonRay"
++                    },
+                     "HdMoonrayRendererPlugin": {
+                         "bases": [
+                             "HdRendererPlugin"
+                         ],
+-                        "displayName": "Moonray",
+-                        "priority": 99
++                        "displayName": "MoonRay",
++                        "priority": 100
+                     }
+                 }
+             },
+diff --git a/plugin/hd_moonray_debug/CMakeLists.txt b/plugin/hd_moonray_debug/CMakeLists.txt
+index 50300e8..e93b814 100644
+--- a/plugin/hd_moonray_debug/CMakeLists.txt
++++ b/plugin/hd_moonray_debug/CMakeLists.txt
+@@ -16,8 +16,13 @@ target_sources(${component}
+     PRIVATE
+         RndrRenderer.cc
+         RendererPlugin.cc
++        ../common/ImplicitSurfaceSceneIndexPlugin.cc
++        ../common/Environment.cc
+ )
+ 
++set_source_files_properties(../common/ImplicitSurfaceSceneIndexPlugin.cc PROPERTIES COMPILE_DEFINITIONS
++    "HDM_PLUGIN_CLASS=HdMoonrayDebug_ImplicitSurfaceSceneIndexPlugin;HDM_PLUGIN_DISPLAY_NAME=\"MoonRay (in-process)\"")
++
+ target_include_directories(${component}
+     PUBLIC
+         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+@@ -37,9 +42,11 @@ target_link_libraries(${component}
+         SceneRdl2::scene_rdl2
+         TBB::tbb
+         hd   # pxr imaging
++        hdsi
+         usdImaging
+         Python::Module
+         ${PlatformSpecificLibs}
++        ${CMAKE_DL_LIBS}
+ )
+ 
+ # If at Dreamworks add a SConscript stub file so others can use this library.
+diff --git a/plugin/hd_moonray_debug/RendererPlugin.cc b/plugin/hd_moonray_debug/RendererPlugin.cc
+index 36f713d..985af81 100644
+--- a/plugin/hd_moonray_debug/RendererPlugin.cc
++++ b/plugin/hd_moonray_debug/RendererPlugin.cc
+@@ -43,7 +43,12 @@ public:
+         delete renderDelegate;
+     }
+ 
+-#if PXR_VERSION >= 2302
++#if PXR_VERSION >= 2608
++    bool IsSupported(const pxr::HdRendererCreateArgsSchema &rendererCreateArgs,
++                     std::string *reasonWhyNot = nullptr) const override {
++        return true;
++    }
++#elif PXR_VERSION >= 2302
+     bool IsSupported(bool gpuEnabled = true) const override {
+         return true;
+     }
+diff --git a/plugin/hd_moonray_debug/plugInfo.json.in b/plugin/hd_moonray_debug/plugInfo.json.in
+index 35146a2..7083e57 100644
+--- a/plugin/hd_moonray_debug/plugInfo.json.in
++++ b/plugin/hd_moonray_debug/plugInfo.json.in
+@@ -3,12 +3,20 @@
+         {
+             "Info": {
+                 "Types": {
++                    "HdMoonrayDebug_ImplicitSurfaceSceneIndexPlugin": {
++                        "bases": [
++                            "HdSceneIndexPlugin"
++                        ],
++                        "loadWithRenderer": "MoonRay (in-process)",
++                        "priority": 0,
++                        "displayName": "Implicit shapes to meshes for MoonRay (in-process)"
++                    },
+                     "HdMoonrayRendererDebugPlugin": {
+                         "bases": [
+                             "HdRendererPlugin"
+                         ],
+-                        "displayName": "Moonray (debug)",
+-                        "priority": 99
++                        "displayName": "MoonRay (in-process)",
++                        "priority": 100
+                     }
+                 }
+             },

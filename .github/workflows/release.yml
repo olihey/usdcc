@@ -405,9 +405,10 @@ jobs:
           echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
 
       # Required, as in the windows job: a release has every USD plugin pack of
-      # the standard set for its platform (docs/USD_PLUGINS.md section 5).
+      # the standard set for its platform (docs/USD_PLUGINS.md section 5), and the
+      # published ones of the optional set (MoonRay), each a download of its own.
       - name: Download the USD plugin packs
-        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
+        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs --optional
 
       # Required, as in the windows job.
       - name: Download PySide6
@@ -457,7 +458,8 @@ jobs:
       - name: Deploy
         run: |
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
-          python tools/deploy.py "$deploy" --require-vsix
+          # The optional packs go to optional/<pack>/<deploy's name>/, out of the deploy.
+          python tools/deploy.py "$deploy" --require-vsix --optional-packs "$RUNNER_TEMP/optional"
           # A release has to ship every licence (docs/RELEASE.md section 6).
           for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/licenses/$folder" 2>/dev/null)" ]; then
@@ -485,20 +487,44 @@ jobs:
             if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
           done
 
+      # Each optional pack (docs/USD_PLUGINS.md section 5) is checked unpacked over the
+      # deploy, which is packed by now, and becomes usdcc-<version>-linux-<arch>-<pack>.tar.xz,
+      # whose top folder is the deploy's name: unpacked where usdcc was, it lands in it.
+      - name: Check and pack the optional USD plugin packs
+        run: |
+          mkdir -p "$RUNNER_TEMP/optional-archives"
+          deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
+          for folder in "$RUNNER_TEMP"/optional/*/; do
+            [ -d "$folder" ] || continue
+            pack=$(basename "$folder")
+            cp -a "$folder/${{ steps.tag.outputs.name }}/." "$deploy/"
+            python tools/ci/smoke_test.py --deploy "$deploy" --expect-version ${{ steps.tag.outputs.version }}
+            file="${{ steps.tag.outputs.name }}-linux-${{ matrix.arch }}-$pack.tar.xz"
+            tar -C "$folder" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/optional-archives/$file"
+            size=$(stat -c %s "$RUNNER_TEMP/optional-archives/$file")
+            echo "$file: $((size / 1048576)) MB"
+            if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
+          done
+          ls -la "$RUNNER_TEMP/optional-archives"
+
       - name: Keep the archive with the run
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.tag.outputs.tarball }}
-          path: ${{ runner.temp }}/${{ steps.tag.outputs.tarball }}
+          path: |
+            ${{ runner.temp }}/${{ steps.tag.outputs.tarball }}
+            ${{ runner.temp }}/optional-archives/
           compression-level: 0
           retention-days: 3
 
       - name: Attach to the release
         if: ${{ !inputs.dry_run }}
         run: |
+          shopt -s nullglob  # arm64 has no optional pack
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}" \
-            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" --clobber --repo "$GITHUB_REPOSITORY"
+            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-archives/*.tar.xz \
+            --clobber --repo "$GITHUB_REPOSITORY"
 
   # macOS on Apple Silicon (docs/MACOS.md): usdcc.app in a disk image. Signed ad hoc, so
   # macOS asks whoever downloads it (docs/RELEASE.md section 4), unless the secret

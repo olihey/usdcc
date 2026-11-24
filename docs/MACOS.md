@@ -4,8 +4,7 @@ Building and running usdcc on macOS, on Apple Silicon. Intel Macs aren't built o
 
 **Status (2026-11-23): builds, runs and passes its 13 test programs**, with PySide6, the
 Blender mesh tools and the USD plugin pack of file formats (glTF, OBJ, PLY, STL, SPZ). CI's
-macOS job ([CI.md](CI.md) §9) passes, so far without PySide6 and the pack, whose macOS assets
-aren't published yet. The release job hasn't run.
+macOS job ([CI.md](CI.md) §9) builds and tests it. The release job hasn't run.
 
 ## 1. The machine
 
@@ -103,7 +102,7 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 
 ## 5. Not done
 
-- The PySide6, USD plugins and release jobs haven't run; a Developer ID, notarization, and updates in the app. The
+- The release job hasn't run; a Developer ID, notarization, and updates in the app. The
   deploy leaves Blender mesh tools out, as the other releases do. The Gatling (no MDL SDK download) and Arnold
   packs.
 - Checked in the running app by script: a Python panel, Mesh > Triangulate and its undo, a glTF

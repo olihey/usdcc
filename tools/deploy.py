@@ -61,6 +61,13 @@ On Linux the folder is a prefix of its own, which is also the Python's
 Every ELF file's RUNPATH is rewritten relative to $ORIGIN (with patchelf), so the
 folder runs from wherever it is unpacked.
 
+--optional-packs DIR (Linux): the packs of the optional set in the install
+(MoonRay) are deployed too and checked with the rest, then moved to
+DIR/<pack>/<destination's name>/, laid out as the deploy is. Unpacked over a
+deploy, each adds its pack; release.yml attaches each as a download of its own.
+A pack's files under plugin/ keep the RUNPATHs its build gave them, which are
+relative to an OpenUSD install laid out as the deploy is.
+
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
     python tools/deploy.py D:\\dist\\usdcc --clean
@@ -267,7 +274,11 @@ def _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources, libraries
         else:
             fail(f"The {pack} pack has a file tools/deploy.py has no place for: {file}")
         (deploy_dir / target).parent.mkdir(parents=True, exist_ok=True)
-        copy_file(usd_install / file, deploy_dir / target)
+        if (usd_install / file).is_symlink():  # libfoo.so -> libfoo.so.1 stays a link, beside it
+            (deploy_dir / target).unlink(missing_ok=True)
+            os.symlink(os.readlink(usd_install / file), deploy_dir / target)
+        else:
+            copy_file(usd_install / file, deploy_dir / target)
         deployed.append(target)
     record = {key: manifest.get(key, "") for key in ("pack", "asset", "repository", "commit", "version", "license")}
     record["files"] = sorted(deployed)
@@ -316,6 +327,9 @@ def main(argv=None):
     parser.add_argument("--bundle-rtx-runtime", action="store_true",
                         help="copy the pinned native SDK bin trees, metadata and licenses into RTX; otherwise "
                              "configure external runtime roots on the target")
+    parser.add_argument("--optional-packs", metavar="DIR",
+                        help="Linux: also deploy the optional set's USD plugin packs, each into DIR/<pack>/<name>/ "
+                             "to be unpacked over the deploy (docs/USD_PLUGINS.md section 5)")
     parser.add_argument("--with-blender-mesh-tools", action="store_true",
                         help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
     parser.add_argument("--blender-source-bundle", metavar="FILE",
@@ -337,6 +351,8 @@ def main(argv=None):
     if not WINDOWS:
         deploy_linux(args)
         return
+    if args.optional_packs:
+        fail("--optional-packs is for Linux only so far: no optional pack is published for Windows.")
 
     configuration = args.configuration
     app_dir = BUILD_DIR / "src/cpp/app" / configuration
@@ -935,6 +951,10 @@ def deploy_linux(args):
         absolute = _full(protected)
         if absolute == deploy_dir or absolute.startswith(deploy_dir + os.sep):
             fail(f"Unsafe deploy destination '{deploy_dir}' contains '{absolute}'.")
+    optional_dir = Path(_full(args.optional_packs)) if args.optional_packs else None
+    if optional_dir and (str(optional_dir) == deploy_dir or str(optional_dir).startswith(deploy_dir + os.sep)
+                         or deploy_dir.startswith(str(optional_dir) + os.sep)):
+        fail(f"--optional-packs '{optional_dir}' can't be in the deploy, nor the deploy in it.")
     deploy_dir = Path(deploy_dir)
     if deploy_dir.exists():
         if not deploy_dir.is_dir():
@@ -974,7 +994,9 @@ def deploy_linux(args):
     for pack, manifest in shipped_packs.items():
         print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, pack_sources, libraries="lib")
-    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+    optional_packs = {} if not optional_dir or args.with_blender_mesh_tools else {
+        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "optional"}
+    for pack in sorted(set(usd_packs) - set(shipped_packs) - set(optional_packs)):
         print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
     print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
@@ -1093,6 +1115,22 @@ def deploy_linux(args):
             set_runpath(file, ["$ORIGIN"])
             elves.append(file)
 
+    # The optional packs, after the RUNPATHs: their files under plugin/ keep their own,
+    # relative to the install's lib/, which is the deploy's. They are checked below with
+    # everything else, from inside the deploy, and then moved out of it.
+    optional_files = {}
+    for pack, manifest in optional_packs.items():
+        print(f"  USD plugin pack, a download of its own: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, [], libraries="lib")
+        record = json.loads((deploy_dir / USD_PACKS_DIR / f"{pack}.json").read_text(encoding="utf-8"))
+        optional_files[pack] = [*record["files"], f"{USD_PACKS_DIR}/{pack}.json"]
+        for name in record["files"]:
+            file = deploy_dir / name
+            if is_elf(file):
+                if file.parent == lib_dir:
+                    set_runpath(file, ["$ORIGIN"])
+                elves.append(file)
+
     # --- licences (docs/RELEASE.md section 6) ---------------------------------
 
     print("  Licences", flush=True)
@@ -1196,6 +1234,21 @@ def deploy_linux(args):
         if found.returncode != 0:
             fail(f"uv can't use the deploy's Python: {(found.stdout + found.stderr).strip()}")
 
+    # The optional packs out of the deploy, each into a folder of the deploy's name.
+    for pack, names in optional_files.items():
+        target = optional_dir / pack / deploy_dir.name
+        if target.exists():
+            remove_tree(target)
+        for name in names:
+            (target / name).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(deploy_dir / name, target / name)
+            parent = (deploy_dir / name).parent
+            while parent != deploy_dir and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+        size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
+        print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), to unpack over the deploy")
+
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with ./usdcc or bin/usdcc.")
 
@@ -1265,6 +1318,8 @@ def deploy_macos(args):
     from _macho import needed, sign, sign_app
     if args.with_blender_mesh_tools:
         fail("--with-blender-mesh-tools isn't set up for macOS: its distribution review is Windows' and Linux'.")
+    if args.optional_packs:
+        fail("--optional-packs is for Linux only so far: no optional pack is published for macOS.")
     configuration = args.configuration
     build_type = cache_value(BUILD_DIR, "CMAKE_BUILD_TYPE")
     app_dir = BUILD_DIR / "src/cpp/app"
