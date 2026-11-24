@@ -3,8 +3,9 @@
 //     USDCC_EXE=<usdcc.exe> npm run e2e
 //
 // usdcc is started with a test profile and quit again; VS Code gets a profile of its own.
+// With VSIX=<usdcc.vsix> it's that, installed, rather than this folder.
 // VSCODE_EXE names VS Code's program when it isn't where its installer puts it.
-import { ChildProcess, spawn } from 'node:child_process';
+import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -43,7 +44,17 @@ async function main(): Promise<number> {
         const env: NodeJS.ProcessEnv = { ...process.env, E2E_PLUGIN: plugin };
         delete env.ELECTRON_RUN_AS_NODE;
         for (const name of Object.keys(env)) if (name.startsWith('VSCODE_')) delete env[name];
-        const extension = path.resolve(__dirname, '../../..');
+        let extension = path.resolve(__dirname, '../../..');
+        if (process.env.VSIX) {
+            const command = path.join(path.dirname(vscode), 'bin', process.platform === 'win32' ? 'code.cmd' : 'code');
+            const quoted = [command, '--install-extension', process.env.VSIX, '--extensions-dir', path.join(root, 'extensions'), '--user-data-dir', path.join(root, 'user')].map((each) => `"${each}"`).join(' ');
+            const installed = spawnSync(quoted, { shell: true, env, encoding: 'utf8' });
+            console.log(`vsix: ${installed.stdout.trim().split('\n').pop()}`);
+            // Tests need an extension in development: one that does nothing.
+            extension = path.join(root, 'nothing');
+            fs.mkdirSync(extension);
+            fs.writeFileSync(path.join(extension, 'package.json'), JSON.stringify({ name: 'nothing', publisher: 'test', version: '0.0.1', engines: { vscode: '*' } }));
+        }
         const editor = spawn(
             vscode,
             [path.join(root, 'workspace'), `--extensionDevelopmentPath=${extension}`, `--extensionTestsPath=${path.join(__dirname, 'suite')}`, `--user-data-dir=${path.join(root, 'user')}`, `--extensions-dir=${path.join(root, 'extensions')}`, '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes'],

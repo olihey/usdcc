@@ -8,10 +8,10 @@ outside the deploy: a DLL or Python file the build's own folders were hiding
 (docs/RELEASE.md section 4).
 
 The same script asks OpenUSD for its own render delegates (Storm, Embree) and
-for the plugins of each USD plugin pack the deploy has (its usd-plugins/*.json),
-and does what the pack's pin asks under "check": the plugins load from the
-deploy, the extensions have file formats, the render delegates are listed, the
-sample files open
+file formats (Alembic, Draco), imports those formats' pxr modules, and asks for the
+plugins of each USD plugin pack the deploy has (its usd-plugins/*.json), and does
+what the pack's pin asks under "check": the plugins load from the deploy, the
+extensions have file formats, the render delegates are listed, the sample files open
 (docs/USD_PLUGINS.md). --expect-standard-usd-packs fails a deploy that lacks a
 pack of the standard set, which a release has to have.
 
@@ -46,8 +46,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import ASSET_PLATFORM, MACOS, REPO, WINDOWS, fail, remove_tree  # noqa: E402
 import usd_plugin_asset  # noqa: E402
 
-# OpenUSD's own render delegates, which every deploy has (tools/deploy.py).
-OPENUSD_PLUGINS = ["hdStorm", "hdEmbree"]
+# OpenUSD's own render delegates and file formats, which every deploy has (tools/deploy.py).
+OPENUSD_PLUGINS = ["hdStorm", "hdEmbree", "usdAbc", "usdDraco"]
+# The pxr modules that link one of those plugins.
+OPENUSD_PLUGIN_MODULES = ["UsdAbc", "UsdDraco"]
 
 CHECK = """\
 import json
@@ -91,6 +93,17 @@ if sys.platform == "linux":
 # OpenUSD's plugins: its own render delegates, and what each USD plugin pack in
 # the deploy is checked for (its pin's "check", docs/USD_PLUGINS.md).
 from pxr import Plug, Sdf, Tf
+
+# Before anything loads the plugins: on Windows a loaded one hides that its module can't find it.
+def import_error(name):
+    import importlib
+    try:
+        importlib.import_module("pxr." + name)
+    except Exception as error:
+        return str(error)
+    return None
+
+result["modules"] = {name: import_error(name) for name in MODULES}
 
 def plugin(name):
     found = Plug.Registry().GetPluginWithName(name)
@@ -198,6 +211,7 @@ def main(argv=None):
     result = work / "result.json"
     script = work / "check.py"
     script.write_text(f"RESULT = {str(result)!r}\nNEED_PYSIDE = {not args.without_pyside!r}\n"
+                      f"MODULES = {OPENUSD_PLUGIN_MODULES!r}\n"
                       f"PLUGINS = {OPENUSD_PLUGINS + sorted(pack_plugins)!r}\nEXTENSIONS = {extensions!r}\n"
                       f"FILES = {sorted(files)!r}\n" + CHECK, encoding="utf-8")
 
@@ -272,6 +286,9 @@ def main(argv=None):
         if len(checked.get("qt", [""])) != 1:
             problems.append(f"the process has {len(checked['qt'])} Qts, not one")
 
+        for name, error in checked["modules"].items():
+            if error is not None:
+                problems.append(f"pxr.{name} can't be imported: {error}")
         for name, found in checked["plugins"].items():
             what = f"the {pack_plugins[name]} pack's {name}" if name in pack_plugins else f"OpenUSD's {name}"
             if not found:

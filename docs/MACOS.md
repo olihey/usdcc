@@ -4,8 +4,8 @@ Building and running usdcc on macOS, on Apple Silicon. Intel Macs aren't built o
 
 **Status (2026-11-23): builds, runs and passes its 13 test programs**, with PySide6, the
 Blender mesh tools and the USD plugin pack of file formats (glTF, OBJ, PLY, STL, SPZ). CI's
-macOS job ([CI.md](CI.md) §9) passes, so far without PySide6 and the pack, whose macOS assets aren't published yet. The
-release job hasn't run.
+macOS job ([CI.md](CI.md) §9) passes, so far without PySide6 and the pack, whose macOS assets
+aren't published yet. The release job hasn't run.
 
 ## 1. The machine
 

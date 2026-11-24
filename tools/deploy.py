@@ -99,6 +99,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "ci"))
 import usd_licenses  # noqa: E402
+import build_vsix  # noqa: E402
 from _common import (  # noqa: E402
     CONFIGURATIONS, MACOS, REPO, VS_ARCH, WINDOWS, cache_on, cache_value, copy_file, copy_tree, fail, remove_tree,
     vcpkg_triplet, warn)
@@ -305,6 +306,8 @@ def main(argv=None):
                         help="the OpenUSD install to take OpenUSD's files from (default: the one the build was "
                              "configured with). usdcc is compiled against that one, so another one gets a "
                              "warning: it may not run with it")
+    parser.add_argument("--require-vsix", action="store_true",
+                        help="fail without the VS Code extension (no npm, say), rather than warn; for releases")
     parser.add_argument("--clean", action="store_true",
                         help="delete the destination folder first, whatever it holds; without it only an earlier "
                              "deploy is replaced, and any other non-empty folder is refused")
@@ -539,6 +542,7 @@ def main(argv=None):
 
     _deploy_debugpy(debugpy_dir, deploy_dir, args)
     _deploy_stubs(deploy_dir, args)
+    _deploy_vsix(deploy_dir, args)
 
     # --- plugins --------------------------------------------------------------
 
@@ -740,6 +744,22 @@ def _deploy_stubs(deploy_dir, args):
         warn(f"No types for editors in the build ('{stubs}'): the deploy works, but Set Up VS Code in it doesn't.")
 
 
+def _deploy_vsix(deploy_dir, args):
+    """tools/vscode/usdcc.vsix, the VS Code extension Set Up VS Code offers. Not with Blender mesh tools, as debugpy."""
+    if args.with_blender_mesh_tools:
+        return
+    try:
+        vsix = build_vsix.build()
+    except build_vsix.VsixError as error:
+        if args.require_vsix:
+            fail(f"No VS Code extension: {error}")
+        warn(f"No VS Code extension ({error}): the deploy works, but Set Up VS Code in it can't offer it.")
+        return
+    print("  VS Code extension", flush=True)
+    (deploy_dir / "tools/vscode").mkdir(parents=True, exist_ok=True)
+    copy_file(vsix, deploy_dir / "tools/vscode")
+
+
 def _pyside_licences(pyside_dir, python_exe, licenses_dir, sources):
     """PySide6's licence texts, and its lines in SOURCES.txt."""
     # tools/build_pyside.py copies them in; an older PySide build has them in
@@ -834,9 +854,10 @@ def _python_layout(python_exe):
     return Path(home), version, Path(stdlib), Path(executable)
 
 
-def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False):
+def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False, also=()):
     """Points the RUNPATH of every ELF file under `folders` at the deploy's lib/
-    (and, for plugins, at their own folder first, as Windows finds a DLL's DLLs)."""
+    (and, for plugins, at their own folder first, as Windows finds a DLL's DLLs),
+    then at the `also` folders."""
     from _elf import elf_files, origin_relative, set_runpath
     lib = deploy_dir / "lib"
     changed = []
@@ -847,6 +868,7 @@ def _set_deploy_runpaths(deploy_dir, folders, own_folder_first=False):
             entries = [origin_relative(file, lib)]
             if own_folder_first and entries[0] != "$ORIGIN":
                 entries.insert(0, "$ORIGIN")
+            entries += [origin_relative(file, other) for other in also]
             set_runpath(file, entries)
             changed.append(file)
     return changed
@@ -1013,6 +1035,7 @@ def deploy_linux(args):
                  f"needs a {name} on PATH.")
     _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), deploy_dir, args)
     _deploy_stubs(deploy_dir, args)
+    _deploy_vsix(deploy_dir, args)
 
     # --- plugins, preview, SDK ------------------------------------------------
 
@@ -1060,7 +1083,8 @@ def deploy_linux(args):
 
     print("  RUNPATHs relative to $ORIGIN", flush=True)
     elves = _set_deploy_runpaths(deploy_dir, [bin_dir, deploy_dir / "plugin/usd", deploy_dir / "Qt6/plugins"])
-    elves += _set_deploy_runpaths(deploy_dir, [site_packages])
+    # pxr.UsdAbc and pxr.UsdDraco link their plugins, usdAbc.so and usdDraco.so, which aren't in lib/.
+    elves += _set_deploy_runpaths(deploy_dir, [site_packages], also=[deploy_dir / "plugin/usd"])
     elves += _set_deploy_runpaths(deploy_dir, [deploy_dir / "plugins", deploy_dir / "examples/plugins"],
                                   own_folder_first=True)
     from _elf import is_elf, set_runpath
@@ -1396,6 +1420,7 @@ def deploy_macos(args):
                  f"needs a {name} on PATH.")
     _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), root, args)
     _deploy_stubs(root, args)
+    _deploy_vsix(root, args)
 
     # --- plugins, preview, SDK ------------------------------------------------
 

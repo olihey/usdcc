@@ -3,6 +3,10 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
+class QObject;
+
 namespace usdcc::scripting {
 
 class PluginManager;
@@ -29,6 +33,14 @@ QString interpreter(const PythonRuntime& python);
 // Writes `folder`/.vscode/settings.json and launch.json, keeping what's there. False, with
 // `error`, when one can't be read as plain JSON (it has comments, say); nothing is written then.
 bool setUpFolder(const QString& folder, const QStringList& paths, const QString& interpreter, int debugPort, QString* error = nullptr);
+
+// The VS Code extension beside this usdcc; empty when there's none.
+QString extensionFile();
+// Whether the user's VS Code has the extension, of this usdcc's version.
+bool isExtensionInstalled();
+// Has VS Code install it. `done`, on the main thread, gets whether it did, and what it said.
+// Nothing happens once `context` is gone.
+void installExtension(QObject* context, const std::function<void(bool, const QString&)>& done);
 
 // VS Code's program; empty when it isn't found.
 QString findVsCode();

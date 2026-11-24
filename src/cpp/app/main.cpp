@@ -1406,8 +1406,27 @@ int main(int argc, char** argv) {
                             .arg(QDir::toNativeSeparators(folder)),
                         QMessageBox::Close, &window);
         QPushButton* open = setup::findVsCode().isEmpty() ? nullptr : box.addButton(QObject::tr("Open in VS Code"), QMessageBox::AcceptRole);
+        // The extension, to run and debug from there, when it isn't there already.
+        const bool offer = !setup::findVsCode().isEmpty() && !setup::extensionFile().isEmpty() && !setup::isExtensionInstalled();
+        QPushButton* install = offer ? box.addButton(QObject::tr("Install Extension"), QMessageBox::AcceptRole) : nullptr;
         box.exec();
         if (open && box.clickedButton() == open) setup::openInVsCode(folder);
+        if (install && box.clickedButton() == install) {
+            window.statusBar()->showMessage(QObject::tr("Installing the VS Code extension..."));
+            setup::installExtension(&window, [&window](bool ok, const QString& said) {
+                window.statusBar()->clearMessage();
+                usdcc::core::ToastRequest request;
+                request.title = (ok ? QObject::tr("The VS Code extension is installed") : QObject::tr("The VS Code extension couldn't be installed")).toStdString();
+                request.body = (ok ? QObject::tr("Reload VS Code's windows to use it.") : said.right(300)).toStdString();
+                request.kind = ok ? usdcc::core::ToastKind::Success : usdcc::core::ToastKind::Error;
+                window.toasts()->show(request);
+                if (ok) {
+                    USDCC_LOG_INFO("usdcc.editor", "Installed the VS Code extension");
+                } else {
+                    USDCC_LOG_WARNING("usdcc.editor", "VS Code couldn't install the extension: {}", said.toStdString());
+                }
+            });
+        }
     };
     QObject::connect(scriptEditor, &usdcc::scripting::ScriptEditorSidePanel::setUpVsCodeRequested, &window, setUpVsCode);
     QObject::connect(pluginPanel, &usdcc::scripting::PluginManagerSidePanel::setUpVsCodeRequested, &window, setUpVsCode);

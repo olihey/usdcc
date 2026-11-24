@@ -45,7 +45,8 @@ if(USDCC_PYTHON_FOUND)
     endif()
     file(GLOB _usdcc_stubs_own CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/python/stubs/*.pyi")
     if(WIN32)
-        list(APPEND _usdcc_stubs_arguments --dlls "${USD_INSTALL}/lib" "${USD_INSTALL}/bin")
+        list(APPEND _usdcc_stubs_arguments --dlls "${USD_INSTALL}/lib" "${USD_INSTALL}/bin"
+             "${USD_INSTALL}/plugin/usd")  # what pxr.UsdAbc and pxr.UsdDraco link
         set(_usdcc_stubs_environment "PYTHONUTF8=1")
     elseif(APPLE)
         # The rpaths reach the libraries, and DYLD_LIBRARY_PATH would replace the system's

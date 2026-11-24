@@ -195,10 +195,18 @@ jobs:
           ctest --test-dir build -C RelWithDebInfo --output-on-failure --timeout 900
           if ($LASTEXITCODE) { throw 'tests failed' }
 
+      # For the VS Code extension, which the deploy has (docs/VSCODE.md).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
       - name: Deploy
         run: |
           $deploy = "$env:RUNNER_TEMP\${{ steps.tag.outputs.name }}"
-          python tools/deploy.py $deploy
+          python tools/deploy.py $deploy --require-vsix
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           # A release has to ship every licence (docs/RELEASE.md section 6).
           foreach ($folder in 'OpenUSD-dependencies', 'PySide6', 'vcpkg') {
@@ -438,10 +446,18 @@ jobs:
       # The deploy checks itself: every library loads from it or the system,
       # and its Python imports pxr and usdcc from it. Then usdcc's own debug
       # info goes into the symbols folder, laid out as the deploy is.
+      # For the VS Code extension, which the deploy has (docs/VSCODE.md).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
       - name: Deploy
         run: |
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
-          python tools/deploy.py "$deploy"
+          python tools/deploy.py "$deploy" --require-vsix
           # A release has to ship every licence (docs/RELEASE.md section 6).
           for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/licenses/$folder" 2>/dev/null)" ]; then
@@ -586,12 +602,20 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure --timeout 900
 
+      # For the VS Code extension, which the deploy has (docs/VSCODE.md).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
       # The deploy checks itself, as on Linux. The symbols come out before anything is
       # made of it: the binaries are signed again without them.
       - name: Deploy
         run: |
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
-          python tools/deploy.py "$deploy" --sign "$SIGN"
+          python tools/deploy.py "$deploy" --sign "$SIGN" --require-vsix
           # A release has to ship every licence (docs/RELEASE.md section 6).
           for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/usdcc.app/Contents/Resources/licenses/$folder" 2>/dev/null)" ]; then
