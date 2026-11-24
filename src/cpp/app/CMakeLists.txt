@@ -9,7 +9,7 @@ if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
 endif()
 
 # usdcc — the application executable.
-add_executable(usdcc main.cpp)
+add_executable(usdcc main.cpp file_open_events.h)
 # Updates of an installed usdcc (docs/UPDATES.md): Velopack's DLL, beside the exe. A build
 # without the Updates feature (docs/BUILD_OPTIONS.md) has none of it.
 if(USDCC_BUILD_UPDATES)
@@ -45,7 +45,7 @@ endif()
 # All three icon formats are generated from one source by tools/gen_app_icon.py.
 if(APPLE)
     # macOS shows an app's icon from its bundle, so usdcc is built as one with
-    # usdcc.icns in Contents/Resources. NOTE: not yet built or run on macOS.
+    # usdcc.icns in Contents/Resources (docs/MACOS.md).
     set(USDCC_MAC_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/usdcc.icns")
     target_sources(usdcc PRIVATE "${USDCC_MAC_ICON}")
     set_source_files_properties("${USDCC_MAC_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -53,7 +53,12 @@ if(APPLE)
         usdcc
         PROPERTIES MACOSX_BUNDLE ON
                    MACOSX_BUNDLE_ICON_FILE usdcc.icns
-                   MACOSX_BUNDLE_BUNDLE_NAME usdcc)
+                   MACOSX_BUNDLE_BUNDLE_NAME usdcc
+                   MACOSX_BUNDLE_GUI_IDENTIFIER org.usdcc.usdcc
+                   MACOSX_BUNDLE_SHORT_VERSION_STRING "${USDCC_VERSION_NUMBER}"
+                   MACOSX_BUNDLE_BUNDLE_VERSION "${USDCC_VERSION_NUMBER}"
+                   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/macos/Info.plist.in")
+    set(USDCC_MACOS_MINIMUM "${CMAKE_OSX_DEPLOYMENT_TARGET}")
 endif()
 
 if(UNIX AND NOT APPLE)

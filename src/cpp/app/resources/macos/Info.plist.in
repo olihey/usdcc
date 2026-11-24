@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.graphics-design</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>${USDCC_MACOS_MINIMUM}</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- Peers finds rooms with mDNS (docs/PEERS.md): without these macOS blocks it. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>usdcc finds rooms that others on your network have opened, and shows yours to them.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_usdcc._tcp</string>
+    </array>
+    <!-- The types macOS itself declares. Not the default app for them: that stays whatever it is. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Universal Scene Description</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>usd</string>
+                <string>usda</string>
+                <string>usdc</string>
+                <string>usdz</string>
+            </array>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.pixar.universal-scene-description</string>
+                <string>com.pixar.universal-scene-description-mobile</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

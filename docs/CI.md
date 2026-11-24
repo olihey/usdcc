@@ -2,7 +2,7 @@
 
 usdcc's continuous integration on GitHub Actions. Part of M0 (docs/PLAN.md §6 item 2,
 §8). **Windows, Linux and macOS.** Each workflow has a `windows` job, a `linux` job
-(`ubuntu-24.04`, GCC 13): §8, and, but for `release.yml`, a `macos` job: §9. USD plugins (file formats, render delegates) and
+(`ubuntu-24.04`, GCC 13): §8, and a `macos` job: §9. USD plugins (file formats, render delegates) and
 self-hosted runners come later (§7).
 
 ## 1. Decisions
@@ -329,7 +329,6 @@ GPU tests are explicitly opt-in and are not counted as passing in hosted CI.
 
 ## 7. Later
 
-- **macOS releases** ([MACOS.md](MACOS.md) §5).
 - **USD plugins.** A second layer on top of the OpenUSD asset (file format plugins,
   render delegates), built against it and unzipped over it, so `tools/deploy.py` picks
   them up from `plugin/usd`. Autodesk's FBX SDK can't be republished in a public release.
@@ -413,4 +412,5 @@ steps do has been done on a Mac, by hand.
   Adobe's file formats' pin only.
 - **`build.yml`**'s check is `macos`, which isn't one of master's required checks. It fails
   until the OpenUSD asset for macOS is published; a missing pack or PySide6 is a warning.
+- **`release.yml`** makes a disk image of `usdcc.app` ([RELEASE.md](RELEASE.md) §4).
 - **vcpkg's host tools** are built static, for the triplet `arm64-osx`: [MACOS.md](MACOS.md) §2.

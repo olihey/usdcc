@@ -11,10 +11,11 @@ doesn't run code whose signature no longer fits. Standard library only.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
-from _common import fail
+from _common import REPO, fail
 
 # Thin 64-bit, and universal (fat) files. The latter's number is Java's class files' too,
 # which have their version, 45 or more, where a fat file has its few architectures.
@@ -129,11 +130,43 @@ def _change(path, arguments):
         fail(f"install_name_tool couldn't change {path}: {result.stderr.strip()}")
 
 
-def sign(path):
-    """An ad-hoc signature, over whatever one there is."""
-    result = subprocess.run(["codesign", "--force", "--sign", "-", str(path)], capture_output=True, text=True)
+def _codesign(arguments, path):
+    result = subprocess.run(["codesign", *arguments, str(path)], capture_output=True, text=True)
     if result.returncode != 0:
-        fail(f"codesign couldn't sign {path}: {result.stderr.strip()}")
+        fail(f"codesign {' '.join(arguments)} failed for {path}: {result.stderr.strip()}")
+
+
+def _signing(identity):
+    """codesign's arguments for an identity: with a real one the hardened runtime and a
+    timestamp too, which notarization asks for."""
+    return ["--force", "--sign", identity, *([] if identity == "-" else ["--options", "runtime", "--timestamp"])]
+
+
+def sign(path, identity="-", entitlements=None):
+    """Signs one file (ad hoc by default), over whatever signature there is."""
+    _codesign(_signing(identity) + (["--entitlements", str(entitlements)] if entitlements else []), path)
+
+
+def sign_app(app, identity="-"):
+    """Signs usdcc.app's programs, with its entitlements, and then the bundle, whose other
+    binaries are signed already; then checks all of it."""
+    entitlements = REPO / "src/cpp/app/resources/macos/entitlements.plist"
+    programs = sorted((Path(app) / "Contents/MacOS").iterdir()) + sorted((Path(app) / "Contents/Resources/bin").iterdir())
+    for program in programs:
+        if is_macho(program):
+            sign(program, identity, entitlements)
+    sign(app, identity, entitlements)
+    _codesign(["--verify", "--deep", "--strict"], app)
+
+
+def library_versions(path):
+    """What a Mach-O file links and its own name, as {install name: compatibility version}."""
+    versions = {}
+    for line in _otool("-L", path).splitlines():
+        match = re.match(r"\s+(.+) \(compatibility version ([0-9.]+),", line)
+        if match:
+            versions[match.group(1)] = tuple(int(part) for part in match.group(2).split("."))
+    return versions
 
 
 def loader_relative(path, folder):

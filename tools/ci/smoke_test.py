@@ -19,8 +19,8 @@ The deploy's render node, usdcc_node, has to start too, say the same version, an
 Embree among its renderers with the plugins loaded, and end without a crash.
 
 On Windows the deploy only has Qt's windows platform plugin; the offscreen one
-comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux deploy
-has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
+comes from --platform-plugins (vcpkg's Qt6\\plugins\\platforms). A Linux or macOS
+(usdcc.app) deploy has its own, and the app starts with no more than PATH=/usr/bin:/bin and HOME: no
 LD_LIBRARY_PATH, nothing of the build's. PySide6 is required,
 unless --without-pyside: a panel made with usdcc.ui docks, and on Linux the process has
 one Qt, the deploy's.
@@ -43,7 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import ASSET_PLATFORM, REPO, WINDOWS, fail, remove_tree  # noqa: E402
+from _common import ASSET_PLATFORM, MACOS, REPO, WINDOWS, fail, remove_tree  # noqa: E402
 import usd_plugin_asset  # noqa: E402
 
 # OpenUSD's own render delegates, which every deploy has (tools/deploy.py).
@@ -136,6 +136,8 @@ def _print_latest_log(started):
     """The end of the log the app wrote, to say why it failed."""
     if WINDOWS:
         folder = Path(os.environ.get("LOCALAPPDATA", "")) / "usdcc_config/logs"
+    elif MACOS:
+        folder = Path.home() / "Library/Application Support/usdcc/logs"
     else:
         folder = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "usdcc/logs"
     if not folder.is_dir():
@@ -161,9 +163,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     deploy_dir = os.path.abspath(args.deploy)
-    exe = os.path.join(deploy_dir, "bin", "usdcc.exe" if WINDOWS else "usdcc")
+    # A macOS deploy is a bundle: its programs, and the folder of everything else.
+    bin_dir = os.path.join(deploy_dir, "usdcc.app/Contents/MacOS" if MACOS else "bin")
+    root_dir = os.path.join(deploy_dir, "usdcc.app/Contents/Resources") if MACOS else deploy_dir
+    exe = os.path.join(bin_dir, "usdcc.exe" if WINDOWS else "usdcc")
     if not os.path.isfile(exe):
-        fail(f"No {os.path.basename(exe)} in {os.path.join(deploy_dir, 'bin')}")
+        fail(f"No {os.path.basename(exe)} in {bin_dir}")
     platform_plugins = None
     if WINDOWS:
         platform_plugins = os.path.abspath(args.platform_plugins)
@@ -173,7 +178,7 @@ def main(argv=None):
     # The USD plugin packs the deploy says it has (tools/deploy.py writes a file
     # each), and what each one's pin wants checked.
     problems = []
-    packs_dir = Path(deploy_dir) / "usd-plugins"
+    packs_dir = Path(root_dir) / "usd-plugins"
     packs = sorted(file.stem for file in packs_dir.glob("*.json")) if packs_dir.is_dir() else []
     if args.expect_standard_usd_packs:
         for pack in sorted(file.stem for file in usd_plugin_asset.PINS.glob("*.json")):
@@ -206,10 +211,13 @@ def main(argv=None):
         environment["QT_QPA_PLATFORM_PLUGIN_PATH"] = platform_plugins
     else:
         environment = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}
+        # macOS's settings folders don't follow HOME: a test profile keeps the user's own out.
+        if "USDCC_TEST_PROFILE" in os.environ:
+            environment["USDCC_TEST_PROFILE"] = os.environ["USDCC_TEST_PROFILE"]
     environment["QT_QPA_PLATFORM"] = "offscreen"
 
     # The render node (docs/RENDER_NODE.md), which the app never starts itself.
-    node = os.path.join(deploy_dir, "bin", "usdcc_node.exe" if WINDOWS else "usdcc_node")
+    node = os.path.join(bin_dir, "usdcc_node.exe" if WINDOWS else "usdcc_node")
     if not os.path.isfile(node):
         problems.append(f"the deploy has no {os.path.basename(node)}")
     else:

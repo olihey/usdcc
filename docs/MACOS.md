@@ -3,8 +3,9 @@
 Building and running usdcc on macOS, on Apple Silicon. Intel Macs aren't built or tested.
 
 **Status (2026-11-23): builds, runs and passes its 13 test programs**, with PySide6, the
-Blender mesh tools and the USD plugin pack of file formats (glTF, OBJ, PLY, STL, SPZ). CI
-has a macOS job ([CI.md](CI.md) §9), which hasn't run yet. Not done yet: a deploy or release (§5).
+Blender mesh tools and the USD plugin pack of file formats (glTF, OBJ, PLY, STL, SPZ). CI's
+macOS job ([CI.md](CI.md) §9) passes, so far without PySide6 and the pack, whose macOS assets aren't published yet. The
+release job hasn't run.
 
 ## 1. The machine
 
@@ -82,6 +83,14 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 - **Paths** compare without case, as APFS does by default.
 - **Credentials and Peers' key** are in files, as on Linux: no Keychain yet.
 
+- **The deploy** (`tools/deploy.py`) is `usdcc.app`, with everything in `Contents/Resources`
+  laid out as a Linux deploy: OpenUSD and Python find their data beside their libraries, and
+  `codesign` takes only signed code in `Frameworks`. Nothing may be written into it: its
+  Python is compiled already, and usdcc's Python writes no `__pycache__` in a bundle.
+  Libraries are linked by their own names, not a link's: the hardened runtime refuses
+  `libjpeg.62.dylib` when the library calls itself `libjpeg.62.4.0.dylib`.
+- **Files** opened from Finder come as an event (`FileOpenEvents`), not an argument.
+
 ## 4. Found in the tests
 
 - `peers_discovery_test` kept a pointer into a temporary list: wrong everywhere, but it only
@@ -94,7 +103,8 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 
 ## 5. Not done
 
-- `tools/deploy.py`, signing and a release. CI hasn't run. The Gatling (no MDL SDK download) and Arnold
+- The PySide6, USD plugins and release jobs haven't run; a Developer ID, notarization, and updates in the app. The
+  deploy leaves Blender mesh tools out, as the other releases do. The Gatling (no MDL SDK download) and Arnold
   packs.
 - Checked in the running app by script: a Python panel, Mesh > Triangulate and its undo, a glTF
   file, Storm and Embree in the viewport, the Outline and Wireframe selection, full screen and
