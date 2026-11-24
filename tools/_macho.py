@@ -17,6 +17,9 @@ from pathlib import Path
 
 from _common import REPO, fail
 
+# What usdcc's programs are signed with.
+ENTITLEMENTS = REPO / "src/cpp/app/resources/macos/entitlements.plist"
+
 # Thin 64-bit, and universal (fat) files. The latter's number is Java's class files' too,
 # which have their version, 45 or more, where a fat file has its few architectures.
 _THIN = (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")
@@ -150,12 +153,11 @@ def sign(path, identity="-", entitlements=None):
 def sign_app(app, identity="-"):
     """Signs usdcc.app's programs, with its entitlements, and then the bundle, whose other
     binaries are signed already; then checks all of it."""
-    entitlements = REPO / "src/cpp/app/resources/macos/entitlements.plist"
     programs = sorted((Path(app) / "Contents/MacOS").iterdir()) + sorted((Path(app) / "Contents/Resources/bin").iterdir())
     for program in programs:
         if is_macho(program):
-            sign(program, identity, entitlements)
-    sign(app, identity, entitlements)
+            sign(program, identity, ENTITLEMENTS)
+    sign(app, identity, ENTITLEMENTS)
     _codesign(["--verify", "--deep", "--strict"], app)
 
 

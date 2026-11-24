@@ -594,9 +594,9 @@ jobs:
           unzip -q "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" -d "$RUNNER_TEMP/deps/usd"
           echo "USD_INSTALL=$RUNNER_TEMP/deps/usd" >> "$GITHUB_ENV"
 
-      # Required, as in the windows job.
+      # Required, as in the windows job; the optional ones (MoonRay) too, as on Linux.
       - name: Download the USD plugin packs
-        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs
+        run: python tools/fetch_usd.py "$RUNNER_TEMP/deps/usd" --packs-only --require-packs --optional
 
       - name: Download PySide6
         run: |
@@ -641,7 +641,7 @@ jobs:
       - name: Deploy
         run: |
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
-          python tools/deploy.py "$deploy" --sign "$SIGN" --require-vsix
+          python tools/deploy.py "$deploy" --sign "$SIGN" --require-vsix --optional-packs "$RUNNER_TEMP/optional"
           # A release has to ship every licence (docs/RELEASE.md section 6).
           for folder in OpenUSD-dependencies PySide6 vcpkg Python; do
             if [ -z "$(ls -A "$deploy/usdcc.app/Contents/Resources/licenses/$folder" 2>/dev/null)" ]; then
@@ -649,18 +649,35 @@ jobs:
             fi
           done
           python tools/ci/split_dsym.py --deploy "$deploy" --symbols "$RUNNER_TEMP/symbols/${{ steps.tag.outputs.name }}" --sign "$SIGN"
+          # Each optional pack's usdcc.app has the same binaries, so these symbols aren't kept.
+          for folder in "$RUNNER_TEMP"/optional/*/; do
+            [ -d "$folder" ] || continue
+            python tools/ci/split_dsym.py --deploy "$folder/${{ steps.tag.outputs.name }}" --symbols "$RUNNER_TEMP/symbols-again" --sign "$SIGN"
+            rm -rf "$RUNNER_TEMP/symbols-again"
+          done
 
-      - name: Make the disk image
+      # And one for each optional USD plugin pack (docs/USD_PLUGINS.md section 5): usdcc with
+      # the pack, as files can't be added to a signed bundle.
+      - name: Make the disk images
         run: |
-          image="$RUNNER_TEMP/image"
-          mkdir "$image"
-          ditto "$RUNNER_TEMP/${{ steps.tag.outputs.name }}/usdcc.app" "$image/usdcc.app"
-          ln -s /Applications "$image/Applications"
-          hdiutil create -volname 'usdcc ${{ steps.tag.outputs.version }}' -srcfolder "$image" -format ULMO -ov "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
+          mkdir "$RUNNER_TEMP/optional-images"
+          make_image() {  # <folder with usdcc.app> <disk image>
+            rm -rf "$RUNNER_TEMP/image"
+            mkdir "$RUNNER_TEMP/image"
+            ditto "$1/usdcc.app" "$RUNNER_TEMP/image/usdcc.app"
+            ln -s /Applications "$RUNNER_TEMP/image/Applications"
+            hdiutil create -volname 'usdcc ${{ steps.tag.outputs.version }}' -srcfolder "$RUNNER_TEMP/image" -format ULMO -ov "$2"
+          }
+          make_image "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
+          for folder in "$RUNNER_TEMP"/optional/*/; do
+            [ -d "$folder" ] || continue
+            make_image "$folder/${{ steps.tag.outputs.name }}" "$RUNNER_TEMP/optional-images/${{ steps.tag.outputs.name }}-macos-arm64-$(basename "$folder").dmg"
+          done
           tar -C "$RUNNER_TEMP/symbols" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}"
-          for file in '${{ steps.tag.outputs.dmg }}' '${{ steps.tag.outputs.symbols }}'; do
-            size=$(stat -f %z "$RUNNER_TEMP/$file")
-            echo "$file: $((size / 1048576)) MB"
+          for file in "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-images/*; do
+            [ -f "$file" ] || continue
+            size=$(stat -f %z "$file")
+            echo "$(basename "$file"): $((size / 1048576)) MB"
             if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
           done
 
@@ -668,26 +685,35 @@ jobs:
       # OpenUSD moved out of reach.
       - name: Start it from the disk image
         run: |
-          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
-          mkdir "$RUNNER_TEMP/installed" "$RUNNER_TEMP/away"
-          ditto "$RUNNER_TEMP/mounted/usdcc.app" "$RUNNER_TEMP/installed/usdcc.app"
-          hdiutil detach "$RUNNER_TEMP/mounted"
+          mkdir "$RUNNER_TEMP/away"
           mv build external/pyside-install "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" "$USD_INSTALL" "$RUNNER_TEMP/away/"
-          python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/installed" \
-            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
-          codesign --verify --deep --strict "$RUNNER_TEMP/installed/usdcc.app"
+          if [ -d "$RUNNER_TEMP/optional" ]; then mv "$RUNNER_TEMP/optional" "$RUNNER_TEMP/away/"; fi
+          for image in "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" "$RUNNER_TEMP"/optional-images/*.dmg; do
+            [ -f "$image" ] || continue
+            rm -rf "$RUNNER_TEMP/installed"
+            mkdir "$RUNNER_TEMP/installed"
+            hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$image"
+            ditto "$RUNNER_TEMP/mounted/usdcc.app" "$RUNNER_TEMP/installed/usdcc.app"
+            hdiutil detach "$RUNNER_TEMP/mounted"
+            python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/installed" \
+              --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
+            codesign --verify --deep --strict "$RUNNER_TEMP/installed/usdcc.app"
+          done
 
       - name: Keep the disk image with the run
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.tag.outputs.dmg }}
-          path: ${{ runner.temp }}/${{ steps.tag.outputs.dmg }}
+          path: |
+            ${{ runner.temp }}/${{ steps.tag.outputs.dmg }}
+            ${{ runner.temp }}/optional-images/
           compression-level: 0
           retention-days: 3
 
       - name: Attach to the release
         if: ${{ !inputs.dry_run }}
         run: |
+          shopt -s nullglob
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" \
-            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" --clobber --repo "$GITHUB_REPOSITORY"
+            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-images/*.dmg --clobber --repo "$GITHUB_REPOSITORY"

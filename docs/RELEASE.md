@@ -126,7 +126,9 @@ usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each j
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
 The `macos` job attaches `usdcc-<version>-macos-arm64.dmg`, with `usdcc.app` and a link to
-Applications, and the dSYMs of usdcc's own binaries. It has not run yet (2026-11-23).
+Applications, and the dSYMs of usdcc's own binaries. And
+`usdcc-<version>-macos-arm64-<pack>.dmg` for each optional USD plugin pack, usdcc with the pack
+(MoonRay's, [USD_PLUGINS.md](USD_PLUGINS.md) §5). It has not run yet (2026-11-23).
 `tools/deploy.py` makes the bundle and checks it, `tools/ci/split_dsym.py` takes the symbols
 out, and the smoke test runs a copy from the disk image.
 

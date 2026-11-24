@@ -61,12 +61,14 @@ On Linux the folder is a prefix of its own, which is also the Python's
 Every ELF file's RUNPATH is rewritten relative to $ORIGIN (with patchelf), so the
 folder runs from wherever it is unpacked.
 
---optional-packs DIR (Linux): the packs of the optional set in the install
+--optional-packs DIR (Linux and macOS): the packs of the optional set in the install
 (MoonRay) are deployed too and checked with the rest, then moved to
 DIR/<pack>/<destination's name>/, laid out as the deploy is. Unpacked over a
 deploy, each adds its pack; release.yml attaches each as a download of its own.
 A pack's files under plugin/ keep the RUNPATHs its build gave them, which are
-relative to an OpenUSD install laid out as the deploy is.
+relative to an OpenUSD install laid out as the deploy is. On macOS
+DIR/<pack>/<destination's name>/ has a whole usdcc.app with the pack in it instead:
+files unpacked into a signed bundle would break its signature.
 
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
@@ -328,8 +330,8 @@ def main(argv=None):
                         help="copy the pinned native SDK bin trees, metadata and licenses into RTX; otherwise "
                              "configure external runtime roots on the target")
     parser.add_argument("--optional-packs", metavar="DIR",
-                        help="Linux: also deploy the optional set's USD plugin packs, each into DIR/<pack>/<name>/ "
-                             "to be unpacked over the deploy (docs/USD_PLUGINS.md section 5)")
+                        help="also deploy the optional set's USD plugin packs, each into DIR/<pack>/<name>/: on Linux "
+                             "to be unpacked over the deploy, on macOS a usdcc.app with it (docs/USD_PLUGINS.md section 5)")
     parser.add_argument("--with-blender-mesh-tools", action="store_true",
                         help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
     parser.add_argument("--blender-source-bundle", metavar="FILE",
@@ -352,7 +354,7 @@ def main(argv=None):
         deploy_linux(args)
         return
     if args.optional_packs:
-        fail("--optional-packs is for Linux only so far: no optional pack is published for Windows.")
+        fail("--optional-packs isn't for Windows: no optional pack is published for it.")
 
     configuration = args.configuration
     app_dir = BUILD_DIR / "src/cpp/app" / configuration
@@ -1272,15 +1274,20 @@ def _macos_links(contents, lib_dir):
             entries.insert(0, "@loader_path")
         own = install_id(file)
         edit(file, new_rpaths=entries, new_id="@rpath/" + file.name if own and own.startswith("/") else None, changes=links)
-    # By the library's own name, not a link's to it (libjpeg.62.dylib, whose name is
-    # libjpeg.62.4.0.dylib where vcpkg's is in place of OpenUSD's): the hardened runtime
-    # refuses a library whose name isn't the one asked for.
+    _macos_own_names(files, lib_dir)
+    return files
+
+
+def _macos_own_names(files, lib_dir):
+    """Links by the library's own name, not a link's to it (libjpeg.62.dylib, whose name is
+    libjpeg.62.4.0.dylib where vcpkg's is in place of OpenUSD's): the hardened runtime
+    refuses a library whose name isn't the one asked for."""
+    from _macho import edit, install_id, needed
     own_names = {library.name: Path(install_id(library.resolve()) or library.name).name
                  for library in lib_dir.iterdir() if library.name.endswith(".dylib") and library.is_file()}
     for file in files:
         edit(file, changes={name: "@rpath/" + own_names[Path(name).name] for name in needed(file)
                             if name.startswith("@rpath/") and own_names.get(Path(name).name, Path(name).name) != Path(name).name})
-    return files
 
 
 def _macos_problems(contents, files):
@@ -1313,13 +1320,42 @@ def _macos_problems(contents, files):
     return problems
 
 
+def _macos_optional_pack(pack, manifest, usd_install, app, target, identity):
+    """A copy of the signed `app`, as `target`, with an optional pack in it. A pack can't be
+    unpacked over a bundle: its files would break the signature, and macOS would call a
+    downloaded usdcc.app damaged."""
+    from _macho import ENTITLEMENTS, is_macho, sign, sign_app
+    if target.parent.exists():
+        remove_tree(target.parent)
+    target.parent.mkdir(parents=True)
+    shutil.copytree(app, target, symlinks=True)
+    contents = target / "Contents"
+    root = contents / "Resources"
+    sources = []
+    _deploy_usd_pack(pack, manifest, usd_install, root, sources, libraries="lib")
+    with (root / "licenses/SOURCES.txt").open("a", encoding="utf-8") as file:
+        file.write("\n".join(sources) + "\n")
+    record = json.loads((root / USD_PACKS_DIR / f"{pack}.json").read_text(encoding="utf-8"))
+    # Their rpaths are relative to the install's lib/, which is the bundle's (as on Linux).
+    files = [root / name for name in record["files"] if is_macho(root / name)]
+    _macos_own_names(files, root / "lib")
+    problems = _macos_problems(contents, files)
+    if problems:
+        fail(f"Libraries the {pack} pack doesn't load from the deploy or the system:\n  "
+             + "\n  ".join(sorted(set(problems))[:40]))
+    for file in files:
+        # A program of the pack's loads libraries too, so it gets usdcc's entitlements.
+        sign(file, identity, ENTITLEMENTS if os.access(file, os.X_OK) and file.parent.name == "bin" else None)
+    sign_app(target, identity)
+    size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
+    print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), usdcc with the pack")
+
+
 def deploy_macos(args):
     """tools/deploy.py on macOS: the layout in the docstring at the top."""
     from _macho import needed, sign, sign_app
     if args.with_blender_mesh_tools:
         fail("--with-blender-mesh-tools isn't set up for macOS: its distribution review is Windows' and Linux'.")
-    if args.optional_packs:
-        fail("--optional-packs is for Linux only so far: no optional pack is published for macOS.")
     configuration = args.configuration
     build_type = cache_value(BUILD_DIR, "CMAKE_BUILD_TYPE")
     app_dir = BUILD_DIR / "src/cpp/app"
@@ -1377,6 +1413,10 @@ def deploy_macos(args):
         absolute = _full(protected)
         if absolute == deploy_dir or absolute.startswith(deploy_dir + os.sep):
             fail(f"Unsafe deploy destination '{deploy_dir}' contains '{absolute}'.")
+    optional_dir = Path(_full(args.optional_packs)) if args.optional_packs else None
+    if optional_dir and (str(optional_dir) == deploy_dir or str(optional_dir).startswith(deploy_dir + os.sep)
+                         or deploy_dir.startswith(str(optional_dir) + os.sep)):
+        fail(f"--optional-packs '{optional_dir}' can't be in the deploy, nor the deploy in it.")
     deploy_dir = Path(deploy_dir)
     app = deploy_dir / "usdcc.app"
     if deploy_dir.exists():
@@ -1414,7 +1454,9 @@ def deploy_macos(args):
     for pack, manifest in shipped_packs.items():
         print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _deploy_usd_pack(pack, manifest, usd_install, root, pack_sources, libraries="lib")
-    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+    optional_packs = {pack: manifest for pack, manifest in usd_packs.items()
+                      if optional_dir and manifest.get("set") == "optional"}
+    for pack in sorted(set(usd_packs) - set(shipped_packs) - set(optional_packs)):
         print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
     print(f"  Qt and vcpkg's libraries ({vcpkg_dir})", flush=True)
@@ -1626,6 +1668,10 @@ def deploy_macos(args):
     sign_check = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
     if sign_check.returncode != 0:
         fail(f"Checking the deploy broke its signature: {sign_check.stderr.strip()}")
+
+    for pack, manifest in optional_packs.items():
+        print(f"  USD plugin pack, a download of its own: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        _macos_optional_pack(pack, manifest, usd_install, app, optional_dir / pack / deploy_dir.name / "usdcc.app", args.sign)
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {app} ({size / 2**20:,.0f} MB). Start it with: open {app}")

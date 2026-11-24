@@ -1,0 +1,26 @@
+diff --git a/arras4_client/lib/client/api/Client.cc b/arras4_client/lib/client/api/Client.cc
+index 42d38b3..5f85664 100644
+--- a/arras4_client/lib/client/api/Client.cc
++++ b/arras4_client/lib/client/api/Client.cc
+@@ -480,6 +480,10 @@ Client::shutdownConnection()
+                 mOutgoingQueue->shutdown();
+             if (mMessageEndpoint)
+                 mMessageEndpoint->shutdown();
++            // Changed by usdcc: the threads end before what they use is closed and deleted.
++            // shutdown() above unblocks them both.
++            if (mThread.joinable()) mThread.join();
++            if (mSendThread.joinable()) mSendThread.join();
+             mPeer->shutdown();
+             delete mMessageEndpoint;
+             delete mOutgoingQueue;
+@@ -1311,7 +1315,9 @@ Client::threadProc()
+             ARRAS_ERROR(log::Id("clientUnhandled") <<
+ 			log::Session(mSessionId) <<
+ 			"Unhandled exception in delivery thread");
+-            throw;
++            // Changed by usdcc: an exception out of a thread would end the program.
++            mConnectionError = true;
++            break;
+         } 
+         
+     }

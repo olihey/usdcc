@@ -365,9 +365,9 @@ Three sets, decided by licence:
 | Set | Where it goes | Packs |
 |---|---|---|
 | `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` |
-| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`), `gatling` (unpublished) |
+| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
 
-How an optional pack ships (Linux; no Windows one is published yet):
+How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
 
 - `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
   says `"publish": true`.
@@ -382,6 +382,9 @@ How an optional pack ships (Linux; no Windows one is published yet):
   test again (its plugins load from the deploy, its renderers are listed), and attaches
   `usdcc-<version>-linux-<arch>-<pack>.tar.xz`. Its top folder is the deploy's name, so
   `tar -xf` where usdcc was unpacked puts it in place.
+- On macOS `--optional-packs DIR` makes `DIR/<pack>/<deploy's name>/usdcc.app`, a copy of the
+  deployed bundle with the pack in it, checked and signed as a whole: files unpacked over a signed
+  bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
 | `local` | Built on a machine that has the SDK; never published | `arnold`, `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,

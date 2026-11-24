@@ -1,0 +1,25 @@
+diff --git a/cmake/MoonrayDso.cmake b/cmake/MoonrayDso.cmake
+index 101f9d3..2802193 100644
+--- a/cmake/MoonrayDso.cmake
++++ b/cmake/MoonrayDso.cmake
+@@ -224,7 +224,6 @@ function(Moonray_dso_link_options target)
+     else()
+         target_link_options(${target}
+             PRIVATE
+-                -Wl,-ld_classic
+                 -undefined dynamic_lookup
+     )
+     endif()
+diff --git a/cmake/OMR_Platform.cmake b/cmake/OMR_Platform.cmake
+index 6a38c8f..9cbb6d2 100644
+--- a/cmake/OMR_Platform.cmake
++++ b/cmake/OMR_Platform.cmake
+@@ -63,7 +63,7 @@ if(IsDarwinPlatform)
+ 
+     set(ISPC_COMPILER $ENV{ISPC} CACHE STRING "Path to ISPC compiler")
+     set(CMAKE_XCODE_ATTRIBUTE_OTHER_CODE_SIGN_FLAGS "-o linker-signed")
+-    set(GLOBAL_LINK_FLAGS "-Wl,-ld_classic")
++    set(GLOBAL_LINK_FLAGS "")
+     set(GLOBAL_INSTALL_RPATH "@loader_path/" "@loader_path/../lib")
+     set(GLOBAL_ISPC_FLAGS -D__aarch64__ -D__APPLE__ -D__ARM_NEON__)
+     set(GLOBAL_ISPC_INSTRUCTION_SETS neon-i32x4)

@@ -7,7 +7,8 @@ Material Editor. The pack framework is [USD_PLUGINS.md](USD_PLUGINS.md).
 in-process and through a local Arras session, build against the published OpenUSD asset as a pack,
 `deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
 Its licences are read (§3.1), and a Linux release attaches it as a download of its own (§7.5), once CI
-has published the pack. **Linux x64 only: no Windows, by decision.**
+has published the pack. The pack builds on macOS (Apple silicon) too and renders there in usdcc (§7.6); CI
+hasn't built that one. **Linux x64 and macOS: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -25,7 +26,7 @@ Baseline: OpenMoonRay `v2026.29.1` (2026-07-17, the newest release).
 
 **Platform: Linux x64.** Upstream builds and tests Rocky 9 with GCC 11; ours is Ubuntu 24.04
 with GCC 13. On Windows MoonRay isn't in the renderer list. Third-party Windows ports exist and
-aren't used. macOS follows usdcc's own macOS build.
+aren't used. macOS on Apple silicon came after usdcc's own macOS build (§7.6).
 
 ### What we write ourselves
 
@@ -247,7 +248,7 @@ Work:
 | **5. Nodes** | §5, MATERIAL_EDITOR.md §3.3, tests | A DwaBaseMaterial network made in the editor renders in MoonRay |
 | **6. Settings and final render** | hdMoonray's render settings under Settings > Renderers, FINAL_RENDER.md checks | A final frame is written |
 | **7. Publish** | Licence list read, real size noted, download offered in Settings | On a release as its own asset |
-| **Later** | Open Image Denoise, XPU (CUDA/OptiX), MaterialX surfaces, macOS | |
+| **Later** | Open Image Denoise, XPU (CUDA/OptiX, Metal), MaterialX surfaces | |
 
 Phase 1 decides the rest and is the cheapest. Phase 2 is the largest risk.
 
@@ -448,11 +449,62 @@ without building the others.
 - Boost's headers came from the Boost download's install, not the asset's (same version, 1.80).
 - Install notes for users beyond the release notes, and a way to get the pack from inside usdcc.
 
+### 7.6 macOS, Apple silicon (2026-11-24)
+
+The same pin, hook and check (`"platforms": ["linux-x64", "macos-arm64"]`), CPU only
+(`-DMOONRAY_USE_METAL=NO`), with Xcode 27.2 on macOS 27.2. From scratch in 6.5 minutes on 18 threads.
+
+**What differs in the build** (`MACOS` in `moonray.py`, `patches/moonray-macos-*.patch`):
+
+- MoonRay's own ISPC commands, which upstream's Xcode build uses, not CMake's ISPC language: CMake hands ISPC
+  Clang's flags. `neon-i32x4`, so 4 lanes where Linux has 8.
+- No `-ld_classic`: Xcode 27 has no classic linker.
+- The sample tables go in with the assembler's `.incbin`. Upstream writes them out as C arrays, 134 MB of it in
+  one, which takes a compiler gigabytes.
+- `common/arm`, headers scene_rdl2's own headers include and its install leaves out, is copied.
+- Boost 1.82, as the macOS asset's. FreeType is built, static. libuuid and the atomics are in libSystem.
+- What links a library by a link's name links it by its own, and no links ship: the hardened runtime
+  refuses the other (MACOS.md §3).
+
+**Bugs of upstream's found on the way:**
+
+- **Half floats on Arm** (`PackTiles.cc`, `RenderOutputWriter.cc`, marked "TODO: Verify this"): the
+  conversion returned the number as an integer, not the half's bits. Through Arras the depth arrived as zeros, and the
+  viewport's grid was drawn over objects. Fixed in the macOS patches.
+- **Closing an Arras session** (`moonray-arras-shutdown.patch`, on Linux too): the socket was closed and the endpoint
+  deleted before the thread reading them had ended, and an exception in it ended usdcc. Seen once, at a switch away
+  after `execComp` had been killed. Afterwards 80 switches, with `execComp` killed at every third, passed.
+
+**In usdcc's viewport,** by script, in the development build: the edits, camera moves, resizing and renderer switches of
+§7.2, both delegates the same picture, with a PNG texture, metal, glass, instances and curves; the grid hidden by
+objects; the longest pause of the UI thread 0.33 s. `execComp` killed three times: usdcc goes on and the next edit starts a new
+one. None is left after quitting. Direct light and shadows agree with Embree's.
+
+**In the app:** `usdcc.app` with the pack, signed ad hoc, with the build and OpenUSD moved away: the smoke test
+passes, both delegates render, and the signature is still whole afterwards. With the hardened runtime on
+too, through Arras.
+
+**Shipping:** files can't be unpacked over a signed bundle, so the release has a second disk image,
+`usdcc-<version>-macos-arm64-moonray.dmg`: usdcc with the pack (USD_PLUGINS.md §5).
+It was 371 MB here, and 160 MB without; the pack is 291 MB installed, 224 MB zipped.
+
+**The first start** of a newly installed MoonRay can take several seconds (5 to 17 s seen), while macOS
+checks its libraries, and blocks the UI. Later ones take 0.3 s.
+
+**Licences** beyond Linux's: FreeType's (FTL), and sse2neon's MIT notice, whose header is compiled in.
+
+**Not done:**
+
+- CI hasn't built it: Xcode 16 on `macos-15` is untried.
+- The published macOS OpenUSD asset links Homebrew libraries of the machine it was built on, so MoonRay doesn't load over
+  it. Tested over a locally built OpenUSD instead. It needs the asset's fix (pull request 87).
+- The crash scenes of §7.3, light linking, VDB, and real scenes haven't been tried here. No Metal XPU mode.
+
 ## 8. Decisions
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | Platform | **Decided:** Linux x64 only |
+| 1 | Platform | **Decided:** Linux x64, and macOS on Apple silicon (§7.6) |
 | 2 | Standard or separate download? | **Decided:** separate, `usdcc-<version>-linux-x64-moonray.tar.xz` (§7.5) |
 | 3 | Rebuild the OpenUSD asset's Embree | **Not needed** (§7.1) |
 | 4 | Before or after Cycles? | Cycles first if one renderer with MaterialX on every platform is the goal |
