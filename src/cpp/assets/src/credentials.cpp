@@ -189,9 +189,31 @@ std::string credentialVariablePrefix(const std::string& id) {
     return prefix;
 }
 
+namespace {
+struct Ambiguous {
+    std::mutex mutex;
+    std::set<std::string> prefixes;
+};
+Ambiguous& ambiguous() {
+    static Ambiguous instance;
+    return instance;
+}
+}  // namespace
+
+void setAmbiguousCredentialVariables(std::set<std::string> prefixes) {
+    Ambiguous& all = ambiguous();
+    std::lock_guard<std::mutex> lock(all.mutex);
+    all.prefixes = std::move(prefixes);
+}
+
 std::optional<Credential> credentialFromVariables(const std::string& id) {
     if (id.empty()) return std::nullopt;
     const std::string prefix = credentialVariablePrefix(id);
+    {
+        Ambiguous& all = ambiguous();
+        std::lock_guard<std::mutex> lock(all.mutex);
+        if (all.prefixes.count(prefix)) return std::nullopt;
+    }
     Credential credential;
     credential.user = PXR_NS::TfGetenv(prefix + "_USER");
     credential.password = PXR_NS::TfGetenv(prefix + "_PASSWORD");

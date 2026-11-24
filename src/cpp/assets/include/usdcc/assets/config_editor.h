@@ -6,6 +6,7 @@
 // as the file has it (Config::toJson()), noticing a file changed on disk meanwhile.
 
 #include "usdcc/assets/config.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/result.h"
 #include "usdcc/assets/transport.h"
 
@@ -41,6 +42,18 @@ public:
     // Every problem with what would be written, one per entry, as Config::parse() names
     // them. Empty when it can be saved.
     std::vector<std::string> problems() const;
+
+    // Its sources as read (docs/ASSET_SOURCES.md §3), and what they and it make together.
+    const std::vector<LoadedSource>& sources() const { return m_sources; }
+    void setSources(std::vector<LoadedSource> sources) { m_sources = std::move(sources); }
+    // Reads its sources' files again.
+    void reloadSources();
+    Config merged(MergeProblems* problems = nullptr) const;
+    // Adds a source at the end (not read until reloadSources()), or removes one.
+    std::string addSource(const SourceEntry& entry);
+    std::string removeSource(const std::string& alias);
+    // What a mixed environment extends: sources' environments ("studio-a/prod").
+    std::string setExtends(const std::string& environment, const std::vector<std::string>& extended);
 
     // Servers (the configuration's "endpoints"). Each returns why not, or empty when done.
     std::string addServer(const Endpoint& endpoint);
@@ -85,6 +98,7 @@ private:
 
     std::filesystem::path m_file;
     Config m_config;
+    std::vector<LoadedSource> m_sources;
     std::string m_saved;  // toJson() as last read or saved: what modified() compares with
     std::string m_loadProblem;
     Stamp m_stamp;

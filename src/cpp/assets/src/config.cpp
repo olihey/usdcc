@@ -1,6 +1,7 @@
 #include "usdcc/assets/config.h"
 
 #include "usdcc/assets/paths.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/uri.h"
 
 #include <pxr/base/js/json.h>
@@ -38,6 +39,16 @@ std::string optionText(const JsValue& value) {
     return std::string();
 }
 
+// An id of a server or environment: what a JSON key, a table cell and a qualified name
+// ("studio-a/prod") can hold. Empty when it's fine.
+std::string badId(const std::string& id) {
+    if (id.empty()) return "an empty name";
+    if (id.find_first_of(" \t\r\n\"\\/") != std::string::npos) return "no spaces, quotes or slashes in a name";
+    return std::string();
+}
+
+bool isQualified(const std::string& id) { return id.find('/') != std::string::npos; }
+
 const JsObject* objectOf(const JsObject& object, const char* key) {
     const auto found = object.find(key);
     return found != object.end() && found->second.IsObject() ? &found->second.GetJsObject() : nullptr;
@@ -58,6 +69,34 @@ Result<Config> Config::parse(const std::string& json) {
     Config config;
     config.source = json;
     config.environment = textOf(top, "environment");
+    // Wins: an older usdcc doesn't know it, and goes by "environment".
+    if (const std::string preferred = textOf(top, "defaultEnvironment"); !preferred.empty()) config.environment = preferred;
+    config.name = textOf(top, "name");
+    if (!config.name.empty() && !isValidName(config.name)) {
+        problems.push_back("its \"name\" is lowercase letters, digits, '-', '_' and '.'");
+    }
+    const auto sources = top.find("sources");
+    if (sources != top.end() && sources->second.IsArray()) {
+        for (const JsValue& value : sources->second.GetJsArray()) {
+            if (!value.IsObject()) {
+                problems.push_back("a source isn't an object");
+                continue;
+            }
+            SourceEntry entry;
+            entry.alias = textOf(value.GetJsObject(), "alias");
+            entry.path = textOf(value.GetJsObject(), "path");
+            entry.url = textOf(value.GetJsObject(), "url");
+            if (!isValidName(entry.alias)) {
+                problems.push_back("source '" + entry.alias + "': an alias is lowercase letters, digits, '-', '_' and '.'");
+            } else if (entry.path.empty() == entry.url.empty()) {
+                problems.push_back("source '" + entry.alias + "': it has a \"path\" or a \"url\"");
+            } else if (std::any_of(config.sources.begin(), config.sources.end(),
+                                   [&](const SourceEntry& other) { return other.alias == entry.alias; })) {
+                problems.push_back("there are two sources '" + entry.alias + "'");
+            }
+            config.sources.push_back(std::move(entry));
+        }
+    }
 
     config.offline = flagOf(top, "offline");
     const auto limit = top.find("cacheLimitGB");
@@ -95,6 +134,10 @@ Result<Config> Config::parse(const std::string& json) {
                 continue;
             }
             const JsObject& object = value.GetJsObject();
+            if (const std::string why = badId(id); !why.empty()) {
+                problems.push_back("endpoint '" + id + "': " + why);
+                continue;
+            }
             Endpoint endpoint;
             endpoint.id = id;
             endpoint.scheme = textOf(object, "scheme");
@@ -122,14 +165,37 @@ Result<Config> Config::parse(const std::string& json) {
         }
     }
 
-    if (const JsObject* environments = objectOf(top, "environments")) {
+    // Plain environments, then mixed ones (docs/ASSET_SOURCES.md §4): a mixed one's stacks can
+    // name other sources' servers, which are checked once the sources are read.
+    for (const char* group : {"environments", "mixed"}) {
+        const bool mixed = std::string(group) == "mixed";
+        const JsObject* environments = objectOf(top, group);
+        if (!environments) continue;
         for (const auto& [environment, schemes] : *environments) {
             if (!schemes.IsObject()) {
                 problems.push_back("environment '" + environment + "' isn't an object");
                 continue;
             }
+            if (const std::string why = badId(environment); !why.empty()) {
+                problems.push_back("environment '" + environment + "': " + why);
+                continue;
+            }
+            if (config.environments.count(environment)) {
+                problems.push_back("environment '" + environment + "' is there twice, plain and mixed");
+                continue;
+            }
             auto& ofEnvironment = config.environments[environment];
             for (const auto& [scheme, names] : schemes.GetJsObject()) {
+                if (mixed && scheme == "extends") {
+                    std::vector<std::string>& extended = config.extends[environment];
+                    if (names.IsArray()) {
+                        for (const JsValue& other : names.GetJsArray()) {
+                            if (other.IsString()) extended.push_back(other.GetString());
+                        }
+                    }
+                    if (extended.empty()) config.extends.erase(environment);
+                    continue;
+                }
                 if (!names.IsObject()) {
                     problems.push_back("environment '" + environment + "': '" + scheme + "' isn't an object");
                     continue;
@@ -148,7 +214,10 @@ Result<Config> Config::parse(const std::string& json) {
                     for (const JsValue& id : stack.GetJsArray()) {
                         const std::string endpoint = id.IsString() ? id.GetString() : std::string();
                         const auto found = config.endpoints.find(endpoint);
-                        if (found == config.endpoints.end()) {
+                        if (mixed && isQualified(endpoint)) {
+                            // Another source's: checked when the sources are read.
+                            ids.push_back(endpoint);
+                        } else if (found == config.endpoints.end()) {
                             problems.push_back(where + ": there is no endpoint '" + endpoint + "'");
                         } else if (found->second.scheme != scheme) {
                             problems.push_back(where + ": endpoint '" + endpoint + "' is " + found->second.scheme +
@@ -163,7 +232,8 @@ Result<Config> Config::parse(const std::string& json) {
         }
     }
 
-    if (!config.environment.empty() && !config.environments.count(config.environment)) {
+    // Another source's is checked when the sources are read.
+    if (!config.environment.empty() && !isQualified(config.environment) && !config.environments.count(config.environment)) {
         problems.push_back("there is no environment '" + config.environment + "'");
     }
     if (!problems.empty()) {
@@ -218,7 +288,22 @@ std::string Config::toJson() const {
         if (before.IsObject()) top = before.GetJsObject();
     }
 
-    setOrErase(top, "environment", !environment.empty(), JsValue(environment));
+    // An older usdcc reads "environment" and refuses one it doesn't have.
+    const bool plainDefault = !environment.empty() && !isQualified(environment) && !isMixed(environment);
+    setOrErase(top, "environment", plainDefault, JsValue(environment));
+    setOrErase(top, "defaultEnvironment", !environment.empty() && !plainDefault, JsValue(environment));
+    setOrErase(top, "name", !name.empty(), JsValue(name));
+    {
+        JsArray list;
+        for (const SourceEntry& entry : sources) {
+            JsObject object;
+            object["alias"] = JsValue(entry.alias);
+            if (!entry.path.empty()) object["path"] = JsValue(entry.path);
+            if (!entry.url.empty()) object["url"] = JsValue(entry.url);
+            list.push_back(JsValue(object));
+        }
+        setOrErase(top, "sources", !list.empty(), JsValue(list));
+    }
     setOrErase(top, "offline", offline || top.count("offline"), JsValue(offline));
     setOrErase(top, "cacheLimitGB", cacheLimitGB.has_value(), JsValue(cacheLimitGB.value_or(0.0)));
 
@@ -268,16 +353,22 @@ std::string Config::toJson() const {
     setOrErase(top, "endpoints", !endpointsObject.empty(), JsValue(endpointsObject));
 
     JsObject environmentsObject;
+    JsObject mixedObject;
     for (const auto& [environment, schemes] : environments) {
         JsObject schemesObject;
+        const auto extended = extends.find(environment);
+        if (extended != extends.end() && !extended->second.empty()) {
+            schemesObject["extends"] = JsValue(stringArray(extended->second));
+        }
         for (const auto& [scheme, names] : schemes) {
             JsObject namesObject;
             for (const auto& [name, ids] : names) namesObject[name] = JsValue(stringArray(ids));
             schemesObject[scheme] = JsValue(namesObject);
         }
-        environmentsObject[environment] = JsValue(schemesObject);
+        (isMixed(environment) ? mixedObject : environmentsObject)[environment] = JsValue(schemesObject);
     }
     setOrErase(top, "environments", !environmentsObject.empty(), JsValue(environmentsObject));
+    setOrErase(top, "mixed", !mixedObject.empty(), JsValue(mixedObject));
 
     std::ostringstream text;
     {
@@ -329,7 +420,28 @@ Config Config::loadDefault() {
         TF_WARN("The asset servers in %s are ignored:\n%s", toUtf8(file).c_str(), loaded.message.c_str());
         return Config();
     }
-    return std::move(loaded.value);
+    // With its sources (docs/ASSET_SOURCES.md §3): one configuration, what they define named
+    // with their aliases.
+    const std::vector<LoadedSource> sources = loadSources(loaded.value, file);
+    MergeProblems problems;
+    Config merged = mergeSources(loaded.value, sources, &problems);
+    for (const std::string& problem : problems.all()) TF_WARN("Asset servers: %s", problem.c_str());
+    return merged;
+}
+
+bool Config::isMixed(const std::string& environment) const {
+    const auto extended = extends.find(environment);
+    if (extended != extends.end() && !extended->second.empty()) return true;
+    const auto found = environments.find(environment);
+    if (found == environments.end()) return false;
+    for (const auto& [scheme, names] : found->second) {
+        for (const auto& [name, ids] : names) {
+            for (const std::string& id : ids) {
+                if (isQualified(id)) return true;
+            }
+        }
+    }
+    return false;
 }
 
 std::string Config::chosenEnvironment() const {

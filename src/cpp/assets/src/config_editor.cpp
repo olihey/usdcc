@@ -3,6 +3,7 @@
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
 #include "usdcc/assets/uri.h"
+#include "usdcc/assets/sources.h"
 
 #include <algorithm>
 #include <chrono>
@@ -71,6 +72,42 @@ void ConfigEditor::reload() {
         }
     }
     m_saved = m_config.toJson();
+    reloadSources();
+}
+
+void ConfigEditor::reloadSources() { m_sources = loadSources(m_config, m_file); }
+
+Config ConfigEditor::merged(MergeProblems* problems) const { return mergeSources(m_config, m_sources, problems); }
+
+std::string ConfigEditor::addSource(const SourceEntry& entry) {
+    if (!isValidName(entry.alias)) return "An alias is lowercase letters, digits, '-', '_' and '.'.";
+    for (const SourceEntry& other : m_config.sources) {
+        if (other.alias == entry.alias) return "There is a source " + quoted(entry.alias) + " already.";
+    }
+    m_config.sources.push_back(entry);
+    m_sources.push_back(loadSource(entry, m_file));
+    return std::string();
+}
+
+std::string ConfigEditor::removeSource(const std::string& alias) {
+    const auto found = std::find_if(m_config.sources.begin(), m_config.sources.end(),
+                                    [&](const SourceEntry& entry) { return entry.alias == alias; });
+    if (found == m_config.sources.end()) return "There is no source " + quoted(alias) + ".";
+    m_config.sources.erase(found);
+    m_sources.erase(std::remove_if(m_sources.begin(), m_sources.end(),
+                                   [&](const LoadedSource& source) { return source.entry.alias == alias; }),
+                    m_sources.end());
+    return std::string();
+}
+
+std::string ConfigEditor::setExtends(const std::string& environment, const std::vector<std::string>& extended) {
+    if (!m_config.environments.count(environment)) return "There is no environment " + quoted(environment) + ".";
+    if (extended.empty()) {
+        m_config.extends.erase(environment);
+    } else {
+        m_config.extends[environment] = extended;
+    }
+    return std::string();
 }
 
 bool ConfigEditor::writable() const {
@@ -118,6 +155,12 @@ std::vector<std::string> ConfigEditor::problems() const {
         for (const std::string& line : lines(parsed.message)) {
             if (std::find(result.begin(), result.end(), line) == result.end()) result.push_back(line);
         }
+    }
+    // What only the sources can tell: mixed environments and a default of another source.
+    MergeProblems merging;
+    merged(&merging);
+    for (const std::string& line : merging.personal) {
+        if (std::find(result.begin(), result.end(), line) == result.end()) result.push_back(line);
     }
     return result;
 }
@@ -185,6 +228,9 @@ std::string ConfigEditor::duplicateEnvironment(const std::string& from, const st
     if (found == m_config.environments.end()) return "There is no environment " + quoted(from) + ".";
     if (std::string why = addEnvironment(environment); !why.empty()) return why;
     m_config.environments[environment] = m_config.environments[from];
+    if (const auto extended = m_config.extends.find(from); extended != m_config.extends.end()) {
+        m_config.extends[environment] = extended->second;
+    }
     return std::string();
 }
 
@@ -195,12 +241,17 @@ std::string ConfigEditor::renameEnvironment(const std::string& environment, cons
     if (std::string why = addEnvironment(newName); !why.empty()) return why;
     m_config.environments[newName] = std::move(m_config.environments[environment]);
     m_config.environments.erase(environment);
+    if (const auto extended = m_config.extends.find(environment); extended != m_config.extends.end()) {
+        m_config.extends[newName] = extended->second;
+        m_config.extends.erase(environment);
+    }
     if (m_config.environment == environment) m_config.environment = newName;
     return std::string();
 }
 
 std::string ConfigEditor::removeEnvironment(const std::string& environment) {
     if (!m_config.environments.erase(environment)) return "There is no environment " + quoted(environment) + ".";
+    m_config.extends.erase(environment);
     if (m_config.environment == environment) m_config.environment.clear();
     return std::string();
 }
@@ -209,8 +260,10 @@ std::string ConfigEditor::addName(const std::string& environment, const std::str
     const auto found = m_config.environments.find(environment);
     if (found == m_config.environments.end()) return "There is no environment " + quoted(environment) + ".";
     if (!isValidName(name)) return "A name is lowercase letters, digits, '-', '_' and '.'.";
-    const auto endpoint = m_config.endpoints.find(server);
-    if (endpoint == m_config.endpoints.end()) return "There is no server " + quoted(server) + ".";
+    // Another source's too, which makes it a mixed environment.
+    const Config all = merged();
+    const auto endpoint = all.endpoints.find(server);
+    if (endpoint == all.endpoints.end()) return "There is no server " + quoted(server) + ".";
     auto& names = found->second[endpoint->second.scheme];
     if (names.count(name)) {
         return "The environment " + quoted(environment) + " has " + endpoint->second.scheme + "://" + name + " already.";
@@ -237,9 +290,10 @@ std::string ConfigEditor::setStack(const std::string& environment, const std::st
     if (found == m_config.environments.end()) return "There is no environment " + quoted(environment) + ".";
     auto& names = found->second[scheme];
     if (!names.count(name)) return "The environment " + quoted(environment) + " has no " + scheme + "://" + name + ".";
+    const Config all = merged();
     for (const std::string& server : servers) {
-        const auto endpoint = m_config.endpoints.find(server);
-        if (endpoint == m_config.endpoints.end()) return "There is no server " + quoted(server) + ".";
+        const auto endpoint = all.endpoints.find(server);
+        if (endpoint == all.endpoints.end()) return "There is no server " + quoted(server) + ".";
         if (endpoint->second.scheme != scheme) {
             return "The server " + quoted(server) + " is " + endpoint->second.scheme + ", and a stack holds one protocol.";
         }

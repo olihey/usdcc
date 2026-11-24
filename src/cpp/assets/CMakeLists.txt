@@ -19,6 +19,7 @@ add_library(usdcc_assets SHARED
     include/usdcc/assets/lookup.h
     include/usdcc/assets/paths.h
     include/usdcc/assets/result.h
+    include/usdcc/assets/sources.h
     include/usdcc/assets/transport.h
     include/usdcc/assets/uri.h
     src/activity.cpp
@@ -31,6 +32,7 @@ add_library(usdcc_assets SHARED
     src/http_client.cpp
     src/logins.cpp
     src/lookup.cpp
+    src/sources.cpp
     src/transport.cpp
     src/uri.cpp
 )

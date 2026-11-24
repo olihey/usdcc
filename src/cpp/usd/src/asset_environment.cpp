@@ -10,6 +10,11 @@
 #include "usdcc/usd/save_stage_as.h"
 #include "usdcc/usd/session_stages.h"
 #include "usdcc/usd/stage_manager.h"
+#include "usdcc/assets/activity.h"
+#include "usdcc/assets/context.h"
+#include "usdcc/assets/sources.h"
+#include "usdcc/ui/main_window.h"
+#include "usdcc/ui/toast_manager.h"
 
 #include <pxr/usd/sdf/layer.h>
 
@@ -20,10 +25,14 @@
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QStyle>
+#include <QPointer>
 #include <QPushButton>
 #include <QThread>
 
 #include <algorithm>
+#include <mutex>
+#include <set>
+#include <tuple>
 #include <exception>
 #include <memory>
 
@@ -49,6 +58,68 @@ QString environmentText(const std::string& environment) {
 }  // namespace
 
 void setReopenGuard(std::function<QString(const StageRefPtr&)> guard) { reopenGuard() = std::move(guard); }
+
+void installAssetEnvironmentOffer(usdcc::ui::MainWindow* window, StageManager* stageManager) {
+    QPointer<usdcc::ui::MainWindow> target(window);
+    usdcc::assets::setUnknownNameCallback([target, stageManager](const std::string& scheme, const std::string& name,
+                                                                 const std::string& environment) {
+        static std::mutex mutex;
+        static std::set<std::tuple<std::string, std::string, std::string>> told;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!told.insert({scheme, name, environment}).second) return;
+        }
+        // From a resolver's thread: the question waits for the UI's.
+        QMetaObject::invokeMethod(
+            qApp,
+            [target, stageManager, scheme, name, environment]() {
+                // Without any environment there's nothing to offer; the Log says what didn't resolve.
+                if (!target || assetEnvironments().empty()) return;
+                std::vector<std::string> offered = usdcc::assets::offeredEnvironments(
+                    usdcc::assets::defaultConfig(), scheme, name);
+                offered.erase(std::remove(offered.begin(), offered.end(), environment), offered.end());
+                // The stage it's about: the current one, if it's in that environment, else one that is.
+                StageRefPtr stage = stageManager->currentStage();
+                if (!stage || stageAssetEnvironment(stage->usdStage()) != environment) {
+                    stage.reset();
+                    for (const StageRefPtr& open : stageManager->stages()) {
+                        if (stageAssetEnvironment(open->usdStage()) == environment) stage = open;
+                    }
+                }
+                const QString path = qs(scheme + "://" + name);
+                usdcc::core::ToastRequest request = usdcc::core::ToastRequest::sticky();
+                request.kind = usdcc::core::ToastKind::Warning;
+                QList<usdcc::ui::ToastAction> actions;
+                if (offered.empty()) {
+                    request.title = QObject::tr("%1 isn't configured").arg(path).toStdString();
+                    request.body = QObject::tr("The asset environment %1 has no server named %2, and nor has any other.")
+                                       .arg(environmentText(environment), qs(name))
+                                       .toStdString();
+                    actions.append({QObject::tr("Asset Servers..."), [target]() { showAssetServersEditor(target); }});
+                } else {
+                    request.title = QObject::tr("%1 is in another environment").arg(path).toStdString();
+                    QStringList names;
+                    for (const std::string& each : offered) names << qs(each);
+                    request.body = QObject::tr("%1 has no server named %2. %3 has.")
+                                       .arg(environmentText(environment), qs(name), names.join(QStringLiteral(", ")))
+                                       .toStdString();
+                    // Offered, never switched silently: switching contacts that source's servers.
+                    for (size_t i = 0; i < offered.size() && i < 3 && stage; ++i) {
+                        const std::string chosen = offered[i];
+                        actions.append({QObject::tr("Reopen in %1").arg(qs(chosen)), [target, stageManager, stage, chosen]() {
+                                            QString error;
+                                            if (!reopenInEnvironment(*stageManager, stage, chosen, target, &error) &&
+                                                !error.isEmpty()) {
+                                                QMessageBox::warning(target, QObject::tr("Asset Environment"), error);
+                                            }
+                                        }});
+                    }
+                }
+                target->toasts()->show(request, actions);
+            },
+            Qt::QueuedConnection);
+    });
+}
 
 std::string wantedEnvironment(const StageRefPtr& stage) {
     return stage->pendingAssetEnvironment().empty() ? stageAssetEnvironment(stage->usdStage())
@@ -107,6 +178,8 @@ StageRefPtr reopenInEnvironment(StageManager& stageManager, const StageRefPtr& s
     }
     // A server's layer is another layer in the other environment: its edits stay behind.
     if (!confirmUnsavedLayers(&stageManager, {stage}, parent, result->stage)) return fail(QString());
+    // Its folder's stages open in it from now on (docs/ASSET_SOURCES.md §4).
+    rememberFolderEnvironment(folderOf(stage->usdStage()->GetRootLayer()->GetIdentifier()), environment);
     return replaceStage(stageManager, stage, result->stage, state);
 }
 
@@ -178,9 +251,20 @@ void AssetEnvironmentButton::fillMenu() {
     list->clear();
     const StageRefPtr stage = m_stageManager->currentStage();
     const std::string wanted = stage ? wantedEnvironment(stage) : defaultAssetEnvironment();
+    // Grouped by source (docs/ASSET_SOURCES.md §9): yours first, then each source's under its alias.
+    std::string group;
     for (const std::string& environment : assetEnvironments()) {
+        const std::string alias = usdcc::assets::aliasOf(environment);
+        if (alias != group) {
+            // A heading of its own: this style draws a section without its text.
+            list->addSeparator();
+            list->addAction(qs(alias))->setEnabled(false);
+            group = alias;
+        }
+        const QString label = alias.empty() ? qs(environment) : qs(environment.substr(alias.size() + 1));
         // "&" would be a mnemonic.
-        QAction* action = list->addAction(qs(environment).replace(QLatin1Char('&'), QLatin1String("&&")));
+        QAction* action = list->addAction(QString(label).replace(QLatin1Char('&'), QLatin1String("&&")));
+        action->setData(qs(environment));
         action->setCheckable(true);
         action->setChecked(environment == wanted);
         connect(action, &QAction::triggered, this, [this, environment, stage]() {

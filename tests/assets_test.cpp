@@ -13,6 +13,7 @@
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
@@ -1103,4 +1104,114 @@ USDCC_TEST(assets_identifiers_and_missing_names) {
     std::string whyNot;
     CHECK(!resolver.CanWriteAssetToPath(resolver.Resolve("fake://studio/chars/tex.txt"), &whyNot) && !whyNot.empty(),
           "and nothing can be written yet: %s", whyNot.c_str());
+}
+
+// ---- Sources (docs/ASSET_SOURCES.md §3-§5) ---------------------------------------------
+
+namespace {
+void writeText(const fs::path& file, const std::string& text) {
+    fs::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << text;
+}
+}  // namespace
+
+USDCC_TEST(assets_sources_are_named_with_their_aliases) {
+    const fs::path folder = fs::temp_directory_path() / ("usdcc-sources-" + stableHash(std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()), 8));
+    writeText(folder / "studio" / "a.json", R"({
+        "name": "studio-a",
+        "environment": "prod",
+        "endpoints": {
+            "nas": { "scheme": "webdav", "url": "https://a.invalid", "credential": "dav" },
+            "aws": { "scheme": "s3", "url": "s3://bucket", "credential": "aws:studio" }
+        },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] }, "s3": { "bucket": ["aws"] } } },
+        "http": { "hosts": { "shared.example": { "credential": "dav" } }, "allow": ["*", "*.a.example"] }
+    })");
+    writeText(folder / "b.json", R"({
+        "endpoints": { "nas": { "scheme": "webdav", "url": "https://b.invalid", "credential": "studio-a-dav" } },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] } } },
+        "http": { "hosts": { "shared.example": { "credential": "x" } } }
+    })");
+    writeText(folder / "mine.json", R"({
+        "defaultEnvironment": "mine",
+        "sources": [ { "alias": "studio-a", "path": "studio/a.json" }, { "alias": "b", "path": "b.json" },
+                     { "alias": "gone", "path": "nowhere.json" } ],
+        "endpoints": { "home": { "scheme": "webdav", "url": "https://home.invalid", "credential": "studio-a-dav" } },
+        "environments": { "local": { "webdav": { "studio": ["home"] } } },
+        "mixed": {
+            "mine": { "extends": ["studio-a/prod", "b/prod"], "webdav": { "server1": ["home", "studio-a/nas"] } },
+            "clash": { "extends": ["studio-a/prod", "b/prod"] }
+        }
+    })");
+    const Result<Config> personal = Config::load(folder / "mine.json");
+    CHECK(personal.ok(), "the personal file parses: %s", personal.message.c_str());
+    if (!personal.ok()) return;
+    CHECK(personal.value.environment == "mine" && personal.value.sources.size() == 3 && personal.value.isMixed("mine") &&
+              !personal.value.isMixed("local"),
+          "its sources, mixed environments and default");
+
+    const std::vector<LoadedSource> sources = loadSources(personal.value, folder / "mine.json");
+    CHECK(sources.size() == 3 && sources[0].problem.empty() && sources[1].problem.empty() && !sources[2].problem.empty(),
+          "relative to its folder; one that isn't there says so");
+    MergeProblems problems;
+    const Config merged = mergeSources(personal.value, sources, &problems);
+    CHECK(merged.endpoints.count("home") && merged.endpoints.count("studio-a/nas") && merged.endpoints.count("b/nas"),
+          "servers named with their aliases, the personal ones as they are");
+    CHECK(merged.endpoints.at("studio-a/nas").credential == "studio-a/dav" &&
+              merged.endpoints.at("studio-a/aws").credential == "aws:studio",
+          "and their logins, but for AWS's own");
+    CHECK(merged.environments.count("studio-a/prod") && merged.environments.count("b/prod") && merged.environments.count("local"),
+          "environments too");
+    CHECK(merged.environments.at("mine").at("webdav").at("server1") == std::vector<std::string>({"home", "studio-a/nas"}),
+          "a mixed one's own stack replaces what it extends");
+    CHECK(merged.environments.at("mine").at("s3").count("bucket"), "and it has the names of what it extends");
+    CHECK(!merged.environments.count("clash") || !merged.environments.at("clash").count("webdav"),
+          "a name two extended environments have differently isn't guessed");
+    const std::string all = [&]() {
+        std::string text;
+        for (const std::string& line : problems.all()) text += line + "\n";
+        return text;
+    }();
+    CHECK(all.find("'clash'") != std::string::npos && all.find("'gone'") != std::string::npos, "both are said:\n%s", all.c_str());
+    CHECK(merged.httpHosts.at("shared.example").credential == "studio-a/dav" && all.find("shared.example") != std::string::npos,
+          "a web host two sources have: the first one's, said");
+    CHECK(std::find(merged.httpAllow.begin(), merged.httpAllow.end(), "*") == merged.httpAllow.end() &&
+              std::find(merged.httpAllow.begin(), merged.httpAllow.end(), "*.a.example") != merged.httpAllow.end(),
+          "a source's bare * isn't taken");
+    CHECK(all.find("STUDIO_A_DAV") != std::string::npos, "two logins with one spelling of variables are said");
+    PXR_NS::TfSetenv("USDCC_ASSETS_STUDIO_A_DAV_USER", "who");
+    CHECK(!credentialFromVariables("studio-a/dav") && !credentialFromVariables("studio-a-dav"), "and neither reads them");
+    PXR_NS::TfUnsetenv("USDCC_ASSETS_STUDIO_A_DAV_USER");
+    setAmbiguousCredentialVariables({});
+
+    const std::vector<std::string> withName = environmentsWithName(merged, "webdav", "server1");
+    CHECK(withName == std::vector<std::string>({"b/prod", "mine", "studio-a/prod"}), "which environments have a name (%zu)",
+          withName.size());
+    CHECK(offeredEnvironments(merged, "webdav", "server1") == std::vector<std::string>({"b/prod", "mine", "studio-a/prod"}),
+          "what's offered for it");
+    writeText(folder / "studio" / "a.json", R"({ "name": "studio-a", "environment": "prod",
+        "endpoints": { "nas": { "scheme": "webdav", "url": "https://a.invalid" } },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] } }, "test": { "webdav": { "server1": ["nas"] } } } })");
+    const Config twice = mergeSources(personal.value, loadSources(personal.value, folder / "mine.json"));
+    const std::vector<std::string> offered = offeredEnvironments(twice, "webdav", "server1");
+    CHECK(std::count(offered.begin(), offered.end(), "studio-a/prod") == 1 &&
+              std::count(offered.begin(), offered.end(), "studio-a/test") == 0,
+          "a source's default stands for it");
+    const Context context(merged, "studio-a/prod");
+    CHECK(context.stack("webdav", "server1") && context.stack("webdav", "server1")->endpoints.front().url == "https://a.invalid",
+          "a source's environment resolves through its servers");
+
+    // Written back: an older usdcc's keys as they were, the new ones where it doesn't look.
+    const std::string json = personal.value.toJson();
+    const Result<Config> again = Config::parse(json);
+    CHECK(again.ok() && again.value.isMixed("mine") && again.value.extends.at("mine").size() == 2 && again.value.environment == "mine",
+          "it writes what it read:\n%s", json.c_str());
+    CHECK(json.find("\"mixed\"") != std::string::npos && json.find("\"defaultEnvironment\"") != std::string::npos &&
+              json.find("\"environment\"") == std::string::npos,
+          "mixed ones under \"mixed\", and the default under \"defaultEnvironment\"");
+    CHECK(suggestedAlias(Config(), "C:/x/Studio B Assets.json") == "studio-b-assets", "an alias from a file name");
+
+    const Result<Config> slashed = Config::parse(R"({ "endpoints": { "a/b": { "scheme": "webdav", "url": "https://x" } } })");
+    CHECK(!slashed.ok(), "a file can't spell another source's ids");
+    fs::remove_all(folder);
 }

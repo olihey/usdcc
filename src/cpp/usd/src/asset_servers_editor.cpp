@@ -5,7 +5,9 @@
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
 #include "usdcc/assets/logins.h"
+#include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 #include "usdcc/usd/asset_servers.h"
@@ -18,6 +20,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QGridLayout>
 #include <QDir>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -170,7 +174,11 @@ void AssetServersDialog::setStageManager(const StageManager* stages) { stageMana
 AssetServersDialog::AssetServersDialog(QWidget* parent, const std::filesystem::path& file) : QDialog(parent) {
     setWindowTitle(tr("Asset Servers"));
     setObjectName(QStringLiteral("assetServersDialog"));
-    m_editor = std::make_unique<assets::ConfigEditor>(file.empty() ? assets::Config::defaultPath() : file);
+    m_personal = std::make_unique<assets::ConfigEditor>(file.empty() ? assets::Config::defaultPath() : file);
+    m_editor = m_personal.get();
+    confirm = [this](const QString& text) {
+        return QMessageBox::question(this, windowTitle(), text) == QMessageBox::Yes;
+    };
     build();
     refreshAll();
     resize(820, 560);
@@ -189,8 +197,51 @@ void AssetServersDialog::build() {
     m_notice->setWordWrap(true);
     layout->addWidget(m_notice);
 
+    // The configurations (docs/ASSET_SOURCES.md §10): the personal file, then its sources.
+    auto* body = new QHBoxLayout();
+    auto* sourcesColumn = new QVBoxLayout();
+    sourcesColumn->addWidget(new QLabel(tr("Configurations:"), this));
+    m_sources = new QListWidget(this);
+    m_sources->setObjectName(QStringLiteral("assetServersSources"));
+    m_sources->setMaximumWidth(190);
+    sourcesColumn->addWidget(m_sources, 1);
+    auto* sourceButtons = new QGridLayout();
+    m_addSource = new QPushButton(tr("Add..."), this);
+    m_addSource->setObjectName(QStringLiteral("assetServersAddSource"));
+    m_addSource->setToolTip(tr("Another configuration, such as a studio's: read-only, its names with its alias in front"));
+    m_removeSource = new QPushButton(tr("Remove"), this);
+    m_refreshSources = new QPushButton(tr("Refresh"), this);
+    m_refreshSources->setToolTip(tr("Reads the sources' files again"));
+    m_copyToPersonal = new QPushButton(tr("Copy to Mine"), this);
+    m_copyToPersonal->setObjectName(QStringLiteral("assetServersCopyToPersonal"));
+    m_copyToPersonal->setToolTip(tr("Copies the selected server, or environment, into your configuration"));
+    sourceButtons->addWidget(m_addSource, 0, 0);
+    sourceButtons->addWidget(m_removeSource, 0, 1);
+    sourceButtons->addWidget(m_refreshSources, 1, 0);
+    sourceButtons->addWidget(m_copyToPersonal, 1, 1);
+    sourcesColumn->addLayout(sourceButtons);
+    body->addLayout(sourcesColumn);
     m_tabs = new QTabWidget(this);
-    layout->addWidget(m_tabs, 1);
+    body->addWidget(m_tabs, 1);
+    layout->addLayout(body, 1);
+    connect(m_sources, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (m_refreshing || row < 0) return;
+        viewSource(m_sources->item(row)->data(Qt::UserRole).toString());
+    });
+    connect(m_addSource, &QPushButton::clicked, this, [this]() {
+        const QString file = QFileDialog::getOpenFileName(this, tr("Add a Configuration"), QString(),
+                                                          tr("Asset configurations (*.json)"));
+        if (!file.isEmpty()) addSource(std::filesystem::path(file.toStdWString()));
+    });
+    connect(m_removeSource, &QPushButton::clicked, this, [this]() {
+        QListWidgetItem* item = m_sources->currentItem();
+        if (item && !item->data(Qt::UserRole).toString().isEmpty()) removeSource(item->data(Qt::UserRole).toString());
+    });
+    connect(m_refreshSources, &QPushButton::clicked, this, [this]() {
+        m_personal->reloadSources();
+        viewSource(m_viewedAlias);
+    });
+    connect(m_copyToPersonal, &QPushButton::clicked, this, [this]() { copyToPersonal(); });
 
     // ---- Servers -------------------------------------------------------------------------
     auto* serversPage = new QWidget(m_tabs);
@@ -205,7 +256,7 @@ void AssetServersDialog::build() {
     m_servers->setSelectionMode(QAbstractItemView::SingleSelection);
     const auto credentialIds = [this]() {
         QStringList ids;
-        for (const assets::KnownLogin& login : assets::knownLogins(m_editor->config())) ids << qs(login.id);
+        for (const assets::KnownLogin& login : assets::knownLogins(m_personal->merged())) ids << qs(login.id);
         return ids;
     };
     m_servers->setItemDelegateForColumn(kCredential, new CredentialDelegate(credentialIds, m_servers));
@@ -341,7 +392,7 @@ void AssetServersDialog::build() {
     connect(m_login, &QPushButton::clicked, this, [this]() {
         const auto found = m_editor->config().endpoints.find(selectedServer().toStdString());
         if (found == m_editor->config().endpoints.end()) return;
-        changeLogin(qs(found->second.credential), qs(found->second.scheme));
+        changeLogin(qs(storedCredentialId(found->second.credential)), qs(found->second.scheme));
     });
 
     // ---- Environments --------------------------------------------------------------------
@@ -364,7 +415,49 @@ void AssetServersDialog::build() {
     environmentButtons->addWidget(m_renameEnvironment);
     environmentButtons->addWidget(m_removeEnvironment);
     left->addLayout(environmentButtons);
+    // A mixed environment (docs/ASSET_SOURCES.md §4): the names of sources' environments too.
+    left->addWidget(new QLabel(tr("Also has the names of:"), environmentsPage));
+    m_extends = new QListWidget(environmentsPage);
+    m_extends->setObjectName(QStringLiteral("assetServersExtends"));
+    m_extends->setMaximumHeight(70);
+    m_extends->setToolTip(tr("Other sources' environments whose names this one has too; its own names replace theirs"));
+    left->addWidget(m_extends);
+    auto* extendsButtons = new QHBoxLayout();
+    m_addExtends = new QPushButton(tr("Add..."), environmentsPage);
+    m_removeExtends = new QPushButton(tr("Remove"), environmentsPage);
+    extendsButtons->addWidget(m_addExtends);
+    extendsButtons->addWidget(m_removeExtends);
+    extendsButtons->addStretch(1);
+    left->addLayout(extendsButtons);
     environmentsLayout->addLayout(left, 1);
+    connect(m_addExtends, &QPushButton::clicked, this, [this]() {
+        const QString environment = selectedEnvironment();
+        if (environment.isEmpty()) return;
+        QStringList offered;
+        const auto& current = m_personal->config().extends;
+        const auto mine = current.find(environment.toStdString());
+        for (const auto& [other, schemes] : m_personal->merged().environments) {
+            if (assets::aliasOf(other).empty()) continue;
+            if (mine != current.end() && std::count(mine->second.begin(), mine->second.end(), other)) continue;
+            offered << qs(other);
+        }
+        if (offered.isEmpty()) return report(tr("Add a source first: only its environments can be extended."));
+        bool ok = false;
+        const QString picked = QInputDialog::getItem(this, tr("Also Has the Names of"), tr("Environment:"), offered, 0,
+                                                     false, &ok);
+        if (!ok) return;
+        QStringList extended;
+        for (int row = 0; row < m_extends->count(); ++row) extended << m_extends->item(row)->text();
+        setExtends(environment, extended << picked);
+    });
+    connect(m_removeExtends, &QPushButton::clicked, this, [this]() {
+        if (!m_extends->currentItem()) return;
+        QStringList extended;
+        for (int row = 0; row < m_extends->count(); ++row) {
+            if (row != m_extends->currentRow()) extended << m_extends->item(row)->text();
+        }
+        setExtends(selectedEnvironment(), extended);
+    });
 
     auto* middle = new QVBoxLayout();
     middle->addWidget(new QLabel(tr("Names in it:"), environmentsPage));
@@ -458,7 +551,7 @@ void AssetServersDialog::build() {
         const QString environment = selectedEnvironment();
         if (environment.isEmpty()) return;
         QStringList servers;
-        for (const auto& [id, endpoint] : m_editor->config().endpoints) {
+        for (const auto& [id, endpoint] : viewedServers().endpoints) {
             servers << qs(id) + QStringLiteral("  (") + qs(endpoint.scheme) + QStringLiteral(")");
         }
         if (servers.isEmpty()) return report(tr("Add a server first: a name's stack is made of servers."));
@@ -483,7 +576,7 @@ void AssetServersDialog::build() {
             m_editor->addName(environment.toStdString(), name->text().toStdString(), server.toStdString());
         if (!why.empty()) return report(qs(why));
         refreshNames();
-        selectName(qs(m_editor->config().endpoints.at(server.toStdString()).scheme), name->text());
+        selectName(qs(viewedServers().endpoints.at(server.toStdString()).scheme), name->text());
         refreshProblems();
     });
     connect(m_removeName, &QPushButton::clicked, this, [this]() {
@@ -626,7 +719,8 @@ void AssetServersDialog::build() {
         if (m_changeLogin->isEnabled()) changeLogin(selectedLogin());
     });
     connect(m_forgetLogin, &QPushButton::clicked, this, [this]() {
-        if (forgetAssetLogin(this, selectedLogin(), &m_editor->config())) refreshLogins();
+        const assets::Config all = m_personal->merged();
+        if (forgetAssetLogin(this, selectedLogin(), &all)) refreshLogins();
     });
     connect(m_logins, &QTableWidget::itemSelectionChanged, this, [this]() {
         const int row = m_logins->currentRow();
@@ -668,22 +762,22 @@ void AssetServersDialog::build() {
 
     connect(m_defaultEnvironment, &QComboBox::currentIndexChanged, this, [this]() {
         if (m_refreshing) return;
-        m_editor->config().environment = m_defaultEnvironment->currentData().toString().toStdString();
+        m_personal->config().environment = m_defaultEnvironment->currentData().toString().toStdString();
         refreshProblems();
     });
     connect(m_save, &QPushButton::clicked, this, [this]() { save(); });
     connect(m_saveCopy, &QPushButton::clicked, this, [this]() { saveCopyAsMine(); });
     connect(m_reload, &QPushButton::clicked, this, [this]() {
-        if (m_editor->modified() &&
+        if (m_personal->modified() &&
             QMessageBox::question(this, windowTitle(), tr("Drop the changes made here and read the file again?")) !=
                 QMessageBox::Yes) {
             return;
         }
-        m_editor->reload();
-        refreshAll();
+        m_personal->reload();
+        viewSource(QString());
     });
     connect(close, &QPushButton::clicked, this, [this]() {
-        if (m_editor->modified() && !m_readOnly) {
+        if (m_personal->modified() && m_personal->writable()) {
             const auto answer = QMessageBox::question(this, windowTitle(), tr("Save the changes made here?"),
                                                       QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
             if (answer == QMessageBox::Cancel) return;
@@ -696,29 +790,38 @@ void AssetServersDialog::build() {
 void AssetServersDialog::report(const QString& error) { QMessageBox::warning(this, windowTitle(), error); }
 
 void AssetServersDialog::refreshAll() {
-    const std::string fileText = assets::toUtf8(m_editor->file());
+    const bool personal = m_editor == m_personal.get();
+    const std::string fileText = assets::toUtf8(personal ? m_editor->file() : m_viewedFile);
     m_fileLabel->setText(QDir::toNativeSeparators(qs(fileText)));
     // A studio's file (USDCC_ASSETS_CONFIG) or one this user can't write: shown, Test and
     // Login working, and a copy of it can become this user's own.
-    m_readOnly = !m_editor->writable();
+    const bool personalReadOnly = !m_personal->writable();
+    m_readOnly = !personal || personalReadOnly;
     const bool fromStudio = !PXR_NS::TfGetenv("USDCC_ASSETS_CONFIG").empty();
     QStringList notes;
+    if (!personal) {
+        notes << tr("The source %1, read-only: its servers, environments and logins are named %1/... where you use "
+                    "them. Copy to Mine makes one of yours from what's selected.")
+                     .arg(m_viewedAlias);
+    }
     if (!m_editor->loadProblem().empty()) {
         notes << tr("The file can't be read as it is, so it can't be edited here until it's fixed in a text "
                     "editor:\n%1")
                      .arg(qs(m_editor->loadProblem()));
     }
-    if (m_readOnly) {
+    if (personal && personalReadOnly) {
         notes << tr("This file can't be written here%1. Test and Login work; Save a Copy as Mine writes it as your "
                     "own assets.json.")
                      .arg(fromStudio ? tr(" (it comes from USDCC_ASSETS_CONFIG)") : QString());
         if (fromStudio) notes << tr("While USDCC_ASSETS_CONFIG is set, it still wins over your own copy.");
-    } else if (fromStudio) {
+    } else if (fromStudio && personal) {
         notes << tr("This file comes from USDCC_ASSETS_CONFIG.");
     }
     m_notice->setText(notes.join(QStringLiteral("\n")));
     m_notice->setVisible(!notes.isEmpty());
-    m_saveCopy->setVisible(m_readOnly);
+    m_saveCopy->setVisible(personalReadOnly);
+    m_copyToPersonal->setEnabled(!personal && !personalReadOnly);
+    refreshSources();
     refreshServers();
     refreshEnvironments();
     refreshWebHosts();
@@ -738,7 +841,7 @@ void AssetServersDialog::setEditable(bool editable) {
              m_addServer, m_removeServer, m_addMirror, m_removeMirror, m_s3Region, m_s3BucketInHost,
              m_addEnvironment, m_duplicateEnvironment, m_renameEnvironment, m_removeEnvironment, m_addName,
              m_removeName, m_stackServer, m_addToStack, m_removeFromStack, m_addWebHost, m_removeWebHost, m_httpAllow,
-             m_s3Allow, m_defaultEnvironment}) {
+             m_s3Allow, m_defaultEnvironment, m_extends, m_addExtends, m_removeExtends}) {
         widget->setEnabled(editable);
     }
     m_stack->setDragDropMode(editable ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
@@ -861,10 +964,14 @@ void AssetServersDialog::refreshEnvironments() {
     const QString selected = selectedEnvironment();
     const RefreshGuard guard(m_refreshing);
     m_environments->clear();
-    for (const auto& [environment, schemes] : m_editor->config().environments) m_environments->addItem(qs(environment));
+    for (const auto& [environment, schemes] : m_editor->config().environments) {
+        auto* item = new QListWidgetItem(qs(environment), m_environments);
+        if (m_editor->config().isMixed(environment)) item->setToolTip(tr("Mixed: it has other sources' names"));
+    }
     if (!selected.isEmpty()) selectEnvironment(selected);
     if (m_environments->currentRow() < 0 && m_environments->count() > 0) m_environments->setCurrentRow(0);
     refreshNames();
+    refreshExtends();
 }
 
 void AssetServersDialog::refreshNames() {
@@ -872,6 +979,7 @@ void AssetServersDialog::refreshNames() {
     const bool had = selectedName(&scheme, &name);
     const RefreshGuard guard(m_refreshing);
     m_names->clear();
+    refreshExtends();
     const auto found = m_editor->config().environments.find(selectedEnvironment().toStdString());
     if (found != m_editor->config().environments.end()) {
         for (const auto& [ofScheme, names] : found->second) {
@@ -898,14 +1006,15 @@ void AssetServersDialog::refreshStack() {
         if (found != names.end()) {
             for (const std::string& server : found->second) {
                 auto* item = new QListWidgetItem(qs(server), m_stack);
-                const auto endpoint = m_editor->config().endpoints.find(server);
-                if (endpoint != m_editor->config().endpoints.end()) {
+                const assets::Config servers = viewedServers();
+                const auto endpoint = servers.endpoints.find(server);
+                if (endpoint != servers.endpoints.end()) {
                     item->setToolTip(qs(endpoint->second.url) +
                                      (endpoint->second.readOnly ? tr(" (read-only)") : QString()));
                 }
             }
             // Only servers of the name's protocol, and not those in it already (§4).
-            for (const auto& [id, endpoint] : m_editor->config().endpoints) {
+            for (const auto& [id, endpoint] : viewedServers().endpoints) {
                 if (endpoint.scheme != scheme) continue;
                 if (std::find(found->second.begin(), found->second.end(), id) != found->second.end()) continue;
                 m_stackServer->addItem(qs(id));
@@ -972,7 +1081,8 @@ QString AssetServersDialog::selectedLogin() const {
 }
 
 void AssetServersDialog::changeLogin(const QString& credential, const QString& scheme) {
-    if (!showAssetLoginDialog(this, credential, scheme, &m_editor->config())) {
+    const assets::Config all = m_personal->merged();
+    if (!showAssetLoginDialog(this, credential, scheme, &all)) {
         // The form can forget one too.
         refreshLogins();
         return;
@@ -990,7 +1100,7 @@ void AssetServersDialog::showLogins(const QString& credential) {
 }
 
 void AssetServersDialog::refreshLogins() {
-    const std::vector<assets::KnownLogin> logins = assets::knownLogins(m_editor->config());
+    const std::vector<assets::KnownLogin> logins = assets::knownLogins(m_personal->merged());
     const QString selected = selectedLogin();
     {
         const RefreshGuard guard(m_refreshing);
@@ -1042,7 +1152,7 @@ void AssetServersDialog::refreshLogins() {
         const std::string id = m_servers->item(row, kId)->data(Qt::UserRole).toString().toStdString();
         const auto endpoint = m_editor->config().endpoints.find(id);
         if (endpoint == m_editor->config().endpoints.end()) continue;
-        const std::string& credential = endpoint->second.credential;
+        const std::string credential = storedCredentialId(endpoint->second.credential);
         const auto login = std::find_if(logins.begin(), logins.end(),
                                         [&credential](const assets::KnownLogin& each) { return each.id == credential; });
         const auto refused = m_refused.find(id);
@@ -1062,13 +1172,15 @@ void AssetServersDialog::refreshDefaultEnvironment() {
     const RefreshGuard guard(m_refreshing);
     m_defaultEnvironment->clear();
     m_defaultEnvironment->addItem(tr("(none)"), QString());
-    for (const auto& [environment, schemes] : m_editor->config().environments) {
+    // The personal file's: its own environments and its sources'.
+    for (const auto& [environment, schemes] : m_personal->merged().environments) {
         m_defaultEnvironment->addItem(qs(environment), qs(environment));
     }
-    const int index = m_defaultEnvironment->findData(qs(m_editor->config().environment));
+    const std::string chosen = m_personal->config().environment;
+    const int index = m_defaultEnvironment->findData(qs(chosen));
     // One the configuration names but doesn't have stays chosen, as a problem to fix.
-    if (index < 0 && !m_editor->config().environment.empty()) {
-        m_defaultEnvironment->addItem(qs(m_editor->config().environment), qs(m_editor->config().environment));
+    if (index < 0 && !chosen.empty()) {
+        m_defaultEnvironment->addItem(qs(chosen), qs(chosen));
         m_defaultEnvironment->setCurrentIndex(m_defaultEnvironment->count() - 1);
     } else {
         m_defaultEnvironment->setCurrentIndex(std::max(0, index));
@@ -1078,7 +1190,8 @@ void AssetServersDialog::refreshDefaultEnvironment() {
 void AssetServersDialog::refreshProblems() {
     // Any change may be to a credential, or to what uses one.
     refreshLogins();
-    const std::vector<std::string> problems = m_editor->problems();
+    // The personal file's, which keep it from being saved; a source's are at its row.
+    const std::vector<std::string> problems = m_personal->problems();
     QStringList lines;
     for (const std::string& problem : problems) lines << qs(problem);
     m_problems->setText(lines.join(QStringLiteral("\n")));
@@ -1110,9 +1223,9 @@ void AssetServersDialog::refreshProblems() {
         item->setBackground(mine.isEmpty() ? QBrush() : QBrush(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error, 70)));
         item->setToolTip(mine.join(QStringLiteral("\n")));
     }
-    const bool canEdit = !m_readOnly && m_editor->loadProblem().empty();
-    m_save->setEnabled(canEdit && problems.empty() && m_editor->modified());
-    m_saveCopy->setEnabled(problems.empty() && m_editor->loadProblem().empty());
+    const bool canSave = m_personal->writable() && m_personal->loadProblem().empty();
+    m_save->setEnabled(canSave && problems.empty() && m_personal->modified());
+    m_saveCopy->setEnabled(problems.empty() && m_personal->loadProblem().empty());
 }
 
 QStringList AssetServersDialog::problems() const {
@@ -1170,8 +1283,9 @@ void AssetServersDialog::testServer(const QString& id) {
     if (!id.isEmpty()) selectServer(id);
     const auto found = m_editor->config().endpoints.find(selectedServer().toStdString());
     if (found == m_editor->config().endpoints.end()) return;
-    // What the table says now, unsaved.
-    const assets::Endpoint endpoint = found->second;
+    // What the table says now, unsaved; a source's with its login's name in the store.
+    assets::Endpoint endpoint = found->second;
+    endpoint.credential = storedCredentialId(endpoint.credential);
     const int generation = ++m_testGeneration;
     m_testResult->setText(tr("%1: asking %2...").arg(qs(endpoint.id), qs(endpoint.url)));
     QPointer<AssetServersDialog> self(this);
@@ -1196,24 +1310,24 @@ void AssetServersDialog::testServer(const QString& id) {
 
 bool AssetServersDialog::save(bool overwriteChanged) {
     if (m_readOnly) return false;
-    if (!overwriteChanged && m_editor->changedOnDisk()) {
+    if (!overwriteChanged && m_personal->changedOnDisk()) {
         QMessageBox ask(QMessageBox::Question, windowTitle(),
                         tr("%1 changed on disk since it was read here: someone else, or a text editor.")
-                            .arg(QDir::toNativeSeparators(qs(assets::toUtf8(m_editor->file())))),
+                            .arg(QDir::toNativeSeparators(qs(assets::toUtf8(m_personal->file())))),
                         QMessageBox::NoButton, this);
         QPushButton* overwrite = ask.addButton(tr("Overwrite It"), QMessageBox::DestructiveRole);
         QPushButton* reload = ask.addButton(tr("Reload It"), QMessageBox::AcceptRole);
         ask.addButton(QMessageBox::Cancel);
         ask.exec();
         if (ask.clickedButton() == reload) {
-            m_editor->reload();
-            refreshAll();
+            m_personal->reload();
+            viewSource(QString());
             return false;
         }
         if (ask.clickedButton() != overwrite) return false;
     }
     const assets::Config before = assets::defaultConfig();
-    const assets::Result<bool> written = m_editor->save(true);
+    const assets::Result<bool> written = m_personal->save(true);
     if (!written.ok()) {
         report(tr("It couldn't be saved: %1").arg(qs(written.message)));
         return false;
@@ -1222,7 +1336,7 @@ bool AssetServersDialog::save(bool overwriteChanged) {
     assets::reloadDefaultConfig();
     // Open stages keep the servers they were opened with: their contexts hold the stacks.
     const std::map<std::string, std::string> was = environmentFingerprints(before);
-    const std::map<std::string, std::string> now = environmentFingerprints(m_editor->config());
+    const std::map<std::string, std::string> now = environmentFingerprints(m_personal->merged());
     m_keptStages = 0;
     if (const StageManager* stages = stageManagerPointer()) {
         for (const StageRefPtr& stage : stages->stages()) {
@@ -1257,7 +1371,7 @@ bool AssetServersDialog::saveCopyAsMine(const std::filesystem::path& file) {
                                   .arg(QDir::toNativeSeparators(qs(assets::toUtf8(target))))) != QMessageBox::Yes) {
         return false;
     }
-    const assets::Result<bool> written = m_editor->saveAs(target);
+    const assets::Result<bool> written = m_personal->saveAs(target);
     if (!written.ok()) {
         report(tr("It couldn't be saved: %1").arg(qs(written.message)));
         return false;
@@ -1267,6 +1381,194 @@ bool AssetServersDialog::saveCopyAsMine(const std::filesystem::path& file) {
     assetConfigChanged()();
     Q_EMIT saved();
     return true;
+}
+
+assets::Config AssetServersDialog::viewedServers() const {
+    return m_editor == m_personal.get() ? m_personal->merged() : m_editor->config();
+}
+
+std::string AssetServersDialog::storedCredentialId(const std::string& credential) const {
+    return assets::qualifiedCredential(m_viewedAlias.toStdString(), credential);
+}
+
+void AssetServersDialog::refreshSources() {
+    const RefreshGuard guard(m_refreshing);
+    m_sources->clear();
+    auto* mine = new QListWidgetItem(tr("Mine"), m_sources);
+    mine->setData(Qt::UserRole, QString());
+    mine->setToolTip(QDir::toNativeSeparators(qs(assets::toUtf8(m_personal->file()))));
+    for (const assets::LoadedSource& source : m_personal->sources()) {
+        const QString alias = qs(source.entry.alias);
+        auto* item = new QListWidgetItem(source.problem.empty() ? alias : alias + QStringLiteral("  !"), m_sources);
+        item->setData(Qt::UserRole, alias);
+        const QString where = QDir::toNativeSeparators(qs(source.file.empty() ? source.entry.url : assets::toUtf8(source.file)));
+        item->setToolTip(source.problem.empty() ? tr("%1, read-only").arg(where)
+                                                : tr("%1 isn't used: %2").arg(where, qs(source.problem)));
+        if (!source.problem.empty()) item->setForeground(usdcc::ui::theme::color(usdcc::ui::theme::Token::Error));
+    }
+    for (int row = 0; row < m_sources->count(); ++row) {
+        if (m_sources->item(row)->data(Qt::UserRole).toString() == m_viewedAlias) m_sources->setCurrentRow(row);
+    }
+    m_removeSource->setEnabled(!m_viewedAlias.isEmpty() && m_personal->writable());
+    m_addSource->setEnabled(m_personal->writable() && m_personal->loadProblem().empty());
+}
+
+void AssetServersDialog::refreshExtends() {
+    const RefreshGuard guard(m_refreshing);
+    m_extends->clear();
+    const auto& extends = m_editor->config().extends;
+    const auto found = extends.find(selectedEnvironment().toStdString());
+    if (found != extends.end()) {
+        for (const std::string& other : found->second) m_extends->addItem(qs(other));
+    }
+}
+
+void AssetServersDialog::viewSource(const QString& alias) {
+    m_viewedAlias.clear();
+    m_viewed.reset();
+    m_viewedFile.clear();
+    m_editor = m_personal.get();
+    for (const assets::LoadedSource& source : m_personal->sources()) {
+        if (qs(source.entry.alias) != alias || alias.isEmpty()) continue;
+        m_viewed = std::make_unique<assets::ConfigEditor>(source.config);
+        m_editor = m_viewed.get();
+        m_viewedAlias = alias;
+        m_viewedFile = source.file;
+    }
+    m_refused.clear();
+    refreshAll();
+}
+
+bool AssetServersDialog::addSource(const std::filesystem::path& file) {
+    const assets::Result<assets::Config> loaded = assets::Config::load(file);
+    if (!loaded.ok()) {
+        report(tr("%1 isn't an asset configuration: %2")
+                   .arg(QDir::toNativeSeparators(qs(assets::toUtf8(file))), qs(loaded.message)));
+        return false;
+    }
+    std::set<std::string> taken;
+    for (const assets::SourceEntry& entry : m_personal->config().sources) taken.insert(entry.alias);
+    QString alias = qs(assets::suggestedAlias(loaded.value, file));
+    while (taken.count(alias.toStdString()) || !assets::isValidName(alias.toStdString())) {
+        bool ok = false;
+        alias = QInputDialog::getText(this, tr("Add a Configuration"),
+                                      tr("The alias %1 is taken. Another (lowercase letters, digits, '-', '_' and '.'):")
+                                          .arg(alias),
+                                      QLineEdit::Normal, alias + QStringLiteral("-2"), &ok)
+                    .trimmed();
+        if (!ok) return false;
+    }
+    // What it brings, before it's trusted with its logins (docs/ASSET_SOURCES.md §5).
+    const assets::Config& theirs = loaded.value;
+    QStringList said;
+    said << tr("Add %1 as the source %2? Its %n server(s) and environments are named %2/... where you use them, "
+               "and it's read-only here.",
+               nullptr, int(theirs.endpoints.size()))
+                .arg(QDir::toNativeSeparators(qs(assets::toUtf8(file))), alias);
+    QStringList hosts;
+    for (const std::string& pattern : theirs.httpAllow) {
+        if (pattern != "*") hosts << qs(pattern);
+    }
+    for (const std::string& pattern : theirs.s3Allow) {
+        if (pattern != "*") hosts << tr("S3 %1").arg(qs(pattern));
+    }
+    if (!hosts.isEmpty()) said << tr("Stages may contact these too: %1.").arg(hosts.join(QStringLiteral(", ")));
+    bool aws = false;
+    for (const auto& [id, endpoint] : theirs.endpoints) aws = aws || assets::isAwsCredential(endpoint.credential);
+    if (aws) said << tr("Some of its servers use your own AWS login.");
+    QStringList kept;
+    for (const assets::StoredCredential& stored : assets::storedCredentials()) {
+        if (assets::aliasOf(stored.id) == alias.toStdString()) kept << qs(stored.id);
+    }
+    if (!kept.isEmpty()) {
+        said << tr("Logins are saved for %1 already (%2), maybe for another configuration of that name: this one "
+                   "gets them.")
+                    .arg(alias, kept.join(QStringLiteral(", ")));
+    }
+    if (!confirm(said.join(QStringLiteral("\n\n")))) return false;
+    assets::SourceEntry entry;
+    entry.alias = alias.toStdString();
+    entry.path = assets::toUtf8(file);
+    const std::string why = m_personal->addSource(entry);
+    if (!why.empty()) {
+        report(qs(why));
+        return false;
+    }
+    viewSource(alias);
+    return true;
+}
+
+bool AssetServersDialog::removeSource(const QString& alias) {
+    QStringList saved;
+    for (const assets::StoredCredential& stored : assets::storedCredentials()) {
+        if (assets::aliasOf(stored.id) == alias.toStdString()) saved << qs(stored.id);
+    }
+    const std::string why = m_personal->removeSource(alias.toStdString());
+    if (!why.empty()) {
+        report(qs(why));
+        return false;
+    }
+    if (!saved.isEmpty() &&
+        confirm(tr("Forget the logins saved for %1 too? %2. This can't be undone.").arg(alias, saved.join(QStringLiteral(", "))))) {
+        for (const QString& id : saved) assets::forgetStoredCredential(id.toStdString());
+        assets::forgetLookups();
+    }
+    viewSource(QString());
+    return true;
+}
+
+void AssetServersDialog::copyToPersonal() {
+    if (m_viewedAlias.isEmpty()) return;
+    const std::string alias = m_viewedAlias.toStdString();
+    const auto unique = [](const auto& existing, const std::string& wanted) {
+        std::string name = wanted;
+        for (int n = 2; existing.count(name); ++n) name = wanted + "-" + std::to_string(n);
+        return name;
+    };
+    QString select;
+    bool environment = false;
+    if (m_tabs->currentIndex() == 1) {
+        const std::string from = selectedEnvironment().toStdString();
+        const auto found = m_editor->config().environments.find(from);
+        if (found == m_editor->config().environments.end()) return;
+        // Mixed: its stacks name the source's servers, which stay the source's.
+        const std::string name = unique(m_personal->config().environments, from);
+        auto& made = m_personal->config().environments[name];
+        for (const auto& [scheme, names] : found->second) {
+            for (const auto& [ofName, ids] : names) {
+                std::vector<std::string> stack;
+                for (const std::string& id : ids) stack.push_back(assets::qualifiedId(alias, id));
+                made[scheme][ofName] = stack;
+            }
+        }
+        select = qs(name);
+        environment = true;
+    } else {
+        const auto found = m_editor->config().endpoints.find(selectedServer().toStdString());
+        if (found == m_editor->config().endpoints.end()) return;
+        assets::Endpoint copy = found->second;
+        copy.id = unique(m_personal->config().endpoints, copy.id);
+        // Its login is the source's; yours is picked here.
+        copy.credential.clear();
+        m_personal->addServer(copy);
+        select = qs(copy.id);
+    }
+    viewSource(QString());
+    if (environment) {
+        selectEnvironment(select);
+    } else {
+        selectServer(select);
+    }
+}
+
+void AssetServersDialog::setExtends(const QString& environment, const QStringList& extended) {
+    std::vector<std::string> list;
+    for (const QString& other : extended) list.push_back(other.toStdString());
+    const std::string why = m_personal->setExtends(environment.toStdString(), list);
+    if (!why.empty()) return report(qs(why));
+    refreshEnvironments();
+    selectEnvironment(environment);
+    refreshProblems();
 }
 
 bool showAssetServersEditor(QWidget* parent) {

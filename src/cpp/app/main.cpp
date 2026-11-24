@@ -490,6 +490,13 @@ int main(int argc, char** argv) {
         usdcc::ui::SessionStore().contains(QLatin1String(usdcc::ui::session::kLastSessionName))) {
         startSession = QLatin1String(usdcc::ui::session::kLastSessionName);
     }
+    // Before the stage named on the command line opens: a server its environment doesn't
+    // have, which another has, is offered (docs/ASSET_SOURCES.md §4), and the environment
+    // remembered for its folder is used. Per folder in this profile's data.
+    usdcc::usd::installAssetEnvironmentOffer(&window, &stageManager);
+    usdcc::usd::setAssetFolderFile(QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                                       .filePath(QStringLiteral("asset-folders.json"))
+                                       .toStdString());
     usdcc::usd::StageRefPtr initialStage;
     if (!positional.isEmpty() && startSession.isEmpty()) {
         // A URL given on the command line: its host may be contacted, for this session.

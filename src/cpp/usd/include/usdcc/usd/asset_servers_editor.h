@@ -11,6 +11,7 @@
 #include <QString>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -28,6 +29,7 @@ class QTreeWidget;
 
 namespace usdcc::assets {
 class ConfigEditor;
+struct Config;
 }
 
 namespace usdcc::usd {
@@ -41,7 +43,8 @@ public:
     explicit AssetServersDialog(QWidget* parent = nullptr, const std::filesystem::path& file = {});
     ~AssetServersDialog() override;
 
-    usdcc::assets::ConfigEditor& editor() { return *m_editor; }
+    // The personal configuration, which it edits; its sources it only shows.
+    usdcc::assets::ConfigEditor& editor() { return *m_personal; }
     // Whether the file can't be written here: then only Test, Login and Save a Copy work.
     bool readOnly() const { return m_readOnly; }
     // The problems shown, one per line: what keeps Save off.
@@ -58,6 +61,20 @@ public:
     void testServer(const QString& id = {});
     // Shows the Logins tab, with `credential` selected.
     void showLogins(const QString& credential = {});
+    // Shows a source (docs/ASSET_SOURCES.md §10), read-only; empty for the personal file.
+    void viewSource(const QString& alias);
+    QString viewedSource() const { return m_viewedAlias; }
+    // Adds the configuration at `file` as a source, asking for an alias only when its own is
+    // taken, and saying what it brings. False when cancelled or it can't be read.
+    bool addSource(const std::filesystem::path& file);
+    // Removes a source; offers to forget the logins saved for it.
+    bool removeSource(const QString& alias);
+    // Copies the selected server, or environment, of the viewed source into the personal file.
+    void copyToPersonal();
+    // A mixed environment's extended environments.
+    void setExtends(const QString& environment, const QStringList& extended);
+    // Asks before adding a source, removing its logins and the like; replaced by tests.
+    std::function<bool(const QString& text)> confirm;
     // Selects a server row, an environment, or one of its names.
     void selectServer(const QString& id);
     void selectEnvironment(const QString& environment);
@@ -86,6 +103,13 @@ private:
     void refreshNames();
     void refreshStack();
     void refreshWebHosts();
+    void refreshSources();
+    void refreshExtends();
+    // The servers a stack of the viewed configuration can name: the personal file's with its
+    // sources' (qualified), or a source's own.
+    usdcc::assets::Config viewedServers() const;
+    // A credential id of the viewed configuration as the store has it (qualified for a source).
+    std::string storedCredentialId(const std::string& credential) const;
     void refreshLogins();
     void changeLogin(const QString& credential, const QString& scheme = {});
     QString selectedLogin() const;
@@ -99,7 +123,12 @@ private:
     bool selectedName(std::string* scheme, std::string* name) const;
     void setEditable(bool editable);
 
-    std::unique_ptr<usdcc::assets::ConfigEditor> m_editor;
+    std::unique_ptr<usdcc::assets::ConfigEditor> m_personal;
+    // A source shown, read-only; m_editor is it or m_personal.
+    std::unique_ptr<usdcc::assets::ConfigEditor> m_viewed;
+    usdcc::assets::ConfigEditor* m_editor = nullptr;
+    QString m_viewedAlias;
+    std::filesystem::path m_viewedFile;
     bool m_readOnly = false;
     bool m_refreshing = false;
     int m_keptStages = 0;
@@ -108,6 +137,14 @@ private:
     std::map<std::string, std::string> m_refused;
 
     QLabel* m_fileLabel = nullptr;
+    QListWidget* m_sources = nullptr;
+    QPushButton* m_addSource = nullptr;
+    QPushButton* m_removeSource = nullptr;
+    QPushButton* m_refreshSources = nullptr;
+    QPushButton* m_copyToPersonal = nullptr;
+    QListWidget* m_extends = nullptr;
+    QPushButton* m_addExtends = nullptr;
+    QPushButton* m_removeExtends = nullptr;
     QLabel* m_notice = nullptr;
     QTabWidget* m_tabs = nullptr;
     QTableWidget* m_servers = nullptr;

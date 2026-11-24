@@ -97,6 +97,11 @@ endpoints make up its stack, top first.
 - **`readOnly`** endpoints are skipped when saving (§5).
 - **`optional`** (default `false`) lets a stack carry on when that endpoint is unreachable.
 
+**Several configurations at once:** the file can list others (`"sources"`), such as a studio's,
+read-only, whose servers, environments and logins are named with an alias in front
+(`studio-a/prod`). Mixed environments take names from them. See
+[ASSET_SOURCES.md](ASSET_SOURCES.md) §3 to §5.
+
 **Where the configuration comes from:** the file named by `USDCC_ASSETS_CONFIG`, or else
 `assets.json` in the user's usdcc data folder (`%LOCALAPPDATA%/usdcc_config` on Windows). usdcc's settings
 page writes that file, so tools outside usdcc see the same servers.

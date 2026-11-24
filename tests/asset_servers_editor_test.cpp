@@ -11,6 +11,8 @@
 #include "usdcc/assets/transport.h"
 #include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
+#include "usdcc/usd/asset_servers.h"
+#include <QTabWidget>
 
 #include <QApplication>
 #include <QCheckBox>
@@ -315,4 +317,86 @@ USDCC_TEST(asset_servers_editor_lists_logins) {
     CHECK(!store->logins.count("test"), "forgotten");
     CHECK(logins->item(rowOf(logins, QStringLiteral("test")), 3)->text() == QStringLiteral("No login"),
           "and still listed, as a server names it");
+}
+
+USDCC_TEST(asset_servers_editor_shows_and_mixes_sources) {
+    ScopedMemoryStore store;
+    assets::registerTransport("edittest", std::make_shared<EditTestTransport>());
+    QTemporaryDir folder;
+    const std::filesystem::path mine = pathOf(folder.filePath(QStringLiteral("assets.json")));
+    const std::filesystem::path studio = pathOf(folder.filePath(QStringLiteral("studio/Studio A.json")));
+    std::filesystem::create_directories(studio.parent_path());
+    writeFile(mine, R"({ "endpoints": { "home": { "scheme": "edittest", "url": "https://home.example" } },
+                        "environments": { "local": { "edittest": { "studio": ["home"] } } } })");
+    writeFile(studio, R"({ "name": "studio-a",
+        "endpoints": { "nas": { "scheme": "edittest", "url": "https://prod.example", "credential": "dav" } },
+        "environments": { "prod": { "edittest": { "server1": ["nas"] } } } })");
+    store->logins["studio-a/old"] = {"x", "y"};
+
+    AssetServersDialog dialog(nullptr, mine);
+    QString asked;
+    dialog.confirm = [&asked](const QString& text) {
+        asked = text;
+        return true;
+    };
+    CHECK(dialog.addSource(studio), "a source is added");
+    CHECK(asked.contains(QStringLiteral("studio-a")) && asked.contains(QStringLiteral("studio-a/old")),
+          "under the alias it suggests, saying a login is saved for that alias already: %s", qPrintable(asked));
+    CHECK(dialog.viewedSource() == QStringLiteral("studio-a"), "and shown");
+    auto* table = dialog.findChild<QTableWidget*>(QStringLiteral("assetServersTable"));
+    auto* save = dialog.findChild<QPushButton*>(QStringLiteral("assetServersSave"));
+    CHECK(table->rowCount() == 1 && table->item(0, 0)->text() == QStringLiteral("nas") &&
+              table->editTriggers() == QAbstractItemView::NoEditTriggers,
+          "its servers, read-only");
+    CHECK(table->item(0, 4)->text() == QStringLiteral("No login"), "its login is its own: studio-a/dav, not saved");
+    store->logins["studio-a/dav"] = {"ada", "pw"};
+    dialog.viewSource(QStringLiteral("studio-a"));
+    CHECK(table->item(0, 4)->text() == QStringLiteral("Saved"), "saved as studio-a/dav, it's that server's");
+
+    // Copied to mine: an environment stays on the source's servers, as a mixed one.
+    dialog.findChild<QTabWidget*>()->setCurrentIndex(1);
+    dialog.selectEnvironment(QStringLiteral("prod"));
+    dialog.copyToPersonal();
+    CHECK(dialog.viewedSource().isEmpty() && dialog.editor().config().isMixed("prod") &&
+              dialog.editor().config().environments.at("prod").at("edittest").at("server1") ==
+                  std::vector<std::string>({"studio-a/nas"}),
+          "Copy to Mine makes a mixed environment on studio-a/nas");
+    dialog.setExtends(QStringLiteral("local"), {QStringLiteral("studio-a/prod")});
+    const assets::Config merged = dialog.editor().merged();
+    CHECK(merged.environments.at("local").at("edittest").count("server1") && merged.environments.at("local").at("edittest").count("studio"),
+          "an environment that extends one has its names and its own");
+    CHECK(dialog.problems().isEmpty() && save->isEnabled(), "nothing wrong: %s", qPrintable(dialog.problems().join(" / ")));
+    dialog.setExtends(QStringLiteral("local"), {QStringLiteral("studio-b/prod")});
+    CHECK(!dialog.problems().isEmpty() && !save->isEnabled(), "one that isn't there is a problem, and keeps Save off");
+    dialog.setExtends(QStringLiteral("local"), {QStringLiteral("studio-a/prod")});
+    CHECK(dialog.save(), "it saves");
+    const std::string written = readFile(mine);
+    CHECK(written.find("\"sources\"") != std::string::npos && written.find("\"mixed\"") != std::string::npos,
+          "with its sources, and its mixed environments where an older usdcc doesn't look");
+
+    CHECK(dialog.removeSource(QStringLiteral("studio-a")) && !store->logins.count("studio-a/dav") &&
+              !store->logins.count("studio-a/old"),
+          "removed, its logins go too when that's the answer");
+    CHECK(!dialog.problems().isEmpty(), "and what used it says so");
+    assets::useDefaultConfigFile();
+}
+
+USDCC_TEST(asset_folders_remember_their_environment) {
+    QTemporaryDir folder;
+    usdcc::usd::setAssetFolderFile(folder.filePath(QStringLiteral("profile/asset-folders.json")).toStdString());
+    assets::setDefaultConfig(assets::Config::parse(R"({
+        "endpoints": { "a": { "scheme": "edittest", "url": "https://a.example" } },
+        "environments": { "prod": { "edittest": { "s": ["a"] } }, "test": { "edittest": { "s": ["a"] } } } })").value);
+    usdcc::usd::rememberFolderEnvironment("C:/proj/shots", "test");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/s010/s010.usda") == "test", "a folder below it");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/assets/a.usda").empty(), "not a folder beside it");
+    usdcc::usd::setAssetFolderFile(folder.filePath(QStringLiteral("profile/asset-folders.json")).toStdString());
+    CHECK(usdcc::usd::rememberedEnvironment("c:/PROJ/shots/x.usda") == "test", "kept in its file");
+    CHECK(usdcc::usd::stageAssetEnvironment(nullptr).empty() &&
+              usdcc::usd::stageResolverContext("C:/proj/shots/x.usda").Get<assets::Context>()->environment() == "test",
+          "and what a stage there opens in");
+    usdcc::usd::rememberFolderEnvironment("C:/proj/shots", "gone");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda").empty(), "one that's gone isn't used");
+    usdcc::usd::setAssetFolderFile({});
+    assets::useDefaultConfigFile();
 }

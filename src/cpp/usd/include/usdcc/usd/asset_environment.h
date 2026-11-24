@@ -15,6 +15,10 @@ class QMenu;
 #include <string>
 #include <vector>
 
+namespace usdcc::ui {
+class MainWindow;
+}
+
 namespace usdcc::usd {
 
 class StageManager;
@@ -31,6 +35,11 @@ USDCC_USD_UI_API void setReopenGuard(std::function<QString(const StageRefPtr&)> 
 
 // The environment a stage is in, or is to be in once reopened.
 USDCC_USD_UI_API std::string wantedEnvironment(const StageRefPtr& stage);
+
+// When a stage names a server its environment doesn't have (docs/ASSET_SOURCES.md §4): a toast
+// in `window` offering the environments that have it, or the Asset Servers editor. Once per
+// name and environment. A choice is remembered for the stage's folder.
+USDCC_USD_UI_API void installAssetEnvironmentOffer(usdcc::ui::MainWindow* window, StageManager* stageManager);
 
 // The status bar's button: the current stage's environment, or the default without a stage.
 // Hidden while the configuration has none.

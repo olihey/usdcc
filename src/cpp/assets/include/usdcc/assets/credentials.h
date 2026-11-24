@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -71,6 +72,9 @@ void setCredentialStore(std::shared_ptr<CredentialStore> store);
 std::string credentialVariablePrefix(const std::string& id);
 // The credential in those variables, when any is set.
 std::optional<Credential> credentialFromVariables(const std::string& id);
+
+// Prefixes (credentialVariablePrefix()) two configured ids share: neither reads them.
+void setAmbiguousCredentialVariables(std::set<std::string> prefixes);
 
 // aws and aws:<profile>: from AWS's own files (docs/S3_RESOLVER.md §4.2), never saved here.
 bool isAwsCredential(const std::string& id);

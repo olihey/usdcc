@@ -5,8 +5,8 @@ them, logins that can't go to the wrong studio, configurations from a web servic
 Asset Servers dialog, and the environment in the status bar. Builds on
 [REMOTE_ASSETS.md](REMOTE_ASSETS.md) (the configuration, §4; the dialog, §10.1).
 
-**Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 and 2 are built**
-(§10.1, §10.2). "Checked" means read in this repository's code; everything else is an assumption
+**Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 to 3 are built**
+(§10.1 to §10.3). "Checked" means read in this repository's code; everything else is an assumption
 or a proposal.
 
 ## 1. Decisions
@@ -332,13 +332,63 @@ and the status bar's `AssetEnvironmentButton`.
   test has no panel: an Outliner made and destroyed without being shown makes the UI scale tests
   that run later fail (*not looked into*).
 
+### 10.3 Phase 3 as built
+
+Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The library's part is in
+[sources.h](../src/cpp/assets/include/usdcc/assets/sources.h): `loadSources()` and
+`mergeSources()`, which make the one `Config` everything else reads.
+
+- **One merged configuration.** `Config::loadDefault()` reads the personal file, then its sources,
+  and merges them: servers, environments and credential ids of a source with its alias in front,
+  its web hosts and allowed lists added, its mixed environments and its own `sources` left out
+  (and said so). Contexts, stacks, lookups, the cache and logins work on the merged one as they did.
+  The editor keeps the personal file apart, as that's what it writes.
+- **`"mixed"`** is read into the same map as plain environments, with `"extends"` beside it. An
+  environment is written there when it extends one or a stack names a source's server; the default
+  goes in `"defaultEnvironment"` when it's one of those, or a source's.
+- **A source that can't be read** is said in the Log and marked in the dialog; a problem in the
+  personal file keeps it from being saved. Only a source's environments can be extended: a mixed
+  one extending another isn't allowed, so there are no cycles to find.
+- **A bare `*`** in a source's allowed lists isn't taken. A web host two configurations have uses the
+  first one's login; the other is said.
+- **Two credential ids with one spelling of environment variables** (a personal `studio-a-dav` and a
+  source's `studio-a/dav`): neither reads them, and the merge says so.
+- **`"name"`** in a file suggests its alias; else its file name made into one. Parsing refuses `/` in
+  ids, so a file can't spell another source's. A source's default environment is `sourceDefaults`
+  in the merged configuration.
+- **The dialog** has the configurations on its left: **Mine** and each source, read-only. **Add…**
+  asks for an alias only when its own is taken, and says what comes with it: its servers, the hosts
+  and buckets it allows, whether it uses your AWS login, and logins already saved under its alias.
+  **Remove** offers to forget those. **Copy to Mine** copies a server (without its login) or an
+  environment, which becomes a mixed one on the source's servers. A mixed environment's extended
+  environments are under its name in Environments. Logins are the merged configuration's.
+  *Not built:* renaming an alias (remove it and add it again), and turning a source off.
+- **A source's URL** (§7) is read into the file but said to be unread until phase 4.
+- **The offer** (`installAssetEnvironmentOffer()`): the resolver tells the app (`setUnknownNameCallback()`,
+  from any thread) about a name its environment lacks. The app shows a sticky toast once per name
+  and environment, with a button per environment to reopen the stage in it: a source's default when
+  it has the name, else each of its environments that has, and personal ones. With none, it says
+  so and offers the Asset Servers editor; without any environment configured, only the Log says.
+  Set up before the stage named on the command line opens, so it's offered for that one too.
+- **Remembered per folder:** reopening a stage in an environment, by the offer or the status bar,
+  makes it the one stages in that folder and below open in (`asset-folders.json` in the app's
+  local data; a tool or test without one remembers nothing). An environment no longer configured
+  isn't used.
+- **The status bar's menu** groups environments by source: yours, then each source's under its
+  alias.
+- **Tests:** `assets_sources_are_named_with_their_aliases` ([assets_test.cpp](../tests/assets_test.cpp)),
+  `asset_servers_editor_shows_and_mixes_sources` and `asset_folders_remember_their_environment`
+  ([asset_servers_editor_test.cpp](../tests/asset_servers_editor_test.cpp)). The app's offer was
+  checked by hand: a stage naming a studio's server opens in the personal environment, and the
+  toast reopens it in the studio's.
+
 ## 11. Phases
 
 | # | What | Needs |
 |---|---|---|
 | 1 | (built) Logins: the list of saved ones, the tab, the dropdown and the empty-password fix | |
 | 2 | (built) The status bar, switching by reopening, the environment in shared scenes and `--asset-env` | |
-| 3 | Sources from local files: aliases, read-only, `extends`, logins per source, the offer for an unknown name | 1 |
+| 3 | (built) Sources from local files: aliases, read-only, `extends`, logins per source, the offer for an unknown name | 1 |
 | 4 | Sources from a URL | 3 |
 | 5 | Credential stores on Linux and macOS | 1 |
 | 6 | Credential descriptions, then the token service, then single sign-on | 3 |
