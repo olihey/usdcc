@@ -13,9 +13,16 @@
 
 #include <QLabel>
 #include <QAction>
+#include <QClipboard>
+#include <QContextMenuEvent>
+#include <QEvent>
+#include <QFontMetrics>
+#include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
+#include <QResizeEvent>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -29,6 +36,78 @@ namespace {
 constexpr auto kAuthoredOnlyKey = "AttributeEditor/authoredOnly";
 constexpr auto kShowHiddenKey = "AttributeEditor/showHidden";
 }  // namespace
+
+// A prim's path and type on one line. The path loses its middle when the line is
+// too narrow for it, so a long one doesn't set the panel's minimum width.
+class PrimPathLabel : public QLabel {
+public:
+    explicit PrimPathLabel(QWidget* parent) : QLabel(parent) {
+        setTextFormat(Qt::RichText);
+        setTextInteractionFlags(Qt::TextSelectableByMouse);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    }
+
+    void setPrim(const QString& path, const QString& type) {
+        m_path = path;
+        m_type = type;
+        setToolTip(path);
+        updateText();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QLabel::resizeEvent(event);
+        updateText();
+    }
+
+    void changeEvent(QEvent* event) override {
+        QLabel::changeEvent(event);
+        if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange) updateText();
+    }
+
+    // Copying across the ellipsis copies the full path, not the shortened one.
+    void keyPressEvent(QKeyEvent* event) override {
+        if (selectionHasEllipsis() && event->matches(QKeySequence::Copy)) {
+            QGuiApplication::clipboard()->setText(m_path);
+            event->accept();
+            return;
+        }
+        QLabel::keyPressEvent(event);
+    }
+
+    void contextMenuEvent(QContextMenuEvent* event) override {
+        if (!selectionHasEllipsis()) {
+            QLabel::contextMenuEvent(event);
+            return;
+        }
+        QMenu menu(this);
+        const QString path = m_path;
+        menu.addAction(AttributesViewPanel::tr("Copy Path"),
+                       [path]() { QGuiApplication::clipboard()->setText(path); });
+        menu.exec(event->globalPos());
+    }
+
+private:
+    bool selectionHasEllipsis() const { return m_elided && selectedText().contains(QChar(0x2026)); }
+
+    void updateText() {
+        if (m_path.isEmpty()) return;
+        QFont bold = font();
+        bold.setBold(true);
+        const QString gap(2, QChar(QChar::Nbsp));
+        // A pixel of slack: the rich text's layout measures in fractions.
+        const int room = contentsRect().width() - fontMetrics().horizontalAdvance(gap + m_type) - 1;
+        const QString shown = QFontMetrics(bold).elidedText(m_path, Qt::ElideMiddle, qMax(0, room));
+        m_elided = shown != m_path;
+        const QString html = QStringLiteral("<b>%1</b>&nbsp;&nbsp;<span style='color:#8e8e93'>%2</span>")
+                                 .arg(shown.toHtmlEscaped(), m_type.toHtmlEscaped());
+        if (html != text()) setText(html);
+    }
+
+    QString m_path;
+    QString m_type;
+    bool m_elided = false;
+};
 
 AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr stage,
                                           std::shared_ptr<UndoManager> undoManager, const QString& title,
@@ -76,10 +155,8 @@ AttributesViewPanel::AttributesViewPanel(StageManager* stageManager, StageRefPtr
     headerLayout->setSpacing(usdcc::ui::scaled::pixels(6));
     m_primIcon = new QLabel(m_primHeader);
     m_primIcon->setObjectName(QStringLiteral("attributesPrimIcon"));
-    m_primName = new QLabel(m_primHeader);
+    m_primName = new PrimPathLabel(m_primHeader);
     m_primName->setObjectName(QStringLiteral("attributesPrimName"));
-    m_primName->setTextFormat(Qt::RichText);
-    m_primName->setTextInteractionFlags(Qt::TextSelectableByMouse);
     headerLayout->addWidget(m_primIcon);
     headerLayout->addWidget(m_primName, 1);
 
@@ -156,9 +233,7 @@ void AttributesViewPanel::updatePrimHeader() {
     const int size = usdcc::ui::scaled::pixels(16);
     m_primIcon->setPixmap(prim_icons::icon(prim).pixmap(QSize(size, size), devicePixelRatioF()));
     const QString type = prim.GetTypeName().IsEmpty() ? tr("no type") : QString::fromStdString(prim.GetTypeName().GetString());
-    m_primName->setText(QStringLiteral("<b>%1</b>&nbsp;&nbsp;<span style='color:#8e8e93'>%2</span>")
-                            .arg(QString::fromStdString(prim.GetPath().GetString()).toHtmlEscaped(), type.toHtmlEscaped()));
-    m_primName->setToolTip(QString::fromStdString(prim.GetPath().GetString()));
+    m_primName->setPrim(QString::fromStdString(prim.GetPath().GetString()), type);
 }
 
 }  // namespace usdcc::usd

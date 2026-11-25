@@ -229,6 +229,7 @@ TransformStackEditor::TransformStackEditor(CategorySection* section, const UsdPr
     }
     if (ops.empty()) {
         auto* empty = new QLabel(tr("No transform ops. Use + Add, or a Move/Rotate/Scale drag, to create one."));
+        empty->setWordWrap(true);  // rather than setting the panel's minimum width
         empty->setObjectName(QStringLiteral("propertyNote"));
         rows->addRow(empty);
     }
