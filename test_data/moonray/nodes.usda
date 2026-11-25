@@ -1,0 +1,69 @@
+#usda 1.0
+(
+    doc = "MoonRay's own nodes: a DwaBaseMaterial whose albedo is a map, on outputs:moonray:surface beside a green UsdPreviewSurface, which is what other renderers show (docs/MOONRAY.md §7.7)."
+    defaultPrim = "World"
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def Camera "camera"
+    {
+        float focalLength = 35
+        float horizontalAperture = 36
+        float verticalAperture = 24
+        float2 clippingRange = (0.1, 100)
+        double3 xformOp:translate = (0, 0, 5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def DomeLight "dome"
+    {
+        float inputs:intensity = 0.8
+    }
+
+    def Mesh "plane" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </World/mat>
+        uniform token subdivisionScheme = "none"
+        float3[] extent = [(-2, -1.2, 0), (2, 1.2, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)]
+        point3f[] points = [(-2, -1.2, 0), (2, -1.2, 0), (2, 1.2, 0), (-2, 1.2, 0)]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Material "mat"
+    {
+        token outputs:surface.connect = </World/mat/preview.outputs:surface>
+        token outputs:moonray:surface.connect = </World/mat/base.outputs:out>
+
+        def Shader "preview"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor = (0.05, 0.8, 0.05)
+            token outputs:surface
+        }
+
+        def Shader "base"
+        {
+            uniform token info:id = "DwaBaseMaterial"
+            color3f inputs:albedo.connect = </World/mat/checker.outputs:out>
+            bool inputs:show_specular = 0
+            token outputs:out
+        }
+
+        def Shader "checker"
+        {
+            uniform token info:id = "CheckerboardMap"
+            color3f inputs:color_A = (0.9, 0.05, 0.05)
+            color3f inputs:color_B = (0.05, 0.05, 0.9)
+            color3f outputs:out
+        }
+    }
+}

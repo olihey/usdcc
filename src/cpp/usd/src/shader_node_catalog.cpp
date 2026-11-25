@@ -1,5 +1,6 @@
 #include "usdcc/usd/shader_node_catalog.h"
 
+#include <pxr/base/plug/registry.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/imaging/hd/renderDelegate.h>
 #include <pxr/imaging/hd/rendererPlugin.h>
@@ -265,6 +266,67 @@ RendererProfile arnoldRendererProfile() {
     // The shaders that have none.
     profile.nodeGroups = {{"arnold:ramp_float", "Texture"}, {"arnold:ramp_rgb", "Texture"}, {"arnold:cryptomatte", "AOV"}, {"arnold:osl", "Utility"}};
     return profile;
+}
+
+RendererProfile moonrayRendererProfile() {
+    RendererProfile profile;
+    profile.shadingSystem = "moonrayClass";
+    profile.displayName = "MoonRay";
+    profile.terminalPrefix = "moonray";
+    profile.defaultSurfaceNode = "DwaBaseMaterial";
+    profile.terminals = {"surface", "displacement", "volume"};
+    // What isn't a shader, from a MOONRAY_CLASS_PATH with all of MoonRay's classes. The pack
+    // has only the shaders.
+    profile.hiddenContexts = {"Camera", "DisplayFilter", "Geometry", "GeometrySet", "Joint", "LightFilterSet", "LightSet", "Metadata",
+                              "RenderOutput", "SceneObject", "ShadowReceiverSet", "ShadowSet", "TraceSet", "UserData"};
+    // MoonRay's copies of USD's preview nodes (by the same names), its tests', and a base class.
+    profile.hiddenNodes = {"Usd*", "Test*", "BaseVolume"};
+    static const std::vector<std::pair<const char*, std::vector<const char*>>> groups = {
+        {"Texture",
+         {"AttributeMap", "ImageMap", "ProjectCameraMap", "ProjectCameraMap_v2", "ProjectCylindricalMap",
+          "ProjectPlanarMap", "ProjectSphericalMap", "ProjectTriplanarMap", "ProjectTriplanarMap_v2",
+          "ProjectTriplanarUdimMap", "UVTransformMap", "OpenVdbMap", "OpenVdbMap_v2"}},
+        {"Noise",
+         {"NoiseMap_v2", "NoiseWorleyMap_v2", "NoiseWorleyMap_v3", "RandomMap"}},
+        {"Pattern",
+         {"CheckerboardMap", "GradientMap", "RampMap", "WireframeMap", "ToonMap"}},
+        {"Color",
+         {"ColorCorrectContrastMap", "ColorCorrectGainOffsetMap", "ColorCorrectGammaMap", "ColorCorrectHsvMap",
+          "ColorCorrectHueShiftMap", "ColorCorrectLegacyMap", "ColorCorrectMap", "ColorCorrectSaturationMap",
+          "ColorCorrectTMIMap", "ConstantColorMap", "HsvToRgbMap", "RgbToHsvMap", "RgbToLabMap"}},
+        {"Math",
+         {"BlendMap", "ClampMap", "ConstantScalarMap", "FloatToRgbMap", "LayerMap", "LayerMap_v2", "ListMap",
+          "MultiChannelToFloatMap", "NormalToRgbMap", "OpMap", "OpSqrtMap", "RemapMap", "RgbToFloatMap",
+          "SwitchColorMap", "SwitchFloatMap"}},
+        {"Geometry",
+         {"AxisAngleMap", "CurvatureMap", "DeformationMap", "DirectionalMap", "TransformNormalMap",
+          "TransformSpaceMap", "TwoSidedMap"}},
+        {"Hair",
+         {"HairColorPresetsMap", "HairColumnMap", "HairMap", "HairColorCorrectMaterial", "HairDiffuseMaterial",
+          "HairLayerMaterial", "HairMaterial_v3", "HairToonMaterial"}},
+        {"Normal",
+         {"CombineNormalMap", "DistortNormalMap", "ImageNormalMap", "ProjectCameraNormalMap", "ProjectPlanarNormalMap",
+          "ProjectTriplanarNormalMap", "ProjectTriplanarNormalMap_v2", "RandomNormalMap", "RgbToNormalMap",
+          "SwitchNormalMap"}},
+        {"Utility",
+         {"DebugMap", "ExtraAovMap", "LODMap"}},
+        {"Material",
+         {"DwaBaseMaterial", "DwaEmissiveMaterial", "DwaFabricMaterial", "DwaMetalMaterial", "DwaRefractiveMaterial",
+          "DwaSkinMaterial", "DwaSolidDielectricMaterial", "DwaToonMaterial", "DwaVelvetMaterial_v2"}},
+        {"Layering",
+         {"DwaAdjustMaterial", "DwaColorCorrectMaterial", "DwaLayerMaterial", "DwaMixMaterial", "DwaSwitchMaterial",
+          "DwaTwoSidedMaterial", "RaySwitchMaterial", "SwitchMaterial"}},
+    };
+    for (const auto& [group, nodes] : groups) {
+        for (const char* node : nodes) profile.nodeGroups[node] = group;
+    }
+    return profile;
+}
+
+bool enableMoonray() {
+    if (!PlugRegistry::GetInstance().GetPluginWithName("moonrayShaderParser")) return false;
+    ShaderNodeCatalog::instance().setProfile(moonrayRendererProfile());
+    return true;
 }
 
 // Nodes defined in .usda, such as USD's preview ones, say "usda" for their context,

@@ -2,6 +2,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/usd/arnold_runtime.h"
+#include "usdcc/usd/shader_node_catalog.h"
 
 #include <pxr/base/arch/defines.h>
 #include <pxr/base/arch/env.h>
@@ -197,6 +198,7 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
     } else if (!arnold.message.empty()) {
         USDCC_LOG_WARNING("usdcc.usd", "{}", arnold.message);
     }
+    enableMoonray();
 }
 
 void setUsdEnvironmentVariable(const std::string& variable, const std::string& value, std::string source) {

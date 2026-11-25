@@ -13,7 +13,7 @@ the pin's downloads are unpacked.
    has (TBB, Embree, OpenImageIO, OpenEXR, OpenVDB, OpenSubdiv, Boost) is the
    asset's.
 2. MoonRay's own projects, one after the other, into <work>/install.
-3. What runs, into the pack: plugin/usd/moonray/{bin,lib,rdl2dso,sessions,plugin},
+3. What runs, into the pack: plugin/usd/moonray/{bin,lib,rdl2dso,sessions,plugin,coredata},
    and a plugInfo.json per plugin in plugin/usd/<plugin>/resources, where OpenUSD's
    plugin/usd/plugInfo.json finds it.
    The plugins set the variables MoonRay reads from where they are
@@ -45,9 +45,13 @@ PROJECTS = [
     ("moonray/moonray_arras/mcrt_dataio", []),
     ("moonray/moonray_arras/mcrt_computation", []),
     ("moonray/hydra/hdMoonray", ["-DHDMOONRAY_ARRAS=ON", "-DHDMOONRAY_TOOLS=OFF"]),
+    ("moonray/hydra/moonray_sdr_plugins", []),
 ]
 # The dependencies whose code is in the pack, as a library or linked in.
 SHIPPED = ["jsoncpp", "log4cplus", "lua", "random123", "openssl", "oidn", "curl", "boost"]
+# The classes a material is made of, for the Material Editor. Not MoonRay's own copies of USD's
+# preview nodes: they have USD's names, and Sdr would give them for those.
+NODE_TYPES = {"Material", "DwaBaseLayerable", "DwaBaseHairLayerable", "Map", "NormalMap", "Displacement", "Volume"}
 # Where the pack's MoonRay goes, and the relative RUNPATHs (rpaths) its binaries get.
 ROOT = "plugin/usd/moonray"
 TO_PACK_LIB = "$ORIGIN/../../../../lib"  # from <root>/<folder>/ to the install's lib
@@ -227,7 +231,7 @@ def build(ctx):
 
     # What runs, into the pack.
     root = ctx.prefix / ROOT
-    for folder in ("bin", "lib", "rdl2dso", "sessions", "plugin"):
+    for folder in ("bin", "lib", "rdl2dso", "sessions", "plugin", "coredata"):
         (root / folder).mkdir(parents=True, exist_ok=True)
     shutil.copy2(install / "bin" / "execComp", root / "bin")
     for name in ("libjsoncpp", "liblog4cplus", "libOpenImageDenoise", "libcurl", "libboost_program_options"):
@@ -241,6 +245,15 @@ def build(ctx):
         # Not the .so.proxy files, which only MoonRay's tools read, nor its test shaders.
         if file.name.endswith(".so") and not file.name.startswith("Test"):
             shutil.copy2(file, root / "rdl2dso")
+    nodes = 0
+    for file in sorted((install / "coredata").glob("*.json")):
+        classes = json.loads(file.read_text())["scene_classes"]
+        if file.name.startswith(("Usd", "Test")) or not any(entry["type"] in NODE_TYPES for entry in classes.values()):
+            continue
+        shutil.copy2(file, root / "coredata")
+        nodes += 1
+    if nodes < 90:
+        raise SystemExit(f"only {nodes} of MoonRay's shader classes are described in {install / 'coredata'}")
     loaded = []  # the computations Arras opens by name, from the sessions
     for name in ("hd_single.sessiondef", "hd_multi.sessiondef"):
         shutil.copy2(install / "sessions" / name, root / "sessions")

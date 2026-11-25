@@ -17,6 +17,7 @@ this machine's environment, does what the pin's "check" asks:
   - "extensions": each has a file format;
   - "renderers": OpenUSD lists each as a render delegate. It isn't created: a
     path tracer's needs a GPU, which a hosted runner doesn't have;
+  - "nodes": Sdr has each of these, by shading system;
   - "open": each file opens as a stage with that many prims of each type;
   - "render": each file renders with that delegate, through UsdImaging without a
     GPU, into a picture whose mean (0 to 1) is at least "min_mean". For a CPU
@@ -89,6 +90,12 @@ if spec.get("renderers"):
     listed = {found.typeName for found in Plug.Registry.GetAllDerivedTypes(Tf.Type.FindByName("HdRendererPlugin"))}
     for renderer in spec["renderers"]:
         check(renderer in listed, f"{renderer} is among the render delegates ({len(listed)} listed)")
+if spec.get("nodes"):
+    from pxr import Sdr
+    known = {(node.GetShadingSystem(), node.GetIdentifier()) for node in Sdr.Registry().GetAllShaderNodes() if node.IsValid()}
+    for system, names in spec["nodes"].items():
+        for name in names:
+            check((system, name) in known, f"Sdr has the {system} node {name}")
 for entry in spec.get("open", []):
     try:
         stage = Usd.Stage.Open(entry["file"])

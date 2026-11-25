@@ -1,0 +1,554 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2af290a..81b81e8 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,22 +1,19 @@
+ # Copyright 2023-2024 DreamWorks Animation LLC
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-# TODO: setting this/these should not be necessary before calling find_package.
+-# see: https://stackoverflow.com/questions/55217771/boostcmake-no-suitable-build-variant
+-set(BUILD_SHARED_LIBS ON)
+-find_package(Boost REQUIRED)
+-add_compile_definitions(BOOST_NO_CXX98_FUNCTION_BASE)
++cmake_minimum_required(VERSION 3.23.1)
++project(moonray_sdr_plugins LANGUAGES CXX)
++set(CMAKE_CXX_STANDARD 17)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++
++if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
++    set(IsDarwinPlatform ON)
++endif()
+ 
+-# the DWA installation of pxrConfig.cmake lives in
+-# the usd_imaging Rez package. To work correctly, it
+-# requires env vars REZ_USD_CORE_ROOT, REZ_USD_IMAGING_ROOT
+-# and PXR_INCLUDE_DIRS to be set (e.g. in CMake preset).
+-# A standard installation should not require these...
+ if(NOT pxr_FOUND)
+     find_package(pxr REQUIRED)
+ endif()
+-
+-find_package(Python REQUIRED COMPONENTS Development)
++include_directories(SYSTEM ${PXR_INCLUDE_DIRS})
+ 
+ add_subdirectory(moonrayShaderDiscovery)
+ add_subdirectory(moonrayShaderParser)
+diff --git a/moonrayShaderDiscovery/CMakeLists.txt b/moonrayShaderDiscovery/CMakeLists.txt
+index b262d79..6e9a707 100644
+--- a/moonrayShaderDiscovery/CMakeLists.txt
++++ b/moonrayShaderDiscovery/CMakeLists.txt
+@@ -13,7 +13,6 @@ set_target_properties(${component} PROPERTIES PREFIX "")
+ target_sources(${component}
+     PRIVATE
+         discoveryPlugin.cpp
+-        moduleDeps.cpp
+ )
+ 
+ target_include_directories(${component}
+@@ -25,9 +24,8 @@ target_include_directories(${component}
+ target_link_libraries(${component}
+     PUBLIC
+         # pxr
+-        ar ndr sdr
+-        Boost::headers
+-        # Python::Module
++        ar sdr
++        ${CMAKE_DL_LIBS}
+ )
+ 
+ if(IsDarwinPlatform)
+diff --git a/moonrayShaderDiscovery/discoveryPlugin.cpp b/moonrayShaderDiscovery/discoveryPlugin.cpp
+index 724427e..8a54830 100644
+--- a/moonrayShaderDiscovery/discoveryPlugin.cpp
++++ b/moonrayShaderDiscovery/discoveryPlugin.cpp
+@@ -12,7 +12,10 @@
+ #include "pxr/usd/ar/resolver.h"
+ #include "pxr/usd/ar/resolverScopedCache.h"
+ 
+-#include "pxr/usd/ndr/debugCodes.h"
++#include "pxr/usd/sdr/debugCodes.h"
++
++#include <cstdlib>
++#include <dlfcn.h>
+ 
+ PXR_NAMESPACE_OPEN_SCOPE
+ 
+@@ -20,11 +23,22 @@ TfToken moonrayNodeType("moonrayClass");
+ 
+ namespace {
+ 
+-bool examineFiles(NdrNodeDiscoveryResultVec* foundNodes,
+-                  NdrStringSet* foundNames,
+-                  const NdrDiscoveryPluginContext* context,
++// The classes of the install this plugin is loaded from: <root>/coredata, beside
++// <root>/plugin. MOONRAY_CLASS_PATH replaces it.
++std::string installedClasses()
++{
++    Dl_info info;
++    if (!dladdr(reinterpret_cast<void*>(&installedClasses), &info) || !info.dli_fname) return std::string();
++    const std::string library = TfRealPath(info.dli_fname);
++    const std::string root = TfGetPathName(TfStringTrimRight(TfGetPathName(library), "/"));
++    return root.empty() ? std::string() : TfStringCatPaths(root, "coredata");
++}
++
++bool examineFiles(SdrShaderNodeDiscoveryResultVec* foundNodes,
++                  SdrStringSet* foundNames,
++                  const SdrDiscoveryPluginContext* context,
+                   const std::string& dirPath,
+-                  const NdrStringVec& dirFileNames)
++                  const SdrStringVec& dirFileNames)
+ {
+     for (const std::string& fileName : dirFileNames) {
+         std::string extension = TfStringToLower(TfGetExtension(fileName));
+@@ -33,15 +47,15 @@ bool examineFiles(NdrNodeDiscoveryResultVec* foundNodes,
+             std::string className = TfStringGetBeforeSuffix(fileName, '.');
+ 
+             if (!foundNames->insert(className).second) {
+-                 TF_DEBUG(NDR_DISCOVERY).Msg(
++                 TF_DEBUG(SDR_DISCOVERY).Msg(
+                      "Duplicate moonray class [%s] found at URI [%s], ignoring.",
+                      className.c_str(), uri.c_str());
+                 continue;
+             }
+ 
+             foundNodes->emplace_back(
+-                NdrIdentifier(className),          // Identifier
+-                NdrVersion().GetAsDefault(),       // Version
++                SdrIdentifier(className),          // Identifier
++                SdrVersion().GetAsDefault(),       // Version
+                 className,                         // Name
+                 TfToken(),                         // Family
+                 moonrayNodeType,                   // DiscoveryType
+@@ -57,7 +71,7 @@ bool examineFiles(NdrNodeDiscoveryResultVec* foundNodes,
+ }
+ } // namespace {
+ 
+-const NdrStringVec&
++const SdrStringVec&
+ MoonrayDiscoveryPlugin::GetSearchURIs() const
+ {
+     return _searchPaths;
+@@ -66,16 +80,19 @@ MoonrayDiscoveryPlugin::GetSearchURIs() const
+ MoonrayDiscoveryPlugin::MoonrayDiscoveryPlugin()
+ {
+     const char* env = std::getenv("MOONRAY_CLASS_PATH");
+-    if (env) {
++    if (env && *env) {
+         _searchPaths = TfStringSplit(env, ":");
++    } else {
++        const std::string classes = installedClasses();
++        if (TfIsDir(classes)) _searchPaths.push_back(classes);
+     }
+ }
+ 
+-NdrNodeDiscoveryResultVec
+-MoonrayDiscoveryPlugin::DiscoverNodes(const Context& context)
++SdrShaderNodeDiscoveryResultVec
++MoonrayDiscoveryPlugin::DiscoverShaderNodes(const Context& context)
+ {
+-    NdrNodeDiscoveryResultVec foundNodes;
+-    NdrStringSet foundNames;
++    SdrShaderNodeDiscoveryResultVec foundNodes;
++    SdrStringSet foundNames;
+     ArResolverScopedCache resolverCache;
+ 
+     for (const std::string& searchPath : _searchPaths) {
+@@ -103,6 +120,6 @@ MoonrayDiscoveryPlugin::DiscoverNodes(const Context& context)
+     return foundNodes;
+ }
+ 
+-NDR_REGISTER_DISCOVERY_PLUGIN(MoonrayDiscoveryPlugin);
++SDR_REGISTER_DISCOVERY_PLUGIN(MoonrayDiscoveryPlugin);
+ 
+ PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/moonrayShaderDiscovery/discoveryPlugin.h b/moonrayShaderDiscovery/discoveryPlugin.h
+index 7407f62..6282f65 100644
+--- a/moonrayShaderDiscovery/discoveryPlugin.h
++++ b/moonrayShaderDiscovery/discoveryPlugin.h
+@@ -7,25 +7,25 @@
+ #include "pxr/pxr.h"
+ #include "pxr/base/tf/token.h"
+ 
+-#include "pxr/usd/ndr/declare.h"
+-#include "pxr/usd/ndr/discoveryPlugin.h"
+-#include "pxr/usd/ndr/parserPlugin.h"
++#include "pxr/usd/sdr/declare.h"
++#include "pxr/usd/sdr/discoveryPlugin.h"
++#include "pxr/usd/sdr/parserPlugin.h"
+ 
+ PXR_NAMESPACE_OPEN_SCOPE
+ 
+-class MoonrayDiscoveryPlugin : public NdrDiscoveryPlugin {
++class MoonrayDiscoveryPlugin : public SdrDiscoveryPlugin {
+ public:
+     MoonrayDiscoveryPlugin();
+ 
+     ~MoonrayDiscoveryPlugin() override = default;
+ 
+-    virtual NdrNodeDiscoveryResultVec DiscoverNodes(const Context &context)
++    virtual SdrShaderNodeDiscoveryResultVec DiscoverShaderNodes(const Context &context)
+         override;
+ 
+-    virtual const NdrStringVec& GetSearchURIs() const override;
++    virtual const SdrStringVec& GetSearchURIs() const override;
+ 
+ private:
+-    NdrStringVec _searchPaths;
++    SdrStringVec _searchPaths;
+ };
+ 
+ PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/moonrayShaderDiscovery/plugInfo.json.in b/moonrayShaderDiscovery/plugInfo.json.in
+index 76a09bc..11986fe 100644
+--- a/moonrayShaderDiscovery/plugInfo.json.in
++++ b/moonrayShaderDiscovery/plugInfo.json.in
+@@ -4,7 +4,7 @@
+             "Info": {
+                 "Types": {
+                     "MoonrayDiscoveryPlugin" : {
+-                        "bases": ["NdrDiscoveryPlugin"],
++                        "bases": ["SdrDiscoveryPlugin"],
+                         "displayName": "Moonray shader definition discovery plugin."
+                     }
+                 }
+diff --git a/moonrayShaderParser/CMakeLists.txt b/moonrayShaderParser/CMakeLists.txt
+index a5a2365..89e2668 100644
+--- a/moonrayShaderParser/CMakeLists.txt
++++ b/moonrayShaderParser/CMakeLists.txt
+@@ -13,7 +13,6 @@ set_target_properties(${component} PROPERTIES PREFIX "")
+ target_sources(${component}
+     PRIVATE
+         parserPlugin.cpp
+-        moduleDeps.cpp
+ )
+ 
+ if(IsDarwinPlatform)
+@@ -33,9 +32,7 @@ target_include_directories(${component}
+ target_link_libraries(${component}
+     PUBLIC
+         # pxr
+-        ar ndr sdr
+-        Boost::headers
+-        # Python::Module
++        ar sdr
+ )
+ 
+ if(NOT IsDarwinPlatform)
+diff --git a/moonrayShaderParser/parserPlugin.cpp b/moonrayShaderParser/parserPlugin.cpp
+index 2e6bf88..2d3c562 100644
+--- a/moonrayShaderParser/parserPlugin.cpp
++++ b/moonrayShaderParser/parserPlugin.cpp
+@@ -4,6 +4,7 @@
+ #include "parserPlugin.h"
+ 
+ #include "pxr/base/tf/staticTokens.h"
++#include "pxr/base/tf/stringUtils.h"
+ #include "pxr/base/js/value.h"
+ #include "pxr/base/js/json.h"
+ #include <pxr/base/gf/vec2f.h>
+@@ -18,7 +19,7 @@
+ #include <pxr/base/vt/array.h>
+ 
+ #include "pxr/usd/ar/resolver.h"
+-#include "pxr/usd/ndr/nodeDiscoveryResult.h"
++#include "pxr/usd/sdr/shaderNodeDiscoveryResult.h"
+ #include "pxr/usd/sdr/shaderNode.h"
+ #include "pxr/usd/sdr/shaderProperty.h"
+ 
+@@ -57,10 +58,10 @@ getSdrTypeAndSize(const std::string& attrType)
+         return std::pair<TfToken,size_t>(SdrPropertyTypes->String,0);
+     }
+     if (attrType == "Rgb" || attrType == "RgbVector") {
+-        return std::pair<TfToken,size_t>(SdrPropertyTypes->Float,3);
++        return std::pair<TfToken,size_t>(SdrPropertyTypes->Color,0);
+     }
+     if (attrType == "Rgba" || attrType == "RgbaVector") {
+-        return std::pair<TfToken,size_t>(SdrPropertyTypes->Float,4);
++        return std::pair<TfToken,size_t>(SdrPropertyTypes->Color4,0);
+      }
+     if (attrType == "Vec2f" || attrType == "Vec2fVector" ||
+         attrType == "Vec2d" || attrType == "Vec2dVector") {
+@@ -88,7 +89,7 @@ VtValue convertVector(const JsValue& val,
+ VtValue convertDefault(const JsValue& val,
+                        const std::string& attrType)
+ {
+-    if (attrType == "Bool") return VtValue(val.GetBool() ? 0 : 1);
++    if (attrType == "Bool") return VtValue(val.GetBool());
+     if (attrType == "Int") return VtValue(val.GetInt());
+     if (attrType == "Long") return VtValue(val.GetInt64());
+     if (attrType == "Float") return VtValue((float)val.GetReal());
+@@ -138,7 +139,7 @@ VtValue convertDefault(const JsValue& val,
+         // can't initialize to anything except null
+         return VtValue(nullSceneObjectPtr);
+     }
+-    if (attrType == "BoolVector") return convertVector<int>(val,"Bool");
++    if (attrType == "BoolVector") return convertVector<bool>(val,"Bool");
+     if (attrType == "IntVector") return convertVector<int>(val,"Int");
+     if (attrType == "LongVector") return convertVector<int64_t>(val,"Long");
+     if (attrType == "FloatVector") return convertVector<float>(val,"Float");
+@@ -146,7 +147,7 @@ VtValue convertDefault(const JsValue& val,
+     if (attrType == "StringVector") return convertVector<std::string>(val,"String");
+     if (attrType == "RgbVector") return convertVector<GfVec3f>(val,"Rgb");
+     if (attrType == "Vec3fVector") return convertVector<GfVec3f>(val,"Vec3f");
+-    if (attrType == "RgbaVector") return convertVector<GfVec3f>(val,"Rgba");
++    if (attrType == "RgbaVector") return convertVector<GfVec4f>(val,"Rgba");
+     if (attrType == "Vec4f") return convertVector<GfVec4f>(val,"Vec4f");
+     if (attrType == "Vec2fVector") return convertVector<GfVec2f>(val,"Vec2f");
+     if (attrType == "Vec2dVector") return convertVector<GfVec2d>(val,"Vec2d");
+@@ -179,13 +180,24 @@ bool isDynamicVector(const std::string& type)
+         (type.substr(type.size()-6,std::string::npos) == "Vector");
+ }
+ 
++bool isMaterial(const std::string& type)
++{
++    return type == "Material" || TfStringStartsWith(type, "DwaBase");
++}
++
++// The scene objects a connection can give: other shaders, whose outputs are terminals.
++bool isShader(const std::string& type)
++{
++    return isMaterial(type) || type == "Volume" || type == "Displacement" || type == "Map" || type == "NormalMap";
++}
++
+ const TfToken getNodeContext(const JsObject& definition)
+ {
+     std::string nodeType = definition.at("type").GetString();
+     // map supported types to those defined in SdrNode.h
+-    if (nodeType == "Material") return SdrNodeContext->Surface;
++    if (isMaterial(nodeType)) return SdrNodeContext->Surface;
+     if (nodeType == "Volume") return SdrNodeContext->Volume;
+-    if (nodeType == "Map") return SdrNodeContext->Pattern;
++    if (nodeType == "Map" || nodeType == "NormalMap") return SdrNodeContext->Pattern;
+     if (nodeType == "Light") return SdrNodeContext->Light;
+     if (nodeType == "LightFilter") return SdrNodeContext->LightFilter;
+     if (nodeType == "Displacement") return SdrNodeContext->Displacement;
+@@ -193,7 +205,7 @@ const TfToken getNodeContext(const JsObject& definition)
+     return TfToken(nodeType);
+ }
+ 
+-NdrTokenMap getNodeMetadata(const NdrTokenMap &baseMetadata,
++SdrTokenMap getNodeMetadata(const SdrTokenMap &baseMetadata,
+                             const JsObject& definition)
+ {
+     // we don't have any special metadata
+@@ -202,19 +214,20 @@ NdrTokenMap getNodeMetadata(const NdrTokenMap &baseMetadata,
+ 
+ SdrShaderProperty* makeOutputProperty(const std::string& nodeType)
+ {
+-    if (nodeType == "Material" || nodeType == "Volume") {
++    // A map bound to a value is a color; what is bound to a scene object is a terminal.
++    if (isMaterial(nodeType) || nodeType == "Volume" || nodeType == "Displacement" || nodeType == "NormalMap") {
+         return new SdrShaderProperty(TfToken("out"), SdrPropertyTypes->Terminal, VtValue(TfToken()),
+-                                     true, 0, NdrTokenMap(), NdrTokenMap(), NdrOptionVec());
++                                     true, 0, SdrTokenMap(), SdrTokenMap(), SdrOptionVec());
+     }
+-    if (nodeType == "Map" || nodeType == "Displacement") {
+-        return new SdrShaderProperty(TfToken("out"), SdrPropertyTypes->Float, VtValue(GfVec3f(0,0,0)),
+-                                     true, 3, NdrTokenMap(), NdrTokenMap(), NdrOptionVec());
++    if (nodeType == "Map") {
++        return new SdrShaderProperty(TfToken("out"), SdrPropertyTypes->Color, VtValue(GfVec3f(0,0,0)),
++                                     true, 0, SdrTokenMap(), SdrTokenMap(), SdrOptionVec());
+     }
+     return nullptr;
+ }
+ 
+-NdrPropertyUniquePtrVec
+-getNodeProperties(const NdrNodeDiscoveryResult& discoveryResult,
++SdrShaderPropertyUniquePtrVec
++getNodeProperties(const SdrShaderNodeDiscoveryResult& discoveryResult,
+                   const JsObject& definition)
+ {
+     // groups are defined by listing the attributes in them : we need
+@@ -240,7 +253,7 @@ getNodeProperties(const NdrNodeDiscoveryResult& discoveryResult,
+         attributes = definition.at("attributes").GetJsObject();
+         numAttributes = attributes.size();
+     }
+-    NdrPropertyUniquePtrVec properties(numAttributes);
++    SdrShaderPropertyUniquePtrVec properties(numAttributes);
+ 
+     for (const auto& attribute : attributes) {
+         const std::string& attrName = attribute.first;
+@@ -254,7 +267,7 @@ getNodeProperties(const NdrNodeDiscoveryResult& discoveryResult,
+ 
+         VtValue propDefault = convertDefault(attrDefault,attrType);
+ 
+-        NdrTokenMap metadata;
++        SdrTokenMap metadata;
+         auto mdIt = attrData.find("metadata");
+         if (mdIt != attrData.end()) {
+             const JsObject& attrMetadata = mdIt->second.GetJsObject();
+@@ -293,10 +306,25 @@ getNodeProperties(const NdrNodeDiscoveryResult& discoveryResult,
+             metadata[SdrPropertyMetadata->Widget] = TfToken("fileInput");
+         }
+ 
++        // There is no bool among Sdr's types, but USD has one.
++        if (attrType == "Bool") metadata[SdrPropertyMetadata->SdrUsdDefinitionType] = "bool";
++        // Nor one for doubles, whose defaults these are.
++        if (attrType == "Vec2d") metadata[SdrPropertyMetadata->SdrUsdDefinitionType] = "double2";
++        if (attrType == "Vec3d") metadata[SdrPropertyMetadata->SdrUsdDefinitionType] = "double3";
++        if (attrType == "Vec4d") metadata[SdrPropertyMetadata->SdrUsdDefinitionType] = "double4";
++        if (attrType == "Mat3f") metadata[SdrPropertyMetadata->SdrUsdDefinitionType] = "matrix3d";
++        if (attrType == "SceneObject*") {
++            const auto interfaceIt = attrData.find("interface");
++            if (interfaceIt != attrData.end() && isShader(interfaceIt->second.GetString())) {
++                sdrType = SdrPropertyTypes->Terminal;
++                metadata[SdrPropertyMetadata->Connectable] = TfToken("true");
++            }
++        }
++
+         // we don't have any additional UI hints
+-        NdrTokenMap hints;
++        SdrTokenMap hints;
+ 
+-        NdrOptionVec options;
++        SdrOptionVec options;
+         auto enumIt = attrData.find("enum");
+         if (enumIt != attrData.end()) {
+             // type for an enum should be string (per Usd), not int (per RDL)
+@@ -339,7 +367,7 @@ getNodeProperties(const NdrNodeDiscoveryResult& discoveryResult,
+ 
+ } // namespace {
+ 
+-NDR_REGISTER_PARSER_PLUGIN(MoonrayParserPlugin);
++SDR_REGISTER_PARSER_PLUGIN(MoonrayParserPlugin);
+ 
+ TF_DEFINE_PRIVATE_TOKENS(
+     _tokens,
+@@ -350,48 +378,34 @@ TF_DEFINE_PRIVATE_TOKENS(
+ 
+ );
+ 
+-const NdrTokenVec&
++const SdrTokenVec&
+ MoonrayParserPlugin::GetDiscoveryTypes() const
+ {
+-    static const NdrTokenVec _DiscoveryTypes = {_tokens->discoveryType};
++    static const SdrTokenVec _DiscoveryTypes = {_tokens->discoveryType};
+     return _DiscoveryTypes;
+ }
+ 
+ const TfToken&
+-MoonrayParserPlugin::GetSourceType() const
++MoonrayParserPlugin::GetShadingSystem() const
+ {
+     return _tokens->sourceType;
+ }
+ 
+-NdrNodeUniquePtr
+-MoonrayParserPlugin::Parse(const NdrNodeDiscoveryResult& discoveryResult)
++SdrShaderNodeUniquePtr
++MoonrayParserPlugin::ParseShaderNode(const SdrShaderNodeDiscoveryResult& discoveryResult)
+ {
+     if (discoveryResult.uri.empty()) {
+-        TF_WARN("Invalid NdrNodeDiscoveryResult with identifier %s: uri is empty.",
++        TF_WARN("Invalid SdrShaderNodeDiscoveryResult with identifier %s: uri is empty.",
+                 discoveryResult.identifier.GetText());
+-         return NdrParserPlugin::GetInvalidNode(discoveryResult);
+-    }
+-
+-#if AR_VERSION == 1
+-    // Get the resolved URI to a location that it can be read
+-    bool localFetchSuccessful = ArGetResolver().FetchToLocalResolvedPath(
+-        discoveryResult.uri,
+-        discoveryResult.resolvedUri
+-        );
+-
+-    if (!localFetchSuccessful) {
+-        TF_WARN("Could not localize the Moonray shader definition at URI [%s] into a local path.",
+-                discoveryResult.uri.c_str());
+-        return NdrParserPlugin::GetInvalidNode(discoveryResult);
++         return SdrParserPlugin::GetInvalidShaderNode(discoveryResult);
+     }
+-#endif
+ 
+     // load the json file
+     std::ifstream ifs(discoveryResult.resolvedUri);
+     if (ifs.fail()) {
+         TF_WARN("Could not open the Moonray shader definition at URI [%s]. ",
+                 discoveryResult.resolvedUri.c_str());
+-        return NdrParserPlugin::GetInvalidNode(discoveryResult);
++        return SdrParserPlugin::GetInvalidShaderNode(discoveryResult);
+     }
+ 
+     try {
+@@ -401,16 +415,16 @@ MoonrayParserPlugin::Parse(const NdrNodeDiscoveryResult& discoveryResult)
+             TF_WARN("JSON error parsing Moonray shader definition at URI [%s]: line %d col %d : %s",
+                     discoveryResult.resolvedUri.c_str(),
+                     error.line,error.column,error.reason.c_str());
+-            return NdrParserPlugin::GetInvalidNode(discoveryResult);
++            return SdrParserPlugin::GetInvalidShaderNode(discoveryResult);
+         }
+ 
+         const JsObject& definition = jsDef.GetJsObject().at("scene_classes").
+             GetJsObject().at(discoveryResult.name).GetJsObject();
+-        return NdrNodeUniquePtr(new SdrShaderNode(
++        return SdrShaderNodeUniquePtr(new SdrShaderNode(
+                                     discoveryResult.identifier,
+                                     discoveryResult.version,
+                                     discoveryResult.name,
+-                                    discoveryResult.family,
++                                    discoveryResult.function,
+                                     getNodeContext(definition),
+                                     _tokens->sourceType,
+                                     discoveryResult.uri,
+@@ -423,7 +437,7 @@ MoonrayParserPlugin::Parse(const NdrNodeDiscoveryResult& discoveryResult)
+                 "An invalid Sdr node definition will be created.",
+                 e.what(), discoveryResult.resolvedUri.c_str());
+     }
+-    return NdrParserPlugin::GetInvalidNode(discoveryResult);
++    return SdrParserPlugin::GetInvalidShaderNode(discoveryResult);
+ }
+ 
+ PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/moonrayShaderParser/parserPlugin.h b/moonrayShaderParser/parserPlugin.h
+index 1c55f82..184e143 100644
+--- a/moonrayShaderParser/parserPlugin.h
++++ b/moonrayShaderParser/parserPlugin.h
+@@ -7,26 +7,25 @@
+ #include "pxr/pxr.h"
+ #include "pxr/base/tf/token.h"
+ 
+-#include "pxr/usd/ndr/declare.h"
+-#include "pxr/usd/ndr/parserPlugin.h"
++#include "pxr/usd/sdr/declare.h"
++#include "pxr/usd/sdr/parserPlugin.h"
+ 
+ PXR_NAMESPACE_OPEN_SCOPE
+ 
+-class NdrNode;
+-class NdrNodeDiscoveryResult;
++struct SdrShaderNodeDiscoveryResult;
+ 
+-class MoonrayParserPlugin : public NdrParserPlugin {
++class MoonrayParserPlugin : public SdrParserPlugin {
+ public:
+     MoonrayParserPlugin() = default;
+ 
+     ~MoonrayParserPlugin() override = default;
+ 
+-    NdrNodeUniquePtr Parse(const NdrNodeDiscoveryResult &discoveryResult)
++    SdrShaderNodeUniquePtr ParseShaderNode(const SdrShaderNodeDiscoveryResult &discoveryResult)
+         override;
+ 
+-    const NdrTokenVec &GetDiscoveryTypes() const override;
++    const SdrTokenVec &GetDiscoveryTypes() const override;
+ 
+-    const TfToken &GetSourceType() const override;
++    const TfToken &GetShadingSystem() const override;
+ 
+ };
+ 
+diff --git a/moonrayShaderParser/plugInfo.json.in b/moonrayShaderParser/plugInfo.json.in
+index 931cda3..5baccde 100644
+--- a/moonrayShaderParser/plugInfo.json.in
++++ b/moonrayShaderParser/plugInfo.json.in
+@@ -4,7 +4,7 @@
+             "Info": {
+                 "Types": {
+                     "MoonrayParserPlugin" : {
+-                        "bases": ["NdrParserPlugin"],
++                        "bases": ["SdrParserPlugin"],
+                         "displayName": "Moonray shader definition parser plugin."
+                     }
+                 }
