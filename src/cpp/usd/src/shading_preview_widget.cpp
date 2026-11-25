@@ -276,7 +276,7 @@ void ShadingPreviewWidget::setStage(const StageRefPtr& stage) {
     if (stage) {
         m_stageChanged = stage->changed.connect([this](const StageChanges& changes) {
             if (!m_preview) return;
-            m_preview->syncWithSource();
+            scaleView(m_preview->syncWithSource());
             const bool shown = showsScenePrim();
             m_preview->sceneChanged(changes.resyncedPaths, changes.changedInfoOnlyPaths);
             if (!m_scenePrim.IsEmpty() && shown != showsScenePrim()) {
@@ -465,6 +465,16 @@ void ShadingPreviewWidget::applyCamera() {
     m_hasCamera = camera.has_value();
     // The camera's lens while it's looked through and orbited from; the usual one otherwise.
     m_viewport->setFieldOfView(camera ? camera->verticalFov : HydraViewportWindow::verticalFieldOfView());
+}
+
+void ShadingPreviewWidget::scaleView(double factor) {
+    if (factor == 1.0) return;
+    // About the origin, as the shape is. The clipping planes follow the distance.
+    HydraViewportWindow::CameraState view = m_viewport->cameraState();
+    view.target *= factor;
+    view.distance *= factor;
+    view.orthoSize *= factor;
+    m_viewport->setCameraState(view);
 }
 
 void ShadingPreviewWidget::resetView() {

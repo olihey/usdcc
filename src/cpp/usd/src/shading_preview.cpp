@@ -8,10 +8,12 @@
 #include <pxr/base/tf/stringUtils.h>
 #include <pxr/base/tf/type.h>
 #include <pxr/base/vt/array.h>
+#include <pxr/base/vt/value.h>
 #include <pxr/usd/sdf/attributeSpec.h>
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/sdf/listOp.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/propertySpec.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/relationshipSpec.h>
 #include <pxr/usd/sdr/registry.h>
@@ -38,10 +40,16 @@
 #include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xform.h>
+#include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/xformOp.h>
+#include <pxr/usd/usdLux/cylinderLight.h>
+#include <pxr/usd/usdLux/diskLight.h>
 #include <pxr/usd/usdLux/distantLight.h>
 #include <pxr/usd/usdLux/domeLight.h>
 #include <pxr/usd/usdLux/lightAPI.h>
+#include <pxr/usd/usdLux/rectLight.h>
+#include <pxr/usd/usdLux/sphereLight.h>
+#include <pxr/usd/usdLux/tokens.h>
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/input.h>
 #include <pxr/usd/usdShade/material.h>
@@ -73,6 +81,43 @@ SdfPath shapePath() { return ShadingPreviewStage::root().AppendChild(TfToken("Sh
 SdfPath assetPath() { return shapePath().AppendChild(TfToken("Asset")); }
 SdfPath domePath() { return ShadingPreviewStage::root().AppendChild(TfToken("Env")); }
 SdfPath keyPath() { return ShadingPreviewStage::root().AppendChild(TfToken("Key")); }
+
+// The ops that take the shape's scale off a light, and give it back to what's under it.
+const TfToken kLightUnits("usdccPreviewUnits");
+const TfToken kLightChildUnits("usdccPreviewChildUnits");
+
+// Multiplies a float or a float3[], at its default and its time samples.
+void scaleAttribute(const UsdAttribute& attribute, float factor) {
+    std::vector<double> times;
+    attribute.GetTimeSamples(&times);
+    // Read before any of it is written.
+    std::vector<std::pair<UsdTimeCode, VtValue>> values;
+    VtValue value;
+    if (attribute.Get(&value)) values.emplace_back(UsdTimeCode::Default(), value);
+    for (const double time : times) {
+        if (attribute.Get(&value, time)) values.emplace_back(time, value);
+    }
+    for (const auto& [time, held] : values) {
+        if (held.IsHolding<float>()) {
+            attribute.Set(held.UncheckedGet<float>() * factor, time);
+        } else if (held.IsHolding<VtVec3fArray>()) {
+            VtVec3fArray array = held.UncheckedGet<VtVec3fArray>();
+            for (GfVec3f& each : array) each *= factor;
+            attribute.Set(array, time);
+        }
+    }
+}
+
+// The nearest prims under `prim` with a transform of their own.
+void nearestXformables(const UsdPrim& prim, std::vector<SdfPath>& found) {
+    for (const UsdPrim& child : prim.GetChildren()) {
+        if (child.IsA<UsdGeomXformable>()) {
+            found.push_back(child.GetPath());
+        } else {
+            nearestXformables(child, found);
+        }
+    }
+}
 
 std::string lower(std::string text) {
     std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -216,20 +261,21 @@ void ShadingPreviewStage::writeShape() {
         // A mesh light is geometry too: it stays.
         if (!prim.IsA<UsdGeomGprim>()) m_shapeLights.push_back(prim.GetPath());
     }
-    writeShapeLights();
     m_metersPerUnit = UsdGeomGetStageMetersPerUnit(m_stage);
+    const float scale = static_cast<float>(shapeScale());
+    writeShapeLightUnits(scale);
+    writeShapeLights();
     const UsdGeomXform shape(m_stage->GetPrimAtPath(shapePath()));
     bool resets = false;
     for (const UsdGeomXformOp& op : shape.GetOrderedXformOps(&resets)) {
         if (op.GetOpType() == UsdGeomXformOp::TypeRotateX) op.Set(m_shapeZUp ? -90.0f : 0.0f);
-        if (op.GetOpType() == UsdGeomXformOp::TypeScale) {
-            const float scale = m_metersPerUnit > 0 ? static_cast<float>(m_shapeMetersPerUnit / m_metersPerUnit) : 1.0f;
-            op.Set(GfVec3f(scale));
-        }
+        if (op.GetOpType() == UsdGeomXformOp::TypeScale) op.Set(GfVec3f(scale));
     }
     writeBinding();
     updatePrimvars(true);
 }
+
+double ShadingPreviewStage::shapeScale() const { return m_metersPerUnit > 0 ? m_shapeMetersPerUnit / m_metersPerUnit : 1.0; }
 
 void ShadingPreviewStage::writeBinding() {
     if (!m_stage) return;
@@ -323,6 +369,71 @@ void ShadingPreviewStage::writeShapeLights() {
         }
     }
     if (!off) layer->RemoveInertSceneDescription();
+}
+
+void ShadingPreviewStage::writeShapeLightUnits(float scale) {
+    // What it wrote for the last scale or shape first, so that it isn't scaled again.
+    if (!m_shapeLightUnits.empty()) {
+        SdfChangeBlock block;
+        for (const SdfPath& path : m_shapeLightUnits) {
+            const SdfPrimSpecHandle spec = m_scene->GetPrimAtPath(path.GetPrimPath());
+            const SdfPropertySpecHandle property = m_scene->GetPropertyAtPath(path);
+            if (spec && property) spec->RemoveProperty(property);
+        }
+        m_shapeLightUnits.clear();
+        m_scene->RemoveInertSceneDescription();
+    }
+    if (scale == 1.0f || scale <= 0) return;
+    const UsdEditContext context(m_stage, UsdEditTarget(m_scene));
+    // Paths, as writing may recompose the prims.
+    std::vector<SdfPath> lights;
+    for (const UsdPrim& prim : UsdPrimRange(m_stage->GetPrimAtPath(assetPath()))) {
+        if (prim.HasAPI<UsdLuxLightAPI>()) lights.push_back(prim.GetPath());
+    }
+    const auto multiply = [this](const UsdAttribute& attribute, float factor) {
+        if (!attribute) return;
+        m_shapeLightUnits.push_back(attribute.GetPath());
+        scaleAttribute(attribute, factor);
+    };
+    const auto addScale = [this](const UsdGeomXformable& xformable, const TfToken& suffix, float factor) {
+        const UsdGeomXformOp op = xformable.AddScaleOp(UsdGeomXformOp::PrecisionFloat, suffix);
+        if (!op) return false;
+        op.Set(GfVec3f(factor));
+        m_shapeLightUnits.push_back(op.GetAttr().GetPath());
+        m_shapeLightUnits.push_back(xformable.GetXformOpOrderAttr().GetPath());
+        return true;
+    };
+    for (const SdfPath& path : lights) {
+        const UsdPrim prim = m_stage->GetPrimAtPath(path);
+        const UsdLuxLightAPI light(prim);
+        const bool area = prim.IsA<UsdLuxRectLight>() || prim.IsA<UsdLuxDiskLight>() || prim.IsA<UsdLuxSphereLight>() ||
+                          prim.IsA<UsdLuxCylinderLight>();
+        // Normalized, a light's power doesn't follow its size; how far off it is does.
+        bool normalized = false;
+        light.GetNormalizeAttr().Get(&normalized);
+        if (normalized && (area || prim.IsA<UsdGeomGprim>())) multiply(light.GetIntensityAttr(), scale * scale);
+        if (!area) continue;
+        for (const TfToken& name :
+             {UsdLuxTokens->inputsWidth, UsdLuxTokens->inputsHeight, UsdLuxTokens->inputsRadius, UsdLuxTokens->inputsLength}) {
+            multiply(prim.GetAttribute(name), scale);
+        }
+        const UsdAttribute extent = prim.GetAttribute(UsdGeomTokens->extent);
+        if (extent && extent.HasAuthoredValue()) multiply(extent, scale);
+        // Innermost, so the light stays where it is.
+        addScale(UsdGeomXformable(prim), kLightUnits, 1.0f / scale);
+        // What's under it keeps the shape's scale: outermost.
+        std::vector<SdfPath> children;
+        nearestXformables(prim, children);
+        for (const SdfPath& child : children) {
+            const UsdGeomXformable xformable(m_stage->GetPrimAtPath(child));
+            bool resets = false;
+            xformable.GetOrderedXformOps(&resets);
+            if (resets || !addScale(xformable, kLightChildUnits, scale)) continue;
+            std::vector<UsdGeomXformOp> ops = xformable.GetOrderedXformOps(&resets);
+            std::rotate(ops.begin(), ops.end() - 1, ops.end());
+            xformable.SetXformOpOrder(ops);
+        }
+    }
 }
 
 void ShadingPreviewStage::clearShapeLights() {
@@ -580,8 +691,8 @@ void ShadingPreviewStage::setEnvironment(const Environment& environment) {
     writeEnvironment();
 }
 
-void ShadingPreviewStage::syncWithSource() {
-    if (!m_stage) return;
+double ShadingPreviewStage::syncWithSource() {
+    if (!m_stage) return 1.0;
     const std::vector<std::string> wanted = m_source->GetMutedLayers();
     const std::vector<std::string> have = m_stage->GetMutedLayers();
     const std::set<std::string> wantedSet(wanted.begin(), wanted.end());
@@ -597,8 +708,13 @@ void ShadingPreviewStage::syncWithSource() {
         m_stage->MuteAndUnmuteLayers(mute, unmute);
     }
     if (!(m_stage->GetLoadRules() == m_source->GetLoadRules())) m_stage->SetLoadRules(m_source->GetLoadRules());
+    const double before = shapeScale();
     if (UsdGeomGetStageMetersPerUnit(m_stage) != m_metersPerUnit || !m_stage->GetPrimAtPath(assetPath())) writeShape();
     if (turnedZUp() != m_wroteZUp) writeEnvironment();
+    // A prim of the scene is shown where it is: its units changing doesn't move it.
+    if (!m_scenePrim.IsEmpty()) return 1.0;
+    const double after = shapeScale();
+    return after == before ? 1.0 : after / before;
 }
 
 GfRange3d ShadingPreviewStage::shapeBounds(UsdTimeCode time) const {

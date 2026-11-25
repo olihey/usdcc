@@ -138,6 +138,8 @@ private:
     void applyPrimvarProblem();
     bool showsScenePrim() const;
     void applyCamera();
+    // Scales the view with the shape when the scene's units change.
+    void scaleView(double factor);
     void applyEnvironment();
     void followRenderer();
     void checkRenderer();

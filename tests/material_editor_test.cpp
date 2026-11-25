@@ -31,6 +31,7 @@
 #include <DockWidget.h>
 
 #include <pxr/base/gf/math.h>
+#include <pxr/base/gf/range3d.h>
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec3d.h>
 #include <pxr/usd/usd/attribute.h>
@@ -1427,4 +1428,73 @@ def Xform "Shape"
     restored.restoreState(state);
     CHECK(restored.shapeName() == "Camera Ball" && restored.shapeHasLights() && !restored.useSceneLights(),
           "a restored panel keeps its choice");
+}
+
+// A live change of the scene's units scales the shape, and the view with it: the same picture.
+USDCC_TEST(material_editor_preview_view_follows_the_units) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    usdcc::usd::ShadingPreviewWidget* preview = f.panel->preview();
+    usdcc::usd::HydraViewportWindow* viewport = preview->viewport();
+    const auto setUnits = [&f](double metersPerUnit) {
+        f.stage->usdStage()->SetMetadata(TfToken("metersPerUnit"), metersPerUnit);
+        settle();
+    };
+    // Where the shape is in the view: what the camera sees, whatever the units.
+    struct Seen {
+        GfVec3d middle;  // of the shape, along the camera's axes, in distances to the target
+        double size = 0;
+    };
+    const auto seen = [preview, viewport]() {
+        const auto state = viewport->cameraState();
+        const auto axes = usdcc::usd::orbitCameraAxes(state.target, state.distance, state.yaw, state.pitch);
+        const GfRange3d bounds = preview->previewStage()->shapeBounds();
+        const GfVec3d offset = (bounds.GetMidpoint() - axes.eye) / state.distance;
+        return Seen{GfVec3d(GfDot(offset, axes.right), GfDot(offset, axes.up), GfDot(offset, axes.forward)),
+                    bounds.GetSize().GetLength() / state.distance};
+    };
+    const auto same = [](const Seen& a, const Seen& b) {
+        return GfIsClose(a.middle, b.middle, 1e-4) && std::abs(a.size - b.size) < 1e-4 * b.size;
+    };
+
+    // One with a camera, one without.
+    for (const char* shape : {"Standard USD Shader Ball", "Sphere"}) {
+        setUnits(1.0);
+        preview->setShapeName(shape);
+        CHECK(preview->shapeName() == shape, "the shape: %s", qPrintable(preview->problem()));
+        // As it was framed, then turned and moved by the user.
+        for (const bool turned : {false, true}) {
+            if (turned) {
+                auto state = viewport->cameraState();
+                state.yaw += 40;
+                state.pitch += 10;
+                state.distance *= 0.7;
+                state.target += GfVec3d(0.1, 0.2, -0.1) * state.distance;
+                viewport->setCameraState(state);
+            }
+            const auto before = viewport->cameraState();
+            const Seen picture = seen();
+            CHECK(picture.size > 0.1, "%s is a size to see: %f", shape, picture.size);
+            setUnits(0.01);
+            auto state = viewport->cameraState();
+            CHECK(std::abs(state.distance / before.distance - 100.0) < 1e-3, "%s, in centimetres: %f from %f", shape,
+                  state.distance, before.distance);
+            CHECK(same(seen(), picture) && state.yaw == before.yaw && state.pitch == before.pitch, "the same picture of %s", shape);
+            setUnits(1.0);
+            state = viewport->cameraState();
+            CHECK(same(seen(), picture) && std::abs(state.distance / before.distance - 1.0) < 1e-9 &&
+                      GfIsClose(state.target, before.target, 1e-9),
+                  "and back: %f", state.distance);
+        }
+    }
+
+    // Any other change leaves the view alone.
+    const auto before = viewport->cameraState();
+    f.stage->usdStage()->SetMetadata(TfToken("upAxis"), TfToken("Z"));
+    f.stage->usdStage()->DefinePrim(SdfPath("/World/New"));
+    settle();
+    const auto after = viewport->cameraState();
+    CHECK(after.target == before.target && after.distance == before.distance && after.yaw == before.yaw && after.pitch == before.pitch,
+          "another edit keeps the view");
 }
