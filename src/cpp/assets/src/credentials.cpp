@@ -12,6 +12,8 @@
 #endif
 #if defined(__linux__)
 #include "secret_service.h"
+#elif defined(__APPLE__)
+#include "keychain.h"
 #endif
 
 namespace usdcc::assets {
@@ -120,8 +122,8 @@ public:
         return all;
     }
 };
-#elif !defined(__linux__)
-// None on this platform: macOS's Keychain isn't built (docs/ASSET_SOURCES.md §10.5).
+#elif !defined(__linux__) && !defined(__APPLE__)
+// None on this platform.
 class SystemStore : public CredentialStore {
 public:
     std::optional<Credential> read(const std::string&) override { return std::nullopt; }
@@ -138,6 +140,8 @@ public:
 std::shared_ptr<CredentialStore> systemStore() {
 #if defined(__linux__)
     return makeSecretServiceStore();
+#elif defined(__APPLE__)
+    return makeKeychainStore();
 #else
     return std::make_shared<SystemStore>();
 #endif

@@ -87,7 +87,8 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 - **The Blender backend's `*_inline.cc` files** aren't compiled by themselves, as in Blender's
   own build: Clang ignores `#pragma once` in the file it compiles.
 - **Paths** compare without case, as APFS does by default.
-- **Credentials and Peers' key** are in files, as on Linux: no Keychain yet.
+- **Asset servers' logins** are in the Keychain ([ASSET_SOURCES.md](ASSET_SOURCES.md) §10.6).
+  **Peers' key** is in a file, as on Linux.
 
 - **The deploy** (`tools/deploy.py`) is `usdcc.app`, with everything in `Contents/Resources`
   laid out as a Linux deploy: OpenUSD and Python find their data beside their libraries, and

@@ -545,6 +545,20 @@ jobs:
       - name: Test
         run: ctest --test-dir build --verbose --timeout 900
 
+      # The logins' store, in a keychain made for it and nothing else (docs/ASSET_SOURCES.md §10.6).
+      - name: Test the Keychain
+        run: |
+          keychain="$RUNNER_TEMP/usdcc-test.keychain-db"
+          before=$(security default-keychain -d user | tr -d ' "')
+          security create-keychain -p test "$keychain"
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p test "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          trap 'security default-keychain -d user -s "$before"; security list-keychains -d user -s "$before"; security delete-keychain "$keychain"' EXIT
+          USDCC_TEST_KEYRING=1 ctest --test-dir build -R '^usdcc_assets_tests$' --verbose --timeout 300 | tee "$RUNNER_TEMP/keychain.txt"
+          grep -q assets_credentials_in_the_system_store "$RUNNER_TEMP/keychain.txt"
+
       # As the linux job.
       - name: Prune the vcpkg cache
         id: vcpkg-prune
