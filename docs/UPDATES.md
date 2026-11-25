@@ -2,11 +2,13 @@
 
 usdcc on Windows comes with an installer, and an installed usdcc updates itself from the
 GitHub releases: **Help > Check for Updates**, or on its own a few seconds after it starts.
-Both are made with [Velopack](https://velopack.io) (MIT). The 7z stays, for anyone who
+On macOS `usdcc.app` does, and on Linux the AppImage (§9); other copies only say that there is
+a newer release. Both are made with [Velopack](https://velopack.io) (MIT). The 7z stays, for anyone who
 would rather unpack a folder. Part of M11 (packaging), after [RELEASE.md](RELEASE.md).
 
 **Status:** built, and tried locally from install to update (§6). The release workflow's
-part (§5) runs for the first time with the next release.
+part (§5) runs for the first time with the next release. §9 is macOS,
+Linux and the copies that can't update themselves.
 
 ## 1. Why
 
@@ -22,8 +24,8 @@ updates usdcc downloads itself, carry no mark.
 - **Velopack**, not an MSI or Inno Setup: it installs per user (no administrator rights),
   keeps one folder per app, and its library checks, downloads and applies updates, with
   delta packages so an update downloads only what changed.
-- **Windows only.** Linux keeps its `tar.xz`; Velopack's Linux packages are AppImages,
-  which the Linux deploy isn't. macOS has a disk image and no updates either.
+- **An installer on Windows only.** macOS has a disk image, and Linux keeps its `tar.xz`,
+  beside an AppImage, which is all Velopack updates there (§9).
 - **The GitHub releases are the update server.** The release workflow attaches the
   installer, the packages and the feed Velopack reads (§5); nothing else to host.
 - **Package id `usdcc`, the user's files in `usdcc_config`.** Velopack installs into
@@ -70,7 +72,8 @@ checked against its SHA-256, into `build/velopack`. Without them (offline, or
 (`velopack_libc.dll`, beside `usdcc.exe`), which keeps its own C runtime to
 itself; the app is on the runtime DLL, as all of usdcc is.
 
-**Installed or not.** usdcc can update itself when it runs from an install: `bin\usdcc.exe`
+**Installed or not.** usdcc can update itself when it runs from an install (on Windows; §9 for
+the others): `bin\usdcc.exe`
 under a `current` folder with Velopack's `Update.exe` beside that folder. This is how
 Velopack's own locator finds it; usdcc checks it itself, so a copy that isn't installed
 doesn't log Velopack's errors.
@@ -81,7 +84,7 @@ doesn't log Velopack's errors.
     is one), and **Download and Install** and **Release Notes**. It stays until closed.
   - "usdcc is up to date".
   - "Couldn't check for updates", with Velopack's error.
-- Anywhere else: "Updates come with the installer", with **Releases Page**.
+- Anywhere else the same from GitHub's list of releases, with **Download** (§9).
 
 Once a check (this one or the one at the start) found an update, the menu item follows it, so
 it can be installed after its notification was closed:
@@ -107,7 +110,7 @@ A build without the Updates feature (`USDCC_BUILD_UPDATES=OFF`,
 [BUILD_OPTIONS.md](BUILD_OPTIONS.md) §11) has none of this section: no menu item, no check,
 no settings.
 
-**Settings > Updates** (only in builds with Velopack):
+**Settings > Updates:**
 
 | Setting | Default | |
 |---|---|---|
@@ -229,4 +232,109 @@ them are under MIT, Apache-2.0, BSD, ISC, Zlib, Unicode and MPL-2.0 licences (wh
 | 1 | Sign the installer and the binaries? | Yes, when there's a certificate: Azure Trusted Signing (about $10 a month) or SignPath (free for open source), through `vpk pack`'s signing options. Signed files also skip Defender's cloud scan of the 7z |
 | 2 | Ship the Rust crates' own licence texts too, not just Velopack's? | Yes, generated from Velopack's `Cargo.lock` at the pinned tag (`cargo about`), into `licenses/Velopack/` |
 | 3 | Keep the 7z? | Yes, for now: some people won't run an installer. Its first start stays slow until it's signed, unless unblocked (Properties > Unblock) before unpacking |
-| 4 | Updates on Linux? | Later, if the Linux deploy becomes an AppImage |
+| 4 | Updates on Linux? | Yes: the AppImage, beside the tar.xz (§9) |
+
+## 9. macOS, Linux and copies that aren't installed
+
+**Status:** built; what was tried is at the end. Nothing has been released with it yet.
+
+| Package | Version check | Updates itself |
+|---|---|---|
+| Windows installer | Yes | Yes |
+| Windows 7z | Yes | No |
+| macOS disk image | Yes | Yes |
+| macOS disk image with an optional pack (MoonRay) | Yes | No: an update would take its pack away |
+| Linux tar.xz | Yes | No |
+| Linux AppImage | Yes | Yes |
+
+### The version check of a copy that can't update itself
+
+`release_check.*` reads GitHub's list of releases, which `AppUpdates` gets with Qt Network and
+the system's proxy, without Velopack.
+
+- **The newest release with a file for this platform and architecture**, not
+  `/releases/latest`: a release's jobs can fail one by one (26.11.9 has no Linux files), and
+  this skips the `deps/...` releases too. Versions compare as in §5; the list's order isn't
+  relied on. Releases marked as prereleases, only with **Include prereleases**.
+- **On its own at most once a day**, failed checks included (`Updates/lastReleaseCheck`), and
+  only in a release build. GitHub allows 60 anonymous requests an hour for an IP address, and a
+  studio shares one. Help > Check for Updates always asks.
+- **The notification** has **Download** (the release's page) and **Release Notes**, and the
+  menu item becomes **Download Update to 26.12.1...**.
+- `USDCC_RELEASES_URL` is another list to read, such as a `file:` URL, for testing.
+
+### macOS
+
+Velopack replaces the whole `usdcc.app`, and asks for an administrator's password where the
+user may not write.
+
+- **Build:** the app links Velopack's static library, with nothing to deploy or sign: the
+  `.dylib`'s name is a path of the machine it was built on. Linux does the same (its `.so` has
+  no soname), hiding the library's symbols.
+- **Start:** there is no launcher, so `usdcc` runs `VelopackApp` before anything else
+  (`AppUpdates::runStartup()`). `usdcc_node` never does.
+- **Packing:** `vpk pack --noInst` on the deployed `usdcc.app`, with the channel `osx-arm64`,
+  so that an Intel build could have its own. The disk image is made from the app vpk puts out
+  (its portable zip, which isn't attached): only that one has `UpdateMac`.
+- **Signing:** vpk adds files to the bundle and signs it again: `--signDisableDeep`, as
+  `tools/deploy.py` has signed the libraries, and our entitlements. The job then installs the
+  package with `UpdateMac` over a copy, and checks that one's signature.
+- **Not from the disk image.** An app run from it, or that macOS translocated, can't be
+  replaced. The check's notification says to move usdcc to the Applications folder.
+- **A Developer ID** isn't expected to be needed for updates, as files usdcc downloads itself
+  shouldn't be quarantined. It takes away the refusal at the first start, and what the user
+  allowed (the local network) should last over updates. Wanted before the Mac build is
+  promoted.
+
+### The Linux AppImage, beside the tar.xz
+
+On Linux Velopack only updates an AppImage: it finds itself by `/usr/bin/` in the program's
+path, with `UpdateNix` beside it, and replaces the one file, with `pkexec` where the user may
+not write. `tools/make_appdir.py` makes the deploy the `usr` folder of a `usdcc.AppDir`
+(`usr/bin/usdcc`, `usr/lib`), which vpk packs as it is.
+
+- **Channels** `linux-x64` and `linux-arm64`: without a name both would be `linux`. The files
+  are `usdcc-linux-x64.AppImage` and `usdcc-linux-arm64.AppImage`.
+- **`AppRun`** also starts the render node ([RENDER_NODE.md](RENDER_NODE.md) §6).
+- **The tar.xz stays**, for farms, shared installs and plugin development. The AppImage is
+  mounted somewhere else at each start, so nothing may store a path into it. Set Up VS Code
+  doesn't (a deploy's editor types are copied to the user's folder), and usdcc restarts itself
+  from the AppImage's file. C++ plugins can't be built against its `sdk`.
+- **Deltas** may be nearly the full package: to vpk the AppImage is one compressed file.
+
+Not instead: an updater of our own for the tar.xz (the swap, rollback and verification would
+be ours), deb or rpm (a repository to host), Flatpak (its sandbox is in the way of plugins and
+other renderers).
+
+### What runs from the install
+
+What an update does to another usdcc, or a `usdcc_node`, running from the install:
+
+| | |
+|---|---|
+| Windows | Velopack stops it, unsaved work or not |
+| macOS | It runs on, but its bundle is deleted: what it loads later is missing, or the new version's |
+| AppImage | Nothing: it keeps the old file until it exits |
+| 7z, tar.xz | Nothing: usdcc doesn't touch them |
+
+So on Windows and macOS (`running_programs.h`):
+
+- **Restart Now** with another usdcc open says to close it first. With a render node running
+  it asks: "A render node is running; updating will stop it", with **Update Anyway** and
+  **Later**. On macOS usdcc then stops the node itself.
+- **At the start**, a downloaded update isn't installed while either runs: the launcher
+  (Windows) or `usdcc` (macOS) starts the version there is, and Restart Now is offered again.
+
+### Tried
+
+- **Windows:** the version check in the running app, at the start and from the menu, with lists
+  of releases made for it (newer, none, not a list; a newer release without a Windows file is
+  passed over) and with GitHub's; the second start the same day doesn't ask. Finding a running
+  `usdcc_node` is a test (`running_programs_finds_a_node_of_this_install`).
+- **Linux** (Ubuntu 24.04, WSL): the same check against GitHub over TLS. An AppImage's files,
+  laid out by hand with `$APPIMAGE` set: the app finds itself, reads a feed of its channel and
+  offers the update, and says "Updated to" after Velopack's restart. `AppRun` with and without
+  `usdcc_node`, and by that name.
+- **Not tried:** anything on a Mac; `vpk pack` for macOS and Linux, and the release jobs; an
+  AppImage that replaces itself, with FUSE; the questions before Restart Now, and the launcher
+  with another usdcc running, in an install. A dry run of `release.yml` is next.

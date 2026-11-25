@@ -13,6 +13,7 @@ target_link_libraries(usdcc_launcher PRIVATE usdcc::velopack_static)
 set_target_properties(usdcc_launcher PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreaded)
 # The version header the app's CMakeLists writes (the icon is the app's, by path).
 set_property(SOURCE launcher.rc APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/src/cpp/app/generated")
+target_include_directories(usdcc_launcher PRIVATE "${CMAKE_SOURCE_DIR}/src/cpp/app")
 target_compile_definitions(usdcc_launcher PRIVATE UNICODE _UNICODE)
 # Built with the app, so a deploy always has both.
 add_dependencies(usdcc usdcc_launcher)

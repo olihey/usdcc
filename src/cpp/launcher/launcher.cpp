@@ -14,6 +14,8 @@
 
 #include <string>
 
+#include "running_programs.h"
+
 #include "Velopack.hpp"
 
 namespace {
@@ -58,9 +60,13 @@ const wchar_t* argumentsAfterProgram(const wchar_t* commandLine) {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // First, as Velopack asks: with one of its hook arguments it runs the hook
     // and exits here; with an update downloaded and not yet applied, it applies
-    // it and starts this program again.
+    // it and starts this program again. Not while another usdcc or a render node runs from
+    // the install: Velopack's updater would stop it, unsaved work or not (docs/UPDATES.md §9).
     try {
-        Velopack::VelopackApp::Build().OnRestarted(&onRestarted).Run();
+        const std::filesystem::path programs = ownFolder() + L"bin";
+        const bool inUse = !usdcc::app::runningPrograms(programs, "usdcc").empty()
+                           || !usdcc::app::runningPrograms(programs, "usdcc_node").empty();
+        Velopack::VelopackApp::Build().SetAutoApplyOnStartup(!inUse).OnRestarted(&onRestarted).Run();
     } catch (...) {
         // Never in the way of starting the app.
     }
