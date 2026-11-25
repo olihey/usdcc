@@ -215,7 +215,7 @@ pull requests merged in the meantime together.
    - The cache holds one zip per package build, named after the package's ABI hash,
      which covers its port, its dependencies and the compiler.
    - Restored: the newest cache for the same dependencies (`vcpkg.json`, the overlay
-     ports in `cmake/ports` with `vcpkg-configuration.json`, and the vcpkg submodule
+     ports in `cmake/ports` (on macOS `cmake/ports-macos` too) with `vcpkg-configuration.json`, and the vcpkg submodule
      commit), or else the newest of any. So after a dependency change or a runner image
      update only what changed is built.
    - Saved whenever vcpkg built something, even if usdcc's build or tests failed after it,

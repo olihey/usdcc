@@ -59,6 +59,9 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
   from a staging folder, and while that is read, as when Qt is packed into the binary cache,
   macOS takes the running `moc` to be there, with no libraries beside it. Reading the staged
   `moc` in a loop made the installed one fail 4 times in 10, and 3 in 10 right after.
+- **Qt is patched** (, an overlay port of macOS' alone): Qt 6.11.1 frees the
+  color space of an image with a color profile before using it. Its move, wait and busy mouse cursors
+  are such images, and setting one crashed. Copy the port again when vcpkg's baseline moves.
 
 ## 3. What is different
 

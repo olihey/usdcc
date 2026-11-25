@@ -8,7 +8,7 @@ Points VCPKG_BINARY_SOURCES at $RUNNER_TEMP/vcpkg-cache (through $GITHUB_ENV, fo
 the later steps) and appends to $GITHUB_OUTPUT:
   dir    the cache folder
   deps   the key prefix for these dependencies: vcpkg.json, the overlay ports in
-         cmake/ports with vcpkg-configuration.json, and the vcpkg submodule commit
+         cmake/ports (cmake/ports-macos too, on macOS) with vcpkg-configuration.json, and the vcpkg submodule commit
   any    the key prefix for any dependencies
   key    deps plus this run's id and attempt, for saving
 
@@ -25,13 +25,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import REPO, VCPKG_TRIPLET, append_line, fail, normalized_text, report, short_hash  # noqa: E402
+from _common import MACOS, REPO, VCPKG_TRIPLET, append_line, fail, normalized_text, report, short_hash  # noqa: E402
 
 
 def dependencies_hash():
     """A hash of everything in the repo that says which packages vcpkg builds."""
     files = [REPO / name for name in ("vcpkg.json", "vcpkg-configuration.json") if (REPO / name).is_file()]
-    for folder in (REPO / "cmake/ports", REPO / "cmake/triplets"):
+    for folder in (REPO / "cmake/ports", *([REPO / "cmake/ports-macos"] if MACOS else []), REPO / "cmake/triplets"):
         if folder.is_dir():
             files += [file for file in folder.rglob("*") if file.is_file()]
     names = sorted("/" + file.relative_to(REPO).as_posix() for file in files)

@@ -1,0 +1,20 @@
+--- a/src/gui/painting/qcoregraphics.mm
++++ b/src/gui/painting/qcoregraphics.mm
+@@ -130,10 +130,16 @@
+             return CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+         }
+     }();
++
++    // The returned format doesn't own the color space, so it has to live on until
++    // the caller has used it. One made from an ICC profile has no other owner.
++    CGColorSpaceRef borrowedColorSpace = colorSpace;
++    if (borrowedColorSpace)
++        CFAutorelease(CFRetain(borrowedColorSpace));
+ 
+     return vImage_CGImageFormat{
+         bitsPerComponent, format.bitsPerPixel(),
+-        colorSpace, bitmapInfo, 0, nullptr,
++        borrowedColorSpace, bitmapInfo, 0, nullptr,
+         kCGRenderingIntentDefault
+     };
+ }
