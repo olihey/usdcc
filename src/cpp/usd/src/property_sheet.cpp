@@ -36,8 +36,10 @@
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/properties/transform_stack_editor.h"
 #include "usdcc/usd/property_categorizer.h"
+#include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_hud.h"
 #include "usdcc/usd/xform_stack.h"
 
 #include <pxr/base/tf/stringUtils.h>
@@ -48,6 +50,7 @@
 #include <pxr/usd/usd/relationship.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/variantSets.h>
+#include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/sdr/shaderNode.h>
@@ -61,6 +64,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFrame>
 #include <QFileInfo>
@@ -80,6 +84,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <set>
@@ -100,6 +105,10 @@ constexpr int kLabelWidth = 130;
 // Inside a frame labels are narrower by its padding, so the fields line up with
 // the other rows'.
 constexpr int kFramePadding = 8;
+// Narrow: room for the numbers, which can't be scrolled through like an editable field's.
+constexpr int kBoundsLabelWidth = 50;
+// Bounds that take longer than this to compute aren't kept up with during edits and playback.
+constexpr qint64 kSlowBoundsMs = 10;
 
 struct GroupFrame {
     QFrame* widget = nullptr;
@@ -185,6 +194,9 @@ PropertySheet::PropertySheet(StageManager* stageManager, std::shared_ptr<UndoMan
     m_timeRefreshTimer->setSingleShot(true);
     m_timeRefreshTimer->setInterval(50);
     connect(m_timeRefreshTimer, &QTimer::timeout, this, &PropertySheet::refreshTimeVaryingValues);
+    m_boundsTimer = new QTimer(this);
+    m_boundsTimer->setSingleShot(true);
+    connect(m_boundsTimer, &QTimer::timeout, this, &PropertySheet::updateBounds);
     rebuild();
 }
 
@@ -201,6 +213,7 @@ void PropertySheet::setStage(const StageRefPtr& stage) {
         // steady pace instead of waiting for the time to rest.
         m_timeConnection = stage->timeChanged.connect([this](double) {
             if (!m_timeRefreshTimer->isActive()) m_timeRefreshTimer->start();
+            scheduleBoundsUpdate();
         });
         m_stageChangedConnection =
             stage->changed.connect([this](const StageChanges& changes) { onStageObjectsChanged(changes); });
@@ -380,6 +393,9 @@ void PropertySheet::rebuild() {
     m_compositionSection = nullptr;
     m_xformEditor = nullptr;
     m_header = {};
+    m_bounds = {};
+    m_hasBounds = false;
+    m_boundsTimer->stop();
     m_connectionScope = SdfPath();  // set again by a shader output's row
     m_rebuildPending = false;
     m_refreshPending = false;
@@ -505,6 +521,8 @@ void PropertySheet::rebuild() {
     // A Shader's inputs are in its definition's pages, where its Inputs would be (or,
     // with none authored, before its Outputs).
     bool pagesBuilt = false;
+    // After Transform, or first when there's none.
+    if (!xformable) buildBoundsSection(layout);
     for (PropertyCategory category : categories) {
         if (shader) {
             if (!pagesBuilt && (category.key == "inputs" || category.key == "outputs")) {
@@ -583,6 +601,7 @@ void PropertySheet::rebuild() {
         }
         layout->addWidget(section);
         m_sections.push_back(section);
+        if (category.key == "transform" && xformable) buildBoundsSection(layout);
     }
     if (shader && !pagesBuilt) buildShaderPages(prim, layout);
     layout->addStretch(1);
@@ -876,6 +895,74 @@ void PropertySheet::buildPrimSection(const UsdPrim& prim, QVBoxLayout* layout) {
 
     refreshPrimHeader(prim);
     layout->addWidget(m_primSection);
+}
+
+void PropertySheet::buildBoundsSection(QVBoxLayout* layout) {
+    CategorySection* section = makeSection(QStringLiteral("boundingVolume"), tr("Bounding Volume"));
+    section->setObjectName(QStringLiteral("boundingVolumeSection"));
+    section->setVisible(false);  // until it's known to have bounds
+    m_bounds.section = section;
+    const auto addRow = [section](const QString& label, const QString& toolTip, PropertyEditor* editor) {
+        editor->setReadOnly(true);
+        auto* row = new PropertyRow(label, editor);
+        row->setLabelWidth(kBoundsLabelWidth);
+        row->setLabelToolTip(toolTip);
+        section->addRow(row);
+        return editor;
+    };
+    const auto vector = []() { return properties::createPropertyEditor(SdfValueTypeNames->Double3); };
+    m_bounds.size = addRow(tr("Size"), tr("The size of the box along the world's axes, in stage units"), vector());
+    m_bounds.center = addRow(tr("Center"), tr("The middle of the box, in world space, in stage units"), vector());
+    m_bounds.min = addRow(tr("Min"), tr("The box's lowest corner, in world space, in stage units"), vector());
+    m_bounds.max = addRow(tr("Max"), tr("The box's highest corner, in world space, in stage units"), vector());
+    m_bounds.units = addRow(tr("Units"), tr("What one unit is: the stage's metersPerUnit"), readOnlyText(QString()));
+    layout->addWidget(section);
+    // Slow ones don't hold up selecting the prim.
+    if (m_boundsCostMs > kSlowBoundsMs) {
+        scheduleBoundsUpdate();
+    } else {
+        updateBounds();
+    }
+}
+
+void PropertySheet::updateBounds() {
+    if (!m_bounds.section) return;
+    const UsdPrim prim = currentPrim();
+    QElapsedTimer timer;
+    timer.start();
+    const std::optional<GfRange3d> bounds = prim ? primBounds(prim, m_stage->timeCode()) : std::nullopt;
+    m_boundsCostMs = timer.elapsed();
+    m_hasBounds = bounds.has_value();
+    if (bounds) {
+        const GfVec3d size = bounds->GetSize();
+        // About four significant digits of the longest side: a 5 cm cup in meters isn't 0.05 or 0.
+        const double longest = std::max({size[0], size[1], size[2]});
+        const int decimals = longest > 0.0 ? std::clamp(3 - static_cast<int>(std::floor(std::log10(longest))), 2, 6) : 3;
+        const auto show = [decimals](PropertyEditor* editor, const GfVec3d& value) {
+            for (auto* field : editor->findChildren<properties::NumberField*>()) field->setDecimals(decimals);
+            editor->setValue(VtValue(value));
+            // In full, for a panel too narrow for the numbers.
+            editor->setToolTip(QStringLiteral("%1, %2, %3")
+                                   .arg(QString::number(value[0], 'g', 10), QString::number(value[1], 'g', 10),
+                                        QString::number(value[2], 'g', 10)));
+        };
+        show(m_bounds.size, size);
+        show(m_bounds.center, bounds->GetMidpoint());
+        show(m_bounds.min, bounds->GetMin());
+        show(m_bounds.max, bounds->GetMax());
+        const QString unit = formatMetersPerUnit(UsdGeomGetStageMetersPerUnit(m_stage->usdStage()));
+        m_bounds.units->setValue(VtValue(tr("1 unit = %1").arg(unit).toStdString()));
+    }
+    m_bounds.section->setVisible(m_hasBounds && m_searchText.trimmed().isEmpty());
+}
+
+void PropertySheet::scheduleBoundsUpdate() {
+    if (!m_bounds.section) return;
+    if (m_boundsCostMs > kSlowBoundsMs) {
+        m_boundsTimer->start(300);  // again from now: once things rest
+    } else if (!m_boundsTimer->isActive()) {
+        m_boundsTimer->start(50);
+    }
 }
 
 void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* layout) {
@@ -1641,12 +1728,18 @@ void PropertySheet::applyFilter() {
     if (m_compositionSection) {
         m_compositionSection->setVisible(text.isEmpty());
     }
+    if (m_bounds.section) {
+        m_bounds.section->setVisible(text.isEmpty() && m_hasBounds);
+    }
 }
 
 void PropertySheet::onStageObjectsChanged(const StageChanges& changes) {
     if (m_primPath.IsEmpty()) {
         return;
     }
+    // Anything can move them: a parent, something under the prim, a prototype elsewhere, the
+    // stage's units.
+    scheduleBoundsUpdate();
     // A shader output's pills list inputs on other prims of its material.
     const auto underScope = [this](const SdfPathVector& paths) {
         return std::any_of(paths.begin(), paths.end(), [this](const SdfPath& path) { return path.HasPrefix(m_connectionScope); });

@@ -329,6 +329,14 @@ A **"Prim" header section** sits above all of these: name (the path in its toolt
 active, instanceable and applied schemas. Most of it is read-only; active, kind and
 instanceable are editable.
 
+A **"Bounding Volume" section** follows Transform (or Composition, for a prim with no
+transform) on every prim that has bounds: its own geometry's or that of what's under it. It
+is read-only: the Size, Center, Min and Max of the world-space, axis-aligned box in stage
+units, and what one unit is (`metersPerUnit`). It counts default, render and proxy geometry,
+visible or not, and guides only for a prim that is one (`primBounds()`, scene_bounds.h). It
+follows edits and the stage's time; where the bounds take more than 10 ms to compute, it
+waits until those rest. Like the Prim section, a search hides it.
+
 **Panel toolbar additions:**
 - A search field that filters rows by label or property name across categories.
 - A **Show** menu: Authored only / All / include `hidden` properties.

@@ -108,6 +108,14 @@ PropertyRow* rowLabelled(QWidget& panel, const QString& label) {
     return nullptr;
 }
 
+// By property path: the Bounding Volume section has a Size row too.
+PropertyRow* rowOf(QWidget& panel, const QString& path) {
+    for (auto* row : panel.findChildren<PropertyRow*>()) {
+        if (row->propertyPath() == path && row->isVisibleTo(&panel)) return row;
+    }
+    return nullptr;
+}
+
 QStringList listTexts(QListWidget* list) {
     QStringList texts;
     for (int i = 0; i < list->count(); ++i) texts << list->item(i)->text();
@@ -318,7 +326,7 @@ USDCC_TEST(variant_edit_mode_from_the_dialog) {
     // The Attribute Editor authors into it, and the dialog shows that.
     auto* banner = panel.findChild<usdcc::usd::VariantEditBanner*>();
     CHECK(banner && banner->isVisible(), "the panel's banner too");
-    PropertyRow* size = rowLabelled(panel, QStringLiteral("Size"));
+    PropertyRow* size = rowOf(panel, QStringLiteral("/Chair/Seat.size"));
     CHECK(size && size->editor(), "the Seat's size row");
     if (size && size->editor()) Q_EMIT size->editor()->valueEdited(VtValue(4.0));
     settle();
@@ -329,7 +337,7 @@ USDCC_TEST(variant_edit_mode_from_the_dialog) {
     // Outside it, the panel is read-only, and says so.
     s.manager->setSelectedPaths(s.stage, {SdfPath("/Table")});
     settle();
-    PropertyRow* tableSize = rowLabelled(panel, QStringLiteral("Size"));
+    PropertyRow* tableSize = rowOf(panel, QStringLiteral("/Table.size"));
     CHECK(tableSize && tableSize->editor()->isReadOnly(), "the row's read-only");
     CHECK(banner->label()->text().contains(QStringLiteral("/Table is outside it")), "and says why");
 
