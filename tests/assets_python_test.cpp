@@ -61,7 +61,7 @@ public:
 };
 
 std::string sphere(double radius) {
-    return "#usda 1.0\ndef Sphere \"S\" { double radius = " + std::to_string(radius) + " }\n";
+    return "#usda 1.0\ndef Sphere \"S\" {\n    double radius = " + std::to_string(radius) + "\n}\n";
 }
 
 struct Servers {
@@ -116,7 +116,8 @@ import usdcc.assets as a
 from pxr import Ar, Usd
 prod, test = a.context(), a.context("test")
 def radius(context):
-    return Usd.Stage.Open("fake://studio/shot.usda", context).GetPrimAtPath("/S").GetAttribute("radius").Get()
+    stage = Usd.Stage.Open("fake://studio/shot.usda", context)
+    return stage.GetPrimAtPath("/S").GetAttribute("radius").Get()
 assert radius(prod) == 1 and radius(test) == 2, "each environment's own file"
 assert radius(Ar.ResolverContext([test, Ar.DefaultResolverContext(["C:/nowhere"])])) == 2, "beside another context"
 with Ar.ResolverContextBinder(test):
