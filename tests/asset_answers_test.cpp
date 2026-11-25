@@ -59,8 +59,10 @@ struct SlowServer {
 
     SlowServer() : server([this](const ServerRequest& request) { return serveFolder(folder, request); }) {
         folder.root = fs::path(dir.filePath(QStringLiteral("prod")).toStdWString());
+        // A folder each: a listing answers for everything in it, and composing lists look.usda's.
         fs::create_directories(folder.root / "tex");
-        std::ofstream(folder.root / "chair.usda") << "#usda 1.0\n(\n    defaultPrim = \"Chair\"\n)\n\ndef Xform \"Chair\"\n{\n}\n";
+        fs::create_directories(folder.root / "props");
+        std::ofstream(folder.root / "props/chair.usda") << "#usda 1.0\n(\n    defaultPrim = \"Chair\"\n)\n\ndef Xform \"Chair\"\n{\n}\n";
         std::ofstream(folder.root / "tex/wood.png") << "png";
         std::ofstream(folder.root / "look.usda") << "#usda 1.0\n";
         folder.delayMs = kDelayMs;
@@ -116,7 +118,7 @@ USDCC_TEST(asset_answers_panels_dont_wait) {
     const SdfLayerRefPtr root = SdfLayer::CreateAnonymous("root.usda");
     root->ImportFromString(
         "#usda 1.0\n(\n    subLayers = [@webdav://studio/look.usda@]\n)\n\n"
-        "def Xform \"A\" (\n    prepend payload = @webdav://studio/chair.usda@\n)\n{\n"
+        "def Xform \"A\" (\n    prepend payload = @webdav://studio/props/chair.usda@\n)\n{\n"
         "    asset map = @webdav://studio/tex/wood.png@\n}\n");
     const ArResolverContext context{assets::Context(assets::defaultConfig(), "prod")};
     const SdfLayerRefPtr session = SdfLayer::CreateAnonymous("session.usda");
@@ -142,7 +144,7 @@ USDCC_TEST(asset_answers_panels_dont_wait) {
     CHECK(arcs.size() == 1 && arcs[0].resolving && !arcs[0].missing, "the payload is resolving, not missing");
     const std::vector<Dependency> files = stageDependencies(stage, true);
     const Dependency* wood = dependency(files, "webdav://studio/tex/wood.png");
-    const Dependency* chair = dependency(files, "webdav://studio/chair.usda");
+    const Dependency* chair = dependency(files, "webdav://studio/props/chair.usda");
     CHECK(wood && wood->resolving && !wood->missing, "so is the texture, in the dependencies");
     CHECK(chair && chair->resolving && !chair->missing, "and the payload there");
     const std::vector<LayerEntry> tree = layerTree(stage);
@@ -171,11 +173,11 @@ USDCC_TEST(asset_answers_panels_dont_wait) {
     timer.restart();
     const std::vector<Dependency> after = stageDependencies(stage, true);
     wood = dependency(after, "webdav://studio/tex/wood.png");
-    chair = dependency(after, "webdav://studio/chair.usda");
+    chair = dependency(after, "webdav://studio/props/chair.usda");
     CHECK(wood && !wood->missing && wood->origin == "prod", "the texture is found, from prod");
     CHECK(chair && !chair->missing && chair->origin == "prod", "and the payload");
     const std::vector<ArcInfo> arcsAfter = compositionArcs(stage->GetPrimAtPath(SdfPath("/A")));
-    CHECK(arcsAfter.size() == 1 && arcsAfter[0].resolvedPath == "webdav://studio/chair.usda" && arcsAfter[0].origin == "prod",
+    CHECK(arcsAfter.size() == 1 && arcsAfter[0].resolvedPath == "webdav://studio/props/chair.usda" && arcsAfter[0].origin == "prod",
           "the arc has the path and the server");
 
     // What isn't there is missing, not resolving for ever.
@@ -192,11 +194,11 @@ USDCC_TEST(asset_answers_outside_a_scope_waits) {
     SlowServer slow;
     slow.folder.delayMs = 0;
     const ArResolverContextBinder binder(ArResolverContext(assets::Context(assets::defaultConfig(), "prod")));
-    CHECK(!assets::NoWait::active() && !ArGetResolver().Resolve("webdav://studio/chair.usda").empty(), "resolving is as it was");
+    CHECK(!assets::NoWait::active() && !ArGetResolver().Resolve("webdav://studio/props/chair.usda").empty(), "resolving is as it was");
     {
         const assets::NoWait noWait;
         const std::size_t before = assets::NoWait::unanswered();
-        CHECK(!ArGetResolver().Resolve("webdav://studio/chair.usda").empty() && assets::NoWait::unanswered() == before,
+        CHECK(!ArGetResolver().Resolve("webdav://studio/props/chair.usda").empty() && assets::NoWait::unanswered() == before,
               "and what it found is known without waiting");
     }
     CHECK(!assets::NoWait::active(), "until the scope ends");
