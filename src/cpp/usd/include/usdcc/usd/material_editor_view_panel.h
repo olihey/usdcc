@@ -136,6 +136,8 @@ private:
     void rebuildBreadcrumb();
     void selectionFromStage(const std::vector<PXR_NS::SdfPath>& paths);
     void selectionToStage();
+    // The prim the preview's Use Selected Prim offers, if one is selected.
+    void rememberSelectedPrim(const std::vector<PXR_NS::SdfPath>& paths);
     void showSelectionInGraph();
     bool pressOnPage(QPoint viewportPoint);
     bool handleKey(QKeyEvent* event, bool run);

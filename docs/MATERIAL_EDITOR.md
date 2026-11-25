@@ -672,10 +672,10 @@ layer sublayers the scene's session layer and the preview scene:
 
 ```
 previewSession (anonymous, the preview's own)
-  subLayers = [ sourceStage session layer, preview scene layer ]
+  subLayers = [ scene prim overrides (§7.10), sourceStage session layer, preview scene layer ]
 previewStage = UsdStage::OpenMasked(sourceStage root layer, previewSession,
                                      mask = { <material path>, /__usdccPreview })
-previewStage->ExpandPopulationMask(...)   // follows connections out of the material
+previewStage->ExpandPopulationMask(...)   // follows connections out of the material; not bindings (§7.10)
 ```
 
 - **The material composes as in the scene:** the same layers, the scene's session layer (usdcc edits
@@ -717,7 +717,7 @@ Rejected:
 - **A name is taken once:** the first folder that has it wins, ignoring case, and the user's folders
   come before the shipped one. So a user's `Shader Ball.usda` replaces the shipped shader ball.
 - **What a shape file holds:** its geometry under the `defaultPrim`, with UVs (`primvars:st`), Y-up, in
-  metres.
+  metres. A material that reads other UV sets gets them from that one (§7.9), unless the file has them.
 - **What gets the material:** the prims in a `collection:preview` on the default prim, or every gprim when
   there's none. So the cloth can lie on a neutral ball, and a shader ball can keep its grey stand.
   The preview session layer binds the material to that collection (a collection binding).
@@ -758,7 +758,8 @@ Rejected:
     keeps what it had. For a shape without lights it does nothing.
 
 The preview's toolbar holds Pause (§7.5) and a ... button. Its menu holds what's shown (Material or
-Selected Node, §7.6), the Shape and Light submenus, and Reset View when the shape has a camera. A
+Selected Node, §7.6), the Shape submenu (with a prim of the scene, §7.10), the UV sets filled in (§7.9),
+the Light submenu, and Reset View when the shape has a camera. A
 right-click on the picture opens the same menu there (`HydraViewportWindow::contextMenuRequested()`,
 as the native window gets no context menu event its container would see). The choice persists per panel (a session, a duplicate), and `Materials/previewShape` and
 `Materials/previewHdri` name the ones a new panel starts with.
@@ -844,3 +845,76 @@ Not done or not right yet:
 4. **Two engines:** GPU memory with the viewport and the preview loading the same textures. Pause is the
    way out for now.
 5. **Following the renderer** was checked with Storm only: the app has no other delegate built here.
+
+### 7.9 UV sets the shape doesn't have
+
+The shipped shapes have one UV set, `st`. A material whose reader asks for `uv1` or `UVMap` would find
+nothing there. So the preview gives the shape the UV sets the material reads, as copies of its own.
+
+- **What the material reads** (`primvarsReadBy()`), from its shaders' Sdr definitions:
+  - `GetAdditionalPrimvarProperties()`: the inputs whose value names a primvar, `varname` of
+    `UsdPrimvarReader_*` and `geomprop` of `ND_geompropvalue_*`. The name often comes from an interface
+    input, which `GetValueProducingAttributes()` follows.
+  - The same two inputs on a shader no definition marks, such as `ND_UsdPrimvarReader_vector2`.
+  - `GetPrimvars()`: only the primary UV set (`st`), which MaterialX's nodes read with no `texcoord` connected.
+    The others it lists (`Nworld`, `Pobject`) aren't primvars of the geometry.
+- **A UV set** is what a reader that gives two numbers reads. Anything else (a float3 `dirt`) is never made
+  up.
+- **The copy:** for each gprim showing the material (§7.3) that has no such primvar, inherited ones
+  included: the values, indices, interpolation and element size of its `st`, or of its first two-number
+  primvar when it has no `st`. It's in the preview scene layer, so nothing reaches the shape file or the
+  scene. USD can't alias a primvar.
+- **All shaders in the material** count, also the unconnected ones, as one of them can be previewed on its
+  own (§7.6).
+- **Kept in step:** with the material, the shape, and any edit to the network (`sceneChanged()`), so a new
+  `varname` shows at once.
+- **Said:** the ... menu lists them ("UV sets: uv1 → st"). What's read and missing after that, and
+  connected, is in the line under the preview. `displayColor`, `displayOpacity`, `normals`, `points` and
+  `widths` never are, as a renderer has a value for them.
+- **Not covered:**
+  - A MaterialX `texcoord` with an index above 0, a renderer's own inputs for it (Arnold's `uvset`) and MDL's
+    texture spaces: no definition says which primvar they read.
+  - A gprim inside an instance in the shape file: nothing can be written on it. It's listed as missing.
+
+Rejected: rewriting `varname` to `st` in the preview's session layer. It changes the network that's being
+edited, needs a rule per reader, and two sets would become one silently.
+
+### 7.10 A prim of the scene as the shape
+
+The Shape menu's **Use Selected Prim** shows the material on a prim of the scene, with its own UV sets. The
+preview stage is the scene's own layers (§7.2), so the prim only has to be added to the mask: it renders where
+it is, and follows every edit.
+
+- **Which prim** (`MaterialEditorViewPanel::rememberSelectedPrim()`): the last one selected that isn't part of
+  a shading network, as selecting a node of the graph selects that in the scene. Selecting a mesh opens its
+  material, so the way is: select the mesh, then Use Selected Prim.
+  - It's taken once, not followed.
+  - `previewablePrim()`: a `GeomSubset` is its mesh, and a prim inside an instance is the instance's root,
+    as nothing can be written inside it. A prim with no geometry, unloaded, inactive or abstract can't be used;
+    the menu's tooltip says which.
+- **Its bindings:**
+  - Something in it has the material in the scene: the bindings stay as they are. A car keeps its glass and
+    chrome while its paint is edited.
+  - Nothing has: all of it shows the material, for every purpose, whatever is bound on it, in it or above it.
+    Its own collection bindings are blocked, and bindings above it lose `strongerThanDescendants`.
+- **The mask** has the prim and the materials bound in it, and what `skel:*` relationships and
+  `prototypes` point to. Bindings aren't followed: a collection binding names the collection's owner, which
+  may be the scene's root. An owner outside the prim's ancestors is added only if it has no children.
+- **Hidden** in the scene, it and its ancestors are shown (`visibility = inherited`); what's hidden in it
+  stays hidden.
+- **The overrides** are in a layer above the scene's session layer, as usdcc edits there.
+- **In place:** not moved, scaled or turned. The camera frames it and orbits about the scene's up axis, and in
+  a Z-up scene the dome and the key light stand up with it.
+- **At the stage's time,** which it follows. A shape stays at the default time.
+- **Lights in it** are handled as a shape's (§7.4); the scene's other lights aren't there. Use scene lights
+  starts off, and choosing a shape with lights again turns it on.
+- **Kept** with the panel's state, by path, and follows a rename or a move. When it can't be shown, the last
+  shape shows and the line under the preview says why; it's back as soon as it can be.
+- **No UV sets are filled in** (§7.9): it shows what it has, and the line says what the material misses.
+- **Checked:** `usdcc_tests` (`shading_preview_test.cpp`), `usdcc_ui_tests`, and the app with Storm: `uv1`
+  read by UsdPreviewSurface and MaterialX on the plane and the shader ball, and a hidden, animated prim with two
+  materials in a Z-up scene. Not with another renderer, skinned geometry or a point instancer.
+- **Costs:** a big prim is as heavy as it is in a viewport, in a second engine (§7.8, 4).
+
+Rejected: following the selection (a click in the graph would lose the prim), and referencing the prim under
+`/__usdccPreview` (it would lose inherited bindings and transforms, and the session layer's opinions).
