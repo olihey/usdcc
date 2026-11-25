@@ -434,8 +434,11 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   Hydra's own threads with no context bound: a quad textured from TEST in the test environment,
   from PROD in prod (§13.4). *Not checked:* the RTX and V-Ray plugins, and Alembic, which don't
   read through `ArAsset`. `usdcc::assets::localFile()` is there for them.
-- **Python** *(not built):* the context for `Usd.Stage.Open` (`ArWrapResolverContextForPython`),
-  and `usdcc.assets` to list and stat. A protocol written in Python is §11.1.
+- **Python** *(built 2026-11-25):* `usdcc.assets`, in the app and in a plain python.
+  `context(environment)` is the context for `Usd.Stage.Open` (`ArWrapResolverContextForPython`),
+  `environments()` and `default_environment()` name them, `list(path)` and `stat(path)` ask the
+  servers. They release the GIL; OpenUSD's own calls aren't ours to change (§11.1). Tests:
+  `python_assets_*` in `usdcc_python_tests`. A protocol written in Python is §11.1.
 
 ### 10.1 The Asset Servers editor
 

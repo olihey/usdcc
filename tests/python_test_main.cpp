@@ -11,6 +11,8 @@
 
 #include "usdcc/ui/scale_controller.h"
 
+#include <pxr/base/plug/registry.h>
+
 #include <QApplication>
 #include <QTemporaryDir>
 
@@ -25,6 +27,8 @@ int main(int argc, char** argv) {
     // offscreen platform, so no window appears. The scale controller's
     // settings live in a temporary folder, never in the user's usdcc.ini.
     QApplication qtApp(argc, argv);
+    // Before anything asks for the resolver, which finds its URI resolvers once (assets_python_test.cpp).
+    PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(USDCC_ASSETS_FAKE_PROTOCOL_DIR);
     QTemporaryDir settingsDir;
     usdcc::ui::UiScaleController scale(qtApp, settingsDir.filePath(QStringLiteral("ui.ini")));
     usdcc::core::setThreadName("main");

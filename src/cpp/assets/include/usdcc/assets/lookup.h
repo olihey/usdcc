@@ -115,6 +115,9 @@ Result<std::vector<ListedEntry>> listFolder(const Stack& stack, const std::strin
 // whose host is allowed (activity.h). Every page of it.
 Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& context);
 
+// The file `uri` names, found as listUri() finds a folder. Error for what names no server.
+Found findUri(const std::string& uri, const Context& context);
+
 // A page of a folder, and where the next starts: what the asset picker browses with, so a
 // folder of thousands shows its first entries at once (docs/S3_RESOLVER.md §5).
 struct ListedPage {

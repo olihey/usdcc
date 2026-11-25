@@ -276,6 +276,18 @@ Result<std::vector<ListedEntry>> listUri(const std::string& uri, const Context& 
     return allPages(stack, folder);
 }
 
+Found findUri(const std::string& uri, const Context& context) {
+    Stack stack;
+    std::string path;
+    const Result<bool> located = browsedStack(uri, context, &stack, &path);
+    if (located.ok()) return findInStack(stack, path, nullptr);
+    Found found;
+    // Not "missing": no server was asked.
+    found.status = located.status == Status::Missing ? Status::Error : located.status;
+    found.message = located.message;
+    return found;
+}
+
 Result<ListedPage> listUriPage(const std::string& uri, const Context& context, const std::string& from) {
     Stack stack;
     std::string folder;

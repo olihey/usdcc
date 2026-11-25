@@ -17,5 +17,7 @@ namespace usdcc::usd::python {
 //   UsdUtils.StageCache.Get().Find(Usd.StageCache.Id.FromLongInt(id))
 // (usdcc/usd.py does that). Prim paths cross as strings.
 void bindStageManager(pybind11::module_& m);
+// Part of it: usdcc.assets' (bind_assets.cpp).
+void bindAssets(pybind11::module_& m);
 
 }  // namespace usdcc::usd::python

@@ -45,6 +45,7 @@ StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
 }  // namespace
 
 void bindStageManager(py::module_& m) {
+    bindAssets(m);
     // Auto-key (docs/ANIMATION.md phase 2): app-wide, off at start.
     // usdcc/validation.py's rules (docs/VALIDATION.md section 5).
     m.def(
