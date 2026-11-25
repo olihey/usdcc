@@ -278,7 +278,7 @@ published like OpenUSD.
    PLUGIN_SDK.md points plugin authors at the asset. Done when the first asset is
    published, which `deps-usd.yml` only does after the SDK check passed against it in
    another folder. *Done: the first run published
-   [`deps/usd-70c45e83b-99f25090`](https://github.com/olihey/usdcc/releases/tag/deps/usd-70c45e83b-99f25090).*
+   `deps/usd-70c45e83b-99f25090` (since superseded and deleted).*
 2. **usdcc builds in CI.** `build.yml` up to step 5, with the vcpkg cache, without
    PySide6 (the CMake configure already turns off `usdcc.ui` and Python-made panels
    without it). Done when `master` is green and a second run restores Qt from the cache.
@@ -306,7 +306,7 @@ published like OpenUSD.
    always matches the Qt usdcc builds against. With it, `usdcc.ui` and the Python panel
    tests build and run in CI.
    *Done (§4.1). The first run published
-   [`deps/pyside-6.11.1-qt6.11.1-c0e9afd2`](https://github.com/olihey/usdcc/releases/tag/deps/pyside-6.11.1-qt6.11.1-c0e9afd2),
+   `deps/pyside-6.11.1-qt6.11.1-c0e9afd2` (since superseded and deleted),
    75 MB, in 7 minutes: Qt came from the cache and PySide's build of Core, Gui and Widgets
    is small. With it, `build.yml` builds `usdcc._ui` and the Python tests went from 56 to
    71 test cases, all green, including the then-current Python render plugins.*
