@@ -315,7 +315,7 @@ bool addressEndpoint(const std::string& uri, Endpoint* endpoint, std::string* pa
     const Config config = defaultConfig();
     const auto host = config.httpHosts.find(url.host);
     if (host != config.httpHosts.end()) made.credential = host->second.credential;
-    // Else the address is the credential's name: what Edit > Asset Server Login is given.
+    // Else the address is the credential's name: what Edit > Asset Servers > Logins is given.
     if (made.credential.empty()) made.credential = credentialIdForAddress(url.host, url.port);
     *endpoint = std::move(made);
     *path = url.path;

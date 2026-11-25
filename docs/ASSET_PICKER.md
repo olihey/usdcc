@@ -302,8 +302,8 @@ layer when both are on one server (`relativeAssetPath()`), else by its logical p
   under the entries asks for the next page, added to what's shown. An S3 folder of thousands on a
   slow server shows its first thousand after one request, not after all of them.
 - **A refused listing offers Log In** (added 2026-11-20): when a server refused for want of a
-  login that Edit > Asset Server Login can save, a **Log In as <credential>...** button under the
-  message opens that dialog with the credential filled in (an access key and its secret for S3),
+  login that the login form can save, a **Log In as <credential>...** button under the
+  message opens that form with the credential filled in (an access key and its secret for S3),
   and the folder is listed again once one is saved. The source says so by throwing
   `AssetLoginNeeded` with the credential id; none is offered for AWS's own credentials
   ([S3_RESOLVER.md](S3_RESOLVER.md) §4.2), which come from AWS's files.

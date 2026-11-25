@@ -193,6 +193,31 @@ void setBucketRefusedCallback(std::function<void(const std::string& bucket)> cal
     all.bucketRefused = std::move(callback);
 }
 
+namespace {
+std::mutex& unknownMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+UnknownNameCallback& unknownCallback() {
+    static UnknownNameCallback callback;
+    return callback;
+}
+}  // namespace
+
+void setUnknownNameCallback(UnknownNameCallback callback) {
+    std::lock_guard<std::mutex> lock(unknownMutex());
+    unknownCallback() = std::move(callback);
+}
+
+void unknownName(const std::string& scheme, const std::string& name, const std::string& environment) {
+    UnknownNameCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(unknownMutex());
+        callback = unknownCallback();
+    }
+    if (callback) callback(scheme, name, environment);
+}
+
 void setExtraAllowedBuckets(std::vector<std::string> patterns) {
     State& all = state();
     std::lock_guard<std::mutex> lock(all.mutex);

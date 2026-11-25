@@ -9,6 +9,7 @@
 
 #include <string>
 
+class QJsonObject;
 class QAction;
 class QComboBox;
 class QWidget;
@@ -30,7 +31,12 @@ class StageManager;
 // Returns the stage now in use, or null with `error` set; `stage` stays then.
 USDCC_USD_UI_API StageRefPtr saveStageAsAndSwitch(StageManager& stageManager, const StageRefPtr& stage,
                                                   const std::string& path, QString* error);
-// Whether saveStageAsAndSwitch() is under way: the stage it opens is the old one's
+// Puts `usdStage` in `stage`'s place, as saveStageAsAndSwitch() does with what it wrote:
+// `state` (session_stages::capture()) is applied to it, the panels showing `stage` show it
+// with their own state, it's current if `stage` was, and `stage` closes.
+USDCC_USD_UI_API StageRefPtr replaceStage(StageManager& stageManager, const StageRefPtr& stage,
+                                          const PXR_NS::UsdStageRefPtr& usdStage, const QJsonObject& state);
+// Whether replaceStage() or saveStageAsAndSwitch() is under way: the stage it opens is the old one's
 // replacement, not a stage opened by the user (main.cpp gives it no viewport of its own).
 USDCC_USD_UI_API bool isSwitchingStage();
 

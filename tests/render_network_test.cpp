@@ -293,6 +293,12 @@ USDCC_TEST(render_network_bundle_and_shared) {
                                           [](const SharedScene::Dependency& d) { return d.path.find("wood.png") != std::string::npos; });
     CHECK(listsTexture, "its dependencies have the texture");
     CHECK(sharedSceneProblems(SharedScene::fromJson(shared.toJson())).isEmpty(), "and everything is here");
+    CHECK(shared.assetEnvironment.empty(), "nothing on a named server, so no asset environment is asked for");
+    SharedScene elsewhere = shared;
+    elsewhere.assetEnvironment = "no-such-environment";
+    CHECK(SharedScene::fromJson(elsewhere.toJson()).assetEnvironment == "no-such-environment", "one travels with it");
+    CHECK(sharedSceneProblems(elsewhere).size() == 1 && !openSharedScene(elsewhere, &error),
+          "and unknown here, the scene isn't opened in another");
     SharedScene moved = shared;
     for (auto& d : moved.dependencies) {
         if (d.path.find("wood.png") != std::string::npos) d.size += 1;

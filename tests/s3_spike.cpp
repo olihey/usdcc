@@ -71,7 +71,7 @@ std::string bucketUrl(const Options& options) {
     return options.url.substr(0, scheme + 3) + options.bucket + "." + options.url.substr(scheme + 3);
 }
 
-// --credential <id>: a login saved for usdcc (Edit > Asset Server Login), used without
+// --credential <id>: a login saved for usdcc (Edit > Asset Servers > Logins), used without
 // printing it.
 std::string savedCredential;
 

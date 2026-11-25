@@ -67,7 +67,10 @@ StageRefPtr StageManager::adoptStage(const PXR_NS::UsdStageRefPtr& usdStage) {
     return stage;
 }
 
-StageRefPtr StageManager::createStage() { return registerStage(PXR_NS::UsdStage::CreateInMemory()); }
+StageRefPtr StageManager::createStage() {
+    // "tmp.usda": the name USD gives one. In the default environment, as a stage that's opened.
+    return registerStage(PXR_NS::UsdStage::CreateInMemory("tmp.usda", stageResolverContext(std::string())));
+ }
 
 StageRefPtr StageManager::createStageFile(const std::string& path, std::string* error) {
     const auto fail = [&](const std::string& why) -> StageRefPtr {
@@ -83,7 +86,7 @@ StageRefPtr StageManager::createStageFile(const std::string& path, std::string* 
         // Only to read the errors: the mark isn't cleared, so they still reach the
         // log (TfDiagnosticBridge) when it goes out of scope.
         PXR_NS::TfErrorMark mark;
-        stage = PXR_NS::UsdStage::CreateNew(path);
+        stage = PXR_NS::UsdStage::CreateNew(path, stageResolverContext(path));
         for (auto it = mark.GetBegin(); it != PXR_NS::TfDiagnosticMgr::GetInstance().GetErrorEnd(); ++it) {
             if (firstError.empty()) firstError = it->GetCommentary();
         }

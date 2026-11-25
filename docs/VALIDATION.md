@@ -238,7 +238,7 @@ Both kinds then run the same way:
 - **MCP:** `validate_stage`, with severity, rule, and paging, so an agent can check its own work
   ([MCP.md](MCP.md)).
 - **Command line:** `usdcc_node validate <file> --validation-profile <name or path> [--rules <folder>]
-  [--json] [--fail-on error|warning|info|never]`. It starts without a window and has the plugins and Python already
+  [--json] [--fail-on error|warning|info|never] [--asset-env <name>]`. It starts without a window and has the plugins and Python already
   ([RENDER_NODE.md](RENDER_NODE.md)). Exit codes: 0 clean, 1 findings, 2 couldn't run.
 - **Render farm:** a final render's check (§3.3) runs on the artist's side, before tasks go out.
 

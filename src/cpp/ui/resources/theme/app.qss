@@ -610,6 +610,45 @@ QStatusBar {
     background: @surface-bar;
     color: rgba(@ink-rgb, 50%);
     border-top: 1px solid rgba(@overlay-rgb, 6%);
+    min-height: 24px;
+}
+
+/* Its items are flat words, as an editor's status bar has them: no frames between them, no
+   button look and no arrow; a hovered one gets a soft, rounded ground. */
+QStatusBar::item {
+    border: none;
+}
+
+QStatusBar QLabel,
+QStatusBar QToolButton {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: rgba(@ink-rgb, 65%);
+    padding: 0 7px;
+    margin: 0 1px;
+    min-height: 20px;
+}
+
+QStatusBar QToolButton:hover {
+    background: @surface-hover;
+    color: @text;
+}
+
+QStatusBar QToolButton:pressed,
+QStatusBar QToolButton:open {
+    background: rgba(@overlay-rgb, 12%);
+    color: @text;
+}
+
+QStatusBar QToolButton::menu-indicator {
+    image: none;
+    width: 0;
+}
+
+/* One that isn't as usual, such as a stage in another asset environment than the default. */
+QStatusBar QToolButton[attention="true"] {
+    color: @accent-text;
 }
 
 QMainWindow::separator,

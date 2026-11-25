@@ -69,6 +69,7 @@ struct USDCC_USD_UI_API SharedStageInfo {
     QString root;              // the root layer's identifier on the host
     usdcc::peers::PeerId host;
     QString hostName;
+    QString assetEnvironment;  // the host's (docs/ASSET_SOURCES.md §8); empty for none
     bool inMemory = false;     // no file: `rootText` is the root layer
     QString rootText;
     QList<Layer> layers;       // below the live layer, the root first

@@ -107,6 +107,8 @@ StageRefPtr saveStageAsAndSwitch(StageManager& stageManager, const StageRefPtr& 
     const bool ownFile = PXR_NS::SdfLayer::Find(path) == stage->usdStage()->GetRootLayer();
     // Before writing: what the new stage takes over.
     QJsonObject state = session_stages::capture(stageManager, stage);
+    state.remove(QStringLiteral("pendingAssetEnvironment"));
+    const std::string pending = stage->pendingAssetEnvironment();
     if (!layer_actions::saveStageAs(stage, path, error)) return {};
     if (ownFile) return stage;
 
@@ -120,6 +122,15 @@ StageRefPtr saveStageAsAndSwitch(StageManager& stageManager, const StageRefPtr& 
         }
         return {};
     }
+    const StageRefPtr replacement = replaceStage(stageManager, stage, usdStage, state);
+    // Saving isn't reopening it as it is: the environment it's to be in stays to come.
+    replacement->setPendingAssetEnvironment(pending);
+    return replacement;
+}
+
+StageRefPtr replaceStage(StageManager& stageManager, const StageRefPtr& stage, const PXR_NS::UsdStageRefPtr& usdStage,
+                         const QJsonObject& state) {
+    const QScopedValueRollback<bool> switching(s_switching, true);
     const bool wasCurrent = stageManager.currentStage() == stage;
     const StageRefPtr replacement = stageManager.adoptStage(usdStage);
     session_stages::apply(stageManager, replacement, state);

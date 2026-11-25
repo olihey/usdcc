@@ -4,6 +4,8 @@
 // stage is opened with, and what the UI shows of a path on a server. Qt-free, like the
 // rest of usdcc_usd. The library underneath is usdcc_assets.
 
+#include "usdcc/core/signal.h"
+
 #include <pxr/pxr.h>
 #include <pxr/usd/ar/resolverContext.h>
 #include <pxr/usd/usd/stage.h>
@@ -16,6 +18,11 @@ namespace usdcc::usd {
 // The environments the asset configuration names (docs/REMOTE_ASSETS.md §4), sorted.
 std::vector<std::string> assetEnvironments();
 
+// Whether the configuration has it.
+bool hasAssetEnvironment(const std::string& environment);
+// After the Asset Servers editor wrote the configuration. On the UI thread.
+usdcc::core::Signal<>& assetConfigChanged();
+
 // The environment a stage opens in when none is asked for: Settings > Assets, else the
 // configuration's own choice (USDCC_ASSET_ENV, or its "environment"). Empty when there
 // is no configuration.
@@ -23,8 +30,20 @@ std::string defaultAssetEnvironment();
 // Settings > Assets' choice; empty for the configuration's. Set by the app from its setting.
 void setPreferredAssetEnvironment(const std::string& environment);
 
-// The context to open `identifier` with: the environment's servers (empty: the default
-// one), and whatever OpenUSD's own resolvers give the asset, its folder for one.
+// The environment chosen for a folder's stages (docs/ASSET_SOURCES.md §4), kept in `file`
+// (JSON). Without a file, as in tools and tests, nothing is remembered.
+void setAssetFolderFile(const std::string& file);
+void rememberFolderEnvironment(const std::string& folder, const std::string& environment);
+// The one remembered for the folder of `identifier`, else for the nearest above it; empty for
+// none. One the configuration doesn't have any more doesn't count.
+std::string rememberedEnvironment(const std::string& identifier);
+// Forgets that one. False when there was none.
+bool forgetFolderEnvironment(const std::string& identifier);
+// The folder of a stage's root, as rememberFolderEnvironment() takes it.
+std::string folderOf(const std::string& identifier);
+
+// The context to open `identifier` with: the environment's servers (empty: the one
+// remembered for its folder, else the default one), and whatever OpenUSD's own resolvers give the asset, its folder for one.
 PXR_NS::ArResolverContext stageResolverContext(const std::string& identifier, const std::string& environment = {});
 
 // The environment a stage was opened in; empty when it has none (one in memory, or one

@@ -32,9 +32,31 @@ struct HttpHost {
     bool insecure = false;   // its credential may be sent over plain http://
 };
 
+// Another configuration this one uses (docs/ASSET_SOURCES.md §3): read-only, everything it
+// defines named with its alias in front ("studio-a/prod").
+struct SourceEntry {
+    std::string alias;  // a name (isValidName())
+    std::string path;   // its file; relative to the file that lists it
+    std::string url;    // or where it's served, https:// (docs/ASSET_SOURCES.md §7)
+};
+
 struct Config {
-    // The environment used when nothing else names one.
+    // The environment used when nothing else names one. One of another source or a mixed one
+    // is written as "defaultEnvironment", which an older usdcc doesn't read.
     std::string environment;
+    // The other configurations, in order (only a personal file's are read).
+    std::vector<SourceEntry> sources;
+    // The alias a source suggests for itself ("name").
+    std::string name;
+    // A mixed environment's (docs/ASSET_SOURCES.md §4): the environments of sources whose names it
+    // has too. An environment with these, or with another source's servers in a stack, is written
+    // under "mixed", where an older usdcc doesn't look.
+    std::map<std::string, std::vector<std::string>> extends;
+    // Of a merged configuration (mergeSources()): each source's default environment, qualified.
+    std::vector<std::string> sourceDefaults;
+    // Of a merged configuration: the credential ids sources from a URL are fetched with, and
+    // which source.
+    std::map<std::string, std::string> sourceLogins;
     // "http": { "hosts": { "<host>": { "credential": "...", "insecure": false } }, "allow": ["*.studio.local"] }
     std::map<std::string, HttpHost> httpHosts;
     std::vector<std::string> httpAllow;
@@ -70,6 +92,9 @@ struct Config {
 
     // USDCC_ASSET_ENV, or else `environment`.
     std::string chosenEnvironment() const;
+
+    // Whether `environment` is written under "mixed".
+    bool isMixed(const std::string& environment) const;
 };
 
 // %LOCALAPPDATA%/usdcc_config on Windows (as ui::userDataFolder()), ~/.local/share/usdcc (or XDG_DATA_HOME) on Linux,

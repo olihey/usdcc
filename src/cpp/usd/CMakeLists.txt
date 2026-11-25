@@ -187,6 +187,10 @@ usdcc_precompile_headers(usdcc_render usd_pch.h)
 # dependency it doesn't otherwise need — usdcc.usd's Python bindings only
 # expose StageManager's plain data surface.
 add_library(usdcc_usd_ui SHARED
+    include/usdcc/usd/asset_environment.h
+    src/asset_environment.cpp
+    include/usdcc/usd/asset_source_refresh.h
+    src/asset_source_refresh.cpp
     include/usdcc/usd/asset_picker.h
     src/asset_picker.cpp
     include/usdcc/usd/asset_servers_editor.h

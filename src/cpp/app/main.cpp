@@ -83,7 +83,10 @@
 #include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_picker.h"
+#include "usdcc/usd/asset_environment.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_source_refresh.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/activity.h"
 #include "usdcc/usd/close_stage_dialog.h"
 #include "usdcc/usd/create_menu.h"
@@ -489,6 +492,15 @@ int main(int argc, char** argv) {
         usdcc::ui::SessionStore().contains(QLatin1String(usdcc::ui::session::kLastSessionName))) {
         startSession = QLatin1String(usdcc::ui::session::kLastSessionName);
     }
+    // Configurations from a URL are fetched in the background (docs/ASSET_SOURCES.md §7).
+    usdcc::assets::setFetchSourcesAtLoad(false);
+    // Before the stage named on the command line opens: a server its environment doesn't
+    // have, which another has, is offered (docs/ASSET_SOURCES.md §4), and the environment
+    // remembered for its folder is used. Per folder in this profile's data.
+    usdcc::usd::installAssetEnvironmentOffer(&window, &stageManager);
+    usdcc::usd::setAssetFolderFile(QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                                       .filePath(QStringLiteral("asset-folders.json"))
+                                       .toStdString());
     usdcc::usd::StageRefPtr initialStage;
     if (!positional.isEmpty() && startSession.isEmpty()) {
         // A URL given on the command line: its host may be contacted, for this session.
@@ -1006,10 +1018,7 @@ int main(int argc, char** argv) {
     // Edit > Selection: None, All, Invert, By Type, By Schema, By Name (docs/SELECTION_MENU.md).
     editMenu->addMenu(new usdcc::usd::SelectionMenu(&stageManager, &window));
     editMenu->addSeparator();
-    // A login for an asset server, kept in the system's credential store (docs/REMOTE_ASSETS.md §8).
-    editMenu->addAction(QObject::tr("Asset Server &Login..."), &window,
-                        [&window]() { usdcc::usd::showAssetLoginDialog(&window); });
-    // The servers, environments and web hosts of the asset configuration (docs/REMOTE_ASSETS.md §10.1).
+    // The servers, environments, web hosts and logins of the asset configuration (docs/REMOTE_ASSETS.md §10.1).
     usdcc::usd::AssetServersDialog::setStageManager(&stageManager);
     editMenu->addAction(QObject::tr("Asset Ser&vers..."), &window,
                         [&window]() { usdcc::usd::showAssetServersEditor(&window); });
@@ -1245,6 +1254,13 @@ int main(int argc, char** argv) {
     auto* sharedStages =
         new usdcc::usd::share::SharedStages(peersController, stageManager, *undoManager, std::move(shareHooks), &window);
     usdcc::usd::share::SharedStages::setInstance(sharedStages);
+    // Reopening a shared stage would end the share.
+    usdcc::usd::setReopenGuard([](const usdcc::usd::StageRefPtr& stage) {
+        const auto* shared = usdcc::usd::share::SharedStages::instance();
+        return shared && shared->isShared(stage)
+                   ? QObject::tr("Shared with others: it can't change environment until that ends.")
+                   : QString();
+    });
     auto* sharedStagesSection = new usdcc::usd::share::SharedStagesSection(sharedStages);
     peersPanel->addRoomSection(sharedStagesSection);
     QObject::connect(peersPanel, &usdcc::ui::PeersSidePanel::roomShown, sharedStagesSection,
@@ -1576,6 +1592,8 @@ int main(int argc, char** argv) {
     // edit target.
     auto* editingLabel = new QLabel(&window);
     window.statusBar()->addPermanentWidget(editingLabel);
+    // And which asset environment it's in (docs/ASSET_SOURCES.md §9).
+    window.statusBar()->addPermanentWidget(new usdcc::usd::AssetEnvironmentButton(&stageManager, &window));
     usdcc::core::Signal<>::Connection editTargetOfCurrent;
     std::function<void()> updateEditing = [editingLabel, &stageManager]() {
         const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
@@ -1597,6 +1615,7 @@ int main(int argc, char** argv) {
 
     // Downloads in the status bar, and a note when a stage asks for a host that isn't allowed.
     usdcc::usd::installAssetActivity(&window);
+    (new usdcc::usd::AssetSourceRefresher(&window))->start();
     window.show();
 #if USDCC_FEATURE_UPDATES
     // "Updated to ..." after an update, and the check a few seconds later (docs/UPDATES.md §4).

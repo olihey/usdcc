@@ -243,7 +243,7 @@ std::string credentialHint(const Endpoint& endpoint) {
     if (!usdcc::s3::isAwsCredentialId(endpoint.credential)) {
         return credentialFor(endpoint.credential) ? "signed with credential '" + endpoint.credential + "'"
                                                   : "sent unsigned: nothing is saved under credential '" + endpoint.credential +
-                                                        "' (Edit > Asset Server Login)";
+                                                        "' (Edit > Asset Servers > Logins)";
     }
     std::string source;
     const bool found = usdcc::s3::awsCredential(endpoint.credential, &source).has_value();

@@ -246,6 +246,7 @@ bool CachingResolver::_Locate(const std::string& assetPath, Location* location, 
         location->stack = context.stack(uri.scheme, uri.name);
         if (!location->stack) {
             *why = "the environment '" + context.environment() + "' has no server named '" + uri.name + "'";
+            unknownName(uri.scheme, uri.name, context.environment());
             return false;
         }
     }
@@ -268,7 +269,7 @@ Found CachingResolver::_Find(const std::string& assetPath, Location* location, b
             why = "refused to answer without a login, and its endpoint names no credential";
         } else if (!credentialFor(credential)) {
             why = "wants a login, and none is saved under the credential '" + credential +
-                  "' (Edit > Asset Server Login in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
+                  "' (Edit > Asset Servers > Logins in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
         } else {
             why = "refused the login saved under the credential '" + credential + "'";
         }

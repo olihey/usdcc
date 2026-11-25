@@ -5,6 +5,7 @@
 // (assets_test_server.h), on 127.0.0.1; nothing leaves the machine. Runs in
 // usdcc_assets_tests.
 #include "test_harness.h"
+#include "assets_memory_store.h"
 
 #include "assets_test_server.h"
 
@@ -16,6 +17,7 @@
 #include "usdcc/assets/http_client.h"
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/transport.h"
 
 #include <pxr/base/tf/errorMark.h>
@@ -1498,3 +1500,199 @@ USDCC_TEST(assets_http_refuses_to_write) {
     CHECK(server.count("PUT") == 0, "and the server is never asked to write");
 }
 #endif  // USDCC_ASSETS_HTTP_PROTOCOL_DIR
+
+// ---- Configurations from a URL (docs/ASSET_SOURCES.md §7) --------------------------------
+
+namespace {
+
+// Serves one configuration, with switches.
+struct SourceServer {
+    std::mutex mutex;
+    std::string text;
+    std::string etag = "\"1\"";
+    std::string login;  // "user:password"; empty for none
+    std::string redirectTo;
+    int code = 200;
+    usdcc::test::TestServer server{[this](const usdcc::test::ServerRequest& request) {
+        std::lock_guard<std::mutex> lock(mutex);
+        usdcc::test::ServerResponse response;
+        if (!redirectTo.empty() && request.target == "/config.json") {
+            response.code = 302;
+            response.headers.push_back({"Location", redirectTo});
+            return response;
+        }
+        if (code != 200) {
+            response.code = code;
+            return response;
+        }
+        const auto auth = request.headers.find("authorization");
+        if (!login.empty() && auth == request.headers.end()) {
+            response.code = 401;
+            return response;
+        }
+        const auto known = request.headers.find("if-none-match");
+        if (known != request.headers.end() && known->second == etag) {
+            response.code = 304;
+            return response;
+        }
+        if (!etag.empty()) response.headers.push_back({"ETag", etag});
+        response.body = text;
+        return response;
+    }};
+
+    void serve(const std::string& now, const std::string& tag) {
+        std::lock_guard<std::mutex> lock(mutex);
+        text = now;
+        etag = tag;
+    }
+    SourceEntry entry() const { return {"studio-a", "", server.url() + "/config.json"}; }
+};
+
+std::string sourceText(const char* url) {
+    return std::string("{ \"name\": \"studio-a\", \"environment\": \"prod\", \"endpoints\": { \"nas\": { \"scheme\": \"webdav\", "
+                       "\"url\": \"") +
+           url + "\" } }, \"environments\": { \"prod\": { \"webdav\": { \"server1\": [\"nas\"] } } } }";
+}
+
+// Copies in a folder of their own, and no one's logins.
+struct SourceScope {
+    fs::path folder;
+    ScopedMemoryStore store;
+    explicit SourceScope(const Net& net) : folder(net.root / "copies") {
+        TfSetenv("USDCC_ASSET_SOURCES", toUtf8(folder));
+        allowLoopbackSources(true);
+        setFetchSourcesAtLoad(false);
+    }
+    ~SourceScope() {
+        allowLoopbackSources(false);
+        setFetchSourcesAtLoad(true);
+        TfUnsetenv("USDCC_ASSET_SOURCES");
+    }
+};
+
+constexpr std::chrono::milliseconds kPatience{5000};
+
+}  // namespace
+
+USDCC_TEST(assets_source_urls_are_https) {
+    CHECK(badSourceUrl("https://studio.example/assets.json").empty(), "https is fine");
+    CHECK(!badSourceUrl("http://studio.example/assets.json").empty() && !badSourceUrl("file:///c/a.json").empty() &&
+              !badSourceUrl("studio.example/a.json").empty() && !badSourceUrl("https://").empty(),
+          "nothing else is");
+    CHECK(!badSourceUrl("https://me:secret@studio.example/a.json").empty(), "nor a login in it");
+    CHECK(!badSourceUrl("http://127.0.0.1/a.json").empty(), "loopback neither, outside tests");
+    allowLoopbackSources(true);
+    CHECK(badSourceUrl("http://127.0.0.1:80/a.json").empty() && !badSourceUrl("http://127.0.0.1.evil.example/a").empty(),
+          "and in tests only that");
+    allowLoopbackSources(false);
+}
+
+USDCC_TEST(assets_source_from_a_url_is_kept) {
+    Net net;
+    SourceScope scope(net);
+    SourceServer server;
+    server.serve(sourceText("https://one.invalid"), "\"1\"");
+    const SourceEntry entry = server.entry();
+
+    LoadedSource loaded = loadSource(entry, {});
+    CHECK(!loaded.problem.empty() && server.server.requests().empty(), "the app's loading never asks the server");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Changed, "fetched");
+    loaded = loadSource(entry, {});
+    CHECK(loaded.problem.empty() && loaded.config.endpoints.at("nas").url == "https://one.invalid" && loaded.checked > 0,
+          "and read from its copy: %s", loaded.problem.c_str());
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Unchanged &&
+              server.server.requests().back().headers.count("if-none-match"),
+          "asked again by its ETag");
+
+    server.serve("{ not json", "\"2\"");
+    SourceRefresh result = refreshSource(entry, kPatience);
+    loaded = loadSource(entry, {});
+    CHECK(result.what == Refreshed::Failed && loaded.problem.empty() && !loaded.fetchProblem.empty() &&
+              loaded.config.endpoints.count("nas"),
+          "what doesn't parse leaves the copy, and is said: %s", loaded.fetchProblem.c_str());
+    server.serve("{ \"error\": \"try later\" }", "\"2b\"");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Failed && loadSource(entry, {}).config.endpoints.count("nas"),
+          "and so does an error served as JSON");
+    server.code = 503;
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Failed && loadSource(entry, {}).problem.empty(),
+          "so does a server that's down");
+    server.code = 200;
+    server.serve(sourceText("https://two.invalid"), "");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Changed, "a change is taken");
+    loaded = loadSource(entry, {});
+    CHECK(loaded.config.endpoints.at("nas").url == "https://two.invalid" && loaded.fetchProblem.empty(), "and used");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Unchanged, "without ETags the text tells");
+
+    SourceEntry other = entry;
+    other.alias = "another";
+    CHECK(!loadSource(other, {}).problem.empty(), "another alias has a copy of its own");
+    Config personal;
+    personal.sources.push_back(entry);
+    const Config merged = mergeSources(personal, loadSources(personal, {}));
+    CHECK(merged.environments.count("studio-a/prod") && merged.sourceLogins.count("studio-a/@source"), "merged as any source");
+    forgetSourceCopy(entry);
+    CHECK(!loadSource(entry, {}).problem.empty() && fs::is_empty(scope.folder), "forgotten, nothing is left of it");
+
+    setFetchSourcesAtLoad(true);
+    CHECK(loadSource(entry, {}).problem.empty(), "a tool with no copy fetches it once");
+    const size_t asked = server.server.requests().size();
+    loadSource(entry, {});
+    CHECK(server.server.requests().size() == asked, "and then reads the copy");
+    forgetSourceCopy(entry);
+    setOffline(true);
+    CHECK(!loadSource(entry, {}).problem.empty() && server.server.requests().size() == asked, "offline it doesn't");
+}
+
+USDCC_TEST(assets_source_logins_stay_with_their_server) {
+    Net net;
+    SourceScope scope(net);
+    SourceServer server;
+    server.login = "ada:pw";
+    server.serve(sourceText("https://one.invalid"), "\"1\"");
+    const SourceEntry entry = server.entry();
+    SourceRefresh result = refreshSource(entry, kPatience);
+    CHECK(result.wantsLogin && result.problem.find("studio-a/@source") != std::string::npos, "a 401 names the login: %s",
+          result.problem.c_str());
+    scope.store->logins["studio-a/@source"] = {"ada", "pw"};
+    scope.store->logins["@source"] = {"someone", "else"};
+    CHECK(refreshSource(entry, kPatience, true).wantsLogin && !server.server.requests().back().headers.count("authorization"),
+          "asked anonymously, nothing is sent");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Changed, "with it, it's fetched");
+
+    SourceServer elsewhere;
+    elsewhere.serve(sourceText("https://evil.invalid"), "\"9\"");
+    server.redirectTo = elsewhere.server.url() + "/config.json";
+    result = refreshSource(entry, kPatience);
+    CHECK(result.what == Refreshed::Failed && elsewhere.server.requests().empty(), "a redirect to another host isn't followed: %s",
+          result.problem.c_str());
+    server.redirectTo = "/moved.json";
+    server.serve(sourceText("https://moved.invalid"), "\"3\"");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Changed, "one on the same host is");
+    server.redirectTo = "/config.json";
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Failed, "but not for ever");
+    server.redirectTo.clear();
+    server.serve(std::string(9 * 1024 * 1024, ' '), "\"4\"");
+    CHECK(refreshSource(entry, kPatience).what == Refreshed::Failed, "and nothing larger than a configuration is");
+    CHECK(loadSource(entry, {}).config.endpoints.at("nas").url == "https://moved.invalid", "the last good copy stays");
+}
+
+USDCC_TEST(assets_http_threads_end) {
+    // A thread whose request died in a name lookup has to end: cleaning libcurl up as it did
+    // could wait for ever, with the loader lock held.
+    Net net;
+    for (int round = 0; round < 5; ++round) {
+        std::vector<std::thread> threads;
+        for (int i = 0; i < 8; ++i) {
+            threads.emplace_back([round, i]() {
+                HttpRequest request;
+                request.url = "https://host-" + std::to_string(round) + "-" + std::to_string(i) + ".invalid/a.json";
+                request.connectTimeout = std::chrono::milliseconds(i % 2 ? 1 : 200);
+                Progress progress;
+                Cancel cancel;
+                httpRequest(request, progress, cancel);
+            });
+        }
+        for (std::thread& thread : threads) thread.join();
+    }
+    CHECK(true, "they did");
+}

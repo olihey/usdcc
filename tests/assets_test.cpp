@@ -3,17 +3,21 @@
 // OpenUSD itself, on the fake:// protocol (assets_fake_protocol.cpp) with a
 // transport over folders on disk. No network. Runs in usdcc_assets_tests.
 #include "test_harness.h"
+#include "assets_memory_store.h"
 
 #include "usdcc/assets/config.h"
 #include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
+#include "usdcc/assets/logins.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/lookup.h"
 #include "usdcc/assets/paths.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
+#include <pxr/base/tf/getenv.h>
 #include <pxr/base/tf/setenv.h>
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/assetInfo.h>
@@ -563,6 +567,33 @@ USDCC_TEST(assets_credentials_come_from_the_callback_then_the_environment) {
     PXR_NS::TfUnsetenv("USDCC_ASSETS_OTHER_TOKEN");
 }
 
+USDCC_TEST(assets_known_logins_are_the_saved_and_the_named_ones) {
+    ScopedMemoryStore store;
+    store->logins["test"] = {"ada", "secret"};
+    store->logins["dav"] = {"bob", "secret"};
+    store->logins["host.example"] = {"", "", "t0ken"};
+    const Result<Config> config = Config::parse(R"({
+        "endpoints": {
+            "prod": { "scheme": "webdav", "url": "https://a", "credential": "dav" },
+            "bucket": { "scheme": "s3", "url": "s3://b", "credential": "keys" },
+            "amazon": { "scheme": "s3", "url": "s3://c", "credential": "aws:studio" }
+        },
+        "http": { "hosts": { "host.example": {}, "open.example": {}, "in.example": { "credential": "dav" } } }
+    })");
+    CHECK(config.ok(), "the configuration parses");
+    PXR_NS::TfSetenv("USDCC_ASSETS_KEYS_USER", "key");
+    const std::vector<KnownLogin> logins = knownLogins(config.value);
+    PXR_NS::TfUnsetenv("USDCC_ASSETS_KEYS_USER");
+    CHECK(logins.size() == 5, "aws:studio, dav, host.example, keys, test; not the anonymous open.example: %zu", logins.size());
+    if (logins.size() != 5) return;
+    CHECK(logins[0].id == "aws:studio" && logins[0].aws && !logins[0].saved, "AWS's own");
+    CHECK(logins[1].id == "dav" && logins[1].saved && logins[1].user == "bob" && logins[1].uses.size() == 2,
+          "one a server and a host share");
+    CHECK(logins[2].id == "host.example" && logins[2].uses.size() == 1, "one a host uses by its address");
+    CHECK(logins[3].id == "keys" && !logins[3].saved && logins[3].variables && logins[3].s3, "one only in variables, an S3 key");
+    CHECK(logins[4].id == "test" && logins[4].saved && logins[4].uses.empty(), "and a saved one nothing uses");
+}
+
 USDCC_TEST(assets_credentials_in_the_system_store) {
 #if defined(_WIN32)
     // A name no one else uses, gone again at the end: this is the user's own Credential Manager.
@@ -574,6 +605,9 @@ USDCC_TEST(assets_credentials_in_the_system_store) {
     login.password = "sÃ©cret";  // not ASCII
     std::string error;
     CHECK(storeCredential(id, login, &error), "a user and password are stored: %s", error.c_str());
+    bool listed = false;
+    for (const StoredCredential& each : storedCredentials()) listed = listed || (each.id == id && each.user == "ada");
+    CHECK(listed, "it's in the list, with its user");
     std::optional<Credential> stored = storedCredential(id);
     CHECK(stored && stored->user == "ada" && stored->password == login.password && stored->token.empty(), "and read back as they were");
     stored = credentialFor(id);
@@ -586,6 +620,42 @@ USDCC_TEST(assets_credentials_in_the_system_store) {
     CHECK(stored && stored->token == "t0ken" && stored->user.empty() && stored->password.empty(), "and is read back as a token");
 
     CHECK(forgetStoredCredential(id) && !storedCredential(id), "forgotten, it's gone");
+#elif defined(__linux__)
+    // A keyring of its own only: run by hand with one (docs/ASSET_SOURCES.md §10.5), never the user's.
+    if (PXR_NS::TfGetenv("USDCC_TEST_KEYRING").empty()) return;
+    CHECK(canStoreCredentials() && credentialStoreName() == "your keyring", "there is a keyring");
+    std::string error;
+    CHECK(!storedCredential("studio-a/dav"), "nothing in it");
+    CHECK(storeCredential("studio-a/dav", {"ada", "s\xc3\xa9"
+                                                  "cret"},
+                          &error),
+          "a user and password are stored: %s", error.c_str());
+    std::optional<Credential> stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->user == "ada" && stored->password == "s\xc3\xa9"
+                                                                 "cret" && stored->token.empty(),
+          "and read back");
+    CHECK(storeCredential("other", {"bob", "pw"}, &error) && storedCredentials().size() == 2 &&
+              storedCredentials()[1].user == "ada",
+          "listed with their users");
+    CHECK(storeCredential("studio-a/dav", {"eve", "pw2"}, &error), "another user replaces it");
+    stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->user == "eve" && stored->password == "pw2" && storedCredentials().size() == 2, "with one left");
+    Credential token;
+    token.token = "t0ken";
+    CHECK(storeCredential("studio-a/dav", token, &error), "a token too");
+    stored = storedCredential("studio-a/dav");
+    CHECK(stored && stored->token == "t0ken" && stored->user.empty(), "read back as a token");
+    std::vector<std::thread> threads;
+    std::atomic<int> read{0};
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&read]() {
+            for (int n = 0; n < 50; ++n) read += credentialFor("other") ? 1 : 0;
+        });
+    }
+    for (std::thread& thread : threads) thread.join();
+    CHECK(read == 400, "from any thread (%d)", read.load());
+    CHECK(forgetStoredCredential("studio-a/dav") && !storedCredential("studio-a/dav"), "forgotten, it's gone");
+    CHECK(forgetStoredCredential("other") && !forgetStoredCredential("other") && storedCredentials().empty(), "and the other");
 #else
     CHECK(!storedCredential("anything"), "no system store on this platform yet");
 #endif
@@ -1071,4 +1141,114 @@ USDCC_TEST(assets_identifiers_and_missing_names) {
     std::string whyNot;
     CHECK(!resolver.CanWriteAssetToPath(resolver.Resolve("fake://studio/chars/tex.txt"), &whyNot) && !whyNot.empty(),
           "and nothing can be written yet: %s", whyNot.c_str());
+}
+
+// ---- Sources (docs/ASSET_SOURCES.md §3-§5) ---------------------------------------------
+
+namespace {
+void writeText(const fs::path& file, const std::string& text) {
+    fs::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << text;
+}
+}  // namespace
+
+USDCC_TEST(assets_sources_are_named_with_their_aliases) {
+    const fs::path folder = fs::temp_directory_path() / ("usdcc-sources-" + stableHash(std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()), 8));
+    writeText(folder / "studio" / "a.json", R"({
+        "name": "studio-a",
+        "environment": "prod",
+        "endpoints": {
+            "nas": { "scheme": "webdav", "url": "https://a.invalid", "credential": "dav" },
+            "aws": { "scheme": "s3", "url": "s3://bucket", "credential": "aws:studio" }
+        },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] }, "s3": { "bucket": ["aws"] } } },
+        "http": { "hosts": { "shared.example": { "credential": "dav" } }, "allow": ["*", "*.a.example"] }
+    })");
+    writeText(folder / "b.json", R"({
+        "endpoints": { "nas": { "scheme": "webdav", "url": "https://b.invalid", "credential": "studio-a-dav" } },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] } } },
+        "http": { "hosts": { "shared.example": { "credential": "x" } } }
+    })");
+    writeText(folder / "mine.json", R"({
+        "defaultEnvironment": "mine",
+        "sources": [ { "alias": "studio-a", "path": "studio/a.json" }, { "alias": "b", "path": "b.json" },
+                     { "alias": "gone", "path": "nowhere.json" } ],
+        "endpoints": { "home": { "scheme": "webdav", "url": "https://home.invalid", "credential": "studio-a-dav" } },
+        "environments": { "local": { "webdav": { "studio": ["home"] } } },
+        "mixed": {
+            "mine": { "extends": ["studio-a/prod", "b/prod"], "webdav": { "server1": ["home", "studio-a/nas"] } },
+            "clash": { "extends": ["studio-a/prod", "b/prod"] }
+        }
+    })");
+    const Result<Config> personal = Config::load(folder / "mine.json");
+    CHECK(personal.ok(), "the personal file parses: %s", personal.message.c_str());
+    if (!personal.ok()) return;
+    CHECK(personal.value.environment == "mine" && personal.value.sources.size() == 3 && personal.value.isMixed("mine") &&
+              !personal.value.isMixed("local"),
+          "its sources, mixed environments and default");
+
+    const std::vector<LoadedSource> sources = loadSources(personal.value, folder / "mine.json");
+    CHECK(sources.size() == 3 && sources[0].problem.empty() && sources[1].problem.empty() && !sources[2].problem.empty(),
+          "relative to its folder; one that isn't there says so");
+    MergeProblems problems;
+    const Config merged = mergeSources(personal.value, sources, &problems);
+    CHECK(merged.endpoints.count("home") && merged.endpoints.count("studio-a/nas") && merged.endpoints.count("b/nas"),
+          "servers named with their aliases, the personal ones as they are");
+    CHECK(merged.endpoints.at("studio-a/nas").credential == "studio-a/dav" &&
+              merged.endpoints.at("studio-a/aws").credential == "aws:studio",
+          "and their logins, but for AWS's own");
+    CHECK(merged.environments.count("studio-a/prod") && merged.environments.count("b/prod") && merged.environments.count("local"),
+          "environments too");
+    CHECK(merged.environments.at("mine").at("webdav").at("server1") == std::vector<std::string>({"home", "studio-a/nas"}),
+          "a mixed one's own stack replaces what it extends");
+    CHECK(merged.environments.at("mine").at("s3").count("bucket"), "and it has the names of what it extends");
+    CHECK(!merged.environments.count("clash") || !merged.environments.at("clash").count("webdav"),
+          "a name two extended environments have differently isn't guessed");
+    const std::string all = [&]() {
+        std::string text;
+        for (const std::string& line : problems.all()) text += line + "\n";
+        return text;
+    }();
+    CHECK(all.find("'clash'") != std::string::npos && all.find("'gone'") != std::string::npos, "both are said:\n%s", all.c_str());
+    CHECK(merged.httpHosts.at("shared.example").credential == "studio-a/dav" && all.find("shared.example") != std::string::npos,
+          "a web host two sources have: the first one's, said");
+    CHECK(std::find(merged.httpAllow.begin(), merged.httpAllow.end(), "*") == merged.httpAllow.end() &&
+              std::find(merged.httpAllow.begin(), merged.httpAllow.end(), "*.a.example") != merged.httpAllow.end(),
+          "a source's bare * isn't taken");
+    CHECK(all.find("STUDIO_A_DAV") != std::string::npos, "two logins with one spelling of variables are said");
+    PXR_NS::TfSetenv("USDCC_ASSETS_STUDIO_A_DAV_USER", "who");
+    CHECK(!credentialFromVariables("studio-a/dav") && !credentialFromVariables("studio-a-dav"), "and neither reads them");
+    PXR_NS::TfUnsetenv("USDCC_ASSETS_STUDIO_A_DAV_USER");
+    setAmbiguousCredentialVariables({});
+
+    const std::vector<std::string> withName = environmentsWithName(merged, "webdav", "server1");
+    CHECK(withName == std::vector<std::string>({"b/prod", "mine", "studio-a/prod"}), "which environments have a name (%zu)",
+          withName.size());
+    CHECK(offeredEnvironments(merged, "webdav", "server1") == std::vector<std::string>({"b/prod", "mine", "studio-a/prod"}),
+          "what's offered for it");
+    writeText(folder / "studio" / "a.json", R"({ "name": "studio-a", "environment": "prod",
+        "endpoints": { "nas": { "scheme": "webdav", "url": "https://a.invalid" } },
+        "environments": { "prod": { "webdav": { "server1": ["nas"] } }, "test": { "webdav": { "server1": ["nas"] } } } })");
+    const Config twice = mergeSources(personal.value, loadSources(personal.value, folder / "mine.json"));
+    const std::vector<std::string> offered = offeredEnvironments(twice, "webdav", "server1");
+    CHECK(std::count(offered.begin(), offered.end(), "studio-a/prod") == 1 &&
+              std::count(offered.begin(), offered.end(), "studio-a/test") == 0,
+          "a source's default stands for it");
+    const Context context(merged, "studio-a/prod");
+    CHECK(context.stack("webdav", "server1") && context.stack("webdav", "server1")->endpoints.front().url == "https://a.invalid",
+          "a source's environment resolves through its servers");
+
+    // Written back: an older usdcc's keys as they were, the new ones where it doesn't look.
+    const std::string json = personal.value.toJson();
+    const Result<Config> again = Config::parse(json);
+    CHECK(again.ok() && again.value.isMixed("mine") && again.value.extends.at("mine").size() == 2 && again.value.environment == "mine",
+          "it writes what it read:\n%s", json.c_str());
+    CHECK(json.find("\"mixed\"") != std::string::npos && json.find("\"defaultEnvironment\"") != std::string::npos &&
+              json.find("\"environment\"") == std::string::npos,
+          "mixed ones under \"mixed\", and the default under \"defaultEnvironment\"");
+    CHECK(suggestedAlias(Config(), "C:/x/Studio B Assets.json") == "studio-b-assets", "an alias from a file name");
+
+    const Result<Config> slashed = Config::parse(R"({ "endpoints": { "a/b": { "scheme": "webdav", "url": "https://x" } } })");
+    CHECK(!slashed.ok(), "a file can't spell another source's ids");
+    fs::remove_all(folder);
 }

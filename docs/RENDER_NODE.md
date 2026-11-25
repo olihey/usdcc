@@ -135,11 +135,12 @@ usdcc_node render shot.usda [--settings /Render/Settings] [--frames 1-24[x2]]
                             [--renderer HdEmbreeRendererPlugin] [--camera /cams/main]
                             [--resolution 1920x1080] [--output "renders/<stage>.####.exr"]
                             [--format exr|png] [--tiles 2x2] [--time-limit 600]
-                            [--set embree:ty:maxBounces=8]...
+                            [--set embree:ty:maxBounces=8]... [--asset-env prod]
 ```
 
 - **The stage opens from its file,** with its resolver context. No session layer, no unsaved
-  edits: what's on disk is what renders.
+  edits: what's on disk is what renders. Its asset environment is `--asset-env`, else
+  `USDCC_ASSET_ENV`, else the configuration's ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4).
 - **The settings** are the stage's RenderSettings prim, as in the app (FINAL_RENDER.md §2.1).
   Each argument overrides its attribute on the job's snapshot only, never in the file.
 - **No camera anywhere** is an error: there's no viewport to borrow one from.

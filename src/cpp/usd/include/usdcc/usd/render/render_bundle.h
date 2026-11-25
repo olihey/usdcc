@@ -35,6 +35,8 @@ struct USDCC_RENDER_API SharedScene {
     };
     std::string rootLayer;                            // its identifier
     std::string sessionLayer;                         // as USDA
+    // The asset environment the stage is in; empty when nothing of it is on a named server.
+    std::string assetEnvironment;
     std::map<std::string, std::string> dirtyLayers;   // unsaved layers: identifier, USDA
     std::vector<Dependency> dependencies;             // every layer and asset it uses
     std::string whyNot;                               // empty: it can be shared

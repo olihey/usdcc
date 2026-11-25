@@ -35,7 +35,9 @@ bool closeStagesInteractively(StageManager* stageManager, const std::vector<Stag
 // still uses, lists them and asks Save All, Discard or Cancel. True to go
 // on closing (nothing unsaved, everything saved, or Discard); false for
 // Cancel, or when a save failed (which it says).
-bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRefPtr>& closing, QWidget* dialogParent);
+// `replacement` is a stage about to be opened in their place: its layers stay too.
+bool confirmUnsavedLayers(StageManager* stageManager, const std::vector<StageRefPtr>& closing, QWidget* dialogParent,
+                          const PXR_NS::UsdStageRefPtr& replacement = {});
 
 // The question closeStageInteractively() asks: "Close these panels" or
 // "Switch them to: [stage]". The switch list holds every open stage that

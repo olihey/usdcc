@@ -91,7 +91,9 @@ OpenStageOptionsDialog::OpenStageOptionsDialog(const QString& path, const usdcc:
         auto* assetForm = new QFormLayout();
         m_assetEnvironment = new QComboBox(this);
         m_assetEnvironment->setObjectName(QStringLiteral("assetEnvironment"));
-        const std::string fallback = defaultAssetEnvironment();
+        // As Open Stage would: the one remembered for its folder, else the default.
+        const std::string remembered = rememberedEnvironment(path.toStdString());
+        const std::string fallback = remembered.empty() ? defaultAssetEnvironment() : remembered;
         for (const std::string& environment : environments) {
             m_assetEnvironment->addItem(QString::fromStdString(environment), QString::fromStdString(environment));
             if (environment == fallback) m_assetEnvironment->setCurrentIndex(m_assetEnvironment->count() - 1);
@@ -99,7 +101,7 @@ OpenStageOptionsDialog::OpenStageOptionsDialog(const QString& path, const usdcc:
         assetForm->addRow(tr("Asset servers:"), m_assetEnvironment);
         layout->addLayout(assetForm);
         layout->addWidget(hint(tr("The environment its server paths are looked up in: which servers, in which order. "
-                                  "Its default is in Settings > Assets."),
+                                  "Its default is in Settings > Assets, or remembered for the folder."),
                                this));
         layout->addSpacing(6);
     }

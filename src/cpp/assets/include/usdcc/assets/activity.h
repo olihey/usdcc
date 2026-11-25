@@ -80,4 +80,11 @@ void setBucketRefusedCallback(std::function<void(const std::string& bucket)> cal
 bool bucketMatches(const std::string& pattern, const std::string& bucket);
 void setExtraAllowedBuckets(std::vector<std::string> patterns);
 
+// Told when a path names a server the environment it's resolved in doesn't have
+// (docs/ASSET_SOURCES.md §4), from whichever thread resolves: don't ask there.
+using UnknownNameCallback =
+    std::function<void(const std::string& scheme, const std::string& name, const std::string& environment)>;
+void setUnknownNameCallback(UnknownNameCallback callback);
+void unknownName(const std::string& scheme, const std::string& name, const std::string& environment);
+
 }  // namespace usdcc::assets
