@@ -1,5 +1,6 @@
 #include "usdcc/usd/dependencies.h"
 
+#include "usdcc/assets/no_wait.h"
 #include "usdcc/usd/asset_servers.h"
 
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -25,19 +26,24 @@ namespace usdcc::usd {
 
 namespace {
 
-// Where `assetPath`, named in `anchor`, points: the file it resolves to
-// (an open layer counts, as in compositionArcs()), else the anchored path,
-// with `found` saying which.
-std::string locate(const PXR_NS::SdfLayerHandle& anchor, const std::string& assetPath, bool* found) {
+struct Located {
+    std::string path;
+    std::string origin;
+    bool found = false;
+    bool resolving = false;
+};
+
+// Where `assetPath`, named in `anchor`, points: the file it resolves to, else the anchored
+// path (locateAsset()).
+Located locate(const PXR_NS::SdfLayerHandle& anchor, const std::string& assetPath) {
     const std::string anchored = anchor ? PXR_NS::SdfComputeAssetPathRelativeToLayer(anchor, assetPath) : assetPath;
-    if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
-        *found = true;
-        return displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
-    }
-    // A server's path as it's written, without the stack id only this process knows.
-    const std::string resolved = displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
-    *found = !resolved.empty();
-    return *found ? resolved : anchored;
+    const LocatedAsset asset = locateAsset(anchored);
+    Located located;
+    located.found = !asset.path.empty();
+    located.path = located.found ? asset.path : anchored;
+    located.origin = asset.origin;
+    located.resolving = asset.resolving;
+    return located;
 }
 
 // One spelling per file: forward slashes, and no case on Windows and macOS.
@@ -59,14 +65,16 @@ struct Collector {
     std::map<std::string, std::set<PXR_NS::SdfPath>> prims, unloaded;
     std::map<std::string, std::set<std::string>> layers;
 
-    void add(Dependency::Kind kind, const std::string& assetPath, const std::string& located, bool found,
-             const std::string& layer, const PXR_NS::SdfPath& prim = {}, bool loaded = true) {
-        const std::string key = fileKey(located);
+    void add(Dependency::Kind kind, const std::string& assetPath, const Located& located, const std::string& layer,
+             const PXR_NS::SdfPath& prim = {}, bool loaded = true) {
+        const std::string key = fileKey(located.path);
         Dependency& file = files[key];
         if (file.kinds == 0) {
             file.assetPath = assetPath;
-            file.resolvedPath = located;
-            file.missing = !found;
+            file.resolvedPath = located.path;
+            file.origin = located.origin;
+            file.missing = !located.found && !located.resolving;
+            file.resolving = located.resolving;
         }
         file.kinds |= kind;
         if (!layer.empty()) layers[key].insert(layer);
@@ -79,11 +87,11 @@ struct Collector {
             if ((arc.type != ArcInfo::Type::Reference && arc.type != ArcInfo::Type::Payload) || arc.assetPath.empty()) {
                 continue;  // an internal arc, or not a file at all
             }
-            bool found = !arc.missing;
-            const std::string located =
-                arc.missing ? locate(PXR_NS::SdfLayer::Find(arc.layerIdentifier), arc.assetPath, &found) : arc.resolvedPath;
+            const Located located = arc.missing || arc.resolving
+                                        ? locate(PXR_NS::SdfLayer::Find(arc.layerIdentifier), arc.assetPath)
+                                        : Located{arc.resolvedPath, arc.origin, true, false};
             add(arc.type == ArcInfo::Type::Payload ? Dependency::Payload : Dependency::Reference, arc.assetPath, located,
-                found, arc.layerIdentifier, prim.GetPath(), arc.type != ArcInfo::Type::Payload || arc.loaded);
+                arc.layerIdentifier, prim.GetPath(), arc.type != ArcInfo::Type::Payload || arc.loaded);
         }
     }
 
@@ -107,12 +115,15 @@ struct Collector {
             const PXR_NS::SdfLayerHandle layer = stack.empty() ? PXR_NS::SdfLayerHandle() : stack.front()->GetLayer();
             for (const PXR_NS::SdfAssetPath& path : paths) {
                 if (path.GetAssetPath().empty()) continue;
-                bool found = !path.GetResolvedPath().empty();
-                std::string located = path.GetResolvedPath();
-                if (!found) located = locate(layer, path.GetAssetPath(), &found);
+                const std::string& resolved = path.GetResolvedPath();
+                Located located{displayAssetPath(resolved), assetOrigin(path.GetAssetPath(), resolved), !resolved.empty(), false};
+                if (!located.found) located = locate(layer, path.GetAssetPath());
                 // A UDIM set ("tex.<UDIM>.png") resolves per tile, never as a whole.
-                if (!found && path.GetAssetPath().find('<') != std::string::npos) found = true;
-                add(Dependency::Asset, path.GetAssetPath(), located, found, layer ? layer->GetIdentifier() : std::string(),
+                if (!located.found && path.GetAssetPath().find('<') != std::string::npos) {
+                    located.found = true;
+                    located.resolving = false;
+                }
+                add(Dependency::Asset, path.GetAssetPath(), located, layer ? layer->GetIdentifier() : std::string(),
                     prim.GetPath());
             }
         }
@@ -123,15 +134,14 @@ struct Collector {
 
 std::vector<Dependency> stageDependencies(const PXR_NS::UsdStageRefPtr& stage, bool assetAttributes) {
     if (!stage) return {};
+    const usdcc::assets::NoWait noWait;
     // Resolved as the stage resolves them (docs/REMOTE_ASSETS.md §10).
     const PXR_NS::ArResolverContextBinder binder(stage->GetPathResolverContext());
     Collector collector;
 
     for (const PXR_NS::SdfLayerHandle& layer : stage->GetUsedLayers()) {
         for (const std::string& sublayer : layer->GetSubLayerPaths()) {
-            bool found = false;
-            const std::string located = locate(layer, sublayer, &found);
-            collector.add(Dependency::Sublayer, sublayer, located, found, layer->GetIdentifier());
+            collector.add(Dependency::Sublayer, sublayer, locate(layer, sublayer), layer->GetIdentifier());
         }
     }
 

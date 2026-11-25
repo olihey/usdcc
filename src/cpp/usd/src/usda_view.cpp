@@ -5,6 +5,8 @@
 #include "usdcc/usd/asset_servers.h"
 
 #include "usdcc/assets/caching_resolver.h"
+#include "usdcc/assets/no_wait.h"
+#include "usdcc/usd/asset_answers.h"
 
 #include <pxr/usd/ar/resolverContextBinder.h>
 
@@ -46,6 +48,7 @@
 #include <QLockFile>
 #include <QMenu>
 #include <QPointer>
+#include <QThreadPool>
 #include <QPushButton>
 #include <QTextDocument>
 #include <QTextCursor>
@@ -294,6 +297,11 @@ UsdaView::UsdaView(Host host, QWidget* parent) : QWidget(parent), m_host(std::mo
             return links;
         },
         [this](const usdcc::ui::LineView::Link& link) { return linkToolTip(link); });
+    connect(&usdcc::usd::AssetAnswers::instance(), &usdcc::usd::AssetAnswers::changed, this, [this]() {
+        if (m_pendingLink.isEmpty()) return;
+        const QString link = std::exchange(m_pendingLink, QString());
+        if (m_pendingLinkSource.kind == m_source.kind && m_pendingLinkSource.identifier == m_source.identifier) openLink(link, m_pendingLinkInNew);
+    });
     connect(m_text, &usdcc::ui::LineView::linkActivated, this, &UsdaView::onLinkActivated);
     connect(m_text, &usdcc::ui::LineView::linkMenuRequested, this, &UsdaView::populateLinkMenu);
 
@@ -1185,7 +1193,8 @@ void UsdaView::goToLine() {
     m_text->setFocus();
 }
 
-QString UsdaView::resolveAsset(const QString& assetPath, bool* found) const {
+QString UsdaView::resolveAsset(const QString& assetPath, bool* found, bool* resolving) const {
+    const usdcc::assets::NoWait noWait;
     // As the stage resolves it: a path on a server means its environment's servers.
     const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage() ? m_stage->usdStage()->GetPathResolverContext()
                                                                               : PXR_NS::ArResolverContext());
@@ -1201,20 +1210,26 @@ QString UsdaView::resolveAsset(const QString& assetPath, bool* found) const {
         // An in-memory layer has no folder, so the root layer's.
         anchored = PXR_NS::SdfComputeAssetPathRelativeToLayer(m_stage->usdStage()->GetRootLayer(), path);
     }
-    // A layer that's open already counts as found, as in compositionArcs().
-    if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
-        if (found) *found = true;
-        return qs(usdcc::usd::displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath()));
-    }
-    // A server's path without the stack id: opened with the context bound, it's found again.
-    const std::string resolved = usdcc::usd::displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
-    if (found) *found = !resolved.empty();
-    return qs(resolved.empty() ? anchored : resolved);
+    // Opened with the context bound, a server's path is found again without the stack id.
+    const usdcc::usd::LocatedAsset located = usdcc::usd::locateAsset(anchored);
+    if (found) *found = !located.path.empty();
+    if (resolving) *resolving = located.resolving;
+    return qs(located.path.empty() ? anchored : located.path);
 }
 
 bool UsdaView::openLink(const QString& assetPath, bool newPanel) {
     bool found = false;
-    const QString resolved = resolveAsset(assetPath, &found);
+    bool resolving = false;
+    const QString resolved = resolveAsset(assetPath, &found, &resolving);
+    m_pendingLink.clear();
+    if (resolving) {
+        // Opened when the server has answered, unless something else is shown by then.
+        m_pendingLink = assetPath;
+        m_pendingLinkInNew = newPanel;
+        m_pendingLinkSource = m_source;
+        m_status->setText(tr("Resolving %1...").arg(usdcc::usd::displayPath(resolved)));
+        return true;
+    }
     if (!found) {
         m_status->setText(tr("Not found: %1").arg(usdcc::usd::displayPath(resolved)));
         return false;
@@ -1222,16 +1237,20 @@ bool UsdaView::openLink(const QString& assetPath, bool newPanel) {
     if (!canPreviewUsda(resolved)) {
         // A texture, a document: the system's app. One on a server, its copy in the cache.
         if (!usdcc::usd::isLocalAssetPath(resolved.toStdString())) {
-            const PXR_NS::ArResolverContextBinder binder(m_stage && m_stage->usdStage()
-                                                             ? m_stage->usdStage()->GetPathResolverContext()
-                                                             : PXR_NS::ArResolverContext());
-            const std::optional<std::filesystem::path> file =
-                usdcc::assets::localFile(PXR_NS::ArGetResolver().Resolve(resolved.toStdString()).GetPathString());
-            if (!file) {
-                m_status->setText(tr("Can't download %1").arg(resolved));
-                return false;
-            }
-            QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdU16String(file->u16string())));
+            const PXR_NS::ArResolverContext context =
+                m_stage && m_stage->usdStage() ? m_stage->usdStage()->GetPathResolverContext() : PXR_NS::ArResolverContext();
+            m_status->setText(tr("Downloading %1...").arg(resolved));
+            QThreadPool::globalInstance()->start([context, resolved, view = QPointer<UsdaView>(this)]() {
+                const PXR_NS::ArResolverContextBinder binder(context);
+                const std::optional<std::filesystem::path> file =
+                    usdcc::assets::localFile(PXR_NS::ArGetResolver().Resolve(resolved.toStdString()).GetPathString());
+                QMetaObject::invokeMethod(qApp, [file, resolved, view]() {
+                    if (!view) return;
+                    if (file) QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdU16String(file->u16string())));
+                    view->m_status->setText(file ? QString() : tr("Can't download %1").arg(resolved));
+                    if (file) view->updateStatus();
+                }, Qt::QueuedConnection);
+            });
             return true;
         }
         QDesktopServices::openUrl(QUrl::fromLocalFile(resolved));
@@ -1340,7 +1359,9 @@ QString UsdaView::linkToolTip(const usdcc::ui::LineView::Link& link) {
     const QString target = linkTarget(link);
     if (link.kind == AssetLink) {
         bool found = false;
-        const QString resolved = usdcc::usd::displayPath(resolveAsset(target, &found));
+        bool resolving = false;
+        const QString resolved = usdcc::usd::displayPath(resolveAsset(target, &found, &resolving));
+        if (resolving) return tr("Resolving %1...").arg(resolved);
         return found ? tr("%1\nClick to open, Ctrl+click to open in a new window").arg(resolved)
                      : tr("Not found: %1").arg(resolved);
     }
@@ -1369,12 +1390,13 @@ void UsdaView::populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& li
         return;
     }
     bool found = false;
-    const QString resolved = resolveAsset(target, &found);
+    bool resolving = false;
+    const QString resolved = resolveAsset(target, &found, &resolving);
     const bool layer = found && canPreviewUsda(resolved);
     auto open = [this, target](bool newPanel) {
         QMetaObject::invokeMethod(this, [this, target, newPanel]() { openLink(target, newPanel); }, Qt::QueuedConnection);
     };
-    menu->addAction(tr("Open Here"), this, [open]() { open(false); })->setEnabled(found);
+    menu->addAction(tr("Open Here"), this, [open]() { open(false); })->setEnabled(found || resolving);
     if (!m_host.openInNewLabel.isEmpty()) {
         menu->addAction(m_host.openInNewLabel, this, [open]() { open(true); })->setEnabled(layer);
     }

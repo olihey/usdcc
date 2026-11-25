@@ -2,6 +2,7 @@
 
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/disk_cache.h"
+#include "usdcc/assets/no_wait.h"
 
 #include <pxr/base/tf/diagnostic.h>
 
@@ -26,7 +27,8 @@ struct DownMarks {
 };
 
 DownMarks& downMarks() {
-    static DownMarks instance;
+    // Never destroyed, as sharedLookups(): a worker may be asking as the process ends (no_wait.h).
+    static DownMarks& instance = *new DownMarks;
     return instance;
 }
 
@@ -130,7 +132,7 @@ void Lookups::forget(const Stack& stack, const std::string& path) {
 }
 
 Lookups& sharedLookups() {
-    static Lookups instance(true);
+    static Lookups& instance = *new Lookups(true);
     return instance;
 }
 
@@ -157,7 +159,24 @@ void forgetDownMarks() {
     marks.until.clear();
 }
 
+namespace {
+
+Found search(const Stack& stack, const std::string& path, Lookups* scope);
+
+}  // namespace
+
 Found findInStack(const Stack& stack, const std::string& path, Lookups* scope) {
+    // Offline asks no server either.
+    if (isOffline()) return search(stack, path, scope);
+    if (NoWait::active()) return answerWithoutWaiting(stack, path);
+    Found found = search(stack, path, scope);
+    rememberAnswer(stack, path, found);
+    return found;
+}
+
+namespace {
+
+Found search(const Stack& stack, const std::string& path, Lookups* scope) {
     Found found;
     if (isOffline()) {
         // No server is asked: whichever endpoint's version is in the cache, top first.
@@ -205,8 +224,6 @@ Found findInStack(const Stack& stack, const std::string& path, Lookups* scope) {
     found.status = Status::Missing;
     return found;
 }
-
-namespace {
 
 // The stack and folder `uri` names for browsing: a name of the context's environment, or
 // a server by its address whose host (or bucket) is allowed.

@@ -65,6 +65,16 @@ std::string displayAssetPath(const std::string& resolvedPath);
 // is anchored inside it (docs/ASSET_PICKER.md §4).
 std::string relativeAssetPath(const std::string& target, const std::string& anchor);
 
+// Where an anchored asset path points, without waiting for a server (usdcc/assets/no_wait.h),
+// under the context that is bound. A layer that's open counts as found, though the resolver may
+// know no file for it.
+struct LocatedAsset {
+    std::string path;        // as the UI shows it; empty when it isn't found
+    std::string origin;      // assetOrigin()
+    bool resolving = false;  // no server answered yet: not found, so far
+};
+LocatedAsset locateAsset(const std::string& anchored);
+
 // The server that delivered a resolved asset: an endpoint's id ("test", "prod") for a
 // named protocol, the host for plain HTTP. Empty for a local file.
 std::string assetOrigin(const std::string& assetPath, const std::string& resolvedPath);

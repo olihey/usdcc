@@ -184,7 +184,7 @@ target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_SOURCE_DIR="${CMAKE_SOUR
 # (asset_picker_save_test.cpp): the protocol plugin, registered at start, and the server's sockets.
 # Only with WebDAV in the build (docs/BUILD_OPTIONS.md).
 if(USDCC_BUILD_WEBDAV)
-    target_sources(usdcc_ui_tests PRIVATE asset_picker_save_test.cpp)
+    target_sources(usdcc_ui_tests PRIVATE asset_answers_test.cpp asset_picker_save_test.cpp)
     target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_UI_TESTS_WEBDAV_PROTOCOL_DIR="${CMAKE_BINARY_DIR}/plugins/webdav/usd")
     add_dependencies(usdcc_ui_tests usdccWebDavProtocol)
 endif()

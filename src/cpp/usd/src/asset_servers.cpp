@@ -1,6 +1,7 @@
 #include "usdcc/usd/asset_servers.h"
 
 #include "usdcc/assets/context.h"
+#include "usdcc/assets/no_wait.h"
 #include "usdcc/assets/paths.h"
 
 #include <pxr/base/js/json.h>
@@ -12,6 +13,7 @@
 #include <pxr/usd/ar/resolvedPath.h>
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/sdf/fileFormat.h>
+#include <pxr/usd/sdf/layer.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -261,6 +263,23 @@ std::string relativeAssetPath(const std::string& target, const std::string& anch
     if (relative.empty()) relative = "./";
     for (size_t i = common; i < toParts.size(); ++i) relative += toParts[i] + (i + 1 < toParts.size() ? "/" : "");
     return relative;
+}
+
+LocatedAsset locateAsset(const std::string& anchored) {
+    const usdcc::assets::NoWait noWait;
+    const std::size_t unanswered = usdcc::assets::NoWait::unanswered();
+    LocatedAsset located;
+    std::string raw;
+    if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
+        raw = open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath();
+    } else {
+        raw = PXR_NS::ArGetResolver().Resolve(anchored).GetPathString();
+        located.resolving = raw.empty() && usdcc::assets::NoWait::unanswered() != unanswered;
+    }
+    // A server's path as it's written, without the stack id only this process knows.
+    located.path = displayAssetPath(raw);
+    located.origin = assetOrigin(anchored, raw);
+    return located;
 }
 
 std::string assetOrigin(const std::string& assetPath, const std::string& resolvedPath) {

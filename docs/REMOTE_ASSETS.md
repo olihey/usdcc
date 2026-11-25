@@ -391,10 +391,7 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
     second line: `EditorHints::resolverContext`)
   - [usda_view.cpp](../src/cpp/usd/src/usda_view.cpp) (following links, and a linked file)
 
-  *Not built:* the plan had them never wait for a server, resolving on a worker meanwhile. They
-  resolve on the UI thread, as they did. A server's answers are remembered for a few seconds, and
-  the asset field keeps its own until the path changes, so it asks once per field; but a slow or
-  dead server holds the UI for up to the connect timeout (5 s) the first time.
+  None of them waits for a server (below).
 - **Paths as shown.** A resolved path on a server carries a stack id (§5); everything the UI shows
   goes through `displayAssetPath()`, without it. `usdcc::usd::displayPath()`
   ([asset_settings.h](../src/cpp/usd/include/usdcc/usd/asset_settings.h)) also keeps
@@ -406,8 +403,21 @@ Built in phase 4 (§13.4) but for what is marked *not built*.
   texture from its copy in the cache (`usdcc::assets::localFile()`). `layer_actions.cpp` already
   left URIs alone.
 - **Showing the origin.** The asset field's second line names the endpoint that delivered the
-  file: `Resolved · test · webdav://studio/chars/hero/tex/albedo.png`, and in its tooltip.
-  *Not built:* the same in the Dependencies panel and the Layer Editor.
+  file: `Resolved · test · webdav://studio/chars/hero/tex/albedo.png`, and in its tooltip. The
+  Dependencies panel has it in State ("from test"), the Layer Editor in the layer's tooltip, the
+  Composition rows and menus beside the path.
+- **Panels don't wait for servers** *(built 2026-11-25)*. Planned as a helper in the panels; built
+  below them, as `SdfLayer::Find()` and reading an asset attribute resolve too: under
+  `usdcc::assets::NoWait` ([no_wait.h](../src/cpp/assets/include/usdcc/assets/no_wait.h)) a thread's
+  resolving gets what servers last answered to anyone in the process. What isn't known doesn't
+  resolve *yet* (`NoWait::unanswered()`), is asked on up to four workers, and shows as
+  "Resolving..."; `AssetAnswers::changed` then refreshes the Attributes, the asset fields,
+  Dependencies, the Layer Editor, and opens a clicked USDA link. Workers have strings and the
+  stack's endpoints, never prims or layers; a context of another environment has other stacks, so
+  an old answer isn't one of its. Answers older than five seconds are used and asked again.
+  Local paths, and offline, resolve as before. Opening a file (Show USDA, a stage) still downloads
+  on the UI thread. Tests: `asset_answers_*` in `usdcc_ui_tests`, with a server that takes three
+  seconds.
 - **Settings > Assets** ([asset_settings.cpp](../src/cpp/usd/src/asset_settings.cpp)): the
   default environment, Work offline, Allowed hosts for plain HTTP, the cache's size, and a
   Clear Cache button (§7). The settings dialog builds its pages from typed settings and has no
