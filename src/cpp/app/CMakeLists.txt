@@ -135,7 +135,9 @@ endif()
 # the DLLs usdcc links against directly, but not the platform plugin, which
 # Qt loads dynamically at startup and which vcpkg doesn't ship a windeployqt
 # binary to deploy. Without it the app fails to start with "no Qt platform
-# plugin could be initialized." Copy it by hand alongside the executable.
+# plugin could be initialized." Copy it by hand alongside the executable, and
+# the offscreen one with it: a scripted run with QT_QPA_PLATFORM=offscreen would
+# otherwise stop at that same dialog.
 if(WIN32)
     add_custom_command(
         TARGET usdcc
@@ -144,8 +146,9 @@ if(WIN32)
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/platforms/qwindows.dll"
+            "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/platforms/qoffscreen.dll"
             "$<TARGET_FILE_DIR:usdcc>/platforms/"
-        COMMENT "Deploying Qt platform plugin")
+        COMMENT "Deploying Qt platform plugins")
     # What plugins built on usdcc_peers (docs/PEERS.md §13) load, which usdcc itself
     # doesn't link, so vcpkg's step above doesn't know of it. Beside usdcc.exe, not a
     # plugin's folder: plugins are loaded with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which
