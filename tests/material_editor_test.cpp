@@ -10,6 +10,7 @@
 #include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/hydra_viewport_window.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/prim_actions.h"
 #include "usdcc/usd/shading_preview.h"
 #include "usdcc/usd/shading_preview_widget.h"
 #include "usdcc/usd/shader_node_catalog.h"
@@ -1108,6 +1109,107 @@ USDCC_TEST(material_editor_preview_shows_the_material) {
     CHECK(restored.preview()->shapeName() == "Cube" && restored.preview()->hdriName() == "venice_sunrise_1k", "the same shape and light");
     CHECK(restored.preview()->hdriRotation() == 45, "turned the same");
     CHECK(!restored.areParametersShown() && restored.isPreviewShown(), "the same parts shown");
+}
+
+USDCC_TEST(material_editor_preview_uses_the_selected_prim) {
+    Fixture f;
+    usdcc::usd::ShadingPreviewWidget* preview = f.panel->preview();
+    const SdfPath ball("/World/WoodBall");
+    const auto menuOf = [](usdcc::usd::ShadingPreviewWidget* widget) {
+        auto menu = std::make_unique<QMenu>();
+        widget->populateOptionsMenu(menu.get());
+        return menu;
+    };
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    // Selecting a prim opens its material; selecting a node afterwards doesn't forget the prim.
+    f.stages.setSelectedPaths(f.stage, {ball});
+    settle();
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    CHECK(preview->selectedPrim() == ball, "the last prim selected that isn't a node: %s", preview->selectedPrim().GetText());
+    {
+        const auto menu = menuOf(preview);
+        QAction* use = menu->findChild<QAction*>("previewUseSelectedPrim");
+        CHECK(use && use->isEnabled() && use->text() == "Use Selected Prim (/World/WoodBall)", "the Shape menu offers it: %s",
+              use ? qPrintable(use->text()) : "none");
+        CHECK(!menu->findChild<QAction*>("previewScenePrim"), "and lists none as shown yet");
+        if (use) use->trigger();
+    }
+    usdcc::usd::ShadingPreviewStage* stage = preview->previewStage();
+    CHECK(preview->scenePrim() == ball && stage->scenePrim() == ball, "and shows it");
+    CHECK(!preview->hasShapeCamera() && preview->viewport()->time() == f.stage->timeCode(), "framed, at the stage's time");
+    const QString noUvs = "The material reads primvars WoodBall doesn't have: st.";
+    CHECK(preview->problem() == noUvs, "saying that a Sphere has no UVs: %s", qPrintable(preview->problem()));
+    {
+        const auto menu = menuOf(preview);
+        QAction* shown = menu->findChild<QAction*>("previewScenePrim");
+        CHECK(shown && shown->isChecked() && shown->text() == "/World/WoodBall", "the menu says which");
+        QAction* use = menu->findChild<QAction*>("previewUseSelectedPrim");
+        CHECK(use && !use->isEnabled(), "with nothing more to use");
+    }
+    f.stage->setTime(7);
+    CHECK(preview->viewport()->time() == UsdTimeCode(7), "it follows the time");
+
+    // A scope without geometry can't be used, and the menu says why.
+    f.stages.setSelectedPaths(f.stage, {SdfPath("/World/Looks")});
+    settle();
+    {
+        const auto menu = menuOf(preview);
+        QAction* use = menu->findChild<QAction*>("previewUseSelectedPrim");
+        CHECK(use && !use->isEnabled() && use->toolTip().contains("no geometry"), "no geometry: %s", use ? qPrintable(use->toolTip()) : "");
+    }
+
+    // Kept by a session, and while it's gone.
+    usdcc::usd::ShadingPreviewWidget restored;
+    restored.setStage(f.stage);
+    restored.restoreState(preview->saveState());
+    CHECK(restored.scenePrim() == ball && restored.previewStage()->scenePrim() == ball, "a session keeps it");
+    f.stage->usdStage()->GetPrimAtPath(ball).SetActive(false);
+    settle();
+    CHECK(preview->scenePrim() == ball && stage->scenePrim().IsEmpty() && preview->problem().contains("isn't drawn"), "deactivated, the shape shows and it says why: %s",
+          qPrintable(preview->problem()));
+    f.stage->usdStage()->GetPrimAtPath(ball).SetActive(true);
+    settle();
+    CHECK(stage->scenePrim() == ball && preview->problem() == noUvs, "and it's back with the prim: %s", qPrintable(preview->problem()));
+
+    // It follows a rename, and its undo.
+    CHECK(usdcc::usd::prim_actions::rename(*f.undo, f.stage, ball, "Oak"), "renamed");
+    settle();
+    CHECK(preview->scenePrim() == SdfPath("/World/Oak") && stage->scenePrim() == SdfPath("/World/Oak"), "to its new path: %s, showing %s",
+          preview->scenePrim().GetText(), stage->scenePrim().GetText());
+    CHECK(stage->stage()->GetPrimAtPath(SdfPath("/World/Oak")) && !stage->stage()->GetPrimAtPath(ball), "which is what's in the preview");
+    f.undo->stack(f.stage)->undo();
+    settle();
+    CHECK(preview->scenePrim() == ball && stage->scenePrim() == ball, "and back: %s", preview->scenePrim().GetText());
+
+    // Choosing a shape goes back to one, on its lights as ever.
+    preview->setShapeName(usdcc::usd::kDefaultPreviewShape);
+    CHECK(preview->scenePrim().IsEmpty() && stage->scenePrim().IsEmpty() && preview->hasShapeCamera(), "a shape again");
+    CHECK(preview->useSceneLights() && preview->viewport()->time() == UsdTimeCode::Default(), "lit by its lights, at no time of the scene's");
+}
+
+USDCC_TEST(material_editor_preview_fills_in_uv_sets) {
+    Fixture f;
+    f.stages.setSelectedPaths(f.stage, {kSurface});
+    settle();
+    usdcc::usd::ShadingPreviewWidget* preview = f.panel->preview();
+    const auto uvSets = [preview]() {
+        QMenu menu;
+        preview->populateOptionsMenu(&menu);
+        auto* action = menu.findChild<QAction*>("previewUvSets");
+        return action ? action->text() : QString();
+    };
+    CHECK(uvSets().isEmpty(), "the material reads st, which the shape has: %s", qPrintable(uvSets()));
+    f.stage->usdStage()->GetAttributeAtPath(kMaps.AppendChild(TfToken("UV")).AppendProperty(TfToken("inputs:varname"))).Set(std::string("uv1"));
+    settle();
+    CHECK(uvSets() == QString::fromUtf8("UV sets: uv1 \xE2\x86\x92 st"), "an edit to its reader is followed: %s", qPrintable(uvSets()));
+    CHECK(preview->problem().isEmpty(), "and nothing's missing: %s", qPrintable(preview->problem()));
+
+    // A prim of the scene has no such set, and says so.
+    preview->setScenePrim(SdfPath("/World/WoodBall"));
+    CHECK(uvSets().isEmpty() && preview->problem().contains("WoodBall") && preview->problem().contains("uv1"), "on a prim of the scene: %s",
+          qPrintable(preview->problem()));
 }
 
 USDCC_TEST(material_editor_preview_stays_square) {

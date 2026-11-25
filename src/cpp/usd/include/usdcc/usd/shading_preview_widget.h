@@ -42,8 +42,8 @@ USDCC_USD_UI_API QString shippedPreviewFolder();
 USDCC_USD_UI_API QStringList previewShapeFolders();
 USDCC_USD_UI_API QStringList previewHdriFolders();
 
-// The Material Editor's preview (docs/MATERIAL_EDITOR.md §7.2–§7.6): a material, or one node's
-// output, on a shape under an HDRI, rendered by the renderer of the viewport showing the same
+// The Material Editor's preview (docs/MATERIAL_EDITOR.md §7.2–§7.6, §7.9, §7.10): a material, or
+// one node's output, on a shape or a prim of the scene under an HDRI, rendered by the renderer of the viewport showing the same
 // stage. Above it: pause/play, and a menu of what's shown, the shape, the HDRI and Reset View.
 class USDCC_USD_UI_API ShadingPreviewWidget : public QWidget {
     Q_OBJECT
@@ -69,6 +69,15 @@ public:
     // By name, as the menus list them.
     void setShapeName(const QString& name);
     QString shapeName() const { return m_shapeName; }
+    // A prim of the scene shown instead of the shape (§7.10); empty, or choosing a shape, goes
+    // back. It's kept, with the shape shown and a warning, while it can't be.
+    void setScenePrim(const PXR_NS::SdfPath& prim);
+    const PXR_NS::SdfPath& scenePrim() const { return m_scenePrim; }
+    // The prim Use Selected Prim would show: the last one selected in the scene that isn't
+    // part of a shading network. It's remembered, as selecting a node of the graph selects
+    // that in the scene.
+    void setSelectedPrim(const PXR_NS::SdfPath& prim) { m_selectedPrim = prim; }
+    const PXR_NS::SdfPath& selectedPrim() const { return m_selectedPrim; }
     void setHdriName(const QString& name);  // empty for none: a grey dome and a key light
     QString hdriName() const { return m_hdriName; }
     void setHdriRotation(double degrees);
@@ -124,6 +133,10 @@ private:
     void applyMaterial();
     void applySubject();
     void applyShape();
+    // After applyShape() or a change in the scene: what the scene prim is seen through.
+    void applyScenePrimView();
+    void applyPrimvarProblem();
+    bool showsScenePrim() const;
     void applyCamera();
     void applyEnvironment();
     void followRenderer();
@@ -140,6 +153,8 @@ private:
     PXR_NS::SdfPath m_node;
     Subject m_subject = Subject::Material;
     QString m_shapeName;
+    PXR_NS::SdfPath m_scenePrim;
+    PXR_NS::SdfPath m_selectedPrim;
     QString m_hdriName;
     double m_rotation = 0;
     double m_exposure = 0;
@@ -164,6 +179,8 @@ private:
     QToolButton* m_more = nullptr;
 
     usdcc::core::Signal<const StageChanges&>::Connection m_stageChanged;
+    usdcc::core::Signal<double>::Connection m_timeChanged;
+    usdcc::core::Signal<const PrimMoves&>::Connection m_primsMoved;
     usdcc::core::Signal<>::Connection m_viewportsChanged;
 };
 

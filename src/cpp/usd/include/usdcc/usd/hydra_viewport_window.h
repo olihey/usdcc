@@ -328,6 +328,9 @@ public:
     // them. Set before the first frame.
     void setPreviewMode(bool preview);
     bool isPreviewMode() const { return m_previewMode; }
+    // Whether a preview orbits about its stage's up axis, as it does on a prim of the scene
+    // (docs/MATERIAL_EDITOR.md §7.10), rather than Y, which its shapes are turned to.
+    void setPreviewUsesStageUpAxis(bool uses);
     // Whether a dome light's map is drawn behind the scene, for renderers that can: the
     // display options' domeLightTextures.
     void setDomeLightVisible(bool visible);
@@ -480,8 +483,8 @@ private:
     void zoomStep(double steps);
     PXR_NS::GfVec3d cameraPosition() const;
     // The up axis the camera orbits about: the stage's. A preview's stays Y, as its
-    // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3).
-    bool cameraZUp() const { return !m_previewMode && stageIsZUp(); }
+    // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3), but on a prim of the scene.
+    bool cameraZUp() const { return (!m_previewMode || m_previewUsesStageUpAxis) && stageIsZUp(); }
     PXR_NS::GfFrustum currentFrustum() const;
     // Width over height of the window, in device pixels.
     double windowAspect() const;
@@ -604,6 +607,7 @@ private:
     PXR_NS::TfToken m_targetOp;
     DisplayOptions m_display;
     bool m_previewMode = false;
+    bool m_previewUsesStageUpAxis = false;
     bool m_paused = false;
     enum class RendererHalt { None, Paused, Stopped };
     RendererHalt m_rendererHalt = RendererHalt::None;  // what updateRendererActivity() did

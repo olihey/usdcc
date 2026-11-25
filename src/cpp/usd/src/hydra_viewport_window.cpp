@@ -459,6 +459,11 @@ void HydraViewportWindow::setPreviewMode(bool preview) {
     renderNow();
 }
 
+void HydraViewportWindow::setPreviewUsesStageUpAxis(bool uses) {
+    m_previewUsesStageUpAxis = uses;
+    stageUpAxisMayHaveChanged();
+}
+
 void HydraViewportWindow::setDomeLightVisible(bool visible) {
     DisplayOptions options = m_display;
     options.domeLightTextures = visible;

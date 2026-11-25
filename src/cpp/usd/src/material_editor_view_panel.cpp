@@ -28,6 +28,8 @@
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/imageable.h>
+#include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/nodeGraph.h>
 #include <pxr/usd/usdShade/shader.h>
@@ -297,6 +299,7 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
 
     m_selectionChanged = this->stageManager()->selectionChanged.connect([this](StageRefPtr changed, std::vector<SdfPath> paths) {
         if (changed != currentStage()) return;
+        rememberSelectedPrim(paths);
         selectionFromStage(paths);
         updateSidePane();
     });
@@ -358,6 +361,7 @@ void MaterialEditorViewPanel::attachStage() {
     m_params->setStage(stage);
     m_preview->setStage(stage);
     if (stage) {
+        rememberSelectedPrim(stageManager()->selectedPaths(stage));
         m_model = std::make_unique<UsdShadeGraphModel>(stage, m_undo);
         m_scene = std::make_unique<QtNodes::BasicGraphicsScene>(*m_model);
         m_scene->setNodeGeometry(std::make_unique<ShaderNodeGeometry>(*m_model));
@@ -715,6 +719,20 @@ void MaterialEditorViewPanel::selectionFromStage(const std::vector<SdfPath>& pat
         }
     }
     showSelectionInGraph();
+}
+
+void MaterialEditorViewPanel::rememberSelectedPrim(const std::vector<SdfPath>& paths) {
+    const UsdStageRefPtr usd = currentStage()->usdStage();
+    for (const SdfPath& path : paths) {
+        const UsdPrim prim = usd->GetPrimAtPath(path);
+        if (!prim || prim.IsPseudoRoot()) continue;
+        // Not a node, nor what holds nodes: selecting in the graph selects those. The menu says
+        // why a prim without geometry can't be used.
+        if (prim.IsA<UsdShadeShader>() || prim.IsA<UsdShadeNodeGraph>()) continue;
+        if (!prim.IsA<UsdGeomImageable>() && !prim.IsA<UsdGeomSubset>()) continue;
+        m_preview->setSelectedPrim(path);
+        return;
+    }
 }
 
 void MaterialEditorViewPanel::showSelectionInGraph() {

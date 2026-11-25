@@ -261,8 +261,15 @@ ShadingPreviewWidget::~ShadingPreviewWidget() = default;
 
 void ShadingPreviewWidget::setStage(const StageRefPtr& stage) {
     if (stage == m_stage && m_preview) return;
+    // A prim of the scene shown is that stage's; none yet is a session being restored.
+    if (m_stage && stage != m_stage) {
+        m_scenePrim = SdfPath();
+        m_selectedPrim = SdfPath();
+    }
     m_stage = stage;
     m_stageChanged = {};
+    m_timeChanged = {};
+    m_primsMoved = {};
     m_material = SdfPath();
     m_node = SdfPath();
     rebuildPreview();
@@ -270,12 +277,34 @@ void ShadingPreviewWidget::setStage(const StageRefPtr& stage) {
         m_stageChanged = stage->changed.connect([this](const StageChanges& changes) {
             if (!m_preview) return;
             m_preview->syncWithSource();
+            const bool shown = showsScenePrim();
+            m_preview->sceneChanged(changes.resyncedPaths, changes.changedInfoOnlyPaths);
+            if (!m_scenePrim.IsEmpty() && shown != showsScenePrim()) {
+                applyShape();  // it's gone
+            } else if (!m_scenePrim.IsEmpty() && !shown && !changes.resyncedPaths.empty() &&
+                       previewablePrim(m_stage->usdStage()->GetPrimAtPath(m_scenePrim))) {
+                applyShape();  // it's back
+            }
+            m_viewport->stageUpAxisMayHaveChanged();
+            applyPrimvarProblem();
             // The material may have gone, or come back.
             if (!changes.resyncedPaths.empty()) {
                 applyMaterial();
                 applySubject();
             }
             m_viewport->requestUpdate();
+        });
+        m_timeChanged = stage->timeChanged.connect([this](double) {
+            if (showsScenePrim()) m_viewport->setTime(m_stage->timeCode());
+        });
+        m_primsMoved = stage->primsMoved.connect([this](const PrimMoves& moves) {
+            m_selectedPrim = pathAfterMoves(m_selectedPrim, moves);
+            const SdfPath moved = pathAfterMoves(m_scenePrim, moves);
+            if (moved != m_scenePrim) {
+                m_scenePrim = moved;
+                applyShape();
+                Q_EMIT stateChanged();
+            }
         });
     }
 }
@@ -312,6 +341,7 @@ void ShadingPreviewWidget::applyMaterial() {
     std::string why;
     m_preview->setMaterial(m_material, &why);
     setProblem("material", qs(why));
+    applyPrimvarProblem();
     checkRenderer();
     m_viewport->requestUpdate();
 }
@@ -354,14 +384,49 @@ void ShadingPreviewWidget::setPaused(bool paused) { m_pause->setChecked(paused);
 bool ShadingPreviewWidget::isPaused() const { return m_pause->isChecked(); }
 
 void ShadingPreviewWidget::setShapeName(const QString& name) {
-    if (name == m_shapeName && m_preview && !m_preview->shape().empty()) return;
+    if (name == m_shapeName && m_scenePrim.IsEmpty() && m_preview && !m_preview->shape().empty()) return;
     m_shapeName = name;
+    m_scenePrim = SdfPath();
     applyShape();
     Q_EMIT stateChanged();
 }
 
+void ShadingPreviewWidget::setScenePrim(const SdfPath& prim) {
+    if (prim == m_scenePrim) return;
+    m_scenePrim = prim;
+    // Use scene lights, on for a lit shape, isn't meant for this. Going back to that shape is
+    // choosing it again.
+    m_sceneLights = false;
+    m_lightsShape.clear();
+    applyShape();
+    Q_EMIT stateChanged();
+}
+
+bool ShadingPreviewWidget::showsScenePrim() const { return m_preview && !m_preview->scenePrim().IsEmpty(); }
+
+void ShadingPreviewWidget::applyScenePrimView() {
+    const bool shown = showsScenePrim();
+    m_viewport->setPreviewUsesStageUpAxis(shown);
+    // A shape has no time of its own; a prim is where, and as, the scene has it now.
+    m_viewport->setTime(shown ? m_stage->timeCode() : UsdTimeCode::Default());
+}
+
+void ShadingPreviewWidget::applyPrimvarProblem() {
+    QStringList missing;
+    if (m_preview) {
+        for (const std::string& name : m_preview->missingPrimvars()) missing << qs(name);
+    }
+    const QString shape = showsScenePrim() ? qs(m_preview->scenePrim().GetName()) : m_shapeName;
+    setProblem("primvars", missing.isEmpty() ? QString()
+                                             : tr("The material reads primvars %1 doesn't have: %2.").arg(shape, missing.join(QStringLiteral(", "))));
+}
+
 void ShadingPreviewWidget::applyShape() {
     if (!m_preview) return;
+    std::string primProblem;
+    const bool prim = m_preview->setScenePrim(m_scenePrim, &primProblem) && !m_scenePrim.IsEmpty();
+    setProblem("prim", qs(primProblem));
+    applyScenePrimView();
     const std::vector<PreviewAsset> shapes = listPreviewAssets(utf8(previewShapeFolders()), previewShapeExtensions());
     if (shapes.empty()) {
         setProblem("shape", tr("No preview shapes in %1.").arg(previewShapeFolders().join(QStringLiteral(", "))));
@@ -378,12 +443,15 @@ void ShadingPreviewWidget::applyShape() {
         // Use scene lights applies to a shape that has some, and is where one starts. Only for
         // another file: the same one again (a new stage) keeps what was chosen for it.
         m_hasLights = m_preview->shapeHasLights();
-        if (m_hasLights && chosen.file != m_lightsShape) {
-            m_sceneLights = true;
-            Q_EMIT stateChanged();
+        if (!prim) {
+            if (m_hasLights && chosen.file != m_lightsShape) {
+                m_sceneLights = true;
+                Q_EMIT stateChanged();
+            }
+            m_lightsShape = chosen.file;
         }
-        m_lightsShape = chosen.file;
         applyEnvironment();
+        applyPrimvarProblem();
         m_framed = false;
         frame();
     } else {
@@ -476,9 +544,18 @@ void ShadingPreviewWidget::populateOptionsMenu(QMenu* menu) {
     menu->addSeparator();
 
     // The menu is built each time it opens, so a file dropped into a folder shows up.
-    QMenu* shapes = menu->addMenu(tr("Shape: %1").arg(m_shapeName));
+    QMenu* shapes = menu->addMenu(tr("Shape: %1").arg(showsScenePrim() ? qs(m_preview->scenePrim().GetName()) : m_shapeName));
     shapes->setObjectName(QStringLiteral("previewShapeMenu"));
     populateShapeMenu(shapes);
+    if (m_preview && !m_preview->filledUvSets().empty()) {
+        QStringList names;
+        for (const std::string& name : m_preview->filledUvSets()) names << qs(name);
+        QAction* uvSets = menu->addAction(
+            tr("UV sets: %1 \xE2\x86\x92 %2").arg(names.join(QStringLiteral(", ")), qs(m_preview->uvSetSource())));
+        uvSets->setObjectName(QStringLiteral("previewUvSets"));
+        uvSets->setToolTip(tr("The material reads these, which the shape doesn't have: it shows them with its own"));
+        uvSets->setEnabled(false);
+    }
     const QString light = m_sceneLights && m_hasLights ? tr("Scene lights") : m_hdriName.isEmpty() ? tr("None") : m_hdriName;
     QMenu* lights = menu->addMenu(tr("Light: %1").arg(light));
     lights->setObjectName(QStringLiteral("previewLightMenu"));
@@ -496,15 +573,38 @@ void ShadingPreviewWidget::populateShapeMenu(QMenu* menu) {
     menu->clear();
     menu->setToolTipsVisible(true);
     auto* group = new QActionGroup(menu);
+    if (!m_scenePrim.IsEmpty()) {
+        QAction* shown = menu->addAction(qs(m_scenePrim.GetString()));
+        shown->setObjectName(QStringLiteral("previewScenePrim"));
+        shown->setToolTip(tr("The prim of the scene the material is shown on"));
+        shown->setCheckable(true);
+        shown->setChecked(showsScenePrim());
+        group->addAction(shown);
+    }
+    // Which prim, and whether it can be shown, as the scene is now.
+    const UsdPrim selected = m_stage && !m_selectedPrim.IsEmpty() ? m_stage->usdStage()->GetPrimAtPath(m_selectedPrim) : UsdPrim();
+    std::string why;
+    const bool usable = selected && previewablePrim(selected, &why);
+    QAction* use = menu->addAction(selected ? tr("Use Selected Prim (%1)").arg(qs(m_selectedPrim.GetString())) : tr("Use Selected Prim"), this,
+                                   [this, path = m_selectedPrim]() { setScenePrim(path); });
+    use->setObjectName(QStringLiteral("previewUseSelectedPrim"));
+    use->setEnabled(usable && !(m_selectedPrim == m_scenePrim && showsScenePrim()));
+    use->setToolTip(!selected ? tr("Select a prim with geometry in the scene to show the material on it")
+                    : !usable ? qs(why)
+                              : tr("Show the material on this prim of the scene, where it is, with its own UV sets"));
+    menu->addSeparator();
+
+    bool any = false;
     for (const PreviewAsset& asset : listPreviewAssets(utf8(previewShapeFolders()), previewShapeExtensions())) {
         const QString name = qs(asset.name);
         QAction* action = menu->addAction(name, this, [this, name]() { setShapeName(name); });
         action->setCheckable(true);
-        action->setChecked(name.compare(m_shapeName, Qt::CaseInsensitive) == 0);
+        action->setChecked(!showsScenePrim() && name.compare(m_shapeName, Qt::CaseInsensitive) == 0);
         action->setToolTip(qs(asset.file));
         group->addAction(action);
+        any = true;
     }
-    if (menu->isEmpty()) menu->addAction(tr("No shapes found"))->setEnabled(false);
+    if (!any) menu->addAction(tr("No shapes found"))->setEnabled(false);
 }
 
 void ShadingPreviewWidget::populateLightMenu(QMenu* menu) {
@@ -635,7 +735,7 @@ int ShadingPreviewWidget::heightForSquare(int width) const {
 
 QString ShadingPreviewWidget::problem() const {
     QStringList lines;
-    for (const char* key : {"material", "renderer", "node", "shape", "hdri"}) {
+    for (const char* key : {"material", "renderer", "node", "prim", "shape", "primvars", "hdri"}) {
         const auto it = m_problems.find(key);
         if (it != m_problems.end()) lines << it->second;
     }
@@ -659,7 +759,7 @@ void ShadingPreviewWidget::frame() {
     if (m_hasCamera) {
         resetView();
     } else {
-        const GfRange3d bounds = m_preview->shapeBounds();
+        const GfRange3d bounds = m_preview->shapeBounds(m_viewport->time());
         if (bounds.IsEmpty()) return;
         m_viewport->frameBox(bounds);
     }
@@ -668,6 +768,7 @@ void ShadingPreviewWidget::frame() {
 
 QJsonObject ShadingPreviewWidget::saveState() const {
     return {{QStringLiteral("shape"), m_shapeName},
+            {QStringLiteral("scenePrim"), qs(m_scenePrim.GetString())},
             {QStringLiteral("hdri"), m_hdriName},
             {QStringLiteral("rotation"), m_rotation},
             {QStringLiteral("exposure"), m_exposure},
@@ -680,6 +781,10 @@ QJsonObject ShadingPreviewWidget::saveState() const {
 void ShadingPreviewWidget::restoreState(const QJsonObject& state) {
     if (state.contains(QStringLiteral("shape"))) {
         m_shapeName = state.value(QStringLiteral("shape")).toString();
+        const std::string prim = state.value(QStringLiteral("scenePrim")).toString().toStdString();
+        m_scenePrim = SdfPath::IsValidPathString(prim) ? SdfPath(prim) : SdfPath();
+        // Its lights are as they were saved.
+        if (!m_scenePrim.IsEmpty()) m_lightsShape.clear();
         applyShape();
     }
     if (state.contains(QStringLiteral("hdri"))) m_hdriName = state.value(QStringLiteral("hdri")).toString();
