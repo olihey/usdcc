@@ -123,6 +123,13 @@ std::string shaderDisplayName(const std::string& name);
 // its nodes one context and no role, so they group by their "category".
 RendererProfile arnoldRendererProfile();
 
+// MoonRay's, which enableMoonray() adds where its nodes are (docs/MOONRAY.md §5). Its classes
+// have no group, so the profile says.
+RendererProfile moonrayRendererProfile();
+
+// Adds it if OpenUSD found the plugin that gives Sdr MoonRay's nodes. False without.
+bool enableMoonray();
+
 // Asks a render delegate plugin ("HdStormRendererPlugin"). Empty if it can't be
 // created. V-Ray and RTX don't run as delegates in this process, so their plugins
 // declare the same through their profiles.

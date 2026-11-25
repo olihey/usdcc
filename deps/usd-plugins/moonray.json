@@ -5,12 +5,13 @@
   "submodules": ["cmake_modules", "moonray/scene_rdl2", "moonray/mcrt_denoise", "moonray/moonray",
                  "moonray/moonshine", "arras/arras4_core", "moonray/moonray_arras/mcrt_messages",
                  "moonray/moonray_arras/mcrt_dataio", "moonray/moonray_arras/mcrt_computation",
-                 "moonray/hydra/hdMoonray"],
+                 "moonray/hydra/hdMoonray", "moonray/hydra/moonray_sdr_plugins"],
   "patches": [
     {"patch": "patches/moonray-no-boost-python.patch", "in": "moonray/scene_rdl2"},
     {"patch": "patches/moonray-own-transpose.patch", "in": "moonray/scene_rdl2"},
     {"patch": "patches/moonray-plain-textures.patch", "in": "moonray/moonray"},
     {"patch": "patches/moonray-hdmoonray-26.08.patch", "in": "moonray/hydra/hdMoonray"},
+    {"patch": "patches/moonray-sdr-26.08.patch", "in": "moonray/hydra/moonray_sdr_plugins"},
     {"patch": "patches/moonray-macos-cmake-modules.patch", "in": "cmake_modules"},
     {"patch": "patches/moonray-macos-scene-rdl2.patch", "in": "moonray/scene_rdl2"},
     {"patch": "patches/moonray-macos-moonray.patch", "in": "moonray/moonray"},
@@ -74,11 +75,13 @@
   "set": "optional",
   "publish": true,
   "check": {
-    "plugins": ["hd_moonray", "hd_moonray_debug", "hdMoonrayAdapters"],
+    "plugins": ["hd_moonray", "hd_moonray_debug", "hdMoonrayAdapters", "moonrayShaderDiscovery", "moonrayShaderParser"],
+    "nodes": {"moonrayClass": ["DwaBaseMaterial", "HairMaterial_v3", "ImageMap", "ImageNormalMap", "NormalDisplacement"]},
     "renderers": ["HdMoonrayRendererPlugin", "HdMoonrayRendererDebugPlugin"],
     "render": [
       {"file": "test_data/moonray/check.usda", "renderer": "HdMoonrayRendererDebugPlugin", "min_mean": 0.02},
-      {"file": "test_data/moonray/check.usda", "renderer": "HdMoonrayRendererPlugin", "min_mean": 0.02}
+      {"file": "test_data/moonray/check.usda", "renderer": "HdMoonrayRendererPlugin", "min_mean": 0.02},
+      {"file": "test_data/moonray/nodes.usda", "renderer": "HdMoonrayRendererDebugPlugin", "min_mean": 0.02}
     ]
   }
 }

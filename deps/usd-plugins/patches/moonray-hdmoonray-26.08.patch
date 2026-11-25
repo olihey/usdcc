@@ -171,10 +171,26 @@ index 0d21114..0274ec0 100644
  
  }
 diff --git a/lib/hydramoonray/RenderDelegate.h b/lib/hydramoonray/RenderDelegate.h
-index 568aa68..174ff7e 100644
+index 568aa68..9013233 100644
 --- a/lib/hydramoonray/RenderDelegate.h
 +++ b/lib/hydramoonray/RenderDelegate.h
-@@ -296,6 +296,7 @@ public:
+@@ -179,6 +179,15 @@ public:
+     pxr::TfToken GetMaterialNetworkSelector() const override
+         { static pxr::TfToken tt("moonray"); return tt; }
+ 
++    /// outputs:moonray:surface first, and outputs:surface for the materials without it:
++    /// a material can have MoonRay's nodes beside what the other renderers read.
++    pxr::TfTokenVector GetMaterialRenderContexts() const override
++        { return {pxr::TfToken("moonray"), pxr::TfToken()}; }
++
++    /// The nodes it has itself, as moonrayShaderParser gives them to Sdr.
++    pxr::TfTokenVector GetShaderSourceTypes() const override
++        { return {pxr::TfToken("moonrayClass")}; }
++
+     /// This function returns the default AOV descriptor for a given named AOV.
+     /// This mechanism lets the renderer decide things like what format
+     /// a given AOV will be written as.
+@@ -296,6 +305,7 @@ public:
      const RenderSettings& renderSettings() const { return mRenderSettings; }
  
      void markAllRprimsDirty(pxr::HdDirtyBits bits);

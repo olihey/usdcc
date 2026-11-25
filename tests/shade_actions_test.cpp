@@ -4,6 +4,7 @@
 
 #include "usdcc/usd/shade_actions.h"
 #include "usdcc/usd/shade_graph.h"
+#include "usdcc/usd/shader_node_catalog.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
@@ -488,4 +489,56 @@ USDCC_TEST(shake_detector) {
         t += 1000;
     }
     CHECK(!fired, "nor slowly");
+}
+
+// Where the moonray pack is (docs/MOONRAY.md §7.7), with its nodes as the editor offers them: the
+// ports a drag connects, and the terminal. USDCC_TEST_MOONRAY_SCENE keeps the scene, to render it.
+USDCC_TEST(shade_actions_moonray_network) {
+    if (!enableMoonray()) return;
+    QFile scene(QStringLiteral(USDCC_TEST_DATA_DIR) + QStringLiteral("/moonray/nodes.usda"));
+    CHECK(scene.open(QIODevice::ReadOnly), "the scene is there");
+    Fixture f(scene.readAll().constData());
+    const SdfPath material("/World/mat");
+    f.usd()->GetPrimAtPath(material).GetAttribute(TfToken("outputs:moonray:surface")).Clear();
+    for (const char* name : {"base", "checker"}) f.usd()->RemovePrim(material.AppendChild(TfToken(name)));
+    f.usd()->GetPrimAtPath(material).RemoveProperty(TfToken("outputs:moonray:surface"));
+
+    const SdfPath base = actions::createShader(f.undo, f.stage, material, moonrayRendererProfile().defaultSurfaceNode, GfVec2f(0, 0));
+    const SdfPath map = actions::createShader(f.undo, f.stage, material, "CheckerboardMap", GfVec2f(-2, 0));
+    const SdfPath normal = actions::createShader(f.undo, f.stage, material, "RgbToNormalMap", GfVec2f(-2, 2));
+    const ShadeGraph graph = readShadeGraph(f.usd()->GetPrimAtPath(material), {{pageKey(base, "Diffuse"), true}, {pageKey(base, "Normal"), true}});
+    const auto port = [&graph](const SdfPath& path, ShadeNodeKind kind, const char* name) -> actions::PortRef {
+        for (const ShadeGraphNode& node : graph.nodes) {
+            if (node.path != path || node.kind != kind) continue;
+            for (const auto* ports : {&node.in, &node.out}) {
+                for (const ShadeGraphPort& each : *ports) {
+                    if (each.attribute == name) return {node.path, each.attribute, each.typeName};
+                }
+            }
+        }
+        return {};
+    };
+    const actions::PortRef albedo = port(base, ShadeNodeKind::Shader, "inputs:albedo");
+    const actions::PortRef surface = port(base, ShadeNodeKind::Shader, "outputs:out");
+    const actions::PortRef color = port(map, ShadeNodeKind::Shader, "outputs:out");
+    const actions::PortRef bump = port(base, ShadeNodeKind::Shader, "inputs:input_normal");
+    const actions::PortRef bumped = port(normal, ShadeNodeKind::Shader, "outputs:out");
+    const actions::PortRef terminal = port(material, ShadeNodeKind::Outputs, "outputs:moonray:surface");
+    CHECK(albedo.typeName == "color3f" && color.typeName == "color3f", "a color and a map: [%s] [%s]", albedo.typeName.c_str(), color.typeName.c_str());
+    CHECK(surface.typeName == "token", "the material's output is a terminal: [%s]", surface.typeName.c_str());
+    CHECK(bump.typeName == "token" && bumped.typeName == "token", "and so are normal maps");
+    CHECK(!terminal.prim.IsEmpty(), "the Material offers outputs:moonray:surface");
+    CHECK(actions::connect(f.undo, f.stage, albedo, color) && actions::connect(f.undo, f.stage, terminal, surface) &&
+              actions::connect(f.undo, f.stage, bump, bumped),
+          "they connect");
+    CHECK(f.source("/World/mat.outputs:moonray:surface") == surface.prim.AppendProperty(surface.attribute), "the terminal has its source");
+    CHECK(actions::authorInput(f.undo, f.stage, base, TfToken("inputs:show_specular")), "an input of it");
+    bool specular = false;
+    CHECK(f.usd()->GetPrimAtPath(base).GetAttribute(TfToken("inputs:show_specular")).Get(&specular) && specular, "with MoonRay's default, on");
+    // What an unconnected normal map is doesn't matter here: no map makes none.
+    actions::deleteNodes(f.undo, f.stage, {normal});
+    f.usd()->GetPrimAtPath(map).CreateAttribute(TfToken("inputs:color_A"), SdfValueTypeNames->Color3f).Set(GfVec3f(0.9f, 0.05f, 0.05f));
+    f.usd()->GetPrimAtPath(map).CreateAttribute(TfToken("inputs:color_B"), SdfValueTypeNames->Color3f).Set(GfVec3f(0.05f, 0.05f, 0.9f));
+    const QByteArray keep = qgetenv("USDCC_TEST_MOONRAY_SCENE");
+    if (!keep.isEmpty()) CHECK(f.usd()->GetRootLayer()->Export(keep.toStdString()), "the scene is kept");
 }

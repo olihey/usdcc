@@ -297,6 +297,16 @@ USDCC_TEST(shader_catalog_profile_groups_and_hides) {
     CHECK(arnold.groupMetadata == "category", "groups by category, as arnold-usd gives no role");
     CHECK(std::find(arnold.hiddenGroups.begin(), arnold.hiddenGroups.end(), "Light Filter") != arnold.hiddenGroups.end(), "without light filters");
     CHECK(arnold.nodeGroups.count("arnold:ramp_rgb") == 1, "and places the shaders that have none");
+
+    const RendererProfile moonray = usdcc::usd::moonrayRendererProfile();
+    CHECK(moonray.shadingSystem == "moonrayClass" && moonray.terminalPrefix == "moonray" &&
+              moonray.defaultSurfaceNode == "DwaBaseMaterial" && moonray.terminals.size() == 3,
+          "MoonRay's profile");
+    CHECK(moonray.nodeGroups.at("NoiseMap_v2") == "Noise" && moonray.nodeGroups.at("DwaBaseMaterial") == "Material" &&
+              moonray.nodeGroups.at("ImageNormalMap") == "Normal",
+          "groups its classes, which say none");
+    CHECK(std::find(moonray.hiddenNodes.begin(), moonray.hiddenNodes.end(), "Usd*") != moonray.hiddenNodes.end(),
+          "without its copies of USD's nodes");
 }
 
 USDCC_TEST(shader_catalog_profiles) {

@@ -8,7 +8,7 @@ in-process and through a local Arras session, build against the published OpenUS
 `deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
 Its licences are read (§3.1), and a Linux release attaches it as a download of its own (§7.5), once CI
 has published the pack. The pack builds on macOS (Apple silicon) too and renders there in usdcc (§7.6); CI
-hasn't built that one. **Linux x64 and macOS: no Windows, by decision.**
+hasn't built that one. Its nodes are in the Material Editor (§7.7). **Linux x64 and macOS: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -499,6 +499,39 @@ checks its libraries, and blocks the UI. Later ones take 0.3 s.
 - The published macOS OpenUSD asset links Homebrew libraries of the machine it was built on, so MoonRay doesn't load over
   it. Tested over a locally built OpenUSD instead. It needs the asset's fix (pull request 87).
 - The crash scenes of §7.3, light linking, VDB, and real scenes haven't been tried here. No Metal XPU mode.
+
+### 7.7 Results of phase 5, nodes (2026-11-25)
+
+In WSL, over the published Linux asset. **A DwaBaseMaterial network made with the Material Editor's
+actions renders in MoonRay**, through Arras and in-process; a renderer without MoonRay's nodes (Embree)
+shows the same material's UsdPreviewSurface.
+
+- **The port,** `patches/moonray-sdr-26.08.patch` over `moonray_sdr_plugins`, a project of the hook now.
+  Ndr's names became Sdr's, and no Boost. Beyond that, it changes what the editor would have got wrong:
+  - A bool's default was the opposite of the class's. Bools are USD's bool, colors are `color3f`, the double
+    vectors and Mat3f have USD's types, and RgbaVector is read as such.
+  - Fifteen Dwa and five hair materials have a class type of their own (`DwaBaseLayerable`,
+    `DwaBaseHairLayerable`): they had no surface context and no output. They are surfaces now, and normal maps
+    are patterns with a terminal output.
+  - A material, normal map, displacement, volume or map given as an object (`SceneObject*`) couldn't be connected.
+    It is a terminal input now. Cameras, light sets, trace sets and geometry still can't.
+  - The classes are found beside the plugin (`<root>/coredata`) when `MOONRAY_CLASS_PATH` is empty: Sdr may look
+    for them before hdMoonray, which sets MoonRay's other variables, is loaded.
+- **What ships:** 102 of the 186 class descriptions: materials, maps, normal maps, displacements, volumes. Not the
+  lights, cameras and the rest, the tests', nor **MoonRay's own `Usd*` classes** (§5.3): they have USD's names and
+  Sdr could have given them for USD's. hdMoonray makes them by name and doesn't need a description.
+- **Contexts and source types** (§5.4): the hdMoonray patch gives `{"moonray", ""}` and `{"moonrayClass"}`.
+- **Multiple outputs** (§5.5): none. Every class has `out`; hdMoonray's one object per output is for
+  UsdUVTexture's channels.
+- **The profile,** `moonrayRendererProfile()` in
+  [shader_node_catalog.cpp](../src/cpp/usd/src/shader_node_catalog.cpp), added at start where the parser plugin
+  is. Displacements and volumes have no groups: there are few.
+- **The check** asks Sdr for five of the nodes and renders `test_data/moonray/nodes.usda`.
+- **Tests:** `shader_catalog_*`, and `shade_actions_moonray_network`, which runs where the pack is (not in CI's test
+  jobs: they have no optional packs). `USDCC_TEST_MOONRAY_SCENE` keeps the scene it makes.
+
+**Not tried:** the editor's panel by hand, macOS (CI builds and checks the pack there), each of the 102 classes (two
+were rendered: `DwaBaseMaterial` and `CheckerboardMap`), hair, volumes and displacement.
 
 ## 8. Decisions
 
