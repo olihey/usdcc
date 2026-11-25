@@ -62,7 +62,7 @@ there; no pin yet (§7 phase 6). The rest is a plan.
 |---|---|---|---|
 | `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check, on Windows (§7 phase 1) and on Linux (phase 8), though its README only names USD 23.08–25.11 |
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
-| `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | Not proven. The local build is against the older USD |
+| `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | **Builds** on Windows, CPU only, against phase 4's OpenUSD. Rendering in usdcc isn't proven (§7 phase 5) |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
 | `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Proven** on Ubuntu 24.04: `deps/usd-plugins/moonray.json` builds a pack against the published asset that passes its check, rendering included, and renders in usdcc's viewport ([MOONRAY.md](MOONRAY.md) §7.4); CI hasn't built it ([MOONRAY.md](MOONRAY.md) §7.1) |
@@ -555,23 +555,26 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
         include boost, which Cycles doesn't put on the include path; the build adds
         OpenUSD's `include/boost-1_86` (here through MSVC's `CL` variable, since Cycles sets
         `CMAKE_CXX_FLAGS` itself). A pin would pass it as a CMake argument or a patch.*
-      - *What hdCycles loads: TBB (`tbb12.dll`), OpenImageIO, OpenColorIO, OpenVDB and
-        OpenUSD's own libraries from the asset, and from Blender's libraries only
-        `OpenImageDenoise.dll` (with its `_core` and `_device_cpu` DLLs; the CUDA, HIP and
-        SYCL ones load only for those devices). So oneTBB in the asset was the right order.*
-      - *Embree: none. hdCycles links Blender's `embree4.lib`, but nothing defines
-        `WITH_EMBREE`, and Cycles builds its own BVH ("Using BVH2 layout"). That avoids two
-        `embree4.dll`s in one process (OpenUSD's 4.3.3 and Blender's), and costs some CPU
-        speed. Turning it on means one Embree for both, OpenUSD's.*
-      - *Rendering: `cycles.exe` from the same build rendered a test scene through
-        hdCycles on the CPU in 0.1 s at 480×320 (32 samples): the ground mesh and the
-        lights, but **not the Sphere and the Cube**. Gatling had the same gap and
-        `gatling-implicit-surfaces.patch` fills it; Cycles needs the same (OpenUSD's
-        implicit-surface scene index for its delegate). In usdcc, "Cycles" is among the
-        viewport's renderers and switching to it works; the viewport's picture couldn't be
-        read from a script here (its window grab showed other panels), so it isn't checked.*
-      - *Install: 126 MB, of which the GPU kernels' sources and the redistributable
-        runtime DLLs are most; a pack takes `hydra/` and the OpenImageDenoise DLLs.*
+      - *What hdCycles imports (`dumpbin`): TBB (`tbb12.dll`), OpenImageIO, OpenColorIO,
+        OpenVDB and OpenUSD's own libraries, all in the asset; from Blender's libraries only
+        `OpenImageDenoise.dll`. What that loads in turn at run time (the install has its
+        `_core` and one `_device_*` DLL per device) isn't checked.*
+      - *Embree: not compiled in. `WITH_CYCLES_EMBREE` is on and Blender's `embree4.lib` is on
+        hdCycles' link line, but none of the generated projects defines `WITH_EMBREE`,
+        hdCycles doesn't import `embree4.dll`, and the render below says "Using BVH2 layout".
+        So this build can't bring a second `embree4.dll` beside OpenUSD's 4.3.3. Why CMake
+        leaves it out, and what it costs in speed, isn't known.*
+      - *Rendering, outside usdcc: `cycles.exe` from the same build reads USD with its own
+        `HdCyclesDelegate` (`src/hydra/file_reader.cpp`), though with a chain of scene indices
+        of its own, not the viewport's. On the CPU, at 480×320 with 32 samples, it traced the
+        test scene in 0.1 s; that picture was all white. With dimmer lights (64 samples) the
+        ground mesh is there, but **the Sphere and the Cube aren't seen**. Why isn't known:
+        Cycles counted three meshes, and its source has nothing about implicit surfaces,
+        so the gap Gatling's patch fills is one guess.*
+      - *In usdcc: "Cycles" is among the viewport's renderers, and `set_renderer()` to it
+        returned, with the app still running 25 s later. **What it draws there isn't known:**
+        the pictures taken showed other panels, which said "No stage open".*
+      - *Install: 126 MB, with GPU kernel sources and runtime DLLs a pack doesn't need.*
    2. `deps/usd-plugins/cycles.json` (`win64` and `linux-x64`, `optional`,
       `"publish": false`). The pack check renders a small scene on the CPU and fails on a
       library the pin doesn't list (§5). The pack builds the Material Editor's
@@ -608,12 +611,11 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
      (`DXCOMPILER_DLL`), which wouldn't load here (error 193); the one DXC's release has
      does. A pin would point `DXCOMPILER_DLL` at it.*
    - *In usdcc (test profile, the RTX 4090 here): "Aurora" is among the viewport's
-     renderers. Switching to it ends the app: Aurora's `Renderer` creation fails, and
-     hdAurora reports that as `TF_FATAL_ERROR("HdAurora fails to create renderer!")`. The
-     cause isn't found; the dump has "D3D12Device2 not supported, cannot import device"
-     among its strings, which suggests the DirectX backend's device or its interop with
-     Storm's GL. That is the next thing to look at, with Aurora's console log
-     (`AU_DEV_ALWAYS_DUMP_LOGS`).*
+     renderers. Switching to it ends the app. In the dump's stack, `aurora.dll`, called from
+     hdAurora inside `CreateDelegate()`, reports a failure to hdAurora's log callback, which
+     makes it a `TF_FATAL_ERROR`. **The message and the cause aren't known:** neither DLL had
+     symbols. The next thing to look at is that message, which the callback also writes to
+     Aurora's console log (`AU_DEV_ALWAYS_DUMP_LOGS`).*
    - *Not done: the pin. Aurora's build isn't plain CMake (its externals script first),
      which needs §4's "small Python hook next to the JSON", not built yet; and there's no
      point publishing a pack that can't start its renderer.*
