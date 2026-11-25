@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 
+using usdcc::usd::primBounds;
 using usdcc::usd::sceneBounds;
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -124,4 +125,21 @@ USDCC_TEST(scene_bounds_of_the_whole_stage) {
     const UsdStageRefPtr empty = UsdStage::CreateInMemory();
     empty->DefinePrim(SdfPath("/Empty"), TfToken("Xform"));
     CHECK(!sceneBounds(empty, {}), "a stage with no geometry has none");
+}
+
+USDCC_TEST(scene_bounds_of_one_prim) {
+    const UsdStageRefPtr stage = makeStage();
+    const auto at = [&](const char* path) { return primBounds(stage->GetPrimAtPath(SdfPath(path)), UsdTimeCode(1)); };
+    auto bounds = at("/World/Hidden");
+    CHECK(bounds && closeTo(*bounds, GfRange3d(GfVec3d(109, -1, -1), GfVec3d(111, 1, 1))), "a hidden prim has its box: %s",
+          text(bounds).c_str());
+    bounds = at("/World/Guide");
+    CHECK(bounds && closeTo(*bounds, GfRange3d(GfVec3d(9, -101, -1), GfVec3d(11, -99, 1))), "and a guide: %s",
+          text(bounds).c_str());
+    bounds = at("/World");
+    CHECK(bounds && closeTo(*bounds, GfRange3d(GfVec3d(9, -1, -1), GfVec3d(111, 6, 1))),
+          "a parent's has the hidden ones, not the guides: %s", text(bounds).c_str());
+    CHECK(!at("/Looks") && !at("/Looks/Mat") && !at("/Missing"), "nothing without geometry");
+    stage->GetPrimAtPath(SdfPath("/World/Box")).SetActive(false);
+    CHECK(!at("/World/Box"), "nor an inactive prim");
 }

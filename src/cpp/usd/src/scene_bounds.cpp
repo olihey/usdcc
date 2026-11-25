@@ -48,4 +48,18 @@ std::optional<PXR_NS::GfRange3d> sceneBounds(const PXR_NS::UsdStagePtr& stage, c
     return bounds;
 }
 
+std::optional<PXR_NS::GfRange3d> primBounds(const PXR_NS::UsdPrim& prim, PXR_NS::UsdTimeCode time) {
+    if (!prim || !prim.IsActive()) return std::nullopt;
+    PXR_NS::TfTokenVector purposes{PXR_NS::UsdGeomTokens->default_, PXR_NS::UsdGeomTokens->render,
+                                   PXR_NS::UsdGeomTokens->proxy};
+    if (const PXR_NS::UsdGeomImageable imageable{prim};
+        imageable && imageable.ComputePurpose() == PXR_NS::UsdGeomTokens->guide) {
+        purposes.push_back(PXR_NS::UsdGeomTokens->guide);
+    }
+    PXR_NS::UsdGeomBBoxCache cache(time, purposes, /*useExtentsHint=*/true, /*ignoreVisibility=*/true);
+    const PXR_NS::GfRange3d range = cache.ComputeWorldBound(prim).ComputeAlignedRange();
+    if (range.IsEmpty() || !isFinite(range.GetMin()) || !isFinite(range.GetMax())) return std::nullopt;
+    return range;
+}
+
 }  // namespace usdcc::usd

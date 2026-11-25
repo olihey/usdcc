@@ -4,6 +4,7 @@
 #include <pxr/base/tf/token.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/common.h>
+#include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/timeCode.h>
 
 #include <optional>
@@ -21,5 +22,11 @@ std::optional<PXR_NS::GfRange3d> sceneBounds(const PXR_NS::UsdStagePtr& stage,
                                              const std::vector<PXR_NS::SdfPath>& paths,
                                              PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default(),
                                              const PXR_NS::TfTokenVector& purposes = {});
+
+// The world-space box around `prim` and everything under it at `time`, whether or not it's
+// visible: what the Attribute Editor shows as its bounding volume. Default, render and proxy
+// geometry; a guide's own box too, but not the guides under another prim. nullopt for a prim
+// with no bounds.
+std::optional<PXR_NS::GfRange3d> primBounds(const PXR_NS::UsdPrim& prim, PXR_NS::UsdTimeCode time);
 
 }  // namespace usdcc::usd

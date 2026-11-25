@@ -54,7 +54,8 @@ class TransformStackEditor;
 // Full: a "Prim" header (name, which renames the prim, type, kind, specifier, active,
 // instanceable, applied schemas), a "Composition" section, then one collapsible section
 // per PropertyCategorizer category, each row a label plus the value type's own
-// PropertyEditor. A Shader's inputs are in its definition's pages instead, with the
+// PropertyEditor. A prim with bounds has a read-only "Bounding Volume" section after
+// Transform. A Shader's inputs are in its definition's pages instead, with the
 // ones not authored yet dimmed: editing one creates it.
 //
 // Shading: only inputs. A Shader's are in its definition's pages; a Material's or
@@ -142,6 +143,22 @@ private:
         properties::PropertyEditor* instanceable = nullptr;
         properties::SchemaPillsEditor* schemas = nullptr;
     };
+    struct BoundsRows {
+        properties::CategorySection* section = nullptr;
+        properties::PropertyEditor* size = nullptr;
+        properties::PropertyEditor* center = nullptr;
+        properties::PropertyEditor* min = nullptr;
+        properties::PropertyEditor* max = nullptr;
+        properties::PropertyEditor* units = nullptr;
+    };
+
+    // World space, in stage units (docs/ATTRIBUTE_EDITOR.md §5). Made for every prim, and
+    // shown while the prim has bounds.
+    void buildBoundsSection(QVBoxLayout* layout);
+    void updateBounds();
+    // Soon, at a steady pace; bounds that are slow to compute wait for the edits or the
+    // time to rest instead.
+    void scheduleBoundsUpdate();
 
     void refreshValues();
     void refreshPrimHeader(const PXR_NS::UsdPrim& prim);
@@ -230,6 +247,10 @@ private:
     properties::CategorySection* m_compositionSection = nullptr;
     properties::TransformStackEditor* m_xformEditor = nullptr;
     PrimHeader m_header;
+    BoundsRows m_bounds;
+    bool m_hasBounds = false;
+    qint64 m_boundsCostMs = 0;  // how long they took to compute last
+    QTimer* m_boundsTimer = nullptr;
     std::string m_signature;  // what the current rows were built from
 
     bool m_rebuildPending = false;
