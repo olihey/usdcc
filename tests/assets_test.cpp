@@ -620,10 +620,16 @@ USDCC_TEST(assets_credentials_in_the_system_store) {
     CHECK(stored && stored->token == "t0ken" && stored->user.empty() && stored->password.empty(), "and is read back as a token");
 
     CHECK(forgetStoredCredential(id) && !storedCredential(id), "forgotten, it's gone");
-#elif defined(__linux__)
-    // A keyring of its own only: run by hand with one (docs/ASSET_SOURCES.md §10.5), never the user's.
+#elif defined(__linux__) || defined(__APPLE__)
+    // A keyring of its own only, never the user's: by hand on Linux, in CI's macOS job
+    // (docs/ASSET_SOURCES.md §10.5, §10.6).
+#if defined(__APPLE__)
+    const std::string storeName = "your Keychain";
+#else
+    const std::string storeName = "your keyring";
+#endif
     if (PXR_NS::TfGetenv("USDCC_TEST_KEYRING").empty()) return;
-    CHECK(canStoreCredentials() && credentialStoreName() == "your keyring", "there is a keyring");
+    CHECK(canStoreCredentials() && credentialStoreName() == storeName, "there is a keyring");
     std::string error;
     CHECK(!storedCredential("studio-a/dav"), "nothing in it");
     CHECK(storeCredential("studio-a/dav", {"ada", "s\xc3\xa9"

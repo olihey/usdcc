@@ -6,7 +6,7 @@ Asset Servers dialog, and the environment in the status bar. Builds on
 [REMOTE_ASSETS.md](REMOTE_ASSETS.md) (the configuration, §4; the dialog, §10.1).
 
 **Status:** planned and its questions decided 2026-11-24 (§13). **Phases 1 to 5 are built**
-(§10.1 to §10.5; macOS's store isn't). "Checked" means read in this repository's code; everything else is an assumption
+(§10.1 to §10.6). "Checked" means read in this repository's code; everything else is an assumption
 or a proposal.
 
 ## 1. Decisions
@@ -149,8 +149,7 @@ studio A's credential id beside a URL of B's, and be sent A's password.
 - **Allowed hosts and buckets** of a source, and `insecure` hosts, are shown when it's added and
   accepted with it, later changes too. They apply to the whole process, as direct URLs have no source.
   A bare `*` is ignored: it would turn the check off for every stage.
-- **Linux** has the desktop's keyring (§10.5). **macOS** would need its Keychain before this is
-  practical there.
+- **Linux** has the desktop's keyring (§10.5), **macOS** its Keychain (§10.6).
 
 ## 6. Can the configuration carry credentials?
 
@@ -430,14 +429,30 @@ Built 2026-11-24, for Linux: `SecretServiceStore` in
   desktop's own dialog, on whichever thread asks, which waits: one thread at a time asks. A login
   kept in memory for 30 seconds, missing ones too, so a refused question isn't asked for every
   request.
-- **Not macOS.** Written before usdcc built there. It does now, so its Keychain can be
-  built and tried now; until then logins there come from the environment variables.
+- **macOS** is §10.6.
 - **Peers' identity key** stays in its file (PEERS.md); this is only the assets' logins.
 - **Tried** on Ubuntu 24.04 (WSL) with gnome-keyring 46 and libsecret 0.21 in a session bus of their
   own: the test `assets_credentials_in_the_system_store` with `USDCC_TEST_KEYRING=1`, which only
   runs when asked as it writes to the keyring it finds; a keyring read again after a restart; and
   that nothing waits when there's no service, or when it's locked with nobody to ask. *Not tried:*
   a desktop's unlock dialog, KWallet, KeePassXC.
+
+### 10.6 Phase 5 on macOS
+
+Built 2026-11-25: `KeychainStore` in [keychain.cpp](../src/cpp/assets/src/keychain.cpp), through
+Security.framework.
+
+- **An item** is a generic password of the service `usdcc-assets`, its account the login's id, so
+  there is one per id and another user's replaces it at once. The user is its comment (empty for a
+  token), the secret its password, the label "usdcc asset server: <id>".
+- **The login Keychain,** the file-based one: the data protection Keychain needs a signed
+  entitlement. macOS asks before another program reads an item; a usdcc signed differently (an
+  ad-hoc signature changes with every build) is another program, so it may ask again after an update.
+- **As on Linux** (§10.5): listing reads no secret, so it never asks; one thread at a time reads; a
+  login is kept in memory for 30 seconds, a missing one too; `USDCC_ASSETS_KEYRING=0` turns it off.
+- **Tried** by CI's macOS job only, in a keychain made for the test:
+  `assets_credentials_in_the_system_store` with `USDCC_TEST_KEYRING=1`. *Not tried:* macOS's own
+  question, a locked Keychain, and the Logins tab, all of which need somebody at a Mac.
 
 ## 11. Phases
 
@@ -447,7 +462,7 @@ Built 2026-11-24, for Linux: `SecretServiceStore` in
 | 2 | (built) The status bar, switching by reopening, the environment in shared scenes and `--asset-env` | |
 | 3 | (built) Sources from local files: aliases, read-only, `extends`, logins per source, the offer for an unknown name | 1 |
 | 4 | (built) Sources from a URL | 3 |
-| 5 | (built for Linux) Credential stores on Linux and macOS | 1 |
+| 5 | (built) Credential stores on Linux and macOS | 1 |
 | 6 | Credential descriptions, then the token service, then single sign-on | 3 |
 
 Phase 3 doesn't ship without logins per source: sources without them are the leak of §5.

@@ -350,7 +350,7 @@ password or a token. Providers are tried in order:
 
 1. **A callback the host registers.** usdcc uses it to show a login dialog after a 401 (§10).
 2. **The OS credential store:** Windows Credential Manager (target `usdcc-assets:<id>`), or the
-   Linux desktop's keyring ([ASSET_SOURCES.md](ASSET_SOURCES.md) §10.5). macOS: not built.
+   Linux desktop's keyring ([ASSET_SOURCES.md](ASSET_SOURCES.md) §10.5); on macOS the Keychain (§10.6).
 3. **Environment variables:** `USDCC_ASSETS_<ID>_USER`, `_PASSWORD`, `_TOKEN`, for CI and tools.
 
 A server named by its address (§5.1) has its address as its credential id: `host:port` when a

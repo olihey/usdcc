@@ -48,6 +48,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(usdcc_assets PRIVATE src/secret_service.h src/secret_service.cpp)
     target_link_libraries(usdcc_assets PRIVATE ${CMAKE_DL_LIBS})
 endif()
+if(APPLE)
+    # The Keychain (credentials.h).
+    target_sources(usdcc_assets PRIVATE src/keychain.h src/keychain.cpp)
+    target_link_libraries(usdcc_assets PRIVATE "-framework Security" "-framework CoreFoundation")
+endif()
 if(WIN32)
     # Windows Credential Manager (credentials.h).
     target_link_libraries(usdcc_assets PRIVATE advapi32)

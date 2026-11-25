@@ -37,7 +37,7 @@ std::optional<Credential> credentialFor(const std::string& id);
 // The OS credential store: Windows Credential Manager, as a generic credential named
 // "usdcc-assets:<id>". A user and password are stored as they are; a token as the
 // password of an empty user. On Linux the desktop's keyring, when there is one
-// (libsecret). Elsewhere there is none: nothing is found, and storing fails.
+// (libsecret). On macOS the Keychain. Elsewhere there is none: nothing is found, and storing fails.
 std::optional<Credential> storedCredential(const std::string& id);
 bool storeCredential(const std::string& id, const Credential& credential, std::string* error = nullptr);
 bool forgetStoredCredential(const std::string& id);
