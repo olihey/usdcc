@@ -1123,6 +1123,7 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
     }
     if (arcs.empty()) {
         auto* label = new QLabel(tr("No composition arcs. Add one with +."));
+        label->setWordWrap(true);
         label->setObjectName(QStringLiteral("propertyNote"));
         section->addRow(label);
     }
