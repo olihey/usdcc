@@ -3,6 +3,7 @@
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/credentials.h"
 #include "usdcc/assets/disk_cache.h"
+#include "usdcc/assets/no_wait.h"
 #include "usdcc/assets/paths.h"
 
 #include <pxr/base/tf/diagnostic.h>
@@ -262,23 +263,8 @@ Found CachingResolver::_Find(const std::string& assetPath, Location* location, b
         return found;
     }
     found = findInStack(*location->stack, location->path, _Scope());
-    if (found.status == Status::NotAllowed) {
-        const std::string& credential = found.endpoint.credential;
-        std::string why;
-        if (credential.empty()) {
-            why = "refused to answer without a login, and its endpoint names no credential";
-        } else if (!credentialFor(credential)) {
-            why = "wants a login, and none is saved under the credential '" + credential +
-                  "' (Edit > Asset Servers > Logins in usdcc, or USDCC_ASSETS_<ID>_USER and _PASSWORD)";
-        } else {
-            why = "refused the login saved under the credential '" + credential + "'";
-        }
-        TF_WARN("%s isn't resolved: the server '%s' %s (%s)", location->display.c_str(), found.endpoint.id.c_str(),
-                why.c_str(), found.message.c_str());
-    } else if (found.status != Status::Ok && found.status != Status::Missing) {
-        TF_WARN("%s isn't resolved: the server '%s' is %s%s%s", location->display.c_str(), found.endpoint.id.c_str(),
-                statusName(found.status), found.message.empty() ? "" : ": ", found.message.c_str());
-    }
+    // A NoWait answer's warning was given when it came.
+    if (!NoWait::active()) warnNotAnswered(found, location->display);
     return found;
 }
 

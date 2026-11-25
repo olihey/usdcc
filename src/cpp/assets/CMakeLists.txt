@@ -17,6 +17,7 @@ add_library(usdcc_assets SHARED
     include/usdcc/assets/disk_cache.h
     include/usdcc/assets/http_client.h
     include/usdcc/assets/lookup.h
+    include/usdcc/assets/no_wait.h
     include/usdcc/assets/paths.h
     include/usdcc/assets/result.h
     include/usdcc/assets/sources.h
@@ -32,6 +33,7 @@ add_library(usdcc_assets SHARED
     src/http_client.cpp
     src/logins.cpp
     src/lookup.cpp
+    src/no_wait.cpp
     src/sources.cpp
     src/transport.cpp
     src/uri.cpp

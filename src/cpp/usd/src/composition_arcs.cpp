@@ -1,5 +1,6 @@
 #include "usdcc/usd/composition_arcs.h"
 
+#include "usdcc/assets/no_wait.h"
 #include "usdcc/usd/asset_servers.h"
 
 #include <pxr/usd/ar/resolverContextBinder.h>
@@ -46,27 +47,20 @@ ArcInfo where(const PXR_NS::SdfPrimSpecHandle& spec, const PXR_NS::UsdPrim& prim
     return arc;
 }
 
-// An asset's path resolved relative to the layer that names it; empty when
-// it can't be found.
-std::string resolve(const PXR_NS::SdfLayerHandle& anchor, const std::string& assetPath) {
-    if (assetPath.empty()) return anchor->GetRealPath().empty() ? anchor->GetIdentifier() : anchor->GetRealPath();
-    const std::string anchored = PXR_NS::SdfComputeAssetPathRelativeToLayer(anchor, assetPath);
-    // A layer that's open already (an anonymous one, say) counts as found,
-    // though the resolver knows no file for it.
-    if (const PXR_NS::SdfLayerHandle open = PXR_NS::SdfLayer::Find(anchored)) {
-        return displayAssetPath(open->GetRealPath().empty() ? open->GetIdentifier() : open->GetRealPath());
-    }
-    // A server's path as it's written, without the stack id only this process knows.
-    return displayAssetPath(PXR_NS::ArGetResolver().Resolve(anchored).GetPathString());
-}
-
 template <typename Item>
 void fillAsset(ArcInfo& arc, const Item& item, const PXR_NS::SdfLayerHandle& layer) {
     arc.assetPath = item.GetAssetPath();
     arc.primPath = item.GetPrimPath();
     arc.layerOffset = item.GetLayerOffset();
-    arc.resolvedPath = resolve(layer, arc.assetPath);
-    arc.missing = !arc.assetPath.empty() && arc.resolvedPath.empty();
+    if (arc.assetPath.empty()) {
+        arc.resolvedPath = layer->GetRealPath().empty() ? layer->GetIdentifier() : layer->GetRealPath();
+        return;
+    }
+    const LocatedAsset located = locateAsset(PXR_NS::SdfComputeAssetPathRelativeToLayer(layer, arc.assetPath));
+    arc.resolvedPath = located.path;
+    arc.origin = located.origin;
+    arc.resolving = located.resolving;
+    arc.missing = located.path.empty() && !located.resolving;
 }
 
 }  // namespace
@@ -85,6 +79,7 @@ const char* arcTypeName(ArcInfo::Type type) {
 std::vector<ArcInfo> compositionArcs(const PXR_NS::UsdPrim& prim) {
     std::vector<ArcInfo> arcs;
     if (!prim) return arcs;
+    const usdcc::assets::NoWait noWait;
     const PXR_NS::UsdStageRefPtr stage = prim.GetStage();
     // Resolved as the stage resolves them: a path on a server means its environment's
     // servers (docs/REMOTE_ASSETS.md §10).

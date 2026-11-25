@@ -72,6 +72,7 @@ QString arcEntry(const ArcInfo& arc) {
     }
     QString text = QStringLiteral("%1   %2").arg(tr(arcTypeName(arc.type)), what);
     if (arc.missing) text += tr("   (missing)");
+    if (arc.resolving) text += tr("   (resolving...)");
     if (arc.type == ArcInfo::Type::Payload && !arc.loaded) text += tr("   (unloaded)");
     return text;
 }
@@ -85,8 +86,11 @@ void populateArcMenu(QMenu* menu, const ArcInfo& arc, const PXR_NS::SdfPath& pri
     const bool asset = arc.type == ArcInfo::Type::Reference || arc.type == ArcInfo::Type::Payload;
     if (asset) {
         line(tr("Asset"), arc.assetPath.empty() ? tr("(this file)") : qs(arc.assetPath));
-        line(tr("Resolved"), arc.missing ? tr("(missing)") : qs(arc.resolvedPath));
+        line(tr("Resolved"), arc.missing     ? tr("(missing)")
+                                : arc.resolving ? tr("(resolving...)")
+                                                : qs(arc.resolvedPath));
         line(tr("Prim"), arc.primPath.IsEmpty() ? tr("(default prim)") : qs(arc.primPath.GetString()));
+        if (!arc.origin.empty()) line(tr("Server"), qs(arc.origin));
         if (!arc.layerOffset.IsIdentity()) {
             line(tr("Offset"), tr("%1, scale %2").arg(arc.layerOffset.GetOffset()).arg(arc.layerOffset.GetScale()));
         }
@@ -109,10 +113,10 @@ void populateArcMenu(QMenu* menu, const ArcInfo& arc, const PXR_NS::SdfPath& pri
         QAction* open = menu->addAction(tr("Open as Stage"), menu, [file]() {
             if (openStageHandler()) openStageHandler()(file);
         });
-        open->setEnabled(openStageHandler() && !arc.assetPath.empty() && !arc.missing);
+        open->setEnabled(openStageHandler() && !arc.assetPath.empty() && !arc.missing && !arc.resolving);
         QAction* show = menu->addAction(tr("Show USDA"), menu,
                                         [file]() { showUsdaPreview(file, QApplication::activeWindow()); });
-        show->setEnabled(!arc.assetPath.empty() && !arc.missing);
+        show->setEnabled(!arc.assetPath.empty() && !arc.missing && !arc.resolving);
         QAction* prims = menu->addAction(tr("Show Prims"), menu,
                                          [file]() { showPrimTree(file, QApplication::activeWindow()); });
         prims->setEnabled(show->isEnabled());

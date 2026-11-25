@@ -29,6 +29,8 @@ struct LayerEntry {
     bool dirty = false;
     bool muted = false;
     bool missing = false;  // a sublayer that can't be opened
+    bool resolving = false;  // not known yet: its server hasn't answered
+    std::string origin;      // the server it comes from; empty for a local file
     bool editTarget = false;
     // The simulation cache (docs/PHYSICS.md §5.5): it can be muted, nothing else.
     bool simulationCache = false;

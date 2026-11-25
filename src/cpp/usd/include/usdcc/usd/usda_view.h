@@ -135,7 +135,7 @@ public:
     // Where an asset path written in the text points: resolved against the
     // layer shown (the root layer for a flattened view), as compositionArcs()
     // does. With `found` false, where it was looked for.
-    QString resolveAsset(const QString& assetPath, bool* found) const;
+    QString resolveAsset(const QString& assetPath, bool* found, bool* resolving = nullptr) const;
     // Opens an asset path's file: here (Back returns) or elsewhere; a file that
     // isn't a layer in the system's app. False if it can't be found.
     bool openLink(const QString& assetPath, bool newPanel = false);
@@ -258,6 +258,10 @@ private:
                          Qt::KeyboardModifiers modifiers);
     void populateLinkMenu(QMenu* menu, const usdcc::ui::LineView::Link& link);
     QString linkToolTip(const usdcc::ui::LineView::Link& link);
+    // A link clicked while its server hadn't answered, and what was shown then.
+    QString m_pendingLink;
+    bool m_pendingLinkInNew = false;
+    Source m_pendingLinkSource;
     void updateEditUi();
     std::string layerText(const PXR_NS::SdfLayerHandle& layer) const;
     const std::unordered_map<std::string, int>& primLines();

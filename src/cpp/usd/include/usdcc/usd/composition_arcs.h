@@ -16,10 +16,13 @@ struct ArcInfo {
 
     // References and payloads: the asset as authored ("./chair.usd"); empty
     // for an internal one (this file). Resolved against the layer that adds
-    // it; empty when the file can't be found (missing).
+    // it; empty when the file can't be found (missing), or a server hasn't
+    // answered yet (resolving; docs/REMOTE_ASSETS.md §10).
     std::string assetPath;
     std::string resolvedPath;
+    std::string origin;  // the server it comes from; empty for a local file
     bool missing = false;
+    bool resolving = false;
     // The target prim (empty = the asset's default prim); for inherits and
     // specializes, the class prim.
     PXR_NS::SdfPath primPath;

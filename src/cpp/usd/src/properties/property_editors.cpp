@@ -3,6 +3,8 @@
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scaled_metrics.h"
+#include "usdcc/assets/no_wait.h"
+#include "usdcc/usd/asset_answers.h"
 #include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/asset_picker.h"
 #include "usdcc/usd/color_management.h"
@@ -534,6 +536,10 @@ public:
         connect(m_edit, &QLineEdit::editingFinished, this, [this]() { commit(m_edit->text()); });
         connect(m_browse, &QToolButton::clicked, this, [this]() { browse(); });
         connect(m_relative, &QToolButton::clicked, this, [this]() { toggleRelative(); });
+        connect(&AssetAnswers::instance(), &AssetAnswers::changed, this, [this]() {
+            // Not a path being typed.
+            if (!m_path.isEmpty() && !m_edit->hasFocus()) updateDisplay();
+        });
         updateDisplay();
     }
 
@@ -562,25 +568,22 @@ private:
     std::string anchoredPath() const {
         return m_anchor ? SdfComputeAssetPathRelativeToLayer(m_anchor, m_path.toStdString()) : m_path.toStdString();
     }
-    // As the resolver gives it: a server's path carries a stack id. With the stage's
-    // context, so a server's path means its environment's servers. A server's answer
-    // is kept for as long as the path stays the same, as this is asked on every refresh
-    // and on the UI thread (docs/REMOTE_ASSETS.md §10).
-    std::string resolvedRaw() const {
+    // With the stage's context, so a server's path means its environment's servers. Asked on
+    // every refresh, on the UI thread: it doesn't wait for one (docs/REMOTE_ASSETS.md §10).
+    LocatedAsset located() const {
         if (m_path.isEmpty()) return {};
-        const std::string anchored = anchoredPath();
-        if (anchored == m_lastAnchored) return m_lastResolved;
+        const usdcc::assets::NoWait noWait;
         const PXR_NS::ArResolverContextBinder binder(m_context);
+        const std::string anchored = anchoredPath();
+        const std::size_t unanswered = usdcc::assets::NoWait::unanswered();
         const std::string resolved = ArGetResolver().Resolve(anchored).GetPathString();
-        if (!isLocalAssetPath(anchored)) {
-            m_lastAnchored = anchored;
-            m_lastResolved = resolved;
-            m_lastOrigin = assetOrigin(anchored, resolved);
-        }
-        return resolved;
+        LocatedAsset located;
+        located.resolving = resolved.empty() && usdcc::assets::NoWait::unanswered() != unanswered;
+        located.path = displayAssetPath(resolved);
+        located.origin = assetOrigin(anchored, resolved);
+        return located;
     }
-    // As the UI shows it: a server's path without the stack id.
-    QString resolvedPath() const { return QString::fromStdString(displayAssetPath(resolvedRaw())); }
+    QString resolvedPath() const { return QString::fromStdString(located().path); }
     static bool isRelative(const QString& path) { return path.startsWith(QStringLiteral("./")) || path.startsWith(QStringLiteral("../")); }
 
     void updateDisplay() {
@@ -590,19 +593,21 @@ private:
         m_relative->setToolTip(isPackageLayer(m_editLayer)
                                    ? tr("A path in a .usdz can only be relative to a file inside it, so a file outside it is written absolute")
                                    : tr("Switch between a path relative to the layer and an absolute path"));
-        const QString resolved = resolvedPath();
+        const LocatedAsset asset = located();
+        const QString resolved = QString::fromStdString(asset.path);
         if (m_path.isEmpty()) {
             m_resolved->setText(QString());
             m_resolved->setVisible(false);
             return;
         }
         m_resolved->setVisible(true);
-        m_resolved->setProperty("unresolved", resolved.isEmpty());
+        m_resolved->setProperty("unresolved", resolved.isEmpty() && !asset.resolving);
         // A server's file says which server delivered it ("test", "prod"): with an
         // overlay, that's what tells two of the same path apart (docs/REMOTE_ASSETS.md §5).
-        const QString origin = !resolved.isEmpty() && anchoredPath() == m_lastAnchored ? QString::fromStdString(m_lastOrigin)
-                                                                                     : QString();
-        if (resolved.isEmpty()) {
+        const QString origin = QString::fromStdString(asset.origin);
+        if (asset.resolving) {
+            m_resolved->setText(tr("Resolving..."));
+        } else if (resolved.isEmpty()) {
             m_resolved->setText(tr("Unresolved"));
         } else if (origin.isEmpty()) {
             m_resolved->setText(tr("Resolved \xC2\xB7 %1").arg(resolved));
@@ -657,9 +662,6 @@ private:
     SdfLayerHandle m_anchor;
     SdfLayerHandle m_editLayer;
     PXR_NS::ArResolverContext m_context;
-    mutable std::string m_lastAnchored;
-    mutable std::string m_lastResolved;
-    mutable std::string m_lastOrigin;
     QString m_path;
     QLineEdit* m_edit;
     QToolButton* m_relative;

@@ -1,7 +1,10 @@
 #include "usdcc/usd/layer_stack.h"
 
+#include "usdcc/assets/no_wait.h"
+#include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/sim_cache.h"
 
+#include <pxr/usd/ar/resolverContextBinder.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/usd/editTarget.h>
 #include <pxr/usd/usd/stage.h>
@@ -31,9 +34,10 @@ struct Builder {
             entry.anonymous = layer->IsAnonymous();
             entry.dirty = layer->IsDirty();
             entry.editTarget = layer == editTarget;
+            entry.origin = assetOrigin(entry.identifier, layer->GetRealPath());
         } else {
             entry.displayName = fileName(entry.authoredPath.empty() ? entry.identifier : entry.authoredPath);
-            entry.missing = !entry.muted;
+            entry.missing = !entry.muted && !entry.resolving;
         }
         if (!layer || entry.muted || !visiting.insert(entry.identifier).second) return;
         const std::vector<std::string> paths = layer->GetSubLayerPaths();
@@ -42,7 +46,9 @@ struct Builder {
             LayerEntry child;
             child.authoredPath = paths[i];
             child.identifier = PXR_NS::SdfComputeAssetPathRelativeToLayer(layer, paths[i]);
+            const std::size_t unanswered = usdcc::assets::NoWait::unanswered();
             child.layer = PXR_NS::SdfLayer::Find(child.identifier);
+            child.resolving = !child.layer && usdcc::assets::NoWait::unanswered() != unanswered;
             if (i < offsets.size()) child.offset = offsets[i];
             describe(child);
             entry.children.push_back(std::move(child));
@@ -55,6 +61,9 @@ struct Builder {
 
 std::vector<LayerEntry> layerTree(const PXR_NS::UsdStageRefPtr& stage) {
     if (!stage) return {};
+    // Found as the stage found them: a path on a server means its environment's servers.
+    const usdcc::assets::NoWait noWait;
+    const PXR_NS::ArResolverContextBinder binder(stage->GetPathResolverContext());
     Builder builder{stage, stage->GetEditTarget().GetLayer(), {}};
     std::vector<LayerEntry> tree;
     for (const PXR_NS::SdfLayerHandle& layer : {stage->GetSessionLayer(), stage->GetRootLayer()}) {

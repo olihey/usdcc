@@ -4,6 +4,8 @@
 #include "usdcc/core/log.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
+#include "usdcc/assets/no_wait.h"
+#include "usdcc/usd/asset_answers.h"
 #include "usdcc/usd/add_shade_input_dialog.h"
 #include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/composition_arcs.h"
@@ -197,6 +199,12 @@ PropertySheet::PropertySheet(StageManager* stageManager, std::shared_ptr<UndoMan
     m_boundsTimer = new QTimer(this);
     m_boundsTimer->setSingleShot(true);
     connect(m_boundsTimer, &QTimer::timeout, this, &PropertySheet::updateBounds);
+    // The Composition rows; the asset fields follow by themselves.
+    connect(&AssetAnswers::instance(), &AssetAnswers::changed, this, [this]() {
+        if (m_primPath.IsEmpty()) return;
+        m_refreshPending = true;
+        queueProcessPendingChanges();
+    });
     rebuild();
 }
 
@@ -285,7 +293,8 @@ std::string PropertySheet::layoutSignature(const UsdPrim& prim) const {
         signature += std::to_string(static_cast<int>(arc.type)) + arc.assetPath + "@" + arc.primPath.GetString() + "@" +
                      std::to_string(arc.layerOffset.GetOffset()) + "x" + std::to_string(arc.layerOffset.GetScale()) +
                      (arc.loaded ? "L" : "U") + arc.variantSet + "=" + arc.variantSelection + arc.layerIdentifier +
-                     (arc.editable ? "e" : "r") + ",";
+                     (arc.editable ? "e" : "r") + (arc.missing ? "m" : arc.resolving ? "w" : "f") +
+                     (arc.editable ? std::string() : arc.origin) + ",";
         if (arc.type == ArcInfo::Type::Variant) {
             for (const std::string& name : prim.GetVariantSet(arc.variantSet).GetVariantNames()) signature += name + "/";
         }
@@ -357,6 +366,8 @@ void activateTabStop(QWidget* stop) {
 }  // namespace
 
 void PropertySheet::rebuild() {
+    // Reading an asset attribute resolves it: the fields show that, when it's known.
+    const usdcc::assets::NoWait noWait;
     const int scrollPosition = m_scroll->verticalScrollBar()->value();
     // Typing in a field when the rows are rebuilt (an edit that changes what's shown,
     // such as a rename committed by Tab): the same field of the new rows takes over.
@@ -1031,13 +1042,13 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
         if (file) {
             const QString resolved = qs(arc.resolvedPath);
             QAction* open = menu->addAction(tr("Open as Stage"), this, [resolved]() { openStageFile(resolved); });
-            open->setEnabled(!arc.missing);
+            open->setEnabled(!arc.missing && !arc.resolving);
             QAction* show = menu->addAction(tr("Show USDA"), this, [this, resolved]() { showUsdaPreview(resolved, this); });
-            show->setEnabled(!arc.missing);
+            show->setEnabled(!arc.missing && !arc.resolving);
             QAction* prims = menu->addAction(tr("Show Prims"), this, [this, resolved]() { showPrimTree(resolved, this); });
-            prims->setEnabled(!arc.missing);
+            prims->setEnabled(!arc.missing && !arc.resolving);
             QAction* reveal = menu->addAction(tr("Reveal in Explorer"), this, [resolved]() { revealFile(resolved); });
-            reveal->setEnabled(!arc.missing && QFileInfo::exists(resolved));
+            reveal->setEnabled(!arc.missing && !arc.resolving && QFileInfo::exists(resolved));
             if (arc.missing) {
                 open->setToolTip(tr("The file can't be found"));
                 show->setToolTip(tr("The file can't be found"));
@@ -1102,7 +1113,12 @@ void PropertySheet::buildCompositionSection(const UsdPrim& prim, QVBoxLayout* la
                 if (asset && !arc.assetPath.empty()) {
                     // As the asset field shows it, U+00B7 as UTF-8 bytes.
                     const QString resolved = qs(arc.resolvedPath);
-                    row->setSubLine(arc.missing ? tr("Unresolved") : tr("Resolved \xC2\xB7 %1").arg(resolved), resolved,
+                    row->setSubLine(arc.missing     ? tr("Unresolved")
+                                    : arc.resolving ? tr("Resolving...")
+                                    : arc.origin.empty()
+                                        ? tr("Resolved \xC2\xB7 %1").arg(resolved)
+                                        : tr("Resolved \xC2\xB7 %1 \xC2\xB7 %2").arg(qs(arc.origin), resolved),
+                                    resolved,
                                     arc.missing ? PropertyRow::SubLineTone::Error : PropertyRow::SubLineTone::Normal);
                 }
                 actionsButton(arc, row, false);
@@ -1641,6 +1657,7 @@ void PropertySheet::addRelationshipTargetInteractively(const TfToken& name) {
 }
 
 void PropertySheet::refreshValues() {
+    const usdcc::assets::NoWait noWait;
     m_refreshPending = false;
     const UsdPrim prim = currentPrim();
     if (!prim) {
@@ -1656,6 +1673,7 @@ void PropertySheet::refreshValues() {
 }
 
 void PropertySheet::refreshTimeVaryingValues() {
+    const usdcc::assets::NoWait noWait;
     // A gesture's end refreshes everything (processPendingChanges()).
     if (!currentPrim() || anyEditing()) return;
     for (Row& row : m_rows) {
@@ -1779,6 +1797,7 @@ bool PropertySheet::anyEditing() const {
 }
 
 void PropertySheet::processPendingChanges() {
+    const usdcc::assets::NoWait noWait;
     if (!m_rebuildPending && !m_refreshPending) return;
     // Never rebuild under a gesture (it would delete the widget being dragged);
     // the gesture's end calls back here.

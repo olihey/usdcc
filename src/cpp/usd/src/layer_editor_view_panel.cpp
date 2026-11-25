@@ -1,4 +1,5 @@
 #include "usdcc/usd/layer_editor_view_panel.h"
+#include "usdcc/usd/asset_answers.h"
 #include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/app_settings.h"
@@ -307,6 +308,7 @@ LayerEditorViewPanel::LayerEditorViewPanel(StageManager* stageManager, StageRefP
 
     // The edit target's name is drawn in the accent colour.
     usdcc::ui::theme::onChanged(this, [this]() { m_refreshTimer->start(); });
+    connect(&AssetAnswers::instance(), &AssetAnswers::changed, m_refreshTimer, qOverload<>(&QTimer::start));
 
     refreshStageCombo();
     // See ViewportViewPanel's constructor for why this is explicit.
@@ -442,11 +444,13 @@ void LayerEditorViewPanel::addItems(const LayerEntry& entry, QTreeWidgetItem* pa
     if (entry.dirty && !entry.simulationCache) name += QStringLiteral(" *");
     if (entry.anonymous && !entry.session && !entry.simulationCache) name += QStringLiteral("  ") + tr("(in memory)");
     if (entry.missing) name += QStringLiteral("  ") + tr("(not found)");
+    if (entry.resolving && !entry.muted) name += QStringLiteral("  ") + tr("(resolving...)");
     if (entry.muted) name += QStringLiteral("  ") + tr("(muted)");
     item->setText(Name, name);
 
     QStringList tip{qs(entry.identifier)};
     if (const QString path = realPath(entry); !path.isEmpty() && path != tip.front()) tip << usdcc::usd::displayPath(path);
+    if (!entry.origin.empty()) tip << tr("From the server '%1'").arg(qs(entry.origin));
     if (!entry.authoredPath.empty()) tip << tr("As authored: %1").arg(qs(entry.authoredPath));
     if (entry.layer) tip << tr("Format: %1").arg(qs(entry.layer->GetFileFormat()->GetFormatId().GetString()));
     if (!entry.offset.IsIdentity()) {

@@ -19,7 +19,9 @@ struct Dependency {
     // layer that names it).
     std::string assetPath;
     std::string resolvedPath;
+    std::string origin;      // the server it comes from; empty for a local file
     bool missing = false;
+    bool resolving = false;  // a server hasn't answered yet
 
     // The prims whose references, payloads or asset attributes name it,
     // sorted; those of its payloads the stage hasn't loaded.

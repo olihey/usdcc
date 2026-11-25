@@ -1,5 +1,7 @@
 #include "usdcc/usd/dependencies_view_panel.h"
 #include "usdcc/ui/theme.h"
+#include "usdcc/assets/no_wait.h"
+#include "usdcc/usd/asset_answers.h"
 #include "usdcc/usd/asset_settings.h"
 
 #include "usdcc/ui/settings.h"
@@ -48,6 +50,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 QString count(int n, const QString& one, const QString& many) { return (n == 1 ? one : many).arg(n); }
 
 QString layerName(const std::string& identifier) {
+    const usdcc::assets::NoWait noWait;
     if (const PXR_NS::SdfLayerHandle layer = PXR_NS::SdfLayer::Find(identifier)) return qs(layer->GetDisplayName());
     return QFileInfo(qs(identifier)).fileName();
 }
@@ -102,6 +105,7 @@ DependenciesViewPanel::DependenciesViewPanel(StageManager* stageManager, StageRe
     m_refreshTimer->setInterval(100);
     connect(m_refreshTimer, &QTimer::timeout, this, &DependenciesViewPanel::refresh);
     usdcc::ui::theme::onChanged(this, [this]() { m_refreshTimer->start(); });
+    connect(&AssetAnswers::instance(), &AssetAnswers::changed, m_refreshTimer, qOverload<>(&QTimer::start));
 
     refreshStageCombo();
     // See ViewportViewPanel's constructor for why this is explicit.
@@ -161,6 +165,9 @@ void DependenciesViewPanel::refresh() {
                                             : count(users, tr("%1 prim"), tr("%1 prims")));
         QStringList state;
         if (file.missing) state << tr("missing");
+        if (file.resolving) state << tr("resolving...");
+        // With an overlay, which server's file it is (docs/REMOTE_ASSETS.md §5).
+        if (!file.origin.empty()) state << tr("from %1").arg(qs(file.origin));
         if (!file.unloaded.empty()) state << tr("%1 unloaded").arg(file.unloaded.size());
         item->setText(State, state.join(QStringLiteral(", ")));
         item->setText(Path, path);
@@ -168,7 +175,10 @@ void DependenciesViewPanel::refresh() {
         QStringList authoredIn;
         for (const std::string& layer : file.layers) authoredIn << layerName(layer);
         item->setToolTip(File, tr("%1\nAs authored: %2\nIn: %3")
-                                   .arg(file.missing ? tr("Not found: %1").arg(path) : path, qs(file.assetPath),
+                                   .arg(file.missing     ? tr("Not found: %1").arg(path)
+                                        : file.resolving ? tr("Resolving: %1").arg(path)
+                                                         : path,
+                                        qs(file.assetPath),
                                         authoredIn.join(QStringLiteral(", "))));
         if (file.missing) {
             ++missing;
@@ -236,7 +246,7 @@ void DependenciesViewPanel::populateFileMenu(QMenu* menu, int index) {
 
     QAction* open = menu->addAction(tr("Open as Stage"), this, [path]() { openStageFile(path); });
     // An asset attribute's file (a texture, ...) is rarely a layer.
-    open->setEnabled(!file.missing && (file.kinds & ~unsigned(Dependency::Asset)));
+    open->setEnabled(!file.missing && !file.resolving && (file.kinds & ~unsigned(Dependency::Asset)));
     QAction* show = menu->addAction(tr("Show USDA"), this, [this, path]() { showUsdaPreview(path, this); });
     show->setEnabled(open->isEnabled());
     QAction* prims = menu->addAction(tr("Show Prims"), this, [this, path]() { showPrimTree(path, this); });
