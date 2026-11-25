@@ -725,6 +725,18 @@ Rejected:
   over the scene's, so textures keep their real-world size. The camera frames its bounds. The preview is
   always Y-up, and so is its camera, unlike the viewport's, which turns about the stage's up axis. So it
   doesn't turn for the scene's `upAxis`: only a shape file authored Z-up is turned.
+- **Its area lights carry that scale in their own size** (`ShadingPreviewStage::writeShapeLightUnits()`):
+  `width`, `height`, `radius`, `length` and an authored `extent` are multiplied by it, and an inverse scale
+  op takes it off their transform. They fill the same space either way. But Storm works out an area light's
+  power from those inputs without the transform, then divides by the distance squared in the scene's units,
+  so a centimetre shape's lights, scaled by their transform, were 10,000 times too bright in a metre scene.
+  - A light with `normalize` on has its intensity multiplied by the scale squared, a mesh light too, as its
+    power doesn't follow its size. Distant and dome lights need nothing.
+  - What's under a light keeps the shape's scale.
+- **When the scene's `metersPerUnit` changes** while it's shown, the shape is scaled again and the view
+  with it: the orbit's target and distance, by the factor `ShadingPreviewStage::syncWithSource()` returns.
+  So the picture stays the same and a view that was turned is kept; nothing is reframed. Any other change
+  leaves the view alone, and so does this one for a prim of the scene (§7.10), which isn't scaled.
 - **A camera in the shape file:** the first perspective `Camera` under the default prim is looked through
   instead of framing the bounds: its position, direction and vertical field of view
   (`ShadingPreviewStage::shapeCamera()`). The orbit turns about the point on its line of sight nearest the

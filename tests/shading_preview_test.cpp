@@ -4,7 +4,9 @@
 #include "usdcc/usd/shading_preview.h"
 
 #include <pxr/base/gf/math.h>
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/vec3d.h>
+#include <pxr/base/gf/vec3f.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/attribute.h>
@@ -16,6 +18,7 @@
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/xform.h>
+#include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdLux/domeLight.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
@@ -152,10 +155,16 @@ USDCC_TEST(shading_preview_scales_for_the_scenes_units) {
     ShadingPreviewStage preview(source);
     preview.setShape(shapeFile(temp.path().toStdString(), false));
     const double metres = preview.shapeBounds().GetSize()[1];
+    CHECK(preview.syncWithSource() == 1.0, "the same units scale nothing");
     source->SetMetadata(TfToken("metersPerUnit"), 0.01);
-    preview.syncWithSource();
+    const double factor = preview.syncWithSource();
     const double centimetres = preview.shapeBounds().GetSize()[1];
     CHECK(std::abs(centimetres / metres - 100.0) < 1e-6, "a metre is 100 units in a centimetre scene: %f / %f", centimetres, metres);
+    CHECK(std::abs(factor - 100.0) < 1e-6, "and it says how much bigger the shape got: %f", factor);
+    CHECK(preview.syncWithSource() == 1.0, "once");
+    source->SetMetadata(TfToken("metersPerUnit"), 1.0);
+    const double back = preview.syncWithSource();
+    CHECK(std::abs(back - 0.01) < 1e-9 && std::abs(preview.shapeBounds().GetSize()[1] - metres) < 1e-6, "and back: %f", back);
 }
 
 USDCC_TEST(shading_preview_finds_the_shapes_camera) {
@@ -284,6 +293,132 @@ def Xform "Shape"
     preview.setEnvironment(environment);
     CHECK(active(lamp), "and on with the grey dome");
     CHECK(!preview.stage()->GetPrimAtPath(lamp).HasAuthoredActive(), "with no active opinion left behind");
+}
+
+// Storm takes an area light's power from its width, height and so on, without its transform's
+// scale, but its distance with it: only a light with no scale left lights the same.
+USDCC_TEST(shading_preview_sizes_the_shapes_lights) {
+    QTemporaryDir temp;
+    const std::string folder = temp.path().toStdString();
+    UsdStageRefPtr source = materials();  // metersPerUnit = 1
+    ShadingPreviewStage preview(source);
+    const std::string file = folder + "/lit.usda";
+    write(file, R"(#usda 1.0
+(
+    defaultPrim = "Shape"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Shape"
+{
+    def Sphere "Ball" {}
+    def Xform "Rig"
+    {
+        double3 xformOp:translate = (0, 100, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        def RectLight "Rect"
+        {
+            float3[] extent = [(-10, -20, 0), (10, 20, 0)]
+            float inputs:width = 20
+            float inputs:height = 40
+            float inputs:intensity = 9
+            double3 xformOp:translate = (50, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            def Scope "Parts"
+            {
+                def Cube "Housing"
+                {
+                    double3 xformOp:translate = (0, 0, 10)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
+            }
+        }
+    }
+    def SphereLight "Bulb"
+    {
+        bool inputs:normalize = 1
+        float inputs:intensity = 5
+        float inputs:intensity.timeSamples = { 1: 5, 2: 10 }
+    }
+    def CylinderLight "Tube" {}
+    def DistantLight "Sun"
+    {
+        bool inputs:normalize = 1
+        float inputs:intensity = 3
+    }
+    def Mesh "Glow" (
+        prepend apiSchemas = ["MeshLightAPI"]
+    )
+    {
+        bool inputs:normalize = 1
+        float inputs:intensity = 7
+    }
+}
+)");
+    std::string why;
+    CHECK(preview.setShape(file, &why), "a lit shape in centimetres: %s", why.c_str());
+
+    const SdfPath asset = ShadingPreviewStage::root().AppendPath(SdfPath("Shape/Asset"));
+    const auto prim = [&](const char* path) { return preview.stage()->GetPrimAtPath(asset.AppendPath(SdfPath(path))); };
+    const auto value = [&](const char* path, const char* name, UsdTimeCode time = UsdTimeCode::Default()) {
+        float held = -1;
+        prim(path).GetAttribute(TfToken(name)).Get(&held, time);
+        return static_cast<double>(held);
+    };
+    const auto world = [&](const char* path) {
+        return UsdGeomXformable(prim(path)).ComputeLocalToWorldTransform(UsdTimeCode::Default());
+    };
+    const auto scaleOf = [&](const char* path) { return world(path).TransformDir(GfVec3d(1, 0, 0)).GetLength(); };
+    const auto close = [](double a, double b) { return std::abs(a - b) <= 1e-5 * std::abs(b); };
+
+    // A second time after another shape in between, which leaves nothing to scale again.
+    for (int round = 0; round < 2; ++round) {
+        CHECK(close(scaleOf("Rig/Rect"), 1) && close(scaleOf("Bulb"), 1) && close(scaleOf("Tube"), 1),
+              "no scale on an area light in a metre scene: %f %f %f", scaleOf("Rig/Rect"), scaleOf("Bulb"), scaleOf("Tube"));
+        CHECK(close(value("Rig/Rect", "inputs:width"), 0.2) && close(value("Rig/Rect", "inputs:height"), 0.4), "its size in metres: %f %f",
+              value("Rig/Rect", "inputs:width"), value("Rig/Rect", "inputs:height"));
+        CHECK(GfIsClose(world("Rig/Rect").ExtractTranslation(), GfVec3d(0.5, 1, 0), 1e-6), "where it was");
+        CHECK(close(value("Rig/Rect", "inputs:intensity"), 9), "its intensity too: %f", value("Rig/Rect", "inputs:intensity"));
+        CHECK(close(value("Bulb", "inputs:radius"), 0.005) && close(value("Tube", "inputs:length"), 0.01), "a size nobody authored: %f %f",
+              value("Bulb", "inputs:radius"), value("Tube", "inputs:length"));
+        VtVec3fArray extent;
+        prim("Rig/Rect").GetAttribute(TfToken("extent")).Get(&extent);
+        CHECK(extent.size() == 2 && GfIsClose(extent[1], GfVec3f(0.1f, 0.2f, 0), 1e-6), "and an authored extent");
+        CHECK(close(scaleOf("Rig/Rect/Parts/Housing"), 0.01) &&
+                  GfIsClose(world("Rig/Rect/Parts/Housing").ExtractTranslation(), GfVec3d(0.5, 1, 0.1), 1e-6),
+              "what's under a light keeps the shape's scale: %f", scaleOf("Rig/Rect/Parts/Housing"));
+        CHECK(close(value("Bulb", "inputs:intensity"), 5e-4) && close(value("Bulb", "inputs:intensity", 2), 1e-3),
+              "normalized, its intensity goes by the distance squared, animated too: %g %g", value("Bulb", "inputs:intensity"),
+              value("Bulb", "inputs:intensity", 2));
+        CHECK(close(value("Glow", "inputs:intensity"), 7e-4) && close(scaleOf("Glow"), 0.01), "a normalized mesh light's too, its mesh as it was");
+        CHECK(close(value("Sun", "inputs:intensity"), 3), "not a distant light's: %f", value("Sun", "inputs:intensity"));
+        preview.setShape(shapeFile(folder, false));
+        preview.setShape(file);
+    }
+
+    // Off under an HDRI when the units change, the lights follow them all the same.
+    ShadingPreviewStage::Environment environment;
+    environment.hdriFile = "studio.hdr";  // only its name matters here
+    preview.setEnvironment(environment);
+    source->SetMetadata(TfToken("metersPerUnit"), 0.1);
+    preview.syncWithSource();
+    CHECK(!prim("Rig/Rect").IsActive(), "off under the HDRI");
+    environment.sceneLights = true;
+    preview.setEnvironment(environment);
+    CHECK(close(scaleOf("Rig/Rect"), 1) && close(value("Rig/Rect", "inputs:width"), 2), "on again, in decimetres: %f", value("Rig/Rect", "inputs:width"));
+
+    // In the shape's own units, it's as its file has it.
+    source->SetMetadata(TfToken("metersPerUnit"), 0.01);
+    preview.syncWithSource();
+    CHECK(close(value("Rig/Rect", "inputs:width"), 20) && close(scaleOf("Rig/Rect"), 1), "a centimetre scene: %f", value("Rig/Rect", "inputs:width"));
+    CHECK(close(value("Bulb", "inputs:intensity"), 5) && close(value("Bulb", "inputs:intensity", 2), 10), "the normalized one: %f",
+          value("Bulb", "inputs:intensity"));
+    CHECK(close(scaleOf("Rig/Rect/Parts/Housing"), 1) &&
+              GfIsClose(world("Rig/Rect/Parts/Housing").ExtractTranslation(), GfVec3d(50, 100, 10), 1e-4),
+          "what's under a light");
+    bool resets = false;
+    CHECK(UsdGeomXformable(prim("Rig/Rect")).GetOrderedXformOps(&resets).size() == 1, "with no op left behind");
 }
 
 USDCC_TEST(shading_preview_shows_one_output) {
@@ -548,6 +683,10 @@ USDCC_TEST(shading_preview_shows_a_scene_prim) {
     const SdfPath ball("/World/WoodBall"), box("/World/SteelBox");
 
     CHECK(preview.setScenePrim(ball, &why), "a prim of the scene: %s", why.c_str());
+    source->SetMetadata(TfToken("metersPerUnit"), 0.01);
+    CHECK(preview.syncWithSource() == 1.0, "it isn't scaled when the units change, so nor is the view");
+    source->SetMetadata(TfToken("metersPerUnit"), 1.0);
+    CHECK(preview.syncWithSource() == 1.0, "and back");
     CHECK(preview.scenePrim() == ball && preview.stage()->GetPrimAtPath(ball), "is in the preview");
     CHECK(!preview.stage()->GetPrimAtPath(box), "without the rest of the scene");
     CHECK(!preview.stage()->GetPrimAtPath(assetChild("Ball")), "instead of the shape");

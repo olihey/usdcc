@@ -88,7 +88,10 @@ public:
     // Keeps what's per stage in step with the scene: muted layers and load rules, and the
     // shape's scale for the scene's units. Cheap when nothing changed. The preview itself is
     // always Y-up, as the viewport's camera is: only a shape authored Z-up is turned.
-    void syncWithSource();
+    // Returns how much bigger the shape got about the preview's origin, 1 unless the units
+    // changed: a view of it that's scaled along (§7.3) shows the same picture. Always 1 for a
+    // prim of the scene, which isn't scaled.
+    double syncWithSource();
     // Something in the scene changed, as its change notice says: what depends on the material's
     // network or the scene prim follows. A scene prim that's gone gives way to the shape file.
     void sceneChanged(const std::vector<PXR_NS::SdfPath>& resynced, const std::vector<PXR_NS::SdfPath>& changed);
@@ -121,10 +124,15 @@ public:
 private:
     void writeScene();
     void writeShape();
+    // From the shape's units to the scene's, the last time the shape was scaled.
+    double shapeScale() const;
     void writeBinding();
     void writeEnvironment();
     // Switches the shape's lights off under an HDRI, on otherwise, in m_scene.
     void writeShapeLights();
+    // Puts the shape's scale into its area lights' own size instead of their transform: Storm
+    // ignores a light's scale but not its distance (§7.3).
+    void writeShapeLightUnits(float scale);
     // Takes back what writeShapeLights() wrote for the last shape.
     void clearShapeLights();
     void applyMask();
@@ -164,6 +172,7 @@ private:
     double m_shapeMetersPerUnit = 1;  // the same
     double m_metersPerUnit = 0.01;    // the scene's, the last time the shape was scaled
     bool m_shapeHasLights = false;
+    std::vector<PXR_NS::SdfPath> m_shapeLightUnits;  // the properties writeShapeLightUnits() wrote in m_scene
     std::vector<PXR_NS::SdfPath> m_shapeLights;  // what an HDRI switches off: not mesh lights
     bool m_wroteZUp = false;                     // how the dome and key light were last turned
 
