@@ -430,8 +430,8 @@ Built 2026-11-24, for Linux: `SecretServiceStore` in
   desktop's own dialog, on whichever thread asks, which waits: one thread at a time asks. A login
   kept in memory for 30 seconds, missing ones too, so a refused question isn't asked for every
   request.
-- **Not macOS.** There is no macOS build to compile or try Keychain code in. `CredentialStore` is
-  what it would implement.
+- **Not macOS.** Written before usdcc built there. It does now, so its Keychain can be
+  built and tried now; until then logins there come from the environment variables.
 - **Peers' identity key** stays in its file (PEERS.md); this is only the assets' logins.
 - **Tried** on Ubuntu 24.04 (WSL) with gnome-keyring 46 and libsecret 0.21 in a session bus of their
   own: the test `assets_credentials_in_the_system_store` with `USDCC_TEST_KEYRING=1`, which only
