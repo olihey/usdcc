@@ -257,8 +257,18 @@ USDCC_TEST(outliner_drag_asks_before_changing_other_layers) {
     drop(model, {"/G/L"}, "/N");
     settle();
     CHECK(asked && s.has("/N/L"), "asked once more");
+    // Answered if it does ask: that's a failure, not a dialog nobody closes.
+    asked = false;
+    QTimer unexpected;
+    QObject::connect(&unexpected, &QTimer::timeout, &unexpected, [&asked]() {
+        if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            asked = true;
+            box->button(QMessageBox::Cancel)->click();
+        }
+    });
+    unexpected.start(5);
     panel.performDrop({SdfPath("/G/M")}, SdfPath("/N"), -1, true);
-    CHECK(s.has("/N/M"), "and then not again");
+    CHECK(!asked && s.has("/N/M"), "and then not again");
 }
 
 USDCC_TEST(outliner_rename_follows_on_undo) {
