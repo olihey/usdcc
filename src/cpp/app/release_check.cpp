@@ -5,11 +5,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QStorageInfo>
 #include <QStringList>
 #include <QSysInfo>
 
 #include <array>
+
+#ifdef Q_OS_MACOS
+#include <sys/mount.h>
+#endif
 
 namespace usdcc::app {
 
@@ -41,6 +44,16 @@ int compareIdentifiers(const QString& a, const QString& b) {
     const int order = a.compare(b);
     return order < 0 ? -1 : (order > 0 ? 1 : 0);
 }
+
+#ifdef Q_OS_MACOS
+// Whether the volume `path` is on is mounted read-only. Not QStorageInfo::isReadOnly(), which
+// asks about the volume's root: for the data volume, where /Applications is, that comes out
+// as "/", the system volume, which always is.
+bool onReadOnlyVolume(const QString& path) {
+    struct statfs volume;
+    return statfs(path.toUtf8().constData(), &volume) == 0 && (volume.f_flags & MNT_RDONLY) != 0;
+}
+#endif
 
 }  // namespace
 
@@ -117,7 +130,7 @@ InstallLocation installLocation(const QString& executable, const QString& appIma
         return {};
     }
     // macOS runs a downloaded app that wasn't moved from a read-only place of its own.
-    if (executable.contains(QLatin1String("/AppTranslocation/")) || QStorageInfo(info.path()).isReadOnly()) {
+    if (executable.contains(QLatin1String("/AppTranslocation/")) || onReadOnlyVolume(info.path())) {
         return {Kind::MacMoved};
     }
     return {Kind::MacApp};
