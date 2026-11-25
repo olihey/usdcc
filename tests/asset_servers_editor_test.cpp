@@ -395,7 +395,12 @@ USDCC_TEST(asset_folders_remember_their_environment) {
     CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/s010/s010.usda") == "test", "a folder below it");
     CHECK(usdcc::usd::rememberedEnvironment("C:/proj/assets/a.usda").empty(), "not a folder beside it");
     usdcc::usd::setAssetFolderFile(folder.filePath(QStringLiteral("profile/asset-folders.json")).toStdString());
-    CHECK(usdcc::usd::rememberedEnvironment("c:/PROJ/shots/x.usda") == "test", "kept in its file");
+    CHECK(usdcc::usd::rememberedEnvironment("C:/proj/shots/x.usda") == "test", "kept in its file");
+#if defined(_WIN32)
+    CHECK(usdcc::usd::rememberedEnvironment("c:/PROJ/shots/x.usda") == "test", "however it's spelled, as Windows' paths are");
+#else
+    CHECK(usdcc::usd::rememberedEnvironment("c:/PROJ/shots/x.usda").empty(), "another spelling is another folder");
+#endif
     CHECK(usdcc::usd::stageAssetEnvironment(nullptr).empty() &&
               usdcc::usd::stageResolverContext("C:/proj/shots/x.usda").Get<assets::Context>()->environment() == "test",
           "and what a stage there opens in");
