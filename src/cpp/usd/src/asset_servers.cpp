@@ -5,8 +5,10 @@
 
 #include <pxr/usd/ar/assetInfo.h>
 #include <pxr/usd/ar/defaultResolverContext.h>
+#include <pxr/usd/ar/packageUtils.h>
 #include <pxr/usd/ar/resolvedPath.h>
 #include <pxr/usd/ar/resolver.h>
+#include <pxr/usd/sdf/fileFormat.h>
 
 #include <algorithm>
 #include <cctype>
@@ -90,6 +92,11 @@ std::string displayAssetPath(const std::string& resolvedPath) {
 
 std::string relativeAssetPath(const std::string& target, const std::string& anchor) {
     if (isLocalAssetPath(target) || isLocalAssetPath(anchor)) return {};
+    // USD anchors a relative path in a package (.usdz) inside the package: only the whole
+    // path reaches a file outside it, as properties::layerFolder() has it on disk.
+    if (PXR_NS::ArIsPackageRelativePath(anchor)) return {};
+    const PXR_NS::SdfFileFormatConstPtr format = PXR_NS::SdfFileFormat::FindByExtension(anchor);
+    if (format && format->IsPackage()) return {};
     const std::string to = displayAssetPath(target);
     const std::string from = displayAssetPath(anchor);
     const auto split = [](const std::string& uri, std::string* server, std::vector<std::string>* parts) {
