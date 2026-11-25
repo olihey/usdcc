@@ -479,6 +479,7 @@ USDCC_TEST(assets_webdav_usdz_contents_resolve) {
               "def Xform \"Model\"\n{\n    custom asset tex = @textures/wood.txt@\n}\n");
     writeFile(source / "textures/wood.txt", "zipped texture");
     fs::create_directories(servers.prodFolder.root / "pkg");
+    writeFile(servers.prodFolder.root / "env/sky.txt", "outside texture");
     {
         SdfZipFileWriter zip = SdfZipFileWriter::CreateNew(toUtf8(servers.prodFolder.root / "pkg/model.usdz"));
         zip.AddFile(toUtf8(source / "scene.usda"), "scene.usda");
@@ -495,6 +496,16 @@ USDCC_TEST(assets_webdav_usdz_contents_resolve) {
         CHECK(tex.rfind("webdav://", 0) == 0 && tex.find("model.usdz[textures/wood.txt]") != std::string::npos,
               "%s: a texture inside it resolves inside the package, through WebDAV: %s", how, tex.c_str());
         CHECK(openedContent(tex) == "zipped texture", "%s: and opens with no context bound", how);
+
+        // A file on the server outside the package, written into the package's layer: a
+        // relative path stays inside the package, so only the whole path reaches it.
+        const std::string folder = expectedRepo.substr(0, expectedRepo.rfind("pkg/"));
+        UsdAttribute outside = stage->GetPrimAtPath(SdfPath("/Model")).GetAttribute(TfToken("tex"));
+        outside.Set(SdfAssetPath("../env/sky.txt"));
+        CHECK(assetAttribute(stage, "/Model", "tex").empty(), "%s: a relative path out of the package doesn't resolve", how);
+        outside.Set(SdfAssetPath(folder + "env/sky.txt"));
+        const std::string sky = assetAttribute(stage, "/Model", "tex");
+        CHECK(openedContent(sky) == "outside texture", "%s: an absolute one does: %s", how, sky.c_str());
     };
 
     check(UsdStage::Open("webdav://studio/pkg/model.usdz", servers.context("prod")), "webdav://studio/pkg/model.usdz", "by name");

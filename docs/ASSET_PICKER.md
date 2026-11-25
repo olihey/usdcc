@@ -195,7 +195,8 @@ An asset path, not a file path:
   absolute.
 - **A remote file, relative:** when the layer is under the same name
   (`webdav://studio/shots/s010.usd` choosing `webdav://studio/chars/hero/hero.usd` gives
-  `../chars/hero/hero.usd`). Worked out on the URIs' paths alone.
+  `../chars/hero/hero.usd`). Worked out on the URIs' paths alone. Never from a `.usdz` or a
+  layer in one, where USD looks for a relative path inside the package: absolute there.
 - **A remote file, absolute:** the logical URL, `webdav://studio/chars/hero/hero.usd`. Never an
   endpoint's URL, and never a stack id.
 - **Across names or protocols,** only absolute is possible.

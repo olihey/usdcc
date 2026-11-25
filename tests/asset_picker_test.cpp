@@ -156,6 +156,12 @@ USDCC_TEST(asset_picker_relative_paths_on_a_server) {
     CHECK(relativeAssetPath("webdavs://studio/a.usd", "webdav://studio/b.usd").empty(), "nor across schemes");
     CHECK(relativeAssetPath("C:/a.usd", "webdav://studio/b.usd").empty() && relativeAssetPath("webdav://studio/a.usd", "C:/b.usd").empty(),
           "nor between a server and the disk");
+    // Either would be looked for inside the package.
+    CHECK(relativeAssetPath("webdav://studio/env/sky.exr", "webdav://studio/single/phone.usdz").empty(), "nor from a .usdz");
+    CHECK(relativeAssetPath("webdav://studio/env/sky.exr", "webdav://studio~7c21/single/phone.usdz[phone.usdc]").empty(),
+          "nor from a layer in one");
+    CHECK(relativeAssetPath("webdav://studio/single/phone.usdz", "webdav://studio/shots/s010.usd") == "../single/phone.usdz",
+          "but a .usdz can be the target");
 }
 
 USDCC_TEST(asset_picker_favourites) {
