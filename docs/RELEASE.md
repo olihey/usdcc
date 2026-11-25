@@ -125,6 +125,9 @@ usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each j
 `windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
+The `linux` jobs also attach `usdcc-linux-<arch>.AppImage`, and they and the `macos` job the packages
+that installs update from ([UPDATES.md](UPDATES.md) §9). This hasn't run yet.
+
 The `macos` job attaches `usdcc-<version>-macos-arm64.dmg`, with `usdcc.app` and a link to
 Applications, and the dSYMs of usdcc's own binaries. And
 `usdcc-<version>-macos-arm64-<pack>.dmg` for each optional USD plugin pack, usdcc with the pack

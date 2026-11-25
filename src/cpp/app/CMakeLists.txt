@@ -10,19 +10,23 @@ endif()
 
 # usdcc — the application executable.
 add_executable(usdcc main.cpp file_open_events.h)
-# Updates of an installed usdcc (docs/UPDATES.md): Velopack's DLL, beside the exe. A build
+# Updates (docs/UPDATES.md): GitHub's releases with Qt Network (its DLL and TLS plugin are
+# deployed below), and for an installed usdcc Velopack: on Windows its DLL, beside the exe. A build
 # without the Updates feature (docs/BUILD_OPTIONS.md) has none of it.
 if(USDCC_BUILD_UPDATES)
-    target_sources(usdcc PRIVATE app_updates.cpp app_updates.h)
+    target_sources(usdcc PRIVATE app_updates.cpp app_updates.h release_check.cpp release_check.h running_programs.h)
+    target_link_libraries(usdcc PRIVATE Qt6::Network)
 endif()
 if(USDCC_BUILD_UPDATES AND USDCC_VELOPACK_FOUND)
     target_link_libraries(usdcc PRIVATE usdcc::velopack)
-    add_custom_command(
-        TARGET usdcc
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${USDCC_VELOPACK_DLL}" "$<TARGET_FILE_DIR:usdcc>/"
-        COMMENT "Deploying Velopack's DLL"
-        VERBATIM)
+    if(WIN32)
+        add_custom_command(
+            TARGET usdcc
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${USDCC_VELOPACK_DLL}" "$<TARGET_FILE_DIR:usdcc>/"
+            COMMENT "Deploying Velopack's DLL"
+            VERBATIM)
+    endif()
 endif()
 if(WIN32)
     # The .exe's own icon (Explorer, taskbar pins) and version (Properties >

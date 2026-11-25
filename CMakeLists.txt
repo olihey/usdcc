@@ -225,7 +225,7 @@ include(UsdccRuff)
 include(UsdccUv)
 include(UsdccDebugpy)
 include(UsdccStubs)
-# The installer and updates on Windows (docs/UPDATES.md).
+# The installer on Windows, and updates (docs/UPDATES.md).
 include(UsdccVelopack)
 
 # The usdcc Python package lives in build/python/usdcc: the compiled modules
@@ -350,7 +350,7 @@ add_subdirectory(src/cpp/app)
 add_subdirectory(src/cpp/node)
 # usdcc.exe at the top of a deploy, which starts bin\usdcc.exe; what the installer's
 # shortcuts start and Velopack runs (docs/UPDATES.md §3).
-if(USDCC_VELOPACK_FOUND)
+if(WIN32 AND USDCC_VELOPACK_FOUND)
     add_subdirectory(src/cpp/launcher)
 endif()
 add_subdirectory(src/plugins/cpp_example)

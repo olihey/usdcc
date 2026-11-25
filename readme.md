@@ -208,7 +208,8 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\usdc
 and PySide6 packages) into one folder that runs on a machine without the dev
 environment. Zip it to distribute; start it with `usdcc.exe` (`usdcc.cmd` in a build
 without Velopack) or `bin\usdcc.exe`. Releases also come with an installer, made from the
-same folder, that updates itself ([docs/UPDATES.md](docs/UPDATES.md)).
+same folder, that updates itself, and on Linux with an AppImage that does
+([docs/UPDATES.md](docs/UPDATES.md)).
 
 ```
 python tools/deploy.py                       # into .\deploy

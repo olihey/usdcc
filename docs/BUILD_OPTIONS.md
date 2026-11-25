@@ -98,7 +98,7 @@ was built with.
 | V-Ray Render | `USDCC_BUILD_VRAY_RENDER` | Python plugin, deploy only | On | Not licensed | Small: deploy and the id |
 | RTX Render | `USDCC_BUILD_RTX_RENDER` | Plugin | Off (as today) | | Rename with an alias |
 | Blender mesh tools | `USDCC_BUILD_BLENDER_MESH_TOOLS` | Plugin | On | GPL | Small: stop forcing it |
-| Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On (without Velopack it only opens the releases page) | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
+| Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On (without Velopack it only says that there is a newer release) | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
 | Peers | `USDCC_BUILD_PEERS` | A library (`usdcc_peers`), linked by `usdcc_usd`, `usdcc_ui`, `usdcc_app` and `usdcc_node` (*checked*) | On | A build that never opens a connection | **Large:** the shared stage, rendering with peers, the render queue and the Peers panel all build on it. Its own plan when it's wanted |
 | Editor link | `USDCC_BUILD_EDITOR_LINK` | In a library (`usdcc_scripting_app`) | On | Other programs running scripts in the app ([VSCODE.md](VSCODE.md)) | Done with its first phase |
 | MCP | to come with it | | | | Has an option from its first phase |
@@ -171,7 +171,7 @@ plugin: it's in the app.
   with the installer gets an install that doesn't update itself; one that deploys its own way
   uses the 7z or `deploy.py` as before.
 - **Not the same as `USDCC_VELOPACK=OFF`**, which leaves Velopack out altogether (no launcher, no
-  installer), but keeps Help > Check for Updates, which then opens the releases page.
+  installer), but keeps Help > Check for Updates, which then only says that there is a newer release.
 - **CI's build with every feature left out** (`--without all`, after a merge) leaves out Updates
   too, as it's in `build.py`'s list.
 

@@ -526,6 +526,62 @@ jobs:
             "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-archives/*.tar.xz \
             --clobber --repo "$GITHUB_REPOSITORY"
 
+      # The AppImage, which updates itself (docs/UPDATES.md section 9), from the deploy that
+      # is packed by now. Out of the deploy again: the optional packs checked above. vpk names
+      # the file usdcc-linux-<arch>.AppImage, and the packages and the feed by the channel.
+      # .NET was removed above, for the space.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Make the AppImage and its update packages
+        run: |
+          sudo apt-get install -y -q squashfs-tools
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -C "$RUNNER_TEMP/unpacked" -xf "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}"
+          python tools/make_appdir.py --move "$RUNNER_TEMP/unpacked/${{ steps.tag.outputs.name }}" "$RUNNER_TEMP/usdcc.AppDir"
+          vpk_version=$(sed -n 's/^set(USDCC_VELOPACK_VERSION "\([^"]*\)").*/\1/p' cmake/modules/UsdccVelopack.cmake)
+          dotnet tool install vpk --version "$vpk_version" --tool-path "$RUNNER_TEMP/vpk"
+          repo="https://github.com/$GITHUB_REPOSITORY"
+          releases="$RUNNER_TEMP/velopack"
+          mkdir -p "$releases"
+          pre=()
+          if [[ '${{ steps.tag.outputs.version }}' == *-* ]]; then pre=(--pre); fi
+          channel='linux-${{ matrix.arch }}'
+          "$RUNNER_TEMP/vpk/vpk" download github --repoUrl "$repo" --token "$GH_TOKEN" --outputDir "$releases" --channel "$channel" "${pre[@]}" \
+            || echo "::notice::No earlier release with update packages, so no delta this time."
+          "$RUNNER_TEMP/vpk/vpk" pack --packId usdcc --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc \
+            --packDir "$RUNNER_TEMP/usdcc.AppDir" --mainExe usdcc --runtime "$channel" --channel "$channel" --outputDir "$releases"
+          ls -la "$releases"
+
+      # Without FUSE, which the runner doesn't need to have.
+      - name: Start the AppImage
+        run: |
+          image="$RUNNER_TEMP/velopack/usdcc-linux-${{ matrix.arch }}.AppImage"
+          "$image" --appimage-extract-and-run usdcc_node --version --no-gpu | tee "$RUNNER_TEMP/node.txt"
+          grep -q 'usdcc_node ${{ steps.tag.outputs.version }}' "$RUNNER_TEMP/node.txt"
+          (cd "$RUNNER_TEMP" && "$image" --appimage-extract > /dev/null)
+          python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/squashfs-root/usr" \
+            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
+
+      - name: Keep the AppImage with the run
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.name }}
+          path: ${{ runner.temp }}/velopack/*.AppImage
+          compression-level: 0
+          retention-days: 3
+
+      - name: Attach the AppImage and its update packages
+        if: ${{ !inputs.dry_run }}
+        run: |
+          pre=()
+          if [[ '${{ steps.tag.outputs.version }}' == *-* ]]; then pre=(--pre); fi
+          "$RUNNER_TEMP/vpk/vpk" upload github --repoUrl "https://github.com/$GITHUB_REPOSITORY" --token "$GH_TOKEN" \
+            --outputDir "$RUNNER_TEMP/velopack" --tag "$TAG" --merge --channel 'linux-${{ matrix.arch }}' "${pre[@]}"
+
   # macOS on Apple Silicon (docs/MACOS.md): usdcc.app in a disk image. Signed ad hoc, so
   # macOS asks whoever downloads it (docs/RELEASE.md section 4), unless the secret
   # MACOS_SIGN_IDENTITY names an identity. That also needs its certificate imported into a
@@ -656,6 +712,52 @@ jobs:
             rm -rf "$RUNNER_TEMP/symbols-again"
           done
 
+      # The update packages (docs/UPDATES.md section 9). vpk puts its updater into usdcc.app and
+      # signs the bundle again, so the app in the disk image is the one it puts out. An app
+      # with an optional pack isn't packed: an update would take its pack away.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Make the update packages
+        run: |
+          vpk_version=$(sed -n 's/^set(USDCC_VELOPACK_VERSION "\([^"]*\)").*/\1/p' cmake/modules/UsdccVelopack.cmake)
+          dotnet tool install vpk --version "$vpk_version" --tool-path "$RUNNER_TEMP/vpk"
+          repo="https://github.com/$GITHUB_REPOSITORY"
+          releases="$RUNNER_TEMP/velopack"
+          mkdir -p "$releases"
+          pre=()
+          if [[ '${{ steps.tag.outputs.version }}' == *-* ]]; then pre=(--pre); fi
+          "$RUNNER_TEMP/vpk/vpk" download github --repoUrl "$repo" --token "$GH_TOKEN" --outputDir "$releases" --channel osx-arm64 ${pre[@]+"${pre[@]}"} \
+            || echo "::notice::No earlier release with update packages, so no delta this time."
+          # vpk takes only this extension.
+          cp src/cpp/app/resources/macos/entitlements.plist "$RUNNER_TEMP/usdcc.entitlements"
+          deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
+          "$RUNNER_TEMP/vpk/vpk" pack --packId usdcc --packVersion '${{ steps.tag.outputs.version }}' --packTitle usdcc --packAuthors usdcc \
+            --packDir "$deploy/usdcc.app" --mainExe usdcc --runtime osx-arm64 --channel osx-arm64 --noInst \
+            --signAppIdentity "$SIGN" --signDisableDeep --signEntitlements "$RUNNER_TEMP/usdcc.entitlements" --outputDir "$releases"
+          ls -la "$releases"
+          mkdir "$RUNNER_TEMP/packed"
+          ditto -x -k "$releases/usdcc-osx-arm64-Portable.zip" "$RUNNER_TEMP/packed"
+          test -x "$RUNNER_TEMP/packed/usdcc.app/Contents/MacOS/UpdateMac"
+          codesign --verify --deep --strict "$RUNNER_TEMP/packed/usdcc.app"
+          # As an update installs it: out of the package, over an installed one, links and signature intact.
+          mkdir "$RUNNER_TEMP/updated"
+          ditto "$RUNNER_TEMP/packed/usdcc.app" "$RUNNER_TEMP/updated/usdcc.app"
+          rm "$RUNNER_TEMP/updated/usdcc.app/Contents/Resources/LICENSE.txt"
+          package=$(ls "$releases"/usdcc-*-full.nupkg | grep -F -- '-${{ steps.tag.outputs.version }}-')
+          "$RUNNER_TEMP/updated/usdcc.app/Contents/MacOS/UpdateMac" --silent apply --norestart --package "$package"
+          test -f "$RUNNER_TEMP/updated/usdcc.app/Contents/Resources/LICENSE.txt"
+          codesign --verify --deep --strict "$RUNNER_TEMP/updated/usdcc.app"
+          rm -rf "$RUNNER_TEMP/updated" "$deploy/usdcc.app"
+          ditto "$RUNNER_TEMP/packed/usdcc.app" "$deploy/usdcc.app"
+          # Only for the disk image: out of vpk's list of what to attach.
+          list="$releases/assets.osx-arm64.json"
+          jq 'map(select(.RelativeFileName | endswith("-Portable.zip") | not))' "$list" > "$list.new"
+          mv "$list.new" "$list"
+          rm "$releases/usdcc-osx-arm64-Portable.zip"
+
       # And one for each optional USD plugin pack (docs/USD_PLUGINS.md section 5): usdcc with
       # the pack, as files can't be added to a signed bundle.
       - name: Make the disk images
@@ -717,3 +819,6 @@ jobs:
           shopt -s nullglob
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" \
             "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-images/*.dmg --clobber --repo "$GITHUB_REPOSITORY"
+          pre=()
+          if [[ '${{ steps.tag.outputs.version }}' == *-* ]]; then pre=(--pre); fi
+          "$RUNNER_TEMP/vpk/vpk" upload github --repoUrl "https://github.com/$GITHUB_REPOSITORY" --token "$GH_TOKEN"             --outputDir "$RUNNER_TEMP/velopack" --tag "$TAG" --merge --channel osx-arm64 ${pre[@]+"${pre[@]}"}

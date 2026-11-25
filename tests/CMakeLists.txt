@@ -66,6 +66,8 @@ add_executable(usdcc_tests
     variant_actions_test.cpp
     version_test.cpp
     install_paths_test.cpp
+    release_check_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/cpp/app/release_check.cpp
     view_panel_registry_test.cpp
     xform_math_test.cpp
     xform_stack_test.cpp
@@ -73,6 +75,8 @@ add_executable(usdcc_tests
     anim_edit_test.cpp
 )
 target_link_libraries(usdcc_tests PRIVATE usdcc_tools usdcc_usd usdcc_usd_ui Qt6::Core)
+# The version check (docs/UPDATES.md §9), which is the app's.
+target_include_directories(usdcc_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/cpp/app")
 # usdcc_node (docs/RENDER_NODE.md): its arguments, trust and keys, and the program itself.
 target_link_libraries(usdcc_tests PRIVATE usdcc_node_core)
 target_compile_definitions(usdcc_tests PRIVATE USDCC_NODE_EXE="$<TARGET_FILE:usdcc_node>")

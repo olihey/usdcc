@@ -159,6 +159,11 @@
 using usdcc::app::ScopedLogSink;
 
 int main(int argc, char** argv) {
+#if USDCC_FEATURE_UPDATES
+    // Before anything else, as Velopack asks: it may install a downloaded update and start
+    // usdcc again instead (macOS and AppImage; on Windows the launcher does it).
+    usdcc::app::AppUpdates::runStartup();
+#endif
     // Logging comes first, so nothing logged during start-up is lost: records
     // wait in the hub's ring buffer until the log file (below) attaches and
     // replays them. USDCC_LOG sets levels, e.g. "debug" or
@@ -1733,7 +1738,12 @@ int main(int argc, char** argv) {
         if (commandLine.isSet(noEditorLinkOption)) arguments << QStringLiteral("--no-editor-link");
 #endif
         USDCC_LOG_INFO("usdcc.app", "Restarting: {}", arguments.join(QLatin1Char(' ')).toStdString());
-        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments)) {
+        // An AppImage is mounted only while it runs: the new one is started from its file.
+        QString program = QCoreApplication::applicationFilePath();
+        const QString appDir = qEnvironmentVariable("APPDIR");
+        const QString appImage = qEnvironmentVariable("APPIMAGE");
+        if (!appDir.isEmpty() && program.startsWith(appDir + QLatin1Char('/')) && QFileInfo::exists(appImage)) program = appImage;
+        if (!QProcess::startDetached(program, arguments)) {
             USDCC_LOG_ERROR("usdcc.app", "Couldn't start the app again");
         }
     }

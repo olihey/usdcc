@@ -432,6 +432,22 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
 
 ## 6. Running it
 
+- **From each package** ([UPDATES.md](UPDATES.md) §9):
+
+  | Package | The program | Path after an update |
+  |---|---|---|
+  | Windows installer | `%LOCALAPPDATA%\usdcc\current\bin\usdcc_node.exe` | The same |
+  | Windows 7z | `<folder>\bin\usdcc_node.exe` | Updated by hand |
+  | macOS | `/Applications/usdcc.app/Contents/MacOS/usdcc_node` | The same |
+  | Linux tar.xz | `<folder>/bin/usdcc_node` | Updated by hand |
+  | Linux AppImage | `./usdcc-linux-x64.AppImage usdcc_node`, or a link to it named `usdcc_node` | The same, if the file keeps its name |
+
+  A farm is best served by the 7z or tar.xz in a folder named by version: its machines change
+  version together, and nothing updates during a job. The AppImage without FUSE needs
+  `--appimage-extract-and-run`, which unpacks all of usdcc at each start. On macOS a downloaded
+  usdcc is opened once first, so that macOS lets it run.
+- **No display on Linux:** `--no-gpu` starts without a window system, for renderers that need
+  no OpenGL. Storm there is for later (§7).
 - **Windows service:** `usdcc_node service install --config node.json` registers it (as Local
   Service, or an account given); `service remove`. The service is `usdcc_node serve` with the
   config. Its log goes to the profile's log folder and the Event Log for start, stop and errors.
@@ -449,8 +465,12 @@ step, like the broadcast's page. Served by the queue's room with Qt HttpServer, 
   machine without a monitor.
 - **Linux:** a systemd unit, when Linux is tried.
 - **Docker:** not planned (§9).
-- **Updates:** the node doesn't update itself. Velopack updates the folder when the app does; a
-  running service is stopped first. On a farm machine without the app, the package is deployed
+- **Updates:** the node doesn't update itself. Velopack updates the folder when the app does,
+  which on Windows and macOS stops a node running from it: usdcc asks first
+  ([UPDATES.md](UPDATES.md) §9). A running service is to be stopped
+  first (phase 5). The node doesn't check for updates on its own either: nobody is there, and
+  farm managers read its output. `usdcc_node --check-update`, which prints the newest version
+  and exits, could be added. On a farm machine without the app, the package is deployed
   as the farm deploys anything.
 
 ## 7. Phases

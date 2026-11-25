@@ -798,6 +798,17 @@ def _pyside_licences(pyside_dir, python_exe, licenses_dir, sources):
         sources.append(f"  source:     https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v{pyside_version}")
 
 
+def _velopack_licence(licenses_dir, sources):
+    """Velopack's, built into usdcc on macOS and Linux (docs/UPDATES.md section 7)."""
+    licence = cache_value(BUILD_DIR, "USDCC_VELOPACK_LICENSE_PATH")
+    if not licence or not os.path.isfile(licence) or not _has_feature("UPDATES"):
+        return
+    (licenses_dir / "Velopack").mkdir(parents=True, exist_ok=True)
+    copy_file(licence, licenses_dir / "Velopack")
+    version = (Path(licence).parent / "VERSION").read_text(encoding="utf-8").strip()
+    sources += ["", f"Velopack {version}", f"  source:     https://github.com/velopack/velopack/tree/{version}"]
+
+
 # --- Linux --------------------------------------------------------------------
 
 # Libraries a Linux deploy may take from the system: what every desktop has (glibc,
@@ -1172,6 +1183,7 @@ def deploy_linux(args):
             (licenses_dir / tool).mkdir(parents=True, exist_ok=True)
             for name in [*_names(tool_dir, "LICENSE*"), *_names(tool_dir, "ThirdPartyNotices*")]:
                 copy_file(tool_dir / name, licenses_dir / tool)
+    _velopack_licence(licenses_dir, sources)
     (licenses_dir / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8")
 
     # --- launcher and checks --------------------------------------------------
@@ -1595,6 +1607,7 @@ def deploy_macos(args):
             (licenses_dir / tool).mkdir(parents=True, exist_ok=True)
             for name in [*_names(tool_dir, "LICENSE*"), *_names(tool_dir, "ThirdPartyNotices*")]:
                 copy_file(tool_dir / name, licenses_dir / tool)
+    _velopack_licence(licenses_dir, sources)
     (licenses_dir / "SOURCES.txt").write_text("\n".join(sources) + "\n", encoding="utf-8")
 
     # --- links, compiled Python, signatures -----------------------------------

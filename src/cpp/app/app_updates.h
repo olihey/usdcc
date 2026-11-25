@@ -6,11 +6,12 @@
 // seconds after the start (Settings > Updates), and the notifications that go
 // with them.
 //
-// An install is what usdcc's installer made: bin\usdcc.exe under a "current"
-// folder with Velopack's Update.exe beside it. Anything else (the 7z, a build)
-// can't update itself, and Check for Updates points to the releases page.
-// Built without Velopack (Linux, or offline at configure time), it's the same.
+// An install is what usdcc's installer made on Windows, usdcc.app on macOS, or the
+// AppImage (InstallLocation). Anything else (the 7z, the tar.xz, a build without
+// Velopack) can't update itself: for it the same check asks GitHub's list of releases,
+// and points to the newest one's page (docs/UPDATES.md §9).
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 
@@ -31,6 +32,10 @@ public:
     // closing asks, and returns whether it closed.
     AppUpdates(ui::MainWindow* window, std::function<bool()> closeWindow);
     ~AppUpdates() override;
+
+    // Velopack's own start, for the first lines of main() on macOS and Linux: installs an
+    // update downloaded earlier (and doesn't return), or notes that this start follows one.
+    static void runStartup();
 
     // Settings > Updates. Before the Settings dialog is first opened.
     static void defineSettings();
@@ -58,16 +63,23 @@ public:
 private:
     struct State;
     void check(bool interactive);
+    void checkReleases(bool interactive);
+    void releasesArrived(const QByteArray& json, const QString& failure, bool interactive);
+    void checkFailed(const QString& error, bool interactive);
+    bool mayRestartForUpdate();
     void download();
     void restartNow();
     void showReady();
     void updateMenuAction();
     void menuActionTriggered();
     QString releasesUrl() const;
+    QString releasePage() const;
 
     ui::MainWindow* m_window;
     std::function<bool()> m_closeWindow;
     QAction* m_menuAction = nullptr;
+    QString m_releaseVersion;  // the newer release a copy that can't update itself found, and its tag
+    QString m_releaseTag;
     int m_availableToast = 0;  // "usdcc <version> is available"; 0 is none
     std::shared_ptr<State> m_state;
 };

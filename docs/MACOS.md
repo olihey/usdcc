@@ -112,7 +112,7 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 
 ## 5. Not done
 
-- The release job hasn't run; a Developer ID, notarization, and updates in the app. The
+- The release job hasn't run; a Developer ID and notarization. The
   deploy leaves Blender mesh tools out, as the other releases do. The Gatling (no MDL SDK download) and Arnold
   packs. MoonRay builds and renders ([MOONRAY.md](MOONRAY.md) §7.6); CI hasn't built it.
 - Checked in the running app by script: a Python panel, Mesh > Triangulate and its undo, a glTF

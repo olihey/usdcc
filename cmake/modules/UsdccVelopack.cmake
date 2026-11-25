@@ -1,4 +1,4 @@
-# Velopack (https://velopack.io), which installs usdcc on Windows and updates it
+# Velopack (https://velopack.io), which installs usdcc on Windows and updates it on all platforms
 # from the GitHub releases (docs/UPDATES.md). Its C/C++ library, pinned:
 # downloaded once at configure time from Velopack's GitHub release, checked
 # against its SHA-256, and the header and the Windows x64 libraries unpacked
@@ -12,9 +12,11 @@
 # velopack_libc_win_<x64|arm64>_msvc.dll is velopack_libc.dll to its import library, so
 # it is unpacked under that name and copied beside usdcc.exe as it.
 #
-# Windows only: on Linux the release stays a tar.xz (docs/UPDATES.md §2).
+# On macOS and Linux the app links the static library, hiding its symbols, so there is
+# no library to deploy, sign or find (the .so has no soname, and the .dylib's name is a path
+# of the machine it was built on).
 # Offline, or with USDCC_VELOPACK off, usdcc builds without it: no launcher,
-# and Help > Check for Updates only opens the releases page.
+# and Help > Check for Updates only points to the newer release.
 #
 # To upgrade: pick a release at least two weeks old, take
 # velopack_libc_<version>.zip's sha256 from it (gh release view <version>
@@ -28,7 +30,7 @@
 #                          libraries it needs, for a program on the static runtime
 #   USDCC_VELOPACK_DLL     the DLL, to copy beside the program that links it
 
-option(USDCC_VELOPACK "Download Velopack's library, for the installer and updates (Windows)" ON)
+option(USDCC_VELOPACK "Download Velopack's library, for the installer and updates" ON)
 
 set(USDCC_VELOPACK_VERSION "1.2.161")
 set(USDCC_VELOPACK_URL
@@ -113,6 +115,73 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND USDCC_VELOPACK)
             INTERFACE_LINK_LIBRARIES
                 "kernel32;advapi32;bcrypt;ntdll;userenv;ws2_32;ole32;oleaut32;shell32;user32;crypt32;secur32;ncrypt;propsys;shlwapi;version;rpcrt4;uuid;iphlpapi;dbghelp;winhttp;gdi32;comctl32")
         message(STATUS "Velopack for the installer and updates: ${_usdcc_velopack_dir} (${USDCC_VELOPACK_VERSION})")
+    endif()
+endif()
+
+if(NOT WIN32 AND USDCC_VELOPACK)
+    # The machine's, or on macOS the one built for.
+    set(_usdcc_velopack_cpu "${CMAKE_SYSTEM_PROCESSOR}")
+    if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+        set(_usdcc_velopack_cpu "${CMAKE_OSX_ARCHITECTURES}")
+    endif()
+    if(_usdcc_velopack_cpu MATCHES "^(arm64|aarch64)$")
+        set(_usdcc_velopack_arch "arm64")
+    elseif(_usdcc_velopack_cpu MATCHES "^(x86_64|AMD64)$")
+        set(_usdcc_velopack_arch "x64")
+    else()
+        set(_usdcc_velopack_arch "")
+    endif()
+    if(APPLE)
+        set(_usdcc_velopack_name "velopack_libc_osx_${_usdcc_velopack_arch}_gnu.a")
+    else()
+        set(_usdcc_velopack_name "velopack_libc_linux_${_usdcc_velopack_arch}_gnu.a")
+    endif()
+    set(_usdcc_velopack_lib "${_usdcc_velopack_dir}/lib-static/${_usdcc_velopack_name}")
+    set(_usdcc_velopack_have "")
+    if(EXISTS "${_usdcc_velopack_stamp}")
+        file(READ "${_usdcc_velopack_stamp}" _usdcc_velopack_have)
+        string(STRIP "${_usdcc_velopack_have}" _usdcc_velopack_have)
+    endif()
+    if(_usdcc_velopack_arch AND (NOT _usdcc_velopack_have STREQUAL USDCC_VELOPACK_VERSION OR NOT EXISTS "${_usdcc_velopack_lib}"))
+        message(STATUS "Downloading Velopack ${USDCC_VELOPACK_VERSION}")
+        file(REMOVE_RECURSE "${_usdcc_velopack_dir}")
+        set(_usdcc_velopack_archive "${CMAKE_BINARY_DIR}/velopack_libc_${USDCC_VELOPACK_VERSION}.zip")
+        file(DOWNLOAD "${USDCC_VELOPACK_URL}" "${_usdcc_velopack_archive}"
+             EXPECTED_HASH SHA256=${USDCC_VELOPACK_SHA256} STATUS _usdcc_velopack_status TLS_VERIFY ON)
+        list(GET _usdcc_velopack_status 0 _usdcc_velopack_code)
+        if(_usdcc_velopack_code EQUAL 0)
+            file(DOWNLOAD "${USDCC_VELOPACK_LICENSE_URL}" "${_usdcc_velopack_dir}/LICENSE"
+                 EXPECTED_HASH SHA256=${USDCC_VELOPACK_LICENSE_SHA256} STATUS _usdcc_velopack_status TLS_VERIFY ON)
+            list(GET _usdcc_velopack_status 0 _usdcc_velopack_code)
+        endif()
+        if(_usdcc_velopack_code EQUAL 0)
+            file(ARCHIVE_EXTRACT INPUT "${_usdcc_velopack_archive}" DESTINATION "${_usdcc_velopack_dir}"
+                 PATTERNS "include/*" "lib-static/${_usdcc_velopack_name}")
+            file(WRITE "${_usdcc_velopack_stamp}" "${USDCC_VELOPACK_VERSION}\n")
+        else()
+            list(GET _usdcc_velopack_status 1 _usdcc_velopack_error)
+            message(WARNING "Couldn't download Velopack ${USDCC_VELOPACK_VERSION} (${_usdcc_velopack_error}); "
+                            "building without updates in the app.")
+            file(REMOVE_RECURSE "${_usdcc_velopack_dir}")
+        endif()
+        file(REMOVE "${_usdcc_velopack_archive}")
+    endif()
+    if(_usdcc_velopack_arch AND EXISTS "${_usdcc_velopack_lib}" AND EXISTS "${_usdcc_velopack_dir}/include/Velopack.hpp")
+        set(USDCC_VELOPACK_FOUND TRUE)
+        add_library(usdcc::velopack STATIC IMPORTED GLOBAL)
+        set_target_properties(usdcc::velopack PROPERTIES
+            IMPORTED_LOCATION "${_usdcc_velopack_lib}"
+            INTERFACE_INCLUDE_DIRECTORIES "${_usdcc_velopack_dir}/include"
+            INTERFACE_COMPILE_DEFINITIONS "USDCC_HAS_VELOPACK=1")
+        if(APPLE)
+            set_target_properties(usdcc::velopack PROPERTIES INTERFACE_LINK_LIBRARIES "iconv")
+        else()
+            # Not among what the program exports, where a library's own copy would find it.
+            set_target_properties(usdcc::velopack PROPERTIES
+                INTERFACE_LINK_LIBRARIES "pthread;dl;m;gcc_s"
+                INTERFACE_LINK_OPTIONS "LINKER:--exclude-libs,${_usdcc_velopack_name}")
+        endif()
+        message(STATUS "Velopack for updates: ${_usdcc_velopack_lib} (${USDCC_VELOPACK_VERSION})")
     endif()
 endif()
 
