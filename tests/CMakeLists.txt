@@ -201,6 +201,7 @@ add_executable(usdcc_python_tests
     test_harness.h
     test_harness.cpp
     python_test_main.cpp
+    assets_python_test.cpp
     package_environment_test.cpp
     plugin_manager_test.cpp
     plugin_native_test.cpp
@@ -465,6 +466,10 @@ file(GENERATE OUTPUT "${_usdcc_fake_protocol}/plugInfo.json" CONTENT [[{
     }]
 }
 ]])
+
+# usdcc.assets' tests (assets_python_test.cpp) use it too.
+target_compile_definitions(usdcc_python_tests PRIVATE USDCC_ASSETS_FAKE_PROTOCOL_DIR="${_usdcc_fake_protocol}")
+add_dependencies(usdcc_python_tests usdccFakeProtocol)
 
 add_executable(usdcc_assets_tests test_harness.h test_harness.cpp assets_test_main.cpp assets_test.cpp
                                   assets_net_test.cpp assets_test_server.h assets_test_server.cpp)
