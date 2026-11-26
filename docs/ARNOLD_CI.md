@@ -6,15 +6,16 @@ in CI, without the Arnold SDK ever reaching the public repository.
 **Status (2026-11-26): set up and working.** The private repository `olihey/usdcc-arnold` holds
 the three trimmed 7.5.4.2 SDKs and a workflow, run by hand, that builds the pack for Windows x64,
 macOS arm64 and Linux x64 with this repository's tools and pin, refuses a pack holding any SDK
-file, checks each over CI's OpenUSD and keeps them in a private release named as that OpenUSD
-asset (`deps/usd-70c45e83b-76ce049f`). The macOS pack renders in usdcc's viewport. The pack stays
+file, checks each over CI's OpenUSD, rendering a frame with Arnold on each of the three, and keeps
+them in a private release named as that OpenUSD asset (`deps/usd-70c45e83b-76ce049f`). The macOS
+pack also renders in usdcc's viewport. The pack stays
 `local`: `deps-usd-plugins.yml` leaves it out and nothing of it is published. What's left:
 phase 4, asking Autodesk (§7).
 
 | Phase | State |
 |---|---|
 | 1. The private repository and its SDKs | Done |
-| 2. The workflow, all three platforms | Done |
+| 2. The workflow, all three platforms, each rendering a frame | Done |
 | 3. A CI-built pack in usdcc (macOS) | Done; Windows and Linux not tried in usdcc |
 | 4. Ask Autodesk: CI download, and publishing the plugins | Open, for the maintainer |
 | 5. Publish as an optional pack | Only after 4 |
@@ -113,14 +114,17 @@ tried by the workflow's own run.
    `lib/` (`ai.dll`, `libai.dylib`, `ai.lib`, the licensing libraries). The pack is 13 files today.
 10. **Check it over OpenUSD**: unzipped elsewhere, build folders deleted,
     `python tools/ci/check_usd_plugin.py arnold --usd … --pack-dir … --sdk arnold=$RUNNER_TEMP/arnold
-    --forbid … --forbid …`. It preloads the core and checks the four plugins and the
-    `HdArnoldRendererPlugin` delegate are there; it renders nothing.
+    --forbid … --forbid …`. It preloads the core, checks the four plugins and the
+    `HdArnoldRendererPlugin` delegate are there, and renders `test_data/arnold/check.usda` (the
+    scene Cycles' check renders: a mesh, a sphere, a cube, a dome and a distant light, a red
+    UsdPreviewSurface) through UsdImaging without a GPU, 320 pixels wide, wanting a mean of at
+    least 0.05 (the pin's `check.render`). Results in §7, phase 2.
 11. **Keep it**: `gh release create <tag>` in the private repository if it isn't there, then
     `gh release upload <tag> <zip> --clobber`.
 12. **Clean up**: hosted runners are thrown away after the job, so nothing to delete.
 
-`ARNOLD_LICENSE_ORDER` needn't be set: without a licence Arnold renders with the watermark and
-the check renders nothing anyway.
+`ARNOLD_LICENSE_ORDER=none` (set for the whole job): a runner has no licence to look for, so
+Arnold doesn't, and renders with its watermark.
 
 ## 4. Using a pack it built
 
@@ -179,7 +183,20 @@ Not legal advice: what is above is what the texts say, read by us.
    archives in its `sdk` release (§2). Their SHA-256 go into `sdk.json` with phase 2.
 2. **The workflow** (Claude). **Done 2026-11-26:** all three platforms build, hold no SDK file and
    pass the check, and their packs are in `olihey/usdcc-arnold`'s release
-   `deps/usd-70c45e83b-76ce049f` (1.2 MB macOS, 1.7 MB Windows, 1.8 MB Linux). Written: `arnold.yml`, `ci.py` (checks and unpacks the
+   `deps/usd-70c45e83b-76ce049f` (1.2 MB macOS, 1.7 MB Windows, 1.8 MB Linux). Since `e074fa3` each
+   job's check also renders a frame with its pack; the first run with it
+   ([45898950662](https://github.com/olihey/usdcc-arnold/actions/runs/45898950662), on `e074fa3`):
+
+   | Platform | Picture | Mean | Render |
+   |---|---|---|---|
+   | Linux x64 (`ubuntu-24.04`) | 320×213 | 0.495 | 13.0 s |
+   | Windows x64 (`windows-2022`) | 320×213 | 0.495 | 13.8 s |
+   | macOS arm64 (`macos-15`) | 320×213 | 0.495 | 11.0 s |
+
+   The same mean on all three, well above the 0.05 asked for: the same picture, not a black one.
+   On a Mac the check can't be run against a local OpenUSD built with `tools/build_usd.py`: its
+   `pxr` modules have an absolute rpath to that install first, so a copy of it, as the check
+   wants, loads OpenUSD twice and stops at `TF_DEBUG_ENVIRONMENT_SYMBOL`. CI's asset is relocatable. Written: `arnold.yml`, `ci.py` (checks and unpacks the
    SDK, and refuses a pack holding any SDK file) and `sdk.json`, as §3, with one job per platform
    in Git Bash on Windows too. Before: `arnold.yml`, `README.md`, `sdk.json` as above, and in
    `olihey/usdcc` a line in [USD_PLUGINS.md](USD_PLUGINS.md) §4 pointing here. Done when a manual
