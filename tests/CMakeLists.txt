@@ -41,6 +41,7 @@ add_executable(usdcc_tests
     validation_run_test.cpp
     validation_profile_test.cpp
     viewport_grid_test.cpp
+    viewport_overlays_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
     primvar_info_test.cpp

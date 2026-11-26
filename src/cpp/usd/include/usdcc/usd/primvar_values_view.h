@@ -9,6 +9,7 @@
 #include <pxr/usd/sdf/valueTypeName.h>
 
 #include <QAbstractTableModel>
+#include <QEvent>
 #include <QString>
 
 #include <cstddef>
@@ -48,6 +49,10 @@ public:
     const std::vector<Column>& columns() const { return m_columns; }
     // "6 points", "8 face corners"; empty when there's nothing to show.
     const QString& domain() const { return m_domain; }
+    // The prim shown, and what its rows are as PrimvarElements has it ("points"); empty for a
+    // constant one, or one whose elements USD doesn't name.
+    const PXR_NS::SdfPath& prim() const { return m_prim; }
+    const std::string& elementDomain() const { return m_elementDomain; }
     // The rows' text, tab-separated, with a line of column names first: for Copy.
     QString text(const QModelIndexList& indexes) const;
 
@@ -64,6 +69,8 @@ private:
     std::vector<Column> m_columns;
     std::size_t m_rows = 0;
     bool m_constant = false;  // one row, each value whole
+    PXR_NS::SdfPath m_prim;
+    std::string m_elementDomain;
     QString m_domain;
     std::vector<std::size_t> m_faceStarts;  // a mesh's first corner of each face, for faceVarying
     PXR_NS::VtIntArray m_faceVertexIndices;
@@ -82,7 +89,19 @@ public:
     QString selectedText() const;
     void copy() const;
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
+    // Rows picked here are the stage's primvar elements (Stage::primvarElements()), and the row
+    // under the cursor its hover; the stage's are picked here when they're of these rows.
+    void rowsPicked();
+    void showStageElements();
+    PrimvarElements elementsOf(std::vector<std::size_t> rows) const;
+
+    StageRefPtr m_stage;
+    usdcc::core::Signal<>::Connection m_elementsConnection;
+    bool m_syncing = false;
     QLabel* m_status;
     QTableView* m_table;
     PrimvarValuesModel* m_model;

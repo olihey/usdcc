@@ -339,6 +339,9 @@ private:
     usdcc::core::Signal<>::Connection m_targetConnection;
     usdcc::core::Signal<>::Connection m_editTargetConnection;
     usdcc::core::Signal<double>::Connection m_timeConnection;  // the stage's time, to the viewport
+    // The stage's primvar elements, which the overlay of them draws.
+    usdcc::core::Signal<>::Connection m_elementsConnection;
+    usdcc::core::Signal<>::Connection m_elementHoverConnection;
 
     QTimer* m_countTimer = nullptr;
     std::unique_ptr<SceneCountJob> m_stageCountJob;

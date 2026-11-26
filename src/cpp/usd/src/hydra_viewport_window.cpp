@@ -14,6 +14,7 @@
 #include "usdcc/usd/stage_camera.h"
 #include "usdcc/usd/viewport_display.h"
 #include "usdcc/usd/viewport_grid.h"
+#include "usdcc/usd/viewport_overlays.h"
 #include "usdcc/usd/viewport_render_params.h"
 
 #include <QCursor>
@@ -148,6 +149,9 @@ HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
     m_rolloverTimer->setInterval(400);
     connect(m_rolloverTimer, &QTimer::timeout, this, &HydraViewportWindow::showRollover);
     // The frame time only means something while frames keep coming.
+    // Overlays come and go, and say when what they draw changed.
+    connect(&ViewportOverlays::instance(), &ViewportOverlays::changed, this, &QWindow::requestUpdate);
+    connect(&ViewportOverlays::instance(), &ViewportOverlays::redrawRequested, this, &QWindow::requestUpdate);
     m_idleTimer = new QTimer(this);
     m_idleTimer->setSingleShot(true);
     m_idleTimer->setInterval(1500);
@@ -1422,10 +1426,25 @@ void HydraViewportWindow::drawGizmo(const usdcc::tools::GizmoGeometry& geo, cons
     for (const auto& tri : geo.triangles) m_overlayRenderer->triangle(tri.a, tri.b, tri.c, tri.color);
 
     // Over everything, the scene's geometry included: the lines first, then the triangles.
+    // Blended as the grid is, for an overlay's see-through fills; the tools' colours are opaque.
     auto* gl = m_context->extraFunctions();
     gl->glDisable(GL_DEPTH_TEST);
+    gl->glEnable(GL_BLEND);
+    gl->glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     m_overlayRenderer->end(projMatrix, m_framebuffer->size(), kGizmoLineWidth);
+    gl->glDisable(GL_BLEND);
     gl->glEnable(GL_DEPTH_TEST);
+}
+
+void HydraViewportWindow::setOverlayStage(const std::shared_ptr<const Stage>& stage) {
+    m_overlayStage = stage;
+    requestUpdate();
+}
+
+void HydraViewportWindow::setHiddenOverlays(std::set<std::string> ids) {
+    if (ids == m_hiddenOverlays) return;
+    m_hiddenOverlays = std::move(ids);
+    requestUpdate();
 }
 
 void HydraViewportWindow::exposeEvent(QExposeEvent*) {
@@ -1636,6 +1655,18 @@ void HydraViewportWindow::renderNow() {
         if (m_display.showColliders) {
             if (!m_physicsOverlay) m_physicsOverlay = std::make_unique<PhysicsOverlay>();
             drawGizmo(m_physicsOverlay->geometry(m_stage, toolCtx.time), toolCtx.viewMatrix, toolCtx.projMatrix);
+        }
+        if (m_stage) {
+            const std::shared_ptr<const Stage> stage = m_overlayStage.lock();
+            ViewportOverlayContext overlayContext;
+            overlayContext.stage = stage && stage->usdStage() == m_stage ? stage.get() : nullptr;
+            overlayContext.usdStage = m_stage;
+            overlayContext.time = toolCtx.time;
+            overlayContext.selection = m_selectedPaths;
+            for (const ViewportOverlay& overlay : ViewportOverlays::instance().overlays()) {
+                if (!overlay.build || m_hiddenOverlays.count(overlay.id)) continue;
+                drawGizmo(overlay.build(overlayContext), toolCtx.viewMatrix, toolCtx.projMatrix);
+            }
         }
         if (m_stage && usdcc::usd::share::liveLayerOf(m_stage)) {
             auto& presence = usdcc::usd::share::PresenceHub::instance();

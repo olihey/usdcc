@@ -21,6 +21,7 @@
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/render/final_renderer.h"
+#include "usdcc/usd/viewport_overlays.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <exception>
@@ -163,6 +164,17 @@ struct Host {
         const std::string added = type.label.toStdString();
         usdcc::usd::PrimvarViews::instance().add(std::move(type));
         noted("Primvar view", added);
+    }
+
+    // Lines and triangles every viewport draws over its render, on unless a viewport's
+    // Overlays menu turns it off (docs/PRIMVAR_VIEWER.md §9.2 point 7). `build` runs for each
+    // frame. One with the id of another replaces it. Remove it in usdcc_plugin_deactivate() with
+    // usdcc::usd::ViewportOverlays::instance().remove(id).
+    void addViewportOverlay(usdcc::usd::ViewportOverlay overlay) {
+        if (overlay.id.empty() || !overlay.build) throw std::invalid_argument("a viewport overlay has an id and builds its lines");
+        const std::string added = overlay.label.toStdString();
+        usdcc::usd::ViewportOverlays::instance().add(std::move(overlay));
+        noted("Viewport overlay", added);
     }
 
     // A key of the plugin's own in usdcc::ui::appSettings().

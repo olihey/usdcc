@@ -242,6 +242,21 @@ void bindStageManager(py::module_& m) {
                 openStageWithId(self, cacheId)->setPrimvarFocus(bare);
             },
             py::arg("cache_id"), py::arg("name"))
+        // The primvar elements picked in the Primvars panel (docs/PRIMVAR_VIEWER.md §9.2).
+        .def(
+            "primvar_elements",
+            [](const StageManager& self, long cacheId) {
+                const PrimvarElements& elements = openStageWithId(self, cacheId)->primvarElements();
+                return std::make_tuple(elements.prim.GetString(), elements.domain, elements.indices);
+            },
+            py::arg("cache_id"))
+        .def(
+            "set_primvar_elements",
+            [](StageManager& self, long cacheId, const std::string& prim, const std::string& domain, std::vector<std::size_t> indices) {
+                if (!prim.empty() && !PXR_NS::SdfPath::IsValidPathString(prim)) throw py::value_error("it isn't a path: " + prim);
+                openStageWithId(self, cacheId)->setPrimvarElements({prim.empty() ? PXR_NS::SdfPath() : PXR_NS::SdfPath(prim), domain, std::move(indices)});
+            },
+            py::arg("cache_id"), py::arg("prim"), py::arg("domain"), py::arg("indices"))
         // Keys (docs/ANIMATION.md phase 2), by attribute path; a script's run is one undo step.
         .def(
             "set_key",

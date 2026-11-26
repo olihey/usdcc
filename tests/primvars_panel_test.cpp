@@ -12,6 +12,9 @@
 #include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/hydra_viewport_window.h"
+#include "usdcc/usd/viewport_view_panel.h"
+#include "usdcc/tools/tool_set.h"
 
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/prim.h>
@@ -27,7 +30,9 @@
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QLabel>
+#include <QJsonArray>
 #include <QLocale>
+#include <QMenu>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -37,6 +42,7 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
 
 using namespace usdcc::usd;
@@ -468,4 +474,74 @@ USDCC_TEST(primvars_values_million_points) {
     std::printf("  a million points: read in %lld ms, shown in %lld ms\n", read, shown);
     CHECK(shown < 2000, "shown without formatting them all (%lld ms)", shown);
     fixture.stages.closeStage(stage);
+}
+
+USDCC_TEST(primvars_values_element_selection) {
+    Fixture fixture;
+    if (!fixture.stage) return;
+    PrimvarsViewPanel panel(&fixture.stages, fixture.stage, fixture.undo);
+    fixture.select({SdfPath("/World/Good")});
+    fixture.stage->setPrimvarFocus("dirt");
+    settle();
+    auto* view = qobject_cast<PrimvarValuesView*>(panel.view("values"));
+    if (!view) return;
+    PrimvarValuesModel* model = view->model();
+    QItemSelectionModel* rows = view->table()->selectionModel();
+    rows->select(QItemSelection(model->index(1, 0), model->index(2, 1)), QItemSelectionModel::ClearAndSelect);
+    const PrimvarElements& picked = fixture.stage->primvarElements();
+    CHECK(picked.prim == SdfPath("/World/Good") && picked.domain == "points" && (picked.indices == std::vector<std::size_t>{1, 2}),
+          "rows picked are the stage's elements: %s %zu", picked.domain.c_str(), picked.indices.size());
+
+    fixture.stage->setPrimvarElements({SdfPath("/World/Good"), "points", {0, 4, 5}});
+    settle();
+    const auto selectedRows = [rows]() {
+        std::set<int> found;
+        for (const QModelIndex& index : rows->selectedIndexes()) found.insert(index.row());
+        return found;
+    };
+    CHECK((selectedRows() == std::set<int>{0, 4, 5}), "and the stage's are picked here (%zu)", selectedRows().size());
+
+    // Another primvar over the same points keeps them; another domain doesn't show them.
+    fixture.stage->setPrimvarFocus("st");
+    settle();
+    CHECK(selectedRows().empty() && fixture.stage->primvarElements().indices.size() == 3, "face corners aren't points, and nothing's lost");
+    fixture.stage->setPrimvarFocus("dirt");
+    settle();
+    CHECK((selectedRows() == std::set<int>{0, 4, 5}), "back on points");
+
+    // The row under the cursor.
+    Q_EMIT view->table()->entered(model->index(3, 0));
+    CHECK((fixture.stage->primvarElementHover().indices == std::vector<std::size_t>{3}), "hover");
+    QEvent leave(QEvent::Leave);
+    QApplication::sendEvent(view->table()->viewport(), &leave);
+    CHECK(fixture.stage->primvarElementHover().empty(), "and leaving");
+
+    fixture.select({SdfPath("/World/ElementCount")});
+    CHECK(fixture.stage->primvarElements().empty() && selectedRows().empty(), "another prim drops them");
+}
+
+USDCC_TEST(viewport_overlays_menu) {
+    Fixture fixture;
+    if (!fixture.stage) return;
+    auto tools = std::make_shared<usdcc::tools::ToolSet>();
+    ViewportViewPanel viewport(&fixture.stages, fixture.stage, tools, fixture.undo);
+    // populateOptionsMenu() is protected: reached through a subclass, as viewport_display_test does.
+    struct Opener : ViewportViewPanel {
+        static void populate(ViewportViewPanel* p, QMenu* m) { (p->*(&Opener::populateOptionsMenu))(m); }
+    };
+    QMenu menu;
+    Opener::populate(&viewport, &menu);
+    QAction* elements = menu.findChild<QAction*>(QStringLiteral("overlay:usdcc.primvarElements"));
+    CHECK(elements && elements->isCheckable() && elements->isChecked(), "Overlays > Primvar Elements, on");
+    if (!elements) return;
+    elements->setChecked(false);
+    CHECK(viewport.hydraWindow()->hiddenOverlays().count("usdcc.primvarElements"), "switched off for this viewport");
+    const QJsonObject state = viewport.saveSessionState();
+    CHECK(state.value("hiddenOverlays").toArray().size() == 1, "a session keeps it");
+    std::unique_ptr<usdcc::ui::ViewPanel> copy(viewport.duplicate());
+    auto* duplicate = qobject_cast<ViewportViewPanel*>(copy.get());
+    CHECK(duplicate && duplicate->hydraWindow()->hiddenOverlays().count("usdcc.primvarElements"), "and Duplicate");
+    elements->setChecked(true);
+    viewport.restoreSessionState(state);
+    CHECK(viewport.hydraWindow()->hiddenOverlays().count("usdcc.primvarElements"), "and gives it back");
 }

@@ -301,6 +301,31 @@ def unregister_view(id: str) -> bool:
     return _native.unregister_primvar_view(id)
 
 
+@dataclass(frozen=True)
+class Elements:
+    """Elements of one prim, by index: what the Values table's rows are."""
+
+    prim: Sdf.Path
+    domain: str  # "points", "faces", "face corners", "curves" or "instances"
+    indices: list[int]
+
+
+def element_selection(stage: Usd.Stage | None = None) -> Elements | None:
+    """The elements picked in the Primvars panel on `stage` (default: the current stage), which
+    the viewports outline; None for none."""
+    prim, domain, indices = _usd.stage_manager().primvar_elements(_usd.stage_id(_usd._resolve(stage)))
+    return Elements(Sdf.Path(prim), domain, list(indices)) if prim and indices else None
+
+
+def set_element_selection(prim: Usd.Prim | Sdf.Path | str | None, domain: str = "", indices: Iterable[int] = (),
+                          stage: Usd.Stage | None = None) -> None:
+    """Picks elements of `prim` (as ``element_selection()`` has them): the Values table selects
+    their rows and the viewports outline them. None, or no indices, picks none. Dropped when the
+    prim selection leaves the prim."""
+    path = "" if prim is None else str(prim.GetPath() if isinstance(prim, Usd.Prim) else prim)
+    _usd.stage_manager().set_primvar_elements(_usd.stage_id(_usd._resolve(stage)), path, str(domain), [int(i) for i in indices])
+
+
 def register_relation(id: str, label: str, members: Iterable[str], complete: bool = False, same_interpolation: bool = False,
                       same_element_size: bool = False, derived_from: Iterable[str] = ()) -> None:
     """Says that primvars belong together, or what they're derived from. `members` are names

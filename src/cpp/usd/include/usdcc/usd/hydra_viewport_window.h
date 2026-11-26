@@ -8,6 +8,7 @@
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/share/presence.h"
+#include "usdcc/usd/stage.h"
 #include "usdcc/usd/viewport_hud.h"
 
 #include <pxr/base/gf/camera.h>
@@ -31,6 +32,7 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -334,6 +336,11 @@ public:
     // Whether a dome light's map is drawn behind the scene, for renderers that can: the
     // display options' domeLightTextures.
     void setDomeLightVisible(bool visible);
+    // The overlays of ViewportOverlays it draws (docs/PRIMVAR_VIEWER.md §9.2): all but those
+    // hidden, given `stage` for its per-stage state (the primvar elements). Redraws on a change.
+    void setOverlayStage(const std::shared_ptr<const Stage>& stage);
+    void setHiddenOverlays(std::set<std::string> ids);
+    const std::set<std::string>& hiddenOverlays() const { return m_hiddenOverlays; }
     bool isDomeLightVisible() const { return m_display.domeLightTextures; }
     // Paused, nothing renders: the last frame stays, fitted to the window, until resumed,
     // which renders at once with whatever changed meanwhile.
@@ -557,6 +564,8 @@ private:
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     std::unique_ptr<PhysicsOverlay> m_physicsOverlay;  // made when Show Colliders is first on
+    std::weak_ptr<const Stage> m_overlayStage;
+    std::set<std::string> m_hiddenOverlays;
     // A shared stage's Follow (docs/SHARED_STAGE.md §8): the peer's view last taken.
     std::optional<usdcc::usd::share::PeerView> m_followed;
     void followPeer();

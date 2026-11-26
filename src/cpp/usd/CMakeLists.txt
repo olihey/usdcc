@@ -231,6 +231,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/primvar_values_view.h
     include/usdcc/usd/primvar_views.h
+    include/usdcc/usd/viewport_overlays.h
     include/usdcc/usd/primvars_view_panel.h
     include/usdcc/usd/layer_actions.h
     include/usdcc/usd/layer_editor_view_panel.h
@@ -326,6 +327,7 @@ add_library(usdcc_usd_ui SHARED
     src/hydra_viewport_window.cpp
     src/primvar_values_view.cpp
     src/primvar_views.cpp
+    src/viewport_overlays.cpp
     src/primvars_view_panel.cpp
     src/selection_overlay.cpp
     src/selection_overlay.h

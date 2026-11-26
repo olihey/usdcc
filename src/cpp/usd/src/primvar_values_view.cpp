@@ -15,6 +15,8 @@
 #include <QClipboard>
 #include <QFont>
 #include <QHeaderView>
+#include <QItemSelection>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenu>
 #include <QScrollBar>
@@ -62,6 +64,8 @@ bool PrimvarValuesModel::setContext(const PrimvarViewContext& context, QString* 
     m_domain.clear();
     m_faceStarts.clear();
     m_faceVertexIndices = {};
+    m_prim = {};
+    m_elementDomain.clear();
     const auto fail = [&](const QString& reason) {
         if (why) *why = reason;
         endResetModel();
@@ -128,6 +132,7 @@ bool PrimvarValuesModel::setContext(const PrimvarViewContext& context, QString* 
         }
     }
 
+    m_prim = set->prim;
     if (constant) {
         m_rows = 1;
         m_constant = true;
@@ -135,6 +140,7 @@ bool PrimvarValuesModel::setContext(const PrimvarViewContext& context, QString* 
     } else if (expected.count) {
         m_rows = *expected.count;
         m_domain = counted(m_rows, expected.of);
+        m_elementDomain = expected.of;
     } else {
         // USD doesn't say how many: as many as the longest has.
         for (const Column& column : m_columns) {
@@ -290,6 +296,60 @@ PrimvarValuesView::PrimvarValuesView(QWidget* parent)
     layout->setSpacing(0);
     layout->addWidget(m_status);
     layout->addWidget(m_table, 1);
+
+    connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this, &PrimvarValuesView::rowsPicked);
+    // The row under the cursor is the stage's hover.
+    m_table->setMouseTracking(true);
+    m_table->viewport()->installEventFilter(this);
+    connect(m_table, &QTableView::entered, this, [this](const QModelIndex& index) {
+        if (m_stage && index.isValid()) m_stage->setPrimvarElementHover(elementsOf({std::size_t(index.row())}));
+    });
+}
+
+PrimvarElements PrimvarValuesView::elementsOf(std::vector<std::size_t> rows) const {
+    if (m_model->elementDomain().empty()) return {};
+    return {m_model->prim(), m_model->elementDomain(), std::move(rows)};
+}
+
+bool PrimvarValuesView::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_table->viewport() && event->type() == QEvent::Leave && m_stage &&
+        m_stage->primvarElementHover().prim == m_model->prim()) {
+        m_stage->setPrimvarElementHover({});
+    }
+    return PrimvarView::eventFilter(watched, event);
+}
+
+void PrimvarValuesView::rowsPicked() {
+    if (m_syncing || !m_stage) return;
+    std::vector<std::size_t> rows;
+    for (const QModelIndex& index : m_table->selectionModel()->selectedIndexes()) rows.push_back(std::size_t(index.row()));
+    m_syncing = true;
+    m_stage->setPrimvarElements(elementsOf(std::move(rows)));
+    m_syncing = false;
+}
+
+void PrimvarValuesView::showStageElements() {
+    if (m_syncing || !m_stage) return;
+    const PrimvarElements& elements = m_stage->primvarElements();
+    const bool ours = !elements.empty() && elements.prim == m_model->prim() && elements.domain == m_model->elementDomain();
+    m_syncing = true;
+    QItemSelection selection;
+    if (ours) {
+        // Runs of rows, so that many in a row are one range.
+        const int columns = m_model->columnCount();
+        std::size_t start = 0;
+        for (std::size_t i = 1; i <= elements.indices.size(); ++i) {
+            if (i < elements.indices.size() && elements.indices[i] == elements.indices[i - 1] + 1) continue;
+            const int first = int(elements.indices[start]), last = int(elements.indices[i - 1]);
+            if (first < m_model->rowCount()) {
+                selection.select(m_model->index(first, 0), m_model->index(std::min(last, m_model->rowCount() - 1), columns - 1));
+            }
+            start = i;
+        }
+    }
+    m_table->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+    if (ours && !selection.isEmpty()) m_table->scrollTo(selection.first().topLeft());
+    m_syncing = false;
 }
 
 void PrimvarValuesView::setContext(const PrimvarViewContext& context, bool focusOnly) {
@@ -298,13 +358,21 @@ void PrimvarValuesView::setContext(const PrimvarViewContext& context, bool focus
     if (focusOnly && shown == m_shown) return;
     const bool same = shown == m_shown && !shown.empty();
     const int scroll = m_table->verticalScrollBar()->value();
+    if (context.stage != m_stage) {
+        m_stage = context.stage;
+        m_elementsConnection = m_stage ? m_stage->primvarElementsChanged.connect([this]() { showStageElements(); })
+                                       : usdcc::core::Signal<>::Connection();
+    }
     QString why;
+    m_syncing = true;  // the reset's empty selection isn't the user's
     const bool ok = m_model->setContext(context, &why);
+    m_syncing = false;
     m_status->setText(ok ? m_model->domain() : why);
     m_table->setVisible(ok);
     if (ok) {
         m_table->resizeColumnsToContents();
         if (same) m_table->verticalScrollBar()->setValue(scroll);
+        showStageElements();
     }
     m_shown = shown;
 }

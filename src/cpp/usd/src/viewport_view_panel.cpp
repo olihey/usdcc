@@ -19,6 +19,7 @@
 #include "usdcc/usd/stage_camera.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/viewport_overlays.h"
 #include "usdcc/usd/viewport_render_params.h"
 
 #include <pxr/base/gf/range1f.h>
@@ -28,6 +29,8 @@
 #include <DockManager.h>
 
 #include <QJsonArray>
+
+#include <set>
 #include <QAction>
 #include <QActionGroup>
 #include <QInputDialog>
@@ -906,6 +909,12 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // The stage's time, which every panel on it shares (docs/ANIMATION.md §4.1).
     m_viewport->setTime(stage ? stage->timeCode() : PXR_NS::UsdTimeCode::Default());
     m_timeConnection = {};
+    // Overlays get the stage's own state: the primvar elements (docs/PRIMVAR_VIEWER.md §9.2).
+    m_viewport->setOverlayStage(stage);
+    m_elementsConnection = stage ? stage->primvarElementsChanged.connect([this]() { m_viewport->requestUpdate(); })
+                                 : usdcc::core::Signal<>::Connection();
+    m_elementHoverConnection = stage ? stage->primvarElementHoverChanged.connect([this]() { m_viewport->requestUpdate(); })
+                                     : usdcc::core::Signal<>::Connection();
     m_viewport->setSelectedPaths(stageManager()->selectedPaths(stage));
     if (activeViewport() == this) activeViewportChanged()();  // the active camera's stage
     viewportsChanged()();
@@ -1369,6 +1378,7 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     auto* copy = new ViewportViewPanel(stageManager(), currentStage(), m_toolSet, m_undoManager, windowTitle(), parent);
     copy->setDisplayOverrides(m_displayOverrides);
     copy->setRendererOverrides(m_rendererOverrides);
+    copy->m_viewport->setHiddenOverlays(m_viewport->hiddenOverlays());
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so it has
@@ -1430,6 +1440,10 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
         if (!settings.isEmpty()) renderers.insert(QString::fromStdString(pluginId.GetString()), settings);
     }
     if (!renderers.isEmpty()) state.insert(QStringLiteral("rendererSettings"), renderers);
+    // The overlays switched off, by id.
+    QJsonArray hidden;
+    for (const std::string& id : m_viewport->hiddenOverlays()) hidden.append(QString::fromStdString(id));
+    if (!hidden.isEmpty()) state.insert(QStringLiteral("hiddenOverlays"), hidden);
     return state;
 }
 
@@ -1456,6 +1470,9 @@ void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
         }
     }
     setRendererOverrides(renderers);
+    std::set<std::string> hiddenOverlays;
+    for (const QJsonValue& id : state.value(QStringLiteral("hiddenOverlays")).toArray()) hiddenOverlays.insert(id.toString().toStdString());
+    m_viewport->setHiddenOverlays(std::move(hiddenOverlays));
     HydraViewportWindow::CameraState camera = m_viewport->cameraState();
     const QJsonObject orbit = state.value(QStringLiteral("camera")).toObject();
     const QJsonArray target = orbit.value(QStringLiteral("target")).toArray();
@@ -1945,6 +1962,24 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     addSwitch(menu, tr("Scene Materials"), "sceneMaterialsAction", &Options::sceneMaterials, &Overrides::sceneMaterials);
     addSwitch(menu, tr("Cull Backfaces"), "cullBackfacesAction", &Options::cullBackfaces, &Overrides::cullBackfaces);
     addSwitch(menu, tr("Show Colliders"), "showCollidersAction", &Options::showColliders, &Overrides::showColliders);
+    // What's drawn over the render (viewport_overlays.h): each on unless switched off here.
+    QMenu* overlays = menu->addMenu(tr("Overlays"));
+    overlays->setObjectName(QStringLiteral("overlaysMenu"));
+    for (const ViewportOverlay& overlay : ViewportOverlays::instance().overlays()) {
+        QAction* action = overlays->addAction(overlay.label);
+        action->setObjectName(QString::fromStdString("overlay:" + overlay.id));
+        action->setCheckable(true);
+        action->setChecked(!m_viewport->hiddenOverlays().count(overlay.id));
+        connect(action, &QAction::toggled, this, [this, id = overlay.id](bool on) {
+            std::set<std::string> hidden = m_viewport->hiddenOverlays();
+            if (on) {
+                hidden.erase(id);
+            } else {
+                hidden.insert(id);
+            }
+            m_viewport->setHiddenOverlays(std::move(hidden));
+        });
+    }
     addSwitch(menu, tr("Dome Light Textures"), "domeLightTexturesAction", &Options::domeLightTextures,
               &Overrides::domeLightTextures);
 

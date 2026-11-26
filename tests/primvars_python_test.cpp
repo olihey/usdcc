@@ -149,3 +149,22 @@ for bad in (("", ["a"]), ("x", [])):
 )"), "relations");
     CHECK(usdcc::usd::PrimvarRelations::instance().relations().size() == builtIn, "none left behind");
 }
+
+USDCC_TEST(python_primvars_element_selection) {
+    CHECK(python(std::string("import usdcc.usd, usdcc.primvars as p\nstage = usdcc.usd.open_stage(r\"") + USDCC_TEST_DATA_DIR +
+                 R"(/broken_primvars.usda")
+try:
+    usdcc.usd.select(["/World/Good"], stage)
+    assert p.element_selection(stage) is None
+    p.set_element_selection("/World/Good", "points", [4, 1, 4], stage)
+    picked = p.element_selection(stage)
+    assert picked == p.Elements(__import__("pxr").Sdf.Path("/World/Good"), "points", [1, 4]), picked
+    p.set_element_selection(stage.GetPrimAtPath("/World/Good"), "faces", [0], stage)
+    assert p.element_selection(stage).domain == "faces"
+    p.set_element_selection(None, stage=stage)
+    assert p.element_selection(stage) is None
+finally:
+    usdcc.usd.close_stage(stage)
+)"),
+          "element_selection() and set_element_selection()");
+}

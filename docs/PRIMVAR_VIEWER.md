@@ -1,8 +1,8 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 to 3 are built** (the model, its Python calls and the validation rules: §13; the panel:
-§14; the Values view, Python views and the histogram example: §15), after the phase 0 spike (§5.2.1). The
-rest is a plan: §10 has the recommendation, §12 the questions.
+Status: **phases 1 to 4 are built** (the model, its Python calls and the validation rules: §13; the panel:
+§14; the Values view, Python views and the histogram example: §15; element selection and viewport overlays:
+§16), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has the recommendation, §12 the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -390,12 +390,12 @@ calls are the API"): an interface the built-ins can't live with is found out at 
 | # | Extension point | C++ (`Host`) | Python | The plugin gets or gives |
 |---|---|---|---|---|
 | 1 | **Data** (no registry; built, §13) | `usdcc/usd/primvar_info.h`, Qt-free, exported | `usdcc.primvars.info(prim)`, `.values(prim, name, flattened=False)`, `.element_count(prim, interpolation)` | The records of §4.6: validity, expected counts, source, relations, readers |
-| 2 | **Shared state** (the focus built, §14) | on `Stage`, with signals | `usdcc.primvars.focus()`, `set_focus()`, `element_selection()`, `set_element_selection()`; events `primvar_focus_changed`, `element_selection_changed` | Which primvar is picked for a stage; which elements (prim, domain, indices) are selected or hovered |
+| 2 | **Shared state** (built, §14, §16; no events yet) | on `Stage`, with signals | `usdcc.primvars.focus()`, `set_focus()`, `element_selection()`, `set_element_selection()`; events `primvar_focus_changed`, `element_selection_changed` | Which primvar is picked for a stage; which elements (prim, domain, indices) are selected or hovered |
 | 3 | **Primvar views** (built, §14, §15) | `addPrimvarView(type)` | `usdcc.primvars.register_view(id, label, cls, applies=None)`, `cls` a `usdcc.ui.PrimvarView` | A tab in the Primvars panel: a widget told the stage, prims, primvar and time, with session state. `applies(context)` decides when the tab shows (the UV view: two float components) |
 | 4 | **Primvar commands** | `addPrimvarMenuAction(label, run, applies)` | `usdcc.primvars.add_menu_action(label, callback, applies=None)` | An entry in the list's context menu and the panel's options, one undo step, as the prim menu's entries are. The context has the prims, the primvars and the element selection |
 | 5 | **Authoring** (no registry) | `usdcc/usd/primvar_edit.h` | `usdcc.primvars.author(prim, name, values, indices=None, interpolation=..., element_size=1)` | Writes a whole primvar as a group (§4.6 point 4): refuses what §4.1 would call broken, blocks weaker indices |
 | 6 | **Colorizers** | `addPrimvarColorizer(...)` | `usdcc.primvars.register_colorizer(id, label, function, applies=None, options=...)` | A Color By mode (§5): values in, colors out, with options described as data, as a tool's are |
-| 7 | **Viewport overlays** | `addViewportOverlay(id, label, build)` | `usdcc.app.add_viewport_overlay(id, label, build)` | World-space lines and triangles over the frame, switched per viewport like Show Colliders, without being the active tool. `build(stage, time, selection)` returns what a tool's gizmo does |
+| 7 | **Viewport overlays** (built in C++, §16) | `addViewportOverlay(overlay)` | `usdcc.app.add_viewport_overlay(id, label, build)` | World-space lines and triangles over the frame, switched per viewport like Show Colliders, without being the active tool. `build(stage, time, selection)` returns what a tool's gizmo does |
 | 8 | **Relations** (built, §13) | `PrimvarRelations::instance().set(...)` | `usdcc.primvars.register_relation(id, label, members, ...)` | A row for §4.2's table: a studio's or a renderer's own groups (`primvars:groom:*`), shown as one row and checked together |
 | — | **Validation rules** | (a USD plugin's validators) | `usdcc.validation.rule(...)` | Exists |
 
@@ -467,7 +467,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **1. Model** — **done** | `primvar_info`, exported: records, expected counts for Mesh, BasisCurves, Points, PointInstancer; inheritance and material sources; the relation table and its registry; problems. `usdcc.primvars`' read calls. Validation rules. Test stages with each kind of broken primvar | M | Unit tests, Python tests |
 | **2. Panel: list and info** — **done** | The panel, following the selection; the list; the primvar focus on `StageManager`; the view registry with Info as its first view, statistics on a worker; Open in Own Panel; the Attribute Editor's ⚠ and link | M | UI tests; in the app on the shader ball |
 | **3. Values** — **done** | The table per domain as a registered view, indexed values, copy. The Python example plugin (histogram view) | M | UI tests, a mesh with a million points; the example's test |
-| **4. Element selection and overlays** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
+| **4. Element selection and overlays** — **done** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
 | **5. Color By** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
 | **6. UV view plugin** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
 | **7. Editing: structure** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
@@ -615,3 +615,30 @@ with a test profile and the example from `--plugin-path`: the shader ball's `st`
 their faces and points, and its histogram (13,826 of its UVs are exactly 0, so the first bin is tall); the
 broken stage's indices outside their values in red. **Not tried:** Linux, the histogram on a million values
 without numpy.
+
+## 16. As built: phase 4
+
+- **Primvar elements** (`Stage::primvarElements()`, `primvarElementHover()`, each with a signal): a prim, what
+  its elements are ("points", "faces", "face corners", "curves", "instances", as `PrimvarElementCounts` names
+  them) and which, in order. View state, not undoable (§12 question 7): dropped when the prim selection
+  leaves their prim. Python: `usdcc.primvars.element_selection()` and `set_element_selection()`; no app
+  events yet.
+- **The Values table** sets them from the rows picked, and its hover from the row under the cursor; the
+  stage's are picked there when they're its rows, whichever primvar over the same elements is in focus (a
+  vertex one and a varying one share points). Picked elsewhere, the table scrolls to the first.
+- **Viewport overlays** (`ViewportOverlays`, `viewport_overlays.h`): an id, a label and a `build(context)`
+  run for each frame, given the viewport's `Stage`, time and selection, returning a gizmo's lines and
+  triangles. Each viewport's options menu has Overlays, every overlay on unless switched off there; sessions
+  and Duplicate keep what's off (`"hiddenOverlays"`). C++ plugins: `Host::addViewportOverlay()`. **Python
+  overlays aren't there:** one would run under the GIL for every frame.
+- **Primvar Elements**, the first overlay: the picked elements in the selection's orange and the hovered one
+  in light blue: crosses at points and instances, a face's outline and a see-through fill, a mark a quarter
+  of the way into the face at a corner, a curve's line; at most 20,000 of each. Like the tools' gizmos it's
+  drawn over everything, so elements behind the mesh show too. Gizmos are now drawn blended, for the fills;
+  the tools' colours are opaque, so they look as before.
+
+**Checked:** `viewport_overlays_test` (each kind of element, world space, hover's colour, the registry,
+the stage's elements and their dropping), `primvars_values_element_selection` (both ways, other domains,
+hover), `viewport_overlays_menu` (the menu, sessions, Duplicate) and `python_primvars_element_selection`. In
+the app on Storm, on the shader ball: 3,336 face corners, every third point and every fourth face. **Not
+tried:** Linux, other renderers, picking elements in the viewport (still later).
