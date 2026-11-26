@@ -5,6 +5,7 @@
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/attributes_view_panel.h"
+#include "usdcc/usd/primvar_values_view.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/primvars_view_panel.h"
 #include "usdcc/usd/properties/property_row.h"
@@ -15,9 +16,14 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
+#include <pxr/usd/usdGeom/tokens.h>
 
 #include <QApplication>
+#include <QClipboard>
+#include <QItemSelectionModel>
+#include <QTableView>
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QLabel>
@@ -28,6 +34,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <string>
@@ -210,7 +217,7 @@ USDCC_TEST(primvars_panel_focus_and_info) {
     fixture.stage->setPrimvarFocus({});
     fixture.select({SdfPath("/World/Good")});
     auto* info = qobject_cast<PrimvarInfoView*>(panel.view("info"));
-    CHECK(tabNames(panel.tabs()) == QStringList{"Info"} && info, "Info is the first view");
+    CHECK(tabNames(panel.tabs()).value(0) == "Info" && info, "Info is the first view");
     if (!info) return;
     CHECK(info->text().contains("Pick a primvar"), "nothing in focus");
 
@@ -262,11 +269,11 @@ USDCC_TEST(primvars_panel_views) {
                                   }});
     fixture.stage->setPrimvarFocus("dirt");
     settle();
-    CHECK(tabNames(panel.tabs()) == QStringList{"Info"}, "a view shows where it applies only");
+    CHECK((tabNames(panel.tabs()) == QStringList{"Info", "Values"}), "a view shows where it applies only");
     fixture.stage->setPrimvarFocus("st");
     settle();
-    CHECK((tabNames(panel.tabs()) == QStringList{"Info", "UV"}) && counting && counting->primvar == "st", "a plugin's view");
-    panel.tabs()->setCurrentIndex(1);
+    CHECK((tabNames(panel.tabs()) == QStringList{"Info", "Values", "UV"}) && counting && counting->primvar == "st", "a plugin's view");
+    panel.tabs()->setCurrentIndex(2);
     auto* open = panel.findChild<QToolButton*>(QStringLiteral("openPrimvarView"));
     CHECK(open && open->isVisibleTo(&panel), "Open in Own Panel");
     if (open) open->click();
@@ -275,11 +282,11 @@ USDCC_TEST(primvars_panel_views) {
     CHECK(state.value("tab").toString() == "test.uv", "a session keeps the tab");
     panel.tabs()->setCurrentIndex(0);
     panel.restoreSessionState(state);
-    CHECK(panel.tabs()->currentIndex() == 1, "and gets it back");
+    CHECK(panel.tabs()->currentIndex() == 2, "and gets it back");
 
     CHECK(PrimvarViews::instance().remove("test.uv") && !PrimvarViews::instance().remove("test.uv"), "removed");
     settle();
-    CHECK(tabNames(panel.tabs()) == QStringList{"Info"} && !panel.view("test.uv"), "its tab goes");
+    CHECK((tabNames(panel.tabs()) == QStringList{"Info", "Values"}) && !panel.view("test.uv"), "its tab goes");
     PrimvarsViewPanel::setHooks({});
 }
 
@@ -342,4 +349,123 @@ USDCC_TEST(attributes_primvar_problem_notes) {
     if (show) show->click();
     CHECK(shown == fixture.stage && focused.empty(), "for the stage");
     PropertySheet::setShowPrimvars({});
+}
+
+USDCC_TEST(primvars_values_view) {
+    Fixture fixture;
+    if (!fixture.stage) return;
+    PrimvarsViewPanel panel(&fixture.stages, fixture.stage, fixture.undo);
+    fixture.select({SdfPath("/World/Good")});
+    fixture.stage->setPrimvarFocus("dirt");
+    settle();
+    CHECK((tabNames(panel.tabs()) == QStringList{"Info", "Values"}), "Values is the second view: %s", qPrintable(tabNames(panel.tabs()).join(',')));
+    auto* view = qobject_cast<PrimvarValuesView*>(panel.view("values"));
+    if (!view) return;
+    PrimvarValuesModel* model = view->model();
+    const auto headers = [model]() {
+        QStringList names;
+        for (int i = 0; i < model->columnCount(); ++i) names << model->headerData(i, Qt::Horizontal, Qt::DisplayRole).toString();
+        return names;
+    };
+    const auto at = [model](int row, int column) { return model->data(model->index(row, column), Qt::DisplayRole).toString(); };
+    const auto status = [view]() { return view->findChild<QLabel*>(QStringLiteral("primvarValuesStatus"))->text(); };
+    CHECK(model->rowCount() == 6 && (headers() == QStringList{"dirt", "points"}) && at(3, 0) == "3.0" && at(5, 1) == "(2.0, 1.0, 0.0)",
+          "a point each, with where it is: %s | %s", qPrintable(headers().join(',')), qPrintable(at(5, 1)));
+    CHECK(status() == "6 points, vertex on /World/Good", "what the rows are: %s", qPrintable(status()));
+
+    fixture.stage->setPrimvarFocus("st");
+    settle();
+    CHECK(model->rowCount() == 8 && (headers() == QStringList{"st", "face", "point"}), "face corners, with their face and point: %s",
+          qPrintable(headers().join(',')));
+    CHECK(at(0, 0) == QString::fromUtf8("(0.0, 0.0)  \xe2\x9f\xa8" "0\xe2\x9f\xa9") && at(5, 0).endsWith(QString::fromUtf8("\xe2\x9f\xa8" "1\xe2\x9f\xa9")) &&
+              at(4, 1) == "1" && at(4, 2) == "1" && at(7, 2) == "4",
+          "an indexed one's value and index: %s; face %s, point %s", qPrintable(at(0, 0)), qPrintable(at(4, 1)), qPrintable(at(4, 2)));
+
+    fixture.stage->setPrimvarFocus("names");
+    settle();
+    CHECK(model->rowCount() == 1 && headers().front() == "names" && headers().contains("displayColor") && headers().contains("wetness") &&
+              at(0, 0) == "[3] a, b, c",
+          "constant: one row, the whole of each, inherited ones too: %s / %s", qPrintable(headers().join(',')), qPrintable(at(0, 0)));
+
+    fixture.stage->setPrimvarFocus("id");
+    settle();
+    CHECK(model->rowCount() == 2 && (headers() == QStringList{"id"}) && at(1, 0) == "2", "uniform: a face each");
+
+    // Copy: the selected cells, tab-separated, under their columns' names.
+    fixture.stage->setPrimvarFocus("dirt");
+    settle();
+    view->table()->selectionModel()->select(QItemSelection(model->index(1, 0), model->index(2, 1)), QItemSelectionModel::ClearAndSelect);
+    CHECK(view->selectedText() == "dirt\tpoints\n1.0\t(1.0, 0.0, 0.0)\n2.0\t(2.0, 0.0, 0.0)", "copied: %s", qPrintable(view->selectedText()));
+    view->copy();
+    CHECK(QApplication::clipboard()->text() == view->selectedText(), "to the clipboard");
+
+    fixture.select({SdfPath("/World/IndexRange")});
+    fixture.stage->setPrimvarFocus("st");
+    settle();
+    const QVariant red = model->data(model->index(2, 0), Qt::ForegroundRole);
+    CHECK(at(2, 0).startsWith("outside the values") && red.isValid() && at(0, 0).startsWith("(0.0, 0.0)"), "an index outside, marked: %s",
+          qPrintable(at(2, 0)));
+    fixture.select({SdfPath("/World/ElementCount")});
+    fixture.stage->setPrimvarFocus("dirt");
+    settle();
+    CHECK(model->rowCount() == 6 && at(5, 0) == "5.0", "as many rows as there are points, though it has more values");
+    fixture.select({SdfPath("/World/ElementSize")});
+    fixture.stage->setPrimvarFocus("sh");
+    settle();
+    CHECK(at(0, 0) == "[0.0, 1.0, 2.0]" && at(1, 0) == "none" && model->data(model->index(1, 0), Qt::ForegroundRole).isValid(),
+          "three numbers an element, and a face without its values: %s", qPrintable(at(1, 0)));
+
+    fixture.stage->setPrimvarFocus({});
+    settle();
+    CHECK(tabNames(panel.tabs()) == QStringList{"Info"}, "no tab without a primvar with values");
+}
+
+USDCC_TEST(primvars_values_million_points) {
+    Fixture fixture;
+    if (!fixture.stage) return;
+    // A grid of 1000 x 1000 points, 999 x 999 quads, with a value for each point.
+    constexpr int side = 1000;
+    const StageRefPtr stage = fixture.stages.createStage();
+    const UsdGeomMesh mesh = UsdGeomMesh::Define(stage->usdStage(), SdfPath("/Grid"));
+    VtVec3fArray points(side * side);
+    VtFloatArray heat(side * side);
+    for (int i = 0; i < side * side; ++i) {
+        points[i] = GfVec3f(float(i % side), float(i / side), 0);
+        heat[i] = float(i % 97);
+    }
+    VtIntArray counts((side - 1) * (side - 1), 4), indices;
+    indices.reserve(counts.size() * 4);
+    for (int y = 0; y + 1 < side; ++y) {
+        for (int x = 0; x + 1 < side; ++x) {
+            const int a = y * side + x;
+            for (const int corner : {a, a + 1, a + side + 1, a + side}) indices.push_back(corner);
+        }
+    }
+    mesh.GetPointsAttr().Set(points);
+    mesh.GetFaceVertexCountsAttr().Set(counts);
+    mesh.GetFaceVertexIndicesAttr().Set(indices);
+    UsdGeomPrimvarsAPI(mesh).CreatePrimvar(TfToken("heat"), SdfValueTypeNames->FloatArray, UsdGeomTokens->vertex).Set(heat);
+    stage->setPrimvarFocus("heat");
+
+    PrimvarValuesView view;
+    view.resize(600, 400);
+    view.show();
+    QElapsedTimer timer;
+    timer.start();
+    fixture.stages.setSelectedPaths(stage, {SdfPath("/Grid")});
+    PrimvarContextTracker tracker(&fixture.stages);
+    tracker.setStage(stage);
+    const qint64 read = timer.restart();
+    view.setContext(tracker.context(), false);
+    settle();
+    const qint64 shown = timer.elapsed();
+    PrimvarValuesModel* model = view.model();
+    CHECK(model->rowCount() == side * side, "a million rows (%d)", model->rowCount());
+    CHECK(model->data(model->index(side * side - 1, 0), Qt::DisplayRole).toString() == QString::number((side * side - 1) % 97) + ".0",
+          "the last one");
+    view.table()->scrollToBottom();
+    settle();
+    std::printf("  a million points: read in %lld ms, shown in %lld ms\n", read, shown);
+    CHECK(shown < 2000, "shown without formatting them all (%lld ms)", shown);
+    fixture.stages.closeStage(stage);
 }

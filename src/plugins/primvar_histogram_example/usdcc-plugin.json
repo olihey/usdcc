@@ -1,0 +1,8 @@
+{
+  "id": "org.usdcc.primvar-histogram-example",
+  "name": "Primvar Histogram Example",
+  "version": "1.0.0",
+  "description": "An example plugin: a view of the Primvars panel that draws a histogram of the primvar in focus.",
+  "api": 1,
+  "python": { "module": "usdcc_primvar_histogram" }
+}

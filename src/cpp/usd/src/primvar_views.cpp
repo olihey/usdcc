@@ -1,5 +1,6 @@
 #include "usdcc/usd/primvar_views.h"
 
+#include "usdcc/usd/primvar_values_view.h"
 #include "usdcc/usd/stage_manager.h"
 
 #include <pxr/base/tf/stringUtils.h>
@@ -164,6 +165,11 @@ PrimvarViews& PrimvarViews::instance() {
 
 PrimvarViews::PrimvarViews() {
     m_types.push_back({QStringLiteral("info"), tr("Info"), [](QWidget* parent) { return new PrimvarInfoView(parent); }, {}});
+    m_types.push_back({QStringLiteral("values"), tr("Values"), [](QWidget* parent) { return new PrimvarValuesView(parent); },
+                       [](const PrimvarViewContext& context) {
+                           const PrimvarInfo* info = context.info();
+                           return info && info->hasValue;
+                       }});
 }
 
 void PrimvarViews::add(PrimvarViewType type) {

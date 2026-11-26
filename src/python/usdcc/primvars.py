@@ -12,7 +12,10 @@ wrong::
     st = found.get("st")                          # None if it has none
     print(st.interpolation, st.element_count, "of", st.expected_count, st.expected_of)
 
-Provisional: these calls may still change, until the Primvars panel has used them.
+A view of primvars of your own is a ``usdcc.ui.PrimvarView`` registered with
+``register_view()``; it's told a ``ViewContext``.
+
+Provisional: these calls may still change, until the UV view has used them.
 """
 
 from __future__ import annotations
@@ -211,6 +214,91 @@ def set_focus(name: str, stage: Usd.Stage | None = None) -> None:
     """Puts the primvar `name` in focus on `stage` (default: the current stage): the Primvars
     panel picks its row and the views show it. "" for none."""
     _usd.stage_manager().set_primvar_focus(_usd.stage_id(_usd._resolve(stage)), str(name))
+
+
+@dataclass
+class ViewContext:
+    """What a primvar view shows (``usdcc.ui.PrimvarView``): the selected prims and the primvar
+    in focus. Their primvars are read when asked for, and kept."""
+
+    stage: Usd.Stage | None
+    prims: list[Sdf.Path]  # the selected ones, at most 100
+    selected: int  # how many are selected
+    primvar: str  # in focus, without "primvars:"; "" for none
+    time: Usd.TimeCode
+    _sets: dict[int, PrimvarSet] = field(default_factory=dict, repr=False, compare=False)
+
+    def primvar_set(self, index: int = 0) -> PrimvarSet | None:
+        """The primvars of ``prims[index]``, or None if it's gone."""
+        if index not in self._sets:
+            prim = self.stage.GetPrimAtPath(self.prims[index]) if self.stage and index < len(self.prims) else None
+            if not prim:
+                return None
+            self._sets[index] = info(prim, self.time)
+        return self._sets[index]
+
+    def focused_prim(self) -> Sdf.Path | None:
+        """The first selected prim that has the primvar in focus."""
+        if not self.primvar:
+            return None
+        for index, path in enumerate(self.prims):
+            found = self.primvar_set(index)
+            if found and found.get(self.primvar):
+                return path
+        return None
+
+    def focused(self) -> Primvar | None:
+        """The primvar in focus, on the first selected prim that has it."""
+        path = self.focused_prim()
+        return self.primvar_set(self.prims.index(path)).get(self.primvar) if path is not None else None
+
+    def focused_values(self, flattened: bool = True) -> Any:
+        """Its values, flattened through its indices unless asked not to: those of the values when
+        some indices are outside them. None without one."""
+        path = self.focused_prim()
+        if path is None:
+            return None
+        prim = self.stage.GetPrimAtPath(path)
+        try:
+            return values(prim, self.primvar, self.time, flattened)
+        except ValueError:
+            return values(prim, self.primvar, self.time, False)
+
+
+def _view_context(cache_id: int, paths: list[str], selected: int, primvar: str, time: float | None) -> ViewContext:
+    stage = _usd._stage(cache_id) if cache_id >= 0 else None
+    return ViewContext(stage, [Sdf.Path(path) for path in paths], selected, primvar,
+                       Usd.TimeCode.Default() if time is None else Usd.TimeCode(time))
+
+
+# The C++ side of a Python view (ScriptedPrimvarView) calls these.
+def _view_context_changed(view: Any, args: tuple, focus_only: bool) -> None:
+    view.context = _view_context(*args)
+    view.context_changed(view.context, focus_only)
+
+
+def _view_applies(applies: Any, args: tuple) -> bool:
+    return bool(applies(_view_context(*args)))
+
+
+def register_view(id: str, label: str, cls: type, applies: Any = None) -> None:
+    """Adds a view of primvars: a ``usdcc.ui.PrimvarView`` subclass, shown as a tab of the
+    Primvars panel and as a panel type of its own, ``primvarView.<id>``. ``applies(context)``,
+    given a ``ViewContext``, says when its tab shows; without it, always. Registering an id
+    again replaces the view; the built-in ones ("info", "values") can't be. A plugin's goes when
+    it reloads. Inside the app only, with PySide6."""
+    if not hasattr(_native, "register_primvar_view"):
+        raise RuntimeError("primvar views need the running usdcc app")
+    _native.register_primvar_view(id, label, cls, applies)
+    _plugins.note("Primvar view", label or id)
+    _plugins.track(lambda: unregister_view(id))
+
+
+def unregister_view(id: str) -> bool:
+    """Removes a view registered from Python; False if there was none."""
+    if not hasattr(_native, "unregister_primvar_view"):
+        return False
+    return _native.unregister_primvar_view(id)
 
 
 def register_relation(id: str, label: str, members: Iterable[str], complete: bool = False, same_interpolation: bool = False,

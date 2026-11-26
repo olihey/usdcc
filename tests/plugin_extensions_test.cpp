@@ -15,6 +15,8 @@
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_views.h"
+#include "usdcc/usd/primvars_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/tool_rail.h"
 #include "usdcc/usd/undo_manager.h"
@@ -37,6 +39,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QStandardPaths>
+#include <QJsonObject>
+#include <QTabWidget>
 #include <QTreeWidget>
 #include <QUndoStack>
 
@@ -741,6 +745,99 @@ USDCC_TEST(plugin_example) {
     CHECK(tool.buildGizmo(ctx).lines.empty(), "gone at the end of the drag");
     tools->setActive(usdcc::tools::kSelectTool);
 
+    // The primvar histogram example (docs/PRIMVAR_VIEWER.md §15): its view in the Primvars panel.
+    {
+        const std::string histogram = "org.usdcc.primvar-histogram-example";
+        const auto* example = manager.find(histogram);
+        CHECK(example && example->state == PluginState::Active, "the histogram example loads: %s", example ? example->reason.c_str() : "not found");
+        CHECK(usdcc::usd::PrimvarViews::instance().find(QString::fromStdString(histogram + ".histogram")), "its view");
+        const StageRefPtr primvars = app.stages.openStage(std::string(USDCC_TEST_DATA_DIR) + "/broken_primvars.usda");
+        usdcc::usd::PrimvarsViewPanel primvarPanel(&app.stages, primvars, nullptr);
+        app.stages.setSelectedPaths(primvars, {PXR_NS::SdfPath("/World/Good")});
+        const auto tabs = [&primvarPanel]() {
+            QStringList names;
+            for (int i = 0; i < primvarPanel.tabs()->count(); ++i) names << primvarPanel.tabs()->tabText(i);
+            return names;
+        };
+        primvars->setPrimvarFocus("dirt");
+        QCoreApplication::processEvents();
+        CHECK(tabs().contains("Histogram"), "a tab where there are numbers: %s", qPrintable(tabs().join(',')));
+        auto* summary = primvarPanel.findChild<QLabel*>(QStringLiteral("histogramSummary"));
+        CHECK(summary && summary->text() == "6 values from 0 to 5", "counted: %s", summary ? qPrintable(summary->text()) : "");
+        primvars->setPrimvarFocus("st");
+        QCoreApplication::processEvents();
+        CHECK(summary && summary->text() == "8 values from 0 to 1", "a UV set, its first component: %s", summary ? qPrintable(summary->text()) : "");
+        primvars->setPrimvarFocus("names");
+        QCoreApplication::processEvents();
+        CHECK(!tabs().contains("Histogram"), "none for strings");
+        app.stages.closeStage(primvars);
+    }
+
     manager.deactivate(app.python);
 }
 #endif
+
+// A view of primvars made in Python (docs/PRIMVAR_VIEWER.md §9.2). plugin_example checks the
+// histogram example, as it activates every example plugin.
+USDCC_TEST(plugin_primvar_views) {
+    TestSettings settings;
+    auto& app = pythonTestApp();
+    const StageRefPtr stage = app.stages.openStage(std::string(USDCC_TEST_DATA_DIR) + "/broken_primvars.usda");
+    CHECK(stage, "the stage opens");
+    if (!stage) return;
+    MainWindow window;
+    ViewPanelRegistry registry;
+    auto tools = std::make_shared<usdcc::tools::ToolSet>();
+    const AppContextScope scope({&app.stages, &app.undo, tools.get(), &window, &registry, nullptr});
+    usdcc::usd::PrimvarsViewPanel panel(&app.stages, stage, nullptr);
+    app.stages.setSelectedPaths(stage, {PXR_NS::SdfPath("/World/Good")});
+    stage->setPrimvarFocus("dirt");
+
+    CHECK(run(R"(
+from PySide6 import QtWidgets
+import builtins, usdcc.primvars, usdcc.ui
+
+seen = builtins.primvar_view_seen = []  # for evaluated(), which has a namespace of its own
+
+class Names(usdcc.ui.PrimvarView):
+    def create_widget(self):
+        self.label = QtWidgets.QLabel()
+        self.label.setObjectName("namesLabel")
+        return self.label
+
+    def context_changed(self, context, focus_only):
+        primvar = context.focused()
+        seen.append((context.primvar, focus_only, len(context.prims), context.selected))
+        self.label.setText("%s %s %s" % (context.primvar, primvar.interpolation if primvar else "-", context.focused_prim()))
+
+    def save_state(self):
+        return {"shown": self.label.text()}
+
+usdcc.primvars.register_view("test.names", "Names", Names, applies=lambda context: context.primvar != "id")
+)"), "register_view()");
+    QCoreApplication::processEvents();
+    const auto tabs = [&panel]() {
+        QStringList names;
+        for (int i = 0; i < panel.tabs()->count(); ++i) names << panel.tabs()->tabText(i);
+        return names;
+    };
+    CHECK(tabs().mid(0, 2) == (QStringList{"Info", "Values"}) && tabs().contains("Names"), "its tab: %s", qPrintable(tabs().join(',')));
+    auto* label = panel.findChild<QLabel*>(QStringLiteral("namesLabel"));
+    CHECK(label && label->text() == "dirt vertex /World/Good", "told the context: %s", label ? qPrintable(label->text()) : "");
+    stage->setPrimvarFocus("st");
+    QCoreApplication::processEvents();
+    CHECK(label && label->text() == "st faceVarying /World/Good", "and the focus: %s", label ? qPrintable(label->text()) : "");
+    CHECK(evaluated("primvar_view_seen[-1]") == "('st', False, 1, 1)", "a ViewContext: %s", evaluated("primvar_view_seen[-1]").c_str());
+    usdcc::usd::PrimvarView* view = panel.view("test.names");
+    CHECK(view && view->saveState().value("python").toObject().value("shown").toString() == "st faceVarying /World/Good",
+          "its state goes with sessions");
+    stage->setPrimvarFocus("id");
+    QCoreApplication::processEvents();
+    CHECK(!tabs().contains("Names"), "applies() leaves it out");
+    CHECK(!run("import usdcc.primvars, usdcc.ui\nusdcc.primvars.register_view('values', 'Mine', usdcc.ui.PrimvarView)"),
+          "a built-in one can't be replaced");
+    CHECK(evaluated("__import__('usdcc.primvars').primvars.unregister_view('test.names')") == "True" && !usdcc::usd::PrimvarViews::instance().find("test.names"),
+          "unregister_view()");
+
+    app.stages.closeStage(stage);
+}

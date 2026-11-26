@@ -80,6 +80,9 @@ void bindRenderViewPanelHandle(pybind11::module_& m);
 // Final renderers from Python (scripted_final_renderer.cpp).
 void bindFinalRenderers(pybind11::module_& m);
 void removeScriptedFinalRenderers();
+// Primvar views from Python (scripted_primvar_view.cpp).
+void bindPrimvarViews(pybind11::module_& m);
+void removeScriptedPrimvarViews();
 
 namespace {
 const AppContext* s_context = nullptr;
@@ -100,6 +103,7 @@ AppContextScope::~AppContextScope() {
 #if USDCC_HAS_PYTHON
     // They call into Python, which goes next.
     if (!m_outer) removeScriptedFinalRenderers();
+    if (!m_outer) removeScriptedPrimvarViews();
 #endif
 }
 
@@ -524,6 +528,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         py::arg("id"), py::arg("display_name"), py::arg("cls"));
     bindRenderViewPanelHandle(m);
     bindFinalRenderers(m);
+    bindPrimvarViews(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {

@@ -1,8 +1,8 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 and 2 are built** (the model, its Python calls and the validation rules: §13; the panel: §14),
-after the phase 0
-spike (§5.2.1). The rest is a plan: §10 has the recommendation, §12 the questions.
+Status: **phases 1 to 3 are built** (the model, its Python calls and the validation rules: §13; the panel:
+§14; the Values view, Python views and the histogram example: §15), after the phase 0 spike (§5.2.1). The
+rest is a plan: §10 has the recommendation, §12 the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -391,7 +391,7 @@ calls are the API"): an interface the built-ins can't live with is found out at 
 |---|---|---|---|---|
 | 1 | **Data** (no registry; built, §13) | `usdcc/usd/primvar_info.h`, Qt-free, exported | `usdcc.primvars.info(prim)`, `.values(prim, name, flattened=False)`, `.element_count(prim, interpolation)` | The records of §4.6: validity, expected counts, source, relations, readers |
 | 2 | **Shared state** (the focus built, §14) | on `Stage`, with signals | `usdcc.primvars.focus()`, `set_focus()`, `element_selection()`, `set_element_selection()`; events `primvar_focus_changed`, `element_selection_changed` | Which primvar is picked for a stage; which elements (prim, domain, indices) are selected or hovered |
-| 3 | **Primvar views** (built in C++, §14) | `addPrimvarView(type)` | `usdcc.primvars.register_view(id, label, cls, applies=None)`, `cls` a `usdcc.ui.PrimvarView` | A tab in the Primvars panel: a widget told the stage, prims, primvar and time, with session state. `applies(records)` decides when the tab shows (the UV view: two float components) |
+| 3 | **Primvar views** (built, §14, §15) | `addPrimvarView(type)` | `usdcc.primvars.register_view(id, label, cls, applies=None)`, `cls` a `usdcc.ui.PrimvarView` | A tab in the Primvars panel: a widget told the stage, prims, primvar and time, with session state. `applies(context)` decides when the tab shows (the UV view: two float components) |
 | 4 | **Primvar commands** | `addPrimvarMenuAction(label, run, applies)` | `usdcc.primvars.add_menu_action(label, callback, applies=None)` | An entry in the list's context menu and the panel's options, one undo step, as the prim menu's entries are. The context has the prims, the primvars and the element selection |
 | 5 | **Authoring** (no registry) | `usdcc/usd/primvar_edit.h` | `usdcc.primvars.author(prim, name, values, indices=None, interpolation=..., element_size=1)` | Writes a whole primvar as a group (§4.6 point 4): refuses what §4.1 would call broken, blocks weaker indices |
 | 6 | **Colorizers** | `addPrimvarColorizer(...)` | `usdcc.primvars.register_colorizer(id, label, function, applies=None, options=...)` | A Color By mode (§5): values in, colors out, with options described as data, as a tool's are |
@@ -438,7 +438,8 @@ It uses 1 (the layout's data), 2 (focus and element selection), 3 (its tab, or i
 (its transform tools, later) and 7 (the face under the cursor, in 3D). It needs nothing of 6.
 
 **C++ rather than Python**, for the reason in §9.3. A small **Python example** goes beside
-`measure_example`: a histogram view of the picked primvar and a colorizer, to keep the Python side honest.
+`measure_example`: a histogram view of the picked primvar (built, §15) and a colorizer (phase 5), to keep
+the Python side honest.
 
 The cost is in the order of work, not its amount: the registries come before the UV view instead of
 never. My estimate is a fifth more on phases 2 and 3 (a guess, not measured), and the Values and Info
@@ -465,7 +466,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **0. Spike** — **done** | The scene index callback on usdcc's engine: `displayColor` replaced on Storm and Embree (§5.2) | S | In the app, §5.2.1: route A for phase 5 |
 | **1. Model** — **done** | `primvar_info`, exported: records, expected counts for Mesh, BasisCurves, Points, PointInstancer; inheritance and material sources; the relation table and its registry; problems. `usdcc.primvars`' read calls. Validation rules. Test stages with each kind of broken primvar | M | Unit tests, Python tests |
 | **2. Panel: list and info** — **done** | The panel, following the selection; the list; the primvar focus on `StageManager`; the view registry with Info as its first view, statistics on a worker; Open in Own Panel; the Attribute Editor's ⚠ and link | M | UI tests; in the app on the shader ball |
-| **3. Values** | The table per domain as a registered view, indexed values, copy. The Python example plugin (histogram view) | M | UI tests, a mesh with a million points; the example's test |
+| **3. Values** — **done** | The table per domain as a registered view, indexed values, copy. The Python example plugin (histogram view) | M | UI tests, a mesh with a million points; the example's test |
 | **4. Element selection and overlays** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
 | **5. Color By** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
 | **6. UV view plugin** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
@@ -571,8 +572,7 @@ without the scan. **Not tried:** Linux, a production stage, value clips.
 - **Open in Own Panel** (the tab bar's button and menu): every view is a panel type too,
   `primvarView.<id>` ("Primvar Info"), with a choice of the primvar in its toolbar. A plugin's view gets one
   as it's added, and loses it when removed.
-- **C++ plugins:** `Host::addPrimvarView(type)`. **Python views aren't there yet:** phase 3, with the
-  example plugin.
+- **C++ plugins:** `Host::addPrimvarView(type)`. Python views came with phase 3 (§15).
 - **Attribute Editor:** a primvar row's note gets a sign and the problem's colour ("⚠ vertex"), the
   messages as its tooltip; the Primvars section's header has a button to the panel, and each primvar row's
   menu Show in Primvars Panel, which focuses it.
@@ -583,3 +583,35 @@ statistics, a plugin's view coming and going, Open in Own Panel, sessions, the A
 `python_primvars_focus`. In the app, with a test profile: the Standard USD Shader Ball's meshes (`st`,
 23,352 of 23,352, its interpolation from `subdiv.usda`; three selected, the union) and the broken stage, with
 its notes in the Attribute Editor. **Not tried:** Linux, a big selection's speed, a plugin's view in the app.
+
+## 15. As built: phase 3
+
+- **Values** (`PrimvarValuesView`, the second built-in view, shown when the primvar in focus has values): a
+  row for each element of its domain, the focus first, then the prim's other primvars of the same
+  interpolation (the inherited ones too when it's constant). A mesh's vertex rows show its points; its face
+  corners show their face and point. An indexed primvar shows the value its index picks, then the index in
+  ⟨ ⟩; an index outside the values, or a value that isn't there, in red. Several values an element, as
+  `[a, b, c]`; a constant one is one row of whole values. Numbers as the Attribute Editor writes them.
+- **Rows** are as many as the interpolation needs, or as the longest has where USD doesn't say.
+- **Virtual:** only the rows on screen are formatted. A 1000×1000 grid (a million points) was read in 2 ms
+  and shown in 7 ms, in `primvars_values_million_points`.
+- **Copy** (Ctrl+C, or the menu): the selected cells, tab-separated, under a line of their columns' names.
+  Select Column too. Not done: sorting, filtering, editing (phase 8).
+- **Python views:** `usdcc.ui.PrimvarView` (`create_widget()`, `context_changed(context, focus_only)`,
+  `save_state()`, `restore_state()`), registered with `usdcc.primvars.register_view(id, label, cls,
+  applies=None)` and taken back with `unregister_view(id)`; a plugin's goes when it reloads. Each is a
+  C++ `ScriptedPrimvarView` hosting the class, as Python view panels are. They're given a
+  `usdcc.primvars.ViewContext` (stage, prims, how many are selected, the focus, the time), which reads the
+  prims' primvars when asked (`primvar_set()`, `focused()`, `focused_prim()`, `focused_values()`).
+  `applies` runs on the main thread, under the GIL, each time the context changes. Needs PySide6.
+- **The example plugin** (`src/plugins/primvar_histogram_example`, in a deploy's `examples/plugins`): a
+  Histogram view of the primvar in focus, of its numbers or one component of a vector, or its length; 16 to
+  128 bins, kept in sessions. With numpy it counts whole arrays at once; without, in Python. No colorizer:
+  those are phase 5's.
+
+**Checked:** `primvars_values_view`, `primvars_values_million_points`, `plugin_primvar_views` (a Python
+view's context, focus, `applies`, state, the built-in ids refused) and `plugin_example` (the histogram's counts). In the app,
+with a test profile and the example from `--plugin-path`: the shader ball's `st`, 23,352 face corners with
+their faces and points, and its histogram (13,826 of its UVs are exactly 0, so the first bin is tall); the
+broken stage's indices outside their values in red. **Not tried:** Linux, the histogram on a million values
+without numpy.

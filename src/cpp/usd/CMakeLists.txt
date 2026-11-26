@@ -229,6 +229,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/apply_schema_ui.h
     include/usdcc/usd/schema_generator.h
     include/usdcc/usd/hydra_viewport_window.h
+    include/usdcc/usd/primvar_values_view.h
     include/usdcc/usd/primvar_views.h
     include/usdcc/usd/primvars_view_panel.h
     include/usdcc/usd/layer_actions.h
@@ -323,6 +324,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/promote_schema_dialog.h
     src/promote_schema_dialog.cpp
     src/hydra_viewport_window.cpp
+    src/primvar_values_view.cpp
     src/primvar_views.cpp
     src/primvars_view_panel.cpp
     src/selection_overlay.cpp
