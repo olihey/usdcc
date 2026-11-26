@@ -1299,6 +1299,7 @@ int main(int argc, char** argv) {
     };
     auto* peersController = new usdcc::ui::PeersController(
         std::make_unique<usdcc::peers::Peers>(std::move(peersOptions)), &window, std::move(peersHooks), &window);
+    usdcc::scripting::setPeersController(peersController);  // usdcc.peers (docs/PEERS.md §8.2)
     auto* peersPanel = new usdcc::ui::PeersSidePanel(peersController);
     window.addSidePanel(peersPanel, Qt::RightDockWidgetArea);
     peersPanel->hide();

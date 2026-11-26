@@ -17,8 +17,8 @@ phase 5's transfers without UI or Python (§14.4), phase 6, the shared stage
 ([SHARED_STAGE.md](SHARED_STAGE.md)), and **phase 3** (2026-11-26, §14.5): the `usdcc_peers`
 Python package, the hub, rooms joined at start, and notifications; and **phase 4** (§14.6): the
 relay, rooms hosted through it, its links, and `wss://`. Not built: the rest of phase 5. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
-`usdcc.peers` for Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two
-machines haven't been tried; everything so far ran on one.
+`usdcc.peers` for Python, set aside on 2026-11-17, is built since (§8.2, 2026-11-26), and with it
+1b's last criterion. Two machines haven't been tried; everything so far ran on one.
 
 ## 1. Can it work without a server?
 
@@ -466,6 +466,21 @@ def add_note(room, plugin, prim_path, text):
 - **A plugin can host or join by itself,** but the Peers panel always shows every room the app is
   in, and the user can leave any of them.
 
+*As built* (2026-11-26): [src/python/usdcc/peers.py](../src/python/usdcc/peers.py) over
+`_usdcc_app`'s `peers_*` and `room_*` functions (`src/cpp/scripting/src/peers_module.cpp`), on the
+app's `PeersController` (`usdcc::scripting::setPeersController()`, which `main.cpp` calls). All of
+the table but transfers (`send_file`, `on_file`), which come with phase 5's rest. Also
+`room.channel(…).send_private()`, `on_refused()`, `room.on("peer_joined" | "peer_left" |
+"closed")`, `room.find(name)`, and `host(…, through_relay=, on_network=)`. A room crosses as a
+number held with a `QPointer`, so a closed room's calls raise instead of reaching freed memory;
+JSON crosses as text. Every `on_…()` and `connect()` returns a `Connection`, tracked for the
+plugin that made it, so it ends when the plugin is turned off or reloaded; a plugin's channels
+and maps stay open in the room, with nobody listening. `room.notify()` checks a notification as a
+receiver does (§10.2). Tested by `python_peers_rooms_from_a_script` (`usdcc_python_tests`): a
+script hosts a room and a C++ member joins; messages with bytes, maps, per-peer state, a private
+message and a notification both ways; a disconnected callback hears nothing more; a closed
+room's calls raise.
+
 ## 9. Other programs
 
 A render farm, an asset tracker, a CI job or a studio's own tool is a peer like any other. The
@@ -778,7 +793,7 @@ every byte and can cut the connection:
 | A reconnect catches up | `peers_reconnect_catches_up`: the proxy cuts a member, three messages go out, it comes back with all of them once, in order |
 | A wrong key is refused | `peers_wrong_key_is_refused` |
 | A map ends equal after both sides set the same key; a late joiner has the map | `peers_shared_state`, also with 300 random sets and removes from three sides |
-| A test plugin shares a map from Python | Not built: no `usdcc.peers` |
+| A test plugin shares a map from Python | Since 2026-11-26: a script shares a map, messages and per-peer state with a C++ member (`python_peers_rooms_from_a_script`, §8.2) |
 
 Also tested: identities and links, a member away too long, per-peer state and channel snapshots,
 the room key changing, and every kind of admission.
@@ -808,8 +823,8 @@ the room key changing, and every kind of admission.
 - **Who may join** (§6): `Admission::Invited`, `Ask` and `Open`, a password, "always allow"
   (`HostOptions::trustedFingerprints`, `Room::trust()`), "ask before a join by link", and
   `Room::joinRequested` with a `JoinRequest` to allow or deny; unanswered, a no after 120 s.
-- **Not built:** `usdcc.peers` and its plugin test (set aside); the pipe of §15 that delays and
-  reorders (the random test runs over real sockets); a clock the test moves.
+- **Not built:** the pipe of §15 that delays and reorders (the random test runs over real
+  sockets); a clock the test moves. `usdcc.peers` is built since (§8.2).
 
 ### 14.3 Phase 2 as built
 

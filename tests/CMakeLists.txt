@@ -222,6 +222,7 @@ add_executable(usdcc_python_tests
     plugin_native_test.cpp
     plugin_tab_test.cpp
     python_app_test.cpp
+    python_peers_test.cpp
     schema_generator_test.cpp
     schema_editor_test.cpp
     python_runtime_test.cpp
