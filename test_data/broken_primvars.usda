@@ -1,0 +1,232 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    doc = """Meshes of two faces, six points and eight face corners, each named after what's wrong
+    with its primvars (docs/PRIMVAR_VIEWER.md section 4): for tests, and to look at."""
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    float primvars:wetness = 0.5 (
+        interpolation = "constant"
+    )
+
+    def Mesh "Good"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+            interpolation = "faceVarying"
+        )
+        int[] primvars:st:indices = [0, 1, 2, 3, 0, 1, 2, 3]
+        color3f[] primvars:displayColor = [(1, 0, 0)] (
+            interpolation = "constant"
+        )
+        float[] primvars:dirt = [0, 1, 2, 3, 4, 5] (
+            interpolation = "vertex"
+        )
+        int[] primvars:id = [1, 2] (
+            interpolation = "uniform"
+        )
+        string[] primvars:names = ["a", "b", "c"] (
+            interpolation = "constant"
+        )
+    }
+
+    def Mesh "ElementCount"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        float[] primvars:dirt = [0, 1, 2, 3, 4, 5, 6, 7] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Mesh "ElementCountIndexed"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        texCoord2f[] primvars:st = [(0, 0), (1, 0)] (
+            interpolation = "faceVarying"
+        )
+        int[] primvars:st:indices = [0, 1, 0, 1, 0, 1]
+    }
+
+    def Mesh "IndexRange"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        texCoord2f[] primvars:st = [(0, 0), (1, 0)] (
+            interpolation = "faceVarying"
+        )
+        int[] primvars:st:indices = [0, 1, 2, -1, 0, 1, 0, 1]
+    }
+
+    def Mesh "IndicesType"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1), (0, 0), (1, 0), (1, 1), (0, 1)] (
+            interpolation = "faceVarying"
+        )
+        float[] primvars:st:indices = [0, 1]
+    }
+
+    def Mesh "IndicesOnly"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        int[] primvars:st:indices = [0, 1, 2, 3, 0, 1, 2, 3]
+    }
+
+    def Mesh "NoInterpolation"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1), (0, 0), (1, 0), (1, 1), (0, 1)]
+    }
+
+    def Mesh "ConstantArray"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        color3f[] primvars:displayColor = [(1, 0, 0), (0, 1, 0), (0, 0, 1)] (
+            interpolation = "constant"
+        )
+    }
+
+    def Mesh "ScalarPerPoint"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        float primvars:dirt = 1 (
+            interpolation = "vertex"
+        )
+    }
+
+    def Mesh "NonFinite"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        float[] primvars:dirt = [0, nan, 2, inf, 4, 5] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Mesh "Overrides"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1)] (
+            interpolation = "uniform"
+        )
+        normal3f[] primvars:normals = [(0, 0, 1), (0, 0, 1)] (
+            interpolation = "uniform"
+        )
+    }
+
+    def Mesh "ElementSize"
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        float[] primvars:sh = [0, 1, 2, 3, 4] (
+            interpolation = "uniform"
+            elementSize = 3
+        )
+    }
+
+    def Mesh "Incomplete" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        int[] primvars:skel:jointIndices = [0, 0, 0, 0, 0, 0] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Mesh "SkinningDiffers" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        int[] primvars:skel:jointIndices = [0] (
+            interpolation = "constant"
+        )
+        float[] primvars:skel:jointWeights = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0] (
+            interpolation = "vertex"
+            elementSize = 2
+        )
+    }
+
+    def Mesh "SkinningValues" (
+        prepend apiSchemas = ["SkelBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4, 4]
+        int[] faceVertexIndices = [0, 1, 4, 3, 1, 2, 5, 4]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)]
+        float3[] extent = [(0, 0, 0), (2, 1, 0)]
+        uniform token subdivisionScheme = "none"
+        uniform token[] skel:joints = ["a", "a/b"]
+        int[] primvars:skel:jointIndices = [0, 1, 2, 0, 1, 0] (
+            interpolation = "vertex"
+        )
+        float[] primvars:skel:jointWeights = [1, 1, 1, 0.5, 1, 1] (
+            interpolation = "vertex"
+        )
+    }
+
+    def Xform "NotGeometry"
+    {
+        float[] primvars:dirt = [1, 2] (
+            interpolation = "vertex"
+        )
+    }
+}

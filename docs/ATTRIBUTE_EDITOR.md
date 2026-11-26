@@ -313,7 +313,9 @@ matches wins:
      (**Mesh**, **Camera**, **Light**, …)
 5. **UsdShade:** `inputs:*` → **Inputs**, `outputs:*` → **Outputs**, on Shader, Material
    and NodeGraph prims.
-6. **Primvars** that no schema declared → **Primvars**, each showing its interpolation.
+6. **Primvars** that no schema declared → **Primvars**, each showing its interpolation, with a sign in the
+   problem's colour when something's wrong with it, and a button to the Primvars panel
+   ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §14).
    In any section, two or more primvars with the same first name after `primvars:` go in a frame
    titled with it, as it's written, and their labels leave it out: `primvars:skel:jointIndices` is "Joint
    Indices" in a frame titled "skel". That includes a primvar and what's named after it: `primvars:st`,

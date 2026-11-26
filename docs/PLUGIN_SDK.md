@@ -37,6 +37,7 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host& host) {}
 | `addMenuAction(path, run, shortcut, tip)` | "Menu/Action". `run` is one undo step, and an exception is logged |
 | `addPrimMenuAction(label, run, applies)` | At the end of the Outliner's prim menu, one undo step |
 | `addViewportMenuAction(label, run, checked, applies, enabled)` | At the end of every viewport's options menu and tab menu; `run(viewport)` is one undo step, `checked` makes it checkable, `enabled` greys it out when false. `ViewportViewPanel::setBorderColor()` marks a viewport, and `ViewportViewPanel::addCloseGuard()` is asked before one closes |
+| `addPrimvarView(type)` | A view of the Primvars panel, and a panel type of its own ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §14): a `usdcc::usd::PrimvarViewType` with an id, a label, what makes its `PrimvarView` and when it applies |
 | `settingKey(key)` | A key of the plugin's own, for `usdcc::ui::appSettings()` |
 | `log(level, message)` | A record with the source `plugin:<id>` in the Log panel |
 

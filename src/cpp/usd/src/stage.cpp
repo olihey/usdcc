@@ -147,6 +147,12 @@ void Stage::clearPlaybackRange() {
     playbackRangeChanged();
 }
 
+void Stage::setPrimvarFocus(const std::string& name) {
+    if (name == m_primvarFocus) return;
+    m_primvarFocus = name;
+    primvarFocusChanged(m_primvarFocus);
+}
+
 PXR_NS::TfToken Stage::targetXformOpFor(const PXR_NS::SdfPath& primPath) const {
     return primPath == m_targetPrim ? m_targetOp : PXR_NS::TfToken();
 }

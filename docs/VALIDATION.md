@@ -30,7 +30,8 @@ it's tried.
 | **`UsdValidationFixer`** | A repair that belongs to a validator, with `CanApplyFix()` and `ApplyFix()` |
 | **Suite** | A named group of validators |
 
-The build has 28 validators: core (3), geometry (4), lights (1), physics (4), shading (9), skeletons
+The build has 28 validators (and usdcc adds two of its own, for primvars:
+[PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §13): core (3), geometry (4), lights (1), physics (4), shading (9), skeletons
 (2), and references and USDZ (5). One has a fixer: `MaterialBindingApiAppliedValidator`. usdcc runs the
 physics ones already, in Check Physics ([PHYSICS.md](PHYSICS.md) §5.4).
 

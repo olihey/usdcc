@@ -46,6 +46,9 @@ public:
     // there). A fixed width keeps the editors of neighbouring rows aligned.
     // The tooltip defaults to the note itself.
     void setNote(const QString& note, int fixedWidth = 0, const QString& toolTip = QString());
+    // The note's colour (theme/app.qss): "error", "warning", "info", or empty for the usual one.
+    void setNoteSeverity(const QString& severity);
+    QString note() const;
     // Full property path, for the context menu's "Copy Property Path".
     void setPropertyPath(const QString& path) { m_propertyPath = path; }
     QString propertyPath() const { return m_propertyPath; }

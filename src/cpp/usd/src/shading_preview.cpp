@@ -182,11 +182,6 @@ std::string nameIn(const UsdShadeShader& shader, const TfToken& name, const SdrS
     return property ? text(property->GetDefaultValue()) : std::string();
 }
 
-// What a gprim has whatever its primvars, or a renderer has a value for without one.
-bool alwaysThere(const std::string& name) {
-    return name == "displayColor" || name == "displayOpacity" || name == "normals" || name == "points" || name == "widths";
-}
-
 bool hasPrimvar(const UsdPrim& prim, const std::string& name) {
     const UsdGeomPrimvar primvar = UsdGeomPrimvarsAPI(prim).FindPrimvarWithInheritance(TfToken(name));
     return primvar && primvar.HasValue();
@@ -1008,13 +1003,17 @@ void ShadingPreviewStage::updatePrimvars(bool force) {
     }
 
     for (const MaterialPrimvar& read : reads) {
-        if (!read.reached || alwaysThere(read.name)) continue;
+        if (!read.reached || rendererSuppliesPrimvar(read.name)) continue;
         const bool missing = std::any_of(showing.begin(), showing.end(), [&](const UsdPrim& prim) {
             if (m_scenePrim.IsEmpty() && m_scene->GetAttributeAtPath(prim.GetPath().AppendProperty(TfToken("primvars:" + read.name)))) return false;
             return !hasPrimvar(prim, read.name);
         });
         if (missing) m_missingPrimvars.push_back(read.name);
     }
+}
+
+bool rendererSuppliesPrimvar(const std::string& name) {
+    return name == "displayColor" || name == "displayOpacity" || name == "normals" || name == "points" || name == "widths";
 }
 
 std::vector<MaterialPrimvar> primvarsReadBy(const UsdShadeMaterial& material, std::set<SdfPath>* network) {

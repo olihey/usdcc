@@ -16,6 +16,7 @@
 
 class QTimer;
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -100,6 +101,12 @@ public:
     void rebuild();
     QScrollArea* scrollArea() const { return m_scroll; }
 
+    // Shows the Primvars panel on `stage`, with `primvar` in focus (empty: as it was): the
+    // Primvars section's button and a primvar row's menu (docs/PRIMVAR_VIEWER.md §8). Set by the
+    // app; neither is there without it.
+    using ShowPrimvars = std::function<void(const StageRefPtr& stage, const std::string& primvar)>;
+    static void setShowPrimvars(ShowPrimvars show);
+
 Q_SIGNALS:
     // The rows were made again, for currentPrim().
     void rebuilt();
@@ -161,6 +168,8 @@ private:
     void scheduleBoundsUpdate();
 
     void refreshValues();
+    // A primvar row's note: its interpolation, and what's wrong with it (primvar_info.h).
+    void updatePrimvarNotes();
     void refreshPrimHeader(const PXR_NS::UsdPrim& prim);
     // From the Name row: one undo step (prim_actions::rename()); the selection
     // follows the new path. A name that isn't valid or is taken is refused.

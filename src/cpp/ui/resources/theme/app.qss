@@ -931,6 +931,15 @@ QLabel#propertyNote {
     color: rgba(@ink-rgb, 35%);
 }
 
+/* A primvar's note when something's wrong with it (docs/PRIMVAR_VIEWER.md section 8). */
+QLabel#propertyNote[severity="error"] {
+    color: @error;
+}
+
+QLabel#propertyNote[severity="warning"] {
+    color: @warning;
+}
+
 QLabel#propertyBadge {
     color: @accent-text;
     font-size: 10px;

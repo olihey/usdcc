@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <set>
 #include <tuple>
 
 #include "usdcc/ui/about_dialog.h"
@@ -96,6 +97,8 @@
 #include "usdcc/usd/curve_editor_view_panel.h"
 #include "usdcc/usd/dope_sheet_view_panel.h"
 #include "usdcc/usd/validation_view_panel.h"
+#include "usdcc/usd/primvars_view_panel.h"
+#include "usdcc/usd/property_sheet.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
 #include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/schema_library_editor.h"
@@ -479,6 +482,54 @@ int main(int argc, char** argv) {
                                                      if (auto* panel = showValidation(context.stage)) panel->run(context.paths);
                                                  },
                                                  nullptr});
+    // A prim's primvars, and views of the one picked (docs/PRIMVAR_VIEWER.md §8).
+    panelTypes.add(QStringLiteral("primvars"), QObject::tr("Primvars"),
+                   [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                 QWidget* parent) -> usdcc::ui::ViewPanel* {
+                       return new usdcc::usd::PrimvarsViewPanel(&stageManager, stage, undoManager, title, parent);
+                   });
+    {
+        // Each view as a panel of its own, the built-in ones and those plugins add, now or later.
+        auto viewPanelTypes = std::make_shared<std::set<QString>>();
+        const auto syncViewPanels = [&panelTypes, &stageManager, viewPanelTypes]() {
+            std::set<QString> now;
+            for (const usdcc::usd::PrimvarViewType& type : usdcc::usd::PrimvarViews::instance().types()) {
+                const QString id = usdcc::usd::PrimvarViews::panelTypeId(type.id);
+                now.insert(id);
+                const QString viewId = type.id;
+                panelTypes.add(id, QObject::tr("Primvar %1").arg(type.label),
+                               [&stageManager, viewId](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                       QWidget* parent) -> usdcc::ui::ViewPanel* {
+                                   return new usdcc::usd::PrimvarViewPanel(&stageManager, stage, viewId, title, parent);
+                               });
+            }
+            for (const QString& id : *viewPanelTypes) {
+                if (!now.count(id)) panelTypes.remove(id);
+            }
+            *viewPanelTypes = std::move(now);
+        };
+        syncViewPanels();
+        QObject::connect(&usdcc::usd::PrimvarViews::instance(), &usdcc::usd::PrimvarViews::changed, &window, syncViewPanels);
+        usdcc::usd::PrimvarsViewPanel::setHooks({[&window, &panelTypes](const QString& viewId, const usdcc::usd::StageRefPtr& stage) {
+            panelTypes.open(usdcc::usd::PrimvarViews::panelTypeId(viewId), stage, window.dockManager(), &window);
+        }});
+        usdcc::usd::PropertySheet::setShowPrimvars([&window, &panelTypes](const usdcc::usd::StageRefPtr& stage, const std::string& primvar) {
+            if (!stage) return;
+            usdcc::usd::PrimvarsViewPanel* panel = nullptr;
+            for (auto* each : window.findChildren<usdcc::usd::PrimvarsViewPanel*>()) {
+                if (each->currentStage() == stage && !each->isClosed()) panel = each;
+            }
+            if (!panel) {
+                panel = qobject_cast<usdcc::usd::PrimvarsViewPanel*>(
+                    panelTypes.open(QStringLiteral("primvars"), stage, window.dockManager(), &window));
+            }
+            if (!primvar.empty()) stage->setPrimvarFocus(primvar);
+            if (panel) {
+                panel->setAsCurrentTab();
+                panel->raise();
+            }
+        });
+    }
     // The schemas USD has registered (docs/SCHEMAS.md §4).
     panelTypes.add(QStringLiteral("schemas"), QObject::tr("Schemas"),
                    [&stageManager, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,

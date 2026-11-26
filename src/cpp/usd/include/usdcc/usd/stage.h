@@ -161,6 +161,13 @@ public:
     void clearPlaybackRange();
     usdcc::core::Signal<> playbackRangeChanged;
 
+    // The primvar the Primvars panel and its views look at (docs/PRIMVAR_VIEWER.md §9.2), by name
+    // without "primvars:"; empty for none. Shared by every panel on the stage, and kept when the
+    // selection changes, so the next prim shows the same one. View state, as the time is.
+    const std::string& primvarFocus() const { return m_primvarFocus; }
+    void setPrimvarFocus(const std::string& name);
+    usdcc::core::Signal<const std::string&> primvarFocusChanged;
+
     // After the Create menu made a prim: the Outliner shows it, however far down it is.
     usdcc::core::Signal<const PXR_NS::SdfPath&> primCreated;
     // After prims changed path: a rename or a move, and undoing or redoing one. What
@@ -202,6 +209,7 @@ private:
     double m_time = 0.0;
     std::optional<TimeRange> m_playbackRange;
     std::string m_pendingAssetEnvironment;
+    std::string m_primvarFocus;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
     // Last: it listens to `changed`, so it goes first.
     std::unique_ptr<physics::PhysicsSession> m_physics;

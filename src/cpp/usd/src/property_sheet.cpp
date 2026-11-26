@@ -37,6 +37,8 @@
 #include "usdcc/usd/asset_servers.h"
 #include "usdcc/usd/properties/property_row.h"
 #include "usdcc/usd/properties/transform_stack_editor.h"
+#include "usdcc/usd/primvar_info.h"
+#include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/property_categorizer.h"
 #include "usdcc/usd/scene_bounds.h"
 #include "usdcc/usd/stage_manager.h"
@@ -102,6 +104,11 @@ using properties::PropertyEditor;
 using properties::PropertyRow;
 
 namespace {
+
+PropertySheet::ShowPrimvars& showPrimvarsHook() {
+    static PropertySheet::ShowPrimvars show;
+    return show;
+}
 
 constexpr int kLabelWidth = 130;
 // Inside a frame labels are narrower by its padding, so the fields line up with
@@ -545,6 +552,14 @@ void PropertySheet::rebuild() {
             if (category.properties.empty()) continue;
         }
         CategorySection* section = makeSection(qs(category.key), qs(category.label));
+        if (category.key == "primvars" && showPrimvarsHook()) {
+            QToolButton* show = properties::iconButton(QStringLiteral(":/usdcc/theme/link.png"), tr("Show in the Primvars panel"));
+            show->setObjectName(QStringLiteral("showPrimvarsButton"));
+            connect(show, &QToolButton::clicked, this, [this]() {
+                if (showPrimvarsHook() && m_stage) showPrimvarsHook()(m_stage, {});
+            });
+            section->addHeaderWidget(show);
+        }
         if (interfaceInputs && category.key == "inputs") addInputButton(section, prim);
         // Properties no schema defines: they can become one (docs/SCHEMAS.md §6).
         if (category.key == "custom" || TfStringStartsWith(category.key, "ns:")) {
@@ -618,9 +633,45 @@ void PropertySheet::rebuild() {
     layout->addStretch(1);
     m_scroll->setWidget(m_content);
 
+    updatePrimvarNotes();
     applyFilter();
     restoreView();
     Q_EMIT rebuilt();
+}
+
+void PropertySheet::setShowPrimvars(ShowPrimvars show) { showPrimvarsHook() = std::move(show); }
+
+void PropertySheet::updatePrimvarNotes() {
+    const UsdPrim prim = currentPrim();
+    const bool any = std::any_of(m_rows.begin(), m_rows.end(), [](const Row& row) {
+        return row.row && UsdGeomPrimvar::IsPrimvar(row.property.As<UsdAttribute>());
+    });
+    if (!prim || !any) return;
+    // Its own primvars only, and nothing about materials: the panel has the rest.
+    PrimvarInfoOptions options;
+    options.inherited = false;
+    options.readers = false;
+    const PrimvarSet set = primvarInfo(prim, m_stage ? m_stage->timeCode() : UsdTimeCode::EarliestTime(), options);
+    for (Row& row : m_rows) {
+        const UsdGeomPrimvar primvar(row.property.As<UsdAttribute>());
+        if (!row.row || !primvar) continue;
+        const QString interpolation = qs(primvar.GetInterpolation().GetString());
+        const PrimvarInfo* info = set.find(primvar.GetPrimvarName().GetString());
+        const auto worst = info ? worstSeverity(info->problems) : std::nullopt;
+        if (!worst) {
+            row.row->setNote(interpolation);
+            row.row->setNoteSeverity(QString());
+            continue;
+        }
+        QStringList messages;
+        for (const PrimvarProblem& problem : info->problems) messages << qs(problem.message);
+        // A sign where the eye goes, the colour from the theme.
+        const QString sign = *worst == PrimvarProblem::Severity::Info ? QStringLiteral("\u2139") : QStringLiteral("\u26a0");
+        row.row->setNote(sign + QLatin1Char(' ') + interpolation, 0, messages.join(QLatin1Char('\n')));
+        row.row->setNoteSeverity(*worst == PrimvarProblem::Severity::Error     ? QStringLiteral("error")
+                                 : *worst == PrimvarProblem::Severity::Warning ? QStringLiteral("warning")
+                                                                               : QStringLiteral("info"));
+    }
 }
 
 void PropertySheet::buildShadingTitle(const UsdPrim& prim, QVBoxLayout* layout) {
@@ -1445,6 +1496,14 @@ PropertySheet::Row PropertySheet::buildRow(const UsdProperty& property, const Pr
         row.row->setReadOnly(!prim_actions::isEditable(attr.GetPrim()));
         if (const UsdGeomPrimvar primvar{attr}) {
             row.row->setNote(qs(primvar.GetInterpolation().GetString()));
+            if (showPrimvarsHook()) {
+                row.row->setExtraMenu([this, name = primvar.GetPrimvarName().GetString()](QMenu* menu) {
+                    menu->addSeparator();
+                    menu->addAction(tr("Show in Primvars Panel"), this, [this, name]() {
+                        if (showPrimvarsHook() && m_stage) showPrimvarsHook()(m_stage, name);
+                    });
+                });
+            }
         }
         if (isReceiver(attr)) addConnectionButton(row, attr.GetPath());
         connect(row.row, &PropertyRow::connectedSourceClicked, this, [this, path = attr.GetPath()]() {
@@ -1670,6 +1729,7 @@ void PropertySheet::refreshValues() {
         if (row.binding) row.binding->refresh();
         updateRowState(row);
     }
+    updatePrimvarNotes();
 }
 
 void PropertySheet::refreshTimeVaryingValues() {

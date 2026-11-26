@@ -19,6 +19,7 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/render/final_renderer.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
@@ -152,6 +153,16 @@ struct Host {
         const std::string added = renderer->name();
         usdcc::render::FinalRenderers::instance().add(std::move(renderer));
         noted("Final renderer", added);
+    }
+
+    // A view of primvars (docs/PRIMVAR_VIEWER.md §9.2): a tab of the Primvars panel, and a panel
+    // type of its own, "primvarView.<id>". One with the id of another replaces it. Remove it in
+    // usdcc_plugin_deactivate() with usdcc::usd::PrimvarViews::instance().remove(id).
+    void addPrimvarView(usdcc::usd::PrimvarViewType type) {
+        if (type.id.isEmpty() || !type.create) throw std::invalid_argument("a primvar view has an id and makes its widget");
+        const std::string added = type.label.toStdString();
+        usdcc::usd::PrimvarViews::instance().add(std::move(type));
+        noted("Primvar view", added);
     }
 
     // A key of the plugin's own in usdcc::ui::appSettings().

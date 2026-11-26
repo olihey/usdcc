@@ -1,5 +1,7 @@
 #include "usdcc/usd/validation_rules.h"
 
+#include "usdcc/usd/primvar_info.h"
+
 #include <pxr/base/js/json.h>
 #include <pxr/usdValidation/usdValidation/registry.h>
 #include <pxr/usdValidation/usdValidation/validator.h>
@@ -27,6 +29,7 @@ std::string Rule::group() const {
 }
 
 std::vector<Rule> rules() {
+    registerPrimvarRules();  // usdcc's own, which OpenUSD has none of
     std::vector<Rule> result = UserRules::instance().rules();
     for (const UsdValidationValidatorMetadata& metadata : UsdValidationRegistry::GetInstance().GetAllValidatorMetadata()) {
         // usdcc.validation's are above, those that are in use.

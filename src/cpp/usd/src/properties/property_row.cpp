@@ -189,6 +189,14 @@ void PropertyRow::setNote(const QString& note, int fixedWidth, const QString& to
     }
 }
 
+void PropertyRow::setNoteSeverity(const QString& severity) {
+    if (m_note->property("severity").toString() == severity) return;
+    m_note->setProperty("severity", severity);
+    repolish(m_note);
+}
+
+QString PropertyRow::note() const { return m_note->text(); }
+
 void PropertyRow::setSubLine(const QString& text, const QString& toolTip, SubLineTone tone) {
     m_subLine->setText(text);
     m_subLine->setToolTip(toolTip.isEmpty() ? text : toolTip);

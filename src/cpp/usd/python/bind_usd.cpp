@@ -46,6 +46,7 @@ StageRefPtr openStageWithId(const StageManager& manager, long cacheId) {
 
 void bindStageManager(py::module_& m) {
     bindAssets(m);
+    bindPrimvars(m);
     // Auto-key (docs/ANIMATION.md phase 2): app-wide, off at start.
     // usdcc/validation.py's rules (docs/VALIDATION.md section 5).
     m.def(
@@ -230,6 +231,17 @@ void bindStageManager(py::module_& m) {
         .def(
             "set_time", [](StageManager& self, long cacheId, double time) { openStageWithId(self, cacheId)->setTime(time); },
             py::arg("cache_id"), py::arg("time"))
+        // The primvar the Primvars panel looks at (docs/PRIMVAR_VIEWER.md §9.2).
+        .def(
+            "primvar_focus", [](const StageManager& self, long cacheId) { return openStageWithId(self, cacheId)->primvarFocus(); },
+            py::arg("cache_id"))
+        .def(
+            "set_primvar_focus",
+            [](StageManager& self, long cacheId, const std::string& name) {
+                const std::string bare = name.rfind("primvars:", 0) == 0 ? name.substr(9) : name;
+                openStageWithId(self, cacheId)->setPrimvarFocus(bare);
+            },
+            py::arg("cache_id"), py::arg("name"))
         // Keys (docs/ANIMATION.md phase 2), by attribute path; a script's run is one undo step.
         .def(
             "set_key",
