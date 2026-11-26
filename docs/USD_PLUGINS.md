@@ -144,7 +144,12 @@ Notes:
        Arnold's `libai.so` has no SONAME, and a library loaded by its path satisfies no
        `NEEDED libai.so`, so the plugins wouldn't load. The pin's `preloaded` takes
        `libai.so` out of their `NEEDED` (`build_usd_plugin.py`, `patchelf`), and their
-       Arnold symbols come from the core loaded globally first. Linux is built only by
+       Arnold symbols come from the core loaded globally first. And `--no-as-needed`
+       (the pin's Linux-only `cmake` entry): Ubuntu's linker drops a library nothing
+       before it on the link line uses, and arnold-usd links `usdImaging` before the
+       render delegate's static library, whose `reader.cpp` subclasses
+       `UsdImagingDelegate`, so `hdArnold.so` lacked `NEEDED libusd_usdImaging.so` and its
+       type info was undefined. Linux is built only by
        [ARNOLD_CI.md](ARNOLD_CI.md)'s workflow so far, not tried in usdcc;
     3. asks the core its version (`AiGetVersion`). The plugins need the Arnold they were
        built for or a later one of the same 7.x: built against 7.5.4, they don't load

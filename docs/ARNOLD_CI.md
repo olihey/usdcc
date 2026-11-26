@@ -184,5 +184,7 @@ Not legal advice: what is above is what the texts say, read by us.
 6. **Linux x64** (2026-11-26): the pin lists it, `enableArnold()` loads `bin/libai.so`, and the
    workflow has an `ubuntu-24.04` job. Its first run failed the check: the plugins name `libai.so`, which
    has no SONAME, so the core loaded first didn't count. The pin's `preloaded` drops it from their
-   `NEEDED` ([USD_PLUGINS.md](USD_PLUGINS.md) §3, Arnold). Rendering in usdcc on Linux is still to try.
+   `NEEDED`. Then `hdArnold` alone failed, missing `libusd_usdImaging.so` from its `NEEDED`
+   (Ubuntu's `--as-needed`), which a Linux-only `-Wl,--no-as-needed` fixes ([USD_PLUGINS.md](USD_PLUGINS.md)
+   §3, Arnold). The workflow prints what the plugins need after a failed Linux check. Rendering in usdcc on Linux is still to try.
 7. **Later:** Windows arm64, if Autodesk ships an arm64 SDK.

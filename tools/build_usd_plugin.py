@@ -33,7 +33,8 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
                       (it needs a login, as the Arnold SDK does), passed as
                       --sdk <name>=<folder>, which must have the files listed;
                       `files` a list, or {platform: list} where they differ
-  cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders
+  cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders;
+                      an entry {platform: [arguments]} is for that platform alone
   targets             what to build (default: everything)
   install_prefix      where in the pack the install goes (default: its root)
   install_components  the install components to take (default: all of it)
@@ -399,7 +400,9 @@ def _cmake_build(spec, pack, source, build, prefix, places, jobs):
         # pxrConfig.cmake looks for the pin's Python (its libraries, not the
         # interpreter): the one this runs on, not whichever CMake finds first.
         f"-DPython3_ROOT_DIR={Path(sys.base_prefix).as_posix()}",
-        *[argument.format(**places) for argument in spec["cmake"]],
+        # An entry may be {platform: [arguments]}, for what only one platform takes.
+        *[argument.format(**places) for entry in spec["cmake"]
+          for argument in (entry.get(ASSET_PLATFORM, []) if isinstance(entry, dict) else [entry])],
     ]
     print(f"Configuring {pack}:", " ".join(str(part) for part in command), flush=True)
     run(command)
